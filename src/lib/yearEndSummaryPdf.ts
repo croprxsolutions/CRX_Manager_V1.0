@@ -120,7 +120,7 @@ export async function generateYearEndSummaryPdf(
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.text(
-    `${fmtMonth(data.season_start)} – ${fmtMonth(data.season_end)}`,
+    `${fmtMonth(data.season_start)} to ${fmtMonth(data.season_end)}`,
     pageW - margin, 48,
     { align: 'right' },
   );

@@ -36,7 +36,14 @@ interface DropdownProps {
   active?: boolean;
   /** Dense table cells: no reserved helper line under the trigger. */
   noHelperRow?: boolean;
+  /** Shown before the value inside the trigger. */
+  icon?: ReactNode;
+  /** Shown in the trigger instead of the selected option's label (e.g. "Sort" while the default is picked). */
+  valueLabel?: ReactNode;
 }
+
+// SelectValue renders valueLabel in place of the option's label when one is given.
+const valueRenderer = (valueLabel: ReactNode) => (valueLabel === undefined ? undefined : () => valueLabel);
 
 // The trigger's look per state, kept out of Dropdown for its complexity budget.
 function triggerClass({ height, inline, error, active }: { height: string; inline: boolean; error: boolean; active: boolean }) {
@@ -68,6 +75,8 @@ export default function Dropdown({
   inline = false,
   active = false,
   noHelperRow = false,
+  icon,
+  valueLabel,
 }: DropdownProps) {
   // RAC's Button drops aria-invalid (it only sets data-invalid on the Select root), so set it directly.
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -96,8 +105,9 @@ export default function Dropdown({
         ref={triggerRef}
         className={triggerClass({ height, inline, error: !!error, active })}
       >
+        {icon}
         {inline && label && <span className={active ? 'font-normal' : 'text-secondary'} aria-hidden="true">{label}</span>}
-        <SelectValue className="truncate data-[placeholder]:text-gray-500" />
+        <SelectValue className="truncate data-[placeholder]:text-gray-500">{valueRenderer(valueLabel)}</SelectValue>
         <ChevronDown className={`h-4 w-4 shrink-0 ${active ? '' : 'text-gray-500'}`} aria-hidden="true" />
       </Button>
       {!inline && !noHelperRow && (
@@ -110,7 +120,7 @@ export default function Dropdown({
         </div>
       )}
       <Popover className="min-w-(--trigger-width) bg-white rounded-xl border border-gray-200 shadow-lg p-1.5 outline-none">
-        <ListBox className="outline-none max-h-72 overflow-auto">
+        <ListBox className="outline-none max-h-72 overflow-auto scroll-thin scroll-shadows">
           {options.map((o) => (
             <ListBoxItem
               key={o.value}

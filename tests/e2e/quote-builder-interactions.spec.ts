@@ -224,13 +224,14 @@ test.describe('Quote Builder Interactions', () => {
 
     // Look for quantity input fields in the quote items
     const qtyInput = page.locator(
-      'input[type="number"][name*="qty" i], input[type="number"][name*="quantity" i], input[type="number"][placeholder*="qty" i], input[type="number"][aria-label*="qty" i], input[type="number"][aria-label*="quantity" i]'
+      'input[type="number"][name*="qty" i]:enabled, input[type="number"][name*="quantity" i]:enabled, input[type="number"][placeholder*="qty" i]:enabled, input[type="number"][aria-label*="qty" i]:enabled, input[type="number"][aria-label*="quantity" i]:enabled'
     ).first();
     const qtyVisible = await qtyInput.isVisible({ timeout: 5000 }).catch(() => false);
 
     if (!qtyVisible) {
       // Try broader number inputs in the items area
-      const numberInputs = page.locator('input[type="number"]');
+      // A sent quote is read-only until revised, so only enabled fields count.
+      const numberInputs = page.locator('input[type="number"]:enabled');
       const count = await numberInputs.count();
       if (count > 0) {
         const firstInput = numberInputs.first();
@@ -270,13 +271,14 @@ test.describe('Quote Builder Interactions', () => {
 
     // Look for price input fields
     const priceInput = page.locator(
-      'input[type="number"][name*="price" i], input[type="number"][name*="rate" i], input[type="number"][placeholder*="price" i], input[type="number"][aria-label*="price" i], input[name*="price" i]'
+      'input[type="number"][name*="price" i]:enabled, input[type="number"][name*="rate" i]:enabled, input[type="number"][placeholder*="price" i]:enabled, input[type="number"][aria-label*="price" i]:enabled, input[name*="price" i]:enabled'
     ).first();
     const priceVisible = await priceInput.isVisible({ timeout: 5000 }).catch(() => false);
 
     if (!priceVisible) {
       // Try finding any number input that looks like price (second or third number input)
-      const numberInputs = page.locator('input[type="number"]');
+      // A sent quote is read-only until revised, so only enabled fields count.
+      const numberInputs = page.locator('input[type="number"]:enabled');
       const count = await numberInputs.count();
       if (count >= 2) {
         const secondInput = numberInputs.nth(1);
@@ -461,6 +463,10 @@ test.describe('Quote Builder Interactions', () => {
       'button:has-text("Save Quote"), button:has-text("Save")'
     ).first();
     await expect(saveButton).toBeVisible({ timeout: 5000 });
+    // Save is off until something changes ("No changes to save"), so make one change first.
+    await expect(saveButton).toBeDisabled();
+    await page.getByRole('textbox', { name: 'Note at the top of the quote' }).fill(`QB11 ${RUN_ID}`);
+    await expect(saveButton).toBeEnabled();
 
     // Click save — on an empty quote, this may show validation errors which is expected
     await saveButton.click();
@@ -595,7 +601,7 @@ test.describe('Quote Builder Interactions', () => {
 
     // Make an edit to trigger dirty state
     const editableInput = page.locator(
-      'textarea, input[type="number"], input[type="text"]:not([readonly]):not([disabled])'
+      'textarea:enabled, input[type="number"]:enabled, input[type="text"]:not([readonly]):enabled'
     ).first();
     const inputVisible = await editableInput.isVisible({ timeout: 5000 }).catch(() => false);
 
@@ -636,7 +642,7 @@ test.describe('Quote Builder Interactions', () => {
       } catch {
         // If Leave button not found, try closing differently
         try {
-          await page.locator('button:has-text("Stay"), button:has-text("Cancel")').first().click({ timeout: 2000 });
+          await page.locator('button:has-text("Keep editing"), button:has-text("Cancel")').first().click({ timeout: 2000 });
         } catch {
           // Modal may have auto-dismissed
         }

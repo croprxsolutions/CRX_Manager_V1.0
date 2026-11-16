@@ -15,6 +15,7 @@ import {
   RotateCcw,
   Eye,
   EyeOff,
+  Check,
   CheckCircle,
   Copy,
   CalendarClock,
@@ -29,6 +30,7 @@ import {
 import Card from '../components/ui/Card';
 import Tabs from '../components/ui/Tabs';
 import { LastChargedPricesCard } from '../components/quotes/LastChargedPrices';
+import PdfPagePreview from '../components/quotes/PdfPagePreview';
 import { useLastChargedPrices } from '../hooks/useLastChargedPrices';
 import { LoadFailedState } from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
@@ -100,14 +102,14 @@ import DatePicker from '../components/ui/DatePicker';
 import Switch from '../components/ui/Switch';
 import TransactionThread from '../components/ui/TransactionThread';
 import ActionMenu, { type ActionMenuItem } from '../components/ui/ActionMenu';
-import { useIsPhone } from '../hooks/useIsPhone';
+import { useIsBelowXl, useIsPhone } from '../hooks/useIsPhone';
 import { lineNeedsRemoveConfirm, primaryAction, todaysPricesMessage } from '../lib/quoteBuilderView';
 import { formatChargedOn } from '../lib/lastChargedPrices';
 import { quoteBadgeVariant, quoteStatusLabel } from '../lib/quoteStatusLabel';
 import CommissionSplitEditor from '../components/ui/CommissionSplitEditor';
 import { useStaleQuoteCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
-import { ProductOptionDetails } from '../components/products/ProductOptionPresentation';
+import { FullToteOnlyBadge, PolicyBadge, normalizeReturnPolicy, productPackageText, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
 import { ProductSearchResultRow } from '../components/products/ProductSearchResultRow';
 import { rateUnitOptionsForProduct } from '../lib/units';
 import { useProductParents } from '../lib/productParents';
@@ -220,7 +222,21 @@ const NO_UNIT = '__none__';
 const LINK_BOX = 'min-h-11 md:inline-flex md:min-h-10 md:items-center';
 const LINK_HIT = "relative min-h-11 md:min-h-0 after:absolute after:inset-x-0 after:top-1/2 after:h-10 after:-translate-y-1/2 after:content-['']";
 // Number boxes in the line table and cards: 44 px below 768 px, 40 px above.
-const LINE_INPUT = 'w-full min-w-0 h-11 md:h-10 px-2 rounded-lg border text-base md:text-sm text-nav-dark tabular-nums focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
+const LINE_INPUT = 'w-full min-w-0 h-11 md:h-10 px-2 rounded-lg border text-base md:text-sm text-right text-nav-dark tabular-nums focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green';
+// A number and its unit in one box: the input on the left, the unit on a cream strip on the right.
+// The caller adds the border colour (the input's hand-set states tint the whole box).
+const UNIT_BOX = 'flex w-full min-w-0 h-11 md:h-10 items-stretch overflow-hidden rounded-lg border focus-within:border-crx-green focus-within:ring-2 focus-within:ring-crx-green/20';
+const UNIT_BOX_INPUT = 'w-full min-w-0 flex-1 bg-transparent px-1.5 text-base md:text-sm text-right text-nav-dark tabular-nums focus:outline-none';
+const UNIT_STRIP = 'shrink-0 flex items-center border-l border-gray-200 bg-cream px-2 text-sm text-secondary';
+// The unit Dropdown as the box's right end: its trigger loses its own border and fills the strip.
+// The box clips the trigger's ring, so keyboard focus (RAC's data-focus-visible) tints it and draws an inset ring.
+const UNIT_SELECT = 'w-auto! shrink-0 max-w-[60%] border-l border-gray-200 bg-cream [&_button]:h-full [&_button]:rounded-none [&_button]:border-0 [&_button]:bg-transparent [&_button]:gap-0.5 [&_button]:px-1.5 [&_button_svg]:h-3.5 [&_button_svg]:w-3.5 [&_button[data-focus-visible]]:bg-crx-green-tint [&_button[data-focus-visible]]:ring-2 [&_button[data-focus-visible]]:ring-inset [&_button[data-focus-visible]]:ring-crx-green/40';
+
+// One muted line under a quote line's product name: SKU, family and package, the fields
+// ProductOptionDetails shows, without their labels. Missing ones are left out.
+function productMetaLine(p: ProductOptionPresentationModel): string {
+  return [p.sku, p.product_family?.name, productPackageText(p)].filter(Boolean).join(' · ');
+}
 
 // The quote's totals: line sums, then rounded to the cent. The page's one totals rule.
 function quoteTotals(sections: LocalSection[]) {
@@ -750,11 +766,20 @@ export default function QuoteBuilder() {
 
   // Transaction thread: related orders, deliveries, invoices from this quote
   const [threadOrders, setThreadOrders] = useState<{ id: string; order_number: string; deliveries: { id: string; delivery_number: string }[]; invoices: { id: string; invoice_number: string }[] }[]>([]);
-  const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+  const [previewPdfBlob, setPreviewPdfBlob] = useState<Blob | null>(null);
+  const [markingPresented, setMarkingPresented] = useState(false);
+  // The columns the shown preview was drawn with; the effect below redraws when the chips change.
+  const previewColumnsKeyRef = useRef<string | null>(null);
+  const [previewRebuild, setPreviewRebuild] = useState<'idle' | 'updating' | 'failed'>('idle');
+  // Bumped per Preview click and on a move to another quote, so a late first build never opens or
+  // replaces the preview. A layout effect, so it moves on commit with routeQuoteIdRef.
+  const previewRunRef = useRef(0);
+  useLayoutEffect(() => {
+    previewRunRef.current += 1;
+  }, [id]);
   const [pdfTemplates, setPdfTemplates] = useState<QuotePdfTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [customColumns, setCustomColumns] = useState<string[] | null>(null);
-  const [showColumnPicker, setShowColumnPicker] = useState(false);
 
   // Quote template state
   const [quoteTemplates, setQuoteTemplates] = useState<QuoteTemplate[]>([]);
@@ -764,6 +789,8 @@ export default function QuoteBuilder() {
   const [showRolloverModal, setShowRolloverModal] = useState(false);
   const [rolloverSeason, setRolloverSeason] = useState(() => computeSeason() + 1);
   const isPhone = useIsPhone();
+  // The line table needs 1280 px (at 1024 with the sidebar open its number boxes cut values off); below that each line is a card.
+  const lineCards = useIsBelowXl();
 
   // Track dirty state for unsaved changes warning
   const [isDirty, setIsDirty] = useState(false);
@@ -858,6 +885,8 @@ export default function QuoteBuilder() {
   // Status-based guards
   const currentStatus = status || 'draft';
   const canEdit = ['draft', 'revised'].includes(currentStatus);
+  // Save keeps a revised quote revised (Save changes); everything else saves as a draft.
+  const savesAsRevised = isEditing && currentStatus === 'revised';
   // Codex round-7 P2: include 'sent' so a frozen sent quote can still be re-emailed —
   // "Preview Quote" is the only route to the Email-to-Grower button, and
   // handleEmailToGrower explicitly supports re-sending an already-sent quote and
@@ -910,16 +939,35 @@ export default function QuoteBuilder() {
   const canRevert = isEditing && isAdmin && ['accepted', 'declined', 'expired', 'cancelled'].includes(currentStatus);
   const revertLabel = currentStatus === 'accepted' ? 'Un-accept' : 'Reopen';
 
-  // Mark dirty whenever user changes form data (after initial load)
+  // The form compared as one value, so an edit typed back to what was saved makes the quote clean
+  // again (Save turns off, no "Unsaved changes") instead of staying changed.
+  const formSnapshot = useMemo(
+    () => JSON.stringify([customerId, tier, chosenExpiryDate, headerNotes, footerNotes, sections, commissionSplit, isPlanned]),
+    [customerId, tier, chosenExpiryDate, headerNotes, footerNotes, sections, commissionSplit, isPlanned],
+  );
+  const cleanSnapshotRef = useRef('');
+
+  // Whatever is on screen when the quote turns clean (loaded, saved, reverted) is "no changes".
+  // Declared before the check below so it runs first in the same commit.
   useEffect(() => {
-    if (!initialLoadDone.current) return;
-    if (suppressDirtyUntilReloadSettlesRef.current) return;
-    if (skipNextDirtyRef.current) {
-      skipNextDirtyRef.current = false;
+    if (!isDirty) cleanSnapshotRef.current = formSnapshot;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the quote turns clean, not on every edit
+  }, [isDirty]);
+
+  // Dirty = the form differs from the last clean state (after initial load)
+  useEffect(() => {
+    // Changes the page makes itself while loading are the saved state.
+    if (!initialLoadDone.current || suppressDirtyUntilReloadSettlesRef.current) {
+      cleanSnapshotRef.current = formSnapshot;
       return;
     }
-    setIsDirty(true);
-  }, [customerId, tier, chosenExpiryDate, headerNotes, footerNotes, sections, commissionSplit, isPlanned]);
+    if (skipNextDirtyRef.current) {
+      skipNextDirtyRef.current = false;
+      if (!isDirty) cleanSnapshotRef.current = formSnapshot;
+      return;
+    }
+    setIsDirty(formSnapshot !== cleanSnapshotRef.current);
+  }, [formSnapshot, isDirty]);
 
   // Release initial-load dirty suppression only after React has committed the
   // complete installed snapshot. Timer/frame releases can run before that
@@ -2743,10 +2791,11 @@ export default function QuoteBuilder() {
     setSaving(true);
     // Always unlock the form (it is locked while saving), whatever the steps below throw.
     try {
-      const result = await saveQuote('draft');
+      // A revised quote is a live booking and the server refuses revised -> draft: its edits save as revised.
+      const result = await saveQuote(savesAsRevised ? 'revised' : 'draft');
       if (result) {
         setIsDirty(false);
-        toast('success', 'Quote saved as draft');
+        toast('success', savesAsRevised ? 'Changes saved. Send the quote again when it is ready.' : 'Quote saved as draft');
         trackBusinessEvent(isEditing ? 'quote_updated' : 'quote_created', {
           message: `Quote ${quoteNumber} ${isEditing ? 'updated' : 'created'}`,
           data: { quoteId: result, quoteNumber, customer: selectedCustomer?.farm_name ?? '' },
@@ -2867,52 +2916,55 @@ export default function QuoteBuilder() {
     navigate(`/quotes/${result.quote_id}`);
   };
 
+  // Download and the preview print the same data (the email builds its own, with the stored expiry).
+  const buildQuotePdfData = () => ({
+    quote_number: quoteNumber,
+    customer_name: selectedCustomer?.farm_name || 'Customer',
+    customer_email: selectedCustomer?.email || undefined,
+    customer_phone: selectedCustomer?.phone || undefined,
+    customer_address: selectedCustomer?.billing_address || undefined,
+    sales_rep_name: profile?.full_name || 'Sales Rep',
+    created_at: new Date().toISOString(),
+    expires_at: parseLocalDate(chosenExpiryDate ?? seasonEnd).toISOString(),
+    tier,
+    header_notes: headerNotes || undefined,
+    footer_notes: footerNotes || undefined,
+    sections: sections.map((sec) => ({
+      section_name: sec.section_name,
+      section_notes: sec.section_notes || undefined,
+      section_header_notes: sec.section_header_notes || undefined,
+      items: sec.items
+        .filter((i) => i.product_id)
+        .map((i) => ({
+          product_name: i.product?.product_name || '',
+          category: i.product?.category || '',
+          notes: i.notes || undefined,
+          suggested_rate: i.product?.suggested_rate || undefined,
+          actual_rate: i.actual_rate || 0,
+          rate_unit: i.rate_unit || '',
+          acres: i.acres || 0,
+          total_units_needed: i.total_units_needed || 0,
+          inventory_unit: i.product?.inventory_unit || undefined,
+          unit_size: i.product?.unit_size || undefined,
+          price_per_unit: i.price_per_unit,
+          price_unit: i.price_unit || undefined,
+          price_per_acre: i.price_per_acre || undefined,
+          total_price: i.total_price,
+        })),
+    })),
+    totals: {
+      totalPrice: totals.totalPrice,
+      totalCost: totals.totalCost,
+      totalProfit: totals.totalProfit,
+      avgMargin: totals.totalMarginPct,
+    },
+  });
+
   // === GAP FIX #1: Download Quote as PDF ===
   const handleDownloadPdf = async () => {
     await runCriticalAction({
       action: async () => {
-        await downloadQuotePdf({
-          quote_number: quoteNumber,
-          customer_name: selectedCustomer?.farm_name || 'Customer',
-          customer_email: selectedCustomer?.email || undefined,
-          customer_phone: selectedCustomer?.phone || undefined,
-          customer_address: selectedCustomer?.billing_address || undefined,
-          sales_rep_name: profile?.full_name || 'Sales Rep',
-          created_at: new Date().toISOString(),
-          expires_at: parseLocalDate(chosenExpiryDate ?? seasonEnd).toISOString(),
-          tier,
-          header_notes: headerNotes || undefined,
-          footer_notes: footerNotes || undefined,
-          sections: sections.map((sec) => ({
-            section_name: sec.section_name,
-            section_notes: sec.section_notes || undefined,
-            section_header_notes: sec.section_header_notes || undefined,
-            items: sec.items
-              .filter((i) => i.product_id)
-              .map((i) => ({
-                product_name: i.product?.product_name || '',
-                category: i.product?.category || '',
-                notes: i.notes || undefined,
-                suggested_rate: i.product?.suggested_rate || undefined,
-                actual_rate: i.actual_rate || 0,
-                rate_unit: i.rate_unit || '',
-                acres: i.acres || 0,
-                total_units_needed: i.total_units_needed || 0,
-                inventory_unit: i.product?.inventory_unit || undefined,
-                unit_size: i.product?.unit_size || undefined,
-                price_per_unit: i.price_per_unit,
-                price_unit: i.price_unit || undefined,
-                price_per_acre: i.price_per_acre || undefined,
-                total_price: i.total_price,
-              })),
-          })),
-          totals: {
-            totalPrice: totals.totalPrice,
-            totalCost: totals.totalCost,
-            totalProfit: totals.totalProfit,
-            avgMargin: totals.totalMarginPct,
-          },
-        }, customColumns || getTemplateColumns(selectedTemplateId));
+        await downloadQuotePdf(buildQuotePdfData(), customColumns || getTemplateColumns(selectedTemplateId));
       },
       toast,
       successMessage: 'PDF downloaded',
@@ -3158,46 +3210,12 @@ export default function QuoteBuilder() {
   const handlePreviewQuote = async () => {
     await runCriticalAction({
       action: async () => {
-        const pdfData = {
-          quote_number: quoteNumber,
-          customer_name: selectedCustomer?.farm_name || 'Customer',
-          customer_email: selectedCustomer?.email || undefined,
-          customer_phone: selectedCustomer?.phone || undefined,
-          customer_address: selectedCustomer?.billing_address || undefined,
-          sales_rep_name: profile?.full_name || 'Sales Rep',
-          created_at: new Date().toISOString(),
-          expires_at: parseLocalDate(chosenExpiryDate ?? seasonEnd).toISOString(),
-          tier,
-          header_notes: headerNotes || undefined,
-          footer_notes: footerNotes || undefined,
-          sections: sections.map((sec) => ({
-            section_name: sec.section_name,
-            section_notes: sec.section_notes || undefined,
-            items: sec.items
-              .filter((i) => i.product_id)
-              .map((i) => ({
-                product_name: i.product?.product_name || '',
-                actual_rate: i.actual_rate || 0,
-                rate_unit: i.rate_unit || '',
-                acres: i.acres || 0,
-                total_units_needed: i.total_units_needed || 0,
-                price_per_unit: i.price_per_unit,
-                price_unit: i.price_unit || undefined,
-                total_price: i.total_price,
-              })),
-          })),
-          totals: {
-            totalPrice: totals.totalPrice,
-            totalCost: totals.totalCost,
-            totalProfit: totals.totalProfit,
-            avgMargin: totals.totalMarginPct,
-          },
-        };
-        const doc = await generateQuotePdf(pdfData);
-        const blob = doc.output('blob');
-        const url = URL.createObjectURL(blob);
-        if (previewPdfUrl) URL.revokeObjectURL(previewPdfUrl);
-        setPreviewPdfUrl(url);
+        const columns = customColumns || getTemplateColumns(selectedTemplateId);
+        const run = ++previewRunRef.current;
+        const doc = await generateQuotePdf(buildQuotePdfData(), columns);
+        if (run !== previewRunRef.current) return;
+        previewColumnsKeyRef.current = columns.join(',');
+        setPreviewPdfBlob(doc.output('blob'));
         setShowPreviewModal(true);
       },
       toast,
@@ -3408,8 +3426,7 @@ export default function QuoteBuilder() {
       );
       resetCreateVersionAttempt();
       setShowPreviewModal(false);
-      if (previewPdfUrl) URL.revokeObjectURL(previewPdfUrl);
-      setPreviewPdfUrl(null);
+      setPreviewPdfBlob(null);
       setIsDirty(false);
       fetchVersions();
       try {
@@ -3446,13 +3463,13 @@ export default function QuoteBuilder() {
     { key: 'product', label: 'Product' },
     { key: 'category', label: 'Category' },
     { key: 'notes', label: 'Notes' },
-    { key: 'sug_rate', label: 'Sug. Rate' },
-    { key: 'actual_rate', label: 'Actual Rate' },
+    { key: 'sug_rate', label: 'Suggested rate' },
+    { key: 'actual_rate', label: 'Rate' },
     { key: 'rate_unit', label: 'Unit' },
     { key: 'acres', label: 'Acres' },
-    { key: 'qty', label: 'Qty' },
+    { key: 'qty', label: 'Quantity' },
     { key: 'unit_size', label: 'Container' },
-    { key: 'price_unit', label: 'Price/Unit' },
+    { key: 'price_unit', label: 'Price' },
     { key: 'price_per_acre', label: '$/Acre' },
     { key: 'total_price', label: 'Total' },
   ] as const;
@@ -3461,6 +3478,33 @@ export default function QuoteBuilder() {
     const t = pdfTemplates.find((p) => p.id === templateId);
     return t ? (t.columns as string[]) : ['product', 'actual_rate', 'acres', 'qty', 'price_unit', 'total_price'];
   };
+
+  // The preview follows the chosen layout and columns (display only: nothing sends or saves this blob).
+  const activePdfColumns = customColumns || getTemplateColumns(selectedTemplateId);
+  const activePdfColumnsKey = activePdfColumns.join(',');
+  const buildQuotePdfDataRef = useLatestRef(buildQuotePdfData);
+  useEffect(() => {
+    if (!showPreviewModal || previewColumnsKeyRef.current === activePdfColumnsKey) {
+      setPreviewRebuild('idle');
+      return;
+    }
+    let stale = false;
+    const timer = setTimeout(async () => {
+      setPreviewRebuild('updating');
+      try {
+        const doc = await generateQuotePdf(buildQuotePdfDataRef.current(), activePdfColumnsKey ? activePdfColumnsKey.split(',') : []);
+        if (stale) return;
+        previewColumnsKeyRef.current = activePdfColumnsKey;
+        setPreviewPdfBlob(doc.output('blob'));
+        setPreviewRebuild('idle');
+      } catch (err) {
+        // Keep the last good preview; Download and Email build their own PDF.
+        if (!stale) setPreviewRebuild('failed');
+        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { tags: { source: 'read', action: 'preview_quote_pdf' } });
+      }
+    }, 200);
+    return () => { stale = true; clearTimeout(timer); };
+  }, [showPreviewModal, activePdfColumnsKey, buildQuotePdfDataRef]);
 
   const fetchVersions = useCallback(async () => {
     if (!quoteId) return;
@@ -4253,6 +4297,11 @@ export default function QuoteBuilder() {
   // The quote cannot be edited while a save or order creation runs: an edit made then
   // would not be in what was written, and the page usually moves on afterwards.
   const formLocked = saving || converting || drawing;
+  // A saved quote whose status can't be edited (sent, accepted, closed...) shows its values but takes no
+  // edits: none could be saved, and each one only raised "Unsaved changes". Tabs, History, collapse,
+  // the job link and Schedule job still work.
+  const readOnly = isEditing && !canEdit;
+  const editLocked = formLocked || readOnly;
 
   // Header actions (spec "Actions by state"). Each action keeps today's show and enable
   // conditions and handler; only where it sits changes.
@@ -4323,10 +4372,12 @@ export default function QuoteBuilder() {
       icon={<Save className="w-4 h-4" />}
       onClick={handleSaveDraft}
       loading={saving}
-      disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading)}
+      // Nothing to save until something changes: repeated clicks would only resend the same quote.
+      disabled={(!canEdit && isEditing) || (!isEditing && quoteNumberLoading) || (!isDirty && !saving)}
+      title={!isDirty && !saving ? 'No changes to save' : undefined}
       className={`${tall} ${className}`}
     >
-      {saving ? 'Saving…' : 'Save draft'}
+      {saving ? 'Saving…' : savesAsRevised ? 'Save changes' : 'Save draft'}
     </Button>
   );
   const previewButton = (variant: 'primary' | 'secondary') => (
@@ -4588,7 +4639,7 @@ export default function QuoteBuilder() {
           />
         </Card>
       )}
-      <fieldset disabled={formLocked} aria-busy={formLocked} className="space-y-4 min-w-0">
+      <fieldset disabled={editLocked} aria-busy={formLocked} className="space-y-4 min-w-0">
       {!id && quoteTemplates.length > 0 && (
         <div className="max-w-sm">
           <Dropdown
@@ -4603,7 +4654,7 @@ export default function QuoteBuilder() {
         </div>
       )}
 
-      {/* RAC controls ignore the disabled fieldset, so each one also takes formLocked. */}
+      {/* RAC controls ignore the disabled fieldset, so each one also takes editLocked. */}
       <Card>
         <h2 className="mb-4 font-heading text-xl font-semibold text-nav-dark">Details</h2>
         <div className="grid grid-cols-1 gap-x-5 gap-y-1 md:grid-cols-2 lg:grid-cols-4">
@@ -4620,6 +4671,7 @@ export default function QuoteBuilder() {
               select={QUOTE_CUSTOMER_SELECT}
               placeholder="Select a customer..."
               ariaLabel="Customer"
+              disabled={editLocked}
             />
             <div className="min-h-5">
               {customerLoadError && (
@@ -4640,7 +4692,7 @@ export default function QuoteBuilder() {
               value={String(tier)}
               onChange={(v) => applyTier(parseInt(v))}
               options={[1, 2, 3].map((n) => ({ value: String(n), label: `Tier ${n}` }))}
-              disabled={formLocked}
+              disabled={editLocked}
             />
             {/* The note takes the Dropdown's empty helper line (mt-1 + min-h-5). */}
             {!customerView && tierMismatch && (
@@ -4669,7 +4721,7 @@ export default function QuoteBuilder() {
                 { value: 'date', label: 'Pick a date' },
               ]}
               helper={!chosenExpiryDate && status !== 'draft' && 'A change applies when the quote is sent again.'}
-              disabled={formLocked}
+              disabled={editLocked}
             />
             {chosenExpiryDate && (
               <DatePicker
@@ -4678,7 +4730,7 @@ export default function QuoteBuilder() {
                 minValue={todayInBusinessTz()}
                 onChange={(v) => { pickedBeforeValidDaysRef.current = false; setChosenExpiryDate(v || seasonEnd); }}
                 helper={status !== 'draft' && 'A change applies when the quote is sent again.'}
-                disabled={formLocked}
+                disabled={editLocked}
               />
             )}
           </div>
@@ -4691,7 +4743,7 @@ export default function QuoteBuilder() {
               commissionSplitTouchedRef.current = true;
               setCommissionSplit(val);
             }}
-            disabled={formLocked}
+            disabled={editLocked}
           />
           <div className="flex items-start justify-between gap-3 self-start rounded-lg border border-gray-200 px-3.5 py-1">
             <Switch
@@ -4754,7 +4806,7 @@ export default function QuoteBuilder() {
         const sectionNoteOpen = !!sec.section_header_notes || openSectionNotes.has(sec._key);
         const openSectionNote = () => setOpenSectionNotes((prev) => (prev.has(sec._key) ? prev : new Set(prev).add(sec._key)));
 
-        // Each line's controls are built once and laid out as a table row (768 px and up) or a card.
+        // Each line's controls are built once and laid out as a table row (1024 px and up) or a card.
         // What one line needs before its cells are drawn.
         const linePriceFacts = (item: LocalItem) => {
           const prod =
@@ -4835,7 +4887,13 @@ export default function QuoteBuilder() {
                   Select product
                 </button>
               )}
-              {prod && <ProductOptionDetails product={prod} />}
+              {prod && (
+                <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-secondary" data-product-id={prod.id}>
+                  {productMetaLine(prod) && <span className="min-w-0 break-words">{productMetaLine(prod)}</span>}
+                  <PolicyBadge policy={normalizeReturnPolicy(prod.return_policy)} />
+                  {prod.is_full_tote_only && <FullToteOnlyBadge />}
+                </div>
+              )}
               {item.suggested_rate && <p className="mt-0.5 text-xs text-secondary">Suggested {item.suggested_rate}</p>}
               {lastChargeText && <p className="mt-0.5 text-xs text-secondary">{lastChargeText}</p>}
               {noteEditing ? (
@@ -4897,7 +4955,7 @@ export default function QuoteBuilder() {
                         use_todays_price: true,
                       });
                     }}
-                    disabled={formLocked}
+                    disabled={editLocked}
                     className={`${LINK_BOX} font-semibold text-crx-green hover:underline disabled:opacity-50`}
                   >
                     Use today {fmt(todayPriceOffer)}
@@ -4911,34 +4969,34 @@ export default function QuoteBuilder() {
           const { prod, allowNoUnit, unitOptions } = f;
           return (
             <>
-              <input
-                type="number"
-                value={item.price_per_unit || ''}
-                onChange={(e) => {
-                  const val = e.target.value ? parseFloat(e.target.value) : 0;
-                  // A manual price is one that differs from what the line
-                  // would otherwise take: its saved price on a sent quote,
-                  // else today's tier price.
-                  const basePrice = (prod ? lockedPriceFor(item, prod.id) : null)
-                    ?? (prod ? getTierPrice(prod, tier) : 0);
-                  const isOverride = Math.abs(val - basePrice) > 0.001;
-                  updateItem(sec._key, item._key, {
-                    price_override: isOverride ? val : null,
-                    price_per_unit: val,
-                  });
-                }}
-                aria-label="Price per unit"
-                // A stated $0 tier price shows as 0.00, not as a missing price.
-                placeholder={prod ? '0.00' : undefined}
-                className={`${LINE_INPUT} ${
-                  item.price_override != null
-                    ? 'border-amber-400 bg-amber-50'
-                    : 'border-gray-300'
-                }`}
-                step="any"
-                min={0}
-              />
-              <div className="mt-1">
+              <div className={`${UNIT_BOX} ${
+                item.price_override != null
+                  ? 'border-amber-400 bg-amber-50'
+                  : 'border-gray-300 bg-white'
+              }`}>
+                <input
+                  type="number"
+                  value={item.price_per_unit || ''}
+                  onChange={(e) => {
+                    const val = e.target.value ? parseFloat(e.target.value) : 0;
+                    // A manual price is one that differs from what the line
+                    // would otherwise take: its saved price on a sent quote,
+                    // else today's tier price.
+                    const basePrice = (prod ? lockedPriceFor(item, prod.id) : null)
+                      ?? (prod ? getTierPrice(prod, tier) : 0);
+                    const isOverride = Math.abs(val - basePrice) > 0.001;
+                    updateItem(sec._key, item._key, {
+                      price_override: isOverride ? val : null,
+                      price_per_unit: val,
+                    });
+                  }}
+                  aria-label="Price per unit"
+                  // A stated $0 tier price shows as 0.00, not as a missing price.
+                  placeholder={prod ? '0.00' : undefined}
+                  className={UNIT_BOX_INPUT}
+                  step="any"
+                  min={0}
+                />
                 <Dropdown
                   aria-label="Price unit"
                   noHelperRow
@@ -4948,9 +5006,10 @@ export default function QuoteBuilder() {
                       price_unit: v === NO_UNIT ? null : v || null,
                     })
                   }
-                  options={unitOptions(item.price_unit, (unit) => `per ${unit}`)}
+                  options={unitOptions(item.price_unit, (unit) => `/ ${unit}`)}
                   placeholder="--"
-                  disabled={formLocked}
+                  disabled={editLocked}
+                  className={UNIT_SELECT}
                 />
               </div>
               {item.price_override != null && (
@@ -4988,7 +5047,7 @@ export default function QuoteBuilder() {
                     <input
                       type="checkbox"
                       checked={item.grower_confirmed_cents === raise.toCents}
-                      disabled={formLocked}
+                      disabled={editLocked}
                       onChange={(e) => updateItem(sec._key, item._key, {
                         grower_confirmed_cents: e.target.checked ? raise.toCents : undefined,
                       })}
@@ -5003,29 +5062,30 @@ export default function QuoteBuilder() {
           );
         };
 
+        const linePerAcre = (item: LocalItem) => `${item.price_per_acre != null ? fmt(item.price_per_acre) : '–'} / acre`;
         const lineParts = (item: LocalItem, n: number) => {
           const f = lineFacts(item);
           const { prod, openPicker, allowNoUnit, unitOptions } = f;
           const product = lineProduct(item, f);
           const rate = (
             <>
-              <input
-                type="number"
-                value={item.actual_rate ?? ''}
-                onChange={(e) =>
-                  updateItem(sec._key, item._key, {
-                    actual_rate: e.target.value
-                      ? parseFloat(e.target.value)
-                      : null,
-                    calc_mode: 'rate_acres',
-                  })
-                }
-                aria-label="Actual rate"
-                className={`${LINE_INPUT} border-gray-300`}
-                step="any"
-                min={0}
-              />
-              <div className="mt-1">
+              <div className={`${UNIT_BOX} border-gray-300 bg-white`}>
+                <input
+                  type="number"
+                  value={item.actual_rate ?? ''}
+                  onChange={(e) =>
+                    updateItem(sec._key, item._key, {
+                      actual_rate: e.target.value
+                        ? parseFloat(e.target.value)
+                        : null,
+                      calc_mode: 'rate_acres',
+                    })
+                  }
+                  aria-label="Actual rate"
+                  className={UNIT_BOX_INPUT}
+                  step="any"
+                  min={0}
+                />
                 <Dropdown
                   aria-label="Rate unit"
                   noHelperRow
@@ -5037,7 +5097,8 @@ export default function QuoteBuilder() {
                   }
                   options={unitOptions(item.rate_unit, (unit) => unit)}
                   placeholder="--"
-                  disabled={formLocked}
+                  disabled={editLocked}
+                  className={UNIT_SELECT}
                 />
               </div>
               {item.oz_per_acre != null && (
@@ -5068,7 +5129,11 @@ export default function QuoteBuilder() {
           );
           const quantity = (
             <>
-              <div className="flex items-center gap-1.5">
+              <div className={`${UNIT_BOX} ${
+                item.calc_mode === 'units_direct'
+                  ? 'border-crx-green bg-crx-green-tint'
+                  : 'border-gray-300 bg-white'
+              }`}>
                 <input
                   type="number"
                   value={item.total_units_needed ?? ''}
@@ -5081,15 +5146,11 @@ export default function QuoteBuilder() {
                     })
                   }
                   aria-label="Quantity"
-                  className={`${LINE_INPUT} ${
-                    item.calc_mode === 'units_direct'
-                      ? 'border-crx-green bg-crx-green-tint'
-                      : 'border-gray-300'
-                  }`}
+                  className={UNIT_BOX_INPUT}
                   step="any"
                   min={0}
                 />
-                {prod?.inventory_unit && <span className="shrink-0 text-sm text-secondary">{prod.inventory_unit}</span>}
+                {prod?.inventory_unit && <span className={UNIT_STRIP}>{prod.inventory_unit}</span>}
               </div>
               {item.calc_mode === 'units_direct' && <p className="mt-1 text-xs text-crx-green">Entered by hand</p>}
             </>
@@ -5115,7 +5176,7 @@ export default function QuoteBuilder() {
           const menu = (
             <ActionMenu
               label={`Actions for line ${n} in ${sec.section_name || 'Untitled section'}`}
-              disabled={formLocked}
+              disabled={editLocked}
               items={[
                 ...(prod ? [{ id: 'change', label: 'Change product', onAction: openPicker }] : []),
                 { id: 'note', label: item.notes ? 'Edit note' : 'Add note', onAction: () => setEditingLineNote(item._key) },
@@ -5129,7 +5190,8 @@ export default function QuoteBuilder() {
               ]}
             />
           );
-          return { prod, product, rate, acres, quantity, price, cost, menu };
+          const perAcre = linePerAcre(item);
+          return { prod, product, rate, acres, quantity, price, perAcre, cost, menu };
         };
 
         return (
@@ -5152,6 +5214,7 @@ export default function QuoteBuilder() {
                 value={sec.section_name}
                 onChange={(e) => updateSectionName(sec._key, e.target.value)}
                 aria-label="Section name"
+                disabled={readOnly}
                 className="min-w-0 flex-1 md:flex-none md:w-56 h-11 md:h-10 -ml-1.5 px-1.5 rounded-md border border-transparent bg-transparent text-lg font-semibold font-heading text-nav-dark hover:border-gray-200 focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
                 placeholder="Section name"
               />
@@ -5167,6 +5230,7 @@ export default function QuoteBuilder() {
                     customerId={customerId || null}
                     placeholder="Search fields..."
                     ariaLabel={`Field for ${sec.section_name || 'section'}`}
+                    disabled={readOnly}
                     className="min-w-0 flex-1 sm:flex-none sm:w-56"
                   />
                 </div>
@@ -5198,13 +5262,15 @@ export default function QuoteBuilder() {
                   </span>
                 )}
               </div>
-              <span className="md:ml-auto text-base font-semibold text-nav-dark tabular-nums whitespace-nowrap">
-                {fmt(sectionTotal)}
-              </span>
+              {/* Always shown; on a phone it shares the first row with the name and the caption is read, not shown. */}
+              <div className="ml-auto flex shrink-0 flex-col items-end leading-tight">
+                <span className="text-xs text-secondary max-md:sr-only">Section total</span>
+                <strong className="text-[17px] md:text-lg font-semibold text-nav-dark tabular-nums whitespace-nowrap">{fmt(sectionTotal)}</strong>
+              </div>
               {sections.length > 1 && (
                 <ActionMenu
                   label={`Actions for section ${sec.section_name || 'Untitled section'}`}
-                  disabled={formLocked}
+                  disabled={editLocked}
                   items={[{ id: 'remove-section', label: 'Remove section', icon: <Trash2 className="w-4 h-4" />, danger: true, onAction: () => removeSection(sec._key) }]}
                 />
               )}
@@ -5219,7 +5285,7 @@ export default function QuoteBuilder() {
                       aria-label="Needed by"
                       value={sec.needed_by_date || null}
                       onChange={(value) => updateSectionField(sec._key, 'needed_by_date', value || null)}
-                      disabled={formLocked}
+                      disabled={editLocked}
                     />
                   </div>
                   {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}
@@ -5250,10 +5316,10 @@ export default function QuoteBuilder() {
             </div>
 
             {!isCollapsed && (
-              <>
-              {/* Section note: prints above the section's products on the PDF. */}
-              <div className="px-3 md:px-4 pt-2">
-                {sectionNoteOpen ? (
+              <fieldset disabled={readOnly} className="min-w-0">
+              {/* Section note: prints above the section's products on the PDF. Its link sits in the footer. */}
+              {sectionNoteOpen && (
+                <div className="px-3 md:px-4 pt-2">
                   <div className="pb-1">
                     <div className="mb-1 flex items-center gap-1 text-xs text-secondary">
                       <span id={`section-note-${sec._key}`}>Note for this section (prints above its products)</span>
@@ -5270,33 +5336,22 @@ export default function QuoteBuilder() {
                       className="w-full text-base md:text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-y"
                     />
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      openSectionNote();
-                      // Focus once the textarea has rendered; never on a remount (collapse, tab switch).
-                      requestAnimationFrame(() => document.getElementById(`section-note-input-${sec._key}`)?.focus());
-                    }}
-                    className="-ml-2 inline-flex min-h-11 md:min-h-10 items-center gap-1.5 px-2 text-left text-sm font-medium text-crx-green hover:underline"
-                  >
-                    <Plus className="w-3.5 h-3.5 shrink-0" />
-                    Add a note for this section (prints above its products)
-                  </button>
-                )}
-              </div>
+                </div>
+              )}
               {sec.items.length === 0 ? (
                 <p className="px-3 md:px-4 pt-2 pb-4 text-sm text-secondary">
-                  No products yet.{' '}
-                  <button
+                  No products yet.{readOnly ? null : ' '}
+                  {!readOnly && <button
                     type="button"
                     onClick={() => addItem(sec._key)}
                     className={`${LINK_HIT} text-crx-green hover:underline font-medium`}
                   >
                     Add one
-                  </button>
+                  </button>}
                 </p>
-              ) : isPhone ? (
+              ) : lineCards ? (
+                // Below 1024 px: one card per line. Fields sit 2 across on a phone and 4 across from 768 px,
+                // once the card has the room (36rem; not with the sidebar open at 768 px).
                 <div className="mt-2 divide-y divide-cream-dark border-t border-cream-dark">
                   {sec.items.map((item, idx) => {
                     const line = lineParts(item, idx + 1);
@@ -5304,46 +5359,58 @@ export default function QuoteBuilder() {
                       <article
                         key={item._key}
                         aria-label={line.prod ? `Line ${idx + 1}, ${line.prod.product_name}` : `Line ${idx + 1}`}
-                        className="px-3 py-4 space-y-3"
+                        className="@container px-3 py-3.5 md:px-4 space-y-3"
                       >
                         <div className="flex items-start gap-2">
+                          <span aria-hidden="true" className="mt-2.5 md:mt-0 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cream-dark text-xs font-semibold text-secondary tabular-nums">{idx + 1}</span>
                           <div className="flex-1 min-w-0">{line.product}</div>
                           {line.menu}
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Rate</span>{line.rate}</div>
+                        <div className="grid grid-cols-2 md:@min-[36rem]:grid-cols-4 gap-x-2.5 gap-y-3">
+                          <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Rate per acre</span>{line.rate}</div>
                           <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Acres</span>{line.acres}</div>
                           <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Quantity</span>{line.quantity}</div>
                           <div className="min-w-0"><span aria-hidden="true" className="mb-1 block text-[13px] font-medium text-secondary">Price</span>{line.price}</div>
                         </div>
                         <div className="flex items-end justify-between gap-3 border-t border-cream-dark pt-2.5">
                           <div className="min-w-0 text-[13px] text-secondary">
-                            <div className="tabular-nums">{item.price_per_acre != null ? `${fmt(item.price_per_acre)}/acre` : '–/acre'}</div>
+                            <div className="tabular-nums">{line.perAcre}</div>
                             {line.cost}
                           </div>
-                          <strong className="shrink-0 text-[17px] font-semibold text-nav-dark tabular-nums">{fmt(item.total_price)}</strong>
+                          <strong className="shrink-0 text-lg font-semibold text-nav-dark tabular-nums">{fmt(item.total_price)}</strong>
                         </div>
                       </article>
                     );
                   })}
                 </div>
               ) : (
-                // 768 px and up: all columns; the table scrolls inside its card with Product pinned when it doesn't fit.
-                // relative: the sr-only header is absolutely positioned and must stay inside this scroller.
-                <div className="relative mt-2 overflow-x-auto">
-                  <table className={`w-full text-sm ${hideCost ? 'min-w-[48.5rem]' : 'min-w-[56.5rem]'}`}>
+                // 1024 px and up: fixed columns that fit the card, Product takes what is left and wraps.
+                // The number columns widen once the card is 72rem. overflow-x-auto only guards a zoomed page.
+                // relative: the sr-only header is absolutely positioned and must stay inside this wrapper.
+                <div className="@container relative mt-2 overflow-x-auto">
+                  <table className="w-full table-fixed text-sm">
+                    <colgroup>
+                      <col className="w-9 @min-[72rem]:w-10" />
+                      <col />
+                      <col className="w-29 @min-[72rem]:w-39" />
+                      <col className="w-17 @min-[72rem]:w-23" />
+                      <col className="w-24 @min-[72rem]:w-33" />
+                      <col className="w-33 @min-[72rem]:w-42" />
+                      <col className="w-24 @min-[72rem]:w-28" />
+                      {!hideCost && <col className="w-32 @min-[72rem]:w-33" />}
+                      <col className="w-12" />
+                    </colgroup>
                     <thead>
-                      <tr className="border-t border-cream-dark text-left text-xs text-secondary">
-                        <th scope="col" className="py-2.5 pl-4 pr-2 w-8 font-medium">#</th>
-                        <th scope="col" className="sticky left-0 z-[1] bg-white py-2.5 px-2 min-w-[10rem] font-medium">Product</th>
-                        <th scope="col" className="py-2.5 px-2 w-[6.5rem] font-medium">Rate</th>
-                        <th scope="col" className="py-2.5 px-2 w-[4.5rem] font-medium">Acres</th>
-                        <th scope="col" className="py-2.5 px-2 w-[6.5rem] font-medium">Quantity</th>
-                        <th scope="col" className="py-2.5 px-2 w-[6.5rem] font-medium">Price</th>
-                        <th scope="col" className="py-2.5 px-2 w-[4.5rem] font-medium text-right">$/acre</th>
-                        <th scope="col" className="py-2.5 px-2 w-20 font-medium text-right">Total</th>
-                        {!hideCost && <th scope="col" className="py-2.5 px-2 w-32 font-medium text-right">Cost · margin</th>}
-                        <th scope="col" className="py-2.5 px-1 w-12"><span className="sr-only">Line actions</span></th>
+                      <tr className="border-t border-cream-dark bg-cream/60 text-left text-xs text-secondary">
+                        <th scope="col" className="py-2.5 pl-3 pr-1 font-medium md:pl-4">#</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Product</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Rate per acre</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Acres</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Quantity</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium">Price</th>
+                        <th scope="col" className="py-2.5 px-1.5 font-medium text-right">Total</th>
+                        {!hideCost && <th scope="col" className="py-2.5 px-1.5 font-medium text-right">Cost · margin</th>}
+                        <th scope="col" className="py-2.5 px-1"><span className="sr-only">Line actions</span></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -5351,19 +5418,18 @@ export default function QuoteBuilder() {
                         const line = lineParts(item, idx + 1);
                         return (
                           <tr key={item._key} className="border-t border-cream-dark align-top">
-                            <td className="py-3 pl-4 pr-2 pt-5 text-xs text-secondary tabular-nums">{idx + 1}</td>
-                            <td className="sticky left-0 z-[1] bg-white py-3 px-2">{line.product}</td>
-                            <td className="py-3 px-2">{line.rate}</td>
-                            <td className="py-3 px-2">{line.acres}</td>
-                            <td className="py-3 px-2">{line.quantity}</td>
-                            <td className="py-3 px-2">{line.price}</td>
-                            <td className="py-3 px-2 pt-5 text-right text-secondary tabular-nums">
-                              {item.price_per_acre != null ? fmt(item.price_per_acre) : '–'}
+                            <td className="py-3 pl-3 pr-1 pt-5 text-xs text-secondary tabular-nums md:pl-4">{idx + 1}</td>
+                            <td className="py-3 px-1.5 break-words">{line.product}</td>
+                            <td className="py-3 px-1.5">{line.rate}</td>
+                            <td className="py-3 px-1.5">{line.acres}</td>
+                            <td className="py-3 px-1.5">{line.quantity}</td>
+                            <td className="py-3 px-1.5">{line.price}</td>
+                            <td className="py-3 px-1.5 pt-5 text-right">
+                              <div className="font-semibold text-nav-dark tabular-nums">{fmt(item.total_price)}</div>
+                              <div className="mt-1 text-xs text-secondary tabular-nums">{line.perAcre}</div>
                             </td>
-                            <td className="py-3 px-2 pt-5 text-right font-semibold text-nav-dark tabular-nums">
-                              {fmt(item.total_price)}
-                            </td>
-                            {!hideCost && <td className="py-3 px-2 pt-5 text-right text-xs">{line.cost}</td>}
+                            {/* Fixed columns: the cost's no-wrap parts may wrap rather than run into the next column. */}
+                            {!hideCost && <td className="py-3 px-1.5 pt-5 text-right text-xs [&_*]:whitespace-normal">{line.cost}</td>}
                             <td className="py-2 px-1 text-right">{line.menu}</td>
                           </tr>
                         );
@@ -5372,26 +5438,42 @@ export default function QuoteBuilder() {
                   </table>
                 </div>
               )}
-              {sec.items.length > 0 && (
-                <div className="px-3 md:px-4 py-3 border-t border-cream-dark">
-                  <Button
-                    variant="secondary"
-                    icon={<Plus className="w-4 h-4" />}
-                    showChevron={false}
-                    onClick={() => addItem(sec._key)}
-                    className="w-full md:w-auto"
-                  >
-                    Add product
-                  </Button>
+              {!readOnly && (sec.items.length > 0 || !sectionNoteOpen) && (
+                <div className="flex flex-col gap-1 border-t border-cream-dark px-3 py-3 md:flex-row md:items-center md:gap-4 md:px-4">
+                  {sec.items.length > 0 && (
+                    <Button
+                      variant="secondary"
+                      icon={<Plus className="w-4 h-4" />}
+                      showChevron={false}
+                      onClick={() => addItem(sec._key)}
+                      className="min-h-11 w-full md:min-h-10 md:w-auto"
+                    >
+                      Add product
+                    </Button>
+                  )}
+                  {!sectionNoteOpen && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        openSectionNote();
+                        // Focus once the textarea has rendered; never on a remount (collapse, tab switch).
+                        requestAnimationFrame(() => document.getElementById(`section-note-input-${sec._key}`)?.focus());
+                      }}
+                      className="-ml-2 inline-flex min-h-11 md:min-h-10 items-center gap-1.5 self-start px-2 text-left text-sm font-medium text-crx-green hover:underline md:self-auto"
+                    >
+                      <Plus className="w-3.5 h-3.5 shrink-0" />
+                      Add a note for this section
+                    </button>
+                  )}
                 </div>
               )}
-              </>
+              </fieldset>
             )}
           </Card>
         );
       })}
 
-      <button
+      {!readOnly && <button
         type="button"
         onClick={addSection}
         className="w-full flex items-center md:justify-center gap-3 rounded-xl border-[1.5px] border-dashed border-gray-300 px-4 py-4 text-left text-nav-dark transition-colors hover:border-crx-green hover:bg-crx-green-tint disabled:opacity-50"
@@ -5403,7 +5485,7 @@ export default function QuoteBuilder() {
           <span className="font-semibold">Add a section</span>
           <span className="text-[13px] text-secondary">Group products by field or timing, like &quot;Spring pre-emerge&quot;. Each section gets its own total on the PDF.</span>
         </span>
-      </button>
+      </button>}
               </fieldset>
             ),
           },
@@ -5856,87 +5938,105 @@ export default function QuoteBuilder() {
 
       <Modal
         open={showPreviewModal}
-        onClose={() => { setShowPreviewModal(false); if (previewPdfUrl) URL.revokeObjectURL(previewPdfUrl); }}
-        title="Quote"
-        accent="Preview"
+        onClose={() => { setShowPreviewModal(false); setPreviewPdfBlob(null); }}
+        title="Preview and send"
+        subtitle={selectedCustomer?.farm_name ? `${quoteNumber} for ${selectedCustomer.farm_name}` : quoteNumber}
+        size="wide"
       >
-        {/* PDF Column Template Picker */}
-        <div className="flex items-center gap-3 mb-3">
-          <select
-            value={selectedTemplateId || ''}
-            onChange={(e) => { setSelectedTemplateId(e.target.value); setCustomColumns(null); }}
-            className="text-sm border border-gray-200 rounded-lg px-3 py-1.5"
-          >
-            {pdfTemplates.map((t) => (
-              <option key={t.id} value={t.id}>{t.template_name}</option>
-            ))}
-          </select>
-          <button
-            onClick={() => setShowColumnPicker(!showColumnPicker)}
-            className="text-sm text-crx-green hover:underline"
-          >
-            {showColumnPicker ? 'Hide columns' : 'Customize columns'}
-          </button>
-        </div>
-        {showColumnPicker && (
-          <div className="flex flex-wrap gap-2 mb-3 p-3 bg-gray-50 rounded-lg">
-            {AVAILABLE_PDF_COLUMNS.map((col) => {
-              const activeColumns = customColumns || getTemplateColumns(selectedTemplateId);
-              const isActive = activeColumns.includes(col.key);
-              return (
-                <label key={col.key} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isActive}
-                    onChange={() => {
-                      const cols = [...activeColumns];
-                      if (isActive) cols.splice(cols.indexOf(col.key), 1);
-                      else cols.push(col.key);
-                      setCustomColumns(cols);
-                    }}
-                  />
-                  {col.label}
-                </label>
-              );
-            })}
+        {/* Phone: pages, then options, with the actions pinned at the bottom. md+: pages left, options and actions in a 360px side panel. */}
+        <div className="-mx-6 -my-5 flex h-[calc(100%+2.5rem)] flex-col md:grid md:grid-cols-[minmax(0,1fr)_360px] md:grid-rows-[minmax(0,1fr)_auto]">
+          <div className="min-h-0 flex-1 overflow-y-auto md:contents">
+            <div className="bg-cream-dark p-4 md:row-span-2 md:overflow-y-auto md:p-7">
+              {previewRebuild === 'failed' && (
+                <p className="mb-3 text-sm text-secondary">Preview could not update. Download and email use the columns you picked.</p>
+              )}
+              <div role="status" aria-live="polite" className={previewRebuild === 'updating' ? 'mb-3 text-xs text-secondary' : 'sr-only'}>
+                {previewRebuild === 'updating' ? 'Updating preview…' : ''}
+              </div>
+              {previewPdfBlob && <PdfPagePreview blob={previewPdfBlob} title={`Quote ${quoteNumber}`} />}
+            </div>
+            <div className="flex flex-col gap-5 p-4 md:overflow-y-auto md:border-l md:border-gray-200 md:px-6 md:py-5">
+              <Dropdown
+                label="PDF layout"
+                value={selectedTemplateId}
+                placeholder="Default layout"
+                onChange={(v) => { setSelectedTemplateId(v); setCustomColumns(null); }}
+                options={pdfTemplates.map((t) => ({ value: t.id, label: t.template_name }))}
+                noHelperRow
+              />
+              <fieldset className="flex min-w-0 flex-col gap-2.5">
+                <legend className="mb-2.5 text-sm font-medium text-secondary">Columns on the PDF</legend>
+                <div className="flex flex-wrap gap-2">
+                  {AVAILABLE_PDF_COLUMNS.map((col) => {
+                    const isActive = activePdfColumns.includes(col.key);
+                    return (
+                      <button
+                        key={col.key}
+                        type="button"
+                        aria-pressed={isActive}
+                        onClick={() => {
+                          const cols = [...activePdfColumns];
+                          if (isActive) cols.splice(cols.indexOf(col.key), 1);
+                          else cols.push(col.key);
+                          setCustomColumns(cols);
+                        }}
+                        className={`inline-flex h-11 items-center rounded-full border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2 md:h-10 ${isActive ? 'border-crx-green bg-crx-green-light text-crx-green' : 'border-gray-300 bg-white text-nav-dark hover:bg-gray-50'}`}
+                      >
+                        {col.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-sm text-secondary">The preview updates as you pick.</p>
+              </fieldset>
+              <div className="flex flex-col gap-1.5 rounded-lg border border-cream-dark bg-cream p-3.5 text-sm">
+                <span className="font-medium text-nav-dark">Sending to</span>
+                <span className="break-all text-nav-dark">{selectedCustomer?.email || 'No email address on file'}</span>
+                {lastQuoteEmailAt && (
+                  <span className="inline-flex items-center gap-1.5 text-crx-green">
+                    <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    Last emailed {new Date(lastQuoteEmailAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
-        )}
-        <div className="h-[60vh]">
-          <iframe src={previewPdfUrl || ''} className="w-full h-full border rounded-lg" title="Quote PDF Preview" />
-        </div>
-        <div className="flex justify-end gap-3 mt-4 pt-4 border-t">
-          <Button
-            variant="secondary"
-            icon={<Download className="w-4 h-4" />}
-            showChevron={false}
-            onClick={handleDownloadPdf}
-          >
-            Download PDF
-          </Button>
-          <Button
-            variant="secondary"
-            icon={<CheckCircle className="w-4 h-4" />}
-            onClick={handleMarkPresented}
-            disabled={status !== 'draft' && status !== 'revised'}
-          >
-            Mark as Presented
-          </Button>
-          <HelpTip text="Marks the quote as sent WITHOUT emailing. Use when you presented it in person" className="ml-1" />
-          <Button
-            variant="primary"
-            icon={<Send className="w-4 h-4" />}
-            showChevron={false}
-            onClick={handleEmailToGrower}
-            loading={emailingGrower}
-          >
-            Email to Grower
-          </Button>
-          {lastQuoteEmailAt && (
-            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-              Emailed {new Date(lastQuoteEmailAt).toLocaleDateString()} ✓
-            </span>
-          )}
-          <HelpTip text="Emails the quote PDF to the grower and logs it" className="ml-1" />
+          <div className="flex shrink-0 flex-col gap-2.5 border-t border-gray-200 bg-white px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:border-l md:px-6 md:pb-5">
+            <Button
+              variant="primary"
+              icon={<Send className="w-4 h-4" />}
+              onClick={handleEmailToGrower}
+              loading={emailingGrower}
+              className="h-11 w-full"
+            >
+              {emailingGrower ? 'Sending…' : 'Email to grower'}
+            </Button>
+            <div className="flex gap-2.5">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={async () => {
+                  setMarkingPresented(true);
+                  try { await handleMarkPresented(); } finally { setMarkingPresented(false); }
+                }}
+                loading={markingPresented}
+                disabled={status !== 'draft' && status !== 'revised'}
+                className="min-h-11 flex-1 whitespace-nowrap md:min-h-10"
+              >
+                {markingPresented ? 'Marking…' : 'Mark as presented'}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Download className="w-4 h-4" />}
+                onClick={handleDownloadPdf}
+                className="min-h-11 flex-1 whitespace-nowrap md:min-h-10"
+              >
+                Download
+              </Button>
+            </div>
+            <p className="text-xs text-secondary">Mark as presented records the quote as sent without emailing, for quotes you hand over in person.</p>
+          </div>
         </div>
       </Modal>
 
@@ -6075,6 +6175,7 @@ export default function QuoteBuilder() {
                               // Locked while the order is created: a later change would not be in it.
                               disabled={drawing || row.remaining <= 0}
                               onChange={(e) => setRow({ qty: e.target.value })}
+                              aria-label={`Quantity to draw for ${row.product_name}`}
                               className="w-24 px-2 py-1 text-sm text-right border border-gray-200 rounded-lg disabled:bg-gray-50"
                             />
                             {row.unit && <span className="text-xs text-secondary">{row.unit}</span>}

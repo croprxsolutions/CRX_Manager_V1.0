@@ -64,6 +64,24 @@ describe('Dropdown', () => {
     expect(trigger).not.toHaveClass('bg-white');
   });
 
+  it('icon and valueLabel change only what the trigger shows', () => {
+    const onChange = vi.fn();
+    render(<Dropdown inline aria-label="Sort things" icon={<span data-testid="lead-icon" />} valueLabel="Sort" value="draft" onChange={onChange} options={options} />);
+    const trigger = screen.getByRole('button', { name: /Sort/ });
+    expect(trigger).toHaveTextContent(/^Sort$/);
+    expect(screen.getByTestId('lead-icon')).toBeInTheDocument();
+    fireEvent.click(trigger);
+    expect(screen.getByRole('option', { name: 'Draft' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('option', { name: 'Sent' }));
+    expect(onChange).toHaveBeenCalledWith('sent');
+  });
+
+  it('the option list gets the thin scrollbar and scroll shadows', () => {
+    render(<Dropdown label="Status" value="draft" onChange={vi.fn()} options={options} />);
+    fireEvent.click(screen.getByRole('button', { name: /Status/ }));
+    expect(screen.getByRole('listbox')).toHaveClass('scroll-thin', 'scroll-shadows');
+  });
+
   it('disabled option cannot be chosen', () => {
     const onChange = vi.fn();
     render(<Dropdown label="Status" value="draft" onChange={onChange} options={options} />);

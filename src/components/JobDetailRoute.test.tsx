@@ -239,7 +239,7 @@ describe('JobDetail transfer intent recovery', () => {
 
   const confirmTransfer = async () => {
     fireEvent.click(screen.getByRole('button', { name: 'Transfer to Invoice' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Transfer to Invoice' });
+    const dialog = await screen.findByRole('alertdialog', { name: 'Transfer to Invoice' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Transfer to Invoice' }));
   };
 
@@ -316,7 +316,7 @@ describe('JobDetail transfer intent recovery', () => {
     expect(screen.getByRole('button', { name: 'Transfer to Invoice' })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Transfer to Invoice' }));
-    expect(screen.queryByRole('dialog', { name: 'Transfer to Invoice' })).toBeNull();
+    expect(screen.queryByRole('alertdialog', { name: 'Transfer to Invoice' })).toBeNull();
     expect(mockRpc.mock.calls.filter(([name]) => name === 'transfer_job_to_invoice')).toHaveLength(1);
 
     resolveReconciliation({ data: completedJob, error: null });

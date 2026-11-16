@@ -122,10 +122,10 @@ export default function Tabs({
                 <span>{tab.label}</span>
                 {tab.count !== undefined && (
                   <span
-                    className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-medium leading-none ${
+                    className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums ${
                       isActive
                         ? 'bg-crx-green text-white'
-                        : 'bg-gray-100 text-gray-600'
+                        : 'bg-crx-green-light text-crx-green'
                     }`}
                   >
                     {tab.count}

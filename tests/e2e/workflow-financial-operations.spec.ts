@@ -136,7 +136,7 @@ async function createNewPO(page: Page): Promise<string> {
 
   // Handle UnsavedChangesModal race condition
   try {
-    const leaveBtn = page.locator('button:has-text("Leave")');
+    const leaveBtn = page.locator('button:has-text("Discard changes")');
     await leaveBtn.click({ timeout: 3000 });
   } catch {
     // No modal appeared — navigation succeeded directly

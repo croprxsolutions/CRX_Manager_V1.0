@@ -130,14 +130,15 @@ export default function CommissionSplitEditor({
                   onChange={(e) => updateSplit(i, 'percentage', e.target.value)}
                   placeholder="0"
                   aria-label={`Commission percentage for split ${i + 1}`}
+                  disabled={disabled}
                   min="0"
                   max="100"
                   step="any"
-                  className="w-full h-11 md:h-10 px-3 pr-7 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green transition-colors duration-150"
+                  className="w-full h-11 md:h-10 px-3 pr-7 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green transition-colors duration-150 disabled:bg-gray-50 disabled:text-gray-500"
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
               </div>
-              {splits.length > 1 && (
+              {splits.length > 1 && !disabled && (
                 <button
                   type="button"
                   onClick={() => removeSplit(i)}
@@ -151,6 +152,7 @@ export default function CommissionSplitEditor({
           );
         })}
         <div className="flex items-center justify-between">
+          {disabled ? <span /> : (
           <button
             type="button"
             onClick={addSplit}
@@ -159,6 +161,7 @@ export default function CommissionSplitEditor({
             <Plus className="w-3 h-3" />
             Add Recipient
           </button>
+          )}
           <span
             className={`text-xs font-medium ${
               splits.length === 0

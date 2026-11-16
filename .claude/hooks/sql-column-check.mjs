@@ -13,6 +13,8 @@
 // registry. A missing or unreadable registry allows the query. A column named
 // in a migration newer than the registry is allowed (the registry may be stale).
 // Escape hatch: `-- column-check: skip` anywhere in the query.
+// shortcut: tables after a comma in FROM and three-part names (schema.table.col)
+// are not checked; add them only if guessed columns keep slipping through there.
 // Fail-open: no onFailure "block"; a crash allows the call.
 // @proven-by sql-column-check.test.mjs
 
@@ -39,6 +41,8 @@ function stripSql(sql) {
 // Returns [{ ref, table, column }] for every reference that is certainly wrong.
 export function findBadColumns(sql, columnsByTable) {
   if (!columnsByTable || typeof columnsByTable !== "object") return [];
+  // Postgres block comments nest; the stripper does not, so skip such a query.
+  if (/\/\*(?:(?!\*\/)[\s\S])*\/\*/.test(String(sql))) return [];
   const bad = [];
   for (const stmt of stripSql(sql).split(";")) {
     const ctes = new Set();
@@ -73,23 +77,27 @@ export function findBadColumns(sql, columnsByTable) {
   return bad.filter((b) => !seen.has(b.ref) && seen.add(b.ref));
 }
 
-// Columns named in migrations stamped after the registry's high water: the
-// registry may not have them yet, so they are never refused.
-function columnsInNewerMigrations(migrationsDir, highWater) {
+// Migrations stamped after the registry's high water: the registry may not
+// have their columns yet (see addedSinceRegistry).
+function newerMigrations(migrationsDir, highWater) {
   try {
-    if (!highWater) return "";
+    if (!highWater) return [];
     return readdirSync(migrationsDir)
       .filter((f) => f.endsWith(".sql") && (f.match(/^(\d+)/)?.[1] || "") > String(highWater))
-      .map((f) => readFileSync(path.join(migrationsDir, f), "utf8").toLowerCase())
-      .join("\n");
-  } catch { return ""; }
+      .map((f) => readFileSync(path.join(migrationsDir, f), "utf8").toLowerCase());
+  } catch { return []; }
 }
 
-// A newer migration adds or renames to this column, or redefines this table as a view.
-export function addedSinceRegistry(newerSql, table, column) {
+// One newer migration file both names this table (ALTER TABLE or a view of
+// that name) and adds/renames to this column, or names the column in that view.
+export function addedSinceRegistry(newerFiles, table, column) {
   const col = `"?${column}"?\\b`;
-  return new RegExp(`\\badd\\s+(?:column\\s+)?(?:if\\s+not\\s+exists\\s+)?${col}|\\brename\\s+column\\s+\\S+\\s+to\\s+${col}`).test(newerSql) ||
-    new RegExp(`\\bview\\s+(?:if\\s+not\\s+exists\\s+)?(?:"?public"?\\.)?"?${table}"?\\b`).test(newerSql);
+  const tbl = `(?:"?public"?\\.)?"?${table}"?\\b`;
+  const alters = new RegExp(`\\balter\\s+table\\s+(?:if\\s+exists\\s+)?(?:only\\s+)?${tbl}`);
+  const adds = new RegExp(`\\badd\\s+(?:column\\s+)?(?:if\\s+not\\s+exists\\s+)?${col}|\\brename\\s+column\\s+\\S+\\s+to\\s+${col}`);
+  const view = new RegExp(`\\bview\\s+(?:if\\s+not\\s+exists\\s+)?${tbl}`);
+  return newerFiles.some((sql) => (alters.test(sql) && adds.test(sql)) ||
+    (view.test(sql) && new RegExp(`\\b${column}\\b`).test(sql)));
 }
 
 function main() {
@@ -105,7 +113,7 @@ function main() {
 
   let bad = findBadColumns(sql, registry?.columns);
   if (bad.length === 0) return;
-  const newer = columnsInNewerMigrations(path.join(here, "..", "..", "supabase", "migrations"), registry?._meta?.migrations_high_water);
+  const newer = newerMigrations(path.join(here, "..", "..", "supabase", "migrations"), registry?._meta?.migrations_high_water);
   bad = bad.filter((b) => !addedSinceRegistry(newer, b.table, b.column));
   if (bad.length === 0) return;
 

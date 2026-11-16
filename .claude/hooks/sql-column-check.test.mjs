@@ -53,6 +53,8 @@ allows("select public.fn_x(oi.id) from order_items oi", "schema-qualified functi
 allows("select 1.5 * oi.acres from order_items oi", "numbers");
 allows("select oi.* from order_items oi", "star");
 allows("select x.ctid, x.xmin from order_items x", "system columns");
+allows("/* outer /* inner */ select p.price_per_acre from products p */ select 1", "nested block comment");
+refuses("/* note */ select p.price_per_acre from products p", ["p.price_per_acre"], "plain block comment still checked");
 // Real 2026 sweep query: a `--` inside a string once hid `JOIN pg_proc p` and bound p to products only.
 allows(`select regexp_replace(p.prosrc, '--[^\\n]*', ' ', 'g'), p.proconfig
   from quote_items qi join products p on p.id = qi.product_id
@@ -71,6 +73,8 @@ const registryPath = path.join(tmp, ".claude", "schema-registry.json");
 writeFileSync(registryPath, JSON.stringify({ _meta: { generated_at: "2026-11-12", migrations_high_water: "20261112000000" }, columns: COLUMNS }));
 writeFileSync(path.join(migDir, "20261101000000_old.sql"), "alter table products add column default_rate_unit text;");
 writeFileSync(path.join(migDir, "20261113000000_new.sql"), "alter table order_items add column quantity numeric;\n-- mentions price_per_acre in passing\nupdate products set rate_unit = 'oz';");
+// Adds the column to a DIFFERENT table: must not excuse products.unit_cost.
+writeFileSync(path.join(migDir, "20261114000000_other.sql"), "alter table orders add column unit_cost bigint;");
 
 function run(query, toolName = "mcp__supabase__execute_sql") {
   const r = spawnSync(process.execPath, [path.join(hooksDir, "sql-column-check.mjs")], {
@@ -89,6 +93,8 @@ assert.equal(run("select p.rate_unit from products p"), null, "correct query pri
 assert.equal(run("select oi.quantity from order_items oi"), null, "column in a migration newer than the registry is allowed"); pass++;
 assert.equal(run("select p.price_per_acre from products p")?.hookSpecificOutput?.permissionDecision, "deny",
   "a newer migration that only mentions the word does not excuse it"); pass++;
+assert.equal(run("select p.unit_cost from products p")?.hookSpecificOutput?.permissionDecision, "deny",
+  "a column added to another table does not excuse it"); pass++;
 assert.equal(run("-- column-check: skip\nselect p.default_rate_unit from products p"), null, "skip marker"); pass++;
 assert.equal(run("select p.default_rate_unit from products p", "mcp__supabase__list_tables"), null, "other tools ignored"); pass++;
 writeFileSync(registryPath, "{ not json");

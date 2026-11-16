@@ -277,6 +277,15 @@ function asAdmin(sql, { commit = false } = {}) {
 }
 const ok = (label, sql) => assert.equal(asAdmin(sql, { commit: true }), '', `${label}: expected to succeed`);
 const refused = (label, sql, token) => assert.match(asAdmin(sql), new RegExp(token), `${label}: expected ${token}`);
+// As the table owner (no grant limits), rolled back: proves a trigger, not the grant.
+const refusedAsOwner = (label, sql, token, begin = 'BEGIN;') => {
+  const r = docker([...psqlArgs()], { input: `${begin}
+${sql}
+ROLLBACK;
+`, allowFailure: true });
+  assert.match(`${r.stdout}
+${r.stderr}`, new RegExp(token), `${label}: expected ${token}`);
+};
 const inv = (p, wh = MAIN) => scalar(`SELECT id FROM public.inventory WHERE product_id = '${p}' AND location = '${wh}';`);
 const onHand = (p, wh = MAIN) => Number(scalar(`SELECT quantity_available FROM public.inventory WHERE product_id = '${p}' AND location = '${wh}';`));
 let keyN = 0;
@@ -402,8 +411,12 @@ async function main() {
     VALUES ('${ccN}', '${PRODUCTS.p2}', '${inv(PRODUCTS.p2, NORTH)}', 0), ('${ccN}', '${PRODUCTS.p2}', '${inv(PRODUCTS.p2, NORTH)}', 0);`, 'CYCLE_COUNT_ROW_ALREADY_OPEN');
   refused('P2 move onto an open row', `UPDATE public.cycle_count_items SET inventory_id = '${inv(PRODUCTS.p2)}'
     WHERE id = '${itemOn(ccN, PRODUCTS.p1)}';`, 'CYCLE_COUNT_ROW_ALREADY_OPEN');
+  refused('P2 reparent onto another count', `UPDATE public.cycle_count_items SET cycle_count_id = '${ccN}'
+    WHERE id = '${itemOn(cc1, PRODUCTS.p1)}';`, 'CYCLE_COUNT_ITEM_REPARENT_FORBIDDEN');
+  refusedAsOwner('P2 repeatable read', `INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty)
+    VALUES ('${cc1}', '${PRODUCTS.p1}', '${inv(PRODUCTS.p1, NORTH)}', 0);`, 'CYCLE_COUNT_ROW_CLAIM_ISOLATION', 'BEGIN ISOLATION LEVEL REPEATABLE READ;');
   ok('P2 unrelated edit', `UPDATE public.cycle_count_items SET notes = 'shelf 3' WHERE id = '${itemOn(cc1, PRODUCTS.p1)}';`);
-  console.log('[case] P2 a stock row already on an open count is refused on another count, twice on one count, twice in one statement, and as a move; an unrelated edit of the line saves');
+  console.log('[case] P2 a stock row already on an open count is refused on another count, twice on one count, twice in one statement, and as a move; a move onto another count and a repeatable-read claim are refused; an unrelated edit of the line saves');
 
   // P3: two concurrent claims on one row (North's p2 row, on no open item yet) from two open counts: exactly one wins.
   raw(`INSERT INTO public.warehouses (name, is_active) SELECT 'South Barn', true WHERE NOT EXISTS (SELECT 1 FROM public.warehouses WHERE name = 'South Barn');`);
@@ -425,22 +438,26 @@ async function main() {
   console.log('[case] P4 completing a count still works: counted 95 of 100 ends at 95, and stock still matches history');
 
   // P5: a closed count never reopens (cancelled or completed); a new count at the warehouse may start.
-  refused('P5 reopen completed', `UPDATE public.cycle_counts SET status = 'in_progress' WHERE id = '${cc1}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is completed and cannot become in_progress');
-  refused('P5 reopen cancelled', `UPDATE public.cycle_counts SET status = 'in_progress' WHERE id = '${ccB}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is cancelled and cannot become in_progress');
-  refused('P5 cancelled to completed', `UPDATE public.cycle_counts SET status = 'completed' WHERE id = '${ccB}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is cancelled and cannot become completed');
-  ok('P5 notes on a closed count', `UPDATE public.cycle_counts SET notes = 'checked' WHERE id = '${cc1}';`);
+  refusedAsOwner('P5 reopen completed', `UPDATE public.cycle_counts SET status = 'in_progress' WHERE id = '${cc1}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is completed and cannot become in_progress');
+  refusedAsOwner('P5 reopen cancelled', `UPDATE public.cycle_counts SET status = 'in_progress' WHERE id = '${ccB}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is cancelled and cannot become in_progress');
+  refusedAsOwner('P5 cancelled to completed', `UPDATE public.cycle_counts SET status = 'completed' WHERE id = '${ccB}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is cancelled and cannot become completed');
+  refused('P5 admin reopens directly', `UPDATE public.cycle_counts SET status = 'in_progress' WHERE id = '${cc1}';`, 'permission denied for table cycle_counts');
+  refused('P5 admin edits a count directly', `UPDATE public.cycle_counts SET notes = 'checked' WHERE id = '${cc1}';`, 'permission denied for table cycle_counts');
+  psql(`UPDATE public.cycle_counts SET notes = 'checked' WHERE id = '${cc1}';`); // the owner may still edit a closed count's notes
   assert.equal(startCount(MAIN, [PRODUCTS.p1]), '', 'P5: a new count may start once the old one is closed');
   const cc2 = openCount(MAIN);
   cancel(cc2); cancel(ccN);
-  console.log('[case] P5 a completed or a cancelled count cannot be set back to in progress; a closed count\'s notes still save; a new count starts after');
+  console.log('[case] P5 a completed or a cancelled count cannot be set back to in progress (the trigger, as owner); a signed-in admin cannot write cycle_counts directly at all; the owner may still edit a closed count notes; a new count starts after');
 
-  // P6: reverse of a completed count still works under the new rule (completed -> cancelled).
+  // P6: an admin cannot mark a completed count cancelled directly (that skipped the reversal); Reverse still works.
+  refused('P6 admin cancels a completed count directly', `UPDATE public.cycle_counts SET status = 'cancelled' WHERE id = '${cc1}';`, 'permission denied for table cycle_counts');
+  assert.equal(onHand(PRODUCTS.p1), 95, 'P6: nothing moved');
   ok('P6 reverse', `SELECT public.reverse_completed_cycle_count('${cc1}', '${ADMIN}', '${key('reverse')}');`);
   assert.equal(onHand(PRODUCTS.p1), 100, 'P6: reverse puts the 5 back');
   assert.equal(sweepRows(), 'none');
-  refused('P6 re-complete a reversed count', `UPDATE public.cycle_counts SET status = 'completed' WHERE id = '${cc1}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is cancelled and cannot become completed');
+  refusedAsOwner('P6 re-complete a reversed count', `UPDATE public.cycle_counts SET status = 'completed' WHERE id = '${cc1}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is cancelled and cannot become completed');
   assert.equal(onHand(PRODUCTS.p1), 100, 'P6: nothing moved');
-  console.log('[case] P6 reversing a completed count still works (95 -> 100) and stock still matches history; the reversed count cannot be set back to completed to reverse it twice');
+  console.log('[case] P6 reversing a completed count still works (95 -> 100) and stock still matches history; an admin cannot mark a completed count cancelled directly (skipping the reversal); the reversed count cannot be set back to completed to reverse it twice');
 
   // R: rollback removes the guards; two open counts at one warehouse are possible again.
   applyFile(REVERSE, 'reverse', true);

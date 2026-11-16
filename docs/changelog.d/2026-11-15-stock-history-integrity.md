@@ -11,7 +11,9 @@
   checked.
 - `20270111120000_one_open_count_per_stock_row.sql` (KI-160 part): one in-progress count per warehouse; a stock row on
   only one line of any in-progress count (two at once: exactly one wins); a count's status only moves forward (no reopen,
-  and a reversed count cannot be marked completed and reversed twice). Plain messages for each refusal.
+  and a reversed count cannot be marked completed and reversed twice); signed-in users lose direct
+  UPDATE on `cycle_counts` (the app only uses the complete, cancel and reverse RPCs), so a completed count can no
+  longer be marked cancelled without its reversal. Plain messages for each refusal.
 - Proof: `node scripts/smoke/prove-one-open-count-real-schema.mjs` (ONE_OPEN_COUNT_PROOF_PASS). Rollback:
   `scripts/smoke/one-open-count-reverse.sql` (proven).
 - Not in this change (left open in KI-160): the direct `variance` grant and the three-request count creation.

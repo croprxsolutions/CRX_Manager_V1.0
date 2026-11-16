@@ -12,6 +12,10 @@
 --      transaction advisory lock on the inventory row, so two concurrent inserts end with exactly one).
 --   3. A count's status only moves forward: in progress -> completed or cancelled, completed -> cancelled (trigger on
 --      cycle_counts). That is exactly what complete, cancel and reverse do; the app has no reopen.
+--   4. Signed-in users lose direct UPDATE on cycle_counts (table and every column). The app never updates the table
+--      directly; complete, cancel and reverse are SECURITY DEFINER RPCs. Without this, an admin's direct write could
+--      mark a completed count cancelled with no reversal (stock stays changed, Reverse then refuses).
+-- The live grant before this file: UPDATE on cycle_counts to authenticated (table level), restored by the rollback.
 -- NOT HERE (left open in KI-160): the direct `variance` UPDATE grant on cycle_count_items, and the three-request
 -- count creation in CycleCounts.tsx (a failed create leaves an empty open count, which Cancel clears).
 --
@@ -57,9 +61,12 @@ BEGIN
      OR (TG_OP = 'UPDATE' AND NEW.inventory_id IS NOT DISTINCT FROM OLD.inventory_id) THEN
     RETURN NEW;
   END IF;
+  -- The check below needs a fresh snapshot after the lock, which only READ COMMITTED (every app path) gives.
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_ROW_CLAIM_ISOLATION: count lines can only be added in a read-committed transaction.'
+      USING ERRCODE = 'check_violation';
+  END IF;
   -- Serializes every claim on this stock row, so the check below sees a concurrent claim once it commits.
-  -- shortcut: relies on READ COMMITTED (a fresh snapshot after the lock), which every app and RPC path uses; a direct
-  -- REPEATABLE READ session could still slip a second claim in.
   PERFORM pg_advisory_xact_lock(hashtextextended('cycle_count_inventory:' || NEW.inventory_id::text, 0));
   SELECT c.count_number INTO v_other
     FROM public.cycle_count_items o
@@ -104,6 +111,10 @@ CREATE TRIGGER trg_cycle_count_no_reopen
   BEFORE UPDATE OF status ON public.cycle_counts
   FOR EACH ROW EXECUTE FUNCTION public._cycle_count_no_reopen();
 
+REVOKE UPDATE ON public.cycle_counts FROM PUBLIC, anon, authenticated;
+REVOKE UPDATE (id, count_number, warehouse, status, notes, initiated_by, started_at, completed_by, completed_at,
+  created_at, item_revision) ON public.cycle_counts FROM PUBLIC, anon, authenticated;
+
 DO $postflight$
 BEGIN
   IF (SELECT count(*) FROM pg_trigger
@@ -116,7 +127,9 @@ BEGIN
                        AND pg_get_expr(indpred, indrelid) LIKE '%in_progress%')
      OR NOT EXISTS (SELECT 1 FROM pg_proc
                      WHERE oid = 'public._cycle_count_item_one_open_row()'::regprocedure AND prosecdef
-                       AND proconfig @> ARRAY['search_path=public, pg_temp']) THEN
+                       AND proconfig @> ARRAY['search_path=public, pg_temp'])
+     OR has_any_column_privilege('authenticated', 'public.cycle_counts', 'UPDATE')
+     OR has_any_column_privilege('anon', 'public.cycle_counts', 'UPDATE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_OPEN_COUNTS: the KI-160 guards are not all in place';
   END IF;
 END;

@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { AlertTriangle, Trash2, ClipboardCheck, type LucideIcon } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { toneButton, toneIconStyles, toneIcons, type ConfirmTone } from './confirmTones';
 import Modal from './Modal';
 import Button from './Button';
 
-type ReasonVariant = 'danger' | 'warning' | 'info';
+type ReasonVariant = ConfirmTone;
 
 interface ReasonModalProps {
   open: boolean;
@@ -29,18 +30,6 @@ interface ReasonModalProps {
   minLength?: number;
 }
 
-const variantStyles: Record<ReasonVariant, { bg: string; text: string; icon: string }> = {
-  danger:  { bg: 'bg-red-50',   text: 'text-red-800',   icon: 'text-red-600' },
-  warning: { bg: 'bg-amber-50', text: 'text-amber-800', icon: 'text-amber-600' },
-  info:    { bg: 'bg-blue-50',  text: 'text-blue-800',  icon: 'text-blue-600' },
-};
-
-const defaultIcons: Record<ReasonVariant, LucideIcon> = {
-  danger:  Trash2,
-  warning: AlertTriangle,
-  info:    ClipboardCheck,
-};
-
 /**
  * Modal that collects a required free-form reason before confirming a
  * destructive action. Replaces window.prompt for cancellation reasons,
@@ -50,6 +39,9 @@ const defaultIcons: Record<ReasonVariant, LucideIcon> = {
  * native browser dialogs (AGENTS.md CRX Hard Rules).
  *
  * Wave B audit B-6.
+ *
+ * It has a textarea, so it keeps the normal dialog: a centred card from md up and a full-screen
+ * panel on phone (room for the keyboard), with the icon circle in the header.
  */
 export default function ReasonModal({
   open,
@@ -64,8 +56,6 @@ export default function ReasonModal({
   placeholder = 'Reason (required)',
   minLength = 1,
 }: ReasonModalProps) {
-  const styles = variantStyles[variant];
-  const Icon = icon || defaultIcons[variant];
   const [reason, setReason] = useState('');
   const [touched, setTouched] = useState(false);
 
@@ -98,14 +88,15 @@ export default function ReasonModal({
       open={open}
       onClose={onClose}
       title={title}
+      icon={icon || toneIcons[variant]}
+      iconClassName={toneIconStyles[variant]}
       footer={
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <Button variant="ghost" onClick={onClose} disabled={loading} className="min-h-11 w-full sm:w-auto">
-            Cancel
+          <Button variant="secondary" onClick={onClose} disabled={loading} className="min-h-11 w-full sm:w-auto">
+            Go back
           </Button>
           <Button
-            variant={variant === 'info' ? 'primary' : 'danger'}
-            icon={<Icon className="w-4 h-4" />}
+            variant={toneButton(variant)}
             onClick={handleConfirm}
             loading={loading}
             disabled={loading}
@@ -117,10 +108,7 @@ export default function ReasonModal({
       }
     >
       <div className="space-y-4">
-        <div className={`flex items-start gap-3 p-3 ${styles.bg} rounded-lg`}>
-          <Icon className={`w-5 h-5 ${styles.icon} shrink-0 mt-0.5`} />
-          <p className={`text-sm ${styles.text}`}>{message}</p>
-        </div>
+        <p className="text-sm text-secondary">{message}</p>
 
         <div>
           <label htmlFor="reason-modal-textarea" className="block text-sm font-medium text-gray-700 mb-1">
@@ -134,7 +122,7 @@ export default function ReasonModal({
             placeholder={placeholder}
             rows={3}
             disabled={loading}
-            className={`w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+            className={`w-full rounded-md border px-3 py-2 text-base md:text-sm focus:outline-none focus:ring-2 ${
               showError
                 ? 'border-red-400 focus:ring-red-400 focus:border-red-400'
                 : 'border-gray-300 focus:ring-crx-green focus:border-crx-green'

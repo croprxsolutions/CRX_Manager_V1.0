@@ -168,7 +168,7 @@ describe('OrderDetail customer lookups', () => {
     const shareOps: [string, unknown[]][][] = [];
     mockTables({ order_shares: () => buildChain((ops) => { shareOps.push(ops); return { data: [], error: null }; }) });
     renderOrder();
-    const addSplit = await screen.findByRole('button', { name: /Add Split/ });
+    const addSplit = await screen.findByRole('button', { name: 'Add a payer' });
     await waitFor(() => expect(customerCalls.some((ops) => ops.some(([m]) => m === 'in'))).toBe(true));
     const customerReadsBefore = customerCalls.length;
     fireEvent.click(addSplit);
@@ -186,8 +186,8 @@ describe('OrderDetail customer lookups', () => {
     expect(mockCaptureException).not.toHaveBeenCalled();
 
     fireEvent.click(within(list).getByRole('option', { name: /Active Partner Farm/ }));
-    fireEvent.change(screen.getByPlaceholderText('e.g. 35'), { target: { value: '35' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add Share' }));
+    fireEvent.change(screen.getByLabelText('Share'), { target: { value: '35' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add payer' }));
     await waitFor(() => expect(shareOps.some((ops) => ops.some(([m]) => m === 'insert'))).toBe(true));
     const insert = shareOps.flat().find(([m]) => m === 'insert')?.[1][0];
     expect(insert).toMatchObject({ customer_id: 'cust-2', customer_name: 'Active Partner Farm', split_percentage: 35 });
@@ -220,7 +220,7 @@ describe('OrderDetail customer lookups', () => {
 
   it('reports a failed Bill Split customer search instead of showing no matches', async () => {
     renderOrder();
-    fireEvent.click(await screen.findByRole('button', { name: /Add Split/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a payer' }));
     mockTables({ customers: () => buildChain(() => ({ data: null, error: { code: '500', message: 'boom' } })) });
     const picker = screen.getByRole('combobox', { name: 'Bill split customer' });
     fireEvent.focus(picker);
@@ -232,7 +232,7 @@ describe('OrderDetail customer lookups', () => {
       { extra: { context: 'customer_search_picker' } },
     );
     expect(screen.queryByText(/No matching/)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add Share' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add payer' })).toBeDisabled();
   });
 
   it('reports a failed field-split lookup load', async () => {
@@ -278,8 +278,8 @@ describe('OrderDetail add-product catalog', () => {
 
   async function openCatalog() {
     renderOrder();
-    fireEvent.click(await screen.findByRole('button', { name: /Edit Order/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /Add Product/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Edit order/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Add product/ }));
   }
 
   it('reads the whole catalog page by page', async () => {
@@ -316,10 +316,10 @@ describe('OrderDetail add-product catalog', () => {
       return Promise.resolve({ data: name === 'get_admin_cost_fields' ? {} : null, error: null });
     });
     renderOrder();
-    fireEvent.click(await screen.findByRole('button', { name: /Edit Order/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Edit order/ }));
     fireEvent.click(await screen.findByRole('button', { name: /^Cancel$/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /Edit Order/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /Add Product/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Edit order/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Add product/ }));
     expect(await screen.findByText('Fungicide Z')).toBeInTheDocument();
 
     releaseOld();

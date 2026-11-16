@@ -319,6 +319,75 @@ scenarios.push(['renaming (renumbering) an applied migration fails as a deletion
   ok(result.stdout.includes(`DELETES an applied migration: ${APPLIED}`), 'rename is caught as delete + add');
 }]);
 
+// Restamp of a migration not on main (#1868): exempt only as an exact pair, only when origin/main lacks the file.
+const RESTAMPED = 'supabase/migrations/20260904000000_applied.sql';
+const restampScenario = (dir, { onMain, bytes = GOOD, to = RESTAMPED }) => {
+  const base = seedBase(dir);
+  sh(dir, ['update-ref', 'refs/remotes/origin/main', onMain ? base : sh(dir, ['commit-tree', sh(dir, ['hash-object', '-t', 'tree', '-w', '--stdin']), '-m', 'empty main'])]);
+  rmSync(path.join(dir, APPLIED));
+  write(dir, to, bytes);
+  const head = commitAll(dir, 'restamp');
+  return runCli(dir, base, head);
+};
+scenarios.push(['a byte-identical restamp of a file not on main passes, and says so', (dir) => {
+  const result = restampScenario(dir, { onMain: false });
+  eq(result.status, 0, 'exit 0');
+  ok(result.stdout.includes(`restamp of a migration not on main`) && result.stdout.includes(`${APPLIED} -> ${RESTAMPED}`), 'exemption printed');
+}]);
+scenarios.push(['a restamp of a file that is on main still fails', (dir) => {
+  const result = restampScenario(dir, { onMain: true });
+  eq(result.status, 1, 'exit 1');
+  ok(result.stdout.includes(`DELETES an applied migration: ${APPLIED}`), 'still a deletion');
+}]);
+scenarios.push(['a restamp of a file that was once on main (later removed) still fails', (dir) => {
+  const base = seedBase(dir);
+  rmSync(path.join(dir, APPLIED));
+  const removed = commitAll(dir, 'main removes it');
+  sh(dir, ['update-ref', 'refs/remotes/origin/main', removed]);
+  sh(dir, ['checkout', '-q', base]);
+  rmSync(path.join(dir, APPLIED));
+  write(dir, RESTAMPED, GOOD);
+  const head = commitAll(dir, 'restamp');
+  const result = runCli(dir, base, head);
+  eq(result.status, 1, 'exit 1');
+  ok(result.stdout.includes(`DELETES an applied migration: ${APPLIED}`), 'in main history counts as on main');
+}]);
+scenarios.push(['a file merged into main from a side branch, then dropped by the merge, still counts as on main', (dir) => {
+  write(dir, 'README.md', 'root\n');
+  const root = commitAll(dir, 'root');
+  const base = seedBase(dir); // side branch: adds APPLIED
+  sh(dir, ['checkout', '-q', '-b', 'mainline', root]);
+  sh(dir, ['merge', '-q', '-s', 'ours', '--no-edit', base]); // main takes its own tree: the file is gone again
+  sh(dir, ['update-ref', 'refs/remotes/origin/main', sh(dir, ['rev-parse', 'HEAD'])]);
+  sh(dir, ['checkout', '-q', base]);
+  sh(dir, ['mv', APPLIED, RESTAMPED]);
+  const head = commitAll(dir, 'restamp');
+  eq(runCli(dir, base, head).status, 1, 'exit 1 (default history simplification would hide the side commit)');
+}]);
+scenarios.push(['a shallow clone: a restamp is not exempt (fail closed)', (dir) => {
+  const base = seedBase(dir);
+  sh(dir, ['update-ref', 'refs/remotes/origin/main', sh(dir, ['commit-tree', sh(dir, ['hash-object', '-t', 'tree', '-w', '--stdin']), '-m', 'empty main'])]);
+  sh(dir, ['mv', APPLIED, RESTAMPED]);
+  const head = commitAll(dir, 'restamp');
+  writeFileSync(path.join(dir, '.git', 'shallow'), `${base}\n`);
+  eq(runCli(dir, base, head).status, 1, 'exit 1');
+}]);
+scenarios.push(['no origin/main: a restamp is not exempt (fail closed)', (dir) => {
+  const base = seedBase(dir);
+  sh(dir, ['mv', APPLIED, RESTAMPED]);
+  const head = commitAll(dir, 'restamp');
+  eq(runCli(dir, base, head).status, 1, 'exit 1');
+}]);
+scenarios.push(['a restamp with changed bytes, another name or an older stamp still fails', (dir) => {
+  eq(restampScenario(dir, { onMain: false, bytes: `${GOOD}\n-- changed\n` }).status, 1, 'changed bytes');
+}]);
+scenarios.push(['a restamp under another name after the stamp still fails', (dir) => {
+  eq(restampScenario(dir, { onMain: false, to: 'supabase/migrations/20260904000000_other.sql' }).status, 1, 'another name');
+}]);
+scenarios.push(['a restamp to an older stamp still fails', (dir) => {
+  eq(restampScenario(dir, { onMain: false, to: 'supabase/migrations/20260701000000_applied.sql' }).status, 1, 'older stamp');
+}]);
+
 scenarios.push(['revising a pending migration passes with a notice', (dir) => {
   const base = seedBase(dir);
   write(dir, PENDING, `${GOOD}\n-- revised before apply\n`);

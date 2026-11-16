@@ -714,7 +714,7 @@ describe('InventoryPage — a lost reply freezes the request instead of minting 
     await renderPage();
 
     const confirmDelete = async () => {
-      const dialog = await screen.findByRole('dialog', { name: /delete inventory item/i });
+      const dialog = await screen.findByRole('alertdialog', { name: /delete inventory item/i });
       fireEvent.click(within(dialog).getByRole('button', { name: /^delete item$/i }));
     };
 

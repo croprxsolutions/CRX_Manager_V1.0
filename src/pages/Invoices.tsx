@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { invoiceRowPdfFields } from '../lib/invoiceRowPdfFields';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Check, Send, Ban, Printer, Mail, Zap, Trash2, PanelRightOpen, Users, X } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -92,32 +93,6 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 type InvoiceShareRow = { customer?: { farm_name: string }; split_percentage: number; acres: number; amount_cents: number; price_per_acre_cents: number | null; pricing_note: string | null };
 
-// The invoice-row half of a printed invoice (the list row already holds these).
-function invoiceRowPdfFields(inv: InvoiceRow) {
-  return {
-    invoice_number: inv.invoice_number,
-    invoice_date: inv.invoice_date,
-    due_date: inv.due_date || undefined,
-    invoice_type: inv.invoice_type || 'chemical_sale',
-    status: inv.status || 'draft',
-    customer_name: inv.customer_name,
-    salesman_name: inv.salesman_name || undefined,
-    purchase_order_ref: inv.purchase_order_ref || undefined,
-    header_notes: inv.header_notes || undefined,
-    footer_notes: inv.footer_notes || undefined,
-    crop_type: inv.crop_type || undefined,
-    field_names: inv.field_names || undefined,
-    total_acres: inv.total_acres || undefined,
-    applicator_name: inv.applicator_name || undefined,
-    vehicle_name: inv.vehicle_name || undefined,
-    application_date: inv.application_date || undefined,
-    total_amount_cents: inv.total_amount_cents || 0,
-    total_cost_cents: inv.total_cost_cents || 0,
-    paid_amount_cents: inv.paid_amount_cents || 0,
-    prepay_applied_cents: inv.prepay_applied_cents || 0,
-    balance_cents: inv.balance_cents || 0,
-  };
-}
 
 function invoicePdfShares(shares: InvoiceShareRow[]) {
   return shares.map((s) => ({
@@ -1268,6 +1243,7 @@ export default function Invoices() {
       {showBatchPrintDialog && <InvoicePrintDialog
         open={showBatchPrintDialog}
         onClose={() => setShowBatchPrintDialog(false)}
+        invoiceNumbers={selectedInvoices.map((i) => i.invoice_number)}
         invoiceType={anySelectedIsFieldApp ? 'field_application' : 'chemical_sale'}
         hasShares={anySelectedHasShares}
         // Mason, 9 Nov: a Bill Split payer's invoice shows every payer, so the table is on unless unticked.

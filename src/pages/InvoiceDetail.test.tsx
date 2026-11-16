@@ -2161,6 +2161,20 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
     await waitFor(() => expect(downloadInvoicePdf).toHaveBeenCalledWith(expect.objectContaining({ customer_address: '9 Barn Rd', customer_city: 'Town' })));
   });
 
+  // Review #1873 MED 2: the PDF's rows add up to the balance only when it gets the credit applied and the write-off.
+  it('prints the credit applied and the write-off with the balance they make', async () => {
+    const { downloadInvoicePdf } = await import('../lib/invoicePdf');
+    Object.assign(savedInvoice, { credit_applied_cents: 500, write_off_cents: 300, balance_cents: 1200 });
+    try {
+      await printWithCustomerRead(() => buildChain({ data: { billing_address: '9 Barn Rd' }, error: null }));
+      await waitFor(() => expect(downloadInvoicePdf).toHaveBeenCalledWith(
+        expect.objectContaining({ total_amount_cents: 2000, credit_applied_cents: 500, write_off_cents: 300, balance_cents: 1200, takes_charge_lines: true }),
+      ));
+    } finally {
+      Object.assign(savedInvoice, { credit_applied_cents: 0, write_off_cents: 0, balance_cents: 2000 });
+    }
+  });
+
   it('still opens the confirm when the RUP check reads cleanly', async () => {
     await openLoaded();
     fireEvent.click(screen.getByRole('button', { name: 'Post invoice…' }));

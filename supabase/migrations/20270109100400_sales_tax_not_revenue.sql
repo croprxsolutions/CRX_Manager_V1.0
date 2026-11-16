@@ -197,6 +197,14 @@ BEGIN
     DELETE FROM public.credit_memo_sales_tax WHERE invoice_id = p_invoice_id;
     RETURN;
   END IF;
+  -- A return's credit lines all name the billed line they credit (the only writer, _issue_return_credit_impl,
+  -- always sets it). One that doesn't would keep its refunded tax in revenue unseen, so posting refuses it.
+  IF EXISTS (SELECT 1 FROM public.returns r WHERE r.credit_invoice_id = p_invoice_id)
+     AND EXISTS (SELECT 1 FROM public.invoice_items ii
+                  WHERE ii.invoice_id = p_invoice_id AND ii.return_credit_source_item_id IS NULL) THEN
+    RAISE EXCEPTION 'CREDIT_SALES_TAX_UNLINKED_LINE: a return credit line does not name the billed line it credits'
+      USING ERRCODE = 'P0001';
+  END IF;
   IF EXISTS (SELECT 1 FROM public.credit_memo_sales_tax WHERE invoice_id = p_invoice_id) THEN
     RETURN;  -- already frozen (posted -> overdue -> paid keeps it)
   END IF;

@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** Issue #1868 (Sol HIGH, MED): `20270109100400_sales_tax_not_revenue.sql` (SQL sha256: `504757c416ff2aadd02a9e226e3805db34b11f2a5fc2f9d77e6a198e59da9044`). Sales tax on sales invoices stops counting as revenue in the two profit reports, and the two billing setters get `DEFAULT NULL` on `p_idempotency_key`.
+**LOCAL CANDIDATE — NOT APPLIED.** Issue #1868 (Sol HIGH, MED): `20270109100400_sales_tax_not_revenue.sql` (SQL sha256: `9af54c62cf0cd2ecf50bca402eb8ab52a3dc1d8cabbb31c7bb21be9433606544`). Sales tax on sales invoices stops counting as revenue in the two profit reports, and the two billing setters get `DEFAULT NULL` on `p_idempotency_key`.
 
 **Why.** A taxed chemical sale's invoice total includes its `sales_tax` line (`20270109100200_sales_tax_checkbox`). `get_monthly_summary` (Month-End Close) and the P&L report (`get_bottom_line_pnl` → `_get_bottom_line_pnl_cost_impl_20261019`) summed invoice totals as revenue, so a $100 sale with $6.25 tax showed $106.25 revenue and $6.25 too much gross margin.
 
@@ -9,6 +9,8 @@
 - `get_monthly_summary`: `invoices.total_amount_cents` is revenue without sales tax , so Month-End Close's Recognized Invoices and Gross Margin (total − cost) leave it out. Same keys, no screen code change; on a taxed month that figure no longer equals the invoice list's sum (the difference is the tax).
 - `_get_bottom_line_pnl_cost_impl_20261019`: Revenue without sales tax; Gross Profit, Net Profit and every % follow. Its `search_path` gains `pg_temp` (last), like its wrapper.
 - `set_invoice_standing_discount` and `set_order_sales_tax`: `p_idempotency_key text DEFAULT NULL`. Full definitions re-emitted; postflight checks each body's md5 unchanged, the default, owner and grants. Preflight refuses if a second overload of either setter exists.
+
+- Posting a return credit refuses a line that doesn't name the billed line it credits (`CREDIT_SALES_TAX_UNLINKED_LINE`); the only writer, `_issue_return_credit_impl`, always sets it, so today nothing changes.
 
 **Not changed:** invoice totals, balances, posting, statements, AR, customer purchase summaries, `close_accounting_period`'s `total_invoiced_cents`, commission. Untaxed invoices give the same numbers.
 

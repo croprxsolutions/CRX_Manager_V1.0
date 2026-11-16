@@ -255,6 +255,11 @@ export function migrationChanges({ toStaging, removedOrEdited, deleted, added, b
     if (!wasShot(from) && isShot) return [`${to}: restamps the ordinary migration ${stem(from)} into a one-shot; a restamp keeps what the file is, or live would only record it`];
     return [];
   });
+  // A new migration in the same PR sorts after the restamps: staging already ran the restamped SQL, but main
+  // would run a lower-stamped newcomer first, before what it may depend on (Sol, #1837).
+  const tops = pairs.map((p) => p.to.slice(0, 14)).sort().at(-1);
+  const targets = new Set(pairs.map((p) => p.to));
+  if (tops) problems.push(...added.filter((f) => !targets.has(f) && f.slice(0, 14) < tops).map((f) => `${f}: sorts below ${tops}, a migration this PR restamps; on main it would run first. Stamp it after the restamps`));
   const restamped = new Set(pairs.map((p) => p.from));
   return { changed: removedOrEdited.filter((f) => !restamped.has(f)), problems };
 }

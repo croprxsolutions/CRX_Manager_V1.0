@@ -41,6 +41,8 @@ applied on staging, sit below main's newest (`20270109100000`), so they are rest
   shows its old file leaving `staging`'s own first-parent line holding the same bytes (the job now checks out
   the full history), in the same change that adds the new file (an old, unrelated delete doesn't count). That reads what staging ran even if the PR edited the file before deleting it, or
   restamped it inside a merge, and also allows only the staging ref (`renameTargetProblem`). A fileless row that was never a file in the repo blocks instead of being silently renamed.
+- **Order (Sol):** in a PR with a restamp, every other new migration must sort after the restamped ones, or main
+  would run it first, before SQL it may depend on.
 - **Anything unclean blocks:** a new file holding the exact SQL of any ledger row (a copy, or a new slug), and
   a backward restamp (MED 1 and 2).
 - **Smaller:** the `changed` computation is a pure, tested function (MED 4); deleted files are read at the

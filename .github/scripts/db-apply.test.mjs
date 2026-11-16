@@ -306,6 +306,9 @@ test('migrationChanges: a restamp is no edit only into staging, for a file not o
   assert.deepEqual(migrationChanges({ ...shot, oneShotsHead: { '20261231110000_m4b': 'why', '20270109100100_m4b': 'why' } }).problems, [], 'new name listed too: fine');
   assert.match(migrationChanges({ ...base, toStaging: true, onMain: () => false, oneShotsHead: { '20270109100100_m4b': 'why' } }).problems[0], /into a one-shot/, 'an ordinary file restamped into a one-shot is refused (attack run)');
   assert.match(migrationChanges({ ...base, toStaging: true, onMain: () => false, oneShotsHead: { '20261231110000_m4b': 'x', '20270109100100_m4b': 'x' } }).problems[0], /into a one-shot/, 'listing both names in the PR itself is still refused (Sol, #1837)');
+  const withNew = (f) => migrationChanges({ ...base, added: [...base.added, f], toStaging: true, onMain: () => false });
+  assert.match(withNew('20270109100000_b.sql').problems[0], /sorts below 20270109100100/, 'a new file below a restamp target is refused (Sol, #1837)');
+  assert.deepEqual(withNew('20270109100200_b.sql').problems, [], 'a new file after the restamps is fine');
 });
 
 test('renameTargetProblem: ledger rows are renamed on staging only (Sol, #1837)', () => {

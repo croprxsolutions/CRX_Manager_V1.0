@@ -189,8 +189,6 @@ CREATE FUNCTION public._refuse_unknown_quote_rate_unit()
 AS $function$
 DECLARE
   v_stock text;
-  v_rate_type text;
-  v_stock_type text;
 BEGIN
   IF NEW.calc_mode IS NOT DISTINCT FROM 'units_direct' OR COALESCE(NEW.actual_rate, 0) = 0
      OR NEW.product_id IS NULL THEN
@@ -201,23 +199,18 @@ BEGIN
          IS NOT DISTINCT FROM (OLD.product_id, OLD.rate_unit, OLD.calc_mode, OLD.actual_rate) THEN
     RETURN NEW;
   END IF;
-  SELECT u.unit_type INTO v_rate_type FROM public.unit_conversions u WHERE lower(u.unit) = lower(NEW.rate_unit) LIMIT 1;
-  IF NOT FOUND THEN
+  IF NOT EXISTS (SELECT 1 FROM public.unit_conversions u WHERE lower(u.unit) = lower(NEW.rate_unit)) THEN
     RAISE EXCEPTION 'QUOTE_RATE_UNIT_UNKNOWN: rate unit "%" is not a known unit; pick a unit from the list.',
       COALESCE(NEW.rate_unit, '(none)') USING ERRCODE = 'check_violation';
   END IF;
   -- Same fallback as save_quote's math.
   SELECT COALESCE(p.inventory_unit, p.unit_size, 'Ea') INTO v_stock FROM public.products p WHERE p.id = NEW.product_id;
-  SELECT u.unit_type INTO v_stock_type FROM public.unit_conversions u WHERE lower(u.unit) = lower(v_stock) LIMIT 1;
-  IF NOT FOUND THEN
+  IF NOT EXISTS (SELECT 1 FROM public.unit_conversions u WHERE lower(u.unit) = lower(v_stock)) THEN
     RAISE EXCEPTION 'QUOTE_STOCK_UNIT_UNKNOWN: this product is stocked in "%", which is not a known unit; fix the product''s stock unit first.',
       v_stock USING ERRCODE = 'check_violation';
   END IF;
-  -- A liquid rate on a dry stock unit (or the reverse) would convert by ounce count alone (0 such open lines live).
-  IF v_rate_type <> v_stock_type AND 'both' NOT IN (v_rate_type, v_stock_type) THEN
-    RAISE EXCEPTION 'QUOTE_RATE_UNIT_WRONG_TYPE: rate unit "%" is a % unit but this product is stocked in "%" (%); pick a % rate unit.',
-      NEW.rate_unit, v_rate_type, v_stock, v_stock_type, v_stock_type USING ERRCODE = 'check_violation';
-  END IF;
+  -- No liquid-vs-dry refusal here: 4 live dry-ounce products carry an "oz" rate meaning weight ounces (KI-114, the
+  -- rates work); refusing would block quoting them until that lands (KI-140).
   RETURN NEW;
 END;
 $function$;

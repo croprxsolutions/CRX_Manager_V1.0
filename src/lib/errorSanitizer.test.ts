@@ -72,7 +72,6 @@ describe('sanitizeError', () => {
   });
   it.each([
     ['PRODUCT_STOCK_UNIT_UNKNOWN', '"Tote" is not a known unit; pick a stock unit from the list.'],
-    ['QUOTE_RATE_UNIT_WRONG_TYPE', 'rate unit "Gal" is a liquid unit but this product is stocked in "Lb" (dry); pick a dry rate unit.'],
   ])('explains a %s refusal without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
   });

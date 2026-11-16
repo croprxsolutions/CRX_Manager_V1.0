@@ -15,6 +15,7 @@
 - The product picker on the PO edit screen now starts a line in the product's stock unit.
 - Proof: `node scripts/smoke/prove-units-batch-real-schema.mjs` (UNITS_BATCH_PROOF_PASS). Rollback:
   `scripts/smoke/units-batch-rules-reverse.sql`, then `scripts/smoke/ki137-units-data-reverse.sql` (both proven).
-- Not in this change: liquid-vs-dry quote checks (KI-140 rest), unit conversion on receiving (the per-line factor
+- Not in this change: liquid-vs-dry quote checks (KI-140 rest; 4 live dry-ounce products use an `oz` rate that
+  means weight ounces, so a refusal would block quoting them before the KI-114 rates work), unit conversion on receiving (the per-line factor
   has only ever been 1 or blank), historical balances (fixed from counts, KI-29).
 - Sol owed: blocked by #1868 (Sol refuses staging-based branches).

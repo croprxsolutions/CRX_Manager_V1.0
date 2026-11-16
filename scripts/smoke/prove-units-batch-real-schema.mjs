@@ -525,7 +525,6 @@ function quoteCases() {
   okProbe(line('OZ', 10));
   okProbe(line('bogus', 10, 'units_direct'));
   refusedProbe(line('bogus', 10, 'other_mode'), /QUOTE_RATE_UNIT_UNKNOWN/);
-  refusedProbe(line('Lb', 10), /QUOTE_RATE_UNIT_WRONG_TYPE: rate unit "Lb" is a dry unit but this product is stocked in "Gal" \(liquid\)/);
   okProbe(line('Ea', 10));
   // A seed/each line with a blank rate unit is filled from the stock unit by the older guard first, then saves.
   // (product guards off for the one setup write only: the container has no seed unit rows to validate against)

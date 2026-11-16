@@ -2,18 +2,21 @@
 
 **Status (2026-11-15):** a plan only. No code and no migration have been written. Written against `staging` (`8b8962d95`) and the live database, read-only SQL only (counts, no names). For building, this sheet replaces the USE-2 outline in `docs/plans/2026-10-29-product-GRAND-PLAN.md` (Stage 6, "USE-2 ·", and overlaps 8 and 15). Where they differ, this sheet wins on *how* (section 2); the grand plan wins on order and on Mason's settled decisions. **Nothing here authorizes building. Mason reviews this sheet first** (Mason, 2026-11-15: "do not overbuild USE-2").
 
-**What USE-2 does, in one line.** An admin records which adjuvant(s) a product's label requires or recommends (once per EPA number), everyone sees it on the product page, a quote warns about it when the product is added, and "Search EPA labels" becomes "View label" wherever a label PDF link is stored.
+**Update (2026-11-15, after Mason's first read):** Mason answered question 2 (yes: product page first, quote warning after Taha) and question 3 (**admins or sales reps** fill the adjuvants). He also asked how the plan handles high-surfactant oils (HSOC, HS-MSO), labels that list several adjuvants with a preferred one depending on the weed and the tank mix, and listing what is in each adjuvant product. Section 3.0 answers these. Two changes follow: the label entry gets a slightly richer shape, and sales reps need their own narrow save. Both need **one small database PR**, so the plan is now one database PR, one product-page PR, and the later quote PR.
+
+**What USE-2 does, in one line.** An admin or sales rep records which adjuvant(s) a product's label requires, recommends or forbids, including "any one of these, this one preferred" (once per EPA number), everyone sees it on the product page, a quote warns about it when the product is added, and "Search EPA labels" becomes "View label" wherever a label PDF link is stored.
 
 **Words used here.**
 - **Registration:** one row of `epa_registrations` (REG-1): one per EPA number, shared by every size and brand carrying that number.
-- **Label adjuvants:** that row's `label_adjuvants` list. Each entry is *required* or *recommended*, a type (such as COC, MSO, NIS, AMS) and an optional note.
+- **Label adjuvants:** that row's `label_adjuvants` list. Each entry is one statement on the label (3.0).
+- **COC / HSOC:** crop oil concentrate / high-surfactant crop oil concentrate (petroleum oil with more emulsifier). **MSO / HS-MSO:** methylated seed oil / high-surfactant MSO. **NIS:** non-ionic surfactant. **AMS:** ammonium sulfate. **UAN:** liquid nitrogen (28% or 32%) used as a spray additive.
 - **Adjuvant:** a product added to the spray tank (oil, surfactant, ammonium sulfate) that the label tells you to use with the chemical.
 
 ---
 
 ## 1. Facts this plan is built on (checked 2026-11-15)
 
-**The database already has everything USE-2 needs.** REG-1 built it:
+**The database already has almost everything USE-2 needs.** REG-1 built it (section 2 says what changes):
 
 | Thing | Where | Live? |
 |---|---|---|
@@ -44,9 +47,11 @@
 
 ---
 
+**Adjuvant products today (live counts, 2026-11-15):** 46 active products in category Adjuvant. 0 carry an EPA number (adjuvants are usually not EPA-registered, so REG-1 holds nothing for them). Going by product name alone: 4 look like MSO, 4 COC, 2 surfactant, 5 AMS, 4 drift or deposition aids, 0 say "HS"; 44 have a description. DM-1 chemistry (`active_ingredients`, product page) has no category limit and allows an ingredient without a CAS number, so an admin can already list what is in an adjuvant product today.
+
 ## 2. Where the grand plan's outline differs
 
-1. **No database PR.** The outline assumed USE-2 adds storage. REG-1 already added it, with the admin check, retry key, stale check and history USE-2 needs.
+1. **Storage exists, but needs one small change.** REG-1 already stores the list, with a retry key, stale check and history. USE-2 changes the shape of one entry (3.0) and adds a save that sales reps may use (3.2). Every registration's list is still empty (0 of 347), so nothing has to be converted.
 2. **The quote warning waits for Taha.** The quote screens are hands-off until Taha's quote UI work lands (grand plan, note after MOA-1; the cancelled-registration quote warning is held for the same reason). So USE-2 ships in two parts; the quote part is a named dependency, not dropped.
 3. **"Once the delivered brand is known, its registration":** quotes do not pick brands, so the quote warning reads the product's own EPA number, as the grand plan says for a quote before a brand is chosen. Brand rows show their own adjuvants on the product page; a warning at delivery is not part of the core job (section 6).
 4. **"A label change reaches new quotes only" is dropped.** Keeping an old line's warning frozen would mean saving a copy on every quote line (a new quote-line column and a database PR). Instead the warning is a live reminder while the quote is open: it always shows the label as recorded now, is never saved and never printed. Mason can ask for the frozen copy later if he wants it.
@@ -55,44 +60,82 @@
 
 ## 3. Design
 
+### 3.0 What one label entry holds (answers Mason's 2026-11-15 questions)
+
+Labels say three kinds of things about adjuvants, and often offer a choice:
+- "Add COC **or** MSO **or** NIS; MSO gives the best control of large weeds or under dry conditions" (a choice with a preferred one, and a reason);
+- "**Also** add AMS at 8.5–17 lb per 100 gal" (a second, separate requirement);
+- "**Do not** add AMS" or "do not use COC when tank mixed with X" (forbidden; using it can cause crop injury or drift).
+
+REG-1's entry holds only *required/recommended* + **one** type + a note. Three required entries would read as "add all three", which is wrong for a choice. So each entry becomes **one statement on the label**:
+
+| Part | Holds |
+|---|---|
+| Kind | **Required**, **Recommended**, or **Do not use** |
+| Types | One or more from the type list. More than one means "any one of these". |
+| Preferred | Optional: which of those types the label prefers |
+| Note | Free text, up to 500 characters: **when and why** (target weeds, tank-mix partner, weather, crop stage) and the label rate |
+
+**Type list** (one fixed list in the editor, so spellings match): NIS, COC, HSOC, MSO, HS-MSO, Vegetable oil, AMS, UAN, Water conditioner, Drift reduction, Deposition aid, Defoamer, plus **Other** (typed). HSOC and HS-MSO are their own types because labels name them as such; a label that says "MSO or HS-MSO" lists both.
+
+Example of a full label as entered:
+- Required · any of HS-MSO, MSO, COC · preferred HS-MSO · "HS-MSO or MSO for waterhemp over 4 in.; COC when tank mixed with atrazine. 1% v/v."
+- Required · AMS · "8.5–17 lb / 100 gal"
+- Do not use · UAN · "on corn after V8"
+
+**Weed and tank-mix preferences stay in the note** (plain text), not as structured rules. Making the app pick the right adjuvant for a given weed and tank mix would need a weed list, a tank-mix list and a rule engine checked against every label; that is well beyond the core job (section 6).
+
+**What is in each adjuvant product** (its oil and surfactant percentages, AMS content): **not part of USE-2.** It is not needed to warn a quote about a label's requirement. If wanted later, DM-1's chemistry section already lets an admin list ingredients on an adjuvant product, with no new storage. A simple "adjuvant type" tag on each of the 46 adjuvant products, so a quote could say "label wants HS-MSO; you carry these", is a possible later step (question 2 in section 7).
+
 ### 3.1 Showing it (everyone)
 On the product page, beside the product's own EPA number and beside each brand row's number, one line:
 - *Not reviewed* (NULL): "Label adjuvants: not reviewed".
 - *Reviewed, none* (`[]`): "Label adjuvants: none on the label".
-- Otherwise: "Label requires: COC" and/or "Label recommends: NIS", each note in smaller text.
+- Otherwise, one line per entry: "Requires one of: **HS-MSO** (preferred), MSO, COC", "Requires: AMS", "Recommends: NIS", "**Do not use:** UAN" (in red), each with its note in smaller text.
 
 A number with no registration row shows nothing extra (there is nothing to edit; see 3.2). If the registration read fails or times out, the line says "Couldn't check the label; reload" and the link stays "Search EPA labels"; a failed read is never shown as "not reviewed" or as no row.
 
-### 3.2 Recording it (admins only)
-An **"Edit adjuvants"** button (admins only; the database refuses anyone else anyway) opens a small modal for one EPA number:
-- rows of *Required / Recommended* + type + optional note; add and remove rows;
+### 3.2 Recording it (admins and sales reps; Mason, 2026-11-15)
+An **"Edit adjuvants"** button (admins and sales reps) opens a small modal for one EPA number:
+- rows of *Required / Recommended / Do not use* + one or more types (tick boxes from the list, "Other" typed) + optional preferred type + note; add and remove rows;
 - a **"None on the label"** tick (saves `[]`);
 - a required **"Why"** box (the database requires a reason);
 - it states: "This applies to every product and brand with EPA number X."
 
-Save calls `set_epa_registration` with `p_changes = {"label_adjuvants": [...]}` only, the version it loaded, and one retry key per intent (the `getCreateKeyFor` pattern). Every input is disabled while saving. A timeout re-sends the same request with the same key (house pattern; MOA-1 sheet section 5). `EPA_REGISTRATION_STALE` reloads and says "someone else just changed this". After a successful save the page re-reads the registrations (the existing hook's `refresh` key), so the new list shows at once. It never creates a registration (a missing row needs a RUP answer, which is out of scope).
+Save calls the new `set_registration_adjuvants` (4.0), which changes **only** the adjuvant list (a sales rep can never change RUP, REI, PHI or the link through it), the version it loaded, and one retry key per intent (the `getCreateKeyFor` pattern). Every input is disabled while saving. A timeout re-sends the same request with the same key (house pattern; MOA-1 sheet section 5). `EPA_REGISTRATION_STALE` reloads and says "someone else just changed this". After a successful save the page re-reads the registrations (the existing hook's `refresh` key), so the new list shows at once. It never creates a registration (a missing row needs a RUP answer, which is out of scope).
 
 ### 3.3 "View label"
 `EpaLabelLink` takes the stored `label_url`. When there is one, it shows **"View label"** and opens that PDF in a new tab; otherwise it stays "Search EPA labels", exactly as today. Links arrive through the EPA lookup when an admin accepts it (DM-4); nothing new fills them. Known limit, not fixed here: if a registration ever had a label date stored without a link, a later lookup with the same date proposes the link as "differs" and does not fill it (`20270105110000:640-651`). Today 0 registrations have a date, so it cannot happen until someone stores one.
 
 ### 3.4 The quote warning (after Taha's quote work lands)
-When a product is added to a **new quote line**, if its EPA number's registration lists a *required* adjuvant, show a yellow note on that line listing **every** required entry ("Label requires: COC, AMS"); recommended entries show as a softer note. It **never blocks** (Mason, 2026-10-29, answer 3), is **not saved** and is not printed (section 2, point 4). Not reviewed shows nothing. A failed read shows "Couldn't check the label" rather than nothing. Each read is tagged with the line and product it was for; a late reply for a product no longer on that line is ignored.
+When a product is added to a **new quote line**, if its EPA number's registration lists a *required* adjuvant, show a yellow note on that line listing **every** entry, worded as on the product page ("Requires one of: HS-MSO (preferred), MSO, COC · Requires: AMS"), with each note; recommended entries show softer; "Do not use" entries show in red. It **never blocks** (Mason, 2026-10-29, answer 3), is **not saved** and is not printed (section 2, point 4). Not reviewed shows nothing. A failed read shows "Couldn't check the label" rather than nothing. Each read is tagged with the line and product it was for; a late reply for a product no longer on that line is ignored.
 
 ---
 
 ## 4. PRs
 
-**No database PR.**
+### 4.0 USE-2 DB (one small migration)
+`supabase/migrations/<stamp>_registration_adjuvants.sql`:
+- **Preflight:** refuse unless every `epa_registrations.label_adjuvants` is NULL or `[]` (0 filled today), and `set_registration_adjuvants` does not exist.
+- **New entry shape:** re-issue `_epa_label_adjuvants_valid` so each entry is `{kind: required|recommended|do_not_use, adjuvant_types: 1–8 non-blank strings ≤100 chars with no repeats, preferred?: one of adjuvant_types, note?: ≤500 chars}`; still NULL = not reviewed, `[]` = none, at most 50 entries. The type list itself stays in the editor, not the database, so "Other" text is allowed.
+- **New save:** `set_registration_adjuvants(p_epa_registration text, p_expected_version bigint, p_adjuvants jsonb, p_reason text, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`, `SECURITY DEFINER`, `SET search_path = public, pg_temp`, `EXECUTE` for `authenticated` only. Refuses anyone who is not an active admin or sales rep (`is_admin()` / `is_sales_rep()`), a missing key or reason, an unknown number (it never creates a registration), a stale version, and a bad list. Takes the same registration lock as `set_epa_registration`, writes only `label_adjuvants` through `_epa_registration_update`, logs one `epa_registration_events` row with before and after, saves its retry receipt last, and returns the updated row so the screen can show it without a second read.
+- `set_epa_registration` stays admin-only and unchanged; it uses the same validator.
+- **Postflight:** grants as above; the md5 of every other REG-1 and DM-4 function unchanged.
+- **Files:** the migration; `scripts/smoke/prove-epa-registrations-real-schema.mjs` and `src/lib/rpcFixtureLiveDiff.test.ts` (they use the old entry shape); ledger record, migration note, `docs/reference/rpc-functions.md`, regenerated `src/types/supabase.ts`.
+- **Rollback:** its own migration: drop `set_registration_adjuvants`, restore the old validator (refuses if any list uses the new shape).
+- **Gates:** under `supabase/`, so Luna, Sol and the apply proof gate as usual. Non-destructive.
+- **Prover cases:** a sales rep saves a list; a sales rep cannot change any other field; a driver or inactive user is refused; a preferred type outside the entry's types is refused; repeated types refused; stale version refused; same key twice writes once.
 
-### 4.1 USE-2 Screens (product page) — can build now
+### 4.1 USE-2 Screens (product page) — after 4.0 is applied
+*Lands after 4.0 is applied.*
 - `src/lib/epaRegistrationStatus.ts`: the existing read keeps the whole row (adjuvants, link, version) beside the cancelled map; existing callers (delivery brand pick, banner) keep working unchanged. Its row type stays local to this file.
 - `src/components/products/EpaLabelLink.tsx`: optional `labelUrl` → "View label".
-- `src/components/products/LabelAdjuvants.tsx` (new): the 3.1 line and the admin button.
+- `src/components/products/LabelAdjuvants.tsx` (new): the 3.1 lines and the edit button (admins and sales reps).
 - `src/components/products/LabelAdjuvantsModal.tsx` (new): the 3.2 editor.
 - `src/pages/ProductDetail.tsx` and `src/components/products/ProductBrandsSection.tsx`: pass the rows down; place the line beside each number.
-- Tests: the three display states; "View label" vs "Search EPA labels"; the editor's stale, timeout and retry-key paths; a non-admin sees no button.
+- Tests: the display states (not reviewed, none, a choice with preferred, do not use); "View label" vs "Search EPA labels"; the editor's stale, timeout and retry-key paths; a non-admin sees no button.
 
-**Gates:** `ProductDetail.tsx` is on `docs/reference/sol-required-paths.md`, so this PR needs one Sol review, then lands on green checks into `staging`. No file in open draft PRs #1877, #1885, #1887, #1890, #1891 is touched (checked 2026-11-15; `src/types/index.ts` and `src/lib/db.ts` are deliberately avoided because #1890 and #1891 touch them).
+**Gates:** this PR touches no file under `supabase/`; `ProductDetail.tsx` is on `docs/reference/sol-required-paths.md`, so this PR needs one Sol review, then lands on green checks into `staging`. No file in open draft PRs #1877, #1885, #1887, #1890, #1891 is touched (checked 2026-11-15; `src/types/index.ts` and `src/lib/db.ts` are deliberately avoided because #1890 and #1891 touch them).
 
 ### 4.2 USE-2 Quote warning — waits for Taha
 - One small PR touching the quote line code (`QuoteBuilder.tsx` or whatever Taha's work leaves), reading `get_epa_registrations` for the product's number when a line is added.
@@ -103,13 +146,13 @@ When a product is added to a **new quote line**, if its EPA number's registratio
 ## 5. Done when
 
 Observed in the app against the private test copy (`scripts/local-app/`), not only tests:
-1. As an admin, record "Required: COC" on a product's EPA number; reload; the product page shows "Label requires: COC". A second size with the same number shows it too, without editing.
+1. As a sales rep, record "Required · any of HS-MSO, MSO, COC · preferred HS-MSO" plus "Required · AMS" plus "Do not use · UAN"; reload; the product page shows all three as worded in 3.1. A second size with the same number shows them too, without editing.
 2. Tick "None on the label"; the page says "none on the label". A never-reviewed number says "not reviewed".
-3. A non-admin sees the line but no "Edit adjuvants" button.
+3. A driver or other user who is neither admin nor sales rep sees the lines but no "Edit adjuvants" button. A sales rep has no way to change RUP, REI, PHI or the link.
 4. A number with a stored label link shows "View label" and opens the PDF; a number without one still shows "Search EPA labels".
 5. Two admins edit the same number; the second save is refused as stale and reloads.
 6. The change appears in the registration's history (`epa_registration_events`) with the reason.
-7. *(Quote PR)* Adding a product whose label requires COC and AMS to a quote line shows both; the quote still saves; swapping the line to another product before the read returns never shows the first product's warning.
+7. *(Quote PR)* Adding a product whose label requires "one of HS-MSO (preferred), MSO, COC" and AMS, and forbids UAN, to a quote line shows all three; the quote still saves; swapping the line to another product before the read returns never shows the first product's warning.
 8. A failed registration read shows "Couldn't check" on the product page (and the quote line), never "not reviewed".
 
 A flow the test copy cannot run is recorded as owed, not passed.
@@ -118,7 +161,7 @@ A flow the test copy cannot run is recorded as owed, not passed.
 
 ## 6. Not doing (deliberately)
 
-- No new table, column, function or migration (REG-1 already has them).
+- No new table or column (REG-1's list is reused; only its entry shape and one narrow save change).
 - No typing a label link by hand: links come from the EPA lookup (DM-4).
 - No bulk fill, spreadsheet column or scraping of adjuvants from label PDFs: admins fill them as labels are reviewed.
 - No automatic adding of an adjuvant product to the quote.
@@ -126,7 +169,9 @@ A flow the test copy cannot run is recorded as owed, not passed.
 - No saved copy of the warning on quote lines (section 2, point 4).
 - No fix to the DM-4 "date stored, link missing" edge case (3.3; it cannot arise today).
 - No adjuvant warning at the delivery brand pick or on invoices, PDFs or the field app.
-- No linking an adjuvant entry to a specific CRX adjuvant product (type is plain text).
+- No linking an adjuvant entry to a specific CRX adjuvant product, and no "adjuvant type" tag on adjuvant products yet (section 7, question 2).
+- No structured weed or tank-mix rules: when and why goes in the note (3.0).
+- No new composition fields for adjuvant products (DM-1 chemistry can already hold them).
 - No admin settings or option tables for adjuvant types.
 - No "Edit registration" panel for the other label facts (RUP, REI, PHI…).
 
@@ -134,16 +179,13 @@ A flow the test copy cannot run is recorded as owed, not passed.
 
 ## 7. Questions for Mason
 
-**NEEDS MASON - DECISION REQUIRED (1 of 3): how should the adjuvant type be entered?**
-**Recommended: a short pick list in the editor (COC, MSO, NIS, AMS, UAN) plus "Other" to type,** so "COC" is always spelled the same. No settings screen; the list lives in the editor and is easy to extend later.
+**Answered 2026-11-15:** the earlier question 2, yes (product page now, quote warning after Taha's quote work); the earlier question 3, **admins or sales reps** fill them, by hand as labels are reviewed.
 
-**NEEDS MASON - DECISION REQUIRED (2 of 3): is it OK to ship the product-page part now and the quote warning after Taha's quote work lands?**
-**Recommended: yes.** Recording and showing adjuvants is useful on its own, and the quote screens are Taha's until his work merges.
+**NEEDS MASON - DECISION REQUIRED (1 of 2, revised): is this the right type list?**
+NIS, COC, HSOC, MSO, HS-MSO, Vegetable oil, AMS, UAN, Water conditioner, Drift reduction, Deposition aid, Defoamer, and Other (typed). **Recommended: yes**; add or remove any you never see on your labels. It is a fixed list in the editor, so it can be changed later in a small screen PR.
 
-**NEEDS MASON - DECISION REQUIRED (3 of 3): who fills them?**
-0 of 347 registrations have adjuvants today. **Recommended: admins fill them by hand as each label is reviewed** (no bulk tool). Until a number is filled, the product says "not reviewed" and the quote shows no warning.
-
----
+**NEEDS MASON - DECISION REQUIRED (2 of 2, new): tag each adjuvant product with its type now, or later?**
+A tag (for example "HS-MSO") on each of the 46 adjuvant products would let a quote say "label wants HS-MSO; you carry these". It means a new field on products, the Products screens, and tagging 46 products. **Recommended: later**, once labels are being filled and you see whether the reminder alone is enough.
 
 ## 8. Review record
 
@@ -157,3 +199,5 @@ A flow the test copy cannot run is recorded as owed, not passed.
 - MED: quote warning must list every entry → fixed (3.4).
 - MED: DM-4 leaves no link when a date is stored without one → true; **named limit, not fixed** (fixing it needs a migration, and 0 registrations have a date today) (3.3).
 - LOW: wrong citation for where the link is written → fixed (section 1).
+
+**After Mason's answers (2026-11-15):** sales reps may fill adjuvants, and the entry gains "do not use", "any one of" and "preferred" (3.0). That adds the small database PR in 4.0. It gets its own Luna and Sol rounds when built; this plan change has not been re-reviewed.

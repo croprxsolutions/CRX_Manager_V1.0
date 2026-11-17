@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-17 — #1916, #1917 and #1918 (USE-2) may have up to 12 Sol rounds
+
+**Decision (Mason, in chat, 2026-11-17: "Yes, up to 12").** PR #1916 (USE-2 database), PR #1917 (product page) and PR #1918 (quote line note) may each have Sol rounds up to 12.
+**What it does:** lifts the round cap on these three PRs from 7 to 12. Every other gate is unchanged: each PR still needs a clean Sol review of its head and green checks before it merges into `staging`.
+
 ## 2026-11-16 — #1916, #1917 and #1918 (USE-2) may have up to 7 Sol rounds
 
 **Decision (Mason, in chat, 2026-11-16: "i approve all these landing and migrations tonight").** PR #1916 (USE-2 database), PR #1917 (product page) and PR #1918 (quote line note) may each have Sol rounds 5 through 7.

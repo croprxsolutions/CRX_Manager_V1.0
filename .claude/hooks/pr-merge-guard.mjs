@@ -513,14 +513,10 @@ function gateRequest(request) {
   }
 
   // Landing claim (pr-claim-lib.mjs, fail open): refuse when another session is landing this PR.
-  const claimed = claimOrRefuse({
-    file: claimsFileFor(payload?.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd()),
-    branch: pr.headRefName,
-    sessionId: payload?.session_id,
-    action: "merge",
-    cwd: payload?.cwd,
-  });
+  // Only checked here; recorded at the allow point, so a merge denied later claims nothing.
+  const claimed = claimOrRefuse({ ...claimContext, branch: pr.headRefName, record: false });
   if (claimed) deny(`PR MERGE GATE: ${claimed}`);
+  claimBranches.push(pr.headRefName);
 
   const base = String(pr.baseRefName || "").trim().toLowerCase();
   if (base === "master" || base === "production") {
@@ -718,7 +714,15 @@ function gateRequest(request) {
 // Requests that cleared every hard gate. Drained only after the loop below has
 // gated EVERY request — see codexAdvisory() for why (Codex round 8, SEC-001).
 const advisoryQueue = [];
+const claimBranches = [];
+const claimContext = {
+  file: claimsFileFor(payload?.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd()),
+  sessionId: payload?.session_id,
+  action: "merge",
+  cwd: payload?.cwd,
+};
 for (const request of requests) gateRequest(request);
+for (const branch of claimBranches) claimOrRefuse({ ...claimContext, branch });
 // ALLOW point for the whole command: every merge has cleared its hard denials,
 // so the advisory lookups can spend what is left of the hook budget here. One
 // deadline is shared across the queue so N merges cannot multiply the budget.

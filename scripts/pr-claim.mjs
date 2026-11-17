@@ -19,7 +19,7 @@ if (command === "release" && branch) {
   const now = Date.now();
   const claims = Object.entries(readClaims(file));
   if (claims.length === 0) console.log("No landing claims.");
-  for (const [name, claim] of claims) {
+  for (const [name, claim] of claims) { // readClaims drops malformed entries
     const age = Math.round((now - Date.parse(claim.at)) / 60000);
     const state = now - Date.parse(claim.at) < CLAIM_TTL_MS ? "held" : "expired";
     console.log(`${name}: ${state}, session ${claim.session}, last ${claim.action} ${age} min ago${claim.cwd ? `, ${claim.cwd}` : ""}`);

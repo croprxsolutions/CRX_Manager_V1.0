@@ -2,7 +2,7 @@
 // expiry work, and every failure fails open.
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, utimesSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CLAIM_TTL_MS, claimOrRefuse, readClaims, releaseClaim } from "./pr-claim-lib.mjs";
@@ -17,6 +17,9 @@ const ok = (value, label) => { assert.ok(value, label); passed += 1; };
 
 // ── library ───────────────────────────────────────────────────────────────────
 const dir = tempDir("pr-claim-");
+ok(claimOrRefuse({ file: path.join(dir, "state", "pr-claims.json"), branch: "feat/x", sessionId: "A" }) === ""
+  && !existsSync(path.join(dir, "state")), "no state folder: nothing is created and nothing is claimed");
+mkdirSync(path.join(dir, "state"));
 const file = path.join(dir, "state", "pr-claims.json");
 const T0 = Date.parse("2026-11-17T12:00:00Z");
 const claim = (sessionId, extra = {}) => claimOrRefuse({ file, branch: "feat/x", sessionId, action: "push", now: T0, ...extra });
@@ -48,6 +51,23 @@ writeFileSync(blocker, "x");
 ok(claimOrRefuse({ file: path.join(blocker, "pr-claims.json"), branch: "feat/x", sessionId: "B" }) === "", "an unwritable claim file never blocks");
 writeFileSync(file, JSON.stringify({ "feat/x": { session: "A", at: "garbage" } }));
 ok(claim("B") === "", "a claim with an unreadable time never blocks");
+
+// Luna round 1 fixes.
+writeFileSync(file, "{}");
+ok(claim("A", { record: false }) === "" && !("feat/x" in readClaims(file)), "a check with record:false claims nothing (denied merges)");
+writeFileSync(file, JSON.stringify({ "feat/x": { session: "A", at: new Date(T0 + 10 * CLAIM_TTL_MS).toISOString() } }));
+ok(claim("B") === "", "a claim dated in the future is ignored, not held forever");
+writeFileSync(file, "{}");
+ok(claim("A", { branch: "__proto__" }) === "" && claim("B", { branch: "__proto__" }) !== "", "a branch named __proto__ is claimed like any other");
+writeFileSync(file, JSON.stringify({ "feat/x": null, "feat/y": { session: "A", at: new Date(T0).toISOString() } }));
+ok(!("feat/x" in readClaims(file)) && "feat/y" in readClaims(file), "malformed entries are dropped, good ones kept");
+const lock = `${file}.lock`;
+writeFileSync(lock, "");
+const started = Date.now();
+ok(claim("B", { branch: "feat/y" }) === "" && readClaims(file)["feat/y"].session === "A", "a lock held by a live writer fails open after a short wait");
+ok(Date.now() - started < 5000, "the lock wait is bounded");
+utimesSync(lock, new Date(T0 - 60_000), new Date(T0 - 60_000));
+ok(claim("B", { branch: "feat/y" }) !== "" && !existsSync(lock), "a stale lock from a crashed writer is cleared");
 
 // Push destinations.
 assert.deepEqual(pushDestinationBranches("git push origin feat/x", "other"), ["feat/x"]);
@@ -89,6 +109,9 @@ ok(pushGuard("git push origin feat/land") === "", "a call with no session id is 
 writeFileSync(claimsPath, "garbage");
 ok(pushGuard("git push origin feat/land", "B") === "", "a corrupt claim file never blocks");
 pushGuard("git push origin feat/land", "A");
+writeFileSync(claimsPath, JSON.stringify({ ...JSON.parse(readFileSync(claimsPath, "utf8")), broken: null }));
+const listed = spawnSync(process.execPath, [path.join(ROOT, "scripts", "pr-claim.mjs"), "list"], { cwd: repo, encoding: "utf8", env: scratchHookEnvironment(repo) });
+ok(listed.status === 0 && /feat\/land: held, session B/.test(listed.stdout), "list shows the claim and skips a malformed one");
 const cli = spawnSync(process.execPath, [path.join(ROOT, "scripts", "pr-claim.mjs"), "release", "feat/land"], { cwd: repo, encoding: "utf8", env: scratchHookEnvironment(repo) });
 ok(/Released/.test(cli.stdout), "the release command releases the claim");
 ok(pushGuard("git push origin feat/land", "B") === "", "after release, B takes over");

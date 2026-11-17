@@ -149,14 +149,11 @@ export default function ProductChemistrySection({ parentId, parentVersion, refre
   const refreshGate = () => {
     const at = forKey;
     const seq = ++gateSeq.current;
-    fetchParentChemistry(parentId).then((next) => {
+    // Groups re-read with chemistry so the two never show different versions.
+    loadChemistryAndGroups(parentId).then((next) => {
       // Only the newest re-read lands: an older, slower reply never restores a stale gate.
       if (seq !== gateSeq.current) return;
-      // Groups read at another chemistry version would now be a mixed picture.
-      setLoaded((prev) => (prev?.forKey === at && prev.status === 'loaded'
-        ? { forKey: at, status: 'loaded', chem: next,
-          groups: typeof prev.groups !== 'string' && prev.groups.chemistry_version !== next.chemistry_version ? 'mismatch' : prev.groups }
-        : prev));
+      setLoaded((prev) => (prev?.forKey === at && prev.status === 'loaded' ? { forKey: at, status: 'loaded', ...next } : prev));
     }).catch((error: unknown) => { Sentry.captureException(errorOf(error), { extra: { context: 'get_parent_chemistry refresh' } }); });
   };
   const setGroups = (ingredient: { id: string; name: string }) => {

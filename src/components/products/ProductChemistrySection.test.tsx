@@ -99,6 +99,18 @@ describe('ProductChemistrySection', () => {
     expect(screen.queryByRole('button', { name: 'Set groups' })).toBeNull();
   });
 
+  it('names only the EPA-confirmed codes when a scheme mixes EPA and typed codes', async () => {
+    mocks.fetchParentChemistry.mockResolvedValue(withIngredients(ingredientRow('d', 'dicamba')));
+    const mixed = { ...scheme('typed', ['5', '27'], []), typed: [
+      { row_id: 't5', group_code: '5', source: 'epa_lookup' }, { row_id: 't27', group_code: '27', source: 'typed' },
+    ] };
+    mocks.fetchParentModeGroups.mockResolvedValue(groups([
+      { ingredient_id: 'd', name: 'dicamba', derived_from: null, acid_name: null, schemes: [mixed], not_recorded: false },
+    ], [{ scheme: 'HRAC', group_code: '5', differs: false }, { scheme: 'HRAC', group_code: '27', differs: false }], 0));
+    render(section('k'));
+    expect(await screen.findByText('typed on this product; EPA confirmed HRAC 5')).toBeInTheDocument();
+  });
+
   it('Set groups is locked while the page has unsaved changes', async () => {
     mocks.fetchParentChemistry.mockResolvedValue(withIngredients(ingredientRow('b', 'mesotrione')));
     mocks.fetchParentModeGroups.mockResolvedValue(groups([

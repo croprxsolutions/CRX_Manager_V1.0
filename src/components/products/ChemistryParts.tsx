@@ -19,7 +19,9 @@ function schemeLabel(entry: GroupEntry, row: SchemeGroups): string {
   if (row.status === 'derived') return `from ${list}`;
   if (row.status === 'matches') return `matches ${list}`;
   if (row.status === 'differs') return `differs: ${list} says ${row.scheme} ${row.derived.join(', ')}; this product says ${row.scheme} ${row.live.join(', ')}`;
-  return row.typed.some((typed) => typed.source === 'epa_lookup') ? 'EPA confirmed on this product' : 'typed on this product';
+  const epa = row.typed.filter((typed) => typed.source === 'epa_lookup').map((typed) => typed.group_code);
+  if (epa.length === 0) return 'typed on this product';
+  return epa.length === row.typed.length ? 'EPA confirmed on this product' : `typed on this product; EPA confirmed ${row.scheme} ${epa.join(', ')}`;
 }
 
 function IngredientGroups({ entry }: { entry: GroupEntry | undefined }) {

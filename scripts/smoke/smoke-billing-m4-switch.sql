@@ -8,6 +8,8 @@
 --      rate" work
 --   D  An active user can read the switch; nobody can change it through the app; the anonymous role can't read it
 --   E  Switch on: ticking tax, a customer discount and a sale's own discount all work
+--   F  A sale ticked and a customer discounted while ON, then the switch OFF: a NEW draft has no tax and no discount
+--      (the drafted rate is recorded as 0); the earlier draft keeps both
 --
 -- HOW TO RUN: execute this whole file as ONE statement (psql -c, or Supabase MCP execute_sql).
 -- It ALWAYS ends with RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so every fixture is rolled back.
@@ -126,11 +128,46 @@ BEGIN
   IF v_err IS NOT NULL THEN v_fails := v_fails || ' (E) a customer discount while on was refused: ' || v_err || ';'; END IF;
   v_err := pg_temp.smk_try(format('SELECT set_invoice_standing_discount(%L, 4, %L)', v_invoice, 'smk-m4sw-e3-' || v_suffix));
   IF v_err IS NOT NULL THEN v_fails := v_fails || ' (E) a sale discount while on was refused: ' || v_err || ';'; END IF;
-  SET CONSTRAINTS ALL IMMEDIATE;
+  SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+
+  -- F: still ON here; the sale is ticked and the customer is at 5%. A second delivery while OFF drafts plain.
+  DECLARE v_line uuid; v_del2 uuid; v_inv2 uuid; v_kept bigint;
+  BEGIN
+    v_kept := (SELECT total_amount_cents FROM invoices WHERE id = v_invoice);
+    INSERT INTO order_items (order_id, product_id, product_name, unit_size, price_per_unit, cost_per_unit,
+      total_units_needed, total_price, quantity_delivered, quantity_remaining)
+      VALUES (v_order, v_product.id, '[SMOKE] M4 switch F', 'gal', v_product.current_cost + 1, v_product.current_cost,
+              4, (v_product.current_cost + 1) * 4, 0, 4) RETURNING id INTO v_line;
+    UPDATE billing_m4_switch SET enabled = false;
+    INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+      VALUES ('SMK-M4SW-F-' || v_suffix, v_order, v_customer, 'scheduled', CURRENT_DATE, v_admin) RETURNING id INTO v_del2;
+    INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+      VALUES (v_del2, v_line, v_product.id, 4, 'gal');
+    PERFORM confirm_delivery(v_del2, v_admin, 'smk-m4sw-f-confirm-' || v_suffix);
+    PERFORM complete_delivery(v_del2, 'No proof — recorded by office', v_admin, NULL, NULL, NULL,
+      'smk-m4sw-f-complete-' || v_suffix, NULL, 'no_proof', 'Rolled-back smoke; M4 switch F');
+    SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    IF NOT EXISTS (SELECT 1 FROM invoices WHERE delivery_id = v_del2 AND invoice_type <> 'credit_memo') THEN
+      PERFORM create_invoice_for_unbilled_delivery(v_del2, v_admin, 'smk-m4sw-f-invoice-' || v_suffix);
+      SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
+    END IF;
+    SELECT id INTO v_inv2 FROM invoices WHERE delivery_id = v_del2 AND invoice_type = 'chemical_sale';
+    IF v_inv2 IS NULL
+       OR EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_inv2 AND charge_type IN ('sales_tax', 'standing_discount'))
+       OR EXISTS (SELECT 1 FROM invoice_sales_tax_rates WHERE invoice_id = v_inv2)
+       OR (SELECT rate_pct FROM invoice_standing_discount_rates WHERE invoice_id = v_inv2) IS DISTINCT FROM 0 THEN
+      v_fails := v_fails || ' (F) a new draft made while OFF took tax or a discount;';
+    END IF;
+    IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice) IS DISTINCT FROM v_kept THEN
+      v_fails := v_fails || ' (F) the earlier draft changed when the switch went off;';
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_fails := v_fails || ' (F) failed: ' || SQLERRM || ';';
+  END;
 
   IF v_fails <> '' THEN
     RAISE EXCEPTION 'SMOKE_FAIL billing M4 switch:%', v_fails;
   END IF;
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK billing M4 switch: while off, ticking tax and any discount above 0 are refused and turning them off works; the app can read the switch but not change it; while on, all three work';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK billing M4 switch: while off, ticking tax and any discount above 0 are refused and turning them off works; the app can read the switch but not change it; while on, all three work; a new draft made while off has no tax or discount, whatever its sale and customer hold';
 END
 $smoke$;

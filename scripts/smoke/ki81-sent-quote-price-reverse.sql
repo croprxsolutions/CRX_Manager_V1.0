@@ -7,7 +7,7 @@ BEGIN
       FROM (VALUES
         ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '81bcfd088498f0cb1624f161e1a55e46', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
         ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'f8db5ee2904c40db23e380b0dadb3640', ARRAY['postgres', 'service_role'], 'v'),
-        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '3feb2ac771de0c4610c72d5b7196c73d', ARRAY['postgres', 'service_role'], 'v'),
+        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', 'a577dcf20b14e441bd3862abb922833d', ARRAY['postgres', 'service_role'], 'v'),
         ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '35cd03475ffe6806b0e0cd2fc997eae1', ARRAY['postgres'], 's')
       ) AS pin(fn, sig, body_md5, execs, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
@@ -84,6 +84,7 @@ BEGIN
   RETURN jsonb_build_object('unit_price_cents', COALESCE(v_unit_price, 0), 'price_source', 'tier');
 END;
 $fn$;
+ALTER FUNCTION public.resolve_field_app_chemical_price(uuid, uuid[], integer, bigint) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.resolve_field_app_chemical_price(uuid, uuid[], integer, bigint)
   FROM public, anon, authenticated;
 CREATE OR REPLACE FUNCTION public.create_invoice_from_blend_ticket(p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb)

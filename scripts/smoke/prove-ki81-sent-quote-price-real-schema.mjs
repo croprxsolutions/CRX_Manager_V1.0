@@ -270,7 +270,7 @@ const OLD = 'create_invoice_from_blend_ticket:a6f5c6e72d6632313549313b34f406ad,_
   + '_save_field_app_split_invoice_impl:a69f21d8e9f32fc6fecb38ac3a54801c,_preview_field_app_invoice_split_impl_20260908:83f6600412ced085d0876a3c7339ff12,'
   + 'resolve_field_app_chemical_price:d2617d60d7b6e5b922bc3e3be4e5850b';
 const NEW = 'create_invoice_from_blend_ticket:81bcfd088498f0cb1624f161e1a55e46,_save_field_app_invoice_impl_20260714:f8db5ee2904c40db23e380b0dadb3640,'
-  + '_save_field_app_split_invoice_impl:3feb2ac771de0c4610c72d5b7196c73d,_preview_field_app_invoice_split_impl_20260908:35cd03475ffe6806b0e0cd2fc997eae1,'
+  + '_save_field_app_split_invoice_impl:a577dcf20b14e441bd3862abb922833d,_preview_field_app_invoice_split_impl_20260908:35cd03475ffe6806b0e0cd2fc997eae1,'
   + 'resolve_field_app_chemical_price:2f6fe91f7c639d953e3d8c525c06f168,_field_app_sent_quote_price_cents:23fd278cd6d7bff920e21d9f482da9d9,'
   + '_field_app_quote_eligible:2e651e469fb7149896851b86179b2039';
 const ASSERT_MD5 = '4e3bca2b48a4af44de9d1f219a880586';

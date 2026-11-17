@@ -105,6 +105,7 @@ AS $fn$
                    JOIN public.quote_items qi ON qi.section_id = qs.id AND qi.quote_id = qs.quote_id
                   WHERE qs.quote_id = q.id AND qs.field_id = ANY (p_field_ids) AND qi.product_id = p_product_id)
 $fn$;
+ALTER FUNCTION public._field_app_quote_eligible(public.quotes, uuid, uuid[], date) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._field_app_quote_eligible(public.quotes, uuid, uuid[], date) FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE FUNCTION public._field_app_sent_quote_price_cents(
@@ -182,6 +183,7 @@ BEGIN
   RETURN v_prices[1];
 END;
 $fn$;
+ALTER FUNCTION public._field_app_sent_quote_price_cents(uuid, uuid[], uuid[], date) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._field_app_sent_quote_price_cents(uuid, uuid[], uuid[], date) FROM PUBLIC, anon, authenticated, service_role;
 
 -- The quote lookup needs the billed growers and the application date, and now takes row locks, so the private
@@ -233,6 +235,7 @@ BEGIN
   RETURN jsonb_build_object('unit_price_cents', COALESCE(v_unit_price, 0), 'price_source', 'tier');
 END;
 $fn$;
+ALTER FUNCTION public.resolve_field_app_chemical_price(uuid, uuid[], integer, bigint, uuid[], date) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.resolve_field_app_chemical_price(uuid, uuid[], integer, bigint, uuid[], date)
   FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.resolve_field_app_chemical_price(uuid, uuid[], integer, bigint, uuid[], date) IS
@@ -2427,8 +2430,11 @@ BEGIN
                     v_product_id, v_field_ids,
                     COALESCE((SELECT c.assigned_tier FROM customers c WHERE c.id = m.cust::uuid), 1),
                     v_chem_manual, ARRAY[m.cust::uuid],
+                    -- KI-81: on the date this grower's child invoice carries (the job's date first).
                     COALESCE(v_job_app_date, (p_invoice->>'invoice_date')::date,
-                             (SELECT max(i.invoice_date) FROM invoices i WHERE i.field_app_billing_set_id = v_set_id AND i.deleted_at IS NULL),
+                             (SELECT i.invoice_date FROM invoices i
+                               WHERE i.field_app_billing_set_id = v_set_id AND i.customer_id = m.cust::uuid AND i.deleted_at IS NULL
+                               ORDER BY i.invoice_date DESC LIMIT 1),
                              (now() AT TIME ZONE 'America/Chicago')::date)
                   )->>'unit_price_cents')::bigint), '{}'::jsonb)
           INTO v_chem_price_map
@@ -2460,7 +2466,9 @@ BEGIN
         v_price_res      := resolve_field_app_chemical_price(
                               v_product_id, v_field_ids, COALESCE(v_rep_tier, 1), v_chem_manual, ARRAY[v_rep_cust],
                               COALESCE(v_job_app_date, (p_invoice->>'invoice_date')::date,
-                             (SELECT max(i.invoice_date) FROM invoices i WHERE i.field_app_billing_set_id = v_set_id AND i.deleted_at IS NULL),
+                             (SELECT i.invoice_date FROM invoices i
+                               WHERE i.field_app_billing_set_id = v_set_id AND i.customer_id = v_rep_cust AND i.deleted_at IS NULL
+                               ORDER BY i.invoice_date DESC LIMIT 1),
                              (now() AT TIME ZONE 'America/Chicago')::date));
         v_src_unit_price := (v_price_res->>'unit_price_cents')::bigint;
         v_base_source    := v_price_res->>'price_source';
@@ -3431,7 +3439,7 @@ BEGIN
       FROM (VALUES
         ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '81bcfd088498f0cb1624f161e1a55e46', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
         ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'f8db5ee2904c40db23e380b0dadb3640', ARRAY['postgres', 'service_role'], 'v'),
-        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '3feb2ac771de0c4610c72d5b7196c73d', ARRAY['postgres', 'service_role'], 'v'),
+        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', 'a577dcf20b14e441bd3862abb922833d', ARRAY['postgres', 'service_role'], 'v'),
         ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '35cd03475ffe6806b0e0cd2fc997eae1', ARRAY['postgres'], 's')
       ) AS pin(fn, sig, body_md5, execs, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)

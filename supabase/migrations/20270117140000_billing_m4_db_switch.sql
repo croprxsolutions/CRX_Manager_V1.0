@@ -76,7 +76,7 @@ CREATE POLICY billing_m4_switch_select ON public.billing_m4_switch FOR SELECT TO
 -- When it last changed (staging is switched on by hand; live by the commission migration).
 CREATE TRIGGER set_billing_m4_switch_updated_at
   BEFORE UPDATE ON public.billing_m4_switch
-  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+  FOR EACH ROW WHEN (OLD.enabled IS DISTINCT FROM NEW.enabled) EXECUTE FUNCTION public.update_updated_at();
 
 CREATE FUNCTION public._billing_m4_enabled_20270117()
  RETURNS boolean

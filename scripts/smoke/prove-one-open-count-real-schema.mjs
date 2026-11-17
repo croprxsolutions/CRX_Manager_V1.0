@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270113130000_one_open_count_per_stock_row (KI-160 part) and the stock-matches-history
+ * Real-schema proof for 20270119130000_one_open_count_per_stock_row (KI-160 part) and the stock-matches-history
  * sweep (KI-159); contract docs/plans/2026-11-15-product-master-steps-1-3-CONTRACT.md, PR B.
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container, replays
@@ -36,7 +36,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270113130000_one_open_count_per_stock_row.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270119130000_one_open_count_per_stock_row.sql');
 const FOLLOW_UPS = [];
 // Later files that only READ what this proof covers and redefine none of it.
 const LATER_READ_ONLY = new Set();

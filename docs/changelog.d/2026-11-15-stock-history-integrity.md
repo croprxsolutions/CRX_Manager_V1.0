@@ -9,7 +9,7 @@
   a stock row, so a product held in two warehouses was flagged on both).
 - New database sweep `stock-matches-history` (same rules, every sweep run): 0 rows live on 2026-11-15, 116 products
   checked.
-- `20270113130000_one_open_count_per_stock_row.sql` (KI-160 part): one in-progress count per warehouse; a stock row on
+- `20270119130000_one_open_count_per_stock_row.sql` (KI-160 part): one in-progress count per warehouse; a stock row on
   only one line of any in-progress count (two at once: exactly one wins), and only for its own product at the count's warehouse; a count's status only moves forward (no reopen,
   and a reversed count cannot be marked completed and reversed twice); signed-in users lose direct
   UPDATE on `cycle_counts` and `cycle_count_items` (the app only uses the save-line, complete, cancel and reverse

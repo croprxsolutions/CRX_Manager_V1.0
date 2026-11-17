@@ -3,7 +3,7 @@ import { generateIdempotencyKey, isDefinitiveRpcRejection } from './idempotency'
 import type {
   ActiveIngredientSummary, ChemistrySource, ChemistryStrengthBasis, ChemistryStrengthUnit, FertilizerBasis,
   FertilizerNutrient, ModeOfActionScheme, ParentActiveCosts, ParentChemistry, ParentChemistryPreview,
-  IngredientChangePreview, IngredientWorklist,
+  IngredientChangePreview, IngredientModeEntry, IngredientWorklist, ParentModeGroups,
 } from '../types';
 
 // DM-1 (20261209100000_product_chemistry, 20261211100000_product_chemistry_confirmed_swaps): a parent's
@@ -182,6 +182,36 @@ export async function fetchActiveCostsWithVersion(parentId: string): Promise<{ c
   throw new Error('The reference size kept changing while loading; try again.');
 }
 
+/** MOA-1 (20270108100000): a parent's groups, worked out when read. Any active profile. */
+export async function fetchParentModeGroups(parentId: string): Promise<ParentModeGroups> {
+  const { data, error } = await supabaseUntyped.rpc('get_parent_mode_groups', { p_parent_id: parentId });
+  if (error) throw error;
+  return assertRpcResult<ParentModeGroups>(data, 'get_parent_mode_groups');
+}
+
+/** One ingredient's own group list (notes included) and how many parents and sizes it feeds. Admin read. */
+export interface IngredientModeUsers {
+  ingredient_id: string; name: string; status: 'active' | 'retired'; modes: IngredientModeEntry[];
+  parents_affected: number; products_affected: number;
+}
+export async function fetchIngredientModeUsers(ingredientId: string): Promise<IngredientModeUsers> {
+  const { data, error } = await supabaseUntyped.rpc('get_ingredient_mode_users', { p_ingredient_id: ingredientId });
+  if (error) throw error;
+  return assertRpcResult<IngredientModeUsers>(data, 'get_ingredient_mode_users');
+}
+
+/** "HRAC 5, 9 · FRAC 11": codes grouped by scheme, in the order given. */
+export function groupsText(groups: Array<{ scheme: ModeOfActionScheme; group_code: string }>, mark?: (index: number) => string): string {
+  const parts: string[] = [];
+  groups.forEach((group, index) => {
+    const code = `${group.group_code}${mark?.(index) ?? ''}`;
+    const last = parts.length - 1;
+    if (index > 0 && groups[index - 1].scheme === group.scheme) parts[last] = `${parts[last]}, ${code}`;
+    else parts.push(`${group.scheme} ${code}`);
+  });
+  return parts.join(' · ');
+}
+
 export async function searchActiveIngredients(text: string): Promise<ActiveIngredientSummary[]> {
   const { data, error } = await supabaseUntyped.rpc('search_active_ingredients', { p_text: text, p_limit: 20 });
   if (error) throw error;
@@ -221,14 +251,15 @@ export type IngredientFields = Partial<{
 const CHEMISTRY_RPCS = [
   'set_parent_chemistry', 'correct_parent_chemistry', 'set_parent_cost_reference',
   'save_active_ingredient', 'retire_active_ingredient', 'reactivate_active_ingredient',
+  'commit_weights_tab', 'commit_ingredients_tab', 'promote_chemistry_proposal', 'set_active_ingredient_modes',
 ] as const;
 export type ChemistryRpc = typeof CHEMISTRY_RPCS[number];
 
-/** An unfinished save: kept until a success or a named refusal from the database. */
+/** An unfinished save: kept until success or a refusal that proves the earlier request cannot have committed. */
 export interface PendingChemistrySave {
   key: string;
   userId: string;
-  /** The parent ID for parent writes; `INGREDIENT_SCOPE` for ingredient-list writes. */
+  /** The parent ID for parent writes; `INGREDIENT_SCOPE` for ingredient-list writes; `ingredientModesScope(id)` for group lists. */
   scope: string;
   rpc: ChemistryRpc;
   args: Record<string, unknown>;
@@ -238,6 +269,8 @@ export interface PendingChemistrySave {
 }
 
 export const INGREDIENT_SCOPE = 'ingredients';
+/** One ingredient's group list: its unfinished save shows in that ingredient's editor. */
+export const ingredientModesScope = (ingredientId: string) => `ingredient-modes:${ingredientId}`;
 const PREFIX = 'crx:chemistry-pending:v1:';
 
 function storage(): Storage | null {
@@ -260,11 +293,34 @@ export function pendingSaves(userId: string, scope: string): PendingChemistrySav
   return found.sort((a, b) => a.createdAt - b.createdAt);
 }
 
-/** Thrown when a save's outcome is unknown (network error, timeout, gateway error): its record is kept. */
+/** Thrown when a save cannot safely be treated as refused (unknown outcome or auth refusal before receipt lookup). */
 export class ChemistrySaveUncertain extends Error {
-  constructor(readonly cause: unknown) {
-    super('We could not confirm the save. Finish it from the notice on this product; it reuses the same retry key.');
+  constructor(readonly cause: unknown, readonly authorizationRefusal = false) {
+    super(authorizationRefusal ? chemistryAuthorizationMessage(true)
+      : 'We could not confirm the save. Finish it from the notice on this product; it reuses the same retry key.');
   }
+}
+
+export function chemistryAuthorizationMessage(retrying: boolean): string {
+  return retrying
+    ? 'Sign in again or check administrator access, then use Finish save to retry the same request.'
+    : 'Sign in again or check administrator access, then try the save again.';
+}
+
+/** Login or role failures can happen before the server checks an earlier idempotency receipt. */
+export function isChemistryAuthorizationRefusal(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  if (error instanceof ChemistrySaveUncertain) return error.authorizationRefusal;
+  const candidate = error as { code?: unknown; message?: unknown };
+  const code = typeof candidate.code === 'string' ? candidate.code.trim().toUpperCase() : '';
+  if (code === '42501' || /^PGRST30[1-3]$/.test(code)) return true;
+  return typeof candidate.message === 'string' && /^(?:AUTH_REQUIRED|ADMIN_REQUIRED)(?::|\b)/.test(candidate.message.trim());
+}
+
+function isPostgrestError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && /^PGRST\d{3}$/.test(code.trim().toUpperCase());
 }
 
 /** One literal call per write, so each is checked by name; the result is checked only when the database accepted it. */
@@ -282,6 +338,14 @@ async function callChemistryWrite(rpc: ChemistryRpc, params: Record<string, unkn
       const { data, error } = await supabaseUntyped.rpc('set_parent_cost_reference', params);
       return error ? { error } : { data: assertRpcResult(data, 'set_parent_cost_reference') };
     }
+    default:
+      return callIngredientWrite(rpc, params);
+  }
+}
+
+/** The ingredient-list and workbook writes (split from callChemistryWrite to keep each switch small). */
+async function callIngredientWrite(rpc: ChemistryRpc, params: Record<string, unknown>): Promise<{ data?: unknown; error?: unknown }> {
+  switch (rpc) {
     case 'save_active_ingredient': {
       const { data, error } = await supabaseUntyped.rpc('save_active_ingredient', params);
       return error ? { error } : { data: assertRpcResult(data, 'save_active_ingredient') };
@@ -294,10 +358,28 @@ async function callChemistryWrite(rpc: ChemistryRpc, params: Record<string, unkn
       const { data, error } = await supabaseUntyped.rpc('reactivate_active_ingredient', params);
       return error ? { error } : { data: assertRpcResult(data, 'reactivate_active_ingredient') };
     }
+    case 'commit_weights_tab': {
+      const { data, error } = await supabaseUntyped.rpc('commit_weights_tab', params);
+      return error ? { error } : { data: assertRpcResult(data, 'commit_weights_tab') };
+    }
+    case 'commit_ingredients_tab': {
+      const { data, error } = await supabaseUntyped.rpc('commit_ingredients_tab', params);
+      return error ? { error } : { data: assertRpcResult(data, 'commit_ingredients_tab') };
+    }
+    case 'promote_chemistry_proposal': {
+      const { data, error } = await supabaseUntyped.rpc('promote_chemistry_proposal', params);
+      return error ? { error } : { data: assertRpcResult(data, 'promote_chemistry_proposal') };
+    }
+    case 'set_active_ingredient_modes': {
+      const { data, error } = await supabaseUntyped.rpc('set_active_ingredient_modes', params);
+      return error ? { error } : { data: assertRpcResult(data, 'set_active_ingredient_modes') };
+    }
+    default:
+      throw new Error(`Unknown chemistry write ${rpc}`);
   }
 }
 
-async function send<T>(record: PendingChemistrySave): Promise<T> {
+async function send<T>(record: PendingChemistrySave, isRetry: boolean): Promise<T> {
   const store = storage();
   const name = PREFIX + record.key;
   // Written before the call, so a closed tab or a refresh still finds it. No record, no send: an unconfirmed
@@ -312,9 +394,21 @@ async function send<T>(record: PendingChemistrySave): Promise<T> {
   try {
     result = await callChemistryWrite(record.rpc, { ...record.args, p_idempotency_key: record.key });
   } catch (error) {
+    if (isChemistryAuthorizationRefusal(error)) {
+      if (!isRetry) store?.removeItem(name);
+      if (isRetry) throw new ChemistrySaveUncertain(error, true);
+      throw error;
+    }
     throw new ChemistrySaveUncertain(error);
   }
   if (result.error) {
+    if (isChemistryAuthorizationRefusal(result.error)) {
+      if (!isRetry) store?.removeItem(name);
+      if (isRetry) throw new ChemistrySaveUncertain(result.error, true);
+      throw result.error;
+    }
+    // PostgREST can reject before the RPC looks up a receipt. On a retry this cannot prove that the first call did no work.
+    if (isRetry && isPostgrestError(result.error)) throw new ChemistrySaveUncertain(result.error);
     if (isDefinitiveRpcRejection(result.error)) {
       store?.removeItem(name);
       throw result.error;
@@ -330,10 +424,10 @@ export function startChemistrySave<T>(userId: string, scope: string, rpc: Chemis
   if (pendingSaves(userId, scope).length > 0) {
     return Promise.reject(new Error('Finish the save you started first (see the notice above).'));
   }
-  return send<T>({ key: generateIdempotencyKey(rpc, userId), userId, scope, rpc, args, label, createdAt: Date.now() });
+  return send<T>({ key: generateIdempotencyKey(rpc, userId), userId, scope, rpc, args, label, createdAt: Date.now() }, false);
 }
 
 /** Sends an unfinished save again with its own key and request: the database returns the saved result if it committed. */
 export function finishChemistrySave<T>(record: PendingChemistrySave): Promise<T> {
-  return send<T>(record);
+  return send<T>(record, true);
 }

@@ -29,8 +29,11 @@ import {
   codexAppIdleOnRecentHeads,
   recentPushedHeads,
   countSolRounds,
+  nextSolRound,
   solRoundLine,
   solRoundGate,
+  solRoundStatusLine,
+  futureDecisionLogDates,
   centralDate,
   cleanMainMergeParent,
   readSolPreflightFacts,
@@ -58,6 +61,8 @@ import {
   fallbackCodexExecutable,
   fixedGitExecutable,
   GUARDED_BASE,
+  STAGING_BASE,
+  solTargetRef,
   isCodexSandboxStartupFailure,
   parseArgs,
   removeSanitizedReviewWorkspace,
@@ -1813,6 +1818,12 @@ not json
 {"head_sha":"${h4}"}
 {"head_sha":"${h2}"}
 `, [h1, h2]), 2, "rounds: only this branch's heads count");
+    // Reruns of one head count once (Mason, 2026-11-17, #1929).
+    const reruns = [h1, h1, h1, h1, h2].map((sha) => JSON.stringify({ head_sha: sha })).join("\n");
+    assert.equal(countSolRounds(reruns, [h1, h2, h3]), 2, "rounds: four runs of one head count once");
+    assert.equal(nextSolRound(reruns, [h1, h2, h3], h3), 3, "rounds: a new head is the next round");
+    assert.equal(nextSolRound(reruns, [h1, h2], h2), 2, "rounds: rerunning an already-reviewed head keeps its round");
+    assert.equal(nextSolRound("", [h1], h1), 1, "rounds: the first run is round 1");
     assert.equal(solRoundLine(2, 1524), "Sol round 2 on PR #1524.", "rounds: plain line");
     assert.match(solRoundLine(3, null), /^Sol round 3 on this branch \(no PR yet\)\. .*ask Mason the business trade-off/, "rounds: round 3 points at the stop rule");
     // Hard stop from round 5 (Mason, 2026-11-09, after PR 1653 reached round 8).
@@ -1838,8 +1849,97 @@ not json
     assert.equal(dry.refuse, false, "round stop: --dry-run never refuses");
     assert.match(dry.message, /Sol round 5/, "round stop: --dry-run still reports the stop");
     assert.equal(centralDate(new Date("2026-11-10T03:00:00Z")), "2026-11-09", "round stop: today is the Central date");
+    // The printed round is the gating round (Mason, 2026-11-17; #1916 approved "up to 7" from a stale count).
+    {
+      const ledgerText = [h1, h2, h3, h4].map((sha) => JSON.stringify({ head_sha: sha, pr: null })).join("\n");
+      const round = nextSolRound(ledgerText, [h1, h2, h3, h4, head], head);
+      const status = solRoundStatusLine({ round, prNumber: 1916, decisionLog: "", today });
+      const gate = solRoundGate({ round, prNumber: 1916, decisionLog: "", today });
+      assert.equal(Number(status.match(/would be round (\d+) on PR #1916/)?.[1]), round, "round line: prints the round the stop uses");
+      assert.equal(Number(gate.message.match(/Sol round (\d+) on PR #1916/)?.[1]), round, "round line: the stop names the same round");
+      assert.equal(round, 5, "round line: pre-PR runs count");
+      assert.match(status, /rounds 1-4 run freely; from round 5 a DECISION_LOG\.md entry dated 2026-11-09 or later must name this PR: none yet/, "round line: says the cap and what unlocks it");
+      assert.match(solRoundStatusLine({ round, prNumber: 1916, decisionLog: logWith("2026-11-09 — X", "**Decision (Mason):** #1916"), today }), /: found\)\.$/, "round line: says when the unlock is present");
+      assert.match(solRoundStatusLine({ round: 1, prNumber: null, decisionLog: "", today }), /round 1 on this branch \(no PR yet\)/, "round line: no PR yet");
+    }
+    // Future-dated decision-log entries refuse before Sol (Mason, 2026-11-17; #1549, #1808, #1916).
+    {
+      const diff = (...lines) => ["diff --git a/docs/manual/DECISION_LOG.md b/docs/manual/DECISION_LOG.md", "--- a/docs/manual/DECISION_LOG.md", "+++ b/docs/manual/DECISION_LOG.md", "@@ -3,0 +4,3 @@", ...lines].join("\n");
+      assert.equal(futureDecisionLogDates(diff("+## 2026-11-09 — Today", "+**Decision (Mason, 2026-11-09):** keep it."), today), null, "future date: today passes");
+      assert.equal(futureDecisionLogDates(diff("+## 2026-11-08 — Yesterday"), today), null, "future date: the past passes");
+      assert.equal(futureDecisionLogDates("", today), null, "future date: no decision-log change passes");
+      const late = futureDecisionLogDates(diff("+## 2026-11-10 — Rounds for #1916", "+**Decision (Mason):** up to 7."), today);
+      assert.match(late, /SOL PRE-FLIGHT: docs\/manual\/DECISION_LOG\.md gains an entry dated after today \(2026-11-09, Central time\), so no Sol tokens were spent\.\n  - ## 2026-11-10 — Rounds for #1916\nRe-date it/, "future date: a future heading refuses and names the line");
+      assert.match(futureDecisionLogDates(diff("+## 2026-11-09 — Today", "+**Decision (Mason, 2026-11-10 night):** yes."), today), /- \*\*Decision \(Mason, 2026-11-10 night\)/, "future date: a future date in the Decision line refuses");
+      assert.match(futureDecisionLogDates(diff("+## 2026-10-13 (recorded 2026-11-10) — late"), today), /recorded 2026-11-10/, "future date: a future recorded date refuses");
+      assert.equal(futureDecisionLogDates(diff("+## 2026-11-09 — Plan due 2026-12-01"), today), null, "future date: a date after the heading's dash is not the entry date");
+      assert.equal(futureDecisionLogDates(diff("-## 2026-11-10 — removed", " ## 2026-11-10 — context", "+Deadline 2026-12-01 in the body."), today), null, "future date: removed, context and body lines are not checked");
+    }
   }
-  assert.match(check({ headContainsBase: false }).problems.join(" "), /does not contain the latest main.*git merge origin\/main/, "preflight: a head missing origin/main refuses (#1075)");
+  assert.match(check({ headContainsBase: false }).problems.join(" "), /does not contain the latest origin\/main.*git merge origin\/main/, "preflight: a head missing origin/main refuses (#1075)");
+  assert.match(check({ headContainsBase: false, baseRef: "origin/staging" }).problems.join(" "), /does not contain the latest origin\/staging.*git merge origin\/staging/, "preflight: a staging-bound head names origin/staging");
+
+  // Sol reviews against the PR's target branch (Mason, 2026-11-16).
+  for (const [branch, ref] of [["claude/x", "origin/staging"], ["ship/pay-fix", "origin/staging"], ["hotfix/a", "origin/main"], ["hotfix/revert-b", "origin/main"], ["release/next", "origin/main"], ["main", "origin/main"], ["staging", "origin/main"], ["", "origin/main"], ["HEAD", "origin/main"]]) {
+    assert.equal(solTargetRef(branch, true), ref, `target ref: ${branch || "(detached)"} → ${ref}`);
+  }
+  assert.equal(solTargetRef("claude/x", false), "origin/main", "target ref: no origin/staging keeps origin/main (the wider diff)");
+  assert.equal(STAGING_BASE, "origin/staging");
+  {
+    const repo = tempDir("crx-staging-base-");
+    const git = (...args) => execFileSync("git", ["-c", "user.name=Review Test", "-c", "user.email=review@example.invalid", ...args], { cwd: repo, encoding: "utf8" }).trim();
+    const names = (from, to) => git("diff", "--name-only", `${from}...${to}`).split(/\s+/).filter(Boolean).sort();
+    const isAncestor = (a, b) => spawnSync("git", ["merge-base", "--is-ancestor", a, b], { cwd: repo }).status === 0;
+    try {
+      git("init", "-q", "-b", "main");
+      writeFileSync(path.join(repo, "a.txt"), "a\n");
+      git("add", ".");
+      git("commit", "-qm", "main");
+      const mainTip = git("rev-parse", "HEAD");
+      git("checkout", "-q", "-b", "staging");
+      writeFileSync(path.join(repo, "someone-elses.sql"), "select 1;\n");
+      git("add", ".");
+      git("commit", "-qm", "unreleased staging work");
+      const stagingTip = git("rev-parse", "HEAD");
+      git("checkout", "-q", "-b", "claude/feature");
+      writeFileSync(path.join(repo, "mine.ts"), "export {};\n");
+      git("add", ".");
+      git("commit", "-qm", "own change");
+      const featureHead = git("rev-parse", "HEAD");
+      assert.deepEqual(names(solReviewBase(repo, featureHead, mainTip), featureHead), ["mine.ts", "someone-elses.sql"], "old base: a staging branch reviewed against main carries others' staging work");
+      const base = solReviewBase(repo, featureHead, stagingTip);
+      assert.equal(base, stagingTip, "staging base: a head containing origin/staging keeps it");
+      assert.deepEqual(names(base, featureHead), ["mine.ts"], "staging base: the review diff is only the branch's own file");
+      const proof = { codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high", head_sha: featureHead, base_sha: base, timestamp: new Date().toISOString() };
+      assert.ok(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: stagingTip, isAncestor }), "staging base: the merge gate accepts it into staging");
+      assert.equal(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: mainTip, isAncestor }), false, "staging base: the same proof is refused for a merge into main");
+      // A branch that undoes unreleased staging work: the main base hides the undo, the staging base shows it.
+      git("checkout", "-q", "-b", "claude/undo", stagingTip);
+      git("rm", "-q", "someone-elses.sql");
+      git("commit", "-qm", "undo staging work");
+      const undoHead = git("rev-parse", "HEAD");
+      assert.deepEqual(names(solReviewBase(repo, undoHead, mainTip), undoHead), [], "old base: an undo of staging work is invisible against main");
+      assert.deepEqual(names(solReviewBase(repo, undoHead, stagingTip), undoHead), ["someone-elses.sql"], "staging base: the undo is in the review diff");
+      // Staging moved on after the branch was cut: the fork point keeps the diff to the branch's own file.
+      git("checkout", "-q", "staging");
+      writeFileSync(path.join(repo, "later.sql"), "select 2;\n");
+      git("add", ".");
+      git("commit", "-qm", "later staging work");
+      const movedStaging = git("rev-parse", "HEAD");
+      assert.equal(solReviewBase(repo, featureHead, movedStaging), stagingTip, "staging base: a head behind origin/staging is reviewed from its fork point");
+      // A hotfix cut from main still reviews everything it adds over main.
+      git("checkout", "-q", "-b", "hotfix/x", mainTip);
+      writeFileSync(path.join(repo, "fix.ts"), "export {};\n");
+      git("add", ".");
+      git("commit", "-qm", "fix");
+      const hotfixHead = git("rev-parse", "HEAD");
+      assert.equal(solTargetRef("hotfix/x", true), "origin/main");
+      assert.equal(solReviewBase(repo, hotfixHead, mainTip), mainTip, "hotfix: reviewed against main");
+      assert.deepEqual(names(mainTip, hotfixHead), ["fix.ts"], "hotfix: the diff is everything it adds over main");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }
   assert.equal(check({ headContainsBase: null }).ok, false, "preflight: an unreadable containment check refuses");
   assert.equal(check({ headContainsBase: undefined }).ok, false, "preflight: a missing containment fact refuses");
 
@@ -2036,7 +2136,7 @@ not json
   // review workspace or Codex call, and a refusal leaves an existing proof alone.
   const wrapperSource = readFileSync(fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url)), "utf8").replace(/\r\n/g, "\n");
   const runBody = wrapperSource.slice(wrapperSource.indexOf("export function run("));
-  const preflightAt = runBody.indexOf("const preflight = solPreflight(root, headBefore, baseBefore);");
+  const preflightAt = runBody.indexOf("const preflight = solPreflight(root, headBefore, baseBefore, target);");
   assert.ok(preflightAt > 0, "preflight: run() checks the head and the exact base it will review");
   assert.ok(runBody.indexOf("const baseBefore = runGit(") < preflightAt, "preflight: the base is pinned before the check, so a later fetch cannot slip past it");
   assert.ok(preflightAt < runBody.indexOf("reviewWorkspace = createSanitizedReviewWorkspace("), "preflight: before the review workspace or Codex run");

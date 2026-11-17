@@ -106,7 +106,7 @@ describe('ProductVendorsSection', () => {
     renderSection(true);
     const rows = await screen.findAllByRole('listitem');
     fireEvent.click(within(rows[1]).getByRole('button', { name: 'Remove' }));
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('alertdialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(mocks.unlinkProductVendor).toHaveBeenCalledWith('l2', 'u1', expect.any(String)));
   });
@@ -116,7 +116,7 @@ describe('ProductVendorsSection', () => {
     renderSection(true);
     const rows = await screen.findAllByRole('listitem');
     fireEvent.click(within(rows[1]).getByRole('button', { name: 'Remove' }));
-    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error',
       'This is the preferred vendor. Make another vendor preferred first, then remove this one.'));
   });

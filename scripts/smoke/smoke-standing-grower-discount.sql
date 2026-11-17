@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a standing grower discount comes off product lines, per payer, to the cent
 -- ----------------------------------------------------------------------------
--- Migration 20261231110000_standing_grower_discount (billing plan M4b).
+-- Migration 20270109100100_standing_grower_discount (billing plan M4b).
 --   A  A 3% customer's delivery invoice drafts at products less 3% (rounded half up to the cent)
 --   B  A $45.00 freight charge is not discounted
 --   C  Re-saving the draft as the screen sends it (its discount line included) never discounts twice
@@ -32,7 +32,7 @@
 --   Z  A Bill Split payer at 3% returns its whole share: its credit is its own posted total
 --   I  (also: the change's audit entries add up to the change in total, once)
 --   I  The office changes a sale's rate on its draft (set_invoice_standing_discount, admin only): 1.5%, then 0
---      (no line), then back to the customer's rate; a rep is refused, a posted invoice is refused, a direct
+--      (no line), then back to the rate it was drafted at (not the customer's later rate); a rep is refused, a posted invoice is refused, a direct
 --      write of the rate table is refused, a replay repeats its first answer and a reused key with another rate is refused, and a split payer's draft takes its own rate and its group still posts
 --
 -- The discount is written at commit (a deferred constraint trigger). This file runs as ONE statement,
@@ -66,6 +66,8 @@ DECLARE
   v_audit bigint;
   v_case text;
 BEGIN
+  -- 20270117140000: the M4 switch is off on live and on a fresh database; this smoke turns it on inside its own rollback.
+  IF to_regclass('public.billing_m4_switch') IS NOT NULL THEN UPDATE public.billing_m4_switch SET enabled = true; END IF;
   SELECT id INTO v_admin FROM profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at LIMIT 1;
   SELECT id INTO v_rep FROM profiles WHERE role = 'sales_rep' AND is_active = true ORDER BY created_at LIMIT 1;
   SELECT id INTO v_customer FROM customers WHERE is_active = true ORDER BY created_at, id LIMIT 1;
@@ -323,8 +325,11 @@ BEGIN
     UPDATE customers SET standing_discount_pct = 2 WHERE id = v_payer2;
     PERFORM set_invoice_standing_discount(v_invoice, NULL, 'smk-dsi-null-' || v_suffix);
     SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-    IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice) IS DISTINCT FROM v_product_cents - round(v_product_cents * 2 / 100.0) THEN
-      v_fails := v_fails || ' (I) clearing the sale''s rate did not go back to the customer''s 2%;';
+    -- 20270117120000: "the customer's rate" restores the rate the sale was drafted at (0% here), not the customer's
+    -- rate now (2%).
+    IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice) IS DISTINCT FROM v_product_cents
+       OR EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'standing_discount') THEN
+      v_fails := v_fails || ' (I) clearing the sale''s rate did not go back to the 0% it was drafted at (the customer is now 2%);';
     END IF;
   EXCEPTION WHEN OTHERS THEN
     v_fails := v_fails || ' (I) setting the sale''s rate failed: ' || SQLERRM || ';';

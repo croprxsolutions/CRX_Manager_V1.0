@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: the sales tax checkbox taxes a chemical sale per payer, to the cent
 -- ----------------------------------------------------------------------------
--- Migration 20261231120000_sales_tax_checkbox (billing plan M4a, scenario B10).
+-- Migration 20270109100200_sales_tax_checkbox (billing plan M4a, scenario B10).
 --   A  A taxed sale for a 3% customer, with $45.00 freight: tax = round((products - discount + freight) x 6.25%),
 --      half up, on its own "Sales tax 6.25%" line; the total is the lines' sum
 --   B  A sale is untaxed by default: no tax line
@@ -54,6 +54,8 @@ DECLARE
   v_fails text := '';
   v_case text;
 BEGIN
+  -- 20270117140000: the M4 switch is off on live and on a fresh database; this smoke turns it on inside its own rollback.
+  IF to_regclass('public.billing_m4_switch') IS NOT NULL THEN UPDATE public.billing_m4_switch SET enabled = true; END IF;
   SELECT id INTO v_admin FROM profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at LIMIT 1;
   SELECT id INTO v_rep FROM profiles WHERE role = 'sales_rep' AND is_active = true ORDER BY created_at LIMIT 1;
   SELECT id INTO v_rep2 FROM profiles WHERE role = 'sales_rep' AND is_active = true AND id <> v_rep ORDER BY created_at LIMIT 1;
@@ -308,7 +310,7 @@ BEGIN
       v_fails := v_fails || ' (F) a rep refused with the wrong error: ' || SQLERRM || ';';
     END IF;
   END;
-  -- A sale with no salesman is no rep's own (20270103190000: the NULL owner once let any rep through).
+  -- A sale with no salesman is no rep's own (20270109100300: the NULL owner once let any rep through).
   PERFORM pg_temp.smk_as(v_admin);
   INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
     VALUES ('SMK-TAX-NOREP-' || v_suffix, v_payer2, CURRENT_DATE, 'confirmed', NULL) RETURNING id INTO v_order;

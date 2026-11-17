@@ -10,6 +10,8 @@ const H = vi.hoisted(() => ({
   toast: vi.fn(),
   logActivity: vi.fn(),
   resetDraftKey: vi.fn(),
+  role: 'admin',
+  rows: new Map<string, unknown>(),
 }));
 
 function baseProduct(overrides: Partial<Product> = {}): Product {
@@ -146,7 +148,7 @@ vi.mock('../lib/productBrands', async (importOriginal) => ({
 // Same for the cancelled-registration read.
 vi.mock('../lib/epaRegistrationStatus', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/epaRegistrationStatus')>()),
-  useCancelledRegistrations: () => ({ cancelled: new Map(), lookup: 'done' }),
+  useCancelledRegistrations: () => ({ cancelled: new Map(), rows: H.rows, lookup: 'done' }),
 }));
 
 vi.mock('../components/ui/Toast', () => ({
@@ -161,7 +163,7 @@ vi.mock('../lib/costFields', async (importOriginal) => ({
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
-    role: 'admin',
+    role: H.role,
     profile: { id: 'admin-1', full_name: 'Admin User' },
   }),
 }));
@@ -221,9 +223,46 @@ async function applyDraft() {
   ));
 }
 
+describe('ProductDetail label link and adjuvants (USE-2)', () => {
+  const row = {
+    epa_registration: '264-849', registration_status: 'active', cancelled_on: null, registration_version: 3,
+    label_url: 'https://example.test/label.pdf',
+    label_adjuvants: [{ kind: 'required', adjuvant_types: ['HS-MSO', 'MSO', 'COC'], preferred: 'HS-MSO', note: '1% v/v' }],
+  };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    H.product = baseProduct({ epa_registration: '264-849' });
+    H.rows = new Map([['264-849', row]]);
+    H.rpc.mockResolvedValue({ data: null, error: null });
+  });
+
+  it.each([['admin', true], ['sales_rep', true], ['driver', false]])('%s: View label, the lines, and Edit adjuvants shown=%s', async (role, canEdit) => {
+    H.role = role;
+    render(<ProductDetail />);
+    const link = await screen.findByRole('link', { name: 'View the EPA label for 264-849' });
+    expect(link).toHaveAttribute('href', 'https://example.test/label.pdf');
+    expect(screen.getByText('Requires one of:', { exact: false })).toBeTruthy();
+    expect(screen.getByText('1% v/v')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Edit adjuvants' }) !== null).toBe(canEdit);
+  });
+
+  it('a typed, unsaved number never shows the saved label or adjuvants', async () => {
+    H.role = 'admin';
+    render(<ProductDetail />);
+    await screen.findByRole('link', { name: 'View the EPA label for 264-849' });
+    fireEvent.change(screen.getAllByLabelText('EPA Registration')[0], { target: { value: '100-1' } });
+    expect(await screen.findByRole('link', { name: 'Search EPA labels for 100-1' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /View the EPA label/ })).toBeNull();
+    expect(screen.queryByText('Requires one of:', { exact: false })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit adjuvants' })).toBeNull();
+  });
+});
+
 describe('ProductDetail EPA lookup', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    H.role = 'admin';
+    H.rows = new Map();
     H.product = baseProduct();
     H.rpc.mockResolvedValue({ data: 'draft-1', error: null });
     H.logActivity.mockResolvedValue(undefined);

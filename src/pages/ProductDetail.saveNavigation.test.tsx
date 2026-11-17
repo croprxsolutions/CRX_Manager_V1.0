@@ -106,7 +106,7 @@ describe('ProductDetail — leaving a new product', () => {
     expect(router.state.location.pathname).toBe('/products/product-1');
     expect(router.state.location.state).toEqual({ justCreated: true });
     expect(mockToast).toHaveBeenCalledWith('success', 'Product created. Now set its prices.');
-    expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
   });
 
   it('falls back to the list when the new id does not come back', async () => {
@@ -148,7 +148,7 @@ describe('ProductDetail — leaving a new product', () => {
     renderNewProduct({ duplicateFrom: { id: 'source-1', product_name: 'Atrazine 4L', category: null, vendor: null, manufacturer: null, product_form: null, inventory_unit: null } });
     await screen.findByText('New product started from Atrazine 4L. Nothing is saved until you create it.');
     fireEvent.click(screen.getByRole('link', { name: 'Elsewhere' }));
-    expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();
+    expect(await screen.findByText('Leave without saving?')).toBeInTheDocument();
   });
 
   it('locks the form while a new product saves', async () => {
@@ -180,9 +180,9 @@ describe('ProductDetail — leaving a new product', () => {
     fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'New Chem' } });
 
     fireEvent.click(screen.getByRole('link', { name: 'Elsewhere' }));
-    expect(await screen.findByText('Unsaved Changes')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Stay/ }));
-    await waitFor(() => expect(screen.queryByText('Unsaved Changes')).not.toBeInTheDocument());
+    expect(await screen.findByText('Leave without saving?')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    await waitFor(() => expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument());
     expect(router.state.location.pathname).toBe('/products/new');
   });
 

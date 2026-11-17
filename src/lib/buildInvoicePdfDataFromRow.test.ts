@@ -367,3 +367,33 @@ describe('buildBatchInvoicePdfData — skip and name a bad invoice', () => {
     expect(batchInvoicePrintToast(0, many).message).toContain('INV-0, INV-1, INV-2, INV-3, INV-4 and 3 more');
   });
 });
+
+// Review #1873 MED 2: the PDF prints a Credits applied row, so every print path must carry the amount.
+describe('buildInvoicePdfDataFromRow: credits applied', () => {
+  it('reads the credit applied from the invoice when the list row omits it', async () => {
+    installFromMock({ invoice_items: [ONE_LINE], invoices: { credit_applied_cents: 20000 } });
+    const data = await buildInvoicePdfDataFromRow(listRow({ balance_cents: 80000 }));
+    expect(data.credit_applied_cents).toBe(20000);
+  });
+
+  it("the caller's amount wins over the re-fetch", async () => {
+    installFromMock({ invoice_items: [ONE_LINE], invoices: { credit_applied_cents: 20000 } });
+    const data = await buildInvoicePdfDataFromRow(listRow({ credit_applied_cents: 5000 }));
+    expect(data.credit_applied_cents).toBe(5000);
+  });
+});
+
+// The PDF labels untyped no-product lines as charges on the invoices the invoice page does (InvoiceDetail takesCharges).
+describe('buildInvoicePdfDataFromRow: which invoices take charge lines', () => {
+  it.each([
+    ['a from-scratch misc charge', { invoice_type: 'misc_charge' }, {}, true],
+    ['a from-scratch chemical sale', { invoice_type: 'chemical_sale' }, {}, true],
+    ['a chemical sale with a delivery', { invoice_type: 'chemical_sale' }, { delivery_id: 'del-1' }, true],
+    ['a chemical sale with a blend ticket', { invoice_type: 'chemical_sale' }, { order_id: 'ord-1', blend_ticket_id: 'bt-1' }, false],
+    ["a payer's misc charge on a delivery", { invoice_type: 'misc_charge' }, { delivery_id: 'del-1' }, false],
+    ['a field application', { invoice_type: 'field_application' }, {}, false],
+  ])('%s', async (_name, row, billing, takes) => {
+    installFromMock({ invoice_items: [ONE_LINE], invoices: billing });
+    expect((await buildInvoicePdfDataFromRow(listRow(row))).takes_charge_lines).toBe(takes);
+  });
+});

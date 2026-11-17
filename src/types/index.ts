@@ -2573,6 +2573,8 @@ export interface RateReviewWorkbook {
   parents: {
     parent_id: string;
     parent_name: string;
+    /** Current parent activity for the history-only rate review. */
+    is_active: boolean;
     product_form: string;
     sizes: string[];
     outcome: ProductRateOutcome | null;
@@ -2612,6 +2614,8 @@ export interface RateReviewWorkbook {
     rates: number; drafts: number; approved: number; per_100_gal: number; per_100_gal_approved: number;
     parents: number; parents_undecided: number; approved_default: number; no_per_acre_default: number; needs_label_data: number;
     outcomes_no_longer_valid: number;
+    /** Inactive parents and retained rate/outcome history; excluded from active readiness counts. */
+    inactive_parents: number; inactive_rates: number; inactive_approved: number; inactive_outcomes: number;
   };
 }
 
@@ -4474,6 +4478,7 @@ export interface GrossSalesRow {
   order_count: number;
 }
 
+/** A customer whose balance can be reconstructed for the selected date. */
 export interface CustomerBalanceRow {
   [k: string]: unknown;
   customer_id: string;
@@ -4485,8 +4490,22 @@ export interface CustomerBalanceRow {
   open_credit: number;
   invoice_count: number;
   oldest_unpaid_date: string | null;
-  // Set (with every amount NULL) when this customer's balance cannot be rebuilt as of the date (KI-95).
-  unavailable_reason?: string | null;
+  unavailable_reason: null;
+}
+
+/** KI-95: a customer whose balance cannot be rebuilt; all balance values are null, never $0. */
+export interface CustomerBalanceUnavailableRow {
+  [k: string]: unknown;
+  customer_id: string;
+  farm_name: string;
+  total_invoiced: null;
+  total_paid: null;
+  prepay_applied: null;
+  outstanding_balance: null;
+  open_credit: null;
+  invoice_count: null;
+  oldest_unpaid_date: null;
+  unavailable_reason: string;
 }
 
 export interface ChemicalHistoryRow {

@@ -31,6 +31,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, '..');
 const COST_TABLES = Object.keys(COST_COLUMNS) as CostTable[];
 
+// Keep the production registry authoritative while this feature branch includes its pending
+// staging migration. Remove this exact overlay after 20261231120000_sales_tax_checkbox applies live.
+const PENDING_STAGING_COLUMNS: Partial<Record<CostTable, readonly string[]>> = {
+  orders: ['sales_tax'],
+};
+
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
@@ -182,7 +188,8 @@ describe('column lists match the schema registry', () => {
       for (const column of cost) expect(live).toContain(column);
       const safe = SAFE_COLUMNS[table].split(',').map((c) => c.trim());
       expect(new Set(safe).size).toBe(safe.length);
-      expect([...safe].sort()).toEqual(live.filter((c) => !cost.includes(c)).sort());
+      const expectedColumns = [...new Set([...live, ...(PENDING_STAGING_COLUMNS[table] ?? [])])];
+      expect([...safe].sort()).toEqual(expectedColumns.filter((c) => !cost.includes(c)).sort());
     });
   }
 });

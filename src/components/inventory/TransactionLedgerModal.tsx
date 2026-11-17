@@ -64,15 +64,14 @@ const TYPE_CONFIG: Record<string, { label: string; color: string; icon: React.El
 /**
  * Determine the signed delta for a transaction based on its type.
  * Convention matches reconciliation.ts:
- *   positive → adds to inventory (received, returned, released, reversals)
+ *   positive → adds to inventory (received, released, reversals)
  *   negative → subtracts from inventory (delivered, booked, prebooked, job_applied)
- *   signed   → already has correct sign (adjusted, transferred, tote_fill_out, tote_fill_in)
+ *   signed   → already has correct sign (adjusted, transferred, returned, tote_fill_out, tote_fill_in)
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export function signedQuantity(qty: number, type: string): number {
   switch (type) {
     case 'received':
-    case 'returned':
     case 'released':
     case 'cancelled_delivery_reversal':
     case 'void_delivery_reversal':
@@ -84,6 +83,7 @@ export function signedQuantity(qty: number, type: string): number {
       return -Math.abs(qty);
     case 'adjusted':
     case 'transferred':
+    case 'returned': // a return receipt is +, its cancellation - (KI-159)
     case 'prebook_reconciliation':
       return qty; // already signed (prebook_reconciliation affects prebooked, shown as-is)
     default:

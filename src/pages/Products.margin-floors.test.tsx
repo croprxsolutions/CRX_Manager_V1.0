@@ -69,6 +69,7 @@ vi.mock('../lib/productPricing', async (importOriginal) => ({
   createPricingWorkbookExport: vi.fn(),
 }));
 vi.mock('../components/products/BulkProductImport', () => ({ default: () => null }));
+vi.mock('../components/products/ProductSetupWorkbookModal', () => ({ default: () => null }));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
 vi.mock('../lib/costFields', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/costFields')>()),

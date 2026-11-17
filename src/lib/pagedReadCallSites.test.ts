@@ -39,6 +39,7 @@ const SHARED_FILES = [
   'lib/ordersPage.ts',
   'lib/paymentDuplicate.ts',
   'lib/productParentProposals.ts',
+  'lib/productSetupChemistry.ts',
   'lib/reconciliation.ts',
   'lib/sellPriceHistory.ts',
   'lib/toteFill.ts',

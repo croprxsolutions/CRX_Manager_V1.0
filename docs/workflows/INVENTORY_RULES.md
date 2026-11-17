@@ -86,7 +86,7 @@ Every inventory change creates an `inventory_transactions` record. Here are all 
 | `received` | PO items are received | + (increases stock) |
 | `booked` | An order is created and its lines are pre-booked, by every order-creation path except quick delivery: quote conversion, direct order, rush order, bulk import and booking draw-down (blend tickets no longer make orders: KI-93, `20261107050000`). Inventory holds write no ledger row | No change to quantity_available (adds to quantity_prebooked) |
 | `delivered` | Delivery is completed | - (decreases stock) |
-| `returned` | Customer return is received back | + (increases stock, if restocked) |
+| `returned` | Customer return is received back (+qty); its cancellation writes -qty | signed: read the stored sign (KI-159) |
 | `adjusted` | Manual inventory adjustment or cycle count variance | +/- (can go either direction) — **see caveat below** |
 | `transferred` | Allowed by the type check and shown in the ledger, but no current code writes it (there is no warehouse-transfer function) | +/- if ever used (decrease at source, increase at destination) |
 | `job_applied` | Product applied during a job or field application (incl. blend-ticket applications) | - (decreases stock) |
@@ -102,6 +102,7 @@ Admins fill totes from the tote's product page (Tote Fill card, with history and
 
 ### Caveats for anyone recomputing stock from the ledger
 
+- **`returned` is signed.** A return receipt writes +qty and its cancellation -qty; read the stored sign, never `abs()` (KI-159). The browser check, the ledger modal and the `stock-matches-history` sweep all use this rule.
 - **Historical `adjusted` rows are not always available-affecting.** Before
   `prebook_reconciliation` existed, prebooked-only corrections were recorded as
   `adjusted` rows distinguishable only by their notes (e.g. "Prebooked
@@ -343,6 +344,11 @@ Physical inventory verification process.
 ### Tables
 - `cycle_counts` — count sessions (status: in_progress/completed/cancelled)
 - `cycle_count_items` — per-product count lines (expected_qty, counted_qty, variance, variance_pct, is_counted, counted_by, counted_at)
+
+### Guards (KI-160, `20270119130000_one_open_count_per_stock_row.sql`)
+- One in-progress count per warehouse (unique index `cycle_counts_one_open_per_warehouse`).
+- A stock row may sit on only one item of any in-progress count (`CYCLE_COUNT_ROW_ALREADY_OPEN`).
+- A count's status only moves forward: in progress -> completed or cancelled, completed -> cancelled (`CYCLE_COUNT_REOPEN_FORBIDDEN`).
 
 ### Source: `src/pages/CycleCounts.tsx`
 

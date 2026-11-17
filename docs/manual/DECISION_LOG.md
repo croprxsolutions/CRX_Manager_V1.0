@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-16 — #1878 and #1880 may have up to 7 Sol rounds after staging moved under them
+
+**Decision (Mason, in chat, 2026-11-16: "i approve up to 7 rounds").** PR #1878 (priority schema types) and PR #1880 (priority integrity follow-ups) may each have Sol rounds 5 through 7. Their latest Sol findings came from merging a fast-moving `staging` (a duplicated generated type after #1885 landed, and staging migrations newer than the candidate), not from one design mechanism coming back.
+**Why:** the round cap exists to stop patching a recurring design problem; here the repeats were merge drift, so there is no business trade-off to remove.
+**What this forbids/implies:** no round past 7 on either PR; a BLOCKER/HIGH that is a new design problem still stops the PR for Mason.
+
 ## 2026-11-14 — Inactive rate history supports explicit cleanup
 
 **Decision (Mason, in chat).** Include inactive product groups' existing rates in review and preserve their approvals until explicitly changed. Inactive history supports sending an approved rate back to draft, deleting a draft and clearing a review decision. It does not support fresh approval, value edits or new review decisions. Keep accepting older half-filled rate workbooks under all existing identity and server safeguards.

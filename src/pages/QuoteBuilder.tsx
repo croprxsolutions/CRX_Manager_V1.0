@@ -114,6 +114,8 @@ import { ProductSearchResultRow } from '../components/products/ProductSearchResu
 import { rateUnitOptionsForProduct } from '../lib/units';
 import { useProductParents } from '../lib/productParents';
 import { QuoteLineCost } from '../components/quotes/QuoteLineCost';
+import QuoteLineAdjuvants from '../components/quotes/QuoteLineAdjuvants';
+import { useCancelledRegistrations } from '../lib/epaRegistrationStatus';
 import type {
   Quote,
   QuoteSection,
@@ -912,6 +914,9 @@ export default function QuoteBuilder() {
   })));
   // Loads on page load and when the customer or product set changes, whichever tab shows.
   const lastCharged = useLastChargedPrices(customerId, lastChargedLines, staffSeesLastCharged);
+  // USE-2: each line's label adjuvants, read for the products' own EPA numbers (a reminder, never blocks).
+  const lineRegistrations = useCancelledRegistrations(sections.flatMap((section) => section.items.map((item) =>
+    (item.product || products.find((p) => p.id === item.product_id))?.epa_registration)));
   // Cost, profit and margin are admin-only (Mason, 2026-10-15); Customer View hides them for an admin too.
   const hideCost = customerView || !isAdmin;
   const canCancel = isEditing && ['draft', 'sent', 'revised'].includes(currentStatus);
@@ -4893,6 +4898,9 @@ export default function QuoteBuilder() {
                   <PolicyBadge policy={normalizeReturnPolicy(prod.return_policy)} />
                   {prod.is_full_tote_only && <FullToteOnlyBadge />}
                 </div>
+              )}
+              {prod && !customerView && (
+                <QuoteLineAdjuvants epaRegistration={prod.epa_registration} rows={lineRegistrations.rows} lookup={lineRegistrations.lookup} />
               )}
               {item.suggested_rate && <p className="mt-0.5 text-xs text-secondary">Suggested {item.suggested_rate}</p>}
               {lastChargeText && <p className="mt-0.5 text-xs text-secondary">{lastChargeText}</p>}

@@ -6300,3 +6300,97 @@ describe('QuoteBuilder load failures', () => {
     expect(screen.queryByText('The booking settlement could not be loaded')).not.toBeInTheDocument();
   });
 });
+
+// USE-2 sheet 3.4: each line shows its product's label adjuvants; never blocks, never saved.
+describe('QuoteBuilder label adjuvants', () => {
+  const FOUR = [
+    { kind: 'required', adjuvant_types: ['HS-MSO', 'MSO', 'COC'], preferred: 'HS-MSO' },
+    { kind: 'required', adjuvant_types: ['AMS'], when: 'hard water', note: '8.5 lb per 100 gal' },
+    { kind: 'recommended', adjuvant_types: ['Drift reduction'] },
+    { kind: 'do_not_use', adjuvant_types: ['UAN', 'NIS'] },
+  ];
+  const row = (n: string, list: unknown) => ({ epa_registration: n, registration_status: 'active', cancelled_on: null, label_url: null, label_adjuvants: list, registration_version: 1 });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    quoteIdempotencyState.reset();
+    quoteIdempotencyHandles.clear();
+    sessionStorage.clear();
+    dirtyStates.length = 0;
+    authState.role = 'admin';
+  });
+
+  function serve(products: Array<Record<string, unknown>>, items: Array<Record<string, unknown>>, fixture: ReturnType<typeof makeQuoteFixture>) {
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? fixture.quote : table === 'quote_sections' ? [fixture.section] : table === 'quote_items' ? items : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? products : [], error: null }));
+  }
+
+  it('shows every statement on a reopened quote, names the number, hides in customer view, and the quote still saves', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const product = { ...fixture.product, epa_registration: '100-1234' };
+    serve([product], [{ ...fixture.item, product }], fixture);
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'get_epa_registrations'
+      ? { data: [row('100-1234', FOUR)], error: null }
+      : name === 'save_quote'
+        ? { data: { status: 'saved', quote_id: fixture.quote.id, row_version: 8, item_ids: {} }, error: null }
+        : { data: null, error: null }));
+
+    renderQuoteBuilder(fixture.quote.id);
+    const note = await screen.findByRole('note', { name: 'Label 100-1234 adjuvants' });
+    expect(note).toHaveTextContent('Requires one of: HS-MSO (preferred), MSO, COC');
+    expect(note).toHaveTextContent('When hard water: requires: AMS');
+    expect(note).toHaveTextContent('8.5 lb per 100 gal');
+    expect(note).toHaveTextContent('Recommended: Drift reduction');
+    expect(note).toHaveTextContent('Do not use: UAN or NIS');
+    expect(mockRpc).toHaveBeenCalledWith('get_epa_registrations', { p_numbers: ['100-1234'] });
+
+    await makeAnEdit();
+    fireEvent.click(screen.getByText('Save draft'));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_quote', expect.anything()));
+    const sent = JSON.stringify(mockRpc.mock.calls.find(([name]) => name === 'save_quote')![1]);
+    expect(sent).not.toContain('HS-MSO');
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Customer view/ }));
+    await waitFor(() => expect(screen.queryByRole('note', { name: 'Label 100-1234 adjuvants' })).not.toBeInTheDocument());
+  });
+
+  it('never shows the first product\'s label after the line is switched before its read returns', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const alpha = { ...fixture.product, product_name: 'Alpha Chem', epa_registration: '100-1' };
+    const beta = { ...fixture.product, id: 'product-2', product_name: 'Beta Chem', epa_registration: '200-2' };
+    serve([alpha, beta], [{ ...fixture.item, product: alpha }], fixture);
+    let releaseAlpha!: () => void;
+    mockRpc.mockImplementation((name: string, args?: { p_numbers?: string[] }) => {
+      if (name !== 'get_epa_registrations') return Promise.resolve({ data: null, error: null });
+      if (args?.p_numbers?.[0] === '100-1') {
+        return new Promise((resolve) => { releaseAlpha = () => resolve({ data: [row('100-1', [{ kind: 'required', adjuvant_types: ['COC'] }])], error: null }); });
+      }
+      return Promise.resolve({ data: [row('200-2', null)], error: null });
+    });
+
+    renderQuoteBuilder(fixture.quote.id);
+    expect(await screen.findByText('Checking label…')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Alpha Chem' }));
+    const picker = await screen.findByPlaceholderText('Search by name, SKU, category, or vendor...');
+    fireEvent.click(within(picker.closest('[role="dialog"]') as HTMLElement).getByText('Beta Chem'));
+    expect(await screen.findByText('Label 200-2: adjuvants not reviewed')).toBeInTheDocument();
+    await act(async () => { releaseAlpha(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(screen.queryByText(/COC/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/100-1/)).not.toBeInTheDocument();
+    expect(screen.getByText('Label 200-2: adjuvants not reviewed')).toBeInTheDocument();
+  });
+
+  it('says it could not check when the read fails, never "not reviewed"; a product with no number says nothing', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const alpha = { ...fixture.product, product_name: 'Alpha Chem', epa_registration: '100-1' };
+    const plain = { ...fixture.product, id: 'product-2', product_name: 'Plain Chem', epa_registration: null };
+    serve([alpha, plain], [{ ...fixture.item, product: alpha }, { ...fixture.item, id: 'item-2', sort_order: 1, product_id: plain.id, product: plain }], fixture);
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'get_epa_registrations'
+      ? { data: null, error: { message: 'boom' } }
+      : { data: null, error: null }));
+
+    renderQuoteBuilder(fixture.quote.id);
+    expect(await screen.findAllByText('Couldn\'t check the label')).toHaveLength(1);
+    expect(screen.queryByText(/not reviewed/)).not.toBeInTheDocument();
+  });
+});

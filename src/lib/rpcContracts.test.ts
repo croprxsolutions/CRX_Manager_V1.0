@@ -3057,7 +3057,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _product_rate_review_reopen: 'internal RT-3 helper (20270104110000): sends one locked approved row back to draft, called only by _product_rate_review_run inside commit_rate_review after its replay check (or a rolled-back preview); every API-role EXECUTE is revoked',
   _product_rate_review_outcome: 'internal RT-3 helper (20270104110000): sets or clears one parent outcome at its expected version, called only by _product_rate_review_run inside commit_rate_review after its replay check (or a rolled-back preview); every API-role EXECUTE is revoked',
   _product_rate_review_run: 'internal RT-3 helper (20270104110000): runs one whole review upload, called only by commit_rate_review after its replay check (child RT-1 writers get keys derived from the commit key) or by preview_rate_review, which always rolls back; every API-role EXECUTE is revoked',
-  // 20270118100000 (#1880, local candidate) re-creates this trigger function for the system-actor fix. Prune once applied.
+  // 20270120100000 (#1880, local candidate) re-creates this trigger function for the system-actor fix. Prune once applied.
   _product_rates_clear_outcome:
     'AFTER row trigger on product_rates (RT-3): any rate change makes the parent undecided and moves its outcome version; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   preview_rate_review:

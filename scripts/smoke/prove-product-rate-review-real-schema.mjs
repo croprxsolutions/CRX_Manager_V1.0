@@ -27,13 +27,13 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270104110000_product_rate_review.sql');
-// shortcut: 20270118100000 (#1880) is listed for ordering only and is NOT applied here; it also replaces
+// shortcut: 20270120100000 (#1880) is listed for ordering only and is NOT applied here; it also replaces
 // delivery-brand and receiving functions from later migrations this prover never replays. Its rate-function
 // changes were tested by Taha on a real-schema DB (#1880) and by the private behaviour prover; apply it here
 // once this prover replays the later chain (#1928).
 const FOLLOW_UPS = [
   path.join(MIGRATIONS, '20270110110000_inactive_rate_review_cleanup.sql'),
-  path.join(MIGRATIONS, '20270118100000_priority_integrity_followups.sql'),
+  path.join(MIGRATIONS, '20270120100000_priority_integrity_followups.sql'),
 ];
 // These later files only call/check parent auth/replay helpers; none redefines them or touches rate tables.
 const LATER_READ_ONLY = new Set([

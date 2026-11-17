@@ -1363,7 +1363,15 @@ before figures are blanked. Extra, other contexts, request query, headers and co
 messages and data are never sent, for errors and performance samples alike (checked against a local Sentry stand-in).
 
 ### KI-164 — Stock and pricing proofs that cannot run, and a stale cost-review record
-**LOW (proof) · OPEN · tooling · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md), Codex audit) · unassigned**
+**LOW (proof) · PARTLY FIXED · tooling · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md), Codex audit) · unassigned**
+**2026-11-16 (repair step 6):**
+- All four proofs below run to PASS again: the undo prover replays the whole chain, the three provers refuse only a
+  later file that redefines what they rely on, and the pricing proof uses the current cost-change form.
+- The 5 `cost-exposure-review` hashes were re-keyed after a live re-read. The only changed function their chains
+  reach is `_enqueue_delivery_receipt`, which reads no cost.
+
+Still open: the KI-159 database sweep and each repair step's regression test.
+
 Several proofs did not complete on 2026-11-13, so those workflows are not certified:
 - The full undo prover stops rebuilding at `20261217100000_job_access_ends_with_the_job.sql` (`JOB_ACCESS_BASELINE_DRIFT`).
 - The cycle-count, tote-fill and PO close-short provers refuse newer dependent migrations before their scenarios.

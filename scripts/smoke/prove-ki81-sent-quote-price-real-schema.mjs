@@ -267,9 +267,9 @@ const FNS = ['create_invoice_from_blend_ticket', '_save_field_app_invoice_impl_2
   'resolve_field_app_chemical_price', '_field_app_sent_quote_price_cents'];
 const OLD = 'create_invoice_from_blend_ticket:a6f5c6e72d6632313549313b34f406ad,_save_field_app_invoice_impl_20260714:0f5da38476fe174cd25c9bf3e364055f,'
   + '_save_field_app_split_invoice_impl:a69f21d8e9f32fc6fecb38ac3a54801c,resolve_field_app_chemical_price:d2617d60d7b6e5b922bc3e3be4e5850b';
-const NEW = 'create_invoice_from_blend_ticket:2a45b09ef78fb4b289db979401bc1bee,_save_field_app_invoice_impl_20260714:d744763725bda9d17d90717e0cf3ba5a,'
+const NEW = 'create_invoice_from_blend_ticket:81bcfd088498f0cb1624f161e1a55e46,_save_field_app_invoice_impl_20260714:d744763725bda9d17d90717e0cf3ba5a,'
   + '_save_field_app_split_invoice_impl:255b970f11991ce065743b160f1930fe,resolve_field_app_chemical_price:a9f32657d9c266b6a5f634d4b51d7823,'
-  + '_field_app_sent_quote_price_cents:d2891906150ff746d2d739a57f4d778c';
+  + '_field_app_sent_quote_price_cents:3b8f1d879238d1196cb5f4ed51272aa7';
 const ASSERT_MD5 = '4e3bca2b48a4af44de9d1f219a880586';
 const bodies = () => scalar(`SELECT string_agg(proname || ':' || md5(replace(prosrc, chr(13), '')), ',' ORDER BY array_position(ARRAY['${FNS.join("','")}'], proname::text))
   FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname IN ('${FNS.join("','")}');`);
@@ -300,7 +300,7 @@ function seed() {
     BEGIN
       INSERT INTO quotes (id, quote_number, customer_id, created_by, status, expires_at)
       VALUES (v_q, 'K81-' || left(v_q::text, 8), p_customer, '${ADMIN}', p_status,
-              ((p_expires + 1)::timestamp - interval '1 minute') AT TIME ZONE 'America/Chicago');
+              p_expires);  -- quotes.expires_at is a calendar date
       INSERT INTO quote_sections (id, quote_id, section_name, sort_order, field_id) VALUES (v_s, v_q, 'K81', 0, p_field);
       INSERT INTO quote_items (id, quote_id, section_id, product_id, sort_order, price_per_unit, total_units_needed, acres, actual_rate, rate_unit)
       VALUES (v_i, v_q, v_s, p_product, 0, p_price, 20, 10, 2, 'gal/acre');

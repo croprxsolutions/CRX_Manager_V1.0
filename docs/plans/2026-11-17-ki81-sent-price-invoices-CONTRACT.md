@@ -82,7 +82,7 @@ Database only, one PR to `staging`; the screens already show server errors. No s
 
 Changed because of it:
 - Season bound (7): an eligible quote also expires in the application date's season (quotes expire at season end),
-  so a next season's quote never prices a backdated application. Expiry is inclusive on its Chicago date; a NULL
+  so a next season's quote never prices a backdated application. Expiry (a calendar date) is inclusive; a NULL
   expiry counts (live: 0 quotes have none) (8).
 - One answer per transaction (21, 37): the helper records its first answer for the same inputs; every later call
   in that transaction recomputes and refuses `FIELD_APP_QUOTE_PRICE_CHANGED` ("save again") if the answer moved, so

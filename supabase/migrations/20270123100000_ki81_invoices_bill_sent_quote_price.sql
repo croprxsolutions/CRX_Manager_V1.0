@@ -1,8 +1,8 @@
 -- KI-81 (Mason, 2026-11-17: "fix now"; contract docs/plans/2026-11-17-ki81-sent-price-invoices-CONTRACT.md):
 -- an invoice that takes a price from a quote takes only a price the customer was sent.
--- actor-binding-check: exempt -- create_invoice_from_blend_ticket keeps its own actor check (p_created_by must be
--- auth.uid()); the two field-app _impl bodies (EXECUTE only postgres and service_role) keep theirs; the new helper and
--- the private resolver are executable by no API role. None of those checks change here.
+-- Actor checks are unchanged: create_invoice_from_blend_ticket still requires p_created_by = auth.uid(); the two
+-- field-app _impl bodies stay callable only by postgres and service_role through their bound wrappers; the new helper
+-- and the private resolver are executable by no API role.
 --
 -- WHY: the sent-price lock (_assert_quote_prices_as_sent, 20261027040000/20261101100000) guards Convert, Partial
 -- Order and Schedule Job, but three invoice paths read quote_items.price_per_unit as it is now:
@@ -116,8 +116,8 @@ BEGIN
        -- Not expired by the application date, and a quote for that season (quotes expire at season end), so a
        -- next season's quote never prices a backdated application.
        AND (q.expires_at IS NULL
-            OR ((q.expires_at AT TIME ZONE 'America/Chicago')::date >= p_on
-                AND public.compute_season((q.expires_at AT TIME ZONE 'America/Chicago')::date) = public.compute_season(p_on)))
+            OR (q.expires_at >= p_on
+                AND public.compute_season(q.expires_at) = public.compute_season(p_on)))
        AND EXISTS (SELECT 1 FROM quote_versions v WHERE v.quote_id = q.id)
        AND EXISTS (SELECT 1 FROM quote_sections qs JOIN quote_items qi ON qi.section_id = qs.id AND qi.quote_id = qs.quote_id
                     WHERE qs.quote_id = q.id AND qs.field_id = ANY (p_field_ids) AND qi.product_id = p_product_id)
@@ -390,6 +390,11 @@ BEGIN
     -- concurrently and both invoices would land (the exact double-bill this
     -- guard exists to stop). Lock order is safe: neither path row-locks
     -- blend_tickets after jobs.
+    -- KI-81: the job's quote row before the job row, the order save_quote takes them (quote, then
+    -- anything that references the job), so this invoice and a quote save cannot deadlock.
+    PERFORM 1 FROM quotes q
+     WHERE q.id = (SELECT j.quote_id FROM jobs j WHERE j.id = v_ticket.job_id)
+       FOR UPDATE OF q;
     PERFORM 1 FROM jobs WHERE id = v_ticket.job_id FOR UPDATE;
     -- Codex R2 P2: test for a LIVE invoice directly (invoices.job_id, non-void/
     -- cancel, not deleted) instead of trusting jobs.status — a job stranded as
@@ -3079,7 +3084,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '2a45b09ef78fb4b289db979401bc1bee', ARRAY['authenticated', 'postgres', 'service_role']),
+        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '81bcfd088498f0cb1624f161e1a55e46', ARRAY['authenticated', 'postgres', 'service_role']),
         ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'd744763725bda9d17d90717e0cf3ba5a', ARRAY['postgres', 'service_role']),
         ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '255b970f11991ce065743b160f1930fe', ARRAY['postgres', 'service_role'])
       ) AS pin(fn, sig, body_md5, execs)
@@ -3110,7 +3115,7 @@ BEGIN
      OR (SELECT count(*) FROM pg_proc o WHERE o.pronamespace = 'public'::regnamespace AND o.proname = 'resolve_field_app_chemical_price') <> 1
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)')) IS DISTINCT FROM 'a9f32657d9c266b6a5f634d4b51d7823'
      OR (SELECT provolatile FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)')) <> 'v'
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)')) IS DISTINCT FROM 'd2891906150ff746d2d739a57f4d778c'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)')) IS DISTINCT FROM '3b8f1d879238d1196cb5f4ed51272aa7'
      OR (SELECT prosecdef FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)'))
      OR has_function_privilege('anon', 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'EXECUTE')

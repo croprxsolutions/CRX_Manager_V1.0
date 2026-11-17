@@ -13,6 +13,7 @@ import {
   CHECK_TIMEOUT_MS,
   cancelledOnText,
   getCancelledRegistrations,
+  getRegistrations,
   normalizeEpaRegistration,
   registrationCheck,
   useCancelledRegistrations,
@@ -67,6 +68,22 @@ describe('getCancelledRegistrations', () => {
     const result = await getCancelledRegistrations(['524-475', ' 524-475', '100-885', '7-1', '264-849']);
     expect(mockRpc).toHaveBeenCalledWith('get_epa_registrations', { p_numbers: ['524-475', '100-885', '7-1', '264-849'] });
     expect([...result]).toEqual([['524-475', '2025-03-01'], ['264-849', null]]);
+  });
+
+  it('reads the REG-1 one-type entry as a one-type statement and keeps new entries as they are', async () => {
+    const statement = { kind: 'required', adjuvant_types: ['HS-MSO', 'MSO'], preferred: 'HS-MSO', when: 'hard water' };
+    mockRpc.mockResolvedValue(reply([
+      { epa_registration: '100-1', registration_status: 'active', cancelled_on: null, label_adjuvants: [
+        { kind: 'recommended', adjuvant_type: ' COC ', note: '1%' }, { kind: 'required', adjuvant_type: 'oil,\nmethylated' }, statement] },
+      { epa_registration: '100-2', registration_status: 'active', cancelled_on: null, label_adjuvants: null },
+    ]));
+    const rows = await getRegistrations(['100-1', '100-2']);
+    expect(rows.get('100-1')?.label_adjuvants).toEqual([
+      { kind: 'recommended', adjuvant_types: ['COC'], note: '1%' },
+      { kind: 'required', adjuvant_types: ['oil, methylated'], note: null },
+      statement,
+    ]);
+    expect(rows.get('100-2')?.label_adjuvants).toBeNull();
   });
 
   it('a failed read throws instead of returning "none cancelled"', async () => {

@@ -1,5 +1,17 @@
 # Decision Log
 
+## 2026-11-17 — #1896: Mason owner-accepted 4 Sol finding(s) at `ed0ec3c3c777`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-17).** Sol's review of PR #1896 at `ed0ec3c3c777` (base `1e55ea03914d`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:210`, text sha256 `a609e6a0d8dab94d` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref f6739a057a25)
+- Finding 2 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:99`, text sha256 `f05f49a2ae86361c` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref eb0bd91e4cc8)
+- Finding 3 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:408`, text sha256 `a4174337960920ab` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 8078485c8694)
+- Finding 4 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:110`, text sha256 `f6c999aae98c965d` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 2009768e08d2)
+
 ## 2026-11-17 — #1917 and #1918 (USE-2) may have up to 18 Sol rounds
 
 **Decision (Mason, in chat, 2026-11-17: "Yes, up to 18").** PR #1917 (USE-2 product page) and PR #1918 (quote line note) may each have Sol rounds up to 18, as the round counter counts them (it includes the #1916 database rounds both branches carry).

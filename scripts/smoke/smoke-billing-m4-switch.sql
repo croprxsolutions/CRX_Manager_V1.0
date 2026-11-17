@@ -107,7 +107,7 @@ BEGIN
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
 
   -- D
-  v_err := pg_temp.smk_try('SELECT enabled FROM billing_m4_switch');
+  v_err := pg_temp.smk_try('DO $r$ BEGIN IF (SELECT count(*) FROM billing_m4_switch) <> 1 THEN RAISE EXCEPTION ''the row is hidden''; END IF; END $r$');
   IF v_err IS NOT NULL THEN v_fails := v_fails || ' (D) an active user could not read the switch: ' || v_err || ';'; END IF;
   v_err := pg_temp.smk_try('UPDATE billing_m4_switch SET enabled = true');
   IF v_err IS NULL OR (SELECT enabled FROM billing_m4_switch) THEN

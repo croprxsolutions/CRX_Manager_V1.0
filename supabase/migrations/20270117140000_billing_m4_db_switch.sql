@@ -13,15 +13,17 @@
 --
 -- WHAT:
 --   1. billing_m4_switch: one row, enabled true/false. RLS on; an active user may read it, nobody can change it
---      through the app (no write grant or policy); a migration turns it on for live with commission. Its starting value: ON where sales tax or a
---      standing discount is already in use (staging), OFF everywhere else (live, which has none before the release
---      because the controls are hidden there; a fresh local or CI database).
+--      through the app (no write grant or policy, service_role included); a migration turns it on for live with
+--      commission. Starting value: ON only where a tax or discount line is more than a day old (staging), OFF
+--      everywhere else (live, a fresh local or CI database).
 --   2. While it's OFF, the database refuses (BILLING_M4_OFF) only what would start charging: ticking a sale's sales
 --      tax, giving a customer a standing discount above 0, and setting a sale's own discount above 0. Unticking,
 --      setting 0 and "use the customer's rate" always work. Triggers on the three tables, so every path is covered
 --      (the RPCs, the customer form, bulk import, any later writer).
 --
 -- NOT CHANGED: the setters themselves, amounts, posting, drafts already taxed or discounted, the app's switch.
+-- ONE WAY: OFF until commission, then ON for good. Turning it OFF after ON is not supported: sales already ticked and
+-- customers already discounted would keep charging their new drafts.
 --
 -- ROLLBACK (its own reviewed migration): drop the three triggers, their function, _billing_m4_enabled_20270117 and
 -- billing_m4_switch.
@@ -129,10 +131,12 @@ CREATE TRIGGER invoice_standing_discount_rates_billing_m4_guard_20270117
 
 -- 3. Its starting value, read only now: CREATE TRIGGER above holds each table against writes until this file
 -- commits, so nothing can set a tax or discount between this read and the guards.
+-- ON only where tax or a standing discount was already on invoices more than a day ago (staging: posted taxed and
+-- discounted invoices since 11 Nov). Live can only get one in the minutes the release applies the M4 migrations
+-- before this file, which doesn't count; a fresh database has none.
 INSERT INTO public.billing_m4_switch (enabled)
-SELECT EXISTS (SELECT 1 FROM orders WHERE sales_tax)
-    OR EXISTS (SELECT 1 FROM customers WHERE standing_discount_pct > 0)
-    OR EXISTS (SELECT 1 FROM invoice_standing_discount_rates WHERE rate_pct > 0 OR drafted_rate_pct > 0);
+SELECT EXISTS (SELECT 1 FROM invoice_items
+                WHERE charge_type IN ('sales_tax', 'standing_discount') AND created_at < now() - interval '1 day');
 
 DO $postflight$
 BEGIN

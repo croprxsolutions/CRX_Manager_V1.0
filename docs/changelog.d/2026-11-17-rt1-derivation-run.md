@@ -32,3 +32,25 @@ KI-114 as predicted: `Piksi Dust Plus` has an `18 mg` per-acre house draft propo
 
 Nothing reads the drafts until RT-4. Undo: `delete_draft_product_rate` per row (logged). This PR targets
 `staging` only.
+
+## 2026-11-17 - RT-3: Mason's first rate review saved on live
+
+Mason decided by rule in chat (2026-11-17): approve today's per-acre rate as the default where it matches
+the label text or there is no per-acre text (303); treat loose notes such as "1-2pt" or "1qt-2qt" as per
+acre and approve today's rate (about 55); seed treatments get no per-acre default ("most are pure unit i
+think no defaults"); per-ton and per-gallon products wait for label data; fix two unit errors (Piksi Dust
+Plus 18 mg → 18 g, Smart Choice 15G 1.8 dry oz → 1.8 lb).
+
+Saved through `commit_rate_review` from Mason's admin login (key `rt3-review-2026-11-17-batch1`) after a
+clean `preview_rate_review` (684 rate rows and 382 outcomes, no problems; every label check `not_checked`,
+because no label maximum is loaded for these products yet). Result on live:
+- 670 rates approved, 30 still drafts; 14 seed-treatment per-acre drafts deleted (logged with the reason).
+- Outcomes on active parents: `approved_default` 361, `no_per_acre_default` 14, `needs_label_data` 7,
+  undecided 14.
+- Unchanged: `products` and `product_parents` md5 as before; quotes and invoices untouched.
+
+Held for Mason (undecided, drafts kept): Authority Maxx, Authority XL, Capture LFR and its two generics,
+Gen Harmony SG, Gen Paraquat, Revulin Q and Vector (today's rate differs from the label text); Verdict
+(beans and corn rates in one note); PeKacid (4 oz against "1-5lb"); Piksi Dust Infurrow ("1.5 gram per G");
+Autumn Super 51 WDG and Cimarron Plus (label text only, no house rate). Quotes still read the old product
+rate columns until RT-4.

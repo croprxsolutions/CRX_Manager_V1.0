@@ -40,9 +40,6 @@ const LEDGER_ONLY = new Set([
   '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
   '20261105170000_data11_preferred_vendor_links.sql',
-  // Need live's storage.objects policies, which this database does not have; neither touches units or stock.
-  '20261217100000_job_access_ends_with_the_job.sql',
-  '20261220100000_applicator_keeps_own_record_fields.sql',
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate or its follow-up creates or relies on.
@@ -189,7 +186,9 @@ function buildContainer() {
     CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT string_to_array(name, '/') $$;
     CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT split_part(name, '/', array_length(string_to_array(name, '/'), 1)) $$;
     GRANT USAGE ON SCHEMA storage TO postgres;
-    GRANT ALL ON storage.objects, storage.buckets TO postgres;`, { user: 'supabase_admin' });
+    GRANT ALL ON storage.objects, storage.buckets TO postgres;
+    -- Row security on, as live has it: 20261217100000 (the current job completion body) checks it (Sol r1).
+    ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;`, { user: 'supabase_admin' });
   psql('CREATE SCHEMA IF NOT EXISTS supabase_migrations; CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text PRIMARY KEY, name text NOT NULL, statements text[]);');
   for (const name of ['20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) psql(`\\i /tmp/${name}`, { user: name.includes('overlay') ? 'supabase_admin' : 'postgres' });
   const files = plan();
@@ -265,7 +264,9 @@ function session(sql, delayMs = 0) {
 const id = (s) => `a8000000-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1'), CUST = id('c1');
 const P1 = id('b1'), P2 = id('b2'), P3 = id('b3');
-const INV1 = id('d01'), INV2 = id('d02'), INV3 = id('d03');   // INV1 < INV2: id order locks P1 first
+// Row ids run opposite to product ids (P1 < P2 but INV1 > INV2), so locking by row id would take P2 first; the
+// job hold sync locks by product (Sol r1), and so must the completions.
+const INV1 = id('d02'), INV2 = id('d01'), INV3 = id('d03');
 const OA = id('e1'), OB = id('e2'), OQ = id('e3');
 const OA1 = id('e11'), OA2 = id('e12'), OB1 = id('e21'), OB2 = id('e22'), OQ1 = id('e31');
 const DA = id('f1'), DLB = id('f2'), DE = id('f3'), DQ = id('f4');
@@ -401,9 +402,9 @@ async function afterCases() {
   const race = await completionRace();
   assert.ok(!race.deadlocked, `no deadlock expected:\n${race.t1.out}\n${race.t2.out}`);
   assert.match(race.t1.out, /T1 done/, race.t1.out); assert.match(race.t2.out, /T2 done/, race.t2.out);
-  assert.equal(await jobHoldsP1First(), true, 'a completing job takes P1 (lower id) before it waits for P2');
+  assert.equal(await jobHoldsP1First(), true, 'a completing job takes P1 (lower product id, higher row id) before it waits for P2');
   assert.equal(okProbe(`${complete(DA)} SELECT status || '/' || (SELECT quantity_available FROM public.inventory WHERE id = '${INV1}') FROM public.deliveries WHERE id = '${DA}';`).replace(/\.0+$/, ''), 'completed/95');
-  console.log('[case] 4 two completions sharing two products in opposite line order both finish (one waits, no deadlock); a completing job locks its stock rows in id order; a single completion still completes and deducts');
+  console.log('[case] 4 two completions sharing two products in opposite line order both finish (one waits, no deadlock); a completing job locks its stock rows in product order, not row-id order; a single completion still completes and deducts');
 
   // KI-163 (1) and (2).
   assert.equal(cancelWith(4), '4/0');

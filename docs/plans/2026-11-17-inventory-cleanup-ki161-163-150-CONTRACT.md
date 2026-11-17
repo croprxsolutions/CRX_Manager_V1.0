@@ -40,13 +40,14 @@ Builds on #1896 (delivery, order and PO lines in the stock unit). One PR to `sta
   order, so two completions sharing two products in opposite order can deadlock.
   - **Delivery:** rename `_complete_delivery_authorized_impl` (body untouched, md5-pinned) and put a thin wrapper of
     the same name, signature and defaults in front: lock the delivery, then its products' Main Warehouse stock rows in
-    inventory-id order, then call the original. Its only caller is `_complete_delivery_aggregate_impl`, after the
+    product order (then row id), the order the quote-linked job hold sync `_sync_quote_job_reservations` already
+    uses (Sol r1: row-id order could disagree with it), then call the original. Its only caller is `_complete_delivery_aggregate_impl`, after the
     role and idempotency checks, and it calls by name, so every completion goes through the wrapper.
   - **Job (changed during the build; Astra 22/23 agree):** the job body updates the job's status, which runs the hold
     sync (`trg_release_job_holds_on_lifecycle` -> `_sync_job_holds`) before its stock loop, so a wrapper in front
     would move stock locks ahead of the hold sync. Instead an AFTER UPDATE OF status trigger `trg_zz_lock_job_stock_rows`
     (sorts after the hold sync's trigger) locks the job's chemicals' stock rows (quantity > 0, not customer-supplied)
-    in id order, right after the hold sync and before the body's stock loop. The hold sync's own order is unchanged.
+    in that same product order, right after the hold sync and before the body's stock loop. The hold sync's own order is unchanged.
   - **Guarantee, stated narrowly:** completion vs completion over stock rows that exist. A product with no Main
     Warehouse row is created by the body as today (live: 0 such products on open deliveries; Astra 25-27 kept as a
     known limit). Other writers' lock orders (order edits, cancels, receipts) are unchanged (Astra 35).
@@ -119,6 +120,14 @@ limit, 0 live), 35/37-39 (other writers' lock orders unchanged; vendor-bill side
 44/45 (old released rows stay as written; the KI says so), 50 (KI-134 settled: completion adds the variance to current
 stock), 51 (screen uses the server's expected figure), 61/62 (old sessions finish before the migration's locks; the
 error messages ship in the same PR).
+
+## Reviews during the build (Luna r1-r4, Sol r1)
+Fixed: TRUNCATE revoked too; the lineage check runs with `deliveries` locked; an open line in another unit refuses
+the migration; a not-a-number count is refused; stock locks follow product order, as the quote-linked hold sync does
+(the prover now seeds row ids opposite to product ids, and replays 20261217100000's current job completion body).
+Kept as stated limits: a stock row that does not exist yet (0 live); a count against on-hand with more than 4
+decimals (0 live); completed or cancelled delivery lines are history and are not re-checked for unit; the existing
+`app.admin_override` escape in `guard_order_item_delivery_lineage` is unchanged (follow-up).
 
 ## Open business decisions
 None. (The PO 1-cent question was answered by the data: see KI-163 item 4.)

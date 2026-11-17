@@ -12,13 +12,14 @@
 --     move to another order. No writer does; authenticated may update deliveries.order_id live.
 --   * authenticated loses INSERT, UPDATE and DELETE on delivery_items (table and columns). The screens never write
 --     the table; the six functions that do are SECURITY DEFINER. SELECT is unchanged.
--- KI-150: stock rows are locked in id order before a completion moves them.
+-- KI-150: stock rows are locked in product order (then row id) before a completion moves them: the same order the
+--   quote-linked job hold sync (_sync_quote_job_reservations, ORDER BY product_id) already uses (Sol r1).
 --   * _complete_delivery_authorized_impl is renamed _complete_delivery_authorized_impl_20270122 (body untouched); a
---     wrapper of the old name and signature locks the delivery, then the Main Warehouse stock rows of its lines in id
+--     wrapper of the old name and signature locks the delivery, then the Main Warehouse stock rows of its lines in that
 --     order, then calls it. The body takes only the delivery lock (and activity/notification inserts) before its own
 --     per-line stock locks, so only the order among stock rows changes.
 --   * Jobs: AFTER UPDATE OF status trigger trg_zz_lock_job_stock_rows (sorts after the hold sync) locks the stock rows
---     of the completing job's chemicals in id order, right before _complete_job_replay_impl_20261015's deduction loop
+--     of the completing job's chemicals in that order, right before _complete_job_replay_impl_20261015's deduction loop
 --     (only inserts run in between). The job body and the hold sync are not changed.
 --   * Receipt reversal vs vendor bill (the KI's first pair): no change. The vendor-bill paths read PO lines without a
 --     lock and never update the PO or take advisory lock 73492009, so no cycle exists; see the contract.
@@ -211,13 +212,13 @@ CREATE FUNCTION public._complete_delivery_authorized_impl(
  SET search_path = public, pg_temp
 AS $function$
 BEGIN
-  -- KI-150: the delivery first (as the body does), then every stock row its lines can move, in id order, so two
+  -- KI-150: the delivery first (as the body does), then every stock row its lines can move, in product order, so two
   -- completions sharing products wait for each other instead of deadlocking. The body re-takes these locks.
   PERFORM 1 FROM public.deliveries WHERE id = p_delivery_id FOR UPDATE;
   PERFORM 1 FROM public.inventory i
    WHERE i.location = 'Main Warehouse'
      AND i.product_id IN (SELECT di.product_id FROM public.delivery_items di WHERE di.delivery_id = p_delivery_id)
-   ORDER BY i.id
+   ORDER BY i.product_id, i.id
      FOR UPDATE;
   RETURN public._complete_delivery_authorized_impl_20270122(
     p_delivery_id, p_signed_by, p_performed_by, p_quantities, p_issue_type, p_issue_notes, p_idempotency_key, p_completed_at);
@@ -235,12 +236,12 @@ CREATE FUNCTION public._lock_job_stock_rows_in_order()
 AS $function$
 BEGIN
   -- KI-150: _complete_job_replay_impl_20261015 deducts each chemical's stock row in line order after this status
-  -- update; lock them all here in id order first so two job completions sharing products cannot deadlock.
+  -- update; lock them all here in product order first (as the hold sync before it), so two completions sharing products cannot deadlock.
   PERFORM 1 FROM public.inventory i
    WHERE i.location = 'Main Warehouse'
      AND i.product_id IN (SELECT jc.product_id FROM public.job_chemicals jc
                            WHERE jc.job_id = NEW.id AND jc.quantity > 0 AND jc.customer_supplied = false)
-   ORDER BY i.id
+   ORDER BY i.product_id, i.id
      FOR UPDATE;
   RETURN NULL;
 END;

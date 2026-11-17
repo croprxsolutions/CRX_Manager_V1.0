@@ -2,8 +2,8 @@
 /**
  * Real-schema proof for the units batch (KI-136, KI-158, KI-140, KI-137; contract
  * docs/plans/2026-11-15-product-master-steps-1-3-CONTRACT.md, PR A):
- *   20270111100000_ki137_powder_keg_each_piksi_mg_labels.sql (data correction, the candidate)
- *   20270111110000_line_unit_is_stock_unit.sql (the rules, its follow-up)
+ *   20270113110000_ki137_powder_keg_each_piksi_mg_labels.sql (data correction, the candidate)
+ *   20270113120000_line_unit_is_stock_unit.sql (the rules, its follow-up)
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
  * replays every post-baseline migration before the candidate, seeds live's pinned rows (same ids, units and
@@ -30,8 +30,8 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270111100000_ki137_powder_keg_each_piksi_mg_labels.sql');
-const RULES = path.join(MIGRATIONS, '20270111110000_line_unit_is_stock_unit.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270113110000_ki137_powder_keg_each_piksi_mg_labels.sql');
+const RULES = path.join(MIGRATIONS, '20270113120000_line_unit_is_stock_unit.sql');
 const FOLLOW_UPS = [RULES];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([
@@ -257,17 +257,21 @@ function refusedProbe(sql, pattern, uid) {
 const CORN = '0b2e713b-4962-4c49-ae3a-6074ddac1464';
 const SOY = '17ccc5ba-7e98-49bf-9510-4d57c0eda962';
 const PIKSI = '36732b8d-b4ed-4643-8a13-d793975d13c7';
+const TREATY = 'ac926057-cfae-4070-9cb6-ff2ecc421c3c';
 const id = (s) => `a7000000-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1'), CUST = id('c1'), GAL = id('d1'), GAL_INV = id('d2');
+const PO11 = id('b11');
 const O1 = id('e1'), O2 = id('e2'), O3 = id('e3'), D1 = id('f1'), D2 = id('f2'), PO1 = id('b1'), PO2 = id('b2');
 const GAL_PO_LINE = id('b21'), BLANK_PO_LINE = id('b22'), GAL_OI = id('e21'), QUOTE = id('91'), SECTION = id('92');
 const PINNED = {
-  inv: { corn: 'a1396a1c-7cbf-48f7-b98d-83e36ad7de25', soy: 'd847d5c1-0676-4e7e-addf-3e1640e216db', piksi: '40224943-7238-4504-ae72-1dbc0ad0bdf6' },
+  inv: { corn: 'a1396a1c-7cbf-48f7-b98d-83e36ad7de25', soy: 'd847d5c1-0676-4e7e-addf-3e1640e216db', piksi: '40224943-7238-4504-ae72-1dbc0ad0bdf6',
+         treaty: '687b3d54-1f4e-4ae1-9a5f-afa0542e94c2' },
   oi: { corn: '41ce7cfe-ad47-4fe3-9ace-9b694338ec34', soy: 'b24ffb13-7925-4c03-8ffd-bdcbb00ad0ca', p1: '69766da1-a9bf-4fc6-90c0-f9ced47556bc',
         p2: 'c12acb4c-45ec-424e-bb13-9566ea3c73f9', p3: 'c8fd3a29-e44b-4ba5-9318-b574845d69a4' },
   di: 'd33b3ba5-8c72-49e5-81a1-6a60a5507c93',
   poi: { piksiOpen: '59a5c466-7e4a-46d8-a65c-55cd8397d52c', piksiDone: '74b7f457-b4ef-462a-a3a2-0a125a98392f',
-         soy1: '789870fe-bca9-4bbc-a1e3-3dc12502f378', soy2: 'e9b444b9-aef3-44fc-b0ba-0ddc83599f7d', corn: 'eff71606-65c0-499d-aa57-450ee85a1a3c' },
+         soy1: '789870fe-bca9-4bbc-a1e3-3dc12502f378', soy2: 'e9b444b9-aef3-44fc-b0ba-0ddc83599f7d', corn: 'eff71606-65c0-499d-aa57-450ee85a1a3c',
+         treaty: '46142f54-0e4d-4259-b749-f24e4101b062' },
 };
 
 function seed() {
@@ -283,7 +287,8 @@ function seed() {
       ('${CORN}', 'Powder Keg - Corn', 'U-CORN', 'dry', 'Lb', 'Lb', 'Lb', 'Ea', NULL, NULL, 100, 125, 125, 125, 3, true),
       ('${SOY}', 'Powder Keg - Soybeans', 'U-SOY', 'dry', 'Lb', 'Lb', 'Lb', 'Ea', NULL, NULL, 200.5, 250, 250, 250, 3, true),
       ('${PIKSI}', 'Piksi Dust Plus - 1800G Jar', 'U-PIKSI', 'dry', 'MG', 'MG', 'MG', 'MG', 18, '18 grams per Acre', 0.1, 0.2, 0.2, 0.2, 1, true),
-      ('${GAL}', '[PROVER] Gallon Herbicide', 'U-GAL', 'liquid', 'Gal', 'Gal', 'oz', 'Gal', 16, NULL, 24, 30, 30, 30, 1, true);
+      ('${GAL}', '[PROVER] Gallon Herbicide', 'U-GAL', 'liquid', 'Gal', 'Gal', 'oz', 'Gal', 16, NULL, 24, 30, 30, 30, 1, true),
+      ('${TREATY}', 'Treaty Extra', 'U-TREATY', 'dry', 'Dry oz', 'Dry oz', 'Dry oz', 'Dry oz', NULL, NULL, 5.87, 7, 7, 7, 1, true);
     INSERT INTO public.product_parents (id, name, product_form, rate_unit, created_by, updated_by) VALUES
       ('8a1f87bf-9732-4046-b464-8bb5e0ee97b9', 'Powder Keg - Corn', 'dry', 'Lb', '${ADMIN}', '${ADMIN}'),
       ('7a565acf-19e8-416e-9373-817ca065ae8a', 'Powder Keg - Soybeans', 'dry', 'Lb', '${ADMIN}', '${ADMIN}'),
@@ -300,7 +305,8 @@ function seed() {
       ('${PINNED.inv.corn}', '${CORN}', 'Main Warehouse', 'Lb', 0, 1, 1),
       ('${PINNED.inv.soy}', '${SOY}', 'Main Warehouse', 'Lb', 0, 0, 0),
       ('${PINNED.inv.piksi}', '${PIKSI}', 'Main Warehouse', 'Dry oz', 58500, 27000, 9000),
-      ('${GAL_INV}', '${GAL}', 'Main Warehouse', 'Gal', 100, 0, 13);
+      ('${GAL_INV}', '${GAL}', 'Main Warehouse', 'Gal', 100, 0, 13),
+      ('${PINNED.inv.treaty}', '${TREATY}', 'Main Warehouse', 'oz', 0, 0, 0);
     INSERT INTO public.orders (id, order_number, customer_id, status) VALUES
       ('${O1}', 'U-O1', '${CUST}', 'partially_fulfilled'), ('${O2}', 'U-O2', '${CUST}', 'confirmed'),
       ('${O3}', 'U-O3', '${CUST}', 'partially_fulfilled');
@@ -317,7 +323,8 @@ function seed() {
     INSERT INTO public.delivery_items (id, delivery_id, order_item_id, product_id, quantity, unit_size) VALUES
       ('${PINNED.di}', '${D1}', '${PINNED.oi.p2}', '${PIKSI}', 27000, 'Dry oz');
     INSERT INTO public.purchase_orders (id, po_number, created_by, status) VALUES
-      ('${PO1}', 'U-PO1', '${ADMIN}', 'partially_received'), ('${PO2}', 'U-PO2', '${ADMIN}', 'submitted');
+      ('${PO1}', 'U-PO1', '${ADMIN}', 'partially_received'), ('${PO2}', 'U-PO2', '${ADMIN}', 'submitted'),
+      ('${PO11}', 'PO-2026-0011', '${ADMIN}', 'fully_received');
     INSERT INTO public.purchase_order_items (id, purchase_order_id, product_id, unit_size, quantity_ordered, quantity_received, unit_cost) VALUES
       ('${PINNED.poi.piksiOpen}', '${PO1}', '${PIKSI}', 'Dry oz', 9000, 0, 0.1),
       ('${PINNED.poi.piksiDone}', '${PO1}', '${PIKSI}', 'MG', 45000, 45000, 0.1),
@@ -325,7 +332,8 @@ function seed() {
       ('${PINNED.poi.soy2}', '${PO1}', '${SOY}', 'EA', 1, 1, 200.5),
       ('${PINNED.poi.corn}', '${PO1}', '${CORN}', 'EA', 2, 1, 100),
       ('${GAL_PO_LINE}', '${PO2}', '${GAL}', 'Gal', 10, 0, 24),
-      ('${BLANK_PO_LINE}', '${PO2}', '${GAL}', NULL, 3, 0, 24);
+      ('${BLANK_PO_LINE}', '${PO2}', '${GAL}', NULL, 3, 0, 24),
+      ('${PINNED.poi.treaty}', '${PO11}', '${TREATY}', 'oz', 800, 800, 5.87);
     INSERT INTO public.quotes (id, quote_number, customer_id, status, created_by) VALUES ('${QUOTE}', 'U-Q1', '${CUST}', 'draft', '${ADMIN}');
     INSERT INTO public.quote_sections (id, quote_id, section_name) VALUES ('${SECTION}', '${QUOTE}', 'Field');`);
   console.log('[prover] seeded live\'s pinned Powder Keg and Piksi rows (ids, units, quantities as live 2026-11-15) and a Gal control');
@@ -368,7 +376,7 @@ function dataCases() {
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
   assert.equal(snapshot(), before, 'no quantity, price or cost changed');
-  assert.equal(scalar(`SELECT string_agg(pricing_version::text, ',' ORDER BY id) FROM public.products;`), '4,4,1,1', 'the rate-unit change bumps Powder Keg pricing versions 3 -> 4 (stale workbooks refuse), nothing else');
+  assert.equal(scalar(`SELECT string_agg(pricing_version::text, ',' ORDER BY id) FROM public.products;`), '4,4,1,1,1', 'the rate-unit change bumps Powder Keg pricing versions 3 -> 4 (stale workbooks refuse), nothing else');
   const l = labels();
   assert.notEqual(l, labelsBefore);
   assert.equal(scalar(`SELECT string_agg(inventory_unit || unit_size || rate_unit, ',' ORDER BY id) FROM public.products WHERE id IN ('${CORN}', '${SOY}');`), 'EaEaEa,EaEaEa');
@@ -385,18 +393,25 @@ function dataCases() {
       FROM public.product_cost_basis WHERE product_id IN ('${CORN}', '${SOY}');`), '10000:false:migration_baseline,10000:true:migration_baseline,20050:false:migration_baseline,20050:true:migration_baseline'
     .split(',').join(','));
   assert.equal(n(`SELECT count(*) FROM public.product_cost_basis WHERE product_id = '${PIKSI}' AND effective_to IS NULL;`), 1, "Piksi's basis is untouched");
+  // Treaty Extra: its received PO-2026-0011 line and stock row now say Dry oz; cost, review flag and quantities unchanged.
+  assert.equal(scalar(`SELECT x.unit_size || '/' || x.unit_cost || '/' || x.cost_needs_review || '/' || x.quantity_received || ' ' || i.unit_size
+      FROM public.purchase_order_items x, public.inventory i WHERE x.id = '${PINNED.poi.treaty}' AND i.id = '${PINNED.inv.treaty}';`), 'Dry oz/5.87/false/800 Dry oz');
+  assert.equal(scalar(`SELECT string_agg(tgenabled::text, '' ORDER BY tgname) FROM pg_trigger WHERE tgrelid = 'public.purchase_order_items'::regclass
+      AND tgname IN ('trigger_0_guard_closed_po_item', 'trigger_capture_purchase_order_item_cost_snapshot');`), 'OO', 'the two PO line guards are back on');
   // The two product guards are back on.
   assert.equal(scalar(`SELECT string_agg(tgenabled::text, '' ORDER BY tgname) FROM pg_trigger WHERE tgrelid = 'public.products'::regclass
       AND tgname IN ('trg_validate_product_setup_fields', 'trigger_zz_guard_product_parent_values');`), 'OO');
   const again = apply('candidate.sql');
   assert.notEqual(again.status, 0); assert.match(again.output, /KI137_ROW_MOVED/);
-  console.log('[case] M1 the data correction relabels exactly the pinned rows (Powder Keg Lb -> Ea, Piksi "Dry oz" -> MG), changes no quantity, price or cost, reopens one cost basis per Powder Keg product at the same cents, and a second run refuses');
+  console.log('[case] M1 the data correction relabels exactly the pinned rows (Powder Keg Lb -> Ea, Piksi "Dry oz" -> MG), changes no quantity, price or cost, reopens one cost basis per Powder Keg product at the same cents, relabels the received Treaty Extra "oz" PO line and stock row to Dry oz (cost and quantities unchanged, both PO guards back on), and a second run refuses');
 }
 
 function driftCase() {
   // On drift it refuses and changes nothing: run it on a copy where one pinned line moved.
   const r = probe(`UPDATE public.order_items SET total_units_needed = 3 WHERE id = '${PINNED.oi.corn}';\n${lf(CANDIDATE)}`);
   assert.notEqual(r.status, 0); assert.match(r.output, /KI137_ROW_MOVED/);
+  const t = probe(`UPDATE public.inventory SET unit_size = 'Dry oz' WHERE id = '${PINNED.inv.treaty}';\n${lf(CANDIDATE)}`);
+  assert.notEqual(t.status, 0); assert.match(t.output, /PO_OZ_ROW_MOVED/);
   console.log('[case] M1b on any pinned-row drift the data correction refuses with KI137_ROW_MOVED (checked before applying)');
 }
 
@@ -447,26 +462,71 @@ function rulesCases() {
   // layer under it, for a reviewed change that lifts that guard (as a migration does).
   refusedProbe(`DELETE FROM public.purchase_order_items WHERE id IN ('${GAL_PO_LINE}', '${BLANK_PO_LINE}');
     DELETE FROM public.order_items WHERE id = '${GAL_OI}';
+    UPDATE public.inventory SET quantity_available = 0, quantity_on_order = 0 WHERE id = '${GAL_INV}';
     UPDATE public.products SET inventory_unit = 'Qt', unit_size = 'Qt' WHERE id = '${GAL}';`, /can't change on a saved product yet/);
   const LIFT = 'ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_setup_fields;';
   refusedProbe(`${LIFT} UPDATE public.products SET inventory_unit = 'Qt', unit_size = 'Qt' WHERE id = '${GAL}';`,
     /PRODUCT_UNIT_HAS_OPEN_LINES: this product's stock unit cannot change to "Qt" while these are open in another unit: .*(PO U-PO2|order U-O2)/);
   refusedProbe(`${LIFT} UPDATE public.products SET inventory_unit = NULL, unit_size = NULL WHERE id = '${GAL}';`,
     /PRODUCT_UNIT_HAS_OPEN_LINES: this product's stock unit cannot change to "" while/);
+  refusedProbe(`${LIFT} DELETE FROM public.purchase_order_items WHERE id IN ('${GAL_PO_LINE}', '${BLANK_PO_LINE}');
+    DELETE FROM public.order_items WHERE id = '${GAL_OI}';
+    UPDATE public.products SET inventory_unit = 'Qt', unit_size = 'Qt' WHERE id = '${GAL}';`,
+    /PRODUCT_UNIT_HAS_STOCK: this product's stock unit cannot change to "Qt" while it has stock counted in "Gal"/);
+  // On-order counts as stock too (Mason 2026-11-16, option A). Deleting the PO lines recomputes on-order to 0, so the
+  // probe puts 13 back as an on-order count with no line behind it.
+  refusedProbe(`${LIFT} DELETE FROM public.purchase_order_items WHERE id IN ('${GAL_PO_LINE}', '${BLANK_PO_LINE}');
+    DELETE FROM public.order_items WHERE id = '${GAL_OI}';
+    UPDATE public.inventory SET quantity_available = 0, quantity_on_order = 13 WHERE id = '${GAL_INV}';
+    UPDATE public.products SET inventory_unit = 'Qt', unit_size = 'Qt' WHERE id = '${GAL}';`,
+    /PRODUCT_UNIT_HAS_STOCK: this product's stock unit cannot change to "Qt" while it has stock counted in "Gal"/);
+  // Once every count is zero the change saves and the empty stock row is relabelled to the new unit.
   assert.equal(okProbe(`${LIFT} DELETE FROM public.purchase_order_items WHERE id IN ('${GAL_PO_LINE}', '${BLANK_PO_LINE}');
     DELETE FROM public.order_items WHERE id = '${GAL_OI}';
+    UPDATE public.inventory SET quantity_available = 0, quantity_on_order = 0 WHERE id = '${GAL_INV}';
     UPDATE public.products SET inventory_unit = 'Qt', unit_size = 'Qt' WHERE id = '${GAL}';
-    SELECT inventory_unit FROM public.products WHERE id = '${GAL}';`), 'Qt');
+    SELECT p.inventory_unit || '/' || i.unit_size FROM public.products p, public.inventory i WHERE p.id = '${GAL}' AND i.id = '${GAL_INV}';`), 'Qt/Qt');
+  // A new stock row must be in the product's stock unit (it locks the product first, so it cannot race a unit change).
+  refusedProbe(`INSERT INTO public.inventory (product_id, location, unit_size, quantity_available) VALUES ('${GAL}', 'Prover Yard', 'Qt', 5);`,
+    /STOCK_ROW_UNIT_NOT_STOCK_UNIT: this stock row is in "Qt" but the product is stocked in "Gal"/);
+  assert.equal(okProbe(`INSERT INTO public.inventory (product_id, location, unit_size, quantity_available) VALUES ('${GAL}', 'Prover Yard', 'gal', 5);
+    SELECT count(*) FROM public.inventory WHERE product_id = '${GAL}';`), '2');
+  assert.equal(okProbe(`INSERT INTO public.inventory (product_id, location, unit_size, quantity_available) VALUES ('${GAL}', 'Prover Yard 2', NULL, 5);
+    SELECT unit_size FROM public.inventory WHERE product_id = '${GAL}' AND location = 'Prover Yard 2';`), 'Gal');
+  // A stock row holding stock cannot change its unit or product (Luna round 4); an empty one can.
+  refusedProbe(`UPDATE public.inventory SET unit_size = 'Qt' WHERE id = '${GAL_INV}';`,
+    /STOCK_ROW_UNIT_NOT_STOCK_UNIT: this stock row is in "Qt" but the product is stocked in "Gal"/);
+  refusedProbe(`UPDATE public.inventory SET product_id = '${CORN}' WHERE id = '${GAL_INV}';`,
+    /STOCK_ROW_UNIT_NOT_STOCK_UNIT: a stock row holding stock cannot move to another product/);
+  refusedProbe(`UPDATE public.inventory SET quantity_available = 0, quantity_on_order = 0 WHERE id = '${GAL_INV}';
+    UPDATE public.inventory SET unit_size = 'Qt' WHERE id = '${GAL_INV}';`,
+    /STOCK_ROW_UNIT_NOT_STOCK_UNIT: this stock row is in "Qt" but the product is stocked in "Gal"/);
+  assert.equal(okProbe(`UPDATE public.inventory SET unit_size = 'gal' WHERE id = '${GAL_INV}';
+    SELECT unit_size FROM public.inventory WHERE id = '${GAL_INV}';`), 'gal');
+  // A product with no stock unit but stock on hand cannot be given one (its count was in no known unit).
+  refusedProbe(`SET session_replication_role = replica;
+    UPDATE public.products SET inventory_unit = NULL, unit_size = NULL WHERE id = '${GAL}';
+    SET session_replication_role = origin;
+    ${LIFT} DELETE FROM public.purchase_order_items WHERE id IN ('${GAL_PO_LINE}', '${BLANK_PO_LINE}');
+    DELETE FROM public.order_items WHERE id = '${GAL_OI}';
+    UPDATE public.products SET inventory_unit = 'Gal', unit_size = 'Gal' WHERE id = '${GAL}';`,
+    /PRODUCT_UNIT_HAS_STOCK: this product's stock unit cannot change to "Gal" while it has stock counted in "\(no unit\)"/);
   refusedProbe(`${LIFT} DELETE FROM public.purchase_order_items WHERE id IN ('${GAL_PO_LINE}', '${BLANK_PO_LINE}');
     DELETE FROM public.order_items WHERE id = '${GAL_OI}';
     UPDATE public.products SET inventory_unit = 'Tote', unit_size = 'Tote' WHERE id = '${GAL}';`, /PRODUCT_STOCK_UNIT_UNKNOWN: "Tote" is not a known unit/);
+  // Clearing the stock unit is refused even with no lines and no stock (Luna round 4).
+  refusedProbe(`${LIFT} DELETE FROM public.purchase_order_items WHERE id IN ('${GAL_PO_LINE}', '${BLANK_PO_LINE}');
+    DELETE FROM public.order_items WHERE id = '${GAL_OI}';
+    UPDATE public.inventory SET quantity_available = 0, quantity_on_order = 0 WHERE id = '${GAL_INV}';
+    UPDATE public.products SET inventory_unit = NULL, unit_size = NULL WHERE id = '${GAL}';`,
+    /PRODUCT_STOCK_UNIT_UNKNOWN: a stock unit cannot be cleared/);
   // A product with no stock unit (none live) takes a blank line but refuses a typed unit.
   refusedProbe(`SET session_replication_role = replica;
     UPDATE public.products SET inventory_unit = NULL, unit_size = NULL WHERE id = '${GAL}';
     SET session_replication_role = origin;
     INSERT INTO public.purchase_order_items (purchase_order_id, product_id, unit_size, quantity_ordered, unit_cost)
       VALUES ('${PO2}', '${GAL}', 'Gal', 1, 1);`, /LINE_UNIT_NOT_STOCK_UNIT: this purchase order line is in "Gal" but the product has no stock unit/);
-  console.log('[case] 2b the setup guard still refuses any stock-unit change; with it lifted, changing a Gal product to Qt is refused while a PO or order line is open in Gal, and saves once none are; blanking the unit with lines open is refused too; an unknown stock unit ("Tote") is refused; a product with no stock unit refuses a typed line unit');
+  console.log('[case] 2b the setup guard still refuses any stock-unit change; with it lifted, changing a Gal product to Qt is refused while a PO or order line is open in Gal or 100 Gal is in stock or 13 Gal on order, and saves (relabelling the empty stock row) once none is; a new stock row in another unit is refused; blanking the unit with lines open is refused too; an unknown stock unit ("Tote") is refused; a product with no stock unit refuses a typed line unit');
 
   // A legacy mismatched open line (written before the rules) is refused at receiving; nothing moves.
   const LEGACY = id('b41');
@@ -483,6 +543,14 @@ function rulesCases() {
     SELECT (SELECT quantity_available || '/' || quantity_on_order FROM public.inventory WHERE id = '${PINNED.inv.piksi}')
       || ' ' || (SELECT unit_size FROM public.receiving_records ORDER BY received_at DESC NULLS LAST LIMIT 1);`, ADMIN);
   assert.equal(got, '67500/0 MG');
+  const LEG2 = id('b43'), SAME = id('b44');
+  raw(`INSERT INTO public.purchase_order_items (id, purchase_order_id, product_id, unit_size, quantity_ordered, quantity_received, unit_cost) VALUES
+      ('${LEG2}', '${PO1}', '${PIKSI}', 'Dry oz', 500, 500, 0.1), ('${SAME}', '${PO1}', '${GAL}', 'Gal', 2, 2, 24);`);
+  refusedProbe(`UPDATE public.purchase_order_items SET quantity_received = 400 WHERE id = '${LEG2}';`, /LINE_UNIT_NOT_STOCK_UNIT: this purchase order line is in "Dry oz"/);
+  refusedProbe(`UPDATE public.purchase_order_items SET quantity_ordered = 600 WHERE id = '${LEG2}';`, /LINE_UNIT_NOT_STOCK_UNIT: this purchase order line is in "Dry oz"/);
+  assert.equal(okProbe(`UPDATE public.purchase_order_items SET quantity_received = 1 WHERE id = '${SAME}'; SELECT quantity_received FROM public.purchase_order_items WHERE id = '${SAME}';`), '1');
+  raw(`DELETE FROM public.purchase_order_items WHERE id IN ('${LEG2}', '${SAME}');`);
+  console.log('[case] 3c reopening a received legacy "Dry oz" line on the MG product (a receipt undone or more ordered) is refused; a received Gal line reopens');
   console.log('[case] 3 receiving a legacy "Dry oz" line on the MG product is refused and nothing moves; a legacy line still saves a note; the relabelled line receives 9,000 MG (stock 58,500 -> 67,500, on order 9,000 -> 0)');
 
   // A part-received line in another spelling receives the rest without its unit being rewritten (the cost-snapshot
@@ -563,8 +631,8 @@ async function main() {
   if (!REUSE) buildContainer();
   seed();
   beforeCases();
-  dataCases();
   driftCase();
+  dataCases();
   rulesCases();
   quoteCases();
   rollbackCases();

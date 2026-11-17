@@ -20,7 +20,7 @@
 --     conversion is done: the per-line factor (inventory_units_per_supplier_unit_snapshot) has only ever been 1 or
 --     blank, and converting would also need reversal, close-short, on-order and vendor bills to convert.
 --     The on-order recompute (_recompute_po_on_order_for_products) is unchanged; it stays right because no open PO
---     line can hold another unit (postflight below; the data correction 20270111100000 runs first).
+--     line can hold another unit (postflight below; the data correction 20270113110000 runs first).
 --  3. product_price_per_acre returns NULL (no figure) when the rate unit or the stock unit is not in
 --     unit_conversions, instead of pricing it as 1 oz. Same body otherwise.
 --  4. A quote_items trigger refuses a rate-mode line with a rate above 0 whose rate unit, or whose product's stock
@@ -29,7 +29,7 @@
 --     Not done here (KI-140 stays open for it): liquid-vs-dry type mismatch; 4 active dry products are rated in the
 --     liquid "oz" and RT-2 step 2 owns them.
 -- Live 2026-11-15: every product's stock unit and every rate-mode quote line's rate unit is in unit_conversions;
--- no open line carries another unit once 20270111100000 has run.
+-- no open line carries another unit once 20270113110000 has run.
 --
 -- ROLLBACK: scripts/smoke/units-batch-rules-reverse.sql restores trg_fill_order_line_unit, the old
 -- product_price_per_acre and drops the new triggers and helper (proven by the units-batch prover).
@@ -83,10 +83,13 @@ BEGIN
   IF TG_OP = 'UPDATE'
      AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id
      AND NEW.unit_size IS NOT DISTINCT FROM OLD.unit_size
-     -- A PO line is checked again when it is received into (receive_po_items raises quantity_received).
+     -- A PO line is checked again when it is received into (receive_po_items raises quantity_received) or when what
+     -- is still outstanding on it rises (a receipt is reversed or the ordered quantity is raised; Sol, #1896).
      AND NOT (TG_TABLE_NAME = 'purchase_order_items'
-              AND COALESCE((to_jsonb(NEW)->>'quantity_received')::numeric, 0)
-                  > COALESCE((to_jsonb(OLD)->>'quantity_received')::numeric, 0)) THEN
+              AND (COALESCE((to_jsonb(NEW)->>'quantity_received')::numeric, 0)
+                     > COALESCE((to_jsonb(OLD)->>'quantity_received')::numeric, 0)
+                   OR COALESCE((to_jsonb(NEW)->>'quantity_ordered')::numeric, 0) - COALESCE((to_jsonb(NEW)->>'quantity_received')::numeric, 0)
+                     > COALESCE((to_jsonb(OLD)->>'quantity_ordered')::numeric, 0) - COALESCE((to_jsonb(OLD)->>'quantity_received')::numeric, 0))) THEN
     RETURN NEW;
   END IF;
 
@@ -138,7 +141,7 @@ CREATE TRIGGER a1_line_unit_is_stock_unit
   BEFORE INSERT OR UPDATE OF unit_size, product_id ON public.delivery_items
   FOR EACH ROW EXECUTE FUNCTION public._enforce_line_stock_unit();
 CREATE TRIGGER a1_line_unit_is_stock_unit
-  BEFORE INSERT OR UPDATE OF unit_size, product_id, quantity_received ON public.purchase_order_items
+  BEFORE INSERT OR UPDATE OF unit_size, product_id, quantity_received, quantity_ordered ON public.purchase_order_items
   FOR EACH ROW EXECUTE FUNCTION public._enforce_line_stock_unit();
 
 -- KI-140: an unknown unit gives no per-acre figure (was priced as 1 oz).
@@ -223,7 +226,8 @@ CREATE TRIGGER trg_h_quote_item_known_units
   FOR EACH ROW EXECUTE FUNCTION public._refuse_unknown_quote_rate_unit();
 
 -- KI-136: a product's stock unit cannot change under open lines counted in the old unit (they would then receive,
--- deliver and count on-order in the new one). Close, finish or re-enter those lines first.
+-- deliver and count on-order in the new one). Close, finish or re-enter those lines first. Nor while any stock row
+-- holds a quantity counted in the old unit (Sol, #1896; Mason 2026-11-16).
 CREATE FUNCTION public._refuse_stock_unit_change_with_open_lines()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -263,6 +267,25 @@ BEGIN
     RAISE EXCEPTION 'PRODUCT_STOCK_UNIT_UNKNOWN: "%" is not a known unit; pick a stock unit from the list.',
       v_new USING ERRCODE = 'check_violation';
   END IF;
+  IF v_bad IS NULL AND v_new IS NULL THEN
+    -- A stock unit cannot be cleared: its empty stock rows would keep the old label and later stock would count under it.
+    RAISE EXCEPTION 'PRODUCT_STOCK_UNIT_UNKNOWN: a stock unit cannot be cleared; pick a stock unit from the list.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF v_bad IS NULL THEN
+    -- Hold every stock row of the product so a concurrent stock move waits for (or is seen by) this check. Lock order is
+    -- product then stock rows; a stock move that locks a stock row first and then the product can deadlock with a unit
+    -- change, and PostgreSQL aborts one of them (nothing half-saved; unit changes are rare and admin-only).
+    PERFORM 1 FROM public.inventory WHERE product_id = NEW.id FOR SHARE;
+  END IF;
+  -- Giving a product with no stock unit its first one counts too: its stock was counted in no known unit (Luna, #1896).
+  IF v_bad IS NULL AND EXISTS (SELECT 1 FROM public.inventory i WHERE i.product_id = NEW.id
+                                  AND (COALESCE(i.quantity_available, 0) <> 0 OR COALESCE(i.quantity_prebooked, 0) <> 0
+                                       OR COALESCE(i.quantity_on_order, 0) <> 0)) THEN
+    -- Stock on hand is counted in the old unit (Mason 2026-11-16: strict). Count it to zero or convert it first.
+    RAISE EXCEPTION 'PRODUCT_UNIT_HAS_STOCK: this product''s stock unit cannot change to "%" while it has stock counted in "%". Bring its stock to zero (or convert it) first.',
+      COALESCE(v_new, ''), COALESCE(v_old, '(no unit)') USING ERRCODE = 'check_violation';
+  END IF;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'PRODUCT_UNIT_HAS_OPEN_LINES: this product''s stock unit cannot change to "%" while these are open in another unit: %',
       COALESCE(v_new, ''), v_bad USING ERRCODE = 'check_violation';
@@ -276,6 +299,76 @@ REVOKE ALL ON FUNCTION public._refuse_stock_unit_change_with_open_lines() FROM P
 CREATE TRIGGER a1_product_unit_keeps_open_lines
   BEFORE UPDATE OF inventory_unit, unit_size ON public.products
   FOR EACH ROW EXECUTE FUNCTION public._refuse_stock_unit_change_with_open_lines();
+
+-- Once a stock-unit change is saved (the BEFORE trigger above has proven every stock row empty), relabel the product's
+-- stock rows so the next receipt counts in the new unit (Mason 2026-11-16, option A). AFTER, so the stock-row guard
+-- below sees the new unit.
+CREATE FUNCTION public._relabel_empty_stock_rows()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_new text := COALESCE(NULLIF(btrim(NEW.inventory_unit), ''), NULLIF(btrim(NEW.unit_size), ''));
+BEGIN
+  IF v_new IS NOT NULL THEN
+    UPDATE public.inventory SET unit_size = v_new, updated_at = now()
+     WHERE product_id = NEW.id AND unit_size IS DISTINCT FROM v_new;
+  END IF;
+  RETURN NULL;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public._relabel_empty_stock_rows() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER a1_product_unit_relabels_stock_rows
+  AFTER UPDATE OF inventory_unit, unit_size ON public.products
+  FOR EACH ROW
+  WHEN (COALESCE(NULLIF(btrim(NEW.inventory_unit), ''), NULLIF(btrim(NEW.unit_size), ''))
+        IS DISTINCT FROM COALESCE(NULLIF(btrim(OLD.inventory_unit), ''), NULLIF(btrim(OLD.unit_size), '')))
+  EXECUTE FUNCTION public._relabel_empty_stock_rows();
+
+-- A stock row takes a share lock on its product, so it waits for a unit change in progress (and a unit change waits
+-- for it), then must be in the product's current stock unit (Luna, #1896; Mason 2026-11-16, option A). A blank unit
+-- takes the stock unit. Every new row and every unit or product change is checked, empty rows included; a row holding
+-- stock cannot move to another product. (No app path changes either column: users may update only reorder fields.)
+CREATE FUNCTION public._stock_row_unit_is_stock_unit()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_unit text;
+BEGIN
+  IF TG_OP = 'UPDATE'
+     AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id AND NEW.unit_size IS NOT DISTINCT FROM OLD.unit_size THEN
+    RETURN NEW;
+  END IF;
+  SELECT COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), '')) INTO v_unit
+    FROM public.products p WHERE p.id = NEW.product_id FOR SHARE;
+  IF TG_OP = 'UPDATE' AND NEW.product_id IS DISTINCT FROM OLD.product_id
+     AND (COALESCE(OLD.quantity_available, 0) <> 0 OR COALESCE(OLD.quantity_prebooked, 0) <> 0
+          OR COALESCE(OLD.quantity_on_order, 0) <> 0) THEN
+    RAISE EXCEPTION 'STOCK_ROW_UNIT_NOT_STOCK_UNIT: a stock row holding stock cannot move to another product.'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF COALESCE(btrim(NEW.unit_size, E' \t\r\n' || chr(160)), '') = '' AND v_unit IS NOT NULL THEN
+    NEW.unit_size := v_unit;
+  ELSIF NOT public._unit_matches_stock_unit(NEW.unit_size, v_unit) THEN
+    RAISE EXCEPTION 'STOCK_ROW_UNIT_NOT_STOCK_UNIT: this stock row is in "%" but the product is stocked in "%".',
+      NEW.unit_size, v_unit USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public._stock_row_unit_is_stock_unit() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER a1_stock_row_unit_is_stock_unit
+  BEFORE INSERT OR UPDATE OF product_id, unit_size ON public.inventory
+  FOR EACH ROW EXECUTE FUNCTION public._stock_row_unit_is_stock_unit();
 
 -- An open PO line with no unit would receive into a blank-unit stock row: give it the stock unit (1 live line
 -- on 2026-11-15; more than 5 means the data moved, so stop and look).
@@ -321,8 +414,17 @@ BEGIN
      WHERE d.status IN ('scheduled', 'in_progress')
        AND (COALESCE(btrim(l.unit_size, E' \t\r\n' || chr(160)), '') = '' OR NOT public._unit_matches_stock_unit(l.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), ''))))
   ) s;
+  IF v_bad IS NULL THEN
+    -- Every PO line, received, closed and cancelled too: undoing a receipt or reopening a PO reopens a line (Sol, #1896;
+    -- the data correction relabels the last one, Treaty Extra on PO-2026-0011).
+    SELECT string_agg('PO line ' || l.id, ', ') INTO v_bad
+      FROM public.purchase_order_items l JOIN public.purchase_orders po ON po.id = l.purchase_order_id
+      JOIN public.products p ON p.id = l.product_id
+     WHERE COALESCE(btrim(l.unit_size, E' \t\r\n' || chr(160)), '') <> ''
+       AND NOT public._unit_matches_stock_unit(l.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), '')));
+  END IF;
   IF v_bad IS NOT NULL THEN
-    RAISE EXCEPTION 'UNITS_POSTFLIGHT_OPEN_LINE: these open lines are not in their product''s stock unit (run 20270111100000 first): %', v_bad;
+    RAISE EXCEPTION 'UNITS_POSTFLIGHT_OPEN_LINE: these open lines are not in their product''s stock unit (run 20270113110000 first): %', v_bad;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_fill_order_line_unit') THEN
     RAISE EXCEPTION 'UNITS_POSTFLIGHT: the old order-line fill trigger is still present';

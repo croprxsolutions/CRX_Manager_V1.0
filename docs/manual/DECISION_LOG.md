@@ -10,6 +10,13 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-16 — Old wrong-unit PO lines are cleaned up; a stock unit cannot change while stock is on hand (#1896)
+
+**Decision (Mason, in session, 2026-11-16: "1. clean up old lines 2. do strict fix for changing units stocked moving forward"):** after Sol's round-2 HIGHs on #1896, (1) every purchase-order line left in a unit other than its product's stock unit is relabelled by the reviewed data correction (only Treaty Extra's received "oz" line on PO-2026-0011 remained), and (2) a product's stock unit cannot change while any of its stock rows holds a quantity.
+**Why:** undoing a receipt on an old wrong-unit line would reopen it and count "on order" in the wrong unit; a unit change under existing stock would silently re-read the count in the new unit.
+**What this forbids/implies:** no PO line of any status may stay in a non-stock unit (the rules migration's postflight refuses); a PO line is re-checked whenever its outstanding amount rises; a stock-unit change needs the stock at zero or converted first.
+**Round limit (Mason, in session, 2026-11-16: "Option A" then, after Luna's round-4 HIGHs, "Yes, one last round"):** the lock also holds every stock row of the product (on-order counts as stock), a first stock unit counts as a change, a stock unit cannot be cleared, every stock row (empty ones too) must carry the product's stock unit, and a stock row holding stock cannot move to another product. One last round only: a further new BLOCKER/HIGH on this lock parks #1896 for Mason. Undoing a receipt on a fully received line after a later unit change is refused on purpose (it would count the old unit as the new one).
+
 ## 2026-11-14 — Rate Review unanswered-save recovery (#1829)
 
 **Decision (Mason, 2026-11-14):** after any unanswered Rate Review save, an admin may check a fresh workbook and explicitly clear the reminder; no attempt count or expiry threshold is required. This supersedes the 2026-11-13 Rate Review follow-up contract's narrower hand-check exit, which appeared only on expiry, a missing record, or an unsafe/refused receipt.

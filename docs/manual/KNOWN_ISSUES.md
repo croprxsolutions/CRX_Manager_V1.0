@@ -954,13 +954,13 @@ on a KI-137 product. Receiving them today adds the typed number. The on-order re
 (`_recompute_po_on_order_for_products`) and new stock-row creation mix units the same way. The per-line factor
 `inventory_units_per_supplier_unit_snapshot` exists but is unused. Repair step 1 (To-Do 0.17); orders and deliveries
 are KI-158. Do not convert historical balances; fix them from counts (KI-29).
-**Fix built 2026-11-15 (units batch, PR A; not live):** `20270111110000_line_unit_is_stock_unit.sql` fills a blank PO,
+**Fix built 2026-11-15 (units batch, PR A; not live):** `20270113120000_line_unit_is_stock_unit.sql` fills a blank PO,
 order or delivery line unit with the stock unit, stores a matching spelling as the product's own (`EA` -> `Ea`),
 refuses any other unit (`LINE_UNIT_NOT_STOCK_UNIT`), checks a PO line again whenever it is received into, refuses a
 product stock-unit change while lines are open in the old unit (`PRODUCT_UNIT_HAS_OPEN_LINES`), and gives the one
 open blank-unit PO line its stock unit. The PO edit screen's product picker defaults a line to `inventory_unit` (other pickers still read `unit_size`, which a guard keeps equal on active products). No conversion: the
 per-line factor has only ever been 1 or blank (left unused; a non-1 factor is still not refused). Open lines are
-relabelled first by `20270111100000` (KI-137). Still open after this: a fully received line in another unit refuses an
+relabelled first by `20270113110000` (KI-137). Still open after this: a fully received line in another unit refuses an
 admin over-receive (re-enter it on a new line).
 
 ### KI-137 — Two seed-treatment products are stocked and priced per Lb at per-jug money
@@ -972,7 +972,7 @@ decision 24), then a reviewed unit correction.
 **Answered 2026-11-13 (Mason, DECISION_LOG):** both Powder Keg products are sold **by the each** at their current prices.
 Their stock and rate unit become Ea, with no stock conversion because on-hand is 0. This needs a reviewed migration
 (repair step 1, To-Do 0.17). One has an open EA PO line (KI-136), so correct it before that line is received.
-**Fix built 2026-11-15 (units batch, PR A; not live):** `20270111100000_ki137_powder_keg_each_piksi_mg_labels.sql`
+**Fix built 2026-11-15 (units batch, PR A; not live):** `20270113110000_ki137_powder_keg_each_piksi_mg_labels.sql`
 moves both products, their families, stock rows and open order lines Lb -> Ea (a new cost basis at the same cents),
 and relabels Piksi Dust Plus's stock row and open PO, order and delivery lines "Dry oz" -> MG. Quantities and money
 do not change. Needs Mason's live-apply approval.

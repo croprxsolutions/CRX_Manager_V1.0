@@ -1,4 +1,4 @@
--- Rollback for supabase/migrations/20270111100000_ki137_powder_keg_each_piksi_mg_labels.sql (proven by
+-- Rollback for supabase/migrations/20270113110000_ki137_powder_keg_each_piksi_mg_labels.sql (proven by
 -- scripts/smoke/prove-units-batch-real-schema.mjs). Run units-batch-rules-reverse.sql first.
 -- Puts Powder Keg back to Lb (product, family, stock rows, open order lines) and Piksi's pinned labels back to
 -- "Dry oz". A new open cost basis is written at the same cents (history rows cannot be deleted).
@@ -117,3 +117,34 @@ BEGIN
   END IF;
 END;
 $ki137_reverse$;
+
+-- Treaty Extra (PO-2026-0011 line and its stock row) back to "oz". Refuses if the line or stock moved since.
+DO $po_oz_reverse$
+DECLARE
+  v_done integer;
+BEGIN
+  PERFORM set_config('lock_timeout', '10s', true);
+  LOCK TABLE public.inventory, public.purchase_orders, public.purchase_order_items IN SHARE ROW EXCLUSIVE MODE;
+  IF NOT EXISTS (SELECT 1 FROM public.purchase_order_items x JOIN public.purchase_orders po ON po.id = x.purchase_order_id
+                  WHERE x.id = '46142f54-0e4d-4259-b749-f24e4101b062' AND x.unit_size = 'Dry oz'
+                    AND x.quantity_ordered = 800 AND x.quantity_received = 800 AND po.status::text = 'fully_received')
+     OR (SELECT count(*) FROM public.purchase_order_items WHERE product_id = 'ac926057-cfae-4070-9cb6-ff2ecc421c3c') <> 1
+     OR NOT EXISTS (SELECT 1 FROM public.inventory WHERE id = '687b3d54-1f4e-4ae1-9a5f-afa0542e94c2' AND unit_size = 'Dry oz'
+                      AND product_id = 'ac926057-cfae-4070-9cb6-ff2ecc421c3c')
+     OR (SELECT count(*) FROM public.inventory WHERE product_id = 'ac926057-cfae-4070-9cb6-ff2ecc421c3c') <> 1 THEN
+    RAISE EXCEPTION 'PO_OZ_REVERSE_MOVED: the Treaty Extra line or stock row changed since the correction. Nothing was changed.';
+  END IF;
+  IF (SELECT string_agg(tgenabled::text, '' ORDER BY tgname) FROM pg_trigger WHERE tgrelid = 'public.purchase_order_items'::regclass
+        AND tgname IN ('trigger_0_guard_closed_po_item', 'trigger_capture_purchase_order_item_cost_snapshot')) IS DISTINCT FROM 'OO' THEN
+    RAISE EXCEPTION 'PO_OZ_GUARD_STATE: a purchase-order line guard is not in its normal on state. Nothing was changed.';
+  END IF;
+  UPDATE public.inventory SET unit_size = 'oz', updated_at = now() WHERE id = '687b3d54-1f4e-4ae1-9a5f-afa0542e94c2' AND unit_size = 'Dry oz';
+  ALTER TABLE public.purchase_order_items DISABLE TRIGGER trigger_0_guard_closed_po_item;
+  ALTER TABLE public.purchase_order_items DISABLE TRIGGER trigger_capture_purchase_order_item_cost_snapshot;
+  UPDATE public.purchase_order_items SET unit_size = 'oz' WHERE id = '46142f54-0e4d-4259-b749-f24e4101b062' AND unit_size = 'Dry oz';
+  GET DIAGNOSTICS v_done = ROW_COUNT;
+  ALTER TABLE public.purchase_order_items ENABLE TRIGGER trigger_capture_purchase_order_item_cost_snapshot;
+  ALTER TABLE public.purchase_order_items ENABLE TRIGGER trigger_0_guard_closed_po_item;
+  IF v_done <> 1 THEN RAISE EXCEPTION 'PO_OZ_REVERSE_COUNT: % of 1 PO line', v_done; END IF;
+END;
+$po_oz_reverse$;

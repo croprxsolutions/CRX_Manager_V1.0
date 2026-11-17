@@ -65,13 +65,15 @@ describe('sanitizeError', () => {
       .toBe(`Nothing was saved. ${sentence}`);
   });
 
-  it('explains a unit-rule refusal (20270111110000) without the raw token', () => {
+  it('explains a unit-rule refusal (20270113120000) without the raw token', () => {
     const sentence = 'this purchase order line is in "Gallon" but the product is stocked in "Gal". Enter the quantity in Gal.';
     expect(sanitizeError({ code: '23514', message: `LINE_UNIT_NOT_STOCK_UNIT: ${sentence}` }))
       .toBe(`Nothing was saved. ${sentence}`);
   });
   it.each([
     ['PRODUCT_STOCK_UNIT_UNKNOWN', '"Tote" is not a known unit; pick a stock unit from the list.'],
+    ['PRODUCT_UNIT_HAS_STOCK', 'this product\'s stock unit cannot change to "Qt" while it has stock counted in "Gal". Bring its stock to zero (or convert it) first.'],
+    ['STOCK_ROW_UNIT_NOT_STOCK_UNIT', 'this stock row is in "Qt" but the product is stocked in "Gal".'],
   ])('explains a %s refusal without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
   });

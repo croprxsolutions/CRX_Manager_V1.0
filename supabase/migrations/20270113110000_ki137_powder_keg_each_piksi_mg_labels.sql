@@ -5,7 +5,7 @@
 -- 2026-11-13, DECISION_LOG: sold by the each at current prices; stock and rate unit become Ea). Piksi Dust Plus is
 -- stocked in MG (milligrams, Mason 2026-11-13) but its stock row, an open PO line and its open order and delivery
 -- lines are labelled "Dry oz"; the quantities are milligrams already ("the quantity is right, the label is wrong").
--- The units rule that follows (20270111110000) refuses a line whose unit is not the stock unit, so these labels must
+-- The units rule that follows (20270113120000) refuses a line whose unit is not the stock unit, so these labels must
 -- be right first.
 --
 -- WHAT (each row pinned by id and current values; quantities and money never change, and prices and costs are not
@@ -274,3 +274,68 @@ BEGIN
   END IF;
 END;
 $ki137$;
+
+-- Sol #1896 HIGH 1 (Mason 2026-11-16: "clean up old lines"). After the block above, one purchase-order line is still in a
+-- unit that is not its product's stock unit: Treaty Extra's line on PO-2026-0011 says "oz" (liquid) on a product stocked
+-- in "Dry oz" (same size; the 800 received are already counted in stock as Dry oz). Undoing that receipt would reopen it
+-- in the wrong unit, so the line and the product's stock row get the stock unit's label. Quantities and cost never
+-- change. The closed-PO guard and the PO cost-snapshot trigger refuse or re-cost any edit of a received line, so both are
+-- switched off for this one UPDATE and checked back on; every other column of the line is proved unchanged.
+DO $po_oz$
+DECLARE
+  c_line constant uuid := '46142f54-0e4d-4259-b749-f24e4101b062';
+  c_inv  constant uuid := '687b3d54-1f4e-4ae1-9a5f-afa0542e94c2';
+  c_prod constant uuid := 'ac926057-cfae-4070-9cb6-ff2ecc421c3c';
+  v_line jsonb;
+  v_inv  jsonb;
+  v_done integer;
+BEGIN
+  PERFORM set_config('lock_timeout', '10s', true);
+  LOCK TABLE public.products, public.inventory, public.purchase_orders, public.purchase_order_items IN SHARE ROW EXCLUSIVE MODE;
+
+  SELECT to_jsonb(x) INTO v_line
+    FROM public.purchase_order_items x
+    JOIN public.purchase_orders po ON po.id = x.purchase_order_id
+    JOIN public.products p ON p.id = x.product_id
+   WHERE x.id = c_line AND x.product_id = c_prod AND x.unit_size = 'oz'
+     AND x.quantity_ordered = 800 AND x.quantity_received = 800
+     AND po.po_number = 'PO-2026-0011' AND po.status::text = 'fully_received'
+     AND p.is_active AND p.product_form::text = 'dry' AND p.inventory_unit = 'Dry oz' AND p.unit_size = 'Dry oz'
+     AND (SELECT count(*) FROM public.purchase_order_items y WHERE y.product_id = c_prod) = 1;
+  SELECT to_jsonb(i) INTO v_inv FROM public.inventory i
+   WHERE i.id = c_inv AND i.product_id = c_prod AND i.unit_size = 'oz'
+     AND (SELECT count(*) FROM public.inventory j WHERE j.product_id = c_prod) = 1;
+  IF v_line IS NULL OR v_inv IS NULL THEN
+    RAISE EXCEPTION 'PO_OZ_ROW_MOVED: the Treaty Extra PO-2026-0011 line or stock row no longer matches the reviewed state; nothing was changed';
+  END IF;
+
+  IF (SELECT string_agg(tgenabled::text, '' ORDER BY tgname) FROM pg_trigger WHERE tgrelid = 'public.purchase_order_items'::regclass
+        AND tgname IN ('trigger_0_guard_closed_po_item', 'trigger_capture_purchase_order_item_cost_snapshot')) IS DISTINCT FROM 'OO' THEN
+    RAISE EXCEPTION 'PO_OZ_GUARD_STATE: a purchase-order line guard is not in its normal on state. Nothing was changed.';
+  END IF;
+  UPDATE public.inventory SET unit_size = 'Dry oz', updated_at = now() WHERE id = c_inv AND unit_size = 'oz';
+  GET DIAGNOSTICS v_done = ROW_COUNT;
+  IF v_done <> 1 THEN RAISE EXCEPTION 'PO_OZ_UPDATE_COUNT: relabelled % of 1 stock row', v_done; END IF;
+
+  ALTER TABLE public.purchase_order_items DISABLE TRIGGER trigger_0_guard_closed_po_item;
+  ALTER TABLE public.purchase_order_items DISABLE TRIGGER trigger_capture_purchase_order_item_cost_snapshot;
+  UPDATE public.purchase_order_items SET unit_size = 'Dry oz' WHERE id = c_line AND unit_size = 'oz';
+  GET DIAGNOSTICS v_done = ROW_COUNT;
+  ALTER TABLE public.purchase_order_items ENABLE TRIGGER trigger_capture_purchase_order_item_cost_snapshot;
+  ALTER TABLE public.purchase_order_items ENABLE TRIGGER trigger_0_guard_closed_po_item;
+  IF v_done <> 1 THEN RAISE EXCEPTION 'PO_OZ_UPDATE_COUNT: relabelled % of 1 PO line', v_done; END IF;
+
+  -- Postflight: both guards back on; only the label (and the stock row's updated_at) moved.
+  IF (SELECT string_agg(tgenabled::text, '' ORDER BY tgname) FROM pg_trigger
+       WHERE tgrelid = 'public.purchase_order_items'::regclass
+         AND tgname IN ('trigger_0_guard_closed_po_item', 'trigger_capture_purchase_order_item_cost_snapshot')) IS DISTINCT FROM 'OO' THEN
+    RAISE EXCEPTION 'PO_OZ_POSTFLIGHT: a PO line guard is not enabled again';
+  END IF;
+  IF (SELECT to_jsonb(x) - 'unit_size' FROM public.purchase_order_items x WHERE x.id = c_line) IS DISTINCT FROM v_line - 'unit_size'
+     OR (SELECT unit_size FROM public.purchase_order_items WHERE id = c_line) IS DISTINCT FROM 'Dry oz'
+     OR (SELECT to_jsonb(i) - ARRAY['unit_size', 'updated_at'] FROM public.inventory i WHERE i.id = c_inv)
+          IS DISTINCT FROM v_inv - ARRAY['unit_size', 'updated_at'] THEN
+    RAISE EXCEPTION 'PO_OZ_POSTFLIGHT: the Treaty Extra line or stock row changed beyond its label';
+  END IF;
+END;
+$po_oz$;

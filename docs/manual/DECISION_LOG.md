@@ -3,6 +3,7 @@
 ## 2026-11-17 — RT-3 first rate review: Mason's rules
 
 **Decision (Mason, in chat, 2026-11-17).** Approve today's per-acre rate as the quoting default where it matches the label text or there is no per-acre text; treat loose notes like "1-2pt" as per acre; seed treatments get no per-acre default; per-ton and per-gallon products wait for label data; Piksi Dust Plus is 18 g per acre and Smart Choice 15G is 1.8 lb per acre. Saved on live: 670 rates approved, 361 products with an approved default, 14 with none, 7 needing label data, 14 held for him (listed in `docs/changelog.d/2026-11-17-rt1-derivation-run.md`). Nothing quotes from these until RT-4.
+Later the same day Mason settled the 14 held: today's rate kept on the 9 that differ from the label; Verdict 14 oz (corn); PeKacid 4 oz per acre with a label of 1-4 lb per 100 gal solution; Autumn Super 51 WDG and Cimarron Plus no default; Piksi Dust Infurrow needs label data. Every active product with rates now has a decision.
 
 ## 2026-11-17 — RT-1 draft rates derived on live
 

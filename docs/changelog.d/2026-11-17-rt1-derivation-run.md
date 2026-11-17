@@ -54,3 +54,10 @@ Gen Harmony SG, Gen Paraquat, Revulin Q and Vector (today's rate differs from th
 (beans and corn rates in one note); PeKacid (4 oz against "1-5lb"); Piksi Dust Infurrow ("1.5 gram per G");
 Autumn Super 51 WDG and Cimarron Plus (label text only, no house rate). Quotes still read the old product
 rate columns until RT-4.
+
+**Held products settled (same day, key `rt3-review-2026-11-17-batch2`, clean preview first).** Mason kept
+today's rate as the default for the 9 that differ from the label note; Verdict defaults to 14 oz (corn, beans
+5 oz typed on the quote); PeKacid stays 4 oz per acre, with a new approved label row of 1-4 lb per 100 gal
+solution; Autumn Super 51 WDG and Cimarron Plus keep their label range with no default; Piksi Dust Infurrow
+needs label data. Live now: 693 approved, 8 drafts (all on `needs_label_data` products); outcomes
+`approved_default` 372, `no_per_acre_default` 16, `needs_label_data` 8, none undecided. `products` md5 unchanged.

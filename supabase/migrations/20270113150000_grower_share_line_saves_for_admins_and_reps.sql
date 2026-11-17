@@ -444,8 +444,14 @@ BEGIN
           -- cost THAT quantity, so quantity x cost_cents on the saved line equals what is booked.
           -- A product line takes its unit from the server exactly as the billed branch does, never
           -- from the request.
+          -- Its cost is per the sold unit, so a product with no sold unit cannot be costed: refuse rather than
+          -- cost a rate-unit quantity at a sold-unit price (live 2026-11-16: 0 such products).
+          IF (v_chem->>'product_id') IS NOT NULL AND NULLIF(btrim(v_inv_unit), '') IS NULL THEN
+            RAISE EXCEPTION 'FIELD_APP_UNIT_UNCONVERTIBLE: cannot cost "%" in the grower share — the product has no sold unit. Fix this product''s units before invoicing this field application.',
+              COALESCE(NULLIF(v_chem->>'description', ''), (v_chem->>'product_id'));
+          END IF;
           v_qa_unit := CASE WHEN (v_chem->>'product_id') IS NOT NULL
-                            THEN COALESCE(v_inv_unit, v_ta_unit)
+                            THEN v_inv_unit
                             ELSE COALESCE(NULLIF(v_chem->>'unit_size', ''), v_ta_unit) END;
           v_qa_qty  := field_app_priced_quantity(v_chem_qty_a, v_ta_unit, v_qa_unit, v_form);
           IF v_qa_qty IS NULL THEN
@@ -1068,7 +1074,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '3dae067adcdd506b5865f3be09d903df', ARRAY['postgres', 'service_role']),
+        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '66b95e572c3b170ac4dd2eba90089ff5', ARRAY['postgres', 'service_role']),
         ('_enforce_below_cost_line', 'public._enforce_below_cost_line()', '1069cd1451454030627b250db7b729d1', ARRAY['postgres', 'service_role'])
       ) AS pin(fn, sig, body_md5, execs)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)

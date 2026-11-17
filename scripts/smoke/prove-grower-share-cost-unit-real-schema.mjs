@@ -277,7 +277,7 @@ function refusedProbe(sql, pattern, uid) {
 
 const LIVE_MD5 = '29d699a8b0698424345a78e9aac9dcd1';
 const FIX_MD5 = 'c3df537c2540a3bbc3f39ddc16c09166';
-const SAVES_MD5 = '3dae067adcdd506b5865f3be09d903df';
+const SAVES_MD5 = '66b95e572c3b170ac4dd2eba90089ff5';
 const GUARD_LIVE_MD5 = '3708388e22f081fd5b70ce8f89492aaf';
 const GUARD_SAVES_MD5 = '1069cd1451454030627b250db7b729d1';
 const GUARD = "'public._enforce_below_cost_line()'::regprocedure";
@@ -526,7 +526,10 @@ async function main() {
       /FIELD_APP_INVOICE_REQUIRED: invoice .* is not a field application invoice/, uid);
   }
   assert.equal(okProbe(`${saveSql([loc(FG, 50), loc(FB, 50, 1)], [UNDER])}\nRESET ROLE;\n${APPROVALS}`, ADMIN), '2', 'G: mixed save with a reason records the billed line and the grower-share line');
-  console.log(`[case] G follow-up applies (impl md5 ${SAVES_MD5}, wall md5 ${GUARD_SAVES_MD5}; grants unchanged; a second run is refused): an admin and a sales rep save a costed $0 grower-share line with no context (37500 cents, one field_app_grower_share approval row naming them); a $0 grower price saves (bill 0, chemical cost 37500, logged); an admin's costed manual line is logged, a rep's no-cost one is not; an applicator is refused; the declared context lets an admin's or rep's $0 line through but not an applicator's $0 line, a 1-cent line or a $0 line with an amount (BELOW_COST_CONTEXT_REQUIRED); a rep sending cost 0, or an admin sending 0 or 999999, still books the server cost (37500); an admin's typed cost on a billed line is kept (25000); an admin's manual grower-share line with no product books the typed cost (37500), a rep's books 0; an admin or rep passing an ordinary draft invoice, or a field-app draft grouped with one, is refused (FIELD_APP_INVOICE_REQUIRED); a billed under-cost line beside a grower share is still refused, and with a reason both lines are recorded`);
+  // A product with no sold unit cannot be costed in the grower share (its cost is per the sold unit): refused.
+  refusedSave([loc(FG, 50), loc(FB, 50, 1)], [chem({ product_id: NOINV })],
+    /FIELD_APP_UNIT_UNCONVERTIBLE: cannot cost .* in the grower share — the product has no sold unit/);
+  console.log(`[case] G follow-up applies (impl md5 ${SAVES_MD5}, wall md5 ${GUARD_SAVES_MD5}; grants unchanged; a second run is refused): a grower-share line for a product with no sold unit is refused;an admin and a sales rep save a costed $0 grower-share line with no context (37500 cents, one field_app_grower_share approval row naming them); a $0 grower price saves (bill 0, chemical cost 37500, logged); an admin's costed manual line is logged, a rep's no-cost one is not; an applicator is refused; the declared context lets an admin's or rep's $0 line through but not an applicator's $0 line, a 1-cent line or a $0 line with an amount (BELOW_COST_CONTEXT_REQUIRED); a rep sending cost 0, or an admin sending 0 or 999999, still books the server cost (37500); an admin's typed cost on a billed line is kept (25000); an admin's manual grower-share line with no product books the typed cost (37500), a rep's books 0; an admin or rep passing an ordinary draft invoice, or a field-app draft grouped with one, is refused (FIELD_APP_INVOICE_REQUIRED); a billed under-cost line beside a grower share is still refused, and with a reason both lines are recorded`);
   normalWall('after the follow-up');
 
   // RG: the follow-up's rollback.

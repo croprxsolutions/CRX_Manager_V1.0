@@ -3,7 +3,7 @@ import { generateIdempotencyKey, isDefinitiveRpcRejection } from './idempotency'
 import type {
   ActiveIngredientSummary, ChemistrySource, ChemistryStrengthBasis, ChemistryStrengthUnit, FertilizerBasis,
   FertilizerNutrient, ModeOfActionScheme, ParentActiveCosts, ParentChemistry, ParentChemistryPreview,
-  IngredientChangePreview, IngredientWorklist,
+  IngredientChangePreview, IngredientModeEntry, IngredientWorklist, ParentModeGroups,
 } from '../types';
 
 // DM-1 (20261209100000_product_chemistry, 20261211100000_product_chemistry_confirmed_swaps): a parent's
@@ -182,6 +182,36 @@ export async function fetchActiveCostsWithVersion(parentId: string): Promise<{ c
   throw new Error('The reference size kept changing while loading; try again.');
 }
 
+/** MOA-1 (20270108100000): a parent's groups, worked out when read. Any active profile. */
+export async function fetchParentModeGroups(parentId: string): Promise<ParentModeGroups> {
+  const { data, error } = await supabaseUntyped.rpc('get_parent_mode_groups', { p_parent_id: parentId });
+  if (error) throw error;
+  return assertRpcResult<ParentModeGroups>(data, 'get_parent_mode_groups');
+}
+
+/** One ingredient's own group list (notes included) and how many parents and sizes it feeds. Admin read. */
+export interface IngredientModeUsers {
+  ingredient_id: string; name: string; status: 'active' | 'retired'; modes: IngredientModeEntry[];
+  parents_affected: number; products_affected: number;
+}
+export async function fetchIngredientModeUsers(ingredientId: string): Promise<IngredientModeUsers> {
+  const { data, error } = await supabaseUntyped.rpc('get_ingredient_mode_users', { p_ingredient_id: ingredientId });
+  if (error) throw error;
+  return assertRpcResult<IngredientModeUsers>(data, 'get_ingredient_mode_users');
+}
+
+/** "HRAC 5, 9 · FRAC 11": codes grouped by scheme, in the order given. */
+export function groupsText(groups: Array<{ scheme: ModeOfActionScheme; group_code: string }>, mark?: (index: number) => string): string {
+  const parts: string[] = [];
+  groups.forEach((group, index) => {
+    const code = `${group.group_code}${mark?.(index) ?? ''}`;
+    const last = parts.length - 1;
+    if (index > 0 && groups[index - 1].scheme === group.scheme) parts[last] = `${parts[last]}, ${code}`;
+    else parts.push(`${group.scheme} ${code}`);
+  });
+  return parts.join(' · ');
+}
+
 export async function searchActiveIngredients(text: string): Promise<ActiveIngredientSummary[]> {
   const { data, error } = await supabaseUntyped.rpc('search_active_ingredients', { p_text: text, p_limit: 20 });
   if (error) throw error;
@@ -221,7 +251,7 @@ export type IngredientFields = Partial<{
 const CHEMISTRY_RPCS = [
   'set_parent_chemistry', 'correct_parent_chemistry', 'set_parent_cost_reference',
   'save_active_ingredient', 'retire_active_ingredient', 'reactivate_active_ingredient',
-  'commit_weights_tab', 'commit_ingredients_tab', 'promote_chemistry_proposal',
+  'commit_weights_tab', 'commit_ingredients_tab', 'promote_chemistry_proposal', 'set_active_ingredient_modes',
 ] as const;
 export type ChemistryRpc = typeof CHEMISTRY_RPCS[number];
 
@@ -229,7 +259,7 @@ export type ChemistryRpc = typeof CHEMISTRY_RPCS[number];
 export interface PendingChemistrySave {
   key: string;
   userId: string;
-  /** The parent ID for parent writes; `INGREDIENT_SCOPE` for ingredient-list writes. */
+  /** The parent ID for parent writes; `INGREDIENT_SCOPE` for ingredient-list writes; `ingredientModesScope(id)` for group lists. */
   scope: string;
   rpc: ChemistryRpc;
   args: Record<string, unknown>;
@@ -239,6 +269,8 @@ export interface PendingChemistrySave {
 }
 
 export const INGREDIENT_SCOPE = 'ingredients';
+/** One ingredient's group list: its unfinished save shows in that ingredient's editor. */
+export const ingredientModesScope = (ingredientId: string) => `ingredient-modes:${ingredientId}`;
 const PREFIX = 'crx:chemistry-pending:v1:';
 
 function storage(): Storage | null {
@@ -306,6 +338,14 @@ async function callChemistryWrite(rpc: ChemistryRpc, params: Record<string, unkn
       const { data, error } = await supabaseUntyped.rpc('set_parent_cost_reference', params);
       return error ? { error } : { data: assertRpcResult(data, 'set_parent_cost_reference') };
     }
+    default:
+      return callIngredientWrite(rpc, params);
+  }
+}
+
+/** The ingredient-list and workbook writes (split from callChemistryWrite to keep each switch small). */
+async function callIngredientWrite(rpc: ChemistryRpc, params: Record<string, unknown>): Promise<{ data?: unknown; error?: unknown }> {
+  switch (rpc) {
     case 'save_active_ingredient': {
       const { data, error } = await supabaseUntyped.rpc('save_active_ingredient', params);
       return error ? { error } : { data: assertRpcResult(data, 'save_active_ingredient') };
@@ -330,6 +370,12 @@ async function callChemistryWrite(rpc: ChemistryRpc, params: Record<string, unkn
       const { data, error } = await supabaseUntyped.rpc('promote_chemistry_proposal', params);
       return error ? { error } : { data: assertRpcResult(data, 'promote_chemistry_proposal') };
     }
+    case 'set_active_ingredient_modes': {
+      const { data, error } = await supabaseUntyped.rpc('set_active_ingredient_modes', params);
+      return error ? { error } : { data: assertRpcResult(data, 'set_active_ingredient_modes') };
+    }
+    default:
+      throw new Error(`Unknown chemistry write ${rpc}`);
   }
 }
 

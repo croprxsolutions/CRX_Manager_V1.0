@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
 import Modal from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import {
-  BASIS_LABEL, NUTRIENTS, SCHEMES, SOURCE_LABEL, UNIT_LABEL, EMPTY_NEW_INGREDIENT, ingredientLine, newIngredientFields, newIngredientProblem,
+  BASIS_LABEL, NUTRIENTS, SCHEMES, SOURCE_LABEL, UNIT_LABEL, EMPTY_NEW_INGREDIENT, fetchIngredientModeUsers, groupsText, ingredientLine, newIngredientFields, newIngredientProblem,
   nutrientLabel, startChemistrySave, type ChemistryChange, type NewIngredientDraft,
 } from '../../lib/productChemistry';
 import { IngredientSearch, NewIngredientFields } from './IngredientPicker';
@@ -14,7 +14,7 @@ import {
   SOURCE_OPTIONS, amountOf, nextKey, reportSaveError, type ModeDraft, type SaveOutcome, type StrengthDraft, type TypedSource,
 } from './chemistryFormHelpers';
 import type {
-  ActiveIngredientSummary, FertilizerBasis, FertilizerNutrient, ModeOfActionScheme, ParentChemistry, ParentChemistryFertilizerRow,
+  ActiveIngredientSummary, FertilizerBasis, FertilizerNutrient, IngredientModeEntry, ModeOfActionScheme, ParentChemistry, ParentChemistryFertilizerRow,
   ParentChemistryIngredientRow,
 } from '../../types';
 
@@ -134,6 +134,19 @@ function FillUnknowns({ ingredients, nutrients, fills, onFill }: {
   );
 }
 
+/** MOA-1: a picked ingredient's own group list, so nobody retypes it per product. Nothing shows when it has none. */
+function IngredientListGroups({ ingredientId }: { ingredientId: string }) {
+  const [modes, setModes] = useState<IngredientModeEntry[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchIngredientModeUsers(ingredientId).then((users) => { if (!cancelled && users.ingredient_id === ingredientId) setModes(users.modes); })
+      .catch(() => { /* a hint only: the product page shows the groups after saving */ });
+    return () => { cancelled = true; };
+  }, [ingredientId]);
+  if (!modes || modes.length === 0) return null;
+  return <p className="text-sm text-secondary" role="status">Groups from the ingredient list: {groupsText(modes)}. No need to type them below.</p>;
+}
+
 function IngredientDraftCard({ draft, index, form, onParent, saving, onPatch, onRemove }: {
   draft: IngredientDraft; index: number; form: string; onParent: string[]; saving: boolean;
   onPatch: (patch: Partial<IngredientDraft>) => void; onRemove: () => void;
@@ -145,10 +158,13 @@ function IngredientDraftCard({ draft, index, form, onParent, saving, onPatch, on
         <Button size="sm" variant="ghost" onClick={onRemove}>Remove</Button>
       </div>
       {draft.existing ? (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span>{ingredientLine(draft.existing)}</span>
-          <Button size="sm" variant="secondary" onClick={() => onPatch({ existing: null })}>Change</Button>
-        </div>
+        <>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span>{ingredientLine(draft.existing)}</span>
+            <Button size="sm" variant="secondary" onClick={() => onPatch({ existing: null })}>Change</Button>
+          </div>
+          <IngredientListGroups key={draft.existing.id} ingredientId={draft.existing.id} />
+        </>
       ) : draft.creating ? (
         <>
           <NewIngredientFields idPrefix={`new-${draft.key}`} draft={draft.fresh} disabled={saving} onChange={(fresh) => onPatch({ fresh })} />

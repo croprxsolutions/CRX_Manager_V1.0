@@ -10,6 +10,10 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-17 — #1896 gets a sixth Sol round
+
+**Decision (Mason, in session, 2026-11-17: "Allow round 6"):** Sol rounds 4 and 5 on #1896 timed out before giving a verdict, so they produced no findings. One more full Sol review of the current head is allowed.
+
 ## 2026-11-16 — Old wrong-unit PO lines are cleaned up; a stock unit cannot change while stock is on hand (#1896)
 
 **Decision (Mason, in session, 2026-11-16: "1. clean up old lines 2. do strict fix for changing units stocked moving forward"):** after Sol's round-2 HIGHs on #1896, (1) every purchase-order line left in a unit other than its product's stock unit is relabelled by the reviewed data correction (only Treaty Extra's received "oz" line on PO-2026-0011 remained), and (2) a product's stock unit cannot change while any of its stock rows holds a quantity.

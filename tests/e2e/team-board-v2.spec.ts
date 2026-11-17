@@ -21,6 +21,7 @@
 
 import { test, expect } from '@playwright/test';
 import { login } from './utils/auth';
+import { moreAction } from './utils/more-actions';
 import { supabaseRest } from './golive/utils/supabase-helpers';
 
 const RUN_ID = Date.now().toString(36);
@@ -803,8 +804,8 @@ test.describe.serial('Team Board V2 Features', () => {
     expect(page.url()).toMatch(/\/orders\/[0-9a-f-]+/);
     S.orderId = page.url().split('/orders/')[1]?.split('?')[0] || '';
 
-    // Look for "Create Task" button
-    const createTaskBtn = page.locator('button:has-text("Create Task")').first();
+    // Look for "Create task" (under More actions on the sale page since the billing UI, Nov 13)
+    const createTaskBtn = await moreAction(page, /^Create task/);
     const btnVisible = await createTaskBtn.isVisible({ timeout: 5000 }).catch(() => false);
 
     if (btnVisible) {

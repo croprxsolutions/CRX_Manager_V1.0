@@ -51,10 +51,34 @@ describe('buildInvoicePostTargets', () => {
       { id: 'inv-1', invoice_number: 'INV-1', invoice_group_id: 'group-1' },
     ]);
 
-    expect(confirmation.message).toContain('every current invoice in that split group');
-    expect(confirmation.message).toContain('outside current filters');
-    expect(confirmation.message).toContain('changed since this list loaded');
-    expect(confirmation.confirmLabel).toContain('full split groups');
+    expect(confirmation.message).toContain('every invoice in that split posts together');
+    expect(confirmation.message).toContain('even ones your filters hide');
+    expect(confirmation.message).toContain('If one changed since you opened this list, none of its split posts');
+    expect(confirmation.message).toContain('The other invoices still post.');
+    expect(confirmation.confirmLabel).toBe('Post 1 invoice');
+  });
+
+  it('a plain selection keeps a short body that does not repeat the title question', () => {
+    const confirmation = describeInvoicePostScope([
+      { id: 'inv-1', invoice_number: 'INV-1', invoice_group_id: null },
+      { id: 'inv-2', invoice_number: 'INV-2', invoice_group_id: null },
+    ]);
+    expect(confirmation).toEqual({ message: 'Posting locks them into AR.', confirmLabel: 'Post 2 invoices', count: 2 });
+  });
+
+  it('counts every loaded member of a split: one ticked member of a 3-invoice split posts 3', () => {
+    const loaded = [
+      { id: 'a', invoice_number: 'INV-A', invoice_group_id: 'g' },
+      { id: 'b', invoice_number: 'INV-B', invoice_group_id: 'g' },
+      { id: 'c', invoice_number: 'INV-C', invoice_group_id: 'g' },
+      { id: 'd', invoice_number: 'INV-D', invoice_group_id: null },
+    ];
+    const one = describeInvoicePostScope([loaded[0]], loaded);
+    expect(one.count).toBe(3);
+    expect(one.confirmLabel).toBe('Post 3 invoices');
+    // Two ticked members of the same split still post 3; a plain invoice adds 1.
+    expect(describeInvoicePostScope([loaded[0], loaded[1]], loaded).count).toBe(3);
+    expect(describeInvoicePostScope([loaded[0], loaded[3]], loaded)).toMatchObject({ count: 4, confirmLabel: 'Post 4 invoices' });
   });
 });
 

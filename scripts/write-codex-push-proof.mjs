@@ -1053,6 +1053,25 @@ function clearCodexPushProof({ root, headSha }) {
 // review of an empty/narrower diff yet still mint a HEAD-bound proof the guard
 // accepts, bypassing review entirely.
 export const GUARDED_BASE = "origin/main";
+export const STAGING_BASE = "origin/staging";
+
+// The ref Sol reviews against follows the branch the PR merges into (Mason, 2026-11-16):
+// a feature branch goes to staging, so it is reviewed against origin/staging and Sol reads
+// only its own changes, not every unreleased staging PR. Only release/next and hotfix/<name>
+// may enter main (.github/workflows/release-flow.yml); they, and anything unsure (main,
+// staging, a detached HEAD, no origin/staging), keep origin/main, the wider diff. The name
+// cannot shrink a review: the merge gate checks the proof's base against GitHub's real base tip.
+export function solTargetRef(branch, stagingResolves) {
+  const name = String(branch || "").trim();
+  if (!stagingResolves || !name || name === "HEAD" || name === "main" || name === "staging") return GUARDED_BASE;
+  return /^(hotfix|release)\//.test(name) ? GUARDED_BASE : STAGING_BASE;
+}
+
+function currentSolTarget(root) {
+  const branch = runGit(["branch", "--show-current"], { cwd: root });
+  const staging = runGit(["rev-parse", "--verify", "--quiet", `${STAGING_BASE}^{commit}`], { cwd: root });
+  return solTargetRef(branch, /^[0-9a-f]{40}$/i.test(staging));
+}
 
 // Fixed review prompt. `codex review --base` can't carry a prompt (so it can't be
 // told to emit a machine verdict), so we drive `codex exec` with these fixed
@@ -1428,6 +1447,7 @@ export function evaluateSolPreflight({
   recentHeads = null,
   appReviewedShas = [],
   nowMs = Date.now(),
+  baseRef = GUARDED_BASE,
 } = {}) {
   const head = String(headSha || "").trim().toLowerCase();
   const problems = [];
@@ -1440,11 +1460,11 @@ export function evaluateSolPreflight({
   // points from main.
   if (headContainsBase === false) {
     problems.push(
-      "this branch does not contain the latest main this checkout knows about (origin/main). Run " +
-      "`git merge origin/main` (no fetch needed), push, wait for the Codex GitHub App's review of that push, then run Sol.",
+      `this branch does not contain the latest ${baseRef} this checkout knows about. Run ` +
+      `\`git merge ${baseRef}\` (no fetch needed), push, wait for the Codex GitHub App's review of that push, then run Sol.`,
     );
   } else if (headContainsBase !== true) {
-    problems.push("could not check that this branch contains origin/main. Retry in a minute.");
+    problems.push(`could not check that this branch contains ${baseRef}. Retry in a minute.`);
   }
   if (!pr) {
     // Sol runs once, before the PR opens (Mason, 2026-10-29); later fixes need no new Sol run.
@@ -1746,11 +1766,11 @@ export function readSolPreflightFacts(root, headSha, baseSha, gh = (args) => pre
   return facts;
 }
 
-export function solPreflight(root, headSha, baseSha) {
-  const facts = readSolPreflightFacts(root, headSha, baseSha);
+export function solPreflight(root, headSha, baseSha, baseRef = GUARDED_BASE) {
+  const facts = { ...readSolPreflightFacts(root, headSha, baseSha), baseRef };
   if (facts.unreadable) {
-    // Name a missing main even when GitHub could not be read, so a retry is not the only advice.
-    const problems = facts.headContainsBase === false ? evaluateSolPreflight({ headContainsBase: false }).problems.slice(0, 1) : [];
+    // Name a missing base even when GitHub could not be read, so a retry is not the only advice.
+    const problems = facts.headContainsBase === false ? evaluateSolPreflight({ headContainsBase: false, baseRef }).problems.slice(0, 1) : [];
     return { ok: false, problems: [...problems, `${facts.unreadable}. Retry in a minute.`], notes: [], facts };
   }
   return { ...evaluateSolPreflight(facts), facts };
@@ -2860,7 +2880,7 @@ function usage() {
   return [
     "Usage: node scripts/write-codex-push-proof.mjs [--timeout <sec>] [--dry-run]",
     "",
-    `Runs \`codex review --base ${GUARDED_BASE}\` on the current branch and, ONLY on a`,
+    `Reviews the current branch against ${STAGING_BASE} (a feature branch) or ${GUARDED_BASE} (hotfix/, release/) and, ONLY on a`,
     "clean verdict with a stable clean worktree, writes the HEAD-bound Codex push",
     "proof that .claude/hooks/codex-push-guard.mjs requires for risky pushes to main.",
     "The base is fixed (not overridable) so a narrower diff cannot mint an unearned proof.",
@@ -3021,7 +3041,8 @@ export function run(argv = process.argv.slice(2)) {
     return 2;
   }
 
-  const prompt = buildCodexReviewPrompt({ base: GUARDED_BASE });
+  const target = currentSolTarget(root);
+  const prompt = buildCodexReviewPrompt({ base: target });
 
   if (options.dryRun) {
     const args = buildCodexExecArgs({ root: "<sanitized-review-workspace>", prompt });
@@ -3032,12 +3053,12 @@ export function run(argv = process.argv.slice(2)) {
       `[dry-run] Sandbox-startup fallback: ${fallbackBin || "none found (a sandbox startup failure fails closed)"}\n`,
     );
     process.stdout.write(`[dry-run] Command: codex ${args.slice(0, -1).join(" ")} <review-prompt>\n`);
-    process.stdout.write(`[dry-run] Review base (pinned): ${GUARDED_BASE}\n`);
+    process.stdout.write(`[dry-run] Review base (pinned to the target branch): ${target}\n`);
     process.stdout.write(`[dry-run] Would mint proof at: ${codexPushProofPath(root, "<HEAD>")}\n`);
     const head = runGit(["rev-parse", "HEAD"], { cwd: root });
-    const reviewBase = solReviewBase(root, head, runGit(["rev-parse", GUARDED_BASE], { cwd: root }));
+    const reviewBase = solReviewBase(root, head, runGit(["rev-parse", target], { cwd: root }));
     process.stdout.write(`[dry-run] Review base commit: ${reviewBase}\n`);
-    const preflight = solPreflight(root, head, reviewBase);
+    const preflight = solPreflight(root, head, reviewBase, target);
     process.stdout.write(
       `[dry-run] Sol pre-flight for ${head.slice(0, 12)}: ${preflight.ok ? "would run" : "would REFUSE"}\n` +
       `${preflightReport(preflight)}\n`,
@@ -3060,7 +3081,8 @@ export function run(argv = process.argv.slice(2)) {
   // session committed / checked out, or edits appeared), the review no longer
   // describes HEAD — revoke, never mint.
   const headBefore = runGit(["rev-parse", "HEAD"], { cwd: root });
-  const baseBefore = solReviewBase(root, headBefore, runGit(["rev-parse", GUARDED_BASE], { cwd: root }));
+  const baseBefore = solReviewBase(root, headBefore, runGit(["rev-parse", target], { cwd: root }));
+  process.stdout.write(`Sol review base: ${target} (commit ${String(baseBefore).slice(0, 12) || "unresolved"}).\n`);
   const cleanBefore = worktreeIsClean(root);
   if (!cleanBefore) {
     process.stderr.write("The push-proof reviewer requires a clean worktree before building its sanitized snapshot.\n");
@@ -3071,7 +3093,7 @@ export function run(argv = process.argv.slice(2)) {
   // Refuse before spending a full Sol review on a head the Codex GitHub App or
   // CodeRabbit has not finished with (see "Sol pre-flight" above). An existing
   // proof is left alone: this refusal says "not yet", not "the review failed".
-  const preflight = solPreflight(root, headBefore, baseBefore);
+  const preflight = solPreflight(root, headBefore, baseBefore, target);
   if (!preflight.ok) {
     process.stderr.write(
       `SOL PRE-FLIGHT: not running the Sol review of ${headBefore.slice(0, 12)} yet, so no Sol tokens were spent.\n` +
@@ -3103,7 +3125,7 @@ export function run(argv = process.argv.slice(2)) {
   for (const item of appliedHistory) {
     process.stdout.write(`Applied history (identical to the live ledger): ${item.name} sha256 ${item.sha256}\n`);
   }
-  const reviewPrompt = buildCodexReviewPrompt({ base: GUARDED_BASE, appliedHistory });
+  const reviewPrompt = buildCodexReviewPrompt({ base: target, appliedHistory });
   const { ledger, round } = solRound(root, headBefore, baseBefore);
   const roundGate = solRoundGate({
     round,
@@ -3178,7 +3200,7 @@ export function run(argv = process.argv.slice(2)) {
   }
 
   const headAfter = runGit(["rev-parse", "HEAD"], { cwd: root });
-  const baseAfter = runGit(["rev-parse", GUARDED_BASE], { cwd: root });
+  const baseAfter = runGit(["rev-parse", target], { cwd: root });
   const cleanAfter = worktreeIsClean(root);
   const verdict = codexReviewProofVerdict({ status: result.status, stdout: result.stdout });
 
@@ -3192,9 +3214,11 @@ export function run(argv = process.argv.slice(2)) {
     );
     if (baseAfter !== proofBase) {
       process.stdout.write(
-        `origin/main (now ${baseAfter}) is ahead of the base this review was bound to. The clean review is kept, bound to ` +
-        "the base it covered, so the merge gates accept it. If this head still needs a push, the push gate wants the exact base: " +
-        "merge origin/main into the branch and run this script with --carry-forward.\n",
+        `${target} (now ${baseAfter}) is ahead of the base this review was bound to. The clean review is kept, bound to ` +
+        "the base it covered, so the merge gates accept it." +
+        (target === GUARDED_BASE
+          ? " If this head still needs a push, the push gate wants the exact base: merge origin/main into the branch and run this script with --carry-forward.\n"
+          : " Nothing else to do: --carry-forward is for main-bound branches only.\n"),
       );
     }
     return 0;
@@ -3211,7 +3235,7 @@ export function run(argv = process.argv.slice(2)) {
     );
   } else {
     process.stderr.write(
-      "Codex returned clean, but the worktree or HEAD was dirty or moved during the review, or origin/main moved " +
+      `Codex returned clean, but the worktree or HEAD was dirty or moved during the review, or ${target} moved ` +
       "anywhere but forward, so the proof cannot be bound to a stable commit + base. Commit or stash your changes on " +
       "a clean tree (and re-fetch if origin/main moved), then re-run.\n",
     );

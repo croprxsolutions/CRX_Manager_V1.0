@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-14 — Inactive rate history supports explicit cleanup
+
+**Decision (Mason, in chat).** Include inactive product groups' existing rates in review and preserve their approvals until explicitly changed. Inactive history supports sending an approved rate back to draft, deleting a draft and clearing a review decision. It does not support fresh approval, value edits or new review decisions. Keep accepting older half-filled rate workbooks under all existing identity and server safeguards.
+
+**Why.** An inactive group can be the historical source left after its last product size moves. Its old rates should remain visible for deliberate cleanup without becoming work required for the active groups' future rate cutover.
+
+**Operative rule.** Active readiness totals and live-rate readers retain their existing scope. The new download explicitly requests inactive history; old no-argument downloads remain active-only. PostgreSQL checks current group activity under the existing locks. Proposal: `docs/plans/2026-11-14-inactive-rate-review-CONTRACT.md`, issue #1814. Candidate only; no apply, merge or deployment.
+
 Last verified: 2026-10-29. Adding an entry does not change this date.
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 
@@ -15,6 +23,16 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in session, 2026-11-14: "Auto-reverse it", over refusing the void until the write-off is reversed by hand).** Voiding a posted, overdue or paid invoice marks each of its active write-offs reversed in the same step, recorded like a manual reversal (who, when, reason naming the void).
 **Why:** a voided invoice's write-off otherwise stayed active and showed on the customer statement as an unexplained credit; void already undoes applied credits and prepay the same way.
 **What this forbids/implies:** each write-off's Chicago booking month must be open, as for a manual reversal; a closed month refuses the whole void. Built in `20270110100000_ki99_void_reverses_write_offs.sql`.
+## 2026-11-14 — Rate Review unanswered-save recovery (#1829)
+
+**Decision (Mason, 2026-11-14):** after any unanswered Rate Review save, an admin may check a fresh workbook and explicitly clear the reminder; no attempt count or expiry threshold is required. This supersedes the 2026-11-13 Rate Review follow-up contract's narrower hand-check exit, which appeared only on expiry, a missing record, or an unsafe/refused receipt.
+**Why:** a save can remain unanswered indefinitely, so tying recovery to a number of replies could strand the admin.
+**What this forbids/implies:** keep the exact saved key and 24-hour receipt window for retries; require a fresh-workbook check and explicit confirmation before clearing. An old request may still finish.
+## 2026-11-13 — "MG" means milligrams; the Powder Keg seed treatments are sold by the each (KI-136, KI-137)
+
+**Decision (Mason, in session, 2026-11-13, answering the Product Master review's D-1 and D-2).** (1) The "MG" stock/rate unit on the two jar products means milligrams, so the conversion table is right. The open PO line ordering one of them as 9,000 "Dry oz" (5 jars × 1,800 MG) has the right quantity and the wrong unit label. (2) Powder Keg Corn and Powder Keg Soybeans are sold by the each at their current prices.
+**Why:** these are the real sale and stock units; the units fix (To-Do 0.17 step 1) needed them before it could be planned.
+**What this forbids/implies:** do not change the MG unit. Correct that PO line's label before it is received. Change both Powder Keg products' stock and rate unit to Ea through a reviewed migration; on-hand is 0, so no stock conversion. To-Do decision 24 is answered.
 
 ## 2026-11-13 — Commission counts in profit when invoiced, is paid to the rep only when the customer pays, pro rata (KI-154)
 

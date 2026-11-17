@@ -19,20 +19,14 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2.57.4";
 import { computeTotalDiluentGallons, formatGallons } from "./fieldAppDiluent.ts";
 import { dueDateFromTerms } from "../paymentTerms.ts";
 import { invoiceBrandNotes, invoiceLineEpaText } from "../brandNotes.ts";
-import { COMPANY_LEGAL_NAME, companyTaglineHeader, type CompanyInfo, DEFAULT_COMPANY_INFO, loadCompanyInfo, fitCompanyNameFont } from "./companyInfo.ts";
+import type { CellDef, Styles } from "npm:jspdf-autotable@5.0.9";
+import { COMPANY_LEGAL_NAME, type CompanyInfo, DEFAULT_COMPANY_INFO, loadCompanyInfo } from "./companyInfo.ts";
+import { type InvoiceBreakdown, invoiceBreakdown } from "./invoiceBreakdown.ts";
 import {
-  ALT_ROW_BG,
-  CHARCOAL,
-  CRX_GREEN,
-  formatCents as fmt,
-  generatedDateLabel,
-  GRAY,
-  type JsPDFWithAutoTable,
-  LIGHT_BG,
-  type PdfLib,
-  RED,
-  TABLE_HEADER_BG,
-} from "./theme.ts";
+  drawCompanyBlock, drawLogo, drawPageFooters, Q_CONTENT_BOTTOM, Q_CONTINUED_TOP, Q_LOGO_RATIO, Q_LOGO_WIDTH, Q_MARGIN_TOP,
+  Q_MARGIN_X, Q_MUTED, Q_NOTE_BG, Q_TABLE, Q_TEXT, Q_TOTALS_RULE, Q_TOTALS_WIDTH,
+} from "./quoteStyle.ts";
+import { CRX_GREEN, formatCents as fmt, type JsPDFWithAutoTable, type PdfLib, RED } from "./theme.ts";
 
 type AutoTable = PdfLib["autoTable"];
 
@@ -375,6 +369,8 @@ export interface InvoicePdfData {
   paid_amount_cents: number;
   prepay_applied_cents: number;
   write_off_cents?: number;
+  /** invoices.credit_applied_cents: credit memos applied to this invoice (on a credit memo, the credit it has given). */
+  credit_applied_cents?: number;
   balance_cents: number;
   // #33: owner-entered early-pay "Discount Earned" (bigint cents). INFORMATIONAL —
   // printed as a labeled line but NEVER subtracted from total/balance (no double-count;
@@ -397,7 +393,14 @@ export interface InvoicePdfData {
   // Shares/Splits
   shares?: InvoicePdfShare[];
 
-  // Finance charges on this invoice
+  /**
+   * Whether the invoice takes charge lines, so an older untyped line with no product is a charge (invoiceBreakdown.ts
+   * isChargeLine). The invoice page passes its own takesCharges; the builder works it out the same way.
+   */
+  takes_charge_lines?: boolean;
+
+  // Finance charges on this invoice. Informational: the charge's own invoice already holds it in its balance
+  // (20260803221244), so it is never added to balance_cents.
   finance_charge_cents?: number;
 
   // Source reference
@@ -454,6 +457,8 @@ export interface InvoiceRowForPdf {
   paid_amount_cents?: number | null;
   prepay_applied_cents?: number | null;
   write_off_cents?: number | null;
+  /** Optional: a list caller omits it and the builder reads it with the billing fields. */
+  credit_applied_cents?: number | null;
   balance_cents: number;
 }
 
@@ -559,7 +564,7 @@ export async function buildInvoicePdfDataFromRow(
     // print of unsaved live form edits is unchanged.
     db
       .from('invoices')
-      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id, delivery_id')
+      .select('discount_earned_cents, discount_date, payment_terms, purchase_order_ref, header_notes, footer_notes, due_date, diluent_rate_gpa, total_acres, invoice_group_id, delivery_id, credit_applied_cents, order_id, blend_ticket_id')
       .eq('id', inv.id)
       .maybeSingle(),
   ]).catch(() => { throw new InvoiceDetailsUnavailableError(); });
@@ -585,6 +590,7 @@ export async function buildInvoicePdfDataFromRow(
     payment_terms?: string | null; purchase_order_ref?: string | null;
     header_notes?: string | null; footer_notes?: string | null; due_date?: string | null;
     diluent_rate_gpa?: number | null; total_acres?: number | null; invoice_group_id?: string | null; delivery_id?: string | null;
+    credit_applied_cents?: number | null; order_id?: string | null; blend_ticket_id?: string | null;
   } | null;
   const billSplitPayers = billingRow?.invoice_group_id && shares.length === 0
       && readsBillSplitPayers({ invoice_type: inv.invoice_type, invoice_group_id: billingRow.invoice_group_id, delivery_id: billingRow.delivery_id, status: inv.status })
@@ -669,11 +675,26 @@ export async function buildInvoicePdfDataFromRow(
     paid_amount_cents: inv.paid_amount_cents || 0,
     prepay_applied_cents: inv.prepay_applied_cents || 0,
     write_off_cents: inv.write_off_cents || 0,
+    takes_charge_lines: takesChargeLines(inv.invoice_type, billingRow),
+    credit_applied_cents: (inv.credit_applied_cents !== undefined ? inv.credit_applied_cents : billingRow?.credit_applied_cents) || 0,
     balance_cents: inv.balance_cents || 0,
     // #33: informational Discount Earned line (does NOT change total/balance).
     discount_earned_cents: pickDiscount || 0,
     options,
   };
+}
+
+/**
+ * Mirrors InvoiceDetail's takesCharges (src/pages/InvoiceDetail.tsx): an invoice with no order and no delivery behind it
+ * (20261021050000), or a chemical sale backed by an order or a delivery and not a blend ticket (20261108160000).
+ */
+export function takesChargeLines(
+  type: string | null | undefined,
+  row: { order_id?: string | null; delivery_id?: string | null; blend_ticket_id?: string | null } | null,
+): boolean {
+  const backed = !!(row?.order_id || row?.delivery_id);
+  if (type === 'misc_charge') return !backed;
+  return type === 'chemical_sale' && (!backed || !row?.blend_ticket_id);
 }
 
 function uniqNonEmpty(values: Array<string | null | undefined>): string[] {
@@ -786,6 +807,24 @@ export async function loadInvoicePdfData(db: SupabaseClient, invoiceId: string):
 export const fmtNum = (n: number, decimals = 4) =>
   new Intl.NumberFormat('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n);
 
+/**
+ * Price per acre in whole cents, exactly: the acreage is read as the decimal it prints as ("91.9"), the division is done
+ * in BigInt and rounded half away from zero, as the database's round(total / acres, 2) does. Null for no acreage.
+ */
+export function centsPerAcre(cents: number, acres: number): number | null {
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(String(acres));
+  // ponytail: an exponent form (under 1e-6 or 1e21+ acres) is not a real acreage; it prints nothing.
+  if (!m || !Number.isSafeInteger(cents)) return null;
+  const scale = BigInt(10) ** BigInt((m[2] ?? '').length);
+  const den = BigInt(m[1] + (m[2] ?? ''));
+  if (den === BigInt(0)) return null;
+  const num = BigInt(Math.abs(cents)) * scale;
+  const q = (num * BigInt(2) + den) / (den * BigInt(2));
+  // Past 2^53 − 1 cents a Number lands on a neighbouring cent, so print no price per acre rather than a wrong one.
+  if (q > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Math.sign(cents) * Number(q);
+}
+
 export const fmtDate = (d: string) =>
   new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
 
@@ -810,711 +849,597 @@ export function buildDiluentLine(
 }
 
 // ── Main Generator ──────────────────────────────────────────────────────
+// The current ("Print") layout in the quote PDF's style (quoteStyle.ts): letterhead with the logo, bill-to,
+// one table per layout, totals line by line, who pays on a Bill Split, a pay note and "Page X of Y".
+
+type Row = Array<string | CellDef>;
+
+/** What each drawing step needs; y is the running position, moved by every step. */
+interface Page {
+  doc: JsPDFWithAutoTable;
+  data: InvoicePdfData;
+  opts: InvoicePrintOptions;
+  autoTable: AutoTable;
+  pageW: number;
+  /** Content stops here; the footer sits below. */
+  bottom: number;
+  /** The totals rows, only when the lines add up to the invoice total; null keeps every line in the table. */
+  breakdown: InvoiceBreakdown | null;
+  y: number;
+}
 
 /** Draws the current ("Print") layout. The app's generateInvoicePdf routes "Old Print" itself. */
 export function drawInvoicePdf({ jsPDF, autoTable }: PdfLib, data: InvoicePdfData): JsPDFWithAutoTable {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' }) as JsPDFWithAutoTable;
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 40;
-  const opts = data.options ?? { show_shares: true, show_price_per_acre: true, show_epa_registration: true };
   const company = data.company ?? DEFAULT_COMPANY_INFO;
-
-  let y = 0;
-
-  // ── Page footer callback ───────────────────────────────────────────
-  const drawPageFooter = () => {
-    try {
-      const footerY = pageH - 20;
-      doc.setDrawColor(200, 200, 200);
-      doc.line(margin, footerY - 6, pageW - margin, footerY - 6);
-      doc.setFontSize(7);
-      doc.setTextColor(160, 160, 160);
-      doc.text(
-        [COMPANY_LEGAL_NAME, company.email, `Generated ${generatedDateLabel()}`].filter(Boolean).join('  •  '),
-        pageW / 2,
-        footerY,
-        { align: 'center' },
-      );
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error('invoicePdf: drawPageFooter failed', e);
-    }
+  const breakdown = invoiceBreakdown(data.items, !!data.takes_charge_lines);
+  const p: Page = {
+    doc, data, autoTable,
+    opts: data.options ?? { show_shares: true, show_price_per_acre: true, show_epa_registration: true },
+    pageW: doc.internal.pageSize.getWidth(),
+    bottom: doc.internal.pageSize.getHeight() - Q_CONTENT_BOTTOM,
+    breakdown: breakdown.totalCents === data.total_amount_cents ? breakdown : null,
+    y: Q_MARGIN_TOP,
   };
 
-  // ── Header Bar ─────────────────────────────────────────────────────
-  doc.setFillColor(...CRX_GREEN);
-  doc.rect(0, 0, pageW, 70, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(255, 255, 255);
-  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 110, 22);
-  doc.text(company.name.toUpperCase(), margin, 35);
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  // A long Settings address wraps instead of running under the invoice number and status.
-  doc.text(doc.splitTextToSize(companyTaglineHeader(company), pageW - margin * 2 - 90), margin, 53);
-
-  // Invoice badge (right)
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
-  doc.text('INVOICE', pageW - margin, 28, { align: 'right' });
-  doc.setFontSize(12);
-  doc.text(data.invoice_number, pageW - margin, 44, { align: 'right' });
-
-  // Status badge
-  if (data.status) {
-    const statusLabel = data.status.toUpperCase();
-    const statusColors: Record<string, [number, number, number]> = {
-      draft: [156, 163, 175],     // gray
-      unposted: [234, 179, 8],    // amber
-      posted: [59, 130, 246],     // blue
-      paid: CRX_GREEN,            // brand crx-green (#28A26A)
-      overdue: [239, 68, 68],     // red
-      voided: [107, 114, 128],    // slate
-      cancelled: [107, 114, 128], // slate
-    };
-    const color = statusColors[data.status] || [107, 114, 128];
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...color);
-    doc.text(statusLabel, pageW - margin, 57, { align: 'right' });
-    doc.setTextColor(255, 255, 255); // reset for header area
-  }
-
-  y = 90;
-
-  // ── Customer + Invoice Details Box ─────────────────────────────────
-  doc.setFillColor(...LIGHT_BG);
-  doc.roundedRect(margin, y, pageW - margin * 2, 90, 4, 4, 'F');
-
-  // Left: Bill To
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...GRAY);
-  doc.text('BILL TO', margin + 12, y + 16);
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...CHARCOAL);
-  // Wrap long customer names within the left half of the info box
-  const maxNameWidth = (pageW - margin * 2) / 2 - 24;
-  const nameLines = doc.splitTextToSize(data.customer_name.toUpperCase(), maxNameWidth);
-  doc.text(nameLines.slice(0, 2).join('\n'), margin + 12, y + 33);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...GRAY);
-  let addrY = y + 46;
-  if (data.customer_address) {
-    doc.text(data.customer_address, margin + 12, addrY);
-    addrY += 12;
-  }
-  if (data.customer_city || data.customer_state) {
-    const cityLine = [data.customer_city, data.customer_state, data.customer_zip].filter(Boolean).join(', ');
-    doc.text(cityLine, margin + 12, addrY);
-    addrY += 12;
-  }
-  if (data.customer_phone) {
-    doc.text(data.customer_phone, margin + 12, addrY);
-  }
-
-  // Right: Invoice details grid
-  const rightX = pageW - margin - 12;
-  const labelX = rightX - 130;
-  let ry = y + 16;
-
-  const drawInfoField = (label: string, value: string, x: number, fy: number) => {
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...GRAY);
-    doc.text(label, x, fy);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...CHARCOAL);
-    doc.text(value, x, fy + 12);
-  };
-
-  drawInfoField('DATE', fmtDate(data.invoice_date), labelX, ry);
-  drawInfoField('DUE DATE', data.due_date ? fmtDate(data.due_date) : 'On receipt', rightX - 50, ry);
-  ry += 30;
-  if (data.account_number) {
-    drawInfoField('ACCT #', data.account_number, labelX, ry);
-  }
-  if (data.salesman_name) {
-    drawInfoField('SALESMAN', data.salesman_name, rightX - 50, ry);
-  }
-  ry += 30;
-  if (data.payment_terms) {
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...GRAY);
-    doc.text('TERMS', labelX, ry);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...CHARCOAL);
-    doc.text(data.payment_terms, labelX, ry + 12);
-  }
-  // #33: PO Reference in the current (default) format too — previously it only
-  // printed on the legacy "Old Print" layout, so a PO set in the editor was invisible
-  // on the default print. Placed beside TERMS on the same info row.
-  if (data.purchase_order_ref) {
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...GRAY);
-    doc.text('PO REF', rightX - 50, ry);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...CHARCOAL);
-    doc.text(data.purchase_order_ref, rightX - 50, ry + 12);
-  }
-
-  y += 105;
-
-  // ── Route to type-specific layout ──────────────────────────────────
-  if (data.invoice_type === 'field_application') {
-    y = drawFieldApplicationLayout(doc, data, y, margin, pageW, opts, autoTable, drawPageFooter);
-  } else if (data.invoice_type === 'chemical_sale') {
-    y = drawChemicalSaleLayout(doc, data, y, margin, pageW, opts, autoTable, drawPageFooter);
-  } else {
-    y = drawMiscChargeLayout(doc, data, y, margin, pageW, opts, autoTable, drawPageFooter);
-  }
-
-  // ── Totals Section ─────────────────────────────────────────────────
-  // Check if we need a new page
-  if (y + 130 > pageH - 40) {
-    doc.addPage();
-    y = margin;
-  }
-
-  const totalsW = 220;
-  const totalsX = pageW - margin - totalsW;
-  // #33: reserve an extra row for the informational Discount Earned line below the
-  // balance (only when an amount is recorded). It is NOT a deduction.
-  const hasDiscount = (data.discount_earned_cents ?? 0) > 0;
-  const totalsH = 110 + (data.paid_amount_cents > 0 ? 16 : 0) + (data.prepay_applied_cents > 0 ? 16 : 0) + ((data.write_off_cents ?? 0) > 0 ? 16 : 0) + (hasDiscount ? 16 : 0);
-  doc.setFillColor(...LIGHT_BG);
-  doc.roundedRect(totalsX, y, totalsW, totalsH, 4, 4, 'F');
-
-  const tLX = totalsX + 12;
-  const tRX = totalsX + totalsW - 12;
-  let ty = y + 20;
-
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...CHARCOAL);
-  doc.text('Subtotal', tLX, ty);
-  doc.text(fmt(data.total_amount_cents), tRX, ty, { align: 'right' });
-  ty += 16;
-
-  if (data.paid_amount_cents > 0) {
-    doc.text('Payments', tLX, ty);
-    doc.setTextColor(...CRX_GREEN);
-    doc.text(`-${fmt(data.paid_amount_cents)}`, tRX, ty, { align: 'right' });
-    doc.setTextColor(...CHARCOAL);
-    ty += 16;
-  }
-
-  if (data.prepay_applied_cents > 0) {
-    doc.text('Prepay Applied', tLX, ty);
-    doc.setTextColor(...CRX_GREEN);
-    doc.text(`-${fmt(data.prepay_applied_cents)}`, tRX, ty, { align: 'right' });
-    doc.setTextColor(...CHARCOAL);
-    ty += 16;
-  }
-
-  if ((data.write_off_cents ?? 0) > 0) {
-    doc.text('Write-off', tLX, ty);
-    doc.setTextColor(...CRX_GREEN);
-    doc.text(`-${fmt(data.write_off_cents ?? 0)}`, tRX, ty, { align: 'right' });
-    doc.setTextColor(...CHARCOAL);
-    ty += 16;
-  }
-
-  if (data.finance_charge_cents && data.finance_charge_cents > 0) {
-    doc.text('Finance Charges', tLX, ty);
-    doc.text(fmt(data.finance_charge_cents), tRX, ty, { align: 'right' });
-    ty += 16;
-  }
-
-  // Divider
-  doc.setDrawColor(200, 200, 200);
-  doc.line(tLX, ty - 4, tRX, ty - 4);
-  ty += 8;
-
-  // Balance due
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'bold');
-  doc.text('BALANCE DUE', tLX, ty);
-  const balanceColor = data.balance_cents > 0 ? RED : CRX_GREEN;
-  doc.setTextColor(...balanceColor);
-  doc.text(fmt(data.balance_cents), tRX, ty, { align: 'right' });
-
-  // #33: informational Discount Earned line BELOW the balance — it is recorded and
-  // shown (early-pay discount) but is deliberately NOT deducted from the balance,
-  // so the printed Balance Due still reconciles to total − payments − prepay − write-off.
-  if (hasDiscount) {
-    ty += 16;
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...GRAY);
-    doc.text('Discount Earned (if paid early)', tLX, ty);
-    doc.text(fmt(data.discount_earned_cents ?? 0), tRX, ty, { align: 'right' });
-  }
-
-  y += totalsH + 15;
-
-  // Footer notes
+  drawHeader(p, company);
+  drawBillTo(p);
+  if (data.invoice_type === 'field_application') drawFieldApplicationLayout(p);
+  else if (data.invoice_type === 'chemical_sale') drawChemicalSaleLayout(p);
+  else drawMiscChargeLayout(p);
+  drawTotals(p);
+  drawPayNote(p);
   if (data.footer_notes) {
-    doc.setFontSize(9);
-    doc.setTextColor(...GRAY);
-    doc.setFont('helvetica', 'normal');
-    const lines = doc.splitTextToSize(data.footer_notes, pageW - margin * 2);
-    doc.text(lines, margin, y);
+    p.y += 10;
+    drawBoxedNote(p, data.footer_notes);
   }
-
-  // Final page footer
-  drawPageFooter();
-
+  // The legal name, as the old footer printed it: a paid invoice has no pay note to carry it.
+  drawPageFooters(doc, [COMPANY_LEGAL_NAME, company.email, company.phone && `Questions? Call ${company.phone}.`].filter(Boolean).join(' · '));
   return doc;
 }
 
-function drawFieldApplicationLayout(
-  doc: JsPDFWithAutoTable, data: InvoicePdfData, startY: number, margin: number, pageW: number,
-  opts: InvoicePrintOptions, autoTable: AutoTable, drawPageFooter: () => void,
-): number {
-  let y = startY;
+function newPage(p: Page): void {
+  p.doc.addPage();
+  p.y = Q_CONTINUED_TOP;
+}
 
-  // Description line: "Corn - 91.90 - Pole Field, Leaming 92"
-  if (data.crop_type || data.total_acres || data.field_names?.length) {
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...CHARCOAL);
-    const descParts = [
-      data.crop_type,
-      data.total_acres ? `${fmtNum(data.total_acres, 2)}` : null,
-      data.field_names?.join(', '),
-    ].filter(Boolean);
-    doc.text(descParts.join(' - '), margin, y);
-    y += 14;
+const contentWidth = (p: Page) => p.pageW - Q_MARGIN_X * 2;
+const fmtShare = (pct: number) => `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(pct)}%`;
+
+/** A Bill Split's payers (each share is another invoice), when the print shows shares. */
+function billSplitPayers(p: Page): InvoicePdfShare[] | null {
+  const shares = p.data.shares ?? [];
+  return p.opts.show_shares && shares.length > 1 && shares.every((s) => s.invoice_number) ? shares : null;
+}
+
+const thisPayer = (p: Page) => billSplitPayers(p)?.find((s) => s.invoice_number === p.data.invoice_number);
+
+// ── Letterhead and bill-to ───────────────────────────────────────────────
+
+/** Company block | logo, "Invoice" and status | the invoice details, as the quote PDF's header. */
+function drawHeader(p: Page, company: CompanyInfo): void {
+  const { doc, data, pageW } = p;
+  const top = p.y;
+  const colW = (contentWidth(p) - 32) / 3;
+  const companyY = drawCompanyBlock(doc, company, top, colW);
+  drawLogo(doc, pageW / 2 - Q_LOGO_WIDTH / 2, top, Q_LOGO_WIDTH);
+  let titleY = top + Q_LOGO_WIDTH * Q_LOGO_RATIO + 15;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13.5);
+  doc.setTextColor(...Q_TEXT);
+  doc.text('Invoice', pageW / 2, titleY, { align: 'center' });
+  if (data.status) {
+    // A voided or cancelled invoice says so loudly, so a forwarded copy never looks live.
+    const dead = isDeadStatus(data.status);
+    titleY += dead ? 16 : 12;
+    doc.setFontSize(dead ? 12 : 7.5);
+    doc.setTextColor(...(data.status === 'voided' ? RED : dead ? Q_TEXT : Q_MUTED));
+    doc.text(data.status.toUpperCase(), pageW / 2, titleY, { align: 'center' });
   }
+  p.y = Math.max(companyY, titleY, drawInvoiceDetails(p, top, colW));
+}
 
-  // ── Diluent / carrier-water line (#2) ──────────────────────────────
-  // Rate per acre + computed total (rate x applied acres), in the standard
-  // (current) field-app layout. Omitted entirely when no rate is recorded —
-  // never a phantom 0. A QUANTITY (gallons), never money.
-  if (data.diluent_gpa != null) {
-    const diluentLine = buildDiluentLine(data.diluent_gpa, data.total_acres);
-    if (diluentLine) {
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(...CHARCOAL);
-      doc.text(diluentLine, margin, y);
-      y += 14;
+const isDeadStatus = (status: string) => status === 'voided' || status === 'cancelled';
+
+function invoiceDetails(data: InvoicePdfData): Array<[string, string]> {
+  const rows: Array<[string, string | undefined]> = [
+    ['Invoice #', data.invoice_number],
+    ['Invoice date', fmtDate(data.invoice_date)],
+    ['Due date', data.due_date ? fmtDate(data.due_date) : 'On receipt'],
+    ['Terms', data.payment_terms],
+    ['Account #', data.account_number],
+    ['Salesperson', data.salesman_name],
+    ['Customer PO #', data.purchase_order_ref],
+  ];
+  return rows.filter((row): row is [string, string] => !!row[1]);
+}
+
+/** Bold label and value per row, right edge on the margin; values wrap in the column. Returns the last baseline. */
+function drawInvoiceDetails(p: Page, top: number, colW: number): number {
+  const { doc } = p;
+  const details = invoiceDetails(p.data);
+  doc.setFontSize(8.25);
+  doc.setTextColor(...Q_TEXT);
+  doc.setFont('helvetica', 'bold');
+  const labelW = Math.max(...details.map(([label]) => doc.getTextWidth(label))) + 9;
+  doc.setFont('helvetica', 'normal');
+  const valueLines = details.map(([, value]) => doc.splitTextToSize(value, colW - labelW) as string[]);
+  const x = p.pageW - Q_MARGIN_X - labelW - Math.max(...valueLines.flat().map((line) => doc.getTextWidth(line)));
+  let y = top + 9;
+  details.forEach(([label], i) => {
+    doc.setFont('helvetica', 'bold');
+    doc.text(label, x, y);
+    doc.setFont('helvetica', 'normal');
+    for (const line of valueLines[i]) {
+      doc.text(line, x + labelW, y);
+      y += 12;
+    }
+  });
+  return y - 12;
+}
+
+function drawLabel(doc: JsPDFWithAutoTable, label: string, x: number, y: number): void {
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...Q_MUTED);
+  doc.text(label, x, y);
+  doc.setTextColor(...Q_TEXT);
+  doc.setFontSize(9);
+}
+
+/** BILL TO where a window envelope shows it, and FOR (this payer's part of the delivery) beside it. */
+function drawBillTo(p: Page): void {
+  const { doc, data } = p;
+  const x = Q_MARGIN_X + 27;
+  p.y += 30;
+  const top = p.y;
+  drawLabel(doc, 'BILL TO', x, top);
+  let y = top;
+  for (const line of cappedLines(doc, data.customer_name.toUpperCase(), contentWidth(p) / 2 - 27)) {
+    y += 13;
+    doc.text(line, x, y);
+  }
+  doc.setFont('helvetica', 'normal');
+  const city = data.customer_city || data.customer_state
+    ? [data.customer_city, [data.customer_state, data.customer_zip].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
+  for (const value of [data.customer_address, city, data.customer_phone]) {
+    if (!value) continue;
+    for (const line of cappedLines(doc, value, contentWidth(p) / 2 - 27)) {
+      y += 13;
+      doc.text(line, x, y);
     }
   }
-
-  // Grower line
-  if (data.shares && data.shares.length > 1) {
-    doc.setFontSize(9);
+  const payer = thisPayer(p);
+  if (payer) {
+    const forX = Q_MARGIN_X + contentWidth(p) / 2 + 12;
+    drawLabel(doc, 'FOR', forX, top);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...GRAY);
-    const growerLine = data.shares.map(s => `Grower: ${s.customer_name}`).join('  ');
-    doc.text(growerLine, margin, y);
-    y += 14;
+    // No percentage: a payer can own whole lines, and freight, discount and tax land per payer (attack MED-1).
+    doc.text("This invoice bills this payer's part of the delivery.", forX, top + 13);
+    y = Math.max(y, top + 13);
   }
+  p.y = y + 8;
+}
 
-  // Header notes
-  if (data.header_notes) {
-    doc.setFontSize(9);
-    doc.setTextColor(...GRAY);
-    doc.setFont('helvetica', 'italic');
-    const lines = doc.splitTextToSize(data.header_notes, pageW - margin * 2);
-    doc.text(lines, margin, y);
-    y += lines.length * 12 + 4;
+/**
+ * Wrapped to the width and kept to six lines per field (the last ends "..."). A real name or street wraps to two at
+ * most, so a normal address fits the envelope window; drawBillTo moves p.y past every line, so a longer block pushes
+ * the content below down instead of overlapping it. Only an absurd value is cut, visibly.
+ */
+function cappedLines(doc: JsPDFWithAutoTable, text: string, width: number, max = 6): string[] {
+  const lines = doc.splitTextToSize(text, width) as string[];
+  if (lines.length <= max) return lines;
+  let last = lines[max - 1];
+  while (last && doc.getTextWidth(`${last}...`) > width) last = last.slice(0, -1);
+  return [...lines.slice(0, max - 1), `${last.trimEnd()}...`];
+}
+
+/** A note in a light grey box, the lead sentence bold; split across pages when long. */
+function drawBoxedNote(p: Page, text: string, lead = ''): void {
+  const { doc } = p;
+  const padX = 7.5;
+  const padY = 6;
+  const lineH = 12;
+  const w = contentWidth(p) - padX * 2;
+  doc.setFontSize(8.25);
+  doc.setFont('helvetica', 'bold');
+  const leadW = lead ? doc.getTextWidth(`${lead} `) : 0;
+  doc.setFont('helvetica', 'normal');
+  const inline = !!lead && (doc.splitTextToSize(text, w - leadW) as string[]).length === 1;
+  const lines: Array<[string, string]> = inline ? [[lead, text]] : [
+    ...(lead ? [[lead, ''] as [string, string]] : []),
+    ...(doc.splitTextToSize(text, w) as string[]).map((line): [string, string] => ['', line]),
+  ];
+  while (lines.length) {
+    const fits = Math.floor((p.bottom - p.y - padY * 2) / lineH);
+    if (fits < 1) {
+      newPage(p);
+      continue;
+    }
+    const chunk = lines.splice(0, fits);
+    doc.setFillColor(...Q_NOTE_BG);
+    doc.rect(Q_MARGIN_X, p.y, contentWidth(p), chunk.length * lineH + padY * 2, 'F');
+    doc.setTextColor(...Q_TEXT);
+    chunk.forEach(([bold, normal], i) => drawNoteLine(doc, bold, normal, p.y + padY + (i + 1) * lineH - 3, leadW));
+    p.y += chunk.length * lineH + padY * 2;
+    if (lines.length) newPage(p);
   }
+}
 
-  y += 4;
+function drawNoteLine(doc: JsPDFWithAutoTable, bold: string, normal: string, y: number, leadW: number): void {
+  const x = Q_MARGIN_X + 7.5;
+  if (bold) {
+    doc.setFont('helvetica', 'bold');
+    doc.text(bold, x, y);
+  }
+  if (normal) {
+    doc.setFont('helvetica', 'normal');
+    doc.text(normal, bold ? x + leadW : x, y);
+  }
+}
 
-  // Product detail table
+// ── Tables ───────────────────────────────────────────────────────────────
+
+/** Bold section title over the green rule, with an optional muted note at its right end. */
+function drawSectionTitle(p: Page, title: string, note = '', width = contentWidth(p)): void {
+  const { doc } = p;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...Q_TEXT);
+  doc.text(title, Q_MARGIN_X, p.y + 9);
+  if (note) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...Q_MUTED);
+    doc.text(note, Q_MARGIN_X + width, p.y + 9, { align: 'right' });
+  }
+  doc.setDrawColor(...CRX_GREEN);
+  doc.setLineWidth(1.125);
+  doc.line(Q_MARGIN_X, p.y + 13, Q_MARGIN_X + width, p.y + 13);
+  p.y += 17;
+}
+
+/** Right-aligns the last `count` of `n` columns (numbers and money) and bolds the last (the amount). */
+function numberColumns(n: number, count: number): Record<number, Partial<Styles>> {
+  const styles: Record<number, Partial<Styles>> = { 0: { cellWidth: 'auto' } };
+  for (let i = n - count; i < n; i++) styles[i] = { halign: 'right' };
+  styles[n - 1] = { halign: 'right', fontStyle: 'bold' };
+  return styles;
+}
+
+function drawTable(
+  p: Page, head: string[], body: Row[], columnStyles: Record<number, Partial<Styles>>,
+  sides: { left: number; right: number } = { left: Q_MARGIN_X, right: Q_MARGIN_X },
+): void {
+  p.autoTable(p.doc, {
+    ...Q_TABLE,
+    startY: p.y,
+    margin: { ...Q_TABLE.margin, ...sides },
+    head: [head],
+    body,
+    columnStyles,
+    // A heading sits over its column: right-aligned over numbers.
+    didParseCell: (hook) => {
+      if (hook.section === 'head') hook.cell.styles.halign = columnStyles[hook.column.index]?.halign ?? 'left';
+    },
+  });
+  p.y = p.doc.lastAutoTable.finalY;
+}
+
+/** The lines the table lists: all of them, less the discount and tax when the totals show those. */
+const tableItems = (p: Page) => (p.breakdown ? p.data.items.filter((item) => !isComputedLine(item)) : p.data.items);
+
+function drawProductsTitle(p: Page): void {
+  p.y += 16;
+  if (p.y + 70 > p.bottom) newPage(p);
+  const payer = thisPayer(p);
+  drawSectionTitle(p, 'PRODUCTS AND CHARGES', payer ? "Quantities are this payer's part of each line" : '');
+}
+
+function drawHeaderNotes(p: Page): void {
+  if (!p.data.header_notes) return;
+  p.y += 10;
+  drawBoxedNote(p, p.data.header_notes);
+}
+
+// ── Layout 1: Field Application ──────────────────────────────────────────
+
+/** "Corn - 91.90 - Pole Field", the diluent line and the growers, above the table. */
+function drawFieldContext(p: Page): void {
+  const { doc, data } = p;
+  const desc = [data.crop_type, data.total_acres ? fmtNum(data.total_acres, 2) : null, data.field_names?.join(', ')]
+    .filter(Boolean).join(' - ');
+  const diluent = data.diluent_gpa != null ? buildDiluentLine(data.diluent_gpa, data.total_acres) : '';
+  const growers = data.shares && data.shares.length > 1 ? data.shares.map((s) => `Grower: ${s.customer_name}`).join('  ') : '';
+  const lines: Array<[string, 'bold' | 'normal']> = [[desc, 'bold'], [diluent, 'normal'], [growers, 'normal']];
+  doc.setFontSize(8.25);
+  doc.setTextColor(...Q_TEXT);
+  for (const [text, weight] of lines) {
+    if (!text) continue;
+    doc.setFont('helvetica', weight);
+    for (const line of doc.splitTextToSize(text, contentWidth(p)) as string[]) {
+      // Nothing is cut: a fields list longer than the page carries on to the next one.
+      if (p.y + 13 > p.bottom) newPage(p);
+      p.y += 13;
+      doc.text(line, Q_MARGIN_X, p.y);
+    }
+  }
+}
+
+function fieldApplicationRow(item: InvoicePdfItem, data: InvoicePdfData, showEpa: boolean): string[] {
+  const isFuel = isFuelSurchargeLine(item);
+  const rateStr = !isFuel && item.rate_per_acre != null ? `${fmtNum(item.rate_per_acre, 4)} ${item.rate_unit || item.unit_size || ''}` : '';
+  const totalApplied = isFuel
+    ? ''
+    : item.total_applied != null
+      ? `${fmtNum(item.total_applied, item.total_applied === Math.round(item.total_applied) ? 2 : 4)} ${item.total_applied_unit || ''}`
+      : item.is_application_fee ? `${fmtNum(item.quantity, 2)} AC` : '';
+  const glLb = item.total_applied_gl_lb != null ? `${fmtNum(item.total_applied_gl_lb, 4)} ${item.gl_lb_unit || ''}` : '';
+  const unitPrice = isFuel
+    ? fmt(item.unit_price_cents)
+    : item.is_application_fee
+      ? `${fmt(item.unit_price_cents)} AC`
+      : `${fmt(item.unit_price_cents)} ${item.gl_lb_unit || item.unit_size || ''}`;
+  return [
+    productCellText(item, data),
+    ...(showEpa ? [invoiceLineEpaText(item.brand_lines, item.epa_registration)] : []),
+    rateStr, totalApplied, glLb, unitPrice, fmt(item.extended_cents),
+  ];
+}
+
+function drawFieldApplicationLayout(p: Page): void {
+  const { doc, data, opts } = p;
+  drawFieldContext(p);
+  drawHeaderNotes(p);
+  drawProductsTitle(p);
   const showEpa = opts.show_epa_registration;
+  const head = ['Product', ...(showEpa ? ['EPA Reg'] : []), 'Rate / Acre', 'Total Applied', 'Total Applied GL/LB', 'Unit Price', 'Total Cost'];
+  drawTable(p, head, tableItems(p).map((item) => fieldApplicationRow(item, data, showEpa)), numberColumns(head.length, 5));
 
-  const head = showEpa
-    ? [['Product', 'EPA Reg', 'Rate / Acre', 'Total Applied', 'Total Applied GL/LB', 'Unit Price', 'Total Cost']]
-    : [['Product', 'Rate / Acre', 'Total Applied', 'Total Applied GL/LB', 'Unit Price', 'Total Cost']];
-
-  const rows = data.items.map((item) => {
-    const isFuel = isFuelSurchargeLine(item);
-    const rateStr = isFuel
-      ? ''
-      : item.rate_per_acre != null
-        ? `${fmtNum(item.rate_per_acre, 4)} ${item.rate_unit || item.unit_size || ''}`
-        : item.is_application_fee ? '' : '';
-
-    const totalApplied = isFuel
-      ? ''
-      : item.total_applied != null
-        ? `${fmtNum(item.total_applied, item.total_applied === Math.round(item.total_applied) ? 2 : 4)} ${item.total_applied_unit || ''}`
-        : item.is_application_fee
-          ? `${fmtNum(item.quantity, 2)} AC`
-          : '';
-
-    const glLb = item.total_applied_gl_lb != null
-      ? `${fmtNum(item.total_applied_gl_lb, 4)} ${item.gl_lb_unit || ''}`
-      : item.is_application_fee
-        ? ''
-        : '';
-
-    const unitPrice = isFuel
-      ? `${fmtNum(item.unit_price_cents / 100, 2)}`
-      : item.is_application_fee
-        ? `${fmtNum(item.unit_price_cents / 100, 2)} AC`
-        : `${fmtNum(item.unit_price_cents / 100, 2)} ${item.gl_lb_unit || item.unit_size || ''}`;
-
-    const product = productCellText(item, data);
-    const row = showEpa
-      ? [
-        product,
-        invoiceLineEpaText(item.brand_lines, item.epa_registration),
-        rateStr,
-        totalApplied,
-        glLb,
-        unitPrice,
-        fmt(item.extended_cents),
-      ]
-      : [
-        product,
-        rateStr,
-        totalApplied,
-        glLb,
-        unitPrice,
-        fmt(item.extended_cents),
-      ];
-
-    return row;
-  });
-
-  autoTable(doc, {
-    startY: y,
-    margin: { left: margin, right: margin },
-    head,
-    body: rows,
-    theme: 'plain',
-    styles: { fontSize: 8, cellPadding: 4, textColor: CHARCOAL },
-    headStyles: {
-      fillColor: TABLE_HEADER_BG,
-      textColor: CHARCOAL,
-      fontStyle: 'bold',
-      fontSize: 7.5,
-    },
-    columnStyles: showEpa ? {
-      0: { cellWidth: 'auto' },
-      1: { cellWidth: 55 },
-      2: { halign: 'right', cellWidth: 65 },
-      3: { halign: 'right', cellWidth: 72 },
-      4: { halign: 'right', cellWidth: 72 },
-      5: { halign: 'right', cellWidth: 55 },
-      6: { halign: 'right', fontStyle: 'bold', cellWidth: 60 },
-    } : {
-      0: { cellWidth: 'auto' },
-      1: { halign: 'right', cellWidth: 70 },
-      2: { halign: 'right', cellWidth: 80 },
-      3: { halign: 'right', cellWidth: 80 },
-      4: { halign: 'right', cellWidth: 60 },
-      5: { halign: 'right', fontStyle: 'bold', cellWidth: 65 },
-    },
-    alternateRowStyles: { fillColor: ALT_ROW_BG },
-    didDrawPage: drawPageFooter,
-  });
-
-  y = doc.lastAutoTable.finalY + 6;
-
-  // Price per acre
   if (opts.show_price_per_acre && data.total_acres && data.total_acres > 0) {
-    const pricePerAcre = data.total_amount_cents / 100 / data.total_acres;
-    doc.setFontSize(9);
+    const pricePerAcreCents = centsPerAcre(data.total_amount_cents, data.total_acres);
+    if (p.y + 18 > p.bottom) newPage(p);
+    p.y += 14;
+    doc.setFontSize(8.25);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...GRAY);
-    doc.text(`Price per acre: ${fmtNum(pricePerAcre, 2)}`, margin + 8, y + 4);
+    doc.setTextColor(...Q_MUTED);
+    if (pricePerAcreCents !== null) doc.text(`Price per acre: ${fmt(pricePerAcreCents)}`, Q_MARGIN_X + 4.5, p.y);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...CHARCOAL);
-    doc.text(`Total ${fmt(data.total_amount_cents)}`, pageW - margin, y + 4, { align: 'right' });
-    y += 18;
+    doc.setTextColor(...Q_TEXT);
+    doc.text(`Total ${fmt(data.total_amount_cents)}`, p.pageW - Q_MARGIN_X - 4.5, p.y, { align: 'right' });
+    p.y += 4;
   }
-
-  // Shares table
-  if (opts.show_shares && data.shares && data.shares.length > 1) {
-    y += 6;
-    const hasPerAcrePricing = data.shares.some(s => s.price_per_acre_cents != null);
-    autoTable(doc, {
-      startY: y,
-      margin: { left: margin + (hasPerAcrePricing ? 140 : 200), right: margin },
-      head: [hasPerAcrePricing
-        ? ['', '$/Acre', 'Shares', 'Acres', 'Total']
-        : ['', 'Shares', 'Acres', 'Total']],
-      body: data.shares.map(s => {
-        const name = s.pricing_note
-          ? `${s.customer_name}\n${s.pricing_note}`
-          : s.customer_name;
-        return hasPerAcrePricing
-          ? [
-              name,
-              s.price_per_acre_cents != null ? fmt(s.price_per_acre_cents) : '',
-              `${fmtNum(s.split_percentage, 2)}%`,
-              s.acres != null ? fmtNum(s.acres, 2) : '',
-              fmt(s.amount_cents),
-            ]
-          : [
-              name,
-              `${fmtNum(s.split_percentage, 2)}%`,
-              s.acres != null ? fmtNum(s.acres, 2) : '',
-              fmt(s.amount_cents),
-            ];
-      }),
-      theme: 'plain',
-      styles: { fontSize: 8.5, cellPadding: 3, textColor: CHARCOAL },
-      headStyles: {
-        fillColor: TABLE_HEADER_BG,
-        textColor: CHARCOAL,
-        fontStyle: 'bold',
-        fontSize: 8,
-      },
-      columnStyles: hasPerAcrePricing
-        ? {
-            0: { cellWidth: 'auto' },
-            1: { halign: 'right', cellWidth: 50 },
-            2: { halign: 'right', cellWidth: 45 },
-            3: { halign: 'right', cellWidth: 45 },
-            4: { halign: 'right', fontStyle: 'bold', cellWidth: 60 },
-          }
-        : {
-            0: { cellWidth: 'auto' },
-            1: { halign: 'right', cellWidth: 55 },
-            2: { halign: 'right', cellWidth: 55 },
-            3: { halign: 'right', fontStyle: 'bold', cellWidth: 65 },
-          },
-      didDrawPage: drawPageFooter,
-    });
-    y = doc.lastAutoTable.finalY + 6;
-  }
-
-  // Finance charges
-  if (data.finance_charge_cents && data.finance_charge_cents > 0) {
-    y += 4;
-    doc.setDrawColor(200, 200, 200);
-    doc.line(margin, y, pageW - margin, y);
-    y += 12;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...CHARCOAL);
-    doc.text('FIN', margin, y);
-    doc.text('Finance Charges', margin + 60, y);
-    doc.text(fmt(data.finance_charge_cents), pageW - margin, y, { align: 'right' });
-    y += 16;
-    doc.setFont('helvetica', 'bold');
-    doc.text(`Net Due (${data.invoice_number}):`, margin + 60, y);
-    doc.text(fmt(data.balance_cents + (data.finance_charge_cents || 0)), pageW - margin, y, { align: 'right' });
-    y += 16;
-  }
-
-  return y + 10;
+  drawSharesTable(p, true);
+  drawFinanceStrip(p);
 }
 
 // ── Layout 2: Chemical Sale ──────────────────────────────────────────────
 
-function drawChemicalSaleLayout(
-  doc: JsPDFWithAutoTable, data: InvoicePdfData, startY: number, margin: number, pageW: number,
-  opts: InvoicePrintOptions, autoTable: AutoTable, drawPageFooter: () => void,
-): number {
-  let y = startY;
+function chemicalSaleRow(item: InvoicePdfItem, data: InvoicePdfData, showEpa: boolean): string[] {
+  const epa = showEpa ? [isComputedLine(item) ? '' : invoiceLineEpaText(item.brand_lines, item.epa_registration)] : [];
+  if (isComputedLine(item)) return [item.product_name || item.description, ...epa, '', '', fmt(item.extended_cents)];
+  const qtyStr = `${fmtNum(item.quantity, 2)} ${item.unit_size || item.rate_unit || ''}`;
+  const costStr = `${fmt(item.unit_price_cents)} ${item.gl_lb_unit || item.unit_size || ''}`;
+  return [productCellText(item, data), ...epa, qtyStr, costStr, fmt(item.extended_cents)];
+}
 
-  // Description line
-  if (data.header_notes) {
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...CHARCOAL);
-    const lines = doc.splitTextToSize(data.header_notes, pageW - margin * 2);
-    doc.text(lines, margin, y);
-    y += lines.length * 13 + 8;
-  }
-
-  // Chemical sale table: Date | Chemical | EPA Reg | Quantity | Cost | Total
-  const showEpa = opts.show_epa_registration;
-
-  const head = showEpa
-    ? [['Date', 'Chemical', 'EPA Reg', 'Quantity', 'Cost', 'Total']]
-    : [['Date', 'Chemical', 'Quantity', 'Cost', 'Total']];
-
-  const rows = data.items.map((item) => {
-    if (isComputedLine(item)) {
-      const name = item.product_name || item.description;
-      return showEpa ? ['', name, '', '', '', fmt(item.extended_cents)] : ['', name, '', '', fmt(item.extended_cents)];
-    }
-    const qtyStr = `${fmtNum(item.quantity, 2)} ${item.unit_size || item.rate_unit || ''}`;
-    const costStr = `${fmt(item.unit_price_cents)} ${item.gl_lb_unit || item.unit_size || ''}`;
-
-    const product = productCellText(item, data);
-    return showEpa
-      ? [fmtDate(data.invoice_date), product, invoiceLineEpaText(item.brand_lines, item.epa_registration), qtyStr, costStr, fmt(item.extended_cents)]
-      : [fmtDate(data.invoice_date), product, qtyStr, costStr, fmt(item.extended_cents)];
-  });
-
-  autoTable(doc, {
-    startY: y,
-    margin: { left: margin, right: margin },
-    head,
-    body: rows,
-    theme: 'plain',
-    styles: { fontSize: 9, cellPadding: 5, textColor: CHARCOAL },
-    headStyles: {
-      fillColor: TABLE_HEADER_BG,
-      textColor: CHARCOAL,
-      fontStyle: 'bold',
-      fontSize: 8,
-    },
-    columnStyles: showEpa ? {
-      0: { cellWidth: 72 },
-      1: { cellWidth: 'auto' },
-      2: { cellWidth: 65 },
-      3: { halign: 'right', cellWidth: 70 },
-      4: { halign: 'right', cellWidth: 80 },
-      5: { halign: 'right', fontStyle: 'bold', cellWidth: 70 },
-    } : {
-      0: { cellWidth: 72 },
-      1: { cellWidth: 'auto' },
-      2: { halign: 'right', cellWidth: 80 },
-      3: { halign: 'right', cellWidth: 90 },
-      4: { halign: 'right', fontStyle: 'bold', cellWidth: 80 },
-    },
-    alternateRowStyles: { fillColor: ALT_ROW_BG },
-    didDrawPage: drawPageFooter,
-  });
-
-  y = doc.lastAutoTable.finalY + 6;
-
-  // Total line
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...CHARCOAL);
-  doc.text(`Total: ${fmt(data.total_amount_cents)}`, pageW - margin, y + 4, { align: 'right' });
-  y += 18;
-
-  // Shares table (chemical sales can also have splits)
-  y = drawSharesTable(doc, data, y, margin, opts, autoTable, drawPageFooter);
-
-  // Finance charges
-  if (data.finance_charge_cents && data.finance_charge_cents > 0) {
-    y += 4;
-    doc.setDrawColor(200, 200, 200);
-    doc.line(margin, y, pageW - margin, y);
-    y += 12;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...CHARCOAL);
-    doc.text('FIN', margin, y);
-    doc.text('Finance Charges', margin + 60, y);
-    doc.text(fmt(data.finance_charge_cents), pageW - margin, y, { align: 'right' });
-    y += 16;
-    doc.setFont('helvetica', 'bold');
-    doc.text(`Net Due (${data.invoice_number}):`, margin + 60, y);
-    doc.text(fmt(data.balance_cents + (data.finance_charge_cents || 0)), pageW - margin, y, { align: 'right' });
-    y += 16;
-  }
-
-  return y + 10;
+function drawChemicalSaleLayout(p: Page): void {
+  drawHeaderNotes(p);
+  drawProductsTitle(p);
+  const showEpa = p.opts.show_epa_registration;
+  const head = ['Product', ...(showEpa ? ['EPA reg. #'] : []), 'Quantity', 'Unit price', 'Amount'];
+  drawTable(p, head, tableItems(p).map((item) => chemicalSaleRow(item, p.data, showEpa)), numberColumns(head.length, 3));
+  drawSharesTable(p, false);
+  drawFinanceStrip(p);
 }
 
 // ── Layout 3: Misc Charge ────────────────────────────────────────────────
 
-/** The customer share table under a chemical sale's or misc charge's lines (a Bill Split payer's draft can be either). */
-function drawSharesTable(
-  doc: JsPDFWithAutoTable, data: InvoicePdfData, startY: number, margin: number,
-  opts: InvoicePrintOptions, autoTable: AutoTable, drawPageFooter: () => void,
-): number {
-  let y = startY;
-  if (opts.show_shares && data.shares && data.shares.length > 1) {
-    y += 4;
-    const hasPerAcrePricing = data.shares.some(s => s.price_per_acre_cents != null);
-    autoTable(doc, {
-      startY: y,
-      margin: { left: margin + (hasPerAcrePricing ? 140 : 200), right: margin },
-      head: [hasPerAcrePricing
-        ? ['Customer', '$/Acre', 'Shares', 'Total']
-        : ['Customer', 'Shares', 'Total']],
-      body: data.shares.map(s => {
-        const name = s.pricing_note
-          ? `${s.customer_name}\n${s.pricing_note}`
-          : s.customer_name;
-        return hasPerAcrePricing
-          ? [
-              name,
-              s.price_per_acre_cents != null ? fmt(s.price_per_acre_cents) : '',
-              `${fmtNum(s.split_percentage, 4)}%`,
-              fmt(s.amount_cents),
-            ]
-          : [
-              name,
-              `${fmtNum(s.split_percentage, 4)}%`,
-              fmt(s.amount_cents),
-            ];
-      }),
-      theme: 'plain',
-      styles: { fontSize: 8.5, cellPadding: 3, textColor: CHARCOAL },
-      headStyles: { fillColor: TABLE_HEADER_BG, textColor: CHARCOAL, fontStyle: 'bold', fontSize: 8 },
-      columnStyles: hasPerAcrePricing
-        ? {
-            0: { cellWidth: 'auto' },
-            1: { halign: 'right', cellWidth: 50 },
-            2: { halign: 'right', cellWidth: 55 },
-            3: { halign: 'right', fontStyle: 'bold', cellWidth: 65 },
-          }
-        : {
-            0: { cellWidth: 'auto' },
-            1: { halign: 'right', cellWidth: 65 },
-            2: { halign: 'right', fontStyle: 'bold', cellWidth: 70 },
-          },
-      didDrawPage: drawPageFooter,
-    });
-    y = doc.lastAutoTable.finalY + 6;
-  }
-  return y;
+function drawMiscChargeLayout(p: Page): void {
+  drawHeaderNotes(p);
+  drawProductsTitle(p);
+  const rows = tableItems(p).map((item) => [item.product_name || item.description, fmt(item.extended_cents)]);
+  drawTable(p, ['Description', 'Amount'], rows, numberColumns(2, 1));
+  // Every Bill Split payer's invoice shows every payer (Mason, 9 Nov), a payer's misc charge draft too.
+  drawSharesTable(p, false);
 }
 
-function drawMiscChargeLayout(
-  doc: JsPDFWithAutoTable, data: InvoicePdfData, startY: number, margin: number, pageW: number,
-  opts: InvoicePrintOptions, autoTable: AutoTable, drawPageFooter: () => void,
-): number {
-  let y = startY;
+// ── Shares, finance charges ──────────────────────────────────────────────
 
-  // Header notes
-  if (data.header_notes) {
-    doc.setFontSize(9);
-    doc.setTextColor(...GRAY);
-    doc.setFont('helvetica', 'italic');
-    const lines = doc.splitTextToSize(data.header_notes, pageW - margin * 2);
-    doc.text(lines, margin, y);
-    y += lines.length * 12 + 8;
+/**
+ * The split of this one invoice (invoice_shares): growers with acres on a field application, customers on a sale.
+ * A Bill Split's payers print beside the totals instead (drawWhoPays).
+ */
+function drawSharesTable(p: Page, field: boolean): void {
+  const shares = p.data.shares;
+  if (!p.opts.show_shares || !shares || shares.length < 2 || billSplitPayers(p)) return;
+  const perAcre = shares.some((s) => s.price_per_acre_cents != null);
+  const head = [field ? '' : 'Customer', ...(perAcre ? ['$/Acre'] : []), 'Shares', ...(field ? ['Acres'] : []), 'Total'];
+  const body = shares.map((s) => [
+    s.pricing_note ? `${s.customer_name}\n${s.pricing_note}` : s.customer_name,
+    ...(perAcre ? [s.price_per_acre_cents != null ? fmt(s.price_per_acre_cents) : ''] : []),
+    `${fmtNum(s.split_percentage, field ? 2 : 4)}%`,
+    ...(field ? [s.acres != null ? fmtNum(s.acres, 2) : ''] : []),
+    fmt(s.amount_cents),
+  ]);
+  p.y += 10;
+  drawTable(p, head, body, numberColumns(head.length, head.length - 1), { left: Q_MARGIN_X + (perAcre ? 140 : 200), right: Q_MARGIN_X });
+}
+
+function drawFinanceStrip(p: Page): void {
+  const { doc, data } = p;
+  const finance = data.finance_charge_cents ?? 0;
+  if (finance <= 0) return;
+  const right = p.pageW - Q_MARGIN_X;
+  if (p.y + 40 > p.bottom) newPage(p);
+  p.y += 8;
+  doc.setDrawColor(...Q_TOTALS_RULE);
+  doc.setLineWidth(0.75);
+  doc.line(Q_MARGIN_X, p.y, right, p.y);
+  p.y += 12;
+  doc.setFontSize(8.25);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...Q_TEXT);
+  doc.text('FIN', Q_MARGIN_X, p.y);
+  doc.text('Finance Charges (included in the balance due)', Q_MARGIN_X + 60, p.y);
+  doc.text(fmt(finance), right, p.y, { align: 'right' });
+  p.y += 14;
+  doc.setFont('helvetica', 'bold');
+  // The balance already holds the charge (20260803221244 stopped the statement adding it twice), so Net Due is the
+  // balance due, the same amount the totals print.
+  doc.text(`Net Due (${data.invoice_number}):`, Q_MARGIN_X + 60, p.y);
+  doc.text(fmt(data.balance_cents), right, p.y, { align: 'right' });
+}
+
+// ── Totals and who pays ──────────────────────────────────────────────────
+
+/** Products, each charge type, the discount and the tax: rows that add up to the invoice total. */
+function breakdownRows(p: Page): Array<[string, string]> {
+  const b = p.breakdown;
+  if (!b) return [];
+  const others = [...b.charges, ...(b.discount ? [b.discount] : []), ...(b.tax ? [b.tax] : [])];
+  // A field application's first row holds the application fee too, so it is a subtotal, not products.
+  const first = p.data.invoice_type === 'field_application' ? 'Subtotal' : 'Products';
+  const products = b.productsCents !== 0 || others.length === 0 ? [{ label: first, cents: b.productsCents }] : [];
+  return [...products, ...others].map(({ label, cents }) => [label || 'Other charges', fmt(cents)]);
+}
+
+/**
+ * What came off the invoice total, so the rows add up to Balance due as invoices.balance_cents does:
+ * total - paid - prepay - write-off - credit applied (a credit memo's credit used brings its balance up toward 0).
+ */
+function paymentRows(data: InvoicePdfData): Array<[string, string]> {
+  const credit = data.credit_applied_cents ?? 0;
+  const rows: Array<[string, string, number]> = [
+    ['Payments', `-${fmt(data.paid_amount_cents)}`, data.paid_amount_cents],
+    ['Prepay applied', `-${fmt(data.prepay_applied_cents)}`, data.prepay_applied_cents],
+    ['Credits applied', fmt(data.invoice_type === 'credit_memo' ? credit : -credit), credit],
+    ['Write-off', `-${fmt(data.write_off_cents ?? 0)}`, data.write_off_cents ?? 0],
+  ];
+  return rows.filter(([, , cents]) => cents > 0).map(([label, value]) => [label, value]);
+}
+
+function drawTotals(p: Page): void {
+  const rows = breakdownRows(p);
+  const after = paymentRows(p.data);
+  const payers = billSplitPayers(p);
+  const height = Math.max((rows.length + after.length) * 12 + 76, payers ? 30 + (payers.length + 2) * 17 : 0);
+  p.y += 18;
+  if (p.y + height > p.bottom) newPage(p);
+  if (!payers) {
+    drawTotalsBlock(p, rows, after);
+    return;
   }
+  // Content is always drawn on the last page. Who pays may run onto a new page; the totals stay beside its start.
+  const top = p.y;
+  const startPage = p.doc.getNumberOfPages();
+  drawWhoPays(p, payers);
+  const payersEnd = p.y;
+  const endPage = p.doc.getNumberOfPages();
+  if (endPage !== startPage) p.doc.setPage(startPage);
+  p.y = top;
+  drawTotalsBlock(p, rows, after);
+  if (endPage !== startPage) {
+    p.doc.setPage(endPage);
+    p.y = payersEnd;
+  } else {
+    p.y = Math.max(p.y, payersEnd);
+  }
+}
 
-  // Simple table: Description | Amount
-  autoTable(doc, {
-    startY: y,
-    margin: { left: margin, right: margin },
-    head: [['Description', 'Amount']],
-    body: data.items.map(item => [
-      item.product_name || item.description,
-      fmt(item.extended_cents),
-    ]),
-    theme: 'plain',
-    styles: { fontSize: 9, cellPadding: 5, textColor: CHARCOAL },
-    headStyles: { fillColor: TABLE_HEADER_BG, textColor: CHARCOAL, fontStyle: 'bold', fontSize: 8 },
-    columnStyles: {
-      0: { cellWidth: 'auto' },
-      1: { halign: 'right', fontStyle: 'bold', cellWidth: 100 },
-    },
-    alternateRowStyles: { fillColor: ALT_ROW_BG },
-    didDrawPage: drawPageFooter,
+function drawTotalsRows(p: Page, rows: Array<[string, string]>, x: number): void {
+  const { doc } = p;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.25);
+  doc.setTextColor(...Q_TEXT);
+  for (const [label, value] of rows) {
+    doc.text(label, x, p.y + 10);
+    doc.text(value, p.pageW - Q_MARGIN_X, p.y + 10, { align: 'right' });
+    p.y += 12;
+  }
+}
+
+function drawTotalLine(p: Page, label: string, value: string, x: number, valueSize: number): void {
+  const { doc } = p;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.75);
+  doc.text(label, x, p.y + 14);
+  doc.setFontSize(valueSize);
+  doc.text(value, p.pageW - Q_MARGIN_X, p.y + 14, { align: 'right' });
+  p.y += 20;
+}
+
+/** The right-hand totals: rows, Invoice total, payments, Balance due (green), and the early-pay discount note. */
+function drawTotalsBlock(p: Page, rows: Array<[string, string]>, after: Array<[string, string]>): void {
+  const { doc, data } = p;
+  const x = p.pageW - Q_MARGIN_X - Q_TOTALS_WIDTH;
+  const right = p.pageW - Q_MARGIN_X;
+  doc.setDrawColor(...Q_TEXT);
+  doc.setLineWidth(1.5);
+  doc.line(x, p.y, right, p.y);
+  p.y += 4;
+  drawTotalsRows(p, rows, x);
+  if (rows.length) {
+    p.y += 5;
+    doc.setDrawColor(...Q_TOTALS_RULE);
+    doc.setLineWidth(0.75);
+    doc.line(x, p.y, right, p.y);
+  }
+  doc.setTextColor(...Q_TEXT);
+  drawTotalLine(p, 'Invoice total', fmt(data.total_amount_cents), x, 12);
+  drawTotalsRows(p, after, x);
+  drawBalanceDue(p, x);
+}
+
+function drawBalanceDue(p: Page, x: number): void {
+  const { doc, data } = p;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.75);
+  doc.setTextColor(...Q_TEXT);
+  doc.text('Balance due', x, p.y + 16);
+  doc.setFontSize(13.5);
+  doc.setTextColor(...(isDeadStatus(data.status) ? Q_TEXT : CRX_GREEN));
+  doc.text(fmt(data.balance_cents), p.pageW - Q_MARGIN_X, p.y + 16, { align: 'right' });
+  p.y += 22;
+  // #33: the early-pay Discount Earned is shown but never taken off the balance, so Balance due still
+  // reconciles to total - payments - prepay - write-off.
+  if ((data.discount_earned_cents ?? 0) > 0) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...Q_MUTED);
+    doc.text('Discount earned (if paid early)', x, p.y + 8);
+    doc.text(fmt(data.discount_earned_cents ?? 0), p.pageW - Q_MARGIN_X, p.y + 8, { align: 'right' });
+    p.y += 12;
+  }
+}
+
+/** Every payer of the Bill Split, this invoice's row bold, and the delivery's total. Left of the totals. */
+function drawWhoPays(p: Page, payers: InvoicePdfShare[]): void {
+  const width = contentWidth(p) - Q_TOTALS_WIDTH - 24;
+  drawSectionTitle(p, 'WHO PAYS FOR THIS DELIVERY', '', width);
+  const bold = (row: string[], extra: Partial<Styles> = {}): Row => row.map((content) => ({ content, styles: { fontStyle: 'bold', ...extra } }));
+  const body: Row[] = payers.map((s) => {
+    const mine = s.invoice_number === p.data.invoice_number;
+    const row = [mine ? `${s.customer_name} (this invoice)` : s.customer_name, s.invoice_number ?? '', fmtShare(s.split_percentage), fmt(s.amount_cents)];
+    return mine ? bold(row) : row;
   });
+  const pct = Math.round(payers.reduce((sum, s) => sum + s.split_percentage, 0) * 10000) / 10000;
+  const cents = payers.reduce((sum, s) => sum + s.amount_cents, 0);
+  body.push(bold(['Delivery total', '', fmtShare(pct), fmt(cents)], { lineWidth: 0 }));
+  // Taha, 16 Nov: the % is the order's split (12 Nov), so it is named "Order split" unless it is each payer's share of
+  // the dollars (no order split read, loadBillSplitPayers), when "Share" is true.
+  const billed = billSplitPayerShares(payers.map((s) => ({ id: '', invoice_number: s.invoice_number ?? null, total_amount_cents: s.amount_cents })));
+  const isShare = payers.every((s) => billed.find((b) => b.invoice_number === s.invoice_number)?.split_percentage === s.split_percentage);
+  drawTable(p, ['Payer', 'Invoice', isShare ? 'Share' : 'Order split', 'Amount'], body, { 0: { cellWidth: 'auto' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+    { left: Q_MARGIN_X, right: p.pageW - Q_MARGIN_X - width });
+}
 
-  // Every Bill Split payer's invoice shows every payer (Mason, 9 Nov), a payer's misc charge draft too.
-  return drawSharesTable(doc, data, doc.lastAutoTable.finalY + 20, margin, opts, autoTable, drawPageFooter);
+/** "Please pay by <due date>." and how to pay, while a posted or overdue invoice is owed (not on a draft, attack LOW-2). */
+function drawPayNote(p: Page): void {
+  if (!['posted', 'overdue'].includes(p.data.status) || p.data.balance_cents <= 0) return;
+  const lead = p.data.due_date ? `Please pay by ${fmtDate(p.data.due_date)}.` : 'Payment is due on receipt.';
+  p.y += 16;
+  drawBoxedNote(p, `Make checks payable to ${COMPANY_LEGAL_NAME} and write the invoice number on the check.`, lead);
 }
 
 // ── Download ─────────────────────────────────────────────────────────────

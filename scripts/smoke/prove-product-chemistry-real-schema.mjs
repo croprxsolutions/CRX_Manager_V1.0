@@ -25,8 +25,39 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261209100000_product_chemistry.sql');
+const MOA_EQUIVALENCE_MODE = process.argv.includes('--moa-equivalence');
+const MOA_EQUIVALENCE = path.join(MIGRATIONS, '20270115100000_moa_group_code_equivalence.sql');
+const MOA_EQUIVALENCE_TOUCH_PINS = new Map([
+  ['20261210100000_epa_registrations.sql', 'cac5e17d8503922f33dca9ac3ea1859937fab7173a52e0d7de4bcf37f6f4a9f3'],
+  ['20261211100000_product_chemistry_confirmed_swaps.sql', '35df2c0782ef4be097eb7ae98f0454181fe6534a953e2a11e4864ac4e01522f0'],
+  ['20261229100000_product_grouping_switch_on.sql', '48c619fbdcc97291863e04855dca52957d90afd71d54df324027323ed4ac99ac'],
+  ['20261229110000_product_rates_draft.sql', '93ae0d308c03a3867120b68591b3448ebb906bd2ee4014126802ce72f12e2b0b'],
+  ['20261229120000_product_crop_use_pairs.sql', 'b21b62ab8715be178288fc3d3b8b7f3651adcd51965ef6be00b2b841580d453d'],
+  ['20261231200000_epa_registration_tools.sql', 'e2deba5c3d8e8e403cc8f61f7e769a3f8188d4685b03741a08a2b5daf516eea9'],
+  ['20261231210000_rup_records_by_line.sql', '05544bfac2fc60e9cec51e38ea23c49ac18b1318c8eed7ea32aebedd932b4f97'],
+  ['20261231220000_epa_registration_seed.sql', '92935cbd41ba75ad9edcc9ee549208d21b89bfbade49977c44bc7628a708d4fe'],
+  ['20270103140000_dry_product_fluid_ounce_guard.sql', 'ec6512b52c837ed3f1bcb20b26dd68aec918648f160ffab93872c58f89058b6a'],
+  ['20270103160000_setup_workbook_chemistry_tabs.sql', '35471deb70ce3fd6a6dcebd145a1c829375974cf97958e96abf1433d5be85bba'],
+  ['20270104110000_product_rate_review.sql', 'd8177fd1cba40fee2b5b40c31bcb150d9484137e580c11bf2eda372027525a1e'],
+  ['20270104120000_delivery_brands.sql', '4faaf187408b2c39511539795fdc92771627e1ecd12646f3764f3a4761740e38'],
+  ['20270105110000_epa_chemistry_proposals.sql', 'e974a5eef2c6abbccd07499f57cdf0da540ff175d5992f6f6c80ff5bb523bc38'],
+  ['20270106110000_invoice_brands_rup.sql', 'f963b6db825514f831fc67cbfdf04a843f98f6fa0ac05b7d2a093babfdd443e2'],
+  ['20270107100000_epa_long_name_keeps_cas_match.sql', '856f92a9decd3b806e584b2630370b1390e518d5cea3002909626735fd88a484'],
+  ['20270108100000_ingredient_modes_of_action.sql', '2fa8044bc4e0b5004bb37ced44d824c59c0696bc8a7b83930c1de062841de107'],
+  ['20270109100000_delivery_receipt_brands.sql', 'f9f52f9ace2024c77b568767288c3700dc35e4e2de871436e6df7a3067be0c87'],
+  ['20270110110000_inactive_rate_review_cleanup.sql', '7f980faaff2fd23642522535b885cca9f30e5c7c316482d4a587586f9f5b6772'],
+  ['20270115100000_moa_group_code_equivalence.sql', '7b54d17d319ca706b9fa87eb2db039bcb362df8e108cad24e5bc6f367a0a1890'],
+]);
+// These access/data migrations are deliberately represented as applied, not replayed, in the established
+// MOA prover because their reviewed behavior depends on the live Storage policy population.
+const MOA_EQUIVALENCE_LEDGER_ONLY = new Map([
+  ['20261217100000_job_access_ends_with_the_job.sql', 'a62bf5cc0cedd3f216fde2f94084f651c59e1374d9c0ac9e0593c7521bf88876'],
+  ['20261220100000_applicator_keeps_own_record_fields.sql', 'ce8ad88c9178a5693d43a1d525f7eed517774c1f9251369196fdb5e37752e1ef'],
+]);
 // Landing fixes (Mason 2026-11-07: a swap states its values, nothing is copied).
 const FOLLOW_UPS = [path.join(MIGRATIONS, '20261211100000_product_chemistry_confirmed_swaps.sql')];
+// Exact live unit rows used by the standard MOA replay before 20261229110000's unit-conversion fingerprint.
+const LIVE_UNIT_ROWS = "('3f5c3827-8523-4b42-9913-ad479588ff95'::uuid, 'Dry oz', 1, 'dry', '1 dry ounce'), ('5ed18e4b-c4d9-42fc-b85e-22babd3fc098'::uuid, 'Ea', 1, 'both', 'Each / unit'), ('f9e10e66-5027-464e-bb9e-ed9800875256'::uuid, 'fl oz', 1, 'liquid', '1 fluid ounce'), ('4406cacd-a7fe-42db-8c84-694e61bb937b'::uuid, 'g', 0.03527396, 'dry', '1 gram = 0.03527396 dry ounces (1000 mg)'), ('29d05e43-cb40-461b-a969-88ee299faca8'::uuid, 'Gal', 128, 'liquid', '1 gallon = 128 fluid ounces'), ('53997e31-d152-4ab6-b768-d1aa81b657bf'::uuid, 'Lb', 16, 'dry', '1 pound = 16 dry ounces'), ('fc5d349f-b58c-48f1-991d-fa0161fd3d01'::uuid, 'LB', 16, 'dry', '1 pound (capitalized alias)'), ('ddde7daf-8090-492b-aed9-c0b7f8ecfd34'::uuid, 'MG', 0.00003527396, 'dry', '1 milligram = 0.00003527396 dry ounces'), ('438d5f7b-f015-4319-b2b7-4f9a672cb350'::uuid, 'oz', 1, 'liquid', '1 fluid ounce (alias for fl oz)'), ('b69ddac6-68ed-4f1d-8e09-e63a7fa6635a'::uuid, 'Oz', 1, 'liquid', '1 fluid ounce (capitalized alias)'), ('a31f95a0-df80-4025-977f-f1fb4e5c8d53'::uuid, 'Pt', 16, 'liquid', '1 pint = 16 fluid ounces'), ('35532f45-2fd0-4400-87d8-3509a58377c0'::uuid, 'qt', 32, 'liquid', '1 quart lowercase (alias for Qt)'), ('915f25ff-8876-4a49-a375-940047e38313'::uuid, 'Qt', 32, 'liquid', '1 quart = 32 fluid ounces'), ('722e8d86-8e68-47d8-a940-209fad38c70e'::uuid, 'Unit', 1, 'both', 'Each / unit (alias for Ea)')";
 // Later migrations that only name what this proof covers (they call _product_parent_require_admin() and list
 // product tables in a CHECK) and redefine none of it; pinned by sha256 of their LF text, so any edit re-asks.
 const LATER_NAME_ONLY = new Map([
@@ -183,6 +214,26 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
+  if (MOA_EQUIVALENCE_MODE) {
+    const eqAt = all.indexOf(MOA_EQUIVALENCE);
+    assert.ok(eqAt > at, 'the frozen MOA equivalence candidate must sort after DM-1');
+    for (const file of all.slice(at + 1, eqAt + 1)) {
+      const base = path.basename(file);
+      if (MOA_EQUIVALENCE_LEDGER_ONLY.has(base)) {
+        assert.equal(createHash('sha256').update(lf(file)).digest('hex'), MOA_EQUIVALENCE_LEDGER_ONLY.get(base), `${base} live-policy ledger-only pin changed`);
+      }
+      if (!TOUCHED.test(lf(file))) continue;
+      const expected = MOA_EQUIVALENCE_TOUCH_PINS.get(base);
+      assert.ok(expected, `${base} touches the chemistry proof before MOA equivalence but has no reviewed source pin`);
+      assert.equal(createHash('sha256').update(lf(file)).digest('hex'), expected, `${base} source changed; refresh the chronological proof review`);
+    }
+    for (const file of all.slice(eqAt + 1)) {
+      if (!TOUCHED.test(lf(file))) continue;
+      const pin = LATER_NAME_ONLY.get(path.basename(file));
+      if (pin && createHash('sha256').update(lf(file)).digest('hex') === pin) continue;
+      assert.fail(`${path.basename(file)} sorts after MOA equivalence and touches what it relies on; re-think this proof`);
+    }
+  }
   // Others' migrations may sort between the candidate and a follow-up (live applied them in between);
   // they are not replayed, so each must leave alone what this proof covers.
   let last = at;
@@ -191,7 +242,7 @@ function plan() {
     assert.ok(i > last, `${path.basename(file)} must sort after the candidate and earlier follow-ups`);
     last = i;
   }
-  for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f))) {
+  for (const file of (MOA_EQUIVALENCE_MODE ? all.slice(all.indexOf(MOA_EQUIVALENCE) + 1) : all.slice(at + 1)).filter((f) => !FOLLOW_UPS.includes(f))) {
     const pin = LATER_NAME_ONLY.get(path.basename(file));
     if (pin && createHash('sha256').update(lf(file)).digest('hex') === pin) continue;
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
@@ -203,6 +254,135 @@ function plan() {
     assert.ok(!TOUCHED.test(lf(file)), `${name} now touches what this proof covers; replay it or re-think the skip`);
   }
   return before;
+}
+function orderedPostDm1Migrations() {
+  const r = spawnSync(process.execPath, ['scripts/list-post-baseline-migrations.mjs'], { cwd: ROOT, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(r.stderr);
+  return r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
+}
+function applyChronologicalMigration(file) {
+  const name = `chron-${path.basename(file)}`;
+  stageText(name, lf(file));
+  const r = apply(name);
+  if (r.status !== 0) throw new Error(`chronological equivalence replay failed at ${path.basename(file)}:\n${r.output}`);
+  ledger(path.basename(file, '.sql'));
+}
+function applyEpaBeforeDm1Fix() {
+  const files = orderedPostDm1Migrations();
+  const epa = files.find((file) => path.basename(file) === '20261210100000_epa_registrations.sql');
+  assert.ok(epa, 'the exact chronological EPA migration must be in the replay plan');
+  assert.equal(createHash('sha256').update(lf(epa)).digest('hex'), MOA_EQUIVALENCE_TOUCH_PINS.get(path.basename(epa)));
+  applyChronologicalMigration(epa);
+}
+function migrationFunctionBody(source, name) {
+  const start = new RegExp(`CREATE (?:OR REPLACE )?FUNCTION public\\.${name}\\(`).exec(source);
+  assert.ok(start, `${name} definition is missing from its migration source`);
+  const as = source.indexOf('AS $function$', start.index);
+  assert.ok(as >= 0, `${name} function delimiter is missing from its migration source`);
+  const bodyStart = as + 'AS $function$'.length;
+  const bodyEnd = source.indexOf('$function$', bodyStart);
+  assert.ok(bodyEnd >= 0, `${name} function body is unterminated in its migration source`);
+  return source.slice(bodyStart, bodyEnd);
+}
+function moveGroupedLegacyBrandToParentFixture() {
+  const legacy = owner(`SELECT count(*) FROM public.product_brands WHERE product_id = '${E4G}' AND brand_name = '[PROVER] Legacy4' AND epa_registration = '100-99';`);
+  assert.equal(legacy, '1', 'the pre-switch EPA-gate fixture begins as a grouped-size legacy brand');
+  assert.equal(owner(`SELECT count(*) FROM public.product_parent_brands WHERE parent_id = '${PEPA4}' AND brand_name = '[PROVER] Legacy4' AND epa_registration = '100-99' AND status = 'active';`), '0');
+  const before = owner(`SELECT public._parent_chemistry_epa_refusal('${PEPA4}');`);
+  assert.match(before, /100-99/, 'the old DM-1 member-brand path supplies the PEPA4 EPA gate');
+  fixture(`INSERT INTO public.product_parent_brands (parent_id, brand_name, epa_registration, status, created_by, updated_by)
+      VALUES ('${PEPA4}', '[PROVER] Legacy4', '100-99', 'active', '${ADMIN}', '${ADMIN}');
+    DELETE FROM public.product_brands WHERE product_id = '${E4G}' AND brand_name = '[PROVER] Legacy4' AND epa_registration = '100-99';`);
+  assert.equal(owner(`SELECT count(*) FROM public.product_brands WHERE product_id = '${E4G}';`), '0', 'the real grouping preflight requires no grouped-size legacy brand rows');
+  assert.equal(owner(`SELECT public._parent_chemistry_epa_refusal('${PEPA4}');`), before, 'moving the synthetic brand to its parent preserves the exact EPA-gate result');
+  refused(ADMIN, setC(PEPA4, [{ kind: 'ingredient', name: 'Grouping gate probe', strength_value: 1,
+    strength_unit: 'lb_per_gal', strength_basis: 'active_ingredient', source: 'label' }]), /CHEMISTRY_FROM_EPA_ONLY.*100-99/);
+  console.log('[fixture] carried the synthetic Legacy4 EPA gate from its grouped member size to PEPA4 before grouping opens; exact refusal and EPA number are preserved');
+}
+function applyMoaEquivalenceTimeline() {
+  const files = orderedPostDm1Migrations();
+  const fix = files.indexOf(FOLLOW_UPS[0]);
+  const eq = files.indexOf(MOA_EQUIVALENCE);
+  assert.ok(fix >= 0 && eq > fix, 'the exact DM-1 fix must precede the frozen MOA equivalence migration');
+  let count = 0;
+  let ledgerOnly = 0;
+  for (const file of files.slice(fix + 1, eq + 1)) {
+    const base = path.basename(file);
+    if (base === '20261229100000_product_grouping_switch_on.sql') moveGroupedLegacyBrandToParentFixture();
+    if (MOA_EQUIVALENCE_LEDGER_ONLY.has(base)) {
+      assert.equal(createHash('sha256').update(lf(file)).digest('hex'), MOA_EQUIVALENCE_LEDGER_ONLY.get(base), `${base} live-policy ledger-only source changed`);
+      ledger(path.basename(file, '.sql'));
+      ledgerOnly += 1;
+      continue;
+    }
+    if (TOUCHED.test(lf(file))) {
+      const expected = MOA_EQUIVALENCE_TOUCH_PINS.get(base);
+      assert.ok(expected, `${base} touched migration is not pinned`);
+      assert.equal(createHash('sha256').update(lf(file)).digest('hex'), expected, `${base} changed after the reviewed source manifest`);
+    }
+    if (base === '20261229110000_product_rates_draft.sql') {
+      fixture(`DELETE FROM public.unit_conversions;
+        INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};`);
+    }
+    if (base === '20270106110000_invoice_brands_rup.sql') {
+      // Match the standard MOA prover: live ran the registration seed before this dependent migration.
+      fixture(`INSERT INTO public.epa_registration_seed_run (seeded_by, rup_default, fingerprint)
+        SELECT '00000000-0000-4000-8000-000000000000', 'unknown', 'moa1-proof'
+        WHERE NOT EXISTS (SELECT 1 FROM public.epa_registration_seed_run);`);
+    }
+    applyChronologicalMigration(file);
+    count += 1;
+  }
+  assert.equal(owner("SELECT count(*) FROM pg_proc WHERE oid = 'public._moa_group_code_key(text)'::regprocedure;"), '1');
+  assert.equal(owner("SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._apply_parent_chemistry(uuid,jsonb,text,text,text)'::regprocedure;"),
+    createHash('md5').update(migrationFunctionBody(lf(MOA_EQUIVALENCE), '_apply_parent_chemistry')).digest('hex'),
+    'business cases must use the exact frozen candidate _apply_parent_chemistry body');
+  assert.equal(owner("SELECT bool_and(indisunique AND indisvalid AND indisready) FROM pg_index WHERE indexrelid IN ('public.active_ingredient_modes_of_action_canonical_one_active'::regclass,'public.product_parent_modes_of_action_canonical_one_active'::regclass);"), 't');
+  for (const role of ['anon', 'authenticated', 'service_role']) {
+    assert.equal(owner(`SELECT has_function_privilege('${role}', 'public._moa_group_code_key(text)'::regprocedure, 'EXECUTE');`), 'f', `MOA key helper grants to ${role}`);
+  }
+  console.log(`[prover] applied ${count} exact chronological SQL migrations after the DM-1 fix through frozen MOA equivalence; recorded ${ledgerOnly} known live-policy migrations through the standard MOA ledger-only recipe; candidate body, helper grants and canonical indexes verified`);
+}
+function rollbackMoaEquivalenceTimeline() {
+  const rows = () => owner(`SELECT (SELECT count(*) FROM public.active_ingredient_modes_of_action)::text || ':'
+    || (SELECT count(*) FROM public.product_parent_modes_of_action)::text;`);
+  const before = rows();
+  const record = lf(path.join(ROOT, 'docs', 'reference', 'migrations.d', '20270115100000_moa_group_code_equivalence.md'));
+  const rollback = /````sql\n([\s\S]*?)\n````/.exec(record);
+  assert.ok(rollback, 'the candidate migration record carries its guarded rollback SQL');
+  stageText('moa-equivalence-rollback.sql', rollback[1]);
+  const reversed = apply('moa-equivalence-rollback.sql');
+  assert.equal(reversed.status, 0, reversed.output);
+  assert.equal(owner("SELECT to_regprocedure('public._moa_group_code_key(text)') IS NULL;"), 't');
+  assert.equal(owner(`SELECT (to_regclass('public.active_ingredient_modes_of_action_canonical_one_active') IS NULL)::text
+    || ':' || (to_regclass('public.product_parent_modes_of_action_canonical_one_active') IS NULL)::text;`), 'true:true');
+  const restored = [
+    ['_ingredient_modes_input', '20270108100000_ingredient_modes_of_action.sql', '(jsonb,text)'],
+    ['_parent_mode_groups', '20270108100000_ingredient_modes_of_action.sql', '(uuid)'],
+    ['set_active_ingredient_modes', '20270108100000_ingredient_modes_of_action.sql', '(uuid,jsonb,jsonb,text,text)'],
+    ['_apply_parent_chemistry', '20261211100000_product_chemistry_confirmed_swaps.sql', '(uuid,jsonb,text,text,text)'],
+  ];
+  for (const [name, sourceFile, signature] of restored) {
+    const expected = createHash('md5').update(migrationFunctionBody(lf(path.join(MIGRATIONS, sourceFile)), name)).digest('hex');
+    assert.equal(owner(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.${name}${signature}'::regprocedure;`),
+      expected, `equivalence rollback did not restore the exact ${sourceFile} body for ${name}`);
+  }
+  assert.equal(rows(), before, 'equivalence rollback preserves both MOA tables');
+  console.log('[rollback] equivalence helper/indexes removed through the content-guarded transaction; all four original function bodies and both MOA table row counts restored');
+
+  const moaRecord = lf(path.join(ROOT, 'docs', 'reference', 'migrations.d', '20270108100000_ingredient_modes_of_action.md'));
+  const moaRollback = /```sql\n([\s\S]*?)```/.exec(moaRecord);
+  assert.ok(moaRollback, 'the MOA-1 record carries its reviewed rollback SQL');
+  stageText('ingredient-modes-rollback.sql', moaRollback[1]);
+  const reversedMoa = apply('ingredient-modes-rollback.sql');
+  assert.equal(reversedMoa.status, 0, reversedMoa.output);
+  assert.equal(owner(`SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+    AND proname IN ('_ingredient_mode_list','_ingredient_modes_input','_ingredient_mode_reach','_parent_mode_groups',
+      'set_active_ingredient_modes','get_parent_mode_groups','get_ingredient_mode_users');`), '0');
+  assert.equal(owner("SELECT to_regclass('public.active_ingredient_modes_of_action') IS NOT NULL;"), 't');
+  refused(ADMIN, 'SELECT count(*) FROM public.active_ingredient_modes_of_action;', /permission denied/);
+  assert.equal(rows(), before, 'MOA-1 rollback preserves both MOA tables as history');
+  console.log('[rollback] MOA-1 functions removed by its reviewed rollback; active-ingredient MOA history remains unreadable and product MOA rows remain');
 }
 function installLiveAuthUid() {
   psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
@@ -216,11 +396,14 @@ function buildContainer() {
   const schema = spawnSync(process.execPath, ['scripts/decompress-schema-baseline.mjs'], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
   if (schema.status !== 0) throw new Error(schema.stderr.toString());
   psql('\\i /tmp/20260727174805_extensions.sql'); psql(schema.stdout.toString());
+  // The standard MOA prover's fixture includes Storage's live created_at column; the equivalence overlay
+  // reuses that exact fixture shape for the later document migration preflight.
+  const storageCreatedAt = MOA_EQUIVALENCE_MODE ? ', created_at timestamptz DEFAULT now()' : '';
   // storage.objects carries metadata and a (bucket_id, name) key, and postgres may read it, as live
   // has them: 20261022075000 (replayed before the candidate) checks that shape in its preflight.
   psql(`CREATE SCHEMA IF NOT EXISTS storage;
     CREATE TABLE IF NOT EXISTS storage.buckets (id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL DEFAULT false, file_size_limit bigint, allowed_mime_types text[]);
-    CREATE TABLE IF NOT EXISTS storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL, owner_id text, metadata jsonb, UNIQUE (bucket_id, name));
+    CREATE TABLE IF NOT EXISTS storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL, owner_id text, metadata jsonb${storageCreatedAt}, UNIQUE (bucket_id, name));
     CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT string_to_array(name, '/') $$;
     CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT split_part(name, '/', array_length(string_to_array(name, '/'), 1)) $$;
     GRANT USAGE ON SCHEMA storage TO postgres;
@@ -503,6 +686,7 @@ async function main() {
   console.log('[prover] DM-1 first: the stub is created private, refuses % w/w liquids (DENSITY_NOT_APPROVED); a stand-in replacement works and changes no DM-1 function');
 
   // ---- The real apply after DM-2 (its function is checked and left alone).
+  if (MOA_EQUIVALENCE_MODE) applyEpaBeforeDm1Fix();
   const dm2Before = owner(`SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public._approved_parent_lb_per_gal(uuid)'::regprocedure;`);
   stageText('fix.sql', lf(FOLLOW_UPS[0]));
   r = apply('fix.sql');
@@ -531,6 +715,7 @@ async function main() {
   assert.match(r.output, /PREFLIGHT_DM1_FIXES_ALREADY_PRESENT/, 'a second apply of the fixes is refused');
   noExecute('public._chemistry_kept_modes(jsonb,uuid,uuid)');
   console.log('[prover] landing fixes: refused before DM-1, applied after it with no existing row changed (old modes of action read typed), a second apply refused');
+  if (MOA_EQUIVALENCE_MODE) applyMoaEquivalenceTimeline();
 
   // ---- Catalogue: RLS, grants, owners, function security.
   for (const t of DM1_TABLES) {
@@ -797,17 +982,21 @@ async function main() {
   assert.equal(epaWrite([{ kind: 'mode_of_action', ingredient_id: glyAcid, scheme: 'HRAC', group_code: '2' }]), 'true', 'the lookup confirms the new ingredient');
   refused(ADMIN, corrC(PDM4, [{ kind: 'ingredient', action: 'retire', row_id: rowId(PDM4, glyAcid) }]), /CHEMISTRY_EPA_ROW_KEPT/);
   refused(ADMIN, setC(PEPA5, [ing('Gate typed epa', 1, { source: 'epa_lookup' })]), /epa_lookup|SOURCE/);
-  console.log('[prover] gate: generic, size, parent-brand and legacy-brand numbers refuse set and correct; a retired brand only is allowed; DM-4 stand-in writes epa_lookup rows on a gated parent; typed epa_lookup refused; a typed row whose mode of action the EPA lookup confirmed cannot be retired (CHEMISTRY_EPA_ROW_KEPT), one without can; a swap records moved modes of action as typed until the lookup confirms them');
+  const epaGateSources = MOA_EQUIVALENCE_MODE ? 'generic, size and parent-brand' : 'generic, size, parent-brand and legacy-brand';
+  console.log(`[prover] gate: ${epaGateSources} numbers refuse set and correct; a retired brand only is allowed; DM-4 stand-in writes epa_lookup rows on a gated parent; typed epa_lookup refused; a typed row whose mode of action the EPA lookup confirmed cannot be retired (CHEMISTRY_EPA_ROW_KEPT), one without can; a swap records moved modes of action as typed until the lookup confirms them`);
 
-  // ---- Gate race: a legacy brand number added while a chemistry write holds its locks.
+  // ---- Gate race: a parent brand number added while a chemistry write holds its locks.
   let bg = session(`BEGIN; SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
     SET LOCAL ROLE authenticated;
     ${setC(PEPA5, add('race1'))}
     SELECT 'JK_READY'; RESET ROLE; ${HOLD_UNTIL_WAITER} COMMIT;`);
   await bg.ready;
-  // App roles can only SELECT product_brands; the one write path is upsert_product_brand.
-  const lateBrand = await waited(bg, () => as(ADMIN2, `SELECT public.upsert_product_brand('${E5G}', '[PROVER] Late', '100-12', NULL, true, NULL, NULL, NULL, NULL, ${q(key())});`),
-    'a legacy brand save behind the chemistry write');
+  // Grouping is open only in the chronological overlay; the default DM-1 proof retains its original writer path.
+  const lateBrand = await waited(bg, () => MOA_EQUIVALENCE_MODE
+    ? as(ADMIN2, `SELECT public.upsert_parent_brand('${PEPA5}', '${E5G}', '[PROVER] Late',
+      '100-12', NULL, true, false, NULL, NULL, NULL, false, NULL, ${q(key())});`)
+    : as(ADMIN2, `SELECT public.upsert_product_brand('${E5G}', '[PROVER] Late', '100-12', NULL, true, NULL, NULL, NULL, NULL, ${q(key())});`),
+  MOA_EQUIVALENCE_MODE ? 'a parent-brand save behind the chemistry write' : 'a legacy brand save behind the chemistry write');
   assert.equal(lateBrand.status, 0, lateBrand.output);
   assert.equal(owner(`SELECT count(*) FROM public.product_parent_ingredients r JOIN public.active_ingredients a ON a.id = r.ingredient_id
     WHERE r.parent_id = '${PEPA5}' AND a.name = 'Gate race1';`), '1', 'the write that held the locks succeeded, then the brand saved');
@@ -820,7 +1009,7 @@ async function main() {
   const late = await waited(bg, () => as(ADMIN, setC(PNOSIZE, add('nosize'), key(), 0)), 'a chemistry write behind a parent brand insert');
   assert.notEqual(late.status, 0);
   assert.match(late.output, /CHEMISTRY_FROM_EPA_ONLY/);
-  console.log('[prover] gate race: a legacy brand insert waited for the chemistry write; a parent brand committed first refused the chemistry write that waited');
+  console.log(`[prover] gate race: the ${MOA_EQUIVALENCE_MODE ? 'grouped-size parent-brand' : 'legacy'} save waited for the chemistry write; a parent brand committed first refused the chemistry write that waited`);
 
   // ---- Add versus correct.
   const pid = PSWITCH;
@@ -1110,6 +1299,8 @@ async function main() {
   const sweep = docker([...psqlArgs(), '-A', '-t'], { input: lf(path.join(ROOT, 'scripts', 'db-invariant-sweeps', 'predicates', 'cost-exposure-review.sql')) })
     .stdout.split(String.fromCharCode(10)).map((l) => l.trim()).filter((l) => /chemistry|active_ingredient|active_cost|cost_reference/.test(l));
   console.log(`[prover] cost-exposure-review flags these DM-1 functions: ${JSON.stringify(sweep)}`);
+
+  if (MOA_EQUIVALENCE_MODE) rollbackMoaEquivalenceTimeline();
 
   // ---- Rollback block: drop the public functions; the freeze, constraints and append-only triggers stay.
   const counts = snapshot();

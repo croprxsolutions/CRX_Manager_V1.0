@@ -26,7 +26,7 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20261209100000_product_chemistry.sql');
 const MOA_EQUIVALENCE_MODE = process.argv.includes('--moa-equivalence');
-const MOA_EQUIVALENCE = path.join(MIGRATIONS, '20270109120000_moa_group_code_equivalence.sql');
+const MOA_EQUIVALENCE = path.join(MIGRATIONS, '20270115100000_moa_group_code_equivalence.sql');
 const MOA_EQUIVALENCE_TOUCH_PINS = new Map([
   ['20261210100000_epa_registrations.sql', 'cac5e17d8503922f33dca9ac3ea1859937fab7173a52e0d7de4bcf37f6f4a9f3'],
   ['20261211100000_product_chemistry_confirmed_swaps.sql', '35df2c0782ef4be097eb7ae98f0454181fe6534a953e2a11e4864ac4e01522f0'],
@@ -45,7 +45,7 @@ const MOA_EQUIVALENCE_TOUCH_PINS = new Map([
   ['20270107100000_epa_long_name_keeps_cas_match.sql', '856f92a9decd3b806e584b2630370b1390e518d5cea3002909626735fd88a484'],
   ['20270108100000_ingredient_modes_of_action.sql', '2fa8044bc4e0b5004bb37ced44d824c59c0696bc8a7b83930c1de062841de107'],
   ['20270109100000_delivery_receipt_brands.sql', 'f9f52f9ace2024c77b568767288c3700dc35e4e2de871436e6df7a3067be0c87'],
-  ['20270109120000_moa_group_code_equivalence.sql', '7b54d17d319ca706b9fa87eb2db039bcb362df8e108cad24e5bc6f367a0a1890'],
+  ['20270115100000_moa_group_code_equivalence.sql', '7b54d17d319ca706b9fa87eb2db039bcb362df8e108cad24e5bc6f367a0a1890'],
 ]);
 // These access/data migrations are deliberately represented as applied, not replayed, in the established
 // MOA prover because their reviewed behavior depends on the live Storage policy population.
@@ -346,7 +346,7 @@ function rollbackMoaEquivalenceTimeline() {
   const rows = () => owner(`SELECT (SELECT count(*) FROM public.active_ingredient_modes_of_action)::text || ':'
     || (SELECT count(*) FROM public.product_parent_modes_of_action)::text;`);
   const before = rows();
-  const record = lf(path.join(ROOT, 'docs', 'reference', 'migrations.d', '20270109120000_moa_group_code_equivalence.md'));
+  const record = lf(path.join(ROOT, 'docs', 'reference', 'migrations.d', '20270115100000_moa_group_code_equivalence.md'));
   const rollback = /````sql\n([\s\S]*?)\n````/.exec(record);
   assert.ok(rollback, 'the candidate migration record carries its guarded rollback SQL');
   stageText('moa-equivalence-rollback.sql', rollback[1]);

@@ -34,7 +34,7 @@ const MOA_EQUIVALENCE_MODE = process.argv.includes('--moa-equivalence');
 const MOA_DEPENDENCY_SHA256_LF = '2fa8044bc4e0b5004bb37ced44d824c59c0696bc8a7b83930c1de062841de107';
 const MOA_OVERLAYS = [
   ['20270109100000_delivery_receipt_brands.sql', 'f9f52f9ace2024c77b568767288c3700dc35e4e2de871436e6df7a3067be0c87'],
-  ['20270109120000_moa_group_code_equivalence.sql', '7b54d17d319ca706b9fa87eb2db039bcb362df8e108cad24e5bc6f367a0a1890'],
+  ['20270115100000_moa_group_code_equivalence.sql', '7b54d17d319ca706b9fa87eb2db039bcb362df8e108cad24e5bc6f367a0a1890'],
 ];
 // Taha 2026-11-12 (#1810): an over-long EPA name still matches by CAS. Applied right after the candidate.
 const PARKED = new Set([
@@ -629,7 +629,7 @@ async function main() {
   assert.equal(fingerprint(), fpBefore);
   console.log(`[case] 11 the ${UNTOUCHED.length} unchanged DM-1/DM-1b/DM-4 functions are byte-for-byte unchanged (checked by the file's postflight and again here)`);
   if (MOA_EQUIVALENCE_MODE) {
-    const equivalenceRecord = lf(path.join(ROOT, 'docs', 'reference', 'migrations.d', '20270109120000_moa_group_code_equivalence.md'));
+    const equivalenceRecord = lf(path.join(ROOT, 'docs', 'reference', 'migrations.d', '20270115100000_moa_group_code_equivalence.md'));
     const equivalenceRollback = /````sql\n([\s\S]*?)\n````/.exec(equivalenceRecord);
     assert.ok(equivalenceRollback, 'the equivalence migration record carries its guarded rollback SQL');
     stageText('moa-equivalence-rollback.sql', equivalenceRollback[1]);

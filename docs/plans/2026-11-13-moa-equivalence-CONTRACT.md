@@ -1,6 +1,6 @@
 # MOA group-code equivalence contract
 
-**Status:** database-only local candidate for #1851 is implemented in `20270109120000_moa_group_code_equivalence.sql`; screen changes remain out of scope. Refreshed against `origin/staging` `d3ca865bdb9ad0cff0cee2cd02ee26a888185967`, which contains main `a52195dbe`. No merge, live write/apply or bulk-load work is part of this task.
+**Status:** database-only local candidate for #1851 is implemented in `20270115100000_moa_group_code_equivalence.sql`; screen changes remain out of scope. Refreshed against `origin/staging` `d3ca865bdb9ad0cff0cee2cd02ee26a888185967`, which contains main `a52195dbe`. No merge, live write/apply or bulk-load work is part of this task.
 
 ## Outcome
 

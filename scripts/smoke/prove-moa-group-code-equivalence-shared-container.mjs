@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Focused real-schema proof for 20270109120000_moa_group_code_equivalence.
+ * Focused real-schema proof for 20270115100000_moa_group_code_equivalence.
  * Uses only the already-running shared PG17, network-none proof container. All DDL and seed
  * rows live inside one transaction and are rolled back, including the temporary base MOA install.
  */
@@ -27,7 +27,7 @@ const active = docker(['exec', container, 'psql', '-U', 'postgres', '-d', 'postg
 assert.equal(active, '0', 'shared proof container has an active non-idle proof session');
 const read = (f) => readFileSync(path.join(root, f), 'utf8').replaceAll('\r\n', '\n');
 const base = read('supabase/migrations/20270108100000_ingredient_modes_of_action.sql');
-const candidate = read('supabase/migrations/20270109120000_moa_group_code_equivalence.sql');
+const candidate = read('supabase/migrations/20270115100000_moa_group_code_equivalence.sql');
 const costPredicate = read('scripts/db-invariant-sweeps/predicates/cost-exposure-review.sql').replace(/;\s*$/, '');
 const originalApply = read('supabase/migrations/20261211100000_product_chemistry_confirmed_swaps.sql');
 const moaconfirm = (sql) => {
@@ -47,7 +47,7 @@ assert.ok(oldApply.includes(exactConfirm) && newApply.includes(exactConfirm), 'E
 assert.ok(oldApply.includes(exactInsert) && newApply.includes(exactInsert), 'EPA insertion body changed');
 assert.match(newApply,/IF NOT FOUND AND p_mode <> 'epa' THEN[\s\S]*?_moa_group_code_key\(group_code\)/,'canonical existing-row lookup must stay outside the exact EPA branch');
 assert.match(newApply,/CASE WHEN p_mode = 'epa' THEN v_code ELSE public\._moa_group_code_key\(v_code\) END/,'EPA request identity must retain exact code spelling');
-const record = read('docs/reference/migrations.d/20270109120000_moa_group_code_equivalence.md');
+const record = read('docs/reference/migrations.d/20270115100000_moa_group_code_equivalence.md');
 const rollback = /````sql\n([\s\S]*?)\n````/.exec(record)?.[1];
 assert.ok(rollback, 'migration record must contain rollback SQL');
 assert.match(rollback, /MOA_GROUP_EQUIVALENCE_ROLLBACK_NOT_IN_TRANSACTION/);
@@ -445,9 +445,9 @@ END $state$;
   writeFileSync(rbTmp, rbGuardTest, 'utf8');
   try {
     docker(['cp', path.join(root, 'supabase/migrations/20270108100000_ingredient_modes_of_action.sql'), `${container}:/tmp/moa-equivalence-base.sql`]);
-    docker(['cp', path.join(root, 'supabase/migrations/20270109120000_moa_group_code_equivalence.sql'), `${container}:/tmp/moa-equivalence-candidate.sql`]);
-    docker(['cp', path.join(root, 'docs/reference/migrations.d/20270109120000_moa_group_code_equivalence.md'), `${container}:/tmp/moa-equivalence-record.md`]);
-    const rbText = /````sql\n([\s\S]*?)\n````/.exec(read('docs/reference/migrations.d/20270109120000_moa_group_code_equivalence.md'))?.[1];
+    docker(['cp', path.join(root, 'supabase/migrations/20270115100000_moa_group_code_equivalence.sql'), `${container}:/tmp/moa-equivalence-candidate.sql`]);
+    docker(['cp', path.join(root, 'docs/reference/migrations.d/20270115100000_moa_group_code_equivalence.md'), `${container}:/tmp/moa-equivalence-record.md`]);
+    const rbText = /````sql\n([\s\S]*?)\n````/.exec(read('docs/reference/migrations.d/20270115100000_moa_group_code_equivalence.md'))?.[1];
     assert.ok(rbText);
     const rbOnly = path.join(tmpdir(), `moa-equivalence-rb-${process.pid}.sql`);
     writeFileSync(rbOnly, rbText, 'utf8');
@@ -483,7 +483,7 @@ END $state$;
       assert.equal(afterCallerGuard,'true:true','later-caller guard proof transaction left candidate objects behind');
     } finally { try{unlinkSync(rbCallerTmp);}catch{} }
     const crlfCandidate = path.join(tmpdir(), `moa-equivalence-candidate-crlf-${process.pid}.sql`);
-    writeFileSync(crlfCandidate, readFileSync(path.join(root, 'supabase/migrations/20270109120000_moa_group_code_equivalence.sql'), 'utf8').replaceAll('\r\n','\n').replaceAll('\n','\r\n'), 'utf8');
+    writeFileSync(crlfCandidate, readFileSync(path.join(root, 'supabase/migrations/20270115100000_moa_group_code_equivalence.sql'), 'utf8').replaceAll('\r\n','\n').replaceAll('\n','\r\n'), 'utf8');
     const crlfProof = path.join(tmpdir(), `moa-equivalence-crlf-proof-${process.pid}.sql`);
     writeFileSync(crlfProof, `\\set ON_ERROR_STOP on\nBEGIN;\n\\i /tmp/moa-equivalence-base.sql\n\\i /tmp/moa-equivalence-candidate-crlf.sql\n\\i /tmp/moa-equivalence-rollback.sql\nDO $crlf$ BEGIN IF to_regprocedure('public._moa_group_code_key(text)') IS NOT NULL OR md5(replace((SELECT prosrc FROM pg_proc WHERE oid='public._ingredient_modes_input(jsonb,text)'::regprocedure),chr(13),'')) <> '${originals[0].hash}' THEN RAISE EXCEPTION 'CRLF rollback did not restore normalized source'; END IF; END $crlf$;\nROLLBACK;\n`, 'utf8');
     try {

@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** `20270109120000_moa_group_code_equivalence.sql` (SQL sha256: `7b54d17d319ca706b9fa87eb2db039bcb362df8e108cad24e5bc6f367a0a1890`). Adds comparison-only MOA group equivalence, collision refusal, raw spelling preservation, and canonical active uniqueness while retaining existing exact indexes and the dormant EPA branch.
+**LOCAL CANDIDATE — NOT APPLIED.** `20270115100000_moa_group_code_equivalence.sql` (SQL sha256: `7b54d17d319ca706b9fa87eb2db039bcb362df8e108cad24e5bc6f367a0a1890`). Adds comparison-only MOA group equivalence, collision refusal, raw spelling preservation, and canonical active uniqueness while retaining existing exact indexes and the dormant EPA branch.
 
 Compatibility note: an exact same-code duplicate typed in one product save previously reached the active-row lookup and raised `CHEMISTRY_ROW_EXISTS`; the candidate identifies the duplicate earlier and raises `CHEMISTRY_DUPLICATE_CHANGE`. This intentionally changes the error prefix, while keeping the same codes and refusal outcome. Current `src` has no matcher for either prefix.
 

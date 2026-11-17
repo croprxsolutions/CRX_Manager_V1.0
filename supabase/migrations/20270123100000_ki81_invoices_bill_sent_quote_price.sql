@@ -121,7 +121,7 @@ BEGIN
             OR ((q.expires_at AT TIME ZONE 'America/Chicago')::date >= p_on
                 AND public.compute_season((q.expires_at AT TIME ZONE 'America/Chicago')::date) = public.compute_season(p_on)))
        AND EXISTS (SELECT 1 FROM quote_versions v WHERE v.quote_id = q.id)
-       AND EXISTS (SELECT 1 FROM quote_sections qs JOIN quote_items qi ON qi.section_id = qs.id
+       AND EXISTS (SELECT 1 FROM quote_sections qs JOIN quote_items qi ON qi.section_id = qs.id AND qi.quote_id = qs.quote_id
                     WHERE qs.quote_id = q.id AND qs.field_id = ANY (p_field_ids) AND qi.product_id = p_product_id)
      ORDER BY q.id
        FOR SHARE OF q
@@ -135,7 +135,7 @@ BEGIN
   SELECT array_agg(DISTINCT ROUND(qi.price_per_unit * 100)::bigint)
     INTO v_prices
     FROM quote_sections qs
-    JOIN quote_items qi ON qi.section_id = qs.id
+    JOIN quote_items qi ON qi.section_id = qs.id AND qi.quote_id = qs.quote_id
    WHERE qs.quote_id = ANY (v_quotes)
      AND qs.field_id = ANY (p_field_ids)
      AND qi.product_id = p_product_id
@@ -3098,7 +3098,7 @@ BEGIN
      OR (SELECT count(*) FROM pg_proc o WHERE o.pronamespace = 'public'::regnamespace AND o.proname = 'resolve_field_app_chemical_price') <> 1
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)')) IS DISTINCT FROM 'a9f32657d9c266b6a5f634d4b51d7823'
      OR (SELECT provolatile FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)')) <> 'v'
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)')) IS DISTINCT FROM 'c4418a97c57fc7b7b4ef33406eab9169'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)')) IS DISTINCT FROM '097fcb3f70b096a8f925158ffad0346b'
      OR (SELECT prosecdef FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)'))
      OR has_function_privilege('anon', 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'EXECUTE')

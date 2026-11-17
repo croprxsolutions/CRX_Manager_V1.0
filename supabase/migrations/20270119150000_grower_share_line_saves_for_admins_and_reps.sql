@@ -458,6 +458,13 @@ BEGIN
             RAISE EXCEPTION 'FIELD_APP_UNIT_UNCONVERTIBLE: cannot price "%" — rate unit "%" does not convert to the product''s sold unit "%". Fix this product''s units before invoicing this field application.',
               COALESCE(NULLIF(v_chem->>'description', ''), (v_chem->>'product_id')), v_ta_unit, v_qa_unit;
           END IF;
+          -- The line stores 4 decimals (invoice_items.quantity numeric(12,4)). Mason, 2026-11-17 ("Refuse if off
+          -- >$0.50"): refuse a grower-share line whose booked cost would differ from the exact cost by more than
+          -- 50 cents (a tiny amount of a costly product rounding to 0, #1926); smaller differences save as before.
+          IF abs(safe_cents_qty(v_qa_unit_cost, ROUND(v_qa_qty, 4)) - v_qa_qty * v_qa_unit_cost) > 50 THEN
+            RAISE EXCEPTION 'FIELD_APP_GROWER_SHARE_ROUNDING: cannot cost "%" in the grower share — % % is too small to record to 4 decimals without its cost changing by more than $0.50. Record this product in a smaller sold unit before invoicing this field application.',
+              COALESCE(NULLIF(v_chem->>'description', ''), (v_chem->>'product_id')), trim_scale(v_qa_qty), v_qa_unit;
+          END IF;
           v_qa_qty := ROUND(v_qa_qty, 4);
           SELECT * INTO v_conv FROM convert_to_gl_lb(ROUND(v_chem_qty_a, 4), v_ta_unit, v_form);
           -- KI-156 (Mason, 2026-11-15: "Admins and reps"): this $0 line is the chemical the grower's per-acre
@@ -1074,7 +1081,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '66b95e572c3b170ac4dd2eba90089ff5', ARRAY['postgres', 'service_role']),
+        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '0f5da38476fe174cd25c9bf3e364055f', ARRAY['postgres', 'service_role']),
         ('_enforce_below_cost_line', 'public._enforce_below_cost_line()', '1069cd1451454030627b250db7b729d1', ARRAY['postgres', 'service_role'])
       ) AS pin(fn, sig, body_md5, execs)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)

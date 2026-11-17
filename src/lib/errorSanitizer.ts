@@ -360,6 +360,11 @@ export function sanitizeError(error: unknown): string {
   if (setupRefusal && !CONSTRAINT_PATTERNS.some(([pattern]) => pattern.test(message))) {
     return `Nothing was saved. ${setupRefusal.charAt(0).toUpperCase()}${setupRefusal.slice(1)}`;
   }
+  // Grower-share line too small to record (20270119150000, Mason 2026-11-17): the server text names the product.
+  const growerShareRounding = message.match(/^FIELD_APP_GROWER_SHARE_ROUNDING:\s*(.+)$/s)?.[1];
+  if (growerShareRounding) {
+    return `Nothing was saved. ${growerShareRounding.charAt(0).toUpperCase()}${growerShareRounding.slice(1)}`;
+  }
   if (/^PRODUCT_ACTIVE_REVIEW_STALE(?::|$)/.test(message)) {
     return 'Product details changed since the review. Review the selection again.';
   }

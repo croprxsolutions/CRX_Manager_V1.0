@@ -277,7 +277,7 @@ function refusedProbe(sql, pattern, uid) {
 
 const LIVE_MD5 = '29d699a8b0698424345a78e9aac9dcd1';
 const FIX_MD5 = 'c3df537c2540a3bbc3f39ddc16c09166';
-const SAVES_MD5 = '66b95e572c3b170ac4dd2eba90089ff5';
+const SAVES_MD5 = '0f5da38476fe174cd25c9bf3e364055f';
 const GUARD_LIVE_MD5 = '3708388e22f081fd5b70ce8f89492aaf';
 const GUARD_SAVES_MD5 = '1069cd1451454030627b250db7b729d1';
 const GUARD = "'public._enforce_below_cost_line()'::regprocedure";
@@ -505,6 +505,12 @@ async function main() {
   // Mason, 2026-11-16 ("Yes, allow it"): a line with no product has no server cost, so an admin's typed cost stands.
   assert.equal(costOf(manualG), 37500, `G: an admin's manual grower-share line (no product) books the typed 3000 (12.5 Gal x 3000): ${manualG}`);
   assert.match(lineOf(manualG, 'KI156 manual — included'), /\|12\.5000\|Gal\|0\|0\|3000\|1600\.0000\|oz$/, manualG);
+  // Mason, 2026-11-17 ("Refuse if off >$0.50"): 1 oz = 0.0078125 Gal stores as 0.0078 Gal. At $1,000,000/Gal that books
+  // 780000 instead of 781250 (off $12.50): refused, nothing saved. At $30,000/Gal it is off 37.5 cents: saves as before.
+  const tinyCostly = (cost) => [[loc(FG, 1)], [chem({ description: 'KI156 manual', rate_per_acre: 1, cost_cents: cost, manual_override: true, unit_price_cents: 0 })]];
+  refusedSave(...tinyCostly(100000000), /FIELD_APP_GROWER_SHARE_ROUNDING: cannot cost "KI156 manual" in the grower share — 0\.0078125 Gal is too small/, ADMIN, false);
+  assert.equal(costOf(save(...tinyCostly(3000000), ADMIN, false)), 23400, 'G: off by under $0.50 still saves (0.0078 Gal x 3,000,000)');
+  console.log('[case] G rounding: a grower-share line whose 4-decimal quantity moves its cost by more than $0.50 is refused (FIELD_APP_GROWER_SHARE_ROUNDING); 37.5 cents off still saves');
   const manualRep = save([loc(FG, 100)], [chem({ description: 'KI156 manual', manual_override: true, unit_price_cents: 0 })], REP, false);
   assert.equal(costOf(manualRep), 0, `G: a rep's manual grower-share line (no product) books 0, not the typed 3000: ${manualRep}`);
   const manualChem = [chem({ description: 'KI156 manual', manual_override: true, unit_price_cents: 0 })];

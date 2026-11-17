@@ -51,10 +51,20 @@ export async function getRegistrations(numbers: (string | null | undefined)[]): 
   return new Map(rows.map((r) => [r.epa_registration, r.label_adjuvants ? { ...r, label_adjuvants: r.label_adjuvants.map(asStatement) } : r]));
 }
 
-/** REG-1's one-type entry (`{kind, adjuvant_type, note}`, still valid in the database) read as a one-type statement; inner line breaks become spaces so the editor keeps it one type. */
+// The editor types "Other" one per line, so a stored type holding a line break must read as one line.
+const oneLine = (type: string) => type.trim().replace(/\s+/g, ' ');
+
+/** REG-1's one-type entry (`{kind, adjuvant_type, note}`, still valid in the database) read as a one-type statement; every type and the preferred one read on one line. */
 function asStatement(entry: LabelAdjuvant & { adjuvant_type?: string }): LabelAdjuvant {
-  if (entry.adjuvant_types || typeof entry.adjuvant_type !== 'string') return entry;
-  return { kind: entry.kind, adjuvant_types: [entry.adjuvant_type.trim().replace(/\s+/g, ' ')], note: entry.note ?? null };
+  if (!entry.adjuvant_types && typeof entry.adjuvant_type === 'string') {
+    return { kind: entry.kind, adjuvant_types: [oneLine(entry.adjuvant_type)], note: entry.note ?? null };
+  }
+  if (!Array.isArray(entry.adjuvant_types) || !entry.adjuvant_types.some((t) => typeof t === 'string' && oneLine(t) !== t)) return entry;
+  return {
+    ...entry,
+    adjuvant_types: [...new Set(entry.adjuvant_types.map(oneLine))],
+    ...(typeof entry.preferred === 'string' ? { preferred: oneLine(entry.preferred) } : {}),
+  };
 }
 
 const cancelledOf = (rows: RegistrationRows): CancelledRegistrations => new Map(

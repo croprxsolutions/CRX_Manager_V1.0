@@ -1,10 +1,9 @@
 # Decision Log
 
-## 2026-11-17 — #1880 keeps its up-to-7 Sol rounds today
+## 2026-11-17 — More review rounds for #1880
 
-**Decision (Mason, in chat, 2026-11-17: "i approve up to 7 rounds on 1880 today").** PR #1880 (priority integrity follow-ups) may have Sol rounds 5 through 7 on 2026-11-17. This renews the 2026-11-16 entry below for the new day; since then the PR only merged `staging` and restamped its byte-identical migration to `20270118100000`.
-**Why:** same as 2026-11-16 — the repeats were merge drift, not one design mechanism coming back.
-**What this forbids/implies:** no round past 7; a BLOCKER/HIGH that is a new design problem still stops the PR for Mason.
+**Decision (Mason, in chat, 2026-11-17: "i approve up to 7 rounds on 1880 today").** Mason allowed PR #1880 (priority integrity follow-ups) up to seven Sol rounds in total, renewing his 2026-11-16 decision for the new day.
+**Why:** the earlier repeat findings came from merging a fast-moving `staging` (restamps and merge conflicts), not from one design problem coming back.
 
 ## 2026-11-16 — #1878 and #1880 may have up to 7 Sol rounds after staging moved under them
 

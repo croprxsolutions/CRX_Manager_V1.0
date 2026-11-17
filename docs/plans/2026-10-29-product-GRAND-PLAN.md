@@ -698,6 +698,7 @@ Brand step 1 is partly live: the `product_brands` list and the Brands section. N
   - Representative quote, application and seed-treatment products show the expected quantities in the harness.
 
 **RT-4 · Cut-over** (2.3, 2.4b, 2.9, 2.9a, D-F; overlap 6)
+*Status 2026-11-17 (Mason): live has 0 draft rates; the RT-1 derivation run is approved, then Mason's RT-3 review, then the lock, then RT-4.*
 - **Before it starts:** the "Lock rates" switch is on (overlap 11).
 - **The key:** the quoting default and the cut-over are per **parent** (PAR-1), so all sizes of a formulation switch together; no size is left on old rates while a sibling is on new ones.
 - **How the 93 readers see new rates (decided before any pilot):** they keep reading the old `products` rate columns. When a parent is switched, RT-4's internal step (overlap 11) fills those columns on all its sizes from the parent's approved default, in the same database step. Readers therefore change nothing, and this is proven for quotes, jobs, the field app and PDFs before the pilot.

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, lazy, Suspense } from 'react';
+import { billingM4Enabled } from '../lib/billingFeatures';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall, User, Ruler, Sprout, Percent, StickyNote, ChevronDown, Users, Lightbulb, FolderOpen, History, Map, Package, Wallet, ShoppingBasket, Receipt, Lock } from 'lucide-react';
 import type { InputHTMLAttributes, ReactNode } from 'react';
@@ -1549,8 +1550,9 @@ export default function CustomerDetail() {
                   />
                   <p className="text-xs text-secondary mt-1">Link this customer to a parent farm group</p>
                 </div>
-                {!isNew && (
+                {!isNew && billingM4Enabled() && (
                   // Saves on its own (saveStandingDiscount); the whole-record Save Changes never carries it.
+                  // Off on live until commission ships (billingM4Enabled).
                   <div className="rounded-lg border border-gray-200 bg-cream/60 p-3 sm:col-span-2 sm:p-4">
                     <div className="flex flex-wrap items-end gap-3">
                       <div className="w-40">

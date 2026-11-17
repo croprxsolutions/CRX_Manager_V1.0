@@ -10,7 +10,8 @@
   "Sent + not expired"). Its prices must pass the sent-price lock (a price changed after sending needs a re-send, or
   a change `save_quote` recorded since). Two such quotes, or two lines, at different prices refuse
   `FIELD_APP_QUOTE_PRICE_CONFLICT`; typing the price on the line saves (Mason, "Stop, type the price"). No eligible
-  quote: the price list, as before.
+  quote: the price list, as before. If an eligible quote changes while one save is pricing several growers, the
+  save refuses `FIELD_APP_QUOTE_PRICE_CHANGED` ("save again") rather than price them differently.
 - The blend-ticket invoice priced from the job's quote without the lock; it now locks that quote and runs the lock
   before any price is read or invoice number drawn (`QUOTE_RESEND_REQUIRED`). A never-sent job quote still prices
   the blend, as Convert and Schedule Job allow.

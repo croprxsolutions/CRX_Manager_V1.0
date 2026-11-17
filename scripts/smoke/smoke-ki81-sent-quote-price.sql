@@ -12,6 +12,7 @@
 --   F4  a draft, declined, cancelled or deleted quote, another grower's quote, or a quote expired before
 --       the invoice date, or a later season's quote, bills the tier price; an "expired" quote still valid that date counts;
 --   F5  two eligible quotes at different prices refuse FIELD_APP_QUOTE_PRICE_CONFLICT; a typed price saves;
+--   F6  a planted transaction-local price record refuses FIELD_APP_QUOTE_PRICE_CHANGED, never prices;
 --   X1-X3 the split-bill save: a co-owner's sent quote prices both children; an unsent change refuses;
 --       a quote of a grower not on the bill does not count;
 --   B1-B3 the blend-ticket invoice: the sent price bills; an unsent change refuses before any invoice;
@@ -123,6 +124,27 @@ BEGIN
     SELECT * INTO v_cents, v_src FROM k81.save_single(c_admin, c_g, c_p, 2100);
     IF v_cents IS DISTINCT FROM 2100 OR v_src IS DISTINCT FROM 'manual' THEN
       RAISE EXCEPTION 'SMOKE_FAIL(F5): the typed price did not save: % %', v_cents, v_src;
+    END IF;
+    RAISE EXCEPTION 'K81_UNDO';
+  EXCEPTION WHEN OTHERS THEN IF SQLERRM <> 'K81_UNDO' THEN RAISE; END IF;
+  END;
+
+  -- F6: the transaction-local first answer can only refuse, never price: a planted record refuses, a
+  -- second honest call returns the same price.
+  BEGIN
+    v_q := k81.quote(c_a, c_g, c_p, 20.00, 'sent', v_today, true);
+    PERFORM set_config('crx_ki81.p' || md5(concat_ws('|', c_p, c_g::text, c_a::text, v_today)), 'v:1', true);
+    BEGIN
+      v_cents := public._field_app_sent_quote_price_cents(c_p, ARRAY[c_g], ARRAY[c_a], v_today);
+      RAISE EXCEPTION 'SMOKE_FAIL(F6): a planted record was trusted: %', v_cents;
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+      IF SQLERRM NOT LIKE 'FIELD_APP_QUOTE_PRICE_CHANGED:%' THEN RAISE EXCEPTION 'SMOKE_FAIL(F6): wrong refusal: %', SQLERRM; END IF;
+    END;
+    PERFORM set_config('crx_ki81.p' || md5(concat_ws('|', c_p, c_g::text, c_a::text, v_today)), '', true);
+    IF public._field_app_sent_quote_price_cents(c_p, ARRAY[c_g], ARRAY[c_a], v_today) IS DISTINCT FROM 2000
+       OR public._field_app_sent_quote_price_cents(c_p, ARRAY[c_g], ARRAY[c_a], v_today) IS DISTINCT FROM 2000 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL(F6): two honest calls did not both return the sent price';
     END IF;
     RAISE EXCEPTION 'K81_UNDO';
   EXCEPTION WHEN OTHERS THEN IF SQLERRM <> 'K81_UNDO' THEN RAISE; END IF;

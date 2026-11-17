@@ -100,15 +100,13 @@ BEGIN
     RETURN NULL;
   END IF;
   -- One answer per transaction for the same inputs: the split save asks once per grower, and a quote sent by
-  -- another session between those calls must not price one grower and not the other. Only a value this
-  -- transaction stored ('v:' prefix) counts; a reverted setting reads back as ''.
+  -- another session between those calls must not price one grower and not the other. The first answer is
+  -- recorded transaction-locally; every later call recomputes and refuses if it differs, so the record can
+  -- only refuse a save, never supply a price. A reverted setting reads back as '' (no record).
   v_key := 'crx_ki81.p' || md5(concat_ws('|', p_product_id,
              array_to_string(ARRAY(SELECT DISTINCT f FROM unnest(p_field_ids) f ORDER BY 1), ','),
              array_to_string(ARRAY(SELECT DISTINCT c FROM unnest(p_customer_ids) c ORDER BY 1), ','), p_on));
   v_cached := current_setting(v_key, true);
-  IF v_cached LIKE 'v:%' THEN
-    RETURN NULLIF(substr(v_cached, 3), '')::bigint;
-  END IF;
   FOR v_quote IN
     SELECT q.id
       FROM quotes q
@@ -146,7 +144,16 @@ BEGIN
       COALESCE(v_name, 'A product')
       USING ERRCODE = 'P0001';
   END IF;
-  PERFORM set_config(v_key, 'v:' || COALESCE(v_prices[1]::text, ''), true);
+  IF v_cached LIKE 'v:%' THEN
+    IF v_cached IS DISTINCT FROM 'v:' || COALESCE(v_prices[1]::text, '') THEN
+      SELECT product_name INTO v_name FROM products WHERE id = p_product_id;
+      RAISE EXCEPTION 'FIELD_APP_QUOTE_PRICE_CHANGED: A quote for % changed while this invoice was saving. Save again.',
+        COALESCE(v_name, 'a product')
+        USING ERRCODE = 'P0001';
+    END IF;
+  ELSE
+    PERFORM set_config(v_key, 'v:' || COALESCE(v_prices[1]::text, ''), true);
+  END IF;
   RETURN v_prices[1];
 END;
 $fn$;
@@ -3098,7 +3105,7 @@ BEGIN
      OR (SELECT count(*) FROM pg_proc o WHERE o.pronamespace = 'public'::regnamespace AND o.proname = 'resolve_field_app_chemical_price') <> 1
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)')) IS DISTINCT FROM 'a9f32657d9c266b6a5f634d4b51d7823'
      OR (SELECT provolatile FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)')) <> 'v'
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)')) IS DISTINCT FROM '097fcb3f70b096a8f925158ffad0346b'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)')) IS DISTINCT FROM 'd2891906150ff746d2d739a57f4d778c'
      OR (SELECT prosecdef FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)'))
      OR has_function_privilege('anon', 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'EXECUTE')

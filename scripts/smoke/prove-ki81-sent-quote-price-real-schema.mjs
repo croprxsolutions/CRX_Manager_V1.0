@@ -8,7 +8,7 @@
  * replays every post-baseline migration before the candidate, commits invented test rows (ids a81a81a8-...)
  * and a private k81 schema of seeding helpers, then:
  *   before  the chain scripts/smoke/smoke-ki81-sent-quote-price.sql FAILS (today's code bills an unsent price);
- *   apply   the candidate applies; the chain passes (cases F1-F5, X1-X3, B1-B3);
+ *   apply   the candidate applies; the chain passes (cases F1-F6, X1-X3, B1-B3);
  *   C9      while a field-app save holds a sent quote, a quote edit's row lock waits (save_quote locks the
  *           quote FOR UPDATE first), and gets it once the save ends;
  *   grants  the helper is executable by no API role, the resolver by neither anon nor authenticated;
@@ -269,7 +269,7 @@ const OLD = 'create_invoice_from_blend_ticket:a6f5c6e72d6632313549313b34f406ad,_
   + '_save_field_app_split_invoice_impl:a69f21d8e9f32fc6fecb38ac3a54801c,resolve_field_app_chemical_price:d2617d60d7b6e5b922bc3e3be4e5850b';
 const NEW = 'create_invoice_from_blend_ticket:2a45b09ef78fb4b289db979401bc1bee,_save_field_app_invoice_impl_20260714:f44ed39784f88be2b01de43868d60058,'
   + '_save_field_app_split_invoice_impl:ccb5dfb90cc2f4faa6d839c64eaa7267,resolve_field_app_chemical_price:a9f32657d9c266b6a5f634d4b51d7823,'
-  + '_field_app_sent_quote_price_cents:097fcb3f70b096a8f925158ffad0346b';
+  + '_field_app_sent_quote_price_cents:d2891906150ff746d2d739a57f4d778c';
 const ASSERT_MD5 = '4e3bca2b48a4af44de9d1f219a880586';
 const bodies = () => scalar(`SELECT string_agg(proname || ':' || md5(replace(prosrc, chr(13), '')), ',' ORDER BY array_position(ARRAY['${FNS.join("','")}'], proname::text))
   FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname IN ('${FNS.join("','")}');`);
@@ -446,7 +446,7 @@ async function main() {
   const after = runChain();
   assert.equal(after.status, 0, after.output);
   assert.match(after.output, /SMOKE_PASS_ROLLBACK/);
-  console.log('[case] F1-F5, X1-X3, B1-B3 pass: sent price bills; unsent change refuses; recorded change bills; ineligible quotes give the tier price; two prices refuse, a typed price saves; split and blend follow the same rule');
+  console.log('[case] F1-F6, X1-X3, B1-B3 pass: sent price bills; a planted price record refuses; unsent change refuses; recorded change bills; ineligible quotes give the tier price; two prices refuse, a typed price saves; split and blend follow the same rule');
 
   await concurrencyCase();
   grantCase();

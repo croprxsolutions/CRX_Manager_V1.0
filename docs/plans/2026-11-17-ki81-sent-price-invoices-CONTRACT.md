@@ -84,8 +84,12 @@ Changed because of it:
 - Season bound (7): an eligible quote also expires in the application date's season (quotes expire at season end),
   so a next season's quote never prices a backdated application. Expiry is inclusive on its Chicago date; a NULL
   expiry counts (live: 0 quotes have none) (8).
-- One answer per transaction (21, 37): the helper returns the same price for the same inputs for the rest of the
-  transaction, so the split save, which asks once per grower, cannot price one grower from a quote sent mid-save.
+- One answer per transaction (21, 37): the helper records its first answer for the same inputs; every later call
+  in that transaction recomputes and refuses `FIELD_APP_QUOTE_PRICE_CHANGED` ("save again") if the answer moved, so
+  the split save, which asks once per grower, cannot price one grower from a quote sent mid-save. The record can
+  only refuse, never supply a price (Luna round 2: a planted record refuses; proof case F6).
+- A quote sent by another user while a save runs, after the save chose its quotes (Luna round 2), is not part of that
+  save: the result equals the save committing just before that send, a price the customer was sent.
 - Negative quote prices are ignored, as the blend path already does (4); cent scale and finiteness are a table
   constraint (`quote_items_price_per_unit_cent_scale_chk`); live has 0 bad prices.
 - Wording: the lock's rules are as in Facts (a raise also needs the grower tick) (1); the draft job quote is the

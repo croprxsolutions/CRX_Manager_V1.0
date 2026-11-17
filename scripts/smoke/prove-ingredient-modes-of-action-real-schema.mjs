@@ -36,6 +36,15 @@ const MOA_OVERLAYS = [
   ['20270109100000_delivery_receipt_brands.sql', 'f9f52f9ace2024c77b568767288c3700dc35e4e2de871436e6df7a3067be0c87'],
   ['20270115100000_moa_group_code_equivalence.sql', '7b54d17d319ca706b9fa87eb2db039bcb362df8e108cad24e5bc6f367a0a1890'],
 ];
+// Later files that only CALL a shared helper TOUCHED names (save_idempotency, _product_parent_require_admin); pinned to reviewed source, not replayed.
+const LATER_CALLER_ONLY = new Map([
+  ['20270109100100_standing_grower_discount.sql', 'c84bd553b6732631d8c01374a0aac522518167e5506782133631f8afd0bfe90f'],
+  ['20270109100200_sales_tax_checkbox.sql', 'a5ffbe01e7d09c0b962560d59dd935f64949ab29b1152fd44b1ae09a532a1b64'],
+  ['20270109100300_sales_tax_rep_no_salesman.sql', 'c0df52c427687cd9bb3c7c160b46211d5d89abfddc1b66805b677f0d28a0732d'],
+  ['20270109100400_sales_tax_not_revenue.sql', '3a53e900d2bb57d9296952e412b6d43b180b4f936427aba6c8f699eb4f18da68'],
+  ['20270110110000_inactive_rate_review_cleanup.sql', '7f980faaff2fd23642522535b885cca9f30e5c7c316482d4a587586f9f5b6772'],
+  ['20270113100000_stock_checks_negative_onorder_chicago.sql', '3d31cc43251b062fda6a8ea13a990462027752d571fbee07e824b864a051b7b0'],
+]);
 // Taha 2026-11-12 (#1810): an over-long EPA name still matches by CAS. Applied right after the candidate.
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -176,6 +185,8 @@ function plan() {
   }
   for (const file of all.slice(at + 1)) {
     if (overlayPaths.includes(file)) continue;
+    const callerPin = LATER_CALLER_ONLY.get(path.basename(file));
+    if (callerPin && createHash('sha256').update(lf(file)).digest('hex') === callerPin) continue;
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);

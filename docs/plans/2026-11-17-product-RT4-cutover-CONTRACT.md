@@ -1,96 +1,231 @@
-# RT-4 rate cut-over: behavior contract
+# RT-4a rate cut-over: behavior contract
 
-Status: draft for the cold challenge (2026-11-17). Grand plan: `2026-10-29-product-GRAND-PLAN.md` › RT-4 and overlap 11. RT-3 contract: `2026-11-11-product-RT3-rate-review-CONTRACT.md`. Facts read at commit `10070370e` (origin/staging) and live read-only on 2026-11-17.
+Status: settled after one Astra cold challenge (gpt-6-astra high, 67 findings, 2026-11-17); two business questions open for Mason (end). Grand plan: `2026-10-29-product-GRAND-PLAN.md` › RT-4 and overlap 11. RT-3 contract: `2026-11-11-product-RT3-rate-review-CONTRACT.md`. Facts read at commit `10070370e` (origin/staging) and live read-only on 2026-11-17.
+
+**Scope name.** This is **RT-4a**: promote approved rates to live per parent, with rollback. The grand plan's RT-4 "done when" also needs RT-4b (move every writer to the rate RPC, revoke direct writes (Mason-gated), drop the field app's invented `'oz'`, Piksi MG→g rename). RT-4 is not complete until RT-4b lands.
 
 ## 1. Outcome and authority
 
-**Business result.** The rate a new quote, job or field-app line picks up for a product comes from the rate Mason approved in RT-3, one parent at a time, with a one-step way back to the exact old reading. Existing quotes, invoices, jobs and orders do not change.
+**Business result.** The rate a new quote, job or field-app line picks up comes from the rate Mason approved in RT-3, one parent at a time, with a one-step way back to the old rate and unit. Saved quotes, invoices, jobs and orders do not change.
 
-**Smallest change.** Readers stay as they are: all ~93 screens and functions keep reading `products.rate_per_acre` / `rate_unit` (and `product_parents` for the parent). RT-4 is one internal step that writes the approved rate into those old columns through the existing PAR-1 write path (`_apply_parent_rates` → `_copy_parent_to_size`, the only write the rate lock lets through), plus a per-parent marker of which rate the parent now shows.
+**Smallest change.** Readers stay as they are: every screen and function keeps reading `products.rate_per_acre` / `rate_unit` (grand plan: "decided before any pilot"). RT-4a writes the approved rate into those columns through the existing PAR-1 path (`_apply_parent_rates` → `_copy_parent_to_size`), one parent per call, as the grand plan requires ("RT-4 promotes approved rows to live, one parent at a time"; the locked correction path is "never in a batch").
 
-Files expected:
-- one migration `supabase/migrations/2027xxxx_product_rate_cutover.sql` (new RPCs, one column on `product_parents`, two new parent event types, refusals added to the RT-3 review RPCs and `correct_parent_rates`);
-- `docs/changelog.d/<date>-rt4-rate-cutover.md`, `src/types/supabase.ts` regen, `.claude/schema-registry.json` refresh, a SQL proof file.
-- No screen in this PR. The pilot runs from Mason's admin login, the same way RT-1 and RT-3 ran.
+**Files expected.**
+- One migration `supabase/migrations/2027xxxx_product_rate_cutover.sql`:
+  - two columns on `product_parents`;
+  - widen `product_parent_events_event_type_check` with `rates_promoted`, `rates_restored`;
+  - RPCs `preview_parent_rate_cutover`, `commit_parent_rate_cutover`;
+  - source-aware refusals in `guard_product_rate_lock`, `correct_parent_rates`, `move_product_size`, and new BEFORE triggers on `product_rates` and `product_parent_rate_outcomes`.
+- Changelog fragment, `src/types/supabase.ts` regen, `.claude/schema-registry.json` refresh, SQL proof file.
+- No screen. Mason runs it from his admin login in the app's browser pane by calling the RPCs over the app's own API (PostgREST) with his session, exactly as the RT-1 derivation and RT-3 review ran on 2026-11-17 (`docs/changelog.d/2026-11-17-rt1-derivation-run.md`).
 
-**New things and why the existing path cannot do them.**
-- `product_parents.rate_source text NOT NULL DEFAULT 'legacy' CHECK (rate_source IN ('legacy','approved'))` and `rate_source_event_id bigint` (the parent event that last switched it). Needed so the review RPCs and the correction screen can tell a switched parent apart; nothing today records that.
-- Parent event types `rates_promoted` and `rates_restored` added to `product_parent_events_event_type_check` (live today: created, updated, size_added, size_moved, identity_corrected, rates_set, rates_corrected).
-- **No new snapshot table.** `product_parent_events` is already append-only (trigger `product_parent_events_append_only`, no-truncate trigger, no grants) and its `affected` column holds each size's full before and after. The `rates_promoted` event is the immutable snapshot.
+**New state, and why existing state cannot do it.**
+- `product_parents.rate_source text NOT NULL DEFAULT 'legacy' CHECK (rate_source IN ('legacy','approved'))`.
+- `product_parents.rate_source_event_id bigint REFERENCES product_parent_events(id)`, with `CHECK ((rate_source = 'approved') = (rate_source_event_id IS NOT NULL))`. It points at the `rates_promoted` event that holds the snapshot; NULL while legacy.
+- Nothing records today which rate a parent shows; the refusals below need it.
+- **Snapshot, no new table.** `product_parent_events` is append-only (update/delete trigger, no-truncate trigger, no write grants; authenticated active profiles may SELECT). The `rates_promoted` event stores, in `after_values`, an explicit versioned payload: `{"v":1, "legacy": {"rate_per_acre", "rate_unit", "suggested_rate"} of the parent, "sizes": [{product_id, rate_per_acre, rate_unit}], "approved": {rate_id, row_version, outcome, outcome_version, recommended, unit_code, written_unit}}`. Nothing in it is more sensitive than the product page already shows.
 
-**Who may act.** Admins only (`_product_parent_require_admin()`: `auth.uid()` with an active admin profile). New RPCs are `SECURITY DEFINER SET search_path = public, pg_temp`, `REVOKE ALL FROM PUBLIC, anon, authenticated, service_role`, `GRANT EXECUTE TO authenticated`; the admin check is inside.
+**Who may act.** Admins only (`_product_parent_require_admin()`). The new RPCs are `SECURITY DEFINER SET search_path = public, pg_temp`, `REVOKE ALL FROM PUBLIC, anon, authenticated, service_role`, `GRANT EXECUTE TO authenticated`. Internal helpers stay revoked.
 
 **RPCs.**
-- `preview_rate_cutover(p_parent_ids uuid[], p_direction text)`: read-only, any length up to 500. Per parent: eligible or the refusal reason, the target rate and unit spelling, each size's current snapshot (the same shape `_apply_parent_rates` requires: pricing_version, unit_size, inventory_unit, product_form, rate_per_acre, rate_unit, suggested_rate, and the three per-acre prices after the change), and `parent_version`.
-- `commit_rate_cutover(p_parent_ids uuid[], p_direction text, p_expected jsonb, p_reason text, p_idempotency_key text)`: all-or-nothing for the list.
+- `preview_parent_rate_cutover(p_parent_id uuid, p_direction text)`: read-only. Returns eligibility or the refusal, the target rate and unit, and the expected-state object for commit. Advisory only: commit re-checks everything.
+- `commit_parent_rate_cutover(p_parent_id uuid, p_direction text, p_expected jsonb, p_reason text, p_idempotency_key text)`.
+  - `p_direction` is `promote` or `restore`.
+  - `p_reason` is required (`_product_parent_reason`, non-blank, bounded).
+  - `p_idempotency_key` is required and non-blank.
+  - Errors use `PRODUCT_PARENT_…: <plain text>` so the app shows them.
 
-**What the server derives itself (the screen sends only locators).** Parent IDs and the direction are locators. The server reads the target from `product_rates` / `product_parent_rate_outcomes` (promote) or from the parent's `rate_source_event_id` event (restore), never from the caller. `p_expected` is only a staleness check, compared field by field; a mismatch refuses the whole batch.
+**Server-derived values.** The parent ID and direction are locators. The target always comes from `product_rates` / `product_parent_rate_outcomes` (promote) or from the event named by `rate_source_event_id` (restore), never from the caller. `p_expected` is a strict staleness check:
+- `parent_version`;
+- the approved rate's `id` and `row_version`, and `outcome_version`;
+- each size's preview snapshot as `_apply_parent_rates` requires.
+
+Unknown keys, missing keys, duplicates or any mismatch refuse.
 
 ## 2. State and failure
 
+**Order of work in one call (one transaction):**
+1. Lock the rate-lock row `FOR SHARE` (held to commit, so a concurrent unlock waits).
+2. `_lock_product_parent` (parent, then sizes in ID order).
+3. Lock the parent's `product_rates` and outcome rows.
+4. All eligibility checks, after the locks.
+5. Write.
+
+No advisory locks. A refusal anywhere rolls back everything.
+
 **Rules that always hold.**
-1. A parent may be promoted only when: `rate_source = 'legacy'`; it is active; its outcome is `approved_default` or `no_per_acre_default`; it has no draft `product_rates` rows; for `approved_default`, exactly one approved `per_acre` row with `is_quoting_default` and `basis_confirmed`; and it is not on the hold list (rule 7).
-2. Promote `approved_default`: parent and every size get `rate_per_acre` = the approved `recommended`, `rate_unit` = the size's existing spelling if it is one of the approved unit's `legacy_spellings`, else the unit's first legacy spelling (`lb` → `Lb`). Seed and each forms keep their stock unit (existing `_copy_parent_to_size` rule).
-3. Promote `no_per_acre_default`: `rate_per_acre` NULL; `rate_unit` NULL for liquid/dry, stock unit for seed/each (existing rule). New lines start with no rate (Mason, 2026-11-17: "Yes, leave it blank").
-4. `suggested_rate` text is never touched by RT-4.
-5. When the target equals today's values (live: 370 of 372 approved_default parents), no `products` or parent rate column is written; only `rate_source`, `rate_source_event_id` and the `rates_promoted` event (with `affected` holding each size's unchanged values) are recorded. `_apply_parent_rates` refuses a no-change correction, so this branch skips it.
-6. When it differs, the write goes through `_apply_parent_rates(..., p_correction => true, reason)`, which locks the parent and its sizes in ID order, checks the size snapshot, takes the rate pass for this transaction only, writes `rates_corrected` rows to `product_rate_events`, and lets `trigger_recalc_product_price_per_acre` recompute the per-acre prices. The RT-4 RPC then writes its own `rates_promoted` parent event pointing at that event.
-7. **Hold list (Mason, 2026-11-17):** Piksi Dust Plus and Infurrow stay on today's values ("Keep both on today's values"); promote refuses them by parent ID, written into the migration. A later MG→g rename is its own known issue.
-8. Restore: only a parent with `rate_source = 'approved'`. Every size and the parent get back exactly the `before` values in the `rates_promoted` event named by `rate_source_event_id`, through the same `_apply_parent_rates` path (or no write when they already match). `rate_source` returns to `legacy`; a `rates_restored` event is appended.
-9. While a parent is `approved`: `commit_rate_review` refuses any reopen, save or delete of that parent's rates or outcome ("switch it back to the old rate first"), and `correct_parent_rates` refuses it too, so the live columns can never drift from the approved rate without a restore.
-10. The rate lock stays ON. RT-4 does not unlock it; promote and restore refuse if it is off (same check as `correct_parent_rates`).
+1. **Promote eligibility.** All of these must hold:
+   - `rate_source = 'legacy'`, the parent is active, and the rate lock is on;
+   - the outcome is `approved_default` or `no_per_acre_default`, with no draft rows;
+   - for `approved_default`: exactly one approved, `basis_confirmed`, `per_acre`, `is_quoting_default` row, with `recommended > 0` and a unit that `_product_rate_unit_ok` accepts for the parent's current form;
+   - not on the hold list (rule 7);
+   - when the unit changes, no `blend_recipe_items` row and no blend ticket line with a blank unit references a size (both reuse the product's current unit when loaded or billed; live 2026-11-17: 0 rows for every product whose value changes).
+2. **Promote `approved_default`.**
+   - Liquid/dry: the parent gets the approved `recommended`, and its unit becomes the parent's existing spelling when that spelling is one of the approved unit's `legacy_spellings`; otherwise the unit's first legacy spelling (`lb` → `Lb`).
+   - Sizes get the same through the existing copy. Live: every size's unit spelling equals its parent's.
+   - Seed/each: the parent unit stays NULL and sizes keep their stock unit (existing `_apply_parent_rates` / `_copy_parent_to_size` behavior). Live: no approved_default parent is seed or each form.
+3. **Promote `no_per_acre_default`.**
+   - `rate_per_acre` NULL on the parent and sizes.
+   - Liquid/dry `rate_unit` NULL; seed/each sizes keep their stock unit. The field app shows the stock unit for a NULL rate unit (existing fallback); the rate stays blank.
+   - New lines start with no rate (Mason, 2026-11-17: "Yes, leave it blank"). No reader parses `suggested_rate` text into a rate (reader trace 2026-11-17).
+4. **Only rate fields move.**
+   - `suggested_rate` is passed through unchanged (the parent's current value).
+   - `_copy_parent_to_size` also writes category and use timings from the parent. Live: every size already equals its parent on suggested text, category and timings, and the call refuses if any size differs at commit.
+5. **No-change promote** (live: 370 of 372 approved_default parents). It takes the same locks and checks as rule 1, verifies the snapshot, and refuses on any mismatch. It writes no rate column. It records the marker and the event, and it bumps `parent_version` so an old preview cannot replay.
+6. **Changing promote.**
+   - Goes through `_apply_parent_rates(..., p_correction => true, reason)`. That checks the size snapshot and per-acre prices, takes the rate pass for this transaction, writes one `corrected` row per size to `product_rate_events` and one `rates_corrected` parent event, and lets `trigger_recalc_product_price_per_acre` recompute prices.
+   - It is followed by the `rates_promoted` event and the marker.
+   - Independent check for Smart Choice: 1.8 Lb × $19.65/Lb = $35.37 per acre at tier 1.
+7. **Hold list (Mason, 2026-11-17, "Keep both on today's values").**
+   - Piksi Dust Plus (`afdae5f9-3410-4f17-975b-07a1650089ae`) is refused by ID, and the migration checks that the ID still names "Piksi Dust Plus".
+   - Piksi Dust Infurrow (`c9933638-…`) is already `needs_label_data`, so promote refuses it anyway.
+   - The hold excludes them from RT-4a only. Ordinary locked corrections stay as they are.
+8. **Restore.**
+   - Only when `rate_source = 'approved'`; inactive parents may be restored.
+   - Puts the parent's snapshot `legacy` rate and unit back and copies down to every current size through the same `_apply_parent_rates` path. When nothing differs, no write happens.
+   - Restore covers exactly `rate_per_acre` and `rate_unit`. `suggested_rate` was never changed. Per-acre prices are recomputed from today's stock prices, so a price change made since promotion is kept, not undone.
+   - Then `rate_source = 'legacy'`, `rate_source_event_id` NULL, `parent_version` bumped, and a `rates_restored` event citing the promote event.
+   - A size added after promotion gets the parent's legacy rate like its siblings; live sizes never differ from their parent today.
+9. **An approved parent cannot drift**, through any route. The guard runs in the database on the tables themselves:
+   - `guard_product_rate_lock` refuses any rate-column change on a size of an `approved` parent unless that transaction holds a rate pass, **even when the lock is off**. So unlocking later reopens only legacy parents.
+   - The only definer paths that write a rate pass: RT-4a commit, `correct_parent_rates` (now refuses `approved` parents: "switch it back to the old rate first"), and add-a-size (copies the parent's own rate, which is allowed).
+   - New BEFORE triggers on `product_rates` and `product_parent_rate_outcomes` refuse any insert, update or delete for an `approved` parent. That covers `commit_rate_review`, `save_draft_product_rate`, derive, and anything else.
+   - `move_product_size` refuses moving a size into or out of an `approved` parent.
+10. **Rate lock.** RT-4a refuses while the lock is off and never changes it.
 
-**Transaction.** One RPC call is one transaction. Any refusal (ineligible, stale snapshot, price preview changed, not admin, lock off) rolls back every parent in the call. No emails, files or receipts leave the database.
-
-**Existing rows.**
-- Live 2026-11-17: 396 parents with an outcome (372 approved_default with exactly one default each, 16 no_per_acre_default, 8 needs_label_data with 8 drafts). 0 sizes differ from their parent's rate today. 1 inactive size under an approved parent. No approved_default parent is seed or each form; 6 no_per_acre_default parents are.
-- Every existing parent gets `rate_source = 'legacy'` from the column default. Every reader keeps reading the same columns; a `legacy` parent reads exactly what it reads today.
-- Only two approved_default parents change value or unit: Smart Choice (1.8 Dry oz → 1.8 Lb; Mason: "1.8 lb per acre"; per-acre price rises with it) and Piksi Dust Plus (held, rule 7). The 16 no_per_acre_default parents go to blank.
-- Lines already saved keep their own copy: `quote_items` (actual_rate, rate_unit, suggested_rate), `invoice_items` and `job_chemicals` (rate_per_acre, rate_unit), `order_items` (actual_rate, rate_unit), blend tickets. RT-4 never writes those tables.
-- Read-only check before apply: the query in §4 case P0 returns the counts above.
-- The deployed app during rollout: the new column has a default and no screen sends it; old screens keep working. The parent correction screen (`ParentRatesModal`) gets a clear refusal on a switched parent from rule 9.
+**Existing rows (live, 2026-11-17).**
+- Parents: 456 total, 413 active.
+- Outcomes:
+  - 372 approved_default: 538 sizes, 1 inactive; each has one valid default with `recommended > 0`; 0 seed/each.
+  - 16 no_per_acre_default: 18 sizes, 6 seed/each.
+  - 8 needs_label_data, with 8 drafts.
+- 17 active parents have no outcome; they stay legacy until decided. 5 active products are in no parent; they stay as they are.
+- 0 sizes differ from their parent on rate, unit, suggested text, category or timings. No parent unit or suggested text has stray spaces.
+- Saved lines keep their own copy:
+  - `quote_items`, `invoice_items`, `job_chemicals` and `order_items` hold their own rate and unit;
+  - season rollover and quote-to-order copy the line's own rate.
+  - The two re-reads of the product's current unit are blend recipes (no unit column) and blank-unit blend lines. Rule 1 refuses a unit change while either exists; live has none for the changing products.
+- Every parent starts `legacy`, and readers see exactly today's values.
+- The deployed app keeps working:
+  - the new columns have defaults;
+  - the parent history screen does not read `event_type`;
+  - `ParentRatesModal` shows `PRODUCT_PARENT_…` errors as plain text.
 
 **Timing.**
-- Double click / retry after timeout: same `p_idempotency_key` with the same request returns the first receipt; the same key with a different request is refused (existing `save_idempotency` / replay pattern, fingerprint over actor, parent IDs sorted, direction, expected, reason).
-- Two admins on one parent, or a size edited between preview and commit: `_lock_product_parent` plus the snapshot check refuses the later one with a stale message; nothing is half-written.
-- A promote racing an RT-3 save: the review RPC and the cut-over both lock the parent row; whichever is second sees the other's change (rule 9 or a stale version).
-- Late response: the receipt lists each parent's event ID; a retry after success replays it.
+- **Retry or double click.** The same key with the same request (fingerprint: actor, parent, direction, expected, reason) returns the first receipt through the existing `_product_parent_replay` / `save_idempotency` pattern; the same key with a different request is refused. The receipt says what was done and when, not the current state.
+- **Two admins, or an edit after preview.** The version or snapshot check refuses the later one; nothing is half-written.
+- **Unlock during a call.** It waits on the `FOR SHARE` lock (step 1).
+- **A user's open screen.** A screen opened before the switch keeps the rate it already loaded until reloaded. That is the same as any rate correction today: the rate is captured when the product is picked.
+- **Copying an old quote** (rollover, convert to order) keeps the saved rate.
 
 **Undo and history.**
-- The original switch records the admin, time, reason, and every size's before/after in `rates_promoted`; value changes also write `rates_corrected` / `product_rate_events` rows.
-- Restore records the admin and reason in `rates_restored` and puts back the snapshot values. A second restore on a `legacy` parent is refused ("already on the old rate"). Promote again after a restore takes a new snapshot of what is live then.
+- Promote records: admin, time, reason, the snapshot, the approved row and version it used, plus per-size correction events when values change.
+- Restore records the admin and reason. A second restore is refused ("already on the old rate").
+- Promote after restore takes a new snapshot of the then-live values. Those equal the original legacy values, because nothing can change an approved parent's rate in between (rule 9).
 - History is never edited.
 
 ## 3. Delivery
 
-- One database PR to `staging`: migration plus proof, no screen. It is safe with the app already deployed (new column has a default; the only behavior change for old screens is rule 9's refusal on switched parents, and no parent is switched until the pilot).
-- Gates: prover, Luna, Sol (database path), staging DB apply, then release to production through the normal release flow.
-- Live runs after the migration is live, each a live write outside a migration that needs Mason's explicit yes in the session: (1) pilot: Smart Choice (value and unit change), MSO XL (no-change promote), one no_per_acre_default parent (goes blank); check a new quote line on each, then restore one and check it reads exactly as before, then re-promote it. (2) The rest of the eligible parents in one call. Mason: "Pilot a few, then the rest".
-- Later, not in this PR (RT-4b): move every remaining writer to the rate RPC, revoke direct column writes (Mason-gated), drop the field app's invented 'oz', the Piksi MG→g rename.
+- **One database PR to `staging`:** migration plus proof, no screen. It is compatible with the deployed app (defaults, no reader change, no parent switched until the pilot).
+- **Gates:** prover, Luna, Sol (database path), staging apply, then release to production through the normal release flow.
+- **Before any rollback of the migration,** every parent must be restored to `legacy`. The columns, event types and events stay (forward-repair only).
+- **Live runs** come after the migration is live in production. Each is a live write outside a migration and needs Mason's explicit yes in that session.
+  1. **Reader proof before the pilot** (grand plan): on staging, a new quote line, job line, field-app line and quote PDF for a changed product and a blank product show the expected rate, unit and price.
+  2. **Pilot:** Smart Choice (value and unit change), MSO XL (no change), Autumn Super 51 WDG (goes blank). Then:
+     - check a new quote line for each in the app;
+     - restore Smart Choice and Autumn Super, and check they read exactly as before;
+     - re-promote both.
+     - Stop and restore on any mismatch. The recovery owner is the agent running it, with Mason's yes.
+  3. **The rest:** a reviewed list (the preview output for every eligible parent: IDs, targets, exclusions), committed one parent per call by a small loop in the browser pane. The loop is resumable: already-approved parents are skipped and listed. The receipt reconciles every intended parent.
 
 ## 4. Proof cases
 
-All run on the local prover / a migrated local database with test data, as the real caller (admin and non-admin JWT claims), never on production data.
+These run on the local prover with test data, as real roles (`SET ROLE authenticated` with JWT claims for an active admin, an active non-admin, an inactive admin, `anon`), never on production data.
 
-- P0 (live, read-only): before apply, the counts in §2 Existing rows still hold; after apply, every parent is `legacy` and products/parents md5 is unchanged.
-- P1: when an admin promotes a parent whose approved rate equals today's, then no `products` row changes (md5 of the sizes equal), `rate_source = 'approved'`, one `rates_promoted` event.
-- P2: when an admin promotes a dry parent from 1.8 `Dry oz` to approved 1.8 `lb`, then the parent and every size read 1.8 `Lb`, the per-acre prices equal `product_price_per_acre` for the new unit, one `rates_corrected` and one `rates_promoted` event.
-- P3: when an admin promotes a `no_per_acre_default` parent (liquid and seed form), then `rate_per_acre` is NULL, liquid `rate_unit` NULL, seed `rate_unit` = stock unit, per-acre prices NULL.
-- P4: when an admin restores P2's parent, then every size's rate, unit and per-acre prices equal the pre-promote values exactly, `rate_source = 'legacy'`, one `rates_restored` event; a second restore is refused.
-- P5: refusals, each with nothing written: not admin; `needs_label_data`; a parent with a draft; a held (Piksi) parent; already `approved`; lock off; one stale size in a batch of three (none of the three change).
-- P6: when a parent is `approved`, then `commit_rate_review` reopen/save/delete and outcome change on it, and `correct_parent_rates` on it, are refused; after restore they work again.
-- P7: same idempotency key twice returns the same receipt and writes once; same key with a different parent list is refused.
-- P8: adding a size to an `approved` parent copies the approved rate (existing add-a-size path).
-- P9: an existing quote line and job line on a promoted product keep their saved rate and unit.
-- P10 (live, after the pilot, read-only plus a browser check): a new quote line for Smart Choice shows 1.8 lb and the new per-acre price; after restore it shows 1.8 Dry oz and $2.21/acre.
+- **P0 (live, read-only).** Before apply, the counts in §2 still hold. After apply, every parent is `legacy`, and an ID-ordered md5 of the pre-existing `products` and `product_parents` columns is unchanged.
+- **P1.** When an admin promotes an unchanged parent, then no `products` rate column changes, `rate_source = 'approved'`, `parent_version` goes up by 1, and there is one `rates_promoted` event with the v1 payload.
+- **P2.** When an admin promotes 1.8 `Dry oz` → approved 1.8 `lb` on a dry parent priced $19.65/Lb, then the parent and sizes read 1.8 `Lb`, tier-1 per-acre is $35.37, and there are 2 `corrected` size events (2 sizes), 1 `rates_corrected` and 1 `rates_promoted`.
+- **P3.** When an admin promotes a `no_per_acre_default` liquid parent and a seed parent, then the rate is NULL, the liquid unit is NULL, the seed unit is the stock unit, and per-acre prices are NULL.
+- **P4.** When an admin restores P2's parent (after a stock-price change in between), then the rate and unit are back to 1.8 `Dry oz` and per-acre prices use the new stock price. When P3's liquid parent is restored, its old rate and unit return. A second restore is refused.
+- **P5.** These are refused, with nothing written:
+  - a non-admin, an inactive admin, or `anon`;
+  - a `needs_label_data` parent, a parent with a draft, or the held Piksi parent;
+  - an already-approved parent, or an inactive parent on promote;
+  - the lock being off;
+  - a stale `parent_version`, rate `row_version` or outcome version;
+  - a stale size snapshot;
+  - a unit change while a blend recipe item or a blank-unit blend line references a size;
+  - a size that differs from its parent on suggested text, category or timings;
+  - a blank reason or key;
+  - unknown keys in `p_expected`.
+- **P6.** When a parent is `approved`, then these are all refused:
+  - `commit_rate_review` reopen, save or delete;
+  - `save_draft_product_rate`;
+  - an outcome change;
+  - `correct_parent_rates`;
+  - `move_product_size` in or out;
+  - a direct `UPDATE products SET rate_per_acre` with the lock **off**.
+
+  After a restore they work again.
+- **P7.** The same key twice returns the same receipt and writes once. The same key with a different reason is refused.
+- **P8.** Adding a size to an `approved` parent copies its approved rate. A later restore gives that size the legacy rate.
+- **P9.** An existing quote line and job line on a promoted product keep their saved rate and unit, and so does season rollover.
+- **P10 (staging, browser, before the pilot).** The reader proof in §3, step 1.
+- **P11 (live, after the pilot, browser).** A new quote line for Smart Choice shows 1.8 Lb and $35.37/acre at tier 1. After restore it shows 1.8 Dry oz and $2.21/acre.
+
+## Challenge settlement (Astra, 67 findings)
+
+**Corrected in this contract:**
+- 1, 29, 56, 60, 67: one parent per call; a reviewed list and a resumable loop.
+- 2: parent spelling; live sizes match.
+- 3, 4, 53: only rate fields move; checked live and refused at commit.
+- 5: seed/each wording.
+- 6, 7, 8: restore covers rate and unit; prices recompute from current prices.
+- 9: restore copies the parent down.
+- 10: moves refused.
+- 11: inactive parents restorable.
+- 12, 13, 14, 15, 55: the source-aware database guard and table triggers.
+- 16, 17: revalidation and `recommended > 0`.
+- 19, 20, 21, 22, 24, 25: locking order, checks after locks, version bump, expected-state fields.
+- 28, 30: reason, key and `p_expected` validation.
+- 32, 33, 34: FK and check on the pointer; v1 payload with the approved source.
+- 35, 36, 64: wording.
+- 38: real roles.
+- 49: independent $35.37.
+- 51: hold by ID with a name check.
+- 57: restore Smart Choice and Autumn Super.
+- 58: reader proof before the pilot.
+- 59: stop rule and recovery owner.
+- 61: rollback order.
+- 63: column-scoped md5.
+- 66: named RT-4a.
+
+**Disproved with evidence:**
+- 18: only Smart Choice changes unit (`Lb`, priced per `Lb`); the 370 no-change parents write nothing.
+- 23: membership changes run through `_lock_product_parent`, and moves into or out of approved parents are now refused.
+- 26: preview is advisory and commit re-checks.
+- 27: the existing replay/save idempotency pattern is used by `correct_parent_rates` and `commit_rate_review` on live.
+- 31: the receipt is historical by design.
+- 37: the payload holds nothing beyond product-page data.
+- 39: the browser-pane runner was used for RT-1 and RT-3.
+- 40: `ParentRatesModal` shows `PRODUCT_PARENT_…` text (`ParentRatesModal.tsx:148`, `errorSanitizer.ts:350`).
+- 41–46: reader trace. No reader parses `suggested_rate`. Saved lines keep their copies. The blend re-reads are guarded by rule 1 (0 live rows). The field-app `'oz'` fallback only applies when the stock unit is also blank.
+- 47, 48: captured-at-pick, the same as any correction today; copies keep the saved rate.
+- 50: parents without an outcome and ungrouped products stay legacy by design.
+- 52: the hold is RT-4a exclusion only.
+- 62: the migration's preflight asserts the helper signatures it calls exist.
+- 65: the history screen does not read `event_type`.
+
+**Sent to Mason:** 54 (how a live rate gets changed after the switch) and 59 (how long to watch the pilot).
 
 ## Settled business decisions (Mason, 2026-11-17)
 
 - Products with no per-acre default: "Yes, leave it blank" when switched.
-- Piksi Dust Plus and Infurrow: "Keep both on today's values"; held from promote.
+- Piksi Dust Plus and Infurrow: "Keep both on today's values".
 - Smart Choice: "1.8 lb per acre".
 - Rollout: "Pilot a few, then the rest".
 
 ## Open business decisions
 
-None known. The cold challenge may raise some.
+1. **Changing a live rate after the switch.** Recommended: switch the parent back, fix the rate in the rate review, then switch it on again (a few minutes on the old rate; no new screen now). The alternative is a one-step "edit live rate" tool, built now instead of in RT-4b, which costs more time and review.
+2. **Pilot watch.** Recommended: go on to the rest the same day, once the pilot checks pass in the app. The alternative is to wait a day of real quoting first.

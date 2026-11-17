@@ -527,9 +527,9 @@ Claude C-9). With `20261029120000`, a logged approved price change needs no re-s
 cascades away. But the field-app lookup is `ORDER BY qi.id LIMIT 1` over UUIDs, so it is effectively random, not
 "first". It also has no season filter: last season's quote, or another grower's quote on the same field, can price
 this year's invoice. Fix: pick the eligible quote by customer, status and season. Repair step 4 (To-Do 0.17).
-The fix (contract `docs/plans/2026-11-17-ki81-sent-price-invoices-CONTRACT.md`): a field-app chemical takes a quote price only from a
-quote sent to a grower billed for it, not draft, declined, cancelled or deleted, not expired by the application date
-and of that season, and passing the sent-price lock; two different prices refuse until the price is typed. The
+The fix (contract `docs/plans/2026-11-17-ki81-sent-price-invoices-CONTRACT.md`): a field-app chemical takes a quote price only from the
+billed grower's own sent quote (Mason, 2026-11-17, "Own quote only"), not draft, declined, cancelled or deleted, not expired by the application date
+and of that season, and passing the sent-price lock; two different prices refuse until the price is typed. The invoice preview uses the same rule. The
 blend-ticket invoice runs the lock on the job's quote first. Proven on a real-schema replay
 (`scripts/smoke/prove-ki81-sent-quote-price-real-schema.mjs`).
 

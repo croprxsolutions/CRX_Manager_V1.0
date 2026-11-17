@@ -29,10 +29,13 @@ Read at `origin/staging` 10070370e (2026-11-17). Decision: Mason, 2026-11-17 (DE
      eligible quote lines (below), locks those quotes (FOR SHARE, id order), runs the lock on each, and returns the
      one price in cents; NULL when none; refuses when eligible quotes disagree.
   2. `resolve_field_app_chemical_price` takes the billing customers and the application date and uses (1).
-  3. The single and split field-app saves use (1)/(2); nothing else in their bodies changes.
+  3. The single and split field-app saves use (1)/(2) once per billed grower; nothing else in their bodies changes.
+  5. The invoice screen's preview (`_preview_field_app_invoice_split_impl_20260908`) picks the same quotes per grower
+     through the shared `_field_app_quote_eligible`, so the preview shows what the save bills (Sol round 2).
   4. The blend invoice locks the job's quote row and runs the lock before any price is read or invoice number drawn.
-- Eligible quote (field-app): its customer is one of the customers billed for this application (any co-owner's
-  quote prices the chemical for everyone on it, as today); not deleted; it was actually sent (has a sent version);
+- Eligible quote (field-app): its customer is the grower being billed (Mason, 2026-11-17, "Own quote only": on a
+  shared field each grower pays their own quoted price, else the price list; a co-owner's quote never prices
+  another grower's share); not deleted; it was actually sent (has a sent version);
   status sent, revised, accepted, expired, closed_by_application or closed_short (not draft, declined, cancelled);
   not expired before the application date (Chicago date; falls back to the invoice date, then today) and expiring
   in that date's season.
@@ -76,7 +79,9 @@ Database only, one PR to `staging`; the screens already show server errors. No s
 6. Split-bill save: cases 1, 2 and 4 through `_save_field_app_split_invoice_impl`.
 7. Blend invoice: the job's quote re-priced and not re-sent refuses QUOTE_RESEND_REQUIRED; sent price bills; never-sent quote bills as today.
 9. When a field-app save holds a quote and save_quote edits that quote's price at once, then save_quote waits and the invoice bills the sent price.
-8. Rollback script restores all four bodies byte-identical (md5).
+8. Rollback script restores all five bodies byte-identical (md5).
+10. Own quote only: on a shared field only grower B has a sent quote; B bills it, A bills A's tier (single and split saves).
+11. The preview shows each grower the price the save bills, and never a draft quote's price.
 
 ## Cold challenge (Astra, gpt-6-astra high, 2026-11-17: 37 findings) — settled
 
@@ -99,7 +104,7 @@ Changed because of it:
 Settled by evidence or an existing decision (no change):
 - Whole-quote lock (12, 13): the blend invoice bills from the job's own quote, exactly the quote Convert and Schedule
   Job check whole (Mason, 2026-10-14: the lock covers every price on the quote); it refuses before any number is drawn.
-- Billing customers (10, 11): every grower billed for the application, co-owner sharing as today; the lock compares
+- Billing customers (10, 11): superseded by Mason's answer 3 (own quote only, after Sol round 2); the lock compares
   line, product and price, not the field (Mason's 2026-11-17 answer 1 is about which quotes, not which field).
 - Dates (9): single save reads `invoice_date`; split reads the job date, then `invoice_date`, then Chicago today.
 - Locks (20, 22, 23): FOR SHARE re-checks the quote row's conditions after any wait (PostgreSQL re-evaluation), and
@@ -112,7 +117,7 @@ Settled by evidence or an existing decision (no change):
   screens (29, 30: the server already chose the quote price; messages say what to do, and a typed price saves),
   idempotency (24) and transaction atomicity (25; invoice-number gaps already happen on any refused save).
 - Grants and rollback (26, 28, 34): the prover checks the helper and the new resolver are closed to API roles, only
-  one resolver signature exists, and the reverse restores all four bodies byte-identical, the old resolver closed,
+  one resolver signature exists, and the reverse restores all five bodies byte-identical, the old resolver closed,
   and the helper dropped. Undo of a successful draft re-price (35) is a normal draft edit. Rollout (36): staging-first
   release flow. Audit references on invoice lines (33): not needed for this fix.
 
@@ -121,3 +126,13 @@ Settled by evidence or an existing decision (no change):
 Mason, 2026-11-17 (in session):
 1. Which quotes price a field-application chemical: "Sent + not expired" (the eligible-quote rule above).
 2. Two eligible quotes disagree on the price: "Stop, type the price" (FIELD_APP_QUOTE_PRICE_CONFLICT; the manual price saves).
+3. Shared field, one grower's quote (Sol round 2): "Own quote only": each grower pays a quoted price only from a quote
+   sent to them; otherwise the price list.
+
+## Sol round 2 (2026-11-17)
+
+- The preview read the old lookup, so it could show a price the save would not bill: it now uses the same eligibility.
+- One grower's quote priced another grower's share (and, in the single save, a skipped deleted recipient's quote could
+  price the others): pricing is now per grower, so both go away.
+- The preview runs no sent-price lock (it is read-only); a quote changed and not re-sent previews its current price and
+  the save refuses "send the quote again", which is the message the grower-facing step needs.

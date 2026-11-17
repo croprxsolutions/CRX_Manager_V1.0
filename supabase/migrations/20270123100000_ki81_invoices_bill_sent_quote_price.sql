@@ -1,8 +1,8 @@
 -- KI-81 (Mason, 2026-11-17: "fix now"; contract docs/plans/2026-11-17-ki81-sent-price-invoices-CONTRACT.md):
 -- an invoice that takes a price from a quote takes only a price the customer was sent.
 -- Actor checks are unchanged: create_invoice_from_blend_ticket still requires p_created_by = auth.uid(); the two
--- field-app _impl bodies stay callable only by postgres and service_role through their bound wrappers; the new helper
--- and the private resolver are executable by no API role.
+-- field-app _impl bodies stay callable only by postgres and service_role through their bound wrappers; the two new helpers,
+-- the private resolver and the preview _impl body are executable by no API role.
 --
 -- WHY: the sent-price lock (_assert_quote_prices_as_sent, 20261027040000/20261101100000) guards Convert, Partial
 -- Order and Schedule Job, but three invoice paths read quote_items.price_per_unit as it is now:
@@ -15,9 +15,9 @@
 -- on two quotes, so no stored invoice is affected; stored invoice lines are never re-priced by this file.
 --
 -- WHAT:
---  1. New private _field_app_sent_quote_price_cents(product, fields, customers, on_date) (invoker rights, executable
---     by no API role). Eligible quotes (Mason, 2026-11-17, "Sent + not expired"): customer is one of the growers
---     billed for this application; not deleted; has a sent version; status sent, revised, accepted, expired,
+--  1. New private _field_app_quote_eligible(quote, product, fields, on_date) and _field_app_sent_quote_price_cents(
+--     product, fields, customers, on_date) (invoker rights, executable by no API role). Eligible quotes (Mason,
+--     2026-11-17, "Sent + not expired" and "Own quote only"): the grower being billed's own quote; not deleted; has a sent version; status sent, revised, accepted, expired,
 --     closed_by_application or closed_short; not expired before the application date (Chicago) and expiring in
 --     that date's season (a later season's quote never prices it). It locks them FOR SHARE in id order, runs the
 --     sent-price lock on each (QUOTE_RESEND_REQUIRED), and returns the one non-negative price in cents, the same
@@ -25,25 +25,29 @@
 --     a manual price on the line still saves). None: NULL, so the tier price applies as before.
 --  2. resolve_field_app_chemical_price gains the billed customers and the application date and uses (1); it becomes
 --     VOLATILE (it now takes row locks). Its only caller is the split save. Grants as before.
---  3. _save_field_app_invoice_impl_20260714 uses (1) with the invoice's customers and invoice date;
---     _save_field_app_split_invoice_impl passes the billing set's members and the job's date (else the invoice
---     date). Nothing else in either body changes.
+--  3. _save_field_app_invoice_impl_20260714 uses (1) for each customer's own invoice, on its invoice date;
+--     _save_field_app_split_invoice_impl prices each billing-set member from their own quote, on the job's date
+--     (else the invoice date). Nothing else in either body changes.
 --  4. create_invoice_from_blend_ticket locks the job's quote row (FOR UPDATE, before its section, as save_quote
 --     orders them) and runs the sent-price lock before any price is read or invoice number drawn. A never-sent job
 --     quote still prices the blend, exactly as Convert and Schedule Job allow (Mason, 2026-10-13/14).
 --
--- ROLLBACK: scripts/smoke/ki81-sent-quote-price-reverse.sql restores all four bodies and the old resolver signature
--- and drops the helper, proven by scripts/smoke/prove-ki81-sent-quote-price-real-schema.mjs.
+--  5. _preview_field_app_invoice_split_impl_20260908 (the invoice screen's preview) picks the same quotes per
+--     customer (no locks; the save still runs the sent-price lock), so the preview shows the price the save bills.
+--
+-- ROLLBACK: scripts/smoke/ki81-sent-quote-price-reverse.sql restores all five bodies and the old resolver signature
+-- and drops the two helpers, proven by scripts/smoke/prove-ki81-sent-quote-price-real-schema.mjs.
 
 DO $preflight$
 BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'a6f5c6e72d6632313549313b34f406ad', ARRAY['authenticated', 'postgres', 'service_role']),
-        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '0f5da38476fe174cd25c9bf3e364055f', ARRAY['postgres', 'service_role']),
-        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', 'a69f21d8e9f32fc6fecb38ac3a54801c', ARRAY['postgres', 'service_role'])
-      ) AS pin(fn, sig, body_md5, execs)
+        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'a6f5c6e72d6632313549313b34f406ad', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
+        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '0f5da38476fe174cd25c9bf3e364055f', ARRAY['postgres', 'service_role'], 'v'),
+        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', 'a69f21d8e9f32fc6fecb38ac3a54801c', ARRAY['postgres', 'service_role'], 'v'),
+        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '83f6600412ced085d0876a3c7339ff12', ARRAY['postgres'], 's')
+      ) AS pin(fn, sig, body_md5, execs, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL
         OR (SELECT count(*) FROM pg_proc o
@@ -52,7 +56,7 @@ BEGIN
         OR p.proowner <> 'postgres'::regrole
         OR NOT p.prosecdef
         OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
-        OR p.provolatile <> 'v' OR p.proisstrict OR p.proleakproof OR p.proretset
+        OR p.provolatile::text <> pin.vol OR p.proisstrict OR p.proleakproof OR p.proretset
         OR ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
                    FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS DISTINCT FROM pin.execs
@@ -63,15 +67,45 @@ BEGIN
      OR (SELECT count(*) FROM pg_proc o WHERE o.pronamespace = 'public'::regnamespace AND o.proname = 'resolve_field_app_chemical_price') <> 1
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint)')) IS DISTINCT FROM 'd2617d60d7b6e5b922bc3e3be4e5850b'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._assert_quote_prices_as_sent(uuid)')) IS DISTINCT FROM '4e3bca2b48a4af44de9d1f219a880586'
-     OR to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)') IS NOT NULL THEN
-    RAISE EXCEPTION 'KI81_PREFLIGHT: resolve_field_app_chemical_price or _assert_quote_prices_as_sent is not the reviewed body, or the new helper already exists';
+     OR to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)') IS NOT NULL
+     OR to_regprocedure('public._field_app_quote_eligible(quotes,uuid,uuid[],date)') IS NOT NULL THEN
+    RAISE EXCEPTION 'KI81_PREFLIGHT: resolve_field_app_chemical_price or _assert_quote_prices_as_sent is not the reviewed body, or a new helper already exists';
   END IF;
   PERFORM set_config('crx.ki81_xid', pg_current_xact_id()::text, true);
   PERFORM set_config('crx.ki81_acls', (SELECT string_agg(coalesce(p.proacl::text, ''), '|' ORDER BY s.n)
-    FROM unnest(ARRAY['public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint)']) WITH ORDINALITY AS s(sig, n)
+    FROM unnest(ARRAY['public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint)']) WITH ORDINALITY AS s(sig, n)
     JOIN pg_proc p ON p.oid = to_regprocedure(s.sig)), true);
 END;
 $preflight$;
+
+CREATE FUNCTION public._field_app_quote_eligible(
+  q            public.quotes,
+  p_product_id uuid,
+  p_field_ids  uuid[],
+  p_on         date
+)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SET search_path = public, pg_temp
+AS $fn$
+  -- KI-81 (Mason, 2026-11-17): a quote may price a field-application chemical only when it is not deleted, was
+  -- actually sent (not a draft, declined or cancelled quote), had not expired by the application date and
+  -- expires in that date's season (quotes expire at season end, so a next season's quote never prices a
+  -- backdated application), and lists the product on one of the fields. Whose quote (the billed grower's own)
+  -- is the caller's filter. Shared by the field-app saves and the invoice preview so both pick the same quotes;
+  -- it takes the quote row so a FOR SHARE re-check after a wait sees the row's new status, deletion and expiry.
+  SELECT q.deleted_at IS NULL
+     AND q.status IN ('sent', 'revised', 'accepted', 'expired', 'closed_by_application', 'closed_short')
+     AND (q.expires_at IS NULL
+          OR (q.expires_at >= p_on
+              AND public.compute_season(q.expires_at) = public.compute_season(p_on)))
+     AND EXISTS (SELECT 1 FROM public.quote_versions v WHERE v.quote_id = q.id)
+     AND EXISTS (SELECT 1 FROM public.quote_sections qs
+                   JOIN public.quote_items qi ON qi.section_id = qs.id AND qi.quote_id = qs.quote_id
+                  WHERE qs.quote_id = q.id AND qs.field_id = ANY (p_field_ids) AND qi.product_id = p_product_id)
+$fn$;
+REVOKE ALL ON FUNCTION public._field_app_quote_eligible(public.quotes, uuid, uuid[], date) FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE FUNCTION public._field_app_sent_quote_price_cents(
   p_product_id   uuid,
@@ -91,9 +125,9 @@ DECLARE
   v_key    text;
   v_cached text;
 BEGIN
-  -- KI-81 (Mason, 2026-11-17): a field-application chemical takes a quote price only from a quote that was
-  -- sent to a grower billed for this application, is not a draft, declined, cancelled or deleted quote, and had
-  -- not expired by the application date; its prices must pass the sent-price lock. Two such quotes at
+  -- KI-81 (Mason, 2026-11-17): a field-application chemical takes a quote price only from an eligible quote
+  -- (_field_app_quote_eligible) sent to the grower being billed (callers pass that one grower: "own quote
+  -- only"); its prices must pass the sent-price lock. Two such quotes at
   -- different prices refuse ("Stop, type the price"). Not SECURITY DEFINER: it runs inside the definer-rights
   -- field-app saves, and no API role may execute it.
   IF p_product_id IS NULL OR p_field_ids IS NULL OR p_customer_ids IS NULL THEN
@@ -111,16 +145,7 @@ BEGIN
     SELECT q.id
       FROM quotes q
      WHERE q.customer_id = ANY (p_customer_ids)
-       AND q.deleted_at IS NULL
-       AND q.status IN ('sent', 'revised', 'accepted', 'expired', 'closed_by_application', 'closed_short')
-       -- Not expired by the application date, and a quote for that season (quotes expire at season end), so a
-       -- next season's quote never prices a backdated application.
-       AND (q.expires_at IS NULL
-            OR (q.expires_at >= p_on
-                AND public.compute_season(q.expires_at) = public.compute_season(p_on)))
-       AND EXISTS (SELECT 1 FROM quote_versions v WHERE v.quote_id = q.id)
-       AND EXISTS (SELECT 1 FROM quote_sections qs JOIN quote_items qi ON qi.section_id = qs.id AND qi.quote_id = qs.quote_id
-                    WHERE qs.quote_id = q.id AND qs.field_id = ANY (p_field_ids) AND qi.product_id = p_product_id)
+       AND public._field_app_quote_eligible(q, p_product_id, p_field_ids, p_on)
      ORDER BY q.id
        FOR SHARE OF q
   LOOP
@@ -189,7 +214,7 @@ BEGIN
     RETURN jsonb_build_object('unit_price_cents', 0, 'price_source', 'manual');
   END IF;
 
-  -- 2) The price a billed grower was sent on a quote for one of these fields (KI-81, Mason 2026-11-17).
+  -- 2) The price the billed grower was sent on their own quote for one of these fields (KI-81, Mason 2026-11-17).
   v_qi_cents := public._field_app_sent_quote_price_cents(p_product_id, p_field_ids, p_customer_ids, p_on);
   IF v_qi_cents IS NOT NULL THEN
     RETURN jsonb_build_object('unit_price_cents', v_qi_cents, 'price_source', 'quoted');
@@ -211,7 +236,7 @@ $fn$;
 REVOKE ALL ON FUNCTION public.resolve_field_app_chemical_price(uuid, uuid[], integer, bigint, uuid[], date)
   FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public.resolve_field_app_chemical_price(uuid, uuid[], integer, bigint, uuid[], date) IS
-  'Field-app chemical unit price in cents: manual override, else the price a billed grower was sent on a quote for these fields (KI-81), else the tier list price.';
+  'Field-app chemical unit price in cents: manual override, else the price the billed grower was sent on their own quote for these fields (KI-81), else the tier list price.';
 
 CREATE OR REPLACE FUNCTION public.create_invoice_from_blend_ticket(p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb)
  RETURNS jsonb
@@ -1122,7 +1147,6 @@ DECLARE
   v_unit_price          bigint;
   v_unit_cost           bigint;
   v_qi_price            numeric;
-  v_quote_customer_ids  uuid[];
   v_quote_price_date    date;
   v_quoted_price        bigint;
   v_price_source        text;
@@ -1283,8 +1307,6 @@ BEGIN
   -- THAT season, which is the rule _save_field_app_split_invoice_impl already follows
   -- (Codex round-3 P1). p_invoice is loop-invariant, so this is computed once.
   v_season := compute_season(COALESCE((p_invoice->>'invoice_date')::date, (now() AT TIME ZONE 'America/Chicago')::date));
-  -- KI-81: a quote prices a chemical only when sent to a grower billed here.
-  v_quote_customer_ids := ARRAY(SELECT (c->>'customer_id')::uuid FROM jsonb_array_elements(v_customers) c);
 
   FOR v_customer IN SELECT * FROM jsonb_array_elements(v_customers)
   LOOP
@@ -1519,7 +1541,7 @@ BEGIN
           IF v_unit_price IS NULL AND (v_chem->>'product_id') IS NOT NULL THEN
             -- KI-81 (Mason, 2026-11-17): only the price the customer was sent (see the helper).
             v_qi_price := public._field_app_sent_quote_price_cents(
-                            (v_chem->>'product_id')::uuid, v_field_ids, v_quote_customer_ids, v_quote_price_date);
+                            (v_chem->>'product_id')::uuid, v_field_ids, ARRAY[v_customer_id], v_quote_price_date);
             IF v_qi_price IS NOT NULL THEN
               v_unit_price   := v_qi_price::bigint;
               v_quoted_price := v_unit_price;
@@ -2356,6 +2378,7 @@ BEGIN
       DECLARE
         v_chem_manual bigint  := NULL;
         v_rep_tier    integer;
+        v_rep_cust    uuid;
         v_inv_unit    text;
         v_form        text;
         v_priced_qty  numeric;
@@ -2394,7 +2417,7 @@ BEGIN
           FROM products p WHERE p.id = v_product_id;
 
         -- Per-customer price map (Option B): each billing-set member priced at their OWN
-        -- assigned_tier. resolve_field_app_chemical_price() naturally makes manual/quote shared
+        -- assigned_tier, and from their OWN sent quote only (KI-81, Mason 2026-11-17). resolve_field_app_chemical_price() naturally makes manual/quote shared
         -- (tier-independent) and only the tier fallback per-customer, so a manual/quote line
         -- yields identical prices for everyone (calculator collapses to source_lr) while a
         -- pure-tier line prices each co-owner at their own tier (calculator per_person).
@@ -2403,7 +2426,7 @@ BEGIN
                  (resolve_field_app_chemical_price(
                     v_product_id, v_field_ids,
                     COALESCE((SELECT c.assigned_tier FROM customers c WHERE c.id = m.cust::uuid), 1),
-                    v_chem_manual, v_members::uuid[],
+                    v_chem_manual, ARRAY[m.cust::uuid],
                     COALESCE(v_job_app_date, (p_invoice->>'invoice_date')::date,
                              (SELECT max(i.invoice_date) FROM invoices i WHERE i.field_app_billing_set_id = v_set_id AND i.deleted_at IS NULL),
                              (now() AT TIME ZONE 'America/Chicago')::date)
@@ -2426,15 +2449,16 @@ BEGIN
 
         -- Representative line base (display + the calculator's default price): the largest-share
         -- owner's price. The MONEY comes from the per-customer overrides injected below, not this.
-        SELECT c.assigned_tier INTO v_rep_tier
-          FROM customers c
-         WHERE c.id = (
+        v_rep_cust := (
            SELECT (value->>'customer_id')::uuid
              FROM jsonb_array_elements(v_vector) AS value
             ORDER BY (value->>'micro_pct')::bigint DESC, value->>'customer_id' ASC
             LIMIT 1);
+        SELECT c.assigned_tier INTO v_rep_tier
+          FROM customers c
+         WHERE c.id = v_rep_cust;
         v_price_res      := resolve_field_app_chemical_price(
-                              v_product_id, v_field_ids, COALESCE(v_rep_tier, 1), v_chem_manual, v_members::uuid[],
+                              v_product_id, v_field_ids, COALESCE(v_rep_tier, 1), v_chem_manual, ARRAY[v_rep_cust],
                               COALESCE(v_job_app_date, (p_invoice->>'invoice_date')::date,
                              (SELECT max(i.invoice_date) FROM invoices i WHERE i.field_app_billing_set_id = v_set_id AND i.deleted_at IS NULL),
                              (now() AT TIME ZONE 'America/Chicago')::date));
@@ -3079,15 +3103,337 @@ BEGIN
 END;
 $function$;
 
+CREATE OR REPLACE FUNCTION public._preview_field_app_invoice_split_impl_20260908(p_locations jsonb, p_chemicals jsonb, p_application_service_id uuid DEFAULT NULL::uuid, p_invoice_id uuid DEFAULT NULL::uuid, p_invoice_date date DEFAULT NULL::date)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_field_ids         uuid[];
+  v_applied_acres_map jsonb := '{}'::jsonb;
+  v_loc               jsonb;
+  v_shares            jsonb;
+  v_customers         jsonb;
+  v_customer          jsonb;
+  v_customer_id       uuid;
+  v_customer_tier     int;
+  v_app_service       record;
+  v_per_customer      jsonb := '[]'::jsonb;
+  v_customer_lines    jsonb;
+  v_grand_total       bigint := 0;
+  v_chem              jsonb;
+  v_share_row         jsonb;
+  v_chem_qty_a        numeric;
+  v_chem_qty_b        numeric;
+  v_share_acres       numeric;
+  v_field_override    bigint;
+  v_unit_price        bigint;
+  v_extended          bigint;
+  v_fee_rate          bigint;
+  v_fee_acres         numeric;
+  v_fee_extended      bigint;
+  v_customer_total    bigint;
+  v_rate              numeric;
+  v_ta_unit           text;       -- PARKED-010: rate unit of the applied amount
+  v_inv_unit          text;       -- PARKED-010: product's sold/pricing unit
+  v_form              text;       -- PARKED-010: product_form (liquid/dry)
+  v_priced_qty        numeric;    -- PARKED-010: applied qty converted into the pricing unit
+  v_group_id          uuid;
+  v_skipped_customer_ids uuid[] := '{}';
+  v_qi_prices         bigint[];
+  v_quote_price_date  date;
+  v_surcharge_acres   numeric;
+  v_surcharge_cents   bigint;
+  v_customer_count    int;        -- CRX-SEC-001: mirrors save's single-customer test
+  v_new_season        integer;    -- CRX-SEC-001: season a NOT-YET-SAVED invoice would be filed under
+  v_row_season        integer;    -- CRX-SEC-001: season an ALREADY-SAVED member carries
+  v_price_season      integer;    -- CRX-SEC-001: the season the fee is actually priced at
+BEGIN
+  -- PARKED-007 (codex-driven cycle 5 #1 HIGH): in-body role gate — without it
+  -- ANY authenticated role (applicator, driver, etc.) can call this SECDEF
+  -- function with arbitrary field_ids and receive private customer pricing
+  -- and split detail. RLS doesn't apply (we're SECDEF), the EXECUTE grant to
+  -- `authenticated` widens beyond billing roles. Mirrors the save side's gate.
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'AUTH_REQUIRED' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF NOT (is_admin() OR is_sales_rep()) THEN
+    RAISE EXCEPTION 'INSUFFICIENT_ROLE: only admins or sales reps can preview field-app invoice splits'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  FOR v_loc IN SELECT * FROM jsonb_array_elements(p_locations)
+  LOOP
+    v_field_ids := array_append(v_field_ids, (v_loc->>'field_id')::uuid);
+    v_applied_acres_map := v_applied_acres_map || jsonb_build_object(
+      v_loc->>'field_id',
+      GREATEST(COALESCE((v_loc->>'applied_acres')::numeric, 0), 0)
+    );
+  END LOOP;
+
+  IF v_field_ids IS NULL THEN
+    RETURN jsonb_build_object('per_customer', '[]'::jsonb, 'grand_total_cents', 0, 'customer_count', 0);
+  END IF;
+
+  v_shares    := derive_customer_shares_from_fields(v_field_ids, v_applied_acres_map);
+  v_customers := v_shares -> 'customers';
+  -- CRX-SEC-001 (2026-09-06): counted BEFORE the deleted-member skip, exactly like save's
+  -- v_customer_count, because save's single-customer branch tests the DERIVED list.
+  v_customer_count := jsonb_array_length(v_customers);
+  -- The season a customer WITHOUT an existing invoice would be filed under. Same expression
+  -- and same America/Chicago fallback as _save_field_app_invoice_impl_20260714's v_season, so
+  -- a preview and the save it precedes cannot land on different sides of October 1.
+  v_new_season := compute_season(COALESCE(p_invoice_date, (now() AT TIME ZONE 'America/Chicago')::date));
+  -- KI-81: the date the save checks quotes on (the invoice date it will store).
+  v_quote_price_date := COALESCE(p_invoice_date, (SELECT invoice_date FROM invoices WHERE id = p_invoice_id),
+                                 (now() AT TIME ZONE 'America/Chicago')::date);
+
+  IF p_invoice_id IS NOT NULL THEN
+    SELECT invoice_group_id INTO v_group_id FROM invoices WHERE id = p_invoice_id;
+    IF v_group_id IS NOT NULL THEN
+      SELECT COALESCE(array_agg(DISTINCT d.customer_id), '{}') INTO v_skipped_customer_ids
+        FROM invoices d
+       WHERE d.invoice_group_id = v_group_id
+         AND d.deleted_at IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM invoices l
+            WHERE l.invoice_group_id = v_group_id
+              AND l.customer_id = d.customer_id
+              AND l.deleted_at IS NULL
+         );
+    END IF;
+  END IF;
+
+  IF p_application_service_id IS NOT NULL THEN
+    SELECT * INTO v_app_service FROM application_services WHERE id = p_application_service_id;
+    IF NOT FOUND OR NOT v_app_service.is_active THEN
+      RAISE EXCEPTION 'Application service not found or inactive: %', p_application_service_id;
+    END IF;
+  END IF;
+
+  FOR v_customer IN SELECT * FROM jsonb_array_elements(v_customers)
+  LOOP
+    v_customer_id    := (v_customer->>'customer_id')::uuid;
+    IF v_customer_id = ANY(v_skipped_customer_ids) THEN CONTINUE; END IF;
+    v_customer_tier  := COALESCE((v_customer->>'tier')::int, 1);
+    v_customer_total := 0;
+    v_customer_lines := '[]'::jsonb;
+
+    FOR v_share_row IN
+      SELECT * FROM jsonb_array_elements(v_shares -> 'rows') AS value
+      WHERE (value->>'customer_id')::uuid = v_customer_id
+        AND (value->>'price_override_cents') IS NOT NULL
+    LOOP
+      v_share_acres    := (v_share_row->>'share_acres')::numeric;
+      v_field_override := (v_share_row->>'price_override_cents')::bigint;
+      v_extended := ROUND(v_field_override * v_share_acres)::bigint;
+      v_customer_lines := v_customer_lines || jsonb_build_object(
+        'kind', 'grower_share',
+        'description', (v_share_row->>'field_name') || ' grower share @ $' ||
+                       (v_field_override / 100.0)::numeric(12,2) || '/ac',
+        'quantity', v_share_acres,
+        'unit_price_cents', v_field_override,
+        'extended_cents', v_extended
+      );
+      v_customer_total := v_customer_total + v_extended;
+    END LOOP;
+
+    FOR v_chem IN SELECT * FROM jsonb_array_elements(p_chemicals)
+    LOOP
+      v_chem_qty_a := 0;
+      v_chem_qty_b := 0;
+      v_rate := COALESCE((v_chem->>'rate_per_acre')::numeric, 0);
+      FOR v_share_row IN
+        SELECT * FROM jsonb_array_elements(v_shares -> 'rows') AS value
+        WHERE (value->>'customer_id')::uuid = v_customer_id
+      LOOP
+        v_share_acres := (v_share_row->>'share_acres')::numeric;
+        IF (v_share_row->>'price_override_cents') IS NOT NULL THEN
+          v_chem_qty_a := v_chem_qty_a + (v_rate * v_share_acres);
+        ELSE
+          v_chem_qty_b := v_chem_qty_b + (v_rate * v_share_acres);
+        END IF;
+      END LOOP;
+
+      IF v_chem_qty_b > 0 THEN
+        v_unit_price := NULL;
+        IF v_chem ? 'manual_override' AND (v_chem->>'manual_override')::boolean = true
+           AND (v_chem->>'unit_price_cents') IS NOT NULL THEN
+          v_unit_price := (v_chem->>'unit_price_cents')::bigint;
+        END IF;
+        IF v_unit_price IS NULL AND (v_chem->>'product_id') IS NOT NULL THEN
+          -- KI-81 (Mason, 2026-11-17): only THIS customer's own sent, unexpired quote prices the chemical,
+          -- the same quotes the save uses (no locks here; the save also runs the sent-price lock).
+          SELECT array_agg(DISTINCT ROUND(qi.price_per_unit * 100)::bigint) INTO v_qi_prices
+            FROM quotes q
+            JOIN quote_sections qs ON qs.quote_id = q.id AND qs.field_id = ANY(v_field_ids)
+            JOIN quote_items qi ON qi.section_id = qs.id AND qi.quote_id = qs.quote_id
+           WHERE q.customer_id = v_customer_id
+             AND public._field_app_quote_eligible(q, (v_chem->>'product_id')::uuid, v_field_ids, v_quote_price_date)
+             AND qi.product_id = (v_chem->>'product_id')::uuid
+             AND qi.price_per_unit >= 0;
+          IF cardinality(v_qi_prices) > 1 THEN
+            RAISE EXCEPTION 'FIELD_APP_QUOTE_PRICE_CONFLICT: % is quoted at more than one price for these fields. Type the agreed price on that line, then save again.',
+              COALESCE((SELECT product_name FROM products WHERE id = (v_chem->>'product_id')::uuid), 'A product')
+              USING ERRCODE = 'P0001';
+          END IF;
+          v_unit_price := v_qi_prices[1];
+        END IF;
+        IF v_unit_price IS NULL AND (v_chem->>'product_id') IS NOT NULL THEN
+          SELECT CASE v_customer_tier
+            WHEN 1 THEN COALESCE(ROUND(p.tier1_price * 100), 0)
+            WHEN 2 THEN COALESCE(ROUND(p.tier2_price * 100), ROUND(p.tier1_price * 100), 0)
+            WHEN 3 THEN COALESCE(ROUND(p.tier3_price * 100), ROUND(p.tier1_price * 100), 0)
+            ELSE COALESCE(ROUND(p.tier1_price * 100), 0)
+          END INTO v_unit_price FROM products p WHERE p.id = (v_chem->>'product_id')::uuid;
+        END IF;
+        v_unit_price := COALESCE(v_unit_price, 0);
+
+        -- PARKED-010 (preview parity with save_field_app_invoice): the applied amount is in the
+        -- RATE unit but v_unit_price is per the product's SOLD unit; convert before pricing so this
+        -- on-page customer-split preview shows the same dollars the saved invoice will (not ~128x).
+        v_ta_unit  := COALESCE(NULLIF(v_chem->>'rate_unit', ''), NULLIF(v_chem->>'unit_size', ''));
+        v_inv_unit := NULL;
+        v_form     := NULL;
+        IF (v_chem->>'product_id') IS NOT NULL THEN
+          SELECT p.inventory_unit, p.product_form::text INTO v_inv_unit, v_form
+            FROM products p WHERE p.id = (v_chem->>'product_id')::uuid;
+        END IF;
+        v_priced_qty := field_app_priced_quantity(v_chem_qty_b, v_ta_unit, COALESCE(v_inv_unit, v_ta_unit), v_form);
+        -- Unconvertible units (save blocks with FIELD_APP_UNIT_UNCONVERTIBLE): preview the line at
+        -- $0 rather than the old ~128x figure or crashing the preview.
+        v_priced_qty := CASE WHEN v_priced_qty IS NULL THEN 0 ELSE ROUND(v_priced_qty, 4) END;
+        v_extended := ROUND(v_unit_price * v_priced_qty)::bigint;
+        v_customer_lines := v_customer_lines || jsonb_build_object(
+          'kind', 'chemical', 'description', v_chem->>'description',
+          'quantity', v_priced_qty,
+          'unit_price_cents', v_unit_price, 'extended_cents', v_extended
+        );
+        v_customer_total := v_customer_total + v_extended;
+      END IF;
+    END LOOP;
+
+    IF p_application_service_id IS NOT NULL THEN
+      -- CRX-SEC-001: resolve the season THIS customer's invoice is (or would be) filed under,
+      -- reproducing _save_field_app_invoice_impl_20260714's branch order exactly:
+      --   1. an existing live member of the group  -> that row's stored season
+      --   2. a single-customer edit of p_invoice_id -> that row's stored season
+      --   3. otherwise (a new invoice)              -> compute_season(invoice date)
+      -- Save never re-seasons an existing invoice (DECISION_LOG 2026-09-04), so branches 1
+      -- and 2 must read the STORED season rather than recompute one.
+      --
+      -- v_row_season is reset at the top of every iteration. The hazard is not the SELECT INTO
+      -- itself -- PL/pgSQL assigns NULL to the target when the query returns no row -- it is the
+      -- IF/ELSIF below, which can take NEITHER branch (no group, and either no p_invoice_id or a
+      -- multi-customer split). In that case nothing assigns v_row_season at all and, without this
+      -- reset, it would still hold the PREVIOUS customer's season and price this customer's fee
+      -- against the wrong year. The reset makes branch 3 reachable rather than inherited.
+      --
+      -- COALESCE treats "no row found" and "row found with a NULL season" the same way, falling
+      -- through to the computed season where save would instead match no rate row and use the
+      -- service default. That divergence cannot occur today because invoices.season is NOT NULL
+      -- with a default; if that constraint is ever relaxed, this line must be revisited.
+      v_row_season := NULL;
+      IF v_group_id IS NOT NULL THEN
+        SELECT i.season INTO v_row_season
+          FROM invoices i
+         WHERE i.invoice_group_id = v_group_id
+           AND i.customer_id      = v_customer_id
+           AND i.deleted_at IS NULL
+         LIMIT 1;
+      ELSIF p_invoice_id IS NOT NULL AND v_customer_count = 1 THEN
+        SELECT i.season INTO v_row_season FROM invoices i WHERE i.id = p_invoice_id;
+      END IF;
+      v_price_season := COALESCE(v_row_season, v_new_season);
+
+      SELECT car.rate_per_acre_cents INTO v_fee_rate
+        FROM customer_application_rates car
+       WHERE car.customer_id = v_customer_id
+         AND car.application_service_id = p_application_service_id
+         AND car.season = v_price_season LIMIT 1;
+      IF v_fee_rate IS NULL THEN v_fee_rate := v_app_service.default_rate_per_acre_cents; END IF;
+      SELECT COALESCE(SUM((value->>'share_acres')::numeric), 0) INTO v_fee_acres
+        FROM jsonb_array_elements(v_shares -> 'rows') AS value
+       WHERE (value->>'customer_id')::uuid = v_customer_id
+         AND (value->>'price_override_cents') IS NULL;
+      IF v_fee_rate > 0 AND v_fee_acres > 0 THEN
+        v_fee_extended := ROUND(v_fee_rate * v_fee_acres)::bigint;
+        v_customer_lines := v_customer_lines || jsonb_build_object(
+          'kind', 'service_fee', 'description', v_app_service.name,
+          'quantity', v_fee_acres, 'unit_price_cents', v_fee_rate,
+          'extended_cents', v_fee_extended
+        );
+        v_customer_total := v_customer_total + v_fee_extended;
+      END IF;
+    END IF;
+
+    SELECT COALESCE(SUM((value->>'share_acres')::numeric), 0) INTO v_surcharge_acres
+      FROM jsonb_array_elements(v_shares -> 'rows') AS value
+     WHERE (value->>'customer_id')::uuid = v_customer_id
+       AND (value->>'price_override_cents') IS NULL;
+
+    v_surcharge_cents := compute_fuel_surcharge_cents(v_surcharge_acres, v_customer_total);
+
+    IF v_surcharge_cents > 0 THEN
+      v_customer_lines := v_customer_lines || jsonb_build_object(
+        'kind', 'fuel_surcharge', 'description', 'Fuel Surcharge',
+        'quantity', 1, 'unit_price_cents', v_surcharge_cents,
+        'extended_cents', v_surcharge_cents
+      );
+      v_customer_total := v_customer_total + v_surcharge_cents;
+    END IF;
+
+    v_per_customer := v_per_customer || jsonb_build_object(
+      'customer_id',   v_customer_id,
+      'customer_name', v_customer->>'customer_name',
+      'is_primary',    COALESCE((v_customer->>'is_primary')::boolean, false),
+      'tier',          v_customer_tier,
+      'total_cents',   v_customer_total,
+      'lines',         v_customer_lines
+    );
+    v_grand_total := v_grand_total + v_customer_total;
+  END LOOP;
+
+  RETURN jsonb_build_object(
+    'per_customer',      v_per_customer,
+    'grand_total_cents', v_grand_total,
+    'customer_count',    jsonb_array_length(v_per_customer),
+    'shares_detail',     v_shares
+  );
+END;
+$function$;
+
+-- Establish the ownership the postflight asserts, rather than depending on the applying role
+-- happening to be postgres. DROP+CREATE re-owns the function to whoever runs the migration, and
+-- 20260729015706's column-level revoke on application_services.cost_per_acre_cents -- which names
+-- this function explicitly -- is safe only while it is a POSTGRES-OWNED SECURITY DEFINER. Without
+-- this line POSTFLIGHT_OWNER would abort a correct apply run by any other role, at the very end,
+-- after everything appeared to work. Same statement 20260729125314, 20260731001654 and
+-- 20260826221000 use, for the same reason.
+--
+-- Two consequences worth stating rather than leaving to be discovered:
+--   * POSTFLIGHT_OWNER can no longer fail on an unmutated run of this file, because this line
+--     forces the value it asserts. It is now a check on THIS statement rather than on the applying
+--     role, and the prover has to mutate this line to make it fire at all. Recorded because a
+--     guard that cannot fail is exactly the shape this file spends its length guarding against.
+--   * This file now SUCCEEDS under applying roles that would previously have been refused -- any
+--     role that may SET ROLE postgres, not only postgres itself. That is the intended trade (the
+--     20260729015706 invariant needs a postgres-OWNED function, and this establishes it), but it
+--     is a real widening. A role that may NOT SET ROLE postgres now aborts here with PostgreSQL's
+--     own "must be able to SET ROLE" rather than with POSTFLIGHT_OWNER's explanation; same
+--     rollback, worse diagnosis.
+
 DO $postflight$
 BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '81bcfd088498f0cb1624f161e1a55e46', ARRAY['authenticated', 'postgres', 'service_role']),
-        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'd744763725bda9d17d90717e0cf3ba5a', ARRAY['postgres', 'service_role']),
-        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '255b970f11991ce065743b160f1930fe', ARRAY['postgres', 'service_role'])
-      ) AS pin(fn, sig, body_md5, execs)
+        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '81bcfd088498f0cb1624f161e1a55e46', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
+        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'f8db5ee2904c40db23e380b0dadb3640', ARRAY['postgres', 'service_role'], 'v'),
+        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '3feb2ac771de0c4610c72d5b7196c73d', ARRAY['postgres', 'service_role'], 'v'),
+        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '35cd03475ffe6806b0e0cd2fc997eae1', ARRAY['postgres'], 's')
+      ) AS pin(fn, sig, body_md5, execs, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL
         OR (SELECT count(*) FROM pg_proc o
@@ -3096,7 +3442,7 @@ BEGIN
         OR p.proowner <> 'postgres'::regrole
         OR NOT p.prosecdef
         OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
-        OR p.provolatile <> 'v' OR p.proisstrict OR p.proleakproof OR p.proretset
+        OR p.provolatile::text <> pin.vol OR p.proisstrict OR p.proleakproof OR p.proretset
         OR ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
                    FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS DISTINCT FROM pin.execs
@@ -3107,22 +3453,27 @@ BEGIN
     RAISE EXCEPTION 'KI81_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT string_agg(coalesce(p.proacl::text, ''), '|' ORDER BY s.n)
-        FROM unnest(ARRAY['public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)']) WITH ORDINALITY AS s(sig, n)
+        FROM unnest(ARRAY['public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)']) WITH ORDINALITY AS s(sig, n)
         JOIN pg_proc p ON p.oid = to_regprocedure(s.sig)) IS DISTINCT FROM current_setting('crx.ki81_acls', true) THEN
     RAISE EXCEPTION 'KI81_POSTFLIGHT: an ACL changed across the replacement';
   END IF;
   IF to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint)') IS NOT NULL
      OR (SELECT count(*) FROM pg_proc o WHERE o.pronamespace = 'public'::regnamespace AND o.proname = 'resolve_field_app_chemical_price') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)')) IS DISTINCT FROM 'a9f32657d9c266b6a5f634d4b51d7823'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)')) IS DISTINCT FROM '2f6fe91f7c639d953e3d8c525c06f168'
      OR (SELECT provolatile FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)')) <> 'v'
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)')) IS DISTINCT FROM '3b8f1d879238d1196cb5f4ed51272aa7'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)')) IS DISTINCT FROM '23fd278cd6d7bff920e21d9f482da9d9'
      OR (SELECT prosecdef FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)'))
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_quote_eligible(quotes,uuid,uuid[],date)')) IS DISTINCT FROM '2e651e469fb7149896851b86179b2039'
+     OR (SELECT prosecdef OR provolatile <> 's' FROM pg_proc WHERE oid = to_regprocedure('public._field_app_quote_eligible(quotes,uuid,uuid[],date)'))
+     OR has_function_privilege('anon', 'public._field_app_quote_eligible(quotes,uuid,uuid[],date)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._field_app_quote_eligible(quotes,uuid,uuid[],date)', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._field_app_quote_eligible(quotes,uuid,uuid[],date)', 'EXECUTE')
      OR has_function_privilege('anon', 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'EXECUTE')
      OR has_function_privilege('service_role', 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)', 'EXECUTE') THEN
-    RAISE EXCEPTION 'KI81_POSTFLIGHT: the resolver or the new helper is not the body, volatility or grants this file installs';
+    RAISE EXCEPTION 'KI81_POSTFLIGHT: the resolver or a new helper is not the body, volatility or grants this file installs';
   END IF;
 END;
 $postflight$;

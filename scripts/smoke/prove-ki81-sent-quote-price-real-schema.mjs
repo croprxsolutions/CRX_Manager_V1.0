@@ -8,12 +8,12 @@
  * replays every post-baseline migration before the candidate, commits invented test rows (ids a81a81a8-...)
  * and a private k81 schema of seeding helpers, then:
  *   before  the chain scripts/smoke/smoke-ki81-sent-quote-price.sql FAILS (today's code bills an unsent price);
- *   apply   the candidate applies; the chain passes (cases F1-F6, X1-X3, B1-B3);
+ *   apply   the candidate applies; the chain passes (cases F1-F7, P1-P2, X1-X3, B1-B3);
  *   C9      while a field-app save holds a sent quote, a quote edit's row lock waits (save_quote locks the
  *           quote FOR UPDATE first), and gets it once the save ends;
- *   grants  the helper is executable by no API role, the resolver by neither anon nor authenticated;
+ *   grants  the helpers are executable by no API role, the resolver by neither anon nor authenticated;
  *   again   a second apply refuses (KI81_PREFLIGHT); a drifted old body refuses the apply;
- *   reverse the rollback restores all four old bodies byte-identical (md5) and drops the helper; a second
+ *   reverse the rollback restores all five old bodies byte-identical (md5) and drops the helpers; a second
  *           reverse refuses; the candidate re-applies cleanly after it.
  *
  * Run: node scripts/smoke/prove-ki81-sent-quote-price-real-schema.mjs   (needs Docker)
@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 // Iterating: CRX_PROVER_REUSE=<kept container> CRX_PROVER_DB=<a copy of its replayed database> skips the replay.
 const REUSE = process.env.CRX_PROVER_REUSE;
+if (REUSE && !/^crx-ki81-/.test(REUSE)) throw new Error('CRX_PROVER_REUSE must name a kept crx-ki81- container');
 const NAME = REUSE || `crx-ki81-${process.pid}-${Date.now().toString(36)}`;
 const DB = process.env.CRX_PROVER_DB || 'postgres';
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
@@ -56,7 +57,7 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate or its follow-up creates or relies on.
-const TOUCHED = /(create_invoice_from_blend_ticket|_save_field_app_invoice_impl_20260714|_save_field_app_split_invoice_impl|resolve_field_app_chemical_price|_assert_quote_prices_as_sent|_field_app_sent_quote_price_cents)/i;
+const TOUCHED = /(create_invoice_from_blend_ticket|_save_field_app_invoice_impl_20260714|_save_field_app_split_invoice_impl|resolve_field_app_chemical_price|_assert_quote_prices_as_sent|_field_app_sent_quote_price_cents|_field_app_quote_eligible|_preview_field_app_invoice_split_impl_20260908)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -264,12 +265,14 @@ function refusedProbe(sql, pattern, uid) {
 const id = (s) => `a81a81a8-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1'), A = id('c1'), B = id('c2'), C = id('c3'), G = id('f1'), F = id('f2'), P = id('d1'), BP = id('d2');
 const FNS = ['create_invoice_from_blend_ticket', '_save_field_app_invoice_impl_20260714', '_save_field_app_split_invoice_impl',
-  'resolve_field_app_chemical_price', '_field_app_sent_quote_price_cents'];
+  '_preview_field_app_invoice_split_impl_20260908', 'resolve_field_app_chemical_price', '_field_app_sent_quote_price_cents', '_field_app_quote_eligible'];
 const OLD = 'create_invoice_from_blend_ticket:a6f5c6e72d6632313549313b34f406ad,_save_field_app_invoice_impl_20260714:0f5da38476fe174cd25c9bf3e364055f,'
-  + '_save_field_app_split_invoice_impl:a69f21d8e9f32fc6fecb38ac3a54801c,resolve_field_app_chemical_price:d2617d60d7b6e5b922bc3e3be4e5850b';
-const NEW = 'create_invoice_from_blend_ticket:81bcfd088498f0cb1624f161e1a55e46,_save_field_app_invoice_impl_20260714:d744763725bda9d17d90717e0cf3ba5a,'
-  + '_save_field_app_split_invoice_impl:255b970f11991ce065743b160f1930fe,resolve_field_app_chemical_price:a9f32657d9c266b6a5f634d4b51d7823,'
-  + '_field_app_sent_quote_price_cents:3b8f1d879238d1196cb5f4ed51272aa7';
+  + '_save_field_app_split_invoice_impl:a69f21d8e9f32fc6fecb38ac3a54801c,_preview_field_app_invoice_split_impl_20260908:83f6600412ced085d0876a3c7339ff12,'
+  + 'resolve_field_app_chemical_price:d2617d60d7b6e5b922bc3e3be4e5850b';
+const NEW = 'create_invoice_from_blend_ticket:81bcfd088498f0cb1624f161e1a55e46,_save_field_app_invoice_impl_20260714:f8db5ee2904c40db23e380b0dadb3640,'
+  + '_save_field_app_split_invoice_impl:3feb2ac771de0c4610c72d5b7196c73d,_preview_field_app_invoice_split_impl_20260908:35cd03475ffe6806b0e0cd2fc997eae1,'
+  + 'resolve_field_app_chemical_price:2f6fe91f7c639d953e3d8c525c06f168,_field_app_sent_quote_price_cents:23fd278cd6d7bff920e21d9f482da9d9,'
+  + '_field_app_quote_eligible:2e651e469fb7149896851b86179b2039';
 const ASSERT_MD5 = '4e3bca2b48a4af44de9d1f219a880586';
 const bodies = () => scalar(`SELECT string_agg(proname || ':' || md5(replace(prosrc, chr(13), '')), ',' ORDER BY array_position(ARRAY['${FNS.join("','")}'], proname::text))
   FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname IN ('${FNS.join("','")}');`);
@@ -359,6 +362,34 @@ function seed() {
       RETURN QUERY SELECT ii.unit_price_cents::bigint, ii.price_source FROM invoice_items ii
         WHERE ii.invoice_id = (v_res->'invoice_ids'->>0)::uuid AND ii.product_id = p_product;
     END $f$;
+    -- The same single save, returning every billed grower's line (a shared field bills each owner).
+    CREATE FUNCTION k81.save_single_all(p_by uuid, p_field uuid, p_product uuid)
+    RETURNS TABLE (customer_id uuid, unit_price_cents bigint, price_source text) LANGUAGE plpgsql SET search_path = public, pg_temp AS $f$
+    DECLARE v_res jsonb;
+    BEGIN
+      v_res := public.save_field_app_invoice(NULL,
+        jsonb_build_object('invoice_date', ((now() AT TIME ZONE 'America/Chicago')::date)::text, 'salesman_id', p_by),
+        jsonb_build_array(jsonb_build_object('field_id', p_field, 'map_number', 1, 'total_acres', 100, 'planted_acres', 100,
+          'applied_acres', 10, 'sort_order', 0)),
+        jsonb_build_array(jsonb_build_object('description', 'K81 chem', 'rate_per_acre', 16, 'rate_unit', 'oz', 'unit_size', 'Gal',
+          'cost_cents', 500, 'sort_order', 0, 'manual_override', false, 'product_id', p_product)),
+        p_by, NULL, 'k81-single-' || gen_random_uuid());
+      RETURN QUERY SELECT i.customer_id, ii.unit_price_cents::bigint, ii.price_source FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+        WHERE ii.invoice_id IN (SELECT (x #>> '{}')::uuid FROM jsonb_array_elements(v_res->'invoice_ids') x) AND ii.product_id = p_product;
+    END $f$;
+    -- The invoice screen's preview of that save: each grower's previewed chemical unit price.
+    CREATE FUNCTION k81.preview(p_field uuid, p_product uuid)
+    RETURNS TABLE (customer_id uuid, unit_price_cents bigint) LANGUAGE plpgsql SET search_path = public, pg_temp AS $f$
+    DECLARE v_res jsonb;
+    BEGIN
+      v_res := public.preview_field_app_invoice_split(
+        jsonb_build_array(jsonb_build_object('field_id', p_field, 'applied_acres', 10)),
+        jsonb_build_array(jsonb_build_object('description', 'K81 chem', 'rate_per_acre', 16, 'rate_unit', 'oz', 'unit_size', 'Gal',
+          'manual_override', false, 'product_id', p_product)),
+        NULL, NULL, (now() AT TIME ZONE 'America/Chicago')::date);
+      RETURN QUERY SELECT (c->>'customer_id')::uuid, (l->>'unit_price_cents')::bigint
+        FROM jsonb_array_elements(v_res->'per_customer') c, jsonb_array_elements(c->'lines') l WHERE l->>'kind' = 'chemical';
+    END $f$;
     -- 1 Gal on the field through the split-bill save; returns the total of every child invoice.
     CREATE FUNCTION k81.save_split(p_by uuid, p_field uuid, p_product uuid) RETURNS bigint LANGUAGE plpgsql SET search_path = public, pg_temp AS $f$
     DECLARE v_res jsonb;
@@ -416,7 +447,16 @@ function grantCase() {
   const can = (role, fn) => scalar(`SELECT has_function_privilege('${role}', '${fn}'::regprocedure, 'EXECUTE');`);
   const helper = 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)';
   const resolver = 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)';
-  for (const role of ['anon', 'authenticated', 'service_role']) assert.equal(can(role, helper), 'f', `${role} may run the helper`);
+  const eligible = 'public._field_app_quote_eligible(quotes,uuid,uuid[],date)';
+  const preview = 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)';
+  for (const role of ['anon', 'authenticated', 'service_role']) {
+    assert.equal(can(role, helper), 'f', `${role} may run the helper`);
+    assert.equal(can(role, eligible), 'f', `${role} may run the eligibility helper`);
+    assert.equal(can(role, preview), 'f', `${role} may run the preview impl`);
+  }
+  assert.equal(scalar(`SELECT prosecdef::text || ',' || provolatile::text FROM pg_proc WHERE oid = '${eligible}'::regprocedure;`), 'false,s');
+  assert.equal(scalar(`SELECT prosecdef::text || ',' || provolatile::text || ',' || array_to_string(proconfig, ';') FROM pg_proc WHERE oid = '${preview}'::regprocedure;`),
+    'true,s,search_path=public, pg_temp');
   for (const role of ['anon', 'authenticated']) assert.equal(can(role, resolver), 'f', `${role} may run the resolver`);
   assert.equal(scalar(`SELECT prosecdef::text || ',' || provolatile::text FROM pg_proc WHERE oid = '${helper}'::regprocedure;`), 'false,v');
   assert.equal(scalar(`SELECT prosecdef::text || ',' || provolatile::text || ',' || array_to_string(proconfig, ';') FROM pg_proc WHERE oid = '${resolver}'::regprocedure;`),
@@ -429,7 +469,7 @@ async function main() {
   if (!REUSE) buildContainer();
   installLiveAuthUid();
   seed();
-  assert.equal(bodies(), OLD, 'the four bodies before the candidate are not the reviewed live bodies');
+  assert.equal(bodies(), OLD, 'the five bodies before the candidate are not the reviewed live bodies');
   assert.equal(assertMd5(), ASSERT_MD5, 'the sent-price lock is not the reviewed body');
 
   const before = runChain();
@@ -446,7 +486,7 @@ async function main() {
   const after = runChain();
   assert.equal(after.status, 0, after.output);
   assert.match(after.output, /SMOKE_PASS_ROLLBACK/);
-  console.log('[case] F1-F6, X1-X3, B1-B3 pass: sent price bills; a planted price record refuses; unsent change refuses; recorded change bills; ineligible quotes give the tier price; two prices refuse, a typed price saves; split and blend follow the same rule');
+  console.log('[case] F1-F7, P1-P2, X1-X3, B1-B3 pass: sent price bills; a planted price record refuses; unsent change refuses; recorded change bills; ineligible quotes give the tier price; two prices refuse, a typed price saves; a co-owner\'s quote prices only that co-owner; the preview shows what the save bills; split and blend follow the same rule');
 
   await concurrencyCase();
   grantCase();
@@ -458,12 +498,12 @@ async function main() {
   stageText('reverse.sql', lf(REVERSE));
   const rev = apply('reverse.sql');
   assert.equal(rev.status, 0, rev.output);
-  assert.equal(bodies(), OLD, 'the reverse did not restore the four old bodies byte-identical');
-  assert.equal(scalar("SELECT count(*) FROM pg_proc WHERE proname = '_field_app_sent_quote_price_cents';"), '0');
+  assert.equal(bodies(), OLD, 'the reverse did not restore the five old bodies byte-identical');
+  assert.equal(scalar("SELECT count(*) FROM pg_proc WHERE proname IN ('_field_app_sent_quote_price_cents', '_field_app_quote_eligible');"), '0');
   assert.equal(scalar("SELECT has_function_privilege('authenticated', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint)'::regprocedure, 'EXECUTE');"), 'f');
   const rev2 = apply('reverse.sql');
   assert.notEqual(rev2.status, 0); assert.match(rev2.output, /KI81_REVERSE_PREFLIGHT/);
-  console.log(`[case] R the reverse restores the four old bodies (md5 ${OLD.split(',').map((x) => x.split(':')[1].slice(0, 8)).join(', ')}) and drops the helper; a second reverse refuses`);
+  console.log(`[case] R the reverse restores the five old bodies (md5 ${OLD.split(',').map((x) => x.split(':')[1].slice(0, 8)).join(', ')}) and drops the helpers; a second reverse refuses`);
 
   // A drifted old body refuses the apply and changes nothing.
   const drift = probe(`DO $d$ BEGIN EXECUTE replace(pg_get_functiondef('public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)'::regprocedure),

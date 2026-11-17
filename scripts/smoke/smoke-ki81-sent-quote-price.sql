@@ -13,7 +13,10 @@
 --       the invoice date, or a later season's quote, bills the tier price; an "expired" quote still valid that date counts;
 --   F5  two eligible quotes at different prices refuse FIELD_APP_QUOTE_PRICE_CONFLICT; a typed price saves;
 --   F6  a planted transaction-local price record refuses FIELD_APP_QUOTE_PRICE_CHANGED, never prices;
---   X1-X3 the split-bill save: a co-owner's sent quote prices both children; an unsent change refuses;
+--   F7  own quote only (Mason, 2026-11-17): on a shared field, grower B's sent quote prices B's invoice, and
+--       grower A's invoice bills A's tier price;
+--   P1-P2 the invoice preview shows the price the save bills: per grower (P1), and a draft quote is not used (P2);
+--   X1-X3 the split-bill save: grower B's sent quote prices only B's share; an unsent change refuses;
 --       a quote of a grower not on the bill does not count;
 --   B1-B3 the blend-ticket invoice: the sent price bills; an unsent change refuses before any invoice;
 --       a never-sent job quote still prices the blend.
@@ -150,8 +153,38 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN IF SQLERRM <> 'K81_UNDO' THEN RAISE; END IF;
   END;
 
+  -- F7 + P1: field F (A 50% / B 50%), only B has a sent quote; the preview matches the save, grower by grower.
+  BEGIN
+    v_q := k81.quote(c_b, c_f, c_p, 20.00, 'sent', v_today, true);
+    SELECT count(*) INTO v_n FROM k81.preview(c_f, c_p) pv
+     WHERE (pv.customer_id = c_a AND pv.unit_price_cents = 1000) OR (pv.customer_id = c_b AND pv.unit_price_cents = 2000);
+    IF v_n <> 2 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL(P1): the preview did not price A at tier and B at B''s quote: %',
+        (SELECT jsonb_agg(to_jsonb(pv)) FROM k81.preview(c_f, c_p) pv);
+    END IF;
+    SELECT count(*) INTO v_n FROM k81.save_single_all(c_admin, c_f, c_p) s
+     WHERE (s.customer_id = c_a AND s.unit_price_cents = 1000 AND s.price_source = 'tier')
+        OR (s.customer_id = c_b AND s.unit_price_cents = 2000 AND s.price_source = 'quoted');
+    IF v_n <> 2 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL(F7): a co-owner''s quote priced another grower, or B''s quote was not billed';
+    END IF;
+    RAISE EXCEPTION 'K81_UNDO';
+  EXCEPTION WHEN OTHERS THEN IF SQLERRM <> 'K81_UNDO' THEN RAISE; END IF;
+  END;
+
+  -- P2: a draft quote on field G does not price the preview.
+  BEGIN
+    v_q := k81.quote(c_a, c_g, c_p, 30.00, 'draft', v_today, false);
+    SELECT unit_price_cents INTO v_cents FROM k81.preview(c_g, c_p);
+    IF v_cents IS DISTINCT FROM 1000 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL(P2): the preview used a draft quote: %', v_cents;
+    END IF;
+    RAISE EXCEPTION 'K81_UNDO';
+  EXCEPTION WHEN OTHERS THEN IF SQLERRM <> 'K81_UNDO' THEN RAISE; END IF;
+  END;
+
   -- ---------------------------------------------------------------- split-bill save (field F: A and B)
-  -- X1: grower B's sent quote prices the chemical for both children (1 Gal at $20.00 = 2000, split 1000 / 1000).
+  -- X1: grower B's sent quote prices only B's child (0.5 Gal at $20.00 = 1000); A's child bills A's tier (500).
   -- X2: its unsent change refuses. X3: grower C (not on the bill) quoting does not count: tier $10.00.
   FOREACH v_case IN ARRAY ARRAY['X1', 'X2', 'X3'] LOOP
     BEGIN
@@ -163,7 +196,7 @@ BEGIN
         IF v_case = 'X2' AND SQLERRM LIKE 'QUOTE_RESEND_REQUIRED:%' THEN v_cents := -1;
         ELSE RAISE EXCEPTION 'SMOKE_FAIL(%): the split save failed: %', v_case, SQLERRM; END IF;
       END;
-      IF v_cents IS DISTINCT FROM (CASE v_case WHEN 'X1' THEN 2000 WHEN 'X2' THEN -1 ELSE 1000 END) THEN
+      IF v_cents IS DISTINCT FROM (CASE v_case WHEN 'X1' THEN 1500 WHEN 'X2' THEN -1 ELSE 1000 END) THEN
         RAISE EXCEPTION 'SMOKE_FAIL(%): the split bill totals % cents', v_case, v_cents;
       END IF;
       RAISE EXCEPTION 'K81_UNDO';

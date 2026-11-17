@@ -20,6 +20,7 @@ import { generatedDateLabel, type JsPDFWithAutoTable } from '../../supabase/func
 import {
   buildDiluentLine,
   buildInvoicePdfDataFromRow as buildSharedInvoicePdfDataFromRow,
+  centsPerAcre,
   deriveFieldAppAppliedAcres as deriveSharedFieldAppAppliedAcres,
   drawInvoicePdf,
   fmtDate,
@@ -346,11 +347,11 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
 
   // ── Price per acre (field-app, plain) ──────────────────────────────
   if (isFieldApp && opts.show_price_per_acre && data.total_acres && data.total_acres > 0) {
-    const pricePerAcre = data.total_amount_cents / 100 / data.total_acres;
+    const pricePerAcreCents = centsPerAcre(data.total_amount_cents, data.total_acres);
     doc.setFont('courier', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(...black);
-    doc.text(`Price per acre: ${fmtNum(pricePerAcre, 2)}`, margin, y);
+    if (pricePerAcreCents !== null) doc.text(`Price per acre: ${fmt(pricePerAcreCents)}`, margin, y);
     y += 14;
   }
 
@@ -410,8 +411,10 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
   totalRow('Subtotal:', fmt(data.total_amount_cents));
   if (data.paid_amount_cents > 0) totalRow('Payments:', `-${fmt(data.paid_amount_cents)}`);
   if (data.prepay_applied_cents > 0) totalRow('Prepay Applied:', `-${fmt(data.prepay_applied_cents)}`);
+  // Review #1873: the rows add up to BALANCE DUE as invoices.balance_cents does (a credit memo's credit used is +).
+  const credit = data.credit_applied_cents ?? 0;
+  if (credit > 0) totalRow('Credits Applied:', fmt(data.invoice_type === 'credit_memo' ? credit : -credit));
   if ((data.write_off_cents ?? 0) > 0) totalRow('Write-off:', `-${fmt(data.write_off_cents ?? 0)}`);
-  if (data.finance_charge_cents && data.finance_charge_cents > 0) totalRow('Finance Charges:', fmt(data.finance_charge_cents));
 
   doc.setDrawColor(...black);
   doc.setLineWidth(0.6);
@@ -425,6 +428,16 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
     doc.setFontSize(8);
     doc.setTextColor(90, 90, 90);
     totalRow('Discount Earned (if paid early):', fmt(data.discount_earned_cents ?? 0));
+    doc.setTextColor(...black);
+    doc.setFontSize(9);
+  }
+  // Review #1873: a finance charge is already in its own invoice's balance (20260803221244), so it shows here as
+  // information, not as a row above BALANCE DUE that the balance would have to add.
+  if ((data.finance_charge_cents ?? 0) > 0) {
+    doc.setFont('courier', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(90, 90, 90);
+    totalRow('Finance charge (in balance):', fmt(data.finance_charge_cents ?? 0));
     doc.setTextColor(...black);
     doc.setFontSize(9);
   }

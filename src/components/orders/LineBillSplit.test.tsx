@@ -47,6 +47,13 @@ describe('LineBillSplit', () => {
     expect(screen.getByText('Glyphosate')).toBeInTheDocument();
   });
 
+  it('starts open when asked, so one click on the card opens it', () => {
+    render(<LineBillSplit {...props} startOpen />);
+    expect(screen.queryByRole('button', { name: 'Split by line' })).not.toBeInTheDocument();
+    expect(screen.getByText('Glyphosate')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Change split for Adjuvant' })).toBeInTheDocument();
+  });
+
   it('rounds what is left on a line, so database decimals stay readable', () => {
     render(<LineBillSplit {...props} lineShares={[{ id: 's1', order_item_id: 'l1', customer_id: 'c1', split_percentage: 33.333333, customer: { farm_name: 'Farmer' } }, { id: 's2', order_item_id: 'l1', customer_id: 'c2', split_percentage: 0.1, customer: { farm_name: 'Other' } }]} />);
     expect(screen.getByText(/Other 66\.57% stays with Farmer/)).toBeInTheDocument();

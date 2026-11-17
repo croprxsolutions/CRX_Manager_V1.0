@@ -65,7 +65,7 @@ describe('BelowCostApprovalProvider', () => {
     renderHarness();
 
     fireEvent.click(screen.getByText('Save'));
-    expect(await screen.findByText('Approve below-cost price')).toBeInTheDocument();
+    expect(await screen.findByText('Approve a below-cost price?')).toBeInTheDocument();
     expect(screen.getByText(/Price \$10\.50 · Cost \$12\.25 · Shortfall \$1\.75/)).toBeInTheDocument();
 
     const confirm = screen.getByText('Approve and Retry').closest('button')!;
@@ -100,7 +100,7 @@ describe('BelowCostApprovalProvider', () => {
 
     fireEvent.click(screen.getByText('Save'));
     expect(await screen.findByText(/Below-cost price requires an admin/)).toBeInTheDocument();
-    expect(screen.queryByText('Approve below-cost price')).not.toBeInTheDocument();
+    expect(screen.queryByText('Approve a below-cost price?')).not.toBeInTheDocument();
     expect(rpc).toHaveBeenCalledTimes(1);
   });
 });

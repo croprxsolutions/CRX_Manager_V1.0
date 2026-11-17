@@ -91,7 +91,7 @@ function queryResult(data: unknown[], error: unknown = null) {
 }
 
 function confirmCreateInvoice() {
-  const dialog = screen.getByRole('dialog', { name: 'Create Invoice' });
+  const dialog = screen.getByRole('alertdialog', { name: 'Create Invoice' });
   fireEvent.click(within(dialog).getByRole('button', { name: 'Create Invoice' }));
 }
 
@@ -163,12 +163,12 @@ describe('UnbilledApplicationsPanel transfer intent recovery', () => {
       expect(jobReads).toBe(2);
       expect(ticketReads).toBe(2);
     });
-    expect(screen.queryByRole('dialog', { name: 'Create Invoice' })).toBeNull();
+    expect(screen.queryByRole('alertdialog', { name: 'Create Invoice' })).toBeNull();
     expect(mockRpc).toHaveBeenCalledTimes(1);
     expect(mockResetKey).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Create Invoice' }));
-    expect(screen.getByRole('dialog', { name: 'Create Invoice' })).toBeInTheDocument();
+    expect(screen.getByRole('alertdialog', { name: 'Create Invoice' })).toBeInTheDocument();
     confirmCreateInvoice();
 
     await waitFor(() => expect(mockRpc).toHaveBeenCalledTimes(2));
@@ -248,7 +248,7 @@ describe('UnbilledApplicationsPanel transfer intent recovery', () => {
     await waitFor(() => expect(jobReads).toBe(2));
     await waitFor(() => expect(screen.queryByText('J-TRANSFER-4004')).toBeNull());
     expect(screen.queryByRole('button', { name: 'Create Invoice' })).toBeNull();
-    expect(screen.queryByRole('dialog', { name: 'Create Invoice' })).toBeNull();
+    expect(screen.queryByRole('alertdialog', { name: 'Create Invoice' })).toBeNull();
     expect(mockRpc).toHaveBeenCalledTimes(1);
     expect(mockResetKey).not.toHaveBeenCalled();
   });
@@ -277,7 +277,7 @@ describe('UnbilledApplicationsPanel transfer intent recovery', () => {
     expect(await screen.findByText('Unbilled applications could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText('J-TRANSFER-4004')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Create Invoice' })).toBeNull();
-    expect(screen.queryByRole('dialog', { name: 'Create Invoice' })).toBeNull();
+    expect(screen.queryByRole('alertdialog', { name: 'Create Invoice' })).toBeNull();
     expect(mockRpc).toHaveBeenCalledTimes(1);
     expect(mockResetKey).not.toHaveBeenCalled();
 
@@ -324,7 +324,7 @@ describe('UnbilledApplicationsPanel transfer intent recovery', () => {
     expect(await screen.findByText('Unbilled applications could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText('J-TRANSFER-4005')).toBeNull();
     expect(screen.queryByRole('button', { name: /Bill next/ })).toBeNull();
-    expect(screen.queryByRole('dialog', { name: 'Create Invoice' })).toBeNull();
+    expect(screen.queryByRole('alertdialog', { name: 'Create Invoice' })).toBeNull();
     expect(mockRpc).toHaveBeenCalledTimes(2);
 
     // A successful refresh reconciles the job and lifts the block.

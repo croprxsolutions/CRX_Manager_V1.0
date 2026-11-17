@@ -385,3 +385,21 @@
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* Long dropdown and menu lists: a thin scrollbar, plus top/bottom shadows that show only
+   while there is more to scroll (background-attachment: local), so iOS overlay scrollbars
+   still hint at the rest of the list. */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-gray-300) transparent;
+}
+.scroll-shadows {
+  background:
+    linear-gradient(var(--color-white) 30%, transparent) center top,
+    linear-gradient(transparent, var(--color-white) 70%) center bottom,
+    radial-gradient(farthest-side at 50% 0, color-mix(in srgb, var(--color-nav-dark) 14%, transparent), transparent) center top,
+    radial-gradient(farthest-side at 50% 100%, color-mix(in srgb, var(--color-nav-dark) 14%, transparent), transparent) center bottom;
+  background-repeat: no-repeat;
+  background-size: 100% 40px, 100% 40px, 100% 10px, 100% 10px;
+  background-attachment: local, local, scroll, scroll;
+}

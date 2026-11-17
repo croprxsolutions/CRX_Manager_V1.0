@@ -51,6 +51,20 @@ describe('StandingDiscountControl (billing plan M4b)', () => {
     })));
   });
 
+  it('says which rate "Use the customer\'s rate" goes back to', async () => {
+    mockFrom.mockImplementation(() => rateRead({ rate_pct: 5, set_by: 'admin-1', drafted_rate_pct: 10 }));
+    render(<StandingDiscountControl invoiceId="inv-1" disabled={false} onChanged={vi.fn()} />);
+    expect(await screen.findByText("Goes back to 10%, the customer's rate when this sale was drafted."))
+      .toBeInTheDocument();
+  });
+
+  it('adds no back-to note when the drafted rate is unknown (override older than the fix)', async () => {
+    mockFrom.mockImplementation(() => rateRead({ rate_pct: 5, set_by: 'admin-1', drafted_rate_pct: null }));
+    render(<StandingDiscountControl invoiceId="inv-1" disabled={false} onChanged={vi.fn()} />);
+    await screen.findByRole('button', { name: "Use the customer's rate" });
+    expect(screen.queryByText(/Goes back to/)).not.toBeInTheDocument();
+  });
+
   it('tells a screen reader the rate is a percent', async () => {
     render(<StandingDiscountControl invoiceId="inv-1" disabled={false} onChanged={vi.fn()} />);
     expect(await screen.findByLabelText('Standing discount for this sale')).toHaveAccessibleDescription('%');

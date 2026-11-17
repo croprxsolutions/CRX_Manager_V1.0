@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-16 — #1916, #1917 and #1918 (USE-2) may have up to 7 Sol rounds
+
+**Decision (Mason, in chat, 2026-11-16: "i approve all these landing and migrations tonight").** PR #1916 (USE-2 database), PR #1917 (product page) and PR #1918 (quote line note) may each have Sol rounds 5 through 7.
+**What it does:** lifts the round cap on these three PRs to 7. Every other gate is unchanged: each PR still needs a clean Sol review of its head and green checks before it merges into `staging`.
+
 ## 2026-11-16 — #1878 and #1880 may have up to 7 Sol rounds after staging moved under them
 
 **Decision (Mason, in chat, 2026-11-16: "i approve up to 7 rounds").** PR #1878 (priority schema types) and PR #1880 (priority integrity follow-ups) may each have Sol rounds 5 through 7. Their latest Sol findings came from merging a fast-moving `staging` (a duplicated generated type after #1885 landed, and staging migrations newer than the candidate), not from one design mechanism coming back.
@@ -24,6 +29,11 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-14 — Voiding an invoice reverses its write-offs automatically (KI-99)
+
+**Decision (Mason, in session, 2026-11-14: "Auto-reverse it", over refusing the void until the write-off is reversed by hand).** Voiding a posted, overdue or paid invoice marks each of its active write-offs reversed in the same step, recorded like a manual reversal (who, when, reason naming the void).
+**Why:** a voided invoice's write-off otherwise stayed active and showed on the customer statement as an unexplained credit; void already undoes applied credits and prepay the same way.
+**What this forbids/implies:** each write-off's Chicago booking month must be open, as for a manual reversal; a closed month refuses the whole void. Built in `20270116100000_ki99_void_reverses_write_offs.sql`.
 ## 2026-11-14 — MOA alternate spellings are refused
 
 **Decision (Mason, 2026-11-14: "CAS optional with warning; refuse alternate MOA spelling.").** If a mode-of-action group is already active under one spelling, a save using another spelling for the same group must refuse; replacing it is a two-save retirement then addition.

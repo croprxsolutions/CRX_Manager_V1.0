@@ -354,6 +354,30 @@ async function concurrentClaims(ccA, ccB, invId, productId) {
   return { a, b };
 }
 
+// One session reverses a completed count while another adds a line for the same stock row to a newer count.
+async function concurrentReverseAndClaim(ccDone, ccOpen, invId, productId) {
+  const asAdminTx = (body) => `BEGIN;
+    SELECT set_config('request.jwt.claims', json_build_object('sub', '${ADMIN}', 'role', 'authenticated')::text, true);
+    SELECT set_config('request.jwt.claim.sub', '${ADMIN}', true);
+    SET LOCAL ROLE authenticated;
+    ${body}
+    SELECT pg_sleep(2);
+    COMMIT;`;
+  const run = (sql) => new Promise((resolve) => {
+    const child = spawn('docker', psqlArgs(), { cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { out += d; });
+    child.on('close', (code) => resolve({ code, out }));
+    child.stdin.end(sql);
+  });
+  const [rev, claim] = await Promise.all([
+    run(asAdminTx(`SELECT public.reverse_completed_cycle_count('${ccDone}', '${ADMIN}', '${key('reverse-race')}');`)),
+    run(asAdminTx(`INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty)
+      VALUES ('${ccOpen}', '${productId}', '${invId}', 0);`)),
+  ]);
+  return { rev, claim };
+}
+
 async function main() {
   buildContainer();
   seed();
@@ -481,7 +505,22 @@ async function main() {
     'CYCLE_COUNT_REVERSE_BLOCKED: Count .* shares stock with open count');
   assert.equal(onHand(PRODUCTS.p1), 95, 'P6: the refused reversal moved nothing');
   cancel(ccO);
-  ok('P6 reverse', `SELECT public.reverse_completed_cycle_count('${cc1}', '${ADMIN}', '${key('reverse')}');`);
+  // Reversal racing a new line on the same stock row: both take the stock row lock first, then the claim lock, so
+  // they never deadlock. Either the line lands first (the reversal is refused) or the reversal does (the line saves after).
+  assert.equal(startCount(MAIN, [PRODUCTS.p2]), '', 'P6: a newer count opens on another row');
+  const ccR = openCount(MAIN);
+  const race = await concurrentReverseAndClaim(cc1, ccR, inv(PRODUCTS.p1), PRODUCTS.p1);
+  const raceLog = `\nreverse: ${race.rev.out}\nclaim: ${race.claim.out}`;
+  assert.doesNotMatch(`${race.rev.out}${race.claim.out}`, /deadlock detected/i, `P6: no deadlock${raceLog}`);
+  assert.equal(race.claim.code, 0, `P6: the line saves${raceLog}`);
+  if (race.rev.code === 0) {
+    assert.doesNotMatch(race.rev.out, /ERROR:/, `P6: reversal ran${raceLog}`);
+  } else {
+    assert.match(race.rev.out, /CYCLE_COUNT_REVERSE_BLOCKED/, `P6: the reversal is refused, not aborted${raceLog}`);
+    cancel(ccR);
+    ok('P6 reverse', `SELECT public.reverse_completed_cycle_count('${cc1}', '${ADMIN}', '${key('reverse')}');`);
+  }
+  if (openCount(MAIN)) cancel(ccR);
   assert.equal(onHand(PRODUCTS.p1), 100, 'P6: reverse puts the 5 back');
   assert.equal(sweepRows(), 'none');
   refusedAsOwner('P6 re-complete a reversed count', `UPDATE public.cycle_counts SET status = 'completed' WHERE id = '${cc1}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is cancelled and cannot become completed');

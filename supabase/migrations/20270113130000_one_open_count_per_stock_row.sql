@@ -82,6 +82,9 @@ BEGIN
     RAISE EXCEPTION 'CYCLE_COUNT_ROW_CLAIM_ISOLATION: count lines can only be added in a read-committed transaction.'
       USING ERRCODE = 'check_violation';
   END IF;
+  -- Lock the stock row first, as complete and reverse do (FOR UPDATE, then this trigger's lock), so a claim racing
+  -- a reversal waits instead of deadlocking (the line's foreign key would take this same row lock later anyway).
+  PERFORM 1 FROM public.inventory WHERE id = NEW.inventory_id FOR KEY SHARE;
   -- Serializes every claim on this stock row, so the check below sees a concurrent claim once it commits.
   PERFORM pg_advisory_xact_lock(hashtextextended('cycle_count_inventory:' || NEW.inventory_id::text, 0));
   SELECT c.count_number INTO v_other

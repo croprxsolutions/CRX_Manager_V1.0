@@ -267,8 +267,8 @@ const FNS = ['create_invoice_from_blend_ticket', '_save_field_app_invoice_impl_2
   'resolve_field_app_chemical_price', '_field_app_sent_quote_price_cents'];
 const OLD = 'create_invoice_from_blend_ticket:a6f5c6e72d6632313549313b34f406ad,_save_field_app_invoice_impl_20260714:0f5da38476fe174cd25c9bf3e364055f,'
   + '_save_field_app_split_invoice_impl:a69f21d8e9f32fc6fecb38ac3a54801c,resolve_field_app_chemical_price:d2617d60d7b6e5b922bc3e3be4e5850b';
-const NEW = 'create_invoice_from_blend_ticket:2a45b09ef78fb4b289db979401bc1bee,_save_field_app_invoice_impl_20260714:f44ed39784f88be2b01de43868d60058,'
-  + '_save_field_app_split_invoice_impl:ccb5dfb90cc2f4faa6d839c64eaa7267,resolve_field_app_chemical_price:a9f32657d9c266b6a5f634d4b51d7823,'
+const NEW = 'create_invoice_from_blend_ticket:2a45b09ef78fb4b289db979401bc1bee,_save_field_app_invoice_impl_20260714:d744763725bda9d17d90717e0cf3ba5a,'
+  + '_save_field_app_split_invoice_impl:255b970f11991ce065743b160f1930fe,resolve_field_app_chemical_price:a9f32657d9c266b6a5f634d4b51d7823,'
   + '_field_app_sent_quote_price_cents:d2891906150ff746d2d739a57f4d778c';
 const ASSERT_MD5 = '4e3bca2b48a4af44de9d1f219a880586';
 const bodies = () => scalar(`SELECT string_agg(proname || ':' || md5(replace(prosrc, chr(13), '')), ',' ORDER BY array_position(ARRAY['${FNS.join("','")}'], proname::text))

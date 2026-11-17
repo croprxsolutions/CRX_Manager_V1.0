@@ -1278,9 +1278,8 @@ BEGIN
   -- THAT season, which is the rule _save_field_app_split_invoice_impl already follows
   -- (Codex round-3 P1). p_invoice is loop-invariant, so this is computed once.
   v_season := compute_season(COALESCE((p_invoice->>'invoice_date')::date, (now() AT TIME ZONE 'America/Chicago')::date));
-  -- KI-81: a quote prices a chemical only when sent to a grower billed here and not expired by this date.
+  -- KI-81: a quote prices a chemical only when sent to a grower billed here.
   v_quote_customer_ids := ARRAY(SELECT (c->>'customer_id')::uuid FROM jsonb_array_elements(v_customers) c);
-  v_quote_price_date := COALESCE((p_invoice->>'invoice_date')::date, (now() AT TIME ZONE 'America/Chicago')::date);
 
   FOR v_customer IN SELECT * FROM jsonb_array_elements(v_customers)
   LOOP
@@ -1350,6 +1349,8 @@ BEGIN
     END IF;
 
     v_invoice_ids := array_append(v_invoice_ids, v_invoice_id);
+    -- KI-81: quotes must be valid on the date this invoice carries (an edit keeps its stored date).
+    SELECT invoice_date INTO v_quote_price_date FROM invoices WHERE id = v_invoice_id;
 
     FOR v_share_row IN
       SELECT * FROM jsonb_array_elements(v_shares -> 'rows') AS value
@@ -2398,7 +2399,9 @@ BEGIN
                     v_product_id, v_field_ids,
                     COALESCE((SELECT c.assigned_tier FROM customers c WHERE c.id = m.cust::uuid), 1),
                     v_chem_manual, v_members::uuid[],
-                    COALESCE(v_job_app_date, (p_invoice->>'invoice_date')::date, (now() AT TIME ZONE 'America/Chicago')::date)
+                    COALESCE(v_job_app_date, (p_invoice->>'invoice_date')::date,
+                             (SELECT max(i.invoice_date) FROM invoices i WHERE i.field_app_billing_set_id = v_set_id AND i.deleted_at IS NULL),
+                             (now() AT TIME ZONE 'America/Chicago')::date)
                   )->>'unit_price_cents')::bigint), '{}'::jsonb)
           INTO v_chem_price_map
           FROM unnest(v_members) AS m(cust);
@@ -2427,7 +2430,9 @@ BEGIN
             LIMIT 1);
         v_price_res      := resolve_field_app_chemical_price(
                               v_product_id, v_field_ids, COALESCE(v_rep_tier, 1), v_chem_manual, v_members::uuid[],
-                              COALESCE(v_job_app_date, (p_invoice->>'invoice_date')::date, (now() AT TIME ZONE 'America/Chicago')::date));
+                              COALESCE(v_job_app_date, (p_invoice->>'invoice_date')::date,
+                             (SELECT max(i.invoice_date) FROM invoices i WHERE i.field_app_billing_set_id = v_set_id AND i.deleted_at IS NULL),
+                             (now() AT TIME ZONE 'America/Chicago')::date));
         v_src_unit_price := (v_price_res->>'unit_price_cents')::bigint;
         v_base_source    := v_price_res->>'price_source';
 
@@ -3075,8 +3080,8 @@ BEGIN
     SELECT 1
       FROM (VALUES
         ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '2a45b09ef78fb4b289db979401bc1bee', ARRAY['authenticated', 'postgres', 'service_role']),
-        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'f44ed39784f88be2b01de43868d60058', ARRAY['postgres', 'service_role']),
-        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', 'ccb5dfb90cc2f4faa6d839c64eaa7267', ARRAY['postgres', 'service_role'])
+        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'd744763725bda9d17d90717e0cf3ba5a', ARRAY['postgres', 'service_role']),
+        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '255b970f11991ce065743b160f1930fe', ARRAY['postgres', 'service_role'])
       ) AS pin(fn, sig, body_md5, execs)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL

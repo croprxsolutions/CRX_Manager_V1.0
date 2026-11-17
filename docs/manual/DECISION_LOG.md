@@ -10,6 +10,12 @@
 - **FAM-1, RET-1, IMG-1:** still "later". **BLK-1b / costing foundation:** stays parked.
 - **KI-81:** fix now; Claude builds it (PR to `staging`, real-schema proof), checked against Taha's open #1576.
 - **#1879:** update onto current `staging` (keep Taha's #1873 invoice layout) and land it; it is Mason's PR, not Taha's.
+## 2026-11-17 — Bookings plan settled; applicator auto-invoicing is ON HOLD (do not start)
+
+**Decision (Mason, in chat, 2026-11-17: "lets not do phase c the auto invoice put that section on hold for our big field application redisgn in futre"; "make sure we dont start the auto bill feature").**
+- The bookings plan is settled: Phase A (`docs/plans/2026-11-17-bookings-phase-a-CONTRACT.md`), then Phase B, then Prepay (`docs/plans/2026-11-17-bookings-phases-B-C-prepay-PLAN.md`, v3).
+- **Do not build Phase C**: applicator job completion automatically creating invoices (D7 in the plan). It waits for the future field-application redesign. Its notes in the plan are input to that redesign only. Do not add, enable or extend any automatic invoice on job completion, and do not change `auto_draft_invoice_on_job_completion` or the job-completion invoicing path as part of the bookings work.
+- Linked prepay keeps a booking's prices locked even after the money is spent on other charges, until the prepay is refunded or voided.
 
 ## 2026-11-17 — #1896: Mason owner-accepted 4 Sol finding(s) at `ed0ec3c3c777`
 

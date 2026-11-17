@@ -3215,8 +3215,10 @@ export function run(argv = process.argv.slice(2)) {
     if (baseAfter !== proofBase) {
       process.stdout.write(
         `${target} (now ${baseAfter}) is ahead of the base this review was bound to. The clean review is kept, bound to ` +
-        "the base it covered, so the merge gates accept it. If this head still needs a push, the push gate wants the exact base: " +
-        "merge origin/main into the branch and run this script with --carry-forward.\n",
+        "the base it covered, so the merge gates accept it." +
+        (target === GUARDED_BASE
+          ? " If this head still needs a push, the push gate wants the exact base: merge origin/main into the branch and run this script with --carry-forward.\n"
+          : " Nothing else to do: --carry-forward is for main-bound branches only.\n"),
       );
     }
     return 0;

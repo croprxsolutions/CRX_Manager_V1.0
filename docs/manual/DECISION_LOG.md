@@ -1,5 +1,16 @@
 # Decision Log
 
+## 2026-11-17 — Product Master waiting items: Mason's answers
+
+**Decision (Mason, in chat, 2026-11-17, decision session).** Live check that day: 0 `product_rates` rows, 0 `active_ingredients`.
+- **RT-4:** run the RT-1 derivation now (drafts only; nothing reads them until RT-4), in its own session with a before/after live check; Mason reviews the drafts soon in the rate review workbook, then the rate lock and RT-4 follow.
+- **CMP-2:** still on hold; Mason re-reviews the plan in a dedicated review session, which records his call. The 2026-11-11 hold stands until then.
+- **MOA-1 bulk load (build sheet §3.6):** approach approved; Mason's yes on the actual list comes later, after ingredients exist.
+- **CLN-1:** stays waiting until Stages 2 and 4 land; the column drop still needs Mason's yes at the time.
+- **FAM-1, RET-1, IMG-1:** still "later". **BLK-1b / costing foundation:** stays parked.
+- **KI-81:** fix now; Claude builds it (PR to `staging`, real-schema proof), checked against Taha's open #1576.
+- **#1879:** update onto current `staging` (keep Taha's #1873 invoice layout) and land it; it is Mason's PR, not Taha's.
+
 ## 2026-11-17 — #1896: Mason owner-accepted 4 Sol finding(s) at `ed0ec3c3c777`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-17).** Sol's review of PR #1896 at `ed0ec3c3c777` (base `1e55ea03914d`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-17 — #1917 and #1918 (USE-2) may have up to 18 Sol rounds
+
+**Decision (Mason, in chat, 2026-11-17: "Yes, up to 18").** PR #1917 (USE-2 product page) and PR #1918 (quote line note) may each have Sol rounds up to 18, as the round counter counts them (it includes the #1916 database rounds both branches carry).
+**What it does:** lifts the round cap on these two PRs from 12 to 18. Every other gate is unchanged: each PR still needs a clean Sol review of its head and green checks before it merges into `staging`.
+
 ## 2026-11-17 — A Sol round is a distinct head: reruns of one commit count once (#1929)
 
 **Decision (Mason, in chat, 2026-11-17: "count distinct heads once for 1929").** The Sol round count for a branch is the number of distinct branch commits Sol has run on, not the number of runs.

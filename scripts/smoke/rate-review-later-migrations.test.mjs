@@ -24,6 +24,7 @@ const readOnly = [
   fn('SELECT _product_parent_replay(k, s, f) INTO v;'),
   "-- ALTER FUNCTION _product_parent_replay(text,text,text) in a comment\n/* DROP TABLE product_rates; */ SELECT 1;",
   "DO $$ BEGIN IF to_regprocedure('public._product_parent_replay(text,text,text)') IS NULL THEN RAISE EXCEPTION 'x'; END IF; END $$;",
+  "SELECT E'it\\'s fine', E'a\\nb', 'some text';",
   "SELECT * FROM (VALUES ('_product_parent_replay', '62880d61a470c2eeca02de7bc11c76be')) v(proname, md5);",
 ];
 for (const sql of readOnly) assert.equal(rateReviewTouch(sql), null, sql);
@@ -43,6 +44,12 @@ const refused = [
   'ALTER TABLE public."product_rates" ADD COLUMN x int;',
   "DO $$ BEGIN EXECUTE 'DROP FUNCTION public._product_parent_replay(text,text,text)'; END $$;",
   "DO $$ BEGIN EXECUTE format('ALTER FUNCTION %s OWNER TO x', 'public._product_parent_replay(text,text,text)'); END $$;",
+  // Luna round 1: each of these drops or alters a covered table.
+  "DO $$ BEGIN EXECUTE format('DROP TABLE %s', to_regclass('public.product_rates')); END $$;",
+  "DO $$ BEGIN EXECUTE 'DROP TABLE public.product_' || 'rates'; END $$;",
+  "DO $$ BEGIN EXECUTE E'DROP TABLE public.product_\\162ates'; END $$;",
+  "DO $$ BEGIN EXECUTE e'DROP TABLE public.product_\\x72ates'; END $$;",
+  'ALTER TABLE public.U&"product\\005frates" ADD COLUMN x int;',
 ];
 for (const sql of refused) assert.ok(rateReviewTouch(sql), `should refuse: ${sql}`);
 

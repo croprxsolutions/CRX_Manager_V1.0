@@ -132,6 +132,8 @@ For each **active ingredient row** of the parent, and for each scheme:
 
 ### 3.6 The one-time bulk load (Mason, 2026-11-12)
 
+*Mason, 2026-11-17: approach approved; his yes on the actual list comes after `active_ingredients` is filled (0 rows that day).*
+
 Mason does not want groups typed ingredient by ingredient. So every ingredient's groups are loaded once, in bulk, and the editor (3.2) is kept only for the rare new ingredient (about once a year).
 
 - **When:** after the DB and screen PRs, and after the setup workbook and EPA lookups have put the ingredients in (`active_ingredients` has 0 rows today, and a group can only attach to an ingredient that exists).

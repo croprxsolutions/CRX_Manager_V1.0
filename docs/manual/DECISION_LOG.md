@@ -6,6 +6,16 @@
 **The change:** "i want the generic built to always be what brand name is pegged agsint, if it is not a saving thenit needs to be red and say not saving to buid". So every row reads one way: generic build total G against brand (premix) price B. When G < B it shows "Build saves $(B − G)/acre", with the percent taken off the brand price: (B − G) / B × 100 (Mason chose "20% off brand price" for $10 brand against an $8 build). When G ≥ B the row is red and says "Not a saving to build", with the dollar difference. The plan's reverse "premix discount versus the generic benchmark" percent is dropped. The same rule applies in admin Cost mode.
 **Editing on the screen (Mason, same day):** asked which numbers he can type over, he chose only "Rate per acre". For what happens to an edit, he chose "What-if only": everything recalculates on screen, the row is marked "edited" with a reset, and nothing changes the catalog, quotes or saved rates. Prices and product strengths always come from the database.
 **What this forbids/implies:** CMP-2 may now get a build sheet and build, but only in its planned place: after its required data, RT-4 trusted rates, relevant use guidance and MOA-1. Approving the plan does not start a build. CLN-2 still follows CMP-2, and dropping `ingredient_map` still needs Mason's approval as a destructive change.
+## 2026-11-17 — Product Master waiting items: Mason's answers
+
+**Decision (Mason, in chat, 2026-11-17, decision session).** Live check that day: 0 `product_rates` rows, 0 `active_ingredients`.
+- **RT-4:** run the RT-1 derivation now (drafts only; nothing reads them until RT-4), in its own session with a before/after live check; Mason reviews the drafts soon in the rate review workbook, then the rate lock and RT-4 follow.
+- **CMP-2:** still on hold; Mason re-reviews the plan in a dedicated review session, which records his call. The 2026-11-11 hold stands until then.
+- **MOA-1 bulk load (build sheet §3.6):** approach approved; Mason's yes on the actual list comes later, after ingredients exist.
+- **CLN-1:** stays waiting until Stages 2 and 4 land; the column drop still needs Mason's yes at the time.
+- **FAM-1, RET-1, IMG-1:** still "later". **BLK-1b / costing foundation:** stays parked.
+- **KI-81:** fix now; Claude builds it (PR to `staging`, real-schema proof), checked against Taha's open #1576.
+- **#1879:** update onto current `staging` (keep Taha's #1873 invoice layout) and land it; it is Mason's PR, not Taha's.
 
 ## 2026-11-17 — #1896: Mason owner-accepted 4 Sol finding(s) at `ed0ec3c3c777`
 

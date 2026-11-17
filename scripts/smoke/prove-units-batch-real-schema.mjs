@@ -2,8 +2,8 @@
 /**
  * Real-schema proof for the units batch (KI-136, KI-158, KI-140, KI-137; contract
  * docs/plans/2026-11-15-product-master-steps-1-3-CONTRACT.md, PR A):
- *   20270113110000_ki137_powder_keg_each_piksi_mg_labels.sql (data correction, the candidate)
- *   20270113120000_line_unit_is_stock_unit.sql (the rules, its follow-up)
+ *   20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql (data correction, the candidate)
+ *   20270121110000_line_unit_is_stock_unit.sql (the rules, its follow-up)
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
  * replays every post-baseline migration before the candidate, seeds live's pinned rows (same ids, units and
@@ -30,8 +30,8 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270113110000_ki137_powder_keg_each_piksi_mg_labels.sql');
-const RULES = path.join(MIGRATIONS, '20270113120000_line_unit_is_stock_unit.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql');
+const RULES = path.join(MIGRATIONS, '20270121110000_line_unit_is_stock_unit.sql');
 const FOLLOW_UPS = [RULES];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([

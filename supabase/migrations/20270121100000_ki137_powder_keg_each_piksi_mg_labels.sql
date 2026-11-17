@@ -5,7 +5,7 @@
 -- 2026-11-13, DECISION_LOG: sold by the each at current prices; stock and rate unit become Ea). Piksi Dust Plus is
 -- stocked in MG (milligrams, Mason 2026-11-13) but its stock row, an open PO line and its open order and delivery
 -- lines are labelled "Dry oz"; the quantities are milligrams already ("the quantity is right, the label is wrong").
--- The units rule that follows (20270113120000) refuses a line whose unit is not the stock unit, so these labels must
+-- The units rule that follows (20270121110000) refuses a line whose unit is not the stock unit, so these labels must
 -- be right first.
 --
 -- WHAT (each row pinned by id and current values; quantities and money never change, and prices and costs are not

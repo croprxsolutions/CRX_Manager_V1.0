@@ -1,4 +1,4 @@
--- Rollback for supabase/migrations/20270113110000_ki137_powder_keg_each_piksi_mg_labels.sql (proven by
+-- Rollback for supabase/migrations/20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql (proven by
 -- scripts/smoke/prove-units-batch-real-schema.mjs). Run units-batch-rules-reverse.sql first.
 -- Puts Powder Keg back to Lb (product, family, stock rows, open order lines) and Piksi's pinned labels back to
 -- "Dry oz". A new open cost basis is written at the same cents (history rows cannot be deleted).

@@ -1,4 +1,4 @@
--- Rollback for supabase/migrations/20270113120000_line_unit_is_stock_unit.sql (proven by
+-- Rollback for supabase/migrations/20270121110000_line_unit_is_stock_unit.sql (proven by
 -- scripts/smoke/prove-units-batch-real-schema.mjs). Run this BEFORE ki137-units-data-reverse.sql.
 -- Puts back the old order-line fill trigger and live's product_price_per_acre body, and removes the unit rules.
 -- The one open PO line that had no unit keeps the stock unit it was given (harmless: receiving read blank as it).

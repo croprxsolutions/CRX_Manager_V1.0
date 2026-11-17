@@ -952,13 +952,13 @@ on a KI-137 product. Receiving them today adds the typed number. The on-order re
 (`_recompute_po_on_order_for_products`) and new stock-row creation mix units the same way. The per-line factor
 `inventory_units_per_supplier_unit_snapshot` exists but is unused. Repair step 1 (To-Do 0.17); orders and deliveries
 are KI-158. Do not convert historical balances; fix them from counts (KI-29).
-**Fix built 2026-11-15 (units batch, PR A; not live):** `20270113120000_line_unit_is_stock_unit.sql` fills a blank PO,
+**Fix built 2026-11-15 (units batch, PR A; not live):** `20270121110000_line_unit_is_stock_unit.sql` fills a blank PO,
 order or delivery line unit with the stock unit, stores a matching spelling as the product's own (`EA` -> `Ea`),
 refuses any other unit (`LINE_UNIT_NOT_STOCK_UNIT`), checks a PO line again whenever it is received into, refuses a
 product stock-unit change while lines are open in the old unit (`PRODUCT_UNIT_HAS_OPEN_LINES`), and gives the one
 open blank-unit PO line its stock unit. The PO edit screen's product picker defaults a line to `inventory_unit` (other pickers still read `unit_size`, which a guard keeps equal on active products). No conversion: the
 per-line factor has only ever been 1 or blank (left unused; a non-1 factor is still not refused). Open lines are
-relabelled first by `20270113110000` (KI-137). Still open after this: a fully received line in another unit refuses an
+relabelled first by `20270121100000` (KI-137). Still open after this: a fully received line in another unit refuses an
 admin over-receive (re-enter it on a new line).
 
 ### KI-137 — Two seed-treatment products are stocked and priced per Lb at per-jug money
@@ -970,7 +970,7 @@ decision 24), then a reviewed unit correction.
 **Answered 2026-11-13 (Mason, DECISION_LOG):** both Powder Keg products are sold **by the each** at their current prices.
 Their stock and rate unit become Ea, with no stock conversion because on-hand is 0. This needs a reviewed migration
 (repair step 1, To-Do 0.17). One has an open EA PO line (KI-136), so correct it before that line is received.
-**Fix built 2026-11-15 (units batch, PR A; not live):** `20270113110000_ki137_powder_keg_each_piksi_mg_labels.sql`
+**Fix built 2026-11-15 (units batch, PR A; not live):** `20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql`
 moves both products, their families, stock rows and open order lines Lb -> Ea (a new cost basis at the same cents),
 and relabels Piksi Dust Plus's stock row and open PO, order and delivery lines "Dry oz" -> MG. Quantities and money
 do not change. Needs Mason's live-apply approval.
@@ -1399,7 +1399,7 @@ hashes, and add each step's regression test. Repair step 6 (To-Do 0.17).
 
 ### KI-165 — A cycle count open across a stock-unit change would save in the new unit
 **MED (latent) · OPEN · inventory · found 2026-11-16 (Luna, #1896 whole-branch round) · unassigned**
-The #1896 stock-unit lock (`20270113120000`) refuses a unit change while stock is on hand, but a cycle count opened on
+The #1896 stock-unit lock (`20270121110000`) refuses a unit change while stock is on hand, but a cycle count opened on
 an empty stock row in the old unit can be completed after the change, recording the counted number in the new unit.
 Not reachable today: the product setup guard refuses any stock-unit change on a saved product, so the lock is a second
 layer. **Decision (Mason, 2026-11-16: "Ship, log the gap"):** #1896 ships with this open. Fix before saved-product
@@ -1408,7 +1408,7 @@ whose unit differs from the product's.
 
 ### KI-166 — A quote for a product with no stock unit is priced as if sold by the each
 **HIGH (latent) · OPEN · quotes/money · found 2026-11-17 (Sol round 6, #1896) · unassigned**
-`save_quote` and the #1896 quote guard (`_refuse_unknown_quote_rate_unit`, `20270113120000`) both fall back to `Ea`
+`save_quote` and the #1896 quote guard (`_refuse_unknown_quote_rate_unit`, `20270121110000`) both fall back to `Ea`
 when a product has neither `inventory_unit` nor `unit_size`, so a rate-based line (e.g. 16 oz/acre) gets a per-acre
 price from an invented unit. 0 such products live (2026-11-17); the behaviour predates #1896. **Decision (Mason,
 2026-11-17: "Accept and land"):** #1896 ships with this open. Fix: refuse a rate-based quote line when the product has

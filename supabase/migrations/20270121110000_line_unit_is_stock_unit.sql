@@ -20,7 +20,7 @@
 --     conversion is done: the per-line factor (inventory_units_per_supplier_unit_snapshot) has only ever been 1 or
 --     blank, and converting would also need reversal, close-short, on-order and vendor bills to convert.
 --     The on-order recompute (_recompute_po_on_order_for_products) is unchanged; it stays right because no open PO
---     line can hold another unit (postflight below; the data correction 20270113110000 runs first).
+--     line can hold another unit (postflight below; the data correction 20270121100000 runs first).
 --  3. product_price_per_acre returns NULL (no figure) when the rate unit or the stock unit is not in
 --     unit_conversions, instead of pricing it as 1 oz. Same body otherwise.
 --  4. A quote_items trigger refuses a rate-mode line with a rate above 0 whose rate unit, or whose product's stock
@@ -29,7 +29,7 @@
 --     Not done here (KI-140 stays open for it): liquid-vs-dry type mismatch; 4 active dry products are rated in the
 --     liquid "oz" and RT-2 step 2 owns them.
 -- Live 2026-11-15: every product's stock unit and every rate-mode quote line's rate unit is in unit_conversions;
--- no open line carries another unit once 20270113110000 has run.
+-- no open line carries another unit once 20270121100000 has run.
 --
 -- ROLLBACK: scripts/smoke/units-batch-rules-reverse.sql restores trg_fill_order_line_unit, the old
 -- product_price_per_acre and drops the new triggers and helper (proven by the units-batch prover).
@@ -427,14 +427,14 @@ BEGIN
   IF v_bad IS NULL THEN
     -- Every stock row is in its product's stock unit (a blank label or another spelling of it is fine): the stock-row
     -- guard checks only new rows and unit changes, so a legacy mismatch would keep receiving (Sol, #1896). Live
-    -- 2026-11-16: Piksi and Treaty Extra only, both relabelled by 20270113110000.
+    -- 2026-11-16: Piksi and Treaty Extra only, both relabelled by 20270121100000.
     SELECT string_agg('stock row ' || i.id, ', ') INTO v_bad
       FROM public.inventory i JOIN public.products p ON p.id = i.product_id
      WHERE COALESCE(btrim(i.unit_size, E' \t\r\n' || chr(160)), '') <> ''
        AND NOT public._unit_matches_stock_unit(i.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), '')));
   END IF;
   IF v_bad IS NOT NULL THEN
-    RAISE EXCEPTION 'UNITS_POSTFLIGHT_OPEN_LINE: these open lines are not in their product''s stock unit (run 20270113110000 first): %', v_bad;
+    RAISE EXCEPTION 'UNITS_POSTFLIGHT_OPEN_LINE: these open lines are not in their product''s stock unit (run 20270121100000 first): %', v_bad;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_fill_order_line_unit') THEN
     RAISE EXCEPTION 'UNITS_POSTFLIGHT: the old order-line fill trigger is still present';

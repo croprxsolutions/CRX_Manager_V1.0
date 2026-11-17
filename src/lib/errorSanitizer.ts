@@ -446,7 +446,7 @@ export function sanitizeError(error: unknown): string {
   // The server sentence names the product and says what to do, so it is kept.
   const chemPriceRequired = message.match(/^CHEM_PRICE_REQUIRED:\s*(.+)$/s);
   if (chemPriceRequired) return `Nothing was saved. ${chemPriceRequired[1].trim()}`;
-  // Unit rules (20270113120000): the server sentence names the unit and what to do, so it is kept.
+  // Unit rules (20270121110000): the server sentence names the unit and what to do, so it is kept.
   const unitRule = message.match(/^(?:LINE_UNIT_NOT_STOCK_UNIT|PRODUCT_UNIT_HAS_OPEN_LINES|PRODUCT_UNIT_HAS_STOCK|STOCK_ROW_UNIT_NOT_STOCK_UNIT|PRODUCT_STOCK_UNIT_UNKNOWN|QUOTE_RATE_UNIT_UNKNOWN|QUOTE_STOCK_UNIT_UNKNOWN):\s*(.+)$/s);
   if (unitRule) return `Nothing was saved. ${unitRule[1].trim()}`;
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { edgeSourceTests, needsAppBuild, needsFreshnessCheck, needsMapCheck, needsPinCheck, needsRegistryCheck } from './prepush-needs-build.mjs';
+import { allDeletes, edgeSourceTests, needsAppBuild, needsFreshnessCheck, needsMapCheck, needsPinCheck, needsRegistryCheck } from './prepush-needs-build.mjs';
 import { tempDir } from './lib/test-temp-dir.mjs';
 
 assert.equal(needsAppBuild(['scripts/a.mjs', 'docs/x.md', 'supabase/migrations/1_x.sql']), false);
@@ -55,6 +55,22 @@ assert.equal(verdict(`refs/heads/x ${docsCommit} refs/heads/x ${git('rev-parse',
 assert.equal(verdict(`refs/heads/x ${zero} refs/heads/x ${appCommit}\n`), 'skip', 'a branch delete has nothing to build');
 assert.equal(verdict(''), 'build', 'no refs: build');
 assert.equal(verdict('garbage line here\n'), 'build', 'an unreadable ref line must build');
+
+// Only a push where every ref is a delete may skip the content checks; any doubt runs them.
+const sha = 'a'.repeat(40);
+const del = (ref) => `(delete) ${zero} ${ref} ${sha}`;
+const push = `refs/heads/y ${sha} refs/heads/y ${zero}`;
+assert.equal(allDeletes(`${del('refs/heads/x')}\n`), true);
+assert.equal(allDeletes(`${del('refs/heads/x')}\n${del('refs/tags/v1')}\n`), true, 'several deletes');
+assert.equal(allDeletes(`${del('refs/heads/x')}\n${push}\n`), false, 'a delete plus a real push');
+assert.equal(allDeletes(`${push}\n`), false, 'a new branch is not a delete');
+assert.equal(allDeletes(''), false, 'no refs');
+assert.equal(allDeletes(`${zero} refs/heads/x ${sha}\n`), false, 'a short line');
+assert.equal(allDeletes(`(delete) 0000 refs/heads/x ${sha}\n`), false, 'a truncated zero sha');
+const deletesVerdict = (stdin) => spawnSync(process.execPath, ['scripts/prepush-needs-build.mjs', '--all-deletes'], { input: stdin, encoding: 'utf8' }).stdout.trim();
+assert.equal(deletesVerdict(`${del('refs/heads/x')}\n`), 'deletes');
+assert.equal(deletesVerdict(`${push}\n`), 'push');
+assert.equal(deletesVerdict(''), 'push');
 
 // A move out of src/ must still build: rename detection would report only the new path.
 const repo = tempDir('crx-prepush-move-');

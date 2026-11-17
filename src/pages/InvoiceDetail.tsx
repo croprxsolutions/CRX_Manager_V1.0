@@ -27,7 +27,9 @@ import { assertInvoiceSendable } from '../lib/invoiceSendDisposition';
 import { INVOICE_BILL_TO_COLUMNS, invoiceEmailKey, type InvoiceBillTo } from '../lib/invoiceBulkEmail';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { generateIdempotencyKey, getIdempotencyBindingRejection, getIdempotencyMismatchResult, isDefinitiveRpcRejection, isMissingIntentBindingColumn, legacyIntentChanged } from '../lib/idempotency';
-import { MONEY_PRECISION_MESSAGE, parseDollarsToCents, parseDollarsToCentsSigned } from '../lib/parseCents';
+import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
+import PriceInput from '../components/invoices/PriceInput';
+import { linePriceProblem } from '../lib/priceProblem';
 import VendorSelect from '../components/orders/VendorSelect';
 import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
@@ -69,6 +71,8 @@ import { toSentryError } from '../lib/sentryError';
 
 interface LineItem {
   id?: string;
+  // What is typed in the line's price box while it is being edited (PriceInput); never saved.
+  price_draft?: string | null;
   order_item_id?: string | null;
   product_id: string | null;
   product_name: string;
@@ -108,7 +112,6 @@ interface LineItem {
   brand_lines?: unknown;
 }
 
-const NEGATIVE_PRICE_MESSAGE = 'Enter a price of $0.00 or more. Use a credit memo to give money back.';
 
 /** What Record Payment validated: the only values the duplicate check reads and the save sends. */
 interface PaymentEntry {
@@ -1181,6 +1184,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   // Save invoice
   const handleSave = async () => {
     if (addingProductRef.current) return;
+    // A price box holding a typed price that can't be saved: name the line instead of saving its last good price.
+    const badPrice = linePriceProblem(items);
+    if (badPrice) { toast('error', badPrice); return; }
     if (paymentTerms === 'Custom date…' && !customDueDate) {
       toast('error', 'Choose a custom due date before saving.');
       return;
@@ -2096,16 +2102,6 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
   const chargeRows = lineRows.filter(({ item }) => !isComputedChargeLine(item.charge_type) && isChargeLine(item, takesCharges));
   const productRows = lineRows.filter((row) => !workedRows.includes(row) && !chargeRows.includes(row));
   const hasTotes = displayItems.some((i) => i.tote_number);
-  const changePrice = (idx: number, value: string) => {
-    const cents = parseDollarsToCentsSigned(value);
-    // null = a third decimal digit. Refuse the keystroke; never store
-    // a $0 unit price that only the below-cost prompt would question.
-    if (cents === null) { toast('error', MONEY_PRECISION_MESSAGE); return; }
-    // The unsigned parser flips "-100" to +$100, which would bill a credit
-    // as a charge (Sol, PR #983). Refuse a negative price instead.
-    if (cents < 0) { toast('error', NEGATIVE_PRICE_MESSAGE); return; }
-    updateItem(idx, 'unit_price_cents', cents);
-  };
   const priceSourcePill = (item: LineItem) => (
     item.price_source === 'quoted' ? <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700" title={item.quoted_price_cents != null ? `Program price: ${fmt(item.quoted_price_cents)}` : undefined}>Quoted price</span>
       : item.price_source === 'tier' ? <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600" title="Using customer tier pricing">Tier price</span>
@@ -2634,13 +2630,12 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                         <td className="flex flex-col gap-1 xl:table-cell xl:px-3 xl:py-3 xl:align-top">
                           {lineLabel('Unit price')}
                           {rowEditable(item) && !item.billing_line_id ? (
-                            <input
-                              type="number"
-                              aria-label={`Unit price for ${name || 'line'}`}
-                              value={(item.unit_price_cents / 100).toFixed(2)}
-                              onChange={(e) => changePrice(idx, e.target.value)}
-                              min={0}
-                              step={0.01}
+                            <PriceInput
+                              label={`Unit price for ${name || 'line'}`}
+                              cents={item.unit_price_cents}
+                              onCents={(cents) => updateItem(idx, 'unit_price_cents', cents)}
+                              draft={item.price_draft}
+                              onDraft={(text) => updateItem(idx, 'price_draft', text)}
                               className={lineInput.replace('xl:w-24', 'xl:w-28')}
                             />
                           ) : (
@@ -2697,7 +2692,7 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                   {chargeRows.map(({ item, idx }) => (
                     <li key={idx} className="py-3">
                       {rowEditable(item) ? (
-                        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_8rem_auto] sm:items-center">
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_8rem_auto] sm:items-start">
                           <select
                             aria-label="Charge type"
                             value={item.charge_type ?? ''}
@@ -2718,16 +2713,15 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
                             className={`${chargeInput} col-span-2 sm:col-span-1`}
                           />
                           {!item.billing_line_id ? (
-                            <input
-                              type="number"
+                            <PriceInput
                               // The box holds the unit price; the line's total is on data-cents. A typed charge is quantity 1
                               // (invoice_items_charge_line_shape_chk), so its box is the amount; an older untyped line may not be.
-                              data-testid="invoice-line-amount" data-kind="charge" data-cents={item.extended_cents}
-                              aria-label={`${item.quantity === 1 ? 'Amount' : 'Unit price'} for ${item.description || 'charge'}`}
-                              value={(item.unit_price_cents / 100).toFixed(2)}
-                              onChange={(e) => changePrice(idx, e.target.value)}
-                              min={0}
-                              step={0.01}
+                              testProps={{ 'data-testid': 'invoice-line-amount', 'data-kind': 'charge', 'data-cents': item.extended_cents }}
+                              label={`${item.quantity === 1 ? 'Amount' : 'Unit price'} for ${item.description || 'charge'}`}
+                              cents={item.unit_price_cents}
+                              onCents={(cents) => updateItem(idx, 'unit_price_cents', cents)}
+                              draft={item.price_draft}
+                              onDraft={(text) => updateItem(idx, 'price_draft', text)}
                               className={chargeInput}
                             />
                           ) : (

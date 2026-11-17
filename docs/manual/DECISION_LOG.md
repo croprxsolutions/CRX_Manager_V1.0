@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-17 — #1879 and #1940 may have one more Sol round each
+
+**Decision (Mason, in chat, 2026-11-17: "Yes, confirmed").** PR #1879 (brand quantities on paperwork) and PR #1940 (inventory cleanup KI-161/150/163) may each have one more Sol round (round 21 and round 20 as the counter reads them).
+**Why:** both were clean at Sol before; the new heads only merge current `staging` (which brought the npm audit exception from #1941) plus this entry, with no change to either PR's own code.
+**What it does:** unlocks one Sol review of each PR's new head. Every other gate is unchanged: each still needs a clean Sol review and green checks before it merges into `staging`.
+
 ## 2026-11-17 — Product Master waiting items: Mason's answers
 
 **Decision (Mason, in chat, 2026-11-17, decision session).** Live check that day: 0 `product_rates` rows, 0 `active_ingredients`.

@@ -1413,6 +1413,9 @@ when a product has neither `inventory_unit` nor `unit_size`, so a rate-based lin
 price from an invented unit. 0 such products live (2026-11-17); the behaviour predates #1896. **Decision (Mason,
 2026-11-17: "Accept and land"):** #1896 ships with this open. Fix: refuse a rate-based quote line when the product has
 no stock unit, in both the guard and `save_quote`.
+Sol round 7 (#1896, 2026-11-17) found the same root on stock: such a product also takes blank-unit PO lines and blank-unit
+stock. Mason owner-accepted both ("this case cannot happen in our business"): the product screen requires an inventory
+unit. Fix both at once by requiring a stock unit on every product in the database.
 
 ### KI-167 — Voiding a finished delivery can reopen an order line in an old unit that cannot be re-delivered
 **HIGH (latent) · OPEN · deliveries · found 2026-11-17 (Sol round 6, #1896) · unassigned**

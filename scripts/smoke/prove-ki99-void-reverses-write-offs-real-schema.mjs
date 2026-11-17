@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270110100000_ki99_void_reverses_write_offs (KI-99; contract
+ * Real-schema proof for 20270116100000_ki99_void_reverses_write_offs (KI-99; contract
  * docs/plans/2026-11-14-ki99-void-reverses-write-off-CONTRACT.md).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
@@ -28,7 +28,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270110100000_ki99_void_reverses_write_offs.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270116100000_ki99_void_reverses_write_offs.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

@@ -272,7 +272,7 @@ Both are in the live `void_invoice`, so they affect the ordinary Void Invoice bu
 - **Write-off stays active.** Voiding a posted invoice that has a write-off sets the invoice's write-off amount to
   zero but leaves its `write_offs` record active (not marked reversed), so the customer statement can still show it.
   Until the fix is live, reverse the write-off before voiding. Fix Delivery refuses these invoices. Fix (Mason,
-  2026-11-14: auto-reverse): `20270110100000_ki99_void_reverses_write_offs.sql` marks each active write-off reversed
+  2026-11-14: auto-reverse): `20270116100000_ki99_void_reverses_write_offs.sql` marks each active write-off reversed
   when its invoice is voided, after checking its Chicago month is open. Live had 0 write-offs (2026-11-14).
 - **Credit month read in UTC — FIXED LIVE 2026-11-07.** `20261206110000` (KI-18) checks each credit's Chicago
   month; confirmed in the live body 2026-11-14.

@@ -17,9 +17,12 @@ import ProductSellPriceHistory from '../components/products/ProductSellPriceHist
 import ProductChangeHistory from '../components/products/ProductChangeHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
 import CancelledRegistrationBanner from '../components/products/CancelledRegistrationBanner';
-import { CHECK_TIMEOUT_MS, registrationCheck, useCancelledRegistrations, useStickyCancellations } from '../lib/epaRegistrationStatus';
+import {
+  CHECK_TIMEOUT_MS, normalizeEpaRegistration, registrationCheck, useCancelledRegistrations, useStickyCancellations,
+} from '../lib/epaRegistrationStatus';
 import ProductVendorsSection from '../components/products/ProductVendorsSection';
 import EpaLabelLink from '../components/products/EpaLabelLink';
+import LabelAdjuvants from '../components/products/LabelAdjuvants';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
 import ProductStockCard from '../components/products/ProductStockCard';
 import ProductRateCorrectionModal from '../components/products/ProductRateCorrectionModal';
@@ -249,6 +252,10 @@ export default function ProductDetail() {
   const { role, profile } = useAuth();
   const isNew = id === 'new';
   const isAdmin = role === 'admin';
+  const canEditAdjuvants = role === 'admin' || role === 'sales_rep';
+  // Bumped after a label-adjuvant save, so the registrations are read again.
+  const [registrationRefresh, setRegistrationRefresh] = useState(0);
+  const refreshRegistrations = useCallback(() => setRegistrationRefresh((n) => n + 1), []);
   const [rateLock, setRateLock] = useState<ProductRateLock | null>(null);
   const [correctingRates, setCorrectingRates] = useState(false);
   const [rateLockFailed, setRateLockFailed] = useState(false);
@@ -447,7 +454,8 @@ export default function ProductDetail() {
       ? [{ label: 'This product', epaRegistration: persistedProduct.epa_registration }, ...brandRegistrations]
       : []
   ), [persistedProduct, id, brandRegistrations]);
-  const registrationStatus = useCancelledRegistrations(registrationSources.map((s) => s.epaRegistration));
+  const registrationStatus = useCancelledRegistrations(
+    registrationSources.map((s) => s.epaRegistration), registrationRefresh ? String(registrationRefresh) : '');
   const shownCancellations = useStickyCancellations(id ?? '', registrationSources, registrationStatus.cancelled);
   const registrationCheckState = registrationCheck(
     productLoaded,
@@ -1553,7 +1561,21 @@ export default function ProductDetail() {
                   </Button>
                 </div>
                 <div className="mt-1">
-                  <EpaLabelLink epaRegistration={product.epa_registration} showHint />
+                  {(() => {
+                    // Registrations are read for the SAVED number; while a different number is typed, show only its search.
+                    const saved = productLoaded ? normalizeEpaRegistration(persistedProduct?.epa_registration) : null;
+                    const matches = saved !== null && normalizeEpaRegistration(product.epa_registration) === saved;
+                    const registration = matches ? registrationStatus.rows.get(saved) : undefined;
+                    return (
+                      <>
+                        <EpaLabelLink epaRegistration={product.epa_registration} showHint labelUrl={registration?.label_url} />
+                        {matches && (
+                          <LabelAdjuvants epaRegistration={saved} row={registration} lookup={registrationStatus.lookup}
+                            canEdit={canEditAdjuvants} profileId={profile?.id ?? ''} onSaved={refreshRegistrations} />
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
                 {parentOwned && <ParentOwnedHint parentName={shownParent?.name} identity />}
                 {isNew && (
@@ -2045,6 +2067,10 @@ export default function ProductDetail() {
                 isAdmin={isAdmin}
                 userId={profile?.id ?? null}
                 cancelled={shownCancellations.cancelled}
+                registrations={registrationStatus.rows}
+                registrationLookup={registrationStatus.lookup}
+                canEditAdjuvants={canEditAdjuvants}
+                onAdjuvantsSaved={refreshRegistrations}
                 onBrandsChange={handleBrandsChange}
               />
             </PhoneSection>

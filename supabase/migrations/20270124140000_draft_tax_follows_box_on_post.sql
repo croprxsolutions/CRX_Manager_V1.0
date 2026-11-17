@@ -80,13 +80,13 @@ $function$;
 REVOKE ALL ON FUNCTION public.guard_sales_tax_box_on_post_20270124() FROM PUBLIC, anon, authenticated, service_role;
 
 -- Only a draft leaving draft (draft -> unposted is a legal step too, so it can't skip the check): an invoice already
--- unposted keeps the tax it was first posted with. Named zz_ to fire last of the
+-- unposted keeps the tax it was first posted with. A soft-deleted draft is checked too (no app path posts one). Named zz_ to fire last of the
 -- BEFORE triggers (they run by name): a stale tax line (invoices_sales_tax_current_on_post_20261231), a closed sale,
 -- a stale discount or a blank unit still reports its own, more specific, refusal first.
 CREATE TRIGGER zz_sales_tax_matches_box_on_post_20270124
   BEFORE UPDATE OF status ON public.invoices
   FOR EACH ROW
-  WHEN (OLD.status = 'draft' AND NEW.status IN ('unposted', 'posted', 'paid', 'overdue') AND NEW.deleted_at IS NULL
+  WHEN (OLD.status = 'draft' AND NEW.status IN ('unposted', 'posted', 'paid', 'overdue')
         AND NEW.invoice_type = 'chemical_sale')
   EXECUTE FUNCTION public.guard_sales_tax_box_on_post_20270124();
 

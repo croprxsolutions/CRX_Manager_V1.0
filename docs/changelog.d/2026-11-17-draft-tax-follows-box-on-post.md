@@ -3,4 +3,5 @@
 Migration `20270124140000_draft_tax_follows_box_on_post` (not applied; staging candidate). Fixes a Sol HIGH in the
 unreleased billing work: a Bill Split payer's draft that the tax box couldn't update (it can't be re-saved) kept its
 old tax and could still be posted. Posting such a draft is now refused with `SALES_TAX_BOX_MISMATCH`; the office
-switches the box over and back (ending where they want it), or voids and redrafts the group. The order page's toast and the plain error message say so.
+switches the box over and back (ending where they want it), which fixes the drafts it can re-save; a locked split
+draft keeps its tax through that, so the office sets the box back to match it, or voids and redrafts the group. The order page's toast and the plain error message say so.

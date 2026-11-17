@@ -2449,6 +2449,7 @@ BEGIN
                     COALESCE(v_job_app_date, (p_invoice->>'invoice_date')::date,
                              (SELECT i.invoice_date FROM invoices i
                                WHERE i.field_app_billing_set_id = v_set_id AND i.customer_id = m.cust::uuid AND i.deleted_at IS NULL
+                                 AND i.status IN ('draft', 'unposted')  -- the child PASS 2 reuses; else a new one dated today
                                ORDER BY i.invoice_date DESC LIMIT 1),
                              (now() AT TIME ZONE 'America/Chicago')::date)
                   )), '{}'::jsonb)
@@ -2490,6 +2491,7 @@ BEGIN
                               COALESCE(v_job_app_date, (p_invoice->>'invoice_date')::date,
                              (SELECT i.invoice_date FROM invoices i
                                WHERE i.field_app_billing_set_id = v_set_id AND i.customer_id = v_rep_cust AND i.deleted_at IS NULL
+                                 AND i.status IN ('draft', 'unposted')
                                ORDER BY i.invoice_date DESC LIMIT 1),
                              (now() AT TIME ZONE 'America/Chicago')::date));
         v_src_unit_price := (v_price_res->>'unit_price_cents')::bigint;
@@ -3249,8 +3251,9 @@ BEGIN
                                    (SELECT i.invoice_date FROM invoices i
                                      WHERE v_group_id IS NOT NULL AND i.invoice_group_id = v_group_id
                                        AND i.customer_id = v_customer_id AND i.deleted_at IS NULL
+                                       AND i.status IN ('draft', 'unposted')  -- as the save: a voided child is replaced, dated today
                                      ORDER BY i.invoice_date DESC LIMIT 1),
-                                   (SELECT invoice_date FROM invoices WHERE id = p_invoice_id),
+                                   (SELECT invoice_date FROM invoices WHERE id = p_invoice_id AND status IN ('draft', 'unposted')),
                                    (now() AT TIME ZONE 'America/Chicago')::date);
     v_customer_total := 0;
     v_customer_lines := '[]'::jsonb;
@@ -3470,8 +3473,8 @@ BEGIN
       FROM (VALUES
         ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '81bcfd088498f0cb1624f161e1a55e46', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
         ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '7ec879b190189252a79d728584a08980', ARRAY['postgres', 'service_role'], 'v'),
-        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '512e2795a0bdf5d96fcb2951ba415a2c', ARRAY['postgres', 'service_role'], 'v'),
-        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'a287925b82bce2fc3a6c15dd4c947c04', ARRAY['postgres'], 's')
+        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '43a7cc9d3ce8e579297410e463709c04', ARRAY['postgres', 'service_role'], 'v'),
+        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '45067806b6d1f97922e9e394498a0aae', ARRAY['postgres'], 's')
       ) AS pin(fn, sig, body_md5, execs, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL

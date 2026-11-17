@@ -18,7 +18,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -589,7 +589,7 @@ function rulesCases() {
   console.log('[case] 5 on-order equals the open PO remainder on every stock row');
 }
 
-function historyCases() {
+async function historyCases() {
   // Sol HIGH on 20270121110000:248: the unit-change guard saw only open lines and stock. In each probe the Gal product
   // is cleared of open lines and stock (as in case 2b) and given closed history in "Gal".
   const LIFT = 'ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_setup_fields;';
@@ -597,6 +597,7 @@ function historyCases() {
   const CLEAR = `${LIFT} SET session_replication_role = replica;
     DELETE FROM public.receiving_records WHERE product_id = '${GAL}'; DELETE FROM public.delivery_items WHERE product_id = '${GAL}';
     DELETE FROM public.order_items WHERE product_id = '${GAL}'; DELETE FROM public.purchase_order_items WHERE product_id = '${GAL}';
+    DELETE FROM public.inventory_transactions WHERE product_id = '${GAL}'; DELETE FROM public.inventory_holds WHERE product_id = '${GAL}';
     SET session_replication_role = origin;
     UPDATE public.inventory SET quantity_available = 0, quantity_on_order = 0 WHERE id = '${GAL_INV}';`;
   const TO_QT = `UPDATE public.products SET inventory_unit = 'Qt', unit_size = 'Qt' WHERE id = '${GAL}';`;
@@ -614,6 +615,11 @@ function historyCases() {
   const DONE_DELIVERY = (unit) => replica(`
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, status) VALUES ('${DONE_D}', 'U-D9', '${O1}', '${CUST}', '${ADMIN}', 'completed');
     INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size) VALUES ('${DONE_D}', '${PINNED.oi.corn}', '${GAL}', 1, ${unit});`);
+  const RECEIPT_ONLY = replica(`INSERT INTO public.receiving_records (purchase_order_id, po_item_id, product_id, quantity_received, received_by)
+      VALUES ('${PO11}', '${PINNED.poi.corn}', '${GAL}', 1, '${ADMIN}');`);
+  const MOVEMENT = replica(`INSERT INTO public.inventory_transactions (product_id, transaction_type, quantity, performed_by)
+      VALUES ('${GAL}', 'adjusted', -1, '${ADMIN}');`);
+  const HOLD = (active) => replica(`INSERT INTO public.inventory_holds (product_id, quantity, created_by, is_active) VALUES ('${GAL}', 1, '${ADMIN}', ${active});`);
   const asAdmin = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);`;
   const receiveReturn = `${asAdmin} SELECT public._receive_return_impl_20260714('${RET}', '${ADMIN}', NULL) IS NOT NULL;`;
 
@@ -633,24 +639,46 @@ function historyCases() {
   const again = apply('history.sql');
   assert.notEqual(again.status, 0); assert.match(again.output, /PREFLIGHT_UNITS_DRIFT: _refuse_stock_unit_change_with_history already exists/);
   for (const role of ['anon', 'authenticated', 'service_role']) {
-    assert.equal(scalar(`SELECT has_function_privilege('${role}', 'public._refuse_stock_unit_change_with_history()', 'EXECUTE');`), 'f', `${role} cannot run it`);
+    for (const fn of ['_refuse_stock_unit_change_with_history', '_return_line_locks_product']) {
+      assert.equal(scalar(`SELECT has_function_privilege('${role}', 'public.${fn}()', 'EXECUTE');`), 'f', `${role} cannot run ${fn}`);
+    }
   }
   const HIST = 'PRODUCT_UNIT_HAS_HISTORY: this product\'s stock unit cannot change to "Qt" because it has been ordered, bought, delivered or returned in its current unit \\(.*';
   // Refused for any history, whatever its status or unit (blank too).
   for (const [pre, who] of [[RETURN('requested'), 'return U-R1'], [RETURN('approved'), 'return U-R1'], [RETURN('approved', true), 'return U-R1'],
     [RETURN('received'), 'return U-R1'], [RETURN('approved', false, 'Qt'), 'return U-R1'], [RECEIVED_PO, 'PO PO-2026-0011'],
-    [DONE_ORDER("'Gal'"), 'order U-O9'], [DONE_ORDER('NULL'), 'order U-O9'], [DONE_DELIVERY("'Gal'"), 'delivery U-D9'], [DONE_DELIVERY("' '"), 'delivery U-D9']]) {
+    [RECEIPT_ONLY, 'PO PO-2026-0011'], [MOVEMENT, 'stock movements or holds'], [HOLD(true), 'stock movements or holds'], [DONE_ORDER("'Gal'"), 'order U-O9'], [DONE_ORDER('NULL'), 'order U-O9'], [DONE_DELIVERY("'Gal'"), 'delivery U-D9'], [DONE_DELIVERY("' '"), 'delivery U-D9']]) {
     refusedProbe(`${CLEAR} ${pre} ${TO_QT}`, new RegExp(`${HIST}${who}`));
   }
   // Allowed: no history at all (the empty stock row is relabelled); a case or outer-space change over history.
-  assert.equal(okProbe(`${CLEAR} ${TO_QT} SELECT p.inventory_unit || '/' || i.unit_size FROM public.products p, public.inventory i
+  assert.equal(okProbe(`${CLEAR} ${HOLD(false)} ${TO_QT} SELECT p.inventory_unit || '/' || i.unit_size FROM public.products p, public.inventory i
     WHERE p.id = '${GAL}' AND i.id = '${GAL_INV}';`), 'Qt/Qt');
   assert.equal(okProbe(`${CLEAR} ${RECEIVED_PO} ${RETURN('approved')} ${DONE_ORDER("'Gal'")}
     ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_units; UPDATE public.products SET inventory_unit = 'GAL', unit_size = 'GAL' WHERE id = '${GAL}';
     SELECT inventory_unit FROM public.products WHERE id = '${GAL}';`), 'GAL');
   // Open lines still answer first.
   refusedProbe(`${LIFT} ${TO_QT}`, /PRODUCT_UNIT_HAS_OPEN_LINES/);
-  console.log('[case] H1 Gal -> Qt is refused (PRODUCT_UNIT_HAS_HISTORY, naming the record) for any history: a requested, approved, restocked, received or Qt return; a received PO line; a fulfilled order line in Gal or blank; a completed delivery line in Gal or blank. With no history it saves and relabels the empty stock row; "GAL" (case only) saves over history; open lines still report PRODUCT_UNIT_HAS_OPEN_LINES first; the function is private; a second apply refuses');
+  // Serialized: while another session holds an uncommitted return line for the product, the unit change waits.
+  assert.equal(scalar("SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_return_line_locks_product' AND tgenabled = 'O';"), '1');
+  const holder = spawn('docker', psqlArgs(), { cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
+  let held = '';
+  holder.stdout.on('data', (d) => { held += d; }); holder.stderr.on('data', (d) => { held += d; });
+  const holderDone = new Promise((resolve) => holder.on('close', resolve));
+  holder.stdin.end(`BEGIN;
+    SET session_replication_role = replica;
+    INSERT INTO public.returns (id, return_number, customer_id, status, requested_by) VALUES ('${RET}', 'U-R1', '${CUST}', 'requested', '${ADMIN}');
+    SET session_replication_role = origin;
+    INSERT INTO public.return_items (id, return_id, product_id, quantity, unit, restock) VALUES ('${RET_ITEM}', '${RET}', '${GAL}', 2, 'Gal', true);
+    SELECT 'HOLDING'; SELECT pg_sleep(6); ROLLBACK;
+`);
+  for (let i = 0; i < 100 && !held.includes('HOLDING'); i += 1) await new Promise((r) => setTimeout(r, 100));
+  assert.match(held, /HOLDING/, `the return line was written with its trigger on:
+${held}`);
+  refusedProbe(`SET lock_timeout = '1s'; ${TO_QT}`, /lock timeout/);
+  assert.equal(await holderDone, 0, held);
+  // Control: with no session holding a line, the same change is not blocked (it meets the open-lines rule instead).
+  refusedProbe(`SET lock_timeout = '1s'; ${TO_QT}`, /PRODUCT_UNIT_HAS_OPEN_LINES/);
+  console.log('[case] H1 Gal -> Qt is refused (PRODUCT_UNIT_HAS_HISTORY, naming the record) for any history: a requested, approved, restocked, received or Qt return; a received PO line; a receipt alone; a stock movement alone; an active hold; a fulfilled order line in Gal or blank; a completed delivery line in Gal or blank. With no history (an ended hold does not count) it saves and relabels the empty stock row; "GAL" (case only) saves over history; open lines still report PRODUCT_UNIT_HAS_OPEN_LINES first; an uncommitted return line in another session makes the change wait (lock timeout); the functions are private; a second apply refuses');
 }
 
 function quoteCases() {
@@ -689,7 +717,8 @@ function rollbackCases() {
   assert.notEqual(early.status, 0); assert.match(early.output, /KI137_REVERSE_ORDER/);
   const r0 = apply('history-rev.sql'); assert.equal(r0.status, 0, r0.output);
   assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_product_unit_keeps_history';"), 0);
-  assert.equal(n("SELECT count(*) FROM pg_proc WHERE proname = '_refuse_stock_unit_change_with_history';"), 0);
+  assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_return_line_locks_product';"), 0);
+  assert.equal(n("SELECT count(*) FROM pg_proc WHERE proname IN ('_refuse_stock_unit_change_with_history', '_return_line_locks_product');"), 0);
   const r1 = apply('rules-rev.sql'); assert.equal(r1.status, 0, r1.output);
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE proname = 'product_price_per_acre';"), fnBefore, "live's per-acre body is back");
   assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_fill_order_line_unit';"), 1);
@@ -705,7 +734,7 @@ ${lf(DATA_REV)}`);
   raw(`DELETE FROM public.order_items WHERE id = '${id('e41')}'; UPDATE public.purchase_order_items SET unit_size = NULL WHERE id = '${BLANK_PO_LINE}';`);
   assert.equal(labels(), labelsBefore, 'every unit label is back');
   assert.equal(n(`SELECT count(*) FROM public.product_cost_basis WHERE product_id IN ('${CORN}', '${SOY}') AND effective_to IS NULL AND cost_cents IN (10000, 20050);`), 2);
-  console.log('[case] R rollback: the history reverse drops its trigger and function; the data reverse refuses before the rules reverse and after any later write; rules reverse restores the live per-acre body and the old fill trigger; data reverse restores every label, one open basis each at the same cents');
+  console.log('[case] R rollback: the history reverse drops its triggers and functions; the data reverse refuses before the rules reverse and after any later write; rules reverse restores the live per-acre body and the old fill trigger; data reverse restores every label, one open basis each at the same cents');
 }
 
 async function main() {
@@ -715,7 +744,7 @@ async function main() {
   driftCase();
   dataCases();
   rulesCases();
-  historyCases();
+  await historyCases();
   quoteCases();
   rollbackCases();
   console.log('UNITS_BATCH_PROOF_PASS');

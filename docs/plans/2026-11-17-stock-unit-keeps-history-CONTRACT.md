@@ -26,8 +26,9 @@ Follow-up to the units batch (`docs/plans/2026-11-15-product-master-steps-1-3-CO
 
 One more BEFORE UPDATE trigger on `products`, `a2_product_unit_keeps_history` (`_refuse_stock_unit_change_with_history`,
 SECURITY DEFINER, `search_path = public, pg_temp`, no grants). When the stock unit changes other than in case or outer
-spaces, it refuses `PRODUCT_UNIT_HAS_HISTORY` if the product has ANY order, delivery, purchase-order or return line or
-receiving record, whatever its status or unit (blank included). The decision is `EXISTS`; the message names up to 5
+spaces, it refuses `PRODUCT_UNIT_HAS_HISTORY` if the product has ANY order, delivery, purchase-order or return line,
+receiving record, stock transaction (jobs, blend tickets, adjustments, counts) or active hold, whatever its status or unit
+(blank included). The decision is `EXISTS`; the message names up to 5
 records (number, else id). A product sold, bought, delivered or returned in one unit keeps it; another unit is a new
 product. This is the screens' existing rule, now also holding for a data correction unless that correction disables it
 explicitly (and then owns relabelling or converting the history, a reviewed business decision of its own).
@@ -40,9 +41,10 @@ units-batch prover, `src/lib/errorSanitizer.ts` (+ test), ledger and migration r
 
 - No data changes; old rows are only read (indexed by product: `idx_recv_records_product`; the line tables' product
   indexes). Unit changes are rare, admin-only and in reviewed migrations.
-- Concurrency: order, delivery and PO line inserts read the product FOR SHARE (a1 line trigger), so they wait for the
-  change and are then checked against the new unit. A return line written for a product with no other history at the
-  same instant is not serialized (returns do not lock the product); accepted, since a change needs a reviewed migration.
+- Concurrency: order, delivery and PO line inserts read the product FOR SHARE (a1 line trigger), and a second new
+  trigger, `a2_return_line_locks_product`, does the same for return lines. A unit change waits for an uncommitted line
+  and then sees it; a line written after the change waits and then meets the new unit. Stock transactions move stock
+  rows, which a1 already locks.
 - Rollout: the deployed app cannot change a stock unit, so nothing on screen changes.
 
 ## Proof cases (units-batch prover, real migrated schema in Docker)
@@ -51,10 +53,11 @@ units-batch prover, `src/lib/errorSanitizer.ts` (+ test), ledger and migration r
   (`RETURN_CREDIT_INVENTORY_UNIT_MISMATCH`) and undoing a received Gal PO line refuses (`LINE_UNIT_NOT_STOCK_UNIT`).
   Without the change the return restocks 2 Gal.
 - H1 after: Gal -> Qt is refused, naming the record, for a requested, approved, restocked, received or Qt return; a
-  received PO line; a fulfilled order line in Gal or blank; a completed delivery line in Gal or blank. With no history it
+  received PO line; a receipt alone (names its PO); a stock movement alone; an active hold; a fulfilled order line in Gal or blank; a completed delivery line in Gal or blank. With no history (an ended hold does not count) it
   saves and relabels the empty stock row; "GAL" (case only) saves over history; open lines still report
-  `PRODUCT_UNIT_HAS_OPEN_LINES` first; the function is private; a second apply refuses.
-- R: the reverse script drops the trigger and function; the units-batch reverses still pass after it.
+  `PRODUCT_UNIT_HAS_OPEN_LINES` first; while another session holds an uncommitted return line the change waits (lock
+  timeout), and without it does not; both functions are private; a second apply refuses.
+- R: the reverse script drops both triggers and functions; the units-batch reverses still pass after it.
 
 ## Challenge (Astra, gpt-6-astra high, 2026-11-17, 25 findings) and how each settled
 
@@ -68,6 +71,14 @@ blocks regardless of status. #13 (existing mismatched history): unchanged by thi
 guard proven by prover case 2b. #15: owner bypasses RLS so nothing is hidden; only admins (product writers) see the
 numbers. #17: sanitizer keeps the sentence (unit test). #19 deadlocks: unchanged lock order from a1. #21: migrations
 apply in one transaction. #22-#23: reverse script and prover output are in the PR. #24: EXISTS on indexed columns.
+
+## Reviews after the build (2026-11-17)
+
+- Luna (gpt-6-luna xhigh) MED: return lines were not serialized -> fixed with `a2_return_line_locks_product` and a
+  two-session lock case. LOW: a receipt alone was not named -> its PO is now named.
+- rls-security-reviewer MED: stock transactions and holds were not history -> added (every stock movement writes a
+  transaction). LOWs: tab/NBSP and first-unit-on-a-blank-product refuse (fail closed, 0 such products live); wording.
+- migration-drift-reviewer: no drift; live order is re-checked by the staging apply job.
 
 ## Open business decisions
 

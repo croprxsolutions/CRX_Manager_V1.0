@@ -50,6 +50,11 @@ const refused = [
   "DO $$ BEGIN EXECUTE E'DROP TABLE public.product_\\162ates'; END $$;",
   "DO $$ BEGIN EXECUTE e'DROP TABLE public.product_\\x72ates'; END $$;",
   'ALTER TABLE public.U&"product\\005frates" ADD COLUMN x int;',
+  // Luna round 2.
+  'SELECT public.product_rate_update(1);',
+  "DO $$ BEGIN EXECUTE format('DROP TABLE public.product_%s', 'rates'); END $$;",
+  "SET standard_conforming_strings = off; DO $$ BEGIN EXECUTE 'DROP TABLE x'; END $$;",
+  'CREATE OR REPLACE FUNCTION public._product_parent_replay() RETURNS void LANGUAGE sql AS $fn1$ SELECT 1 $fn1$;',
 ];
 for (const sql of refused) assert.ok(rateReviewTouch(sql), `should refuse: ${sql}`);
 

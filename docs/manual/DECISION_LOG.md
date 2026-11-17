@@ -1,5 +1,14 @@
 # Decision Log
 
+## 2026-11-17 — RT-3 first rate review: Mason's rules
+
+**Decision (Mason, in chat, 2026-11-17).** Approve today's per-acre rate as the quoting default where it matches the label text or there is no per-acre text; treat loose notes like "1-2pt" as per acre; seed treatments get no per-acre default; per-ton and per-gallon products wait for label data; Piksi Dust Plus is 18 g per acre and Smart Choice 15G is 1.8 lb per acre. Saved on live: 670 rates approved, 361 products with an approved default, 14 with none, 7 needing label data, 14 held for him (listed in `docs/changelog.d/2026-11-17-rt1-derivation-run.md`). Nothing quotes from these until RT-4.
+Later the same day Mason settled the 14 held: today's rate kept on the 9 that differ from the label; Verdict 14 oz (corn); PeKacid 4 oz per acre with a label of 1-4 lb per 100 gal solution; Autumn Super 51 WDG and Cimarron Plus no default; Piksi Dust Infurrow needs label data. Every active product with rates now has a decision.
+
+## 2026-11-17 — RT-1 draft rates derived on live
+
+**Decision (Mason, in chat in the RT-1 run session, 2026-11-17: "Yes, run it").** Run `derive_draft_product_rates` once on live for the 413 active product parents, from Mason's admin login. Result: 714 draft rows on 396 parents and 181 notes; no product, parent, quote or invoice changed. The drafts are used nowhere until RT-4. Next: Mason reviews them in the rate review workbook (RT-3), then the rate lock and RT-4. Details: `docs/changelog.d/2026-11-17-rt1-derivation-run.md`.
+
 ## 2026-11-17 — CMP-2 plan approved with one change: the generic build is always the yardstick
 
 **Decision (Mason, in chat, 2026-11-17):** after a chunk-by-chunk re-review of the CMP-2 plan (grand plan Stage 5), Mason chose "Approve with that change". This lifts the 2026-11-11 hold below. He confirmed the scope and build order, the shared generic reference set and the Halex GT test, search by ingredient and mode of action, the equivalence warnings, the selling price and admin cost modes with admin-only profit, the missing-data and incomplete-row rules, and the many-products/category view.

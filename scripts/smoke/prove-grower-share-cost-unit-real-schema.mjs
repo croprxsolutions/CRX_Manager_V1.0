@@ -515,7 +515,7 @@ async function main() {
     const z = save([loc(FZ, 100)], [chem({ product_id: GAL })], uid, false);
     assert.equal(z.split(' || ')[1], '0', `G: ${who} $0 grower price bills 0: ${z}`);
     assert.equal(costOf(z), 37500, `G: ${who} $0 grower price still books the chemical cost: ${z}`);
-    assert.match(lineOf(z, '[PROVER] KI156 zero grower price field'), /\|0\|0\|0\|/, z);
+    assert.match(lineOf(z, '[PROVER] KI156 zero grower price field'), /\|acre\|0\|0\|0$/, z);
     assert.equal(approvalsOf([loc(FZ, 100)], [chem({ product_id: GAL })], uid), `field_app_grower_share|${uid}|${GAL}|0|3000|12.5000|37500`, `G: ${who} $0 grower price logs the chemical`);
   }
   refusedSave([loc(FG, 50), loc(FB, 50, 1)], [UNDER], /BELOW_COST_CONTEXT_REQUIRED/, ADMIN, false);

@@ -14,11 +14,11 @@
 -- WHAT:
 --   1. billing_m4_switch: one row, enabled true/false. RLS on; an active user may read it, nobody can change it
 --      through the app (no write grant or policy, service_role included); a migration turns it on for live with
---      commission. Starting value: ON only where a tax or discount line is more than a day old (staging), OFF
---      everywhere else (live, a fresh local or CI database).
+--      commission. It starts OFF everywhere; staging is turned on by hand once (test data), local by its rebuild
+--      script.
 --   2. While it's OFF, the database refuses (BILLING_M4_OFF) only what would start charging: ticking a sale's sales
 --      tax, giving a customer a standing discount above 0, and setting a sale's own discount above 0. Unticking,
---      setting 0 and "use the customer's rate" always work. And a NEW draft made while OFF never gets tax or a
+--      setting 0 and "use the customer's rate" back to 0 always work. And a NEW draft made while OFF never gets tax or a
 --      discount, however its sale or customer is set up (a box ticked or a discount set before the switch existed):
 --      its tax rate row isn't written and its drafted discount rate is recorded as 0. Drafts that already have them
 --      keep them, like posted invoices. Triggers on the four tables, so every path is covered (the RPCs, the
@@ -110,14 +110,16 @@ BEGIN
   ELSIF TG_TABLE_NAME = 'invoice_standing_discount_rates' THEN
     IF NEW.rate_pct > 0 AND (TG_OP = 'INSERT' OR NEW.rate_pct IS DISTINCT FROM OLD.rate_pct
                               OR OLD.set_by IS DISTINCT FROM NEW.set_by) THEN
-      -- The office setting a sale's own rate: refused. A rate the database records for a new draft (the customer's,
-      -- or "the customer's rate" bringing back a drafted one): recorded as 0, so a draft made while OFF has no
-      -- discount whatever the customer holds. (With no row, the discount would fall back to the customer's rate.)
-      IF NEW.set_by IS NOT NULL THEN
+      -- A new draft's recorded rate (the customer's, set_by NULL): recorded as 0, so a draft made while OFF has no
+      -- discount whatever the customer holds (with no row it would fall back to the customer's rate). Anything else
+      -- that would start a discount on a draft (the office's own rate, or "the customer's rate" bringing back a
+      -- drafted rate above 0): refused, nothing changes.
+      IF TG_OP = 'INSERT' AND NEW.set_by IS NULL THEN
+        NEW.rate_pct := 0;
+      ELSE
         RAISE EXCEPTION 'BILLING_M4_OFF: standing discounts aren''t switched on yet; they turn on with commission'
           USING ERRCODE = '55000';
       END IF;
-      NEW.rate_pct := 0;
     END IF;
   ELSIF TG_TABLE_NAME = 'invoice_sales_tax_rates' THEN
     -- A new draft of a sale whose box is ticked (ticked before the switch existed): no rate row, so no tax line.
@@ -142,14 +144,9 @@ CREATE TRIGGER invoice_sales_tax_rates_billing_m4_guard_20270117
   BEFORE INSERT ON public.invoice_sales_tax_rates
   FOR EACH ROW EXECUTE FUNCTION public._billing_m4_guard_20270117();
 
--- 3. Its starting value, read only now: CREATE TRIGGER above holds each table against writes until this file
--- commits, so nothing can set a tax or discount between this read and the guards.
--- ON only where tax or a standing discount was already on invoices more than a day ago (staging: posted taxed and
--- discounted invoices since 11 Nov). Live can only get one in the minutes the release applies the M4 migrations
--- before this file, which doesn't count; a fresh database has none.
-INSERT INTO public.billing_m4_switch (enabled)
-SELECT EXISTS (SELECT 1 FROM invoice_items
-                WHERE charge_type IN ('sales_tax', 'standing_discount') AND created_at < now() - interval '1 day');
+-- 3. Its starting value: OFF, everywhere. Live turns it on with commission (its own migration); staging is turned on
+-- once by hand right after this applies (test data); the local rebuild script turns it on.
+INSERT INTO public.billing_m4_switch (enabled) VALUES (false);
 
 DO $postflight$
 BEGIN

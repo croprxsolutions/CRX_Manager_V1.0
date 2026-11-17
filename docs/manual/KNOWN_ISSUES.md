@@ -267,17 +267,15 @@ and `comprehensive-ui-workflow.spec.ts`. No secret keys were found. Fix: read it
 
 
 ### KI-99 — Voiding an invoice leaves two money records out of step
-**MED · OPEN · money · found 2026-11-04 (Fix Delivery reviews, PR #1421) · Claude**
+**MED · FIX IN REVIEW (not live) · money · found 2026-11-04 (Fix Delivery reviews, PR #1421) · Claude**
 Both are in the live `void_invoice`, so they affect the ordinary Void Invoice button, not only Fix Delivery.
 - **Write-off stays active.** Voiding a posted invoice that has a write-off sets the invoice's write-off amount to
   zero but leaves its `write_offs` record active (not marked reversed), so the customer statement can still show it.
-  Until fixed, reverse the write-off before voiding. Fix Delivery refuses these invoices.
-- **Credit month read in UTC.** Before reversing an applied credit, `void_invoice` checks that the credit's month
-  is open using the UTC date (`applied_at::date`), not the Chicago business date. A credit applied just after
-  midnight UTC on the 1st belongs to the previous Chicago month, so a closed month can be changed. Fix Delivery
-  checks both dates.
-- **Next step.** A reviewed migration that marks the write-off reversed when its invoice is voided and checks the
-  credit month by the Chicago date (Sol-listed: money).
+  Until the fix is live, reverse the write-off before voiding. Fix Delivery refuses these invoices. Fix (Mason,
+  2026-11-14: auto-reverse): `20270116100000_ki99_void_reverses_write_offs.sql` marks each active write-off reversed
+  when its invoice is voided, after checking its Chicago month is open. Live had 0 write-offs (2026-11-14).
+- **Credit month read in UTC — FIXED LIVE 2026-11-07.** `20261206110000` (KI-18) checks each credit's Chicago
+  month; confirmed in the live body 2026-11-14.
 ### KI-10 — About 69 live functions replay a saved result matched on the retry key alone
 **HIGH on money paths · PARTIAL · money/inventory/database · unassigned (batch 3 remainder is next)**
 When a user retries an action with a saved "retry key", these functions return the first call's saved answer

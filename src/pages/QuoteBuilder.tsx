@@ -3617,7 +3617,12 @@ export default function QuoteBuilder() {
 
   const handleScheduleJob = async (sectionKey: string) => {
     const sec = sections.find((s) => s._key === sectionKey);
-    if (!sec?.id || !quoteId || !profile) return;
+    if (!sec || !quoteId || !profile) return;
+    // A section with no saved id (new, or re-created by a save whose reply had no section map) cannot be named.
+    if (!sec.id) {
+      toast('error', 'This section is not saved yet. Save the quote, then reload it if this message comes back, before scheduling a job from it.');
+      return;
+    }
     // U13 (#111): create_job_from_quote_section only inserts a job_fields row
     // `IF v_section.field_id IS NOT NULL` — a field-less section would silently
     // create a job with ZERO locations (no acres, nothing to apply chemicals on
@@ -5277,7 +5282,7 @@ export default function QuoteBuilder() {
                     </Badge>
                   </button>
                 )}
-                {canScheduleJobs && quoteId && sec.id && sec.items.length > 0 && !sectionJobs[sec.id] && (
+                {canScheduleJobs && quoteId && sec.items.length > 0 && !(sec.id && sectionJobs[sec.id]) && (
                   <Button variant="ghost" size="sm" icon={<CalendarClock className="w-3.5 h-3.5" />} showChevron={false} onClick={() => currentStatus === 'draft' ? setConfirmDraftScheduleKey(sec._key) : handleScheduleJob(sec._key)} loading={schedulingJobSectionKey === sec._key} className="min-h-11 md:min-h-10">
                     Schedule job
                   </Button>

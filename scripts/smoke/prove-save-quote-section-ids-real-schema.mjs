@@ -315,7 +315,12 @@ END;
 $bug$;`;
 
 async function main() {
-  if (!REUSE) buildContainer();
+  if (REUSE) {
+    // Reuse writes seed rows and replaces unit_conversions: only on a kept, network-less prover container, on a copied database.
+    assert.match(REUSE, /^crx-[a-z0-9-]+$/, 'CRX_PROVER_REUSE must name a kept prover container (crx-...)');
+    assert.equal(docker(['inspect', '-f', '{{.HostConfig.NetworkMode}}', REUSE]).stdout.trim(), 'none', 'CRX_PROVER_REUSE must be a network-less prover container');
+    assert.ok(process.env.CRX_PROVER_DB && DB !== 'postgres', 'CRX_PROVER_REUSE needs CRX_PROVER_DB naming a copy, not postgres');
+  } else buildContainer();
   seed();
 
   // 1. BEFORE

@@ -21,9 +21,9 @@
 --        refuses SECTION_ID_INVALID.
 --     g. a booking with a live job (not cancelled, not deleted) keeps its customer, else
 --        BOOKING_HAS_JOB.
---     h. a section with a live job keeps its field and its lines (product, quantity, price,
---        units, rate, acres) exactly, else SECTION_HAS_JOB_LOCKED. Its name, notes and needed-by
---        date may change. The job copied those lines; letting them drift would split the job
+--     h. a section with a live job keeps its field, its place and its lines exactly (each line's
+--        id, order, product, quantity, price, units, rate, acres and quote-time cost; null-safe),
+--        else SECTION_HAS_JOB_LOCKED. Its name, notes and needed-by date may change. The job copied those lines; letting them drift would split the job
 --        from its booking and let the two invoice paths charge different prices.
 --     Rules b, c and g run after the quote row lock and the row_version check, before the DELETE;
 --     h compares the stored lines after the server prices them.
@@ -405,12 +405,15 @@ BEGIN
              (SELECT j.job_number FROM jobs j
                WHERE j.quote_section_id = qs.id AND j.deleted_at IS NULL AND j.status <> 'cancelled'
                ORDER BY j.job_number, j.id LIMIT 1) AS job_number,
-             COALESCE(qs.field_id::text, '') || '|' || COALESCE((
-               SELECT string_agg(x.v, ';' ORDER BY x.v) FROM (
-                 SELECT concat_ws(',', qi.product_id, trim_scale(qi.total_units_needed), trim_scale(qi.price_per_unit),
-                                  qi.unit_size, qi.price_unit, qi.calc_mode, trim_scale(qi.actual_rate), qi.rate_unit,
-                                  trim_scale(qi.acres)) AS v
-                   FROM quote_items qi WHERE qi.section_id = qs.id) x), '') AS sig
+             jsonb_build_object('field', qs.field_id, 'sort', qs.sort_order, 'lines', COALESCE((
+               SELECT jsonb_agg(jsonb_build_object(
+                        'id', qi.id, 'sort', qi.sort_order, 'product', qi.product_id,
+                        'qty', trim_scale(qi.total_units_needed), 'price', trim_scale(qi.price_per_unit),
+                        'unit_size', qi.unit_size, 'price_unit', qi.price_unit, 'calc_mode', qi.calc_mode,
+                        'rate', trim_scale(qi.actual_rate), 'rate_unit', qi.rate_unit, 'acres', trim_scale(qi.acres),
+                        'cost', trim_scale(qi.current_cost), 'cost_cents', qi.cost_at_quote_cents)
+                      ORDER BY qi.sort_order, qi.id)
+                 FROM quote_items qi WHERE qi.section_id = qs.id), '[]'::jsonb)) AS sig
         FROM quote_sections qs WHERE qs.quote_id = v_quote_id
     ) s
     WHERE s.job_number IS NOT NULL;
@@ -830,15 +833,18 @@ BEGIN
   -- expression as the snapshot above, on the lines as now stored and priced).
   FOR v_locked_key IN SELECT jsonb_object_keys(v_locked_sections)
   LOOP
-    IF (SELECT COALESCE(qs.field_id::text, '') || '|' || COALESCE((
-               SELECT string_agg(x.v, ';' ORDER BY x.v) FROM (
-                 SELECT concat_ws(',', qi.product_id, trim_scale(qi.total_units_needed), trim_scale(qi.price_per_unit),
-                                  qi.unit_size, qi.price_unit, qi.calc_mode, trim_scale(qi.actual_rate), qi.rate_unit,
-                                  trim_scale(qi.acres)) AS v
-                   FROM quote_items qi WHERE qi.section_id = qs.id) x), '')
+    IF (SELECT jsonb_build_object('field', qs.field_id, 'sort', qs.sort_order, 'lines', COALESCE((
+               SELECT jsonb_agg(jsonb_build_object(
+                        'id', qi.id, 'sort', qi.sort_order, 'product', qi.product_id,
+                        'qty', trim_scale(qi.total_units_needed), 'price', trim_scale(qi.price_per_unit),
+                        'unit_size', qi.unit_size, 'price_unit', qi.price_unit, 'calc_mode', qi.calc_mode,
+                        'rate', trim_scale(qi.actual_rate), 'rate_unit', qi.rate_unit, 'acres', trim_scale(qi.acres),
+                        'cost', trim_scale(qi.current_cost), 'cost_cents', qi.cost_at_quote_cents)
+                      ORDER BY qi.sort_order, qi.id)
+                 FROM quote_items qi WHERE qi.section_id = qs.id), '[]'::jsonb))
           FROM quote_sections qs WHERE qs.id = v_locked_key::uuid)
-       IS DISTINCT FROM v_locked_sections->v_locked_key->>'sig' THEN
-      RAISE EXCEPTION 'SECTION_HAS_JOB_LOCKED: job % was scheduled from section "%", so its products, quantities, prices and field cannot change. Change the job, or add a new section for new work.',
+       IS DISTINCT FROM v_locked_sections->v_locked_key->'sig' THEN
+      RAISE EXCEPTION 'SECTION_HAS_JOB_LOCKED: job % was scheduled from section "%", so its products, quantities, prices, line order, place and field cannot change. Change the job, or add a new section for new work.',
         v_locked_sections->v_locked_key->>'job', v_locked_sections->v_locked_key->>'section'
         USING ERRCODE = 'P0001';
     END IF;
@@ -964,7 +970,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public._save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)'::regprocedure)
-     IS DISTINCT FROM 'de50686405134a7cd50c1ad1e80906e1' THEN
+     IS DISTINCT FROM '5bf9364b64a77098fe6fa2900f4d600f' THEN
     RAISE EXCEPTION 'POSTFLIGHT_SAVE_QUOTE: the new body did not install';
   END IF;
   IF NOT EXISTS (

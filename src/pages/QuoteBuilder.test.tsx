@@ -2201,6 +2201,27 @@ describe('QuoteBuilder', () => {
     expect(sent(2).p_sections.map((s) => s.id)).toEqual(['sec-2']);
   });
 
+  it('refuses Schedule job on a section whose id a save did not return, and says to save and reload', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, is_planned: true };
+    const section = { ...fixture.section, field_id: 'field-1' };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote
+      : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item]
+        : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+          : table === 'products' ? [fixture.product] : table === 'fields' ? [HOME_QUARTER_OF_CUSTOMER_1] : [], error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+      ? { data: { status: 'saved', quote_id: quote.id, row_version: 8, item_ids: {} }, error: null }
+      : { data: null, error: null }));
+    renderQuoteBuilder(quote.id);
+    fireEvent.change(await screen.findByDisplayValue('Version test header'), { target: { value: 'First edit' } });
+    fireEvent.click(screen.getByText('Save draft'));
+    await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+    fireEvent.click(await screen.findByRole('button', { name: 'Schedule job' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Schedule anyway' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'This section is not saved yet. Save the quote, then reload it if this message comes back, before scheduling a job from it.'));
+    expect(mockRpc.mock.calls.some(([name]) => name === 'create_job_from_quote_section')).toBe(false);
+  });
+
   it('stops naming a line as its saved line once it is switched to another product, even if switched back', async () => {
     const fixture = makeQuoteFixture('draft', 7);
     const alpha = { ...fixture.product, product_name: 'Alpha Chem' };

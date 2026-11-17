@@ -15,8 +15,8 @@
 --      its sections take new ids; a marked save adding a new section gives it a new id
 --   R  an exact idempotent replay returns the same section_ids
 --   L  while the job is live: a customer change is refused BOOKING_HAS_JOB; a change to the
---      job's section quantity, price, or moving its line away is refused
---      SECTION_HAS_JOB_LOCKED; the section without a job may change. Once the job is
+--      job's section quantity, price, line order, line id (cost basis), units, its place among the
+--      sections, or moving its line away is refused SECTION_HAS_JOB_LOCKED; the section without a job may change. Once the job is
 --      cancelled its section may change. Two sections with one client_key: SECTION_ID_INVALID.
 --
 -- HOW TO RUN: execute this whole file as ONE statement. It ALWAYS ends with
@@ -31,6 +31,7 @@ DECLARE
   v_products uuid[] := ARRAY[]::uuid[];
   v_i int;
   v_la jsonb;
+  v_la1 jsonb;
   v_lb jsonb;
   v_lc jsonb;
   v_quote_id uuid;
@@ -114,7 +115,9 @@ BEGIN
   v_version := (v_res->>'row_version')::bigint;
   v_s1 := (v_res->'section_ids'->>'_s1')::uuid;
   v_s2 := (v_res->'section_ids'->>'_s2')::uuid;
-  IF v_s1 IS NULL OR v_s2 IS NULL OR v_s1 = v_s2
+  -- S1's line, named by its saved id (as the screen does): a job's section keeps its line ids.
+  v_la1 := v_la || jsonb_build_object('id', v_res->'item_ids'->>'_k1');
+  IF v_la1->>'id' IS NULL OR v_s1 IS NULL OR v_s2 IS NULL OR v_s1 = v_s2
      OR NOT EXISTS (SELECT 1 FROM quote_sections WHERE id = v_s1 AND quote_id = v_quote_id AND section_name = 'North')
      OR NOT EXISTS (SELECT 1 FROM quote_sections WHERE id = v_s2 AND quote_id = v_quote_id AND section_name = 'South') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (1) section_ids did not name the two new sections: %', v_res;
@@ -129,7 +132,7 @@ BEGIN
   v_payload := v_payload || jsonb_build_object('row_version_expected', v_version, 'header_notes', 'P1');
   v_res := save_quote(v_quote_id, v_payload, jsonb_build_array(
     jsonb_build_object('id', v_s1, 'client_key', '_s1', 'section_name', 'North renamed', 'sort_order', 0,
-      'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1'))),
+      'items', jsonb_build_array(v_la1 || jsonb_build_object('client_key', '_k1'))),
     jsonb_build_object('id', v_s2, 'client_key', '_s2', 'section_name', 'South', 'sort_order', 1,
       'items', jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2')))),
     v_admin, 'smk-sqsi-save-p1-' || v_suffix);
@@ -151,21 +154,25 @@ BEGIN
   SELECT string_agg(id::text || ':' || section_name, ',' ORDER BY sort_order) INTO v_sections_before
   FROM quote_sections WHERE quote_id = v_quote_id;
   v_payload := v_payload || jsonb_build_object('row_version_expected', v_version, 'header_notes', 'L');
-  FOR v_count IN 1..4 LOOP
+  FOR v_count IN 1..8 LOOP
+    CONTINUE WHEN v_count = 6;   -- (an id-less line re-matches its saved line; accepted in L ok)
     v_err := NULL;
     BEGIN
       PERFORM save_quote(v_quote_id,
         CASE WHEN v_count = 1 THEN v_payload || jsonb_build_object('customer_id', v_customer2_id) ELSE v_payload END,
         jsonb_build_array(
-          jsonb_build_object('id', v_s1, 'client_key', '_s1', 'section_name', 'North renamed', 'sort_order', 0,
+          jsonb_build_object('id', v_s1, 'client_key', '_s1', 'section_name', 'North renamed',
+            'sort_order', CASE WHEN v_count = 7 THEN 2 ELSE 0 END,   -- 7: the section moves after South
             'items', CASE v_count
-              WHEN 2 THEN jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1', 'total_units_needed', 12))
-              WHEN 3 THEN jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1', 'price_override', 25, 'price_per_unit', 25))
+              WHEN 2 THEN jsonb_build_array(v_la1 || jsonb_build_object('client_key', '_k1', 'total_units_needed', 12))
+              WHEN 3 THEN jsonb_build_array(v_la1 || jsonb_build_object('client_key', '_k1', 'price_override', 25, 'price_per_unit', 25))
               WHEN 4 THEN '[]'::jsonb
-              ELSE jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1')) END),
+              WHEN 5 THEN jsonb_build_array(v_la1 || jsonb_build_object('client_key', '_k1', 'sort_order', 3))   -- line order
+              WHEN 8 THEN jsonb_build_array(v_la1 || jsonb_build_object('client_key', '_k1', 'unit_size', NULL, 'price_unit', 'gal'))   -- units swap through null
+              ELSE jsonb_build_array(v_la1 || jsonb_build_object('client_key', '_k1')) END),
           jsonb_build_object('id', v_s2, 'client_key', '_s2', 'section_name', 'South', 'sort_order', 1,
             'items', CASE WHEN v_count = 4
-              THEN jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2'), v_la || jsonb_build_object('client_key', '_k1'))
+              THEN jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2'), v_la1 || jsonb_build_object('client_key', '_k1'))
               ELSE jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2')) END)),
         v_admin, 'smk-sqsi-save-l-' || v_count || '-' || v_suffix);
     EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
@@ -185,7 +192,7 @@ BEGIN
   v_res := save_quote(v_quote_id, v_payload, jsonb_build_array(
     jsonb_build_object('id', v_s1, 'client_key', '_s1', 'section_name', 'North renamed', 'sort_order', 0,
       'needed_by_date', (now() AT TIME ZONE 'America/Chicago')::date + 30,
-      'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1'))),
+      'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1'))),   -- no line id: re-matched to the same line
     jsonb_build_object('id', v_s2, 'client_key', '_s2', 'section_name', 'South', 'sort_order', 1,
       'items', jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2', 'total_units_needed', 12)))),
     v_admin, 'smk-sqsi-save-l-ok-' || v_suffix);
@@ -193,7 +200,8 @@ BEGIN
   EXECUTE 'SET CONSTRAINTS ALL DEFERRED';
   v_version := (v_res->>'row_version')::bigint;
   IF (SELECT total_units_needed FROM quote_items WHERE section_id = v_s2) IS DISTINCT FROM 12::numeric
-     OR (SELECT needed_by_date FROM quote_sections WHERE id = v_s1) IS NULL THEN
+     OR (SELECT needed_by_date FROM quote_sections WHERE id = v_s1) IS NULL
+     OR (SELECT id::text FROM quote_items WHERE section_id = v_s1) IS DISTINCT FROM v_la1->>'id' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (L ok) the unlocked change did not save: %', v_res;
   END IF;
 
@@ -363,6 +371,6 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (L cancelled) the section of a cancelled job did not change: %', v_res;
   END IF;
 
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK section ids kept; job link held; refusals SECTION_HAS_JOB x4, SECTION_ID_INVALID x5, BOOKING_HAS_JOB x1, SECTION_HAS_JOB_LOCKED x3';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK section ids kept; job link held; refusals SECTION_HAS_JOB x4, SECTION_ID_INVALID x5, BOOKING_HAS_JOB x1, SECTION_HAS_JOB_LOCKED x6';
 END;
 $smoke$;

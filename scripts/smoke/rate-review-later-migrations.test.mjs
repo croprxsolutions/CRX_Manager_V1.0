@@ -50,6 +50,8 @@ const refused = [
   "DO $$ BEGIN EXECUTE E'DROP TABLE public.product_\\162ates'; END $$;",
   "DO $$ BEGIN EXECUTE e'DROP TABLE public.product_\\x72ates'; END $$;",
   'ALTER TABLE public.U&"product\\005frates" ADD COLUMN x int;',
+  // Luna round 3: adjacent literals are joined by PostgreSQL.
+  "DO $$ BEGIN EXECUTE 'DROP TABLE public.pro'\n 'duct_'\n 'r'\n 'ates'; END $$;",
   // Luna round 2.
   'SELECT public.product_rate_update(1);',
   "DO $$ BEGIN EXECUTE format('DROP TABLE public.product_%s', 'rates'); END $$;",

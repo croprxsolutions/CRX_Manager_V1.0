@@ -4,7 +4,8 @@
 // IS [NOT] NULL check or a ('name', '<md5>') pin row. Anything else (CREATE/ALTER/DROP/GRANT/REVOKE/COMMENT, a
 // trigger, INSERT/UPDATE/DELETE/SELECT on a covered table, a dynamic EXECUTE whose text says product/rate/review or
 // uses ||, a U& escape, standard_conforming_strings) is refused.
-// shortcut: a dynamic EXECUTE whose command comes from a variable is not judged; the threat is an accidental overlap in our own reviewed migrations, not a hidden one. Sol still reads every migration.
+// shortcut: a dynamic EXECUTE whose command comes from a variable or a computed expression (decode, convert_from)
+// is not judged (Mason accepted this limit, 2026-11-17, after three Luna rounds); the threat is an accidental overlap in our own reviewed migrations, not a hidden one. Sol still reads every migration.
 export const TOUCHED = /(product_rate|_product_parent_require_admin|_product_parent_replay|product_parent_rate_outcomes|rate_review)/i;
 
 const READ_ONLY_CALLS = new Set(['_product_parent_require_admin', '_product_parent_replay']);
@@ -56,10 +57,12 @@ export function rateReviewTouch(sql) {
     if (/^u$/i.test(t.word ?? '') && text(ts[i + 1]) === '&') return 'a U& escape could hide a covered name';
     if (/standard_conforming_strings/i.test(t.word ?? t.str ?? '')) return 'standard_conforming_strings changes how strings decode';
     if (/^execute$/i.test(t.word ?? '') && !['function', 'procedure', 'on'].includes(text(ts[i + 1]))) {
+      let joined = ''; // all its literals joined, so adjacent or split pieces are still seen
       for (let j = i + 1; j < ts.length && text(ts[j]) !== ';'; j += 1) {
         if (text(ts[j]) === '|' && text(ts[j + 1]) === '|') return 'dynamic EXECUTE builds its command with ||';
-        if (/product|rate|review/i.test(ts[j].str ?? '')) return `dynamic EXECUTE text '${ts[j].str}' could name a covered object`;
+        joined += ts[j].str ?? '';
       }
+      if (/product|rate|review/i.test(joined)) return 'dynamic EXECUTE text could name a covered object';
     }
     if (t.word !== undefined && TOUCHED.test(t.word)) {
       let p = i - 1;

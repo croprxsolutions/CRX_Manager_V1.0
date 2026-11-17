@@ -1016,7 +1016,7 @@ misspelled; screens prefer `products.inventory_unit`. Fix: default and fill to t
 mismatch, in the same units batch as KI-136 (repair step 1, To-Do 0.17).
 
 ### KI-159 — Cancelling a received return writes a history row both stock checks read with the wrong sign
-**MED (latent) · OPEN · inventory/returns · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-5) · unassigned**
+**MED (latent) · FIX IN REVIEW (branch `claude/pm-stock-history`, PR B of To-Do 0.17; not live) · inventory/returns · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-5) · Claude**
 `_cancel_return_intent_impl_20260812` (in `20260827041500…`) writes `'returned', -restocked_quantity`. Both
 "stock matches history" checks (`src/lib/reconciliation.ts` ~L174-195 and the KI-108 SQL in `20270103150000`, plus
 `scripts/smoke/prove-ki108-…`) take `abs()` of `returned` rows. Example: a return restocks 10 and is then cancelled.
@@ -1024,9 +1024,16 @@ Real stock nets to 0, but the check expects +20 and reports a false mismatch. A 
 repair would then **add 20 phantom units**. Live-verified body; 0 such rows yet. Fix: write an `adjusted` row on
 cancel, or teach both checks the sign. Also add stock-vs-history to the database sweep. Must land before any repeat of
 a history-based repair (repair step 2, To-Do 0.17).
+**Fix in review:** the browser check (`src/lib/reconciliation.ts`) and the stock history screen read `returned` as
+signed, and the browser check compares each product once, summed over its warehouse rows (history has no stock-row
+id, so the old per-row check flagged every product held in two warehouses). New database sweep
+`scripts/db-invariant-sweeps/predicates/stock-matches-history.sql` (same rules; 0 rows live 2026-11-15, 116 products
+checked; a product with history but no stock row left counts as stock 0, 0 such products live 2026-11-17). The writer is unchanged: its negative row is the true movement. KI-108's applied repair
+(`20270103150000`) stays as it ran (0 `returned` rows existed); any repeat of a history-based repair must use the
+signed rule.
 
 ### KI-160 — Two stock counts open on the same product apply the same correction twice
-**MED (latent) · OPEN · inventory/counts · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-6, C-14) · unassigned**
+**MED (latent) · PART FIX IN REVIEW (branch `claude/pm-stock-history`, migration `20270119130000`; not live) · inventory/counts · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-6, C-14) · Claude**
 `_complete_cycle_count_impl` adds the stored `variance` to current on-hand, and nothing stops two open counts on one
 inventory row: no unique or partial index on `cycle_counts` or `cycle_count_items` (live-verified). Example: counts A
 and B both record +10 on a shelf going from 90 to 100; after both complete, stock is 110. Named out of scope in the
@@ -1034,6 +1041,11 @@ KI-134 contract, with no KI until now. Smaller: admins hold a column UPDATE gran
 which bypasses the KI-134 baseline. Count creation is also three browser requests (`CycleCounts.tsx` ~L246-292), so a
 failed create leaves an empty open count. 0 open counts today. Fix: one open count per row, variance written only by
 the RPCs, atomic create. Repair step 2 (To-Do 0.17), before the pre-season count.
+**Part fix in review:** one in-progress count per warehouse; a stock row on only one item of any in-progress count
+(also refuses the same row twice on one count; concurrent claims serialized); a count's status only moves forward (in progress
+to completed or cancelled, completed to cancelled), so no count can be reopened or reversed twice; signed-in users lose direct UPDATE on `cycle_counts` and `cycle_count_items`, so a
+completed count cannot be marked cancelled without its reversal and a line's variance is only what the save RPC computed (a direct line insert may set only the four columns the app sends). **Still open here:** the three-request creation (a failed create leaves an empty open count, which
+now blocks a new count at that warehouse until it is cancelled from the Cycle Counts screen).
 
 ### KI-161 — Delivery editing does not re-check the edited line against its order line
 **MED · OPEN · deliveries · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-7) · unassigned**

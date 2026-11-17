@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-17 — #1897 may have Sol rounds 5 and 6
+
+**Decision (Mason, in chat, 2026-11-17: "I approve up to 6 rounds before parking for the night").** PR #1897 (stock history integrity: one open count per stock row) may have Sol rounds 5 and 6. Rounds 3 and 4 each found a different gap in who may write the stock-count tables directly (reversing a count while a newer count holds its stock row; deleting a completed count), and each was closed in the database: counts now change only through the count screen's actions (start, add a line, save a line, complete, cancel, reverse).
+**Why:** each gap was a missing database guard on the same two tables, closed rather than worked around; Mason chose to keep going for the night rather than park.
+**What this forbids/implies:** no Sol round past 6 on #1897; a new BLOCKER/HIGH in round 6 parks the PR for Mason.
+
 ## 2026-11-16 — #1878 and #1880 may have up to 7 Sol rounds after staging moved under them
 
 **Decision (Mason, in chat, 2026-11-16: "i approve up to 7 rounds").** PR #1878 (priority schema types) and PR #1880 (priority integrity follow-ups) may each have Sol rounds 5 through 7. Their latest Sol findings came from merging a fast-moving `staging` (a duplicated generated type after #1885 landed, and staging migrations newer than the candidate), not from one design mechanism coming back.

@@ -70,7 +70,7 @@ function ChemistryBody({ chem, groups, isAdmin, busy, profileId, reloadKey, pend
       {chem.epa_refusal != null && <p className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-secondary" role="status">{plainRefusal(chem.epa_refusal)}</p>}
       {busy && isAdmin && <p className="text-xs text-secondary">Save or discard the other changes on this page before changing chemistry.</p>}
       <p className="text-xs text-secondary">Shared by every size of {chem.parent_name}.</p>
-      <ChemistryLists values={chem.chemistry} groups={shown} onSetGroups={isAdmin ? onSetGroups : undefined} />
+      <ChemistryLists values={chem.chemistry} groups={shown} onSetGroups={isAdmin ? onSetGroups : undefined} locked={busy || pending.length > 0} />
       {isAdmin && <ChemistryActiveCosts chem={chem} profileId={profileId} reloadKey={reloadKey} pending={pending.length > 0} onSaveSettled={onCostSettled} />}
     </>
   );

@@ -99,6 +99,15 @@ describe('ProductChemistrySection', () => {
     expect(screen.queryByRole('button', { name: 'Set groups' })).toBeNull();
   });
 
+  it('Set groups is locked while the page has unsaved changes', async () => {
+    mocks.fetchParentChemistry.mockResolvedValue(withIngredients(ingredientRow('b', 'mesotrione')));
+    mocks.fetchParentModeGroups.mockResolvedValue(groups([
+      { ingredient_id: 'b', name: 'mesotrione', derived_from: 'from_ingredient', acid_name: null, schemes: [scheme('derived', ['27'], ['27'])], not_recorded: false },
+    ], [{ scheme: 'HRAC', group_code: '27', differs: false }], 0));
+    render(<ProductChemistrySection parentId="par1" parentVersion={1} refreshKey="k" isAdmin profileId="u1" busy />);
+    expect(await screen.findByRole('button', { name: 'Set groups' })).toBeDisabled();
+  });
+
   it('re-reads both once when the two reads saw different chemistry, then says the groups are being updated', async () => {
     mocks.fetchParentChemistry.mockResolvedValue(withIngredients(ingredientRow('b', 'mesotrione')));
     mocks.fetchParentModeGroups.mockResolvedValue(groups([], [], 0, 2));

@@ -53,8 +53,8 @@ export function GroupsSummary({ groups }: { groups: ParentModeGroups }) {
  * The parent's ingredients and fertilizer. With `groups` (MOA-1), each ingredient shows its live resistance groups and
  * where they come from; without it (not loaded), the groups typed on this product as before.
  */
-export function ChemistryLists({ values, groups, onSetGroups }: {
-  values: ParentChemistryValues; groups?: ParentModeGroups | null;
+export function ChemistryLists({ values, groups, onSetGroups, locked = false }: {
+  values: ParentChemistryValues; groups?: ParentModeGroups | null; locked?: boolean;
   /** Admins only: opens the ingredient's group list editor. */
   onSetGroups?: (ingredient: { id: string; name: string }) => void;
 }) {
@@ -72,7 +72,7 @@ export function ChemistryLists({ values, groups, onSetGroups }: {
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="font-medium text-nav-dark">{ingredientIdentity(row)}</div>
                   {onSetGroups && (
-                    <Button size="sm" variant="ghost" onClick={() => onSetGroups({ id: row.ingredient_id, name: row.name })}>Set groups</Button>
+                    <Button size="sm" variant="ghost" disabled={locked} onClick={() => onSetGroups({ id: row.ingredient_id, name: row.name })}>Set groups</Button>
                   )}
                 </div>
                 <div className="text-secondary">

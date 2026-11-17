@@ -1,13 +1,17 @@
 /**
- * reportPdf.ts — generates CRX-branded PDF reports (tabular data)
+ * reportPdf.ts — generates CRX-branded PDF reports (tabular data) in the quote PDF's design
  * Uses jsPDF + jspdf-autotable (dynamically imported to keep out of main bundle)
  *
  * Sprint 9: Generic Report PDF Generator
  */
 
-import { CRX_GREEN, CHARCOAL, GRAY, type JsPDFWithAutoTable } from './pdfTheme';
+import type { JsPDFWithAutoTable } from './pdfTheme';
+import {
+  QUOTE_CONTENT_BOTTOM, QUOTE_CONTINUED_TOP, QUOTE_LOGO_RATIO, QUOTE_LOGO_WIDTH, QUOTE_MARGIN_TOP, QUOTE_MARGIN_X,
+  QUOTE_MUTED, QUOTE_ROW_RULE, QUOTE_TABLE_HEAD_BG, QUOTE_TEXT,
+} from './quotePdfLayout';
+import { drawCompanyBlock, drawPageFooters, loadLogoDrawer } from './pdfBrand';
 import { localToday } from './dateUtils';
-import { companyTaglineNoPhone, fitCompanyNameFont } from './companyInfo';
 import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatUSD as fmtCurrency } from './money';
 
@@ -53,46 +57,39 @@ export async function generateReportPdf(options: ReportPdfOptions) {
     format: 'letter',
   });
   const pageW = doc.internal.pageSize.getWidth();
-  const margin = 36;
-  let y = 36;
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = QUOTE_MARGIN_X;
+  const contentW = pageW - margin * 2;
+  const pageBottom = pageH - QUOTE_CONTENT_BOTTOM;
+  const drawLogo = await loadLogoDrawer(doc);
+  let y = QUOTE_MARGIN_TOP;
 
-  // Header bar
-  doc.setFillColor(...CRX_GREEN);
-  doc.rect(0, 0, pageW, 60, 'F');
+  // Header row like the quote PDF: company block, logo with the report title under it, date range at right.
+  const colW = (contentW - 32) / 3;
+  const companyY = drawCompanyBlock(doc, company, y, colW);
+  drawLogo(pageW / 2 - QUOTE_LOGO_WIDTH / 2, y, QUOTE_LOGO_WIDTH);
+  const titleY = y + QUOTE_LOGO_WIDTH * QUOTE_LOGO_RATIO + 15;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
-  doc.setTextColor(255, 255, 255);
-  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW / 2 - margin, 18);
-  doc.text(company.name.toUpperCase(), margin, 28);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.text(doc.splitTextToSize(companyTaglineNoPhone(company), pageW / 2 - margin).slice(0, 2), margin, 44);
-
-  // Report title on right
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'bold');
-  doc.text(options.title, pageW - margin, 28, { align: 'right' });
+  doc.setFontSize(13.5);
+  doc.setTextColor(...QUOTE_TEXT);
+  const titleLines = doc.splitTextToSize(options.title, colW + 32) as string[];
+  titleLines.forEach((line, i) => doc.text(line, pageW / 2, titleY + i * 15, { align: 'center' }));
   if (options.dateRange?.start) {
-    doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    doc.text(
-      `${options.dateRange.start} — ${options.dateRange.end}`,
-      pageW - margin,
-      44,
-      { align: 'right' }
-    );
+    doc.setFontSize(8.25);
+    doc.text(`${options.dateRange.start} to ${options.dateRange.end}`, pageW - margin, y + 9, { align: 'right' });
   }
+  y = Math.max(companyY, titleY + (titleLines.length - 1) * 15);
 
-  y = 74;
-
-  // Subtitle
+  // Subtitle under the header
   if (options.subtitle) {
-    doc.setFontSize(10);
-    doc.setTextColor(...GRAY);
-    doc.setFont('helvetica', 'italic');
+    y += 20;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(...QUOTE_MUTED);
     doc.text(options.subtitle, margin, y);
-    y += 16;
   }
+  y += 12;
 
   // Table
   const heads = [options.columns.map((c) => c.header)];
@@ -134,60 +131,49 @@ export async function generateReportPdf(options: ReportPdfOptions) {
 
   autoTable(doc, {
     startY: y,
-    margin: { left: margin, right: margin },
+    margin: { left: margin, right: margin, top: QUOTE_CONTINUED_TOP, bottom: QUOTE_CONTENT_BOTTOM },
     head: heads,
     body,
     foot,
+    showHead: 'everyPage',
     // A grand-totals foot must appear ONCE on the last page, not repeated at the
     // bottom of every page (autotable defaults showFoot to 'everyPage'). Only set
     // it when a foot exists so non-totals reports are unaffected (Codex P2).
     ...(foot ? { showFoot: 'lastPage' as const } : {}),
     theme: 'plain',
     tableWidth: 'auto',
-    styles: { fontSize: bodyFontSize, cellPadding: 4, textColor: CHARCOAL, overflow: 'linebreak' },
-    headStyles: {
-      fillColor: [240, 240, 240],
-      textColor: CHARCOAL,
-      fontStyle: 'bold',
-      fontSize: wideColumns ? 6.5 : 7,
-    },
-    footStyles: {
-      fillColor: [232, 245, 238],
-      textColor: CHARCOAL,
-      fontStyle: 'bold',
+    styles: {
+      font: 'helvetica',
       fontSize: bodyFontSize,
+      cellPadding: { top: 3.75, bottom: 3.75, left: 4.5, right: 4.5 },
+      textColor: QUOTE_TEXT,
+      overflow: 'linebreak',
     },
+    headStyles: { fillColor: QUOTE_TABLE_HEAD_BG, textColor: QUOTE_TEXT, fontStyle: 'bold' },
+    bodyStyles: { lineColor: QUOTE_ROW_RULE, lineWidth: { bottom: 0.75, top: 0, left: 0, right: 0 } },
+    footStyles: { textColor: QUOTE_TEXT, fontStyle: 'bold', lineColor: QUOTE_TEXT, lineWidth: { top: 1.5, bottom: 0, left: 0, right: 0 } },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     columnStyles: colStyles as any,
-    alternateRowStyles: { fillColor: [252, 252, 252] },
-    didDrawPage: () => {
-      try {
-        // Footer on every page
-        const footerY = doc.internal.pageSize.getHeight() - 20;
-        doc.setDrawColor(200, 200, 200);
-        doc.line(margin, footerY - 6, pageW - margin, footerY - 6);
-        doc.setFontSize(7);
-        doc.setTextColor(160, 160, 160);
-        doc.text(
-          `${company.name}  •  Generated ${new Date().toLocaleDateString()}`,
-          pageW / 2,
-          footerY,
-          { align: 'center' }
-        );
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error('reportPdf: didDrawPage failed', e);
-      }
+    // Head and totals cells line up with their column, so money headers sit over right-aligned money.
+    didParseCell: (cell) => {
+      if (cell.section !== 'body') cell.cell.styles.halign = options.columns[cell.column.index]?.align ?? 'left';
     },
   });
 
   // Summary footer note
   if (options.footerNote) {
     y = (doc as JsPDFWithAutoTable).lastAutoTable.finalY + 14;
-    doc.setFontSize(8);
-    doc.setTextColor(...GRAY);
+    if (y > pageBottom) {
+      doc.addPage();
+      y = QUOTE_CONTINUED_TOP + 9;
+    }
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.25);
+    doc.setTextColor(...QUOTE_MUTED);
     doc.text(options.footerNote, margin, y);
   }
+
+  drawPageFooters(doc, `${company.name}  •  Generated ${new Date().toLocaleDateString()}`, drawLogo);
 
   return doc;
 }

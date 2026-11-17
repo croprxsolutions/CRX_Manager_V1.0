@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   isReleaseOrHotfixHead, flowEnabled, releaseExtraFiles, proofLink, heldOffNote, isBackMerge, labelProblem,
   pickPr, prState, releaseVersion, firstParagraph, releaseNotesModule, changelogSection, nextVersion, versionFromTitle, groupChangelog, usersSee, gateState, renderReleaseBody, changelogMarkdown, cell, neutralizeCommentMarkers, dropComments, botFileProblems, versionProblems, versionIsNewer,
+  hotfixStagingCarry, backportAllowed,
 } from './release-flow.mjs';
 
 test('only release/next and hotfix/<name> may open a PR into main', () => {
@@ -264,4 +265,32 @@ test('versionIsNewer compares X.Y.Z as numbers', () => {
   assert.equal(versionIsNewer('0.10.0', '0.9.0'), true);
   assert.equal(versionIsNewer('1.3.9', '1.4.0'), false);
   assert.equal(versionIsNewer('1.4.0', '1.4.0'), false);
+});
+
+test('a hotfix carrying staging work under new commit ids is caught (Sol, #1838)', () => {
+  const blobs = { head: { 'a.ts': 'S1', 'b.ts': 'H1', 'c.ts': 'M1' }, staging: { 'a.ts': 'S1', 'b.ts': 'S2', 'c.ts': 'M1' }, main: { 'a.ts': 'M0', 'b.ts': 'M0', 'c.ts': 'M1' } };
+  const blob = (side, f) => blobs[side][f] ?? null;
+  assert.deepEqual(hotfixStagingCarry({ changed: ['a.ts', 'b.ts', 'c.ts', 'gone.ts'], blob, cherry: ['+ aaa', '- bbb'] }), { files: ['a.ts'], commits: ['bbb'] });
+  assert.deepEqual(hotfixStagingCarry({ changed: ['b.ts'], blob, cherry: ['+ aaa'] }), { files: [], commits: [] });
+  // A staging line copied into a bigger hotfix edit (Luna, Sol).
+  const lines = { staging: { 'b.ts': ['  if (order.status === "refund_pending") return null;', '}'] }, head: { 'b.ts': ['  if (order.status === "refund_pending") return null;', '  fixTheBug();'] } };
+  const added = (side, f) => lines[side]?.[f] ?? [];
+  assert.deepEqual(hotfixStagingCarry({ changed: ['b.ts'], blob, cherry: [], added }).files, ['b.ts']);
+  const shortOnly = (side, f) => (side === 'staging' ? ['}', 'return;'] : ['}', 'return;']);
+  assert.deepEqual(hotfixStagingCarry({ changed: ['b.ts'], blob, cherry: [], added: shortOnly }).files, [], 'short common lines do not count');
+  const gone = (side, f) => (f === 'b.ts' ? ['  if (!isValid(order)) throw new Error("invalid order");'] : []);
+  assert.deepEqual(hotfixStagingCarry({ changed: ['b.ts'], blob, cherry: [], removed: gone }).files, ['b.ts'], 'a staging deletion copied into the hotfix');
+});
+
+test("only Taha's hotfix-backport label, added after the latest push, lets a backport through", () => {
+  const lab = (event, login) => ({ event, label: { name: 'hotfix-backport' }, actor: { login } });
+  const commit = (sha) => ({ event: 'committed', sha });
+  const labels = [{ name: 'hotfix-backport' }];
+  const ok = (events, head = 'h2') => backportAllowed({ events, labels, head });
+  assert.equal(ok([commit('h1'), commit('h2'), lab('labeled', 'TahaKhanAbdalli')]), true);
+  assert.equal(ok([commit('h2'), lab('labeled', 'masonwells1')]), false);
+  assert.equal(ok([commit('h2'), lab('labeled', 'TahaKhanAbdalli'), lab('unlabeled', 'x'), lab('labeled', 'masonwells1')]), false);
+  assert.equal(ok([commit('h1'), lab('labeled', 'TahaKhanAbdalli'), commit('h2')]), false, 'a push after the label needs the label again');
+  assert.equal(ok([commit('h1'), lab('labeled', 'TahaKhanAbdalli')]), false, 'the head commit must be in the timeline');
+  assert.equal(backportAllowed({ events: [commit('h2'), lab('labeled', 'TahaKhanAbdalli')], labels: [], head: 'h2' }), false);
 });

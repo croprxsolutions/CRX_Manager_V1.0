@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-14 — Inactive rate history supports explicit cleanup
+
+**Decision (Mason, in chat).** Include inactive product groups' existing rates in review and preserve their approvals until explicitly changed. Inactive history supports sending an approved rate back to draft, deleting a draft and clearing a review decision. It does not support fresh approval, value edits or new review decisions. Keep accepting older half-filled rate workbooks under all existing identity and server safeguards.
+
+**Why.** An inactive group can be the historical source left after its last product size moves. Its old rates should remain visible for deliberate cleanup without becoming work required for the active groups' future rate cutover.
+
+**Operative rule.** Active readiness totals and live-rate readers retain their existing scope. The new download explicitly requests inactive history; old no-argument downloads remain active-only. PostgreSQL checks current group activity under the existing locks. Proposal: `docs/plans/2026-11-14-inactive-rate-review-CONTRACT.md`, issue #1814. Candidate only; no apply, merge or deployment.
+
 Last verified: 2026-10-29. Adding an entry does not change this date.
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 
@@ -37,6 +45,29 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in chat, 2026-11-08, answering foundation 18.1 question 2: "yes we need to also be able to split line items by different shares than saved to the field. field level splits always auto populate based on field but we need to be able to adjust the split before posting invoice and change line items at different percentages and shares"):** a field's split group can mark a payer as not paying the application charge, every field-billing invoice line starts from the field's split, and before posting the office can give any line its own payer percentages.
 **Why:** real splits differ by charge (a landlord who pays product but not application) and sometimes by line; the field split is the default, not a lock.
 **What this forbids/implies:** the field-application engine must bill line by line (the per-line engine, build sheet FP-5a in `docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`); each line still adds to exactly 100% in the database; a line change never edits the field's saved split; posting snapshots each line. Which payers a line may add is still question 1 (KI-76).
+## 2026-11-14 — Rate Review unanswered-save recovery (#1829)
+
+**Decision (Mason, 2026-11-14):** after any unanswered Rate Review save, an admin may check a fresh workbook and explicitly clear the reminder; no attempt count or expiry threshold is required. This supersedes the 2026-11-13 Rate Review follow-up contract's narrower hand-check exit, which appeared only on expiry, a missing record, or an unsafe/refused receipt.
+**Why:** a save can remain unanswered indefinitely, so tying recovery to a number of replies could strand the admin.
+**What this forbids/implies:** keep the exact saved key and 24-hour receipt window for retries; require a fresh-workbook check and explicit confirmation before clearing. An old request may still finish.
+## 2026-11-13 — "MG" means milligrams; the Powder Keg seed treatments are sold by the each (KI-136, KI-137)
+
+**Decision (Mason, in session, 2026-11-13, answering the Product Master review's D-1 and D-2).** (1) The "MG" stock/rate unit on the two jar products means milligrams, so the conversion table is right. The open PO line ordering one of them as 9,000 "Dry oz" (5 jars × 1,800 MG) has the right quantity and the wrong unit label. (2) Powder Keg Corn and Powder Keg Soybeans are sold by the each at their current prices.
+**Why:** these are the real sale and stock units; the units fix (To-Do 0.17 step 1) needed them before it could be planned.
+**What this forbids/implies:** do not change the MG unit. Correct that PO line's label before it is received. Change both Powder Keg products' stock and rate unit to Ea through a reviewed migration; on-hand is 0, so no stock conversion. To-Do decision 24 is answered.
+
+## 2026-11-13 — Commission counts in profit when invoiced, is paid to the rep only when the customer pays, pro rata (KI-154)
+
+**Decision (Mason, in session, 2026-11-13: "ok make sure that is in our docs", accepting the recommendation of: profit report = invoiced, rep's payout = customer paid, and a partial customer payment releases the matching share of commission).** Three rules: (1) a commission counts against profit (Bottom Line P&L, Monthly Summary) in the period its sale is invoiced, split by the share billed (entry below); (2) a commission becomes payable to the rep only once the customer has paid for that sale (confirms the 2026-11-09 decision in CRX Notes, "commission after discount"); (3) a partial customer payment makes the same share of that sale's commission payable; the rest waits for the rest of the money.
+**Why:** revenue is reported when invoiced, so counting commission on a paid basis would put the sale and its commission in different months; paying the rep only from collected money means a written-off bill never pays commission and nothing has to be clawed back.
+**What this forbids/implies:** the payout must check customer payment per sale and limit each commission to the paid share (not built: KI-154, To-Do 8.5); the P&L must not switch commissions to a paid basis. Returns and credits still claw back under KI-13.
+
+## 2026-11-13 — A partly billed sale's commission is split by the share billed in each period (KI-125)
+
+**Decision (Mason, in session, 2026-11-13: "Split by share billed").** Refines 2026-11-10 (To-Do decision 15): when an order is billed across more than one period, Bottom Line P&L and Monthly Summary subtract only the share of its commission that matches the share of the order billed in that period (a quarter billed in December puts a quarter of the commission in December).
+**Why:** the 2026-11-10 rule, read literally, put the whole commission in the first period with any CRX invoice ([2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md), finding 2).
+**What this forbids/implies:** the KI-125 fix must match commission to invoiced share, not to whether an invoice exists. Not built; recorded for future work only.
+
 ## 2026-11-12 — #1848: Mason owner-accepted 1 Sol finding(s) at `1e248aee5e30`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-12).** Sol's review of PR #1848 at `1e248aee5e30` (base `258bd096be8f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

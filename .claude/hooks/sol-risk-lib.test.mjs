@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   classifySolRisk, GATED_MERGE_BASES, solRiskOnGitHub, solRiskPathProblem, SOL_REQUIRED_PATHS, SOL_RISK_MAX_FILES,
-  agentMergeProblem, mainCommitsInPrOnGitHub,
+  agentMergeProblem, mainCommitsInPrOnGitHub, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem,
 } from "./sol-risk-lib.mjs";
 
 let passed = 0;
@@ -112,12 +112,96 @@ check("a PR into staging carrying main's commits that staging lacks is a back-me
   assert.equal(ask({ [STAGING]: ahead, [HEAD]: j({ status: "diverged", ahead_by: 2, commits: [c("b"), c("c")] }) }), null, "the head holds neither");
   assert.match(ask({ [STAGING]: ahead, [HEAD]: j({ status: "identical", ahead_by: 0, commits: [] }) }), /2 commit\(s\)/, "the head holds all of main");
   // unreadable, cut short, unexpected or malformed answers fail closed, on either call.
-  for (const bad of [new Error("offline"), "not json", j({ status: "ahead", ahead_by: 300, commits: [c("b")] }), j({ status: "ahead", ahead_by: 1 }), j({ status: "weird", ahead_by: 0, commits: [] }), j({ status: "behind", ahead_by: 1, commits: [] }), j({ status: "ahead", ahead_by: 0, commits: [] })]) {
+  for (const bad of [new Error("offline"), "not json", j({ status: "ahead", ahead_by: 300, commits: [c("b")] }), j({ status: "ahead", ahead_by: 1 }), j({ status: "weird", ahead_by: 0, commits: [] }), j({ status: "behind", ahead_by: 1, commits: [] }), j({ status: "ahead", ahead_by: 0, commits: [] }), j({ status: "identical", ahead_by: 0, commits: [c("b")] }), j({ status: "behind", ahead_by: 0 })]) {
     assert.ok(ask({ [STAGING]: bad }), `staging call: ${bad}`);
     assert.ok(ask({ [STAGING]: ahead, [HEAD]: bad }), `head call: ${bad}`);
   }
   assert.match(mainCommitsInPrOnGitHub({ stagingSha: "short", headSha: HEAD, repo: "o/r", gh: () => "{}" }), /unusable base commit/, "a bad staging sha fails closed");
   assert.ok(mainCommitsInPrOnGitHub({ stagingSha: STAGING, headSha: "short", repo: "o/r", gh: () => "{}" }), "a bad head sha fails closed");
+});
+
+check("agents never approve a pull request (#1838 HIGH 2)", () => {
+  for (const t of ["gh pr review 5 --approve", "gh pr review 5 -a", "gh pr review -ab ok 5", "gh api repos/o/r/pulls/5/reviews -f event=APPROVE",
+    "gh api repos/o/r/pulls/5/reviews --method POST --input /tmp/review.json", "gh api graphql -F query=@q.graphql -f v='{}' # submitPullRequestReview"]) assert.ok(prApprovalProblem(t), t);
+  for (const t of ["gh api repos/o/r/pulls/5/reviews", "gh api repos/o/r/pulls/5/reviews -f event=COMMENT -f body=note",
+    "gh api repos/o/r/pulls/5/reviews -f event=COMMENT -f body='Please do not APPROVE this yet'"]) assert.equal(prApprovalProblem(t), null, t);
+  for (const t of ["curl -d @body.json https://api.github.com/repos/o/r/pulls/5/reviews", "gh api graphql -F query=@/tmp/approve.graphql",
+    "curl --data-binary @q.json https://api.github.com/graphql",
+    "gh api repos/o/r/pulls/5/reviews -X POST --input review.json # event=COMMENT"]) assert.ok(prApprovalProblem(t), t);
+  for (const t of ["gh pr review 5 --comment -b 'approve later'", "gh pr view 5 --json reviewDecision", "gh pr review 5 -r", "rg APPROVED src/"]) assert.equal(prApprovalProblem(t), null, t);
+});
+
+check("staging merges wait while the release is being applied (#1838 MED 2)", () => {
+  const gh = (answers) => (args) => { const a = answers.find(([re]) => re.test(args.join(" "))); if (!a) throw new Error(`unexpected ${args.join(" ")}`); if (a[1] instanceof Error) throw a[1]; return a[1]; };
+  const list = /pulls\?base=main&state=open/;
+  const comments = /issues\/77\/comments/;
+  const HEAD = "abcdef123456".padEnd(40, "0");
+  const open = `77 ${HEAD}`;
+  const c = (login, body) => JSON.stringify({ login, at: "2026-11-19T09:00:00Z", body });
+  const run = (answers) => releaseFreezeProblem({ repo: "o/r", gh: gh(answers) });
+  assert.equal(run([[list, ""]]), null, "no release PR open");
+  assert.equal(run([[list, open], [comments, c("someone", "Staging proof: x")]]), null, "release open, nothing applied yet");
+  assert.match(run([[list, open], [comments, c("masonwells1", "note\nApplied live: 20270110100000_x")]]), /#77.*being applied live/);
+  assert.match(run([[list, open], [comments, c("TahaKhanAbdalli", "Ready to merge: abcdef123456")]]), /#77/, "Taha's go-ahead for the current head starts the freeze, with no expiry");
+  assert.equal(run([[list, open], [comments, c("TahaKhanAbdalli", "Ready to merge: 123456789abc")]]), null, "a go-ahead for an older head freezes nothing");
+  assert.equal(run([[list, open], [comments, c("stranger", "Ready to merge: abcdef123456") + "\n" + c("stranger", "Applied live: x")]]), null, "anyone else's text freezes nothing");
+  assert.match(run([[list, new Error("HTTP 502")]]), /fail closed/);
+  assert.match(run([[list, open], [comments, new Error("HTTP 502")]]), /fail closed/);
+  assert.match(run([[list, "77"]]), /fail closed/);
+});
+
+check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)", () => {
+  const H = "a".repeat(40);
+  const b64 = (t) => Buffer.from(t).toString("base64");
+  const gh = (files, sql) => (args) => {
+    const a = args.join(" ");
+    if (/pulls\/5\/files/.test(a)) { if (files instanceof Error) throw files; return files; }
+    if (/compare\/b{40}\.\.\.a{40}/.test(a)) return "c".repeat(40);
+    if (/git\/trees\//.test(a)) return "t".repeat(40);
+    if (/contents\/supabase\/migrations\/x\.sql\?ref=a{40}/.test(a)) { if (sql instanceof Error) throw sql; assert.ok(a.includes("application/vnd.github.raw")); return sql; }
+    throw new Error(`unexpected ${a}`);
+  };
+  const run = (files, sql) => stagingDestructiveProblem({ repo: "o/r", gh: gh(files, sql), number: 5, headSha: H, baseSha: "b".repeat(40) });
+  const MIG = "added\tsupabase/migrations/x.sql\t\n";
+  assert.equal(run("modified\tsrc/a.ts\t\n", ""), null, "no migration");
+  assert.equal(run(MIG, "ALTER TABLE t ADD COLUMN c int;"), null, "an additive migration");
+  assert.equal(run("removed\tsupabase/migrations/x.sql\t\n", ""), null, "a removed migration is not read");
+  assert.match(run(MIG, "DELETE FROM invoices WHERE true;"), /destructive migration.*x\.sql/);
+  assert.match(run(MIG, "DROP TABLE t;"), /DROP TABLE/);
+  assert.match(run(new Error("HTTP 502"), ""), /fail closed/);
+  assert.match(run(MIG, new Error("HTTP 502")), /fail closed/);
+  assert.match(stagingDestructiveProblem({ repo: "o/r", gh: gh("", ""), number: undefined, headSha: H, baseSha: "b".repeat(40) }), /fail closed/);
+  assert.match(stagingDestructiveProblem({ repo: "o/r", gh: gh("", ""), number: 5, headSha: H, baseSha: undefined }), /fail closed/, "no base sha");
+  assert.match(run(MIG, "   "), /came back empty/);
+  assert.match(run("src/a.ts\n", ""), /unreadable file list.*fail closed/, "a list without status and tabs fails closed");
+});
+
+check("an agent doesn't merge a .github/ change into staging (Taha, 13 Nov)", () => {
+  const gh = (files, trees = {}) => (args) => {
+    const a = args.join(" ");
+    if (/pulls\/5\/files/.test(a)) return files;
+    if (/compare\/b{40}\.\.\.a{40}/.test(a)) { if (trees.base instanceof Error) throw trees.base; return trees.base ?? "c".repeat(40); }
+    if (/git\/trees\/a{40}/.test(a)) { assert.ok(a.includes("truncated")); return trees.head ?? "t".repeat(40); }
+    if (/git\/trees\/c{40}/.test(a)) { if (trees.old instanceof Error) throw trees.old; return trees.old ?? "t".repeat(40); }
+    throw new Error(`unexpected ${a}`);
+  };
+  const run = (files, trees) => stagingDestructiveProblem({ repo: "o/r", gh: gh(files, trees), number: 5, headSha: "a".repeat(40), baseSha: "b".repeat(40) });
+  assert.match(run("modified\t.github/workflows/release-flow.yml\t\n"), /\.github\/workflows\/release-flow\.yml.*Taha merges it, never an agent/);
+  assert.match(run("removed\t.github/CODEOWNERS\t\n"), /\.github\/CODEOWNERS/, "a deletion counts");
+  assert.match(run("renamed\tdocs/old.yml\t.github/workflows/ci.yml\n"), /\.github\/workflows\/ci\.yml/, "a move out of .github/ counts");
+  assert.match(run("modified\tsrc/a.ts\t\nadded\t.github/scripts/x.mjs\t\n"), /\.github\/scripts\/x\.mjs/, "one .github file among others");
+  assert.equal(run("modified\tsrc/.github-like.ts\t\nmodified\tdocs/github/a.md\t\n"), null, "only the top-level .github/ folder");
+  assert.equal(run("modified\tsrc/a.ts"), null, "trimmed output (no trailing tab) still parses");
+  assert.match(run("modified\t.github/x.yml"), /\.github\/x\.yml/, "trimmed output still sees .github/");
+  // The file list is capped and not bound to the head, so the .github/ tree at the head is compared with the merge-base's.
+  assert.match(run("modified\tsrc/a.ts\t\n", { head: "d".repeat(40) }), /changes \.github\/.*Taha merges it/, "a change the capped list missed");
+  assert.match(run("", { head: "", old: "t".repeat(40) }), /changes \.github\//, "deleting the whole folder");
+  assert.match(run("", { head: "d".repeat(40), old: "" }), /changes \.github\//, "adding the folder");
+  assert.match(run("", { head: "", old: "" }), /not found on either side.*fail closed/, "a missing folder on both sides fails closed");
+  assert.match(run("", { old: new Error("truncated") }), /could not be compared.*fail closed/, "a truncated tree fails closed");
+  assert.match(run("", { base: "nope" }), /merge-base could not be read.*fail closed/);
+  assert.match(run("", { base: new Error("HTTP 502") }), /could not be compared.*fail closed/);
+  assert.match(run("", { old: new Error("HTTP 404") }), /could not be compared.*fail closed/);
 });
 
 console.log(`sol-risk-lib: ${passed} passed`);

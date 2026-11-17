@@ -7,7 +7,7 @@ import { useToast } from '../ui/Toast';
 import { sanitizeError } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import {
-  ChemistrySaveUncertain, INGREDIENT_SCOPE, casValid, fetchIngredientWorklist, pendingSaves, previewIngredientChange,
+  ChemistrySaveUncertain, INGREDIENT_SCOPE, casValid, chemistryAuthorizationMessage, fetchIngredientWorklist, isChemistryAuthorizationRefusal, pendingSaves, previewIngredientChange,
   ingredientLine, parseFraction, startChemistrySave, type IngredientFields,
 } from '../../lib/productChemistry';
 import { IngredientSearch } from './IngredientPicker';
@@ -171,6 +171,7 @@ function EditIngredient({ ingredient, casOnly, profileId, onDone, onCancel }: {
       onDone('saved');
     } catch (error) {
       if (error instanceof ChemistrySaveUncertain) { toast('warning', error.message); onDone('uncertain'); return; }
+      if (isChemistryAuthorizationRefusal(error)) { toast('error', chemistryAuthorizationMessage(false)); return; }
       toast('error', sanitizeError(error));
       const message = String((error as { message?: unknown })?.message ?? '');
       if (/^INGREDIENT_(STALE|USAGE_CHANGED)\b/.test(message)) onDone('stale');
@@ -228,6 +229,7 @@ function RetireOrReactivate({ kind, ingredient, profileId, onDone, onCancel }: {
       onDone('saved');
     } catch (error) {
       if (error instanceof ChemistrySaveUncertain) { toast('warning', error.message); onDone('uncertain'); return; }
+      if (isChemistryAuthorizationRefusal(error)) { toast('error', chemistryAuthorizationMessage(false)); return; }
       toast('error', sanitizeError(error));
       if (/^INGREDIENT_STALE\b/.test(String((error as { message?: unknown })?.message ?? ''))) onDone('stale');
     } finally {

@@ -333,6 +333,26 @@ r = runHook({ tool_name: "mcp__ccd_pr__set_auto_merge", tool_input: { enabled: f
 ok(r.status === 0 && r.decision === null, "agent turning auto-merge OFF passes");
 r = runHook({ tool_name: "Bash", tool_input: { command: "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"PR_1\"}) { clientMutationId } }'" } });
 ok(r.decision?.permissionDecision === "deny", "GraphQL enablePullRequestAutoMerge denied");
+// Agents never approve a pull request (#1838 HIGH 2): CODEOWNERS names the account they share.
+for (const command of [
+  "gh pr review 5 --approve",
+  "gh pr review 5 -a -b 'ok'",
+  "gh pr review --approve=true 5",
+  "gh api repos/o/r/pulls/5/reviews -f event=APPROVE",
+  "gh api graphql -f query='mutation { addPullRequestReview(input:{pullRequestId:\"P\", event: APPROVE}) { clientMutationId } }'",
+  "bash -c 'gh pr review 5 --approve'",
+]) {
+  r = runHook({ tool_name: "Bash", tool_input: { command } });
+  ok(r.decision?.permissionDecision === "deny" && /never approves/.test(r.decision?.permissionDecisionReason), `approval denied: ${command}`);
+}
+r = runHook({ tool_name: "mcp__github__create_pull_request_review", tool_input: { owner: "o", repo: "r", pull_number: 5, event: "APPROVE" } });
+ok(r.decision?.permissionDecision === "deny", "the GitHub review tool's APPROVE is denied");
+r = runHook({ tool_name: "mcp__github__create_pull_request_review", tool_input: { owner: "o", repo: "r", pull_number: 5, event: "COMMENT", body: "Do not APPROVE until the proof passes" } });
+ok(r.status === 0 && r.decision === null, "a COMMENT review that mentions APPROVE in its body passes");
+for (const command of ["gh pr review 5 --comment -b 'see the note'", "gh pr review 5 -r -b 'needs a test'", "gh pr view 5 --json reviewDecision"]) {
+  r = runHook({ tool_name: "Bash", tool_input: { command } });
+  ok(r.status === 0 && r.decision === null, `a non-approving review call passes: ${command}`);
+}
 r = runHook({ tool_name: "Bash", tool_input: { command: "rg enablePullRequestAutoMerge docs/" } });
 ok(r.status === 0 && r.decision === null, "searching for the mutation name is not a GraphQL call");
 r = runHook({ tool_name: "Bash", tool_input: { command: "rg -n 'graphql|enablePullRequestAutoMerge' .claude/hooks/pr-merge-guard.mjs" } });
@@ -617,7 +637,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   eq((guardSource.match(/\.risky\b/g) || []).length, 2, "`.risky` is read in exactly two places: the allow decision and the earlier-proof check");
   ok(/if \(!risk\.risky\) \{[\s\S]{0,400}?advisoryQueue\.push\(request\);\s*return;\s*\}/.test(gateRequestSource.slice(riskCall)),
     "the low-risk allow point is guarded by risk.risky");
-  ok(/import \{ agentMergeProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
+  ok(/import \{ agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
   ok(/if \(base === "staging"\) \{[\s\S]{0,300}mainCommitsInPrOnGitHub\(\{ stagingSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(backMerge\) deny\(/.test(gateRequestSource), "a PR into staging carrying main's unbacked-merged commits is refused");
   // staging gets every main gate (Mason on #1363, 2026-11-04); staging-first: agents never merge into main
   // or the back-merge, and a migration may go into staging.
@@ -631,7 +651,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(!/docs\/changelog\.d|docs\/workflows/.test(guardSource), "no path list is forked into the guard itself");
   // Follow-ups section (Mason, 2026-11-09): the PR view asks for body and author, and the
   // shared rule denies before any allow point. The rule itself: followups-lib.test.mjs.
-  ok(/"baseRefName,baseRefOid,headRefName,headRefOid,[^"]*,body,author"/.test(gateRequestSource), "the PR view asks for the description and author");
+  ok(/"number,baseRefName,baseRefOid,headRefName,headRefOid,[^"]*,body,author"/.test(gateRequestSource), "the PR view asks for the description and author");
   ok(/const followUps = followUpsProblem\(pr\);\s*if \(followUps\) deny\(followUpsDenial\("PR MERGE GATE", request\.selector, followUps\)\);/.test(gateRequestSource),
     "a PR without a usable Follow-ups section is denied");
   ok(gateRequestSource.indexOf("followUpsProblem(pr)") < gateRequestSource.indexOf("advisoryQueue.push(request)"),

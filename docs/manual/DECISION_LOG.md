@@ -18,6 +18,12 @@
 
 **Decision (Mason, in chat, 2026-11-16: "i approve all these landing and migrations tonight").** PR #1916 (USE-2 database), PR #1917 (product page) and PR #1918 (quote line note) may each have Sol rounds 5 through 7.
 **What it does:** lifts the round cap on these three PRs to 7. Every other gate is unchanged: each PR still needs a clean Sol review of its head and green checks before it merges into `staging`.
+## 2026-11-17 — #1895 may have Sol rounds 5 and 6
+
+**Decision (Mason, in chat, 2026-11-17: "I approve up to 6 rounds before parking for the night"; on the rounding finding he chose "Refuse if off >$0.50").** PR #1895 (grower-share cost in the sold unit) may have Sol rounds 5 and 6. Its last Sol HIGH was that a quantity stored to 4 decimals could book a grower-share cost far from the exact cost; the database now refuses such a line when the booked cost would differ from the exact cost by more than 50 cents (`FIELD_APP_GROWER_SHARE_ROUNDING`). The billed line's rounding stays with #1926.
+**Why:** the round count includes runs on heads that staging merges and restamps replaced; Mason chose to keep going for the night rather than park.
+**What this forbids/implies:** no Sol round past 6 on #1895; a new BLOCKER/HIGH in round 6 parks the PR for Mason.
+
 ## 2026-11-17 — #1897 may have Sol rounds 5 and 6
 
 **Decision (Mason, in chat, 2026-11-17: "I approve up to 6 rounds before parking for the night").** PR #1897 (stock history integrity: one open count per stock row) may have Sol rounds 5 and 6. Rounds 3 and 4 each found a different gap in who may write the stock-count tables directly (reversing a count while a newer count holds its stock row; deleting a completed count), and each was closed in the database: counts now change only through the count screen's actions (start, add a line, save a line, complete, cancel, reverse).

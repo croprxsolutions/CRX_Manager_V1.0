@@ -3,7 +3,7 @@
 --  _product_parent_replay(key, scope, fingerprint), which calls check_idempotency, then saves its receipt with
 --  save_idempotency last, in the same transaction. The hook only recognises check_idempotency.)
 -- Written 2026-11-15. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270112100000_registration_adjuvants.md.
+-- docs/reference/migrations.d/20270114130000_registration_adjuvants.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY: Product Master USE-2, part 1 (database). docs/plans/2026-11-15-product-USE2-BUILD-SHEET.md sections 3.0
@@ -12,8 +12,8 @@
 --   optional preferred type and a note. Admins and sales reps record them (Mason, 2026-11-15).
 --
 -- WHAT:
---   - _epa_label_adjuvants_valid: re-issued with the new entry shape (REG-1's one-type shape had 0 rows using
---     it; the preflight refuses if any list was filled). The epa_registrations CHECK already calls it, so
+--   - _epa_label_adjuvants_valid: re-issued to accept the new entry shape AND REG-1's one-type entry, exactly as
+--     REG-1 checked it (every list valid before stays valid). The epa_registrations CHECK already calls it, so
 --     set_epa_registration (admin) and the new save share one rule. NULL = not reviewed, [] = none on the label.
 --   - set_registration_adjuvants: active admins and sales reps. Changes ONLY label_adjuvants of one
 --     registration (or creates the registration, RUP 'unknown', when none exists and p_expected_version is
@@ -73,11 +73,6 @@ BEGIN
   IF to_regclass('public.epa_registration_seed_run') IS NULL THEN
     RAISE EXCEPTION 'REGISTRATION_ADJUVANTS_PREFLIGHT: apply 20261231200000_epa_registration_tools first';
   END IF;
-  -- The new shape replaces REG-1's; refuse if any list was filled in the old shape.
-  IF EXISTS (SELECT 1 FROM public.epa_registrations
-              WHERE label_adjuvants IS NOT NULL AND label_adjuvants <> '[]'::jsonb) THEN
-    RAISE EXCEPTION 'REGISTRATION_ADJUVANTS_PREFLIGHT: a registration already has an adjuvant list in the old shape';
-  END IF;
   -- The replaced validator must still be REG-1's.
   IF (SELECT count(*) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._epa_label_adjuvants_valid(jsonb)')
@@ -122,6 +117,20 @@ BEGIN
   IF jsonb_array_length(p) > 50 THEN RETURN false; END IF;
   FOR e IN SELECT x FROM jsonb_array_elements(p) x LOOP
     IF jsonb_typeof(e) <> 'object' THEN RETURN false; END IF;
+    -- REG-1's one-type entry {kind: required|recommended, adjuvant_type, note?} stays valid, exactly as REG-1
+    -- checked it, so set_epa_registration keeps its write contract. The screens read it as a one-type statement.
+    IF e ? 'adjuvant_type' THEN
+      IF EXISTS (SELECT 1 FROM jsonb_object_keys(e) k WHERE k NOT IN ('kind', 'adjuvant_type', 'note')) THEN
+        RETURN false;
+      END IF;
+      IF jsonb_typeof(e->'kind') IS DISTINCT FROM 'string' THEN RETURN false; END IF;
+      IF e->>'kind' NOT IN ('required', 'recommended') THEN RETURN false; END IF;
+      IF jsonb_typeof(e->'adjuvant_type') IS DISTINCT FROM 'string' THEN RETURN false; END IF;
+      IF btrim(e->>'adjuvant_type') = '' OR length(e->>'adjuvant_type') > 100 THEN RETURN false; END IF;
+      IF e ? 'note' AND jsonb_typeof(e->'note') NOT IN ('string', 'null') THEN RETURN false; END IF;
+      IF length(COALESCE(e->>'note', '')) > 500 THEN RETURN false; END IF;
+      CONTINUE;
+    END IF;
     IF EXISTS (SELECT 1 FROM jsonb_object_keys(e) k
                 WHERE k NOT IN ('kind', 'adjuvant_types', 'preferred', 'when', 'note')) THEN
       RETURN false;

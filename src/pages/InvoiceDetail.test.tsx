@@ -59,6 +59,9 @@ function buildDeferredChain(): {
 }
 
 // Fixtures already carry cost; the admin cost read (get_admin_cost_fields) passes rows through.
+// Live hides the sales tax and standing discount controls until commission ships (billingM4Enabled).
+const billingM4 = vi.hoisted(() => ({ on: true }));
+vi.mock('../lib/billingFeatures', () => ({ billingM4Enabled: () => billingM4.on }));
 vi.mock('../lib/costFields', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/costFields')>()),
   withAdminCost: async (_table: string, row: unknown) => row,
@@ -2161,6 +2164,20 @@ describe('InvoiceDetail — Post uses the saved, reviewed invoice', () => {
     await waitFor(() => expect(downloadInvoicePdf).toHaveBeenCalledWith(expect.objectContaining({ customer_address: '9 Barn Rd', customer_city: 'Town' })));
   });
 
+  // Review #1873 MED 2: the PDF's rows add up to the balance only when it gets the credit applied and the write-off.
+  it('prints the credit applied and the write-off with the balance they make', async () => {
+    const { downloadInvoicePdf } = await import('../lib/invoicePdf');
+    Object.assign(savedInvoice, { credit_applied_cents: 500, write_off_cents: 300, balance_cents: 1200 });
+    try {
+      await printWithCustomerRead(() => buildChain({ data: { billing_address: '9 Barn Rd' }, error: null }));
+      await waitFor(() => expect(downloadInvoicePdf).toHaveBeenCalledWith(
+        expect.objectContaining({ total_amount_cents: 2000, credit_applied_cents: 500, write_off_cents: 300, balance_cents: 1200, takes_charge_lines: true }),
+      ));
+    } finally {
+      Object.assign(savedInvoice, { credit_applied_cents: 0, write_off_cents: 0, balance_cents: 2000 });
+    }
+  });
+
   it('still opens the confirm when the RUP check reads cleanly', async () => {
     await openLoaded();
     fireEvent.click(screen.getByRole('button', { name: 'Post invoice…' }));
@@ -2273,6 +2290,19 @@ describe('InvoiceDetail — standing discount and sales tax lines (billing plan 
       if (table === 'invoice_items') return buildChain({ data: lines, error: null });
       return buildChain({ data: [], error: null });
     });
+  });
+
+  it('on live (billing M4 off) still shows existing discount and tax lines, without the per-sale discount box', async () => {
+    billingM4.on = false;
+    try {
+      renderInvoiceDetail('inv-disc');
+      const worked = await screen.findByRole('region', { name: 'Worked out for you' });
+      expect(within(worked).getByText('Standing discount 3%')).toBeInTheDocument();
+      expect(within(worked).getByText('Sales tax 6.25%')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Standing discount for this sale')).not.toBeInTheDocument();
+    } finally {
+      billingM4.on = true;
+    }
   });
 
   it('shows the discount and tax lines read-only and saves the draft', async () => {

@@ -39,6 +39,7 @@ import Breadcrumbs from '../components/ui/Breadcrumbs';
 import { runCriticalAction } from '../lib/criticalAction';
 import { parseLocalDate } from '../lib/dateUtils';
 import { formatUSD as fmt, quantityTimesDollarsCents } from '../lib/money';
+import { billingM4Enabled } from '../lib/billingFeatures';
 import { exactRound2 } from '../lib/quoteCalc';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import QuickTaskModal from '../components/team/QuickTaskModal';
@@ -1795,32 +1796,35 @@ export default function OrderDetail() {
             />
           )}
 
-          <Card>
-            <section aria-labelledby="billing-title" className="flex flex-col gap-2">
-              <h2 id="billing-title" className="font-heading text-xl font-semibold text-nav-dark">Billing</h2>
-              {/* The sales tax switch (billing plan M4a): an admin or the sale's own rep. The database applies it
-                  to the sale's draft invoices; posted ones keep their tax. */}
-              <Switch
-                label="Charge sales tax"
-                // Settings is admin-only, so only an admin is pointed there.
-                description={`${isAdmin ? `${salesTaxRate ? `${salesTaxRate}%, set` : 'Set'} in Settings › Billing.` : salesTaxRate ? `${salesTaxRate}%.` : ''} Posted invoices keep the tax they had.`.trim()}
-                isSelected={!!order.sales_tax}
-                isDisabled={savingSalesTax || !canSetSalesTax}
-                onChange={() => void handleToggleSalesTax()}
-              />
-              {standingDiscount > 0 && customer && (
-                <div className="flex items-start justify-between gap-3 border-t border-gray-100 pt-3">
-                  <span className="flex min-w-0 flex-col">
-                    <span className="text-sm font-medium text-nav-dark">Standing discount {standingDiscount}%</span>
-                    <span className="text-sm text-secondary">{customer.farm_name}&apos;s rate, off products before tax</span>
-                  </span>
-                  <Link to={`/customers/${customer.id}`} className="inline-flex min-h-11 items-center text-sm font-medium text-crx-green underline hover:text-crx-green-hover md:min-h-0">
-                    Customer
-                  </Link>
-                </div>
-              )}
-            </section>
-          </Card>
+          {/* Sales tax and the standing discount are off on live until commission ships (billingM4Enabled). */}
+          {billingM4Enabled() && (
+            <Card>
+              <section aria-labelledby="billing-title" className="flex flex-col gap-2">
+                <h2 id="billing-title" className="font-heading text-xl font-semibold text-nav-dark">Billing</h2>
+                {/* The sales tax switch (billing plan M4a): an admin or the sale's own rep. The database applies it
+                    to the sale's draft invoices; posted ones keep their tax. */}
+                <Switch
+                  label="Charge sales tax"
+                  // Settings is admin-only, so only an admin is pointed there.
+                  description={`${isAdmin ? `${salesTaxRate ? `${salesTaxRate}%, set` : 'Set'} in Settings › Billing.` : salesTaxRate ? `${salesTaxRate}%.` : ''} Posted invoices keep the tax they had.`.trim()}
+                  isSelected={!!order.sales_tax}
+                  isDisabled={savingSalesTax || !canSetSalesTax}
+                  onChange={() => void handleToggleSalesTax()}
+                />
+                {standingDiscount > 0 && customer && (
+                  <div className="flex items-start justify-between gap-3 border-t border-gray-100 pt-3">
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-sm font-medium text-nav-dark">Standing discount {standingDiscount}%</span>
+                      <span className="text-sm text-secondary">{customer.farm_name}&apos;s rate, off products before tax</span>
+                    </span>
+                    <Link to={`/customers/${customer.id}`} className="inline-flex min-h-11 items-center text-sm font-medium text-crx-green underline hover:text-crx-green-hover md:min-h-0">
+                      Customer
+                    </Link>
+                  </div>
+                )}
+              </section>
+            </Card>
+          )}
         </div>
 
         <div className="min-w-0 space-y-4 lg:col-start-1 lg:row-start-1">

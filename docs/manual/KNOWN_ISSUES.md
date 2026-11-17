@@ -976,6 +976,7 @@ Tier 2 above Tier 3; 3 active products have no cost, 4 have no Tier 1 price, and
 
 ### KI-139 — "Reconcile negative inventory" can overwrite any row, not just negative ones
 **LOW · OPEN · inventory · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #7) · unassigned**
+**Fix pending 2026-11-16:** `20270113100000_stock_checks_negative_onorder_chicago` (repair step 5, part 1; not applied live) refuses a row that is not below zero, and NaN/Infinity. C-13 (Mason chose "toward zero", 2026-11-16): the same migration lets `adjust_inventory` accept any increase, so a −10 row can be partly fixed by +5; a decrease still may not end below zero.
 `_reconcile_negative_inventory_replay_impl_20261015` sets any row to any number of 0 or more with no count behind it,
 against "negatives fixed only from the count". Admin-only and logged. Fix: refuse when on-hand is not below zero, or
 require a completed count line.
@@ -995,6 +996,7 @@ the units batch (To-Do 0.17): refuse an unknown or wrong-type unit in both place
 
 ### KI-141 — Retiring an inventory row ignores open purchase orders
 **LOW · OPEN · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #9) · unassigned**
+**Fix pending 2026-11-16:** `20270113100000_stock_checks_negative_onorder_chicago` (repair step 5, part 1; not applied live) refuses while the row has stock on order. It tries the on-order recompute's lock and never waits for it, so a PO saved at the same moment cannot slip past.
 `_retire_inventory_item_replay_impl_20261015` deletes the row without checking `quantity_on_order`; the on-order
 recompute then recreates a zero row and the PO still points at retired stock. Fix: refuse while open PO quantity is
 above 0.
@@ -1045,6 +1047,7 @@ path and tighten direct line writes, in a new migration. Repair step 5 (To-Do 0.
 
 ### KI-162 — The Receiving Log filters by UTC date
 **LOW · OPEN · purchasing/reports · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-11) · unassigned**
+**Fix pending 2026-11-16:** `20270113100000_stock_checks_negative_onorder_chicago` (repair step 5, part 1; not applied live) filters on Chicago business-day bounds.
 `get_receiving_log` (`20261113110000` ~L99-100) compares `received_at::date`. The database runs in UTC and the function
 sets no zone (live-verified), so a receipt after about 6-7 PM Central files under the next day. The KI-18 batches
 missed it. Fix: use the Chicago date, as KI-18 did. Repair step 5 (To-Do 0.17).
@@ -1343,7 +1346,15 @@ before figures are blanked. Extra, other contexts, request query, headers and co
 messages and data are never sent, for errors and performance samples alike (checked against a local Sentry stand-in).
 
 ### KI-164 — Stock and pricing proofs that cannot run, and a stale cost-review record
-**LOW (proof) · OPEN · tooling · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md), Codex audit) · unassigned**
+**LOW (proof) · PARTLY FIXED · tooling · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md), Codex audit) · unassigned**
+**2026-11-16 (repair step 6):**
+- All four proofs below run to PASS again: the undo prover replays the whole chain, the three provers refuse only a
+  later file that redefines what they rely on, and the pricing proof uses the current cost-change form.
+- The 5 `cost-exposure-review` hashes were re-keyed after a live re-read. The only changed function their chains
+  reach is `_enqueue_delivery_receipt`, which reads no cost.
+
+Still open: the KI-159 database sweep and each repair step's regression test.
+
 Several proofs did not complete on 2026-11-13, so those workflows are not certified:
 - The full undo prover stops rebuilding at `20261217100000_job_access_ends_with_the_job.sql` (`JOB_ACCESS_BASELINE_DRIFT`).
 - The cycle-count, tote-fill and PO close-short provers refuse newer dependent migrations before their scenarios.

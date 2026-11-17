@@ -1,5 +1,5 @@
-// Pure and import-free, so the Deno invoice PDF can share it with the browser app (nothing under supabase/functions
-// imports it yet; the invoice page's Amount due card does). Amounts are integer cents.
+// Pure and import-free, so the Deno invoice PDF shares it with the browser app: invoicePdf.ts (the printed and emailed
+// invoice) and the invoice page's Amount due card (via src/lib/invoiceChargeLines.ts) both use it. Amounts are integer cents.
 
 export const CHARGE_TYPE_LABELS: Readonly<Record<string, string>> = {
   freight: 'Freight',
@@ -19,7 +19,7 @@ interface BreakdownLine {
 
 /**
  * A charge line: a typed charge, or, on an invoice that takes charges, an older untyped line with no product.
- * The database agrees: the standing discount's base is product_id set and charge_type null (20261231110000).
+ * The database agrees: the standing discount's base is product_id set and charge_type null (20270109100100).
  */
 export function isChargeLine(line: { product_id?: string | null; charge_type?: string | null }, productlessIsCharge: boolean): boolean {
   return !!line.charge_type || (productlessIsCharge && !line.product_id);

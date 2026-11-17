@@ -1,0 +1,3 @@
+## 2026-11-16 — Sol reviews a staging PR against origin/staging
+
+- **Sol reviews a staging PR against `origin/staging` (Mason, 2026-11-16).** `write-codex-push-proof.mjs` now picks its review base from the branch: a feature branch is reviewed against `origin/staging` (its tip, or the fork point when behind), so Sol reads only that PR's own changes, not every unreleased staging PR; `hotfix/`, `release/`, `main`, `staging` and a detached HEAD keep `origin/main`. Each full run prints the base it chose. The merge gates, the live-apply gate and `--carry-forward` are unchanged. Contract: `docs/plans/2026-11-16-sol-staging-base-CONTRACT.md`.

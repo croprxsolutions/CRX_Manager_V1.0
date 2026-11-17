@@ -781,7 +781,7 @@ export async function runReconciliationChecks(): Promise<ReconciliationReport> {
       description: 'Inventory quantity matches transaction history running total',
       passed: disc.length === 0,
       discrepancies: disc,
-      entitiesChecked: new Set(inventory.map((r) => r.product_id)).size,
+      entitiesChecked: new Set([...inventory.map((r) => r.product_id), ...transactions.map((t) => t.product_id)]).size,
     });
   } catch (err) {
     checks.push({

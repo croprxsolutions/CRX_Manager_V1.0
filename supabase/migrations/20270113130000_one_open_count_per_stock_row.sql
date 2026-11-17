@@ -172,6 +172,10 @@ REVOKE INSERT ON public.cycle_count_items FROM PUBLIC, anon, authenticated;
 REVOKE INSERT (id, cycle_count_id, product_id, inventory_id, expected_qty, counted_qty, variance, variance_pct,
   is_counted, counted_by, counted_at, notes, created_at) ON public.cycle_count_items FROM PUBLIC, anon, authenticated;
 GRANT INSERT (cycle_count_id, product_id, inventory_id, expected_qty) ON public.cycle_count_items TO authenticated;
+-- The app never deletes a count or a line; a direct delete of a completed count would drop its audit lines while its
+-- stock adjustment stays, leaving nothing to reverse.
+REVOKE DELETE ON public.cycle_counts FROM PUBLIC, anon, authenticated;
+REVOKE DELETE ON public.cycle_count_items FROM PUBLIC, anon, authenticated;
 
 DO $postflight$
 BEGIN
@@ -191,6 +195,10 @@ BEGIN
      OR has_any_column_privilege('authenticated', 'public.cycle_count_items', 'UPDATE')
      OR has_any_column_privilege('anon', 'public.cycle_count_items', 'UPDATE')
      OR has_any_column_privilege('anon', 'public.cycle_count_items', 'INSERT')
+     OR has_table_privilege('authenticated', 'public.cycle_counts', 'DELETE')
+     OR has_table_privilege('anon', 'public.cycle_counts', 'DELETE')
+     OR has_table_privilege('authenticated', 'public.cycle_count_items', 'DELETE')
+     OR has_table_privilege('anon', 'public.cycle_count_items', 'DELETE')
      OR has_table_privilege('authenticated', 'public.cycle_count_items', 'INSERT')
      OR has_column_privilege('authenticated', 'public.cycle_count_items', 'variance', 'INSERT')
      OR has_column_privilege('authenticated', 'public.cycle_count_items', 'is_counted', 'INSERT')

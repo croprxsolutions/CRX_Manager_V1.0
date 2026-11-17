@@ -12,4 +12,6 @@ DROP INDEX public.cycle_counts_one_open_per_warehouse;
 GRANT UPDATE ON public.cycle_counts TO authenticated;
 GRANT UPDATE ON public.cycle_count_items TO authenticated;
 GRANT INSERT ON public.cycle_count_items TO authenticated;
+GRANT DELETE ON public.cycle_counts TO authenticated;
+GRANT DELETE ON public.cycle_count_items TO authenticated;
 COMMIT;

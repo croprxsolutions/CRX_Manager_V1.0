@@ -99,7 +99,7 @@ A number with no registration row shows nothing extra (there is nothing to edit;
 
 ### 3.2 Recording it (admins and sales reps; Mason, 2026-11-15)
 An **"Edit adjuvants"** button (admins and sales reps) opens a small modal for one EPA number:
-- rows of *Required / Recommended / Do not use* + one or more types (tick boxes from the list, "Other" typed) + optional preferred type + note; add and remove rows;
+- rows of *Required / Recommended / Do not use* + one or more types (tick boxes from the list, "Other" typed) + optional preferred type + optional "When" condition + note; add and remove rows;
 - a **"None on the label"** tick (saves `[]`);
 - a required **"Why"** box (the database requires a reason);
 - it states: "This applies to every product and brand with EPA number X."
@@ -119,7 +119,7 @@ For **every product line shown on a quote being built or edited** (a line just a
 ### 4.0 USE-2 DB (one small migration)
 `supabase/migrations/<stamp>_registration_adjuvants.sql`:
 - **Preflight:** refuse unless every `epa_registrations.label_adjuvants` is NULL or `[]` (0 filled today), and `set_registration_adjuvants` does not exist.
-- **New entry shape:** re-issue `_epa_label_adjuvants_valid` so each entry is `{kind: required|recommended|do_not_use, adjuvant_types: 1–8 non-blank strings ≤100 chars with no repeats, preferred?: one of adjuvant_types, note?: ≤500 chars}`; still NULL = not reviewed, `[]` = none, at most 50 entries. The type list itself stays in the editor, not the database, so "Other" text is allowed.
+- **New entry shape:** re-issue `_epa_label_adjuvants_valid` so each entry is `{kind: required|recommended|do_not_use, adjuvant_types: 1–8 non-blank strings ≤100 chars with no repeats, preferred?: one of adjuvant_types, when?: ≤200 chars, no leading or trailing spaces, note?: ≤500 chars}`; still NULL = not reviewed, `[]` = none, at most 50 entries. The type list itself stays in the editor, not the database, so "Other" text is allowed.
 - **New save:** `set_registration_adjuvants(p_epa_registration text, p_expected_version bigint, p_adjuvants jsonb, p_reason text, p_idempotency_key text DEFAULT NULL) RETURNS jsonb`, `SECURITY DEFINER`, `SET search_path = public, pg_temp`, `EXECUTE` for `authenticated` only. Refuses anyone who is not an active admin or sales rep (`is_admin()` / `is_sales_rep()`), a missing key, a blank reason or one over 1,000 characters (the `set_epa_registration` cap), a bad number, a stale version, and a bad list. **Order:** take the same exclusive registration lock as `set_epa_registration` first, then the retry-key check (so two identical requests sent at once: the second waits, finds the first one's receipt and returns it, never "stale"; the same key with a different request is refused), then the row. An existing row: writes only `label_adjuvants` through `_epa_registration_update`. A missing row (`p_expected_version` NULL): inserts it through `_epa_registration_insert` with only `rup_status 'unknown'` and the list. Logs one `epa_registration_events` row with before and after, saves its retry receipt last, returns a small receipt (number, new version, event id).
 - `set_epa_registration` stays admin-only and unchanged; it uses the same validator.
 - **Postflight:** grants as above; the md5 of every other REG-1 and DM-4 function unchanged.

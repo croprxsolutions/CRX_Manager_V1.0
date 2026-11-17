@@ -1,6 +1,6 @@
 # RT-4a rate cut-over: behavior contract
 
-Status: settled after one Astra cold challenge (gpt-6-astra high, 67 findings, 2026-11-17); two business questions open for Mason (end). Grand plan: `2026-10-29-product-GRAND-PLAN.md` › RT-4 and overlap 11. RT-3 contract: `2026-11-11-product-RT3-rate-review-CONTRACT.md`. Facts read at commit `10070370e` (origin/staging) and live read-only on 2026-11-17.
+Status: SETTLED 2026-11-17, after one Astra cold challenge (gpt-6-astra high, 67 findings) and one targeted re-check (19 findings); Mason answered all three business questions the same day. Grand plan: `2026-10-29-product-GRAND-PLAN.md` › RT-4 and overlap 11. RT-3 contract: `2026-11-11-product-RT3-rate-review-CONTRACT.md`. Facts read at commit `10070370e` (origin/staging) and live read-only on 2026-11-17.
 
 **Scope name.** This is **RT-4a**: promote approved rates to live per parent, with rollback. The grand plan's RT-4 "done when" also needs RT-4b (move every writer to the rate RPC, revoke direct writes (Mason-gated), drop the field app's invented `'oz'`, Piksi MG→g rename). RT-4 is not complete until RT-4b lands.
 
@@ -220,7 +220,7 @@ These run on the local prover with test data, as real roles (`SET ROLE authentic
 
 ## Re-check settlement (Astra targeted re-check, 19 findings)
 
-The re-check attacked rule 9's "even when the lock is off" protection. Covering every way a rate's meaning can move with the lock off (unit conversions 1, parent-only rates 3, stock unit or form changes 5, the guard's early returns 6) would rebuild the lock. **Simplified design (pending Mason, decision 3):** `set_product_rate_lock` refuses to unlock while any parent is `approved`. The existing lock then covers 1, 3, 5 and 6 unchanged, and rule 9's guard stays "lock on, plus refuse approved parents in every pass-writing path".
+The re-check attacked rule 9's "even when the lock is off" protection. Covering every way a rate's meaning can move with the lock off (unit conversions 1, parent-only rates 3, stock unit or form changes 5, the guard's early returns 6) would rebuild the lock. **Simplified design (Mason, decision 3):** `set_product_rate_lock` refuses to unlock while any parent is `approved`. The existing lock then covers 1, 3, 5 and 6 unchanged, and rule 9's guard stays "lock on, plus refuse approved parents in every pass-writing path".
 
 Other settlements, applied at build:
 - **2:** `correct_product_rates` also refuses sizes of `approved` parents.
@@ -246,6 +246,7 @@ Other settlements, applied at build:
 
 ## Open business decisions
 
-1. **Changing a live rate after the switch.** Recommended: switch the parent back, fix the rate in the rate review, then switch it on again (a few minutes on the old rate; no new screen now). The alternative is a one-step "edit live rate" tool, built now instead of in RT-4b, which costs more time and review.
-2. **Pilot watch.** Recommended: go on to the rest the same day, once the pilot checks pass in the app. The alternative is to wait a day of real quoting first.
-3. **The rate lock after the first switch.** Recommended: once any product is switched, the "Lock rates" switch cannot be turned off until every switched product is switched back. Rates on products not yet switched can still be fixed one at a time with the locked correction. This narrows Mason's 2026-10-29 answer that any admin may switch the lock at any time (grand plan, overlap 11, question 11). The alternative keeps the lock switch free, at the cost of a much larger guard to rebuild.
+None. Mason answered all three on 2026-11-17:
+1. Changing a live rate after the switch: "Switch back, fix, switch on". Rule 9's full freeze on a switched parent stands; the one-step tool waits for RT-4b.
+2. Pilot watch: "Same day, once checks pass".
+3. The rate lock after the first switch: "Yes, keep it locked". `set_product_rate_lock` refuses to unlock while any parent is `approved`. This narrows his 2026-10-29 answer (question 11).

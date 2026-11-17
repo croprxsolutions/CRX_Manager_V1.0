@@ -513,7 +513,7 @@ live when this was written.
   commission split). UNVERIFIED, LOW.
 
 ### KI-81 — Two invoice paths read a quote line's current price, not the price the customer was sent
-**MED · OPEN (found 2026-10-25, To-Do 1.2 follow-up) · money · unassigned (Mason, 2026-10-27: fix later, not now)**
+**MED · OPEN (found 2026-10-25, To-Do 1.2 follow-up) · money · Claude (Mason, 2026-11-17: fix now; supersedes 2026-10-27 "fix later")**
 The sent-price lock (`20261027040000`, live since 2026-10-27, ledger `20261027123725`) gates Convert, Partial Order and Schedule Job, which copy quote prices into
 orders and job lines. Two later paths read `quote_items.price_per_unit` live instead (read from live bodies
 2026-10-25): `create_invoice_from_blend_ticket` (through `set_blend_ticket_product_quote_price` /
@@ -595,6 +595,7 @@ this number is fixed and live (archive, 2026-11-05).
 RT-1's draft rates (`20261229110000`, live 2026-11-10) copy these as they are; nothing here is fixed yet. RT-2 step 1
 (PR #1706, open) has its unit converter live (`20261229160000`, ledger `20261110061547`); its spelling remap
 `20261229170000` is not live (2026-11-10). Derive notes the basis doubts (`basis_suspect`, `unit_not_for_form`, no basis), but not the Piksi grams: its house row is an `18 mg/acre` quoting default beside an `18 g/acre` label row, so RT-3 must fix it before any draft is approved.
+**Derived on live 2026-11-17** (714 drafts, [run record](../changelog.d/2026-11-17-rt1-derivation-run.md)): as predicted, `Piksi Dust Plus` has an `18 mg` per-acre house draft proposed as the quoting default beside an `18 g` label draft; `Piksi Dust Infurrow` has a `6 mg` house draft (not default). The two dry `oz` products got no house draft (`unit_not_for_form`).
 - Seed treatments: the 9 liquid seed treatments with `/unit` text store the per-seed-unit number as a per-acre rate
   (Ilevo 2.5 Gal: `1.18 oz` "per acre", text `1.18 oz/unit`), so a quote multiplies it by acres. RT-3.
 - Liquid unit on a dry product: `Autumn Super 51 WDG` and `Cimarron Plus - 10 oz` are dry with `rate_unit = 'oz'`.

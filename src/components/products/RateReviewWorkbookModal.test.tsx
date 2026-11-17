@@ -1,9 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const H = vi.hoisted(() => ({ toast: vi.fn(), parse: vi.fn(), preview: vi.fn(), commit: vi.fn() }));
+const H = vi.hoisted(() => ({ toast: vi.fn(), parse: vi.fn(), preview: vi.fn(), commit: vi.fn(), rpc: vi.fn() }));
 vi.mock('../../lib/db', () => ({
-  supabaseUntyped: { rpc: vi.fn() },
+  supabaseUntyped: { rpc: H.rpc },
   assertRpcResult: (data: unknown) => data,
   sanitizeError: (error: unknown) => (error instanceof Error ? error.message : String(error)),
 }));
@@ -115,6 +115,44 @@ describe('RateReviewWorkbookModal', () => {
     expect(await screen.findByText(/Saved 2 rates and 1 outcome\./)).toBeInTheDocument();
   });
 
+  it('warns that inactive rate cleanup clears its recorded outcome without suggesting Reconfirm', async () => {
+    const inactiveUpload: ParsedRateReview = {
+      ...upload, rates: [upload.rates[1]], outcomes: [], recorded: { [P1]: 'approved_default' }, inactive_parent_ids: [P1],
+    };
+    H.parse.mockResolvedValue(inactiveUpload);
+    H.preview.mockResolvedValue({
+      rates: [{ index: 0, rate_id: 'r2', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['reopen'] }],
+      outcomes: [],
+    });
+    const view = render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+    const file = new File(['x'], 'review.xlsx');
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => new ArrayBuffer(1) });
+    fireEvent.change(screen.getByLabelText('Rate review workbook file'), { target: { files: [file] } });
+    expect(await screen.findByText(/Reopening or deleting these inactive rates also clears their recorded outcomes: Atrazine 4L \(approved default\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/To keep an outcome that still fits/)).not.toBeInTheDocument();
+    view.unmount();
+  });
+
+  it('requests inactive history explicitly and keeps its totals separate from active readiness counts', async () => {
+    H.rpc.mockResolvedValue({
+      data: { parents: [], units: [], totals: {
+        rates: 3, drafts: 1, approved: 2, per_100_gal: 0, per_100_gal_approved: 0, parents: 2, parents_undecided: 1,
+        approved_default: 1, no_per_acre_default: 0, needs_label_data: 0, outcomes_no_longer_valid: 0,
+        inactive_parents: 1, inactive_rates: 2, inactive_approved: 1, inactive_outcomes: 1,
+      } }, error: null,
+    });
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:rate-review');
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const view = render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Download rate review workbook' }));
+    expect(await screen.findByText(/Historical only: 1 inactive group, 2 rates \(1 approved\), and 1 recorded outcome/)).toBeInTheDocument();
+    expect(H.rpc).toHaveBeenCalledWith('get_rate_review_workbook', { p_include_inactive: true });
+    expect(screen.getByText(/2 parents: 1 undecided, 1 approved default/)).toBeInTheDocument();
+    view.unmount();
+    create.mockRestore();
+    click.mockRestore();
+  });
+
   it('does not describe its own in-flight save as an earlier unanswered request', async () => {
     H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'] }], outcomes: [] });
     let finishCommit!: (receipt: unknown) => void;
@@ -165,6 +203,32 @@ describe('RateReviewWorkbookModal', () => {
     await waitFor(() => expect(H.commit).toHaveBeenCalledTimes(2));
     expect(H.commit.mock.calls[1][1]).toBe(H.commit.mock.calls[0][1]);
     expect(await screen.findByText(/Saved 1 rate and 0 outcomes\./)).toBeInTheDocument();
+  });
+
+  it('restores the inactive cleanup warning from a saved retry without changing its payload', async () => {
+    const inactiveUpload: ParsedRateReview = {
+      rates: [{ ...upload.rates[0], decision: 'reopen', reason: 'inactive group cleanup' }], outcomes: [],
+      recorded: { [P1]: 'approved_default' }, inactive_parent_ids: [P1],
+    };
+    H.parse.mockResolvedValue(inactiveUpload);
+    H.preview.mockResolvedValue({ rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['reopen'] }], outcomes: [] });
+    H.commit.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const first = render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+    const file = new File(['x'], 'review.xlsx');
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => new ArrayBuffer(1) });
+    fireEvent.change(screen.getByLabelText('Rate review workbook file'), { target: { files: [file] } });
+    const warning = /Reopening or deleting these inactive rates also clears their recorded outcomes: Atrazine 4L \(approved default\)/;
+    expect(await screen.findByText(warning)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Confirm rate review/ }));
+    await waitFor(() => expect(H.commit).toHaveBeenCalledOnce());
+    const stored = JSON.parse(sessionStorage.getItem('crx:pending-retry:rate-review:u1')!);
+    expect(stored.request.upload.inactive_parent_ids).toEqual([P1]);
+    first.unmount();
+    render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+    expect(await screen.findByText(/earlier Confirm got no reply/)).toBeInTheDocument();
+    expect(screen.getByText(warning)).toBeInTheDocument();
+    expect(H.commit).toHaveBeenCalledOnce();
+    expect(JSON.parse(sessionStorage.getItem('crx:pending-retry:rate-review:u1')!).request.upload).toEqual(inactiveUpload);
   });
 
   it('offers a hand check when an old in-flight Confirm settles after remount', async () => {

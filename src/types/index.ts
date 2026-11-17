@@ -2573,6 +2573,8 @@ export interface RateReviewWorkbook {
   parents: {
     parent_id: string;
     parent_name: string;
+    /** Current parent activity for the history-only rate review. */
+    is_active: boolean;
     product_form: string;
     sizes: string[];
     outcome: ProductRateOutcome | null;
@@ -2612,6 +2614,8 @@ export interface RateReviewWorkbook {
     rates: number; drafts: number; approved: number; per_100_gal: number; per_100_gal_approved: number;
     parents: number; parents_undecided: number; approved_default: number; no_per_acre_default: number; needs_label_data: number;
     outcomes_no_longer_valid: number;
+    /** Inactive parents and retained rate/outcome history; excluded from active readiness counts. */
+    inactive_parents: number; inactive_rates: number; inactive_approved: number; inactive_outcomes: number;
   };
 }
 

@@ -1,5 +1,7 @@
 # RPC Functions Reference (440 callable overloads across 432 names + 129 trigger functions — live DB as of 2026-08-11)
 
+**Pending #1814, migration `20270110110000` (not applied):** `get_rate_review_workbook(p_include_inactive boolean DEFAULT false)` replaces the zero-argument declaration with one defaulted overload. Old calls keep the old active-only JSON. Explicit true adds inactive rate history, parent `is_active`, and separate `inactive_parents`, `inactive_rates`, `inactive_approved`, `inactive_outcomes` totals. Admin-only access is unchanged. Private cleanup permits reopening/deleting/clearing for inactive history and refuses fresh approvals/decisions; draft-value saves remain refused. See its migration record and behavior contract; the applied RT-3 description below still describes production.
+
 > Function inventory verified live against Supabase project `rhyzpcqhnizqbxphqdkr` (`pg_proc` joined to `pg_namespace` where `nspname='public'`, split by trigger return type): **440 callable overloads across 432 distinct names**, **129 trigger function overloads/names**, **561 total public function names**.
 >
 > **Count is dated (checked 2026-09-26).** The 2026-08-11 live count above has not been re-measured. More than 40 function names were added by later migrations, and `src/types/supabase.ts` (generated 2026-09-11) already lists 481 function names. Re-measure with a read-only `pg_proc` query before quoting a current total.

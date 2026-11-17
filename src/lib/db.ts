@@ -150,6 +150,10 @@ export const RpcErrorCodes = {
   PRODUCT_PARENT_STALE: 'PRODUCT_PARENT_STALE',
   PRODUCT_PARENT_SIZE_STALE: 'PRODUCT_PARENT_SIZE_STALE',
   PRODUCT_PARENT_RATES_STALE: 'PRODUCT_PARENT_RATES_STALE',
+  // Setup workbook chemistry: definitive tab refusal codes from the workbook RPCs.
+  WORKBOOK_WEIGHTS_REFUSED: 'WORKBOOK_WEIGHTS_REFUSED',
+  WORKBOOK_INGREDIENTS_REFUSED: 'WORKBOOK_INGREDIENTS_REFUSED',
+  WORKBOOK_NOTHING_TO_SAVE: 'WORKBOOK_NOTHING_TO_SAVE',
   // Crop + timing choices (migration 20261229120000): the choice changed since it was loaded.
   USE_TIMING_STALE: 'USE_TIMING_STALE',
   // Product weights (migration 20261207100000): a weight screen older than the subject, a lower-trust value

@@ -62,7 +62,9 @@ const isPendingRateReview = (value: unknown): value is PendingRateReview => {
   const { rates, outcomes, recorded } = value.upload;
   const previewRates = value.preview.rates;
   const previewOutcomes = value.preview.outcomes;
-  return Array.isArray(rates) && rates.every(isStoredRate) && Array.isArray(outcomes) && outcomes.every(isStoredOutcome)
+  return (value.upload.inactive_parent_ids === undefined || (Array.isArray(value.upload.inactive_parent_ids)
+      && value.upload.inactive_parent_ids.every((id: unknown) => typeof id === 'string')))
+    && Array.isArray(rates) && rates.every(isStoredRate) && Array.isArray(outcomes) && outcomes.every(isStoredOutcome)
     && isRecord(recorded) && Object.values(recorded).every((outcome) => typeof outcome === 'string')
     && Array.isArray(previewRates) && previewRates.every((row) => isStoredPreviewRow(row, rates.length))
     && Array.isArray(previewOutcomes) && previewOutcomes.every((row) => isStoredPreviewRow(row, outcomes.length));
@@ -205,12 +207,17 @@ function previewRows(upload: ParsedRateReview, preview: RateReviewResult) {
   // The database clears a parent's recorded outcome when any of its rates change; say so unless this file sets it again.
   const outcomeSet = new Set(outcomes.filter((o) => o.status === 'change').map((o) => o.parent_id));
   const cleared = new Map<string, string>();
+  const inactiveCleared = new Map<string, string>();
   for (const r of rates) {
     const parentId = upload.rates[r.index]?.parent_id;
     const was = parentId ? upload.recorded[parentId] : undefined;
-    if (r.status === 'change' && parentId && was && !outcomeSet.has(parentId)) cleared.set(parentId, `${r.label ?? parentId} (${was.replace(/_/g, ' ')})`);
+    if (r.status === 'change' && parentId && was && !outcomeSet.has(parentId)) {
+      const label = `${r.label ?? parentId} (${was.replace(/_/g, ' ')})`;
+      if (upload.inactive_parent_ids?.includes(parentId)) inactiveCleared.set(parentId, label);
+      else cleared.set(parentId, label);
+    }
   }
-  return { rates, outcomes, changes, problems, cleared: [...cleared.values()], blocked: problems.length > 0 || changes.length === 0 };
+  return { rates, outcomes, changes, problems, cleared: [...cleared.values()], inactiveCleared: [...inactiveCleared.values()], blocked: problems.length > 0 || changes.length === 0 };
 }
 
 type Shown = ReturnType<typeof previewRows>;
@@ -260,6 +267,11 @@ function PreviewDetail({ shown, upload }: { shown: Shown; upload: ParsedRateRevi
           These rate changes clear the recorded outcome of {shown.cleared.join(', ')}. To keep an outcome that still fits the edited rates, mark Reconfirm yes on Rate Outcomes in this workbook and upload again. Otherwise set it later after the rates are approved.
         </p>
       )}
+      {shown.inactiveCleared.length > 0 && (
+        <p className="text-amber-800">
+          Reopening or deleting these inactive rates also clears their recorded outcomes: {shown.inactiveCleared.join(', ')}. Inactive outcomes cannot be reconfirmed; they can only be cleared as part of history cleanup.
+        </p>
+      )}
     </>
   );
 }
@@ -306,6 +318,7 @@ function Totals({ totals }: { totals: RateReviewWorkbook['totals'] }) {
       {totals.parents_undecided} undecided, {totals.approved_default} approved default, {totals.no_per_acre_default} no per-acre default,{' '}
       {totals.needs_label_data} need label data.
       {totals.outcomes_no_longer_valid > 0 && <span className="text-red-700"> {count(totals.outcomes_no_longer_valid, 'recorded outcome no longer holds', 'recorded outcomes no longer hold')}.</span>}
+      {totals.inactive_parents > 0 && <span> Historical only: {count(totals.inactive_parents, 'inactive group', 'inactive groups')}, {count(totals.inactive_rates, 'rate', 'rates')} ({totals.inactive_approved} approved), and {count(totals.inactive_outcomes, 'recorded outcome', 'recorded outcomes')}. Inactive rates can only be reopened or drafts deleted; outcomes can only be cleared.</span>}
     </p>
   );
 }
@@ -315,8 +328,7 @@ function RateWorkbookFileControls({ fileRef, busy, blocked, onDownload, onFile }
 }) {
   return <>
     <p className="text-secondary">
-      Review the draft per-acre rates. In the spreadsheet, approve, correct, add, delete or reopen rates on Draft Rates and set
-      one outcome per parent on Rate Outcomes, then upload it here. You see every change before anything is saved, and the
+      Review the draft per-acre rates and inactive history. In the spreadsheet, active groups can have rates approved, corrected, added, deleted or reopened; inactive groups are history only. Their approved rates can be reopened, drafts deleted, and outcomes cleared. Then upload it here. You see every change before anything is saved, and the
       whole review saves at once or not at all. Quotes and jobs do not use these rates yet.
     </p>
     <div className="flex flex-wrap gap-2">

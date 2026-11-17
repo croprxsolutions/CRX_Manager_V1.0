@@ -169,9 +169,32 @@ describe('chemCalculator — toGallonOrLbEquivalent (ChemMan parity #1)', () => 
 // asserts the CLIENT helper returns exactly what the SERVER would — so agreement
 // is proven against the rules, not coincidental.
 describe('chemCalculator — toGallonOrLbEquivalent branches on product_form (server parity, #25)', () => {
-  /** Mirror of the SQL convert_to_gl_lb branch (migration 20260629140000) — the
-   *  authority the client must equal. Reproduces BOTH CASE statements verbatim,
-   *  including every fl-oz / pound / ton spelling and NULL-on-unrecognized. */
+  it.each(['oz', 'ounce', 'ounces', 'Dry oz'])('rounds a dry %s decimal tie like PostgreSQL numeric', (unit) => {
+    expect(toGallonOrLbEquivalent(0.0024, unit, 'dry')).toEqual({ value: 0.0002, unit: 'lb' });
+    expect(toGallonOrLbEquivalent(-0.0024, unit, 'dry')).toEqual({ value: -0.0002, unit: 'lb' });
+    expect(0.0023999999999999994).not.toBe(0.0024);
+    expect(toGallonOrLbEquivalent(0.0023999999999999994, unit, 'dry')).toEqual({ value: 0.0001, unit: 'lb' });
+  });
+
+  it.each([
+    [0.0192, 'oz', 'liquid', 0.0002, 'gal'],
+    [-0.0192, 'oz', 'liquid', -0.0002, 'gal'],
+    [0.0012, 'pt', 'liquid', 0.0002, 'gal'],
+    [0.0006, 'qt', 'liquid', 0.0002, 'gal'],
+    [0.00015, 'lb', 'dry', 0.0002, 'lb'],
+    [7.5e-8, 'ton', 'dry', 0.0002, 'lb'],
+    [0.0024, 'oz', undefined, 0.0002, 'lb'],
+    [0.0192, 'fl oz', undefined, 0.0002, 'gal'],
+  ] as const)('rounds %s %s (%s) using SQL-observed decimal expectations', (quantity, unit, form, value, equivalentUnit) => {
+    expect(toGallonOrLbEquivalent(quantity, unit, form)).toEqual({ value, unit: equivalentUnit });
+  });
+
+  it('preserves negative zero for tiny negative equivalents', () => {
+    expect(toGallonOrLbEquivalent(-0.00001, 'oz', 'dry')?.value).toBe(-0);
+  });
+
+  /** Ordinary reference cases from convert_to_gl_lb (20261229160000).
+   *  Binary arithmetic here is not an oracle for rounding ties; those use SQL-observed literals above. */
   function serverGlLb(q: number, unit: string, form: 'liquid' | 'dry'): { value: number; unit: 'gal' | 'lb' } | null {
     const u = unit.replace(/^ +| +$/g, '').toUpperCase(); // SQL btrim strips spaces only, never tabs or line breaks
     if (form === 'dry') {

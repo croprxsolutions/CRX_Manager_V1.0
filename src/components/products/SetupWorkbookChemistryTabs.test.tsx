@@ -393,7 +393,7 @@ describe('SetupWorkbookChemistryTabs', () => {
     render(<SetupWorkbookChemistryTabs open profileId="admin" fileGeneration={8} parsed={null} onSaved={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Apply with removal…' }));
     expect(H.startChemistrySave).not.toHaveBeenCalled();
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Apply with removal' }));
     await waitFor(() => expect(H.startChemistrySave).toHaveBeenCalledWith('admin', 'setup-workbook-chemistry',
       'promote_chemistry_proposal', { p_proposal_id: proposal.id, p_expected_proposal_version: 3, p_decision: 'apply_delete' }, expect.any(String)));
@@ -409,7 +409,7 @@ describe('SetupWorkbookChemistryTabs', () => {
     render(<SetupWorkbookChemistryTabs open profileId="admin" fileGeneration={8} parsed={null} onSaved={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Apply with removal…' }));
     fireEvent.click(screen.getByRole('button', { name: 'Apply with removal' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
     await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', expect.stringMatching(/Use Finish save above to retry it/)));
     expect(screen.getByRole('button', { name: 'Finish save' })).toBeInTheDocument();
   });
@@ -422,7 +422,7 @@ describe('SetupWorkbookChemistryTabs', () => {
     render(<SetupWorkbookChemistryTabs open profileId="admin" fileGeneration={8} parsed={null} onSaved={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Apply with removal…' }));
     fireEvent.click(screen.getByRole('button', { name: 'Apply with removal' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
     await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', 'proposal changed'));
   });
 

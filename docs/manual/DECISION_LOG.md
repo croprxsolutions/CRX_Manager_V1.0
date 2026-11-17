@@ -6,6 +6,12 @@
 **Why:** both were clean at Sol before; the new heads only merge current `staging` (which brought the npm audit exception from #1941) plus this entry, with no change to either PR's own code.
 **What it does:** unlocks one Sol review of each PR's new head. Every other gate is unchanged: each still needs a clean Sol review and green checks before it merges into `staging`.
 
+## 2026-11-17 — CMP-2 plan approved with one change: the generic build is always the yardstick
+
+**Decision (Mason, in chat, 2026-11-17):** after a chunk-by-chunk re-review of the CMP-2 plan (grand plan Stage 5), Mason chose "Approve with that change". This lifts the 2026-11-11 hold below. He confirmed the scope and build order, the shared generic reference set and the Halex GT test, search by ingredient and mode of action, the equivalence warnings, the selling price and admin cost modes with admin-only profit, the missing-data and incomplete-row rules, and the many-products/category view.
+**The change:** "i want the generic built to always be what brand name is pegged agsint, if it is not a saving thenit needs to be red and say not saving to buid". So every row reads one way: generic build total G against brand (premix) price B. When G < B it shows "Build saves $(B − G)/acre", with the percent taken off the brand price: (B − G) / B × 100 (Mason chose "20% off brand price" for $10 brand against an $8 build). When G ≥ B the row is red and says "Not a saving to build", with the dollar difference. The plan's reverse "premix discount versus the generic benchmark" percent is dropped. The same rule applies in admin Cost mode.
+**Editing on the screen (Mason, same day):** asked which numbers he can type over, he chose only "Rate per acre". For what happens to an edit, he chose "What-if only": everything recalculates on screen, the row is marked "edited" with a reset, and nothing changes the catalog, quotes or saved rates. Prices and product strengths always come from the database.
+**What this forbids/implies:** CMP-2 may now get a build sheet and build, but only in its planned place: after its required data, RT-4 trusted rates, relevant use guidance and MOA-1. Approving the plan does not start a build. CLN-2 still follows CMP-2, and dropping `ingredient_map` still needs Mason's approval as a destructive change.
 ## 2026-11-17 — Product Master waiting items: Mason's answers
 
 **Decision (Mason, in chat, 2026-11-17, decision session).** Live check that day: 0 `product_rates` rows, 0 `active_ingredients`.
@@ -262,7 +268,7 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision (Mason, 2026-11-11):** he wants to re-review the CMP-2 plan "BEFORE ANY BUILD HAPPENS".
 **Why:** CMP-2 is the last and largest product-comparison build; Mason wants to look at its plan again before any work starts.
-**What this forbids/implies:** no CMP-2 build session, build sheet or code may start until Mason has re-reviewed the plan and approved it in chat. The hold is marked in `docs/plans/2026-10-29-product-GRAND-PLAN.md` (stage table, Stage 5 and section 8) and on To-Do row 2.12. CLN-2 (retire `ingredient_map`) waits with it, since it follows CMP-2. Lifting the hold needs a new entry here.
+**What this forbids/implies:** no CMP-2 build session, build sheet or code may start until Mason has re-reviewed the plan and approved it in chat. The hold is marked in `docs/plans/2026-10-29-product-GRAND-PLAN.md` (stage table, Stage 5 and section 8) and on To-Do row 2.12. CLN-2 (retire `ingredient_map`) waits with it, since it follows CMP-2. Lifting the hold needs a new entry here. **Lifted 2026-11-17** (entry above: approved with one change).
 
 ## 2026-11-11 — Resistance mode-of-action groups: shown on the product, later on quotes
 

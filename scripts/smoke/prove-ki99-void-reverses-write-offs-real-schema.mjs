@@ -351,6 +351,16 @@ function main() {
   assert.equal(before.reversed, 'false', `BEFORE: the write-off was already reversed by the void\n${before.output}`);
   console.log('[prover] BEFORE: voiding INV-K99-1 leaves its $10.00 write-off active (KI-99 reproduced)');
 
+  // Sol HIGH: a write-off left active by an old-body void refuses the candidate, and nothing changes.
+  stageText('refusal.sql', [`SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);`,
+    'SET ROLE authenticated;', voidSql(INV.one), 'RESET ROLE;', lf(CANDIDATE)].join('\n'));
+  const refusedApply = apply('refusal.sql');
+  assert.notEqual(refusedApply.status, 0, refusedApply.output);
+  assert.match(refusedApply.output, /POSTFLIGHT_FAIL: a voided invoice still has an active write-off/);
+  assert.equal(invState(INV.one).status, 'posted', 'the refused apply left the old-body void behind');
+  assert.equal(definition(TARGET), preDef, 'the refused apply changed the function');
+  console.log('[prover] refusal: an old-body void that left a write-off active makes the candidate refuse and roll back');
+
   stageText('candidate.sql', lf(CANDIDATE));
   let r = apply('candidate.sql');
   assert.equal(r.status, 0, r.output);
@@ -378,6 +388,9 @@ function main() {
   assert.equal(n(`SELECT count(*) FROM public.financial_audit_log WHERE entity_id IN ('${WO.active}', '${WO.active2}') AND actor_user_id = '${ADMIN}'`), 2, 'audit actor not filled');
   assert.deepEqual(row(`SELECT to_jsonb(w) FROM public.write_offs w WHERE id = '${WO.old}'`), oldBefore, 'the earlier reversal changed');
   assert.equal(audits(WO.old), 0);
+  assert.equal(n(`SELECT count(*) FROM public.activity_feed WHERE event_type = 'write_off_reversed' AND related_entity_type = 'invoice'
+    AND related_entity_id = '${INV.one}' AND performed_by = '${ADMIN}' AND customer_id = '${CUSTOMER}'`), 2, 'one timeline event per reversed write-off');
+
   const audit = row(`SELECT jsonb_build_object('impact', total_impact_cents, 'role', actor_role, 'old', old_values, 'new', new_values - 'reversed_at') FROM public.financial_audit_log WHERE operation_type = 'write_off_reversed' AND entity_id = '${WO.active}'`);
   assert.deepEqual(audit, { impact: 1000, role: 'admin', old: { amount_cents: 1000, reversed_at: null, invoice_status: 'posted' },
     new: { reverse_reason: 'Auto-reversed: invoice INV-K99-1 voided — [PROVER] wrong customer', invoice_status: 'voided' } });

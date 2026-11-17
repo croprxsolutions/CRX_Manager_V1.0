@@ -3,3 +3,5 @@
 Proof: `node scripts/smoke/prove-ki99-void-reverses-write-offs-real-schema.mjs` (prints `KI99_VOID_REVERSES_WRITE_OFFS_PROOF_PASS`). After the apply, read back the function md5 (`3293393c3a73721c768a365465ffe31a`) and confirm no voided invoice keeps an active write-off.
 
 Rollback (its own reviewed migration): re-issue the function from `20261206110000_ki18_leftovers_hold_expiry_reversal_month_stale_quotes.sql` (lines 291-608). Write-offs already auto-reversed stay reversed.
+
+Sol round 3 fixes (2026-11-16): each automatic reversal also writes the `write_off_reversed` customer-timeline event that `reverse_write_off` writes; the postflight locks `invoices` and `write_offs` and refuses to install while any voided invoice still has an active write-off (a void committed under the old body). The prover covers both: the refusal case rolls back with the old body intact, and case 1 counts one timeline event per reversed write-off.

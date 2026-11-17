@@ -19,7 +19,7 @@ DECLARE
   v_fn pg_proc;
 BEGIN
   FOR v_row IN SELECT * FROM (VALUES
-    ('_void_invoice_split_provenance_impl_20260719(uuid,text,text)', '604b914bae32ca1da76719658a561730', '3293393c3a73721c768a365465ffe31a', '{postgres=X/postgres}', 'p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text')
+    ('_void_invoice_split_provenance_impl_20260719(uuid,text,text)', '604b914bae32ca1da76719658a561730', 'd431c88af12d3c0563ce931e5f729c89', '{postgres=X/postgres}', 'p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text')
   ) AS t(sig, pre_md5, post_md5, acl, args)
   LOOP
     SELECT * INTO v_fn FROM pg_proc WHERE oid = to_regprocedure('public.' || v_row.sig);
@@ -257,6 +257,11 @@ BEGIN
       v_wo.amount_cents,
       'Write-off of ' || (v_wo.amount_cents::numeric / 100)::text || ' reversed on invoice ' || p_invoice_id::text
         || ': auto-reversed, invoice ' || v_inv.invoice_number || ' voided — ' || p_void_reason);
+    -- Same customer-timeline event reverse_write_off writes.
+    INSERT INTO activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id, customer_id)
+    VALUES ('write_off_reversed',
+      'Write-off of $' || (v_wo.amount_cents::numeric / 100)::text || ' reversed: auto-reversed, invoice ' || v_inv.invoice_number || ' voided — ' || p_void_reason,
+      auth.uid(), 'invoice', p_invoice_id, v_inv.customer_id);
   END LOOP;
 
   -- CREDIT-APPLY: credit_applied_cents = 0 added (all applications reversed above → already 0;
@@ -390,8 +395,14 @@ DECLARE
   v_row record;
   v_fn pg_proc;
 BEGIN
+  -- A void committed under the old body leaves its write-off active; refuse rather than install over it.
+  LOCK TABLE public.invoices, public.write_offs IN SHARE ROW EXCLUSIVE MODE;
+  IF EXISTS (SELECT 1 FROM public.write_offs w JOIN public.invoices i ON i.id = w.invoice_id
+             WHERE w.reversed_at IS NULL AND i.status = 'voided') THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: a voided invoice still has an active write-off; resolve it before applying KI-99';
+  END IF;
   FOR v_row IN SELECT * FROM (VALUES
-    ('_void_invoice_split_provenance_impl_20260719(uuid,text,text)', '604b914bae32ca1da76719658a561730', '3293393c3a73721c768a365465ffe31a', '{postgres=X/postgres}', 'p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text')
+    ('_void_invoice_split_provenance_impl_20260719(uuid,text,text)', '604b914bae32ca1da76719658a561730', 'd431c88af12d3c0563ce931e5f729c89', '{postgres=X/postgres}', 'p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text')
   ) AS t(sig, pre_md5, post_md5, acl, args)
   LOOP
     SELECT * INTO v_fn FROM pg_proc WHERE oid = to_regprocedure('public.' || v_row.sig);

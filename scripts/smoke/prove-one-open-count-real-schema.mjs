@@ -38,8 +38,10 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270111120000_one_open_count_per_stock_row.sql');
 const FOLLOW_UPS = [];
-// Later files that only READ what this proof covers and redefine none of it.
-const LATER_READ_ONLY = new Set();
+// Later files that redefine nothing this proof covers (the TOUCHED regex matches by name only).
+// 20270113100000 (#1911) re-emits adjust_inventory for C-13; no cycle-count function or trigger here calls it
+// (its latest complete_cycle_count, 20260908120000, never mentions it), so the count rules proved here are unchanged.
+const LATER_READ_ONLY = new Set(['20270113100000_stock_checks_negative_onorder_chicago.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

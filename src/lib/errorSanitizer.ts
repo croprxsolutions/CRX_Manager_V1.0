@@ -142,6 +142,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was changed. A line's shares can't total more than 100%"],
   [/^BILL_SPLIT_GROUP_DELETE_PARTIAL\b/,
    "Nothing was deleted. A Bill Split group's drafts go together: select every payer's draft to delete them"],
+  [/^STANDING_DISCOUNT_SPLIT_LOCKED\b/,
+   "Nothing was changed. This draft can't be edited (it's part of a field split, or a Bill Split payer's draft with a product line that has no quantity), so its discount can't change. Void the group and redraft it"],
   [/^BILL_SPLIT_SLIVER_LOCKED\b/,
    "Nothing was saved. This payer's draft has a product line with no quantity, so it can't be edited. Post it as drafted, or void the group"],
   [/^BILL_SPLIT_CUSTOMER_INACTIVE\b/,

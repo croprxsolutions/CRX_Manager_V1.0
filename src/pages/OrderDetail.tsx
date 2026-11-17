@@ -1021,7 +1021,8 @@ export default function OrderDetail() {
     setSavingShares(true);
     let saved = false;
     try {
-      const amountCents = Math.round(order.total_price * 100 * (pct / 100));
+      // Exact cents (total × pct ÷ 100, half away from zero): float math saved $1,024.09 at 50% as 51,204¢.
+      const amountCents = quantityTimesDollarsCents(`${pct}e-2`, order.total_price);
       const result = await supabase.from('order_shares').insert({
         order_id: order.id,
         customer_id: customerId,

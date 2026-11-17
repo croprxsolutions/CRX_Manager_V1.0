@@ -345,7 +345,7 @@ Physical inventory verification process.
 - `cycle_counts` — count sessions (status: in_progress/completed/cancelled)
 - `cycle_count_items` — per-product count lines (expected_qty, counted_qty, variance, variance_pct, is_counted, counted_by, counted_at)
 
-### Guards (KI-160, `20270111120000_one_open_count_per_stock_row.sql`)
+### Guards (KI-160, `20270113130000_one_open_count_per_stock_row.sql`)
 - One in-progress count per warehouse (unique index `cycle_counts_one_open_per_warehouse`).
 - A stock row may sit on only one item of any in-progress count (`CYCLE_COUNT_ROW_ALREADY_OPEN`).
 - A count's status only moves forward: in progress -> completed or cancelled, completed -> cancelled (`CYCLE_COUNT_REOPEN_FORBIDDEN`).

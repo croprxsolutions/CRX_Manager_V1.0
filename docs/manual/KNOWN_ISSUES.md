@@ -1035,7 +1035,7 @@ checked; it skips a product with history but no stock row at all, 0 such product
 signed rule.
 
 ### KI-160 — Two stock counts open on the same product apply the same correction twice
-**MED (latent) · PART FIX IN REVIEW (branch `claude/pm-stock-history`, migration `20270111120000`; not live) · inventory/counts · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-6, C-14) · Claude**
+**MED (latent) · PART FIX IN REVIEW (branch `claude/pm-stock-history`, migration `20270113130000`; not live) · inventory/counts · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-6, C-14) · Claude**
 `_complete_cycle_count_impl` adds the stored `variance` to current on-hand, and nothing stops two open counts on one
 inventory row: no unique or partial index on `cycle_counts` or `cycle_count_items` (live-verified). Example: counts A
 and B both record +10 on a shelf going from 90 to 100; after both complete, stock is 110. Named out of scope in the

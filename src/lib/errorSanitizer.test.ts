@@ -65,7 +65,7 @@ describe('sanitizeError', () => {
       .toBe(`Nothing was saved. ${sentence}`);
   });
 
-  // The RAISE texts and index of 20270111120000_one_open_count_per_stock_row.sql (KI-160).
+  // The RAISE texts and index of 20270113130000_one_open_count_per_stock_row.sql (KI-160).
   it.each([
     ['CYCLE_COUNT_ROW_ALREADY_OPEN', 'This stock row is already on open count CC-0018; finish or cancel that count first.'],
     ['CYCLE_COUNT_ROW_WRONG_PLACE', "This stock row is not this product at this count's warehouse."],

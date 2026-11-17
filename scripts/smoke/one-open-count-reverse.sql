@@ -1,4 +1,4 @@
--- Rollback for 20270111120000_one_open_count_per_stock_row.sql (KI-160 part). Run as one transaction.
+-- Rollback for 20270113130000_one_open_count_per_stock_row.sql (KI-160 part). Run as one transaction.
 -- Removes the two guards and the one-open-count-per-warehouse index; no data changes. After it, two open counts can
 -- again correct one stock row twice (KI-160), so only use it to back out a fault in the guards themselves.
 -- Proven by scripts/smoke/prove-one-open-count-real-schema.mjs (case R).

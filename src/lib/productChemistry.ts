@@ -338,6 +338,14 @@ async function callChemistryWrite(rpc: ChemistryRpc, params: Record<string, unkn
       const { data, error } = await supabaseUntyped.rpc('set_parent_cost_reference', params);
       return error ? { error } : { data: assertRpcResult(data, 'set_parent_cost_reference') };
     }
+    default:
+      return callIngredientWrite(rpc, params);
+  }
+}
+
+/** The ingredient-list and workbook writes (split from callChemistryWrite to keep each switch small). */
+async function callIngredientWrite(rpc: ChemistryRpc, params: Record<string, unknown>): Promise<{ data?: unknown; error?: unknown }> {
+  switch (rpc) {
     case 'save_active_ingredient': {
       const { data, error } = await supabaseUntyped.rpc('save_active_ingredient', params);
       return error ? { error } : { data: assertRpcResult(data, 'save_active_ingredient') };
@@ -366,6 +374,8 @@ async function callChemistryWrite(rpc: ChemistryRpc, params: Record<string, unkn
       const { data, error } = await supabaseUntyped.rpc('set_active_ingredient_modes', params);
       return error ? { error } : { data: assertRpcResult(data, 'set_active_ingredient_modes') };
     }
+    default:
+      throw new Error(`Unknown chemistry write ${rpc}`);
   }
 }
 

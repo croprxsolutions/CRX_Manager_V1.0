@@ -37,6 +37,40 @@ function listProblem(entries: IngredientModeEntry[], reason: string): string | n
   return null;
 }
 
+const reachText = (products: number, codesChanged: boolean) => {
+  const count = `${products} product${products === 1 ? '' : 's'}`;
+  return codesChanged ? `This changes the groups shown on ${count}.` : `Used by ${count}.`;
+};
+
+function GroupRows({ rows, onChange }: { rows: GroupDraft[]; onChange: (update: (current: GroupDraft[]) => GroupDraft[]) => void }) {
+  const patch = (key: number, change: Partial<GroupDraft>) => onChange((current) => current.map((row) => (row.key === key ? { ...row, ...change } : row)));
+  return (
+    <div className="space-y-2">
+      {rows.map((row) => (
+        <div key={row.key} className="flex flex-wrap items-end gap-2 rounded-lg border border-gray-200 p-2">
+          <div className="w-28">
+            <Select id={`grp-scheme-${row.key}`} label="Scheme" value={row.scheme}
+              options={SCHEMES.map((scheme) => ({ value: scheme, label: scheme }))}
+              onChange={(event) => patch(row.key, { scheme: event.target.value as ModeOfActionScheme })} />
+          </div>
+          <div className="w-28">
+            <Input id={`grp-code-${row.key}`} label="Group" maxLength={10} value={row.code} onChange={(event) => patch(row.key, { code: event.target.value })} />
+          </div>
+          <div className="min-w-48 flex-1">
+            <Input id={`grp-note-${row.key}`} label="Where is this from?" maxLength={1000} value={row.note} placeholder="e.g. HRAC 2024 classification"
+              onChange={(event) => patch(row.key, { note: event.target.value })} />
+          </div>
+          <Button size="sm" variant="ghost" onClick={() => onChange((current) => current.filter((item) => item.key !== row.key))}>Remove</Button>
+        </div>
+      ))}
+      <Button size="sm" variant="secondary" disabled={rows.length >= MAX_GROUPS}
+        onClick={() => onChange((current) => [...current, { key: nextKey(), scheme: 'HRAC', code: '', note: '' }])}>
+        Add a group
+      </Button>
+    </div>
+  );
+}
+
 /**
  * MOA-1: one ingredient's resistance group list (sheet section 5). Every product containing the ingredient, and every
  * salt or ester of it with no list of its own, shows these groups. Admin only; the database refuses anyone else.
@@ -105,7 +139,6 @@ export default function IngredientGroupsModal({ ingredientId, ingredientName, ac
       setSaving(false);
     }
   };
-  const patch = (key: number, change: Partial<GroupDraft>) => setRows((current) => current.map((row) => (row.key === key ? { ...row, ...change } : row)));
 
   return (
     <Modal open onClose={onClose} closeDisabled={saving} title={`Groups of ${users?.name ?? ingredientName}`} size="large"
@@ -130,36 +163,12 @@ export default function IngredientGroupsModal({ ingredientId, ingredientName, ac
               ester of it that has no list of its own.
             </p>
             <p className="text-sm text-nav-dark" role="status">
-              {codesChanged
-                ? `This changes the groups shown on ${users.products_affected} product${users.products_affected === 1 ? '' : 's'}.`
-                : `Used by ${users.products_affected} product${users.products_affected === 1 ? '' : 's'}.`}
+              {reachText(users.products_affected, codesChanged)}
             </p>
             {users.modes.length === 0 && acidName && (
               <p className="text-sm text-secondary">No list of its own yet, so products show {acidName}'s groups. Saving a list here replaces those for {users.name}.</p>
             )}
-            <div className="space-y-2">
-              {rows.map((row) => (
-                <div key={row.key} className="flex flex-wrap items-end gap-2 rounded-lg border border-gray-200 p-2">
-                  <div className="w-28">
-                    <Select id={`grp-scheme-${row.key}`} label="Scheme" value={row.scheme}
-                      options={SCHEMES.map((scheme) => ({ value: scheme, label: scheme }))}
-                      onChange={(event) => patch(row.key, { scheme: event.target.value as ModeOfActionScheme })} />
-                  </div>
-                  <div className="w-28">
-                    <Input id={`grp-code-${row.key}`} label="Group" maxLength={10} value={row.code} onChange={(event) => patch(row.key, { code: event.target.value })} />
-                  </div>
-                  <div className="min-w-48 flex-1">
-                    <Input id={`grp-note-${row.key}`} label="Where is this from?" maxLength={1000} value={row.note} placeholder="e.g. HRAC 2024 classification"
-                      onChange={(event) => patch(row.key, { note: event.target.value })} />
-                  </div>
-                  <Button size="sm" variant="ghost" onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))}>Remove</Button>
-                </div>
-              ))}
-              <Button size="sm" variant="secondary" disabled={rows.length >= MAX_GROUPS}
-                onClick={() => setRows((current) => [...current, { key: nextKey(), scheme: 'HRAC', code: '', note: '' }])}>
-                Add a group
-              </Button>
-            </div>
+            <GroupRows rows={rows} onChange={setRows} />
             <Input id="grp-reason" label="Why are the groups changing?" maxLength={1000} value={reason} onChange={(event) => setReason(event.target.value)} />
             {problem && <p className="text-sm text-amber-800" role="status">{problem}</p>}
           </fieldset>

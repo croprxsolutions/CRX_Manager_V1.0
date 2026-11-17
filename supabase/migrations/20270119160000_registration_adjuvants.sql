@@ -3,7 +3,7 @@
 --  _product_parent_replay(key, scope, fingerprint), which calls check_idempotency, then saves its receipt with
 --  save_idempotency last, in the same transaction. The hook only recognises check_idempotency.)
 -- Written 2026-11-15. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270117110000_registration_adjuvants.md.
+-- docs/reference/migrations.d/20270119160000_registration_adjuvants.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY: Product Master USE-2, part 1 (database). docs/plans/2026-11-15-product-USE2-BUILD-SHEET.md sections 3.0

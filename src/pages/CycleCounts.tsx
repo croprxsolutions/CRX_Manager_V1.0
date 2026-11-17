@@ -291,7 +291,11 @@ export default function CycleCounts() {
           .from('cycle_count_items')
           .insert(items);
 
-        if (itemsError) throw itemsError;
+        if (itemsError) {
+          // The empty count was saved; show it so it can be cancelled (KI-160: creation is not one request).
+          void fetchCounts();
+          throw itemsError;
+        }
 
         await logActivity({ event: 'cycle_count_started', description: `Cycle count ${countNum} started for ${newWarehouse} (${invItems.length} products)`, performedBy: profile.id, entityType: 'cycle_count', entityId: cc.id });
 

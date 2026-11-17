@@ -24,6 +24,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/products_sku_unique/, 'Another product already has this SKU'],
   [/products_container_type_check/, 'Choose a container type: Jug, Drum, Pallet, Mini-Bulk, Shuttle, Bag, Tote, Ea or Jar'],
   [/products_active_name_unique/, 'Another active product already has this name'],
+  [/cycle_counts_one_open_per_warehouse/, 'Nothing was saved. This warehouse already has an open count; finish or cancel it first'],
   [/product_setup_rate_check/, 'Rate Per Acre must be zero or greater'],
   [/product_setup_epa_check/, 'Enter an EPA number like 524-475 or 100-1234-5905. This checks format only'],
   [/product_setup_rei_check/, 'REI (hours) must be zero or greater'],
@@ -142,6 +143,10 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Nothing was changed. A line's shares can't total more than 100%"],
   [/^BILL_SPLIT_GROUP_DELETE_PARTIAL\b/,
    "Nothing was deleted. A Bill Split group's drafts go together: select every payer's draft to delete them"],
+  [/^STANDING_DISCOUNT_SPLIT_LOCKED\b/,
+   "Nothing was changed. This draft can't be edited (it's part of a field split, or a Bill Split payer's draft with a product line that has no quantity), so its discount can't change. Void the group and redraft it"],
+  [/^BILLING_M4_OFF\b/,
+   "Nothing was changed. Sales tax and standing discounts aren't switched on yet; they turn on with commission"],
   [/^BILL_SPLIT_SLIVER_LOCKED\b/,
    "Nothing was saved. This payer's draft has a product line with no quantity, so it can't be edited. Post it as drafted, or void the group"],
   [/^BILL_SPLIT_CUSTOMER_INACTIVE\b/,
@@ -441,6 +446,9 @@ export function sanitizeError(error: unknown): string {
   // The server sentence names the product and says what to do, so it is kept.
   const chemPriceRequired = message.match(/^CHEM_PRICE_REQUIRED:\s*(.+)$/s);
   if (chemPriceRequired) return `Nothing was saved. ${chemPriceRequired[1].trim()}`;
+  // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.
+  const countRule = message.match(/^(?:CYCLE_COUNT_ROW_ALREADY_OPEN|CYCLE_COUNT_ROW_WRONG_PLACE|CYCLE_COUNT_REOPEN_FORBIDDEN|CYCLE_COUNT_REVERSE_BLOCKED):\s*(.+)$/s);
+  if (countRule) return `Nothing was saved. ${countRule[1].trim()}`;
   // Sale-line triggers (20261105190000, WP-PM-6b): the same rule on quote, order and tier-priced invoice lines.
   const salePriceMissing = message.match(/^(?:QUOTE|ORDER|INVOICE)_PRICE_MISSING:\s*(.+)$/s);
   if (salePriceMissing) return `Nothing was saved. ${salePriceMissing[1].trim()}`;

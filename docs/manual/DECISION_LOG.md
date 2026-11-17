@@ -1,5 +1,20 @@
 # Decision Log
 
+## 2026-11-17 — #1916, #1917 and #1918 (USE-2) may have up to 12 Sol rounds
+
+**Decision (Mason, in chat, 2026-11-17: "Yes, up to 12").** PR #1916 (USE-2 database), PR #1917 (product page) and PR #1918 (quote line note) may each have Sol rounds up to 12.
+**What it does:** lifts the round cap on these three PRs from 7 to 12. Every other gate is unchanged: each PR still needs a clean Sol review of its head and green checks before it merges into `staging`.
+
+## 2026-11-16 — #1916, #1917 and #1918 (USE-2) may have up to 7 Sol rounds
+
+**Decision (Mason, in chat, 2026-11-16: "i approve all these landing and migrations tonight").** PR #1916 (USE-2 database), PR #1917 (product page) and PR #1918 (quote line note) may each have Sol rounds 5 through 7.
+**What it does:** lifts the round cap on these three PRs to 7. Every other gate is unchanged: each PR still needs a clean Sol review of its head and green checks before it merges into `staging`.
+## 2026-11-17 — #1897 may have Sol rounds 5 and 6
+
+**Decision (Mason, in chat, 2026-11-17: "I approve up to 6 rounds before parking for the night").** PR #1897 (stock history integrity: one open count per stock row) may have Sol rounds 5 and 6. Rounds 3 and 4 each found a different gap in who may write the stock-count tables directly (reversing a count while a newer count holds its stock row; deleting a completed count), and each was closed in the database: counts now change only through the count screen's actions (start, add a line, save a line, complete, cancel, reverse).
+**Why:** each gap was a missing database guard on the same two tables, closed rather than worked around; Mason chose to keep going for the night rather than park.
+**What this forbids/implies:** no Sol round past 6 on #1897; a new BLOCKER/HIGH in round 6 parks the PR for Mason.
+
 ## 2026-11-16 — #1878 and #1880 may have up to 7 Sol rounds after staging moved under them
 
 **Decision (Mason, in chat, 2026-11-16: "i approve up to 7 rounds").** PR #1878 (priority schema types) and PR #1880 (priority integrity follow-ups) may each have Sol rounds 5 through 7. Their latest Sol findings came from merging a fast-moving `staging` (a duplicated generated type after #1885 landed, and staging migrations newer than the candidate), not from one design mechanism coming back.
@@ -24,6 +39,11 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-14 — Voiding an invoice reverses its write-offs automatically (KI-99)
+
+**Decision (Mason, in session, 2026-11-14: "Auto-reverse it", over refusing the void until the write-off is reversed by hand).** Voiding a posted, overdue or paid invoice marks each of its active write-offs reversed in the same step, recorded like a manual reversal (who, when, reason naming the void).
+**Why:** a voided invoice's write-off otherwise stayed active and showed on the customer statement as an unexplained credit; void already undoes applied credits and prepay the same way.
+**What this forbids/implies:** each write-off's Chicago booking month must be open, as for a manual reversal; a closed month refuses the whole void. Built in `20270116100000_ki99_void_reverses_write_offs.sql`.
 ## 2026-11-14 — MOA alternate spellings are refused
 
 **Decision (Mason, 2026-11-14: "CAS optional with warning; refuse alternate MOA spelling.").** If a mode-of-action group is already active under one spelling, a save using another spelling for the same group must refuse; replacing it is a two-save retirement then addition.
@@ -414,6 +434,34 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in session, 2026-11-09: "I agree build report before typing in brands"):** CLN-3, the read-only report of products whose bracketed name brands disagree with their saved brands, is built before Mason starts entering brands, not after brand PR B as the Product Master grand plan ordered.
 **Why:** it then serves as the brand-entry worklist and afterwards as the ongoing check. It has no technical dependency on PR B, which leaves brand storage and `get_product_brands` unchanged. Plan: `docs/plans/2026-11-08-product-CLN3-BUILD-SHEET.md`.
 **What this forbids/implies:** don't hold CLN-3 behind PR B. If brand storage or the brand list rule changes, re-check the report's copy of that rule.
+
+## 2026-11-08 — Field split rules: who may be billed, split dates, the extra penny, archiving fields
+
+**Decision (Mason, in chat, 2026-11-08: "I agree with all rest", accepting the recommended answers to foundation 18.1 questions 1, 3, 4 and 5 in `docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md` §5):**
+- **Who may be billed (KI-76):** a field split bills only payers saved on the field's split, or on the job's own split. To bill someone else, the office adds them to the field's split first (any active customer). A line changed before posting may re-weight those payers but not add a new one.
+- **Split changes:** a new split starts on a date the office picks (any date, past or future, from the first package on; superseded the earlier today-only limit, see the 2026-11-08 Astra-review entry below); work dated on or after it uses it; posted invoices never change; an unposted draft keeps its split until someone presses "refresh split", which is logged.
+- **Extra penny:** leftover cents go to the primary payer (usually the grower), the same rule as the chemical-sale Bill Split.
+- **Archiving:** fields are archived, never deleted. Admins and sales reps archive; archiving is blocked while the field has open or unbilled work; only admins restore.
+**Why:** one rule set for every billing path, matching Taha's chemical-sale split where they meet, and no billing history lost.
+**What this forbids/implies:** no field-billing path may bill a customer outside the field's (or job's) split; no hard delete of fields from any screen.
+
+## 2026-11-08 — Field splits: separate application and product shares; "shared with" on bills; posted field invoices editable until money or month close
+
+**Decision (Mason, in chat, 2026-11-08 evening, after the plan was compared with other ag retail software):** each payer on a field's split has an application share and a product share, set on the field; application and fuel-surcharge lines start from the application shares, product lines from the product shares, and any one line can still be changed by hand before posting. Each payer's invoice shows who else shares it. A posted field-application invoice can be edited (unpost, change, re-post, whole payer set) while no payment, prepay, credit or write-off is applied to any invoice in the set and its accounting month is open; after that, only a credit and a new bill.
+**Why:** matches how other ag retail systems split landlord and tenant bills by product group, with only the two groups CRX needs, and lets the office fix a bill before money or the month makes it final.
+**What this forbids/implies:** replaces the yes/no "pays application" flag in the fields-and-who-pays plan (`docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md` §0); no edit of a posted field invoice once money touches it or its month closes.
+
+## 2026-11-08 — Field splits: any start date from the start; fuel surcharge follows who pays application
+
+**Decision (Mason, in chat, 2026-11-08, answering build sheet questions 6 and 7 after the Astra review: "fuel surcharge follows who pays application" and "no i want split fields now"):** a payer excused from the application charge also starts at 0% on fuel surcharge lines; and the office may give a field split any start date, past or future, from the first package (FP-1), instead of only today's date until February.
+
+**What this forbids/implies:** the old invoice, job-transfer, blend-ticket and field-linked order screens are not made date-aware. Mason confirmed the same day that field application invoices are not billed until February, the feature is used from about March, and the old screens stay on for testing only ("im not using them so just keep them on so we can test etc no real orders will be entered"); each later package's cutover checks that no real record went through an old screen. A nightly job keeps the old copy current when a future split starts. Flat fees were not covered by the answer; they default to the full field split until Mason says otherwise. Every line can still be changed before posting.
+
+## 2026-11-08 — Field splits fill every invoice line, and each line can be changed before posting
+
+**Decision (Mason, in chat, 2026-11-08, answering foundation 18.1 question 2: "yes we need to also be able to split line items by different shares than saved to the field. field level splits always auto populate based on field but we need to be able to adjust the split before posting invoice and change line items at different percentages and shares"):** a field's split group can mark a payer as not paying the application charge, every field-billing invoice line starts from the field's split, and before posting the office can give any line its own payer percentages.
+**Why:** real splits differ by charge (a landlord who pays product but not application) and sometimes by line; the field split is the default, not a lock.
+**What this forbids/implies:** the field-application engine must bill line by line (the per-line engine, build sheet FP-5a in `docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`); each line still adds to exactly 100% in the database; a line change never edits the field's saved split; posting snapshots each line. Which payers a line may add is still question 1 (KI-76).
 
 ## 2026-11-08 — Re-activating an applicator never takes a field off another sprayer's board (KI-28 review)
 

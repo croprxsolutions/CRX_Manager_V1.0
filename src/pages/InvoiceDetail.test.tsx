@@ -1793,7 +1793,7 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     fireEvent.change(screen.getByRole('combobox', { name: 'Charge type' }), { target: { value: 'service' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Charge description' }), { target: { value: 'Soil sampling' } });
     const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('li')!;
-    fireEvent.change(within(row).getByRole('spinbutton'), { target: { value: '40.50' } });
+    fireEvent.change(within(row).getByRole('textbox', { name: /^(Amount|Unit price) for/ }), { target: { value: '40.50' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
@@ -1817,11 +1817,12 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
 
     fireEvent.click(screen.getByRole('button', { name: 'Add charge' }));
     const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('li')!;
-    const amount = within(row).getByRole('spinbutton') as HTMLInputElement;
+    const amount = within(row).getByRole('textbox', { name: /^(Amount|Unit price) for/ }) as HTMLInputElement;
     fireEvent.change(amount, { target: { value: '-100.00' } });
 
-    expect(mockToast).toHaveBeenCalledWith('error', 'Enter a price of $0.00 or more. Use a credit memo to give money back.');
-    expect(amount.value).toBe('0.00');
+    // The typed text stays with a message under the box; nothing is stored, so no $100.00 charge appears.
+    expect(within(row).getByText("Can't be negative")).toBeInTheDocument();
+    expect(amount).toHaveAttribute('aria-invalid', 'true');
     expect(screen.queryByText('$100.00')).toBeNull();
   });
 
@@ -1848,7 +1849,7 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     expect(screen.getByRole('combobox', { name: 'Charge type' })).toHaveValue('');
     fireEvent.change(screen.getByRole('textbox', { name: 'Charge description' }), { target: { value: 'Soil sampling' } });
     const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('li')!;
-    fireEvent.change(within(row).getByRole('spinbutton'), { target: { value: '40.50' } });
+    fireEvent.change(within(row).getByRole('textbox', { name: /^(Amount|Unit price) for/ }), { target: { value: '40.50' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Pick a charge type for every line.'));
     expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
@@ -1882,7 +1883,8 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     await waitFor(() => {
       const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
       expect(saveCall?.[1].p_items).toEqual([expect.objectContaining({
-        id: 'item-old', charge_type: 'other', quantity: 1, unit_price_cents: 1234, extended_cents: 1234, is_application_fee: false,
+        // Item 9 (b): the line keeps its amount (2 × $12.34 = $24.68 becomes 1 × $24.68), not 1 × the unit price.
+        id: 'item-old', charge_type: 'other', quantity: 1, unit_price_cents: 2468, extended_cents: 2468, is_application_fee: false,
       })]);
     });
   });
@@ -1909,8 +1911,8 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     fireEvent.change(screen.getByRole('combobox', { name: 'Charge type' }), { target: { value: 'freight' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Charge description' }), { target: { value: 'Freight' } });
     const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('li')!;
-    expect(within(row).getAllByRole('spinbutton')).toHaveLength(1);
-    fireEvent.change(within(row).getByRole('spinbutton'), { target: { value: '45.00' } });
+    expect(within(row).getAllByRole('textbox', { name: /^(Amount|Unit price) for/ })).toHaveLength(1);
+    fireEvent.change(within(row).getByRole('textbox', { name: /^(Amount|Unit price) for/ }), { target: { value: '45.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
@@ -1952,7 +1954,7 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     fireEvent.change(screen.getByRole('combobox', { name: 'Charge type' }), { target: { value: 'service' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Charge description' }), { target: { value: 'Soil sampling' } });
     const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('li')!;
-    fireEvent.change(within(row).getByRole('spinbutton'), { target: { value: '40.50' } });
+    fireEvent.change(within(row).getByRole('textbox', { name: /^(Amount|Unit price) for/ }), { target: { value: '40.50' } });
     const due = screen.getByRole('region', { name: 'Amount due' });
     expect(due.textContent).toMatch(/\$40\.50Invoice total\$40\.50/);
     expect(within(due).queryByText('Totals update when you save')).not.toBeInTheDocument();
@@ -1967,7 +1969,7 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     fireEvent.click(screen.getByRole('button', { name: 'Add charge' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Charge description' }), { target: { value: 'Freight' } });
     const row = screen.getByRole('textbox', { name: 'Charge description' }).closest('li')!;
-    fireEvent.change(within(row).getByRole('spinbutton'), { target: { value: '45.00' } });
+    fireEvent.change(within(row).getByRole('textbox', { name: /^(Amount|Unit price) for/ }), { target: { value: '45.00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Pick a charge type for every line.'));
     expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
@@ -2313,7 +2315,7 @@ describe('InvoiceDetail — standing discount and sales tax lines (billing plan 
     // An admin on a chemical-sale draft can change this sale's discount (billing plan M4b).
     expect(await screen.findByLabelText('Standing discount for this sale')).toBeInTheDocument();
     // Price boxes for the product and the freight, none for the discount or tax line.
-    const prices = screen.getAllByRole('spinbutton').map((input) => (input as HTMLInputElement).value);
+    const prices = screen.getAllByRole('textbox', { name: /^(Amount|Unit price) for/ }).map((input) => (input as HTMLInputElement).value);
     expect(prices).toContain('100.00');
     expect(prices).toContain('45.00');
     expect(prices).not.toContain('-30.00');
@@ -2488,11 +2490,96 @@ describe('InvoiceDetail — one main action per status, same actions and people 
       load(draft, [...withCharges.slice(0, 2), oldFreight]);
       renderInvoiceDetail();
       const box = await screen.findByLabelText('Unit price for Old freight');
-      expect(box).toHaveValue(25);
+      expect(box).toHaveValue('25.00');
       expect(screen.getByText('3 × $25.00 = $75.00')).toBeInTheDocument();
       // A one-amount charge keeps its Amount box and no sum.
-      expect(screen.getByLabelText('Amount for Delivery to home farm')).toHaveValue(45);
+      expect(screen.getByLabelText('Amount for Delivery to home farm')).toHaveValue('45.00');
       expect(screen.queryByText(/1 × \$45\.00/)).not.toBeInTheDocument();
+    });
+
+    // Item 9 (b): picking a type on that older line keeps its amount (1 × $75.00), not 1 × the unit price ($25.00).
+    it('picking a type on an older 3 × $25.00 line keeps its $75.00', async () => {
+      load(draft, [lines[0], oldFreight]);
+      renderInvoiceDetail();
+      fireEvent.change(await screen.findByLabelText('Charge type'), { target: { value: 'freight' } });
+      const box = await screen.findByLabelText('Amount for Old freight');
+      expect(box).toHaveValue('75.00');
+      expect(screen.queryByText(/3 × \$25\.00/)).not.toBeInTheDocument();
+      const amounts = within(screen.getByRole('region', { name: 'What this invoice bills' })).getAllByTestId('invoice-line-amount');
+      expect(amounts.find((el) => el.getAttribute('data-kind') === 'charge')).toHaveAttribute('data-cents', '7500');
+    });
+
+    // Item 9 (c): an edited line total is the database's exact quantity × price (safe_cents_qty), not binary float:
+    // 4.35 × 50¢ is exactly 217.5¢, which rounds to 218¢; float math gives 217.4999… and 217¢.
+    it('an edited line total is exact: 4.35 × $0.50 is $2.18', async () => {
+      load(draft, [lines[0]]);
+      renderInvoiceDetail();
+      fireEvent.change(await screen.findByLabelText('Quantity for Herbicide'), { target: { value: '4.35' } });
+      fireEvent.change(screen.getByLabelText('Unit price for Herbicide'), { target: { value: '0.50' } });
+      const productAmount = () => within(screen.getByRole('region', { name: 'What this invoice bills' }))
+        .getAllByTestId('invoice-line-amount').find((el) => el.getAttribute('data-kind') === 'product');
+      await waitFor(() => expect(productAmount()).toHaveTextContent('$2.18'));
+    });
+
+    // Price boxes take normal typing: clear, then type key by key (each key added to what the box shows).
+    const typeKeys = (box: HTMLElement, keys: string) => {
+      for (const key of keys) fireEvent.change(box, { target: { value: (box as HTMLInputElement).value + key } });
+    };
+
+    it('a cleared unit price box takes 0.50 typed key by key, and the line updates', async () => {
+      load(draft, [lines[0]]);
+      renderInvoiceDetail();
+      const box = await screen.findByLabelText('Unit price for Herbicide');
+      fireEvent.change(box, { target: { value: '' } });
+      typeKeys(box, '0.50');
+      expect(box).toHaveValue('0.50');
+      const productAmount = within(screen.getByRole('region', { name: 'What this invoice bills' }))
+        .getAllByTestId('invoice-line-amount').find((el) => el.getAttribute('data-kind') === 'product');
+      expect(productAmount).toHaveTextContent('$1.00');
+    });
+
+    it('a third decimal stays in the box with a message and Save names the line instead of saving', async () => {
+      load(draft, [lines[0]]);
+      renderInvoiceDetail();
+      const box = await screen.findByLabelText('Unit price for Herbicide');
+      typeKeys(box, '5');
+      expect(box).toHaveValue('10.005');
+      expect(box).toHaveAttribute('aria-invalid', 'true');
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Price for Herbicide: 2 decimals max'));
+      expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
+    });
+
+    // Luna MED: rows are keyed by position, so the typed text lives on the line, not in the box.
+    it('removing a line with a bad typed price does not leave that text on the next line', async () => {
+      const fungicide = { ...lines[0], id: 'it-9', order_item_id: 'oi-9', product_id: 'p-9', product: { product_name: 'Fungicide' }, description: 'Fungicide', unit_price_cents: 2500, extended_cents: 5000, sort_order: 1 };
+      load(draft, [lines[0], fungicide]);
+      renderInvoiceDetail();
+      typeKeys(await screen.findByLabelText('Unit price for Herbicide'), '5');
+      fireEvent.click(screen.getByRole('button', { name: 'Remove Herbicide' }));
+      const box = await screen.findByLabelText('Unit price for Fungicide');
+      expect(box).toHaveValue('25.00');
+      expect(box).not.toHaveAttribute('aria-invalid');
+    });
+
+    it('renaming a charge keeps its bad typed price, so Save still refuses it', async () => {
+      load(draft, [...withCharges.slice(0, 2)]);
+      renderInvoiceDetail();
+      typeKeys(await screen.findByLabelText('Amount for Delivery to home farm'), '5');
+      fireEvent.change(screen.getByLabelText('Charge description'), { target: { value: 'Freight' } });
+      expect(screen.getByLabelText('Amount for Freight')).toHaveValue('45.005');
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Price for Freight: 2 decimals max'));
+      expect(mockRpc.mock.calls.some(([name]) => name === 'save_invoice')).toBe(false);
+    });
+
+    it('the charge Amount box takes normal typing too', async () => {
+      load(draft, [...withCharges.slice(0, 2)]);
+      renderInvoiceDetail();
+      const box = await screen.findByLabelText('Amount for Delivery to home farm');
+      fireEvent.change(box, { target: { value: '' } });
+      typeKeys(box, '62.50');
+      expect(box).toHaveValue('62.50');
     });
 
     // Sol MED-3: the line the page lists under Charges is a charge in Amount due too, not a product.

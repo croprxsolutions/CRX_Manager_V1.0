@@ -19,7 +19,7 @@ export default function StandingDiscountControl({ invoiceId, disabled, onChanged
   const { profile } = useAuth();
   const { toast } = useToast();
   const idem = useIdempotencyKey('set_invoice_standing_discount', profile?.id || '');
-  const [rate, setRate] = useState<{ pct: number; office: boolean } | null>(null);
+  const [rate, setRate] = useState<{ pct: number; office: boolean; drafted: number | null } | null>(null);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const inputId = useId();
@@ -30,13 +30,14 @@ export default function StandingDiscountControl({ invoiceId, disabled, onChanged
     const forId = invoiceId;
     const { data, error } = await supabase
       .from('invoice_standing_discount_rates')
-      .select('rate_pct, set_by')
+      .select('rate_pct, set_by, drafted_rate_pct')
       .eq('invoice_id', invoiceId)
       .maybeSingle();
     if (currentIdRef.current !== forId) return;
     if (error) { toast('error', sanitizeError(error)); return; }
-    const row = data as { rate_pct: number | string; set_by: string | null } | null;
-    const next = { pct: Number(row?.rate_pct ?? 0), office: !!row?.set_by };
+    const row = data as { rate_pct: number | string; set_by: string | null; drafted_rate_pct?: number | string | null } | null;
+    const drafted = row?.drafted_rate_pct == null ? null : Number(row.drafted_rate_pct);
+    const next = { pct: Number(row?.rate_pct ?? 0), office: !!row?.set_by, drafted };
     setRate(next);
     setDraft(String(next.pct));
   };
@@ -105,9 +106,14 @@ export default function StandingDiscountControl({ invoiceId, disabled, onChanged
           : rate.office ? 'Set for this sale.' : "The customer's rate when this sale was drafted."}
       </p>
       {rate.office && (
-        <Button variant="ghost" size="sm" className="min-h-11 md:min-h-0" showChevron={false} disabled={locked} onClick={() => apply(null)}>
-          Use the customer&apos;s rate
-        </Button>
+        <div>
+          <Button variant="ghost" size="sm" className="min-h-11 md:min-h-0" showChevron={false} disabled={locked} onClick={() => apply(null)}>
+            Use the customer&apos;s rate
+          </Button>
+          {rate.drafted !== null && (
+            <p className="px-3 text-xs text-secondary">Goes back to {rate.drafted}%, the customer&apos;s rate when this sale was drafted.</p>
+          )}
+        </div>
       )}
     </div>
   );

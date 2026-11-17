@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-14 — Inactive rate history supports explicit cleanup
+
+**Decision (Mason, in chat).** Include inactive product groups' existing rates in review and preserve their approvals until explicitly changed. Inactive history supports sending an approved rate back to draft, deleting a draft and clearing a review decision. It does not support fresh approval, value edits or new review decisions. Keep accepting older half-filled rate workbooks under all existing identity and server safeguards.
+
+**Why.** An inactive group can be the historical source left after its last product size moves. Its old rates should remain visible for deliberate cleanup without becoming work required for the active groups' future rate cutover.
+
+**Operative rule.** Active readiness totals and live-rate readers retain their existing scope. The new download explicitly requests inactive history; old no-argument downloads remain active-only. PostgreSQL checks current group activity under the existing locks. Proposal: `docs/plans/2026-11-14-inactive-rate-review-CONTRACT.md`, issue #1814. Candidate only; no apply, merge or deployment.
+
 Last verified: 2026-10-29. Adding an entry does not change this date.
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 

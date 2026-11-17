@@ -63,7 +63,7 @@ COMMENT ON TABLE public.billing_m4_switch IS
   'Sales tax (M4a) and standing discounts (M4b): while enabled is false the database refuses ticking a sale''s tax and '
   'any standing discount above 0 (20270117140000). One row; no app access; a migration turns it on with commission.';
 ALTER TABLE public.billing_m4_switch ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON TABLE public.billing_m4_switch FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.billing_m4_switch FROM PUBLIC, anon, authenticated, service_role;
 -- Reading it is harmless (an active user may see whether it's on); writing has no policy and no grant.
 GRANT SELECT ON TABLE public.billing_m4_switch TO authenticated;
 CREATE POLICY billing_m4_switch_select ON public.billing_m4_switch FOR SELECT TO authenticated
@@ -132,7 +132,7 @@ CREATE TRIGGER invoice_standing_discount_rates_billing_m4_guard_20270117
 INSERT INTO public.billing_m4_switch (enabled)
 SELECT EXISTS (SELECT 1 FROM orders WHERE sales_tax)
     OR EXISTS (SELECT 1 FROM customers WHERE standing_discount_pct > 0)
-    OR EXISTS (SELECT 1 FROM invoice_standing_discount_rates WHERE rate_pct > 0);
+    OR EXISTS (SELECT 1 FROM invoice_standing_discount_rates WHERE rate_pct > 0 OR drafted_rate_pct > 0);
 
 DO $postflight$
 BEGIN
@@ -142,6 +142,7 @@ BEGIN
      OR (SELECT count(*) FROM billing_m4_switch) <> 1
      OR has_table_privilege('authenticated', 'public.billing_m4_switch', 'INSERT,UPDATE,DELETE,TRUNCATE')
      OR has_table_privilege('anon', 'public.billing_m4_switch', 'SELECT,INSERT,UPDATE,DELETE')
+     OR has_table_privilege('service_role', 'public.billing_m4_switch', 'INSERT,UPDATE,DELETE,TRUNCATE')
      OR (SELECT proacl FROM pg_proc WHERE oid = 'public._billing_m4_guard_20270117()'::regprocedure)
           IS DISTINCT FROM ARRAY['postgres=X/postgres']::aclitem[]
      OR (SELECT proacl FROM pg_proc WHERE oid = 'public._billing_m4_enabled_20270117()'::regprocedure)

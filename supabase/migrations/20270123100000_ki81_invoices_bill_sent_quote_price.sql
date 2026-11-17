@@ -2400,6 +2400,7 @@ BEGIN
         v_form        text;
         v_priced_qty  numeric;
         v_price_res   jsonb;
+        v_chem_res_map jsonb;  -- KI-81: customer_id -> that customer's own resolver result (price + source)
         v_rate_unit   text := NULLIF(btrim(coalesce(v_line->>'rate_unit', '')), '');
       BEGIN
         IF v_product_id IS NULL THEN
@@ -2440,7 +2441,7 @@ BEGIN
         -- pure-tier line prices each co-owner at their own tier (calculator per_person).
         SELECT COALESCE(jsonb_object_agg(
                  m.cust,
-                 (resolve_field_app_chemical_price(
+                 resolve_field_app_chemical_price(
                     v_product_id, ARRAY(SELECT jsonb_array_elements_text(v_member_fields -> m.cust)::uuid),
                     COALESCE((SELECT c.assigned_tier FROM customers c WHERE c.id = m.cust::uuid), 1),
                     v_chem_manual, ARRAY[m.cust::uuid],
@@ -2450,9 +2451,15 @@ BEGIN
                                WHERE i.field_app_billing_set_id = v_set_id AND i.customer_id = m.cust::uuid AND i.deleted_at IS NULL
                                ORDER BY i.invoice_date DESC LIMIT 1),
                              (now() AT TIME ZONE 'America/Chicago')::date)
-                  )->>'unit_price_cents')::bigint), '{}'::jsonb)
-          INTO v_chem_price_map
+                  )), '{}'::jsonb)
+          INTO v_chem_res_map
           FROM unnest(v_members) AS m(cust);
+        -- KI-81 (Codex PR review): one grower may bill their own quote while another bills tier, so
+        -- keep each grower's OWN price source too; PASS 2 records it on their share and invoice line.
+        SELECT COALESCE(jsonb_object_agg(r.key, (r.value->>'unit_price_cents')::bigint), '{}'::jsonb),
+               jsonb_object_agg(r.key, r.value->>'price_source')
+          INTO v_chem_price_map, v_svc_source_map
+          FROM jsonb_each(v_chem_res_map) AS r;
 
         -- Codex round-11 P1: reject an UNRESOLVED chemical price. Without a manual override, if any
         -- co-owner's resolved price (field quote → their assigned tier) is NULL or <= 0, the line would
@@ -2789,13 +2796,13 @@ BEGIN
         v_share_base_price  := COALESCE((v_plan->'resolved_price_map'->>v_cust)::bigint,
                                         (v_plan->>'repr_base_unit_price_cents')::bigint,
                                         (v_alloc_row->>'base_unit_price_cents')::bigint);
-        v_share_base_source := CASE WHEN v_line_kind = 'service'
+        v_share_base_source := CASE WHEN v_line_kind IN ('service', 'chemical')
                                     THEN COALESCE(v_plan->'svc_source_map'->>v_cust, v_alloc_row->>'base_price_source')
                                     ELSE v_alloc_row->>'base_price_source' END;
         v_share_price_mode  := 'override';
       ELSIF COALESCE((v_plan->>'per_customer_priced')::boolean, false) THEN
         v_share_base_price  := (v_alloc_row->>'unit_price_cents')::bigint;        -- this co-owner's OWN price
-        v_share_base_source := CASE WHEN v_line_kind = 'service'
+        v_share_base_source := CASE WHEN v_line_kind IN ('service', 'chemical')
                                     THEN COALESCE(v_plan->'svc_source_map'->>v_cust, v_alloc_row->>'base_price_source')
                                     ELSE v_alloc_row->>'base_price_source' END;
         v_share_price_mode  := 'default';
@@ -3463,7 +3470,7 @@ BEGIN
       FROM (VALUES
         ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '81bcfd088498f0cb1624f161e1a55e46', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
         ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '7ec879b190189252a79d728584a08980', ARRAY['postgres', 'service_role'], 'v'),
-        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '767b12bc61a96bf90c6adb5cb392d7be', ARRAY['postgres', 'service_role'], 'v'),
+        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '512e2795a0bdf5d96fcb2951ba415a2c', ARRAY['postgres', 'service_role'], 'v'),
         ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'a287925b82bce2fc3a6c15dd4c947c04', ARRAY['postgres'], 's')
       ) AS pin(fn, sig, body_md5, execs, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)

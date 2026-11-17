@@ -206,6 +206,7 @@ BEGIN
 
   -- ---------------------------------------------------------------- split-bill save (field F: A and B)
   -- X1: grower B's sent quote prices only B's child (0.5 Gal at $20.00 = 1000); A's child bills A's tier (500).
+  --     Each child records its OWN price source: B's line and share 'quoted', A's 'tier' (Codex PR review).
   -- X2: its unsent change refuses. X3: grower C (not on the bill) quoting does not count: tier $10.00.
   -- X4: B's quote is on field G (A only); a split bill for G and F bills 1 Gal at tier ($10.00 = 1000).
   FOREACH v_case IN ARRAY ARRAY['X1', 'X2', 'X3', 'X4'] LOOP
@@ -221,6 +222,17 @@ BEGIN
       END;
       IF v_cents IS DISTINCT FROM (CASE v_case WHEN 'X1' THEN 1500 WHEN 'X2' THEN -1 ELSE 1000 END) THEN
         RAISE EXCEPTION 'SMOKE_FAIL(%): the split bill totals % cents', v_case, v_cents;
+      END IF;
+      IF v_case = 'X1' AND (
+           (SELECT count(*) FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+             WHERE ii.description = 'K81 split chem' AND i.deleted_at IS NULL
+               AND ii.price_source = CASE WHEN i.customer_id = c_b THEN 'quoted' ELSE 'tier' END) <> 2
+        OR (SELECT count(*) FROM invoice_line_shares s JOIN invoice_items ii ON ii.id = s.invoice_item_id
+             WHERE ii.description = 'K81 split chem'
+               AND s.base_price_source = CASE WHEN s.customer_id = c_b THEN 'quoted' ELSE 'tier' END) <> 2) THEN
+        RAISE EXCEPTION 'SMOKE_FAIL(X1): a grower''s price source is not their own: %',
+          (SELECT jsonb_agg(jsonb_build_object('customer', i.customer_id, 'item', ii.price_source))
+             FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id WHERE ii.description = 'K81 split chem');
       END IF;
       RAISE EXCEPTION 'K81_UNDO';
     EXCEPTION WHEN OTHERS THEN IF SQLERRM <> 'K81_UNDO' THEN RAISE; END IF;

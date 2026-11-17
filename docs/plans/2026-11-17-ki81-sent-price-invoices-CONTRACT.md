@@ -133,6 +133,11 @@ Mason, 2026-11-17 (in session):
    on or before the application date and had not expired by it; a quote written later (such as next season's) never
    prices an earlier application.
 
+## PR review (Codex GitHub, 2026-11-17)
+
+- Split save kept one price source for every grower: when one grower bills their own quote and another the price
+  list, each grower's invoice line and share now record their OWN source ('quoted' or 'tier'). Proof: X1.
+
 ## Sol round 3 (2026-11-17)
 
 - The season bound ignored a still-valid quote whose expiry fell after October 1: replaced by Mason's answer 4.

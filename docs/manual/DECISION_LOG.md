@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-17 — #1916, #1917 and #1918 (USE-2) may have up to 7 Sol rounds and land tonight
+
+**Decision (Mason, in chat, 2026-11-17: "i approve all these landing and migrations tonight").** PR #1916 (USE-2 database), PR #1917 (product page) and PR #1918 (quote line note) may each have Sol rounds through 7 and merge into `staging` tonight once Sol is clean and checks are green; the staging database job applies the #1916 migration.
+**Why:** the latest rounds came from merging a fast-moving `staging` (a newer staging migration forced a restamp, and #1878 rewrote a shared test list) and from small reading fixes for REG-1 one-type entries, not from one design mechanism coming back.
+**What this forbids/implies:** no round past 7 on any of the three; a BLOCKER/HIGH that is a new design problem still stops that PR for Mason; no production apply follows from this.
+
 ## 2026-11-16 — #1878 and #1880 may have up to 7 Sol rounds after staging moved under them
 
 **Decision (Mason, in chat, 2026-11-16: "i approve up to 7 rounds").** PR #1878 (priority schema types) and PR #1880 (priority integrity follow-ups) may each have Sol rounds 5 through 7. Their latest Sol findings came from merging a fast-moving `staging` (a duplicated generated type after #1885 landed, and staging migrations newer than the candidate), not from one design mechanism coming back.

@@ -722,7 +722,12 @@ const claimContext = {
   cwd: payload?.cwd,
 };
 for (const request of requests) gateRequest(request);
-for (const branch of claimBranches) claimOrRefuse({ ...claimContext, branch });
+// Every gate passed (a denial exits the process), so record the claims; a session
+// that claimed in between still wins.
+for (const branch of claimBranches) {
+  const claimed = claimOrRefuse({ ...claimContext, branch });
+  if (claimed) deny(`PR MERGE GATE: ${claimed}`);
+}
 // ALLOW point for the whole command: every merge has cleared its hard denials,
 // so the advisory lookups can spend what is left of the hook budget here. One
 // deadline is shared across the queue so N merges cannot multiply the budget.

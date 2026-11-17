@@ -172,7 +172,10 @@ for (const pushCmd of pushCommands) {
 
   // Landing claim (pr-claim-lib.mjs, fail open): the first session to push a PR branch claims it.
   let destinations = [];
-  try { destinations = pushDestinationBranches(pushCmd, branch); } catch { /* fail open */ }
+  // A dry run writes nothing, so it claims nothing.
+  if (!/(?:^|\s)(?:--dry-run|-n)(?=\s|$)/.test(pushCmd)) {
+    try { destinations = pushDestinationBranches(pushCmd, branch); } catch { /* fail open */ }
+  }
   // A ref-less push may land on a differently named upstream (push.default=upstream): claim that too.
   if (destinations.length === 1 && destinations[0] === branch) {
     try { destinations.push(git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"], pushRepoDir).replace(/^[^/]+\//, "")); } catch { /* no upstream */ }

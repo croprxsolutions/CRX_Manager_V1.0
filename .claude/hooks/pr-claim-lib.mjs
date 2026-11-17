@@ -76,6 +76,12 @@ function withLock(file, fn) {
   try { return fn(); } finally { try { unlinkSync(lock); } catch { /* gone */ } }
 }
 
+// Is this claim still enforced? A timestamp in the future (beyond clock skew) is corrupt, not fresh.
+export function claimIsFresh(claim, now = Date.now()) {
+  const at = Date.parse(claim?.at);
+  return Number.isFinite(at) && at <= now + CLOCK_SKEW_MS && now - at < CLAIM_TTL_MS;
+}
+
 // Returns a refusal message when another session holds a fresh claim on `branch`;
 // otherwise, unless `record` is false, records/refreshes this session's claim. "" = go ahead.
 export function claimOrRefuse({ file, branch, sessionId, action, cwd = "", now = Date.now(), record = true }) {
@@ -87,16 +93,14 @@ export function claimOrRefuse({ file, branch, sessionId, action, cwd = "", now =
       const claims = readClaims(file);
       const held = claims[name];
       const heldAt = Date.parse(held?.at);
-      // A timestamp in the future (beyond clock skew) is corrupt, not fresh.
-      const fresh = Number.isFinite(heldAt) && heldAt <= now + CLOCK_SKEW_MS && now - heldAt < CLAIM_TTL_MS;
-      if (held && held.session !== session && fresh) {
+      if (held && held.session !== session && claimIsFresh(held, now)) {
         const minutes = Math.max(1, Math.round((now - heldAt) / 60000));
         return (
           `LANDING CLAIM: another session is landing branch "${name}" (session ${held.session}` +
           `${held.cwd ? `, folder ${held.cwd}` : ""}; its last ${held.action || "action"} was ${minutes} min ago). ` +
           `Two sessions landing one PR collide (pushes race, pinned merges fail, Sol rounds are wasted), so this ` +
-          `${action} is refused. Leave this PR to that session. If that session is finished or gone, release ` +
-          `the claim and retry: \`node scripts/pr-claim.mjs release ${name}\`. Claims expire 2 hours after ` +
+          `${action} is refused. Leave this PR to that session. Only if that session is finished or gone ` +
+          `(ask Mason when unsure; never just to get past this), release the claim and retry: \`node scripts/pr-claim.mjs release ${name}\`. Claims expire 2 hours after ` +
           `their last use; the check fails open on any error and never applies to Codex sessions.`
         );
       }

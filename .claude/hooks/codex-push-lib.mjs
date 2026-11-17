@@ -586,7 +586,9 @@ export function pushDestinationBranches(cmd, currentBranch) {
   return refspecs
     .map((refspec) => refspec.split(":").pop().replace(/^\+/, "").replace(/^refs\/heads\//i, ""))
     .map((branch) => (branch === "HEAD" ? String(currentBranch || "") : branch))
-    .filter(Boolean);
+    // shortcut: a wildcard refspec (or push.default=matching) is not expanded, so those
+    // branches go unclaimed (fail open); expand via `git for-each-ref` if it is ever used.
+    .filter((branch) => branch && !branch.includes("*"));
 }
 
 function tokensPushCurrentHeadOnly(tokens, normalizedBranch) {

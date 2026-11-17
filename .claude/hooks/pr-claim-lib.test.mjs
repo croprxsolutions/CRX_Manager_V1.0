@@ -66,7 +66,7 @@ writeFileSync(lock, "");
 const started = Date.now();
 ok(claim("B", { branch: "feat/y" }) === "" && readClaims(file)["feat/y"].session === "A", "a lock held by a live writer fails open after a short wait");
 ok(Date.now() - started < 5000, "the lock wait is bounded");
-utimesSync(lock, new Date(T0 - 60_000), new Date(T0 - 60_000));
+utimesSync(lock, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000)); // lock age uses the real clock
 ok(claim("B", { branch: "feat/y" }) !== "" && !existsSync(lock), "a stale lock from a crashed writer is cleared");
 
 // Push destinations.
@@ -76,7 +76,8 @@ assert.deepEqual(pushDestinationBranches("git -C C:/w push -u origin HEAD", "fea
 assert.deepEqual(pushDestinationBranches("git push origin HEAD:refs/heads/feat/z", "feat/y"), ["feat/z"]);
 assert.deepEqual(pushDestinationBranches("git push -o ci.skip origin a b:c", "x"), ["a", "c"]);
 assert.deepEqual(pushDestinationBranches("git status", "x"), []);
-passed += 6;
+assert.deepEqual(pushDestinationBranches("git push origin 'feat/*:feat/*' b", "x"), ["b"]);
+passed += 7;
 
 // ── through the real push guard (Claude-only hook) ───────────────────────────
 const repo = tempDir("pr-claim-repo-");
@@ -104,6 +105,7 @@ ok(/LANDING CLAIM/.test(pushGuard("node scripts/write-codex-push-proof.mjs", "B"
 ok(pushGuard("node scripts/write-codex-push-proof.mjs --dry-run", "B") === "", "a dry run is never refused");
 ok(pushGuard("node scripts/write-codex-push-proof.mjs", "A") === "", "the holder's Sol run is allowed");
 ok(pushGuard("git push origin other-branch", "B") === "", "B may push a different branch");
+ok(pushGuard("git push --dry-run origin dry-branch", "B") === "" && !("dry-branch" in readClaims(claimsPath)), "a dry-run push claims nothing");
 ok(pushGuard("git status && npm test", "B") === "", "ordinary commands are never refused");
 ok(pushGuard("git push origin feat/land") === "", "a call with no session id is never refused");
 writeFileSync(claimsPath, "garbage");

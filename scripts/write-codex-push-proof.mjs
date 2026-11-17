@@ -1819,16 +1819,23 @@ export function solRoundsLedgerPath(root) {
   return path.join(dir || path.join(root, ".claude", "session-state"), SOL_ROUNDS_FILE);
 }
 
-// How many ledger lines name one of these commits. Unreadable lines are skipped.
+// How many distinct branch commits the ledger names: reruns of one head count once (Mason, 2026-11-17,
+// #1929; on #1916 four runs of one head had counted as four rounds). Unreadable lines are skipped.
 export function countSolRounds(ledgerText, branchCommits) {
   const commits = new Set([...(branchCommits || [])].map((sha) => String(sha).toLowerCase()));
-  let count = 0;
+  const reviewed = new Set();
   for (const line of String(ledgerText || "").split(/\r?\n/)) {
     try {
-      if (commits.has(String(JSON.parse(line)?.head_sha || "").toLowerCase())) count += 1;
+      const sha = String(JSON.parse(line)?.head_sha || "").toLowerCase();
+      if (commits.has(sha)) reviewed.add(sha);
     } catch { /* not a ledger line */ }
   }
-  return count;
+  return reviewed.size;
+}
+
+// The round this run would be: a head already in the ledger keeps its round number.
+export function nextSolRound(ledgerText, branchCommits, headSha) {
+  return countSolRounds(`${ledgerText || ""}\n${JSON.stringify({ head_sha: headSha })}`, [...(branchCommits || []), headSha]);
 }
 
 export function solRoundLine(round, prNumber) {
@@ -1912,7 +1919,7 @@ function solRound(root, headSha, baseSha) {
   let text = "";
   try { text = readFileSync(ledger, "utf8"); } catch { /* no runs recorded yet */ }
   const commits = runGit(["rev-list", `${baseSha}..${headSha}`], { cwd: root }).split(/\s+/).filter(Boolean);
-  return { ledger, round: countSolRounds(text, commits) + 1 };
+  return { ledger, round: nextSolRound(text, commits, headSha) };
 }
 
 function recordSolRound(ledger, headSha, prNumber) {

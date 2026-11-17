@@ -1,5 +1,12 @@
 # Decision Log
 
+## 2026-11-17 — Bookings with a spray job: section edits warn, accept/decline blocked
+
+**Decision (Mason, in chat, 2026-11-17, answering Sol round 3 on Bookings Phase A PR 1a).**
+- A section a spray job was scheduled from may still get a new name, notes or needed-by date. The save goes through and the booking warns that the job keeps its own copy, so change those on the job too (warn, not block).
+- A booking whose spray job is still scheduled or in progress cannot be marked accepted or declined; cancel or finish the job first (`BOOKING_HAS_JOB`).
+- The section's products, quantities, prices, line order, place and field stay locked while the job is live (Sol rounds 1-2).
+
 ## 2026-11-17 — Product Master waiting items: Mason's answers
 
 **Decision (Mason, in chat, 2026-11-17, decision session).** Live check that day: 0 `product_rates` rows, 0 `active_ingredients`.

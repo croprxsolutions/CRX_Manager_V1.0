@@ -205,6 +205,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (L ok) the unlocked change did not save: %', v_res;
   END IF;
 
+
   -- P2. Leaving S1 out is refused, for an active, a cancelled and a soft-deleted job.
   SELECT string_agg(id::text || ':' || section_name, ',' ORDER BY sort_order) INTO v_sections_before
   FROM quote_sections WHERE quote_id = v_quote_id;
@@ -371,6 +372,26 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (L cancelled) the section of a cancelled job did not change: %', v_res;
   END IF;
 
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK section ids kept; job link held; refusals SECTION_HAS_JOB x4, SECTION_ID_INVALID x5, BOOKING_HAS_JOB x1, SECTION_HAS_JOB_LOCKED x6';
+  -- I. A sent booking with a job still scheduled cannot be accepted or declined (rule i).
+  INSERT INTO jobs (job_number, customer_id, job_date, quote_id)
+  VALUES ('SMK-I-' || v_suffix, v_customer_id, (now() AT TIME ZONE 'America/Chicago')::date + 7, v_quote_id);
+  INSERT INTO quote_versions (quote_id, sent_by, snapshot_data) VALUES (v_quote_id, v_admin, '{}'::jsonb);
+  UPDATE quotes SET status = 'sent' WHERE id = v_quote_id;
+  SELECT row_version INTO v_version FROM quotes WHERE id = v_quote_id;
+  FOR v_count IN 1..2 LOOP
+    v_err := NULL;
+    BEGIN
+      PERFORM save_quote(v_quote_id,
+        v_payload || jsonb_build_object('row_version_expected', v_version, 'header_notes', 'I',
+          'status', CASE v_count WHEN 1 THEN 'accepted' ELSE 'declined' END),
+        '[]'::jsonb, v_admin, 'smk-sqsi-save-i-' || v_count || '-' || v_suffix);
+    EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+    END;
+    IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_HAS_JOB:%' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (I.%) expected BOOKING_HAS_JOB, got %', v_count, COALESCE(v_err, 'success');
+    END IF;
+  END LOOP;
+
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK section ids kept; job link held; refusals SECTION_HAS_JOB x4, SECTION_ID_INVALID x5, BOOKING_HAS_JOB x3, SECTION_HAS_JOB_LOCKED x6';
 END;
 $smoke$;

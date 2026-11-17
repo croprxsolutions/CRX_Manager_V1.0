@@ -5283,7 +5283,7 @@ export default function QuoteBuilder() {
                   </button>
                 )}
                 {canScheduleJobs && quoteId && sec.items.length > 0 && !(sec.id && sectionJobs[sec.id]) && (
-                  <Button variant="ghost" size="sm" icon={<CalendarClock className="w-3.5 h-3.5" />} showChevron={false} onClick={() => currentStatus === 'draft' ? setConfirmDraftScheduleKey(sec._key) : handleScheduleJob(sec._key)} loading={schedulingJobSectionKey === sec._key} className="min-h-11 md:min-h-10">
+                  <Button variant="ghost" size="sm" icon={<CalendarClock className="w-3.5 h-3.5" />} showChevron={false} onClick={() => sec.id && currentStatus === 'draft' ? setConfirmDraftScheduleKey(sec._key) : handleScheduleJob(sec._key)} loading={schedulingJobSectionKey === sec._key} className="min-h-11 md:min-h-10">
                     Schedule job
                   </Button>
                 )}
@@ -5306,6 +5306,11 @@ export default function QuoteBuilder() {
                   disabled={editLocked}
                   items={[{ id: 'remove-section', label: 'Remove section', icon: <Trash2 className="w-4 h-4" />, danger: true, onAction: () => removeSection(sec._key) }]}
                 />
+              )}
+              {sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled' && (
+                <p className="order-last w-full text-xs text-amber-700">
+                  Job {sectionJobs[sec.id].job_number} was scheduled from this section. Its products, quantities, prices and field stay as booked; a new name, notes or needed-by date here does not change the job, so change those on the job too.
+                </p>
               )}
               {isPlanned && (
                 <div className="order-last w-full flex flex-wrap items-start gap-x-6 gap-y-1">

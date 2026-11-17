@@ -2201,6 +2201,19 @@ describe('QuoteBuilder', () => {
     expect(sent(2).p_sections.map((s) => s.id)).toEqual(['sec-2']);
   });
 
+  it('warns that a section with a live job keeps its lines and that a new name, notes or date does not reach the job', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, is_planned: true };
+    const section = { ...fixture.section, field_id: 'field-1' };
+    const job = { id: 'job-7', job_number: 'J-7', status: 'scheduled', quote_section_id: section.id };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote
+      : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item]
+        : table === 'products' ? [fixture.product] : table === 'fields' ? [HOME_QUARTER_OF_CUSTOMER_1]
+          : table === 'jobs' ? [job] : [], error: null }));
+    renderQuoteBuilder(quote.id);
+    expect(await screen.findByText(/Job J-7 was scheduled from this section. Its products, quantities, prices and field stay as booked; a new name, notes or needed-by date here does not change the job/)).toBeInTheDocument();
+  });
+
   it('refuses Schedule job on a section whose id a save did not return, and says to save and reload', async () => {
     const fixture = makeQuoteFixture('draft', 7);
     const quote = { ...fixture.quote, is_planned: true };
@@ -2217,7 +2230,8 @@ describe('QuoteBuilder', () => {
     fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
     fireEvent.click(await screen.findByRole('button', { name: 'Schedule job' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Schedule anyway' }));
+    // No draft confirmation first: the rep is told at once (Sol round 3 LOW).
+    expect(screen.queryByRole('button', { name: 'Schedule anyway' })).not.toBeInTheDocument();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'This section is not saved yet. Save the quote, then reload it if this message comes back, before scheduling a job from it.'));
     expect(mockRpc.mock.calls.some(([name]) => name === 'create_job_from_quote_section')).toBe(false);
   });

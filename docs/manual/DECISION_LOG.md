@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-17 — #1896: Mason owner-accepted 2 Sol finding(s) at `1c08e3abe834`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-17).** Sol's review of PR #1896 at `1c08e3abe834` (base `02a49d27f149`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:99`, text sha256 `b9746ccf1d276151` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business) (ref 78f14b686f57)
+- Finding 2 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:210`, text sha256 `dec3f100d24f4e6b` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 8ba0fe74d7fc)
+
 ## 2026-11-17 — A Sol round is a distinct head: reruns of one commit count once (#1929)
 
 **Decision (Mason, in chat, 2026-11-17: "count distinct heads once for 1929").** The Sol round count for a branch is the number of distinct branch commits Sol has run on, not the number of runs.

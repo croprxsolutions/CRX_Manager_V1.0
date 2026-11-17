@@ -60,6 +60,9 @@ vi.mock('../lib/dateUtils', () => ({ parseLocalDate: vi.fn((d: string) => new Da
 vi.mock('../components/team/QuickTaskModal', () => ({ default: () => null }));
 vi.mock('../components/team/RelatedNotes', () => ({ default: () => null }));
 
+// Live hides the sales tax and standing discount controls until commission ships (billingM4Enabled).
+const billingM4 = vi.hoisted(() => ({ on: true }));
+vi.mock('../lib/billingFeatures', () => ({ billingM4Enabled: () => billingM4.on }));
 import OrderDetail from './OrderDetail';
 import { supabase } from '../lib/db';
 
@@ -187,6 +190,18 @@ describe('OrderDetail draft invoice actions', () => {
 
 describe('OrderDetail sales tax box (billing plan M4a)', () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it('on live (billing M4 off) there is no Billing card and no sales tax box', async () => {
+    billingM4.on = false;
+    try {
+      renderWith('admin', []);
+      expect(await screen.findByRole('heading', { name: 'Who pays' })).toBeInTheDocument();
+      expect(screen.queryByRole('switch', { name: /Charge sales tax/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Billing' })).not.toBeInTheDocument();
+    } finally {
+      billingM4.on = true;
+    }
+  });
 
   it('an admin ticks it and the sale is taxed through set_order_sales_tax', async () => {
     renderWith('admin', []);

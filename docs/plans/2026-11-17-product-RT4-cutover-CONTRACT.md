@@ -250,3 +250,17 @@ None. Mason answered all three on 2026-11-17:
 1. Changing a live rate after the switch: "Switch back, fix, switch on". Rule 9's full freeze on a switched parent stands; the one-step tool waits for RT-4b.
 2. Pilot watch: "Same day, once checks pass".
 3. The rate lock after the first switch: "Yes, keep it locked". `set_product_rate_lock` refuses to unlock while any parent is `approved`. This narrows his 2026-10-29 answer (question 11).
+
+## As built (2026-11-17, migration 20270125100000)
+
+These supersede the rules above where they differ.
+
+- **Freezes are table triggers, not refusals inside each function.**
+  - `trg_guard_product_parent_rate_source` on `product_parents`: a new parent starts `legacy`; the rate source, its event ID, and (on an `approved` parent) the rate, unit, suggested text and form change only inside `commit_parent_rate_cutover` (a row in `product_rate_cutover_passes` for this transaction). So `correct_parent_rates`, `set_parent_rates` and direct writes are refused after their own locks. Sizes stay protected by the existing parent and rate-lock guards.
+  - `trg_product_rates_guard_rate_source` and `trg_product_parent_rate_outcomes_guard_rate_source`: any insert, update or delete for an `approved` parent is refused after it waits on the parent row (`FOR SHARE`). This covers `commit_rate_review`, `save_draft_product_rate`, reopen, and derive (a derive batch that names an approved parent with no rows fails as a whole; accepted).
+  - `trg_product_rate_lock_guard_unlock` on `product_rate_lock` refuses an unlock while any parent is `approved` (decision 3), instead of re-issuing `set_product_rate_lock`.
+- **Moves (deviation from P6 and rule 9's move refusal).** `move_product_size` is not changed. The rate lock, which must stay on while any parent is approved, already refuses any move that would change a size's rate; a move between parents with the same rate changes nothing that could go wrong. Proof: moving a Smart Choice size into a parent with another rate is refused.
+- **Seed and each parents.** An `approved_default` outcome on a seed or each parent is refused (`PRODUCT_PARENT_CUTOVER_FORM`); live has none. `no_per_acre_default` works for them and keeps the stock unit as the rate unit.
+- **Versions.** A switch always adds 1 to `parent_version` when it records the rate source, so a switch that also changes the rate adds 2.
+- **Deadlock.** An RT-3 writer and a switch on the same parent take locks in opposite orders; PostgreSQL detects the deadlock and one of them fails with nothing saved. Accepted.
+- **Restore when an old unit no longer prices.** The preview refuses (`PRODUCT_RATE_UNIT_INVALID`) and the parent stays approved.

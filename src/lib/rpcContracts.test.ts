@@ -2967,7 +2967,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'BEFORE INSERT/UPDATE row trigger on split_invoice_provenance: recomputes the draft\'s discount line before its fingerprint is taken, a no-op when right; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   _create_bill_split_delivery_invoices:
     'private Bill Split invoice writer called only by complete_delivery and create_invoice_for_unbilled_delivery, which own idempotency; every application-role EXECUTE is revoked',
-  // KI-156 follow-up (local candidate 20270113150000): the below-cost wall, re-emitted; a trigger function, never an RPC.
+  // KI-156 follow-up (local candidate 20270119150000): the below-cost wall, re-emitted; a trigger function, never an RPC.
   _enforce_below_cost_line:
     'BEFORE INSERT/UPDATE row trigger on order_items, invoice_items and quote_items: refuses a below-cost line or records its admin approval for the line being written; the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function, and no browser role can EXECUTE it. Prune once the candidate is in the generated snapshot',
   // Sprayed jobs keep each product's EPA number (20261204120000).

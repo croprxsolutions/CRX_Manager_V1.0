@@ -109,7 +109,7 @@ test.describe.serial('Recipe to Job Workflow', () => {
     await waitForPage(page, 2000);
 
     // Handle UnsavedChangesModal race condition
-    const leaveBtn = page.locator('button:has-text("Leave")');
+    const leaveBtn = page.locator('button:has-text("Discard changes")');
     try { await leaveBtn.click({ timeout: 3000 }); } catch { /* no modal */ }
 
     // Should navigate to job detail

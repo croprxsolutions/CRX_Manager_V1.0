@@ -14,7 +14,7 @@ describe('BulkDeleteConfirmModal', () => {
       />
     );
     // Modal renders null when open=false
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
   });
 
   it('shows count and plural entity name in warning', () => {
@@ -94,7 +94,25 @@ describe('BulkDeleteConfirmModal', () => {
         onConfirm={vi.fn()}
       />
     );
-    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^keep quotes$/i }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks a question with the count and names both buttons for what they do', () => {
+    render(
+      <BulkDeleteConfirmModal open onClose={vi.fn()} count={3} entityName="quote" onConfirm={vi.fn()} />
+    );
+    expect(screen.getByRole('alertdialog', { name: 'Delete 3 quotes?' })).toBeInTheDocument();
+    const buttons = Array.from(document.querySelectorAll('[data-modal-footer] button')).map((b) => b.textContent);
+    expect(buttons).toEqual(['Keep quotes', 'Delete 3 quotes']);
+    expect(screen.getByRole('button', { name: 'Delete 3 quotes' }).className).toContain('bg-red-600');
+  });
+
+  it('uses a green go-ahead for deactivate, which can be undone', () => {
+    render(
+      <BulkDeleteConfirmModal open onClose={vi.fn()} count={2} entityName="product" actionWord="deactivate" onConfirm={vi.fn()} />
+    );
+    expect(screen.getByRole('button', { name: 'Keep products active' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deactivate 2 products' }).className).toContain('bg-crx-green');
   });
 });

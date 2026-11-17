@@ -5,6 +5,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { login } from './utils/auth';
+import { moreAction } from './utils/more-actions';
 import { supabaseRest } from './golive/utils/supabase-helpers';
 
 const waitForPage = (page: import('@playwright/test').Page, ms: number) => page.waitForTimeout(ms);
@@ -52,8 +53,8 @@ test.describe.serial('Write-Off Workflow', () => {
     await page.goto(state.invoiceUrl!);
     await waitForPage(page, 2000);
 
-    // Find and click the "Write Off" button
-    const writeOffBtn = page.locator('button:has-text("Write Off")').first();
+    // Write off… sits under More actions on the invoice page.
+    const writeOffBtn = await moreAction(page, /^Write off/);
     await expect(writeOffBtn).toBeVisible({ timeout: 10000 });
     await writeOffBtn.click();
     await waitForPage(page, 1000);
@@ -88,8 +89,8 @@ test.describe.serial('Write-Off Workflow', () => {
     await page.goto(state.invoiceUrl!);
     await waitForPage(page, 2000);
 
-    // Click Write Off button
-    const writeOffBtn = page.locator('button:has-text("Write Off")').first();
+    // Write off… sits under More actions on the invoice page.
+    const writeOffBtn = await moreAction(page, /^Write off/);
     await expect(writeOffBtn).toBeVisible({ timeout: 10000 });
     await writeOffBtn.click();
     await waitForPage(page, 1000);
@@ -153,7 +154,8 @@ test.describe.serial('Write-Off Workflow', () => {
     await page.goto(state.invoiceUrl!);
     await waitForPage(page, 2000);
 
-    const writeOffBtn = page.locator('button:has-text("Write Off")').first();
+    // Write off… sits under More actions on the invoice page.
+    const writeOffBtn = await moreAction(page, /^Write off/);
     if (await writeOffBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await writeOffBtn.click();
       await waitForPage(page, 1000);
@@ -181,7 +183,8 @@ test.describe.serial('Write-Off Workflow', () => {
     await page.goto(state.invoiceUrl!);
     await waitForPage(page, 2000);
 
-    const writeOffBtn = page.locator('button:has-text("Write Off")').first();
+    // Write off… sits under More actions on the invoice page.
+    const writeOffBtn = await moreAction(page, /^Write off/);
     if (await writeOffBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await writeOffBtn.click();
       await waitForPage(page, 1000);

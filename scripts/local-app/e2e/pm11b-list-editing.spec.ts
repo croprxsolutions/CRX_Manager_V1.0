@@ -50,13 +50,13 @@ test('edit mode shows a page of rows, keeps edits across pages, and warns before
   await page.screenshot({ path: 'scripts/local-app/.state/pm11b-edit-page-2.png' });
 
   await page.getByText('Supplier Pricing').first().click();
-  await page.getByRole('button', { name: 'Stay' }).click();
+  await page.getByRole('button', { name: 'Keep editing' }).click();
   await expect(page).toHaveURL(/\/products$/);
   await page.getByRole('button', { name: 'Previous' }).click();
   await expect(firstName).toHaveValue(`${prefix} edited`);
 
   await page.getByText('Supplier Pricing').first().click();
-  await page.getByRole('button', { name: 'Leave' }).click();
+  await page.getByRole('button', { name: 'Discard changes' }).click();
   await expect(page).toHaveURL(/\/supplier-pricing/);
 });
 

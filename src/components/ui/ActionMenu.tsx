@@ -27,6 +27,8 @@ interface ActionMenuProps {
   label: string;
   items: ActionMenuItem[];
   trigger?: 'icon' | { text: string; variant: 'primary' | 'secondary'; icon?: ReactNode };
+  /** RAC buttons ignore a disabled <fieldset>, so a locked form passes its lock here. */
+  disabled?: boolean;
 }
 
 const focusRing = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crx-green focus-visible:ring-offset-2';
@@ -53,7 +55,7 @@ function Item({ item }: { item: ActionMenuItem }) {
   );
 }
 
-export default function ActionMenu({ label, items, trigger = 'icon' }: ActionMenuProps) {
+export default function ActionMenu({ label, items, trigger = 'icon', disabled }: ActionMenuProps) {
   const plain = items.filter((i) => !i.danger && !i.group);
   const danger = items.filter((i) => i.danger);
   const groups = new Map<string, ActionMenuItem[]>();
@@ -67,13 +69,15 @@ export default function ActionMenu({ label, items, trigger = 'icon' }: ActionMen
       {trigger === 'icon' ? (
         <Button
           aria-label={label}
-          className={`h-11 w-11 md:h-10 md:w-10 inline-flex items-center justify-center rounded-lg bg-white text-nav-dark border border-gray-300 hover:bg-gray-50 data-[pressed]:bg-gray-100 transition-colors duration-150 ${focusRing}`}
+          isDisabled={disabled}
+          className={`h-11 w-11 md:h-10 md:w-10 inline-flex items-center justify-center rounded-lg bg-white text-nav-dark border border-gray-300 hover:bg-gray-50 data-[pressed]:bg-gray-100 data-[disabled]:opacity-50 transition-colors duration-150 ${focusRing}`}
         >
           <MoreHorizontal size={18} aria-hidden="true" />
         </Button>
       ) : (
         <Button
           aria-label={label}
+          isDisabled={disabled}
           className={`h-11 md:h-10 inline-flex items-center justify-center gap-2 px-4 text-sm font-medium rounded-lg transition-colors duration-150 ${focusRing} ${
             trigger.variant === 'primary'
               ? 'bg-crx-green text-white hover:bg-crx-green-hover data-[pressed]:bg-crx-green-hover shadow-sm'
@@ -90,7 +94,7 @@ export default function ActionMenu({ label, items, trigger = 'icon' }: ActionMen
         placement="bottom end"
         className="min-w-60 bg-white rounded-xl border border-gray-200 shadow-lg p-1.5 outline-none"
       >
-        <Menu className="outline-none max-h-80 overflow-auto">
+        <Menu className="outline-none max-h-80 overflow-auto scroll-thin scroll-shadows">
           {plain.map((i) => <Item key={i.id} item={i} />)}
           {[...groups].map(([name, list]) => (
             <MenuSection key={name}>

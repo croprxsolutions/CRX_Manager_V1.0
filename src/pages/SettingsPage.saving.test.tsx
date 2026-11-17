@@ -36,6 +36,9 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
   useIdempotencyKey: () => ({ getKey: () => 'key', resetKey: vi.fn(), getKeyFor: () => 'key', resetKeyFor: vi.fn() }),
 }));
 
+// Live hides the sales tax and standing discount controls until commission ships (billingM4Enabled).
+const billingM4 = vi.hoisted(() => ({ on: true }));
+vi.mock('../lib/billingFeatures', () => ({ billingM4Enabled: () => billingM4.on }));
 import SettingsPage from './SettingsPage';
 
 const USERS = [
@@ -118,7 +121,7 @@ describe('SettingsPage — Edit User', () => {
 
     fireEvent.change(within(dialog).getByLabelText('Role'), { target: { value: 'driver' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save Changes' }));
-    const confirm = await screen.findByRole('dialog', { name: /Confirm User Changes/ });
+    const confirm = await screen.findByRole('alertdialog', { name: /Confirm User Changes/ });
     expect(confirm).toHaveTextContent('from Sales rep to Driver');
     expect(mockRpc).not.toHaveBeenCalled();
 
@@ -139,6 +142,19 @@ describe('SettingsPage — sales tax rate (billing plan M4a)', () => {
     mockRpc.mockResolvedValue({ data: {}, error: null });
   });
 
+  it('on live (billing M4 off) there is no sales tax rate to change', async () => {
+    billingM4.on = false;
+    try {
+      await renderPage();
+      expect(screen.queryByLabelText('Sales tax rate')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Save sales tax' })).not.toBeInTheDocument();
+      // The rest of Billing stays.
+      expect(screen.getByRole('button', { name: 'Save invoice drafts' })).toBeInTheDocument();
+    } finally {
+      billingM4.on = true;
+    }
+  });
+
   it('shows the saved rate and saves a new one', async () => {
     await renderPage();
     const input = screen.getByLabelText('Sales tax rate');
@@ -157,6 +173,27 @@ describe('SettingsPage — sales tax rate (billing plan M4a)', () => {
     fireEvent.click(saveButton('Save sales tax'));
     expect(input).toBeDisabled();
     await waitFor(() => expect(input).toBeEnabled());
+  });
+
+  it('comes first in Billing, with a % on the field and a live example that hides while the rate is invalid', async () => {
+    await renderPage();
+    const billing = document.getElementById('settings-billing') as HTMLElement;
+    const parts = within(billing).getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+    expect(parts).toEqual(['Sales tax', 'Automatic invoice drafts', 'Fuel surcharge', 'Reminders and quote defaults']);
+
+    const input = screen.getByLabelText('Sales tax rate');
+    expect(input.parentElement).toHaveTextContent('%');
+    const example = (text: string) => screen.queryByText((_, el) => el?.tagName === 'P' && el.textContent === `Example: a $100.00 taxed sale adds ${text}`);
+    expect(example('$6.25')).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: '7.5' } });
+    expect(example('$7.50')).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: '6.125' } });
+    expect(example('$6.13')).toBeInTheDocument();
+    for (const bad of ['6.25%', '', '100', '6.1234']) {
+      fireEvent.change(input, { target: { value: bad } });
+      expect(screen.queryByText(/^Example: a \$100\.00 taxed sale/)).not.toBeInTheDocument();
+    }
+    expect(mockUpsert).not.toHaveBeenCalled();
   });
 
   it('refuses a rate that is not a plain percentage before saving', async () => {

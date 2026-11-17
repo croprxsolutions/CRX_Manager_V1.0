@@ -6,7 +6,8 @@ BEGIN;
 
 DROP TRIGGER a2_product_unit_keeps_history ON public.products;
 DROP FUNCTION public._refuse_stock_unit_change_with_history();
-DROP TRIGGER a2_return_line_locks_product ON public.return_items;
-DROP FUNCTION public._return_line_locks_product();
+DROP TRIGGER a2_history_row_locks_product ON public.return_items;
+DROP TRIGGER a2_history_row_locks_product ON public.inventory_holds;
+DROP FUNCTION public._history_row_locks_product();
 
 COMMIT;

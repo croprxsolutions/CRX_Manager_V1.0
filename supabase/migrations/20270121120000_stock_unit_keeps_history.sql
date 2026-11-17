@@ -17,8 +17,9 @@
 -- for a reviewed data correction too, which must disable it explicitly, as 20270121100000 does its guards.
 -- The decision uses EXISTS; the message names up to 5 records separately.
 -- Serialized: order, delivery and PO lines already read the product FOR SHARE (a1_line_unit_is_stock_unit), and a
--- receipt raises its PO line; a2_return_line_locks_product does the same for return lines, so a unit change waits for
--- an uncommitted line and then sees it, and a line written after the change waits and then meets the new unit.
+-- receipt raises its PO line; a2_history_row_locks_product does the same for return lines and holds, so a unit change waits for
+-- an uncommitted line and then sees it, and a line written after the change waits and then meets the new unit. Stock
+-- transactions move stock rows, which a1 already locks.
 --
 -- ROLLBACK: scripts/smoke/stock-unit-history-guard-reverse.sql (proven by the units-batch prover).
 
@@ -30,7 +31,7 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT_UNITS_DRIFT: 20270121110000 (the unit rules) must be applied first';
   END IF;
   IF to_regprocedure('public._refuse_stock_unit_change_with_history()') IS NOT NULL
-     OR to_regprocedure('public._return_line_locks_product()') IS NOT NULL THEN
+     OR to_regprocedure('public._history_row_locks_product()') IS NOT NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_UNITS_DRIFT: _refuse_stock_unit_change_with_history already exists';
   END IF;
 END;
@@ -77,7 +78,7 @@ BEGIN
           FROM public.receiving_records rr LEFT JOIN public.purchase_orders po ON po.id = rr.purchase_order_id WHERE rr.product_id = NEW.id
       ) a ORDER BY x LIMIT 5
     ) s;
-    RAISE EXCEPTION 'PRODUCT_UNIT_HAS_HISTORY: this product''s stock unit cannot change to "%" because it has been ordered, bought, delivered or returned in its current unit (%). Set up a new product for the new unit.',
+    RAISE EXCEPTION 'PRODUCT_UNIT_HAS_HISTORY: this product''s stock unit cannot change to "%" because it already has orders, purchases, deliveries, returns, stock movements or holds (%). Set up a new product for the new unit.',
       btrim(COALESCE(NULLIF(btrim(NEW.inventory_unit), ''), NEW.unit_size)), COALESCE(v_what, 'stock movements or holds')
       USING ERRCODE = 'check_violation';
   END IF;
@@ -91,21 +92,24 @@ CREATE TRIGGER a2_product_unit_keeps_history
   BEFORE UPDATE OF inventory_unit, unit_size ON public.products
   FOR EACH ROW EXECUTE FUNCTION public._refuse_stock_unit_change_with_history();
 
-CREATE FUNCTION public._return_line_locks_product()
+CREATE FUNCTION public._history_row_locks_product()
  RETURNS trigger
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path = public, pg_temp
 AS $function$
 BEGIN
-  -- The stock unit cannot change before this return line commits (see a2_product_unit_keeps_history).
+  -- The stock unit cannot change before this return line or hold commits (see a2_product_unit_keeps_history).
   PERFORM 1 FROM public.products WHERE id = NEW.product_id FOR SHARE;
   RETURN NEW;
 END;
 $function$;
 
-REVOKE ALL ON FUNCTION public._return_line_locks_product() FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public._history_row_locks_product() FROM PUBLIC, anon, authenticated, service_role;
 
-CREATE TRIGGER a2_return_line_locks_product
+CREATE TRIGGER a2_history_row_locks_product
   BEFORE INSERT OR UPDATE OF product_id ON public.return_items
-  FOR EACH ROW EXECUTE FUNCTION public._return_line_locks_product();
+  FOR EACH ROW EXECUTE FUNCTION public._history_row_locks_product();
+CREATE TRIGGER a2_history_row_locks_product
+  BEFORE INSERT OR UPDATE OF product_id, is_active ON public.inventory_holds
+  FOR EACH ROW EXECUTE FUNCTION public._history_row_locks_product();

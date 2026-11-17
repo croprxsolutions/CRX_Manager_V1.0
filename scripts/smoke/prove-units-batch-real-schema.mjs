@@ -639,11 +639,11 @@ async function historyCases() {
   const again = apply('history.sql');
   assert.notEqual(again.status, 0); assert.match(again.output, /PREFLIGHT_UNITS_DRIFT: _refuse_stock_unit_change_with_history already exists/);
   for (const role of ['anon', 'authenticated', 'service_role']) {
-    for (const fn of ['_refuse_stock_unit_change_with_history', '_return_line_locks_product']) {
+    for (const fn of ['_refuse_stock_unit_change_with_history', '_history_row_locks_product']) {
       assert.equal(scalar(`SELECT has_function_privilege('${role}', 'public.${fn}()', 'EXECUTE');`), 'f', `${role} cannot run ${fn}`);
     }
   }
-  const HIST = 'PRODUCT_UNIT_HAS_HISTORY: this product\'s stock unit cannot change to "Qt" because it has been ordered, bought, delivered or returned in its current unit \\(.*';
+  const HIST = 'PRODUCT_UNIT_HAS_HISTORY: this product\'s stock unit cannot change to "Qt" because it already has orders, purchases, deliveries, returns, stock movements or holds \\(.*';
   // Refused for any history, whatever its status or unit (blank too).
   for (const [pre, who] of [[RETURN('requested'), 'return U-R1'], [RETURN('approved'), 'return U-R1'], [RETURN('approved', true), 'return U-R1'],
     [RETURN('received'), 'return U-R1'], [RETURN('approved', false, 'Qt'), 'return U-R1'], [RECEIVED_PO, 'PO PO-2026-0011'],
@@ -659,26 +659,30 @@ async function historyCases() {
   // Open lines still answer first.
   refusedProbe(`${LIFT} ${TO_QT}`, /PRODUCT_UNIT_HAS_OPEN_LINES/);
   // Serialized: while another session holds an uncommitted return line for the product, the unit change waits.
-  assert.equal(scalar("SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_return_line_locks_product' AND tgenabled = 'O';"), '1');
-  const holder = spawn('docker', psqlArgs(), { cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
-  let held = '';
-  holder.stdout.on('data', (d) => { held += d; }); holder.stderr.on('data', (d) => { held += d; });
-  const holderDone = new Promise((resolve) => holder.on('close', resolve));
-  holder.stdin.end(`BEGIN;
-    SET session_replication_role = replica;
+  assert.equal(scalar("SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_history_row_locks_product' AND tgenabled = 'O';"), '2');
+  const holdAndChange = async (write) => {
+    const holder = spawn('docker', psqlArgs(), { cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
+    let held = '';
+    holder.stdout.on('data', (d) => { held += d; }); holder.stderr.on('data', (d) => { held += d; });
+    const holderDone = new Promise((resolve) => holder.on('close', resolve));
+    holder.stdin.end(`BEGIN; ${write} SELECT 'HOLDING'; SELECT pg_sleep(6); ROLLBACK;\n`);
+    for (let i = 0; i < 100 && !held.includes('HOLDING'); i += 1) await new Promise((r) => setTimeout(r, 100));
+    assert.match(held, /HOLDING/, `the row was written with its trigger on:\n${held}`);
+    refusedProbe(`SET lock_timeout = '1s'; ${TO_QT}`, /lock timeout/);
+    assert.equal(await holderDone, 0, held);
+  };
+  await holdAndChange(`SET session_replication_role = replica;
     INSERT INTO public.returns (id, return_number, customer_id, status, requested_by) VALUES ('${RET}', 'U-R1', '${CUST}', 'requested', '${ADMIN}');
     SET session_replication_role = origin;
-    INSERT INTO public.return_items (id, return_id, product_id, quantity, unit, restock) VALUES ('${RET_ITEM}', '${RET}', '${GAL}', 2, 'Gal', true);
-    SELECT 'HOLDING'; SELECT pg_sleep(6); ROLLBACK;
-`);
-  for (let i = 0; i < 100 && !held.includes('HOLDING'); i += 1) await new Promise((r) => setTimeout(r, 100));
-  assert.match(held, /HOLDING/, `the return line was written with its trigger on:
-${held}`);
-  refusedProbe(`SET lock_timeout = '1s'; ${TO_QT}`, /lock timeout/);
-  assert.equal(await holderDone, 0, held);
+    INSERT INTO public.return_items (id, return_id, product_id, quantity, unit, restock) VALUES ('${RET_ITEM}', '${RET}', '${GAL}', 2, 'Gal', true);`);
+  // Holds are created only through create_inventory_hold; re-activating an ended one fires the same lock.
+  await holdAndChange(`SET session_replication_role = replica;
+    INSERT INTO public.inventory_holds (id, product_id, quantity, created_by, is_active) VALUES ('${id('c43')}', '${GAL}', 1, '${ADMIN}', false);
+    SET session_replication_role = origin;
+    UPDATE public.inventory_holds SET is_active = true WHERE id = '${id('c43')}';`);
   // Control: with no session holding a line, the same change is not blocked (it meets the open-lines rule instead).
   refusedProbe(`SET lock_timeout = '1s'; ${TO_QT}`, /PRODUCT_UNIT_HAS_OPEN_LINES/);
-  console.log('[case] H1 Gal -> Qt is refused (PRODUCT_UNIT_HAS_HISTORY, naming the record) for any history: a requested, approved, restocked, received or Qt return; a received PO line; a receipt alone; a stock movement alone; an active hold; a fulfilled order line in Gal or blank; a completed delivery line in Gal or blank. With no history (an ended hold does not count) it saves and relabels the empty stock row; "GAL" (case only) saves over history; open lines still report PRODUCT_UNIT_HAS_OPEN_LINES first; an uncommitted return line in another session makes the change wait (lock timeout); the functions are private; a second apply refuses');
+  console.log('[case] H1 Gal -> Qt is refused (PRODUCT_UNIT_HAS_HISTORY, naming the record) for any history: a requested, approved, restocked, received or Qt return; a received PO line; a receipt alone; a stock movement alone; an active hold; a fulfilled order line in Gal or blank; a completed delivery line in Gal or blank. With no history (an ended hold does not count) it saves and relabels the empty stock row; "GAL" (case only) saves over history; open lines still report PRODUCT_UNIT_HAS_OPEN_LINES first; an uncommitted return line or hold in another session makes the change wait (lock timeout); the functions are private; a second apply refuses');
 }
 
 function quoteCases() {
@@ -717,8 +721,8 @@ function rollbackCases() {
   assert.notEqual(early.status, 0); assert.match(early.output, /KI137_REVERSE_ORDER/);
   const r0 = apply('history-rev.sql'); assert.equal(r0.status, 0, r0.output);
   assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_product_unit_keeps_history';"), 0);
-  assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_return_line_locks_product';"), 0);
-  assert.equal(n("SELECT count(*) FROM pg_proc WHERE proname IN ('_refuse_stock_unit_change_with_history', '_return_line_locks_product');"), 0);
+  assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_history_row_locks_product';"), 0);
+  assert.equal(n("SELECT count(*) FROM pg_proc WHERE proname IN ('_refuse_stock_unit_change_with_history', '_history_row_locks_product');"), 0);
   const r1 = apply('rules-rev.sql'); assert.equal(r1.status, 0, r1.output);
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE proname = 'product_price_per_acre';"), fnBefore, "live's per-acre body is back");
   assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_fill_order_line_unit';"), 1);

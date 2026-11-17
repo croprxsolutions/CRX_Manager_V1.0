@@ -74,7 +74,7 @@ describe('sanitizeError', () => {
     ['PRODUCT_STOCK_UNIT_UNKNOWN', '"Tote" is not a known unit; pick a stock unit from the list.'],
     ['PRODUCT_UNIT_HAS_STOCK', 'this product\'s stock unit cannot change to "Qt" while it has stock counted in "Gal". Bring its stock to zero (or convert it) first.'],
     ['STOCK_ROW_UNIT_NOT_STOCK_UNIT', 'this stock row is in "Qt" but the product is stocked in "Gal".'],
-    ['PRODUCT_UNIT_HAS_HISTORY', 'this product\'s stock unit cannot change to "Qt" because it has been ordered, bought, delivered or returned in its current unit (order ORD-0001, return RMA-0001). Set up a new product for the new unit.'],
+    ['PRODUCT_UNIT_HAS_HISTORY', 'this product\'s stock unit cannot change to "Qt" because it already has orders, purchases, deliveries, returns, stock movements or holds (order ORD-0001, return RMA-0001). Set up a new product for the new unit.'],
   ])('explains a %s refusal without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
   });

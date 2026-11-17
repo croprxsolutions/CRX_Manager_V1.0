@@ -42,7 +42,7 @@ units-batch prover, `src/lib/errorSanitizer.ts` (+ test), ledger and migration r
 - No data changes; old rows are only read (indexed by product: `idx_recv_records_product`; the line tables' product
   indexes). Unit changes are rare, admin-only and in reviewed migrations.
 - Concurrency: order, delivery and PO line inserts read the product FOR SHARE (a1 line trigger), and a second new
-  trigger, `a2_return_line_locks_product`, does the same for return lines. A unit change waits for an uncommitted line
+  trigger, `a2_history_row_locks_product`, does the same for return lines and holds. A unit change waits for an uncommitted line
   and then sees it; a line written after the change waits and then meets the new unit. Stock transactions move stock
   rows, which a1 already locks.
 - Rollout: the deployed app cannot change a stock unit, so nothing on screen changes.
@@ -55,7 +55,7 @@ units-batch prover, `src/lib/errorSanitizer.ts` (+ test), ledger and migration r
 - H1 after: Gal -> Qt is refused, naming the record, for a requested, approved, restocked, received or Qt return; a
   received PO line; a receipt alone (names its PO); a stock movement alone; an active hold; a fulfilled order line in Gal or blank; a completed delivery line in Gal or blank. With no history (an ended hold does not count) it
   saves and relabels the empty stock row; "GAL" (case only) saves over history; open lines still report
-  `PRODUCT_UNIT_HAS_OPEN_LINES` first; while another session holds an uncommitted return line the change waits (lock
+  `PRODUCT_UNIT_HAS_OPEN_LINES` first; while another session holds an uncommitted return line or hold the change waits (lock
   timeout), and without it does not; both functions are private; a second apply refuses.
 - R: the reverse script drops both triggers and functions; the units-batch reverses still pass after it.
 
@@ -74,10 +74,12 @@ apply in one transaction. #22-#23: reverse script and prover output are in the P
 
 ## Reviews after the build (2026-11-17)
 
-- Luna (gpt-6-luna xhigh) MED: return lines were not serialized -> fixed with `a2_return_line_locks_product` and a
+- Luna (gpt-6-luna xhigh) MED: return lines were not serialized -> fixed with `a2_history_row_locks_product` and a
   two-session lock case. LOW: a receipt alone was not named -> its PO is now named.
 - rls-security-reviewer MED: stock transactions and holds were not history -> added (every stock movement writes a
   transaction). LOWs: tab/NBSP and first-unit-on-a-blank-product refuse (fail closed, 0 such products live); wording.
+- Luna round 2 MED: holds were not serialized -> the lock trigger now also covers `inventory_holds` (prover case).
+  LOW: the message said "ordered, bought, delivered or returned" for a hold or movement -> reworded.
 - migration-drift-reviewer: no drift; live order is re-checked by the staging apply job.
 
 ## Open business decisions

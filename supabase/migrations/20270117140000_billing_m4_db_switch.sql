@@ -57,8 +57,7 @@ $preflight$;
 -- 1. The switch -----------------------------------------------------------------------------------------------
 CREATE TABLE public.billing_m4_switch (
   id boolean PRIMARY KEY DEFAULT true CONSTRAINT billing_m4_switch_one_row CHECK (id),
-  enabled boolean NOT NULL,
-  updated_at timestamptz NOT NULL DEFAULT now()
+  enabled boolean NOT NULL
 );
 COMMENT ON TABLE public.billing_m4_switch IS
   'Sales tax (M4a) and standing discounts (M4b): while enabled is false the database refuses ticking a sale''s tax and '
@@ -69,11 +68,6 @@ REVOKE ALL ON TABLE public.billing_m4_switch FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON TABLE public.billing_m4_switch TO authenticated;
 CREATE POLICY billing_m4_switch_select ON public.billing_m4_switch FOR SELECT TO authenticated
   USING ((SELECT public.is_active_profile()));
-
-INSERT INTO public.billing_m4_switch (enabled)
-SELECT EXISTS (SELECT 1 FROM orders WHERE sales_tax)
-    OR EXISTS (SELECT 1 FROM customers WHERE standing_discount_pct > 0)
-    OR EXISTS (SELECT 1 FROM invoice_standing_discount_rates WHERE rate_pct > 0);
 
 CREATE FUNCTION public._billing_m4_enabled_20270117()
  RETURNS boolean
@@ -132,6 +126,13 @@ CREATE TRIGGER customers_billing_m4_guard_20270117
 CREATE TRIGGER invoice_standing_discount_rates_billing_m4_guard_20270117
   BEFORE INSERT OR UPDATE ON public.invoice_standing_discount_rates
   FOR EACH ROW EXECUTE FUNCTION public._billing_m4_guard_20270117();
+
+-- 3. Its starting value, read only now: CREATE TRIGGER above holds each table against writes until this file
+-- commits, so nothing can set a tax or discount between this read and the guards.
+INSERT INTO public.billing_m4_switch (enabled)
+SELECT EXISTS (SELECT 1 FROM orders WHERE sales_tax)
+    OR EXISTS (SELECT 1 FROM customers WHERE standing_discount_pct > 0)
+    OR EXISTS (SELECT 1 FROM invoice_standing_discount_rates WHERE rate_pct > 0);
 
 DO $postflight$
 BEGIN

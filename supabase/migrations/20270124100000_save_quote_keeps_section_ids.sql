@@ -17,8 +17,16 @@
 --        once, else SECTION_ID_INVALID before anything changes. A section with no id gets a new id.
 --     c. always: a prior section not kept that any job references (any status, deleted jobs too)
 --        refuses SECTION_HAS_JOB naming the job, instead of the raw FK error.
---     f. the result adds section_ids (client_key -> id), like item_ids.
---     Rules b and c run after the quote row lock and the row_version check, before the DELETE.
+--     f. the result adds section_ids (client_key -> id), like item_ids; a client_key sent twice
+--        refuses SECTION_ID_INVALID.
+--     g. a booking with a live job (not cancelled, not deleted) keeps its customer, else
+--        BOOKING_HAS_JOB.
+--     h. a section with a live job keeps its field and its lines (product, quantity, price,
+--        units, rate, acres) exactly, else SECTION_HAS_JOB_LOCKED. Its name, notes and needed-by
+--        date may change. The job copied those lines; letting them drift would split the job
+--        from its booking and let the two invoice paths charge different prices.
+--     Rules b, c and g run after the quote row lock and the row_version check, before the DELETE;
+--     h compares the stored lines after the server prices them.
 --  Restore (Rewind) is not changed: it still fails on a booking with a job (the screen names it).
 --
 -- ROLLBACK: re-run the 20261204100000 body of _save_quote_below_cost_impl_20260810 and
@@ -132,6 +140,8 @@ DECLARE
   v_section_client_key text;
   v_section_ids jsonb := '{}'::jsonb;
   v_section_job record;
+  v_locked_sections jsonb := '{}'::jsonb;
+  v_locked_key text;
 BEGIN
   v_actor := auth.uid();
   IF v_actor IS NULL THEN
@@ -373,6 +383,37 @@ BEGIN
         v_section_job.job_number, v_section_job.section_name
         USING ERRCODE = 'P0001';
     END IF;
+    -- (g) a live job (not cancelled, not deleted) belongs to this booking's customer.
+    SELECT j.job_number INTO v_section_job
+    FROM jobs j
+    WHERE (j.quote_id = v_quote_id OR j.quote_section_id = ANY (v_prior_section_ids))
+      AND j.deleted_at IS NULL AND j.status <> 'cancelled'
+      AND (p_quote_payload->>'customer_id')::uuid IS DISTINCT FROM (SELECT q.customer_id FROM quotes q WHERE q.id = v_quote_id)
+    ORDER BY j.job_number, j.id
+    LIMIT 1;
+    IF FOUND THEN
+      RAISE EXCEPTION 'BOOKING_HAS_JOB: job % was scheduled from this booking, so its customer cannot change. Cancel the job first, or start a new booking.',
+        v_section_job.job_number
+        USING ERRCODE = 'P0001';
+    END IF;
+    -- (h) remember each section with a live job: its field and lines, as stored. Compared
+    -- after the server has priced the new lines (below).
+    SELECT COALESCE(jsonb_object_agg(s.id::text, jsonb_build_object('job', s.job_number, 'section', s.section_name, 'sig', s.sig)), '{}'::jsonb)
+      INTO v_locked_sections
+    FROM (
+      SELECT qs.id, qs.section_name,
+             (SELECT j.job_number FROM jobs j
+               WHERE j.quote_section_id = qs.id AND j.deleted_at IS NULL AND j.status <> 'cancelled'
+               ORDER BY j.job_number, j.id LIMIT 1) AS job_number,
+             COALESCE(qs.field_id::text, '') || '|' || COALESCE((
+               SELECT string_agg(x.v, ';' ORDER BY x.v) FROM (
+                 SELECT concat_ws(',', qi.product_id, trim_scale(qi.total_units_needed), trim_scale(qi.price_per_unit),
+                                  qi.unit_size, qi.price_unit, qi.calc_mode, trim_scale(qi.actual_rate), qi.rate_unit,
+                                  trim_scale(qi.acres)) AS v
+                   FROM quote_items qi WHERE qi.section_id = qs.id) x), '') AS sig
+        FROM quote_sections qs WHERE qs.quote_id = v_quote_id
+    ) s
+    WHERE s.job_number IS NOT NULL;
     -- >>>SECTION IDS
 
     DELETE FROM quote_sections WHERE quote_id = v_quote_id;
@@ -443,6 +484,10 @@ BEGIN
     -- SECTION IDS (f): client_key -> section id, returned like item_ids.
     v_section_client_key := NULLIF(v_section->>'client_key', '');
     IF v_section_client_key IS NOT NULL THEN
+      IF v_section_ids ? v_section_client_key THEN
+        RAISE EXCEPTION 'SECTION_ID_INVALID: this save sent two sections with the same key. Reload the booking and save again.'
+          USING ERRCODE = 'P0001';
+      END IF;
       v_section_ids := v_section_ids || jsonb_build_object(v_section_client_key, v_section_id::text);
     END IF;
 
@@ -781,6 +826,24 @@ BEGIN
       v_drawn_guard.product_name, v_drawn_guard.quantity_drawn, v_drawn_guard.new_booked;
   END IF;
 
+  -- SECTION IDS (h): a section with a live job kept its field and lines exactly (same
+  -- expression as the snapshot above, on the lines as now stored and priced).
+  FOR v_locked_key IN SELECT jsonb_object_keys(v_locked_sections)
+  LOOP
+    IF (SELECT COALESCE(qs.field_id::text, '') || '|' || COALESCE((
+               SELECT string_agg(x.v, ';' ORDER BY x.v) FROM (
+                 SELECT concat_ws(',', qi.product_id, trim_scale(qi.total_units_needed), trim_scale(qi.price_per_unit),
+                                  qi.unit_size, qi.price_unit, qi.calc_mode, trim_scale(qi.actual_rate), qi.rate_unit,
+                                  trim_scale(qi.acres)) AS v
+                   FROM quote_items qi WHERE qi.section_id = qs.id) x), '')
+          FROM quote_sections qs WHERE qs.id = v_locked_key::uuid)
+       IS DISTINCT FROM v_locked_sections->v_locked_key->>'sig' THEN
+      RAISE EXCEPTION 'SECTION_HAS_JOB_LOCKED: job % was scheduled from section "%", so its products, quantities, prices and field cannot change. Change the job, or add a new section for new work.',
+        v_locked_sections->v_locked_key->>'job', v_locked_sections->v_locked_key->>'section'
+        USING ERRCODE = 'P0001';
+    END IF;
+  END LOOP;
+
   SELECT
     COALESCE(SUM(total_price), 0) AS total_price,
     -- Settle each line's extended cost to cents BEFORE summing, matching the
@@ -901,7 +964,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public._save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)'::regprocedure)
-     IS DISTINCT FROM '16b2d42ae7d53b9dfb0b3e84b41744f0' THEN
+     IS DISTINCT FROM 'de50686405134a7cd50c1ad1e80906e1' THEN
     RAISE EXCEPTION 'POSTFLIGHT_SAVE_QUOTE: the new body did not install';
   END IF;
   IF NOT EXISTS (

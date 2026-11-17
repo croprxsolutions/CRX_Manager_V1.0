@@ -54,6 +54,8 @@ DECLARE
   v_fails text := '';
   v_case text;
 BEGIN
+  -- 20270117140000: the M4 switch is off on live and on a fresh database; this smoke turns it on inside its own rollback.
+  IF to_regclass('public.billing_m4_switch') IS NOT NULL THEN UPDATE public.billing_m4_switch SET enabled = true; END IF;
   SELECT id INTO v_admin FROM profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at LIMIT 1;
   SELECT id INTO v_rep FROM profiles WHERE role = 'sales_rep' AND is_active = true ORDER BY created_at LIMIT 1;
   SELECT id INTO v_rep2 FROM profiles WHERE role = 'sales_rep' AND is_active = true AND id <> v_rep ORDER BY created_at LIMIT 1;

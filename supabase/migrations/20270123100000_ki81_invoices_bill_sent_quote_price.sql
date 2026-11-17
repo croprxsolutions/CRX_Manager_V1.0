@@ -3208,9 +3208,6 @@ BEGIN
   -- and same America/Chicago fallback as _save_field_app_invoice_impl_20260714's v_season, so
   -- a preview and the save it precedes cannot land on different sides of October 1.
   v_new_season := compute_season(COALESCE(p_invoice_date, (now() AT TIME ZONE 'America/Chicago')::date));
-  -- KI-81: the date the save checks quotes on (the invoice date it will store).
-  v_quote_price_date := COALESCE(p_invoice_date, (SELECT invoice_date FROM invoices WHERE id = p_invoice_id),
-                                 (now() AT TIME ZONE 'America/Chicago')::date);
 
   IF p_invoice_id IS NOT NULL THEN
     SELECT invoice_group_id INTO v_group_id FROM invoices WHERE id = p_invoice_id;
@@ -3240,6 +3237,14 @@ BEGIN
     v_customer_id    := (v_customer->>'customer_id')::uuid;
     IF v_customer_id = ANY(v_skipped_customer_ids) THEN CONTINUE; END IF;
     v_customer_tier  := COALESCE((v_customer->>'tier')::int, 1);
+    -- KI-81 (Luna round 7): the date the save checks THIS customer's quotes on, the date their invoice will carry.
+    v_quote_price_date := COALESCE(p_invoice_date,
+                                   (SELECT i.invoice_date FROM invoices i
+                                     WHERE v_group_id IS NOT NULL AND i.invoice_group_id = v_group_id
+                                       AND i.customer_id = v_customer_id AND i.deleted_at IS NULL
+                                     ORDER BY i.invoice_date DESC LIMIT 1),
+                                   (SELECT invoice_date FROM invoices WHERE id = p_invoice_id),
+                                   (now() AT TIME ZONE 'America/Chicago')::date);
     v_customer_total := 0;
     v_customer_lines := '[]'::jsonb;
 
@@ -3459,7 +3464,7 @@ BEGIN
         ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '81bcfd088498f0cb1624f161e1a55e46', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
         ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '7ec879b190189252a79d728584a08980', ARRAY['postgres', 'service_role'], 'v'),
         ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '767b12bc61a96bf90c6adb5cb392d7be', ARRAY['postgres', 'service_role'], 'v'),
-        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'a6ab05aaab8252db0607b6660666be09', ARRAY['postgres'], 's')
+        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'a287925b82bce2fc3a6c15dd4c947c04', ARRAY['postgres'], 's')
       ) AS pin(fn, sig, body_md5, execs, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL

@@ -9,7 +9,7 @@ assert.match(container ?? '', /^crx-brandb1b-\d+-[a-z0-9]+$/, 'Pass the owned in
 const metadata = JSON.parse(execFileSync('docker', ['inspect', container], { encoding: 'utf8' }))[0];
 assert.equal(metadata.HostConfig.NetworkMode, 'none', 'Mutation proof requires a network-disabled disposable database.');
 assert.match(metadata.Config.Image, /supabase\/postgres:17\./);
-const candidate = readFileSync(new URL('../../supabase/migrations/20270109110000_priority_integrity_followups.sql', import.meta.url), 'utf8');
+const candidate = readFileSync(new URL('../../supabase/migrations/20270114100000_priority_integrity_followups.sql', import.meta.url), 'utf8');
 const id = n => `bb1b0000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 const A = id(1), REP = id(2), DRIVER = id(3), CUSTOMER = id(10), PRODUCT = id(40);
 const D = id(0x1000 + 700), ORDER = id(0x2000 + 700), OI = id(0x30000 + 700 * 16), DI = id(0x40000 + 700 * 16);

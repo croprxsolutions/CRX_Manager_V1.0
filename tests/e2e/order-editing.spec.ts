@@ -396,7 +396,8 @@ test.describe('Order Edit — Product Swap Regression', () => {
     }
 
     // Find trash/delete buttons (Lucide Trash2 icon button)
-    const trashButtons = page.locator(
+    // Scoped to the product rows: the Who pays card has its own Remove buttons.
+    const trashButtons = itemRows.locator(
       'button:has(svg.lucide-trash-2), button:has(svg.lucide-trash), button[aria-label*="delete" i], button[aria-label*="remove" i]'
     );
     const trashCount = await trashButtons.count();

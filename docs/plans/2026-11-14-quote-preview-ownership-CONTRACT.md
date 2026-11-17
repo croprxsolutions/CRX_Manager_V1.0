@@ -43,3 +43,7 @@ Mason answered both app-native questions November14: "Keep creator/admin editing
 The independent rounding fix has no unresolved business choice. A targeted re-check covers only its settled exact-cent aggregation, exact margin, preview-only zero cost and proof limits; the pending ownership questions do not hold that independent work.
 
 Targeted Opus re-check b3786238: no B/H/M math defects; its three wording/proof findings are settled above without a design change. Missing cost is explicitly the unchanged preview-only behavior; no new business decision. Additional PostgreSQL tie comparisons must be observed, not inferred. No further plan loop is needed.
+
+## Rebase onto the quote redesign (November 16)
+
+At Taha's request, staging (with redesign PRs #1900 and #1901) was merged in and both fixes re-applied to the new screen rather than restoring the old one. The redesign's single totals rule `quoteTotals` now calls `computeQuoteTotals`. The draft lock folds into `canEdit`, so the redesign's own read-only mode hides Save draft, Add product and Add a section and disables the form; `canSend`, `canCancel` and the More menu's Book as order also exclude a locked draft, and the shared save handler and Email to grower still refuse it. Schedule job stays outside the lock.

@@ -179,7 +179,7 @@ test('the product page is usable at phone size and unchanged on desktop', async 
   // A tablet gets the desktop form, and it fits.
   await page.setViewportSize({ width: 768, height: 1024 });
   await page.goto(`/products/${id}`);
-  await page.getByRole('button', { name: 'Leave' }).click({ timeout: 2000 }).catch(() => undefined);
+  await page.getByRole('button', { name: 'Discard changes' }).click({ timeout: 2000 }).catch(() => undefined);
   await expect(page.getByLabel('SKU')).toBeVisible();
   await expectNoSidewaysScroll(page);
   await page.screenshot({ path: shot('tablet-product'), fullPage: true });

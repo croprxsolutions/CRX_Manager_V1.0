@@ -1,5 +1,5 @@
--- ROLLBACK for 20270111140000_grower_share_line_saves_for_admins_and_reps.sql (KI-156 follow-up). Restores
--- _save_field_app_invoice_impl_20260714 to the 20270111130000 body (md5 c3df537c2540a3bbc3f39ddc16c09166) and _enforce_below_cost_line to
+-- ROLLBACK for 20270113150000_grower_share_line_saves_for_admins_and_reps.sql (KI-156 follow-up). Restores
+-- _save_field_app_invoice_impl_20260714 to the 20270113140000 body (md5 c3df537c2540a3bbc3f39ddc16c09166) and _enforce_below_cost_line to
 -- the live body (md5 3708388e22f081fd5b70ce8f89492aaf): a grower-share line is again refused by the below-cost wall. Rows saved under the
 -- fix are not rewritten. Apply as ONE transaction (psql -1), BEFORE grower-share-cost-unit-reverse.sql.
 -- Proven by scripts/smoke/prove-grower-share-cost-unit-real-schema.mjs.
@@ -26,7 +26,7 @@ BEGIN
                    FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS DISTINCT FROM pin.execs
   ) THEN
-    RAISE EXCEPTION 'KI156_SAVES_REVERSE: the functions are not the 20270111140000 bodies; nothing to reverse or they have changed since';
+    RAISE EXCEPTION 'KI156_SAVES_REVERSE: the functions are not the 20270113150000 bodies; nothing to reverse or they have changed since';
   END IF;
   PERFORM set_config('crx.ki156sr_xid', pg_current_xact_id()::text, true);
   PERFORM set_config('crx.ki156sr_impl_acl', (SELECT coalesce(proacl::text, '') FROM pg_proc WHERE oid = 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)'::regprocedure), true);

@@ -3234,7 +3234,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
     'trigger function re-emitted by the Bill Split candidate (billing plan M2); no application role can EXECUTE it and it takes no key. Prune once the candidate is in the generated snapshot',
   _create_bill_split_delivery_invoices:
     'private writer of Bill Split drafts (billing plan M2); complete_delivery and create_invoice_for_unbilled_delivery own idempotency and every application-role EXECUTE is revoked',
-  // KI-156 follow-up (local candidate 20270111140000): the below-cost wall, re-emitted; a trigger function, never an RPC.
+  // KI-156 follow-up (local candidate 20270113150000): the below-cost wall, re-emitted; a trigger function, never an RPC.
   _enforce_below_cost_line:
     'BEFORE INSERT/UPDATE row trigger on order_items, invoice_items and quote_items: refuses a below-cost line or records its admin approval for the line being written; the calling RPC owns idempotency, Postgres refuses direct calls of a trigger function, and no browser role can EXECUTE it. Prune once the candidate is in the generated snapshot',
   // KI-06 (local candidate 20261115160000): trigger functions, never called as RPCs.

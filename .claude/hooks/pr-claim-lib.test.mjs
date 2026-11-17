@@ -107,6 +107,7 @@ ok(readClaims(claimsPath)["feat/land"]?.session === "A", "the push recorded A's 
 ok(/LANDING CLAIM/.test(pushGuard("git push origin feat/land", "B")), "session B's push to the same branch is refused");
 ok(/LANDING CLAIM/.test(pushGuard("node scripts/write-codex-push-proof.mjs", "B")), "session B's Sol run on that branch is refused");
 ok(/LANDING CLAIM/.test(pushGuard("node --no-warnings scripts/write-codex-push-proof.mjs", "B")), "a Sol run with node options is refused too");
+ok(/LANDING CLAIM/.test(pushGuard(`node "${path.join(ROOT, "scripts", "write-codex-push-proof.mjs")}"`, "B")), "a Sol run via another checkout's script path is judged by the folder it runs in");
 ok(pushGuard("node scripts/write-codex-push-proof.mjs --dry-run", "B") === "", "a dry run is never refused");
 ok(pushGuard("node scripts/write-codex-push-proof.mjs", "A") === "", "the holder's Sol run is allowed");
 ok(pushGuard("git push origin other-branch", "B") === "", "B may push a different branch");

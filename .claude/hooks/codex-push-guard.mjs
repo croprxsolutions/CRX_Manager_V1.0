@@ -96,9 +96,8 @@ for (const segment of segmentsForClaim) {
   if (!run || /--dry-run|--help|(?:^|\s)-h\b/.test(run[3]) || /\b(?:cd|pushd|Set-Location|sl)\b/i.test(cmd)) continue;
   let refusal = "";
   try {
-    const dir = path.isAbsolute(run[2])
-      ? path.dirname(path.dirname(run[2]))
-      : path.resolve(payload?.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd());
+    // The proof script reviews its working directory (resolveRepoRoot(process.cwd())), wherever the script file lives.
+    const dir = path.resolve(payload?.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd());
     const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: dir, encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }).trim();
     refusal = claimOrRefuse({ file: claimsFileFor(dir), branch, sessionId: payload?.session_id, action: "Sol review", cwd: dir });
   } catch { /* fail open */ }

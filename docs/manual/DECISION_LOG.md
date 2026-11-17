@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-17 — #1946 (KI-81): each grower on a split bill records their own price source
+
+**Decision (Mason, in chat, 2026-11-17: "Each records its own").** On PR #1946, when one grower on a split field-application bill pays their own quoted price and another pays the price list, each grower's invoice line and line share record that grower's own price source ('quoted' or 'tier'), not the largest-share grower's.
+**What it does:** follows from his earlier "Own quote only" rule; the split save keeps a per-grower source next to the per-grower price. Amounts are unchanged. Every other gate is unchanged.
+
 ## 2026-11-17 — CMP-2 plan approved with one change: the generic build is always the yardstick
 
 **Decision (Mason, in chat, 2026-11-17):** after a chunk-by-chunk re-review of the CMP-2 plan (grand plan Stage 5), Mason chose "Approve with that change". This lifts the 2026-11-11 hold below. He confirmed the scope and build order, the shared generic reference set and the Halex GT test, search by ingredient and mode of action, the equivalence warnings, the selling price and admin cost modes with admin-only profit, the missing-data and incomplete-row rules, and the many-products/category view.

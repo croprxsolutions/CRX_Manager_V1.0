@@ -36,7 +36,8 @@ BEGIN
   END IF;
   SELECT c.confdeltype, c.confupdtype, c.confmatchtype, c.condeferrable, c.condeferred, c.convalidated,
          c.confrelid, array_length(c.conkey, 1) AS nk,
-         (SELECT a.attname FROM pg_attribute a WHERE a.attrelid = c.conrelid AND a.attnum = c.conkey[1]) AS col
+         (SELECT a.attname FROM pg_attribute a WHERE a.attrelid = c.conrelid AND a.attnum = c.conkey[1]) AS col,
+         (SELECT a.attname FROM pg_attribute a WHERE a.attrelid = c.confrelid AND a.attnum = c.confkey[1]) AS refcol
     INTO v_c
   FROM pg_constraint c
   WHERE c.conrelid = 'public.jobs'::regclass AND c.conname = 'jobs_quote_section_id_fkey' AND c.contype = 'f';
@@ -45,6 +46,7 @@ BEGIN
   END IF;
   IF v_c.confdeltype <> 'a' OR v_c.confupdtype <> 'a' OR v_c.confmatchtype <> 's' OR NOT v_c.convalidated
      OR v_c.confrelid <> 'public.quote_sections'::regclass OR v_c.nk <> 1 OR v_c.col <> 'quote_section_id'
+     OR v_c.refcol IS DISTINCT FROM 'id'
      OR v_c.condeferrable OR v_c.condeferred THEN
     RAISE EXCEPTION 'PREFLIGHT_FK_DRIFT: jobs_quote_section_id_fkey is not the immediate NO ACTION quote_section_id -> quote_sections(id) key this file was written against';
   END IF;

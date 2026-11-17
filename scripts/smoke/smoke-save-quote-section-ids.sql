@@ -24,6 +24,11 @@ DECLARE
   v_admin uuid;
   v_customer_id uuid;
   v_product_id uuid;
+  v_products uuid[] := ARRAY[]::uuid[];
+  v_i int;
+  v_la jsonb;
+  v_lb jsonb;
+  v_lc jsonb;
   v_quote_id uuid;
   v_quote2_id uuid;
   v_version bigint;
@@ -56,27 +61,38 @@ BEGIN
   INSERT INTO customers (farm_name)
   VALUES ('[SMOKE] Section Ids Farm ' || v_suffix)
   RETURNING id INTO v_customer_id;
-  INSERT INTO products (product_name, unit_size, product_form)
-  VALUES ('[SMOKE] Section Ids Product ' || v_suffix, 'gal', 'liquid')
-  RETURNING id INTO v_product_id;
-  v_price_res := preview_product_pricing_changes(
-    'product_page', NULL,
-    jsonb_build_array(jsonb_build_object(
-      'product_id', v_product_id,
-      'row_version', (SELECT pricing_version FROM products WHERE id = v_product_id),
-      'pricing_mode', 'margin_driven', 'new_cost', '6.00',
-      'tier1_margin_percent', '20', 'tier2_margin_percent', '25', 'tier3_margin_percent', '30',
-      'change_reason', 'Rollback smoke section-ids fixture setup')),
-    v_admin, 'smk-sqsi-price-preview-' || v_suffix);
-  PERFORM apply_product_pricing_change_set(
-    (v_price_res->>'change_set_id')::uuid, v_price_res->>'request_fingerprint',
-    v_admin, 'smk-sqsi-price-apply-' || v_suffix);
+  -- One product per section, so no save repeats a product (QUOTE_ITEM_AMBIGUOUS_COST is not under test).
+  FOR v_i IN 1..3 LOOP
+    INSERT INTO products (product_name, unit_size, product_form)
+    VALUES ('[SMOKE] Section Ids Product ' || v_i || ' ' || v_suffix, 'gal', 'liquid')
+    RETURNING id INTO v_product_id;
+    v_products := v_products || v_product_id;
+  END LOOP;
+  -- Pricing sets a transaction-wide pricing mode, so every product is inserted before any is priced.
+  FOREACH v_product_id IN ARRAY v_products LOOP
+    v_i := array_position(v_products, v_product_id);
+    v_price_res := preview_product_pricing_changes(
+      'product_page', NULL,
+      jsonb_build_array(jsonb_build_object(
+        'product_id', v_product_id,
+        'row_version', (SELECT pricing_version FROM products WHERE id = v_product_id),
+        'pricing_mode', 'margin_driven', 'new_cost', '6.00',
+        'tier1_margin_percent', '20', 'tier2_margin_percent', '25', 'tier3_margin_percent', '30',
+        'change_reason', 'Rollback smoke section-ids fixture setup')),
+      v_admin, 'smk-sqsi-price-preview-' || v_i || '-' || v_suffix);
+    PERFORM apply_product_pricing_change_set(
+      (v_price_res->>'change_set_id')::uuid, v_price_res->>'request_fingerprint',
+      v_admin, 'smk-sqsi-price-apply-' || v_i || '-' || v_suffix);
+  END LOOP;
 
   v_line := jsonb_build_object(
-    'product_id', v_product_id, 'sort_order', 0, 'notes', null,
+    'sort_order', 0, 'notes', null,
     'calc_mode', 'units_direct', 'total_units_needed', 10,
     'price_override', 20, 'price_per_unit', 20, 'current_cost', 6,
     'unit_size', 'gal', 'acres', 0);
+  v_la := v_line || jsonb_build_object('product_id', v_products[1]);
+  v_lb := v_line || jsonb_build_object('product_id', v_products[2]);
+  v_lc := v_line || jsonb_build_object('product_id', v_products[3]);
 
   -- 1. New quote, two sections, marked.
   v_payload := jsonb_build_object(
@@ -85,9 +101,9 @@ BEGIN
     'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true);
   v_res := save_quote(NULL, v_payload, jsonb_build_array(
     jsonb_build_object('client_key', '_s1', 'section_name', 'North', 'sort_order', 0,
-      'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k1'))),
+      'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1'))),
     jsonb_build_object('client_key', '_s2', 'section_name', 'South', 'sort_order', 1,
-      'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k2')))),
+      'items', jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2')))),
     v_admin, 'smk-sqsi-save-1-' || v_suffix);
   v_quote_id := (v_res->>'quote_id')::uuid;
   v_version := (v_res->>'row_version')::bigint;
@@ -108,9 +124,9 @@ BEGIN
   v_payload := v_payload || jsonb_build_object('row_version_expected', v_version, 'header_notes', 'P1');
   v_res := save_quote(v_quote_id, v_payload, jsonb_build_array(
     jsonb_build_object('id', v_s1, 'client_key', '_s1', 'section_name', 'North renamed', 'sort_order', 0,
-      'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k1'))),
+      'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1'))),
     jsonb_build_object('id', v_s2, 'client_key', '_s2', 'section_name', 'South', 'sort_order', 1,
-      'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k2')))),
+      'items', jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2')))),
     v_admin, 'smk-sqsi-save-p1-' || v_suffix);
   -- Run the deferred foreign-key check now (a rolled-back chain never reaches COMMIT).
   EXECUTE 'SET CONSTRAINTS ALL IMMEDIATE';
@@ -138,7 +154,7 @@ BEGIN
     BEGIN
       PERFORM save_quote(v_quote_id, v_payload, jsonb_build_array(
         jsonb_build_object('id', v_s2, 'client_key', '_s2', 'section_name', 'South', 'sort_order', 0,
-          'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k2')))),
+          'items', jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2')))),
         v_admin, 'smk-sqsi-save-p2-' || v_count || '-' || v_suffix);
     EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
     END;
@@ -151,9 +167,9 @@ BEGIN
   BEGIN
     PERFORM save_quote(v_quote_id, v_payload - 'section_ids_v1', jsonb_build_array(
       jsonb_build_object('section_name', 'North', 'sort_order', 0,
-        'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k1'))),
+        'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1'))),
       jsonb_build_object('section_name', 'South', 'sort_order', 1,
-        'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k2')))),
+        'items', jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2')))),
       v_admin, 'smk-sqsi-save-p2-old-' || v_suffix);
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
   END;
@@ -174,7 +190,7 @@ BEGIN
     'commission_split', '{"splits": []}'::jsonb);
   v_res := save_quote(NULL, v_payload2, jsonb_build_array(
     jsonb_build_object('client_key', '_t1', 'section_name', 'East', 'sort_order', 0,
-      'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_m1')))),
+      'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_m1')))),
     v_admin, 'smk-sqsi-save-q2-' || v_suffix);
   v_quote2_id := (v_res->>'quote_id')::uuid;
   v_version2 := (v_res->>'row_version')::bigint;
@@ -188,26 +204,26 @@ BEGIN
       IF v_count = 1 THEN      -- another quote's section id
         PERFORM save_quote(v_quote_id, v_payload, jsonb_build_array(
           jsonb_build_object('id', v_s1, 'section_name', 'North', 'sort_order', 0,
-            'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k1'))),
+            'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1'))),
           jsonb_build_object('id', v_q2s1, 'section_name', 'Stolen', 'sort_order', 1, 'items', '[]'::jsonb)),
           v_admin, 'smk-sqsi-save-p3-' || v_count || '-' || v_suffix);
       ELSIF v_count = 2 THEN   -- the same id twice
         PERFORM save_quote(v_quote_id, v_payload, jsonb_build_array(
           jsonb_build_object('id', v_s1, 'section_name', 'North', 'sort_order', 0,
-            'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k1'))),
+            'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1'))),
           jsonb_build_object('id', v_s1, 'section_name', 'Twice', 'sort_order', 1, 'items', '[]'::jsonb)),
           v_admin, 'smk-sqsi-save-p3-' || v_count || '-' || v_suffix);
       ELSIF v_count = 3 THEN   -- not a uuid
         PERFORM save_quote(v_quote_id, v_payload, jsonb_build_array(
           jsonb_build_object('id', v_s1, 'section_name', 'North', 'sort_order', 0,
-            'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k1'))),
+            'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1'))),
           jsonb_build_object('id', 'not-a-uuid', 'section_name', 'Bad', 'sort_order', 1, 'items', '[]'::jsonb)),
           v_admin, 'smk-sqsi-save-p3-' || v_count || '-' || v_suffix);
       ELSE                     -- an id on a brand-new quote
         PERFORM save_quote(NULL, v_payload2 || jsonb_build_object('section_ids_v1', true,
             'quote_number', '[SMOKE] QSI3-' || v_suffix), jsonb_build_array(
           jsonb_build_object('id', v_q2s1, 'section_name', 'Copied', 'sort_order', 0,
-            'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_m1')))),
+            'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_m1')))),
           v_admin, 'smk-sqsi-save-p3-' || v_count || '-' || v_suffix);
       END IF;
     EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
@@ -228,7 +244,7 @@ BEGIN
   -- P4. Old (unmarked) save of the job-free quote: saves, ids are not reused (as before).
   v_res := save_quote(v_quote2_id, v_payload2 || jsonb_build_object('row_version_expected', v_version2), jsonb_build_array(
     jsonb_build_object('id', v_q2s1, 'client_key', '_t1', 'section_name', 'East', 'sort_order', 0,
-      'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_m1')))),
+      'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_m1')))),
     v_admin, 'smk-sqsi-save-p4-' || v_suffix);
   IF (v_res->>'status') IS DISTINCT FROM 'saved'
      OR (v_res->'section_ids'->>'_t1')::uuid = v_q2s1
@@ -239,15 +255,15 @@ BEGIN
   END IF;
 
   -- A marked save that adds a section with no id gives it a new one; replay returns the same map.
-  UPDATE jobs SET deleted_at = NULL, status = 'scheduled' WHERE id = v_job_id;
+  UPDATE jobs SET deleted_at = NULL WHERE id = v_job_id;  -- still cancelled; any job keeps its section
   v_payload := v_payload || jsonb_build_object('header_notes', 'P4');
   v_res := save_quote(v_quote_id, v_payload, jsonb_build_array(
     jsonb_build_object('id', v_s1, 'client_key', '_s1', 'section_name', 'North', 'sort_order', 0,
-      'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k1'))),
+      'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1'))),
     jsonb_build_object('id', v_s2, 'client_key', '_s2', 'section_name', 'South', 'sort_order', 1,
-      'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k2'))),
+      'items', jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2'))),
     jsonb_build_object('client_key', '_s3', 'section_name', 'West', 'sort_order', 2,
-      'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k3')))),
+      'items', jsonb_build_array(v_lc || jsonb_build_object('client_key', '_k3')))),
     v_admin, 'smk-sqsi-save-p4b-' || v_suffix);
   EXECUTE 'SET CONSTRAINTS ALL IMMEDIATE';
   EXECUTE 'SET CONSTRAINTS ALL DEFERRED';
@@ -259,11 +275,11 @@ BEGIN
   END IF;
   v_replay := save_quote(v_quote_id, v_payload, jsonb_build_array(
     jsonb_build_object('id', v_s1, 'client_key', '_s1', 'section_name', 'North', 'sort_order', 0,
-      'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k1'))),
+      'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1'))),
     jsonb_build_object('id', v_s2, 'client_key', '_s2', 'section_name', 'South', 'sort_order', 1,
-      'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k2'))),
+      'items', jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2'))),
     jsonb_build_object('client_key', '_s3', 'section_name', 'West', 'sort_order', 2,
-      'items', jsonb_build_array(v_line || jsonb_build_object('client_key', '_k3')))),
+      'items', jsonb_build_array(v_lc || jsonb_build_object('client_key', '_k3')))),
     v_admin, 'smk-sqsi-save-p4b-' || v_suffix);
   IF v_replay->'section_ids' IS DISTINCT FROM v_res->'section_ids' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (R) replay returned different section_ids';

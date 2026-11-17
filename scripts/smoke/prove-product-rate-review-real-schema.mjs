@@ -43,6 +43,7 @@ const LATER_READ_ONLY = new Set([
   '20270108100000_ingredient_modes_of_action.sql',
   '20270109100000_delivery_receipt_brands.sql',
   '20270115100000_moa_group_code_equivalence.sql',
+  '20270119160000_registration_adjuvants.sql',
 ]);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

@@ -19,6 +19,7 @@ describe('signedQuantity', () => {
   it.each([
     ['received', 100, 100],
     ['returned', 50, 50],
+    ['returned', -50, -50], // a cancelled return removes stock (KI-159)
     ['released', 30, 30],
     ['cancelled_delivery_reversal', 20, 20],
     ['void_delivery_reversal', 15, 15],

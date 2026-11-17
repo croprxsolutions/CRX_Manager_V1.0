@@ -267,17 +267,15 @@ and `comprehensive-ui-workflow.spec.ts`. No secret keys were found. Fix: read it
 
 
 ### KI-99 — Voiding an invoice leaves two money records out of step
-**MED · OPEN · money · found 2026-11-04 (Fix Delivery reviews, PR #1421) · Claude**
+**MED · FIX IN REVIEW (not live) · money · found 2026-11-04 (Fix Delivery reviews, PR #1421) · Claude**
 Both are in the live `void_invoice`, so they affect the ordinary Void Invoice button, not only Fix Delivery.
 - **Write-off stays active.** Voiding a posted invoice that has a write-off sets the invoice's write-off amount to
   zero but leaves its `write_offs` record active (not marked reversed), so the customer statement can still show it.
-  Until fixed, reverse the write-off before voiding. Fix Delivery refuses these invoices.
-- **Credit month read in UTC.** Before reversing an applied credit, `void_invoice` checks that the credit's month
-  is open using the UTC date (`applied_at::date`), not the Chicago business date. A credit applied just after
-  midnight UTC on the 1st belongs to the previous Chicago month, so a closed month can be changed. Fix Delivery
-  checks both dates.
-- **Next step.** A reviewed migration that marks the write-off reversed when its invoice is voided and checks the
-  credit month by the Chicago date (Sol-listed: money).
+  Until the fix is live, reverse the write-off before voiding. Fix Delivery refuses these invoices. Fix (Mason,
+  2026-11-14: auto-reverse): `20270116100000_ki99_void_reverses_write_offs.sql` marks each active write-off reversed
+  when its invoice is voided, after checking its Chicago month is open. Live had 0 write-offs (2026-11-14).
+- **Credit month read in UTC — FIXED LIVE 2026-11-07.** `20261206110000` (KI-18) checks each credit's Chicago
+  month; confirmed in the live body 2026-11-14.
 ### KI-10 — About 69 live functions replay a saved result matched on the retry key alone
 **HIGH on money paths · PARTIAL · money/inventory/database · unassigned (batch 3 remainder is next)**
 When a user retries an action with a saved "retry key", these functions return the first call's saved answer
@@ -988,6 +986,7 @@ Tier 2 above Tier 3; 3 active products have no cost, 4 have no Tier 1 price, and
 
 ### KI-139 — "Reconcile negative inventory" can overwrite any row, not just negative ones
 **LOW · OPEN · inventory · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #7) · unassigned**
+**Fix pending 2026-11-16:** `20270113100000_stock_checks_negative_onorder_chicago` (repair step 5, part 1; not applied live) refuses a row that is not below zero, and NaN/Infinity. C-13 (Mason chose "toward zero", 2026-11-16): the same migration lets `adjust_inventory` accept any increase, so a −10 row can be partly fixed by +5; a decrease still may not end below zero.
 `_reconcile_negative_inventory_replay_impl_20261015` sets any row to any number of 0 or more with no count behind it,
 against "negatives fixed only from the count". Admin-only and logged. Fix: refuse when on-hand is not below zero, or
 require a completed count line.
@@ -1012,6 +1011,7 @@ dry check (4 live dry products use a liquid `oz` rate; KI-114, rates work), and 
 
 ### KI-141 — Retiring an inventory row ignores open purchase orders
 **LOW · OPEN · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #9) · unassigned**
+**Fix pending 2026-11-16:** `20270113100000_stock_checks_negative_onorder_chicago` (repair step 5, part 1; not applied live) refuses while the row has stock on order. It tries the on-order recompute's lock and never waits for it, so a PO saved at the same moment cannot slip past.
 `_retire_inventory_item_replay_impl_20261015` deletes the row without checking `quantity_on_order`; the on-order
 recompute then recreates a zero row and the PO still points at retired stock. Fix: refuse while open PO quantity is
 above 0.
@@ -1036,7 +1036,7 @@ replaces `_fill_order_line_unit` (it filled from `unit_size`). Existing closed l
 edits that do not touch the unit.
 
 ### KI-159 — Cancelling a received return writes a history row both stock checks read with the wrong sign
-**MED (latent) · OPEN · inventory/returns · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-5) · unassigned**
+**MED (latent) · FIX IN REVIEW (branch `claude/pm-stock-history`, PR B of To-Do 0.17; not live) · inventory/returns · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-5) · Claude**
 `_cancel_return_intent_impl_20260812` (in `20260827041500…`) writes `'returned', -restocked_quantity`. Both
 "stock matches history" checks (`src/lib/reconciliation.ts` ~L174-195 and the KI-108 SQL in `20270103150000`, plus
 `scripts/smoke/prove-ki108-…`) take `abs()` of `returned` rows. Example: a return restocks 10 and is then cancelled.
@@ -1044,9 +1044,16 @@ Real stock nets to 0, but the check expects +20 and reports a false mismatch. A 
 repair would then **add 20 phantom units**. Live-verified body; 0 such rows yet. Fix: write an `adjusted` row on
 cancel, or teach both checks the sign. Also add stock-vs-history to the database sweep. Must land before any repeat of
 a history-based repair (repair step 2, To-Do 0.17).
+**Fix in review:** the browser check (`src/lib/reconciliation.ts`) and the stock history screen read `returned` as
+signed, and the browser check compares each product once, summed over its warehouse rows (history has no stock-row
+id, so the old per-row check flagged every product held in two warehouses). New database sweep
+`scripts/db-invariant-sweeps/predicates/stock-matches-history.sql` (same rules; 0 rows live 2026-11-15, 116 products
+checked; a product with history but no stock row left counts as stock 0, 0 such products live 2026-11-17). The writer is unchanged: its negative row is the true movement. KI-108's applied repair
+(`20270103150000`) stays as it ran (0 `returned` rows existed); any repeat of a history-based repair must use the
+signed rule.
 
 ### KI-160 — Two stock counts open on the same product apply the same correction twice
-**MED (latent) · OPEN · inventory/counts · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-6, C-14) · unassigned**
+**MED (latent) · PART FIX IN REVIEW (branch `claude/pm-stock-history`, migration `20270119130000`; not live) · inventory/counts · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-6, C-14) · Claude**
 `_complete_cycle_count_impl` adds the stored `variance` to current on-hand, and nothing stops two open counts on one
 inventory row: no unique or partial index on `cycle_counts` or `cycle_count_items` (live-verified). Example: counts A
 and B both record +10 on a shelf going from 90 to 100; after both complete, stock is 110. Named out of scope in the
@@ -1054,6 +1061,11 @@ KI-134 contract, with no KI until now. Smaller: admins hold a column UPDATE gran
 which bypasses the KI-134 baseline. Count creation is also three browser requests (`CycleCounts.tsx` ~L246-292), so a
 failed create leaves an empty open count. 0 open counts today. Fix: one open count per row, variance written only by
 the RPCs, atomic create. Repair step 2 (To-Do 0.17), before the pre-season count.
+**Part fix in review:** one in-progress count per warehouse; a stock row on only one item of any in-progress count
+(also refuses the same row twice on one count; concurrent claims serialized); a count's status only moves forward (in progress
+to completed or cancelled, completed to cancelled), so no count can be reopened or reversed twice; signed-in users lose direct UPDATE on `cycle_counts` and `cycle_count_items`, so a
+completed count cannot be marked cancelled without its reversal and a line's variance is only what the save RPC computed (a direct line insert may set only the four columns the app sends). **Still open here:** the three-request creation (a failed create leaves an empty open count, which
+now blocks a new count at that warehouse until it is cancelled from the Cycle Counts screen).
 
 ### KI-161 — Delivery editing does not re-check the edited line against its order line
 **MED · OPEN · deliveries · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-7) · unassigned**
@@ -1065,6 +1077,7 @@ path and tighten direct line writes, in a new migration. Repair step 5 (To-Do 0.
 
 ### KI-162 — The Receiving Log filters by UTC date
 **LOW · OPEN · purchasing/reports · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-11) · unassigned**
+**Fix pending 2026-11-16:** `20270113100000_stock_checks_negative_onorder_chicago` (repair step 5, part 1; not applied live) filters on Chicago business-day bounds.
 `get_receiving_log` (`20261113110000` ~L99-100) compares `received_at::date`. The database runs in UTC and the function
 sets no zone (live-verified), so a receipt after about 6-7 PM Central files under the next day. The KI-18 batches
 missed it. Fix: use the Chicago date, as KI-18 did. Repair step 5 (To-Do 0.17).
@@ -1538,7 +1551,8 @@ per order, and a payload change is refused with a conflict dialog that reloads t
   applied live); both read the Chicago date (live bodies checked 2026-11-10).
 - Transfer Net 30 (KI-14): FIXED 2026-11-06 (PR #1556); see KI-14.
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing
-  defaults; whether that scope is intended is Mason's open decision (MED). Any rep can read another rep's
+  defaults (MED). Decided for field splits (Mason, 2026-11-08): only payers saved on the field's split, or on
+  the job's own split; built in foundation 18.1 (`docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`). Any rep can read another rep's
   split-return lines and prices under `return_items_select` (LOW).
 - Invoice lines could be written with no unit (from an order line or delivery line with no unit), so they could never
   get a return credit (MED): FIXED by `20270106100000` (applied live 2026-11-11, PR #1731). A new order line with no unit takes the product's

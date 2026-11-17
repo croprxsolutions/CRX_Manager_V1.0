@@ -36,7 +36,7 @@ import {
   type StaleCostRow,
 } from '../lib/costFreshness';
 import type {
-  PnLRow, GrossSalesRow, CustomerBalanceRow,
+  PnLRow, GrossSalesRow, CustomerBalanceRow, CustomerBalanceUnavailableRow,
   ChemicalHistoryRow, CommissionBalanceRow, CommissionHistoryReportPayload, CommissionPaymentDetailRow, InventoryCostRow,
   YearEndSummaryData,
 } from '../types';
@@ -48,6 +48,7 @@ type Category = 'profitability' | 'logbook' | 'financial' | 'operational' | 'yea
 type ProfitTab = 'customer' | 'product' | 'commission' | 'revenue';
 type FinancialTab = 'pnl' | 'gross_sales' | 'customer_balance' | 'commission_balance';
 type OperationalTab = 'chemical_history' | 'inventory_cost' | 'stale_costs' | 'posted_applications' | 'price_list';
+type CustomerBalanceDatabaseRow = Database['public']['Functions']['get_customer_balance_listing']['Returns'][number];
 
 // Cost and margin are admin-only (Mason, 2026-10-15). The server refuses these
 // reports to everyone else, so non-admins never see the tabs.
@@ -233,7 +234,7 @@ export default function Reports() {
   const [custBalanceData, setCustBalanceData] = useState<CustomerBalanceRow[]>([]);
   // Customers whose balance cannot be shown as of this date (no amounts): listed, never in the table.
   // Flagged rows carry no amounts (all NULL), so the type keeps arithmetic off them.
-  const [custBalanceUnavailable, setCustBalanceUnavailable] = useState<Pick<CustomerBalanceRow, 'customer_id' | 'farm_name' | 'unavailable_reason'>[]>([]);
+  const [custBalanceUnavailable, setCustBalanceUnavailable] = useState<CustomerBalanceUnavailableRow[]>([]);
   const [commBalanceData, setCommBalanceData] = useState<CommissionBalanceRow[]>([]);
   const [commPaymentDetailData, setCommPaymentDetailData] = useState<CommissionPaymentDetailRow[]>([]);
   const [commissionAsOfDate, setCommissionAsOfDate] = useState('');
@@ -521,7 +522,7 @@ export default function Reports() {
   const fetchCustomerBalance = useCallback(async () => {
     const asOf = endDate || localToday();
     const seq = reportLoadSeq.current;
-    const { data, error } = await fetchAllRows<CustomerBalanceRow>((from, to) => supabase
+    const { data, error } = await fetchAllRows<CustomerBalanceDatabaseRow>((from, to) => supabase
       .rpc('get_customer_balance_listing', { p_as_of_date: asOf }, { count: 'exact' })
       // The function's own order (largest balance first), then the unique customer id.
       .order('outstanding_balance', { ascending: false })
@@ -535,9 +536,9 @@ export default function Reports() {
       toast('error', `Customer balance failed: ${error.message}`);
       return;
     }
-    const allRows = assertRpcResult<CustomerBalanceRow[]>(data, 'get_customer_balance_listing');
-    setCustBalanceData(allRows.filter((r) => !r.unavailable_reason));
-    setCustBalanceUnavailable(allRows.filter((r) => r.unavailable_reason));
+    const allRows = assertRpcResult<CustomerBalanceDatabaseRow[]>(data, 'get_customer_balance_listing');
+    setCustBalanceData(allRows.filter((r): r is CustomerBalanceRow => r.unavailable_reason === null));
+    setCustBalanceUnavailable(allRows.filter((r): r is CustomerBalanceUnavailableRow => r.unavailable_reason !== null));
     reportLoaded('financial:customer_balance');
   }, [endDate, toast, reportLoaded, markReportFailed]);
 

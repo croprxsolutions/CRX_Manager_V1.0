@@ -7,7 +7,8 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { useEffect } from 'react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 
-const { mockFrom, mockToast, deletes } = vi.hoisted(() => ({
+const { mockFrom, mockToast, deletes, inserts } = vi.hoisted(() => ({
+  inserts: [] as Array<[string, unknown]>,
   mockFrom: vi.fn(),
   mockToast: vi.fn(),
   deletes: [] as unknown[][],
@@ -54,7 +55,7 @@ function answerChain(table: string, answer: (calls: string[]) => { data: unknown
   const eqs: unknown[] = [];
   const self: Record<string, unknown> = {};
   for (const m of ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'not', 'or', 'order', 'limit', 'range', 'maybeSingle', 'single']) {
-    self[m] = (...args: unknown[]) => { calls.push(m); if (m === 'eq') eqs.push(args); return self; };
+    self[m] = (...args: unknown[]) => { calls.push(m); if (m === 'eq') eqs.push(args); if (m === 'insert') inserts.push([table, args[0]]); return self; };
   }
   self.then = (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => Promise.resolve().then(() => {
     if (calls.includes('delete')) deletes.push([table, ...eqs]);
@@ -63,7 +64,7 @@ function answerChain(table: string, answer: (calls: string[]) => { data: unknown
   return self;
 }
 
-type Sale = { id: string; number: string; shares: unknown[]; items?: unknown[]; invoices?: unknown[]; status?: string; allocations?: unknown[] };
+type Sale = { id: string; number: string; totalPrice?: number; shares: unknown[]; items?: unknown[]; invoices?: unknown[]; status?: string; allocations?: unknown[] };
 const share = (id: string, orderId: string, customerId: string, name: string, pct: number, createdAt = '2026-11-01T10:00:00Z') =>
   ({ id, order_id: orderId, customer_id: customerId, customer_name: name, split_percentage: pct, sort_order: 1, created_at: createdAt });
 
@@ -76,7 +77,7 @@ function mockSale() {
     const sale = current;
     if (table === 'orders') {
       return { data: { id: sale.id, order_number: sale.number, status: 'confirmed', customer_id: 'cust-1', row_version: 1,
-        order_date: '2026-03-15', total_price: 1000, notes: '', created_at: '2026-03-15T00:00:00Z', ...(sale.status && { status: sale.status }) }, error: null };
+        order_date: '2026-03-15', total_price: sale.totalPrice ?? 1000, notes: '', created_at: '2026-03-15T00:00:00Z', ...(sale.status && { status: sale.status }) }, error: null };
     }
     if (table === 'customers' && calls.includes('maybeSingle')) return { data: { id: 'cust-1', farm_name: 'Maple Hollow Farms' }, error: null };
     if (table === 'order_shares') return { data: sale.shares, error: null };
@@ -194,6 +195,28 @@ describe('Who pays and the invoice rows agree with the bill', () => {
     expect(screen.queryByText(/· 0%/)).not.toBeInTheDocument();
     expect(screen.queryByText(/· 65%/)).not.toBeInTheDocument();
     expect(screen.queryByText(/· 35%/)).not.toBeInTheDocument();
+  });
+});
+
+describe('Adding a payer saves its amount in exact cents', () => {
+  beforeEach(() => { vi.clearAllMocks(); deletes.length = 0; inserts.length = 0; });
+
+  const addPayer = async (sale: Sale, pct: string) => {
+    renderSale(sale);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a payer' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Bill split customer' }));
+    fireEvent.change(screen.getByLabelText('Share'), { target: { value: pct } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add payer' }));
+    await vi.waitFor(() => expect(inserts.find(([t]) => t === 'order_shares')).toBeDefined());
+    return inserts.find(([t]) => t === 'order_shares')![1] as { amount_cents: number; split_percentage: number };
+  };
+
+  it('rounds half a cent up where float math rounded it down ($1,024.09 at 50% is 51,205¢, not 51,204¢)', async () => {
+    expect((await addPayer({ ...saleA, shares: [], totalPrice: 1024.09 }, '50')).amount_cents).toBe(51205);
+  });
+
+  it('keeps the reference sale exact ($1,333.20 at 50% is 66,660¢)', async () => {
+    expect((await addPayer({ ...saleA, shares: [], totalPrice: 1333.2 }, '50')).amount_cents).toBe(66660);
   });
 });
 

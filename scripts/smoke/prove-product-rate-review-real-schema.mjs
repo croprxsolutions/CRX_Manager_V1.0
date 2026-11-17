@@ -16,6 +16,7 @@ import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
+import { proveInactiveRateReview } from './prove-inactive-rate-review-real-schema.mjs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -26,7 +27,14 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270104110000_product_rate_review.sql');
-const FOLLOW_UPS = [];
+// shortcut: 20270120100000 (#1880) is listed for ordering only and is NOT applied here; it also replaces
+// delivery-brand and receiving functions from later migrations this prover never replays. Its rate-function
+// changes were tested by Taha on a real-schema DB (#1880) and by the private behaviour prover; apply it here
+// once this prover replays the later chain (#1928).
+const FOLLOW_UPS = [
+  path.join(MIGRATIONS, '20270110110000_inactive_rate_review_cleanup.sql'),
+  path.join(MIGRATIONS, '20270120100000_priority_integrity_followups.sql'),
+];
 // These later files only call/check parent auth/replay helpers; none redefines them or touches rate tables.
 const LATER_READ_ONLY = new Set([
   '20270104120000_delivery_brands.sql',
@@ -34,6 +42,8 @@ const LATER_READ_ONLY = new Set([
   '20270106110000_invoice_brands_rup.sql',
   '20270108100000_ingredient_modes_of_action.sql',
   '20270109100000_delivery_receipt_brands.sql',
+  '20270115100000_moa_group_code_equivalence.sql',
+  '20270119160000_registration_adjuvants.sql',
 ]);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -670,6 +680,7 @@ async function main() {
   downloadCases();
   accessCases();
   console.log('PRODUCT_RATE_REVIEW_PROOF_PASS');
+  await proveInactiveRateReview(NAME);
 }
 
 try { await main(); }

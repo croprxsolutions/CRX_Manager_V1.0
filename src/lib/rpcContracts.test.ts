@@ -2930,7 +2930,11 @@ function unappliedLocalCandidateTimestamps(history: string, appliedNames: string
 // No live or staging RPC currently needs this pre-generated-type bucket: live
 // names are present in the full snapshot, and the pending M4 functions are
 // explicitly retained in the staging schema overlay.
-const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>();
+const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
+  // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
+  // _product_parent_replay and saves its receipt. Prune once the generated types carry it.
+  'set_registration_adjuvants',
+]);
 
 /**
  * Mutating helpers without a client idempotency key are listed here only when

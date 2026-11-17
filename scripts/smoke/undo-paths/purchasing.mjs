@@ -81,5 +81,5 @@ export function run() {
   assert.equal(cp, 'ok|moves=received:4 poO=cancelled:0/7:receipts=0 poR=partially_received:4/10:receipts=1 stock=54/onorder=6'
     + '|replay_same=true|replay_unchanged=true|again=already_cancelled|again_unchanged=true|cancelled_audit=1'
     + '|driver=INSUFFICIENT_ROLE: only admins or sales reps can cancel purchase orders|driver_unchanged=true');
-  assert.match(cr, /^ok\|Cannot cancel PO PO-\d{4}-\d{4}: 4 units already received\. Use partial receive workflow instead\.\|unchanged=true$/);
+  assert.match(cr, /^ok\|Cannot cancel PO PO-\d{4}-\d{4}: 4 units already received\. Use Close Short to stop waiting for the rest\.\|unchanged=true$/);
 }

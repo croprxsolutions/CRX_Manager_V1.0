@@ -23,6 +23,9 @@ function seedInvoices() {
     ${draft('toVoid', 'INV-VOID', 30000)} ${post('toVoid')}
     ${draft('paid', 'INV-PAID', 25000)} ${post('paid')}
     ${draft('draft', 'INV-DRAFT', 20000)}
+    -- A chemical-sale draft's total is recomputed from its lines (billing M4, 20261231), so it carries its $200.00 as one.
+    INSERT INTO public.invoice_items (invoice_id, description, quantity, unit_price_cents, extended_cents, cost_cents, charge_type)
+      VALUES ('${INV.draft}', '[UNDO] Draft service', 1, 20000, 20000, 0, 'service');
     -- A $10.00 payment on the paid invoice, so voiding or unposting it must be refused.
     PERFORM 1;`.replace('PERFORM 1;', `SELECT public.allocate_payment('${CUST}', 1000, 'check', '[UNDO]-PAY-1', NULL, CURRENT_DATE, '[UNDO] payment',
       jsonb_build_array(jsonb_build_object('invoice_id', '${INV.paid}', 'amount_cents', 1000)), '${ADMIN}', 'undo-seed-pay-1');`));

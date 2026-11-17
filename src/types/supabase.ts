@@ -11959,6 +11959,11 @@ export type Database = {
       }
     }
     Functions: {
+      // Source-verified pending 20270110110000 overlay; retain until live type regeneration.
+      get_rate_review_workbook: {
+        Args: { p_include_inactive?: boolean }
+        Returns: Json
+      }
       __plpgsql_show_dependency_tb:
         | {
             Args: {

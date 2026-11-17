@@ -32,13 +32,17 @@ export function QuoteLineCost({ quotedCost, todayCost, pricePerUnit }: QuoteLine
     todayFlag = 'up';
     todayNote = 'Cost has gone up since this line was quoted.';
   }
+  // One line, as the line table shows it: "$7.40 / today $7.65 · up".
   return (
-    <div className="leading-tight">
-      <div>{formatUSD(quotedCost)}</div>
+    <div className="leading-tight tabular-nums">
+      {formatUSD(quotedCost)}
       {todayCost != null && (
-        <div className={`text-xs whitespace-nowrap ${todayClass}`} title={todayNote}>
-          today {formatUSD(todayCost)}{todayFlag ? ` · ${todayFlag}` : ''}
-        </div>
+        <>
+          <span className="text-gray-400" aria-hidden="true"> / </span>
+          <span className={`whitespace-nowrap ${todayClass}`} title={todayNote}>
+            today {formatUSD(todayCost)}{todayFlag ? ` · ${todayFlag}` : ''}
+          </span>
+        </>
       )}
     </div>
   );

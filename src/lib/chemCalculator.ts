@@ -409,8 +409,18 @@ export interface AppliedConversion {
   unit: 'gal' | 'lb';
 }
 
-/** 4-dp rounding — matches the server's ROUND(..., 4) on the saved gl/lb value. */
-const round4 = (x: number): number => Math.round(x * 10000) / 10000;
+/** Round the canonical decimal quantity × factor like the saved numeric(12,4) column. */
+function round4(quantity: number, factor: number): number {
+  const amount = exactDecimal(quantity);
+  const multiplier = exactDecimal(factor);
+  if (amount === null || multiplier === null) return NaN;
+  const product = multiplyExactDecimal(amount, multiplier);
+  const negative = product.coefficient < 0n;
+  const numerator = (negative ? -product.coefficient : product.coefficient) * 10000n;
+  const denominator = 10n ** BigInt(product.scale);
+  const rounded = numerator / denominator + (2n * (numerator % denominator) >= denominator ? 1n : 0n);
+  return (negative ? -1 : 1) * Number(rounded) / 10000;
+}
 
 /**
  * Convert a total-applied quantity to its gallon (liquid) or pound (dry)
@@ -436,20 +446,20 @@ export function toGallonOrLbEquivalent(
 
   // #25 field-app preview: branch on product_form so screen == saved/PDF.
   if (productForm === 'dry') {
-    if (key in DRY_TO_POUNDS) return { value: round4(quantity * DRY_TO_POUNDS[key]), unit: 'lb' };
+    if (key in DRY_TO_POUNDS) return { value: round4(quantity, DRY_TO_POUNDS[key]), unit: 'lb' };
     // 'Dry oz' (RT-2, Mason 2026-11-09) matches convert_to_gl_lb's DRY OZ case. Kept out of DRY_TO_POUNDS:
     // reconcileChemAutofillUnits and the billing-hazard guard size units off that table (parked redesign).
-    if (key === 'dry oz') return { value: round4(quantity / 16), unit: 'lb' };
+    if (key === 'dry oz') return { value: round4(quantity, 1 / 16), unit: 'lb' };
     return null; // a non-dry unit on a dry product → don't guess
   }
   if (productForm === 'liquid') {
-    if (key in LIQUID_TO_GALLONS) return { value: round4(quantity * LIQUID_TO_GALLONS[key]), unit: 'gal' };
+    if (key in LIQUID_TO_GALLONS) return { value: round4(quantity, LIQUID_TO_GALLONS[key]), unit: 'gal' };
     return null; // a non-liquid unit on a liquid product → don't guess
   }
 
   // Legacy path (product_form unknown): infer liquid-vs-dry from the unit text.
-  if (key in TO_GALLONS) return { value: round4(quantity * TO_GALLONS[key]), unit: 'gal' };
-  if (key in TO_POUNDS) return { value: round4(quantity * TO_POUNDS[key]), unit: 'lb' };
+  if (key in TO_GALLONS) return { value: round4(quantity, TO_GALLONS[key]), unit: 'gal' };
+  if (key in TO_POUNDS) return { value: round4(quantity, TO_POUNDS[key]), unit: 'lb' };
   return null;
 }
 

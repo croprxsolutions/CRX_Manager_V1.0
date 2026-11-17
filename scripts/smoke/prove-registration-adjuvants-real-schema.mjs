@@ -310,14 +310,25 @@ const LABEL = [
 // What posting and the compliance screen read for a number (a missing row and an 'unknown' row must match).
 const postingView = () => scalar(`SELECT to_jsonb(f) FROM public._invoice_brand_rup_facts('${P2}', NULL, NULL) f;`);
 
+const OLD = [{ kind: 'required', adjuvant_type: 'NIS', note: null }];
 function caseM0() {
-  // Preflight: a list in REG-1's old shape refuses the file. (REG-1's validator still accepts it here.)
+  // A list stored in REG-1's one-type shape before the file applies.
   raw(`INSERT INTO public.epa_registrations (epa_registration, label_adjuvants, created_by, updated_by)
-    VALUES ('${EPA3}', '[{"kind":"required","adjuvant_type":"NIS"}]', '${ADMIN}', '${ADMIN}');`);
-  const r = apply('candidate.sql');
-  assert.notEqual(r.status, 0); assert.match(r.output, /REGISTRATION_ADJUVANTS_PREFLIGHT: a registration already has an adjuvant list in the old shape/);
-  raw(`DELETE FROM public.epa_registrations WHERE epa_registration = '${EPA3}';`);
-  console.log('[case] M0 a list already stored in the old shape refuses the file');
+    VALUES ('${EPA3}', '${JSON.stringify(OLD)}', '${ADMIN}', '${ADMIN}');`);
+}
+// After the file: that list is kept and valid, and the admin tool still saves the old shape (its write contract).
+function caseM0After() {
+  assert.deepEqual(js(DRIVER, `SELECT public.get_epa_registrations(ARRAY['${EPA3}']);`)[0].label_adjuvants, OLD);
+  const v = version(EPA3);
+  const older = [{ kind: 'recommended', adjuvant_type: 'COC', note: '1%' }, { kind: 'required', adjuvant_type: 'AMS' }];
+  js(ADMIN, `SELECT public.set_epa_registration('${EPA3}', ${v}, ${J({ label_adjuvants: older })}, 'old shape', NULL, ${q(key())});`);
+  assert.deepEqual(js(DRIVER, `SELECT public.get_epa_registrations(ARRAY['${EPA3}']);`)[0].label_adjuvants, older);
+  for (const list of [[{ kind: 'do_not_use', adjuvant_type: 'NIS' }], [{ kind: 'required', adjuvant_type: ' ' }],
+    [{ kind: 'required', adjuvant_type: 'NIS', preferred: 'NIS' }], [{ kind: 'required', adjuvant_type: 'x'.repeat(101) }]]) {
+    refused(ADMIN, `SELECT public.set_epa_registration('${EPA3}', ${version(EPA3)}, ${J({ label_adjuvants: list })}, 'x', NULL, ${q(key())});`, /label_adjuvants_check/);
+  }
+  raw(`DELETE FROM public.epa_registration_events WHERE epa_registration = '${EPA3}'; DELETE FROM public.epa_registrations WHERE epa_registration = '${EPA3}';`);
+  console.log('[case] M0 a list stored in REG-1 one-type shape before the file is kept and valid; the admin tool still saves that shape exactly as REG-1 checked it (a do-not-use, blank, preferred or over-long old entry is still refused)');
 }
 
 function case1() {
@@ -418,18 +429,18 @@ function case4() {
     [{ kind: 'required', adjuvant_types: ['MSO'], when: 3 }],
     [{ kind: 'required', adjuvant_types: ['MSO'], note: 'x'.repeat(501) }],
     [{ kind: 'required', adjuvant_types: ['MSO'], note: 1 }],
-    [{ kind: 'required', adjuvant_type: 'MSO' }],
+    [{ kind: 'required', adjuvant_type: 'MSO', adjuvant_types: ['MSO'] }],
     [{ kind: 'required', adjuvant_types: ['MSO'], rate: '1%' }],
     Array.from({ length: 51 }, () => ({ kind: 'required', adjuvant_types: ['MSO'] })),
   ];
   for (const list of bad) refused(REP, SAVE(EPA1, v, list), /EPA_LABEL_ADJUVANTS_INVALID/);
-  // The table's CHECK uses the same rule, so the admin tool cannot store a bad (or old-shape) list either.
-  refused(ADMIN, `SELECT public.set_epa_registration('${EPA1}', ${v}, ${J({ label_adjuvants: [{ kind: 'required', adjuvant_type: 'NIS' }] })}, 'x', NULL, ${q(key())});`, /label_adjuvants_check/);
+  // The table's CHECK uses the same rule, so the admin tool cannot store a bad list either.
+  refused(ADMIN, `SELECT public.set_epa_registration('${EPA1}', ${v}, ${J({ label_adjuvants: [{ kind: 'maybe', adjuvant_types: ['NIS'] }] })}, 'x', NULL, ${q(key())});`, /label_adjuvants_check/);
   // A rep cannot reach any other fact: the general tool stays admin-only.
   refused(REP, `SELECT public.set_epa_registration('${EPA1}', ${v}, ${J({ rup_status: 'yes' })}, 'x', NULL, ${q(key())});`, /ADMIN_REQUIRED/);
   assert.equal(totals(), t, 'no refusal writes anything');
   assert.equal(version(EPA1), v);
-  console.log(`[case] 4 anon, an inactive rep and a driver are refused; so are a missing key, a blank or over-long reason, a bad number, a stale or missing version, no change, and ${bad.length} malformed lists (repeats, a preferred outside its types or on do-not-use, blank or long conditions, the old shape); the admin tool's CHECK refuses the old shape; a rep cannot change other facts; nothing written`);
+  console.log(`[case] 4 anon, an inactive rep and a driver are refused; so are a missing key, a blank or over-long reason, a bad number, a stale or missing version, no change, and ${bad.length} malformed lists (repeats, a preferred outside its types or on do-not-use, blank or long conditions, an entry mixing both shapes); the admin tool's CHECK refuses a bad list; a rep cannot change other facts; nothing written`);
 }
 
 function case5() {
@@ -485,6 +496,7 @@ async function main() {
   const again = apply('candidate.sql');
   assert.notEqual(again.status, 0); assert.match(again.output, /REGISTRATION_ADJUVANTS_PREFLIGHT: this file was already applied/);
   assert.equal(fingerprint(), fpBefore);
+  caseM0After();
   console.log('[case] M1 the candidate refuses outside one transaction, applies (its postflight checks grants, pinned bodies, rows and counts), a second run refuses, and every pinned function is unchanged');
   case1();
   case2();

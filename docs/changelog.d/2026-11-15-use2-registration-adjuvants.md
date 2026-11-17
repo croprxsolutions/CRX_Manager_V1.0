@@ -9,5 +9,6 @@
   RUP, REI, PHI or the label link), needs a reason, refuses a list that changed since the screen opened it, and is
   logged on the registration's history. A number with no registration gets one holding only the list (RUP
   "unknown"), which posting and the compliance list read exactly as a missing one.
+- REG-1's one-type entry (`adjuvant_type`) stays valid, so the admin tool keeps working; the screens read it as a one-type statement.
 - No screen calls it yet (the product-page PR follows; the quote warning waits for Taha's quote work).
 - Proof: `node scripts/smoke/prove-registration-adjuvants-real-schema.mjs`.

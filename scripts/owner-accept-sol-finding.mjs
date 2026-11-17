@@ -85,7 +85,9 @@ const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
 if (!/^[0-9A-Za-z_-]{8,128}$/.test(String(sessionId || ""))) die("run this inside the Claude Code session Mason will reply in (CLAUDE_CODE_SESSION_ID is not set).");
 if (!promptHookSeen({ dirs: [stateDir], sessionId })) die(hooklessSessionRefusal({ checkout, sessionId }));
 
-// The pull request the acceptance names: this branch, open against main, at this exact head.
+// The pull request the acceptance names: this branch, open against main or (staging-first, #1363) staging,
+// at this exact head.
+const ACCEPT_BASES = new Set(["main", "staging"]);
 let pr;
 try {
   pr = JSON.parse(String(execFileSync("gh", ["pr", "view", git(["rev-parse", "--abbrev-ref", "HEAD"]), "--json", "number,state,headRefOid,baseRefName"], {
@@ -94,8 +96,8 @@ try {
 } catch (err) {
   die(`could not find this branch's open pull request (${err?.message || err}).`);
 }
-if (String(pr?.state).toUpperCase() !== "OPEN" || pr?.baseRefName !== "main" || String(pr?.headRefOid).toLowerCase() !== head.toLowerCase()) {
-  die(`pull request #${pr?.number ?? "?"} must be open against main with head ${head.slice(0, 12)}; push first.`);
+if (String(pr?.state).toUpperCase() !== "OPEN" || !ACCEPT_BASES.has(pr?.baseRefName) || String(pr?.headRefOid).toLowerCase() !== head.toLowerCase()) {
+  die(`pull request #${pr?.number ?? "?"} must be open against main or staging with head ${head.slice(0, 12)}; push first.`);
 }
 // The code running now must be the bytes committed at this head (in this checkout).
 try {

@@ -29,8 +29,11 @@ import {
   codexAppIdleOnRecentHeads,
   recentPushedHeads,
   countSolRounds,
+  nextSolRound,
   solRoundLine,
   solRoundGate,
+  solRoundStatusLine,
+  futureDecisionLogDates,
   centralDate,
   cleanMainMergeParent,
   readSolPreflightFacts,
@@ -1815,6 +1818,12 @@ not json
 {"head_sha":"${h4}"}
 {"head_sha":"${h2}"}
 `, [h1, h2]), 2, "rounds: only this branch's heads count");
+    // Reruns of one head count once (Mason, 2026-11-17, #1929).
+    const reruns = [h1, h1, h1, h1, h2].map((sha) => JSON.stringify({ head_sha: sha })).join("\n");
+    assert.equal(countSolRounds(reruns, [h1, h2, h3]), 2, "rounds: four runs of one head count once");
+    assert.equal(nextSolRound(reruns, [h1, h2, h3], h3), 3, "rounds: a new head is the next round");
+    assert.equal(nextSolRound(reruns, [h1, h2], h2), 2, "rounds: rerunning an already-reviewed head keeps its round");
+    assert.equal(nextSolRound("", [h1], h1), 1, "rounds: the first run is round 1");
     assert.equal(solRoundLine(2, 1524), "Sol round 2 on PR #1524.", "rounds: plain line");
     assert.match(solRoundLine(3, null), /^Sol round 3 on this branch \(no PR yet\)\. .*ask Mason the business trade-off/, "rounds: round 3 points at the stop rule");
     // Hard stop from round 5 (Mason, 2026-11-09, after PR 1653 reached round 8).
@@ -1840,6 +1849,32 @@ not json
     assert.equal(dry.refuse, false, "round stop: --dry-run never refuses");
     assert.match(dry.message, /Sol round 5/, "round stop: --dry-run still reports the stop");
     assert.equal(centralDate(new Date("2026-11-10T03:00:00Z")), "2026-11-09", "round stop: today is the Central date");
+    // The printed round is the gating round (Mason, 2026-11-17; #1916 approved "up to 7" from a stale count).
+    {
+      const ledgerText = [h1, h2, h3, h4].map((sha) => JSON.stringify({ head_sha: sha, pr: null })).join("\n");
+      const round = nextSolRound(ledgerText, [h1, h2, h3, h4, head], head);
+      const status = solRoundStatusLine({ round, prNumber: 1916, decisionLog: "", today });
+      const gate = solRoundGate({ round, prNumber: 1916, decisionLog: "", today });
+      assert.equal(Number(status.match(/would be round (\d+) on PR #1916/)?.[1]), round, "round line: prints the round the stop uses");
+      assert.equal(Number(gate.message.match(/Sol round (\d+) on PR #1916/)?.[1]), round, "round line: the stop names the same round");
+      assert.equal(round, 5, "round line: pre-PR runs count");
+      assert.match(status, /rounds 1-4 run freely; from round 5 a DECISION_LOG\.md entry dated 2026-11-09 or later must name this PR: none yet/, "round line: says the cap and what unlocks it");
+      assert.match(solRoundStatusLine({ round, prNumber: 1916, decisionLog: logWith("2026-11-09 — X", "**Decision (Mason):** #1916"), today }), /: found\)\.$/, "round line: says when the unlock is present");
+      assert.match(solRoundStatusLine({ round: 1, prNumber: null, decisionLog: "", today }), /round 1 on this branch \(no PR yet\)/, "round line: no PR yet");
+    }
+    // Future-dated decision-log entries refuse before Sol (Mason, 2026-11-17; #1549, #1808, #1916).
+    {
+      const diff = (...lines) => ["diff --git a/docs/manual/DECISION_LOG.md b/docs/manual/DECISION_LOG.md", "--- a/docs/manual/DECISION_LOG.md", "+++ b/docs/manual/DECISION_LOG.md", "@@ -3,0 +4,3 @@", ...lines].join("\n");
+      assert.equal(futureDecisionLogDates(diff("+## 2026-11-09 — Today", "+**Decision (Mason, 2026-11-09):** keep it."), today), null, "future date: today passes");
+      assert.equal(futureDecisionLogDates(diff("+## 2026-11-08 — Yesterday"), today), null, "future date: the past passes");
+      assert.equal(futureDecisionLogDates("", today), null, "future date: no decision-log change passes");
+      const late = futureDecisionLogDates(diff("+## 2026-11-10 — Rounds for #1916", "+**Decision (Mason):** up to 7."), today);
+      assert.match(late, /SOL PRE-FLIGHT: docs\/manual\/DECISION_LOG\.md gains an entry dated after today \(2026-11-09, Central time\), so no Sol tokens were spent\.\n  - ## 2026-11-10 — Rounds for #1916\nRe-date it/, "future date: a future heading refuses and names the line");
+      assert.match(futureDecisionLogDates(diff("+## 2026-11-09 — Today", "+**Decision (Mason, 2026-11-10 night):** yes."), today), /- \*\*Decision \(Mason, 2026-11-10 night\)/, "future date: a future date in the Decision line refuses");
+      assert.match(futureDecisionLogDates(diff("+## 2026-10-13 (recorded 2026-11-10) — late"), today), /recorded 2026-11-10/, "future date: a future recorded date refuses");
+      assert.equal(futureDecisionLogDates(diff("+## 2026-11-09 — Plan due 2026-12-01"), today), null, "future date: a date after the heading's dash is not the entry date");
+      assert.equal(futureDecisionLogDates(diff("-## 2026-11-10 — removed", " ## 2026-11-10 — context", "+Deadline 2026-12-01 in the body."), today), null, "future date: removed, context and body lines are not checked");
+    }
   }
   assert.match(check({ headContainsBase: false }).problems.join(" "), /does not contain the latest origin\/main.*git merge origin\/main/, "preflight: a head missing origin/main refuses (#1075)");
   assert.match(check({ headContainsBase: false, baseRef: "origin/staging" }).problems.join(" "), /does not contain the latest origin\/staging.*git merge origin\/staging/, "preflight: a staging-bound head names origin/staging");

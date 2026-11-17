@@ -360,8 +360,9 @@ BEGIN
         v_payload_section_id := NULLIF(v_section->>'id', '');
         IF v_payload_section_id IS NOT NULL THEN
           IF v_payload_section_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-             OR NOT (v_payload_section_id::uuid = ANY (v_prior_section_ids))
-             OR v_payload_section_id::uuid = ANY (v_reused_section_ids) THEN
+             -- compared as text, so a malformed id can never reach a uuid cast (Luna)
+             OR NOT (lower(v_payload_section_id) = ANY (v_prior_section_ids::text[]))
+             OR lower(v_payload_section_id) = ANY (v_reused_section_ids::text[]) THEN
             RAISE EXCEPTION 'SECTION_ID_INVALID: this save named a section that is not on this booking, or named one twice. Reload the booking and save again.'
               USING ERRCODE = 'P0001';
           END IF;
@@ -466,7 +467,7 @@ BEGIN
     v_payload_section_id := CASE WHEN v_section_ids_v1 THEN NULLIF(v_section->>'id', '') END;
     IF v_payload_section_id IS NOT NULL
        AND NOT (v_payload_section_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                AND v_payload_section_id::uuid = ANY (v_reused_section_ids)) THEN
+                AND lower(v_payload_section_id) = ANY (v_reused_section_ids::text[])) THEN
       RAISE EXCEPTION 'SECTION_ID_INVALID: this save named a section that is not on this booking, or named one twice. Reload the booking and save again.'
         USING ERRCODE = 'P0001';
     END IF;
@@ -969,7 +970,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public._save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)'::regprocedure)
-     IS DISTINCT FROM 'f9edb24d15ab6360c5240cd1ab2c93e1' THEN
+     IS DISTINCT FROM '64a994d8c94519502be3880e5f8d4b1b' THEN
     RAISE EXCEPTION 'POSTFLIGHT_SAVE_QUOTE: the new body did not install';
   END IF;
   IF NOT EXISTS (

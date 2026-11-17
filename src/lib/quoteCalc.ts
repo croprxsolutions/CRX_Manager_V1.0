@@ -118,16 +118,20 @@ function decimalOf(n: number): [bigint, bigint] {
  * database gives 0.15. The inputs are taken as the decimals they print as, never float results.
  */
 export function exactRound2(nums: number[], dens: number[] = []): number {
+  return Number(exactRoundedCents(nums, dens)) / 100;
+}
+
+function exactRoundedCents(nums: number[], dens: number[] = []): bigint {
   let p = 100n;
   let q = 1n;
   for (const n of nums) { const [a, b] = decimalOf(n); p *= a; q *= b; }
   for (const d of dens) { const [a, b] = decimalOf(d); p *= b; q *= a; }
-  if (q === 0n) return 0;
+  if (q === 0n) return 0n;
   const negative = (p < 0n) !== (q < 0n);
   if (p < 0n) p = -p;
   if (q < 0n) q = -q;
   const cents = p / q + (2n * (p % q) >= q ? 1n : 0n);
-  return (negative ? -1 : 1) * Number(cents) / 100;
+  return (negative ? -1n : 1n) * cents;
 }
 
 /**
@@ -260,19 +264,20 @@ export function computeQuoteTotals(items: CalcItem[]): {
   totalProfit: number;
   totalMarginPct: number;
 } {
-  let totalPrice = 0;
-  let totalCost = 0;
+  let totalPriceCents = 0n;
+  let totalCostCents = 0n;
   for (const item of items) {
-    totalPrice += (item.total_price || 0);
-    totalCost += (item.current_cost || 0) * (item.total_units_needed || 0);
+    totalPriceCents += exactRoundedCents([item.total_price || 0]);
+    totalCostCents += exactRoundedCents([item.current_cost || 0, item.total_units_needed || 0]);
   }
-  const totalProfit = totalPrice - totalCost;
-  const totalMarginPct = totalPrice > 0 ? (totalProfit / totalPrice) * 100 : 0;
+  const totalPrice = Number(totalPriceCents) / 100;
+  const totalCost = Number(totalCostCents) / 100;
+  const totalProfit = Number(totalPriceCents - totalCostCents) / 100;
   return {
-    totalPrice: Math.round(totalPrice * 100) / 100,
-    totalCost: Math.round(totalCost * 100) / 100,
-    totalProfit: Math.round(totalProfit * 100) / 100,
-    totalMarginPct: Math.round(totalMarginPct * 100) / 100,
+    totalPrice,
+    totalCost,
+    totalProfit,
+    totalMarginPct: totalPrice > 0 ? exactRound2([totalProfit, 100], [totalPrice]) : 0,
   };
 }
 

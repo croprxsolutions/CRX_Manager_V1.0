@@ -40,6 +40,7 @@ import { runCriticalAction } from '../lib/criticalAction';
 import { parseLocalDate } from '../lib/dateUtils';
 import { formatUSD as fmt, quantityTimesDollarsCents } from '../lib/money';
 import { billingM4Enabled } from '../lib/billingFeatures';
+import { salesTaxToast } from '../lib/salesTaxToast';
 import { exactRound2 } from '../lib/quoteCalc';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import QuickTaskModal from '../components/team/QuickTaskModal';
@@ -829,14 +830,13 @@ export default function OrderDetail() {
         p_order_id: order.id, p_sales_tax: next, p_idempotency_key: salesTaxIdem.getKeyFor(scope),
       });
       if (error) throw error;
-      const result = assertRpcResult<{ drafts_updated?: number }>(data, 'set_order_sales_tax');
+      const result = assertRpcResult<{ drafts_updated?: number; drafts_kept?: string[] }>(data, 'set_order_sales_tax');
       salesTaxIdem.resetKeyFor(scope);
-      const drafts = result.drafts_updated ?? 0;
-      if (drafts) toast('success', `Sales tax ${next ? 'on' : 'off'} (${drafts} draft invoice${drafts === 1 ? '' : 's'} updated)`);
-      else {
-        const hasPosted = invoices.some((inv) => !['draft', 'voided', 'cancelled'].includes(inv.status));
-        toast('info', `Sales tax ${next ? 'on' : 'off'}. New invoices for this sale will${next ? '' : ' not'} be taxed${hasPosted ? '; posted invoices keep their tax' : ''}.`);
-      }
+      const hasPosted = invoices.some((inv) => !['draft', 'voided', 'cancelled'].includes(inv.status));
+      // name the kept split drafts so the office knows which group to void and redraft
+      const kept = (result.drafts_kept ?? []).map((id) => invoices.find((inv) => inv.id === id)?.invoice_number ?? 'one draft');
+      const [kind, message] = salesTaxToast(next, result.drafts_updated ?? 0, kept, hasPosted);
+      toast(kind, message);
       await fetchOrder();
     } catch (err: unknown) {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context: 'set_order_sales_tax' } });
@@ -1021,7 +1021,8 @@ export default function OrderDetail() {
     setSavingShares(true);
     let saved = false;
     try {
-      const amountCents = Math.round(order.total_price * 100 * (pct / 100));
+      // Exact cents (total × pct ÷ 100, half away from zero): float math saved $1,024.09 at 50% as 51,204¢.
+      const amountCents = quantityTimesDollarsCents(`${pct}e-2`, order.total_price);
       const result = await supabase.from('order_shares').insert({
         order_id: order.id,
         customer_id: customerId,

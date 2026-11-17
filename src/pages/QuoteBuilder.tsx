@@ -87,7 +87,8 @@ import { sendOrderConfirmedEmail } from '../lib/orderConfirmedEmail';
 import { trackBusinessEvent } from '../lib/metrics';
 import { localDatePlusDays, localToday, parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { computeSeason, seasonEndDate } from '../utils/season';
-import { loadQuoteValidDays, pickedExpiryStart } from '../lib/appSettingDefaults';
+import { loadQuoteValidDays, pickedExpiryStart, loadTimingWindows, timingWindowStart, type BookingTiming, type BookingConfidence, type TimingWindows } from '../lib/appSettingDefaults';
+import Select from '../components/ui/Select';
 import { downloadQuotePdf, generateQuotePdf } from '../lib/quotePdf';
 import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
 import { escapeHtml } from '../lib/proofNotification';
@@ -142,8 +143,21 @@ interface LocalSection {
   section_header_notes: string | null;
   needed_by_date: string | null;
   field_id: string | null;
+  timing?: BookingTiming | null;
+  confidence?: BookingConfidence | null;
   items: LocalItem[];
 }
+
+const TIMING_OPTIONS = [
+  { value: 'pre_plant', label: 'Pre-plant' },
+  { value: 'in_season', label: 'In season' },
+  { value: 'late_summer', label: 'Late summer' },
+];
+const CONFIDENCE_OPTIONS = [
+  { value: 'firm', label: 'Firm' },
+  { value: 'likely', label: 'Likely' },
+  { value: 'maybe', label: 'Maybe' },
+];
 
 type CalcMode = 'rate_acres' | 'units_direct';
 
@@ -563,6 +577,14 @@ export default function QuoteBuilder() {
         setChosenExpiryDate((current) => (current === null ? null : pickedExpiryStart(todayInBusinessTz(), days, seasonEndDate(computeSeason(parseLocalDate(todayInBusinessTz()))))));
       }
     });
+    return () => { cancelled = true; };
+  }, []);
+  // Booking timing windows: picking a timing fills an empty needed-by date (A-R1).
+  // null until the saved windows arrive; the Timing pick waits so it never fills a date from the defaults.
+  const [timingWindows, setTimingWindows] = useState<TimingWindows | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void loadTimingWindows().then((w) => { if (!cancelled) setTimingWindows(w); });
     return () => { cancelled = true; };
   }, []);
   const [headerNotes, setHeaderNotes] = useState('');
@@ -1422,6 +1444,8 @@ export default function QuoteBuilder() {
       section_header_notes: s.section_header_notes,
       needed_by_date: s.needed_by_date || null,
       field_id: s.field_id || null,
+      timing: s.timing ?? null,
+      confidence: s.confidence ?? null,
       items: dbItems
         .filter((item) => item.section_id === s.id)
         .map((item) => {
@@ -2097,6 +2121,19 @@ export default function QuoteBuilder() {
     );
   };
 
+  const setSectionTiming = (key: string, timing: BookingTiming | null) => {
+    setSections((prev) => prev.map((s) => {
+      if (s._key !== key) return s;
+      // A live job's section keeps its needed-by date (save_quote refuses SECTION_HAS_JOB_LOCKED).
+      const jobLocked = Boolean(s.id && sectionJobs[s.id] && sectionJobs[s.id].status !== 'cancelled');
+      return {
+        ...s,
+        timing,
+        needed_by_date: s.needed_by_date || jobLocked || !timing || !timingWindows ? s.needed_by_date : timingWindowStart(timingWindows, timing, todayInBusinessTz()),
+      };
+    }));
+  };
+
   const updateSectionField = (key: string, field: keyof LocalSection, value: string | null) => {
     setSections((prev) =>
       prev.map((s) => (s._key === key ? { ...s, [field]: value } : s))
@@ -2500,6 +2537,8 @@ export default function QuoteBuilder() {
       section_header_notes: sec.section_header_notes || null,
       needed_by_date: sec.needed_by_date || null,
       field_id: sec.field_id || null,
+      timing: sec.timing ?? null,
+      confidence: sec.confidence ?? null,
       items: sec.items
         .filter((item) => item.product_id)
         .map((item) => {
@@ -4326,6 +4365,9 @@ export default function QuoteBuilder() {
   // the job link and Schedule job still work.
   const readOnly = isEditing && !canEdit;
   const editLocked = formLocked || readOnly;
+  // Another rep's booking: its save may change prices only (QUOTE_PRICE_ONLY_FOR_OTHER_REPS).
+  const planningLocked = editLocked || (isEditing && !isAdmin
+    && (!profile?.id || loadedQuoteOwner?.quoteId !== id || loadedQuoteOwner?.createdBy !== profile.id));
 
   // Header actions (spec "Actions by state"). Each action keeps today's show and enable
   // conditions and handler; only where it sits changes.
@@ -5324,6 +5366,28 @@ export default function QuoteBuilder() {
                       value={sec.needed_by_date || null}
                       onChange={(value) => updateSectionField(sec._key, 'needed_by_date', value || null)}
                       disabled={editLocked || Boolean(sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled')}
+                    />
+                  </div>
+                  <div className="w-full sm:w-40">
+                    <Select
+                      id={`section-timing-${sec._key}`}
+                      label="Timing"
+                      placeholder="Not set"
+                      options={TIMING_OPTIONS}
+                      value={sec.timing ?? ''}
+                      onChange={(e) => setSectionTiming(sec._key, (e.target.value || null) as BookingTiming | null)}
+                      disabled={planningLocked || !timingWindows}
+                    />
+                  </div>
+                  <div className="w-full sm:w-40">
+                    <Select
+                      id={`section-confidence-${sec._key}`}
+                      label="Confidence"
+                      placeholder="Not set"
+                      options={CONFIDENCE_OPTIONS}
+                      value={sec.confidence ?? ''}
+                      onChange={(e) => updateSectionField(sec._key, 'confidence', e.target.value || null)}
+                      disabled={planningLocked}
                     />
                   </div>
                   {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}

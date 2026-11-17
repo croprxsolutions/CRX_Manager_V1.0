@@ -44,11 +44,6 @@ BEGIN
     CREATE FUNCTION pg_temp.smk_as(p_user uuid) RETURNS void LANGUAGE sql AS $b$
       SELECT set_config('request.jwt.claims', jsonb_build_object('sub', p_user, 'role', 'authenticated')::text, true),
              set_config('request.jwt.claim.sub', p_user::text, true) $b$;
-    -- Runs p_sql as the signed-in user; NULL when it worked, else the error.
-    CREATE FUNCTION pg_temp.smk_try(p_sql text) RETURNS text LANGUAGE plpgsql AS $b$
-    BEGIN
-      SET LOCAL ROLE authenticated; EXECUTE p_sql; RESET ROLE; RETURN NULL;
-    EXCEPTION WHEN OTHERS THEN RETURN SQLERRM; END $b$;
   $f$;
 
   -- A sale with one delivered line and its draft invoice, untaxed, no discount.
@@ -82,36 +77,81 @@ BEGIN
   UPDATE billing_m4_switch SET enabled = false;
 
   -- A
-  v_err := pg_temp.smk_try(format('SELECT set_order_sales_tax(%L, true, %L)', v_order, 'smk-m4sw-a1-' || v_suffix));
+  BEGIN  -- as the signed-in admin; v_err is NULL when it worked, else the error
+    SET LOCAL ROLE authenticated;
+    PERFORM set_order_sales_tax(v_order, true, 'smk-m4sw-a1-' || v_suffix);
+    RESET ROLE; v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
   IF v_err IS NULL OR v_err NOT LIKE 'BILLING_M4_OFF%' THEN
     v_fails := v_fails || ' (A) ticking tax while off was not refused: ' || COALESCE(v_err, 'it worked') || ';';
   END IF;
-  v_err := pg_temp.smk_try(format('SELECT set_order_sales_tax(%L, false, %L)', v_order, 'smk-m4sw-a2-' || v_suffix));
+  BEGIN  -- as the signed-in admin; v_err is NULL when it worked, else the error
+    SET LOCAL ROLE authenticated;
+    PERFORM set_order_sales_tax(v_order, false, 'smk-m4sw-a2-' || v_suffix);
+    RESET ROLE; v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
   IF v_err IS NOT NULL THEN v_fails := v_fails || ' (A) unticking while off was refused: ' || v_err || ';'; END IF;
 
   -- B
-  v_err := pg_temp.smk_try(format('UPDATE customers SET standing_discount_pct = 5 WHERE id = %L', v_customer));
+  BEGIN  -- as the signed-in admin; v_err is NULL when it worked, else the error
+    SET LOCAL ROLE authenticated;
+    UPDATE customers SET standing_discount_pct = 5 WHERE id = v_customer;
+    RESET ROLE; v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
   IF v_err IS NULL OR v_err NOT LIKE 'BILLING_M4_OFF%' THEN
     v_fails := v_fails || ' (B) a customer discount of 5 while off was not refused: ' || COALESCE(v_err, 'it worked') || ';';
   END IF;
-  v_err := pg_temp.smk_try(format('UPDATE customers SET standing_discount_pct = 0 WHERE id = %L', v_customer));
+  BEGIN  -- as the signed-in admin; v_err is NULL when it worked, else the error
+    SET LOCAL ROLE authenticated;
+    UPDATE customers SET standing_discount_pct = 0 WHERE id = v_customer;
+    RESET ROLE; v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
   IF v_err IS NOT NULL THEN v_fails := v_fails || ' (B) a customer discount of 0 was refused: ' || v_err || ';'; END IF;
 
   -- C
-  v_err := pg_temp.smk_try(format('SELECT set_invoice_standing_discount(%L, 5, %L)', v_invoice, 'smk-m4sw-c1-' || v_suffix));
+  BEGIN  -- as the signed-in admin; v_err is NULL when it worked, else the error
+    SET LOCAL ROLE authenticated;
+    PERFORM set_invoice_standing_discount(v_invoice, 5, 'smk-m4sw-c1-' || v_suffix);
+    RESET ROLE; v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
   IF v_err IS NULL OR v_err NOT LIKE 'BILLING_M4_OFF%' THEN
     v_fails := v_fails || ' (C) a sale discount of 5 while off was not refused: ' || COALESCE(v_err, 'it worked') || ';';
   END IF;
-  v_err := pg_temp.smk_try(format('SELECT set_invoice_standing_discount(%L, 0, %L)', v_invoice, 'smk-m4sw-c2-' || v_suffix));
+  BEGIN  -- as the signed-in admin; v_err is NULL when it worked, else the error
+    SET LOCAL ROLE authenticated;
+    PERFORM set_invoice_standing_discount(v_invoice, 0, 'smk-m4sw-c2-' || v_suffix);
+    RESET ROLE; v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
   IF v_err IS NOT NULL THEN v_fails := v_fails || ' (C) a sale discount of 0 was refused: ' || v_err || ';'; END IF;
-  v_err := pg_temp.smk_try(format('SELECT set_invoice_standing_discount(%L, NULL, %L)', v_invoice, 'smk-m4sw-c3-' || v_suffix));
+  BEGIN  -- as the signed-in admin; v_err is NULL when it worked, else the error
+    SET LOCAL ROLE authenticated;
+    PERFORM set_invoice_standing_discount(v_invoice, NULL, 'smk-m4sw-c3-' || v_suffix);
+    RESET ROLE; v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
   IF v_err IS NOT NULL THEN v_fails := v_fails || ' (C) "the customer''s rate" was refused: ' || v_err || ';'; END IF;
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
 
   -- D
-  v_err := pg_temp.smk_try('DO $r$ BEGIN IF (SELECT count(*) FROM billing_m4_switch) <> 1 THEN RAISE EXCEPTION ''the row is hidden''; END IF; END $r$');
+  BEGIN  -- as the signed-in admin; v_err is NULL when it worked, else the error
+    SET LOCAL ROLE authenticated;
+    IF (SELECT count(*) FROM billing_m4_switch) <> 1 THEN RAISE EXCEPTION 'the row is hidden'; END IF;
+    RESET ROLE; v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
   IF v_err IS NOT NULL THEN v_fails := v_fails || ' (D) an active user could not read the switch: ' || v_err || ';'; END IF;
-  v_err := pg_temp.smk_try('UPDATE billing_m4_switch SET enabled = true');
+  BEGIN  -- as the signed-in admin; v_err is NULL when it worked, else the error
+    SET LOCAL ROLE authenticated;
+    UPDATE billing_m4_switch SET enabled = true;
+    RESET ROLE; v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
   IF v_err IS NULL OR (SELECT enabled FROM billing_m4_switch) THEN
     v_fails := v_fails || ' (D) the signed-in admin could turn the switch on;';
   END IF;
@@ -121,12 +161,27 @@ BEGIN
 
   -- E
   UPDATE billing_m4_switch SET enabled = true;
-  v_err := pg_temp.smk_try(format('SELECT set_order_sales_tax(%L, true, %L)', v_order, 'smk-m4sw-e1-' || v_suffix));
+  BEGIN  -- as the signed-in admin; v_err is NULL when it worked, else the error
+    SET LOCAL ROLE authenticated;
+    PERFORM set_order_sales_tax(v_order, true, 'smk-m4sw-e1-' || v_suffix);
+    RESET ROLE; v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
   IF v_err IS NOT NULL THEN v_fails := v_fails || ' (E) ticking tax while on was refused: ' || v_err || ';'; END IF;
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
-  v_err := pg_temp.smk_try(format('UPDATE customers SET standing_discount_pct = 5 WHERE id = %L', v_customer));
+  BEGIN  -- as the signed-in admin; v_err is NULL when it worked, else the error
+    SET LOCAL ROLE authenticated;
+    UPDATE customers SET standing_discount_pct = 5 WHERE id = v_customer;
+    RESET ROLE; v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
   IF v_err IS NOT NULL THEN v_fails := v_fails || ' (E) a customer discount while on was refused: ' || v_err || ';'; END IF;
-  v_err := pg_temp.smk_try(format('SELECT set_invoice_standing_discount(%L, 4, %L)', v_invoice, 'smk-m4sw-e3-' || v_suffix));
+  BEGIN  -- as the signed-in admin; v_err is NULL when it worked, else the error
+    SET LOCAL ROLE authenticated;
+    PERFORM set_invoice_standing_discount(v_invoice, 4, 'smk-m4sw-e3-' || v_suffix);
+    RESET ROLE; v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
   IF v_err IS NOT NULL THEN v_fails := v_fails || ' (E) a sale discount while on was refused: ' || v_err || ';'; END IF;
   SET CONSTRAINTS ALL IMMEDIATE; SET CONSTRAINTS ALL DEFERRED;
 

@@ -74,14 +74,18 @@ END;
 $preflight$;
 
 -- ---------------------------------------------------------------- KI-161
-LOCK TABLE public.delivery_items IN SHARE ROW EXCLUSIVE MODE;
+-- Deliveries too: no delivery can change order between this check and the guard trigger below (Luna r2).
+LOCK TABLE public.deliveries, public.delivery_items IN SHARE ROW EXCLUSIVE MODE;
 
 DO $lineage_now$
 BEGIN
   IF EXISTS (SELECT 1 FROM public.delivery_items di
                JOIN public.deliveries d ON d.id = di.delivery_id
                LEFT JOIN public.order_items oi ON oi.id = di.order_item_id
-              WHERE oi.id IS NULL OR oi.order_id IS DISTINCT FROM d.order_id OR oi.product_id IS DISTINCT FROM di.product_id) THEN
+              WHERE oi.id IS NULL OR oi.order_id IS DISTINCT FROM d.order_id OR oi.product_id IS DISTINCT FROM di.product_id
+                 -- open lines can still be edited, so their unit must already match (history is left as written)
+                 OR (d.status IN ('scheduled', 'in_progress')
+                     AND NOT public._unit_matches_stock_unit(di.unit_size, oi.unit_size))) THEN
     RAISE EXCEPTION 'INV_CLEANUP_PREFLIGHT: a delivery line does not match its order line; correct it first';
   END IF;
   IF EXISTS (SELECT 1 FROM public.delivery_items GROUP BY delivery_id, order_item_id HAVING count(*) > 1) THEN

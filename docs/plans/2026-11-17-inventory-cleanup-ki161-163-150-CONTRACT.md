@@ -66,8 +66,9 @@ Builds on #1896 (delivery, order and PO lines in the stock unit). One PR to `sta
    vendor bill, and the bill cap uses the larger figure. No business decision is needed.
 
 ## 2. State and failure
-- **Always true after the migration:** every delivery line matches its order line (postflight: 0 mismatches, 0
-  duplicates, 0 lines without an order line; live today all 0); `authenticated` has no write privilege on
+- **Always true after the migration:** every delivery line matches its order line (checked with `deliveries` and
+  `delivery_items` locked, before the triggers go in: 0 mismatches, 0 duplicates, 0 lines without an order line, and
+  every open line in its order line's unit; live today all 0); `authenticated` has no write privilege on
   `delivery_items`.
 - **Existing rows:** delivery lines are only checked when inserted or when those columns change, so completion (which
   writes `quantity_delivered`) and history are untouched. Count rows widen in place. Old `released` rows stay as written.

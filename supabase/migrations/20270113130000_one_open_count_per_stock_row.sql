@@ -26,7 +26,8 @@
 -- empty open count, which Cancel clears).
 --
 -- EXISTING ROWS (live 2026-11-15, read-only): 17 counts, all cancelled; 0 in progress.
--- PREFLIGHT refuses if any warehouse has two in-progress counts, or any stock row is on two in-progress items.
+-- PREFLIGHT refuses if any warehouse has two in-progress counts, any stock row is on two in-progress items, or an
+-- in-progress line's stock row is not its product at its count's warehouse.
 -- ROLLBACK: scripts/smoke/one-open-count-reverse.sql (drops the two triggers, their functions and the index).
 
 SET LOCAL lock_timeout = '10s';
@@ -43,6 +44,12 @@ BEGIN
               WHERE c.status = 'in_progress' AND i.inventory_id IS NOT NULL
               GROUP BY i.inventory_id HAVING count(*) > 1) THEN
     RAISE EXCEPTION 'PREFLIGHT_OPEN_COUNTS: a stock row is on two in-progress count items; finish or cancel one first';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.cycle_count_items i JOIN public.cycle_counts c ON c.id = i.cycle_count_id
+              WHERE c.status = 'in_progress' AND i.inventory_id IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM public.inventory s
+                                 WHERE s.id = i.inventory_id AND s.product_id = i.product_id AND s.location = c.warehouse)) THEN
+    RAISE EXCEPTION 'PREFLIGHT_OPEN_COUNTS: an in-progress count line is not its product at its count''s warehouse; cancel that count first';
   END IF;
   IF to_regprocedure('public._cycle_count_item_one_open_row()') IS NOT NULL
      OR to_regprocedure('public._cycle_count_no_reopen()') IS NOT NULL THEN
@@ -62,20 +69,10 @@ CREATE FUNCTION public._cycle_count_item_one_open_row()
 AS $function$
 DECLARE
   v_other text;
-  v_status text;
 BEGIN
-  -- A finished count's lines are history: a new line goes only on an in-progress count (locked, so it cannot close meanwhile).
-  IF TG_OP = 'INSERT' THEN
-    SELECT c.status, c.count_number INTO v_status, v_other
-      FROM public.cycle_counts c WHERE c.id = NEW.cycle_count_id FOR SHARE;
-    IF v_status IS DISTINCT FROM 'in_progress' THEN
-      RAISE EXCEPTION 'CYCLE_COUNT_CLOSED: Count % is %; lines can only be added to an in-progress count.',
-        COALESCE(v_other, '(no number)'), COALESCE(v_status, 'missing') USING ERRCODE = 'check_violation';
-    END IF;
-    v_other := NULL;
-  END IF;
   IF NEW.inventory_id IS NULL
-     OR (TG_OP = 'UPDATE' AND NEW.inventory_id IS NOT DISTINCT FROM OLD.inventory_id) THEN
+     OR (TG_OP = 'UPDATE' AND NEW.inventory_id IS NOT DISTINCT FROM OLD.inventory_id
+         AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id) THEN
     RETURN NEW;
   END IF;
   -- The check below needs a fresh snapshot after the lock, which only READ COMMITTED (every app path) gives.
@@ -109,7 +106,7 @@ $function$;
 REVOKE ALL ON FUNCTION public._cycle_count_item_one_open_row() FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER trg_cycle_count_item_one_open_row
-  BEFORE INSERT OR UPDATE OF inventory_id ON public.cycle_count_items
+  BEFORE INSERT OR UPDATE OF inventory_id, product_id ON public.cycle_count_items
   FOR EACH ROW EXECUTE FUNCTION public._cycle_count_item_one_open_row();
 
 CREATE FUNCTION public._cycle_count_no_reopen()

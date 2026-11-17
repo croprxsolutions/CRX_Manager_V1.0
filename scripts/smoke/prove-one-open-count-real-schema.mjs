@@ -390,9 +390,15 @@ async function main() {
     DELETE FROM public.inventory_transactions WHERE product_id = '${PRODUCTS.b1}' AND transaction_type = 'adjusted' AND notes LIKE 'Cycle count%';`);
   console.log('[case] B BEFORE: two open counts at one warehouse each record +10 and both complete: shelf 110, stock 120; a cancelled count can be set back to in progress');
 
+  // An open line already pointing at another product's stock row is refused before the guards exist.
+  assert.equal(startCount(NORTH, [PRODUCTS.b1]), '');
+  const ccX = openCount(NORTH);
+  raw(`UPDATE public.cycle_count_items SET product_id = '${PRODUCTS.p1}' WHERE cycle_count_id = '${ccX}';`);
+  assert.match(applyFile(CANDIDATE, 'cand-misplaced', false), /PREFLIGHT_OPEN_COUNTS: an in-progress count line is not its product/);
+  cancel(ccX);
   applyFile(CANDIDATE, 'cand-apply', true);
   assert.match(applyFile(CANDIDATE, 'cand-again', false), /PREFLIGHT_OPEN_COUNTS: the KI-160 functions already exist/);
-  console.log('[case] P0 the candidate refuses while a warehouse has two open counts, applies once they close, and refuses a second run');
+  console.log('[case] P0 the candidate refuses while a warehouse has two open counts or an open line sits on another product\'s stock row, applies once they close, and refuses a second run');
 
   // P1: one open count per warehouse.
   assert.equal(startCount(MAIN, [PRODUCTS.p1, PRODUCTS.p2]), '');
@@ -433,6 +439,8 @@ async function main() {
   const { a, b } = await concurrentClaims(ccN, ccN, inv(PRODUCTS.p2, NORTH), PRODUCTS.p2);
   assert.equal([a.code, b.code].filter((c) => c === 0).length, 1, `P3: exactly one claim commits\nA: ${a.out}\nB: ${b.out}`);
   assert.match(a.code === 0 ? b.out : a.out, /CYCLE_COUNT_ROW_ALREADY_OPEN/);
+  // Changing only a line's product (keeping its stock row) is checked too.
+  refusedAsOwner('P3 product swap', `UPDATE public.cycle_count_items SET product_id = '${PRODUCTS.p1}' WHERE id = '${itemOn(ccN, PRODUCTS.p2)}';`, 'CYCLE_COUNT_ROW_WRONG_PLACE');
   assert.equal(scalar(`SELECT count(*) FROM public.cycle_count_items i JOIN public.cycle_counts c ON c.id = i.cycle_count_id
     WHERE i.inventory_id = '${inv(PRODUCTS.p2, NORTH)}' AND c.status = 'in_progress';`), '1');
   cancel(ccS);
@@ -453,10 +461,9 @@ async function main() {
   refusedAsOwner('P5 reopen cancelled', `UPDATE public.cycle_counts SET status = 'in_progress' WHERE id = '${ccB}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is cancelled and cannot become in_progress');
   refusedAsOwner('P5 cancelled to completed', `UPDATE public.cycle_counts SET status = 'completed' WHERE id = '${ccB}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is cancelled and cannot become completed');
   refused('P5 admin reopens directly', `UPDATE public.cycle_counts SET status = 'in_progress' WHERE id = '${cc1}';`, 'permission denied for table cycle_counts');
-  refused('P5 admin adds a line to a completed count', `INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty)
-    VALUES ('${cc1}', '${PRODUCTS.p2}', NULL, 0);`, 'CYCLE_COUNT_CLOSED: Count .* is completed');
-  refused('P5 admin adds a line to a cancelled count', `INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty)
-    VALUES ('${ccB}', '${PRODUCTS.p2}', '${inv(PRODUCTS.p2)}', 0);`, 'CYCLE_COUNT_CLOSED: Count .* is cancelled');
+  // The existing revision trigger (20260831235900) already refuses any line write on a closed count.
+  refusedAsOwner('P5 line on a completed count', `INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty)
+    VALUES ('${cc1}', '${PRODUCTS.p2}', NULL, 0);`, 'CYCLE_COUNT_NOT_IN_PROGRESS');
   refused('P5 admin edits a count directly', `UPDATE public.cycle_counts SET notes = 'checked' WHERE id = '${cc1}';`, 'permission denied for table cycle_counts');
   psql(`UPDATE public.cycle_counts SET notes = 'checked' WHERE id = '${cc1}';`); // the owner may still edit a closed count's notes
   assert.equal(startCount(MAIN, [PRODUCTS.p1]), '', 'P5: a new count may start once the old one is closed');

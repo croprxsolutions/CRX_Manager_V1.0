@@ -121,9 +121,17 @@ BEGIN
           USING ERRCODE = '55000';
       END IF;
     END IF;
+    -- A new row's drafted rate is what the draft would go back to; a draft made while OFF was drafted at 0.
+    IF TG_OP = 'INSERT' AND NEW.drafted_rate_pct > 0 THEN
+      NEW.drafted_rate_pct := 0;
+    END IF;
   ELSIF TG_TABLE_NAME = 'invoice_sales_tax_rates' THEN
-    -- A new draft of a sale whose box is ticked (ticked before the switch existed): no rate row, so no tax line.
-    RETURN NULL;
+    -- A new chemical-sale draft of a sale whose box is ticked (before the switch existed, or before it went OFF):
+    -- no rate row, so no tax line. (Only drafts get one; credit memos take their tax from the posted invoice.)
+    IF EXISTS (SELECT 1 FROM invoices i WHERE i.id = NEW.invoice_id AND i.invoice_type = 'chemical_sale'
+                AND i.status = 'draft') THEN
+      RETURN NULL;
+    END IF;
   END IF;
   RETURN NEW;
 END

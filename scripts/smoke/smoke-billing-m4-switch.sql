@@ -158,7 +158,11 @@ BEGIN
        OR (SELECT rate_pct FROM invoice_standing_discount_rates WHERE invoice_id = v_inv2) IS DISTINCT FROM 0 THEN
       v_fails := v_fails || ' (F) a new draft made while OFF took tax or a discount;';
     END IF;
-    IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice) IS DISTINCT FROM v_kept THEN
+    IF (SELECT total_amount_cents FROM invoices WHERE id = v_invoice) IS DISTINCT FROM v_kept
+       OR NOT EXISTS (SELECT 1 FROM invoice_sales_tax_rates WHERE invoice_id = v_invoice)
+       OR (SELECT rate_pct FROM invoice_standing_discount_rates WHERE invoice_id = v_invoice) IS DISTINCT FROM 4
+       OR NOT EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'sales_tax')
+       OR NOT EXISTS (SELECT 1 FROM invoice_items WHERE invoice_id = v_invoice AND charge_type = 'standing_discount') THEN
       v_fails := v_fails || ' (F) the earlier draft changed when the switch went off;';
     END IF;
   EXCEPTION WHEN OTHERS THEN

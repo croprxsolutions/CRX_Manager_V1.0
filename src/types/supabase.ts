@@ -20070,7 +20070,6 @@ export type Database = {
           version_number: number
         }[]
       }
-      get_rate_review_workbook: { Args: never; Returns: Json }
       get_receiving_log: {
         Args: {
           p_condition?: string

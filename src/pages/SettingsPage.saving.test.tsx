@@ -36,6 +36,9 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
   useIdempotencyKey: () => ({ getKey: () => 'key', resetKey: vi.fn(), getKeyFor: () => 'key', resetKeyFor: vi.fn() }),
 }));
 
+// Live hides the sales tax and standing discount controls until commission ships (billingM4Enabled).
+const billingM4 = vi.hoisted(() => ({ on: true }));
+vi.mock('../lib/billingFeatures', () => ({ billingM4Enabled: () => billingM4.on }));
 import SettingsPage from './SettingsPage';
 
 const USERS = [
@@ -137,6 +140,19 @@ describe('SettingsPage — sales tax rate (billing plan M4a)', () => {
       table === 'profiles' ? USERS : table === 'app_settings' ? [{ setting_key: 'sales_tax_rate', setting_value: '6.25' }] : [],
     ));
     mockRpc.mockResolvedValue({ data: {}, error: null });
+  });
+
+  it('on live (billing M4 off) there is no sales tax rate to change', async () => {
+    billingM4.on = false;
+    try {
+      await renderPage();
+      expect(screen.queryByLabelText('Sales tax rate')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Save sales tax' })).not.toBeInTheDocument();
+      // The rest of Billing stays.
+      expect(screen.getByRole('button', { name: 'Save invoice drafts' })).toBeInTheDocument();
+    } finally {
+      billingM4.on = true;
+    }
   });
 
   it('shows the saved rate and saves a new one', async () => {

@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// An exception holds only while its package's newest published version is still
+// An exception holds only while its package's newest published version (any dist-tag) is still
 // `latestSeen`, npm offers no direct fix, and the advisory is absent from the
 // production-only audit: a new release, or the package reaching what customers run,
 // ends it early, so CI makes someone act instead of hiding it until the date.
@@ -78,8 +78,12 @@ function main() {
   const latest = new Map();
   const latestOf = (name) => {
     if (!latest.has(name)) {
-      const r = spawnSync(`npm view ${name} version`, { encoding: 'utf8', shell: true });
-      latest.set(name, r.status === 0 ? r.stdout.trim() : null); // unknown: the exception lapses
+      // Every published version (semver-sorted), not the `latest` dist-tag: a fix shipped
+      // under another tag still counts as a newer release.
+      const r = spawnSync(`npm view ${name} versions --json`, { encoding: 'utf8', shell: true });
+      let newest = null;
+      try { newest = r.status === 0 ? [].concat(JSON.parse(r.stdout)).at(-1) ?? null : null; } catch { /* unknown */ }
+      latest.set(name, newest); // unknown: the exception lapses
     }
     return latest.get(name);
   };
@@ -88,7 +92,7 @@ function main() {
     const state = today > ex.until ? `EXPIRED on ${ex.until}`
       : now !== ex.latestSeen ? `ENDED: ${ex.package} latest is ${now ?? 'unknown'}, not ${ex.latestSeen}; bump it`
       : prodIds.has(id) ? 'ENDED: it is now in production dependencies'
-      : `active until ${ex.until}`;
+      : `active until ${ex.until} (a direct npm fix still ends it)`;
     console.log(`Exception ${id} ${state}`);
   }
   const blocking = blockingAdvisories(report, today, EXCEPTIONS, latestOf, prodIds);

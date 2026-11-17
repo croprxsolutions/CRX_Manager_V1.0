@@ -12,7 +12,9 @@
 --      transaction advisory lock on the inventory row, so two concurrent inserts end with exactly one), and only on a
 --      line for its own product at the count's warehouse (Complete adjusts that row).
 --   3. A count's status only moves forward: in progress -> completed or cancelled, completed -> cancelled (trigger on
---      cycle_counts). That is exactly what complete, cancel and reverse do; the app has no reopen.
+--      cycle_counts). That is exactly what complete, cancel and reverse do; the app has no reopen. A completed count
+--      cannot be reversed while an open count holds one of its stock rows (the reversal would shift that count's
+--      starting stock); same per-row lock as a line claim.
 --   4. Signed-in users lose direct UPDATE on cycle_counts and cycle_count_items (table and every column). The app
 --      never updates either table directly; saving a line (update_cycle_count_item), complete, cancel and reverse are
 --      SECURITY DEFINER RPCs. Without this, an admin's direct write could mark a completed count cancelled with no
@@ -114,12 +116,38 @@ CREATE FUNCTION public._cycle_count_no_reopen()
  LANGUAGE plpgsql
  SET search_path = public, pg_temp
 AS $function$
+DECLARE
+  v_inv uuid;
+  v_other text;
 BEGIN
   IF NEW.status IS DISTINCT FROM OLD.status
      AND NOT (OLD.status = 'in_progress' AND NEW.status IN ('completed', 'cancelled')
               OR OLD.status = 'completed' AND NEW.status = 'cancelled') THEN
     RAISE EXCEPTION 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count % is % and cannot become %; a count only moves forward. Start a new count instead.',
       OLD.count_number, OLD.status, NEW.status USING ERRCODE = 'check_violation';
+  END IF;
+  -- Reversing a completed count moves its stock rows back. An open count already holding one of those rows
+  -- would then complete against the wrong starting stock, so refuse until that count is finished or cancelled.
+  IF OLD.status = 'completed' AND NEW.status = 'cancelled' THEN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+      RAISE EXCEPTION 'CYCLE_COUNT_ROW_CLAIM_ISOLATION: a count can only be reversed in a read-committed transaction.'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    -- The same per-row lock a line claim takes, so a claim committing meanwhile is seen below.
+    FOR v_inv IN SELECT DISTINCT inventory_id FROM public.cycle_count_items
+                  WHERE cycle_count_id = OLD.id AND inventory_id IS NOT NULL ORDER BY inventory_id LOOP
+      PERFORM pg_advisory_xact_lock(hashtextextended('cycle_count_inventory:' || v_inv::text, 0));
+    END LOOP;
+    SELECT c.count_number INTO v_other
+      FROM public.cycle_count_items mine
+      JOIN public.cycle_count_items o ON o.inventory_id = mine.inventory_id
+      JOIN public.cycle_counts c ON c.id = o.cycle_count_id
+     WHERE mine.cycle_count_id = OLD.id AND c.id <> OLD.id AND c.status = 'in_progress'
+     LIMIT 1;
+    IF FOUND THEN
+      RAISE EXCEPTION 'CYCLE_COUNT_REVERSE_BLOCKED: Count % shares stock with open count %; finish or cancel that count before reversing this one.',
+        OLD.count_number, COALESCE(v_other, '(no number)') USING ERRCODE = 'check_violation';
+    END IF;
   END IF;
   RETURN NEW;
 END;

@@ -1030,7 +1030,7 @@ a history-based repair (repair step 2, To-Do 0.17).
 signed, and the browser check compares each product once, summed over its warehouse rows (history has no stock-row
 id, so the old per-row check flagged every product held in two warehouses). New database sweep
 `scripts/db-invariant-sweeps/predicates/stock-matches-history.sql` (same rules; 0 rows live 2026-11-15, 116 products
-checked; it skips a product with history but no stock row at all, 0 such products live). The writer is unchanged: its negative row is the true movement. KI-108's applied repair
+checked; a product with history but no stock row left counts as stock 0, 0 such products live 2026-11-17). The writer is unchanged: its negative row is the true movement. KI-108's applied repair
 (`20270103150000`) stays as it ran (0 `returned` rows existed); any repeat of a history-based repair must use the
 signed rule.
 

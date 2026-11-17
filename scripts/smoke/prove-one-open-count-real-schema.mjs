@@ -474,12 +474,19 @@ async function main() {
   // P6: an admin cannot mark a completed count cancelled directly (that skipped the reversal); Reverse still works.
   refused('P6 admin cancels a completed count directly', `UPDATE public.cycle_counts SET status = 'cancelled' WHERE id = '${cc1}';`, 'permission denied for table cycle_counts');
   assert.equal(onHand(PRODUCTS.p1), 95, 'P6: nothing moved');
+  // A newer open count holding the same stock row blocks the reversal (it would shift that count's starting stock).
+  assert.equal(startCount(MAIN, [PRODUCTS.p1]), '', 'P6: a newer count opens on the same stock row');
+  const ccO = openCount(MAIN);
+  refused('P6 reverse while a newer count holds the row', `SELECT public.reverse_completed_cycle_count('${cc1}', '${ADMIN}', '${key('reverse-blocked')}');`,
+    'CYCLE_COUNT_REVERSE_BLOCKED: Count .* shares stock with open count');
+  assert.equal(onHand(PRODUCTS.p1), 95, 'P6: the refused reversal moved nothing');
+  cancel(ccO);
   ok('P6 reverse', `SELECT public.reverse_completed_cycle_count('${cc1}', '${ADMIN}', '${key('reverse')}');`);
   assert.equal(onHand(PRODUCTS.p1), 100, 'P6: reverse puts the 5 back');
   assert.equal(sweepRows(), 'none');
   refusedAsOwner('P6 re-complete a reversed count', `UPDATE public.cycle_counts SET status = 'completed' WHERE id = '${cc1}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is cancelled and cannot become completed');
   assert.equal(onHand(PRODUCTS.p1), 100, 'P6: nothing moved');
-  console.log('[case] P6 reversing a completed count still works (95 -> 100) and stock still matches history; an admin cannot mark a completed count cancelled directly (skipping the reversal); the reversed count cannot be set back to completed to reverse it twice');
+  console.log('[case] P6 a completed count cannot be reversed while a newer open count holds one of its stock rows (CYCLE_COUNT_REVERSE_BLOCKED, nothing moves); once that count is cancelled, reversing still works (95 -> 100) and stock still matches history; an admin cannot mark a completed count cancelled directly (skipping the reversal); the reversed count cannot be set back to completed to reverse it twice');
 
   // R: rollback removes the guards; two open counts at one warehouse are possible again.
   applyFile(REVERSE, 'reverse', true);

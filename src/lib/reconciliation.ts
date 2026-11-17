@@ -218,6 +218,11 @@ export function checkInventoryLedger(
 
   const issues: Discrepancy[] = [];
 
+  // A product with history but no stock row left has stock 0 (a deleted row must still show up).
+  for (const productId of expectedByProduct.keys()) {
+    if (!stockByProduct.has(productId)) stockByProduct.set(productId, { name: productId, qty: 0 });
+  }
+
   for (const [productId, stock] of stockByProduct) {
     const expectedQty = expectedByProduct.get(productId);
     // If no transactions exist, we can't verify (initial load only)

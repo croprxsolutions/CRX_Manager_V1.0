@@ -4,7 +4,7 @@
 --
 -- INVARIANT
 --   For each product with any history, SUM(inventory.quantity_available) over all of
---   its stock rows equals the signed sum of its inventory_transactions. Same rules as
+--   its stock rows (0 when it has none left) equals the signed sum of its inventory_transactions. Same rules as
 --   the browser check (src/lib/reconciliation.ts checkInventoryLedger):
 --     add:      received, cancelled_delivery_reversal, void_delivery_reversal
 --     subtract: delivered, job_applied
@@ -28,6 +28,7 @@
 --
 -- KNOWN LIMITS
 --   * A product with no history at all is not checked (its opening balance is unknown).
+--   * A product with history but no stock row left counts as stock 0, so a deleted row shows up.
 --   * Tolerance 0.01 of the stock unit, like the browser check.
 -- =============================================================================
 WITH tx AS (
@@ -57,16 +58,16 @@ stock AS (
   GROUP BY i.product_id
 )
 SELECT
-  'product:' || s.product_id::text || ':stock_vs_history'           AS identity_key,
+  'product:' || tx.product_id::text || ':stock_vs_history'          AS identity_key,
   'stock_vs_history'::text                                         AS violation_type,
   round(tx.expected_qty, 2)                                        AS expected_qty,
-  round(s.actual_qty, 2)                                           AS actual_qty,
-  'Product ' || COALESCE(p.product_name, s.product_id::text) || ': stock '
-    || round(s.actual_qty, 2)::text || ' but history totals '
+  round(COALESCE(s.actual_qty, 0), 2)                              AS actual_qty,
+  'Product ' || COALESCE(p.product_name, tx.product_id::text) || ': stock '
+    || round(COALESCE(s.actual_qty, 0), 2)::text || ' but history totals '
     || round(tx.expected_qty, 2)::text                             AS detail,
-  'product:' || s.product_id::text || ':stock_vs_history'           AS violation_key
-FROM stock s
-JOIN tx ON tx.product_id = s.product_id
-LEFT JOIN products p ON p.id = s.product_id
-WHERE abs(s.actual_qty - tx.expected_qty) > 0.01
+  'product:' || tx.product_id::text || ':stock_vs_history'          AS violation_key
+FROM tx
+LEFT JOIN stock s ON s.product_id = tx.product_id
+LEFT JOIN products p ON p.id = tx.product_id
+WHERE abs(COALESCE(s.actual_qty, 0) - tx.expected_qty) > 0.01
 ORDER BY identity_key;

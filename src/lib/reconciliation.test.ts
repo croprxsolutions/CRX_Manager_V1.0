@@ -175,6 +175,17 @@ describe('checkInventoryLedger', () => {
     expect(checkInventoryLedger(inventory, transactions)).toEqual([]);
   });
 
+  it('flags a product with history but no stock row left (stock 0)', () => {
+    const transactions: InventoryTransactionRow[] = [
+      { product_id: 'p9', transaction_type: 'received', quantity: 100 },
+      { product_id: 'p8', transaction_type: 'received', quantity: 10 },
+      { product_id: 'p8', transaction_type: 'delivered', quantity: 10 },
+    ];
+    expect(checkInventoryLedger([], transactions)).toEqual([
+      { check: 'inventory_ledger', entity: 'p9', entityId: 'p9', expected: 100, actual: 0, delta: 100 },
+    ]);
+  });
+
   it('detects mismatch between inventory and transactions', () => {
     const inventory: InventoryRow[] = [
       { id: 'inv1', product_id: 'p1', product_name: 'Product A', quantity_available: 75 },

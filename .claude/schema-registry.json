@@ -1,12 +1,12 @@
 {
   "_meta": {
     "registry_version": 2,
-    "generated_at": "2026-11-12",
+    "generated_at": "2026-11-13",
     "generated_from": "Supabase project rhyzpcqhnizqbxphqdkr — public schema introspection",
     "regenerate_with": "node scripts/regenerate-schema-registry.mjs --live (or --from-introspection <queries.json>; queries in INTROSPECTION_QUERIES)",
     "purpose": "Single source of truth for hooks: generated columns, status enums, ALL parseable CHECK IN-lists, NOT NULL columns, full column lists, sequences, tables-with/without updated_at, applied-migration high water.",
     "note": "For a fresh refresh from the live DB, ask Claude Code: 'regenerate the schema-registry from Supabase' (/regen-schema-registry). skipped_constraints lists every CHECK the hooks can NOT validate — review it when touching those tables.",
-    "migrations_high_water": "20261112123046",
+    "migrations_high_water": "20261113011216",
     "applied_migration_names": [
       "20260207_gap_analysis_fixes.sql",
       "20260209050000_inventory_overhaul",
@@ -585,6 +585,9 @@
       "20270105110000_epa_chemistry_proposals",
       "20270106100000_blank_unit_fill_and_post_refusal",
       "20270106110000_invoice_brands_rup",
+      "20270107100000_epa_long_name_keeps_cas_match",
+      "20270108100000_ingredient_modes_of_action",
+      "20270109100000_delivery_receipt_brands",
       "a1_dispatched_list_recent_completed",
       "a1b_dispatched_to_me_completed_tail",
       "accounting_and_integrity_fixes",
@@ -1274,6 +1277,10 @@
       "open",
       "closed"
     ],
+    "active_ingredient_modes_of_action.status": [
+      "active",
+      "retired"
+    ],
     "active_ingredients.status": [
       "active",
       "retired"
@@ -1733,6 +1740,25 @@
       ],
       "constraints": [
         "active_ingredient_events_event_type_check"
+      ]
+    },
+    "active_ingredient_modes_of_action.scheme": {
+      "values": [
+        "HRAC",
+        "FRAC",
+        "IRAC"
+      ],
+      "constraints": [
+        "active_ingredient_modes_of_action_scheme_check"
+      ]
+    },
+    "active_ingredient_modes_of_action.status": {
+      "values": [
+        "active",
+        "retired"
+      ],
+      "constraints": [
+        "active_ingredient_modes_of_action_status_check"
       ]
     },
     "active_ingredients.status": {
@@ -3976,6 +4002,24 @@
       "constraint": "accounting_periods_whole_calendar_month_check",
       "def": "CHECK (((period_start = (date_trunc('month'::text, (period_start)::timestamp without time zone))::date) AND (period_end = ((date_trunc('month'::text, (period_start)::timestamp without time zone) + '1 mon -1 days'::interval))::date)))",
       "reason": "conditional/multi-column — not a single-column IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "active_ingredient_modes_of_action",
+      "constraint": "active_ingredient_modes_of_action_group_code_check",
+      "def": "CHECK (((group_code = upper(btrim(group_code))) AND (group_code <> ''::text) AND (char_length(group_code) <= 10)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "active_ingredient_modes_of_action",
+      "constraint": "active_ingredient_modes_of_action_row_version_check",
+      "def": "CHECK ((row_version >= 1))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
+    },
+    {
+      "table": "active_ingredient_modes_of_action",
+      "constraint": "active_ingredient_modes_of_action_source_note_check",
+      "def": "CHECK (((source_note = btrim(source_note)) AND (source_note <> ''::text) AND (char_length(source_note) <= 1000)))",
+      "reason": "range/comparison — not an IN-list; hooks do NOT validate this constraint"
     },
     {
       "table": "active_ingredients",
@@ -6472,6 +6516,23 @@
       "with_default": [
         "id",
         "changed_at"
+      ]
+    },
+    "active_ingredient_modes_of_action": {
+      "no_default": [
+        "ingredient_id",
+        "scheme",
+        "group_code",
+        "source_note",
+        "created_by",
+        "updated_by"
+      ],
+      "with_default": [
+        "id",
+        "status",
+        "row_version",
+        "created_at",
+        "updated_at"
       ]
     },
     "active_ingredients": {
@@ -9403,6 +9464,19 @@
       "after_values",
       "changed_by",
       "changed_at"
+    ],
+    "active_ingredient_modes_of_action": [
+      "id",
+      "ingredient_id",
+      "scheme",
+      "group_code",
+      "source_note",
+      "status",
+      "row_version",
+      "created_by",
+      "updated_by",
+      "created_at",
+      "updated_at"
     ],
     "active_ingredients": [
       "id",

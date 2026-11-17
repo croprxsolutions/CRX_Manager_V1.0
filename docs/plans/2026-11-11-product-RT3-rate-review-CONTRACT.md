@@ -180,6 +180,8 @@ label-maximum change after a reason was saved shows on the row and is re-checked
 above (its own workbook, one confirm). Routine, decided here: 6 inactive parents are out of the review (RT-4 promotes
 active parents only); 42, 43 notes optional, blank clears; 44 a zero default is a real zero (RT-1 allows it).
 
+**Superseding decision, 2026-11-14 (#1814, candidate only):** Mason chose explicit visibility of inactive rate history for cleanup, preserving approvals until reopening/deleting/clearing. Fresh approvals and live-rate cutover remain active-only. Older half-filled workbooks stay accepted with their existing safeguards. The new contract is `2026-11-14-inactive-rate-review-CONTRACT.md`; this note does not claim delivery.
+
 ## Luna rounds (gpt-6-luna, xhigh)
 
 - Round 1 (head 541a611): HIGH an outcome stays "approved" after the parent's form or label maximum changes: fixed (the

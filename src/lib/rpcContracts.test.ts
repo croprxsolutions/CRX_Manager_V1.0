@@ -2885,6 +2885,7 @@ const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([
   '20270104110000',
   '20270105110000',
   '20270106110000',
+  '20270110110000', // Inactive rate-history cleanup: optional read argument, pending apply/type regeneration.
 ]);
 
 /**
@@ -3097,6 +3098,11 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // the registry high-water passes 20261210100000 (the bodies never reach the generated types).
   '_create_label_draft_replay_impl_20261015',
   '_bulk_create_label_drafts_replay_impl_20261015',
+  // 20270113100000 (repair step 5) re-emits both only to add the KI-139 / KI-141 refusals; each keeps
+  // p_idempotency_key behind its required-key public wrapper. Prune once the registry high-water passes
+  // 20270113100000 (the bodies never reach the generated types).
+  '_reconcile_negative_inventory_replay_impl_20261015',
+  '_retire_inventory_item_replay_impl_20261015',
   // 20261108120000 (PAR-1, applied live 2026-11-05): admin-only parent writers; each replays through
   // _product_parent_replay (check_idempotency + actor/fingerprint match) and saves its receipt.
   // Prune with its MIGRATIONS_AWAITING_TYPE_REGENERATION entry.

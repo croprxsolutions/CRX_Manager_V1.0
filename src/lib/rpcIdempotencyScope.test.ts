@@ -493,6 +493,9 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // 20261210100000 re-emits both only to record each new draft's label_draft_targets row.
   _create_label_draft_replay_impl_20261015: ['create_label_draft'],
   _bulk_create_label_drafts_replay_impl_20261015: ['bulk_create_label_drafts'],
+  // Same shape. Repair step 5 (20270113100000) re-emits both only to add the KI-139 / KI-141 refusals.
+  _reconcile_negative_inventory_replay_impl_20261015: ['reconcile_negative_inventory'],
+  _retire_inventory_item_replay_impl_20261015: ['retire_inventory_item'],
   // Restore the Wave A alias exemption when its drafts are promoted from
   // scripts/.staging-migrations/.
 };

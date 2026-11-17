@@ -256,6 +256,11 @@ describe('FieldAppChemicalEntry', () => {
     expect(screen.getByText(/= 5 lb/i)).toBeInTheDocument();
   });
 
+  it('shows a supplied dry-ounce decimal tie rounded to four decimals', async () => {
+    await renderEntry({ chemicals: [makeLine({ quantity: 0.0024, rate_unit: 'Dry oz', unit: 'Dry oz', product_form: 'dry', rate_per_acre: null })], readOnly: true });
+    expect(screen.getByText('= 0.0002 lb')).toBeInTheDocument();
+  });
+
   it('#25 fix: a LIQUID product dosed in bare oz previews as GALLONS (0.625 GL), matching the saved/printed value (not 5 lb)', async () => {
     // The bug: the unit-text helper sent bare 'oz' to the pounds table -> "5 lb" on
     // screen while the server saved 80/128 = 0.625 GL. Now both branch on product_form.

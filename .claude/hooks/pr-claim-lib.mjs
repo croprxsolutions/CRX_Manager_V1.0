@@ -100,7 +100,8 @@ export function claimOrRefuse({ file, branch, sessionId, action, cwd = "", now =
           `${held.cwd ? `, folder ${held.cwd}` : ""}; its last ${held.action || "action"} was ${minutes} min ago). ` +
           `Two sessions landing one PR collide (pushes race, pinned merges fail, Sol rounds are wasted), so this ` +
           `${action} is refused. Leave this PR to that session. Only if that session is finished or gone ` +
-          `(ask Mason when unsure; never just to get past this), release the claim and retry: \`node scripts/pr-claim.mjs release ${name}\`. Claims expire 2 hours after ` +
+          `(ask Mason when unsure; never just to get past this), release the claim and retry: ` +
+          `${/^[\w./-]+$/.test(name) ? `\`node scripts/pr-claim.mjs release ${name}\`` : "`node scripts/pr-claim.mjs release <branch>` (quote the branch name)"}. Claims expire 2 hours after ` +
           `their last use; the check fails open on any error and never applies to Codex sessions.`
         );
       }

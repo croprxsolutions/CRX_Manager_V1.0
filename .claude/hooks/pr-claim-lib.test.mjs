@@ -52,6 +52,10 @@ ok(claimOrRefuse({ file: path.join(blocker, "pr-claims.json"), branch: "feat/x",
 writeFileSync(file, JSON.stringify({ "feat/x": { session: "A", at: "garbage" } }));
 ok(claim("B") === "", "a claim with an unreadable time never blocks");
 
+writeFileSync(file, "{}");
+claim("A", { branch: "feat/x;whoami" });
+ok(!claim("B", { branch: "feat/x;whoami" }).includes("release feat/x;whoami"), "an unusual branch name is never pasted into a shell command");
+
 // Luna round 1 fixes.
 writeFileSync(file, "{}");
 ok(claim("A", { record: false }) === "" && !("feat/x" in readClaims(file)), "a check with record:false claims nothing (denied merges)");
@@ -102,6 +106,7 @@ ok(pushGuard("git push origin feat/land", "A") === "", "session A's push is allo
 ok(readClaims(claimsPath)["feat/land"]?.session === "A", "the push recorded A's claim in the main checkout's session-state");
 ok(/LANDING CLAIM/.test(pushGuard("git push origin feat/land", "B")), "session B's push to the same branch is refused");
 ok(/LANDING CLAIM/.test(pushGuard("node scripts/write-codex-push-proof.mjs", "B")), "session B's Sol run on that branch is refused");
+ok(/LANDING CLAIM/.test(pushGuard("node --no-warnings scripts/write-codex-push-proof.mjs", "B")), "a Sol run with node options is refused too");
 ok(pushGuard("node scripts/write-codex-push-proof.mjs --dry-run", "B") === "", "a dry run is never refused");
 ok(pushGuard("node scripts/write-codex-push-proof.mjs", "A") === "", "the holder's Sol run is allowed");
 ok(pushGuard("git push origin other-branch", "B") === "", "B may push a different branch");

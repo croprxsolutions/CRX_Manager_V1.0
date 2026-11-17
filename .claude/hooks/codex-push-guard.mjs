@@ -91,7 +91,7 @@ if (nestedCommands.commands.some((inner) => isGitPush(inner))) {
 let segmentsForClaim = [];
 try { segmentsForClaim = shellSegments(cmd); } catch { /* fail open; the push checks below parse it themselves */ }
 for (const segment of segmentsForClaim) {
-  const run = segment.match(/^\s*node(?:\.exe)?\s+("?)([^\s"]*write-codex-push-proof\.mjs)\1(.*)$/i);
+  const run = segment.match(/^\s*node(?:\.exe)?(?:\s+-\S+)*\s+("?)([^\s"]*write-codex-push-proof\.mjs)\1(.*)$/i);
   // A directory change in the command could point the run at another checkout: skip (fail open).
   if (!run || /--dry-run|--help|(?:^|\s)-h\b/.test(run[3]) || /\b(?:cd|pushd|Set-Location|sl)\b/i.test(cmd)) continue;
   let refusal = "";

@@ -74,13 +74,13 @@ describe('getCancelledRegistrations', () => {
     const statement = { kind: 'required', adjuvant_types: ['HS-MSO', 'MSO'], preferred: 'HS-MSO', when: 'hard water' };
     mockRpc.mockResolvedValue(reply([
       { epa_registration: '100-1', registration_status: 'active', cancelled_on: null, label_adjuvants: [
-        { kind: 'recommended', adjuvant_type: ' COC ', note: '1%' }, { kind: 'required', adjuvant_type: 'AMS' }, statement] },
+        { kind: 'recommended', adjuvant_type: ' COC ', note: '1%' }, { kind: 'required', adjuvant_type: 'oil,\nmethylated' }, statement] },
       { epa_registration: '100-2', registration_status: 'active', cancelled_on: null, label_adjuvants: null },
     ]));
     const rows = await getRegistrations(['100-1', '100-2']);
     expect(rows.get('100-1')?.label_adjuvants).toEqual([
       { kind: 'recommended', adjuvant_types: ['COC'], note: '1%' },
-      { kind: 'required', adjuvant_types: ['AMS'], note: null },
+      { kind: 'required', adjuvant_types: ['oil, methylated'], note: null },
       statement,
     ]);
     expect(rows.get('100-2')?.label_adjuvants).toBeNull();

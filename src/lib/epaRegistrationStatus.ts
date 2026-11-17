@@ -51,10 +51,10 @@ export async function getRegistrations(numbers: (string | null | undefined)[]): 
   return new Map(rows.map((r) => [r.epa_registration, r.label_adjuvants ? { ...r, label_adjuvants: r.label_adjuvants.map(asStatement) } : r]));
 }
 
-/** REG-1's one-type entry (`{kind, adjuvant_type, note}`, still valid in the database) read as a one-type statement. */
+/** REG-1's one-type entry (`{kind, adjuvant_type, note}`, still valid in the database) read as a one-type statement; inner line breaks become spaces so the editor keeps it one type. */
 function asStatement(entry: LabelAdjuvant & { adjuvant_type?: string }): LabelAdjuvant {
   if (entry.adjuvant_types || typeof entry.adjuvant_type !== 'string') return entry;
-  return { kind: entry.kind, adjuvant_types: [entry.adjuvant_type.trim()], note: entry.note ?? null };
+  return { kind: entry.kind, adjuvant_types: [entry.adjuvant_type.trim().replace(/\s+/g, ' ')], note: entry.note ?? null };
 }
 
 const cancelledOf = (rows: RegistrationRows): CancelledRegistrations => new Map(

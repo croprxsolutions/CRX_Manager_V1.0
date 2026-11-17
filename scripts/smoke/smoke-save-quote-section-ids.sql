@@ -162,7 +162,7 @@ BEGIN
         CASE WHEN v_count = 1 THEN v_payload || jsonb_build_object('customer_id', v_customer2_id) ELSE v_payload END,
         jsonb_build_array(
           jsonb_build_object('id', v_s1, 'client_key', '_s1', 'section_name', 'North renamed',
-            'sort_order', CASE WHEN v_count = 7 THEN 2 ELSE 0 END,   -- 7: the section moves after South
+            'sort_order', (v_count = 7)::int * 2,   -- 7: the section moves after South
             'items', CASE v_count
               WHEN 2 THEN jsonb_build_array(v_la1 || jsonb_build_object('client_key', '_k1', 'total_units_needed', 12))
               WHEN 3 THEN jsonb_build_array(v_la1 || jsonb_build_object('client_key', '_k1', 'price_override', 25, 'price_per_unit', 25))

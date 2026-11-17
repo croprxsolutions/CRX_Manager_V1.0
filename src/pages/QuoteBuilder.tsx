@@ -2470,6 +2470,8 @@ export default function QuoteBuilder() {
       header_notes: headerNotes || null,
       footer_notes: footerNotes || null,
       is_planned: isPlanned,
+      // The server keeps each section's id (and the jobs scheduled from it) only when told the screen sends them.
+      section_ids_v1: true,
       ...(newStatus === 'sent' ? { sent_at: new Date(saveAttemptAtMs).toISOString() } : {}),
     };
 
@@ -2489,6 +2491,8 @@ export default function QuoteBuilder() {
 
     // Build sections JSON for the atomic RPC
     const sectionsPayload = sections.map((sec) => ({
+      id: sec.id ?? null,
+      client_key: sec._key,
       section_name: sec.section_name,
       sort_order: sec.sort_order,
       section_notes: sec.section_notes || null,
@@ -2648,7 +2652,7 @@ export default function QuoteBuilder() {
         return null;
       }
 
-      const result = assertRpcResult<{ quote_id: string; commission_split?: CommissionSplit | null; row_version?: unknown; item_ids?: Record<string, unknown> | null; item_prices?: Record<string, unknown> | null }>(data, 'save_quote');
+      const result = assertRpcResult<{ quote_id: string; commission_split?: CommissionSplit | null; row_version?: unknown; item_ids?: Record<string, unknown> | null; item_prices?: Record<string, unknown> | null; section_ids?: Record<string, unknown> | null }>(data, 'save_quote');
       // A save_quote that answers with an EMPTY payload and no error is ambiguous —
       // the row may already be committed — so retiring the key first would send the
       // user's retry under a fresh key the server cannot replay, writing the quote
@@ -2735,6 +2739,17 @@ export default function QuoteBuilder() {
         await refreshPriceChanges(result.quote_id);
         if (editingSessionChanged()) return null;
       }
+      // save_quote answers each section's id (section_ids, 20270124100000); the next save names them
+      // so the section, and any job scheduled from it, is kept. A reply without the map (a receipt
+      // cached before it existed) means the sections were re-created, so the old ids are dropped.
+      const sectionIds = result.section_ids && typeof result.section_ids === 'object' && !Array.isArray(result.section_ids)
+        ? result.section_ids
+        : null;
+      setSections((prev) => prev.map((sec) => {
+        const id = sectionIds?.[sec._key];
+        if (typeof id === 'string') return { ...sec, id };
+        return sectionIds ? sec : { ...sec, id: undefined };
+      }));
       // The save committed, but conversion and other chained actions must not
       // continue unless this tab can install the exact authoritative token.
       if (!installAuthoritativeQuoteRowVersion(result.row_version, 'saved')) {
@@ -3577,6 +3592,9 @@ export default function QuoteBuilder() {
         staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
         setStaleSaveOpen(true);
         toast('error', 'The quote changed before the version could be restored. Reload and review it before trying again.');
+      } else if (String((error as { message?: unknown }).message ?? '').includes('jobs_quote_section_id_fkey')) {
+        // A restore re-creates every section, so it cannot keep the section a spray job was scheduled from.
+        toast('error', 'This booking has a spray job, so an earlier version cannot be restored. Edit the booking directly instead.');
       } else {
         toast('error', 'Failed to restore version');
       }

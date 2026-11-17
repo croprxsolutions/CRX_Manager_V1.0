@@ -2166,6 +2166,41 @@ describe('QuoteBuilder', () => {
     expect(sentLines(1).map((line) => line.id)).toEqual(['saved-1-0', 'saved-1-1']);
   });
 
+  // save_quote kept a section (and the spray job scheduled from it) only when the save names it (20270124100000).
+  it('names each saved section on every save and installs the ids the save returns', async () => {
+    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote : table === 'quote_sections' ? [section] : table === 'quote_items' ? [item] : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? [product] : [], error: null }));
+    let saves = 0;
+    mockRpc.mockImplementation((name: string, args: { p_sections?: Array<{ client_key: string }> }) => {
+      if (name !== 'save_quote') return Promise.resolve({ data: null, error: null });
+      saves += 1;
+      // The first reply carries no map (a receipt cached before it existed); the second mints new ids.
+      const sectionIds = saves === 1 ? undefined : Object.fromEntries((args.p_sections ?? []).map((s) => [s.client_key, `sec-${saves}`]));
+      return Promise.resolve({ data: { status: 'saved', quote_id: quote.id, row_version: 7 + saves, item_ids: {}, section_ids: sectionIds }, error: null });
+    });
+    const sent = (call: number) => mockRpc.mock.calls.filter(([name]) => name === 'save_quote')[call][1] as {
+      p_quote_payload: { section_ids_v1?: boolean };
+      p_sections: Array<{ id: string | null; client_key: string }>;
+    };
+    const edit = async (from: string, to: string, count: number) => {
+      fireEvent.change(await screen.findByDisplayValue(from), { target: { value: to } });
+      fireEvent.click(screen.getByText('Save draft'));
+      await waitFor(() => expect(saves).toBe(count));
+      await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+    };
+
+    renderQuoteBuilder(quote.id);
+    await edit('Version test header', 'First edit', 1);
+    expect(sent(0).p_quote_payload.section_ids_v1).toBe(true);
+    expect(sent(0).p_sections.map((s) => s.id)).toEqual([section.id]);
+    expect(sent(0).p_sections[0].client_key).toBeTruthy();
+    // No map in the reply: the sections were re-created, so the old id is not sent again.
+    await edit('First edit', 'Second edit', 2);
+    expect(sent(1).p_sections.map((s) => s.id)).toEqual([null]);
+    await edit('Second edit', 'Third edit', 3);
+    expect(sent(2).p_sections.map((s) => s.id)).toEqual(['sec-2']);
+  });
+
   it('stops naming a line as its saved line once it is switched to another product, even if switched back', async () => {
     const fixture = makeQuoteFixture('draft', 7);
     const alpha = { ...fixture.product, product_name: 'Alpha Chem' };

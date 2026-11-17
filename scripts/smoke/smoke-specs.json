@@ -1016,6 +1016,18 @@
         "lifecycle"
       ]
     },
+    "save_quote_section_ids": {
+      "chain": "smoke-save-quote-section-ids.sql",
+      "container_prover": "prove-save-quote-section-ids-real-schema.mjs",
+      "description": "REQUIRES 20270124100000. Bookings Phase A PR 1a: a marked save (section_ids_v1) that names its sections keeps their ids, so a job scheduled from a section stays linked (deferred FK checked immediately); dropping a section a job references (active, cancelled or soft-deleted job, marked or old unmarked save) is refused SECTION_HAS_JOB and the booking is unchanged; another quote's id, a repeated id, a non-uuid and any id on a new quote are refused SECTION_ID_INVALID; an unmarked save without jobs still works and gets new ids; a replay returns the same section_ids. Terminal rollback.",
+      "covers": [
+        "save_quote"
+      ],
+      "area": [
+        "lifecycle",
+        "regression"
+      ]
+    },
     "save_quote_repeated_product_line_ids": {
       "chain": "smoke-save-quote-repeated-product-line-ids.sql",
       "description": "QUOTE_ITEM_AMBIGUOUS_COST fix (QuoteBuilder sends each saved line's id and a client_key, and installs the returned item_ids). A quote with one product on two field sections: an id-less re-save is refused QUOTE_ITEM_AMBIGUOUS_COST; re-saves that name every line succeed after a reprice, keep each saved line's quote-time cost, give a new line today's cost and keep ids stable; Mark Presented and Convert succeed and each order line carries its own quote line's cost; a quote without a repeated product re-saves with or without ids as before. Terminal rollback.",

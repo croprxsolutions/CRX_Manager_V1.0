@@ -29,7 +29,7 @@ const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270104110000_product_rate_review.sql');
 const FOLLOW_UPS = [
   path.join(MIGRATIONS, '20270110110000_inactive_rate_review_cleanup.sql'),
-  path.join(MIGRATIONS, '20270114100000_priority_integrity_followups.sql'),
+  path.join(MIGRATIONS, '20270117100000_priority_integrity_followups.sql'),
 ];
 // These later files only call/check parent auth/replay helpers; none redefines them or touches rate tables.
 const LATER_READ_ONLY = new Set([

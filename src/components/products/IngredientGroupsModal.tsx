@@ -19,8 +19,9 @@ const MAX_GROUPS = 10;
 const draftsOf = (modes: IngredientModeEntry[]): GroupDraft[] =>
   modes.map((mode) => ({ key: nextKey(), scheme: mode.scheme, code: mode.group_code, note: mode.source_note }));
 const entryOf = (draft: GroupDraft): IngredientModeEntry => ({ scheme: draft.scheme, group_code: draft.code.trim().toUpperCase(), source_note: draft.note.trim() });
-const codeSet = (modes: IngredientModeEntry[]) => modes.map((mode) => `${mode.scheme}:${mode.group_code}`).sort().join('|');
-const fullSet = (modes: IngredientModeEntry[]) => modes.map((mode) => `${mode.scheme}:${mode.group_code}:${mode.source_note}`).sort().join('|');
+// JSON per entry, so a note containing a separator can never make two different lists compare equal.
+const codeSet = (modes: IngredientModeEntry[]) => JSON.stringify(modes.map((mode) => JSON.stringify([mode.scheme, mode.group_code])).sort());
+const fullSet = (modes: IngredientModeEntry[]) => JSON.stringify(modes.map((mode) => JSON.stringify([mode.scheme, mode.group_code, mode.source_note])).sort());
 
 /** What is wrong with the list, or null. The database checks all of it again (and refuses an equivalent spelling). */
 function listProblem(entries: IngredientModeEntry[], reason: string): string | null {

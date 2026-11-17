@@ -2491,7 +2491,8 @@ export default function QuoteBuilder() {
 
     // Build sections JSON for the atomic RPC
     const sectionsPayload = sections.map((sec) => ({
-      id: sec.id ?? null,
+      // A section id names a section of THIS saved quote; a new quote has none to name.
+      id: quoteId ? sec.id ?? null : null,
       client_key: sec._key,
       section_name: sec.section_name,
       sort_order: sec.sort_order,

@@ -118,8 +118,9 @@ export function checkOrderTotals(
 /**
  * Check 2: Inventory ledger balance
  *
- * For each product, the current quantity_available should equal:
- *   SUM(received) - SUM(delivered) + SUM(returned) ± adjustments
+ * For each product, the current quantity_available summed over all its stock rows should equal:
+ *   SUM(received) - SUM(delivered) + SUM(returned, signed) ± adjustments
+ * History rows carry no stock-row id, so the comparison is per product, not per warehouse row.
  *
  * NOTE: This is an approximation because the initial inventory
  * load is also an "adjustment". We compare against the transaction
@@ -173,7 +174,6 @@ export interface InventoryTransactionRow {
 // (booked, prebooked, released, prebook_reconciliation) and unknown types count 0.
 const LEDGER_DIRECTION: Partial<Record<InventoryTransactionRow['transaction_type'], 'add' | 'subtract' | 'signed'>> = {
   received: 'add',
-  returned: 'add',
   cancelled_delivery_reversal: 'add',
   void_delivery_reversal: 'add',
   delivered: 'subtract',
@@ -181,6 +181,8 @@ const LEDGER_DIRECTION: Partial<Record<InventoryTransactionRow['transaction_type
   // Signed: positive = add, negative = subtract.
   adjusted: 'signed',
   transferred: 'signed',
+  // A return receipt writes +qty; cancelling it writes -qty (KI-159).
+  returned: 'signed',
   // tote_fill_out is the Bulk row (negative on a fill, positive on its undo);
   // tote_fill_in is the tote row (positive on a fill, negative on its undo).
   tote_fill_out: 'signed',
@@ -206,22 +208,34 @@ export function checkInventoryLedger(
     expectedByProduct.set(tx.product_id, (expectedByProduct.get(tx.product_id) ?? 0) + ledgerDelta(tx));
   }
 
+  // One total per product across every warehouse row (history has no stock-row id).
+  const stockByProduct = new Map<string, { name: string; qty: number }>();
+  for (const inv of inventory) {
+    const entry = stockByProduct.get(inv.product_id);
+    if (entry) entry.qty += inv.quantity_available;
+    else stockByProduct.set(inv.product_id, { name: inv.product_name, qty: inv.quantity_available });
+  }
+
   const issues: Discrepancy[] = [];
 
-  for (const inv of inventory) {
-    const expectedQty = expectedByProduct.get(inv.product_id);
+  // A product with history but no stock row left has stock 0 (a deleted row must still show up).
+  for (const productId of expectedByProduct.keys()) {
+    if (!stockByProduct.has(productId)) stockByProduct.set(productId, { name: productId, qty: 0 });
+  }
+
+  for (const [productId, stock] of stockByProduct) {
+    const expectedQty = expectedByProduct.get(productId);
     // If no transactions exist, we can't verify (initial load only)
     if (expectedQty === undefined) continue;
 
-    // Use whole-number comparison (quantities may have decimals for liquid)
-    const diff = Math.abs(inv.quantity_available - expectedQty);
+    const diff = Math.abs(stock.qty - expectedQty);
     if (diff > 0.01) {
       issues.push({
         check: 'inventory_ledger',
-        entity: inv.product_name,
-        entityId: inv.id,
+        entity: stock.name,
+        entityId: productId,
         expected: Math.round(expectedQty * 100) / 100,
-        actual: inv.quantity_available,
+        actual: Math.round(stock.qty * 100) / 100,
         delta: Math.round(diff * 100) / 100,
       });
     }
@@ -767,7 +781,7 @@ export async function runReconciliationChecks(): Promise<ReconciliationReport> {
       description: 'Inventory quantity matches transaction history running total',
       passed: disc.length === 0,
       discrepancies: disc,
-      entitiesChecked: inventory.length,
+      entitiesChecked: new Set([...inventory.map((r) => r.product_id), ...transactions.map((t) => t.product_id)]).size,
     });
   } catch (err) {
     checks.push({

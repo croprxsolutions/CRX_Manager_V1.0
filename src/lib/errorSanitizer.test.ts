@@ -65,6 +65,20 @@ describe('sanitizeError', () => {
       .toBe(`Nothing was saved. ${sentence}`);
   });
 
+  // The RAISE texts and index of 20270119130000_one_open_count_per_stock_row.sql (KI-160).
+  it.each([
+    ['CYCLE_COUNT_ROW_ALREADY_OPEN', 'This stock row is already on open count CC-0018; finish or cancel that count first.'],
+    ['CYCLE_COUNT_ROW_WRONG_PLACE', "This stock row is not this product at this count's warehouse."],
+    ['CYCLE_COUNT_REOPEN_FORBIDDEN', 'Count CC-0017 is cancelled and cannot become in_progress; a count only moves forward. Start a new count instead.'],
+    ['CYCLE_COUNT_REVERSE_BLOCKED', 'Count CC-0017 shares stock with open count CC-0018; finish or cancel that count before reversing this one.'],
+  ])('explains a %s refusal without the raw token', (token, sentence) => {
+    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
+  });
+  it('explains a second open count at one warehouse', () => {
+    expect(sanitizeError({ code: '23505', message: 'duplicate key value violates unique constraint "cycle_counts_one_open_per_warehouse"' }))
+      .toBe('Nothing was saved. This warehouse already has an open count; finish or cancel it first');
+  });
+
   // The RAISE texts of 20261105190000_sale_lines_refuse_missing_price.sql with the product filled in.
   it.each([
     ['QUOTE_PRICE_MISSING', "Atrazine 4L has no price for this quote's tier, so its line would show $0. Type a price on the line, or set the product's prices first (give it a $0 price if you give it away)."],

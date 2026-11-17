@@ -132,6 +132,8 @@ For each **active ingredient row** of the parent, and for each scheme:
 
 ### 3.6 The one-time bulk load (Mason, 2026-11-12)
 
+*Mason, 2026-11-17: approach approved; his yes on the actual list comes after `active_ingredients` is filled (0 rows that day).*
+
 Mason does not want groups typed ingredient by ingredient. So every ingredient's groups are loaded once, in bulk, and the editor (3.2) is kept only for the rare new ingredient (about once a year).
 
 - **When:** after the DB and screen PRs, and after the setup workbook and EPA lookups have put the ingredients in (`active_ingredients` has 0 rows today, and a group can only attach to an ingredient that exists).
@@ -230,7 +232,7 @@ Lands after the database PR is applied (migration-plus-callers split, `docs/work
 ## 7. Order and dependencies
 
 - **Ready to build now:** DM-1, DM-1b and DM-4's database parts are live (`20270105110000` applied 2026-11-12). MOA-1 needs nothing else.
-- **Lands before CMP-2:** CMP-2's mode-of-action filter reads `_parent_mode_groups`. CMP-2 is on hold until Mason re-reviews its plan (Stage 5); MOA-1 does not wait for it.
+- **Lands before CMP-2:** CMP-2's mode-of-action filter reads `_parent_mode_groups`. CMP-2's plan was approved on 2026-11-17 (Stage 5); MOA-1 does not wait for it.
 - **Out of scope:** anything on the quote page. Taha owns the quote screens; the quote-page option to show each line's actives and groups to the grower stays a logged "Later features" item until his quote work lands. No quote file is touched. Also out: a groups column on the setup workbook, a permanent bulk-import screen (the one-time load in 3.6 is a reviewed migration instead), and showing groups on the product list or in search.
 - **Then the one-time load (3.6):** after both PRs land and the ingredients are in; its own small migration, applied only after Mason says yes to the list.
 - **Other sessions:** the screen PR edits only `src/components/products/` chemistry files and a new lib file. Before building, check open PRs for those files (none on 2026-11-12) and never edit a file another open PR touches.

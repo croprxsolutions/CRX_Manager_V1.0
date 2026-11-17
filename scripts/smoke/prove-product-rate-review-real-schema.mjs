@@ -16,6 +16,7 @@ import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
+import { proveInactiveRateReview } from './prove-inactive-rate-review-real-schema.mjs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -26,7 +27,10 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270104110000_product_rate_review.sql');
-const FOLLOW_UPS = [path.join(MIGRATIONS, '20270114100000_priority_integrity_followups.sql')];
+const FOLLOW_UPS = [
+  path.join(MIGRATIONS, '20270110110000_inactive_rate_review_cleanup.sql'),
+  path.join(MIGRATIONS, '20270114100000_priority_integrity_followups.sql'),
+];
 // These later files only call/check parent auth/replay helpers; none redefines them or touches rate tables.
 const LATER_READ_ONLY = new Set([
   '20270104120000_delivery_brands.sql',
@@ -670,6 +674,7 @@ async function main() {
   downloadCases();
   accessCases();
   console.log('PRODUCT_RATE_REVIEW_PROOF_PASS');
+  await proveInactiveRateReview(NAME);
 }
 
 try { await main(); }

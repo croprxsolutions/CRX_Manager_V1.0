@@ -43,7 +43,7 @@ describe('rendered brand paperwork', () => {
     ])));
     expect(text).toContain('Brand: Alpha (EPA 1-1)');
     expect(text).toContain('Brand: Beta (EPA 2-2)');
-    expect(text).toContain('Full-load brand amounts are on the delivery receipt.');
+    expect(text).toContain('Brand amounts cover the whole load, so they are not shown on this invoice.');
     expect(text).not.toContain('Brand: Alpha (EPA 1-1) - 2');
     expect(text).toContain('Brand: Charlie (EPA 3-3) - 5');
   });
@@ -52,7 +52,7 @@ describe('rendered brand paperwork', () => {
     const split = await renderedText(await generateInvoicePdf(invoice([item(3)], true)));
     expect(split).toContain('Brand: Alpha (EPA 1-1) - 2 on the load');
     const repeated = await renderedText(await generateInvoicePdf(invoice([item(5), item(5)])));
-    expect(repeated).toContain('Full-load brand amounts are on the delivery receipt.');
+    expect(repeated).toContain('Brand amounts cover the whole load, so they are not shown on this invoice.');
     expect(repeated).not.toContain('Brand: Alpha (EPA 1-1) - 2');
   });
 

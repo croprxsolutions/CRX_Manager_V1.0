@@ -150,6 +150,6 @@ export function invoiceBrandNotes(brandLines: unknown, billedQuantity: number | 
   if (hasUnrecorded) notes.push('Brand not recorded');
   const mismatch = brandSplitMismatch(entries);
   if (mismatch) notes.push(mismatchNote(mismatch));
-  else if (hideAmounts && !hasUnrecorded) notes.push('Full-load brand amounts are on the delivery receipt.');
+  else if (hideAmounts && !hasUnrecorded) notes.push('Brand amounts cover the whole load, so they are not shown on this invoice.');
   return notes;
 }

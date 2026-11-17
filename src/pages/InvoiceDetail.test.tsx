@@ -574,7 +574,7 @@ describe('InvoiceDetail', () => {
     const brand = await screen.findByText('Brand: Alpha (EPA 1-1)');
     expect(brand).not.toHaveTextContent(' - 2');
     expect(screen.getByText('Brand: Beta (EPA 2-2)')).toBeInTheDocument();
-    expect(screen.getByText('Full-load brand amounts are on the delivery receipt.')).toBeInTheDocument();
+    expect(screen.getByText('Brand amounts cover the whole load, so they are not shown on this invoice.')).toBeInTheDocument();
   });
 
   it('uses the stored Bill Split identity to show whole-load amounts on a voided payer invoice', async () => {
@@ -625,7 +625,7 @@ describe('InvoiceDetail', () => {
     renderInvoiceDetail(invoice.id);
     const labels = await screen.findAllByText('Brand: Alpha (EPA 1-1)');
     expect(labels).toHaveLength(2);
-    expect(screen.getAllByText('Full-load brand amounts are on the delivery receipt.')).toHaveLength(2);
+    expect(screen.getAllByText('Brand amounts cover the whole load, so they are not shown on this invoice.')).toHaveLength(2);
     expect(screen.queryByText('Brand: Alpha (EPA 1-1) - 5')).not.toBeInTheDocument();
   });
 

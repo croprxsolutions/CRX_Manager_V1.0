@@ -79,7 +79,7 @@ describe('invoice brand notes (paper)', () => {
     const bl = [e({ brand_name: 'Alpha', epa_registration: '1-1', quantity: 2 }), e({ brand_name: 'Beta', epa_registration: '2-2', quantity: 3 })];
     expect(invoiceBrandNotes(bl, 3)).toEqual([
       'Brand: Alpha (EPA 1-1)', 'Brand: Beta (EPA 2-2)',
-      'Full-load brand amounts are on the delivery receipt.',
+      'Brand amounts cover the whole load, so they are not shown on this invoice.',
     ]);
     expect(invoiceBrandNotes(bl, 5)).toEqual([
       'Brand: Alpha (EPA 1-1) - 2', 'Brand: Beta (EPA 2-2) - 3',
@@ -94,11 +94,11 @@ describe('invoice brand notes (paper)', () => {
     expect(hasRepeatedBrandTrip(lines, 0)).toBe(true);
     expect(hasRepeatedBrandTrip(lines, 1)).toBe(true);
     expect(invoiceBrandNotes(bl, 5, false, hasRepeatedBrandTrip(lines, 0))).toEqual([
-      'Brand: Alpha (EPA 1-1)', 'Full-load brand amounts are on the delivery receipt.',
+      'Brand: Alpha (EPA 1-1)', 'Brand amounts cover the whole load, so they are not shown on this invoice.',
     ]);
     const trips = [bl[0], e({ brand_name: 'Alpha', epa_registration: '1-1', quantity: 5, delivery_item_id: 'di2' })];
     expect(invoiceBrandNotes(trips, 5)).toEqual([
-      'Brand: Alpha (EPA 1-1)', 'Full-load brand amounts are on the delivery receipt.',
+      'Brand: Alpha (EPA 1-1)', 'Brand amounts cover the whole load, so they are not shown on this invoice.',
     ]);
   });
   it('keeps an unreconciled trip warning and a missing-brand trip when amounts are hidden', () => {

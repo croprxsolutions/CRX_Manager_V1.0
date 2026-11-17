@@ -74,6 +74,9 @@ describe('sanitizeError', () => {
   ])('explains a delivery-line refusal %s (20270122100000) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
   });
+  it('keeps a delivery-line sentence that starts with "s" whole', () => {
+    expect(sanitizeError({ code: '23514', message: 'DELIVERY_LINE_DUPLICATE:same order line twice.' })).toBe('Nothing was saved. same order line twice.');
+  });
   it('explains the delivery-line unique index (20270122100000) as a duplicate line', () => {
     expect(sanitizeError({ code: '23505', message: 'duplicate key value violates unique constraint "delivery_items_one_line_per_order_line"' }))
       .toMatch(/^Nothing was saved. This order line is already on the delivery/);

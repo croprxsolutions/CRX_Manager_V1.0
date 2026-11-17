@@ -174,7 +174,7 @@ CREATE TRIGGER a2_delivery_order_keeps_lines
 -- Two writers at once: the trigger's check cannot see the other's uncommitted line; the index can.
 CREATE UNIQUE INDEX delivery_items_one_line_per_order_line ON public.delivery_items (delivery_id, order_item_id);
 
-REVOKE INSERT, UPDATE, DELETE ON public.delivery_items FROM authenticated, anon, PUBLIC;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.delivery_items FROM authenticated, anon, PUBLIC;
 DO $column_grants$
 DECLARE
   v_cols text;
@@ -601,6 +601,8 @@ BEGIN
   IF has_table_privilege('authenticated', 'public.delivery_items', 'INSERT')
      OR has_table_privilege('authenticated', 'public.delivery_items', 'UPDATE')
      OR has_table_privilege('authenticated', 'public.delivery_items', 'DELETE')
+     OR has_table_privilege('authenticated', 'public.delivery_items', 'TRUNCATE')
+     OR has_table_privilege('anon', 'public.delivery_items', 'TRUNCATE')
      OR has_any_column_privilege('authenticated', 'public.delivery_items', 'INSERT')
      OR has_any_column_privilege('authenticated', 'public.delivery_items', 'UPDATE')
      OR NOT has_table_privilege('authenticated', 'public.delivery_items', 'SELECT') THEN

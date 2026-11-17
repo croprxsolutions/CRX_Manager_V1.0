@@ -58,6 +58,8 @@ import {
   fallbackCodexExecutable,
   fixedGitExecutable,
   GUARDED_BASE,
+  STAGING_BASE,
+  solTargetRef,
   isCodexSandboxStartupFailure,
   parseArgs,
   removeSanitizedReviewWorkspace,
@@ -1839,7 +1841,70 @@ not json
     assert.match(dry.message, /Sol round 5/, "round stop: --dry-run still reports the stop");
     assert.equal(centralDate(new Date("2026-11-10T03:00:00Z")), "2026-11-09", "round stop: today is the Central date");
   }
-  assert.match(check({ headContainsBase: false }).problems.join(" "), /does not contain the latest main.*git merge origin\/main/, "preflight: a head missing origin/main refuses (#1075)");
+  assert.match(check({ headContainsBase: false }).problems.join(" "), /does not contain the latest origin\/main.*git merge origin\/main/, "preflight: a head missing origin/main refuses (#1075)");
+  assert.match(check({ headContainsBase: false, baseRef: "origin/staging" }).problems.join(" "), /does not contain the latest origin\/staging.*git merge origin\/staging/, "preflight: a staging-bound head names origin/staging");
+
+  // Sol reviews against the PR's target branch (Mason, 2026-11-16).
+  for (const [branch, ref] of [["claude/x", "origin/staging"], ["ship/pay-fix", "origin/staging"], ["hotfix/a", "origin/main"], ["hotfix/revert-b", "origin/main"], ["release/next", "origin/main"], ["main", "origin/main"], ["staging", "origin/main"], ["", "origin/main"], ["HEAD", "origin/main"]]) {
+    assert.equal(solTargetRef(branch, true), ref, `target ref: ${branch || "(detached)"} → ${ref}`);
+  }
+  assert.equal(solTargetRef("claude/x", false), "origin/main", "target ref: no origin/staging keeps origin/main (the wider diff)");
+  assert.equal(STAGING_BASE, "origin/staging");
+  {
+    const repo = tempDir("crx-staging-base-");
+    const git = (...args) => execFileSync("git", ["-c", "user.name=Review Test", "-c", "user.email=review@example.invalid", ...args], { cwd: repo, encoding: "utf8" }).trim();
+    const names = (from, to) => git("diff", "--name-only", `${from}...${to}`).split(/\s+/).filter(Boolean).sort();
+    const isAncestor = (a, b) => spawnSync("git", ["merge-base", "--is-ancestor", a, b], { cwd: repo }).status === 0;
+    try {
+      git("init", "-q", "-b", "main");
+      writeFileSync(path.join(repo, "a.txt"), "a\n");
+      git("add", ".");
+      git("commit", "-qm", "main");
+      const mainTip = git("rev-parse", "HEAD");
+      git("checkout", "-q", "-b", "staging");
+      writeFileSync(path.join(repo, "someone-elses.sql"), "select 1;\n");
+      git("add", ".");
+      git("commit", "-qm", "unreleased staging work");
+      const stagingTip = git("rev-parse", "HEAD");
+      git("checkout", "-q", "-b", "claude/feature");
+      writeFileSync(path.join(repo, "mine.ts"), "export {};\n");
+      git("add", ".");
+      git("commit", "-qm", "own change");
+      const featureHead = git("rev-parse", "HEAD");
+      assert.deepEqual(names(solReviewBase(repo, featureHead, mainTip), featureHead), ["mine.ts", "someone-elses.sql"], "old base: a staging branch reviewed against main carries others' staging work");
+      const base = solReviewBase(repo, featureHead, stagingTip);
+      assert.equal(base, stagingTip, "staging base: a head containing origin/staging keeps it");
+      assert.deepEqual(names(base, featureHead), ["mine.ts"], "staging base: the review diff is only the branch's own file");
+      const proof = { codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high", head_sha: featureHead, base_sha: base, timestamp: new Date().toISOString() };
+      assert.ok(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: stagingTip, isAncestor }), "staging base: the merge gate accepts it into staging");
+      assert.equal(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: mainTip, isAncestor }), false, "staging base: the same proof is refused for a merge into main");
+      // A branch that undoes unreleased staging work: the main base hides the undo, the staging base shows it.
+      git("checkout", "-q", "-b", "claude/undo", stagingTip);
+      git("rm", "-q", "someone-elses.sql");
+      git("commit", "-qm", "undo staging work");
+      const undoHead = git("rev-parse", "HEAD");
+      assert.deepEqual(names(solReviewBase(repo, undoHead, mainTip), undoHead), [], "old base: an undo of staging work is invisible against main");
+      assert.deepEqual(names(solReviewBase(repo, undoHead, stagingTip), undoHead), ["someone-elses.sql"], "staging base: the undo is in the review diff");
+      // Staging moved on after the branch was cut: the fork point keeps the diff to the branch's own file.
+      git("checkout", "-q", "staging");
+      writeFileSync(path.join(repo, "later.sql"), "select 2;\n");
+      git("add", ".");
+      git("commit", "-qm", "later staging work");
+      const movedStaging = git("rev-parse", "HEAD");
+      assert.equal(solReviewBase(repo, featureHead, movedStaging), stagingTip, "staging base: a head behind origin/staging is reviewed from its fork point");
+      // A hotfix cut from main still reviews everything it adds over main.
+      git("checkout", "-q", "-b", "hotfix/x", mainTip);
+      writeFileSync(path.join(repo, "fix.ts"), "export {};\n");
+      git("add", ".");
+      git("commit", "-qm", "fix");
+      const hotfixHead = git("rev-parse", "HEAD");
+      assert.equal(solTargetRef("hotfix/x", true), "origin/main");
+      assert.equal(solReviewBase(repo, hotfixHead, mainTip), mainTip, "hotfix: reviewed against main");
+      assert.deepEqual(names(mainTip, hotfixHead), ["fix.ts"], "hotfix: the diff is everything it adds over main");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }
   assert.equal(check({ headContainsBase: null }).ok, false, "preflight: an unreadable containment check refuses");
   assert.equal(check({ headContainsBase: undefined }).ok, false, "preflight: a missing containment fact refuses");
 
@@ -2036,7 +2101,7 @@ not json
   // review workspace or Codex call, and a refusal leaves an existing proof alone.
   const wrapperSource = readFileSync(fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url)), "utf8").replace(/\r\n/g, "\n");
   const runBody = wrapperSource.slice(wrapperSource.indexOf("export function run("));
-  const preflightAt = runBody.indexOf("const preflight = solPreflight(root, headBefore, baseBefore);");
+  const preflightAt = runBody.indexOf("const preflight = solPreflight(root, headBefore, baseBefore, target);");
   assert.ok(preflightAt > 0, "preflight: run() checks the head and the exact base it will review");
   assert.ok(runBody.indexOf("const baseBefore = runGit(") < preflightAt, "preflight: the base is pinned before the check, so a later fetch cannot slip past it");
   assert.ok(preflightAt < runBody.indexOf("reviewWorkspace = createSanitizedReviewWorkspace("), "preflight: before the review workspace or Codex run");

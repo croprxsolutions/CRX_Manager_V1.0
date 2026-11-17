@@ -218,6 +218,25 @@ These run on the local prover with test data, as real roles (`SET ROLE authentic
 
 **Sent to Mason:** 54 (how a live rate gets changed after the switch) and 59 (how long to watch the pilot).
 
+## Re-check settlement (Astra targeted re-check, 19 findings)
+
+The re-check attacked rule 9's "even when the lock is off" protection. Covering every way a rate's meaning can move with the lock off (unit conversions 1, parent-only rates 3, stock unit or form changes 5, the guard's early returns 6) would rebuild the lock. **Simplified design (pending Mason, decision 3):** `set_product_rate_lock` refuses to unlock while any parent is `approved`. The existing lock then covers 1, 3, 5 and 6 unchanged, and rule 9's guard stays "lock on, plus refuse approved parents in every pass-writing path".
+
+Other settlements, applied at build:
+- **2:** `correct_product_rates` also refuses sizes of `approved` parents.
+- **4:** every refusal in `correct_parent_rates`, `correct_product_rates` and `move_product_size` (both parents) runs after that function's own row locks.
+- **7, 8:** no table triggers. The approved-parent refusal goes inside `_product_rate_review_run` only for rows whose status is `change`, so unchanged rows still pass. Derive skips `approved` parents and lists them as skipped.
+- **9:** joined to decision 1.
+- **10:** restore runs the same blend-reference check as promote.
+- **11:** the in-flight blend writer is the same residual risk as any locked unit correction today. `guard_product_rate_unit_for_blend_lines` is unchanged, and only Smart Choice changes unit, with 0 blend rows. Accepted and named.
+- **12, 13:** restore is previewed. If the old unit or rate no longer passes for a current size, restore is refused, the parent stays `approved` (a safe state), and the refusal is reported. Proof case P4b covers the promote → restore round trip from `Dry oz` and from `oz`.
+- **14:** promote also refuses when any size's rate or unit differs from the parent. While `approved`, sizes cannot diverge.
+- **15:** the no-change branch runs its own full check: each size's snapshot and its current per-acre prices against `p_expected`.
+- **16:** eligibility also requires `_product_rate_value_ok`.
+- **17:** `p_expected` has one shape per outcome. `no_per_acre_default` carries `outcome_version` and the parent's rate-row IDs and versions (possibly empty).
+- **18:** text is compared and kept trimmed; empty string and NULL both mean blank. Live has no empty-string values.
+- **19:** "duplicates" means duplicate size entries only.
+
 ## Settled business decisions (Mason, 2026-11-17)
 
 - Products with no per-acre default: "Yes, leave it blank" when switched.
@@ -229,3 +248,4 @@ These run on the local prover with test data, as real roles (`SET ROLE authentic
 
 1. **Changing a live rate after the switch.** Recommended: switch the parent back, fix the rate in the rate review, then switch it on again (a few minutes on the old rate; no new screen now). The alternative is a one-step "edit live rate" tool, built now instead of in RT-4b, which costs more time and review.
 2. **Pilot watch.** Recommended: go on to the rest the same day, once the pilot checks pass in the app. The alternative is to wait a day of real quoting first.
+3. **The rate lock after the first switch.** Recommended: once any product is switched, the "Lock rates" switch cannot be turned off until every switched product is switched back. Rates on products not yet switched can still be fixed one at a time with the locked correction. This narrows Mason's 2026-10-29 answer that any admin may switch the lock at any time (grand plan, overlap 11, question 11). The alternative keeps the lock switch free, at the cost of a much larger guard to rebuild.

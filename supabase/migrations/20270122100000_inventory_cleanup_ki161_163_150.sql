@@ -540,6 +540,10 @@ BEGIN
   END IF;
 
   v_expected := v_item.expected_qty;
+  -- Not-a-number or infinite counts would flow into on-hand at Complete (Luna r3).
+  IF p_counted_qty IS NOT NULL AND p_counted_qty::text IN ('NaN', 'Infinity', '-Infinity') THEN
+    RAISE EXCEPTION 'CYCLE_COUNT_QTY_INVALID: the counted quantity must be a number.' USING ERRCODE = 'check_violation';
+  END IF;
   IF p_counted_qty IS NOT NULL THEN
     -- KI-134: compare the count with what the app holds NOW, not at count creation, so stock that moved in between
     -- is not applied twice when Complete adds the variance to current on-hand.

@@ -57,7 +57,8 @@ Builds on #1896 (delivery, order and PO lines in the stock unit). One PR to `sta
    change.
 2. **Count rounding.** Widen `cycle_count_items.expected_qty`, `counted_qty`, `variance` from numeric(10,2) to
    numeric(14,4) and round to 4 places in `update_cycle_count_item`, so completing a count lands exactly on the
-   counted figure. Live: 1 stock row has more than 2 decimals; no view depends on the table; values convert exactly.
+   counted figure. It also refuses a not-a-number or infinite count (`CYCLE_COUNT_QTY_INVALID`; Luna r3), which
+   would otherwise reach on-hand at Complete. Live: 1 stock row has more than 2 decimals; no view depends on the table; values convert exactly.
 3. **Return / application-reversal rows linked only by note text: deferred.** It needs a new link column on
    `inventory_transactions` and its readers; low value, no figure is wrong. Stays open in KI-163.
 4. **One PO header 1 cent off its lines: not a defect; closed with evidence, no change.** Live 2026-11-17: the one

@@ -410,8 +410,9 @@ async function afterCases() {
   assert.equal(cancelWith(20), '10/10');
   assert.equal(cancelWith(0), 'none/0');
   console.log('[case] 5 a quick-delivery cancel logs what it really released: 4 when 4 were held, 10 when 20 were held, no row when none were held');
+  refusedProbe(`SELECT public.update_cycle_count_item('${CCI}', 'NaN'::numeric, NULL, '${ADMIN}', 'ic-cc-nan');`, /CYCLE_COUNT_QTY_INVALID/, ADMIN);
   assert.equal(Number(okProbe(countAndComplete, ADMIN)), 12.35);
-  console.log('[case] 6 a count of 12.35 on a 12.3456 stock row completes to exactly 12.35');
+  console.log('[case] 6 a not-a-number count is refused; a count of 12.35 on a 12.3456 stock row completes to exactly 12.35');
 }
 
 function rollbackCases() {

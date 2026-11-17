@@ -463,7 +463,7 @@ export function sanitizeError(error: unknown): string {
   const deliveryLineRule = message.match(/^(?:DELIVERY_LINE_NOT_ON_ORDER|DELIVERY_LINE_PRODUCT_MISMATCH|DELIVERY_LINE_UNIT_MISMATCH|DELIVERY_LINE_DUPLICATE|DELIVERY_ORDER_LOCKED):\s*(.+)$/s);
   if (deliveryLineRule) return `Nothing was saved. ${deliveryLineRule[1].trim()}`;
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.
-  const countRule = message.match(/^(?:CYCLE_COUNT_ROW_ALREADY_OPEN|CYCLE_COUNT_ROW_WRONG_PLACE|CYCLE_COUNT_REOPEN_FORBIDDEN|CYCLE_COUNT_REVERSE_BLOCKED):\s*(.+)$/s);
+  const countRule = message.match(/^(?:CYCLE_COUNT_ROW_ALREADY_OPEN|CYCLE_COUNT_ROW_WRONG_PLACE|CYCLE_COUNT_REOPEN_FORBIDDEN|CYCLE_COUNT_REVERSE_BLOCKED|CYCLE_COUNT_QTY_INVALID):\s*(.+)$/s);
   if (countRule) return `Nothing was saved. ${countRule[1].trim()}`;
   // Sale-line triggers (20261105190000, WP-PM-6b): the same rule on quote, order and tier-priced invoice lines.
   const salePriceMissing = message.match(/^(?:QUOTE|ORDER|INVOICE)_PRICE_MISSING:\s*(.+)$/s);

@@ -74,6 +74,10 @@ describe('sanitizeError', () => {
   ])('explains a delivery-line refusal %s (20270122100000) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
   });
+  it('explains a not-a-number count (20270122100000)', () => {
+    expect(sanitizeError({ code: '23514', message: 'CYCLE_COUNT_QTY_INVALID: the counted quantity must be a number.' }))
+      .toBe('Nothing was saved. the counted quantity must be a number.');
+  });
   it('keeps a delivery-line sentence that starts with "s" whole', () => {
     expect(sanitizeError({ code: '23514', message: 'DELIVERY_LINE_DUPLICATE:same order line twice.' })).toBe('Nothing was saved. same order line twice.');
   });

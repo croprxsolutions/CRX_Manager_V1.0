@@ -18,6 +18,11 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-14 — MOA alternate spellings are refused
+
+**Decision (Mason, 2026-11-14: "CAS optional with warning; refuse alternate MOA spelling.").** If a mode-of-action group is already active under one spelling, a save using another spelling for the same group must refuse; replacing it is a two-save retirement then addition.
+**Why:** official codes can use different zero-padding by scheme, and a save must not silently replace a stored spelling or substitute an alternate submitted spelling. The comparison-only product summary may fold equivalent groups using an existing source spelling, as specified in the contract.
+**What this forbids/implies:** compare equivalent codes for duplicates and matching, but preserve stored/requested spelling and refuse an active alternate spelling before any write.
 ## 2026-11-14 — Rate Review unanswered-save recovery (#1829)
 
 **Decision (Mason, 2026-11-14):** after any unanswered Rate Review save, an admin may check a fresh workbook and explicitly clear the reminder; no attempt count or expiry threshold is required. This supersedes the 2026-11-13 Rate Review follow-up contract's narrower hand-check exit, which appeared only on expiry, a missing record, or an unsafe/refused receipt.

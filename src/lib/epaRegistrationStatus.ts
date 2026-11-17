@@ -17,21 +17,63 @@ export function cancelledOnText(cancelledOn: string | null | undefined): string 
 /** Registration number (normalized) → the date EPA cancelled it (`YYYY-MM-DD`), or null when not recorded. */
 export type CancelledRegistrations = Map<string, string | null>;
 
-interface RegistrationRow {
+/** One statement on a label about adjuvants (USE-2). Several types mean "any one of" ("none of" for do_not_use). */
+export interface LabelAdjuvant {
+  kind: 'required' | 'recommended' | 'do_not_use';
+  adjuvant_types: string[];
+  preferred?: string | null;
+  when?: string | null;
+  note?: string | null;
+}
+
+/** A stored registration, as `get_epa_registrations` returns it (only the fields the screens use). */
+export interface RegistrationRow {
   epa_registration: string;
   registration_status: string;
   cancelled_on: string | null;
+  label_url: string | null;
+  /** NULL = not reviewed; [] = none on the label. */
+  label_adjuvants: LabelAdjuvant[] | null;
+  registration_version: number;
 }
 
-/** Which of these numbers are stored as cancelled (REG-1). Only reads; nothing here ever blocks a sale. */
-export async function getCancelledRegistrations(numbers: (string | null | undefined)[]): Promise<CancelledRegistrations> {
+/** Registration number (normalized) → its stored row. A number with no row is absent. */
+export type RegistrationRows = Map<string, RegistrationRow>;
+
+/** The stored rows for these numbers (REG-1). Only reads. */
+export async function getRegistrations(numbers: (string | null | undefined)[]): Promise<RegistrationRows> {
   const wanted = [...new Set(numbers.map(normalizeEpaRegistration).filter((n): n is string => n !== null))];
   // An empty or NULL list would ask for every registration.
   if (wanted.length === 0) return new Map();
   const { data, error } = await supabaseUntyped.rpc('get_epa_registrations', { p_numbers: wanted });
   if (error) throw error;
   const rows = assertRpcResult<RegistrationRow[]>(data, 'get_epa_registrations');
-  return new Map(rows.filter((r) => r.registration_status === 'cancelled').map((r) => [r.epa_registration, r.cancelled_on]));
+  return new Map(rows.map((r) => [r.epa_registration, r.label_adjuvants ? { ...r, label_adjuvants: r.label_adjuvants.map(asStatement) } : r]));
+}
+
+// The editor types "Other" one per line, so a stored type holding a line break must read as one line.
+const oneLine = (type: string) => type.trim().replace(/\s+/g, ' ');
+
+/** REG-1's one-type entry (`{kind, adjuvant_type, note}`, still valid in the database) read as a one-type statement; every type and the preferred one read on one line. */
+function asStatement(entry: LabelAdjuvant & { adjuvant_type?: string }): LabelAdjuvant {
+  if (!entry.adjuvant_types && typeof entry.adjuvant_type === 'string') {
+    return { kind: entry.kind, adjuvant_types: [oneLine(entry.adjuvant_type)], note: entry.note ?? null };
+  }
+  if (!Array.isArray(entry.adjuvant_types) || !entry.adjuvant_types.some((t) => typeof t === 'string' && oneLine(t) !== t)) return entry;
+  return {
+    ...entry,
+    adjuvant_types: [...new Set(entry.adjuvant_types.map(oneLine))],
+    ...(typeof entry.preferred === 'string' ? { preferred: oneLine(entry.preferred) } : {}),
+  };
+}
+
+const cancelledOf = (rows: RegistrationRows): CancelledRegistrations => new Map(
+  [...rows.values()].filter((r) => r.registration_status === 'cancelled').map((r) => [r.epa_registration, r.cancelled_on]),
+);
+
+/** Which of these numbers are stored as cancelled (REG-1). Only reads; nothing here ever blocks a sale. */
+export async function getCancelledRegistrations(numbers: (string | null | undefined)[]): Promise<CancelledRegistrations> {
+  return cancelledOf(await getRegistrations(numbers));
 }
 
 export const CHECK_TIMEOUT_MS = 15_000;
@@ -59,30 +101,30 @@ export function registrationCheck(productLoaded: boolean, brands: BrandListState
  * Loads the cancelled set for these numbers. A failed read, or none within CHECK_TIMEOUT_MS, is
  * `failed`, never "none cancelled"; a late reply still lands. An answer for other numbers is never used.
  */
-export function useCancelledRegistrations(numbers: (string | null | undefined)[], refresh = ''): { cancelled: CancelledRegistrations; lookup: LookupState } {
+export function useCancelledRegistrations(numbers: (string | null | undefined)[], refresh = ''): { cancelled: CancelledRegistrations; rows: RegistrationRows; lookup: LookupState } {
   const wanted = [...new Set(numbers.map(normalizeEpaRegistration).filter(Boolean))].sort().join('|');
   // A new `refresh` value asks again for the same numbers (a screen reload).
   const key = refresh ? `${wanted}#${refresh}` : wanted;
-  const [state, setState] = useState<{ key: string; cancelled: CancelledRegistrations; lookup: LookupState }>(
-    { key: '', cancelled: new Map(), lookup: 'done' },
+  const [state, setState] = useState<{ key: string; cancelled: CancelledRegistrations; rows: RegistrationRows; lookup: LookupState }>(
+    { key: '', cancelled: new Map(), rows: new Map(), lookup: 'done' },
   );
   useEffect(() => {
     let active = true;
     // Each request starts as "checking", so an earlier answer for the same numbers is never reused.
-    setState({ key, cancelled: new Map(), lookup: 'checking' });
-    getCancelledRegistrations(wanted ? wanted.split('|') : [])
-      .then((cancelled) => { if (active) setState({ key, cancelled, lookup: 'done' }); })
+    setState({ key, cancelled: new Map(), rows: new Map(), lookup: 'checking' });
+    getRegistrations(wanted ? wanted.split('|') : [])
+      .then((rows) => { if (active) setState({ key, cancelled: cancelledOf(rows), rows, lookup: 'done' }); })
       .catch((err: unknown) => {
         if (!active) return;
         Sentry.captureException(toSentryError(err), { extra: { context: 'get_epa_registrations' } });
-        setState({ key, cancelled: new Map(), lookup: 'failed' });
+        setState({ key, cancelled: new Map(), rows: new Map(), lookup: 'failed' });
       });
     const timer = setTimeout(() => {
-      if (active) setState((prev) => (prev.key === key && prev.lookup !== 'checking' ? prev : { key, cancelled: new Map(), lookup: 'failed' }));
+      if (active) setState((prev) => (prev.key === key && prev.lookup !== 'checking' ? prev : { key, cancelled: new Map(), rows: new Map(), lookup: 'failed' }));
     }, CHECK_TIMEOUT_MS);
     return () => { active = false; clearTimeout(timer); };
   }, [key, wanted]);
-  return state.key === key ? state : { cancelled: new Map(), lookup: 'checking' };
+  return state.key === key ? state : { cancelled: new Map(), rows: new Map(), lookup: 'checking' };
 }
 
 /** Who carries a number: "This product" or a brand. */

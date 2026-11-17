@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-17 — A Sol round is a distinct head: reruns of one commit count once (#1929)
+
+**Decision (Mason, in chat, 2026-11-17: "count distinct heads once for 1929").** The Sol round count for a branch is the number of distinct branch commits Sol has run on, not the number of runs.
+**What it does:** `scripts/write-codex-push-proof.mjs` counts each reviewed head once; re-running Sol on a head already in the round ledger keeps that head's round number. The round-5 stop and its decision-log unlock are unchanged.
+
 ## 2026-11-17 — #1916, #1917 and #1918 (USE-2) may have up to 12 Sol rounds
 
 **Decision (Mason, in chat, 2026-11-17: "Yes, up to 12").** PR #1916 (USE-2 database), PR #1917 (product page) and PR #1918 (quote line note) may each have Sol rounds up to 12.

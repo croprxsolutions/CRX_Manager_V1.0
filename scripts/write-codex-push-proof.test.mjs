@@ -29,6 +29,7 @@ import {
   codexAppIdleOnRecentHeads,
   recentPushedHeads,
   countSolRounds,
+  nextSolRound,
   solRoundLine,
   solRoundGate,
   solRoundStatusLine,
@@ -1817,6 +1818,12 @@ not json
 {"head_sha":"${h4}"}
 {"head_sha":"${h2}"}
 `, [h1, h2]), 2, "rounds: only this branch's heads count");
+    // Reruns of one head count once (Mason, 2026-11-17, #1929).
+    const reruns = [h1, h1, h1, h1, h2].map((sha) => JSON.stringify({ head_sha: sha })).join("\n");
+    assert.equal(countSolRounds(reruns, [h1, h2, h3]), 2, "rounds: four runs of one head count once");
+    assert.equal(nextSolRound(reruns, [h1, h2, h3], h3), 3, "rounds: a new head is the next round");
+    assert.equal(nextSolRound(reruns, [h1, h2], h2), 2, "rounds: rerunning an already-reviewed head keeps its round");
+    assert.equal(nextSolRound("", [h1], h1), 1, "rounds: the first run is round 1");
     assert.equal(solRoundLine(2, 1524), "Sol round 2 on PR #1524.", "rounds: plain line");
     assert.match(solRoundLine(3, null), /^Sol round 3 on this branch \(no PR yet\)\. .*ask Mason the business trade-off/, "rounds: round 3 points at the stop rule");
     // Hard stop from round 5 (Mason, 2026-11-09, after PR 1653 reached round 8).
@@ -1844,13 +1851,13 @@ not json
     assert.equal(centralDate(new Date("2026-11-10T03:00:00Z")), "2026-11-09", "round stop: today is the Central date");
     // The printed round is the gating round (Mason, 2026-11-17; #1916 approved "up to 7" from a stale count).
     {
-      const ledgerText = [h1, h1, h2, h3].map((sha) => JSON.stringify({ head_sha: sha, pr: null })).join("\n");
-      const round = countSolRounds(ledgerText, [h1, h2, h3]) + 1;
+      const ledgerText = [h1, h2, h3, h4].map((sha) => JSON.stringify({ head_sha: sha, pr: null })).join("\n");
+      const round = nextSolRound(ledgerText, [h1, h2, h3, h4, head], head);
       const status = solRoundStatusLine({ round, prNumber: 1916, decisionLog: "", today });
       const gate = solRoundGate({ round, prNumber: 1916, decisionLog: "", today });
       assert.equal(Number(status.match(/would be round (\d+) on PR #1916/)?.[1]), round, "round line: prints the round the stop uses");
       assert.equal(Number(gate.message.match(/Sol round (\d+) on PR #1916/)?.[1]), round, "round line: the stop names the same round");
-      assert.equal(round, 5, "round line: pre-PR runs and reruns of one head all count");
+      assert.equal(round, 5, "round line: pre-PR runs count");
       assert.match(status, /rounds 1-4 run freely; from round 5 a DECISION_LOG\.md entry dated 2026-11-09 or later must name this PR: none yet/, "round line: says the cap and what unlocks it");
       assert.match(solRoundStatusLine({ round, prNumber: 1916, decisionLog: logWith("2026-11-09 — X", "**Decision (Mason):** #1916"), today }), /: found\)\.$/, "round line: says when the unlock is present");
       assert.match(solRoundStatusLine({ round: 1, prNumber: null, decisionLog: "", today }), /round 1 on this branch \(no PR yet\)/, "round line: no PR yet");

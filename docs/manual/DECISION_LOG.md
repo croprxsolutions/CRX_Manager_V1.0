@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-17 — #1880 keeps its up-to-7 Sol rounds today
+
+**Decision (Mason, in chat, 2026-11-17: "i approve up to 7 rounds on 1880 today").** PR #1880 (priority integrity follow-ups) may have Sol rounds 5 through 7 on 2026-11-17. This renews the 2026-11-16 entry below for the new day; since then the PR only merged `staging` and restamped its byte-identical migration to `20270118100000`.
+**Why:** same as 2026-11-16 — the repeats were merge drift, not one design mechanism coming back.
+**What this forbids/implies:** no round past 7; a BLOCKER/HIGH that is a new design problem still stops the PR for Mason.
+
 ## 2026-11-16 — #1878 and #1880 may have up to 7 Sol rounds after staging moved under them
 
 **Decision (Mason, in chat, 2026-11-16: "i approve up to 7 rounds").** PR #1878 (priority schema types) and PR #1880 (priority integrity follow-ups) may each have Sol rounds 5 through 7. Their latest Sol findings came from merging a fast-moving `staging` (a duplicated generated type after #1885 landed, and staging migrations newer than the candidate), not from one design mechanism coming back.

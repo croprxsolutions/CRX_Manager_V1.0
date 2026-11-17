@@ -86,6 +86,14 @@ describe('getCancelledRegistrations', () => {
     expect(rows.get('100-2')?.label_adjuvants).toBeNull();
   });
 
+  it('reads a stored type holding a line break as one type, preferred included', async () => {
+    mockRpc.mockResolvedValue(reply([{ epa_registration: '100-1', registration_status: 'active', cancelled_on: null, label_adjuvants: [
+      { kind: 'required', adjuvant_types: ['oil,\nmethylated', 'COC'], preferred: 'oil,\nmethylated', note: '1%' }] }]));
+    const rows = await getRegistrations(['100-1']);
+    expect(rows.get('100-1')?.label_adjuvants).toEqual([
+      { kind: 'required', adjuvant_types: ['oil, methylated', 'COC'], preferred: 'oil, methylated', note: '1%' }]);
+  });
+
   it('a failed read throws instead of returning "none cancelled"', async () => {
     mockRpc.mockResolvedValue({ data: null, error: new Error('boom') });
     await expect(getCancelledRegistrations(['524-475'])).rejects.toThrow('boom');

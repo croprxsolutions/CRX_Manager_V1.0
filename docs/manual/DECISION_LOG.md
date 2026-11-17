@@ -16,6 +16,7 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Why:** undoing a receipt on an old wrong-unit line would reopen it and count "on order" in the wrong unit; a unit change under existing stock would silently re-read the count in the new unit.
 **What this forbids/implies:** no PO line of any status may stay in a non-stock unit (the rules migration's postflight refuses); a PO line is re-checked whenever its outstanding amount rises; a stock-unit change needs the stock at zero or converted first.
 **Round limit (Mason, in session, 2026-11-16: "Option A" then, after Luna's round-4 HIGHs, "Yes, one last round"):** the lock also holds every stock row of the product (on-order counts as stock), a first stock unit counts as a change, a stock unit cannot be cleared, every stock row (empty ones too) must carry the product's stock unit, and a stock row holding stock cannot move to another product. One last round only: a further new BLOCKER/HIGH on this lock parks #1896 for Mason. Undoing a receipt on a fully received line after a later unit change is refused on purpose (it would count the old unit as the new one).
+**Ship with a logged gap (Mason, in session, 2026-11-16: "Ship, log the gap"):** whole-branch Luna then found a cycle count opened before a unit change could finish in the new unit. Saved-product unit changes are refused by the setup guard today, so #1896 ships and the gap is KI-165, to close before unit changes are ever allowed.
 
 ## 2026-11-14 — Rate Review unanswered-save recovery (#1829)
 

@@ -1384,6 +1384,15 @@ Stock-vs-history is checked only in the browser integrity report and a one-off s
 (KI-159). No tests cover KI-156 to KI-162. Fix: repair the fixtures alongside each repair step, refresh the review
 hashes, and add each step's regression test. Repair step 6 (To-Do 0.17).
 
+### KI-165 — A cycle count open across a stock-unit change would save in the new unit
+**MED (latent) · OPEN · inventory · found 2026-11-16 (Luna, #1896 whole-branch round) · unassigned**
+The #1896 stock-unit lock (`20270113120000`) refuses a unit change while stock is on hand, but a cycle count opened on
+an empty stock row in the old unit can be completed after the change, recording the counted number in the new unit.
+Not reachable today: the product setup guard refuses any stock-unit change on a saved product, so the lock is a second
+layer. **Decision (Mason, 2026-11-16: "Ship, log the gap"):** #1896 ships with this open. Fix before saved-product
+unit changes are ever allowed: refuse a unit change while a count is open on the product, or refuse completing a count
+whose unit differs from the product's.
+
 ---
 
 ## Accepted risks (Mason decided to live with these; do not re-open without a new decision)

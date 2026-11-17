@@ -1,10 +1,10 @@
 # Decision Log
 
-## 2026-11-17 — Bookings with a spray job: section edits warn, accept/decline blocked
+## 2026-11-17 — Bookings with a spray job: section edits warn, accept/decline/expire blocked
 
 **Decision (Mason, in chat, 2026-11-17, answering Sol round 3 on Bookings Phase A PR 1a).**
 - A section a spray job was scheduled from may still get a new name, notes or needed-by date. The save goes through and the booking warns that the job keeps its own copy, so change those on the job too (warn, not block).
-- A booking whose spray job is still scheduled or in progress cannot be marked accepted or declined; cancel or finish the job first (`BOOKING_HAS_JOB`).
+- A booking with a spray job that is not cancelled (scheduled, in progress, completed or invoiced) cannot be marked accepted, declined or expired; cancel the job first (`BOOKING_HAS_JOB`). Widened by Mason after Sol round 3 on the PR: expiring dropped the job's booking draw, and accepting after a completed job left a booking that cannot become a sale order.
 - The section's products, quantities, prices, line order, place and field stay locked while the job is live (Sol rounds 1-2).
 
 ## 2026-11-17 — CMP-2 plan approved with one change: the generic build is always the yardstick

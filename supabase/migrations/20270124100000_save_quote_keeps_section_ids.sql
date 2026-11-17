@@ -21,8 +21,10 @@
 --        refuses SECTION_ID_INVALID.
 --     g. a booking with a live job (not cancelled, not deleted) keeps its customer, else
 --        BOOKING_HAS_JOB.
---     i. a booking with a job still scheduled or in progress cannot become accepted or declined,
---        else BOOKING_HAS_JOB (Mason, 2026-11-17: cancel or finish the job first).
+--     i. a booking with a live job (not cancelled, not deleted: scheduled, in progress, completed
+--        or invoiced) cannot become accepted, declined or expired, else BOOKING_HAS_JOB (Mason,
+--        2026-11-17: cancel the job first). Expiring drops the job's booking draw; accepting after
+--        a completed job leaves a booking that convert_quote_to_order refuses.
 --     h. a section with a live job keeps its field, its place and its lines exactly (each line's
 --        id, order, product, quantity, price, units, rate and acres; null-safe; a kept id and product
 --        keep the line's cost snapshot, so cost needs no compare and a legacy line may get one),
@@ -276,18 +278,18 @@ BEGIN
       ) THEN
         RAISE EXCEPTION 'Invalid status transition: % -> %', v_old_status, v_status;
       END IF;
-      -- (i) a booking with a spray job still scheduled or in progress cannot be accepted or
-      -- declined: the job must be cancelled or finished first (Mason, 2026-11-17).
-      IF v_status IN ('accepted', 'declined') THEN
+      -- (i) a booking with a live spray job cannot be accepted, declined or expired: the job
+      -- must be cancelled first (Mason, 2026-11-17).
+      IF v_status IN ('accepted', 'declined', 'expired') THEN
         SELECT j.job_number INTO v_section_job
         FROM jobs j
         WHERE (j.quote_id = p_quote_id
                OR j.quote_section_id IN (SELECT qs.id FROM quote_sections qs WHERE qs.quote_id = p_quote_id))
-          AND j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')
+          AND j.deleted_at IS NULL AND j.status <> 'cancelled'
         ORDER BY j.job_number, j.id
         LIMIT 1;
         IF FOUND THEN
-          RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % from this booking is still scheduled or in progress, so the booking cannot be marked %. Cancel or finish the job first.',
+          RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % was made from this booking, so the booking cannot be marked %. Cancel the job first.',
             v_section_job.job_number, v_status
             USING ERRCODE = 'P0001';
         END IF;
@@ -988,7 +990,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public._save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)'::regprocedure)
-     IS DISTINCT FROM '761278d81ddb22b371b2ae2ec59ca7d6' THEN
+     IS DISTINCT FROM 'bbf87a65c4554d3960e4bc14e9d7531c' THEN
     RAISE EXCEPTION 'POSTFLIGHT_SAVE_QUOTE: the new body did not install';
   END IF;
   IF NOT EXISTS (

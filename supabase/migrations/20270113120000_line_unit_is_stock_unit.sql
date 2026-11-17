@@ -354,9 +354,10 @@ BEGIN
     RAISE EXCEPTION 'STOCK_ROW_UNIT_NOT_STOCK_UNIT: a stock row holding stock cannot move to another product.'
       USING ERRCODE = 'check_violation';
   END IF;
-  IF COALESCE(btrim(NEW.unit_size, E' \t\r\n' || chr(160)), '') = '' AND v_unit IS NOT NULL THEN
+  IF COALESCE(btrim(NEW.unit_size, E' \t\r\n' || chr(160)), '') = '' THEN
     NEW.unit_size := v_unit;
-  ELSIF NOT public._unit_matches_stock_unit(NEW.unit_size, v_unit) THEN
+  ELSIF v_unit IS NULL OR NOT public._unit_matches_stock_unit(NEW.unit_size, v_unit) THEN
+    -- No stock unit (0 such products live): a typed unit cannot be checked, so it is refused, like a line's.
     RAISE EXCEPTION 'STOCK_ROW_UNIT_NOT_STOCK_UNIT: this stock row is in "%" but the product is stocked in "%".',
       NEW.unit_size, v_unit USING ERRCODE = 'check_violation';
   END IF;
@@ -422,6 +423,15 @@ BEGIN
       JOIN public.products p ON p.id = l.product_id
      WHERE COALESCE(btrim(l.unit_size, E' \t\r\n' || chr(160)), '') <> ''
        AND NOT public._unit_matches_stock_unit(l.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), '')));
+  END IF;
+  IF v_bad IS NULL THEN
+    -- Every stock row is in its product's stock unit (a blank label or another spelling of it is fine): the stock-row
+    -- guard checks only new rows and unit changes, so a legacy mismatch would keep receiving (Sol, #1896). Live
+    -- 2026-11-16: Piksi and Treaty Extra only, both relabelled by 20270113110000.
+    SELECT string_agg('stock row ' || i.id, ', ') INTO v_bad
+      FROM public.inventory i JOIN public.products p ON p.id = i.product_id
+     WHERE COALESCE(btrim(i.unit_size, E' \t\r\n' || chr(160)), '') <> ''
+       AND NOT public._unit_matches_stock_unit(i.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), NULLIF(btrim(p.unit_size), '')));
   END IF;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'UNITS_POSTFLIGHT_OPEN_LINE: these open lines are not in their product''s stock unit (run 20270113110000 first): %', v_bad;

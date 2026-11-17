@@ -43,8 +43,14 @@ BEGIN
              public.product_size_net_weight_values, public.product_cost_basis,
              public.inventory, public.purchase_orders, public.purchase_order_items, public.quotes,
              public.quote_items, public.quote_versions, public.orders, public.order_items,
-             public.deliveries, public.delivery_items, public.delivery_remainders, public.invoice_items
+             public.deliveries, public.delivery_items, public.delivery_remainders, public.invoice_items,
+             public.cycle_counts, public.cycle_count_items
              IN SHARE ROW EXCLUSIVE MODE;
+
+  -- A count opened before the relabel would complete in the old unit (Sol, #1896). 0 in progress live 2026-11-16.
+  IF EXISTS (SELECT 1 FROM public.cycle_counts WHERE status = 'in_progress') THEN
+    RAISE EXCEPTION 'KI137_COUNT_IN_PROGRESS: finish or cancel the open cycle count first. Nothing was changed.';
+  END IF;
 
   IF NOT EXISTS (SELECT 1 FROM public.product_rate_lock WHERE is_locked = false FOR SHARE) THEN
     RAISE EXCEPTION 'KI137_RATE_LOCK_ON: product rates are locked; unlock them with a reason, apply, then lock again. Nothing was changed.';

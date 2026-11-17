@@ -412,11 +412,16 @@ function driftCase() {
   assert.notEqual(r.status, 0); assert.match(r.output, /KI137_ROW_MOVED/);
   const t = probe(`UPDATE public.inventory SET unit_size = 'Dry oz' WHERE id = '${PINNED.inv.treaty}';\n${lf(CANDIDATE)}`);
   assert.notEqual(t.status, 0); assert.match(t.output, /PO_OZ_ROW_MOVED/);
-  console.log('[case] M1b on any pinned-row drift the data correction refuses with KI137_ROW_MOVED (checked before applying)');
+  const c = probe(`INSERT INTO public.cycle_counts (count_number, status, initiated_by) VALUES ('CC-PROVER', 'in_progress', '${ADMIN}');\n${lf(CANDIDATE)}`);
+  assert.notEqual(c.status, 0); assert.match(c.output, /KI137_COUNT_IN_PROGRESS/);
+  console.log('[case] M1b on any pinned-row drift the data correction refuses with KI137_ROW_MOVED (checked before applying); with a cycle count in progress it refuses with KI137_COUNT_IN_PROGRESS');
 }
 
 function rulesCases() {
   stageText('rules.sql', lf(RULES));
+  // A legacy stock row in another unit stops the rules (Sol, #1896): its quantity-only receipts would not be checked.
+  const legacyRow = probe(`INSERT INTO public.inventory (product_id, location, unit_size, quantity_available) VALUES ('${GAL}', 'Prover Legacy', 'Qt', 5);\n${lf(RULES)}`);
+  assert.notEqual(legacyRow.status, 0); assert.match(legacyRow.output, /UNITS_POSTFLIGHT_OPEN_LINE: .*stock row/);
   const first = apply('rules.sql');
   assert.equal(first.status, 0, first.output);
   const again = apply('rules.sql');
@@ -424,7 +429,8 @@ function rulesCases() {
   assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_fill_order_line_unit';"), 0);
   assert.equal(scalar(`SELECT unit_size FROM public.purchase_order_items WHERE id = '${BLANK_PO_LINE}';`), 'Gal', 'the open blank-unit PO line now says Gal');
   assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname IN ('a1_line_unit_is_stock_unit', 'a1_product_unit_keeps_open_lines');"), 4);
-  for (const fn of ['_unit_matches_stock_unit(text,text)', '_enforce_line_stock_unit()', '_refuse_unknown_quote_rate_unit()', '_refuse_stock_unit_change_with_open_lines()']) {
+  for (const fn of ['_unit_matches_stock_unit(text,text)', '_enforce_line_stock_unit()', '_refuse_unknown_quote_rate_unit()', '_refuse_stock_unit_change_with_open_lines()',
+                    '_stock_row_unit_is_stock_unit()', '_relabel_empty_stock_rows()']) {
     for (const role of ['anon', 'authenticated']) {
       assert.equal(scalar(`SELECT has_function_privilege('${role}', 'public.${fn}', 'EXECUTE');`), 'f', `${role} cannot run ${fn}`);
     }
@@ -526,6 +532,11 @@ function rulesCases() {
     SET session_replication_role = origin;
     INSERT INTO public.purchase_order_items (purchase_order_id, product_id, unit_size, quantity_ordered, unit_cost)
       VALUES ('${PO2}', '${GAL}', 'Gal', 1, 1);`, /LINE_UNIT_NOT_STOCK_UNIT: this purchase order line is in "Gal" but the product has no stock unit/);
+  refusedProbe(`SET session_replication_role = replica;
+    UPDATE public.products SET inventory_unit = NULL, unit_size = NULL WHERE id = '${GAL}';
+    SET session_replication_role = origin;
+    INSERT INTO public.inventory (product_id, location, unit_size, quantity_available) VALUES ('${GAL}', 'Prover Yard 3', 'Gal', 5);`,
+    /STOCK_ROW_UNIT_NOT_STOCK_UNIT: this stock row is in "Gal" but the product is stocked in/);
   console.log('[case] 2b the setup guard still refuses any stock-unit change; with it lifted, changing a Gal product to Qt is refused while a PO or order line is open in Gal or 100 Gal is in stock or 13 Gal on order, and saves (relabelling the empty stock row) once none is; a new stock row in another unit is refused; blanking the unit with lines open is refused too; an unknown stock unit ("Tote") is refused; a product with no stock unit refuses a typed line unit');
 
   // A legacy mismatched open line (written before the rules) is refused at receiving; nothing moves.

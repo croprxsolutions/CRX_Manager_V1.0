@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-16 — #1878 and #1880 may have up to 7 Sol rounds after staging moved under them
+
+**Decision (Mason, in chat, 2026-11-16: "i approve up to 7 rounds").** PR #1878 (priority schema types) and PR #1880 (priority integrity follow-ups) may each have Sol rounds 5 through 7. Their latest Sol findings came from merging a fast-moving `staging` (a duplicated generated type after #1885 landed, and staging migrations newer than the candidate), not from one design mechanism coming back.
+**Why:** the round cap exists to stop patching a recurring design problem; here the repeats were merge drift, so there is no business trade-off to remove.
+**What this forbids/implies:** no round past 7 on either PR; a BLOCKER/HIGH that is a new design problem still stops the PR for Mason.
+
 ## 2026-11-14 — Inactive rate history supports explicit cleanup
 
 **Decision (Mason, in chat).** Include inactive product groups' existing rates in review and preserve their approvals until explicitly changed. Inactive history supports sending an approved rate back to draft, deleting a draft and clearing a review decision. It does not support fresh approval, value edits or new review decisions. Keep accepting older half-filled rate workbooks under all existing identity and server safeguards.
@@ -18,6 +24,16 @@ rule it implies. This is a log of outcomes, not a design doc — see the cited s
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
 
+## 2026-11-14 — Voiding an invoice reverses its write-offs automatically (KI-99)
+
+**Decision (Mason, in session, 2026-11-14: "Auto-reverse it", over refusing the void until the write-off is reversed by hand).** Voiding a posted, overdue or paid invoice marks each of its active write-offs reversed in the same step, recorded like a manual reversal (who, when, reason naming the void).
+**Why:** a voided invoice's write-off otherwise stayed active and showed on the customer statement as an unexplained credit; void already undoes applied credits and prepay the same way.
+**What this forbids/implies:** each write-off's Chicago booking month must be open, as for a manual reversal; a closed month refuses the whole void. Built in `20270116100000_ki99_void_reverses_write_offs.sql`.
+## 2026-11-14 — MOA alternate spellings are refused
+
+**Decision (Mason, 2026-11-14: "CAS optional with warning; refuse alternate MOA spelling.").** If a mode-of-action group is already active under one spelling, a save using another spelling for the same group must refuse; replacing it is a two-save retirement then addition.
+**Why:** official codes can use different zero-padding by scheme, and a save must not silently replace a stored spelling or substitute an alternate submitted spelling. The comparison-only product summary may fold equivalent groups using an existing source spelling, as specified in the contract.
+**What this forbids/implies:** compare equivalent codes for duplicates and matching, but preserve stored/requested spelling and refuse an active alternate spelling before any write.
 ## 2026-11-14 — Rate Review unanswered-save recovery (#1829)
 
 **Decision (Mason, 2026-11-14):** after any unanswered Rate Review save, an admin may check a fresh workbook and explicitly clear the reminder; no attempt count or expiry threshold is required. This supersedes the 2026-11-13 Rate Review follow-up contract's narrower hand-check exit, which appeared only on expiry, a missing record, or an unsafe/refused receipt.

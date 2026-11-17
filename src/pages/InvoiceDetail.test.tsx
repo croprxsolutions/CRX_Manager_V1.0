@@ -1882,7 +1882,8 @@ describe('InvoiceDetail — an invoice made from scratch takes charge lines only
     await waitFor(() => {
       const saveCall = mockRpc.mock.calls.find(([name]) => name === 'save_invoice');
       expect(saveCall?.[1].p_items).toEqual([expect.objectContaining({
-        id: 'item-old', charge_type: 'other', quantity: 1, unit_price_cents: 1234, extended_cents: 1234, is_application_fee: false,
+        // Item 9 (b): the line keeps its amount (2 × $12.34 = $24.68 becomes 1 × $24.68), not 1 × the unit price.
+        id: 'item-old', charge_type: 'other', quantity: 1, unit_price_cents: 2468, extended_cents: 2468, is_application_fee: false,
       })]);
     });
   });
@@ -2493,6 +2494,30 @@ describe('InvoiceDetail — one main action per status, same actions and people 
       // A one-amount charge keeps its Amount box and no sum.
       expect(screen.getByLabelText('Amount for Delivery to home farm')).toHaveValue(45);
       expect(screen.queryByText(/1 × \$45\.00/)).not.toBeInTheDocument();
+    });
+
+    // Item 9 (b): picking a type on that older line keeps its amount (1 × $75.00), not 1 × the unit price ($25.00).
+    it('picking a type on an older 3 × $25.00 line keeps its $75.00', async () => {
+      load(draft, [lines[0], oldFreight]);
+      renderInvoiceDetail();
+      fireEvent.change(await screen.findByLabelText('Charge type'), { target: { value: 'freight' } });
+      const box = await screen.findByLabelText('Amount for Old freight');
+      expect(box).toHaveValue(75);
+      expect(screen.queryByText(/3 × \$25\.00/)).not.toBeInTheDocument();
+      const amounts = within(screen.getByRole('region', { name: 'What this invoice bills' })).getAllByTestId('invoice-line-amount');
+      expect(amounts.find((el) => el.getAttribute('data-kind') === 'charge')).toHaveAttribute('data-cents', '7500');
+    });
+
+    // Item 9 (c): an edited line total is the database's exact quantity × price (safe_cents_qty), not binary float:
+    // 4.35 × 50¢ is exactly 217.5¢, which rounds to 218¢; float math gives 217.4999… and 217¢.
+    it('an edited line total is exact: 4.35 × $0.50 is $2.18', async () => {
+      load(draft, [lines[0]]);
+      renderInvoiceDetail();
+      fireEvent.change(await screen.findByLabelText('Quantity for Herbicide'), { target: { value: '4.35' } });
+      fireEvent.change(screen.getByLabelText('Unit price for Herbicide'), { target: { value: '0.50' } });
+      const productAmount = () => within(screen.getByRole('region', { name: 'What this invoice bills' }))
+        .getAllByTestId('invoice-line-amount').find((el) => el.getAttribute('data-kind') === 'product');
+      await waitFor(() => expect(productAmount()).toHaveTextContent('$2.18'));
     });
 
     // Sol MED-3: the line the page lists under Charges is a charge in Amount due too, not a product.

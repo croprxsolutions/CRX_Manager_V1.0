@@ -33,7 +33,7 @@ import { useVendorNames } from '../lib/useVendorNames';
 import type { DuplicatePayment, Invoice, InvoiceChargeType, InvoiceType, InvoiceStatus, Product, Customer, InvoiceShare, InvoicePrintOptions } from '../types';
 import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceBreakdown, invoiceMarginCents, isChargeLine, isComputedChargeLine, isFromScratchInvoice } from '../lib/invoiceChargeLines';
 import { assertInvoiceLinesLoaded, loadBillSplitPayers, readsBillSplitPayers, type BillSplitPayer, downloadInvoicePdf, deriveFieldAppAppliedAcres, groupReturnCreditDisplayItems, InvoiceDetailsUnavailableError, mapInvoicePdfItem, type InvoicePdfData } from '../lib/invoicePdf';
-import { formatCents as fmt, formatCentsMinus } from '../lib/money';
+import { formatCents as fmt, formatCentsMinus, centsTimesQuantity } from '../lib/money';
 import { formatSharePct, invoiceStatusBadge, statusLabel } from '../lib/statusLabel';
 import { getTierPrice } from '../lib/quoteCalc';
 import { ilikeOrPattern } from '../lib/recordSearch';
@@ -1158,14 +1158,15 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
       const updated = [...prev];
       const item = { ...updated[index], [field]: value };
       // Recalculate extended
+      // Exact, as the database's safe_cents_qty: float math made 4.35 × 50¢ 217¢, not 218¢.
       if (field === 'quantity' || field === 'unit_price_cents') {
-        item.extended_cents = Math.round(item.quantity * item.unit_price_cents);
+        item.extended_cents = centsTimesQuantity(item.unit_price_cents, item.quantity);
       }
-      // Typing an older product-less line makes it a charge line: quantity 1, the amount is the
-      // line total, and it is not a machine fee (the database's charge-line shape check).
+      // Typing an older product-less line makes it a charge line: quantity 1 and the amount is the line total (the
+      // database's charge-line shape check), so an older 3 × $25.00 line stays $75.00. Not a machine fee.
       if (field === 'charge_type' && value) {
         item.quantity = 1;
-        item.extended_cents = item.unit_price_cents;
+        item.unit_price_cents = item.extended_cents;
         item.is_application_fee = false;
       }
       updated[index] = item;

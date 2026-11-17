@@ -179,6 +179,7 @@ vi.mock('../components/ui/EditableDataTable', () => ({
 }));
 
 vi.mock('../components/products/BulkProductImport', () => ({ default: () => null }));
+vi.mock('../components/products/ProductSetupWorkbookModal', () => ({ default: () => null }));
 
 vi.mock('../components/ui/Toast', () => ({
   useToast: () => ({ toast: mockToast }),

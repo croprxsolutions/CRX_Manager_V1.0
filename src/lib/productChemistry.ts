@@ -221,10 +221,11 @@ export type IngredientFields = Partial<{
 const CHEMISTRY_RPCS = [
   'set_parent_chemistry', 'correct_parent_chemistry', 'set_parent_cost_reference',
   'save_active_ingredient', 'retire_active_ingredient', 'reactivate_active_ingredient',
+  'commit_weights_tab', 'commit_ingredients_tab', 'promote_chemistry_proposal',
 ] as const;
 export type ChemistryRpc = typeof CHEMISTRY_RPCS[number];
 
-/** An unfinished save: kept until a success or a named refusal from the database. */
+/** An unfinished save: kept until success or a refusal that proves the earlier request cannot have committed. */
 export interface PendingChemistrySave {
   key: string;
   userId: string;
@@ -260,11 +261,34 @@ export function pendingSaves(userId: string, scope: string): PendingChemistrySav
   return found.sort((a, b) => a.createdAt - b.createdAt);
 }
 
-/** Thrown when a save's outcome is unknown (network error, timeout, gateway error): its record is kept. */
+/** Thrown when a save cannot safely be treated as refused (unknown outcome or auth refusal before receipt lookup). */
 export class ChemistrySaveUncertain extends Error {
-  constructor(readonly cause: unknown) {
-    super('We could not confirm the save. Finish it from the notice on this product; it reuses the same retry key.');
+  constructor(readonly cause: unknown, readonly authorizationRefusal = false) {
+    super(authorizationRefusal ? chemistryAuthorizationMessage(true)
+      : 'We could not confirm the save. Finish it from the notice on this product; it reuses the same retry key.');
   }
+}
+
+export function chemistryAuthorizationMessage(retrying: boolean): string {
+  return retrying
+    ? 'Sign in again or check administrator access, then use Finish save to retry the same request.'
+    : 'Sign in again or check administrator access, then try the save again.';
+}
+
+/** Login or role failures can happen before the server checks an earlier idempotency receipt. */
+export function isChemistryAuthorizationRefusal(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  if (error instanceof ChemistrySaveUncertain) return error.authorizationRefusal;
+  const candidate = error as { code?: unknown; message?: unknown };
+  const code = typeof candidate.code === 'string' ? candidate.code.trim().toUpperCase() : '';
+  if (code === '42501' || /^PGRST30[1-3]$/.test(code)) return true;
+  return typeof candidate.message === 'string' && /^(?:AUTH_REQUIRED|ADMIN_REQUIRED)(?::|\b)/.test(candidate.message.trim());
+}
+
+function isPostgrestError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && /^PGRST\d{3}$/.test(code.trim().toUpperCase());
 }
 
 /** One literal call per write, so each is checked by name; the result is checked only when the database accepted it. */
@@ -294,10 +318,22 @@ async function callChemistryWrite(rpc: ChemistryRpc, params: Record<string, unkn
       const { data, error } = await supabaseUntyped.rpc('reactivate_active_ingredient', params);
       return error ? { error } : { data: assertRpcResult(data, 'reactivate_active_ingredient') };
     }
+    case 'commit_weights_tab': {
+      const { data, error } = await supabaseUntyped.rpc('commit_weights_tab', params);
+      return error ? { error } : { data: assertRpcResult(data, 'commit_weights_tab') };
+    }
+    case 'commit_ingredients_tab': {
+      const { data, error } = await supabaseUntyped.rpc('commit_ingredients_tab', params);
+      return error ? { error } : { data: assertRpcResult(data, 'commit_ingredients_tab') };
+    }
+    case 'promote_chemistry_proposal': {
+      const { data, error } = await supabaseUntyped.rpc('promote_chemistry_proposal', params);
+      return error ? { error } : { data: assertRpcResult(data, 'promote_chemistry_proposal') };
+    }
   }
 }
 
-async function send<T>(record: PendingChemistrySave): Promise<T> {
+async function send<T>(record: PendingChemistrySave, isRetry: boolean): Promise<T> {
   const store = storage();
   const name = PREFIX + record.key;
   // Written before the call, so a closed tab or a refresh still finds it. No record, no send: an unconfirmed
@@ -312,9 +348,21 @@ async function send<T>(record: PendingChemistrySave): Promise<T> {
   try {
     result = await callChemistryWrite(record.rpc, { ...record.args, p_idempotency_key: record.key });
   } catch (error) {
+    if (isChemistryAuthorizationRefusal(error)) {
+      if (!isRetry) store?.removeItem(name);
+      if (isRetry) throw new ChemistrySaveUncertain(error, true);
+      throw error;
+    }
     throw new ChemistrySaveUncertain(error);
   }
   if (result.error) {
+    if (isChemistryAuthorizationRefusal(result.error)) {
+      if (!isRetry) store?.removeItem(name);
+      if (isRetry) throw new ChemistrySaveUncertain(result.error, true);
+      throw result.error;
+    }
+    // PostgREST can reject before the RPC looks up a receipt. On a retry this cannot prove that the first call did no work.
+    if (isRetry && isPostgrestError(result.error)) throw new ChemistrySaveUncertain(result.error);
     if (isDefinitiveRpcRejection(result.error)) {
       store?.removeItem(name);
       throw result.error;
@@ -330,10 +378,10 @@ export function startChemistrySave<T>(userId: string, scope: string, rpc: Chemis
   if (pendingSaves(userId, scope).length > 0) {
     return Promise.reject(new Error('Finish the save you started first (see the notice above).'));
   }
-  return send<T>({ key: generateIdempotencyKey(rpc, userId), userId, scope, rpc, args, label, createdAt: Date.now() });
+  return send<T>({ key: generateIdempotencyKey(rpc, userId), userId, scope, rpc, args, label, createdAt: Date.now() }, false);
 }
 
 /** Sends an unfinished save again with its own key and request: the database returns the saved result if it committed. */
 export function finishChemistrySave<T>(record: PendingChemistrySave): Promise<T> {
-  return send<T>(record);
+  return send<T>(record, true);
 }

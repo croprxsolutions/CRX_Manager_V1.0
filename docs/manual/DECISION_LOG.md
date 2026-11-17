@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-17 — RT-1 draft rates derived on live
+
+**Decision (Mason, in chat in the RT-1 run session, 2026-11-17: "Yes, run it").** Run `derive_draft_product_rates` once on live for the 413 active product parents, from Mason's admin login. Result: 714 draft rows on 396 parents and 181 notes; no product, parent, quote or invoice changed. The drafts are used nowhere until RT-4. Next: Mason reviews them in the rate review workbook (RT-3), then the rate lock and RT-4. Details: `docs/changelog.d/2026-11-17-rt1-derivation-run.md`.
+
 ## 2026-11-17 — #1896: Mason owner-accepted 4 Sol finding(s) at `ed0ec3c3c777`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-17).** Sol's review of PR #1896 at `ed0ec3c3c777` (base `1e55ea03914d`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

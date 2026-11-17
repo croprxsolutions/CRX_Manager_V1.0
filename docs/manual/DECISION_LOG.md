@@ -1,9 +1,28 @@
 # Decision Log
 
+## 2026-11-17 — #1896: Mason owner-accepted 4 Sol finding(s) at `ed0ec3c3c777`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-17).** Sol's review of PR #1896 at `ed0ec3c3c777` (base `1e55ea03914d`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:210`, text sha256 `a609e6a0d8dab94d` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref f6739a057a25)
+- Finding 2 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:99`, text sha256 `f05f49a2ae86361c` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref eb0bd91e4cc8)
+- Finding 3 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:408`, text sha256 `a4174337960920ab` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 8078485c8694)
+- Finding 4 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:110`, text sha256 `f6c999aae98c965d` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 2009768e08d2)
+
 ## 2026-11-17 — #1917 and #1918 (USE-2) may have up to 18 Sol rounds
 
 **Decision (Mason, in chat, 2026-11-17: "Yes, up to 18").** PR #1917 (USE-2 product page) and PR #1918 (quote line note) may each have Sol rounds up to 18, as the round counter counts them (it includes the #1916 database rounds both branches carry).
 **What it does:** lifts the round cap on these two PRs from 12 to 18. Every other gate is unchanged: each PR still needs a clean Sol review of its head and green checks before it merges into `staging`.
+## 2026-11-17 — #1896: Mason owner-accepted 2 Sol finding(s) at `1c08e3abe834`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-17).** Sol's review of PR #1896 at `1c08e3abe834` (base `02a49d27f149`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:99`, text sha256 `b9746ccf1d276151` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business) (ref 78f14b686f57)
+- Finding 2 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:210`, text sha256 `dec3f100d24f4e6b` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 8ba0fe74d7fc)
 
 ## 2026-11-17 — A Sol round is a distinct head: reruns of one commit count once (#1929)
 
@@ -58,6 +77,20 @@ order, so search by date and title rather than position. Each entry is a decisio
 rule it implies. This is a log of outcomes, not a design doc — see the cited source for detail.
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
+
+## 2026-11-17 — #1896 gets a sixth Sol round
+
+**Decision (Mason, in session, 2026-11-17: "Allow round 6"):** Sol rounds 4 and 5 on #1896 timed out before giving a verdict, so they produced no findings. One more full Sol review of the current head is allowed.
+
+**Decision (Mason, in session, 2026-11-17: "Accept and land"):** Sol round 6 raised three HIGH edge cases (a no-unit product quoted as `Ea`, a voided delivery reopening an old-unit order line, an alias-spelled PO line receiving without a cost snapshot). #1896 lands with them open as KI-166, KI-167 and KI-168, accepted through the owner-accept flow on the final reviewed head. #1896 also takes the Sol review needed after it is renumbered above #1897/#1895.
+
+## 2026-11-16 — Old wrong-unit PO lines are cleaned up; a stock unit cannot change while stock is on hand (#1896)
+
+**Decision (Mason, in session, 2026-11-16: "1. clean up old lines 2. do strict fix for changing units stocked moving forward"):** after Sol's round-2 HIGHs on #1896, (1) every purchase-order line left in a unit other than its product's stock unit is relabelled by the reviewed data correction (only Treaty Extra's received "oz" line on PO-2026-0011 remained), and (2) a product's stock unit cannot change while any of its stock rows holds a quantity.
+**Why:** undoing a receipt on an old wrong-unit line would reopen it and count "on order" in the wrong unit; a unit change under existing stock would silently re-read the count in the new unit.
+**What this forbids/implies:** no PO line of any status may stay in a non-stock unit (the rules migration's postflight refuses); a PO line is re-checked whenever its outstanding amount rises; a stock-unit change needs the stock at zero or converted first.
+**Round limit (Mason, in session, 2026-11-16: "Option A" then, after Luna's round-4 HIGHs, "Yes, one last round"):** the lock also holds every stock row of the product (on-order counts as stock), a first stock unit counts as a change, a stock unit cannot be cleared, every stock row (empty ones too) must carry the product's stock unit, and a stock row holding stock cannot move to another product. One last round only: a further new BLOCKER/HIGH on this lock parks #1896 for Mason. Undoing a receipt on a fully received line after a later unit change is refused on purpose (it would count the old unit as the new one).
+**Ship with a logged gap (Mason, in session, 2026-11-16: "Ship, log the gap"):** whole-branch Luna then found a cycle count opened before a unit change could finish in the new unit. Saved-product unit changes are refused by the setup guard today, so #1896 ships and the gap is KI-165, to close before unit changes are ever allowed.
 
 ## 2026-11-14 — Voiding an invoice reverses its write-offs automatically (KI-99)
 

@@ -645,7 +645,7 @@ Fix it together with KI-157, where every invoice PDF reads the live product name
 [Product Master review](../audits/2026-11-13-product-master-review.md), repair step 3).
 
 ### KI-156 — A field-application invoice books the grower-share chemical's cost in the wrong unit
-**MED · FIX IN REVIEW (branch `claude/pm-grower-share-cost`, migrations `20270119140000` and `20270119150000`, not applied) · money/field-app billing · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-1)**
+**MED · FIX IN REVIEW (branch `claude/pm-grower-share-cost`, migrations `20270120140000` and `20270120150000`, not applied) · money/field-app billing · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-1)**
 In `_save_field_app_invoice_impl_20260714` (latest body `20260904180000_invoice_season_follows_invoice_date.sql`), the
 `v_chem_qty_a > 0` branch (chemical included in the grower's share) adds `safe_cents_qty(v_qa_unit_cost, v_chem_qty_a)`.
 That multiplies the cost per sold unit by a quantity in the rate unit, with no conversion. Example: 16 oz/ac × 100 ac
@@ -654,7 +654,7 @@ bill is right ($0 line); margin, P&L and possibly commission are wrong. The bill
 (`field_app_priced_quantity`); this branch was not. Live-verified body; 0 such lines live yet. Fix: convert like the
 billed branch, with a real-schema proof. Repair step 3 (To-Do 0.17).
 
-Fix in review: `20270119140000_grower_share_cost_in_sold_unit.sql` converts the grower-share amount into the product's
+Fix in review: `20270120140000_grower_share_cost_in_sold_unit.sql` converts the grower-share amount into the product's
 sold unit (a manual line: its own unit) with `field_app_priced_quantity`, refuses a unit that does not convert with the
 billed line's message, stores the line in that unit and costs the stored quantity (the example books $375). The bill's
 amounts and the billed branch are unchanged; the printed grower-share line shows the converted quantity. The split field-app saver refuses grower-price fields and the generic invoice
@@ -664,7 +664,7 @@ Found while proving (live, read-only, 2026-11-15): no field-app save path declar
 below-cost wall (`_enforce_below_cost_line`) refused every field-app save whose grower-share line is a costed product
 (`BELOW_COST_CONTEXT_REQUIRED`; a sales rep also `BELOW_COST_ADMIN_REQUIRED`). That is why live has none of these lines.
 Mason's rule (2026-11-15, "Admins and reps"): an active admin or sales rep may save it. Fix in review, same branch:
-`20270119150000_grower_share_line_saves_for_admins_and_reps.sql` declares a `field_app_grower_share` context around
+`20270120150000_grower_share_line_saves_for_admins_and_reps.sql` declares a `field_app_grower_share` context around
 that $0 line only; the wall lets it through for an admin or rep and logs a `below_cost_approvals` row naming them (Mason, 2026-11-16: "Yes, record it"; a $0 grower price is allowed: "Yes, allow $0"), and judges every other below-cost
 line exactly as before. It also refuses to rebuild a non-field-application invoice passed to the field-app save
 (`FIELD_APP_INVOICE_REQUIRED`). Mason decided 2026-11-16: grower-share cost is always the server cost, even for

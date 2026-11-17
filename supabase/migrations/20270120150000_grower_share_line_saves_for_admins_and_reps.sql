@@ -11,7 +11,7 @@
 -- (BELOW_COST_ADMIN_REQUIRED). Every field-app save with such a line failed; live has none. The line is not a sale
 -- below cost: the grower's per-acre price, billed on its own line, pays for it.
 --
--- WHAT (needs 20270119140000 first; its preflight pins that body):
+-- WHAT (needs 20270120140000 first; its preflight pins that body):
 --  * _save_field_app_invoice_impl_20260714 declares the below-cost context 'field_app_grower_share' around the
 --    grower-share INSERT only, and puts the previous context back right after it. It also refuses to rebuild an
 --    existing invoice, or a group member, that is not a field-application invoice (FIELD_APP_INVOICE_REQUIRED): it deletes and
@@ -58,7 +58,7 @@ BEGIN
                    FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS DISTINCT FROM pin.execs
   ) THEN
-    RAISE EXCEPTION 'KI156_SAVES_PREFLIGHT: a re-emitted function differs from its pinned body, header or grants (apply 20270119140000 first)';
+    RAISE EXCEPTION 'KI156_SAVES_PREFLIGHT: a re-emitted function differs from its pinned body, header or grants (apply 20270120140000 first)';
   END IF;
   -- The approval log's operation list, exactly as live (set by 20261020210000); widened below.
   IF (SELECT count(*) FROM pg_constraint c

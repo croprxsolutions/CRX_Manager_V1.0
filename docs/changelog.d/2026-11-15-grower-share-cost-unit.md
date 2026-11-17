@@ -2,7 +2,7 @@
 
 - Product Master repair step 3 (To-Do 0.17), behavior contract
   `docs/plans/2026-11-15-product-master-steps-1-3-CONTRACT.md`, PR C. Two new migrations, not applied live.
-- `20270119140000_grower_share_cost_in_sold_unit.sql` re-emits `_save_field_app_invoice_impl_20260714` (preflight pins
+- `20270120140000_grower_share_cost_in_sold_unit.sql` re-emits `_save_field_app_invoice_impl_20260714` (preflight pins
   the live body, md5 `29d699a8b0698424345a78e9aac9dcd1`). Only the grower-share branch changes: a chemical included in
   a grower's per-acre price is converted from the rate unit into the unit its cost is per (the product's sold unit; a
   manual line's own unit), refused with the billed line's message when the units do not convert, stored in that unit,
@@ -17,8 +17,8 @@
   grower-share lines (read-only, 2026-11-15), so no rows need re-costing.
 - Follow-up, same PR (Mason, 2026-11-15, his words: "Admins and reps"): the below-cost wall refused every field-app
   save whose grower-share line carries a cost (no field-app path declared a below-cost context, and only an admin
-  with a written reason may approve one), so live has none. `20270119150000_grower_share_line_saves_for_admins_and_reps.sql`
-  (needs `20270119140000` first) makes the save declare a `field_app_grower_share` context around that $0 line only,
+  with a written reason may approve one), so live has none. `20270120150000_grower_share_line_saves_for_admins_and_reps.sql`
+  (needs `20270120140000` first) makes the save declare a `field_app_grower_share` context around that $0 line only,
   and the wall lets that line through for an active admin or sales rep and writes a `below_cost_approvals` row
   (operation `field_app_grower_share`, the saver as actor) in the same transaction (Mason, 2026-11-16: "Yes, record it";
   the operation CHECK is widened to a superset). A $0 grower price per acre is allowed (Mason, 2026-11-16: "Yes, allow $0"). The wall treats the

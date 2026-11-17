@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270119140000_grower_share_cost_in_sold_unit (KI-156; contract
+ * Real-schema proof for 20270120140000_grower_share_cost_in_sold_unit (KI-156; contract
  * docs/plans/2026-11-15-product-master-steps-1-3-CONTRACT.md, PR C) and its follow-up
- * 20270119150000_grower_share_line_saves_for_admins_and_reps (Mason, 2026-11-15: "Admins and reps").
+ * 20270120150000_grower_share_line_saves_for_admins_and_reps (Mason, 2026-11-15: "Admins and reps").
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container, replays
  * every post-baseline migration before the candidate, then saves field-application invoices the way the app does
@@ -22,7 +22,7 @@
  *   W   before the follow-up, the below-cost wall refuses every costed grower-share line (no context; a rep even with one).
  *   N   a normal below-cost line (a billed line priced under cost) needs the existing approval, before AND after the
  *       follow-up: no context is refused, a sales rep is refused, an admin with a reason saves and is recorded.
- *   G   the follow-up applies (refused before 20270119140000 and on a second run; grants unchanged): an admin and a
+ *   G   the follow-up applies (refused before 20270120140000 and on a second run; grants unchanged): an admin and a
  *       sales rep save a costed $0 grower-share line with no below-cost context and one approval row naming them; an applicator is
  *       refused; the context it declares lets nothing else through (a 1-cent line, an applicator's $0 line); a billed
  *       below-cost line beside a grower share is still refused, so the context is put back after the grower line.
@@ -48,9 +48,9 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270119140000_grower_share_cost_in_sold_unit.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270120140000_grower_share_cost_in_sold_unit.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'grower-share-cost-unit-reverse.sql');
-const CANDIDATE2 = path.join(MIGRATIONS, '20270119150000_grower_share_line_saves_for_admins_and_reps.sql');
+const CANDIDATE2 = path.join(MIGRATIONS, '20270120150000_grower_share_line_saves_for_admins_and_reps.sql');
 const REVERSE2 = path.join(ROOT, 'scripts', 'smoke', 'grower-share-line-saves-reverse.sql');
 const FOLLOW_UPS = [CANDIDATE2];
 const LATER_READ_ONLY = new Set([]);

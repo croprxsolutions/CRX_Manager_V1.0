@@ -1,4 +1,4 @@
--- ROLLBACK for 20270119140000_grower_share_cost_in_sold_unit.sql (KI-156). Restores the live body of
+-- ROLLBACK for 20270120140000_grower_share_cost_in_sold_unit.sql (KI-156). Restores the live body of
 -- _save_field_app_invoice_impl_20260714 as it was before the fix (md5 29d699a8b0698424345a78e9aac9dcd1): the grower-share
 -- branch goes back to costing the applied amount in the rate unit. Rows saved under the fix are not rewritten.
 -- Apply as ONE transaction (psql -1). Proven by scripts/smoke/prove-grower-share-cost-unit-real-schema.mjs.

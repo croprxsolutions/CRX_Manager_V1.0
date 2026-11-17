@@ -1,7 +1,8 @@
 -- ROLLBACK for 20270113150000_grower_share_line_saves_for_admins_and_reps.sql (KI-156 follow-up). Restores
 -- _save_field_app_invoice_impl_20260714 to the 20270113140000 body (md5 c3df537c2540a3bbc3f39ddc16c09166) and _enforce_below_cost_line to
 -- the live body (md5 3708388e22f081fd5b70ce8f89492aaf): a grower-share line is again refused by the below-cost wall. Rows saved under the
--- fix are not rewritten. Apply as ONE transaction (psql -1), BEFORE grower-share-cost-unit-reverse.sql.
+-- fix are not rewritten. The widened below_cost_approvals_operation_check stays: approval rows are immutable, and a wider
+-- list is harmless once nothing writes 'field_app_grower_share'. Apply as ONE transaction (psql -1), BEFORE grower-share-cost-unit-reverse.sql.
 -- Proven by scripts/smoke/prove-grower-share-cost-unit-real-schema.mjs.
 -- actor-binding-check: exempt -- internal _impl and trigger function restored byte-for-byte (see the migration).
 
@@ -11,7 +12,7 @@ BEGIN
     SELECT 1
       FROM (VALUES
         ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '3dae067adcdd506b5865f3be09d903df', ARRAY['postgres', 'service_role']),
-        ('_enforce_below_cost_line', 'public._enforce_below_cost_line()', '1c421de75f20d9244a06d29428d1f99a', ARRAY['postgres', 'service_role'])
+        ('_enforce_below_cost_line', 'public._enforce_below_cost_line()', '1069cd1451454030627b250db7b729d1', ARRAY['postgres', 'service_role'])
       ) AS pin(fn, sig, body_md5, execs)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL

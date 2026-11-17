@@ -19,7 +19,9 @@
   save whose grower-share line carries a cost (no field-app path declared a below-cost context, and only an admin
   with a written reason may approve one), so live has none. `20270113150000_grower_share_line_saves_for_admins_and_reps.sql`
   (needs `20270113140000` first) makes the save declare a `field_app_grower_share` context around that $0 line only,
-  and the wall lets that line through for an active admin or sales rep, with no approval row. The wall treats the
+  and the wall lets that line through for an active admin or sales rep and writes a `below_cost_approvals` row
+  (operation `field_app_grower_share`, the saver as actor) in the same transaction (Mason, 2026-11-16: "Yes, record it";
+  the operation CHECK is widened to a superset). A $0 grower price per acre is allowed (Mason, 2026-11-16: "Yes, allow $0"). The wall treats the
   context as none for everything else, so every other below-cost line (a billed line under cost, a fee, an order or
   quote line) is refused or approved exactly as before; applicators and anyone else are still refused.
   The same file makes the field-app save refuse to rebuild an existing invoice (or group member) that is not a field-application

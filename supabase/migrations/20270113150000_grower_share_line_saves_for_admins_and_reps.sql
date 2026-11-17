@@ -1,3 +1,4 @@
+-- status-enum-check: exempt -- this file widens below_cost_approvals_operation_check to add 'field_app_grower_share'.
 -- KI-156 follow-up (Mason, 2026-11-15, his words: "Admins and reps"): a field-application invoice whose chemical is
 -- included in the grower's per-acre price saves for an active admin or sales rep.
 -- actor-binding-check: exempt -- internal _impl (EXECUTE only postgres and service_role) and a trigger function; the
@@ -21,8 +22,15 @@
 --    where it would refuse a below-cost line does it let through an invoice_items INSERT with unit price 0, amount 0,
 --    not an application fee and not from an order line, when the signed-in user is an active admin or sales rep
 --    (is_admin() / is_sales_rep()). The validations before that point (product found, product cost set and in whole
---    cents, positive quantity on a line with no product) still apply. No below_cost_approvals row is written: no
---    price was lowered below cost and there is no reason to record.
+--    cents, positive quantity on a line with no product) still apply. Mason, 2026-11-16 ("Yes, record it"): each
+--    such line writes one below_cost_approvals row (operation 'field_app_grower_share', the saving admin or rep as
+--    actor, price 0, the locked cost, the quantity), so the approval log shows who approved every $0 grower-share
+--    line. The row is written by this trigger, in the same transaction as the line, so no line saves without it.
+--    A hand-typed line with no product and no cost is not below cost and saves as before with no row (the log
+--    requires a positive cost). below_cost_approvals_operation_check is widened to a superset that adds
+--    'field_app_grower_share' (live list pinned in the preflight).
+--  * Mason, 2026-11-16 ("Yes, allow $0"): a $0 grower price per acre is allowed; its billed line has no product and
+--    no cost, so the wall never judges it. Unchanged here; the prover covers it.
 --  * Browser roles cannot insert invoice_items or set this context. Only this _impl body sets the value 'field_app_grower_share'
 --    (_begin_below_cost_money_write allows a fixed list of other values, and browser roles cannot run it).
 --
@@ -52,11 +60,23 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'KI156_SAVES_PREFLIGHT: a re-emitted function differs from its pinned body, header or grants (apply 20270113140000 first)';
   END IF;
+  -- The approval log's operation list, exactly as live (set by 20261020210000); widened below.
+  IF (SELECT count(*) FROM pg_constraint c
+       WHERE c.conrelid = 'public.below_cost_approvals'::regclass
+         AND c.conname = 'below_cost_approvals_operation_check'
+         AND pg_get_constraintdef(c.oid) = 'CHECK ((operation = ANY (ARRAY[''create_direct_order''::text, ''create_rush_order''::text, ''bulk_import_order''::text, ''update_order_items''::text, ''price_order''::text, ''save_invoice''::text, ''save_quote''::text, ''convert_quote_to_order''::text, ''draw_down_quote''::text, ''restore_quote_version''::text, ''duplicate_quote''::text, ''create_invoice_from_blend_ticket''::text])))') <> 1 THEN
+    RAISE EXCEPTION 'KI156_SAVES_PREFLIGHT: below_cost_approvals_operation_check differs from its reviewed state';
+  END IF;
   PERFORM set_config('crx.ki156s_xid', pg_current_xact_id()::text, true);
   PERFORM set_config('crx.ki156s_impl_acl', (SELECT coalesce(proacl::text, '') FROM pg_proc WHERE oid = 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)'::regprocedure), true);
   PERFORM set_config('crx.ki156s_guard_acl', (SELECT coalesce(proacl::text, '') FROM pg_proc WHERE oid = 'public._enforce_below_cost_line()'::regprocedure), true);
 END;
 $preflight$;
+
+-- The approval log accepts the grower-share operation (a superset of the live list; live rows all keep their value).
+ALTER TABLE public.below_cost_approvals
+  DROP CONSTRAINT below_cost_approvals_operation_check,
+  ADD CONSTRAINT below_cost_approvals_operation_check CHECK (operation = ANY (ARRAY['create_direct_order'::text, 'create_rush_order'::text, 'bulk_import_order'::text, 'update_order_items'::text, 'price_order'::text, 'save_invoice'::text, 'save_quote'::text, 'convert_quote_to_order'::text, 'draw_down_quote'::text, 'restore_quote_version'::text, 'duplicate_quote'::text, 'create_invoice_from_blend_ticket'::text, 'field_app_grower_share'::text]));
 
 CREATE OR REPLACE FUNCTION public._save_field_app_invoice_impl_20260714(p_invoice_id uuid, p_invoice jsonb, p_locations jsonb, p_chemicals jsonb, p_performed_by uuid, p_application_service_id uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
@@ -970,6 +990,16 @@ BEGIN
        AND NOT COALESCE(NEW.is_application_fee, false)
        AND NEW.order_item_id IS NULL
        AND (public.is_admin() OR public.is_sales_rep()) THEN
+      -- Mason, 2026-11-16 ("Yes, record it"): log who approved this $0 line, in this transaction.
+      INSERT INTO public.below_cost_approvals (
+        operation, entity_type, entity_id, line_id, product_id, actor_user_id,
+        reason, unit_price_cents, locked_unit_cost_cents, quantity,
+        total_shortfall_cents
+      ) VALUES (
+        'field_app_grower_share', v_entity_type, v_entity_id, v_line_id, v_product_id, v_actor,
+        'Included in the grower''s per-acre price', v_price_cents, v_cost_cents, v_quantity,
+        round((v_cost_cents - v_price_cents) * v_quantity)::bigint
+      );
       RETURN NEW;
     END IF;
   END IF;
@@ -1039,7 +1069,7 @@ BEGIN
     SELECT 1
       FROM (VALUES
         ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '3dae067adcdd506b5865f3be09d903df', ARRAY['postgres', 'service_role']),
-        ('_enforce_below_cost_line', 'public._enforce_below_cost_line()', '1c421de75f20d9244a06d29428d1f99a', ARRAY['postgres', 'service_role'])
+        ('_enforce_below_cost_line', 'public._enforce_below_cost_line()', '1069cd1451454030627b250db7b729d1', ARRAY['postgres', 'service_role'])
       ) AS pin(fn, sig, body_md5, execs)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL
@@ -1064,6 +1094,12 @@ BEGIN
      OR (SELECT coalesce(proacl::text, '') FROM pg_proc WHERE oid = 'public._enforce_below_cost_line()'::regprocedure)
        IS DISTINCT FROM current_setting('crx.ki156s_guard_acl', true) THEN
     RAISE EXCEPTION 'KI156S_POSTFLIGHT: an ACL changed across the replacement';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint c
+                  WHERE c.conrelid = 'public.below_cost_approvals'::regclass
+                    AND c.conname = 'below_cost_approvals_operation_check' AND c.convalidated
+                    AND pg_get_constraintdef(c.oid) LIKE '%''field_app_grower_share''::text%') THEN
+    RAISE EXCEPTION 'KI156S_POSTFLIGHT: below_cost_approvals_operation_check does not accept field_app_grower_share';
   END IF;
 END;
 $postflight$;

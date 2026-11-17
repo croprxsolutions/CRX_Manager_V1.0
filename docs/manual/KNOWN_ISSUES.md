@@ -667,7 +667,7 @@ below-cost wall (`_enforce_below_cost_line`) refused every field-app save whose 
 (`BELOW_COST_CONTEXT_REQUIRED`; a sales rep also `BELOW_COST_ADMIN_REQUIRED`). That is why live has none of these lines.
 Mason's rule (2026-11-15, "Admins and reps"): an active admin or sales rep may save it. Fix in review, same branch:
 `20270113150000_grower_share_line_saves_for_admins_and_reps.sql` declares a `field_app_grower_share` context around
-that $0 line only; the wall lets it through for an admin or rep (no approval row) and judges every other below-cost
+that $0 line only; the wall lets it through for an admin or rep and logs a `below_cost_approvals` row naming them (Mason, 2026-11-16: "Yes, record it"; a $0 grower price is allowed: "Yes, allow $0"), and judges every other below-cost
 line exactly as before. It also refuses to rebuild a non-field-application invoice passed to the field-app save
 (`FIELD_APP_INVOICE_REQUIRED`). Mason decided 2026-11-16: grower-share cost is always the server cost, even for
 admins. A grower-share line with a product ignores a typed `cost_cents` and books the product's current cost; a

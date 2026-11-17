@@ -23,7 +23,7 @@
  *   N   a normal below-cost line (a billed line priced under cost) needs the existing approval, before AND after the
  *       follow-up: no context is refused, a sales rep is refused, an admin with a reason saves and is recorded.
  *   G   the follow-up applies (refused before 20270113140000 and on a second run; grants unchanged): an admin and a
- *       sales rep save a costed $0 grower-share line with no below-cost context and no approval row; an applicator is
+ *       sales rep save a costed $0 grower-share line with no below-cost context and one approval row naming them; an applicator is
  *       refused; the context it declares lets nothing else through (a 1-cent line, an applicator's $0 line); a billed
  *       below-cost line beside a grower share is still refused, so the context is put back after the grower line.
  *   RG  the follow-up's reverse restores both bodies and the refusal (W); a second run is refused.
@@ -279,7 +279,7 @@ const LIVE_MD5 = '29d699a8b0698424345a78e9aac9dcd1';
 const FIX_MD5 = 'c3df537c2540a3bbc3f39ddc16c09166';
 const SAVES_MD5 = '3dae067adcdd506b5865f3be09d903df';
 const GUARD_LIVE_MD5 = '3708388e22f081fd5b70ce8f89492aaf';
-const GUARD_SAVES_MD5 = '1c421de75f20d9244a06d29428d1f99a';
+const GUARD_SAVES_MD5 = '1069cd1451454030627b250db7b729d1';
 const GUARD = "'public._enforce_below_cost_line()'::regprocedure";
 const guardMd5 = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = ${GUARD};`);
 const guardAcl = () => scalar(`SELECT coalesce(proacl::text, '-') FROM pg_proc WHERE oid = ${GUARD};`);
@@ -287,7 +287,7 @@ const IMPL = "'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jso
 const bodyMd5 = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = ${IMPL};`);
 const acl = () => scalar(`SELECT coalesce(proacl::text, '-') FROM pg_proc WHERE oid = ${IMPL};`);
 const id = (s) => `c156c156-0000-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), REP = id('a2'), APPL = id('a3'), SALE = id('e1'), GRP = id('e2'), GSALE = id('e3'), GFAPP = id('e4'), CUST = id('c1'), FG = id('f1'), FB = id('f2'), GAL = id('d1'), EA = id('d2'), NOINV = id('d3');
+const ADMIN = id('a1'), REP = id('a2'), APPL = id('a3'), SALE = id('e1'), GRP = id('e2'), GSALE = id('e3'), GFAPP = id('e4'), CUST = id('c1'), FG = id('f1'), FB = id('f2'), FZ = id('f3'), GAL = id('d1'), EA = id('d2'), NOINV = id('d3');
 let keyN = 0;
 const key = () => `prover-ki156-${process.pid}-${keyN += 1}`;
 
@@ -312,10 +312,12 @@ function seed() {
       ('${GSALE}', 'KI156-GRP-SALE', '${CUST}', 'chemical_sale', 'draft', '2026-11-15', 0, 0, '${ADMIN}', '${GRP}');
     INSERT INTO public.fields (id, customer_id, field_name, total_acres, is_active) VALUES
       ('${FG}', '${CUST}', '[PROVER] KI156 grower-price field', 100, true),
-      ('${FB}', '${CUST}', '[PROVER] KI156 billed field', 100, true);
+      ('${FB}', '${CUST}', '[PROVER] KI156 billed field', 100, true),
+      ('${FZ}', '${CUST}', '[PROVER] KI156 zero grower price field', 100, true);
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary, price_override_cents) VALUES
       ('${FG}', '${CUST}', 100, true, 2500),
-      ('${FB}', '${CUST}', 100, true, NULL);
+      ('${FB}', '${CUST}', 100, true, NULL),
+      ('${FZ}', '${CUST}', 100, true, 0);
     DELETE FROM public.app_settings WHERE setting_key = 'per_line_split_billing_enabled';
     INSERT INTO public.app_settings (setting_key, setting_value) VALUES ('per_line_split_billing_enabled', 'true');`);
 }
@@ -353,6 +355,11 @@ const EA_GROWER = [[loc(FG, 100)], [chem({ product_id: EA, unit_size: 'Ea' })]];
 // N: a billed line priced at $1/Gal under its $30 cost is a normal below-cost line.
 const UNDER = chem({ product_id: GAL, manual_override: true, unit_price_cents: 100 });
 const APPROVALS = "SELECT count(*) FROM public.below_cost_approvals WHERE entity_id = current_setting('crx.inv')::uuid;";
+// operation|actor|product|price|locked cost|quantity|shortfall for each approval row of the saved invoice
+const APPROVAL_ROWS = `SELECT coalesce(string_agg(concat_ws('|', operation, actor_user_id, coalesce(product_id::text, '-'), unit_price_cents,
+    locked_unit_cost_cents, quantity, total_shortfall_cents), ' ; ' ORDER BY operation), 'none')
+  FROM public.below_cost_approvals WHERE entity_id = current_setting('crx.inv')::uuid;`;
+const approvalsOf = (locs, chems, uid) => okProbe(`${saveSql(locs, chems, uid, false)}\nRESET ROLE;\n${APPROVAL_ROWS}`, uid);
 function normalWall(label) {
   refusedSave([loc(FB, 100)], [UNDER], /BELOW_COST_CONTEXT_REQUIRED/, ADMIN, false);
   refusedSave([loc(FB, 100)], [UNDER], /BELOW_COST_ADMIN_REQUIRED/, REP);
@@ -477,7 +484,8 @@ async function main() {
     assert.equal(costOf(s), 37500, `G: ${who} grower-share save books 12.5 Gal x $30: ${s}`);
     assert.equal(lineOf(s, 'KI156 chem — included'), lineOf(g, 'KI156 chem — included'), `G: ${who} line identical to case 1`);
     assert.equal(s.split(' || ')[1], g.split(' || ')[1], `G: ${who} bill unchanged`);
-    assert.equal(okProbe(`${saveSql([loc(FG, 100)], [chem({ product_id: GAL })], uid, false)}\nRESET ROLE;\n${APPROVALS}`, uid), '0', `G: ${who} writes no approval row`);
+    // Mason, 2026-11-16 ("Yes, record it"): the $0 grower-share line logs who approved it.
+    assert.equal(approvalsOf([loc(FG, 100)], [chem({ product_id: GAL })], uid), `field_app_grower_share|${uid}|${GAL}|0|3000|12.5000|37500`, `G: ${who} writes one approval row naming them`);
   }
   refusedSave([loc(FG, 100)], [chem({ product_id: GAL })], /Not authorized/, APPL, false);
   assert.equal(okProbe(direct(ADMIN, 'field_app_grower_share', 0), ADMIN), 'inserted', 'G: the declared $0 line saves for an admin');
@@ -499,6 +507,17 @@ async function main() {
   assert.match(lineOf(manualG, 'KI156 manual — included'), /\|12\.5000\|Gal\|0\|0\|3000\|1600\.0000\|oz$/, manualG);
   const manualRep = save([loc(FG, 100)], [chem({ description: 'KI156 manual', manual_override: true, unit_price_cents: 0 })], REP, false);
   assert.equal(costOf(manualRep), 0, `G: a rep's manual grower-share line (no product) books 0, not the typed 3000: ${manualRep}`);
+  const manualChem = [chem({ description: 'KI156 manual', manual_override: true, unit_price_cents: 0 })];
+  assert.equal(approvalsOf([loc(FG, 100)], manualChem, ADMIN), `field_app_grower_share|${ADMIN}|-|0|37500|1|37500`, 'G: an admin manual line with a cost is logged (total cost, quantity 1)');
+  assert.equal(approvalsOf([loc(FG, 100)], manualChem, REP), 'none', 'G: a rep manual line with no cost is not below cost and logs nothing');
+  // Mason, 2026-11-16 ("Yes, allow $0"): a $0 grower price per acre saves; its chemical is still logged.
+  for (const [who, uid] of [['admin', ADMIN], ['sales rep', REP]]) {
+    const z = save([loc(FZ, 100)], [chem({ product_id: GAL })], uid, false);
+    assert.equal(z.split(' || ')[1], '0', `G: ${who} $0 grower price bills 0: ${z}`);
+    assert.equal(costOf(z), 37500, `G: ${who} $0 grower price still books the chemical cost: ${z}`);
+    assert.match(lineOf(z, '[PROVER] KI156 zero grower price field'), /\|0\|0\|0\|/, z);
+    assert.equal(approvalsOf([loc(FZ, 100)], [chem({ product_id: GAL })], uid), `field_app_grower_share|${uid}|${GAL}|0|3000|12.5000|37500`, `G: ${who} $0 grower price logs the chemical`);
+  }
   refusedSave([loc(FG, 50), loc(FB, 50, 1)], [UNDER], /BELOW_COST_CONTEXT_REQUIRED/, ADMIN, false);
   // The save rebuilds the invoice it is given: an ordinary draft (chemical sale) is refused before any line is touched.
   for (const [inv, uid] of [[SALE, ADMIN], [SALE, REP], [GFAPP, ADMIN]]) {
@@ -506,8 +525,8 @@ async function main() {
       ${J([loc(FG, 100)])}, ${J([chem({ product_id: GAL })])}, '${uid}', NULL, '${key()}');`,
       /FIELD_APP_INVOICE_REQUIRED: invoice .* is not a field application invoice/, uid);
   }
-  assert.equal(okProbe(`${saveSql([loc(FG, 50), loc(FB, 50, 1)], [UNDER])}\nRESET ROLE;\n${APPROVALS}`, ADMIN), '1', 'G: mixed save with a reason records only the billed line');
-  console.log(`[case] G follow-up applies (impl md5 ${SAVES_MD5}, wall md5 ${GUARD_SAVES_MD5}; grants unchanged; a second run is refused): an admin and a sales rep save a costed $0 grower-share line with no context (37500 cents, no approval row); an applicator is refused; the declared context lets an admin's or rep's $0 line through but not an applicator's $0 line, a 1-cent line or a $0 line with an amount (BELOW_COST_CONTEXT_REQUIRED); a rep sending cost 0, or an admin sending 0 or 999999, still books the server cost (37500); an admin's typed cost on a billed line is kept (25000); an admin's manual grower-share line with no product books the typed cost (37500), a rep's books 0; an admin or rep passing an ordinary draft invoice, or a field-app draft grouped with one, is refused (FIELD_APP_INVOICE_REQUIRED); a billed under-cost line beside a grower share is still refused, and with a reason only it is recorded`);
+  assert.equal(okProbe(`${saveSql([loc(FG, 50), loc(FB, 50, 1)], [UNDER])}\nRESET ROLE;\n${APPROVALS}`, ADMIN), '2', 'G: mixed save with a reason records the billed line and the grower-share line');
+  console.log(`[case] G follow-up applies (impl md5 ${SAVES_MD5}, wall md5 ${GUARD_SAVES_MD5}; grants unchanged; a second run is refused): an admin and a sales rep save a costed $0 grower-share line with no context (37500 cents, one field_app_grower_share approval row naming them); a $0 grower price saves (bill 0, chemical cost 37500, logged); an admin's costed manual line is logged, a rep's no-cost one is not; an applicator is refused; the declared context lets an admin's or rep's $0 line through but not an applicator's $0 line, a 1-cent line or a $0 line with an amount (BELOW_COST_CONTEXT_REQUIRED); a rep sending cost 0, or an admin sending 0 or 999999, still books the server cost (37500); an admin's typed cost on a billed line is kept (25000); an admin's manual grower-share line with no product books the typed cost (37500), a rep's books 0; an admin or rep passing an ordinary draft invoice, or a field-app draft grouped with one, is refused (FIELD_APP_INVOICE_REQUIRED); a billed under-cost line beside a grower share is still refused, and with a reason both lines are recorded`);
   normalWall('after the follow-up');
 
   // RG: the follow-up's rollback.

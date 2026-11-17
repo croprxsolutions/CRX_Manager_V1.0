@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { billingM4Enabled } from '../lib/billingFeatures';
 import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Ban, Plus, Trash2, Search, FileText, Truck, Mail, RotateCcw, AlertTriangle, ShoppingCart, ChevronRight, Lock,
@@ -2262,8 +2263,9 @@ export default function InvoiceDetail({ routeArea }: { routeArea?: 'field' | 'ch
               // Cost is admin-only (Mason, 2026-10-15).
               admin={isAdmin ? { costCents: totalCostCents, marginCents, marginPct } : null}
               discountControl={
-                // The office's discount on this sale (billing plan M4b): admin, chemical-sale draft.
-                isAdmin && !isNew && invoice.id && invoice.invoice_type === 'chemical_sale' && invoice.status === 'draft' ? (
+                // The office's discount on this sale (billing plan M4b): admin, chemical-sale draft; off on live until
+                // commission ships (billingM4Enabled).
+                billingM4Enabled() && isAdmin && !isNew && invoice.id && invoice.invoice_type === 'chemical_sale' && invoice.status === 'draft' ? (
                   <StandingDiscountControl
                     invoiceId={invoice.id}
                     disabled={hasUnsavedChanges}

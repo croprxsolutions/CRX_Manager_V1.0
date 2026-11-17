@@ -62,6 +62,9 @@ const LEDGER_ONLY = new Set([
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate creates or relies on.
 const TOUCHED = /(cycle_count|adjust_inventory|receive_po_items)/i;
+// A later file breaks this proof only by redefining what it relies on; calling or naming it (shared retry
+// helpers, comments, CASE lists) does not. Definitions of functions, tables, triggers and policies count.
+const REDEFINED = new RegExp(String.raw`(CREATE(\s+OR\s+REPLACE)?|ALTER|DROP)\s+(FUNCTION|TABLE)\s+(IF\s+(NOT\s+)?EXISTS\s+)?(ONLY\s+)?(public\.)?"?[a-z_0-9]*${TOUCHED.source}|(CREATE|ALTER|DROP)\s+(OR\s+REPLACE\s+)?(TRIGGER|POLICY)\s[^;]*?\bON\s+(public\.)?"?[a-z_0-9]*${TOUCHED.source}`, 'i');
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -178,7 +181,7 @@ function plan() {
     last = i;
   }
   for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f) && !LATER_READ_ONLY.has(path.basename(f)))) {
-    assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
+    assert.ok(!REDEFINED.test(lf(file)), `${path.basename(file)} sorts after the candidate and redefines what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);
   for (const name of PARKED) {

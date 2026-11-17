@@ -59,6 +59,9 @@ function buildDeferredChain(): {
 }
 
 // Fixtures already carry cost; the admin cost read (get_admin_cost_fields) passes rows through.
+// Live hides the sales tax and standing discount controls until commission ships (billingM4Enabled).
+const billingM4 = vi.hoisted(() => ({ on: true }));
+vi.mock('../lib/billingFeatures', () => ({ billingM4Enabled: () => billingM4.on }));
 vi.mock('../lib/costFields', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/costFields')>()),
   withAdminCost: async (_table: string, row: unknown) => row,
@@ -2287,6 +2290,19 @@ describe('InvoiceDetail — standing discount and sales tax lines (billing plan 
       if (table === 'invoice_items') return buildChain({ data: lines, error: null });
       return buildChain({ data: [], error: null });
     });
+  });
+
+  it('on live (billing M4 off) still shows existing discount and tax lines, without the per-sale discount box', async () => {
+    billingM4.on = false;
+    try {
+      renderInvoiceDetail('inv-disc');
+      const worked = await screen.findByRole('region', { name: 'Worked out for you' });
+      expect(within(worked).getByText('Standing discount 3%')).toBeInTheDocument();
+      expect(within(worked).getByText('Sales tax 6.25%')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Standing discount for this sale')).not.toBeInTheDocument();
+    } finally {
+      billingM4.on = true;
+    }
   });
 
   it('shows the discount and tax lines read-only and saves the draft', async () => {

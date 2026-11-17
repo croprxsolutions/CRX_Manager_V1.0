@@ -466,6 +466,11 @@
             "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/live-testdata-guard.mjs\"",
             "timeout": 15,
             "onFailure": "block"
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR${CLAUDE_PROJECT_DIR:+/}.claude/hooks/sql-column-check.mjs\"",
+            "timeout": 15
           }
         ]
       },

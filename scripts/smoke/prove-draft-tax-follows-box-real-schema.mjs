@@ -328,6 +328,10 @@ async function main() {
   assert.ok(!/\(A\) ticking|\(B\) unticking|\(C\)/.test(before.fail), `BEFORE: the fixture or control failed: ${before.fail}`);
   console.log(`[case] 1 BEFORE: the kept payer draft posts on a ticked and an unticked sale, and a switch-off draft posts after the switch is on: ${before.fail}`);
   const passedBefore = covering('BEFORE');
+  // The sales-tax and M4-switch chains must pass before, so "still passes after" can't be vacuous.
+  for (const name of ['smoke-sales-tax.sql', 'smoke-billing-m4-switch.sql']) {
+    assert.ok(passedBefore.has(name), `BEFORE: ${name} must pass in this database`);
+  }
   // 2. AUTOCOMMIT
   const sql = lf(CANDIDATE);
   stageText('cand.sql', sql);

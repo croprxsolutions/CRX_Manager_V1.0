@@ -48,7 +48,8 @@ BEGIN
      -- The stale-line guard checks the tax cents; this one only checks taxed vs untaxed, so it relies on that one.
      OR NOT EXISTS (SELECT 1 FROM pg_trigger t
                      WHERE t.tgrelid = 'public.invoices'::regclass
-                       AND t.tgname = 'invoices_sales_tax_current_on_post_20261231' AND t.tgenabled = 'O')
+                       AND t.tgname = 'invoices_sales_tax_current_on_post_20261231' AND t.tgenabled = 'O'
+                       AND t.tgfoid = to_regprocedure('public.guard_sales_tax_current_on_post_20261231()'))
      OR NOT EXISTS (SELECT 1 FROM information_schema.columns
                      WHERE table_schema = 'public' AND table_name = 'orders' AND column_name = 'sales_tax') THEN
     RAISE EXCEPTION 'DRAFT_TAX_BOX_PREFLIGHT: needs orders.sales_tax, invoice_sales_tax_rates and the M4 switch';
@@ -69,7 +70,7 @@ BEGIN
   v_box := COALESCE((SELECT o.sales_tax FROM orders o WHERE o.id = NEW.order_id), false);
   v_taxed := EXISTS (SELECT 1 FROM invoice_sales_tax_rates r WHERE r.invoice_id = NEW.id);
   IF (v_taxed AND NOT v_box) OR (v_box AND NOT v_taxed AND public._billing_m4_enabled_20270117()) THEN
-    RAISE EXCEPTION 'SALES_TAX_BOX_MISMATCH: this draft is % but its sale''s sales tax box is %; switch the box over and back, ending at the setting you want, to re-apply it to the sale''s drafts (a split draft that can''t be edited: void the group and redraft it), then post',
+    RAISE EXCEPTION 'SALES_TAX_BOX_MISMATCH: this draft is % but its sale''s sales tax box is %; switch the box over and back, ending at the setting you want, to re-apply it to the sale''s drafts (a split draft that can''t be edited: set the box back to match it, or void the group and redraft it), then post',
       CASE WHEN v_taxed THEN 'taxed' ELSE 'untaxed' END, CASE WHEN v_box THEN 'on' ELSE 'off' END
       USING ERRCODE = '55000';
   END IF;
@@ -108,14 +109,14 @@ BEGIN
   END IF;
   SELECT count(*) INTO v_refused
     FROM invoices i LEFT JOIN orders o ON o.id = i.order_id
-   WHERE i.status = 'draft' AND i.deleted_at IS NULL AND i.invoice_type = 'chemical_sale'
+   WHERE i.status = 'draft' AND i.invoice_type = 'chemical_sale'
      AND ((EXISTS (SELECT 1 FROM invoice_sales_tax_rates r WHERE r.invoice_id = i.id) AND NOT COALESCE(o.sales_tax, false))
           OR (COALESCE(o.sales_tax, false) AND public._billing_m4_enabled_20270117()
               AND NOT EXISTS (SELECT 1 FROM invoice_sales_tax_rates r WHERE r.invoice_id = i.id)));
   -- Ticked sales' untaxed drafts made while the switch is off: allowed now, refused once the switch goes on.
   SELECT count(*) INTO v_later
     FROM invoices i JOIN orders o ON o.id = i.order_id
-   WHERE i.status = 'draft' AND i.deleted_at IS NULL AND i.invoice_type = 'chemical_sale' AND o.sales_tax
+   WHERE i.status = 'draft' AND i.invoice_type = 'chemical_sale' AND o.sales_tax
      AND NOT public._billing_m4_enabled_20270117()
      AND NOT EXISTS (SELECT 1 FROM invoice_sales_tax_rates r WHERE r.invoice_id = i.id);
   RAISE NOTICE 'DRAFT_TAX_BOX_POSTFLIGHT_OK: % draft(s) now refused at posting until redrafted or the box is set back; % more once the M4 switch is on', v_refused, v_later;

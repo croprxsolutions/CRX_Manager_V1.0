@@ -7,3 +7,4 @@
 - **Ordering:** after `20270117140000_billing_m4_db_switch`.
 
 - Luna round 1 (2026-11-17): the trigger also checks soft-deleted drafts (its WHEN no longer requires deleted_at IS NULL).
+- Luna round 2 (2026-11-17): the preflight requires the stale-line trigger to call its own function; postflight counts include soft-deleted drafts.

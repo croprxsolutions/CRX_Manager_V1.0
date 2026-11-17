@@ -14,6 +14,8 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision (Mason, in session, 2026-11-17: "Allow round 6"):** Sol rounds 4 and 5 on #1896 timed out before giving a verdict, so they produced no findings. One more full Sol review of the current head is allowed.
 
+**Decision (Mason, in session, 2026-11-17: "Accept and land"):** Sol round 6 raised three HIGH edge cases (a no-unit product quoted as `Ea`, a voided delivery reopening an old-unit order line, an alias-spelled PO line receiving without a cost snapshot). #1896 lands with them open as KI-166, KI-167 and KI-168, accepted through the owner-accept flow on the final reviewed head. #1896 also takes the Sol review needed after it is renumbered above #1897/#1895.
+
 ## 2026-11-16 — Old wrong-unit PO lines are cleaned up; a stock unit cannot change while stock is on hand (#1896)
 
 **Decision (Mason, in session, 2026-11-16: "1. clean up old lines 2. do strict fix for changing units stocked moving forward"):** after Sol's round-2 HIGHs on #1896, (1) every purchase-order line left in a unit other than its product's stock unit is relabelled by the reviewed data correction (only Treaty Extra's received "oz" line on PO-2026-0011 remained), and (2) a product's stock unit cannot change while any of its stock rows holds a quantity.

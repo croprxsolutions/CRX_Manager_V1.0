@@ -1393,6 +1393,31 @@ layer. **Decision (Mason, 2026-11-16: "Ship, log the gap"):** #1896 ships with t
 unit changes are ever allowed: refuse a unit change while a count is open on the product, or refuse completing a count
 whose unit differs from the product's.
 
+### KI-166 — A quote for a product with no stock unit is priced as if sold by the each
+**HIGH (latent) · OPEN · quotes/money · found 2026-11-17 (Sol round 6, #1896) · unassigned**
+`save_quote` and the #1896 quote guard (`_refuse_unknown_quote_rate_unit`, `20270113120000`) both fall back to `Ea`
+when a product has neither `inventory_unit` nor `unit_size`, so a rate-based line (e.g. 16 oz/acre) gets a per-acre
+price from an invented unit. 0 such products live (2026-11-17); the behaviour predates #1896. **Decision (Mason,
+2026-11-17: "Accept and land"):** #1896 ships with this open. Fix: refuse a rate-based quote line when the product has
+no stock unit, in both the guard and `save_quote`.
+
+### KI-167 — Voiding a finished delivery can reopen an order line in an old unit that cannot be re-delivered
+**HIGH (latent) · OPEN · deliveries · found 2026-11-17 (Sol round 6, #1896) · unassigned**
+#1896 relabels only open lines. A completed order line still in an old spelling or unit (3 live 2026-11-17: "Gall",
+"Gallon ", "oz") reopens if its delivery is voided, and the new line-unit guard then refuses its replacement delivery.
+No amount is changed; the office must correct the line's unit by hand. **Decision (Mason, 2026-11-17: "Accept and
+land"):** #1896 ships with this open. Fix: relabel completed lines to the stock unit, or relabel a line when a void
+reopens it.
+
+### KI-168 — A received PO line spelled differently from its product's unit gets no cost snapshot
+**HIGH (latent) · OPEN · purchasing/costing · found 2026-11-17 (Sol round 6, #1896) · unassigned**
+The #1896 line guard accepts an alias spelling (e.g. "EA" for `Ea`) on a received PO line without rewriting it, and the
+PO cost-snapshot trigger needs the exact spelling, so the receipt saves no conversion snapshot and that purchase cannot
+be chosen as an actual-purchase cost basis. 1 live open line (a Powder Keg line in "EA"). Purchase-cost valuation is
+parked, so nothing reads it yet. **Decision (Mason, 2026-11-17: "Accept and land"):** #1896 ships with this open. Fix
+before actual-purchase costing ships: compare units case-insensitively in the snapshot trigger, or normalize the
+spelling on receipt.
+
 ---
 
 ## Accepted risks (Mason decided to live with these; do not re-open without a new decision)

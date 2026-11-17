@@ -239,6 +239,16 @@ describe('sanitizeError', () => {
       .toBe('Create this field invoice from its job, blend ticket, or the Field Application screen');
   });
 
+  it('explains that only a field application invoice is edited on the field application screen', () => {
+    expect(sanitizeError('FIELD_APP_INVOICE_REQUIRED: invoice 00000000-0000-4000-8000-000000000001 is not a field application invoice'))
+      .toBe('Nothing was saved. This invoice is not a field application invoice, so it cannot be edited here. Open it from Invoices instead');
+  });
+
+  it('passes the grower-share rounding refusal through with its product name', () => {
+    expect(sanitizeError('FIELD_APP_GROWER_SHARE_ROUNDING: cannot cost "Dry X" in the grower share — 0.00003125 ton is too small to record to 4 decimals without its cost changing by more than $0.50. Record this product in a smaller sold unit before invoicing this field application.'))
+      .toBe('Nothing was saved. Cannot cost "Dry X" in the grower share — 0.00003125 ton is too small to record to 4 decimals without its cost changing by more than $0.50. Record this product in a smaller sold unit before invoicing this field application.');
+  });
+
   it('maps return-credit and customer-scope tokens to operator guidance', () => {
     expect(sanitizeError('CUSTOMER_SCOPE_DENIED')).toBe('You can only work with customers assigned to you');
     expect(sanitizeError('REP_CANNOT_REASSIGN')).toBe('Only an admin can change which sales rep a customer is assigned to');

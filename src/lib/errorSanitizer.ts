@@ -77,6 +77,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'No invoice was changed. An invoice update is finishing; wait a moment, then try Save again'],
   [/^FIELD_APPLICATION_VIA_SAVE_INVOICE_NOT_ALLOWED(?::|$)/,
    'Create this field invoice from its job, blend ticket, or the Field Application screen'],
+  [/^FIELD_APP_INVOICE_REQUIRED(?::|$)/,
+   'Nothing was saved. This invoice is not a field application invoice, so it cannot be edited here. Open it from Invoices instead'],
   [/^CUSTOMER_SCOPE_DENIED\b/i,
    'You can only work with customers assigned to you'],
   // Reps work with any customer (2026-10-13, migration 20261013220000) with these exceptions.
@@ -357,6 +359,11 @@ export function sanitizeError(error: unknown): string {
   const setupRefusal = message.match(/^(?:PRODUCT_SETUP_STALE|PRODUCT_SETUP_INVALID|PRODUCT_SETUP_DUPLICATE_PRODUCT|PRODUCT_SETUP_ROW_SHAPE_INVALID|PRODUCT_SETUP_DUPLICATE|PRODUCT_SETUP_ROWS_REQUIRED):\s*(.+)$/s)?.[1];
   if (setupRefusal && !CONSTRAINT_PATTERNS.some(([pattern]) => pattern.test(message))) {
     return `Nothing was saved. ${setupRefusal.charAt(0).toUpperCase()}${setupRefusal.slice(1)}`;
+  }
+  // Grower-share line too small to record (20270120150000, Mason 2026-11-17): the server text names the product.
+  const growerShareRounding = message.match(/^FIELD_APP_GROWER_SHARE_ROUNDING:\s*(.+)$/s)?.[1];
+  if (growerShareRounding) {
+    return `Nothing was saved. ${growerShareRounding.charAt(0).toUpperCase()}${growerShareRounding.slice(1)}`;
   }
   if (/^PRODUCT_ACTIVE_REVIEW_STALE(?::|$)/.test(message)) {
     return 'Product details changed since the review. Review the selection again.';

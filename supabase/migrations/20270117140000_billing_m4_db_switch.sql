@@ -1,0 +1,187 @@
+-- Written 2026-11-17. STATUS: NOT APPLIED (staging candidate). Apply status is tracked only in
+-- docs/reference/migrations.d/20270117140000_billing_m4_db_switch.md.
+-- Re-read the live ledger before applying.
+--
+-- WHY: two more Sol HIGHs from Mason's agents on the unreleased staging billing work (17 Nov, #1892 comment):
+--   (1) Sales tax (M4a) and standing discounts (M4b) ship switched OFF on live until commission ships (Mason, 16 Nov),
+--       but the switch (src/lib/billingFeatures.ts) only hides the controls. set_order_sales_tax,
+--       set_invoice_standing_discount and the customer's standing_discount_pct still accept a change on live.
+--   (2) "A misc-charge draft retyped to a chemical sale while the box is ticked can stay untaxed": checked and not
+--       changed. The tick (set_order_sales_tax) holds the sale's row; a retype through save_invoice waits on that same
+--       row and ends taxed (reproduced locally with the two running at once: the retype waited, then took the rate).
+--       The app can't write invoices.invoice_type directly (no column grant), so save_invoice is the only retype path.
+--
+-- WHAT:
+--   1. billing_m4_switch: one row, enabled true/false. RLS on; an active user may read it, nobody can change it
+--      through the app (no write grant or policy, service_role included); a migration turns it on for live with
+--      commission. It starts OFF everywhere; staging is turned on by hand once (test data), local by its rebuild
+--      script.
+--   2. While it's OFF, the database refuses (BILLING_M4_OFF) only what would start charging: ticking a sale's sales
+--      tax, giving a customer a standing discount above 0, and setting a sale's own discount above 0. Unticking,
+--      setting 0 and "use the customer's rate" back to 0 always work. And a NEW draft made while OFF never gets tax or a
+--      discount, however its sale or customer is set up (a box ticked or a discount set before the switch existed):
+--      its tax rate row isn't written and its drafted discount rate is recorded as 0. Drafts that already have them
+--      keep them, like posted invoices. Triggers on the four tables, so every path is covered (the RPCs, the
+--      customer form, bulk import, drafting, any later writer).
+--
+-- NOT CHANGED: the setters themselves, amounts, posting, drafts already taxed or discounted, the app's switch.
+-- Reversible: turning it OFF again stops new drafts charging tax or discounts; drafts already made keep theirs.
+--
+-- ROLLBACK (its own reviewed migration): drop the four triggers, their function, _billing_m4_enabled_20270117 and
+-- billing_m4_switch.
+--
+-- ORDERING: after 20270117120000_billing_sol_fixes_staging and 20270117130000_standing_discount_in_order_profit.
+-- TURNING IT ON (with commission): its own migration, `UPDATE public.billing_m4_switch SET enabled = true;`.
+
+SET LOCAL lock_timeout = '5s';
+
+CREATE TEMP TABLE billing_m4_switch_tx ON COMMIT DROP AS
+SELECT pg_current_xact_id()::text AS transaction_id;
+
+DO $preflight$
+BEGIN
+  IF to_regclass('pg_temp.billing_m4_switch_tx') IS NULL
+     OR (SELECT transaction_id FROM pg_temp.billing_m4_switch_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
+    RAISE EXCEPTION 'BILLING_M4_SWITCH_NOT_IN_TRANSACTION: apply this file as one transaction';
+  END IF;
+  IF to_regclass('public.billing_m4_switch') IS NOT NULL THEN
+    RAISE EXCEPTION 'BILLING_M4_SWITCH_PREFLIGHT: already applied';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'orders'
+                  AND column_name = 'sales_tax')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'customers'
+                     AND column_name = 'standing_discount_pct')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
+                     AND table_name = 'invoice_standing_discount_rates' AND column_name = 'drafted_rate_pct') THEN
+    RAISE EXCEPTION 'BILLING_M4_SWITCH_PREFLIGHT: the sales tax, standing discount or billing Sol fix migrations are missing';
+  END IF;
+END
+$preflight$;
+
+-- 1. The switch -----------------------------------------------------------------------------------------------
+CREATE TABLE public.billing_m4_switch (
+  id boolean PRIMARY KEY DEFAULT true CONSTRAINT billing_m4_switch_one_row CHECK (id),
+  enabled boolean NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE public.billing_m4_switch IS
+  'Sales tax (M4a) and standing discounts (M4b): while enabled is false the database refuses ticking a sale''s tax and '
+  'any standing discount above 0 (20270117140000). One row; no app access; a migration turns it on with commission.';
+ALTER TABLE public.billing_m4_switch ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.billing_m4_switch FROM PUBLIC, anon, authenticated, service_role;
+-- Reading it is harmless (an active user may see whether it's on); writing has no policy and no grant.
+GRANT SELECT ON TABLE public.billing_m4_switch TO authenticated;
+CREATE POLICY billing_m4_switch_select ON public.billing_m4_switch FOR SELECT TO authenticated
+  USING ((SELECT public.is_active_profile()));
+-- When it last changed (staging is switched on by hand; live by the commission migration).
+CREATE TRIGGER set_billing_m4_switch_updated_at
+  BEFORE UPDATE ON public.billing_m4_switch
+  FOR EACH ROW WHEN (OLD.enabled IS DISTINCT FROM NEW.enabled) EXECUTE FUNCTION public.update_updated_at();
+
+CREATE FUNCTION public._billing_m4_enabled_20270117()
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT COALESCE((SELECT enabled FROM billing_m4_switch), false)
+$function$;
+
+REVOKE ALL ON FUNCTION public._billing_m4_enabled_20270117() FROM PUBLIC, anon, authenticated, service_role;
+
+-- 2. The refusals ---------------------------------------------------------------------------------------------
+CREATE FUNCTION public._billing_m4_guard_20270117()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_draft boolean;
+BEGIN
+  IF public._billing_m4_enabled_20270117() THEN
+    RETURN NEW;
+  END IF;
+  -- Nested per table: PL/pgSQL resolves a NEW field even when an earlier AND is false.
+  IF TG_TABLE_NAME = 'orders' THEN
+    IF NEW.sales_tax AND (TG_OP = 'INSERT' OR NOT OLD.sales_tax) THEN
+      RAISE EXCEPTION 'BILLING_M4_OFF: sales tax isn''t switched on yet; it turns on with commission'
+        USING ERRCODE = '55000';
+    END IF;
+  ELSIF TG_TABLE_NAME = 'customers' THEN
+    IF NEW.standing_discount_pct > 0
+       AND (TG_OP = 'INSERT' OR NEW.standing_discount_pct IS DISTINCT FROM OLD.standing_discount_pct) THEN
+      RAISE EXCEPTION 'BILLING_M4_OFF: standing discounts aren''t switched on yet; they turn on with commission'
+        USING ERRCODE = '55000';
+    END IF;
+  ELSIF TG_TABLE_NAME = 'invoice_standing_discount_rates' THEN
+    IF NEW.rate_pct > 0 AND (TG_OP = 'INSERT' OR NEW.rate_pct IS DISTINCT FROM OLD.rate_pct
+                              OR OLD.set_by IS DISTINCT FROM NEW.set_by) THEN
+      -- A new draft's recorded rate (the customer's, set_by NULL): recorded as 0, so a draft made while OFF has no
+      -- discount whatever the customer holds (with no row it would fall back to the customer's rate). Anything else
+      -- that would start a discount on a draft (the office's own rate, or "the customer's rate" bringing back a
+      -- drafted rate above 0): refused, nothing changes.
+      IF TG_OP = 'INSERT' AND NEW.set_by IS NULL THEN
+        -- Only a draft's (a row written for a posted invoice records what it was billed at).
+        SELECT i.status = 'draft' INTO v_draft FROM invoices i WHERE i.id = NEW.invoice_id;
+        IF v_draft THEN
+          NEW.rate_pct := 0;
+        END IF;
+      ELSE
+        RAISE EXCEPTION 'BILLING_M4_OFF: standing discounts aren''t switched on yet; they turn on with commission'
+          USING ERRCODE = '55000';
+      END IF;
+    END IF;
+    -- A new row's drafted rate is what the draft would go back to; a draft made while OFF was drafted at 0.
+    IF TG_OP = 'INSERT' AND NEW.drafted_rate_pct > 0 THEN
+      NEW.drafted_rate_pct := 0;
+    END IF;
+  ELSIF TG_TABLE_NAME = 'invoice_sales_tax_rates' THEN
+    -- A new chemical-sale draft of a sale whose box is ticked (before the switch existed, or before it went OFF):
+    -- no rate row, so no tax line. (Only drafts get one; credit memos take their tax from the posted invoice.)
+    IF EXISTS (SELECT 1 FROM invoices i WHERE i.id = NEW.invoice_id AND i.invoice_type = 'chemical_sale'
+                AND i.status = 'draft') THEN
+      RETURN NULL;
+    END IF;
+  END IF;
+  RETURN NEW;
+END
+$function$;
+
+REVOKE ALL ON FUNCTION public._billing_m4_guard_20270117() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER orders_billing_m4_guard_20270117
+  BEFORE INSERT OR UPDATE OF sales_tax ON public.orders
+  FOR EACH ROW EXECUTE FUNCTION public._billing_m4_guard_20270117();
+CREATE TRIGGER customers_billing_m4_guard_20270117
+  BEFORE INSERT OR UPDATE OF standing_discount_pct ON public.customers
+  FOR EACH ROW EXECUTE FUNCTION public._billing_m4_guard_20270117();
+CREATE TRIGGER invoice_standing_discount_rates_billing_m4_guard_20270117
+  BEFORE INSERT OR UPDATE ON public.invoice_standing_discount_rates
+  FOR EACH ROW EXECUTE FUNCTION public._billing_m4_guard_20270117();
+CREATE TRIGGER invoice_sales_tax_rates_billing_m4_guard_20270117
+  BEFORE INSERT ON public.invoice_sales_tax_rates
+  FOR EACH ROW EXECUTE FUNCTION public._billing_m4_guard_20270117();
+
+-- 3. Its starting value: OFF, everywhere. Live turns it on with commission (its own migration); staging is turned on
+-- once by hand right after this applies (test data); the local rebuild script turns it on.
+INSERT INTO public.billing_m4_switch (enabled) VALUES (false);
+
+DO $postflight$
+BEGIN
+  IF (SELECT count(*) FROM pg_trigger WHERE tgname IN ('orders_billing_m4_guard_20270117',
+        'customers_billing_m4_guard_20270117', 'invoice_standing_discount_rates_billing_m4_guard_20270117',
+        'invoice_sales_tax_rates_billing_m4_guard_20270117')
+        AND NOT tgisinternal) <> 4
+     OR (SELECT count(*) FROM billing_m4_switch) <> 1
+     OR has_table_privilege('authenticated', 'public.billing_m4_switch', 'INSERT,UPDATE,DELETE,TRUNCATE')
+     OR has_table_privilege('anon', 'public.billing_m4_switch', 'SELECT,INSERT,UPDATE,DELETE')
+     OR has_table_privilege('service_role', 'public.billing_m4_switch', 'INSERT,UPDATE,DELETE,TRUNCATE')
+     OR (SELECT proacl FROM pg_proc WHERE oid = 'public._billing_m4_guard_20270117()'::regprocedure)
+          IS DISTINCT FROM ARRAY['postgres=X/postgres']::aclitem[]
+     OR (SELECT proacl FROM pg_proc WHERE oid = 'public._billing_m4_enabled_20270117()'::regprocedure)
+          IS DISTINCT FROM ARRAY['postgres=X/postgres']::aclitem[] THEN
+    RAISE EXCEPTION 'BILLING_M4_SWITCH_POSTFLIGHT: a trigger, grant or body is not as written';
+  END IF;
+END
+$postflight$;

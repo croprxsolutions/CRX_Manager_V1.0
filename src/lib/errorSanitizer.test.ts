@@ -308,6 +308,12 @@ describe('sanitizeError', () => {
     expect(sanitizeError('ORDER_ITEM_SHARES_LINE_MOVE: this line has its own bill split')).toBe(
       'Nothing was changed. This line has its own bill split. Remove its shares before moving it to another order',
     );
+    expect(sanitizeError('STANDING_DISCOUNT_SPLIT_LOCKED: this invoice is part of a field split, which can\'t be edited')).toBe(
+      "Nothing was changed. This draft can't be edited (it's part of a field split, or a Bill Split payer's draft with a product line that has no quantity), so its discount can't change. Void the group and redraft it",
+    );
+    expect(sanitizeError("BILLING_M4_OFF: sales tax isn't switched on yet; it turns on with commission")).toBe(
+      "Nothing was changed. Sales tax and standing discounts aren't switched on yet; they turn on with commission",
+    );
     expect(sanitizeError("BILL_SPLIT_SLIVER_LOCKED: this payer's draft has a product line with no quantity")).toBe(
       "Nothing was saved. This payer's draft has a product line with no quantity, so it can't be edited. Post it as drafted, or void the group",
     );

@@ -533,6 +533,20 @@ describe('recalcItem', () => {
 // ---------------------------------------------------------------------------
 
 describe('computeQuoteTotals', () => {
+  it('adds line-rounded cost cents, with profit and margin from those same cents', () => {
+    const totals = computeQuoteTotals([
+      makeItem({ total_price: 0.5, current_cost: 0.01, total_units_needed: 0.5 }),
+      makeItem({ total_price: 0.5, current_cost: 0.01, total_units_needed: 0.5 }),
+    ]);
+    expect(totals).toEqual({ totalPrice: 1, totalCost: 0.02, totalProfit: 0.98, totalMarginPct: 98 });
+  });
+
+  it('rounds decimal cost and percentage ties like PostgreSQL numeric', () => {
+    expect(computeQuoteTotals([makeItem({ total_price: 1, current_cost: 0.01, total_units_needed: 14.5 })]).totalCost).toBe(0.15);
+    expect(computeQuoteTotals([makeItem({ total_price: 200, current_cost: 197.99, total_units_needed: 1 })]))
+      .toEqual({ totalPrice: 200, totalCost: 197.99, totalProfit: 2.01, totalMarginPct: 1.01 });
+  });
+
   it('computes totals across multiple items', () => {
     const items: CalcItem[] = [
       makeItem({ total_price: 500, current_cost: 10, total_units_needed: 25 }),

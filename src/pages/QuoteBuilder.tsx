@@ -70,7 +70,7 @@ import { logActivity } from '../lib/activityLogger';
 import { PRODUCT_COLUMNS, QUOTE_COLUMNS, QUOTE_ITEM_COLUMNS, fetchAdminCostFields, withAdminCost, withAdminCosts, withAdminNestedCosts } from '../lib/costFields';
 import { formatUSD, formatCents } from '../lib/money';
 import { BelowCostApprovalHandledError, isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
-import { catalogPricePerAcre, getQuoteTierPrice, isTierPriceMissing, recalcItem as recalcQuoteLine, validateCommissionSplits } from '../lib/quoteCalc';
+import { catalogPricePerAcre, computeQuoteTotals, getQuoteTierPrice, isTierPriceMissing, recalcItem as recalcQuoteLine, validateCommissionSplits } from '../lib/quoteCalc';
 import { buildCommissionSplitPatch, nextLoadedSplitSnapshot } from '../lib/commissionSplitConcurrency';
 import {
   buildRowVersionPatch,
@@ -149,6 +149,7 @@ type CalcMode = 'rate_acres' | 'units_direct';
 // The server independently fingerprints the full request, so the exact reason
 // remains bound to the idempotency receipt rather than being trusted from the key.
 const MAX_REVERT_REASON_LENGTH = 500;
+const DRAFT_EDIT_PERMISSION_MESSAGE = 'Only this draft’s creator or an admin can edit it.';
 
 interface LocalItem {
   _key: string;
@@ -240,23 +241,7 @@ function productMetaLine(p: ProductOptionPresentationModel): string {
 
 // The quote's totals: line sums, then rounded to the cent. The page's one totals rule.
 function quoteTotals(sections: LocalSection[]) {
-  let totalPrice = 0;
-  let totalCost = 0;
-  let totalProfit = 0;
-  sections.forEach((sec) => {
-    sec.items.forEach((item) => {
-      totalPrice += item.total_price;
-      totalCost += item.current_cost * (item.total_units_needed || 0);
-      totalProfit += item.profit;
-    });
-  });
-  const totalMarginPct = totalPrice > 0 ? (totalProfit / totalPrice) * 100 : 0;
-  return {
-    totalPrice: Math.round(totalPrice * 100) / 100,
-    totalCost: Math.round(totalCost * 100) / 100,
-    totalProfit: Math.round(totalProfit * 100) / 100,
-    totalMarginPct: Math.round(totalMarginPct * 100) / 100,
-  };
+  return computeQuoteTotals(sections.flatMap((sec) => sec.items));
 }
 
 interface CostAlert {
@@ -595,6 +580,7 @@ export default function QuoteBuilder() {
   // The saved quote whose snapshot is on screen. `quoteId` starts as the URL's id
   // before anything loads, so it cannot tell a loaded quote from a failed first load.
   const [installedQuoteId, setInstalledQuoteId] = useState<string | null>(null);
+  const [loadedQuoteOwner, setLoadedQuoteOwner] = useState<{ quoteId: string; createdBy: string | null } | null>(null);
   // Scoped by the quote this save actually TARGETS. F1 makes an ambiguous reply
   // RETAIN this key, and QuoteBuilder does not remount when only `:id` changes (no
   // `<x>/:id` route in src/App.tsx carries a `key` prop). Page-wide, an unresolved
@@ -884,14 +870,17 @@ export default function QuoteBuilder() {
 
   // Status-based guards
   const currentStatus = status || 'draft';
-  const canEdit = ['draft', 'revised'].includes(currentStatus);
+  const isAdmin = profile?.role === 'admin';
+  const draftEditLocked = isEditing && currentStatus === 'draft' && !isAdmin
+    && (!profile?.id || loadedQuoteOwner?.quoteId !== id || loadedQuoteOwner?.createdBy !== profile.id);
+  const canEdit = !draftEditLocked && ['draft', 'revised'].includes(currentStatus);
   // Save keeps a revised quote revised (Save changes); everything else saves as a draft.
   const savesAsRevised = isEditing && currentStatus === 'revised';
   // Codex round-7 P2: include 'sent' so a frozen sent quote can still be re-emailed —
   // "Preview Quote" is the only route to the Email-to-Grower button, and
   // handleEmailToGrower explicitly supports re-sending an already-sent quote and
   // creates a newly confirmed version snapshot before every send.
-  const canSend = ['draft', 'revised', 'sent'].includes(currentStatus);
+  const canSend = !draftEditLocked && ['draft', 'revised', 'sent'].includes(currentStatus);
   // The server conversion RPC deliberately resumes an accepted Quote that has
   // no Order and returns the existing Order when one already exists. Keeping
   // accepted Quotes convertible gives a sales rep a safe retry path when a
@@ -904,7 +893,6 @@ export default function QuoteBuilder() {
   // Quote lifecycle terminal/reopen actions (roadmap #5). The status-transition
   // trigger allows: draft/sent/revised → cancelled; sent/revised → declined;
   // accepted/declined/expired/cancelled → sent (admin revert RPC only).
-  const isAdmin = profile?.role === 'admin';
   const staffSeesLastCharged = !customerView && (isAdmin || profile?.role === 'sales_rep');
   const lastChargedLines = sections.flatMap((section) => section.items.map((item) => ({
     productId: item.product_id,
@@ -914,7 +902,7 @@ export default function QuoteBuilder() {
   const lastCharged = useLastChargedPrices(customerId, lastChargedLines, staffSeesLastCharged);
   // Cost, profit and margin are admin-only (Mason, 2026-10-15); Customer View hides them for an admin too.
   const hideCost = customerView || !isAdmin;
-  const canCancel = isEditing && ['draft', 'sent', 'revised'].includes(currentStatus);
+  const canCancel = isEditing && !draftEditLocked && ['draft', 'sent', 'revised'].includes(currentStatus);
   const canDecline = isEditing && ['sent', 'revised'].includes(currentStatus);
   // "Close — fulfilled by application" is only for a PLANNED open booking (the
   // application channel), in parity with the close_quote_as_applied RPC
@@ -1498,6 +1486,7 @@ export default function QuoteBuilder() {
     }
     setQuoteId(q.id);
     setInstalledQuoteId(q.id);
+    setLoadedQuoteOwner({ quoteId: q.id, createdBy: q.created_by ?? null });
     setQuoteLoadFailedId(null);
     setQuoteNumber(q.quote_number);
     setCustomerId(q.customer_id);
@@ -2296,6 +2285,10 @@ export default function QuoteBuilder() {
       toast('error', 'This quote has not finished loading. Refresh the page before saving so your changes go to the right quote.');
       return null;
     }
+    if (draftEditLocked) {
+      toast('error', DRAFT_EDIT_PERMISSION_MESSAGE);
+      return null;
+    }
     if (!customerId) {
       toast('error', customerLoadError ?? 'Please select a customer');
       return null;
@@ -2755,6 +2748,7 @@ export default function QuoteBuilder() {
       if (!quoteId || !isEditing) {
         setQuoteId(savedQuoteId);
         setInstalledQuoteId(savedQuoteId);
+        setLoadedQuoteOwner({ quoteId: savedQuoteId, createdBy: profile.id });
       }
       // The database priced a line from the catalog as it is now, which changed since this page
       // loaded, so the lines and totals shown are not the saved ones. The save stands, but no
@@ -3226,6 +3220,7 @@ export default function QuoteBuilder() {
   // #3 Stage A: email the quote PDF to the grower via the send-email Edge Function.
   // The Edge Function records the send in email_log and dedupes on the idempotency key.
   const handleEmailToGrower = async () => {
+    if (draftEditLocked) { toast('error', DRAFT_EDIT_PERMISSION_MESSAGE); return; }
     if (!quoteId) { toast('warning', 'Save the quote before emailing it.'); return; }
     if (quoteVersionRecoveryRequiredRef.current) {
       staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
@@ -4333,7 +4328,7 @@ export default function QuoteBuilder() {
     },
     ...(quoteId ? [{ id: 'template', label: 'Save as template', icon: <Copy className="w-4 h-4" />, onAction: () => setShowSaveTemplateModal(true) }] : []),
     ...(quoteId ? [{ id: 'rollover', label: 'Roll over to next season', icon: <RotateCcw className="w-4 h-4" />, onAction: () => setShowRolloverModal(true) }] : []),
-    ...(isEditing && !!quoteId && currentStatus === 'draft' && !isDirty ? [{
+    ...(isEditing && !!quoteId && currentStatus === 'draft' && !draftEditLocked && !isDirty ? [{
       id: 'book', label: 'Book as order', icon: <ShoppingCart className="w-4 h-4" />,
       onAction: () => setConfirmBookAsOrderOpen(true), disabled: bookingAsOrder,
     }] : []),
@@ -4564,7 +4559,13 @@ export default function QuoteBuilder() {
         <GuardrailBanner warning={staleWarning} onDismiss={dismissStaleWarning} />
       )}
 
-      {isEditing && !canEdit && currentStatus !== 'sent' && (
+      {draftEditLocked && (
+        <Notice tone="warn" icon={<Lock className="h-4.5 w-4.5" aria-hidden="true" />}>
+          <span>{DRAFT_EDIT_PERMISSION_MESSAGE} You can still use available job actions.</span>
+        </Notice>
+      )}
+
+      {isEditing && !canEdit && !draftEditLocked && currentStatus !== 'sent' && (
         <Notice tone="warn" icon={<Lock className="h-4.5 w-4.5" aria-hidden="true" />}>
           <span>This quote is in <strong>{quoteStatusLabel(currentStatus)}</strong> status and cannot be edited.</span>
         </Notice>

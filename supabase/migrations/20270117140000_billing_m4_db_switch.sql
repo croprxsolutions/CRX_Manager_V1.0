@@ -61,7 +61,8 @@ $preflight$;
 -- 1. The switch -----------------------------------------------------------------------------------------------
 CREATE TABLE public.billing_m4_switch (
   id boolean PRIMARY KEY DEFAULT true CONSTRAINT billing_m4_switch_one_row CHECK (id),
-  enabled boolean NOT NULL
+  enabled boolean NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
 COMMENT ON TABLE public.billing_m4_switch IS
   'Sales tax (M4a) and standing discounts (M4b): while enabled is false the database refuses ticking a sale''s tax and '
@@ -72,6 +73,10 @@ REVOKE ALL ON TABLE public.billing_m4_switch FROM PUBLIC, anon, authenticated, s
 GRANT SELECT ON TABLE public.billing_m4_switch TO authenticated;
 CREATE POLICY billing_m4_switch_select ON public.billing_m4_switch FOR SELECT TO authenticated
   USING ((SELECT public.is_active_profile()));
+-- When it last changed (staging is switched on by hand; live by the commission migration).
+CREATE TRIGGER set_billing_m4_switch_updated_at
+  BEFORE UPDATE ON public.billing_m4_switch
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
 
 CREATE FUNCTION public._billing_m4_enabled_20270117()
  RETURNS boolean
@@ -91,6 +96,8 @@ CREATE FUNCTION public._billing_m4_guard_20270117()
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
+DECLARE
+  v_draft boolean;
 BEGIN
   IF public._billing_m4_enabled_20270117() THEN
     RETURN NEW;
@@ -115,7 +122,11 @@ BEGIN
       -- that would start a discount on a draft (the office's own rate, or "the customer's rate" bringing back a
       -- drafted rate above 0): refused, nothing changes.
       IF TG_OP = 'INSERT' AND NEW.set_by IS NULL THEN
-        NEW.rate_pct := 0;
+        -- Only a draft's (a row written for a posted invoice records what it was billed at).
+        SELECT i.status = 'draft' INTO v_draft FROM invoices i WHERE i.id = NEW.invoice_id;
+        IF v_draft THEN
+          NEW.rate_pct := 0;
+        END IF;
       ELSE
         RAISE EXCEPTION 'BILLING_M4_OFF: standing discounts aren''t switched on yet; they turn on with commission'
           USING ERRCODE = '55000';

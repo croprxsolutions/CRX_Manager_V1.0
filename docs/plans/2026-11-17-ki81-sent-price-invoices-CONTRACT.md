@@ -35,10 +35,11 @@ Read at `origin/staging` 10070370e (2026-11-17). Decision: Mason, 2026-11-17 (DE
   4. The blend invoice locks the job's quote row and runs the lock before any price is read or invoice number drawn.
 - Eligible quote (field-app): its customer is the grower being billed (Mason, 2026-11-17, "Own quote only": on a
   shared field each grower pays their own quoted price, else the price list; a co-owner's quote never prices
-  another grower's share); not deleted; it was actually sent (has a sent version);
+  another grower's share), on a field that grower has a share of (Sol round 3); not deleted; it was actually sent (has a sent version);
   status sent, revised, accepted, expired, closed_by_application or closed_short (not draft, declined, cancelled);
-  not expired before the application date (Chicago date; falls back to the invoice date, then today) and expiring
-  in that date's season.
+  written on or before the application date and not expired by it (Chicago dates; Mason, 2026-11-17, "Valid +
+  written before", replacing the earlier season bound). The date is the job's date, else the invoice date the line
+  will carry, else Chicago today.
 - Who may act: unchanged (admins and reps through the existing wrappers). Every price stays server-derived; the screen
   sends only ids and a manual override, which still wins as today.
 - Files: `supabase/migrations/20270123100000_ki81_invoices_bill_sent_quote_price.sql`, its ledger and
@@ -128,6 +129,16 @@ Mason, 2026-11-17 (in session):
 2. Two eligible quotes disagree on the price: "Stop, type the price" (FIELD_APP_QUOTE_PRICE_CONFLICT; the manual price saves).
 3. Shared field, one grower's quote (Sol round 2): "Own quote only": each grower pays a quoted price only from a quote
    sent to them; otherwise the price list.
+4. A quote whose expiry crosses October 1 (Sol round 3): "Valid + written before": a quote counts when it was written
+   on or before the application date and had not expired by it; a quote written later (such as next season's) never
+   prices an earlier application.
+
+## Sol round 3 (2026-11-17)
+
+- The season bound ignored a still-valid quote whose expiry fell after October 1: replaced by Mason's answer 4.
+- A grower's quote on a field they had no share of could price their invoice: each grower's quote now counts only on
+  their own fields (single save and preview from the field shares; split save field by field with the same split rule).
+- Preview without the sent-price lock (MED): settled in round 2, below.
 
 ## Sol round 2 (2026-11-17)
 

@@ -7,7 +7,8 @@
   product on one of the fields: any customer, any status, deleted, expired or never sent, chosen effectively at
   random. Now only the billed grower's own quote (Mason, "Own quote only": on a shared field a co-owner's quote never
   prices another grower's share) that was sent, is not a draft, declined, cancelled
-  or deleted, and has not expired by the application date (and expires in that season) can price it (Mason,
+  or deleted, was written on or before the application date and has not expired by it, on a field that grower has a
+  share of, can price it (Mason, "Valid + written before";
   "Sent + not expired"). Its prices must pass the sent-price lock (a price changed after sending needs a re-send, or
   a change `save_quote` recorded since). Two such quotes, or two lines, at different prices refuse
   `FIELD_APP_QUOTE_PRICE_CONFLICT`; typing the price on the line saves (Mason, "Stop, type the price"). No eligible

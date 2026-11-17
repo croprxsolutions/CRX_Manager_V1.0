@@ -8,7 +8,7 @@
  * replays every post-baseline migration before the candidate, commits invented test rows (ids a81a81a8-...)
  * and a private k81 schema of seeding helpers, then:
  *   before  the chain scripts/smoke/smoke-ki81-sent-quote-price.sql FAILS (today's code bills an unsent price);
- *   apply   the candidate applies; the chain passes (cases F1-F7, P1-P2, X1-X3, B1-B3);
+ *   apply   the candidate applies; the chain passes (cases F1-F8, P1-P3, X1-X4, B1-B3);
  *   C9      while a field-app save holds a sent quote, a quote edit's row lock waits (save_quote locks the
  *           quote FOR UPDATE first), and gets it once the save ends;
  *   grants  the helpers are executable by no API role, the resolver by neither anon nor authenticated;
@@ -269,10 +269,10 @@ const FNS = ['create_invoice_from_blend_ticket', '_save_field_app_invoice_impl_2
 const OLD = 'create_invoice_from_blend_ticket:a6f5c6e72d6632313549313b34f406ad,_save_field_app_invoice_impl_20260714:0f5da38476fe174cd25c9bf3e364055f,'
   + '_save_field_app_split_invoice_impl:a69f21d8e9f32fc6fecb38ac3a54801c,_preview_field_app_invoice_split_impl_20260908:83f6600412ced085d0876a3c7339ff12,'
   + 'resolve_field_app_chemical_price:d2617d60d7b6e5b922bc3e3be4e5850b';
-const NEW = 'create_invoice_from_blend_ticket:81bcfd088498f0cb1624f161e1a55e46,_save_field_app_invoice_impl_20260714:f8db5ee2904c40db23e380b0dadb3640,'
-  + '_save_field_app_split_invoice_impl:a577dcf20b14e441bd3862abb922833d,_preview_field_app_invoice_split_impl_20260908:35cd03475ffe6806b0e0cd2fc997eae1,'
+const NEW = 'create_invoice_from_blend_ticket:81bcfd088498f0cb1624f161e1a55e46,_save_field_app_invoice_impl_20260714:7ec879b190189252a79d728584a08980,'
+  + '_save_field_app_split_invoice_impl:767b12bc61a96bf90c6adb5cb392d7be,_preview_field_app_invoice_split_impl_20260908:a6ab05aaab8252db0607b6660666be09,'
   + 'resolve_field_app_chemical_price:2f6fe91f7c639d953e3d8c525c06f168,_field_app_sent_quote_price_cents:23fd278cd6d7bff920e21d9f482da9d9,'
-  + '_field_app_quote_eligible:2e651e469fb7149896851b86179b2039';
+  + '_field_app_quote_eligible:21eace1e5236db37b4e4e039631eefc4';
 const ASSERT_MD5 = '4e3bca2b48a4af44de9d1f219a880586';
 const bodies = () => scalar(`SELECT string_agg(proname || ':' || md5(replace(prosrc, chr(13), '')), ',' ORDER BY array_position(ARRAY['${FNS.join("','")}'], proname::text))
   FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname IN ('${FNS.join("','")}');`);
@@ -327,6 +327,8 @@ function seed() {
         VALUES (p_quote, v_i.id, v_i.product_id, ROUND(v_i.price_per_unit * 100), ROUND(p_price * 100), '${ADMIN}', 1);
       END IF;
     END $f$;
+    CREATE FUNCTION k81.set_created(p_quote uuid, p_at timestamptz) RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp
+      SET session_replication_role = replica AS $f$ UPDATE quotes SET created_at = p_at WHERE id = p_quote $f$;
     CREATE FUNCTION k81.soft_delete(p_quote uuid) RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp
       SET session_replication_role = replica AS $f$ UPDATE quotes SET deleted_at = now() WHERE id = p_quote $f$;
     -- A job on the quote's section, and an approved, unbilled blend ticket for 20 Gal of the product on the field.
@@ -363,14 +365,14 @@ function seed() {
         WHERE ii.invoice_id = (v_res->'invoice_ids'->>0)::uuid AND ii.product_id = p_product;
     END $f$;
     -- The same single save, returning every billed grower's line (a shared field bills each owner).
-    CREATE FUNCTION k81.save_single_all(p_by uuid, p_field uuid, p_product uuid)
+    CREATE FUNCTION k81.save_single_all(p_by uuid, p_fields uuid[], p_product uuid)
     RETURNS TABLE (customer_id uuid, unit_price_cents bigint, price_source text) LANGUAGE plpgsql SET search_path = public, pg_temp AS $f$
     DECLARE v_res jsonb;
     BEGIN
       v_res := public.save_field_app_invoice(NULL,
         jsonb_build_object('invoice_date', ((now() AT TIME ZONE 'America/Chicago')::date)::text, 'salesman_id', p_by),
-        jsonb_build_array(jsonb_build_object('field_id', p_field, 'map_number', 1, 'total_acres', 100, 'planted_acres', 100,
-          'applied_acres', 10, 'sort_order', 0)),
+        (SELECT jsonb_agg(jsonb_build_object('field_id', f, 'map_number', n, 'total_acres', 100, 'planted_acres', 100,
+          'applied_acres', 10, 'sort_order', n - 1)) FROM unnest(p_fields) WITH ORDINALITY AS u(f, n)),
         jsonb_build_array(jsonb_build_object('description', 'K81 chem', 'rate_per_acre', 16, 'rate_unit', 'oz', 'unit_size', 'Gal',
           'cost_cents', 500, 'sort_order', 0, 'manual_override', false, 'product_id', p_product)),
         p_by, NULL, 'k81-single-' || gen_random_uuid());
@@ -378,12 +380,12 @@ function seed() {
         WHERE ii.invoice_id IN (SELECT (x #>> '{}')::uuid FROM jsonb_array_elements(v_res->'invoice_ids') x) AND ii.product_id = p_product;
     END $f$;
     -- The invoice screen's preview of that save: each grower's previewed chemical unit price.
-    CREATE FUNCTION k81.preview(p_field uuid, p_product uuid)
+    CREATE FUNCTION k81.preview(p_fields uuid[], p_product uuid)
     RETURNS TABLE (customer_id uuid, unit_price_cents bigint) LANGUAGE plpgsql SET search_path = public, pg_temp AS $f$
     DECLARE v_res jsonb;
     BEGIN
       v_res := public.preview_field_app_invoice_split(
-        jsonb_build_array(jsonb_build_object('field_id', p_field, 'applied_acres', 10)),
+        (SELECT jsonb_agg(jsonb_build_object('field_id', f, 'applied_acres', 10)) FROM unnest(p_fields) f),
         jsonb_build_array(jsonb_build_object('description', 'K81 chem', 'rate_per_acre', 16, 'rate_unit', 'oz', 'unit_size', 'Gal',
           'manual_override', false, 'product_id', p_product)),
         NULL, NULL, (now() AT TIME ZONE 'America/Chicago')::date);
@@ -391,12 +393,12 @@ function seed() {
         FROM jsonb_array_elements(v_res->'per_customer') c, jsonb_array_elements(c->'lines') l WHERE l->>'kind' = 'chemical';
     END $f$;
     -- 1 Gal on the field through the split-bill save; returns the total of every child invoice.
-    CREATE FUNCTION k81.save_split(p_by uuid, p_field uuid, p_product uuid) RETURNS bigint LANGUAGE plpgsql SET search_path = public, pg_temp AS $f$
+    CREATE FUNCTION k81.save_split(p_by uuid, p_fields uuid[], p_product uuid) RETURNS bigint LANGUAGE plpgsql SET search_path = public, pg_temp AS $f$
     DECLARE v_res jsonb;
     BEGIN
       v_res := public.save_field_app_split_invoice(NULL, NULL,
         jsonb_build_object('invoice_date', ((now() AT TIME ZONE 'America/Chicago')::date)::text),
-        jsonb_build_array(jsonb_build_object('field_id', p_field, 'applied_acres', 10)),
+        (SELECT jsonb_agg(jsonb_build_object('field_id', f, 'applied_acres', 10)) FROM unnest(p_fields) f),
         jsonb_build_array(jsonb_build_object('line_kind', 'chemical', 'product_id', p_product, 'description', 'K81 split chem',
           'source_quantity', 1, 'rate_unit', 'Gal', 'manual_override', false)),
         p_by, NULL, 'k81-split-' || gen_random_uuid());
@@ -486,7 +488,7 @@ async function main() {
   const after = runChain();
   assert.equal(after.status, 0, after.output);
   assert.match(after.output, /SMOKE_PASS_ROLLBACK/);
-  console.log('[case] F1-F7, P1-P2, X1-X3, B1-B3 pass: sent price bills; a planted price record refuses; unsent change refuses; recorded change bills; ineligible quotes give the tier price; two prices refuse, a typed price saves; a co-owner\'s quote prices only that co-owner; the preview shows what the save bills; split and blend follow the same rule');
+  console.log('[case] F1-F8, P1-P3, X1-X4, B1-B3 pass: sent price bills; a planted price record refuses; unsent change refuses; recorded change bills; ineligible quotes give the tier price; two prices refuse, a typed price saves; a co-owner\'s quote prices only that co-owner, only on a field that co-owner has a share of; a quote written after the application date does not count; the preview shows what the save bills; split and blend follow the same rule');
 
   await concurrencyCase();
   grantCase();

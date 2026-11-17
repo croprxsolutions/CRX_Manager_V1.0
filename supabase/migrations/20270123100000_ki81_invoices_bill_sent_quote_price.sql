@@ -17,9 +17,10 @@
 -- WHAT:
 --  1. New private _field_app_quote_eligible(quote, product, fields, on_date) and _field_app_sent_quote_price_cents(
 --     product, fields, customers, on_date) (invoker rights, executable by no API role). Eligible quotes (Mason,
---     2026-11-17, "Sent + not expired" and "Own quote only"): the grower being billed's own quote; not deleted; has a sent version; status sent, revised, accepted, expired,
---     closed_by_application or closed_short; not expired before the application date (Chicago) and expiring in
---     that date's season (a later season's quote never prices it). It locks them FOR SHARE in id order, runs the
+--     2026-11-17, "Sent + not expired" and "Own quote only"): the grower being billed's own quote, on a field
+--     that grower has a share of (Sol round 3); not deleted; has a sent version; status sent, revised, accepted, expired,
+--     closed_by_application or closed_short; written on or before the application date and not expired by it
+--     (Chicago dates; Mason, 2026-11-17, "Valid + written before"). It locks them FOR SHARE in id order, runs the
 --     sent-price lock on each (QUOTE_RESEND_REQUIRED), and returns the one non-negative price in cents, the same
 --     answer for the same inputs for the rest of the transaction (the split save asks once per grower). Different prices refuse (Mason, 2026-11-17, "Stop, type the price": FIELD_APP_QUOTE_PRICE_CONFLICT;
 --     a manual price on the line still saves). None: NULL, so the tier price applies as before.
@@ -90,16 +91,15 @@ STABLE
 SET search_path = public, pg_temp
 AS $fn$
   -- KI-81 (Mason, 2026-11-17): a quote may price a field-application chemical only when it is not deleted, was
-  -- actually sent (not a draft, declined or cancelled quote), had not expired by the application date and
-  -- expires in that date's season (quotes expire at season end, so a next season's quote never prices a
-  -- backdated application), and lists the product on one of the fields. Whose quote (the billed grower's own)
+  -- actually sent (not a draft, declined or cancelled quote), was written on or before the application date and
+  -- had not expired by it (Chicago dates; "Valid + written before", so a quote written later, such as next
+  -- season's, never prices an earlier application), and lists the product on one of the fields. Whose quote (the billed grower's own)
   -- is the caller's filter. Shared by the field-app saves and the invoice preview so both pick the same quotes;
   -- it takes the quote row so a FOR SHARE re-check after a wait sees the row's new status, deletion and expiry.
   SELECT q.deleted_at IS NULL
      AND q.status IN ('sent', 'revised', 'accepted', 'expired', 'closed_by_application', 'closed_short')
-     AND (q.expires_at IS NULL
-          OR (q.expires_at >= p_on
-              AND public.compute_season(q.expires_at) = public.compute_season(p_on)))
+     AND (q.created_at AT TIME ZONE 'America/Chicago')::date <= p_on
+     AND (q.expires_at IS NULL OR q.expires_at >= p_on)
      AND EXISTS (SELECT 1 FROM public.quote_versions v WHERE v.quote_id = q.id)
      AND EXISTS (SELECT 1 FROM public.quote_sections qs
                    JOIN public.quote_items qi ON qi.section_id = qs.id AND qi.quote_id = qs.quote_id
@@ -1542,9 +1542,12 @@ BEGIN
           END IF;
 
           IF v_unit_price IS NULL AND (v_chem->>'product_id') IS NOT NULL THEN
-            -- KI-81 (Mason, 2026-11-17): only the price the customer was sent (see the helper).
+            -- KI-81 (Mason, 2026-11-17): only the price this customer was sent, on a field they have a share of.
             v_qi_price := public._field_app_sent_quote_price_cents(
-                            (v_chem->>'product_id')::uuid, v_field_ids, ARRAY[v_customer_id], v_quote_price_date);
+                            (v_chem->>'product_id')::uuid,
+                            ARRAY(SELECT DISTINCT (r->>'field_id')::uuid FROM jsonb_array_elements(v_shares -> 'rows') r
+                                     WHERE (r->>'customer_id')::uuid = v_customer_id),
+                            ARRAY[v_customer_id], v_quote_price_date);
             IF v_qi_price IS NOT NULL THEN
               v_unit_price   := v_qi_price::bigint;
               v_quoted_price := v_unit_price;
@@ -1809,6 +1812,7 @@ DECLARE
   v_vector             jsonb;          -- default vector [{customer_id, micro_pct}]
   v_micro_map          jsonb := '{}'::jsonb;
   v_members            text[];         -- billing-set member customer_ids, sorted ASC
+  v_member_fields      jsonb := '{}'::jsonb;  -- KI-81: member customer_id -> the fields that member has a share of
   v_set_id             uuid;
   v_group_id           uuid;
   v_line               jsonb;
@@ -1975,6 +1979,16 @@ BEGIN
   SELECT COALESCE(jsonb_object_agg(value->>'customer_id', (value->>'micro_pct')::bigint), '{}'::jsonb)
     INTO v_micro_map
     FROM jsonb_array_elements(v_vector) AS value;
+
+  -- KI-81 (Sol round 3): a member's quote prices the chemical only on the fields that member has a share of,
+  -- resolved field by field with the same split rule as the default vector.
+  SELECT COALESCE(jsonb_object_agg(e.cust, e.fields), '{}'::jsonb)
+    INTO v_member_fields
+    FROM (SELECT x->>'customer_id' AS cust, jsonb_agg(DISTINCT f) AS fields
+            FROM unnest(v_field_ids) AS f,
+                 jsonb_array_elements(resolve_line_split_vector(ARRAY[f], p_source_job_id, v_applied_acres_map)) AS x
+           WHERE (x->>'micro_pct')::bigint > 0
+           GROUP BY x->>'customer_id') e;
 
   -- ---- CUSTOMER-SCOPE SECURITY (Codex P1 #4, 2026-07-18; widened 2026-10-13) ----
   -- Reps bill ANY customer (Mason, 2026-10-13): 20261013220000 removed the
@@ -2427,7 +2441,7 @@ BEGIN
         SELECT COALESCE(jsonb_object_agg(
                  m.cust,
                  (resolve_field_app_chemical_price(
-                    v_product_id, v_field_ids,
+                    v_product_id, ARRAY(SELECT jsonb_array_elements_text(v_member_fields -> m.cust)::uuid),
                     COALESCE((SELECT c.assigned_tier FROM customers c WHERE c.id = m.cust::uuid), 1),
                     v_chem_manual, ARRAY[m.cust::uuid],
                     -- KI-81: on the date this grower's child invoice carries (the job's date first).
@@ -2464,7 +2478,8 @@ BEGIN
           FROM customers c
          WHERE c.id = v_rep_cust;
         v_price_res      := resolve_field_app_chemical_price(
-                              v_product_id, v_field_ids, COALESCE(v_rep_tier, 1), v_chem_manual, ARRAY[v_rep_cust],
+                              v_product_id, ARRAY(SELECT jsonb_array_elements_text(v_member_fields -> v_rep_cust::text)::uuid),
+                              COALESCE(v_rep_tier, 1), v_chem_manual, ARRAY[v_rep_cust],
                               COALESCE(v_job_app_date, (p_invoice->>'invoice_date')::date,
                              (SELECT i.invoice_date FROM invoices i
                                WHERE i.field_app_billing_set_id = v_set_id AND i.customer_id = v_rep_cust AND i.deleted_at IS NULL
@@ -3275,10 +3290,14 @@ BEGIN
           -- the same quotes the save uses (no locks here; the save also runs the sent-price lock).
           SELECT array_agg(DISTINCT ROUND(qi.price_per_unit * 100)::bigint) INTO v_qi_prices
             FROM quotes q
-            JOIN quote_sections qs ON qs.quote_id = q.id AND qs.field_id = ANY(v_field_ids)
+            JOIN quote_sections qs ON qs.quote_id = q.id
+                                  AND qs.field_id = ANY(ARRAY(SELECT DISTINCT (r->>'field_id')::uuid FROM jsonb_array_elements(v_shares -> 'rows') r
+                                     WHERE (r->>'customer_id')::uuid = v_customer_id))
             JOIN quote_items qi ON qi.section_id = qs.id AND qi.quote_id = qs.quote_id
            WHERE q.customer_id = v_customer_id
-             AND public._field_app_quote_eligible(q, (v_chem->>'product_id')::uuid, v_field_ids, v_quote_price_date)
+             AND public._field_app_quote_eligible(q, (v_chem->>'product_id')::uuid,
+                   ARRAY(SELECT DISTINCT (r->>'field_id')::uuid FROM jsonb_array_elements(v_shares -> 'rows') r
+                                     WHERE (r->>'customer_id')::uuid = v_customer_id), v_quote_price_date)
              AND qi.product_id = (v_chem->>'product_id')::uuid
              AND qi.price_per_unit >= 0;
           IF cardinality(v_qi_prices) > 1 THEN
@@ -3438,9 +3457,9 @@ BEGIN
     SELECT 1
       FROM (VALUES
         ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '81bcfd088498f0cb1624f161e1a55e46', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
-        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'f8db5ee2904c40db23e380b0dadb3640', ARRAY['postgres', 'service_role'], 'v'),
-        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', 'a577dcf20b14e441bd3862abb922833d', ARRAY['postgres', 'service_role'], 'v'),
-        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '35cd03475ffe6806b0e0cd2fc997eae1', ARRAY['postgres'], 's')
+        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '7ec879b190189252a79d728584a08980', ARRAY['postgres', 'service_role'], 'v'),
+        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '767b12bc61a96bf90c6adb5cb392d7be', ARRAY['postgres', 'service_role'], 'v'),
+        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'a6ab05aaab8252db0607b6660666be09', ARRAY['postgres'], 's')
       ) AS pin(fn, sig, body_md5, execs, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL
@@ -3471,7 +3490,7 @@ BEGIN
      OR (SELECT provolatile FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)')) <> 'v'
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)')) IS DISTINCT FROM '23fd278cd6d7bff920e21d9f482da9d9'
      OR (SELECT prosecdef FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)'))
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_quote_eligible(quotes,uuid,uuid[],date)')) IS DISTINCT FROM '2e651e469fb7149896851b86179b2039'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_quote_eligible(quotes,uuid,uuid[],date)')) IS DISTINCT FROM '21eace1e5236db37b4e4e039631eefc4'
      OR (SELECT prosecdef OR provolatile <> 's' FROM pg_proc WHERE oid = to_regprocedure('public._field_app_quote_eligible(quotes,uuid,uuid[],date)'))
      OR has_function_privilege('anon', 'public._field_app_quote_eligible(quotes,uuid,uuid[],date)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._field_app_quote_eligible(quotes,uuid,uuid[],date)', 'EXECUTE')

@@ -30,6 +30,7 @@ import {
   environmentSelectsDifferentRepo,
   destinationLooksLikeUrl,
   pushDestinationToken,
+  pushDestinationBranches,
   repoIsGuardedApp,
   urlIsGuardedApp,
   riskyFiles,
@@ -40,6 +41,7 @@ import {
   readHookInputBounded,
   sanitizeForMessage,
 } from "./codex-push-lib.mjs";
+import { claimOrRefuse, claimsFileFor } from "./pr-claim-lib.mjs";
 
 function passthrough() { process.exit(0); }               // emit nothing → normal flow (git push is allow-listed)
 function deny(reason) {
@@ -83,6 +85,23 @@ try {
 if (nestedCommands.tooDeep) deny(nestedTooDeepDenial("CODEX GATE"));
 if (nestedCommands.commands.some((inner) => isGitPush(inner))) {
   deny("CODEX GATE: this command runs a git push inside another shell or an evaluator (bash -c, cmd /c, pwsh -Command or -EncodedCommand, eval, Invoke-Expression, Start-Process). The review gate reads the outer command's text, so it cannot prove where a push carried that way would go. Run the push as its own plain command: `git -C <repo> push <remote> <refspec>`.");
+}
+// Landing claim (pr-claim-lib.mjs, fail open): a Sol run claims its branch, and a
+// second session's Sol run on a branch another session is landing is refused.
+let segmentsForClaim = [];
+try { segmentsForClaim = shellSegments(cmd); } catch { /* fail open; the push checks below parse it themselves */ }
+for (const segment of segmentsForClaim) {
+  const run = segment.match(/^\s*node(?:\.exe)?(?:\s+-\S+)*\s+("?)([^\s"]*write-codex-push-proof\.mjs)\1(.*)$/i);
+  // A directory change in the command could point the run at another checkout: skip (fail open).
+  if (!run || /--dry-run|--help|(?:^|\s)-h\b/.test(run[3]) || /\b(?:cd|pushd|Set-Location|sl)\b/i.test(cmd)) continue;
+  let refusal = "";
+  try {
+    // The proof script reviews its working directory (resolveRepoRoot(process.cwd())), wherever the script file lives.
+    const dir = path.resolve(payload?.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd());
+    const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: dir, encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+    refusal = claimOrRefuse({ file: claimsFileFor(dir), branch, sessionId: payload?.session_id, action: "Sol review", cwd: dir });
+  } catch { /* fail open */ }
+  if (refusal) deny(refusal);
 }
 if (!isGitPush(cmd)) passthrough();
 if (pushContextIsAmbiguous(cmd)) {
@@ -148,6 +167,21 @@ for (const pushCmd of pushCommands) {
     branch = git(["rev-parse", "--abbrev-ref", "HEAD"], pushRepoDir);
   } catch (error) {
     deny(`CODEX GATE: could not determine the repository/branch selected by this push, so it is denied. ${error?.message || error}`);
+  }
+
+  // Landing claim (pr-claim-lib.mjs, fail open): the first session to push a PR branch claims it.
+  let destinations = [];
+  // A dry run writes nothing, so it claims nothing.
+  if (!/(?:^|\s)(?:--dry-run|-n)(?=\s|$)/.test(pushCmd)) {
+    try { destinations = pushDestinationBranches(pushCmd, branch); } catch { /* fail open */ }
+  }
+  // A ref-less push may land on a differently named upstream (push.default=upstream): claim that too.
+  if (destinations.length === 1 && destinations[0] === branch) {
+    try { destinations.push(git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"], pushRepoDir).replace(/^[^/]+\//, "")); } catch { /* no upstream */ }
+  }
+  for (const destination of destinations) {
+    const refusal = claimOrRefuse({ file: claimsFileFor(pushRepoDir), branch: destination, sessionId: payload?.session_id, action: "push", cwd: pushRepoDir });
+    if (refusal) deny(refusal);
   }
 
   const srcRef = mainPushSource(pushCmd, branch);

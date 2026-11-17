@@ -2123,6 +2123,12 @@
       "covers": ["_recompute_standing_discount_20261231", "_sales_tax_expected_20261231", "_sales_tax_setting_rate_20261231", "_sales_tax_record_rate_20261231", "guard_sales_tax_line_scope_20261231", "guard_sales_tax_current_on_post_20261231", "set_order_sales_tax", "_standing_discount_net_cents_20261231", "_return_customer_line_share", "create_return", "issue_return_credit", "unpost_invoice_group", "save_invoice", "post_invoice", "post_invoice_group", "complete_delivery"],
       "area": ["billing", "regression"]
     },
+    "billing_m4_switch": {
+      "chain": "smoke-billing-m4-switch.sql",
+      "description": "Migration 20270117140000: with the M4 switch off (live until commission), ticking a sale's sales tax, a customer standing discount above 0 and a sale's own discount above 0 are refused (BILLING_M4_OFF), while unticking, 0 and \"the customer's rate\" work; a signed-in admin can read the switch but not change it, the anonymous role can't read it; switched on, all three work. Terminal rollback.",
+      "covers": ["_billing_m4_guard_20270117", "_billing_m4_enabled_20270117", "set_order_sales_tax", "set_invoice_standing_discount"],
+      "area": ["billing", "security", "regression"]
+    },
     "epa_long_name_cas_match": {
       "chain": "smoke-epa_long_name_cas_match.sql",
       "description": "REQUIRES 20270107100000 (#1810 follow-up). On an invented product with one Glyphosate row, an admin starts an EPA lookup and the epa-lookup role records an answer listing Glyphosate by CAS under a 250-character name: the proposal shows that entry as an unticked conflict with no change, shows the product's row beside it, and does not list the row as missing from EPA. Fails before the migration. Terminal rollback.",

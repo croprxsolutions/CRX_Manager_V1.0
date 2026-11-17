@@ -69,7 +69,8 @@
       "sweeps": [
         "returns-lifecycle-rpc-owned",
         "product-name-vs-return-policy",
-        "section9-po-ap-controls"
+        "section9-po-ap-controls",
+        "stock-matches-history"
       ]
     },
     "lifecycle": {

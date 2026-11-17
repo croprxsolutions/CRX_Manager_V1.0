@@ -7,12 +7,15 @@
  * replays every post-baseline migration before the candidate, seeds invented parents, sizes and ingredients,
  * applies the candidate (and a second run, which refuses), then runs cases 1-11 through the real RPCs as a
  * signed-in admin, a second admin, a sales rep, an inactive user and anon, and finally the rollback SQL from
- * docs/reference/migrations.d/20270108100000_ingredient_modes_of_action.md.
+ * docs/reference/migrations.d/20270108100000_ingredient_modes_of_action.md. `--moa-equivalence` additionally
+ * applies the exact chronological delivery-receipt migration and MOA equivalence candidate before those cases,
+ * pins their source bodies, and reverses equivalence before MOA-1 rollback.
  *
- * Run: node scripts/smoke/prove-ingredient-modes-of-action-real-schema.mjs   (needs Docker)
+ * Run: node scripts/smoke/prove-ingredient-modes-of-action-real-schema.mjs [--moa-equivalence]   (needs Docker)
  * Prints INGREDIENT_MODES_OF_ACTION_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
@@ -27,6 +30,21 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270108100000_ingredient_modes_of_action.sql');
+const MOA_EQUIVALENCE_MODE = process.argv.includes('--moa-equivalence');
+const MOA_DEPENDENCY_SHA256_LF = '2fa8044bc4e0b5004bb37ced44d824c59c0696bc8a7b83930c1de062841de107';
+const MOA_OVERLAYS = [
+  ['20270109100000_delivery_receipt_brands.sql', 'f9f52f9ace2024c77b568767288c3700dc35e4e2de871436e6df7a3067be0c87'],
+  ['20270115100000_moa_group_code_equivalence.sql', '7b54d17d319ca706b9fa87eb2db039bcb362df8e108cad24e5bc6f367a0a1890'],
+];
+// Later files that only CALL a shared helper TOUCHED names (save_idempotency, _product_parent_require_admin); pinned to reviewed source, not replayed.
+const LATER_CALLER_ONLY = new Map([
+  ['20270109100100_standing_grower_discount.sql', 'c84bd553b6732631d8c01374a0aac522518167e5506782133631f8afd0bfe90f'],
+  ['20270109100200_sales_tax_checkbox.sql', 'a5ffbe01e7d09c0b962560d59dd935f64949ab29b1152fd44b1ae09a532a1b64'],
+  ['20270109100300_sales_tax_rep_no_salesman.sql', 'c0df52c427687cd9bb3c7c160b46211d5d89abfddc1b66805b677f0d28a0732d'],
+  ['20270109100400_sales_tax_not_revenue.sql', '3a53e900d2bb57d9296952e412b6d43b180b4f936427aba6c8f699eb4f18da68'],
+  ['20270110110000_inactive_rate_review_cleanup.sql', '7f980faaff2fd23642522535b885cca9f30e5c7c316482d4a587586f9f5b6772'],
+  ['20270113100000_stock_checks_negative_onorder_chicago.sql', '3d31cc43251b062fda6a8ea13a990462027752d571fbee07e824b864a051b7b0'],
+]);
 // Taha 2026-11-12 (#1810): an over-long EPA name still matches by CAS. Applied right after the candidate.
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -62,6 +80,13 @@ function psqlArgs(user = 'postgres') { return ['exec', '-i', NAME, 'psql', '-U',
 function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input: sql, allowFailure: options.allowFailure }); }
 function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
 function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
+function migrationFunctionBody(source, name) {
+  const start = new RegExp(`CREATE (?:OR REPLACE )?FUNCTION public\\.${name}\\(`).exec(source);
+  assert.ok(start, `candidate SQL is missing the ${name} body`);
+  const end = source.indexOf('$function$;', start.index);
+  assert.notEqual(end, -1, `${name} does not use the pinned function delimiter`);
+  return /\$function\$(.*?)\$function\$;/s.exec(source.slice(start.index, end + '$function$;'.length))?.[1];
+}
 function stageText(name, text) {
   const staged = path.join(tmpdir(), `${NAME}-${name}`);
   writeFileSync(staged, text, 'utf8');
@@ -145,7 +170,23 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
+  if (MOA_EQUIVALENCE_MODE) {
+    assert.equal(createHash('sha256').update(lf(CANDIDATE)).digest('hex'), MOA_DEPENDENCY_SHA256_LF,
+      'the exact original MOA dependency changed from its reviewed source');
+  }
+  let lastOverlay = at;
+  const overlayPaths = MOA_EQUIVALENCE_MODE ? MOA_OVERLAYS.map(([name]) => path.join(MIGRATIONS, name)) : [];
+  for (const file of overlayPaths) {
+    const index = all.indexOf(file);
+    assert.ok(index > lastOverlay, `${path.basename(file)} must sort after the candidate and prior overlay migrations`);
+    lastOverlay = index;
+    const pin = MOA_OVERLAYS.find(([name]) => path.join(MIGRATIONS, name) === file)?.[1];
+    assert.equal(createHash('sha256').update(lf(file)).digest('hex'), pin, `${path.basename(file)} changed from the exact reviewed overlay source`);
+  }
   for (const file of all.slice(at + 1)) {
+    if (overlayPaths.includes(file)) continue;
+    const callerPin = LATER_CALLER_ONLY.get(path.basename(file));
+    if (callerPin && createHash('sha256').update(lf(file)).digest('hex') === callerPin) continue;
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);
@@ -155,6 +196,45 @@ function plan() {
     assert.ok(!TOUCHED.test(lf(file)), `${name} now touches what this proof covers; replay it or re-think the skip`);
   }
   return before;
+}
+function applyMoaEquivalenceOverlay() {
+  assert.ok(MOA_EQUIVALENCE_MODE, 'the overlay is available only under the explicit mode');
+  const [receiptFile, equivalenceFile] = MOA_OVERLAYS.map(([name]) => path.join(MIGRATIONS, name));
+  stageText('delivery-receipt-brands.sql', lf(receiptFile));
+  let result = apply('delivery-receipt-brands.sql');
+  assert.equal(result.status, 0, result.output);
+  ledger(path.basename(receiptFile, '.sql'));
+  result = apply('delivery-receipt-brands.sql');
+  assert.notEqual(result.status, 0);
+  assert.match(result.output, /DELIVERY_RECEIPT_BRANDS_PREFLIGHT: this file was already applied/);
+
+  stageText('moa-equivalence.sql', lf(equivalenceFile));
+  result = apply('moa-equivalence.sql');
+  assert.equal(result.status, 0, result.output);
+  ledger(path.basename(equivalenceFile, '.sql'));
+  result = apply('moa-equivalence.sql');
+  assert.notEqual(result.status, 0);
+  assert.match(result.output, /MOA_GROUP_EQUIVALENCE_PREFLIGHT/);
+
+  const candidate = lf(equivalenceFile);
+  const replaced = [
+    ['_ingredient_modes_input', '(jsonb,text)'],
+    ['_parent_mode_groups', '(uuid)'],
+    ['set_active_ingredient_modes', '(uuid,jsonb,jsonb,text,text)'],
+    ['_apply_parent_chemistry', '(uuid,jsonb,text,text,text)'],
+    ['_moa_group_code_key', '(text)'],
+  ];
+  for (const [name, signature] of replaced) {
+    const expected = createHash('md5').update(migrationFunctionBody(candidate, name)).digest('hex');
+    assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.${name}${signature}'::regprocedure;`),
+      expected, `the database does not contain the exact ${name} body from the equivalence candidate`);
+  }
+  assert.equal(scalar(`SELECT has_function_privilege('anon','public._moa_group_code_key(text)','EXECUTE')::text
+    || has_function_privilege('authenticated','public._moa_group_code_key(text)','EXECUTE')::text
+    || has_function_privilege('service_role','public._moa_group_code_key(text)','EXECUTE')::text;`), 'falsefalsefalse');
+  assert.equal(scalar(`SELECT bool_and(indisunique AND indisvalid AND indisready) FROM pg_index WHERE indexrelid IN
+    ('public.active_ingredient_modes_of_action_canonical_one_active'::regclass,'public.product_parent_modes_of_action_canonical_one_active'::regclass);`), 't');
+  console.log('[overlay] applied exact chronological delivery-receipt prerequisite and equivalence candidate; candidate source hashes, helper grants, and canonical indexes match');
 }
 function installLiveAuthUid() {
   psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
@@ -321,13 +401,14 @@ const events = (ing) => n(`SELECT count(*) FROM public.active_ingredient_events 
 const typedCount = () => n('SELECT count(*) FROM public.product_parent_modes_of_action;');
 const summary = (g) => g.summary.map((s) => `${s.scheme} ${s.group_code}${s.differs ? ' differs' : ''}`).join(', ');
 // The fifteen DM-1/DM-1b/DM-4 functions MOA-1 must not touch (sheet 4.A), fingerprinted independently of the file.
-const UNTOUCHED = ['_apply_parent_chemistry', '_parent_chemistry_values', '_check_parent_chemistry', '_chemistry_kept_modes',
+const UNTOUCHED_ALL = ['_apply_parent_chemistry', '_parent_chemistry_values', '_check_parent_chemistry', '_chemistry_kept_modes',
   '_parent_chemistry_epa_refusal', 'get_parent_chemistry', 'set_parent_chemistry', 'correct_parent_chemistry', '_ingredient_users',
   '_ingredient_usage_fingerprint', 'get_active_ingredient_worklist', 'retire_active_ingredient', 'reactivate_active_ingredient',
   'promote_chemistry_proposal', 'commit_epa_proposal'];
-const fingerprint = () => scalar(`SELECT md5(string_agg(p.oid::regprocedure::text || p.prosrc || COALESCE(p.proconfig::text, '')
+const UNTOUCHED = MOA_EQUIVALENCE_MODE ? UNTOUCHED_ALL.filter((name) => name !== '_apply_parent_chemistry') : UNTOUCHED_ALL;
+const fingerprint = (names = UNTOUCHED) => scalar(`SELECT md5(string_agg(p.oid::regprocedure::text || p.prosrc || COALESCE(p.proconfig::text, '')
   || p.proowner::text || p.prosecdef::text || COALESCE(p.proacl::text, ''), '#' ORDER BY p.oid::regprocedure::text))
-  || ':' || count(DISTINCT p.proname) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN (${UNTOUCHED.map(q).join(', ')});`);
+  || ':' || count(DISTINCT p.proname) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN (${names.map(q).join(', ')});`);
 
 function case1() {
   const before = typedCount();
@@ -527,8 +608,10 @@ async function case12() {
 async function main() {
   buildContainer();
   seed();
+  const fpAllBefore = fingerprint(UNTOUCHED_ALL);
+  assert.match(fpAllBefore, new RegExp(`:${UNTOUCHED_ALL.length}$`), `all ${UNTOUCHED_ALL.length} MOA-1 protected functions exist before the original migration`);
   const fpBefore = fingerprint();
-  assert.match(fpBefore, /:15$/, 'the fifteen untouched functions exist before the candidate');
+  assert.match(fpBefore, new RegExp(`:${UNTOUCHED.length}$`), `the ${UNTOUCHED.length} unchanged functions exist before the candidate`);
   stageText('candidate.sql', lf(CANDIDATE));
   const notTx = docker([...psqlArgs(), '-f', '/tmp/candidate.sql'], { allowFailure: true });
   assert.notEqual(notTx.status, 0); assert.match(`${notTx.stdout}${notTx.stderr}`, /INGREDIENT_MODES_NOT_IN_TRANSACTION/);
@@ -538,6 +621,11 @@ async function main() {
   const again = apply('candidate.sql');
   assert.notEqual(again.status, 0); assert.match(again.output, /INGREDIENT_MODES_PREFLIGHT: this file was already applied/);
   console.log('[case] M1 the candidate refuses outside one transaction, applies (its postflight checks every grant and the untouched functions), and a second run refuses');
+  assert.equal(fingerprint(UNTOUCHED_ALL), fpAllBefore, `MOA-1 leaves all ${UNTOUCHED_ALL.length} protected function bodies, settings, owners, security modes and grants unchanged`);
+  if (MOA_EQUIVALENCE_MODE) {
+    ledger(path.basename(CANDIDATE, '.sql'));
+    applyMoaEquivalenceOverlay();
+  }
   case1();
   case2();
   case3();
@@ -550,7 +638,31 @@ async function main() {
   case10();
   await case12();
   assert.equal(fingerprint(), fpBefore);
-  console.log('[case] 11 the fifteen DM-1/DM-1b/DM-4 functions are byte-for-byte unchanged (checked by the file\'s postflight and again here)');
+  console.log(`[case] 11 the ${UNTOUCHED.length} unchanged DM-1/DM-1b/DM-4 functions are byte-for-byte unchanged (checked by the file's postflight and again here)`);
+  if (MOA_EQUIVALENCE_MODE) {
+    const equivalenceRecord = lf(path.join(ROOT, 'docs', 'reference', 'migrations.d', '20270115100000_moa_group_code_equivalence.md'));
+    const equivalenceRollback = /````sql\n([\s\S]*?)\n````/.exec(equivalenceRecord);
+    assert.ok(equivalenceRollback, 'the equivalence migration record carries its guarded rollback SQL');
+    stageText('moa-equivalence-rollback.sql', equivalenceRollback[1]);
+    const reversedEquivalence = apply('moa-equivalence-rollback.sql');
+    assert.equal(reversedEquivalence.status, 0, reversedEquivalence.output);
+    assert.equal(scalar("SELECT to_regprocedure('public._moa_group_code_key(text)') IS NULL;"), 't');
+    assert.equal(scalar(`SELECT (to_regclass('public.active_ingredient_modes_of_action_canonical_one_active') IS NULL)::text
+      || ':' || (to_regclass('public.product_parent_modes_of_action_canonical_one_active') IS NULL)::text;`), 'true:true');
+    const restoredFunctions = [
+      ['_ingredient_modes_input', '20270108100000_ingredient_modes_of_action.sql'],
+      ['_parent_mode_groups', '20270108100000_ingredient_modes_of_action.sql'],
+      ['set_active_ingredient_modes', '20270108100000_ingredient_modes_of_action.sql'],
+      ['_apply_parent_chemistry', '20261211100000_product_chemistry_confirmed_swaps.sql'],
+    ];
+    for (const [name, file] of restoredFunctions) {
+      const expected = createHash('md5').update(migrationFunctionBody(lf(path.join(MIGRATIONS, file)), name)).digest('hex');
+      assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.${name}${name === '_apply_parent_chemistry' ? '(uuid,jsonb,text,text,text)' : name === 'set_active_ingredient_modes' ? '(uuid,jsonb,jsonb,text,text)' : name === '_parent_mode_groups' ? '(uuid)' : '(jsonb,text)'}'::regprocedure;`),
+        expected, `equivalence rollback did not restore the MOA-1 source body for ${name}`);
+    }
+    assert.equal(fingerprint(UNTOUCHED_ALL), fpAllBefore, `equivalence rollback restores all ${UNTOUCHED_ALL.length} MOA-1 protected function bodies, settings, owners, security modes and grants`);
+    console.log('[case] R2 the equivalence candidate is reversed through its content-guarded transaction, source-consumer, and LF-normalized body checks before MOA-1 rollback');
+  }
   // Rollback: the SQL block in the migrations.d record.
   const record = lf(path.join(ROOT, 'docs', 'reference', 'migrations.d', '20270108100000_ingredient_modes_of_action.md'));
   const rb = /```sql\n([\s\S]*?)```/.exec(record);
@@ -563,8 +675,9 @@ async function main() {
     'get_ingredient_mode_users');`), 0);
   assert.ok(n('SELECT count(*) FROM public.active_ingredient_modes_of_action;') > 0, 'the table is kept as history');
   refused(ADMIN, 'SELECT count(*) FROM public.active_ingredient_modes_of_action;', /permission denied/);
+  assert.equal(fingerprint(UNTOUCHED_ALL), fpAllBefore, `after candidate and MOA-1 rollback, all ${UNTOUCHED_ALL.length} protected function bodies, settings, owners, security modes and grants match their pre-MOA values`);
   assert.equal(fingerprint(), fpBefore);
-  console.log('[case] R the rollback drops the seven functions, keeps the table unreadable, and leaves the fifteen untouched');
+  console.log(`[case] R the rollback drops the seven functions, keeps the table unreadable, and confirms all ${UNTOUCHED_ALL.length} original DM-1/DM-1b/DM-4 function bodies, settings, owners, security modes and grants after both rollbacks`);
   console.log('INGREDIENT_MODES_OF_ACTION_PROOF_PASS');
 }
 

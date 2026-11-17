@@ -142,7 +142,7 @@ export function buildContainer({ stopBefore } = {}) {
   psql('\\i /tmp/20260727174805_extensions.sql'); psql(schema.stdout.toString());
   psql(`CREATE SCHEMA IF NOT EXISTS storage;
     CREATE TABLE IF NOT EXISTS storage.buckets (id text PRIMARY KEY, name text NOT NULL, public boolean NOT NULL DEFAULT false, file_size_limit bigint, allowed_mime_types text[]);
-    CREATE TABLE IF NOT EXISTS storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL, owner_id text, metadata jsonb, UNIQUE (bucket_id, name));
+    CREATE TABLE IF NOT EXISTS storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL, name text NOT NULL, owner_id text, metadata jsonb, created_at timestamptz DEFAULT now(), UNIQUE (bucket_id, name));
     CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT string_to_array(name, '/') $$;
     CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT split_part(name, '/', array_length(string_to_array(name, '/'), 1)) $$;
     GRANT USAGE ON SCHEMA storage TO postgres;
@@ -153,6 +153,7 @@ export function buildContainer({ stopBefore } = {}) {
   replay({ stopBefore });
 }
 
+const LIVE_UNIT_ROWS = "('3f5c3827-8523-4b42-9913-ad479588ff95'::uuid, 'Dry oz', 1, 'dry', '1 dry ounce'), ('5ed18e4b-c4d9-42fc-b85e-22babd3fc098'::uuid, 'Ea', 1, 'both', 'Each / unit'), ('f9e10e66-5027-464e-bb9e-ed9800875256'::uuid, 'fl oz', 1, 'liquid', '1 fluid ounce'), ('4406cacd-a7fe-42db-8c84-694e61bb937b'::uuid, 'g', 0.03527396, 'dry', '1 gram = 0.03527396 dry ounces (1000 mg)'), ('29d05e43-cb40-461b-a969-88ee299faca8'::uuid, 'Gal', 128, 'liquid', '1 gallon = 128 fluid ounces'), ('53997e31-d152-4ab6-b768-d1aa81b657bf'::uuid, 'Lb', 16, 'dry', '1 pound = 16 dry ounces'), ('fc5d349f-b58c-48f1-991d-fa0161fd3d01'::uuid, 'LB', 16, 'dry', '1 pound (capitalized alias)'), ('ddde7daf-8090-492b-aed9-c0b7f8ecfd34'::uuid, 'MG', 0.00003527396, 'dry', '1 milligram = 0.00003527396 dry ounces'), ('438d5f7b-f015-4319-b2b7-4f9a672cb350'::uuid, 'oz', 1, 'liquid', '1 fluid ounce (alias for fl oz)'), ('b69ddac6-68ed-4f1d-8e09-e63a7fa6635a'::uuid, 'Oz', 1, 'liquid', '1 fluid ounce (capitalized alias)'), ('a31f95a0-df80-4025-977f-f1fb4e5c8d53'::uuid, 'Pt', 16, 'liquid', '1 pint = 16 fluid ounces'), ('35532f45-2fd0-4400-87d8-3509a58377c0'::uuid, 'qt', 32, 'liquid', '1 quart lowercase (alias for Qt)'), ('915f25ff-8876-4a49-a375-940047e38313'::uuid, 'Qt', 32, 'liquid', '1 quart = 32 fluid ounces'), ('722e8d86-8e68-47d8-a940-209fad38c70e'::uuid, 'Unit', 1, 'both', 'Each / unit (alias for Ea)')";
 const LIVE_UID = `CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`;
 /** Replays every post-baseline migration not yet in the ledger (so a stopped build can resume). */
 export function replay({ stopBefore } = {}) {
@@ -168,6 +169,14 @@ export function replay({ stopBefore } = {}) {
     if (base === FORMS_SEED_EACH) restoreLiveBodies();
     // The tote-fill preflight needs live's count units; the schema baseline carries no unit rows (live factors, 2026-11-05).
     if (base === '20261117130000_tote_fill_from_bulk.sql') psql("INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Ea', 1, 'both'), ('Unit', 1, 'both') ON CONFLICT DO NOTHING;");
+    // KI-01 part C's preflight pins live's storage.objects policies with row security on, as live has it
+    // (its own prover does the same before the file); the overlay already created the policies.
+    if (base === '20261217100000_job_access_ends_with_the_job.sql') psql('ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;', { user: 'supabase_admin' });
+    // RT-1 pins live's 14 unit rows (read live 2026-11-10; same rows as the cycle-count prover).
+    if (base === '20261229110000_product_rates_draft.sql') psql(`DELETE FROM public.unit_conversions;
+      INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};`);
+    // B-1b refuses before the REG-1 seed has run (live has run it); the undo areas sell no numbered products.
+    if (base === '20270106110000_invoice_brands_rup.sql') psql(`INSERT INTO public.epa_registration_seed_run (seeded_by, rup_default, fingerprint) VALUES ('${USERS.admin}', 'no', 'undo-paths') ON CONFLICT DO NOTHING;`);
     const name = `m-${i}.sql`; stageText(name, lf(file));
     const r = docker([...psqlArgs(), '-1', '-f', `/tmp/${name}`], { allowFailure: true });
     if (r.status !== 0) throw new Error(`source replay failed at ${base}:\n${r.stdout}\n${r.stderr}`);

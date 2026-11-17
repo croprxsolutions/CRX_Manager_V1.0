@@ -257,6 +257,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'This customer was not billed on that order. Pick the order\'s customer, or a payer billed on the order\'s posted split invoice'],
   [/invoice_items_return_credit_source_item_fk/i,
    'This source invoice line is retained as return-credit accounting history and cannot be deleted or re-saved. Keep the source invoice unchanged, or permanently delete the already-voided credit memo before editing it'],
+  // Two writers added the same order line to one delivery at once (20270122100000, KI-161).
+  [/delivery_items_one_line_per_order_line/i,
+   'Nothing was saved. This order line is already on the delivery'],
   [/duplicate key value violates unique constraint "[^"]+"/i,
    'A record with this information already exists'],
   [/violates foreign key constraint "[^"]+"/i,
@@ -456,6 +459,9 @@ export function sanitizeError(error: unknown): string {
   // Unit rules (20270121110000): the server sentence names the unit and what to do, so it is kept.
   const unitRule = message.match(/^(?:LINE_UNIT_NOT_STOCK_UNIT|PRODUCT_UNIT_HAS_OPEN_LINES|PRODUCT_UNIT_HAS_STOCK|STOCK_ROW_UNIT_NOT_STOCK_UNIT|PRODUCT_STOCK_UNIT_UNKNOWN|QUOTE_RATE_UNIT_UNKNOWN|QUOTE_STOCK_UNIT_UNKNOWN):\s*(.+)$/s);
   if (unitRule) return `Nothing was saved. ${unitRule[1].trim()}`;
+  // Delivery lines match their order lines (20270122100000, KI-161): the server sentence says what is wrong.
+  const deliveryLineRule = message.match(/^(?:DELIVERY_LINE_NOT_ON_ORDER|DELIVERY_LINE_PRODUCT_MISMATCH|DELIVERY_LINE_UNIT_MISMATCH|DELIVERY_LINE_DUPLICATE|DELIVERY_ORDER_LOCKED):s*(.+)$/s);
+  if (deliveryLineRule) return `Nothing was saved. ${deliveryLineRule[1].trim()}`;
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.
   const countRule = message.match(/^(?:CYCLE_COUNT_ROW_ALREADY_OPEN|CYCLE_COUNT_ROW_WRONG_PLACE|CYCLE_COUNT_REOPEN_FORBIDDEN|CYCLE_COUNT_REVERSE_BLOCKED):\s*(.+)$/s);
   if (countRule) return `Nothing was saved. ${countRule[1].trim()}`;

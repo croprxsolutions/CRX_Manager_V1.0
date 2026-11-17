@@ -22,7 +22,8 @@
 --     g. a booking with a live job (not cancelled, not deleted) keeps its customer, else
 --        BOOKING_HAS_JOB.
 --     h. a section with a live job keeps its field, its place and its lines exactly (each line's
---        id, order, product, quantity, price, units, rate, acres and quote-time cost; null-safe),
+--        id, order, product, quantity, price, units, rate and acres; null-safe; a kept id and product
+--        keep the line's cost snapshot, so cost needs no compare and a legacy line may get one),
 --        else SECTION_HAS_JOB_LOCKED. Its name, notes and needed-by date may change. The job copied those lines; letting them drift would split the job
 --        from its booking and let the two invoice paths charge different prices.
 --     Rules b, c and g run after the quote row lock and the row_version check, before the DELETE;
@@ -410,8 +411,7 @@ BEGIN
                         'id', qi.id, 'sort', qi.sort_order, 'product', qi.product_id,
                         'qty', trim_scale(qi.total_units_needed), 'price', trim_scale(qi.price_per_unit),
                         'unit_size', qi.unit_size, 'price_unit', qi.price_unit, 'calc_mode', qi.calc_mode,
-                        'rate', trim_scale(qi.actual_rate), 'rate_unit', qi.rate_unit, 'acres', trim_scale(qi.acres),
-                        'cost', trim_scale(qi.current_cost), 'cost_cents', qi.cost_at_quote_cents)
+                        'rate', trim_scale(qi.actual_rate), 'rate_unit', qi.rate_unit, 'acres', trim_scale(qi.acres))
                       ORDER BY qi.sort_order, qi.id)
                  FROM quote_items qi WHERE qi.section_id = qs.id), '[]'::jsonb)) AS sig
         FROM quote_sections qs WHERE qs.quote_id = v_quote_id
@@ -838,8 +838,7 @@ BEGIN
                         'id', qi.id, 'sort', qi.sort_order, 'product', qi.product_id,
                         'qty', trim_scale(qi.total_units_needed), 'price', trim_scale(qi.price_per_unit),
                         'unit_size', qi.unit_size, 'price_unit', qi.price_unit, 'calc_mode', qi.calc_mode,
-                        'rate', trim_scale(qi.actual_rate), 'rate_unit', qi.rate_unit, 'acres', trim_scale(qi.acres),
-                        'cost', trim_scale(qi.current_cost), 'cost_cents', qi.cost_at_quote_cents)
+                        'rate', trim_scale(qi.actual_rate), 'rate_unit', qi.rate_unit, 'acres', trim_scale(qi.acres))
                       ORDER BY qi.sort_order, qi.id)
                  FROM quote_items qi WHERE qi.section_id = qs.id), '[]'::jsonb))
           FROM quote_sections qs WHERE qs.id = v_locked_key::uuid)
@@ -970,7 +969,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public._save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)'::regprocedure)
-     IS DISTINCT FROM '5bf9364b64a77098fe6fa2900f4d600f' THEN
+     IS DISTINCT FROM 'f9edb24d15ab6360c5240cd1ab2c93e1' THEN
     RAISE EXCEPTION 'POSTFLIGHT_SAVE_QUOTE: the new body did not install';
   END IF;
   IF NOT EXISTS (

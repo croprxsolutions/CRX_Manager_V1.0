@@ -37,7 +37,7 @@ Read at origin/staging 2bf18b3ef (2026-11-17).
    - **c. Sections with jobs (always).** If a prior section that is not reused is referenced by any job (any status, soft-deleted too), refuse `SECTION_HAS_JOB` with the job number. Old screens get this message instead of today's raw FK error.
    - **d. Old screens and planning data.** If there is no marker and any prior section has timing or confidence set, refuse `PLANNING_RELOAD_REQUIRED`, so an old screen cannot wipe planning data. A new screen replacing every section is allowed, because the guard keys on the marker, not on ids.
    - **e. Planning fields.** `timing` and `confidence` are written straight from the payload. With the marker, an omitted key keeps the prior value. `needed_by_date` behaves as today. The server computes no dates.
-   - **f. Returned map.** The result adds `section_ids`, keyed by the section's `client_key`, the same way items are mapped today. If a result has no `section_ids` (a replay stored before the upgrade), the screen reloads the quote.
+   - **f. Returned map.** The result adds `section_ids`, keyed by the section's `client_key`, the same way items are mapped today. If a result has no `section_ids` (a replay stored before the upgrade), the screen reloads the quote. *As built (PR 1a):* the screen drops its section ids instead of reloading, and Schedule job on such a section says to save and reload; a replay without the map only happens for a retry of a save stored before the upgrade.
 3. **New read-only `get_purchasing_plan(p_months_ahead int DEFAULT 6)`.**
    - SECURITY DEFINER, `SET search_path = public, pg_temp`.
    - Gate: active admin or sales_rep, the same as `get_inventory_forecast`.
@@ -174,7 +174,7 @@ Run on the local prover database as the real caller via a JWT. Today = 2027-02-0
 - 30: the explanation was corrected; see P6.
 - 31: the Rewind FK error is mapped to a clear message, with no data change.
 - 32: recovery is screens-only, and rolling back the database body needs Mason.
-- 33: the screen reloads when `section_ids` is missing.
+- 33: the screen reloads when `section_ids` is missing. *As built:* it drops the ids; Schedule job explains (QuoteBuilder test).
 
 ## Defaults applied, for Mason to see
 1. A sold order counts as needed **now**.

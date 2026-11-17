@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { proveInactiveRateReview } from './prove-inactive-rate-review-real-schema.mjs';
+import { TOUCHED, rateReviewTouch } from './rate-review-later-migrations.mjs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -35,16 +36,6 @@ const FOLLOW_UPS = [
   path.join(MIGRATIONS, '20270110110000_inactive_rate_review_cleanup.sql'),
   path.join(MIGRATIONS, '20270120100000_priority_integrity_followups.sql'),
 ];
-// These later files only call/check parent auth/replay helpers; none redefines them or touches rate tables.
-const LATER_READ_ONLY = new Set([
-  '20270104120000_delivery_brands.sql',
-  '20270105110000_epa_chemistry_proposals.sql',
-  '20270106110000_invoice_brands_rup.sql',
-  '20270108100000_ingredient_modes_of_action.sql',
-  '20270109100000_delivery_receipt_brands.sql',
-  '20270115100000_moa_group_code_equivalence.sql',
-  '20270119160000_registration_adjuvants.sql',
-]);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -63,8 +54,7 @@ const LEDGER_ONLY = new Set([
   '20261220100000_applicator_keeps_own_record_fields.sql',
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
-// A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(product_rate|_product_parent_require_admin|_product_parent_replay|product_parent_rate_outcomes|rate_review)/i;
+// TOUCHED (rate-review-later-migrations.mjs): names the candidate creates or relies on.
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -180,8 +170,10 @@ function plan() {
     assert.ok(i > last, `${path.basename(file)} must sort after the candidate and earlier follow-ups`);
     last = i;
   }
-  for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f) && !LATER_READ_ONLY.has(path.basename(f)))) {
-    assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
+  // A later file that only calls or md5-pins the covered helpers is fine; anything else refuses (fail closed).
+  for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f))) {
+    const why = rateReviewTouch(lf(file));
+    assert.ok(!why, `${path.basename(file)} sorts after the candidate and touches what it relies on (${why}); re-think this proof`);
   }
   const before = all.slice(0, at);
   for (const name of PARKED) {

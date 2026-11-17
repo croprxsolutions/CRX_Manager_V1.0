@@ -232,7 +232,7 @@ Lands after the database PR is applied (migration-plus-callers split, `docs/work
 ## 7. Order and dependencies
 
 - **Ready to build now:** DM-1, DM-1b and DM-4's database parts are live (`20270105110000` applied 2026-11-12). MOA-1 needs nothing else.
-- **Lands before CMP-2:** CMP-2's mode-of-action filter reads `_parent_mode_groups`. CMP-2 is on hold until Mason re-reviews its plan (Stage 5); MOA-1 does not wait for it.
+- **Lands before CMP-2:** CMP-2's mode-of-action filter reads `_parent_mode_groups`. CMP-2's plan was approved on 2026-11-17 (Stage 5); MOA-1 does not wait for it.
 - **Out of scope:** anything on the quote page. Taha owns the quote screens; the quote-page option to show each line's actives and groups to the grower stays a logged "Later features" item until his quote work lands. No quote file is touched. Also out: a groups column on the setup workbook, a permanent bulk-import screen (the one-time load in 3.6 is a reviewed migration instead), and showing groups on the product list or in search.
 - **Then the one-time load (3.6):** after both PRs land and the ingredients are in; its own small migration, applied only after Mason says yes to the list.
 - **Other sessions:** the screen PR edits only `src/components/products/` chemistry files and a new lib file. Before building, check open PRs for those files (none on 2026-11-12) and never edit a file another open PR touches.

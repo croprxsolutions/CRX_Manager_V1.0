@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270112100000_registration_adjuvants (USE-2 part 1; build sheet
+ * Real-schema proof for 20270114130000_registration_adjuvants (USE-2 part 1; build sheet
  * docs/plans/2026-11-15-product-USE2-BUILD-SHEET.md section 4.0).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
  * replays every post-baseline migration before the candidate, seeds invented users and products, checks the
  * preflight refuses an old-shape list, applies the candidate (and a second run, which refuses), then runs
  * cases 1-6 through the real RPCs as admins, a sales rep, a driver, an inactive rep and anon, and finally the
- * rollback SQL from docs/reference/migrations.d/20270112100000_registration_adjuvants.md.
+ * rollback SQL from docs/reference/migrations.d/20270114130000_registration_adjuvants.md.
  *
  * Run: node scripts/smoke/prove-registration-adjuvants-real-schema.mjs   (needs Docker)
  * Prints REGISTRATION_ADJUVANTS_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
@@ -26,7 +26,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270112100000_registration_adjuvants.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270114130000_registration_adjuvants.sql');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -494,7 +494,7 @@ async function main() {
   await case6();
   assert.equal(fingerprint(), fpBefore);
   // Rollback: the SQL block in the migrations.d record.
-  const record = lf(path.join(ROOT, 'docs', 'reference', 'migrations.d', '20270112100000_registration_adjuvants.md'));
+  const record = lf(path.join(ROOT, 'docs', 'reference', 'migrations.d', '20270114130000_registration_adjuvants.md'));
   const rb = /```sql\n([\s\S]*?)```/.exec(record);
   assert.ok(rb, 'the record carries its rollback SQL');
   stageText('rollback.sql', rb[1]);

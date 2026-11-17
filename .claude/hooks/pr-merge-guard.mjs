@@ -68,6 +68,7 @@ import {
 } from "./teammate-comments-lib.mjs";
 import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
+import { claimOrRefuse, claimsFileFor } from "./pr-claim-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
@@ -510,6 +511,16 @@ function gateRequest(request) {
   } catch (error) {
     deny(`PR MERGE GATE: could not resolve this pull request's base branch and exact SHAs, so the merge is denied (fail closed). ${error?.message || error}`);
   }
+
+  // Landing claim (pr-claim-lib.mjs, fail open): refuse when another session is landing this PR.
+  const claimed = claimOrRefuse({
+    file: claimsFileFor(payload?.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd()),
+    branch: pr.headRefName,
+    sessionId: payload?.session_id,
+    action: "merge",
+    cwd: payload?.cwd,
+  });
+  if (claimed) deny(`PR MERGE GATE: ${claimed}`);
 
   const base = String(pr.baseRefName || "").trim().toLowerCase();
   if (base === "master" || base === "production") {

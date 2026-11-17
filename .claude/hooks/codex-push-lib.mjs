@@ -565,6 +565,30 @@ export function pushTargetsCurrentHead(cmd, currentBranch) {
     .every((tokens) => tokensPushCurrentHeadOnly(tokens, normalizedBranch));
 }
 
+// The branch names this push writes to on the remote, for the landing claim
+// (pr-claim-lib.mjs). Best effort, never used to ALLOW anything: no refspec means
+// the current branch, and `HEAD` as a destination means the current branch.
+export function pushDestinationBranches(cmd, currentBranch) {
+  const argsText = String(cmd || "").match(GIT_PUSH_RE)?.groups.args;
+  if (argsText == null) return [];
+  const tokens = splitShellArgs(argsText);
+  const positional = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token === "--") { positional.push(...tokens.slice(i + 1)); break; }
+    if (!token.startsWith("-")) { positional.push(token); continue; }
+    const bare = fullPushOption(token.includes("=") ? token.slice(0, token.indexOf("=")) : token);
+    if (!token.includes("=") && PUSH_OPTS_WITH_VALUE.has(bare)) i += 1;
+    else if (pushShortClusterTakesNextWord(token)) i += 1;
+  }
+  const refspecs = positional.slice(1);
+  if (refspecs.length === 0) return currentBranch ? [String(currentBranch)] : [];
+  return refspecs
+    .map((refspec) => refspec.split(":").pop().replace(/^\+/, "").replace(/^refs\/heads\//i, ""))
+    .map((branch) => (branch === "HEAD" ? String(currentBranch || "") : branch))
+    .filter(Boolean);
+}
+
 function tokensPushCurrentHeadOnly(tokens, normalizedBranch) {
   if (tokens.some((token) =>
     token === "--delete"

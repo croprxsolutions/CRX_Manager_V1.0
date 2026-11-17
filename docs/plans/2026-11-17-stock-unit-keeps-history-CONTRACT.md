@@ -29,7 +29,7 @@ SECURITY DEFINER, `search_path = public, pg_temp`, no grants). When the stock un
 spaces, it refuses `PRODUCT_UNIT_HAS_HISTORY` if the product has ANY order, delivery, purchase-order or return line,
 receiving record, stock transaction (jobs, blend tickets, adjustments, counts) or active hold, whatever its status or unit
 (blank included). The decision is `EXISTS`; the message names up to 5
-records (number, else id). A product sold, bought, delivered or returned in one unit keeps it; another unit is a new
+order, delivery, PO or return records (number, else id); stock movements and holds are named by kind only. A product sold, bought, delivered or returned in one unit keeps it; another unit is a new
 product. This is the screens' existing rule, now also holding for a data correction unless that correction disables it
 explicitly (and then owns relabelling or converting the history, a reviewed business decision of its own).
 
@@ -80,6 +80,9 @@ apply in one transaction. #22-#23: reverse script and prover output are in the P
   transaction). LOWs: tab/NBSP and first-unit-on-a-blank-product refuse (fail closed, 0 such products live); wording.
 - Luna round 2 MED: holds were not serialized -> the lock trigger now also covers `inventory_holds` (prover case).
   LOW: the message said "ordered, bought, delivered or returned" for a hold or movement -> reworded.
+- Luna round 3 MED (prover fixtures could collide) refuted: every probe and both lock holders end in ROLLBACK
+  (`probe()` wraps BEGIN/ROLLBACK), so no fixture is ever committed. LOW (holds and movements not named): by design,
+  named by kind; this contract now says so.
 - migration-drift-reviewer: no drift; live order is re-checked by the staging apply job.
 
 ## Open business decisions

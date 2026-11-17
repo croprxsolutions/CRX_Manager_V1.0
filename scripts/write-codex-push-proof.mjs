@@ -1878,6 +1878,35 @@ export function solRoundGate({ round, prNumber, decisionLog, today, dryRun = fal
   return { refuse: !dryRun, message };
 }
 
+// Printed on every run (Mason, 2026-11-17), from the same round the stop above uses. On #1916 an
+// approval was asked against "round 5 on this branch" (printed before the PR opened); the stop
+// later read "round 10 on PR #1916", because every run on the branch's commits counts.
+export function solRoundStatusLine({ round, prNumber, decisionLog, today }) {
+  const where = Number.isInteger(prNumber) ? `PR #${prNumber}` : "this branch (no PR yet)";
+  const named = decisionLogNamesPr(decisionLog, prNumber, today) ? "found" : "none yet";
+  return `Sol round: this would be round ${round} on ${where} (rounds 1-${SOL_ROUND_HARD_STOP - 1} run freely; ` +
+    `from round ${SOL_ROUND_HARD_STOP} a DECISION_LOG.md entry dated ${today} or later must name this PR: ${named}).`;
+}
+
+// ── Future-dated decision-log entries (Mason, 2026-11-17) ───────────────────
+// Sol returned a BLOCKER on decision-log entries three times (#1549, #1808, #1916); on #1916 the
+// entry was dated 11-17 while Central time was still 11-16. The branch's added "## <date>" headings
+// and "**Decision (Mason, … <date>)" lines must be dated today (Central) or earlier.
+// Returns null when fine, else the refusal message. diffText is `git diff base head -- DECISION_LOG.md`.
+export function futureDecisionLogDates(diffText, today) {
+  const late = [];
+  for (const line of String(diffText || "").split(/\r?\n/)) {
+    if (!line.startsWith("+") || line.startsWith("+++")) continue;
+    const text = line.slice(1);
+    const dated = text.match(/^## ([^—–]*)/)?.[1] ?? text.match(/^\*\*Decision \(Mason,([^)]*)\)/)?.[1];
+    if ((dated?.match(/\d{4}-\d{2}-\d{2}/g) || []).some((date) => date > today)) late.push(text.trim());
+  }
+  if (!late.length) return null;
+  return `SOL PRE-FLIGHT: ${DECISION_LOG_PATH} gains an entry dated after today (${today}, Central time), so no Sol tokens were spent.\n` +
+    `${late.map((text) => `  - ${text}`).join("\n")}\n` +
+    `Re-date it to ${today} or earlier (plain \`date\` prints Central time), commit, then re-run this command.`;
+}
+
 function solRound(root, headSha, baseSha) {
   const ledger = solRoundsLedgerPath(root);
   let text = "";
@@ -3064,14 +3093,13 @@ export function run(argv = process.argv.slice(2)) {
       `${preflightReport(preflight)}\n`,
     );
     const { round } = solRound(root, head, reviewBase);
+    const decisionLog = runGit(["show", `${head}:docs/manual/DECISION_LOG.md`], { cwd: root });
+    const today = centralDate();
+    process.stdout.write(`[dry-run] ${solRoundStatusLine({ round, prNumber: preflight.facts?.pr?.number, decisionLog, today })}\n`);
     process.stdout.write(`[dry-run] Would be: ${solRoundLine(round, preflight.facts?.pr?.number)}\n`);
-    const gate = solRoundGate({
-      round,
-      prNumber: preflight.facts?.pr?.number,
-      decisionLog: runGit(["show", `${head}:docs/manual/DECISION_LOG.md`], { cwd: root }),
-      today: centralDate(),
-      dryRun: true,
-    });
+    const lateDates = futureDecisionLogDates(runGit(["diff", "-U0", reviewBase, head, "--", DECISION_LOG_PATH], { cwd: root }), today);
+    if (lateDates) process.stdout.write(`[dry-run] Would REFUSE: ${lateDates}\n`);
+    const gate = solRoundGate({ round, prNumber: preflight.facts?.pr?.number, decisionLog, today, dryRun: true });
     if (gate.message) process.stdout.write(`[dry-run] Would REFUSE: ${gate.message}\n`);
     return 0;
   }
@@ -3094,6 +3122,10 @@ export function run(argv = process.argv.slice(2)) {
   // CodeRabbit has not finished with (see "Sol pre-flight" above). An existing
   // proof is left alone: this refusal says "not yet", not "the review failed".
   const preflight = solPreflight(root, headBefore, baseBefore, target);
+  const { ledger, round } = solRound(root, headBefore, baseBefore);
+  const decisionLog = runGit(["show", `${headBefore}:docs/manual/DECISION_LOG.md`], { cwd: root });
+  const today = centralDate();
+  process.stdout.write(`${solRoundStatusLine({ round, prNumber: preflight.facts?.pr?.number, decisionLog, today })}\n`);
   if (!preflight.ok) {
     process.stderr.write(
       `SOL PRE-FLIGHT: not running the Sol review of ${headBefore.slice(0, 12)} yet, so no Sol tokens were spent.\n` +
@@ -3126,13 +3158,12 @@ export function run(argv = process.argv.slice(2)) {
     process.stdout.write(`Applied history (identical to the live ledger): ${item.name} sha256 ${item.sha256}\n`);
   }
   const reviewPrompt = buildCodexReviewPrompt({ base: target, appliedHistory });
-  const { ledger, round } = solRound(root, headBefore, baseBefore);
-  const roundGate = solRoundGate({
-    round,
-    prNumber: preflight.facts?.pr?.number,
-    decisionLog: runGit(["show", `${headBefore}:docs/manual/DECISION_LOG.md`], { cwd: root }),
-    today: centralDate(),
-  });
+  const lateDates = futureDecisionLogDates(runGit(["diff", "-U0", baseBefore, headBefore, "--", DECISION_LOG_PATH], { cwd: root }), today);
+  if (lateDates) {
+    process.stderr.write(`${lateDates}\n`);
+    return 1;
+  }
+  const roundGate = solRoundGate({ round, prNumber: preflight.facts?.pr?.number, decisionLog, today });
   if (roundGate.refuse) {
     process.stderr.write(`${roundGate.message}\n`);
     return 1;

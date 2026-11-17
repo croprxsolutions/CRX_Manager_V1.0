@@ -62,7 +62,18 @@ CREATE FUNCTION public._cycle_count_item_one_open_row()
 AS $function$
 DECLARE
   v_other text;
+  v_status text;
 BEGIN
+  -- A finished count's lines are history: a new line goes only on an in-progress count (locked, so it cannot close meanwhile).
+  IF TG_OP = 'INSERT' THEN
+    SELECT c.status, c.count_number INTO v_status, v_other
+      FROM public.cycle_counts c WHERE c.id = NEW.cycle_count_id FOR SHARE;
+    IF v_status IS DISTINCT FROM 'in_progress' THEN
+      RAISE EXCEPTION 'CYCLE_COUNT_CLOSED: Count % is %; lines can only be added to an in-progress count.',
+        COALESCE(v_other, '(no number)'), COALESCE(v_status, 'missing') USING ERRCODE = 'check_violation';
+    END IF;
+    v_other := NULL;
+  END IF;
   IF NEW.inventory_id IS NULL
      OR (TG_OP = 'UPDATE' AND NEW.inventory_id IS NOT DISTINCT FROM OLD.inventory_id) THEN
     RETURN NEW;

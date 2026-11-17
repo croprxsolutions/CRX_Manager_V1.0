@@ -453,6 +453,10 @@ async function main() {
   refusedAsOwner('P5 reopen cancelled', `UPDATE public.cycle_counts SET status = 'in_progress' WHERE id = '${ccB}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is cancelled and cannot become in_progress');
   refusedAsOwner('P5 cancelled to completed', `UPDATE public.cycle_counts SET status = 'completed' WHERE id = '${ccB}';`, 'CYCLE_COUNT_REOPEN_FORBIDDEN: Count .* is cancelled and cannot become completed');
   refused('P5 admin reopens directly', `UPDATE public.cycle_counts SET status = 'in_progress' WHERE id = '${cc1}';`, 'permission denied for table cycle_counts');
+  refused('P5 admin adds a line to a completed count', `INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty)
+    VALUES ('${cc1}', '${PRODUCTS.p2}', NULL, 0);`, 'CYCLE_COUNT_CLOSED: Count .* is completed');
+  refused('P5 admin adds a line to a cancelled count', `INSERT INTO public.cycle_count_items (cycle_count_id, product_id, inventory_id, expected_qty)
+    VALUES ('${ccB}', '${PRODUCTS.p2}', '${inv(PRODUCTS.p2)}', 0);`, 'CYCLE_COUNT_CLOSED: Count .* is cancelled');
   refused('P5 admin edits a count directly', `UPDATE public.cycle_counts SET notes = 'checked' WHERE id = '${cc1}';`, 'permission denied for table cycle_counts');
   psql(`UPDATE public.cycle_counts SET notes = 'checked' WHERE id = '${cc1}';`); // the owner may still edit a closed count's notes
   assert.equal(startCount(MAIN, [PRODUCTS.p1]), '', 'P5: a new count may start once the old one is closed');

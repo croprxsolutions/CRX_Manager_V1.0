@@ -6,9 +6,9 @@ BEGIN
     SELECT 1
       FROM (VALUES
         ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '81bcfd088498f0cb1624f161e1a55e46', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
-        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '7ec879b190189252a79d728584a08980', ARRAY['postgres', 'service_role'], 'v'),
+        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '14e32574403a249a9a138a2546f6809d', ARRAY['postgres', 'service_role'], 'v'),
         ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '43a7cc9d3ce8e579297410e463709c04', ARRAY['postgres', 'service_role'], 'v'),
-        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '45067806b6d1f97922e9e394498a0aae', ARRAY['postgres'], 's')
+        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'fb26feb7877ba20adf8acff1b41be6c9', ARRAY['postgres'], 's')
       ) AS pin(fn, sig, body_md5, execs, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL

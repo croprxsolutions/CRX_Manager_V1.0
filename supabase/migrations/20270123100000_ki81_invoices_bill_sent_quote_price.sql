@@ -1546,7 +1546,7 @@ BEGIN
             v_qi_price := public._field_app_sent_quote_price_cents(
                             (v_chem->>'product_id')::uuid,
                             ARRAY(SELECT DISTINCT (r->>'field_id')::uuid FROM jsonb_array_elements(v_shares -> 'rows') r
-                                     WHERE (r->>'customer_id')::uuid = v_customer_id),
+                                     WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0),
                             ARRAY[v_customer_id], v_quote_price_date);
             IF v_qi_price IS NOT NULL THEN
               v_unit_price   := v_qi_price::bigint;
@@ -3307,12 +3307,12 @@ BEGIN
             FROM quotes q
             JOIN quote_sections qs ON qs.quote_id = q.id
                                   AND qs.field_id = ANY(ARRAY(SELECT DISTINCT (r->>'field_id')::uuid FROM jsonb_array_elements(v_shares -> 'rows') r
-                                     WHERE (r->>'customer_id')::uuid = v_customer_id))
+                                     WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0))
             JOIN quote_items qi ON qi.section_id = qs.id AND qi.quote_id = qs.quote_id
            WHERE q.customer_id = v_customer_id
              AND public._field_app_quote_eligible(q, (v_chem->>'product_id')::uuid,
                    ARRAY(SELECT DISTINCT (r->>'field_id')::uuid FROM jsonb_array_elements(v_shares -> 'rows') r
-                                     WHERE (r->>'customer_id')::uuid = v_customer_id), v_quote_price_date)
+                                     WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0), v_quote_price_date)
              AND qi.product_id = (v_chem->>'product_id')::uuid
              AND qi.price_per_unit >= 0;
           IF cardinality(v_qi_prices) > 1 THEN
@@ -3472,9 +3472,9 @@ BEGIN
     SELECT 1
       FROM (VALUES
         ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '81bcfd088498f0cb1624f161e1a55e46', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
-        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '7ec879b190189252a79d728584a08980', ARRAY['postgres', 'service_role'], 'v'),
+        ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '14e32574403a249a9a138a2546f6809d', ARRAY['postgres', 'service_role'], 'v'),
         ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '43a7cc9d3ce8e579297410e463709c04', ARRAY['postgres', 'service_role'], 'v'),
-        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '45067806b6d1f97922e9e394498a0aae', ARRAY['postgres'], 's')
+        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'fb26feb7877ba20adf8acff1b41be6c9', ARRAY['postgres'], 's')
       ) AS pin(fn, sig, body_md5, execs, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL

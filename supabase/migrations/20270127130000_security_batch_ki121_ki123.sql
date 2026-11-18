@@ -31,12 +31,6 @@ BEGIN
                 '((performed_by = ( SELECT auth.uid() AS uid)) AND (event_type !~~ ''auth\_password\_reset%''::text))')) THEN
     RAISE EXCEPTION 'SECURITY_BATCH_PREFLIGHT: activity_insert is not the expected policy';
   END IF;
-  -- Rows of those types may be genuine server records (written while an earlier apply was live) or rows any
-  -- signed-in user wrote before the lock; nothing here can tell them apart, so a person decides (Mason,
-  -- 2026-11-18: refuse, never relabel). Live had none on 2026-11-18.
-  IF EXISTS (SELECT 1 FROM public.activity_feed WHERE event_type LIKE 'auth\_password\_reset%') THEN
-    RAISE EXCEPTION 'SECURITY_BATCH_PREFLIGHT: auth_password_reset activity rows already exist; review them before applying';
-  END IF;
 END
 $preflight$;
 
@@ -112,6 +106,18 @@ CREATE OR REPLACE TRIGGER trg_guard_last_active_admin
 -- ---------------------------------------------------------------------------
 ALTER POLICY activity_insert ON public.activity_feed
   WITH CHECK (performed_by = (SELECT auth.uid()) AND event_type NOT LIKE 'auth\_password\_reset%');
+
+-- Checked after ALTER POLICY, which holds the table's exclusive lock until commit, so no row can be added after
+-- the check. Rows of those types may be genuine server records (written while an earlier apply was live) or rows
+-- any signed-in user wrote before the lock; nothing here can tell them apart, so a person decides (Mason,
+-- 2026-11-18: refuse, never relabel). Live had none on 2026-11-18.
+DO $reset_rows$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.activity_feed WHERE event_type LIKE 'auth\_password\_reset%') THEN
+    RAISE EXCEPTION 'SECURITY_BATCH_PREFLIGHT: auth_password_reset activity rows already exist; review them before applying';
+  END IF;
+END
+$reset_rows$;
 
 -- ---------------------------------------------------------------------------
 -- KI-123: the signed-out role reads nothing in public.

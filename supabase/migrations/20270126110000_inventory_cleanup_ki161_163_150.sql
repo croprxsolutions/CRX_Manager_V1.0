@@ -36,6 +36,8 @@
 --   API roles); its only caller _complete_delivery_aggregate_impl is unchanged. _cancel_delivery_replay_impl_20261015
 --   :: same signature and result shape. update_cycle_count_item :: same signature and grants; the result's numbers
 --   may carry 4 decimals (the screen formats them). delivery_items :: the screens only read it.
+-- caller-analysis: update_cycle_count_item :: REVOKE is from PUBLIC and anon only; authenticated keeps EXECUTE, so
+--   the only caller (src/pages/CycleCounts.tsx, signed-in staff) is unaffected.
 --
 -- ROLLBACK: scripts/smoke/inventory-cleanup-ki161-163-150-reverse.sql (proven by the prover).
 
@@ -115,11 +117,12 @@ BEGIN
 
   -- FOR SHARE: the delivery cannot move to another order (a2_delivery_order_keeps_lines) until this line commits.
   SELECT d.order_id INTO v_order_id FROM public.deliveries d WHERE d.id = NEW.delivery_id FOR SHARE;
-  -- FOR SHARE: the order line's product cannot change (guard_order_item_delivery_lineage) until this line commits.
-  -- Every writer already holds this row FOR UPDATE or created it, so this never upgrades a shared lock.
+  -- FOR UPDATE: the order line's product cannot change (guard_order_item_delivery_lineage) until this line commits.
+  -- Not FOR SHARE: create_followup_delivery does not lock the order line first, so two follow-ups would both share it
+  -- and then both fail enforce_delivery_items_parent_lock's FOR UPDATE NOWAIT; with FOR UPDATE the second one waits.
   SELECT oi.order_id, oi.product_id, oi.unit_size INTO v_oi
     FROM public.order_items oi WHERE oi.id = NEW.order_item_id
-     FOR SHARE;
+     FOR UPDATE;
   IF NOT FOUND OR v_order_id IS NULL OR v_oi.order_id IS DISTINCT FROM v_order_id THEN
     RAISE EXCEPTION 'DELIVERY_LINE_NOT_ON_ORDER: this delivery line is not a line of the delivery''s order.'
       USING ERRCODE = 'check_violation';

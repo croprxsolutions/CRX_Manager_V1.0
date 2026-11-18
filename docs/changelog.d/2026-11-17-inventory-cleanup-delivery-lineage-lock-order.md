@@ -2,7 +2,7 @@
 
 - Product Master repair step 5, part 2 (To-Do 0.17); behavior contract
   `docs/plans/2026-11-17-inventory-cleanup-ki161-163-150-CONTRACT.md`. One new migration, not applied live:
-  `20270122100000_inventory_cleanup_ki161_163_150.sql`.
+  `20270126110000_inventory_cleanup_ki161_163_150.sql`.
 - **KI-161:** every delivery line must belong to its delivery's order, for the same product and unit as its order
   line, and an order line can appear once per delivery. The database checks this for every writer, not only the
   edit screen. A delivery that has lines cannot be moved to another order. Signed-in users can no longer write

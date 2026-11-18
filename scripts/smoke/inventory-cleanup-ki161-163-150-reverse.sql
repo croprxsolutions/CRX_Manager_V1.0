@@ -1,6 +1,8 @@
 -- Rollback for 20270122100000_inventory_cleanup_ki161_163_150.sql (run as one transaction; proven by
--- scripts/smoke/prove-inventory-cleanup-real-schema.mjs). The cycle-count columns stay numeric(14,4): the old
--- update_cycle_count_item rounds to 2 places, which fits, and narrowing could round stored counts.
+-- scripts/smoke/prove-inventory-cleanup-real-schema.mjs). The cycle-count columns go back to numeric(10,2): the
+-- restored update_cycle_count_item stores the raw count but works out the variance and result from 2 places, so a
+-- 4-place column would let the saved count and Complete disagree (CodeRabbit, #1940). Narrowing rounds any count
+-- saved with 4 places to 2, as the old columns did.
 SET LOCAL lock_timeout = '5s';
 
 DROP TRIGGER a2_delivery_line_matches_order_line ON public.delivery_items;
@@ -350,6 +352,11 @@ $function$;
 
 REVOKE ALL ON FUNCTION public.update_cycle_count_item(uuid, numeric, text, uuid, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.update_cycle_count_item(uuid, numeric, text, uuid, text) TO authenticated, service_role;
+
+ALTER TABLE public.cycle_count_items
+  ALTER COLUMN expected_qty TYPE numeric(10,2),
+  ALTER COLUMN counted_qty TYPE numeric(10,2),
+  ALTER COLUMN variance TYPE numeric(10,2);
 
 DO $reverse_check$
 BEGIN

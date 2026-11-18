@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270122100000_inventory_cleanup_ki161_163_150.sql (KI-161, KI-163, KI-150; contract
+ * Real-schema proof for 20270126110000_inventory_cleanup_ki161_163_150.sql (KI-161, KI-163, KI-150; contract
  * docs/plans/2026-11-17-inventory-cleanup-ki161-163-150-CONTRACT.md).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
@@ -27,7 +27,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270122100000_inventory_cleanup_ki161_163_150.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270126110000_inventory_cleanup_ki161_163_150.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'inventory-cleanup-ki161-163-150-reverse.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
@@ -423,7 +423,8 @@ function rollbackCases() {
   assert.equal(n(`SELECT count(*) FROM pg_trigger WHERE tgname IN ('a2_delivery_line_matches_order_line', 'trg_zz_lock_job_stock_rows');`), 0);
   assert.equal(n(`SELECT count(*) FROM pg_class WHERE relname = 'delivery_items_one_line_per_order_line';`), 0);
   assert.equal(scalar(`SELECT has_table_privilege('authenticated', 'public.delivery_items', 'INSERT');`), 't');
-  console.log('[case] R rollback restores the three original function bodies (md5-checked in the script), drops the trigger, index and job lock, and gives back the direct write grant');
+  assert.equal(scalar(`SELECT string_agg(column_name || ':' || numeric_precision || ',' || numeric_scale, ' ' ORDER BY column_name) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'cycle_count_items' AND column_name IN ('counted_qty', 'expected_qty', 'variance');`), 'counted_qty:10,2 expected_qty:10,2 variance:10,2');
+  console.log('[case] R rollback restores the three original function bodies (md5-checked in the script), drops the trigger, index and job lock, gives back the direct write grant, and narrows the count columns back to 2 places');
 }
 
 async function main() {

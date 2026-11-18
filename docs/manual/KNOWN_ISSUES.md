@@ -1096,7 +1096,7 @@ now blocks a new count at that warehouse until it is cancelled from the Cycle Co
 
 ### KI-161 — Delivery editing does not re-check the edited line against its order line
 **MED · OPEN · deliveries · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-7) · unassigned**
-**Fix pending 2026-11-17:** `20270122100000_inventory_cleanup_ki161_163_150` (repair step 5, part 2; not applied live): the database checks every delivery line against its order line for every writer, an order line appears once per delivery, a delivery with lines keeps its order, and signed-in users no longer write delivery lines directly (the delivery functions still do).
+**Fix pending 2026-11-17:** `20270126110000_inventory_cleanup_ki161_163_150` (repair step 5, part 2; not applied live): the database checks every delivery line against its order line for every writer, an order line appears once per delivery, a delivery with lines keeps its order, and signed-in users no longer write delivery lines directly (the delivery functions still do).
 When a delivery is edited, the database does not confirm that each line still matches the product and unit of the
 order line it fills, or that an order line is used once. The normal screens send consistent lines, so this is not
 reachable from the app UI. Live 2026-11-13: 0 affected delivery lines. Detail is held back until the fix is live
@@ -1112,7 +1112,7 @@ missed it. Fix: use the Chicago date, as KI-18 did. Repair step 5 (To-Do 0.17).
 
 ### KI-163 — Small stock-history gaps
 **LOW · OPEN · inventory · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-15, C-16) · unassigned**
-**Fix pending 2026-11-17:** `20270122100000_inventory_cleanup_ki161_163_150` (not applied live) fixes (1) (the `released` row records what was really released; none when nothing was) and (2) (count lines keep 4 decimals). (4) is not a defect: the header equals the sum of its lines each rounded to whole cents (house rule); only the unrounded sum is 1¢ lower, and it has no vendor bill. (3) stays open (needs a link column; no figure is wrong). Old `released` rows stay as written.
+**Fix pending 2026-11-17:** `20270126110000_inventory_cleanup_ki161_163_150` (not applied live) fixes (1) (the `released` row records what was really released; none when nothing was) and (2) (count lines keep 4 decimals). (4) is not a defect: the header equals the sum of its lines each rounded to whole cents (house rule); only the unrounded sum is 1¢ lower, and it has no vendor bill. (3) stays open (needs a link column; no figure is wrong). Old `released` rows stay as written.
 (1) Quick-delivery cancel (`_cancel_delivery_replay_impl_20261015`) clamps `quantity_prebooked` at 0 but logs a
 `released` row for the full amount, so reservation history can disagree with the figure. (2) Count rounding in
 `update_cycle_count_item` (`20270103170000`) can leave up to 0.005 on 4-decimal bulk rows. (3) Return and
@@ -1163,7 +1163,7 @@ overwrite each other (one settings record). Fix depends on who owns crop program
 
 ### KI-150 — Receipt reversal takes the PO locks in the opposite order from vendor bills
 **LOW · OPEN · purchasing/payables · found 2026-11-11 (PR #1769 review) · unassigned**
-**Fix pending 2026-11-17:** `20270122100000_inventory_cleanup_ki161_163_150` (not applied live). Receipt reversal vs vendor bill: no change needed. Live 2026-11-17, the vendor-bill paths lock the vendor/bill and the PO but never lock or update PO lines, so the reversal only waits and no cycle exists; taking the PO first would instead invert against `apply_product_cost_basis_change_set`. C-12 is fixed: delivery completion locks its stock rows in product order (the order the job hold sync already uses) before the original body, and job completion does the same right after the hold sync (a trigger on the status change). Known limit: a product with no Main Warehouse stock row yet (0 on open deliveries live).
+**Fix pending 2026-11-17:** `20270126110000_inventory_cleanup_ki161_163_150` (not applied live). Receipt reversal vs vendor bill: no change needed. Live 2026-11-17, the vendor-bill paths lock the vendor/bill and the PO but never lock or update PO lines, so the reversal only waits and no cycle exists; taking the PO first would instead invert against `apply_product_cost_basis_change_set`. C-12 is fixed: delivery completion locks its stock rows in product order (the order the job hold sync already uses) before the original body, and job completion does the same right after the hold sync (a trigger on the status change). Known limit: a product with no Main Warehouse stock row yet (0 on open deliveries live).
 Reversing a receipt locks the PO line before the PO; creating or editing a vendor bill locks the vendor, then the PO.
 Two people doing both at once on the same PO could make one of them wait and fail with a retryable error. Fix: take
 the PO lock first in the reversal path, in a new migration.

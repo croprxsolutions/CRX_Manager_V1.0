@@ -16,7 +16,7 @@ Builds on #1896 (delivery, order and PO lines in the stock unit). One PR to `sta
   - the unit must match the order line's unit (`_unit_matches_stock_unit` from #1896; `DELIVERY_LINE_UNIT_MISMATCH`);
   - a second line for the same order line on the same delivery is refused (`DELIVERY_LINE_DUPLICATE`), backed by a
     unique index on `(delivery_id, order_item_id)` for two writers at once;
-  - it holds the delivery and the order line `FOR SHARE`, so the existing order-line product guard
+  - it holds the delivery `FOR SHARE` and the order line `FOR UPDATE` (Taha, #1940: follow-ups queue), so the existing order-line product guard
     (`guard_order_item_delivery_lineage`) and this check cannot pass each other in a race.
   - `order_item_id` must be set (live: 0 lines without one; every creating RPC sets it; the column is NOT NULL).
 - **Parent side (Astra 4).** A second BEFORE UPDATE OF `order_id` trigger on `deliveries` refuses moving a delivery

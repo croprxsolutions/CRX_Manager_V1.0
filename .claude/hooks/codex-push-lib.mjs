@@ -1747,7 +1747,7 @@ export function proofValid(data, headSha, nowMs, expectedBaseSha, maxAgeMs = SOL
   const carried = carriedSolProof(data);
   const candidate = carried ? { ...data, codex_ran: true } : data;
   return reviewProofValid(candidate, headSha, nowMs, "codex_ran", expectedBaseSha, Math.min(maxAgeMs, SOL_PROOF_MAX_AGE_MS))
-    && data.model === "gpt-6-sol"
+    && data.model === "gpt-6.2-sol"
     && data.reasoning_effort === "high"
     && (!carried || carryRootReviewOk(data, nowMs));
 }

@@ -904,7 +904,7 @@ const base = "c".repeat(40);
 const codexProof = {
   codex_ran: true,
   verdict: "clean",
-  model: "gpt-6-sol",
+  model: "gpt-6.2-sol",
   reasoning_effort: "high",
   head_sha: sha,
   base_sha: base,

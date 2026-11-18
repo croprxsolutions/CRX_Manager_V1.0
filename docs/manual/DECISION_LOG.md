@@ -4,6 +4,10 @@
 
 **Decision (Mason, in chat, 2026-11-18: "Fill chemistry first").** Live check that day: 0 `active_ingredients`, 0 parents with ingredient rows, 0 mode-of-action rows, 0 `ingredient_map` rows. The comparison is built entirely from ingredient strengths, so a page built now would show every row as incomplete. He was offered "build now on test data" and "a price-per-acre slice only", and chose to fill the chemistry first.
 **What this forbids/implies:** no CMP-2 code starts until the "Start when" list in `docs/plans/2026-11-18-product-CMP2-BUILD-SHEET.md` is met: chemistry filled (DM-4 EPA lookup, DM-1b workbook or reviewed manual entry), MOA-1 landed with its group load, and RT-4 live. The next Product Master step is filling the chemistry, not CMP-2.
+## 2026-11-18 — Codex Sol and Astra move to the 6.2 models
+
+**Decision (Mason):** use `gpt-6.2-sol` and `gpt-6.2-astra` instead of the older Sol and Astra. The Sol ship gate, every guard that checks a Sol proof, the scripts and the skills all move together; Luna stays `gpt-6-luna` (no 6.2 Luna exists for this account, probed 2026-11-18).
+**What this forbids/implies:** a `gpt-6-sol` proof no longer satisfies any gate; open PRs re-run Sol after this lands. No validator accepts both models during the switch. This replaces the 2026-11-06 "wait for a side-by-side" note on moving Sol.
 
 ## 2026-11-18 — #1946 (KI-81): a blend ticket's own grower falls back to their own quote
 

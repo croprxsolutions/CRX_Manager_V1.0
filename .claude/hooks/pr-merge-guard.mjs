@@ -7,7 +7,7 @@
 //
 //   * merge into main → allowed only under Mason's autonomous-landing rule
 //     (2026-09-26; CodeRabbit approval dropped 2026-10-19): the newest run of every
-//     check is green with mergeStateStatus CLEAN, and a fresh gpt-6-sol/high
+//     check is green with mergeStateStatus CLEAN, and a fresh gpt-6.2-sol/high
 //     Codex proof is bound to that head, or to an earlier commit on the PR's own
 //     branch not yet in main (Mason, 2026-10-29), and GitHub's real base (minted only by
 //     scripts/write-codex-push-proof.mjs — hand-writing is blocked). Only a diff
@@ -575,7 +575,7 @@ function gateRequest(request) {
   // ── AUTONOMOUS LANDING RULE (Mason, 2026-09-26) ────────────────────────────
   // An agent merges into main by itself only when ALL of these hold for the exact
   // head GitHub will merge: every check's newest
-  // run is green with mergeStateStatus CLEAN, and a fresh gpt-6-sol/high Codex
+  // run is green with mergeStateStatus CLEAN, and a fresh gpt-6.2-sol/high Codex
   // proof is bound to that head and to GitHub's real base. Every change needs the
   // Sol proof now, not only the risky ones — that is the rule Mason confirmed,
   // accepting the extra Codex spend. The one exception is a documentation-only
@@ -703,7 +703,7 @@ function gateRequest(request) {
   }
 
   deny(
-    `PR MERGE GATE: this merge into ${base} needs a clean gpt-6-sol/high Codex proof because ${risk.reason} ` +
+    `PR MERGE GATE: this merge into ${base} needs a clean gpt-6.2-sol/high Codex proof because ${risk.reason} ` +
     `(docs/reference/sol-required-paths.md; Mason, 2026-10-30). None was found.\n\n` +
     `"Review is queued/scheduled" is NOT reviewed. Before merging:\n` +
     `  1. Check out the PR branch (\`gh pr checkout ${request.selector || "<number>"}\`) if it isn't the current branch.\n` +

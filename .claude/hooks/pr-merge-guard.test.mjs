@@ -482,7 +482,7 @@ ok(r.decision?.permissionDecision === "deny", "--admin later in a chain is still
   // `CODEX=$(ls … | head -1); "$CODEX" exec …` that this refusal used to block.
   for (const command of [
     "a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951 --squash",
-    "CODEX=$(ls -t /c/tools/*/codex.exe | head -1); timeout 2400 \"$CODEX\" exec --ephemeral -m gpt-6-sol -c 'model_reasoning_effort=\"high\"'",
+    "CODEX=$(ls -t /c/tools/*/codex.exe | head -1); timeout 2400 \"$CODEX\" exec --ephemeral -m gpt-6.2-sol -c 'model_reasoning_effort=\"high\"'",
   ]) {
     r = runHook({ tool_name: "Bash", tool_input: { command } });
     ok(!r.decision, `accepted hole / ordinary launch is allowed: ${JSON.stringify(command.slice(0, 60))}`);
@@ -694,7 +694,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   const X = "d".repeat(40);   // a base the head does not contain
   const now = Date.now();
   const proof = (over = {}) => ({
-    codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high",
+    codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
     head_sha: H, base_sha: B0, timestamp: new Date(now - 60_000).toISOString(), ...over,
   });
   const edges = new Set([`${B0}>${H}`, `${B0}>${B1}`]);
@@ -741,7 +741,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   const B = "b".repeat(40);   // main, which the head and every reviewed commit contain
   const now = Date.now();
   const proof = (head_sha, over = {}) => ({
-    codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high",
+    codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
     head_sha, base_sha: B, timestamp: new Date(now - 60_000).toISOString(), ...over,
   });
   const older = ["1", "2", "3", "4", "5", "6"].map((c) => proof(c.repeat(40)));

@@ -77,7 +77,7 @@ export async function adminResetPassword(
 
   const { error: auditError } = await adminClient
     .from("activity_feed")
-    .insert(auditRow(callerId, userId, "user_password_reset", "Admin set a new password for this user"));
+    .insert(auditRow(callerId, userId, "user_password_reset", "Admin started a password reset for this user (a failure row follows if Auth refused it)"));
   if (auditError) {
     return { status: 500, body: { error: "Could not record the reset. Password not changed." } };
   }
@@ -85,10 +85,13 @@ export async function adminResetPassword(
   const { error: updateError } = await adminClient.auth.admin.updateUserById(userId, { password });
   if (updateError) {
     // Best effort: the request row is already written, so a failed second row
-    // still leaves a record that a reset was attempted.
-    await adminClient
+    // still leaves a record that a reset was attempted; log it for the function logs.
+    const { error: failAuditError } = await adminClient
       .from("activity_feed")
       .insert(auditRow(callerId, userId, "user_password_reset_failed", "Password reset failed in Auth; password not changed"));
+    if (failAuditError) {
+      console.error("password reset: could not record the Auth failure", failAuditError.message);
+    }
     return { status: 400, body: { error: updateError.message } };
   }
 

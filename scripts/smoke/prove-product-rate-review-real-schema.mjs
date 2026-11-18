@@ -16,6 +16,8 @@ import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
+import { proveInactiveRateReview } from './prove-inactive-rate-review-real-schema.mjs';
+import { TOUCHED, rateReviewTouch } from './rate-review-later-migrations.mjs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -26,9 +28,18 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270104110000_product_rate_review.sql');
-const FOLLOW_UPS = [];
-// Later files that only READ what this proof covers and redefine none of it.
-const LATER_READ_ONLY = new Set();
+// shortcut: 20270120100000 (#1880) is listed for ordering only and is NOT applied here; it also replaces
+// delivery-brand and receiving functions from later migrations this prover never replays. Its rate-function
+// changes were tested by Taha on a real-schema DB (#1880) and by the private behaviour prover; apply it here
+// once this prover replays the later chain (#1928).
+const FOLLOW_UPS = [
+  path.join(MIGRATIONS, '20270110110000_inactive_rate_review_cleanup.sql'),
+  path.join(MIGRATIONS, '20270120100000_priority_integrity_followups.sql'),
+  // RT-4a (listed for ordering only, NOT applied): it adds triggers on product_rates and the outcomes that refuse
+  // writes for a parent switched to its approved rate; no parent here is switched. Its own proof is
+  // scripts/smoke/prove-rate-cutover-real-schema.mjs, which replays this whole chain first.
+  path.join(MIGRATIONS, '20270125100000_product_rate_cutover.sql'),
+];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -47,8 +58,7 @@ const LEDGER_ONLY = new Set([
   '20261220100000_applicator_keeps_own_record_fields.sql',
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
-// A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(product_rate|_product_parent_require_admin|_product_parent_replay|product_parent_rate_outcomes|rate_review)/i;
+// TOUCHED (rate-review-later-migrations.mjs): names the candidate creates or relies on.
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -164,8 +174,10 @@ function plan() {
     assert.ok(i > last, `${path.basename(file)} must sort after the candidate and earlier follow-ups`);
     last = i;
   }
-  for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f) && !LATER_READ_ONLY.has(path.basename(f)))) {
-    assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
+  // A later file that only calls or md5-pins the covered helpers is fine; anything else refuses (fail closed).
+  for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f))) {
+    const why = rateReviewTouch(lf(file));
+    assert.ok(!why, `${path.basename(file)} sorts after the candidate and touches what it relies on (${why}); re-think this proof`);
   }
   const before = all.slice(0, at);
   for (const name of PARKED) {
@@ -552,15 +564,22 @@ function batchCases() {
     { parent_id: L[7], basis: 'per_acre', source: 'label', low: '0.5', high: '1.5', unit: 'pt', decision: 'approve' }], [outRow(L[7], 'approved_default', null, p8)]));
   assert.equal(rec.rates_changed, 2); assert.equal(rec.outcomes_changed, 1);
   assert.equal(outcomeOf(L[7]), 'approved_default');
-  // A reopen + edit on a decided parent, with its outcome row downloaded before the upload: not stale.
+  // A fresh approved row can reconfirm the exact recorded outcome and note in the same upload.
   const p3 = par(L[2]);
-  js(ADMIN, commit([up(L[2], p3.rates.find((r) => r.rate_id === R.b3), { high: '2.5', decision: 'reopen', reason: 'label 2026' })],
-    [outRow(L[2], 'needs_label_data', 'waiting on the 2026 label', p3)]));
+  const sameOutcome = js(ADMIN, commit([{ parent_id: L[2], basis: 'per_100_gal', source: 'label', recommended: '1', unit: 'pt', decision: 'approve' }],
+    [outRow(L[2], p3.outcome, p3.outcome_note, p3)]));
+  assert.equal(sameOutcome.outcomes_changed, 1);
+  assert.equal(outcomeOf(L[2]), 'approved_default');
+  assert.equal(par(L[2]).outcome_note, p3.outcome_note);
+  // A reopen + edit on a decided parent, with its outcome row downloaded before the upload: not stale.
+  const p3After = par(L[2]);
+  js(ADMIN, commit([up(L[2], p3After.rates.find((r) => r.rate_id === R.b3), { high: '2.5', decision: 'reopen', reason: 'label 2026' })],
+    [outRow(L[2], 'needs_label_data', 'waiting on the 2026 label', p3After)]));
   assert.equal(outcomeOf(L[2]), 'needs_label_data');
   assert.equal(statusOf(R.b3), 'draft');
   // But an outcome row whose parent's outcome moved since the download is stale.
-  refused(ADMIN, commit([], [outRow(L[2], 'needs_label_data', 'other', p3)]), /PRODUCT_RATE_OUTCOME_STALE/);
-  console.log('[case] 10 one upload adds and approves a default, then sets approved_default; a reopen + edit with the outcome in the same upload is not stale');
+  refused(ADMIN, commit([], [outRow(L[2], 'needs_label_data', 'other', p3After)]), /PRODUCT_RATE_OUTCOME_STALE/);
+  console.log('[case] 10 one upload sets the same recorded outcome and note after a rate change, then a reopen + edit with a new outcome is not stale');
 
   // 11a. The upload's parent_id must be the rate's parent; unknown parents; duplicates.
   const wrong = js(ADMIN, preview([upId(L[8], R.a9, { parent_id: L[0], decision: 'reopen', reason: 'x' })])).rates[0];
@@ -657,6 +676,7 @@ async function main() {
   downloadCases();
   accessCases();
   console.log('PRODUCT_RATE_REVIEW_PROOF_PASS');
+  await proveInactiveRateReview(NAME);
 }
 
 try { await main(); }

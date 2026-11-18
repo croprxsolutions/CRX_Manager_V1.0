@@ -4,7 +4,8 @@
 // prints "build", so a broken diff never skips the check. With --map it asks the same
 // about the workflow map generator's inputs and prints "check" or "skip"; --pins asks it about migration
 // SQL and records; --freshness asks it about migration SQL alone; --registry asks it about the schema registry and migration records. With --edge-tests it lists the vitest
-// files that read a changed Edge Function folder's source. CI builds every PR either way
+// files that read a changed Edge Function folder's source. With --all-deletes it prints "deletes" when every
+// pushed ref is a branch or tag delete (no commits leave the machine), else "push". CI builds every PR either way
 // (2026-11-03 retro: three scripts/docs pushes spent ~13 minutes rebuilding the app).
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -58,6 +59,16 @@ export function edgeSourceTests(paths, tests) {
   return tests.filter((t) => mention.test(t.text)).map((t) => t.path).sort();
 }
 
+// True only when every ref line is a well-formed delete (local sha all zeros); any doubt is false.
+// A delete sends no commits, so the content checks have nothing to inspect (2026-11-17 retro: 1-4 min per delete).
+export function allDeletes(refLines) {
+  const lines = refLines.split('\n').map((l) => l.trim()).filter(Boolean);
+  return lines.length > 0 && lines.every((line) => {
+    const fields = line.split(/\s+/);
+    return fields.length === 4 && /^0{40}(?:0{24})?$/.test(fields[1]) && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(fields[3]);
+  });
+}
+
 function vitestFiles() {
   return execFileSync('git', ['ls-files', 'src/*.test.ts', 'src/*.test.tsx'], { encoding: 'utf8' })
     .split('\n').filter(Boolean).flatMap((path) => {
@@ -80,7 +91,11 @@ function changedPaths(refLines) {
   return paths;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] && process.argv.includes('--edge-tests')) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] && process.argv.includes('--all-deletes')) {
+  let verdict = 'push';
+  try { if (allDeletes(readFileSync(0, 'utf8'))) verdict = 'deletes'; } catch { /* keep push */ }
+  console.log(verdict);
+} else if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] && process.argv.includes('--edge-tests')) {
   // One test file per line; empty means nothing to run. Unknown changed files run every source-reading
   // test; only an unlistable test tree prints nothing (CI still runs everything).
   try {

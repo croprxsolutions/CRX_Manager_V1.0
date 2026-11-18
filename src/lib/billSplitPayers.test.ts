@@ -149,7 +149,10 @@ describe('loadBillSplitPayers', () => {
   const flat = (id: string, name: string, cents: number) => ({ id, invoice_number: `CS-2026-0412-${id}`, total_amount_cents: cents, farm_name: name });
   const db = (data: unknown[] | null, count: number | null, error: unknown = null) => {
     const calls: unknown[][] = [];
-    return { calls, client: { rpc: (...a: unknown[]) => { calls.push(a); return Promise.resolve({ data, error, count }); } } as never };
+    return { calls, client: {
+      rpc: (...a: unknown[]) => { calls.push(a); return Promise.resolve({ data, error, count }); },
+      from: () => read({ data: { order_id: null }, error: null }),
+    } as never };
   };
   it('reads every payer of the sale through get_bill_split_payers, for the invoice opened', async () => {
     const { calls, client } = db([flat('1', 'Farmer', 6000), flat('2', 'Landlord', 4000)], 2);
@@ -162,6 +165,89 @@ describe('loadBillSplitPayers', () => {
   });
   it('refuses when the read fails', async () => {
     await expect(loadBillSplitPayers(db(null, null, new Error('INVOICE_NOT_VISIBLE')).client, 'inv-1')).rejects.toThrow();
+  });
+
+  // The % column shows the sale's split from the order (Mason, 2026-11-12: "the 50/50 split from the order, with
+  // freight as its own line for that payer"), not each payer's share of the billed totals, which freight, the
+  // standing discount and tax move (50.92% / 49.08% on a 50/50 sale with freight on one side).
+  describe("the order's split", () => {
+    const bigSky = flat('1', 'Big Sky Farms 18', 73483);
+    const cedar = flat('2', 'Cedar Creek Farms 12', 70826);
+    const share = (customer_id: string, farm_name: string, split_percentage: number | string) => ({ customer_id, split_percentage, customer: { farm_name } });
+    const client = (payers: unknown[], o: { shares?: unknown[]; lineShares?: number | null; main?: unknown; orderId?: string | null; fail?: string } = {}) => ({
+      rpc: () => Promise.resolve({ data: payers, error: null, count: payers.length }),
+      from: (t: string) => {
+        const err = o.fail === t ? new Error('denied') : null;
+        if (t === 'invoices') return read({ data: { order_id: o.orderId === undefined ? 'o1' : o.orderId }, error: err });
+        if (t === 'orders') return read({ data: o.main === undefined ? { customer_id: 'c1', customer: { farm_name: 'Big Sky Farms 18' } } : o.main, error: err });
+        if (t === 'order_shares') return read({ data: o.shares ?? [share('c2', 'Cedar Creek Farms 12', 50)], error: err });
+        if (t === 'order_item_shares') return read({ data: null, error: err, count: o.lineShares === undefined ? 0 : o.lineShares });
+        return read({ data: null, error: new Error(`unexpected ${t}`) });
+      },
+    }) as never;
+    const pcts = async (c: never) => (await loadBillSplitPayers(c, 'inv-1')).map((p) => [p.customer_name, p.split_percentage, p.amount_cents]);
+
+    it('shows 50% / 50% for a 50/50 sale with freight, discount and tax on one payer; amounts stay as billed', async () => {
+      expect(await pcts(client([bigSky, cedar]))).toEqual([['Big Sky Farms 18', 50, 73483], ['Cedar Creek Farms 12', 50, 70826]]);
+    });
+
+    it("counts the main customer's own row on the card plus whatever the card leaves over", async () => {
+      expect(await pcts(client([bigSky, cedar], { shares: [share('c1', 'Big Sky Farms 18', 40), share('c2', 'Cedar Creek Farms 12', '35.5')] })))
+        .toEqual([['Big Sky Farms 18', 64.5, 73483], ['Cedar Creek Farms 12', 35.5, 70826]]);
+    });
+
+    it('gives the main customer nothing when the card gives all of it to others', async () => {
+      const a = flat('1', 'Cedar Creek Farms 12', 6450);
+      const b = flat('2', 'Other Farm', 3900);
+      expect(await pcts(client([a, b], { shares: [share('c2', 'Cedar Creek Farms 12', 60), share('c3', 'Other Farm', 40)] })))
+        .toEqual([['Cedar Creek Farms 12', 60, 6450], ['Other Farm', 40, 3900]]);
+    });
+
+    it('prints a three-way card to two places adding up to 100%', async () => {
+      const payers = [flat('1', 'Big Sky Farms 18', 145), flat('2', 'B', 100), flat('3', 'C', 100)];
+      const got = await loadBillSplitPayers(client(payers, { shares: [share('c2', 'B', '33.333333'), share('c3', 'C', '33.333333')] }), 'inv-1');
+      expect(got.map((p) => p.split_percentage)).toEqual([33.34, 33.33, 33.33]);
+    });
+
+    it("keeps the billed share when a line has its own payers (the card doesn't bill those lines)", async () => {
+      expect((await pcts(client([bigSky, cedar], { lineShares: 1 }))).map((p) => p[1])).toEqual([50.92, 49.08]);
+    });
+
+    it("refuses, as a failed payer read does, when the order or its split can't be read, rather than quietly showing another basis", async () => {
+      for (const fail of ['invoices', 'orders', 'order_shares', 'order_item_shares']) {
+        await expect(loadBillSplitPayers(client([bigSky, cedar], { fail }), 'inv-1')).rejects.toThrow('Could not load the invoice details');
+      }
+      await expect(loadBillSplitPayers(client([bigSky, cedar], { main: null }), 'inv-1')).rejects.toThrow('Could not load the invoice details');
+      await expect(loadBillSplitPayers(client([bigSky, cedar], { lineShares: null }), 'inv-1')).rejects.toThrow('Could not load the invoice details');
+      // The key invoice itself came back empty (the payer read already showed it to this user): not "no order".
+      const hidden = { ...(client([bigSky, cedar]) as Record<string, unknown>) };
+      const base = (hidden.from as (t: string) => unknown);
+      hidden.from = (tb: string) => (tb === 'invoices' ? read({ data: null, error: null }) : base(tb));
+      await expect(loadBillSplitPayers(hidden as never, 'inv-1')).rejects.toThrow('Could not load the invoice details');
+    });
+
+    it('keeps the billed share for a payer invoice with no order', async () => {
+      expect((await pcts(client([bigSky, cedar], { orderId: null }))).map((p) => p[1])).toEqual([50.92, 49.08]);
+    });
+
+    it('shows the split for two customers with one farm name when their shares are equal', async () => {
+      const twin = flat('2', 'Big Sky Farms 18', 70826);
+      expect((await pcts(client([bigSky, twin], { shares: [share('c2', 'Big Sky Farms 18', 50)] }))).map((p) => p[1])).toEqual([50, 50]);
+    });
+
+    it('adds up two card rows for one customer', async () => {
+      expect((await pcts(client([bigSky, cedar], { shares: [share('c2', 'Cedar Creek Farms 12', 25), share('c2', 'Cedar Creek Farms 12', 25)] }))).map((p) => p[1]))
+        .toEqual([50, 50]);
+    });
+
+    it("keeps the billed share when the payers don't match the card one to one", async () => {
+      // Two customers with one name and different shares can't be told apart; a payer missing from the card, or a
+      // card payer with no invoice.
+      const twin = flat('2', 'Big Sky Farms 18', 70826);
+      expect((await pcts(client([bigSky, twin], { shares: [share('c2', 'Big Sky Farms 18', 40)] }))).map((p) => p[1])).toEqual([50.92, 49.08]);
+      expect((await pcts(client([bigSky, cedar], { shares: [share('c3', 'Someone Else', 50)] }))).map((p) => p[1])).toEqual([50.92, 49.08]);
+      expect((await pcts(client([bigSky], { shares: [share('c2', 'Cedar Creek Farms 12', 50)] }))).map((p) => p[1])).toEqual([100]);
+    });
   });
 });
 

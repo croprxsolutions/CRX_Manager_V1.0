@@ -658,6 +658,8 @@ export interface CommissionSplit {
 }
 
 export interface Customer {
+  /** Standing grower discount, % off product lines on chemical sales (billing plan M4b). Admin only. */
+  standing_discount_pct?: number;
   id: string;
   farm_name: string;
   /** Controlled list, enforced by customers_crops_allowed_check (see src/lib/crops.ts). */
@@ -1051,6 +1053,8 @@ export interface Order {
    * is queued for a manual "Create Split Invoices" pass. Cleared back to false
    * once create_split_invoices_from_order successfully bills it. */
   needs_split_billing?: boolean | null;
+  /** The sale's sales tax box (billing plan M4a); changed only through set_order_sales_tax. */
+  sales_tax?: boolean;
   created_at: string;
   updated_at: string;
   customer?: Customer;
@@ -2569,6 +2573,8 @@ export interface RateReviewWorkbook {
   parents: {
     parent_id: string;
     parent_name: string;
+    /** Current parent activity for the history-only rate review. */
+    is_active: boolean;
     product_form: string;
     sizes: string[];
     outcome: ProductRateOutcome | null;
@@ -2608,6 +2614,8 @@ export interface RateReviewWorkbook {
     rates: number; drafts: number; approved: number; per_100_gal: number; per_100_gal_approved: number;
     parents: number; parents_undecided: number; approved_default: number; no_per_acre_default: number; needs_label_data: number;
     outcomes_no_longer_valid: number;
+    /** Inactive parents and retained rate/outcome history; excluded from active readiness counts. */
+    inactive_parents: number; inactive_rates: number; inactive_approved: number; inactive_outcomes: number;
   };
 }
 
@@ -2829,7 +2837,8 @@ export interface BlendRecipeItem {
 
 export type InvoiceType = 'chemical_sale' | 'field_application' | 'misc_charge' | 'credit_memo';
 /** invoice_items.charge_type (CHECK invoice_items_charge_type_check, mig 20261021050000). */
-export type InvoiceChargeType = 'freight' | 'application_fee' | 'service' | 'other';
+// 'standing_discount' (billing plan M4b) and 'sales_tax' (M4a) are written only by the database; never offered as types to pick.
+export type InvoiceChargeType = 'freight' | 'application_fee' | 'service' | 'other' | 'standing_discount' | 'sales_tax';
 export type InvoiceStatus = 'draft' | 'unposted' | 'posted' | 'paid' | 'overdue' | 'voided' | 'cancelled';
 
 export interface Invoice {
@@ -4469,6 +4478,7 @@ export interface GrossSalesRow {
   order_count: number;
 }
 
+/** A customer whose balance can be reconstructed for the selected date. */
 export interface CustomerBalanceRow {
   [k: string]: unknown;
   customer_id: string;
@@ -4480,8 +4490,22 @@ export interface CustomerBalanceRow {
   open_credit: number;
   invoice_count: number;
   oldest_unpaid_date: string | null;
-  // Set (with every amount NULL) when this customer's balance cannot be rebuilt as of the date (KI-95).
-  unavailable_reason?: string | null;
+  unavailable_reason: null;
+}
+
+/** KI-95: a customer whose balance cannot be rebuilt; all balance values are null, never $0. */
+export interface CustomerBalanceUnavailableRow {
+  [k: string]: unknown;
+  customer_id: string;
+  farm_name: string;
+  total_invoiced: null;
+  total_paid: null;
+  prepay_applied: null;
+  outstanding_balance: null;
+  open_credit: null;
+  invoice_count: null;
+  oldest_unpaid_date: null;
+  unavailable_reason: string;
 }
 
 export interface ChemicalHistoryRow {

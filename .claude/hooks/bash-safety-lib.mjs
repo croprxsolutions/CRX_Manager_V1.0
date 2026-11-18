@@ -15,7 +15,9 @@
 // rule had come to refuse only reads that named it (`grep`, `git log -- <path>`).
 
 import { readFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { expandNestedCommands } from "./codex-push-lib.mjs";
 
 // computedJavaScriptScriptArgument (below) recognises a JavaScript runtime whose
 // SCRIPT argument cannot be read from the text (`node "$F"`). Nothing refuses on
@@ -500,10 +502,115 @@ export function readPackageScripts(cwd) {
   }
 }
 
+// Staging-first (Mason, 2026-11-13): feature PRs target `staging`; only
+// `hotfix/<name>` (and the bot's `release/next`) go into `main`. GitHub's default
+// branch is still `main` (its scheduled release jobs need that), so a `gh pr
+// create` with no base would land on `main` too. The "Release flow guard (main)"
+// CI check stops such a PR merging; this stops it being opened.
+// Nested commands (`bash -c "…"`, `pwsh -Command …`) are unwrapped as the merge
+// guard does. A hotfix's ancestry is not checked here: CI's hotfix gate refuses a
+// `hotfix/` PR that lacks `main` or carries `staging` work (release-flow.mjs).
+// Same head rule as CI's isReleaseOrHotfixHead (.github/scripts/release-flow.mjs).
+const MAIN_PR_HEAD_RE = /^(?:release\/next|hotfix\/[^/]+)$/;
+const FOLDER_CHANGE_HEADS = new Set(["cd", "pushd", "set-location", "sl", "chdir"]);
+function unquoteWord(word) {
+  // Quotes can sit inside a word (`--base="staging"`); branch names never hold them.
+  return String(word).replace(/["']/g, "");
+}
+// The LAST value wins, as it does for gh when a flag repeats.
+function prFlagValue(args, long, short) {
+  let value = null;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === long || arg === short) value = args[index + 1] ?? "";
+    else if (arg.startsWith(`${long}=`)) value = arg.slice(long.length + 1);
+    else if (short && arg.startsWith(short) && arg.length > short.length && !arg.startsWith("--")) value = arg.slice(short.length).replace(/^=/, "");
+  }
+  return value;
+}
+const branchName = (value) => String(value).replace(/^refs\/heads\//, "");
+// A REST field naming the PR's base: `-f base=x`, `--field=base=x`, `-fbase=x`.
+const REST_BASE_FIELD_RE = /^(?:--(?:raw-)?field=|-[fF])?base=(.*)$/;
+function currentGitBranch(cwd) {
+  const result = spawnSync("git", ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", timeout: 5_000 });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+export function checkPrBase(cmd, cwd, branchOf = currentGitBranch) {
+  const text = String(cmd || "");
+  if (!/\b(?:pr|pulls)\b|createPullRequest|baseRefName/i.test(text)) return null;
+  let commands = [text];
+  try {
+    const nested = expandNestedCommands(text);
+    if (nested.tooDeep) return "Blocked: commands nested too deeply to check for a PR into `main`. Run `gh pr create --base staging …` as its own plain command.";
+    commands = [text, ...nested.commands];
+  } catch {
+    return "Blocked: could not unwrap the commands nested in this one to check for a PR into `main`. Run `gh pr create --base staging …` as its own plain command.";
+  }
+  for (const command of commands) {
+    const reason = checkPrBaseText(command, cwd, branchOf);
+    if (reason) return reason;
+  }
+  return null;
+}
+function checkPrBaseText(text, cwd, branchOf) {
+  let changesFolder = false;
+  for (const segment of splitShellSegments(text)) {
+    const words = splitShellWords(segment.trim()).map(unquoteWord);
+    if (FOLDER_CHANGE_HEADS.has(String(words[0] || "").toLowerCase())) { changesFolder = true; continue; }
+    // Only the segment's command word counts (after `A=b` assignments), so
+    // `echo gh pr create` is text, not a PR.
+    let ghIndex = 0;
+    while (ghIndex < words.length && /^[A-Za-z_]\w*=/.test(words[ghIndex])) ghIndex += 1;
+    if (!/^gh(?:\.exe|\.cmd)?$/i.test(String(words[ghIndex] || "").split(/[\\/]/).pop())) continue;
+    if (words[ghIndex + 1] === "api") {
+      // A query that only reads `baseRefName` is fine; a mutation that sets it is not.
+      if (/\bmutation\b/i.test(segment) && /createPullRequest|baseRefName/i.test(segment)) {
+        return "Blocked a GraphQL call that opens a PR or sets its target branch: that branch cannot be checked here. Use `gh pr create --base staging`.";
+      }
+      if (!words.some((word) => /\/pulls(?:\/\d+)?\/?$/.test(word))) continue;
+      // `--method GET` sends the fields as a list filter, not a new PR.
+      const method = prFlagValue(words.slice(ghIndex + 2), "--method", "-X");
+      if (method !== null && method.toUpperCase() === "GET") continue;
+      const bases = words.map((word) => REST_BASE_FIELD_RE.exec(word)?.[1]).filter((value) => value !== undefined);
+      if (words.some((word) => word === "--input" || word.startsWith("--input=")) || bases.some((value) => branchName(value) !== "staging")) {
+        return "Blocked a raw `gh api …/pulls` call that sets a PR's target branch to something other than `staging`. Use `gh pr create --base staging` (a hotfix: `--base main --head hotfix/<name>`).";
+      }
+      continue;
+    }
+    const prIndex = words.indexOf("pr", ghIndex + 1);
+    if (prIndex < 0) continue;
+    const sub = words[prIndex + 1];
+    if (!["create", "new", "edit"].includes(sub)) continue;
+    const args = words.slice(prIndex + 2);
+    if (args.includes("--help") || args.includes("-h")) continue;
+    const base = prFlagValue(args, "--base", "-B");
+    // A shell-expanded value (`$BASE`) is not "staging" or "main", so it is refused below.
+    if (base !== null && branchName(base) === "staging") continue;
+    if (sub === "edit") {
+      if (base === null) continue;
+      return "Blocked moving a PR onto a branch other than `staging`. Staging-first: feature PRs target `staging`; a hotfix opens straight into `main` from `hotfix/<name>` (AGENTS.md, ship.md › Staging).";
+    }
+    if (base === null || base === "") {
+      return "Blocked `gh pr create` with no `--base`: GitHub's default branch is `main`, so it would open into `main`. Add `--base staging` (a hotfix uses `--base main --head hotfix/<name>`).";
+    }
+    if (branchName(base) !== "main") {
+      return `Blocked a PR into \`${base}\`. Staging-first: PRs open into \`staging\`, or into \`main\` from a \`hotfix/<name>\` branch.`;
+    }
+    const explicitHead = prFlagValue(args, "--head", "-H");
+    const head = explicitHead !== null ? explicitHead.replace(/^[^:]+:/, "") : (changesFolder ? "" : branchOf(cwd));
+    if (!MAIN_PR_HEAD_RE.test(head) || /[$`%]/.test(head)) {
+      return `Blocked a PR into \`main\` from \`${head || "an unknown branch"}\`. Staging-first: feature PRs use \`--base staging\`; only a \`hotfix/<name>\` branch cut from \`main\` (or the bot's \`release/next\`) opens into \`main\`, and Taha or Mason merges it.`;
+    }
+  }
+  return null;
+}
+
 // The full command check used by both hooks: literal command text first, then
 // (only if clean) every `npm run X` target's resolved script body, recursively.
 // Returns the first matching reason, or null.
 export function checkCommandDeep(cmd, cwd) {
+  const prBase = checkPrBase(cmd, cwd);
+  if (prBase) return prBase;
   const direct = checkDangerousCommand(cmd);
   if (direct) return direct;
 

@@ -38,6 +38,9 @@ export function readMarker(body) {
   }
   for (const k of ['gate', 'done', 'warned']) if (typeof v[k] === 'boolean') out[k] = v[k];
   for (const k of ['mig', 'orph', 'at']) if (Number.isSafeInteger(v[k]) && v[k] >= 0) out[k] = v[k];
+  if (v.grp && typeof v.grp === 'object' && !Array.isArray(v.grp)) {
+    out.grp = Object.fromEntries(Object.entries(v.grp).filter(([k, n]) => Object.hasOwn(GROUPS, k) && Number.isSafeInteger(n) && n >= 0));
+  }
   return out;
 }
 export function writeMarker(body, marker) {
@@ -45,6 +48,50 @@ export function writeMarker(body, marker) {
   const b = body ?? '';
   return MARK.test(b) ? b.replace(MARK, () => tag) : `${b.trimEnd()}\n\n${tag}\n`;
 }
+
+// What's in a release, by kind, from each PR's conventional-commit title. Tooling scopes (CI, agents,
+// guards, the release flow) go under Engineering so Features and Fixes are what the app gained.
+// Back-merges are plumbing and left out.
+const GROUPS = {
+  features: ':sparkles: New features',
+  fixes: ':bug: Fixes and improvements',
+  other: ':jigsaw: Other changes',
+  engineering: ':hammer_and_wrench: Engineering',
+  docs: ':memo: Docs and records',
+};
+const LISTED = ['features', 'fixes', 'other'];
+const TOOLING_TYPES = new Set(['ci', 'build', 'test', 'chore', 'refactor', 'style', 'harness']);
+// A scope counts with its suffixes too: release-flow, sol-accept, hooks-x.
+const TOOLING_SCOPES = /^(ci|guards?|sol|luna|codex|prover|proofs?|pre-push|agents?|release|hooks?|harness|local-app|staging|smoke|sweeps|deps|worktree|review|tooling|workflows?)(-[a-z0-9-]+)?$/;
+const CONVENTIONAL = /^(\w+)(?:\(([^)]*)\))?!?:\s*/;
+export function changeGroup(title) {
+  const t = String(title ?? '');
+  if (/^(back-?merge|merge )/i.test(t)) return null;
+  const m = CONVENTIONAL.exec(t);
+  if (!m) return 'other';
+  const type = m[1].toLowerCase();
+  // Every listed scope counts: feat(products, ci) touches tooling, so it is Engineering.
+  const scopes = (m[2] ?? '').toLowerCase().split(/[\s,/]+/).filter(Boolean);
+  if (type === 'docs') return 'docs';
+  if (TOOLING_TYPES.has(type) || scopes.some((sc) => TOOLING_SCOPES.test(sc))) return 'engineering';
+  if (type === 'feat') return 'features';
+  if (type === 'fix' || type === 'perf') return 'fixes';
+  return 'other';
+}
+// A title without its "type(scope):" prefix, for people reading Slack.
+const plain = (title) => String(title ?? '').replace(CONVENTIONAL, '').replace(/^\w/, (c) => c.toUpperCase());
+export function groupCounts(prs) {
+  const out = {};
+  for (const p of prs) {
+    const g = p.state !== 'held' && changeGroup(p.title);
+    if (g) out[g] = (out[g] ?? 0) + 1;
+  }
+  return out;
+}
+const countLine = (grp, mig) => [
+  ...['features', 'fixes'].filter((k) => grp?.[k]).map((k) => `${GROUPS[k].split(' ')[0]} ${grp[k]} ${k === 'features' ? 'feature(s)' : 'fix(es)'}`),
+  mig == null ? null : mig ? `:file_cabinet: ${mig} database change(s)` : 'No database changes',
+].filter(Boolean);
 
 const COLORS = { open: '#BA7517', ready: '#185FA5', merged: '#3B6D11', squashed: '#A32D2D', hotfix: '#993C1D' };
 const WAITING = new Set(['unverified', 'missing']);
@@ -58,6 +105,10 @@ export function cardMessage(m, { prs, phase = 'open', prUrl, compareUrl, tagUrl,
   const waiting = list.filter((p) => WAITING.has(p.state));
   const shown = phase === 'open' && m.gate ? 'ready' : phase;
   const word = { open: 'candidate', ready: 'ready to merge', merged: 'shipped', squashed: 'merged without a merge commit' }[shown];
+  const icon = { open: ':rocket:', ready: ':rocket:', merged: ':white_check_mark:', squashed: ':warning:' }[shown];
+  const held = list.filter((p) => p.state === 'held');
+  // Back-merges ship nothing of their own; without titles (a marker-only card) every non-held PR counts.
+  const shipping = list.filter((p) => p.state !== 'held' && (p.title == null || changeGroup(p.title))).length;
   const gate = {
     open: waiting.length + (m.orph ?? 0) ? `:hourglass_flowing_sand: Waiting on ${waiting.length + (m.orph ?? 0)}` : ':red_circle: Red',
     ready: ':large_green_circle: Green',
@@ -65,28 +116,43 @@ export function cardMessage(m, { prs, phase = 'open', prUrl, compareUrl, tagUrl,
     squashed: ':warning: No tag',
   }[shown];
   const blocks = [
-    { type: 'header', text: { type: 'plain_text', text: short(`Release ${m.v} · ${word}`, 150) } },
-    { type: 'context', elements: [{ type: 'mrkdwn', text: `${esc(m.date)} · ${list.length} PR(s) from staging · ${m.mig ?? 0} migration(s) for live` }] },
+    { type: 'header', text: { type: 'plain_text', text: short(`${icon} Release ${m.v} · ${word}`, 150), emoji: true } },
+    { type: 'context', elements: [{ type: 'mrkdwn', text: [esc(m.date), `${shipping} PR(s) shipping`, `${m.mig ?? 0} database change(s) for live`, held.length && `${held.length} held back`].filter(Boolean).join(' · ') }] },
     {
       type: 'section',
       fields: [
-        `*Verified on staging*\n${count((p) => p.state === 'verified')}`,
-        `*Needs proof*\n${waiting.length}`,
-        `*Held off*\n${count((p) => p.state === 'held')}`,
-        `*Release gate*\n${gate}`,
+        `*:white_check_mark: Verified on staging*\n${count((p) => p.state === 'verified')}`,
+        `*:hourglass_flowing_sand: Needs proof*\n${waiting.length}`,
+        `*:double_vertical_bar: Held off*\n${held.length}`,
+        `*:vertical_traffic_light: Release gate*\n${gate}`,
       ].map((text) => ({ type: 'mrkdwn', text })),
     },
   ];
-  if (phase === 'open' && waiting.length) {
-    const lines = waiting.slice(0, 8).map((p) => `${link(p.url, `#${p.number}`)} ${clip(p.title ?? '', 80)}`);
-    if (waiting.length > 8) lines.push(`…and ${waiting.length - 8} more`);
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Needs proof on staging*\n${lines.join('\n')}` } });
+  // What's in it: only when the PR titles are known (the open card), never from a marker alone.
+  if (prs?.length) {
+    const groups = {};
+    for (const p of list) {
+      const g = p.state !== 'held' && changeGroup(p.title);
+      if (g) (groups[g] ??= []).push(p);
+    }
+    const parts = LISTED.filter((k) => groups[k]).map((k) => {
+      const lines = groups[k].slice(0, 3).map((p) => `• ${clip(p.users?.[0] ?? plain(p.title), 90)} ${link(p.url, `#${p.number}`)}`);
+      if (groups[k].length > 3) lines.push(`_…and ${groups[k].length - 3} more_`);
+      return `*${GROUPS[k]} (${groups[k].length})*\n${lines.join('\n')}`;
+    });
+    const counted = ['engineering', 'docs'].filter((k) => groups[k]).map((k) => `*${GROUPS[k]}* ${groups[k].length}`);
+    if (counted.length) parts.push(counted.join('  ·  '));
+    if (parts.length) blocks.push({ type: 'divider' }, { type: 'section', text: { type: 'mrkdwn', text: parts.join('\n\n') } });
   }
-  const held = list.filter((p) => p.state === 'held');
+  if (phase === 'open' && waiting.length) {
+    const lines = waiting.slice(0, 8).map((p) => `${link(p.url, `#${p.number}`)} ${clip(plain(p.title), 80)}`);
+    if (waiting.length > 8) lines.push(`…and ${waiting.length - 8} more`);
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*:hourglass_flowing_sand: Needs proof on staging*\n${lines.join('\n')}` } });
+  }
   if (phase === 'open' && held.length) {
     const lines = held.slice(0, 8).map((p) => `${link(p.url, `#${p.number}`)} ${clip(p.held ?? p.title ?? '', 120)}`);
     if (held.length > 8) lines.push(`…and ${held.length - 8} more`);
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Held off (not shipping)*\n${lines.join('\n')}` } });
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*:double_vertical_bar: Held off (not shipping)*\n${lines.join('\n')}` } });
   }
   if (m.orph) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `:x: ${m.orph} commit(s) on staging without a PR` }] });
   const buttons = [prUrl && button('Open release PR', prUrl), phase === 'open' && compareUrl && button('Compare main…release', compareUrl), phase === 'merged' && tagUrl && button('Release notes', tagUrl)].filter(Boolean);
@@ -116,35 +182,49 @@ export function threadUpdates(prev, now) {
   return out;
 }
 
-// The announcement once a release is on main. r: { version, items, prCount, migrations, mergedBy, tagUrl, changelogUrl, prUrl }.
+// The announcement once a release is on main.
+// r: { version, items, prCount, migrations, groups (from the card's marker), mergedBy, tagUrl, changelogUrl, prUrl }.
 export function liveMessage(r) {
   const items = r.items.slice(0, 12).map((i) => `• ${clip(String(i), 200)}`);
-  if (r.items.length > 12) items.push(`…and ${r.items.length - 12} more in the release notes`);
-  const facts = [`Merged by ${esc(r.mergedBy)}`, r.prCount != null && `${r.prCount} PR(s)`, r.migrations != null && `${r.migrations} migration(s)`].filter(Boolean);
+  if (r.items.length > 12) items.push(`_…and ${r.items.length - 12} more in the release notes_`);
+  const counts = r.groups ? countLine(r.groups, r.migrations) : [];
+  const facts = [...(counts.length ? counts : [r.prCount != null && `${r.prCount} PR(s)`, r.migrations != null && `${r.migrations} migration(s)`]), `Merged by ${esc(r.mergedBy)}`].filter(Boolean);
   return {
     text: `${r.version} is live`,
     attachments: [{
       color: COLORS.merged,
       blocks: [
-        { type: 'header', text: { type: 'plain_text', text: `${r.version} is live` } },
+        { type: 'header', text: { type: 'plain_text', text: `:tada: CRX Manager ${r.version} is live`, emoji: true } },
         { type: 'context', elements: [{ type: 'mrkdwn', text: facts.join(' · ') }] },
-        { type: 'section', text: { type: 'mrkdwn', text: `*What's new for users*\n${items.join('\n') || '_Nothing user-facing this time._'}` } },
+        { type: 'section', text: { type: 'mrkdwn', text: `*:busts_in_silhouette: What's new for users*\n${items.join('\n') || '_Nothing user-facing this time._'}` } },
         { type: 'actions', elements: [button('Release notes', r.tagUrl), button('Changelog', r.changelogUrl), button('Release PR', r.prUrl)] },
       ],
     }],
   };
 }
 
-// A hotfix on main. h: { number, title, url, mergedBy, releasesUrl }.
+// From a hotfix's changed files: how many migrations, and whether it touches the shipped app (not only
+// tooling). Unknown files (null) give nothing, and the post leaves both out.
+export const hotfixFacts = (files) => (files ? {
+  migrations: files.filter((f) => /^supabase\/migrations\/[^/]+\.sql$/.test(f)).length,
+  app: files.some((f) => /^(src|supabase|public)\/|^(package(-lock)?\.json|index\.html|vite\.config\.\w+)$/.test(f)),
+} : {});
+
+// A hotfix on main. h: { number, title, url, mergedBy, releasesUrl, users (what users see),
+// migrations (count), app (touches the app, not only tooling) }; the last three may be unknown.
 export function hotfixMessage(h) {
+  const kind = h.app == null ? null : h.app ? ':package: App change' : ':hammer_and_wrench: Engineering';
+  const db = h.migrations == null ? null : h.migrations ? `:file_cabinet: ${h.migrations} database change(s)` : 'No database changes';
+  const users = (h.users ?? []).slice(0, 6).map((u) => `• ${clip(String(u), 200)}`);
   return {
     text: `Hotfix #${h.number} is on main`,
     attachments: [{
       color: COLORS.hotfix,
       blocks: [
-        { type: 'header', text: { type: 'plain_text', text: 'Hotfix on main' } },
-        { type: 'section', text: { type: 'mrkdwn', text: `${link(h.url, `#${h.number}`)} ${clip(h.title, 200)}` } },
-        { type: 'context', elements: [{ type: 'mrkdwn', text: `Merged by ${esc(h.mergedBy)} · its tag and GitHub Release follow in a minute` }] },
+        { type: 'header', text: { type: 'plain_text', text: `:adhesive_bandage: Hotfix #${h.number} is on main`, emoji: true } },
+        { type: 'context', elements: [{ type: 'mrkdwn', text: [`Merged by ${esc(h.mergedBy)}`, kind, db, 'its tag and GitHub Release follow in a minute'].filter(Boolean).join(' · ') }] },
+        { type: 'section', text: { type: 'mrkdwn', text: `*What changed*\n${link(h.url, `#${h.number}`)} ${clip(plain(h.title), 300)}` } },
+        ...(h.users ? [{ type: 'section', text: { type: 'mrkdwn', text: `*:busts_in_silhouette: What users see*\n${users.join('\n') || '_Nothing user-facing._'}` } }] : []),
         { type: 'actions', elements: [button('Hotfix PR', h.url), button('Releases', h.releasesUrl)] },
       ],
     }],

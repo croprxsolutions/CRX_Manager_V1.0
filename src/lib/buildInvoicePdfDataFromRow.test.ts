@@ -116,6 +116,15 @@ beforeEach(() => {
 });
 
 describe('buildInvoicePdfDataFromRow — #33 list-print re-fetch', () => {
+  it('marks a stored delivery Bill Split for load-labelled brands even when its payer table is not used', async () => {
+    installFromMock({
+      invoice_items: [ONE_LINE],
+      invoice_shares: [{ split_percentage: 100, acres: null, amount_cents: 100000 }],
+      invoices: { invoice_group_id: 'group-1', delivery_id: 'delivery-1' },
+    });
+    expect((await buildInvoicePdfDataFromRow(listRow({ invoice_type: 'chemical_sale' }))).bill_split_on_load).toBe(true);
+  });
+
   it('re-fetches Discount Earned + Terms (+ PO/due/notes) when the list row omits them', async () => {
     // The invoice HAS a saved discount + terms + PO + due + notes in the DB; the list
     // row (which never carries these) leaves them undefined. The builder must surface
@@ -356,5 +365,35 @@ describe('buildBatchInvoicePdfData — skip and name a bad invoice', () => {
     expect(failed.message).toContain('Could not make the PDF for INV-9');
     const many = Array.from({ length: 8 }, (_, i) => `INV-${i}`);
     expect(batchInvoicePrintToast(0, many).message).toContain('INV-0, INV-1, INV-2, INV-3, INV-4 and 3 more');
+  });
+});
+
+// Review #1873 MED 2: the PDF prints a Credits applied row, so every print path must carry the amount.
+describe('buildInvoicePdfDataFromRow: credits applied', () => {
+  it('reads the credit applied from the invoice when the list row omits it', async () => {
+    installFromMock({ invoice_items: [ONE_LINE], invoices: { credit_applied_cents: 20000 } });
+    const data = await buildInvoicePdfDataFromRow(listRow({ balance_cents: 80000 }));
+    expect(data.credit_applied_cents).toBe(20000);
+  });
+
+  it("the caller's amount wins over the re-fetch", async () => {
+    installFromMock({ invoice_items: [ONE_LINE], invoices: { credit_applied_cents: 20000 } });
+    const data = await buildInvoicePdfDataFromRow(listRow({ credit_applied_cents: 5000 }));
+    expect(data.credit_applied_cents).toBe(5000);
+  });
+});
+
+// The PDF labels untyped no-product lines as charges on the invoices the invoice page does (InvoiceDetail takesCharges).
+describe('buildInvoicePdfDataFromRow: which invoices take charge lines', () => {
+  it.each([
+    ['a from-scratch misc charge', { invoice_type: 'misc_charge' }, {}, true],
+    ['a from-scratch chemical sale', { invoice_type: 'chemical_sale' }, {}, true],
+    ['a chemical sale with a delivery', { invoice_type: 'chemical_sale' }, { delivery_id: 'del-1' }, true],
+    ['a chemical sale with a blend ticket', { invoice_type: 'chemical_sale' }, { order_id: 'ord-1', blend_ticket_id: 'bt-1' }, false],
+    ["a payer's misc charge on a delivery", { invoice_type: 'misc_charge' }, { delivery_id: 'del-1' }, false],
+    ['a field application', { invoice_type: 'field_application' }, {}, false],
+  ])('%s', async (_name, row, billing, takes) => {
+    installFromMock({ invoice_items: [ONE_LINE], invoices: billing });
+    expect((await buildInvoicePdfDataFromRow(listRow(row))).takes_charge_lines).toBe(takes);
   });
 });

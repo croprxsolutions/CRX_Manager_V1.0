@@ -1,3 +1,5 @@
+import { formatCents } from '../../supabase/functions/_shared/pdf/theme.ts';
+
 /**
  * money.ts — canonical money formatting for CRX Manager.
  *
@@ -28,6 +30,9 @@ const wholeDollarFormatter = new Intl.NumberFormat('en-US');
 
 /** Format an integer number of CENTS as USD. Divides by 100. Shared with send-email's PDFs (KI-98). */
 export { formatCents } from '../../supabase/functions/_shared/pdf/theme.ts';
+
+/** formatCents with a true minus sign for negatives ("−$20.00"), for on-screen money lines. */
+export const formatCentsMinus = (cents: number): string => formatCents(cents).replace('-', '\u2212');
 
 /** Format exact bigint cents without converting them through floating point. */
 export function formatExactCents(cents: bigint): string {
@@ -232,4 +237,31 @@ export function centsTimesQuantity(cents: number, quantityText: string | number)
   if (roundedAbs > 9007199254740991n) return Number.NaN;
 
   return Number(product < 0n ? -roundedAbs : roundedAbs);
+}
+
+/**
+ * Exact cents for `quantity × dollars`, both decimals (a JS number's exponent form such as 1e-7 is read
+ * exactly too), rounded half away from zero like PostgreSQL's ROUND(numeric). No binary float.
+ * Not a number → 0. A result past Number.MAX_SAFE_INTEGER cents → NaN (no neighbouring cent, as in
+ * centsTimesQuantity).
+ */
+export function quantityTimesDollarsCents(quantity: string | number, dollars: string | number): number {
+  const parse = (v: string | number) => {
+    const m = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(String(v ?? '').trim());
+    if (!m || (m[2] === '' && (m[3] ?? '') === '')) return null;
+    const frac = m[3] || '';
+    const exp = Number(m[4] ?? 0);
+    let n = BigInt((m[2] || '0') + frac) * (m[1] === '-' ? -1n : 1n);
+    let scale = frac.length - exp;
+    if (scale < 0) { n *= 10n ** BigInt(-scale); scale = 0; }
+    return { n, scale };
+  };
+  const q = parse(quantity), d = parse(dollars);
+  if (!q || !d) return 0;
+  const product = q.n * d.n * 100n;
+  const denom = 10n ** BigInt(q.scale + d.scale);
+  const abs = product < 0n ? -product : product;
+  const rounded = abs / denom + ((abs % denom) * 2n >= denom ? 1n : 0n);
+  if (rounded > BigInt(Number.MAX_SAFE_INTEGER)) return Number.NaN;
+  return Number(product < 0n ? -rounded : rounded);
 }

@@ -1,0 +1,7 @@
+**LOCAL CANDIDATE — NOT APPLIED.** KI-99: `20270116100000_ki99_void_reverses_write_offs.sql` (SQL sha256: `2fe6a999637be4236a4f37f693cee19379952051c0935849523cbad79c1dbc84`). Re-issues `_void_invoice_split_provenance_impl_20260719(uuid,text,text)` (md5 pinned to its live body, same signature, owner postgres, SECURITY DEFINER, `search_path`, and no app grants) so every void path (single, batch, group) marks each active write-off on the voided invoice reversed, with one `write_off_reversed` audit row each; a write-off in a closed Chicago month refuses the whole void.
+
+Proof: `node scripts/smoke/prove-ki99-void-reverses-write-offs-real-schema.mjs` (prints `KI99_VOID_REVERSES_WRITE_OFFS_PROOF_PASS`). After the apply, read back the function md5 (`3293393c3a73721c768a365465ffe31a`) and confirm no voided invoice keeps an active write-off.
+
+Rollback (its own reviewed migration): re-issue the function from `20261206110000_ki18_leftovers_hold_expiry_reversal_month_stale_quotes.sql` (lines 291-608). Write-offs already auto-reversed stay reversed.
+
+Sol round 3 fixes (2026-11-16): each automatic reversal also writes the `write_off_reversed` customer-timeline event that `reverse_write_off` writes; the postflight locks `invoices` and `write_offs` and refuses to install while any voided invoice still has an active write-off (a void committed under the old body). The prover covers both: the refusal case rolls back with the old body intact, and case 1 counts one timeline event per reversed write-off.

@@ -3,14 +3,63 @@ import Button from '../ui/Button';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
 import { useToast } from '../ui/Toast';
-import { BASIS_LABEL, SCHEMES, SOURCE_LABEL, finishChemistrySave, nutrientLabel, parseAmount, strengthText, type PendingChemistrySave } from '../../lib/productChemistry';
+import { BASIS_LABEL, SCHEMES, SOURCE_LABEL, finishChemistrySave, groupsText, nutrientLabel, parseAmount, strengthText, type PendingChemistrySave } from '../../lib/productChemistry';
 import {
   BASIS_OPTIONS, SOURCE_OPTIONS, ingredientIdentity, nextKey, reportSaveError, unitOptions,
   type ModeDraft, type StrengthDraft, type TypedSource,
 } from './chemistryFormHelpers';
-import type { ChemistryStrengthBasis, ChemistryStrengthUnit, ModeOfActionScheme, ParentChemistryValues } from '../../types';
+import type { ChemistryStrengthBasis, ChemistryStrengthUnit, ModeOfActionScheme, ParentChemistryValues, ParentModeGroups } from '../../types';
 
-export function ChemistryLists({ values }: { values: ParentChemistryValues }) {
+type GroupEntry = ParentModeGroups['ingredients'][number];
+type SchemeGroups = GroupEntry['schemes'][number];
+
+/** One scheme's live groups and where they come from (MOA-1 sheet 3.3). */
+function schemeLabel(entry: GroupEntry, row: SchemeGroups): string {
+  const list = entry.derived_from === 'from_acid' ? `${entry.acid_name ?? 'the acid'}'s list` : 'ingredient list';
+  if (row.status === 'derived') return `from ${list}`;
+  if (row.status === 'matches') return `matches ${list}`;
+  if (row.status === 'differs') return `differs: ${list} says ${row.scheme} ${row.derived.join(', ')}; this product says ${row.scheme} ${row.live.join(', ')}`;
+  const epa = row.typed.filter((typed) => typed.source === 'epa_lookup').map((typed) => typed.group_code);
+  if (epa.length === 0) return 'typed on this product';
+  return epa.length === row.typed.length ? 'EPA confirmed on this product' : `typed on this product; EPA confirmed ${row.scheme} ${epa.join(', ')}`;
+}
+
+function IngredientGroups({ entry }: { entry: GroupEntry | undefined }) {
+  if (!entry || entry.not_recorded) return <p className="mt-1 text-xs text-secondary">Group not recorded</p>;
+  return (
+    <ul className="mt-1 space-y-1 text-xs">
+      {entry.schemes.map((row) => (
+        <li key={row.scheme} className="flex flex-wrap items-center gap-2">
+          <span className="rounded bg-gray-100 px-2 py-0.5 text-nav-dark">{row.scheme} {row.live.join(', ')}</span>
+          <span className={row.status === 'differs' ? 'font-medium text-amber-800' : 'text-secondary'}>{schemeLabel(entry, row)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** "Groups: HRAC 5, 9, 27 · FRAC 11" across the product's ingredients; nothing when no ingredient is recorded. */
+export function GroupsSummary({ groups }: { groups: ParentModeGroups }) {
+  if (groups.ingredients.length === 0) return null;
+  const missing = groups.not_recorded_count;
+  const codes = groups.summary.length > 0 ? groupsText(groups.summary, (index) => (groups.summary[index].differs ? ' (differs)' : '')) : 'none recorded';
+  return (
+    <p className="text-sm font-medium text-nav-dark" data-testid="groups-summary">
+      Groups: {codes}
+      {missing > 0 && <span className="font-normal text-secondary"> · {missing} ingredient{missing === 1 ? '' : 's'}: group not recorded</span>}
+    </p>
+  );
+}
+
+/**
+ * The parent's ingredients and fertilizer. With `groups` (MOA-1), each ingredient shows its live resistance groups and
+ * where they come from; without it (not loaded), the groups typed on this product as before.
+ */
+export function ChemistryLists({ values, groups, onSetGroups, locked = false }: {
+  values: ParentChemistryValues; groups?: ParentModeGroups | null; locked?: boolean;
+  /** Admins only: opens the ingredient's group list editor. */
+  onSetGroups?: (ingredient: { id: string; name: string }) => void;
+}) {
   if (values.ingredients.length === 0 && values.fertilizer.length === 0) {
     return <p className="text-sm text-secondary">No chemistry recorded yet.</p>;
   }
@@ -22,12 +71,17 @@ export function ChemistryLists({ values }: { values: ParentChemistryValues }) {
             const modes = values.modes_of_action.filter((mode) => mode.ingredient_id === row.ingredient_id);
             return (
               <li key={row.row_id} className="rounded-lg border border-gray-200 px-3 py-2">
-                <div className="font-medium text-nav-dark">{ingredientIdentity(row)}</div>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="font-medium text-nav-dark">{ingredientIdentity(row)}</div>
+                  {onSetGroups && (
+                    <Button size="sm" variant="ghost" disabled={locked} onClick={() => onSetGroups({ id: row.ingredient_id, name: row.name })}>Set groups</Button>
+                  )}
+                </div>
                 <div className="text-secondary">
                   {strengthText(row.strength_value, row.strength_unit, row.strength_basis)} · from {SOURCE_LABEL[row.source]}
                   {row.source_note ? ` (${row.source_note})` : ''}
                 </div>
-                {modes.length > 0 && (
+                {groups ? <IngredientGroups entry={groups.ingredients.find((entry) => entry.ingredient_id === row.ingredient_id)} /> : modes.length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {modes.map((mode) => (
                       <span key={mode.row_id} className="rounded bg-gray-100 px-2 py-0.5 text-xs text-nav-dark">

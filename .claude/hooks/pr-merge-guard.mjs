@@ -68,6 +68,7 @@ import {
 } from "./teammate-comments-lib.mjs";
 import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
+import { claimOrRefuse, claimsFileFor } from "./pr-claim-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
@@ -283,14 +284,18 @@ const projectDir = path.resolve(
 
 // The hard gates spend ONE budget between them (see createHardGateBudget). This
 // guard runs under merge-guard-launcher.mjs, which denies a possible merge if the
-// guard is still running at 36s; the hook entry in .claude/settings.json allows
-// 45s so the launcher can still answer. The reserve covers what process.uptime()
+// guard is still running at 270s; the hook entry in .claude/settings.json allows
+// 280s so the launcher can still answer. The reserve covers what process.uptime()
 // cannot see plus writing the verdict. The advisory lookup
 // is NOT on this budget: it keeps its own deadline and fails open by design, so a
 // slow GitHub there must not turn into a denial.
-const HOOK_TIMEOUT_MS = 30_000;
+// Slow GitHub (2026-11-16 and 11-18): 10s caps refused merges with ETIMEDOUT. A
+// staging merge makes 8 hard-gate calls, and a call is admitted only if a full
+// cap still fits, so 177s fits 8 calls at ~15s each with any one taking 25s. A
+// GitHub that does not answer still denies, at the first call's 25s cap.
+const HOOK_TIMEOUT_MS = 180_000;
 const HOOK_RESERVE_MS = 3_000;
-const GH_CALL_TIMEOUT_MS = 10_000;
+const GH_CALL_TIMEOUT_MS = 25_000;
 const hardGateBudget = createHardGateBudget({
   deadlineMs: hookDeadlineMs(HOOK_TIMEOUT_MS, HOOK_RESERVE_MS),
   callTimeoutMs: GH_CALL_TIMEOUT_MS,
@@ -309,7 +314,7 @@ function gh(args, timeout = GH_CALL_TIMEOUT_MS) {
 // The money-PR CodeRabbit requirement read makes up to three calls inside the
 // advisory budget, so each gets a shorter cap: a call is only started if it can
 // finish before the budget ends (readCodeRabbitRequirement).
-const REQUIREMENT_CALL_TIMEOUT_MS = 5_000;
+const REQUIREMENT_CALL_TIMEOUT_MS = 20_000;
 
 // Every gh call a HARD gate makes goes through here. deny() exits, so a refused
 // call can never be caught and reinterpreted by the gate that made it.
@@ -347,9 +352,9 @@ function listWorktreesFromProjectDir() {
 // notice and merges. See the header of codex-bot-review-lib.mjs for why this one
 // predicate does not fail closed like its neighbours.
 //
-// RUNS LAST, AND THAT IS THE POINT (Codex round 6). This hook gets 30 seconds
-// (.claude/settings.json). Each gh call is capped at 10s, and this lookup makes
-// up to four of them, so it can alone outlive the hook. A PreToolUse hook killed
+// RUNS LAST, AND THAT IS THE POINT (Codex round 6). The hard gates may spend up
+// to 177s and this lookup up to 75s more (four calls); started first, a slow
+// lookup could eat the hard gates' time before they ran. A PreToolUse hook killed
 // mid-call emits nothing, and a hook that emits nothing does NOT deny — so
 // @speed-bump — the ORDERING protects the hard gates; this lookup is not one.
 // running an advisory, fail-open lookup BEFORE the green-pipeline, risky-diff and
@@ -358,7 +363,8 @@ function listWorktreesFromProjectDir() {
 // had their chance, at a point where the alternative is returning ALLOW anyway.
 // Do not move it earlier "so the reader sees it first".
 // The launcher denies a merge if the guard runs past its own deadline.
-const CODEX_ADVISORY_BUDGET_MS = 15_000;
+// 75s: its four calls at ~15s each, with room for a cap to start the last.
+const CODEX_ADVISORY_BUDGET_MS = 75_000;
 
 // DEFERRED PAST EVERY MERGE IN THE COMMAND (Codex round 8, SEC-001). Running
 // last within ONE merge was not enough: `gh pr merge 1 && gh pr merge 2` gates
@@ -510,6 +516,12 @@ function gateRequest(request) {
   } catch (error) {
     deny(`PR MERGE GATE: could not resolve this pull request's base branch and exact SHAs, so the merge is denied (fail closed). ${error?.message || error}`);
   }
+
+  // Landing claim (pr-claim-lib.mjs, fail open): refuse when another session is landing this PR.
+  // Only checked here; recorded at the allow point, so a merge denied later claims nothing.
+  const claimed = claimOrRefuse({ ...claimContext, branch: pr.headRefName, record: false });
+  if (claimed) deny(`PR MERGE GATE: ${claimed}`);
+  claimBranches.push(pr.headRefName);
 
   const base = String(pr.baseRefName || "").trim().toLowerCase();
   if (base === "master" || base === "production") {
@@ -695,8 +707,8 @@ function gateRequest(request) {
     `(docs/reference/sol-required-paths.md; Mason, 2026-10-30). None was found.\n\n` +
     `"Review is queued/scheduled" is NOT reviewed. Before merging:\n` +
     `  1. Check out the PR branch (\`gh pr checkout ${request.selector || "<number>"}\`) if it isn't the current branch.\n` +
-    `  2. \`git fetch origin\` and merge the PR's base into the branch if the head does not contain it (origin/staging for a PR into staging, never main; GitHub's base is ${baseSha.slice(0, 12)}...) — the review covers origin/main...HEAD.\n` +
-    `  3. Run: node scripts/write-codex-push-proof.mjs — it runs an independent read-only Codex review of origin/main...HEAD and requires a machine verdict.\n` +
+    `  2. \`git fetch origin\` and merge the PR's base into the branch if the head does not contain it (origin/staging for a PR into staging, never main; GitHub's base is ${baseSha.slice(0, 12)}...) — a feature branch is reviewed against origin/staging, a hotfix/ or release/ branch against origin/main.\n` +
+    `  3. Run: node scripts/write-codex-push-proof.mjs — it runs an independent read-only Codex review of the branch against that base and requires a machine verdict.\n` +
     `  4. If Codex flags blockers, fix them, push, and re-run until it reports clean; only a clean verdict on a stable, clean worktree mints the proof.\n` +
     `  5. Retry the merge. (Proof is bound to head ${headSha || "<head>"} and to the base; it lasts 24 hours on an unchanged head, keeps counting when main only moves forward afterwards, and new commits force a fresh review.)\n` +
     `If this head only merged a newer main into a branch Sol already reviewed clean, run \`node scripts/write-codex-push-proof.mjs --carry-forward\` instead of step 3.\n` +
@@ -707,7 +719,20 @@ function gateRequest(request) {
 // Requests that cleared every hard gate. Drained only after the loop below has
 // gated EVERY request — see codexAdvisory() for why (Codex round 8, SEC-001).
 const advisoryQueue = [];
+const claimBranches = [];
+const claimContext = {
+  file: claimsFileFor(payload?.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd()),
+  sessionId: payload?.session_id,
+  action: "merge",
+  cwd: payload?.cwd,
+};
 for (const request of requests) gateRequest(request);
+// Every gate passed (a denial exits the process), so record the claims; a session
+// that claimed in between still wins.
+for (const branch of claimBranches) {
+  const claimed = claimOrRefuse({ ...claimContext, branch });
+  if (claimed) deny(`PR MERGE GATE: ${claimed}`);
+}
 // ALLOW point for the whole command: every merge has cleared its hard denials,
 // so the advisory lookups can spend what is left of the hook budget here. One
 // deadline is shared across the queue so N merges cannot multiply the budget.

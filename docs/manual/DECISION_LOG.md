@@ -1,5 +1,149 @@
 # Decision Log
 
+## 2026-11-18 — #1879 may have one more Sol round
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, one more round").** PR #1879 (brand quantities on paperwork) may have one more Sol round (round 6 as the counter reads it).
+**Why:** the new head only merges current `staging` into the branch, with no change to the PR's own code; Sol now reviews it against `origin/staging`.
+**What it does:** unlocks one Sol review of the new head. Every other gate is unchanged: it still needs a clean Sol review and green checks before it merges into `staging`.
+
+## 2026-11-17 — #1879 and #1940 may have one more Sol round each
+
+**Decision (Mason, in chat, 2026-11-17: "Yes, confirmed").** PR #1879 (brand quantities on paperwork) and PR #1940 (inventory cleanup KI-161/150/163) may each have one more Sol round (round 21 and round 20 as the counter reads them).
+**Why:** both were clean at Sol before; the new heads only merge current `staging` (which brought the npm audit exception from #1941) plus this entry, with no change to either PR's own code.
+**What it does:** unlocks one Sol review of each PR's new head. Every other gate is unchanged: each still needs a clean Sol review and green checks before it merges into `staging`.
+## 2026-11-18 — #1947: Mason owner-accepted 3 Sol finding(s) at `3d71a5c062fc`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1947 at `3d71a5c062fc` (base `29682a0332c0`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270125110000_save_quote_keeps_section_ids.sql:283`, text sha256 `6ca650a316f44b81` (the wording stays with the proof, not here)
+  Mason's reason: direct expire (ref b619dec39703)
+- Finding 2 (HIGH) at `supabase/migrations/20270125110000_save_quote_keeps_section_ids.sql:283`, text sha256 `45dc1781a05db83a` (the wording stays with the proof, not here)
+  Mason's reason: convert to order (ref 5af7b46b5075)
+- Finding 3 (HIGH) at `supabase/migrations/20270125110000_save_quote_keeps_section_ids.sql:413`, text sha256 `eac6dcda4077433e` (the wording stays with the proof, not here)
+  Mason's reason: direct customer change (ref b4e55c1c42c2)
+
+## 2026-11-18 — Bookings with a spray job: needed-by date locked, booked price kept (#1947)
+
+**Decision (Mason, in chat, 2026-11-18, answering Sol round 5 on PR #1947).**
+- A section with a live spray job now keeps its needed-by date too. Draws are allocated to booking lines by needed-by date first, so re-dating the job's section could credit the job's product to another section and drop that section's real need. To change the date, change the job's own date or cancel the job first. This replaces the 2026-11-17 rule that the date may change; the name and notes still may.
+- A section with a live spray job keeps its stored line prices on a draft booking too, so a catalog price change cannot block an unrelated save. The job and invoices stay at what was booked.
+- Direct status updates that skip the save screen: accepted again as a business non-issue, with the database-level guard as a follow-up PR (same answer as Sol round 4).
+
+## 2026-11-18 — #1947: Mason owner-accepted 3 Sol finding(s) at `5ae3ac5ae2a1`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1947 at `5ae3ac5ae2a1` (base `e0513c039664`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270124100000_save_quote_keeps_section_ids.sql:408`, text sha256 `6b651be2d534d26a` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our business (ref 67c08159f5fe)
+- Finding 2 (HIGH) at `supabase/migrations/20270124100000_save_quote_keeps_section_ids.sql:281`, text sha256 `08dcd0576823f9e1` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 721b16345165)
+- Finding 3 (HIGH) at `supabase/migrations/20270124100000_save_quote_keeps_section_ids.sql:433`, text sha256 `6de210e7c7e47c0e` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 9c35e45c14ff)
+
+## 2026-11-17 — Bookings with a spray job: section edits warn, accept/decline/expire blocked
+
+**Decision (Mason, in chat, 2026-11-17, answering Sol round 3 on Bookings Phase A PR 1a).**
+- A section a spray job was scheduled from may still get a new name, notes or needed-by date. The save goes through and the booking warns that the job keeps its own copy, so change those on the job too (warn, not block).
+- A booking with a spray job that is not cancelled (scheduled, in progress, completed or invoiced) cannot be marked accepted, declined or expired; cancel the job first (`BOOKING_HAS_JOB`). Widened by Mason after Sol round 3 on the PR: expiring dropped the job's booking draw, and accepting after a completed job left a booking that cannot become a sale order.
+- The section's products, quantities, prices, line order, place and field stay locked while the job is live (Sol rounds 1-2).
+## 2026-11-17 — RT-3 first rate review: Mason's rules
+
+**Decision (Mason, in chat, 2026-11-17).** Approve today's per-acre rate as the quoting default where it matches the label text or there is no per-acre text; treat loose notes like "1-2pt" as per acre; seed treatments get no per-acre default; per-ton and per-gallon products wait for label data; Piksi Dust Plus is 18 g per acre and Smart Choice 15G is 1.8 lb per acre. Saved on live: 670 rates approved, 361 products with an approved default, 14 with none, 7 needing label data, 14 held for him (listed in `docs/changelog.d/2026-11-17-rt1-derivation-run.md`). Nothing quotes from these until RT-4.
+Later the same day Mason settled the 14 held: today's rate kept on the 9 that differ from the label; Verdict 14 oz (corn); PeKacid 4 oz per acre with a label of 1-4 lb per 100 gal solution; Autumn Super 51 WDG and Cimarron Plus no default; Piksi Dust Infurrow needs label data. Every active product with rates now has a decision.
+
+## 2026-11-17 — RT-1 draft rates derived on live
+
+**Decision (Mason, in chat in the RT-1 run session, 2026-11-17: "Yes, run it").** Run `derive_draft_product_rates` once on live for the 413 active product parents, from Mason's admin login. Result: 714 draft rows on 396 parents and 181 notes; no product, parent, quote or invoice changed. The drafts are used nowhere until RT-4. Next: Mason reviews them in the rate review workbook (RT-3), then the rate lock and RT-4. Details: `docs/changelog.d/2026-11-17-rt1-derivation-run.md`.
+
+## 2026-11-17 — CMP-2 plan approved with one change: the generic build is always the yardstick
+
+**Decision (Mason, in chat, 2026-11-17):** after a chunk-by-chunk re-review of the CMP-2 plan (grand plan Stage 5), Mason chose "Approve with that change". This lifts the 2026-11-11 hold below. He confirmed the scope and build order, the shared generic reference set and the Halex GT test, search by ingredient and mode of action, the equivalence warnings, the selling price and admin cost modes with admin-only profit, the missing-data and incomplete-row rules, and the many-products/category view.
+**The change:** "i want the generic built to always be what brand name is pegged agsint, if it is not a saving thenit needs to be red and say not saving to buid". So every row reads one way: generic build total G against brand (premix) price B. When G < B it shows "Build saves $(B − G)/acre", with the percent taken off the brand price: (B − G) / B × 100 (Mason chose "20% off brand price" for $10 brand against an $8 build). When G ≥ B the row is red and says "Not a saving to build", with the dollar difference. The plan's reverse "premix discount versus the generic benchmark" percent is dropped. The same rule applies in admin Cost mode.
+**Editing on the screen (Mason, same day):** asked which numbers he can type over, he chose only "Rate per acre". For what happens to an edit, he chose "What-if only": everything recalculates on screen, the row is marked "edited" with a reset, and nothing changes the catalog, quotes or saved rates. Prices and product strengths always come from the database.
+**What this forbids/implies:** CMP-2 may now get a build sheet and build, but only in its planned place: after its required data, RT-4 trusted rates, relevant use guidance and MOA-1. Approving the plan does not start a build. CLN-2 still follows CMP-2, and dropping `ingredient_map` still needs Mason's approval as a destructive change.
+## 2026-11-17 — Product Master waiting items: Mason's answers
+
+**Decision (Mason, in chat, 2026-11-17, decision session).** Live check that day: 0 `product_rates` rows, 0 `active_ingredients`.
+- **RT-4:** run the RT-1 derivation now (drafts only; nothing reads them until RT-4), in its own session with a before/after live check; Mason reviews the drafts soon in the rate review workbook, then the rate lock and RT-4 follow.
+- **CMP-2:** still on hold; Mason re-reviews the plan in a dedicated review session, which records his call. The 2026-11-11 hold stands until then.
+- **MOA-1 bulk load (build sheet §3.6):** approach approved; Mason's yes on the actual list comes later, after ingredients exist.
+- **CLN-1:** stays waiting until Stages 2 and 4 land; the column drop still needs Mason's yes at the time.
+- **FAM-1, RET-1, IMG-1:** still "later". **BLK-1b / costing foundation:** stays parked.
+- **KI-81:** fix now; Claude builds it (PR to `staging`, real-schema proof), checked against Taha's open #1576.
+- **#1879:** update onto current `staging` (keep Taha's #1873 invoice layout) and land it; it is Mason's PR, not Taha's.
+## 2026-11-17 — Bookings plan settled; applicator auto-invoicing is ON HOLD (do not start)
+
+**Decision (Mason, in chat, 2026-11-17: "lets not do phase c the auto invoice put that section on hold for our big field application redisgn in futre"; "make sure we dont start the auto bill feature").**
+- The bookings plan is settled: Phase A (`docs/plans/2026-11-17-bookings-phase-a-CONTRACT.md`), then Phase B, then Prepay (`docs/plans/2026-11-17-bookings-phases-B-C-prepay-PLAN.md`, v3).
+- **Do not build Phase C**: applicator job completion automatically creating invoices (D7 in the plan). It waits for the future field-application redesign. Its notes in the plan are input to that redesign only. Do not add, enable or extend any automatic invoice on job completion, and do not change `auto_draft_invoice_on_job_completion` or the job-completion invoicing path as part of the bookings work.
+- Linked prepay keeps a booking's prices locked even after the money is spent on other charges, until the prepay is refunded or voided.
+
+## 2026-11-17 — #1896: Mason owner-accepted 4 Sol finding(s) at `ed0ec3c3c777`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-17).** Sol's review of PR #1896 at `ed0ec3c3c777` (base `1e55ea03914d`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:210`, text sha256 `a609e6a0d8dab94d` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref f6739a057a25)
+- Finding 2 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:99`, text sha256 `f05f49a2ae86361c` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref eb0bd91e4cc8)
+- Finding 3 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:408`, text sha256 `a4174337960920ab` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 8078485c8694)
+- Finding 4 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:110`, text sha256 `f6c999aae98c965d` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 2009768e08d2)
+
+## 2026-11-17 — #1917 and #1918 (USE-2) may have up to 18 Sol rounds
+
+**Decision (Mason, in chat, 2026-11-17: "Yes, up to 18").** PR #1917 (USE-2 product page) and PR #1918 (quote line note) may each have Sol rounds up to 18, as the round counter counts them (it includes the #1916 database rounds both branches carry).
+**What it does:** lifts the round cap on these two PRs from 12 to 18. Every other gate is unchanged: each PR still needs a clean Sol review of its head and green checks before it merges into `staging`.
+## 2026-11-17 — #1896: Mason owner-accepted 2 Sol finding(s) at `1c08e3abe834`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-17).** Sol's review of PR #1896 at `1c08e3abe834` (base `02a49d27f149`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:99`, text sha256 `b9746ccf1d276151` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business) (ref 78f14b686f57)
+- Finding 2 (HIGH) at `supabase/migrations/20270121110000_line_unit_is_stock_unit.sql:210`, text sha256 `dec3f100d24f4e6b` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 8ba0fe74d7fc)
+
+## 2026-11-17 — A Sol round is a distinct head: reruns of one commit count once (#1929)
+
+**Decision (Mason, in chat, 2026-11-17: "count distinct heads once for 1929").** The Sol round count for a branch is the number of distinct branch commits Sol has run on, not the number of runs.
+**What it does:** `scripts/write-codex-push-proof.mjs` counts each reviewed head once; re-running Sol on a head already in the round ledger keeps that head's round number. The round-5 stop and its decision-log unlock are unchanged.
+
+## 2026-11-17 — More review rounds for #1880
+
+**Decision (Mason, in chat, 2026-11-17: "i approve up to 7 rounds on 1880 today").** Mason allowed PR #1880 (priority integrity follow-ups) up to seven Sol rounds in total, renewing his 2026-11-16 decision for the new day.
+**Why:** the earlier repeat findings came from merging a fast-moving `staging` (restamps and merge conflicts), not from one design problem coming back.
+## 2026-11-17 — #1916, #1917 and #1918 (USE-2) may have up to 12 Sol rounds
+
+**Decision (Mason, in chat, 2026-11-17: "Yes, up to 12").** PR #1916 (USE-2 database), PR #1917 (product page) and PR #1918 (quote line note) may each have Sol rounds up to 12.
+**What it does:** lifts the round cap on these three PRs from 7 to 12. Every other gate is unchanged: each PR still needs a clean Sol review of its head and green checks before it merges into `staging`.
+
+## 2026-11-16 — #1916, #1917 and #1918 (USE-2) may have up to 7 Sol rounds
+
+**Decision (Mason, in chat, 2026-11-16: "i approve all these landing and migrations tonight").** PR #1916 (USE-2 database), PR #1917 (product page) and PR #1918 (quote line note) may each have Sol rounds 5 through 7.
+**What it does:** lifts the round cap on these three PRs to 7. Every other gate is unchanged: each PR still needs a clean Sol review of its head and green checks before it merges into `staging`.
+## 2026-11-17 — #1895 may have Sol rounds 5 and 6
+
+**Decision (Mason, in chat, 2026-11-17: "I approve up to 6 rounds before parking for the night"; on the rounding finding he chose "Refuse if off >$0.50").** PR #1895 (grower-share cost in the sold unit) may have Sol rounds 5 and 6. Its last Sol HIGH was that a quantity stored to 4 decimals could book a grower-share cost far from the exact cost; the database now refuses such a line when the booked cost would differ from the exact cost by more than 50 cents (`FIELD_APP_GROWER_SHARE_ROUNDING`). The billed line's rounding stays with #1926.
+**Why:** the round count includes runs on heads that staging merges and restamps replaced; Mason chose to keep going for the night rather than park.
+**What this forbids/implies:** no Sol round past 6 on #1895; a new BLOCKER/HIGH in round 6 parks the PR for Mason.
+
+## 2026-11-17 — #1897 may have Sol rounds 5 and 6
+
+**Decision (Mason, in chat, 2026-11-17: "I approve up to 6 rounds before parking for the night").** PR #1897 (stock history integrity: one open count per stock row) may have Sol rounds 5 and 6. Rounds 3 and 4 each found a different gap in who may write the stock-count tables directly (reversing a count while a newer count holds its stock row; deleting a completed count), and each was closed in the database: counts now change only through the count screen's actions (start, add a line, save a line, complete, cancel, reverse).
+**Why:** each gap was a missing database guard on the same two tables, closed rather than worked around; Mason chose to keep going for the night rather than park.
+**What this forbids/implies:** no Sol round past 6 on #1897; a new BLOCKER/HIGH in round 6 parks the PR for Mason.
+
+## 2026-11-16 — #1878 and #1880 may have up to 7 Sol rounds after staging moved under them
+
+**Decision (Mason, in chat, 2026-11-16: "i approve up to 7 rounds").** PR #1878 (priority schema types) and PR #1880 (priority integrity follow-ups) may each have Sol rounds 5 through 7. Their latest Sol findings came from merging a fast-moving `staging` (a duplicated generated type after #1885 landed, and staging migrations newer than the candidate), not from one design mechanism coming back.
+**Why:** the round cap exists to stop patching a recurring design problem; here the repeats were merge drift, so there is no business trade-off to remove.
+**What this forbids/implies:** no round past 7 on either PR; a BLOCKER/HIGH that is a new design problem still stops the PR for Mason.
+
+## 2026-11-14 — Inactive rate history supports explicit cleanup
+
+**Decision (Mason, in chat).** Include inactive product groups' existing rates in review and preserve their approvals until explicitly changed. Inactive history supports sending an approved rate back to draft, deleting a draft and clearing a review decision. It does not support fresh approval, value edits or new review decisions. Keep accepting older half-filled rate workbooks under all existing identity and server safeguards.
+
+**Why.** An inactive group can be the historical source left after its last product size moves. Its old rates should remain visible for deliberate cleanup without becoming work required for the active groups' future rate cutover.
+
+**Operative rule.** Active readiness totals and live-rate readers retain their existing scope. The new download explicitly requests inactive history; old no-argument downloads remain active-only. PostgreSQL checks current group activity under the existing locks. Proposal: `docs/plans/2026-11-14-inactive-rate-review-CONTRACT.md`, issue #1814. Candidate only; no apply, merge or deployment.
+
 Last verified: 2026-10-29. Adding an entry does not change this date.
 Update triggers: append when an architectural/policy/business decision is made or reversed.
 
@@ -9,6 +153,53 @@ order, so search by date and title rather than position. Each entry is a decisio
 rule it implies. This is a log of outcomes, not a design doc — see the cited source for detail.
 Correct or reverse a decision with a new entry that names the one it supersedes; this file merges
 with git's union driver, so two rewrites of one old entry would both survive a merge.
+
+## 2026-11-17 — #1896 gets a sixth Sol round
+
+**Decision (Mason, in session, 2026-11-17: "Allow round 6"):** Sol rounds 4 and 5 on #1896 timed out before giving a verdict, so they produced no findings. One more full Sol review of the current head is allowed.
+
+**Decision (Mason, in session, 2026-11-17: "Accept and land"):** Sol round 6 raised three HIGH edge cases (a no-unit product quoted as `Ea`, a voided delivery reopening an old-unit order line, an alias-spelled PO line receiving without a cost snapshot). #1896 lands with them open as KI-166, KI-167 and KI-168, accepted through the owner-accept flow on the final reviewed head. #1896 also takes the Sol review needed after it is renumbered above #1897/#1895.
+
+## 2026-11-16 — Old wrong-unit PO lines are cleaned up; a stock unit cannot change while stock is on hand (#1896)
+
+**Decision (Mason, in session, 2026-11-16: "1. clean up old lines 2. do strict fix for changing units stocked moving forward"):** after Sol's round-2 HIGHs on #1896, (1) every purchase-order line left in a unit other than its product's stock unit is relabelled by the reviewed data correction (only Treaty Extra's received "oz" line on PO-2026-0011 remained), and (2) a product's stock unit cannot change while any of its stock rows holds a quantity.
+**Why:** undoing a receipt on an old wrong-unit line would reopen it and count "on order" in the wrong unit; a unit change under existing stock would silently re-read the count in the new unit.
+**What this forbids/implies:** no PO line of any status may stay in a non-stock unit (the rules migration's postflight refuses); a PO line is re-checked whenever its outstanding amount rises; a stock-unit change needs the stock at zero or converted first.
+**Round limit (Mason, in session, 2026-11-16: "Option A" then, after Luna's round-4 HIGHs, "Yes, one last round"):** the lock also holds every stock row of the product (on-order counts as stock), a first stock unit counts as a change, a stock unit cannot be cleared, every stock row (empty ones too) must carry the product's stock unit, and a stock row holding stock cannot move to another product. One last round only: a further new BLOCKER/HIGH on this lock parks #1896 for Mason. Undoing a receipt on a fully received line after a later unit change is refused on purpose (it would count the old unit as the new one).
+**Ship with a logged gap (Mason, in session, 2026-11-16: "Ship, log the gap"):** whole-branch Luna then found a cycle count opened before a unit change could finish in the new unit. Saved-product unit changes are refused by the setup guard today, so #1896 ships and the gap is KI-165, to close before unit changes are ever allowed.
+
+## 2026-11-14 — Voiding an invoice reverses its write-offs automatically (KI-99)
+
+**Decision (Mason, in session, 2026-11-14: "Auto-reverse it", over refusing the void until the write-off is reversed by hand).** Voiding a posted, overdue or paid invoice marks each of its active write-offs reversed in the same step, recorded like a manual reversal (who, when, reason naming the void).
+**Why:** a voided invoice's write-off otherwise stayed active and showed on the customer statement as an unexplained credit; void already undoes applied credits and prepay the same way.
+**What this forbids/implies:** each write-off's Chicago booking month must be open, as for a manual reversal; a closed month refuses the whole void. Built in `20270116100000_ki99_void_reverses_write_offs.sql`.
+## 2026-11-14 — MOA alternate spellings are refused
+
+**Decision (Mason, 2026-11-14: "CAS optional with warning; refuse alternate MOA spelling.").** If a mode-of-action group is already active under one spelling, a save using another spelling for the same group must refuse; replacing it is a two-save retirement then addition.
+**Why:** official codes can use different zero-padding by scheme, and a save must not silently replace a stored spelling or substitute an alternate submitted spelling. The comparison-only product summary may fold equivalent groups using an existing source spelling, as specified in the contract.
+**What this forbids/implies:** compare equivalent codes for duplicates and matching, but preserve stored/requested spelling and refuse an active alternate spelling before any write.
+## 2026-11-14 — Rate Review unanswered-save recovery (#1829)
+
+**Decision (Mason, 2026-11-14):** after any unanswered Rate Review save, an admin may check a fresh workbook and explicitly clear the reminder; no attempt count or expiry threshold is required. This supersedes the 2026-11-13 Rate Review follow-up contract's narrower hand-check exit, which appeared only on expiry, a missing record, or an unsafe/refused receipt.
+**Why:** a save can remain unanswered indefinitely, so tying recovery to a number of replies could strand the admin.
+**What this forbids/implies:** keep the exact saved key and 24-hour receipt window for retries; require a fresh-workbook check and explicit confirmation before clearing. An old request may still finish.
+## 2026-11-13 — "MG" means milligrams; the Powder Keg seed treatments are sold by the each (KI-136, KI-137)
+
+**Decision (Mason, in session, 2026-11-13, answering the Product Master review's D-1 and D-2).** (1) The "MG" stock/rate unit on the two jar products means milligrams, so the conversion table is right. The open PO line ordering one of them as 9,000 "Dry oz" (5 jars × 1,800 MG) has the right quantity and the wrong unit label. (2) Powder Keg Corn and Powder Keg Soybeans are sold by the each at their current prices.
+**Why:** these are the real sale and stock units; the units fix (To-Do 0.17 step 1) needed them before it could be planned.
+**What this forbids/implies:** do not change the MG unit. Correct that PO line's label before it is received. Change both Powder Keg products' stock and rate unit to Ea through a reviewed migration; on-hand is 0, so no stock conversion. To-Do decision 24 is answered.
+
+## 2026-11-13 — Commission counts in profit when invoiced, is paid to the rep only when the customer pays, pro rata (KI-154)
+
+**Decision (Mason, in session, 2026-11-13: "ok make sure that is in our docs", accepting the recommendation of: profit report = invoiced, rep's payout = customer paid, and a partial customer payment releases the matching share of commission).** Three rules: (1) a commission counts against profit (Bottom Line P&L, Monthly Summary) in the period its sale is invoiced, split by the share billed (entry below); (2) a commission becomes payable to the rep only once the customer has paid for that sale (confirms the 2026-11-09 decision in CRX Notes, "commission after discount"); (3) a partial customer payment makes the same share of that sale's commission payable; the rest waits for the rest of the money.
+**Why:** revenue is reported when invoiced, so counting commission on a paid basis would put the sale and its commission in different months; paying the rep only from collected money means a written-off bill never pays commission and nothing has to be clawed back.
+**What this forbids/implies:** the payout must check customer payment per sale and limit each commission to the paid share (not built: KI-154, To-Do 8.5); the P&L must not switch commissions to a paid basis. Returns and credits still claw back under KI-13.
+
+## 2026-11-13 — A partly billed sale's commission is split by the share billed in each period (KI-125)
+
+**Decision (Mason, in session, 2026-11-13: "Split by share billed").** Refines 2026-11-10 (To-Do decision 15): when an order is billed across more than one period, Bottom Line P&L and Monthly Summary subtract only the share of its commission that matches the share of the order billed in that period (a quarter billed in December puts a quarter of the commission in December).
+**Why:** the 2026-11-10 rule, read literally, put the whole commission in the first period with any CRX invoice ([2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md), finding 2).
+**What this forbids/implies:** the KI-125 fix must match commission to invoiced share, not to whether an invoice exists. Not built; recorded for future work only.
 
 ## 2026-11-12 — #1848: Mason owner-accepted 1 Sol finding(s) at `1e248aee5e30`
 
@@ -130,7 +321,7 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 
 **Decision (Mason, 2026-11-11):** he wants to re-review the CMP-2 plan "BEFORE ANY BUILD HAPPENS".
 **Why:** CMP-2 is the last and largest product-comparison build; Mason wants to look at its plan again before any work starts.
-**What this forbids/implies:** no CMP-2 build session, build sheet or code may start until Mason has re-reviewed the plan and approved it in chat. The hold is marked in `docs/plans/2026-10-29-product-GRAND-PLAN.md` (stage table, Stage 5 and section 8) and on To-Do row 2.12. CLN-2 (retire `ingredient_map`) waits with it, since it follows CMP-2. Lifting the hold needs a new entry here.
+**What this forbids/implies:** no CMP-2 build session, build sheet or code may start until Mason has re-reviewed the plan and approved it in chat. The hold is marked in `docs/plans/2026-10-29-product-GRAND-PLAN.md` (stage table, Stage 5 and section 8) and on To-Do row 2.12. CLN-2 (retire `ingredient_map`) waits with it, since it follows CMP-2. Lifting the hold needs a new entry here. **Lifted 2026-11-17** (entry above: approved with one change).
 
 ## 2026-11-11 — Resistance mode-of-action groups: shown on the product, later on quotes
 
@@ -372,6 +563,34 @@ with git's union driver, so two rewrites of one old entry would both survive a m
 **Decision (Mason, in session, 2026-11-09: "I agree build report before typing in brands"):** CLN-3, the read-only report of products whose bracketed name brands disagree with their saved brands, is built before Mason starts entering brands, not after brand PR B as the Product Master grand plan ordered.
 **Why:** it then serves as the brand-entry worklist and afterwards as the ongoing check. It has no technical dependency on PR B, which leaves brand storage and `get_product_brands` unchanged. Plan: `docs/plans/2026-11-08-product-CLN3-BUILD-SHEET.md`.
 **What this forbids/implies:** don't hold CLN-3 behind PR B. If brand storage or the brand list rule changes, re-check the report's copy of that rule.
+
+## 2026-11-08 — Field split rules: who may be billed, split dates, the extra penny, archiving fields
+
+**Decision (Mason, in chat, 2026-11-08: "I agree with all rest", accepting the recommended answers to foundation 18.1 questions 1, 3, 4 and 5 in `docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md` §5):**
+- **Who may be billed (KI-76):** a field split bills only payers saved on the field's split, or on the job's own split. To bill someone else, the office adds them to the field's split first (any active customer). A line changed before posting may re-weight those payers but not add a new one.
+- **Split changes:** a new split starts on a date the office picks (any date, past or future, from the first package on; superseded the earlier today-only limit, see the 2026-11-08 Astra-review entry below); work dated on or after it uses it; posted invoices never change; an unposted draft keeps its split until someone presses "refresh split", which is logged.
+- **Extra penny:** leftover cents go to the primary payer (usually the grower), the same rule as the chemical-sale Bill Split.
+- **Archiving:** fields are archived, never deleted. Admins and sales reps archive; archiving is blocked while the field has open or unbilled work; only admins restore.
+**Why:** one rule set for every billing path, matching Taha's chemical-sale split where they meet, and no billing history lost.
+**What this forbids/implies:** no field-billing path may bill a customer outside the field's (or job's) split; no hard delete of fields from any screen.
+
+## 2026-11-08 — Field splits: separate application and product shares; "shared with" on bills; posted field invoices editable until money or month close
+
+**Decision (Mason, in chat, 2026-11-08 evening, after the plan was compared with other ag retail software):** each payer on a field's split has an application share and a product share, set on the field; application and fuel-surcharge lines start from the application shares, product lines from the product shares, and any one line can still be changed by hand before posting. Each payer's invoice shows who else shares it. A posted field-application invoice can be edited (unpost, change, re-post, whole payer set) while no payment, prepay, credit or write-off is applied to any invoice in the set and its accounting month is open; after that, only a credit and a new bill.
+**Why:** matches how other ag retail systems split landlord and tenant bills by product group, with only the two groups CRX needs, and lets the office fix a bill before money or the month makes it final.
+**What this forbids/implies:** replaces the yes/no "pays application" flag in the fields-and-who-pays plan (`docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md` §0); no edit of a posted field invoice once money touches it or its month closes.
+
+## 2026-11-08 — Field splits: any start date from the start; fuel surcharge follows who pays application
+
+**Decision (Mason, in chat, 2026-11-08, answering build sheet questions 6 and 7 after the Astra review: "fuel surcharge follows who pays application" and "no i want split fields now"):** a payer excused from the application charge also starts at 0% on fuel surcharge lines; and the office may give a field split any start date, past or future, from the first package (FP-1), instead of only today's date until February.
+
+**What this forbids/implies:** the old invoice, job-transfer, blend-ticket and field-linked order screens are not made date-aware. Mason confirmed the same day that field application invoices are not billed until February, the feature is used from about March, and the old screens stay on for testing only ("im not using them so just keep them on so we can test etc no real orders will be entered"); each later package's cutover checks that no real record went through an old screen. A nightly job keeps the old copy current when a future split starts. Flat fees were not covered by the answer; they default to the full field split until Mason says otherwise. Every line can still be changed before posting.
+
+## 2026-11-08 — Field splits fill every invoice line, and each line can be changed before posting
+
+**Decision (Mason, in chat, 2026-11-08, answering foundation 18.1 question 2: "yes we need to also be able to split line items by different shares than saved to the field. field level splits always auto populate based on field but we need to be able to adjust the split before posting invoice and change line items at different percentages and shares"):** a field's split group can mark a payer as not paying the application charge, every field-billing invoice line starts from the field's split, and before posting the office can give any line its own payer percentages.
+**Why:** real splits differ by charge (a landlord who pays product but not application) and sometimes by line; the field split is the default, not a lock.
+**What this forbids/implies:** the field-application engine must bill line by line (the per-line engine, build sheet FP-5a in `docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`); each line still adds to exactly 100% in the database; a line change never edits the field's saved split; posting snapshots each line. Which payers a line may add is still question 1 (KI-76).
 
 ## 2026-11-08 — Re-activating an applicator never takes a field off another sprayer's board (KI-28 review)
 

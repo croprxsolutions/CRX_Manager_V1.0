@@ -10,6 +10,7 @@ const H = vi.hoisted(() => ({
   toast: vi.fn(),
 }));
 
+vi.mock('../deliveries/DeliveriesMissingBrands', () => ({ default: () => null }));
 vi.mock('../../lib/db', () => {
   function createQuery(result: { data: unknown; error: unknown }) {
     const query = new Proxy({}, {

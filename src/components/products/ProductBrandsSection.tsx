@@ -7,6 +7,7 @@ import Input from '../ui/Input';
 import Modal from '../ui/Modal';
 import Select from '../ui/Select';
 import EpaLabelLink from './EpaLabelLink';
+import LabelAdjuvants from './LabelAdjuvants';
 import ProductSearchPicker from './ProductSearchPicker';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
@@ -24,7 +25,9 @@ import {
   type ProductBrandInput,
 } from '../../lib/productBrands';
 import { sanitizeError } from '../../lib/errorSanitizer';
-import { cancelledOnText, normalizeEpaRegistration, type CancelledRegistrations } from '../../lib/epaRegistrationStatus';
+import {
+  cancelledOnText, normalizeEpaRegistration, type CancelledRegistrations, type LookupState, type RegistrationRows,
+} from '../../lib/epaRegistrationStatus';
 import { Sentry } from '../../lib/sentry';
 import type { BrandSignalWord, EpaLookupResult, ProductBrand } from '../../types';
 import { toSentryError } from '../../lib/sentryError';
@@ -40,6 +43,12 @@ interface ProductBrandsSectionProps {
   userId: string | null;
   /** Registrations stored as cancelled (the product page reads them); each brand row on one is marked. */
   cancelled?: CancelledRegistrations;
+  /** The stored registrations for the brand numbers (label link and adjuvants, USE-2), and where that read stands. */
+  registrations?: RegistrationRows;
+  registrationLookup?: LookupState;
+  /** Admins and sales reps may edit a registration's label adjuvants; `onAdjuvantsSaved` re-reads them. */
+  canEditAdjuvants?: boolean;
+  onAdjuvantsSaved?: () => void;
   /** Told the brand list's state so the page banner covers brand numbers too: undefined while loading, null when the read failed. */
   onBrandsChange?: (productId: string, brands: ProductBrand[] | null | undefined) => void;
 }
@@ -134,7 +143,10 @@ function isClearRefusal(err: unknown): boolean {
   ].some((code) => hasRpcCode(err, code));
 }
 
-export default function ProductBrandsSection({ productId, productName, isAdmin, userId, cancelled, onBrandsChange }: ProductBrandsSectionProps) {
+export default function ProductBrandsSection({
+  productId, productName, isAdmin, userId, cancelled, registrations, registrationLookup = 'checking', canEditAdjuvants = false,
+  onAdjuvantsSaved, onBrandsChange,
+}: ProductBrandsSectionProps) {
   const { toast } = useToast();
   const [brands, setBrands] = useState<ProductBrand[]>([]);
   // A grouped size shows and edits its parent's list (PAR-2); null while the size has its own list.
@@ -500,12 +512,19 @@ export default function ProductBrandsSection({ productId, productName, isAdmin, 
                   <td className="py-2 pr-3 font-medium text-nav-dark">{brand.brand_name}</td>
                   <td className="py-2 pr-3">
                     <div>{brand.epa_registration ?? <span className="text-secondary">None</span>}</div>
-                    <EpaLabelLink epaRegistration={brand.epa_registration} />
                     {(() => {
                       const key = normalizeEpaRegistration(brand.epa_registration);
-                      return key && cancelled?.has(key) ? (
-                        <Badge variant="error" size="sm">{cancelledOnText(cancelled.get(key))}</Badge>
-                      ) : null;
+                      const registration = key ? registrations?.get(key) : undefined;
+                      return (
+                        <>
+                          <EpaLabelLink epaRegistration={brand.epa_registration} labelUrl={registration?.label_url} />
+                          {key && cancelled?.has(key) && (
+                            <Badge variant="error" size="sm">{cancelledOnText(cancelled.get(key))}</Badge>
+                          )}
+                          <LabelAdjuvants epaRegistration={brand.epa_registration} row={registration} lookup={registrationLookup}
+                            canEdit={canEditAdjuvants} profileId={userId ?? ''} onSaved={() => onAdjuvantsSaved?.()} />
+                        </>
+                      );
                     })()}
                   </td>
                   <td className="py-2 pr-3">{brand.manufacturer ?? '—'}</td>

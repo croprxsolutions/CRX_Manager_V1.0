@@ -7,6 +7,32 @@ production, and nothing outside this computer can reach it. The rules are in the
 
 ## Commands
 
+### Chemical sales gauntlet (separate test copy)
+
+Use `node scripts/local-app/sales.mjs rebuild`, then `node scripts/local-app/sales.mjs test` for the
+chemical-sales browser journey. This is a separate Docker project (`crx-sales-gauntlet`) with its own
+volumes and fixed loopback ports: app 5209, API 54821, database gateway 54822. The launcher does not
+touch the shared `crx-local-app` stack. An older checkout without this launcher refuses rather than
+interpreting a new option as a rebuild of the default copy. Unknown command options also refuse.
+
+Its ignored settings, generated one-origin gateway config, build manifest and browser artifacts live
+under `scripts/local-app/.state/sales-gauntlet/`. The settings contain three invented logins: admin,
+sales rep and another sales rep. Default test-copy settings and its one-user check are unchanged.
+Never put these generated files or credentials in a PR. The browser profile runs only
+`chemical-sales.spec.ts`; the default suite excludes it. Marking a quote sent records its version;
+this isolated copy sends no actual email. Stop the task-owned copy afterwards with
+`node scripts/local-app/sales.mjs stop`.
+
+The Supabase 2.109.1 installation needs both release executables, `supabase` and `supabase-go`.
+A shim reporting 2.109.1 beside an older Go executable is insufficient. Put the complete official
+release folder first on this task's PATH, or set `SUPABASE_GO_BINARY` to its matching companion;
+the runner rejects a mismatched override. Before the invoice-brand migration, rebuild initializes
+the empty registration catalog through the real generated-admin seed workflow. No numbered business
+product is present at that point; business fixtures are seeded after all migrations finish.
+
+Historical migration provers are separate from this latest-schema browser proof: passing a historical
+candidate's before/after checks alone does not establish that today's sales workflow passes.
+
 Run these from the root of a checkout. They need Docker running, `npm ci` done and Supabase CLI 2.109.1,
 the version these steps are proven on.
 
@@ -33,7 +59,7 @@ line. `.state/build.json` holds the full migration list.
 
 When another session is using `127.0.0.1:5199`, check your branch's screens with
 `node scripts/local-app/app.mjs frontend --port 5201`. Any port from 1024 to 65535 works except 5199, 54721
-and 54722. It uses the same test database and test user, and listens on `127.0.0.1` only. It runs every check
+and 54722, or the sales copy's reserved 5209, 54821 and 54822. It uses the same test database and test user, and listens on `127.0.0.1` only. It runs every check
 the other commands run, the 5199 check included. The browser calls `/_sb` on that same port and the frontend
 passes the call on to the gateway, so the gateway still lets in only pages from 5199. Live updates do not
 pass through, which changes nothing because the test copy has none.

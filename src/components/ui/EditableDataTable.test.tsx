@@ -408,7 +408,7 @@ describe('EditableDataTable', () => {
       blockState.value = 'blocked';
       rerender(<EditableDataTable {...props} />);
       expect(screen.getByRole('alertdialog')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Leave' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Discard changes' })).toBeDisabled();
       finishSave?.();
 
       await waitFor(() => expect(mockReset).toHaveBeenCalledTimes(1));

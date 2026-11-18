@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-18 — #1946 (KI-81): blend-ticket invoices follow the same quote rules
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, same rules").** Answering Taha's review of PR #1946: a blend-ticket invoice prices each grower like a field-application invoice. Each grower is billed a quoted price only from their own quote that was sent, is still valid on the application date and was written before it (decisions "Own quote only", "Sent + not expired", "Valid + written before"); otherwise their list price. This replaces the earlier blend rule that billed the job's quote price (draft quotes included) to every grower on the ticket.
+**What it does:** the blend invoice stops giving one grower's quote price to another grower on a shared field, and stops billing from a declined, expired, never-sent or later-written quote. "Stop, type the price" still applies. Every other gate is unchanged.
+
 ## 2026-11-17 — #1946 (KI-81): each grower on a split bill records their own price source
 
 **Decision (Mason, in chat, 2026-11-17: "Each records its own").** On PR #1946, when one grower on a split field-application bill pays their own quoted price and another pays the price list, each grower's invoice line and line share record that grower's own price source ('quoted' or 'tier'), not the largest-share grower's.

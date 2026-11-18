@@ -197,4 +197,19 @@ describe('CycleCounts completion race', () => {
     const completionCalls = H.rpc.mock.calls.filter((call) => call[0] === 'complete_cycle_count');
     expect(completionCalls).toEqual([]);
   });
+  // Both dialogs share z-50, so whichever comes later in the page draws on top. The
+  // Cancel Count confirm once rendered BEFORE the detail window and opened hidden behind it.
+  it('opens the Cancel Count confirmation on top of the open count', async () => {
+    render(<CycleCounts />);
+    await waitFor(() => expect(screen.getByText('CC-1001')).toBeTruthy());
+    fireEvent.click(screen.getByText('CC-1001'));
+    await waitFor(() => expect(heldItemQueries.length).toBe(1));
+    await release(0);
+    await waitFor(() => expect(screen.getByText('ALPHA PRODUCT')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Cancel Count/ }));
+    const confirm = await screen.findByRole('alertdialog', { name: 'Cancel Cycle Count' });
+    const detail = screen.getByRole('dialog');
+    expect(detail.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

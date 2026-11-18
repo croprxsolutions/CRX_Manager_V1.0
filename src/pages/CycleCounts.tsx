@@ -1145,37 +1145,6 @@ export default function CycleCounts() {
         </div>
       </Modal>
 
-      {/* Confirm Modals */}
-      <ConfirmModal
-        open={completeConfirmOpen}
-        onClose={() => setCompleteConfirmOpen(false)}
-        onConfirm={() => { void executeComplete(); }}
-        title="Complete with Uncounted Items"
-        message={completeConfirmMsg || `Some products have not been counted yet. Complete anyway?`}
-        confirmLabel="Complete Anyway"
-        variant="warning"
-        loading={completing || preparingCompletion}
-      />
-      <ConfirmModal
-        open={cancelConfirmOpen}
-        onClose={() => setCancelConfirmOpen(false)}
-        onConfirm={executeCancelCount}
-        title="Cancel Cycle Count"
-        message="Cancel this cycle count? No inventory adjustments will be made."
-        confirmLabel="Cancel Count"
-        variant="warning"
-      />
-      <ConfirmModal
-        open={reverseConfirmOpen}
-        onClose={() => setReverseConfirmOpen(false)}
-        onConfirm={doReverse}
-        title="Reverse Cycle Count"
-        message="Reverse this completed cycle count? All inventory adjustments will be undone."
-        confirmLabel="Reverse Count"
-        variant="danger"
-        loading={reversing}
-      />
-
       {/* Cycle Count Detail Modal */}
       <Modal
         open={showDetail}
@@ -1334,6 +1303,37 @@ export default function CycleCounts() {
           </div>
         )}
       </Modal>
+
+      {/* Confirm Modals: after the detail Modal so they stack on top of it (both z-50) */}
+      <ConfirmModal
+        open={completeConfirmOpen}
+        onClose={() => setCompleteConfirmOpen(false)}
+        onConfirm={() => { void executeComplete(); }}
+        title="Complete with Uncounted Items"
+        message={completeConfirmMsg || `Some products have not been counted yet. Complete anyway?`}
+        confirmLabel="Complete Anyway"
+        variant="warning"
+        loading={completing || preparingCompletion}
+      />
+      <ConfirmModal
+        open={cancelConfirmOpen}
+        onClose={() => setCancelConfirmOpen(false)}
+        onConfirm={executeCancelCount}
+        title="Cancel Cycle Count"
+        message="Cancel this cycle count? No inventory adjustments will be made."
+        confirmLabel="Cancel Count"
+        variant="warning"
+      />
+      <ConfirmModal
+        open={reverseConfirmOpen}
+        onClose={() => setReverseConfirmOpen(false)}
+        onConfirm={doReverse}
+        title="Reverse Cycle Count"
+        message="Reverse this completed cycle count? All inventory adjustments will be undone."
+        confirmLabel="Reverse Count"
+        variant="danger"
+        loading={reversing}
+      />
 
     </div>
   );

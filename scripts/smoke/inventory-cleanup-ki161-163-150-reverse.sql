@@ -1,8 +1,8 @@
--- Rollback for 20270122100000_inventory_cleanup_ki161_163_150.sql (run as one transaction; proven by
+-- Rollback for 20270126110000_inventory_cleanup_ki161_163_150.sql (run as one transaction; proven by
 -- scripts/smoke/prove-inventory-cleanup-real-schema.mjs). The cycle-count columns go back to numeric(10,2): the
 -- restored update_cycle_count_item stores the raw count but works out the variance and result from 2 places, so a
--- 4-place column would let the saved count and Complete disagree (CodeRabbit, #1940). Narrowing rounds any count
--- saved with 4 places to 2, as the old columns did.
+-- 4-place column would let the saved count and Complete disagree (CodeRabbit, #1940). It refuses, changing nothing,
+-- while any count, expected quantity or variance has more than 2 places, so narrowing never silently rounds one (Sol).
 SET LOCAL lock_timeout = '5s';
 
 DROP TRIGGER a2_delivery_line_matches_order_line ON public.delivery_items;
@@ -352,6 +352,15 @@ $function$;
 
 REVOKE ALL ON FUNCTION public.update_cycle_count_item(uuid, numeric, text, uuid, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.update_cycle_count_item(uuid, numeric, text, uuid, text) TO authenticated, service_role;
+
+DO $narrow_check$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.cycle_count_items
+              WHERE expected_qty <> round(expected_qty, 2) OR counted_qty <> round(counted_qty, 2) OR variance <> round(variance, 2)) THEN
+    RAISE EXCEPTION 'ROLLBACK_REFUSED: a cycle count holds more than 2 decimal places; narrowing would round it';
+  END IF;
+END;
+$narrow_check$;
 
 ALTER TABLE public.cycle_count_items
   ALTER COLUMN expected_qty TYPE numeric(10,2),

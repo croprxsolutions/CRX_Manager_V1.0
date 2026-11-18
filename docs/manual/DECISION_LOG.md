@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-18 — #1940 may have a sixth Sol round; Mason accepts the missing-stock-row deadlock
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, do that").** PR #1940 (inventory cleanup KI-161/150/163) may have one more Sol round (round 6 as the counter reads it). Sol round 5 found 3 HIGHs. Mason accepts the first two as a business non-issue: two delivery or job completions sharing two products that have never had a Main Warehouse stock row, listed in opposite order, can still deadlock. Postgres cancels one, nothing is half-saved, it is retried, and it already happens today; this PR fixes the common case (rows exist). The third (the rollback rounding saved 4-place counts) is fixed.
+**Why:** the stock-lock mechanism has produced a new HIGH in three rounds, so per the contract it stops being patched; the rare case fails safely.
+**What it does:** unlocks one Sol review of the new head. If that review raises only the accepted deadlock case, it goes through the `accept <code>` owner-acceptance step; any other finding stops the merge. It still needs green checks before it merges into `staging`.
+
 ## 2026-11-18 — #1940 may have one more Sol round
 
 **Decision (Mason, in chat, 2026-11-18: "Yes, one more round").** PR #1940 (inventory cleanup KI-161/150/163) may have one more Sol round (round 5 as the counter reads it).

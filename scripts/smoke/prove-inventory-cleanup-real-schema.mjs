@@ -418,13 +418,20 @@ async function afterCases() {
 
 function rollbackCases() {
   stageText('reverse.sql', lf(REVERSE));
+  const savedCount = scalar(`SELECT coalesce(counted_qty::text, 'NULL') FROM public.cycle_count_items WHERE id = '${CCI}';`);
+  psql(`UPDATE public.cycle_count_items SET counted_qty = 12.3456 WHERE id = '${CCI}';`);
+  const refused = apply('reverse.sql');
+  assert.notEqual(refused.status, 0, 'a 4-place count must stop the rollback');
+  assert.match(refused.output, /ROLLBACK_REFUSED/, refused.output);
+  assert.equal(n(`SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_delivery_line_matches_order_line';`), 1, 'the refused rollback changed nothing');
+  psql(`UPDATE public.cycle_count_items SET counted_qty = ${savedCount} WHERE id = '${CCI}';`);
   const r = apply('reverse.sql');
   assert.equal(r.status, 0, r.output);
   assert.equal(n(`SELECT count(*) FROM pg_trigger WHERE tgname IN ('a2_delivery_line_matches_order_line', 'trg_zz_lock_job_stock_rows');`), 0);
   assert.equal(n(`SELECT count(*) FROM pg_class WHERE relname = 'delivery_items_one_line_per_order_line';`), 0);
   assert.equal(scalar(`SELECT has_table_privilege('authenticated', 'public.delivery_items', 'INSERT');`), 't');
   assert.equal(scalar(`SELECT string_agg(column_name || ':' || numeric_precision || ',' || numeric_scale, ' ' ORDER BY column_name) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'cycle_count_items' AND column_name IN ('counted_qty', 'expected_qty', 'variance');`), 'counted_qty:10,2 expected_qty:10,2 variance:10,2');
-  console.log('[case] R rollback restores the three original function bodies (md5-checked in the script), drops the trigger, index and job lock, gives back the direct write grant, and narrows the count columns back to 2 places');
+  console.log('[case] R rollback refuses, changing nothing, while a count has 4 places; then restores the three original function bodies (md5-checked in the script), drops the trigger, index and job lock, gives back the direct write grant, and narrows the count columns back to 2 places');
 }
 
 async function main() {

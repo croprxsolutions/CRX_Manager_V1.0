@@ -41,6 +41,7 @@ const num = (q: Qty) => Number(q);
 const qty = (q: Qty) => num(q).toLocaleString('en-US', { maximumFractionDigits: 3 });
 const day = (d: string | null) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
 
+// eslint-disable-next-line react-refresh/only-export-components -- exported for its unit test
 export function suggestionText(s: Suggestion, unit: string | null): string {
   const n = `${qty(s.quantity)}${unit ? ` ${unit}` : ''}`;
   const order = s.order_now ? `Order ${n} now` : `Order ${n} by ${day(s.order_by)}`;

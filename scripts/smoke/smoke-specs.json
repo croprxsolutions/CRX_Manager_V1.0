@@ -1016,6 +1016,18 @@
         "lifecycle"
       ]
     },
+    "save_quote_section_ids": {
+      "chain": "smoke-save-quote-section-ids.sql",
+      "container_prover": "prove-save-quote-section-ids-real-schema.mjs",
+      "description": "REQUIRES 20270125110000. Bookings Phase A PR 1a: a marked save (section_ids_v1) that names its sections keeps their ids, so a job scheduled from a section stays linked (deferred FK checked immediately); dropping a section a job references (active, cancelled or soft-deleted job, marked or old unmarked save) is refused SECTION_HAS_JOB and the booking is unchanged; another quote's id, a repeated id, a non-uuid and any id on a new quote are refused SECTION_ID_INVALID; an unmarked save without jobs still works and gets new ids; a replay returns the same section_ids. Terminal rollback.",
+      "covers": [
+        "save_quote"
+      ],
+      "area": [
+        "lifecycle",
+        "regression"
+      ]
+    },
     "save_quote_repeated_product_line_ids": {
       "chain": "smoke-save-quote-repeated-product-line-ids.sql",
       "description": "QUOTE_ITEM_AMBIGUOUS_COST fix (QuoteBuilder sends each saved line's id and a client_key, and installs the returned item_ids). A quote with one product on two field sections: an id-less re-save is refused QUOTE_ITEM_AMBIGUOUS_COST; re-saves that name every line succeed after a reprice, keep each saved line's quote-time cost, give a new line today's cost and keep ids stable; Mark Presented and Convert succeed and each order line carries its own quote line's cost; a quote without a repeated product re-saves with or without ids as before. Terminal rollback.",
@@ -2121,6 +2133,14 @@
       "chain": "smoke-sales-tax.sql",
       "description": "Migration 20270109100200 (billing plan M4a, B10): a taxed sale for a 3% customer with $45.00 freight drafts one 'Sales tax 6.25%' line = round((products - discount + freight) x 6.25%), half up; untaxed by default; a re-save never taxes twice; a hand edit or delete of the line is put right at commit; a taxed Bill Split is exact per payer and its group posts; set_order_sales_tax moves the sale's drafts on and off, leaves posted invoices alone, admin or the sale's own rep only (a sale with no salesman is no rep's), replay-safe; a draft keeps its rate when Settings changes, a new draft takes the new one; a bad Settings rate is refused; the line is refused off a chemical sale; a stale tax line can't post; unposting keeps the posted tax; a draft switched to misc charge loses its tax and regains it when switched back; returns credit the posted total, tax included.",
       "covers": ["_recompute_standing_discount_20261231", "_sales_tax_expected_20261231", "_sales_tax_setting_rate_20261231", "_sales_tax_record_rate_20261231", "guard_sales_tax_line_scope_20261231", "guard_sales_tax_current_on_post_20261231", "set_order_sales_tax", "_standing_discount_net_cents_20261231", "_return_customer_line_share", "create_return", "issue_return_credit", "unpost_invoice_group", "save_invoice", "post_invoice", "post_invoice_group", "complete_delivery"],
+      "area": ["billing", "regression"]
+    },
+    "draft_tax_follows_box": {
+      "chain": "smoke-draft-tax-follows-box.sql",
+      "container_only": true,
+      "container_prover": "prove-draft-tax-follows-box-real-schema.mjs",
+      "description": "CONTAINER ONLY. Migration 20270124140000: a Bill Split payer draft the tax box had to keep (it can't be re-saved) can't post with tax that contradicts its sale's box, ticked or unticked (SALES_TAX_BOX_MISMATCH), and posts once the box matches; with the M4 switch off a ticked sale's untaxed draft posts; once on it is refused until the box is unticked and ticked. Terminal rollback.",
+      "covers": ["guard_sales_tax_box_on_post_20270124", "set_order_sales_tax", "post_invoice", "post_invoice_group"],
       "area": ["billing", "regression"]
     },
     "billing_m4_switch": {

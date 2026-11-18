@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { sentryVitePlugin } from '@sentry/vite-plugin';
+import { workboxOptions } from './src/pwa/workbox.ts';
 
 const liveSchemaTests = process.env.CRX_LIVE_SCHEMA_TESTS === 'true';
 const liveSchemaUrl = process.env.VITE_SUPABASE_URL?.trim();
@@ -76,21 +77,7 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        navigateFallback: 'index.html',
-        // Aggressively clean up old caches — critical for Safari iOS
-        cleanupOutdatedCaches: true,
-        // clientsClaim and skipWaiting removed: with registerType 'prompt' these
-        // would still cause immediate SW activation and page reloads on mobile.
-        // The UpdatePrompt component handles activation when the user consents.
-        // Don't precache sw-doctor.js so it always loads from network
-        globIgnores: ['**/sw-doctor.js'],
-        // No runtimeCaching for Google Fonts: a service-worker fetch is checked
-        // against the CSP connect-src, which does not list the font hosts, so
-        // those rules blocked the fonts. The browser loads them directly instead
-        // (allowed by style-src / font-src) and caches them over HTTP.
-      },
+      workbox: workboxOptions,
     }),
   ],
   optimizeDeps: {

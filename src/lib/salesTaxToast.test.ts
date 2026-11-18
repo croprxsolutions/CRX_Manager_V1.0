@@ -7,9 +7,9 @@ describe('salesTaxToast', () => {
   });
   it('says split drafts that could not be edited keep their tax', () => {
     expect(salesTaxToast(true, 1, ['CS-2026-0412-2'], false)).toEqual(['info',
-      "Sales tax on (1 draft invoice updated). Split draft CS-2026-0412-2 can't be edited and keeps its tax until the group is voided and redrafted."]);
+      "Sales tax on (1 draft invoice updated). Split draft CS-2026-0412-2 can't be edited, so it keeps its tax and can't be posted while that differs from the box: void and redraft the group, or set the box back."]);
     expect(salesTaxToast(false, 0, ['FS-1', 'FS-2'], false)).toEqual(['info',
-      "Sales tax off. Split drafts FS-1, FS-2 can't be edited and keep their tax until the group is voided and redrafted."]);
+      "Sales tax off. Split drafts FS-1, FS-2 can't be edited, so they keep their tax and can't be posted while that differs from the box: void and redraft the group, or set the box back."]);
   });
   it('explains new invoices when no draft changed', () => {
     expect(salesTaxToast(false, 0, [], true)).toEqual(['info',

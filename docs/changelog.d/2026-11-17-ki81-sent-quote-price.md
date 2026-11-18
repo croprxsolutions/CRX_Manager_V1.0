@@ -2,7 +2,7 @@
 
 - Mason, 2026-11-17: fix now. Behavior contract `docs/plans/2026-11-17-ki81-sent-price-invoices-CONTRACT.md`
   (cold-challenged by Astra, 37 findings settled there). One migration, not applied live:
-  `20270123100000_ki81_invoices_bill_sent_quote_price.sql`.
+  `20270125163000_ki81_invoices_bill_sent_quote_price.sql`.
 - Field-application invoices (single save and split-bill save) took a chemical's price from any quote line for the
   product on one of the fields: any customer, any status, deleted, expired or never sent, chosen effectively at
   random. Now only the billed grower's own quote (Mason, "Own quote only": on a shared field a co-owner's quote never

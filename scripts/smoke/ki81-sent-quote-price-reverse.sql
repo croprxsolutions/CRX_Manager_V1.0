@@ -1,4 +1,4 @@
--- Reverse of 20270123100000_ki81_invoices_bill_sent_quote_price: restores the five bodies it replaced and drops
+-- Reverse of 20270125163000_ki81_invoices_bill_sent_quote_price: restores the five bodies it replaced and drops
 -- the two helpers. Run as ONE transaction (psql -1). Proven by scripts/smoke/prove-ki81-sent-quote-price-real-schema.mjs.
 DO $pre$
 BEGIN
@@ -23,10 +23,10 @@ BEGIN
                    FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS DISTINCT FROM pin.execs
   ) THEN
-    RAISE EXCEPTION 'KI81_REVERSE_PREFLIGHT: the live bodies are not the ones 20270123100000 installs';
+    RAISE EXCEPTION 'KI81_REVERSE_PREFLIGHT: the live bodies are not the ones 20270125163000 installs';
   END IF;
   IF to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)') IS NULL OR to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)') IS NULL OR to_regprocedure('public._field_app_quote_eligible(quotes,uuid,uuid[],date)') IS NULL THEN
-    RAISE EXCEPTION 'KI81_REVERSE_PREFLIGHT: 20270123100000 is not applied';
+    RAISE EXCEPTION 'KI81_REVERSE_PREFLIGHT: 20270125163000 is not applied';
   END IF;
 END;
 $pre$;

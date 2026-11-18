@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Real-schema proof for KI-81 (contract docs/plans/2026-11-17-ki81-sent-price-invoices-CONTRACT.md):
- *   20270123100000_ki81_invoices_bill_sent_quote_price.sql (the candidate)
+ *   20270125163000_ki81_invoices_bill_sent_quote_price.sql (the candidate)
  *   scripts/smoke/ki81-sent-quote-price-reverse.sql (its rollback)
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
@@ -37,7 +37,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270123100000_ki81_invoices_bill_sent_quote_price.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270125163000_ki81_invoices_bill_sent_quote_price.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'ki81-sent-quote-price-reverse.sql');
 const SMOKE = path.join(ROOT, 'scripts', 'smoke', 'smoke-ki81-sent-quote-price.sql');
 const FOLLOW_UPS = [];

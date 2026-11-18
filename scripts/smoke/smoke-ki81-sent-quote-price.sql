@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Valid quotes expire on the run's own Chicago date (the inclusive boundary), so the chain holds on any day of the season.
--- CONTAINER ONLY smoke chain for 20270123100000_ki81_invoices_bill_sent_quote_price (KI-81).
+-- CONTAINER ONLY smoke chain for 20270125163000_ki81_invoices_bill_sent_quote_price (KI-81).
 -- Run through scripts/smoke/prove-ki81-sent-quote-price-real-schema.mjs, never against a shared
 -- database: it saves invoices, which draw invoice numbers a rollback does not return.
 -- It needs the prover's committed fixtures (ids a81a81a8-...) and its k81.quote() helper.

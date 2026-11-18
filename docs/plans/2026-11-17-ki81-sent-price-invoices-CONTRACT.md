@@ -42,7 +42,7 @@ Read at `origin/staging` 10070370e (2026-11-17). Decision: Mason, 2026-11-17 (DE
   will carry, else Chicago today.
 - Who may act: unchanged (admins and reps through the existing wrappers). Every price stays server-derived; the screen
   sends only ids and a manual override, which still wins as today.
-- Files: `supabase/migrations/20270123100000_ki81_invoices_bill_sent_quote_price.sql`, its ledger and
+- Files: `supabase/migrations/20270125163000_ki81_invoices_bill_sent_quote_price.sql`, its ledger and
   migrations.d record, a real-schema prover + reverse script under `scripts/smoke/`, KNOWN_ISSUES, this contract.
 
 ## State and failure

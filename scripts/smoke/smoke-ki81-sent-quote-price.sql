@@ -28,7 +28,8 @@
 --   B8-B11 (Mason, 2026-11-18 "Yes, use B's quote"): on the shared field, grower B's own sent quote prices B's blend
 --       share (B8); an unsent change to it refuses before any invoice (B9); a $0 on it asks for the below-cost
 --       approval (B11). B10 (Taha's re-review): on a field only B owns, grower A's job quote prices nobody, so its
---       unsent change does not refuse B's invoice.
+--       unsent change does not refuse B's invoice. B12-B13 ("Yes, use A's quote"): with the job quote declined, A's own
+--       sent quote prices A (B12); a usable job quote still wins over A's own quote (B13).
 -- Each case runs in its own sub-transaction (rolled back by K81_UNDO). Terminal SMOKE_PASS_ROLLBACK.
 -- ============================================================================
 DO $smoke$
@@ -305,7 +306,7 @@ BEGIN
       EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
       END;
       IF v_case = 'B9' THEN
-        IF v_err IS NULL OR v_err NOT LIKE 'QUOTE_RESEND_REQUIRED:%Fix or resend that grower''s quote%' THEN
+        IF v_err IS NULL OR v_err NOT LIKE 'QUOTE_RESEND_REQUIRED:%Fix or resend the quote for [PROVER] KI81 Farm B,%' THEN
           RAISE EXCEPTION 'SMOKE_FAIL(B9): an unsent change to B''s own quote did not refuse as expected: %', v_err;
         END IF;
         SELECT count(*) INTO v_n FROM public.invoice_items WHERE product_id = c_bp;
@@ -334,6 +335,32 @@ BEGIN
             RAISE EXCEPTION 'SMOKE_FAIL(B8): grower A''s blend line billed % % (want the job quote, 2000 quoted)', v_cents, v_src;
           END IF;
         END IF;
+      END IF;
+      RAISE EXCEPTION 'K81_UNDO';
+    EXCEPTION WHEN OTHERS THEN IF SQLERRM <> 'K81_UNDO' THEN RAISE; END IF;
+    END;
+  END LOOP;
+
+  -- ---------------------------------------------------------------- blend-ticket invoice, the owner's own quote
+  FOREACH v_case IN ARRAY ARRAY['B12', 'B13'] LOOP
+    BEGIN
+      v_q := k81.quote(c_a, NULL, c_bp, 20.00, CASE WHEN v_case = 'B12' THEN 'declined' ELSE 'sent' END, v_today, true);
+      v_q2 := k81.quote(c_a, c_f, c_bp, 25.00, 'sent', v_today, true);
+      v_t := k81.blend_ticket(c_admin, c_a, c_f, c_bp, v_q);
+      v_res := public.create_invoice_from_blend_ticket(v_t, c_admin, 'k81-blend-' || v_case || '-' || md5(random()::text));
+      SELECT ii.unit_price_cents, ii.price_source INTO v_cents, v_src
+        FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
+       WHERE ii.invoice_id IN (SELECT jsonb_array_elements_text(v_res->'invoice_ids')::uuid)
+         AND i.customer_id = c_a AND ii.product_id = c_bp;
+      IF v_cents IS DISTINCT FROM (CASE WHEN v_case = 'B12' THEN 2500 ELSE 2000 END) OR v_src IS DISTINCT FROM 'quoted' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL(%): grower A''s blend line billed % %', v_case, v_cents, v_src;
+      END IF;
+      SELECT ii.unit_price_cents, ii.price_source INTO v_cents, v_src
+        FROM public.invoice_items ii JOIN public.invoices i ON i.id = ii.invoice_id
+       WHERE ii.invoice_id IN (SELECT jsonb_array_elements_text(v_res->'invoice_ids')::uuid)
+         AND i.customer_id = c_b AND ii.product_id = c_bp;
+      IF v_cents IS DISTINCT FROM 1000 OR v_src IS DISTINCT FROM 'tier' THEN
+        RAISE EXCEPTION 'SMOKE_FAIL(%): grower B''s blend line billed % % from A''s quote', v_case, v_cents, v_src;
       END IF;
       RAISE EXCEPTION 'K81_UNDO';
     EXCEPTION WHEN OTHERS THEN IF SQLERRM <> 'K81_UNDO' THEN RAISE; END IF;

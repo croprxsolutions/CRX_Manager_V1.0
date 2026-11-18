@@ -20,7 +20,7 @@
  * MODEL TIERS (Codex 6 family — model names verified live 2026-09-23 against
  * codex-cli 0.156.1; needs codex-cli >= 0.156, which is what taught the CLI these
  * names — on 0.153 every `gpt-6-*` name was refused as unsupported):
- *   gpt-6-sol  : frontier tier → money / DB / complex units
+ *   gpt-6.2-sol  : frontier tier → money / DB / complex units
  *   gpt-6-luna : workhorse     → standard UI units and mechanical sweeps (DEFAULT)
  *   The mission doc pins the tier per unit; the default is Luna.
  *   There is no `gpt-6-terra` or `gpt-6-spark` — the GPT-6 class ships two tiers,
@@ -41,7 +41,7 @@
  *       Codex can only touch the repo — every consequential live action stays on
  *       the Claude side. (Auth still resolves from CODEX_HOME, so the model works.)
  *       Because the user config is ignored, the model + reasoning effort are pinned
- *       explicitly below (the config normally sets model = "gpt-6-sol").
+ *       explicitly below (the config normally sets model = "gpt-6.2-sol").
  *   --sandbox danger-full-access : REQUIRED on Windows. Codex has no OS-level
  *       sandbox on Windows, so `--sandbox workspace-write` silently degrades to
  *       READ-ONLY (Codex refuses to write). Full-access is the only mode that lets

@@ -148,7 +148,7 @@ The only sanctioned way to apply a migration to the live database:
 
 1. Run `/migration-review` on the migration file. It dispatches the security/drift
    reviewers and, if clean, stamps the apply-guard proof for this exact file content.
-2. Every migration also needs a fresh independent `gpt-6-sol` high-effort Codex review of
+2. Every migration also needs a fresh independent `gpt-6.2-sol` high-effort Codex review of
    this exact migration content — the content-bound Sol proof in `AGENTS.md`; a clean
    Luna round does not count (the `/migration-review` flow mints it; the apply-guard checks it).
 3. Authorization (`AGENTS.md`, Mason's autonomous-landing rule, 2026-09-26; CodeRabbit

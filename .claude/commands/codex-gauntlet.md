@@ -108,7 +108,7 @@ Do not claim a database or money fix is ready from code inspection alone.
 
 Use `/codex-review` with the selected scope. If the direct Codex CLI fails to resolve, fall back to `/codex-cross-review`.
 
-**The fallback packet defaults to Luna/xhigh too — for a risky change you must say so and run it on Sol.** `/codex-cross-review` produces a paste-able packet whose reviewer tier is whatever the packet states. A clean Luna packet is an advisory round, not the exact-SHA `gpt-6-sol` proof the push and apply guards require, and the CLI being unavailable does not lower that bar: if the CLI cannot run at all, the Sol proof cannot be minted and the risky change parks until it can.
+**The fallback packet defaults to Luna/xhigh too — for a risky change you must say so and run it on Sol.** `/codex-cross-review` produces a paste-able packet whose reviewer tier is whatever the packet states. A clean Luna packet is an advisory round, not the exact-SHA `gpt-6.2-sol` proof the push and apply guards require, and the CLI being unavailable does not lower that bar: if the CLI cannot run at all, the Sol proof cannot be minted and the risky change parks until it can.
 
 **Order matters: Luna rounds first, the Sol proof last.** Iterate on `/codex-review` **Step 3A**
 (`gpt-6-luna` at xhigh, advisory, mints nothing) until it comes back clean. `write-codex-push-proof.mjs`
@@ -148,7 +148,7 @@ decision, 2026-09-20) — a gauntlet is many rounds, and the cheap tier is what 
 affordable. Iterate on Luna until it comes back clean. The re-review in Step 5 (sub-item 2) must
 use the same Codex scope and the same Luna/xhigh settings.
 
-The **hard gate** is unchanged: a separate ephemeral `gpt-6-sol` high-effort session
+The **hard gate** is unchanged: a separate ephemeral `gpt-6.2-sol` high-effort session
 (`node scripts/write-codex-push-proof.mjs`) for a change touching
 `docs/reference/sol-required-paths.md` (database, logins and permissions, money and inventory). Step 4 evidence verification reduces false positives; it is
 NOT a substitute for that Sol gate, and neither is a clean Luna round. Luna builds and takes

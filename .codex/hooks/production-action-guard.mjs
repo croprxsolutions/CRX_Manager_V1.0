@@ -399,10 +399,10 @@ function proofRequirement(headSha, riskDescription, detail, baseSha) {
     `CODEX PRODUCTION GATE: ${riskDescription}\n\n` +
     `${detail}\n\n` +
     `${fetchFirst}run the exact-SHA adversarial gate with ` +
-    `node scripts/write-codex-push-proof.mjs. It invokes gpt-6-sol at high reasoning in a read-only, ephemeral session. ` +
+    `node scripts/write-codex-push-proof.mjs. It invokes gpt-6.2-sol at high reasoning in a read-only, ephemeral session. ` +
     `Only an unambiguous terminal CODEX_PROOF_VERDICT: CLEAN writes .claude/session-state/codex-review-<SHA>.json. ` +
     `Required JSON: ` +
-    `{\"codex_ran\":true,\"verdict\":\"clean\",\"model\":\"gpt-6-sol\",\"reasoning_effort\":\"high\",` +
+    `{\"codex_ran\":true,\"verdict\":\"clean\",\"model\":\"gpt-6.2-sol\",\"reasoning_effort\":\"high\",` +
     `\"head_sha\":\"${headSha || "<exact pushed SHA>"}\",\"base_sha\":\"${expectedBase}\",` +
     `\"timestamp\":\"<ISO-8601, 0-24 hours old>\"}. ` +
     `The proof is bound to both the exact pushed SHA and that exact base; future-dated, stale, base-moved, malformed, or BOM-corrupted proof is refused. ` +
@@ -571,8 +571,8 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
       headSha,
       riskDescription,
       authoritativeBaseSha
-        ? `Sol proof is stale, future-dated, bound to a different HEAD, bound to a base the head does not contain or that is not an ancestor of ${baseSha}, lacks the required gpt-6-sol/high identity, has the wrong verdict/ran key, or is otherwise invalid. A head that does not contain main needs origin/main merged in before Sol can review it.`
-        : `Sol proof is stale, future-dated, bound to a different HEAD or to a base other than ${baseSha}, lacks the required gpt-6-sol/high identity, has the wrong verdict/ran key, or is otherwise invalid.`,
+        ? `Sol proof is stale, future-dated, bound to a different HEAD, bound to a base the head does not contain or that is not an ancestor of ${baseSha}, lacks the required gpt-6.2-sol/high identity, has the wrong verdict/ran key, or is otherwise invalid. A head that does not contain main needs origin/main merged in before Sol can review it.`
+        : `Sol proof is stale, future-dated, bound to a different HEAD or to a base other than ${baseSha}, lacks the required gpt-6.2-sol/high identity, has the wrong verdict/ran key, or is otherwise invalid.`,
       baseSha
     );
   }

@@ -48,8 +48,10 @@ Sol's three bypass findings on #1947 on the condition that this database guard f
 1c. A `BEFORE INSERT OR UPDATE OF quote_id ON public.quote_sections` row trigger (Sol HIGH, rounds 2 and 3): a
    section that a live job comes from cannot move to another booking (`BOOKING_HAS_JOB`), also not by being
    deleted and re-created under the same id (the section FK is deferred so save_quote can do exactly that on the
-   same booking). On re-insert the section must come back on its job's booking; for a job linked by section only
-   (the scheduler always sets both), on a booking that is not closed (Mason, 2026-11-18, "close it"). A section-linked job's booking is its
+   same booking). On re-insert the section must come back on its job's booking (Mason, 2026-11-18, "close it"). That is a
+   plain comparison because a job made from a section must also name that section's booking (`JOB_NEEDS_BOOKING`,
+   Mason, 2026-11-18, "Require both", after the Luna cap: the scheduler always sets both; live had 0 rows
+   breaking it, and the postflight refuses the apply if one appears). A section-linked job's booking is its
    section's booking, so a move would otherwise put a live job on a closed booking, or empty the old booking so it
    could close, without firing either trigger above. Nothing in the app moves sections today.
 2. `auto_expire_quotes` re-emitted with one more filter: it skips a booking with a live job, so the trigger
@@ -114,8 +116,8 @@ Database only. No screen change: the screen already shows a database message as 
 14. A live job cannot be unlinked from its booking or re-pointed to another one; a job attach racing a section
     move to a closed booking waits for it, then is refused, with no job left on the section.
 15. A section with a live job deleted and re-created under the same id on a closed booking is refused; re-created
-    on its own booking (how save_quote saves) it goes through. Re-created on a booking being declined at the same
-    moment, it waits for the decline (the target booking is locked `FOR SHARE` first), then is refused (Luna HIGH).
+    on its own booking (how save_quote saves) it goes through, also while another booking is being declined.
+16. A job made from a section that names no booking, or a different booking, is refused `JOB_NEEDS_BOOKING`.
 
 ## Challenge (Astra, gpt-6-astra high, 2026-11-18): settled
 

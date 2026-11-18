@@ -21,6 +21,8 @@
 --      that is accepted, declined, expired, cancelled, closed_by_application or closed_short (BOOKING_CLOSED; the
 --      same statuses the scheduler already refuses). An already-live job keeps moving through its own statuses,
 --      but its booking and section link is fixed: to move it, cancel it and schedule a new one (Mason, 2026-11-18).
+--      A job made from a section must also name that section's booking (JOB_NEEDS_BOOKING; the scheduler always
+--      does; Mason, 2026-11-18, "Require both"); the postflight checks no live row breaks this (0 on live).
 --   1c. _enforce_section_with_live_job_stays(), a BEFORE INSERT OR UPDATE OF quote_id row trigger on quote_sections:
 --      a section that a live job comes from cannot move to another booking (BOOKING_HAS_JOB), including by being
 --      deleted and re-inserted under the same id on another booking (the section FK is deferred).
@@ -139,7 +141,7 @@ CREATE TRIGGER quotes_booking_live_job_rules
 --     or un-delete under RLS would otherwise skip the scheduler's own status check). Same statuses the
 --     scheduler (_create_job_from_quote_section_replay_impl_20261015) refuses. The booking row is locked
 --     FOR SHARE, so this and a booking status change serialize on that row; the section row too, so a
---     section moving to a closed booking meanwhile is caught. A live job's booking/section link is frozen.
+--     section moving meanwhile is caught. A job's booking/section link is frozen, and a section job names its booking.
 CREATE FUNCTION public._enforce_job_live_on_open_booking()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -147,7 +149,6 @@ CREATE FUNCTION public._enforce_job_live_on_open_booking()
  SET search_path = public, pg_temp
 AS $function$
 DECLARE
-  v_quote_id uuid;
   v_section_quote_id uuid;
   v_quote record;
 BEGIN
@@ -165,31 +166,29 @@ BEGIN
   IF TG_OP = 'UPDATE' AND OLD.deleted_at IS NULL AND OLD.status <> 'cancelled' THEN
     RETURN NEW;
   END IF;
-  -- The section's booking, read unlocked here, is re-checked under a section lock after the booking locks
-  -- below (booking first, then section: the order save_quote locks in).
-  IF NEW.quote_section_id IS NOT NULL THEN
-    SELECT qs.quote_id INTO v_section_quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id;
-  END IF;
-  FOR v_quote_id IN
-    SELECT DISTINCT x.id FROM (VALUES (NEW.quote_id), (v_section_quote_id)) AS x(id)
-    WHERE x.id IS NOT NULL
-    ORDER BY x.id
-  LOOP
-    SELECT q.quote_number, q.status INTO v_quote FROM public.quotes q WHERE q.id = v_quote_id FOR SHARE;
+  IF NEW.quote_id IS NOT NULL THEN
+    SELECT q.quote_number, q.status INTO v_quote FROM public.quotes q WHERE q.id = NEW.quote_id FOR SHARE;
     IF FOUND AND v_quote.status IN ('accepted', 'declined', 'expired', 'cancelled', 'closed_by_application', 'closed_short') THEN
       RAISE EXCEPTION 'BOOKING_CLOSED: booking % is %, so a spray job cannot be scheduled from it.',
         v_quote.quote_number, v_quote.status
         USING ERRCODE = 'P0001';
     END IF;
-  END LOOP;
-  -- A section moving at the same moment: wait for it, then refuse if it no longer belongs to the booking
-  -- checked above (Luna HIGH, #1959). Its own trigger refuses the move once this job is committed.
+  END IF;
+  -- Mason 2026-11-18 ("Require both"): a job made from a section also names that section's booking, as the
+  -- scheduler always does. The section row is checked under a lock taken after the booking's (the order
+  -- save_quote locks in), so a section moving at the same moment is waited for, then refused (Luna HIGH).
   IF NEW.quote_section_id IS NOT NULL THEN
+    SELECT qs.quote_id INTO v_section_quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id;
     PERFORM 1 FROM public.quote_sections qs
-    WHERE qs.id = NEW.quote_section_id AND qs.quote_id IS NOT DISTINCT FROM v_section_quote_id
+    WHERE qs.id = NEW.quote_section_id AND qs.quote_id = NEW.quote_id
     FOR SHARE;
     IF NOT FOUND THEN
-      RAISE EXCEPTION 'BOOKING_CLOSED: the booking section changed while this spray job was being scheduled. Try again.'
+      IF NEW.quote_id IS NOT NULL AND v_section_quote_id IS NOT DISTINCT FROM NEW.quote_id THEN
+        RAISE EXCEPTION 'BOOKING_CLOSED: the booking section changed while this spray job was being scheduled. Try again.'
+          USING ERRCODE = 'P0001';
+      END IF;
+      RAISE EXCEPTION 'JOB_NEEDS_BOOKING: spray job % comes from a booking section, so it must also name that section''s booking.',
+        NEW.job_number
         USING ERRCODE = 'P0001';
     END IF;
   END IF;
@@ -229,21 +228,12 @@ BEGIN
   ELSE
     -- INSERT: the section FK is deferred, so save_quote can delete and re-insert a section with a job under
     -- the same id. A live job already pointing at the new id must stay on the booking it was scheduled from
-    -- (Sol HIGH r3; Mason 2026-11-18, "close it"): the job's own booking, or, for a job linked by section
-    -- only, any booking that is not closed. The target booking is locked first (as the jobs trigger does), so a
-    -- decline of it at the same moment either waits for this section and then sees the job, or is seen here.
-    IF EXISTS (SELECT 1 FROM public.jobs j
-               WHERE j.quote_section_id = NEW.id AND j.deleted_at IS NULL AND j.status <> 'cancelled') THEN
-      PERFORM 1 FROM public.quotes q WHERE q.id = NEW.quote_id FOR SHARE;
-    END IF;
+    -- (Sol HIGH r3; Mason 2026-11-18, "close it"), which every live section job names (1b, and the postflight
+    -- below checks existing rows), so this is a plain comparison.
     SELECT j.job_number INTO v_job_number
     FROM public.jobs j
     WHERE j.quote_section_id = NEW.id AND j.deleted_at IS NULL AND j.status <> 'cancelled'
-      AND (j.quote_id IS DISTINCT FROM NEW.quote_id)
-      AND (j.quote_id IS NOT NULL OR EXISTS (
-        SELECT 1 FROM public.quotes q
-        WHERE q.id = NEW.quote_id
-          AND q.status IN ('accepted', 'declined', 'expired', 'cancelled', 'closed_by_application', 'closed_short')))
+      AND j.quote_id IS DISTINCT FROM NEW.quote_id
     ORDER BY j.job_number, j.id
     LIMIT 1;
   END IF;
@@ -446,6 +436,12 @@ BEGIN
      OR (SELECT count(*) FROM pg_proc WHERE proname = 'auto_expire_quotes'
            AND pronamespace = 'public'::regnamespace) <> 1 THEN
     RAISE EXCEPTION 'POSTFLIGHT_AUTO_EXPIRE: auto_expire_quotes body, overloads, owner, mode, search_path or grants wrong';
+  END IF;
+  -- Checked with the new triggers' table locks held, so no job can be written in between (0 rows live, 2026-11-18).
+  IF EXISTS (SELECT 1 FROM public.jobs j LEFT JOIN public.quote_sections qs ON qs.id = j.quote_section_id
+             WHERE j.quote_section_id IS NOT NULL AND j.deleted_at IS NULL AND j.status <> 'cancelled'
+               AND j.quote_id IS DISTINCT FROM qs.quote_id) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_SECTION_JOB_BOOKING: a live spray job from a section does not name that section''s booking; re-read live first';
   END IF;
 END
 $postflight$;

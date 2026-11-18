@@ -37,7 +37,7 @@ async function readAll<T>(table: string, columns: string, order: string, filter:
 /** Active parents with no ingredient row (any status), each with its EPA number or the reason it is skipped. */
 export async function fetchBatchCandidates(now = Date.now()): Promise<BatchCandidate[]> {
   type Num = { epa_registration: string | null };
-  const [parents, ingredients, members, products, parentBrands, legacyBrands, lookups, proposals, failures] = await Promise.all([
+  const [parents, ingredients, members, products, parentBrands, legacyBrands, lookups, proposals, failures, registrations] = await Promise.all([
     readAll<{ id: string; name: string; generic_epa_registration: string | null }>('product_parents',
       'id, name, generic_epa_registration', 'id', { eq: ['is_active', true] }),
     readAll<{ id: string; parent_id: string }>('product_parent_ingredients', 'id, parent_id', 'id'),
@@ -51,7 +51,10 @@ export async function fetchBatchCandidates(now = Date.now()): Promise<BatchCandi
     readAll<{ id: string; parent_id: string; epa_registration: string; status: string }>('epa_chemistry_proposals',
       'id, parent_id, epa_registration, status', 'id', { in: ['status', ['proposed', 'held', 'rejected']] }),
     readAll<{ id: string; parent_id: string; epa_registration: string }>('epa_lookup_failures', 'id, parent_id, epa_registration', 'id'),
+    readAll<{ epa_registration: string }>('epa_registrations', 'epa_registration', 'epa_registration'),
   ]);
+  // start_epa_lookup refuses a number with no registration row (EPA_REGISTRATION_MISSING), so it is never offered.
+  const registered = new Set(registrations.map((r) => r.epa_registration));
   const filled = new Set(ingredients.map((i) => i.parent_id));
   const productById = new Map(products.map((p) => [p.id, p]));
   const out: BatchCandidate[] = [];
@@ -72,6 +75,7 @@ export async function fetchBatchCandidates(now = Date.now()): Promise<BatchCandi
     let skip: string | null = null;
     if (numbers.length === 0) skip = 'No EPA number';
     else if (numbers.length > 1) skip = `Several EPA numbers (${numbers.join(', ')})`;
+    else if (!registered.has(numbers[0])) skip = 'EPA number not set up on the EPA Registration screen';
     else if (on(lookups).some((l) => now - Date.parse(l.requested_at) < LOOKUP_EXPIRY_MS)) skip = 'A lookup is running';
     else if (on(proposals).some((p) => p.status !== 'rejected')) skip = 'A proposal is waiting for a decision';
     else if (on(proposals).length > 0) skip = 'A proposal was rejected before';
@@ -161,6 +165,15 @@ export interface BatchResult { parentId: string; name: string; epaNumber: string
 
 /** A request outlived its deadline; it may still finish, so the run stops instead of starting another product. */
 export class BatchDeadlineError extends Error {}
+
+/** Readable text for any thrown value; database errors arrive as plain objects with a message. */
+export function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && typeof (error as { message?: unknown }).message === 'string') {
+    return (error as { message: string }).message;
+  }
+  return String(error);
+}
 
 function withDeadline<T>(promise: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;

@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: booking sections keep timing and confidence (bookings Phase A, PR 1b)
 -- ----------------------------------------------------------------------------
--- REQUIRES 20270125173000_booking_timing_purchasing_plan. Through the real save_quote:
+-- REQUIRES 20270127110000_booking_timing_purchasing_plan. Through the real save_quote:
 --   1  a marked save writes timing and confidence per section
 --   P7 a marked save that omits timing keeps the saved value; one that sends it as null
 --      clears it; a new section that omits both starts unset

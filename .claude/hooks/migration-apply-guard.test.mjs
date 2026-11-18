@@ -233,7 +233,7 @@ function writeSolProof(stateDir, query, name = MIG) {
   writeFileSync(path.join(stateDir, `codex-review-mig-${name}.json`), JSON.stringify({
     queryHash: sha(query),
     verdict: "clean",
-    model: "gpt-6-sol",
+    model: "gpt-6.2-sol",
     reasoning_effort: "high",
     timestamp: new Date().toISOString(),
   }));
@@ -378,7 +378,7 @@ function armAutopilot(stateDir, hoursFromNow) {
       writeFileSync(codexProofPath, JSON.stringify({
         queryHash: sha(query),
         verdict: "clean",
-        model: "gpt-6-sol",
+        model: "gpt-6.2-sol",
         reasoning_effort: "high",
         timestamp: new Date().toISOString(),
         ...overrides,

@@ -1,5 +1,5 @@
 -- ============================================================================
--- 20270125173000_booking_timing_purchasing_plan
+-- 20270127110000_booking_timing_purchasing_plan
 -- Bookings Phase A, PR 1b (docs/plans/2026-11-17-bookings-phase-a-CONTRACT.md v4 "PR 1b";
 -- plan docs/plans/2026-11-17-bookings-phases-B-C-prepay-PLAN.md v2 A-R2..A-R5 and v3 Phase A).
 --
@@ -19,8 +19,10 @@
 --      Order draws record no section, so they come off a booking's LATEST-needed lines
 --      first: totals stay exact and needs only move earlier, never later; the drawn part is
 --      also listed as "drawn, section unknown" until Phase B records the section.
--- ROLLBACK: DROP FUNCTION public.get_purchasing_plan(integer); re-run the PR 1a body of
---   the impl (20270125110000). Dropping the two columns deletes reps' planning data and
+-- ROLLBACK: DROP FUNCTION public.get_purchasing_plan(integer). Keep this migration's impl body:
+--   the PR 1a body (20270125110000) rewrites sections without timing or confidence, so
+--   re-running it would clear saved planning data on the next save of each booking. Restore
+--   it only together with dropping the two columns, which deletes reps' planning data and
 --   needs Mason's explicit OK.
 -- ============================================================================
 
@@ -1081,23 +1083,47 @@ BEGIN
        AND (q.status IN ('sent', 'revised')
             OR (q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.quote_id = q.id)))
   ),
-  bl AS (
-    SELECT qi.id AS item_id, eq.id AS quote_id, qi.product_id, s.id AS section_id, s.needed_by_date,
+  bla AS (
+    SELECT qi.id AS item_id, eq.id AS quote_id, qi.product_id, s.id AS section_id,
+           -- A non-finite date ('infinity') counts as no date, so one bad section cannot fail the plan.
+           CASE WHEN isfinite(s.needed_by_date) THEN s.needed_by_date END AS needed_by_date,
            s.timing, s.confidence, COALESCE(s.sort_order, 0) AS s_sort, COALESCE(qi.sort_order, 0) AS i_sort,
-           GREATEST(COALESCE(qi.total_units_needed, 0), 0) AS qty
+           GREATEST(COALESCE(qi.total_units_needed, 0), 0) AS qty,
+           -- A line saved in a unit that no longer matches the stock unit is set aside (Mason, 2026-11-18):
+           -- listed under Check units only; it absorbs no draw and covers no hold.
+           NOT _unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)) AS unit_problem
       FROM eq
       JOIN quote_items qi ON qi.quote_id = eq.id
+      JOIN products p ON p.id = qi.product_id
       LEFT JOIN quote_sections s ON s.id = qi.section_id
      WHERE qi.product_id IS NOT NULL
   ),
+  bl AS (
+    SELECT * FROM bla WHERE NOT bla.unit_problem
+  ),
+  -- Active job lines, with the reservation engine's own quantity (20261107070000).
+  jcl AS (
+    SELECT jc.job_id, jc.product_id, j.job_date, j.quote_id, j.quote_section_id, j.customer_id,
+           COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity) AS qty,
+           (field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form) IS NULL
+            AND NOT _unit_matches_stock_unit(jc.unit, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))) AS unit_problem
+      FROM jobs j
+      JOIN job_chemicals jc ON jc.job_id = j.id
+      JOIN products p ON p.id = jc.product_id
+     WHERE j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')
+       AND jc.customer_supplied IS NOT TRUE AND COALESCE(jc.quantity, 0) > 0
+  ),
   -- Draws. A job draw belongs to the job's section when that section is on the same booking;
-  -- an order draw (quote_product_draws) never records a section.
+  -- an order draw (quote_product_draws) never records a section. An active job whose line for
+  -- the product cannot be converted (Check units, not counted) draws nothing here, so the
+  -- booking's demand stays counted instead of vanishing into an uncounted job.
   jd AS (
     SELECT jpd.quote_id, jpd.product_id, s.id AS section_id, COALESCE(jpd.quantity_drawn, 0) AS qty
       FROM job_product_draws jpd
       JOIN eq ON eq.id = jpd.quote_id
       JOIN jobs j ON j.id = jpd.job_id
       LEFT JOIN quote_sections s ON s.id = j.quote_section_id AND s.quote_id = jpd.quote_id
+     WHERE NOT EXISTS (SELECT 1 FROM jcl WHERE jcl.job_id = jpd.job_id AND jcl.product_id = jpd.product_id AND jcl.unit_problem)
   ),
   alld AS (
     SELECT qpd.quote_id, qpd.product_id, NULL::uuid AS section_id, COALESCE(qpd.quantity_drawn, 0) AS qty
@@ -1129,6 +1155,9 @@ BEGIN
   -- Step 2: every other draw (order draws, and job draws beyond their section) comes off the
   -- LATEST-needed lines first. Totals stay exact and needs can only move earlier, so the plan
   -- never buys short or late while the real section of an order draw is unknown (Phase B records it).
+  -- Undated lines come off last, so a Firm line with no date stays on the needs-a-date list.
+  -- Less sure lines come off before surer ones (Maybe, then Likely or unset, then Firm), so an
+  -- unknown draw never erases Firm demand while a Maybe line of the same product stays.
   s2a AS (
     SELECT s1.*, GREATEST(COALESCE(dt.total, 0) - COALESCE(ap1.applied, 0), 0) AS pool
       FROM s1
@@ -1139,7 +1168,8 @@ BEGIN
     SELECT s2a.*,
            s2a.rem1 - LEAST(s2a.rem1, GREATEST(0, s2a.pool
              - (SUM(s2a.rem1) OVER (PARTITION BY s2a.quote_id, s2a.product_id
-                                    ORDER BY s2a.needed_by_date DESC NULLS FIRST, s2a.s_sort DESC, s2a.i_sort DESC, s2a.item_id DESC
+                                    ORDER BY CASE s2a.confidence WHEN 'maybe' THEN 0 WHEN 'firm' THEN 2 ELSE 1 END,
+                                             s2a.needed_by_date DESC NULLS LAST, s2a.s_sort DESC, s2a.i_sort DESC, s2a.item_id DESC
                                     ROWS UNBOUNDED PRECEDING) - s2a.rem1))) AS rem
       FROM s2a
   ),
@@ -1153,36 +1183,36 @@ BEGIN
     SELECT s2.product_id, 'booking'::text AS kind,
            CASE s2.confidence WHEN 'firm' THEN 'committed' WHEN 'maybe' THEN 'shown' ELSE 'could_add' END AS cls,
            s2.needed_by_date AS raw_date, s2.rem AS qty, s2.quote_id, NULL::uuid AS order_id, NULL::uuid AS job_id,
-           s2.section_id, s2.confidence, (s2.rem < s2.rem1) AS estimated, false AS unit_problem,
+           s2.section_id, s2.confidence, (s2.rem < s2.rem1) AS estimated, s2.unit_problem,
            (SELECT eq.customer_id FROM eq WHERE eq.id = s2.quote_id) AS customer_id
       FROM s2 WHERE s2.rem > 0
     UNION ALL
-    -- Open orders: dated by the earliest scheduled, undelivered delivery of the line, else today.
+    -- Set-aside lines (unit does not match stock): Check units, in full.
+    SELECT bla.product_id, 'booking',
+           CASE bla.confidence WHEN 'firm' THEN 'committed' WHEN 'maybe' THEN 'shown' ELSE 'could_add' END,
+           bla.needed_by_date, bla.qty, bla.quote_id, NULL::uuid, NULL::uuid,
+           bla.section_id, bla.confidence, false, true,
+           (SELECT eq.customer_id FROM eq WHERE eq.id = bla.quote_id)
+      FROM bla WHERE bla.unit_problem AND bla.qty > 0
+    UNION ALL
+    -- Open orders: dated by the earliest scheduled, undelivered delivery of the line only when the
+    -- scheduled deliveries cover all of what remains; otherwise today, so the plan never buys late.
     SELECT oi.product_id, 'order', 'committed',
            COALESCE((SELECT MIN(d.scheduled_date)
                        FROM delivery_items di JOIN deliveries d ON d.id = di.delivery_id
                       WHERE di.order_item_id = oi.id AND d.deleted_at IS NULL
-                        AND d.status IN ('scheduled', 'in_progress') AND d.scheduled_date IS NOT NULL),
+                        AND d.status IN ('scheduled', 'in_progress') AND d.scheduled_date IS NOT NULL
+                     HAVING SUM(COALESCE(di.quantity, 0)) >= oi.quantity_remaining),
                     (SELECT today FROM prm)),
            oi.quantity_remaining, o.quote_id, o.id, NULL::uuid, NULL::uuid, NULL::text, false, false, o.customer_id
       FROM order_items oi JOIN orders o ON o.id = oi.order_id
      WHERE o.deleted_at IS NULL AND o.status IN ('confirmed', 'partially_fulfilled')
        AND oi.product_id IS NOT NULL AND oi.quantity_remaining > 0
     UNION ALL
-    -- Active jobs, with the reservation engine's own quantity (20261107070000).
+    -- Active jobs (jcl).
     SELECT x.product_id, 'job', 'committed', x.job_date, x.qty, x.quote_id, NULL::uuid, x.job_id,
            x.quote_section_id, NULL::text, false, x.unit_problem, x.customer_id
-      FROM (
-        SELECT jc.product_id, j.job_date, j.quote_id, j.id AS job_id, j.quote_section_id, j.customer_id,
-               COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity) AS qty,
-               (field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form) IS NULL
-                AND NOT _unit_matches_stock_unit(jc.unit, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))) AS unit_problem
-          FROM jobs j
-          JOIN job_chemicals jc ON jc.job_id = j.id
-          JOIN products p ON p.id = jc.product_id
-         WHERE j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')
-           AND jc.customer_supplied IS NOT TRUE AND COALESCE(jc.quantity, 0) > 0
-      ) x
+      FROM jcl x
     UNION ALL
     -- Manual holds, and crop-program holds whose booking does not count that product above (a
     -- draft Planned booking, one that is gone or closed, or one with no line for the product),
@@ -1191,9 +1221,15 @@ BEGIN
            NULL::uuid, NULL::text, false, false, ih.customer_id
       FROM inventory_holds ih
      WHERE ih.is_active = true AND ih.quantity > 0
+       -- An expired hold reserves nothing (as in the inventory position, 20261204100000).
+       AND (ih.expires_at IS NULL OR ih.expires_at >= (SELECT today FROM prm))
        AND (ih.hold_type = 'manual'
             OR (ih.hold_type = 'crop_program'
-                AND NOT EXISTS (SELECT 1 FROM bl WHERE bl.quote_id = ih.source_id AND bl.product_id = ih.product_id)))
+                AND (NOT EXISTS (SELECT 1 FROM bl WHERE bl.quote_id = ih.source_id AND bl.product_id = ih.product_id)
+                     -- A hold cannot say which line it is for: when the booking also has a set-aside
+                     -- line of the product, the hold counts (it may belong to that line).
+                     OR EXISTS (SELECT 1 FROM bla WHERE bla.quote_id = ih.source_id AND bla.product_id = ih.product_id
+                                                  AND bla.unit_problem))))
   ),
   demb AS (
     SELECT dem.*,
@@ -1231,6 +1267,7 @@ BEGIN
       FROM products p LEFT JOIN onhand oh ON oh.product_id = p.id
      WHERE EXISTS (SELECT 1 FROM demb WHERE demb.product_id = p.id)
         OR EXISTS (SELECT 1 FROM po WHERE po.product_id = p.id)
+        OR EXISTS (SELECT 1 FROM overdrawn WHERE overdrawn.product_id = p.id)
         OR COALESCE(oh.qty, 0) < 0
   ),
   -- Rule 5: per product and date, supply before demand, starting at on hand.
@@ -1352,10 +1389,9 @@ BEGIN
                           'need_date', sg.d,
                           'order_by', GREATEST(sg.d - prm.lead_days, prm.today),
                           'order_now', sg.d - prm.lead_days <= prm.today,
-                          'quantity', sg.qty,
-                          'later_po', (SELECT jsonb_build_object('po_id', po.po_id, 'po_number', po.po_number, 'expected_date', po.raw_date)
-                                         FROM po WHERE po.product_id = sg.product_id AND po.flag IN ('counted', 'later') AND po.eff_date > sg.d
-                                        ORDER BY po.eff_date, po.po_number LIMIT 1))
+                          -- No "expedite a later PO instead" alternative (Mason, 2026-11-18): it could not show
+                          -- the shortage that moving a PO earlier leaves behind. Open POs stay listed.
+                          'quantity', sg.qty)
                           ORDER BY sg.d)
                    FROM sugg sg WHERE sg.product_id = prod.product_id AND sg.qty > 0), '[]'::jsonb),
                'months', (
@@ -1413,7 +1449,7 @@ BEGIN
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM 'a030711a74ac307438dc07fd4b7bb22a' THEN
+     IS DISTINCT FROM '25b0591e2df6d2c34d3aaaf9e5df5e71' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF (SELECT count(*) FROM pg_proc p

@@ -31,6 +31,7 @@ Write `docs/plans/<YYYY-MM-DD>-<slug>-CONTRACT.md`, or add a "Behavior contract"
    - Who may act, on which records. Every action the screen offers must be allowed by the server; the screen may offer less than the server allows.
    - How the server enforces this, including `SECURITY DEFINER` functions that bypass RLS.
    - Which values the screen sends are only locators, and what the server derives or checks itself: the actor, scope, price, status, and that supplied records belong together, per record for bulk actions.
+   - **Price source by path and role.** When the change touches pricing, price sources or quote eligibility on more than one invoice path, add a table: one row per affected path (field-app single save, split save, invoice preview, blend-ticket invoice, quote), one column per grower role (ticket or job owner, co-owner on a shared field, grower with a typed price, grower with a grower-share override). Every cell names the price source. Every cell that differs between paths goes into one combined Open business decision, asked before building (KI-81, PR #1946, found these one Taha review at a time).
 2. **State and failure.**
    - **Rules that always hold**, and the transaction that keeps them, plus what happens to effects outside it (emails, receipts, files).
    - **Existing rows.** What old rows mean, what new writes do, how every reader treats each allowed value, and writes from the already-deployed app during rollout. Include the read-only query and its expected result.
@@ -50,7 +51,7 @@ Write `docs/plans/<YYYY-MM-DD>-<slug>-CONTRACT.md`, or add a "Behavior contract"
 
 Give the other model the contract plus its sources: the relevant schema lines, RPC bodies, policies and screen code, with file paths. Include brief, evidence-backed reasons for key constraints. Leave out the author, any self-assessment, and any request to approve.
 
-- **From Claude:** use the `codex` skill with `gpt-6-astra` at `high` and its packet method.
+- **From Claude:** use the `codex` skill with `gpt-6.2-astra` at `high` and its packet method.
 - **From Codex:** save the prompt, contract and sources as one packet file in a scratch folder outside the repo, then run `node scripts/run-claude-review.mjs --scope uncommitted --topic plan-contract --prompt-file` followed by that file's path. The packet is what gets challenged; any uncommitted code in the diff is extra context.
 
 Prompt: "Assume this behavior contract is wrong. Report every counterexample (who does what, and the wrong result), missing decision, missing evidence you would need, screen/server/RLS mismatch, legacy-row gap, timing, undo or rollout hole, and a smaller design that still meets the outcome. Label each finding DEFECT, DECISION, MISSING-EVIDENCE or SUGGESTION, with severity. End with FINDINGS <n>." There is no approve verdict. When a change reuses an already-settled contract unchanged, challenge only what is new.

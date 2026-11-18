@@ -150,7 +150,7 @@ If ready, state the remaining landing steps explicitly — this skill does **not
    review on any commit, so post `@coderabbitai full review` once if CodeRabbit has not reviewed it
    (rules: `docs/reference/coderabbit-native-review.md`). The legacy `ready-for-coderabbit`
    label route no longer triggers a review; `docs/reference/coderabbit-native-review.md` describes it.
-5. Run the `gpt-6-sol` high-effort proof for a change on `docs/reference/sol-required-paths.md`
+5. Run the `gpt-6.2-sol` high-effort proof for a change on `docs/reference/sol-required-paths.md`
    (Mason, 2026-10-30; other changes need none), then apply the change's
    non-destructive migration if it has one, then merge with `--match-head-commit`. Both agent
    merge gates enforce Mason's autonomous-landing rule: the newest run of every reported check

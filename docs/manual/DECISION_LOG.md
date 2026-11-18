@@ -1,5 +1,66 @@
 # Decision Log
 
+## 2026-11-18 — #1971: Mason owner-accepted 1 Sol finding(s) at `3d37b06e956c`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1971 at `3d37b06e956c` (base `59a711b8cd8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270127110000_booking_timing_purchasing_plan.sql:51`, text sha256 `f2a425bd7657e590` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our busines (ref 19f21d343eea)
+
+## 2026-11-18 — Purchasing plan: no "expedite a later PO" alternative; a Maybe booking's held stock follows its confidence (Bookings PR 1b, #1971)
+
+**Decision (Mason, in chat, 2026-11-18), after Sol round 3 on Bookings PR 1b raised a HIGH on each rule (third round on each).** (1) `get_purchasing_plan` suggestions no longer carry a `later_po` "expedite this PO instead" alternative: it could not show the shortage that moving a PO earlier leaves for a later need. Open POs stay listed; it may return later, built to re-plan the knock-on need. (2) A crop-program hold on a booking that books that product follows the booking's confidence: when the booking is Maybe, its held stock is not counted as spoken for (Mason chose this over always counting held stock). Mason accepts the resulting gap, where a Firm need elsewhere can look covered by stock held for a Maybe booking.
+
+## 2026-11-18 — Purchasing plan: booking lines in a unit that no longer matches stock are set aside (Bookings PR 1b, #1971)
+
+**Decision (Mason, in chat, 2026-11-18).** A booking line saved in a unit that no longer matches the product's stock unit is listed only under Check units in `get_purchasing_plan`: it is not counted as demand, absorbs no order or job draw, and does not stand in for its booking's crop-program hold (which then counts). Chosen over accepting the gap, after Luna raised HIGHs on how such lines interacted with draws and holds (third round on that mechanism). Live had 0 such lines on 2026-11-18; screens do not allow a stock-unit change on a saved product.
+## 2026-11-18 — #1940 may have a sixth Sol round; Mason accepts the missing-stock-row deadlock
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, do that").** PR #1940 (inventory cleanup KI-161/150/163) may have one more Sol round (round 6 as the counter reads it). Sol round 5 found 3 HIGHs. Mason accepts the first two as a business non-issue: two delivery or job completions sharing two products that have never had a Main Warehouse stock row, listed in opposite order, can still deadlock. Postgres cancels one, nothing is half-saved, it is retried, and it already happens today; this PR fixes the common case (rows exist). The third (the rollback rounding saved 4-place counts) is fixed.
+**Why:** the stock-lock mechanism has produced a new HIGH in three rounds, so per the contract it stops being patched; the rare case fails safely.
+**What it does:** unlocks one Sol review of the new head. If that review raises only the accepted deadlock case, it goes through the `accept <code>` owner-acceptance step; any other finding stops the merge. It still needs green checks before it merges into `staging`.
+
+## 2026-11-18 — #1940 may have one more Sol round
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, one more round").** PR #1940 (inventory cleanup KI-161/150/163) may have one more Sol round (round 5 as the counter reads it).
+**Why:** since the last round the branch merged current `staging`, gave its migration a new stamp (`20270126110000`), locks the order line `FOR UPDATE` so two follow-up deliveries queue, and its rollback narrows the cycle-count columns back to 2 places; the prover passes.
+**What it does:** unlocks one Sol review of the new head. Every other gate is unchanged: it still needs a clean Sol review and green checks before it merges into `staging`.
+## 2026-11-18 — Codex Sol and Astra move to the 6.2 models
+
+**Decision (Mason):** use `gpt-6.2-sol` and `gpt-6.2-astra` instead of the older Sol and Astra. The Sol ship gate, every guard that checks a Sol proof, the scripts and the skills all move together; Luna stays `gpt-6-luna` (no 6.2 Luna exists for this account, probed 2026-11-18).
+**What this forbids/implies:** a `gpt-6-sol` proof no longer satisfies any gate; open PRs re-run Sol after this lands. No validator accepts both models during the switch. This replaces the 2026-11-06 "wait for a side-by-side" note on moving Sol.
+
+## 2026-11-18 — #1946 (KI-81): a blend ticket's own grower falls back to their own quote
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, price the owner from their own quote").** Answering Taha's second re-review of PR #1946: when the job's quote gives no usable price for a product (no job quote, or it is declined, expired, unsent or does not list the product), the ticket's own grower is priced from their own sent, valid quote, as every other grower and the field-application invoices are; a usable job-quote price still wins.
+**What it does:** where the job's quote gives no usable price, the owner is priced by the same own-quote rules a field-application invoice uses. A usable job-quote price still wins on the blend ticket, so the two paths can bill the owner differently when the job's quote is not on the owner's field.
+**Supersedes:** the owner part of "2026-11-18 — #1946 (KI-81): blend-ticket invoices follow the same quote rules" (the owner billed their list price when the job's quote gave no price).
+
+## 2026-11-18 — #1946 (KI-81): a blend co-owner is priced from their own quote
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, use B's quote").** Answering Taha's re-review of PR #1946: on a blend ticket, a grower who does not own the job's quote is priced from their own sent, valid quote, as a field-application invoice prices them, else their list price.
+**What it does:** a co-owner is priced by the same own-quote rules a field-application invoice uses.
+**Supersedes:** in "2026-11-18 — #1946 (KI-81): blend-ticket invoices follow the same quote rules", the rule that every other grower on the ticket bills their list price.
+
+## 2026-11-18 — #1946 (KI-81): blend-ticket invoices follow the same quote rules
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, same rules").** Answering Taha's review of PR #1946: a blend-ticket invoice follows decisions "Own quote only", "Sent + not expired" and "Valid + written before". The job's quote prices a blend line only for the grower who owns it, and only if it was sent, written on or before the application date and not expired by it; every other grower on the ticket bills their list price. This replaces the earlier blend rule that billed the job's quote price (draft quotes included) to every grower on the ticket.
+**What it does:** the blend invoice stops giving one grower's quote price to another grower on a shared field, and stops billing from a declined, expired, never-sent or later-written quote. "Stop, type the price" still applies. Every other gate is unchanged.
+
+## 2026-11-17 — #1946 (KI-81): each grower on a split bill records their own price source
+
+**Decision (Mason, in chat, 2026-11-17: "Each records its own").** On PR #1946, when one grower on a split field-application bill pays their own quoted price and another pays the price list, each grower's invoice line and line share record that grower's own price source ('quoted' or 'tier'), not the largest-share grower's.
+**What it does:** follows from his earlier "Own quote only" rule; the split save keeps a per-grower source next to the per-grower price. Amounts are unchanged. Every other gate is unchanged.
+## 2026-11-18 — #1879 may have one more Sol round
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, one more round").** PR #1879 (brand quantities on paperwork) may have one more Sol round (round 6 as the counter reads it).
+**Why:** the new head only merges current `staging` into the branch, with no change to the PR's own code; Sol now reviews it against `origin/staging`.
+**What it does:** unlocks one Sol review of the new head. Every other gate is unchanged: it still needs a clean Sol review and green checks before it merges into `staging`.
+
+## 2026-11-17 — #1879 and #1940 may have one more Sol round each
+
+**Decision (Mason, in chat, 2026-11-17: "Yes, confirmed").** PR #1879 (brand quantities on paperwork) and PR #1940 (inventory cleanup KI-161/150/163) may each have one more Sol round (round 21 and round 20 as the counter reads them).
+**Why:** both were clean at Sol before; the new heads only merge current `staging` (which brought the npm audit exception from #1941) plus this entry, with no change to either PR's own code.
+**What it does:** unlocks one Sol review of each PR's new head. Every other gate is unchanged: each still needs a clean Sol review and green checks before it merges into `staging`.
 ## 2026-11-18 — #1947: Mason owner-accepted 3 Sol finding(s) at `3d71a5c062fc`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1947 at `3d71a5c062fc` (base `29682a0332c0`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

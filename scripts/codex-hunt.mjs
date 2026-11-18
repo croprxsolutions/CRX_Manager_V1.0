@@ -18,7 +18,7 @@
  *
  * HARDENED INVOCATION — `codex exec` with:
  *   --model gpt-6-luna : pin the cheap read-only hunter model; the gate/glance
- *       steps use overnight-codex-gate.mjs (gpt-6-sol) instead. Re-pinned
+ *       steps use overnight-codex-gate.mjs (gpt-6.2-sol) instead. Re-pinned
  *       2026-09-23: the previous pin, `gpt-5.3-codex-spark`, is refused outright
  *       by the API ("not supported"), so every hunt slice failed on the model
  *       before it read a line of code. There is no `gpt-6-spark`; Luna is the

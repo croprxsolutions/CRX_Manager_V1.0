@@ -33,7 +33,7 @@ describe('invoice PDF page breaks (real jsPDF)', () => {
       invoice_number: `CS-2026-0005-${i + 1}`,
     }));
     const data: InvoicePdfData = {
-      invoice_number: 'CS-2026-0005-1', invoice_date: '2026-11-06', due_date: '2026-12-06', invoice_type: 'chemical_sale', status: 'posted', // posted: a draft prints no pay note
+      invoice_number: 'CS-2026-0005-1', invoice_date: '2026-11-06', due_date: '2026-12-06', invoice_type: 'chemical_sale', bill_split_on_load: true, status: 'posted', // posted: a draft prints no pay note
       customer_name: 'Maple Hollow Farms', items: [
         { description: 'Atrazine 4L', product_name: 'Atrazine 4L', quantity: 2, unit_size: 'GL', unit_price_cents: 500, extended_cents: 1000 },
       ],
@@ -66,7 +66,7 @@ describe('invoice PDF page breaks (real jsPDF)', () => {
 describe('invoice PDF long values (real jsPDF)', () => {
   const long = 'North Bottom Ground by the Creek Crossing West of the Grain Bins Section Fourteen';
   const data: InvoicePdfData = {
-    invoice_number: 'INV-2026-0042', invoice_date: '2026-11-06', invoice_type: 'field_application', status: 'posted',
+    invoice_number: 'INV-2026-0042', invoice_date: '2026-11-06', invoice_type: 'field_application', bill_split_on_load: false, status: 'posted',
     customer_name: 'Test Farm', customer_address: `RR 2 Box 14, ${long}`, customer_city: 'Testville', customer_state: 'IL', customer_zip: '62000',
     crop_type: 'Corn', total_acres: 91.9, field_names: [long, `${long} Two`],
     items: [{ description: 'Atrazine 4L', product_name: 'Atrazine 4L', quantity: 2, unit_size: 'GL', unit_price_cents: 500, extended_cents: 1000 }],
@@ -98,7 +98,7 @@ describe('invoice PDF long values (real jsPDF)', () => {
 describe('invoice PDF very long values (real jsPDF)', () => {
   const huge = Array.from({ length: 40 }, (_, i) => `Lot ${i + 1} on the long gravel road past the test elevator`).join(', ');
   const base: InvoicePdfData = {
-    invoice_number: 'INV-2026-0043', invoice_date: '2026-11-06', invoice_type: 'field_application', status: 'draft',
+    invoice_number: 'INV-2026-0043', invoice_date: '2026-11-06', invoice_type: 'field_application', bill_split_on_load: false, status: 'draft',
     customer_name: 'Test Farm', customer_address: huge, crop_type: 'Corn', total_acres: 10,
     field_names: Array.from({ length: 600 }, (_, i) => `Test Field Number ${i + 1}`),
     items: [{ description: 'Atrazine 4L', product_name: 'Atrazine 4L', quantity: 2, unit_size: 'GL', unit_price_cents: 500, extended_cents: 1000 }],

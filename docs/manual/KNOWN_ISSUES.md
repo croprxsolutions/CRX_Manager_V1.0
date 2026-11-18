@@ -513,7 +513,7 @@ live when this was written.
   commission split). UNVERIFIED, LOW.
 
 ### KI-81 — Two invoice paths read a quote line's current price, not the price the customer was sent
-**MED · OPEN (found 2026-10-25, To-Do 1.2 follow-up) · money · Claude (Mason, 2026-11-17: fix now; supersedes 2026-10-27 "fix later")**
+**MED · FIX IN REVIEW (Claude, `20270125163000_ki81_invoices_bill_sent_quote_price.sql`, to staging; found 2026-10-25, To-Do 1.2 follow-up) · money (Mason, 2026-11-17: fix now; supersedes 2026-10-27 "fix later")**
 The sent-price lock (`20261027040000`, live since 2026-10-27, ledger `20261027123725`) gates Convert, Partial Order and Schedule Job, which copy quote prices into
 orders and job lines. Two later paths read `quote_items.price_per_unit` live instead (read from live bodies
 2026-10-25): `create_invoice_from_blend_ticket` (through `set_blend_ticket_product_quote_price` /
@@ -527,6 +527,11 @@ Claude C-9). With `20261029120000`, a logged approved price change needs no re-s
 cascades away. But the field-app lookup is `ORDER BY qi.id LIMIT 1` over UUIDs, so it is effectively random, not
 "first". It also has no season filter: last season's quote, or another grower's quote on the same field, can price
 this year's invoice. Fix: pick the eligible quote by customer, status and season. Repair step 4 (To-Do 0.17).
+The fix (contract `docs/plans/2026-11-17-ki81-sent-price-invoices-CONTRACT.md`): a field-app chemical takes a quote price only from the
+billed grower's own sent quote (Mason, 2026-11-17, "Own quote only"), not draft, declined, cancelled or deleted, not expired by the application date
+and written on or before it, on a field the grower has a share of, and passing the sent-price lock; two different prices refuse until the price is typed. The invoice preview shares the save's quote eligibility (`_field_app_quote_eligible`) but does not run the sent-price check: a quote changed since its send previews its current price, and the save refuses `QUOTE_RESEND_REQUIRED`. A preview price is not approval to bill it. The
+blend-ticket invoice runs the lock on the job's quote first. Proven on a real-schema replay
+(`scripts/smoke/prove-ki81-sent-quote-price-real-schema.mjs`).
 
 ### KI-82 — The open quote screen can show a stale cost for a line it just saved
 **LOW · FIX IN REVIEW (Taha, branch `taha/quote-saved-line-cost`; found 2026-10-27, Sol review of PR #1105) · money (display only)**
@@ -1091,6 +1096,7 @@ now blocks a new count at that warehouse until it is cancelled from the Cycle Co
 
 ### KI-161 — Delivery editing does not re-check the edited line against its order line
 **MED · OPEN · deliveries · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-7) · unassigned**
+**Fix pending 2026-11-17:** `20270126110000_inventory_cleanup_ki161_163_150` (repair step 5, part 2; not applied live): the database checks every delivery line against its order line for every writer, an order line appears once per delivery, a delivery with lines keeps its order, and signed-in users no longer write delivery lines directly (the delivery functions still do).
 When a delivery is edited, the database does not confirm that each line still matches the product and unit of the
 order line it fills, or that an order line is used once. The normal screens send consistent lines, so this is not
 reachable from the app UI. Live 2026-11-13: 0 affected delivery lines. Detail is held back until the fix is live
@@ -1106,6 +1112,7 @@ missed it. Fix: use the Chicago date, as KI-18 did. Repair step 5 (To-Do 0.17).
 
 ### KI-163 — Small stock-history gaps
 **LOW · OPEN · inventory · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-15, C-16) · unassigned**
+**Fix pending 2026-11-17:** `20270126110000_inventory_cleanup_ki161_163_150` (not applied live) fixes (1) (the `released` row records what was really released; none when nothing was) and (2) (count lines keep 4 decimals). (4) is not a defect: the header equals the sum of its lines each rounded to whole cents (house rule); only the unrounded sum is 1¢ lower, and it has no vendor bill. (3) stays open (needs a link column; no figure is wrong). Old `released` rows stay as written.
 (1) Quick-delivery cancel (`_cancel_delivery_replay_impl_20261015`) clamps `quantity_prebooked` at 0 but logs a
 `released` row for the full amount, so reservation history can disagree with the figure. (2) Count rounding in
 `update_cycle_count_item` (`20270103170000`) can leave up to 0.005 on 4-decimal bulk rows. (3) Return and
@@ -1156,6 +1163,7 @@ overwrite each other (one settings record). Fix depends on who owns crop program
 
 ### KI-150 — Receipt reversal takes the PO locks in the opposite order from vendor bills
 **LOW · OPEN · purchasing/payables · found 2026-11-11 (PR #1769 review) · unassigned**
+**Fix pending 2026-11-17:** `20270126110000_inventory_cleanup_ki161_163_150` (not applied live). Receipt reversal vs vendor bill: no change needed. Live 2026-11-17, the vendor-bill paths lock the vendor/bill and the PO but never lock or update PO lines, so the reversal only waits and no cycle exists; taking the PO first would instead invert against `apply_product_cost_basis_change_set`. C-12 is fixed: delivery completion locks its stock rows in product order (the order the job hold sync already uses) before the original body, and job completion does the same right after the hold sync (a trigger on the status change). Known limit: a product with no Main Warehouse stock row yet (0 on open deliveries live).
 Reversing a receipt locks the PO line before the PO; creating or editing a vendor bill locks the vendor, then the PO.
 Two people doing both at once on the same PO could make one of them wait and fail with a retryable error. Fix: take
 the PO lock first in the reversal path, in a new migration.

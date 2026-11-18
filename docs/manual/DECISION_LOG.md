@@ -1,5 +1,18 @@
 # Decision Log
 
+## 2026-11-18 — #1971: Mason owner-accepted 1 Sol finding(s) at `3d37b06e956c`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1971 at `3d37b06e956c` (base `59a711b8cd8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270127110000_booking_timing_purchasing_plan.sql:51`, text sha256 `f2a425bd7657e590` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our busines (ref 19f21d343eea)
+
+## 2026-11-18 — Purchasing plan: no "expedite a later PO" alternative; a Maybe booking's held stock follows its confidence (Bookings PR 1b, #1971)
+
+**Decision (Mason, in chat, 2026-11-18), after Sol round 3 on Bookings PR 1b raised a HIGH on each rule (third round on each).** (1) `get_purchasing_plan` suggestions no longer carry a `later_po` "expedite this PO instead" alternative: it could not show the shortage that moving a PO earlier leaves for a later need. Open POs stay listed; it may return later, built to re-plan the knock-on need. (2) A crop-program hold on a booking that books that product follows the booking's confidence: when the booking is Maybe, its held stock is not counted as spoken for (Mason chose this over always counting held stock). Mason accepts the resulting gap, where a Firm need elsewhere can look covered by stock held for a Maybe booking.
+
+## 2026-11-18 — Purchasing plan: booking lines in a unit that no longer matches stock are set aside (Bookings PR 1b, #1971)
+
+**Decision (Mason, in chat, 2026-11-18).** A booking line saved in a unit that no longer matches the product's stock unit is listed only under Check units in `get_purchasing_plan`: it is not counted as demand, absorbs no order or job draw, and does not stand in for its booking's crop-program hold (which then counts). Chosen over accepting the gap, after Luna raised HIGHs on how such lines interacted with draws and holds (third round on that mechanism). Live had 0 such lines on 2026-11-18; screens do not allow a stock-unit change on a saved product.
 ## 2026-11-18 — #1940 may have a sixth Sol round; Mason accepts the missing-stock-row deadlock
 
 **Decision (Mason, in chat, 2026-11-18: "Yes, do that").** PR #1940 (inventory cleanup KI-161/150/163) may have one more Sol round (round 6 as the counter reads it). Sol round 5 found 3 HIGHs. Mason accepts the first two as a business non-issue: two delivery or job completions sharing two products that have never had a Main Warehouse stock row, listed in opposite order, can still deadlock. Postgres cancels one, nothing is half-saved, it is retried, and it already happens today; this PR fixes the common case (rows exist). The third (the rollback rounding saved 4-place counts) is fixed.

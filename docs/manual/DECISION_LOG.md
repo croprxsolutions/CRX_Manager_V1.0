@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-18 — CMP-2 (Brand vs Generic rebuild) waits for real ingredient data
+
+**Decision (Mason, in chat, 2026-11-18: "Fill chemistry first").** Live check that day: 0 `active_ingredients`, 0 parents with ingredient rows, 0 mode-of-action rows, 0 `ingredient_map` rows. The comparison is built entirely from ingredient strengths, so a page built now would show every row as incomplete. He was offered "build now on test data" and "a price-per-acre slice only", and chose to fill the chemistry first.
+**What this forbids/implies:** no CMP-2 code starts until the "Start when" list in `docs/plans/2026-11-18-product-CMP2-BUILD-SHEET.md` is met: chemistry filled (DM-4 EPA lookup, DM-1b workbook or reviewed manual entry), MOA-1 landed with its group load, and RT-4 live. The next Product Master step is filling the chemistry, not CMP-2.
+
 ## 2026-11-18 — #1946 (KI-81): a blend ticket's own grower falls back to their own quote
 
 **Decision (Mason, in chat, 2026-11-18: "Yes, price the owner from their own quote").** Answering Taha's second re-review of PR #1946: when the job's quote gives no usable price for a product (no job quote, or it is declined, expired, unsent or does not list the product), the ticket's own grower is priced from their own sent, valid quote, as every other grower and the field-application invoices are; a usable job-quote price still wins.

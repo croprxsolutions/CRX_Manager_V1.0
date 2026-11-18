@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-18 — #1974: Mason owner-accepted 1 Sol finding(s) at `c465339bc70c`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1974 at `c465339bc70c` (base `59a711b8cd8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270127120000_booking_live_job_guard.sql:178`, text sha256 `2a84b5eee3c4c51b` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref b798ec12d11b)
+
 ## 2026-11-18 — Sol round 5 on PR #1974 (#1959 booking live-job guard)
 
 **Decision (Mason, in chat, 2026-11-18: "yes, run Sol round 5").** Sol round 4 on PR #1974 found a HIGH on the nightly alert (planned bookings, the only kind the scheduler makes jobs from, were left out) and a MED on section id renames; both are fixed. This is a new finding area, not the section-move mechanism Mason already ruled on, so he approved one more Sol round rather than a re-plan. Later the same day (Mason, in chat: "i approve up to 3 more rounds before coming to me") he widened this to up to three more review rounds on PR #1974 (Sol rounds 5-7) before the stop-and-ask rule applies again.

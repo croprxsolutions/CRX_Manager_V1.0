@@ -179,7 +179,7 @@ const COLUMN_CHECK_EXEMPT: Record<string, { sites: number; reason: string }> = {
   'src/components/receiving/ReceivingLogPanel.tsx': { sites: 1, reason: RPC },
   'src/components/reports/LogbookReport.tsx': { sites: 4, reason: RPC },
   'src/lib/customerStatement.ts': { sites: 1, reason: RPC },
-  'src/lib/epaBatchFill.ts': { sites: 1, reason: 'the table comes from the readAll(table, ...) helper (nine reads); its unit test checks each table and column' },
+  'src/lib/epaBatchFill.ts': { sites: 1, reason: 'the table comes from the readAll(table, ...) helper (ten reads); its unit test checks each table and column' },
   'src/lib/fieldsGeojsonCache.ts': { sites: 1, reason: RPC },
   'src/lib/ordersPage.ts': { sites: 1, reason: 'reads through fetchOrdersPage(), an RPC' },
   'src/pages/ARaging.tsx': { sites: 1, reason: RPC },

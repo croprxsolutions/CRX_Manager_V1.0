@@ -1,5 +1,15 @@
 # Decision Log
 
+## 2026-11-18 — #1947: Mason owner-accepted 3 Sol finding(s) at `5ae3ac5ae2a1`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1947 at `5ae3ac5ae2a1` (base `e0513c039664`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270124100000_save_quote_keeps_section_ids.sql:408`, text sha256 `6b651be2d534d26a` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our business (ref 67c08159f5fe)
+- Finding 2 (HIGH) at `supabase/migrations/20270124100000_save_quote_keeps_section_ids.sql:281`, text sha256 `08dcd0576823f9e1` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 721b16345165)
+- Finding 3 (HIGH) at `supabase/migrations/20270124100000_save_quote_keeps_section_ids.sql:433`, text sha256 `6de210e7c7e47c0e` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 9c35e45c14ff)
+
 ## 2026-11-17 — Bookings with a spray job: section edits warn, accept/decline/expire blocked
 
 **Decision (Mason, in chat, 2026-11-17, answering Sol round 3 on Bookings Phase A PR 1a).**

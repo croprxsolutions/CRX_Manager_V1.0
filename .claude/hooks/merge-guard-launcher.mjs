@@ -36,18 +36,19 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const LABEL = "PR MERGE GATE";
 
 // Timing, measured from this launcher's process start. pr-merge-guard.mjs keeps
-// its own 90-second budget (HOOK_TIMEOUT_MS minus a 3-second reserve), so it has
-// said everything it will say about 87 seconds after it starts. The launcher stops
-// waiting at 96 seconds, and the hook entry in .claude/settings.json allows 105,
-// leaving the launcher about 9 seconds to answer, including the Windows launcher
+// its own 180-second hard-gate budget (HOOK_TIMEOUT_MS minus a 3-second reserve)
+// plus at most 75 seconds of advisory reads, so it has said everything it will say
+// about 252 seconds after it starts. The launcher stops
+// waiting at 270 seconds, and the hook entry in .claude/settings.json allows 280,
+// leaving the launcher about 10 seconds to answer, including the Windows launcher
 // shell that process.uptime() cannot see. The test pins all three numbers.
 // The launcher's own work never blocks for long: child I/O is asynchronous, and
 // its synchronous parsing is bounded by the input cap below — about 0.3 seconds
 // at a full 64 MB call, measured 2026-09-28 — so its deadline timer always gets
-// to run inside that 9-second margin (Luna, 2026-09-28).
-export const GUARD_BUDGET_MS = 90_000;
-export const KILL_AFTER_MS = 96_000;
-export const HARNESS_TIMEOUT_S = 105;
+// to run inside that 10-second margin (Luna, 2026-09-28).
+export const GUARD_BUDGET_MS = 180_000;
+export const KILL_AFTER_MS = 270_000;
+export const HARNESS_TIMEOUT_S = 280;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 // A tool call larger than this is refused unread rather than buffered without
 // limit (Luna, 2026-09-28); real Bash, PowerShell and MCP calls are far smaller.

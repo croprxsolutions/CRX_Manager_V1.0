@@ -1731,22 +1731,24 @@ export default function QuoteBuilder() {
       setSplitNote(theirs && !sameSplit(theirs, commissionSplit) ? { kind: 'offer', customer: cust.farm_name, split: theirs } : null);
       return;
     }
-    // A customer saved with an empty split means no commission (saves as is); one never set starts the blank row.
-    setCommissionSplit(theirs ?? (cust.default_commission_split ? { splits: [] } : NEW_QUOTE_SPLIT));
+    // A customer never given a split starts the blank row; an empty split is "no commission" and is taken as is.
+    setCommissionSplit(theirs ?? NEW_QUOTE_SPLIT);
     commissionSplitTouchedRef.current = true;
-    setSplitNote({ kind: theirs ? 'from' : 'none', customer: cust.farm_name });
+    setSplitNote(theirs ? { kind: 'from', customer: cust.farm_name, split: theirs } : { kind: 'none', customer: cust.farm_name });
   };
   const takeOfferedSplit = () => {
     if (splitNote?.kind !== 'offer') return;
     setCommissionSplit(splitNote.split);
     commissionSplitTouchedRef.current = true;
     splitTypedRef.current = false;
-    setSplitNote({ kind: 'from', customer: splitNote.customer });
+    setSplitNote({ kind: 'from', customer: splitNote.customer, split: splitNote.split });
   };
 
   const handleCustomerChange = (cust: QuoteCustomer | null): boolean => {
     if (!cust) {
       setCustomerId('');
+      // An offer belongs to the customer it names: with no customer there is nothing to take (Luna, 18 Nov).
+      setSplitNote(null);
       return true;
     }
     if (repriceBlocked) {

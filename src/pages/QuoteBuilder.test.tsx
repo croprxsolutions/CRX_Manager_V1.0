@@ -6650,7 +6650,7 @@ describe('QuoteBuilder commission split from the customer', () => {
   const withSplit = { id: 'customer-1', farm_name: 'Big Sky Farms 18', assigned_tier: 1, is_active: true, default_commission_split: SPLIT };
   const noSplit = { id: 'customer-2', farm_name: 'Cedar Creek Farms 12', assigned_tier: 1, is_active: true, default_commission_split: null };
   const percent = (n: number) => (screen.getByRole('spinbutton', { name: `Commission percentage for split ${n}` }) as HTMLInputElement).value;
-  const FROM = "From Big Sky Farms 18's split. You can change it for this quote.";
+  const FROM = "From Big Sky Farms 18's split.";
   const OFFER = "Use Big Sky Farms 18's split (Test Rep One 60% · Test Rep Two 40%)?";
   const pick = async (name: string) => {
     const clear = screen.queryByRole('button', { name: 'Clear customer' });
@@ -6691,7 +6691,7 @@ describe('QuoteBuilder commission split from the customer', () => {
     await pick('Cedar Creek Farms 12');
     await waitFor(() => expect(screen.queryByRole('spinbutton', { name: 'Commission percentage for split 2' })).not.toBeInTheDocument());
     expect(percent(1)).toBe('100');
-    expect(screen.getByText('Cedar Creek Farms 12 has no commission split. Pick one here.')).toBeInTheDocument();
+    expect(screen.getByText('Cedar Creek Farms 12 has no split. Pick one.')).toBeInTheDocument();
     expect(screen.queryByText(FROM)).not.toBeInTheDocument();
   });
 
@@ -6718,10 +6718,35 @@ describe('QuoteBuilder commission split from the customer', () => {
     mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote : table === 'quote_sections' ? [fixture.section] : table === 'quote_items' ? [fixture.item] : table === 'customers' ? [withSplit, noSplit] : table === 'products' ? [fixture.product] : [], error: null }));
     renderQuoteBuilder(quote.id);
     await waitFor(() => expect(percent(1)).toBe('100'));
-    expect(screen.queryByText(/commission split\. Pick one here|split\. You can change it/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/has no split|'s split\./)).not.toBeInTheDocument();
     await pick('Big Sky Farms 18');
     expect(await screen.findByText(OFFER)).toBeInTheDocument();
     expect(percent(1)).toBe('100');
     expect(screen.queryByRole('spinbutton', { name: 'Commission percentage for split 2' })).not.toBeInTheDocument();
+  });
+
+  it('a saved quote is offered a customer\'s "no commission" split, and Use it takes it (Luna HIGH)', async () => {
+    const noCommission = { ...noSplit, id: 'customer-3', farm_name: 'Dry Creek Farms 3', default_commission_split: { splits: [] } };
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, customer_id: 'customer-2', customer: noSplit, commission_split: { splits: [{ recipient: 'Test Admin', percentage: 100 }] } };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote : table === 'quote_sections' ? [fixture.section] : table === 'quote_items' ? [fixture.item] : table === 'customers' ? [noCommission, noSplit] : table === 'products' ? [fixture.product] : [], error: null }));
+    renderQuoteBuilder(quote.id);
+    await waitFor(() => expect(percent(1)).toBe('100'));
+    await pick('Dry Creek Farms 3');
+    expect(await screen.findByText("Use Dry Creek Farms 3's split (no commission)?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Use it' }));
+    await waitFor(() => expect(screen.queryByRole('spinbutton', { name: 'Commission percentage for split 1' })).not.toBeInTheDocument());
+    expect(screen.getByText("From Dry Creek Farms 3's split: no commission.")).toBeInTheDocument();
+  });
+
+  it('clearing the customer drops a pending offer (Luna MED)', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    fireEvent.change(await screen.findByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '90' } });
+    await pick('Big Sky Farms 18');
+    expect(await screen.findByText(OFFER)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear customer' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Use it' })).not.toBeInTheDocument());
+    expect(percent(1)).toBe('90');
   });
 });

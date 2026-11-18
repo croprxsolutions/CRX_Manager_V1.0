@@ -27,7 +27,10 @@ Sol's three bypass findings on #1947 on the condition that this database guard f
    - customer_id changing while a live job exists.
    Its function is `SECURITY DEFINER`, owned by postgres, `search_path = public, pg_temp`, no EXECUTE grant,
    so a rep whose RLS hides a job still gets the refusal.
-   It also refuses `cancelled` (Mason, 2026-11-18). `closed_by_application` and `closed_short` stay allowed:
+   It also refuses `cancelled` (Mason, 2026-11-18). One exception (Mason, 2026-11-18, "Let it close"): `accepted`
+   goes through once every booked product is fully drawn onto orders (`quote_product_draws`), which is how
+   `draw_down_quote` closes a booking on its last draw (`20261029110000`); a booking with nothing booked does not
+   count as drawn. Convert to Order refuses any booking with draws, so it cannot use this. `closed_by_application` and `closed_short` stay allowed:
    job-driven closures set them.
 1b. The other side of the same rule (added after the Astra challenge): a `BEFORE INSERT OR UPDATE OF quote_id,
    quote_section_id, status, deleted_at ON public.jobs` row trigger. When a job becomes live on a booking (new,
@@ -88,6 +91,8 @@ Database only. No screen change: the screen already shows a database message as 
 10. On an expired booking, a live job cannot be inserted (by quote or by section), re-linked to it, or
     un-deleted onto it (`BOOKING_CLOSED` naming the booking); a cancelled job can still be recorded, and an
     existing live job elsewhere can still move between its own statuses.
+11. With a live job, a Partial Order of part of the booking keeps it sent; the Partial Order that draws the last
+    booked unit closes it as accepted and the job stays live.
 
 ## Challenge (Astra, gpt-6-astra high, 2026-11-18): settled
 

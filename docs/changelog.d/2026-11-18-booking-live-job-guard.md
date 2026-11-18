@@ -2,6 +2,7 @@
 
 - New migration `20270125183000_booking_live_job_guard.sql` (not applied live; record in `docs/reference/migrations.d/`).
 - While a spray job that is not cancelled or deleted comes from a booking, the database itself now refuses marking the booking accepted, declined, expired or cancelled, and refuses a customer change, with the same plain message the booking save gives (`BOOKING_HAS_JOB`). Before, only the booking save enforced it: the Decline and Cancel buttons, Convert to Order and the nightly expiry could skip it.
+- One exception (Mason, 2026-11-18): a Partial Order that draws the last booked product still closes the booking as accepted, even with a live job.
 - The other direction too: a job cannot become live (new, re-linked, un-cancelled or un-deleted) on a booking that is already accepted, declined, expired, cancelled or closed (`BOOKING_CLOSED`), so a job created while a decline is in flight cannot slip past.
 - The nightly expiry skips a past-date booking that has a live spray job and sends its rep one "Booking past its date" alert per expiry date instead, so one such booking cannot stop the whole night's expiries.
 - Proof: container prover (before: a rep's direct decline of such a booking goes through; after: the new chain passes, the rep's decline and cancel are refused, both race orders serialize on the booking row and refuse, and the existing chains that write jobs, quote statuses, convert or auto-expire end exactly as before: 38 chains, 11 end to end, the rest at their own fixture setup). Not yet verified on staging.

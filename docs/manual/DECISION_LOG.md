@@ -5,6 +5,7 @@
 **Decision (Mason, in chat, 2026-11-18: "yes to both").**
 - The nightly auto-expire skips a past-date booking that has a live spray job (not cancelled, not deleted) and sends its rep the existing "Booking past its date" alert once per expiry date, instead of failing the night's batch.
 - Cancelling a booking is blocked while a live spray job comes from it, with the same "cancel the job first" message as accept, decline and expire (extends the 2026-11-17 rule).
+- **Mason, 2026-11-18 ("Let it close (Recommended)"):** a booking may still close as accepted, even with a live spray job, once every booked product is fully drawn onto orders; that is how a Partial Order closes a booking on its last draw. Without this, that sale would fail.
 - The rules (no accept, decline, expire or cancel, and no customer change, while a live job exists) now hold in the database for every write path, not only the booking save. Contract: `docs/plans/2026-11-18-booking-live-job-guard-CONTRACT.md`.
 
 ## 2026-11-18 — #1947: Mason owner-accepted 3 Sol finding(s) at `3d71a5c062fc`

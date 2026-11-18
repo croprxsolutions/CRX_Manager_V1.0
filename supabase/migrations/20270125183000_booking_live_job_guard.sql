@@ -10,7 +10,8 @@
 --   1. _enforce_booking_live_job_rules(), a BEFORE UPDATE OF status, customer_id row trigger on quotes.
 --      While a live job exists (on the quote or one of its sections; not cancelled, not deleted) it refuses
 --      BOOKING_HAS_JOB when status changes to accepted, declined, expired or cancelled, or customer_id
---      changes. SECURITY DEFINER so a caller whose RLS hides the job is still refused. Job scheduling locks
+--      changes. One exception (Mason 2026-11-18): accepted goes through once every booked product is fully
+--      drawn onto orders, which is how draw_down_quote closes a booking on its last draw. SECURITY DEFINER so a caller whose RLS hides the job is still refused. Job scheduling locks
 --      the quote row FOR UPDATE first (_create_job_from_quote_section_replay_impl_20261015) and refuses a
 --      booking already in those statuses, so the two serialize on the quote row.
 --   1b. _enforce_job_live_on_open_booking(), a BEFORE INSERT OR UPDATE OF quote_id, quote_section_id, status,
@@ -70,6 +71,20 @@ BEGIN
   ORDER BY j.job_number, j.id
   LIMIT 1;
   IF NOT FOUND THEN
+    RETURN NEW;
+  END IF;
+  -- Mason 2026-11-18 ("Let it close"): a booking whose every booked product is fully drawn onto orders
+  -- may close as accepted even with a live job; draw_down_quote does this on its last draw (the same
+  -- per-product test as 20261029110000, but a booking with nothing booked does not count as drawn).
+  IF NEW.status = 'accepted' AND NEW.customer_id IS NOT DISTINCT FROM OLD.customer_id
+     AND EXISTS (SELECT 1 FROM public.quote_items qi WHERE qi.quote_id = NEW.id
+                 GROUP BY qi.product_id HAVING SUM(COALESCE(qi.total_units_needed, 0)) > 0)
+     AND NOT EXISTS (
+       SELECT 1
+       FROM (SELECT qi.product_id, SUM(COALESCE(qi.total_units_needed, 0)) AS booked
+             FROM public.quote_items qi WHERE qi.quote_id = NEW.id GROUP BY qi.product_id) b
+       LEFT JOIN public.quote_product_draws d ON d.quote_id = NEW.id AND d.product_id = b.product_id
+       WHERE b.booked > 0 AND COALESCE(d.quantity_drawn, 0) < b.booked) THEN
     RETURN NEW;
   END IF;
   IF NEW.customer_id IS DISTINCT FROM OLD.customer_id THEN
@@ -189,6 +204,14 @@ BEGIN
       )
     FOR UPDATE SKIP LOCKED
   LOOP
+    -- #1959: a job committed after the loop's snapshot but before this row was locked is not in the
+    -- filter above; re-check under the lock (fresh snapshot) and skip it rather than fail the night.
+    CONTINUE WHEN EXISTS (
+      SELECT 1 FROM public.jobs j
+      WHERE (j.quote_id = v_quote.id
+             OR j.quote_section_id IN (SELECT qs.id FROM public.quote_sections qs WHERE qs.quote_id = v_quote.id))
+        AND j.deleted_at IS NULL AND j.status <> 'cancelled'
+    );
     -- M1 (2026-06-10): release holds BEFORE the status flip so the AFTER
     -- UPDATE trigger finds 0 active holds and its FK-fragile log insert does
     -- not run. End state identical.
@@ -315,8 +338,11 @@ BEGIN
      OR v_p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
      OR ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
                 FROM aclexplode(v_p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
-        IS DISTINCT FROM ARRAY['postgres', 'service_role'] THEN
-    RAISE EXCEPTION 'POSTFLIGHT_AUTO_EXPIRE: auto_expire_quotes owner, mode, search_path or grants changed';
+        IS DISTINCT FROM ARRAY['postgres', 'service_role']
+     OR position('quotes_booking_live_job_rules' IN v_p.prosrc) = 0
+     OR (SELECT count(*) FROM pg_proc WHERE proname = 'auto_expire_quotes'
+           AND pronamespace = 'public'::regnamespace) <> 1 THEN
+    RAISE EXCEPTION 'POSTFLIGHT_AUTO_EXPIRE: auto_expire_quotes body, overloads, owner, mode, search_path or grants wrong';
   END IF;
 END
 $postflight$;

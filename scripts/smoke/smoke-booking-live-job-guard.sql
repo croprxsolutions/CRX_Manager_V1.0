@@ -16,6 +16,8 @@
 --       naming the spray job; a second run adds no second alert
 --   J   on the expired booking a job cannot become live: direct insert on it or its section, re-link, un-delete
 --       (BOOKING_CLOSED); a cancelled job may be written; a live job on an open booking still starts
+--   D   with a live job: a Partial Order of part of the booking keeps it sent; the one that draws the last
+--       booked unit closes it as accepted (Mason 2026-11-18)
 --
 -- HOW TO RUN: execute this whole file as ONE statement. It ALWAYS ends with
 -- RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so nothing persists. Any other error is a failure.
@@ -229,6 +231,22 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (J) a live job on an open booking could not start';
   END IF;
 
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK live-job guard: BOOKING_HAS_JOB/BOOKING_CLOSED x%, nightly expiry skipped the booking with a job and alerted once', v_refusals;
+  -- D. Partial Orders on A, which still has its live job SMK-LJ2 (Mason 2026-11-18, "Let it close"): a part
+  --    draw keeps the booking sent; the draw that takes the last booked unit closes it as accepted.
+  UPDATE quotes SET expires_at = CURRENT_DATE + 30 WHERE id = v_q;
+  PERFORM draw_down_quote(v_q, jsonb_build_array(jsonb_build_object('product_id', v_product_id, 'quantity', 4)),
+    v_admin, 'smk-bljg-draw-1-' || v_suffix, NULL);
+  IF (SELECT status FROM quotes WHERE id = v_q) <> 'sent' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (D) a part draw moved the booking off sent';
+  END IF;
+  PERFORM draw_down_quote(v_q, jsonb_build_array(jsonb_build_object('product_id', v_product_id, 'quantity', 6)),
+    v_admin, 'smk-bljg-draw-2-' || v_suffix, NULL);
+  IF (SELECT status FROM quotes WHERE id = v_q) <> 'accepted'
+     OR (SELECT count(*) FROM orders WHERE quote_id = v_q) <> 2
+     OR NOT EXISTS (SELECT 1 FROM jobs WHERE job_number = 'SMK-LJ2-' || v_suffix AND status = 'in_progress' AND deleted_at IS NULL) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (D) the last draw did not close the booking as accepted with two orders and its live job';
+  END IF;
+
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK live-job guard: BOOKING_HAS_JOB/BOOKING_CLOSED x%, nightly expiry skipped the booking with a job and alerted once, the last Partial Order closed it', v_refusals;
 END;
 $smoke$;

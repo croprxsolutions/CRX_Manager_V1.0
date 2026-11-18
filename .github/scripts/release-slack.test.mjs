@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { esc, link, readMarker, writeMarker, changeGroup, groupCounts, hotfixFacts, cardMessage, threadUpdates, liveMessage, hotfixMessage, parseReleaseNotes, trySlack, slackConfigured, backMergeText } from './release-slack.mjs';
-import { releaseNotesModule } from './release-flow.mjs';
+import { releaseNotesModule, syncCard } from './release-flow.mjs';
+import * as S from './release-slack.mjs';
 
 const texts = (msg) => JSON.stringify(msg);
 const on = { SLACK_RELEASE_TOKEN: 'xoxb-test', SLACK_RELEASE_CHANNEL: 'C123' };
@@ -118,6 +119,23 @@ test('the open card says what is in the release: top 3 per listed group, counts 
   assert.doesNotMatch(what, /held one|Back-merge|<!here>/);
   // A marker-only card (merged) has no titles, so no changes section.
   assert.ok(!texts(cardMessage(state, { phase: 'merged' })).includes('New features'));
+});
+
+test('syncCard posts a new card with group counts in its marker, then edits it in place', async () => {
+  process.env.GITHUB_REPOSITORY = 'o/r';
+  process.env.SLACK_RELEASE_CHANNEL = 'C1';
+  const calls = [];
+  const kit = { ...S, slack: async (method, body) => (calls.push({ method, body }), { ts: '7.7' }) };
+  const pr = (number, title, labels = []) => ({ number, title, body: 'Staging proof: https://x.example/p', labels, comments: [] });
+  const plan = { version: 'v0.2.0', date: '2026-11-19', prs: [pr(1, 'feat(products): a', ['verified-on-staging']), pr(2, 'Back-merge main into staging', ['verified-on-staging'])], gate: { ok: true }, migrations: [], orphans: [] };
+  const first = await syncCard(kit, plan, 'https://x.example/pr', null);
+  assert.deepEqual(first.marker.grp, { features: 1 });
+  assert.equal(first.marker.ts, '7.7');
+  assert.equal(calls[0].method, 'chat.postMessage');
+  assert.match(texts(calls[0].body), /1 PR\(s\) shipping/);
+  const again = await syncCard(kit, plan, 'https://x.example/pr', first.marker);
+  assert.equal(calls[1].method, 'chat.update');
+  assert.deepEqual(again.marker.grp, { features: 1 });
 });
 
 test('the marker keeps group counts, and nothing else under grp', () => {

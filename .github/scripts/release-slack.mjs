@@ -105,6 +105,8 @@ export function cardMessage(m, { prs, phase = 'open', prUrl, compareUrl, tagUrl,
   const word = { open: 'candidate', ready: 'ready to merge', merged: 'shipped', squashed: 'merged without a merge commit' }[shown];
   const icon = { open: ':rocket:', ready: ':rocket:', merged: ':white_check_mark:', squashed: ':warning:' }[shown];
   const held = list.filter((p) => p.state === 'held');
+  // Back-merges ship nothing of their own; without titles (a marker-only card) every non-held PR counts.
+  const shipping = list.filter((p) => p.state !== 'held' && (p.title == null || changeGroup(p.title))).length;
   const gate = {
     open: waiting.length + (m.orph ?? 0) ? `:hourglass_flowing_sand: Waiting on ${waiting.length + (m.orph ?? 0)}` : ':red_circle: Red',
     ready: ':large_green_circle: Green',
@@ -113,7 +115,7 @@ export function cardMessage(m, { prs, phase = 'open', prUrl, compareUrl, tagUrl,
   }[shown];
   const blocks = [
     { type: 'header', text: { type: 'plain_text', text: short(`${icon} Release ${m.v} · ${word}`, 150), emoji: true } },
-    { type: 'context', elements: [{ type: 'mrkdwn', text: [esc(m.date), `${list.length - held.length} PR(s) shipping`, `${m.mig ?? 0} database change(s) for live`, held.length && `${held.length} held back`].filter(Boolean).join(' · ') }] },
+    { type: 'context', elements: [{ type: 'mrkdwn', text: [esc(m.date), `${shipping} PR(s) shipping`, `${m.mig ?? 0} database change(s) for live`, held.length && `${held.length} held back`].filter(Boolean).join(' · ') }] },
     {
       type: 'section',
       fields: [

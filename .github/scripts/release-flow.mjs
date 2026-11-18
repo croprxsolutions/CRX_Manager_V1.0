@@ -458,7 +458,7 @@ function slackPrs(plan) {
 
 // Posts the release card, or edits it in place. Returns the marker to save and the thread replies
 // for what changed, which are posted only once that marker is saved (a failed save can't repeat them).
-async function syncCard({ cardMessage, groupCounts, slack, threadUpdates }, plan, prUrl, prev) {
+export async function syncCard({ cardMessage, groupCounts, slack, threadUpdates }, plan, prUrl, prev) {
   const prs = slackPrs(plan);
   const now = { ...cardState(plan), grp: groupCounts(prs) };
   const msg = cardMessage(now, { prs, prUrl, compareUrl: `${REPO_URL()}/compare/main...release/next` });

@@ -7,6 +7,10 @@
 ## 2026-11-18 — Purchasing plan: booking lines in a unit that no longer matches stock are set aside (Bookings PR 1b, #1971)
 
 **Decision (Mason, in chat, 2026-11-18).** A booking line saved in a unit that no longer matches the product's stock unit is listed only under Check units in `get_purchasing_plan`: it is not counted as demand, absorbs no order or job draw, and does not stand in for its booking's crop-program hold (which then counts). Chosen over accepting the gap, after Luna raised HIGHs on how such lines interacted with draws and holds (third round on that mechanism). Live had 0 such lines on 2026-11-18; screens do not allow a stock-unit change on a saved product.
+## 2026-11-18 — Codex Sol and Astra move to the 6.2 models
+
+**Decision (Mason):** use `gpt-6.2-sol` and `gpt-6.2-astra` instead of the older Sol and Astra. The Sol ship gate, every guard that checks a Sol proof, the scripts and the skills all move together; Luna stays `gpt-6-luna` (no 6.2 Luna exists for this account, probed 2026-11-18).
+**What this forbids/implies:** a `gpt-6-sol` proof no longer satisfies any gate; open PRs re-run Sol after this lands. No validator accepts both models during the switch. This replaces the 2026-11-06 "wait for a side-by-side" note on moving Sol.
 
 ## 2026-11-18 — #1946 (KI-81): a blend ticket's own grower falls back to their own quote
 

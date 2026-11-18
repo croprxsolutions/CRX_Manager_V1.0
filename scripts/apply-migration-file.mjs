@@ -48,7 +48,7 @@
 //   Mason's autonomous-landing rule (2026-09-26): a NON-destructive migration whose
 //   final exact-SHA Sol review and CodeRabbit review are clean applies with no
 //   per-migration ask, in any session, once the rule book passes — both reviewer
-//   proofs and a fresh content-bound gpt-6-sol/high proof, all under 30 minutes.
+//   proofs and a fresh content-bound gpt-6.2-sol/high proof, all under 30 minutes.
 //   A migration that DELETES data, OVERWRITES existing rows or CHANGES WHO CAN
 //   ACCESS WHAT stays Mason's. There is deliberately no override flag — a flag the
 //   agent can pass itself cannot prove Mason approved that exact migration (Sol

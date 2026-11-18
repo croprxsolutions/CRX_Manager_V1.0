@@ -28,7 +28,7 @@
 --     h. a section with a live job keeps its field, its place and its lines exactly (each line's
 --        id, order, product, quantity, price, units, rate and acres; null-safe; a kept id and product
 --        keep the line's cost snapshot, so cost needs no compare and a legacy line may get one),
---        else SECTION_HAS_JOB_LOCKED. Its name, notes and needed-by date may change. The job copied those lines; letting them drift would split the job
+--        else SECTION_HAS_JOB_LOCKED. Its name and notes may change; its needed-by date may not (Mason, 2026-11-18). The job copied those lines; letting them drift would split the job
 --        from its booking and let the two invoice paths charge different prices.
 --     Rules b, c and g run after the quote row lock and the row_version check, before the DELETE;
 --     h compares the stored lines after the server prices them.
@@ -433,7 +433,7 @@ BEGIN
                ORDER BY j.job_number, j.id LIMIT 1) AS job_number,
              (SELECT COALESCE(jsonb_agg(o.id ORDER BY o.id), '[]'::jsonb) FROM quote_sections o
                WHERE o.quote_id = qs.quote_id AND (o.sort_order, o.id) < (qs.sort_order, qs.id)) AS above,
-             jsonb_build_object('field', qs.field_id, 'lines', COALESCE((
+             jsonb_build_object('field', qs.field_id, 'needed_by', qs.needed_by_date, 'lines', COALESCE((
                SELECT jsonb_agg(jsonb_build_object(
                         'id', qi.id, 'sort', qi.sort_order, 'product', qi.product_id,
                         'qty', trim_scale(qi.total_units_needed), 'price', trim_scale(qi.price_per_unit),
@@ -628,8 +628,11 @@ BEGIN
       -- one-per-product fallback keeps its cost but takes today's price, so the screen (which
       -- names every saved line) and the server agree; if that changes its price, the change is
       -- recorded below like any other (a raise needs the tick) and the sent-price check accepts it.
-      IF v_price_locked AND v_reuse_item_id IS NOT NULL
-         AND v_reuse_item_id::text = v_payload_item_id
+      -- SECTION IDS (h): a line of a section with a live job keeps its stored price on a draft
+      -- too, so a catalog price change cannot block an unrelated save (Mason, 2026-11-18).
+      IF (v_price_locked OR v_locked_sections ? v_section_id::text)
+         AND v_reuse_item_id IS NOT NULL
+         AND (v_reuse_item_id::text = v_payload_item_id OR v_locked_sections ? v_section_id::text)
          AND COALESCE((v_item->>'use_todays_price')::boolean, false) = false THEN
         v_carry_prices := v_carry_prices
           || jsonb_build_object(v_new_item_id::text, v_prior_item_costs->(v_reuse_item_id::text)->'pp');
@@ -863,7 +866,7 @@ BEGIN
   -- above it only renumbers (Taha's review on PR #1947).
   FOR v_locked_key IN SELECT jsonb_object_keys(v_locked_sections)
   LOOP
-    IF (SELECT jsonb_build_object('field', qs.field_id, 'lines', COALESCE((
+    IF (SELECT jsonb_build_object('field', qs.field_id, 'needed_by', qs.needed_by_date, 'lines', COALESCE((
                SELECT jsonb_agg(jsonb_build_object(
                         'id', qi.id, 'sort', qi.sort_order, 'product', qi.product_id,
                         'qty', trim_scale(qi.total_units_needed), 'price', trim_scale(qi.price_per_unit),
@@ -881,7 +884,7 @@ BEGIN
              FROM quote_sections o
             WHERE o.quote_id = v_quote_id
               AND o.id::text IN (SELECT jsonb_array_elements_text(v_locked_sections->v_locked_key->'above'))) THEN
-      RAISE EXCEPTION 'SECTION_HAS_JOB_LOCKED: job % was scheduled from section "%", so its products, quantities, prices, line order, place and field cannot change. Change the job, or add a new section for new work.',
+      RAISE EXCEPTION 'SECTION_HAS_JOB_LOCKED: job % was scheduled from section "%", so its products, quantities, prices, line order, place, needed-by date and field cannot change. Change the job, or add a new section for new work.',
         v_locked_sections->v_locked_key->>'job', v_locked_sections->v_locked_key->>'section'
         USING ERRCODE = 'P0001';
     END IF;
@@ -1007,7 +1010,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public._save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)'::regprocedure)
-     IS DISTINCT FROM '94d61890073fd187178ed62641c6be69' THEN
+     IS DISTINCT FROM '4736c0007212f53952b4fe810a8d2517' THEN
     RAISE EXCEPTION 'POSTFLIGHT_SAVE_QUOTE: the new body did not install';
   END IF;
   IF NOT EXISTS (

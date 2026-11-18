@@ -2211,7 +2211,7 @@ describe('QuoteBuilder', () => {
         : table === 'products' ? [fixture.product] : table === 'fields' ? [HOME_QUARTER_OF_CUSTOMER_1]
           : table === 'jobs' ? [job] : [], error: null }));
     renderQuoteBuilder(quote.id);
-    expect(await screen.findByText(/Job J-7 was scheduled from this section. Its products, quantities, prices and field stay as booked; a new name, notes or needed-by date here does not change the job/)).toBeInTheDocument();
+    expect(await screen.findByText(/Job J-7 was scheduled from this section. Its products, quantities, prices, needed-by date and field stay as booked; a new name or notes here does not change the job/)).toBeInTheDocument();
   });
 
   it('refuses Schedule job on a section whose id a save did not return, and says to save and reload', async () => {

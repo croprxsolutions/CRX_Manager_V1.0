@@ -5309,7 +5309,7 @@ export default function QuoteBuilder() {
               )}
               {sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled' && (
                 <p className="order-last w-full text-xs text-amber-700">
-                  Job {sectionJobs[sec.id].job_number} was scheduled from this section. Its products, quantities, prices and field stay as booked; a new name, notes or needed-by date here does not change the job, so change those on the job too.
+                  Job {sectionJobs[sec.id].job_number} was scheduled from this section. Its products, quantities, prices, needed-by date and field stay as booked; a new name or notes here does not change the job, so change those on the job too.
                 </p>
               )}
               {isPlanned && (
@@ -5323,7 +5323,7 @@ export default function QuoteBuilder() {
                       aria-label="Needed by"
                       value={sec.needed_by_date || null}
                       onChange={(value) => updateSectionField(sec._key, 'needed_by_date', value || null)}
-                      disabled={editLocked}
+                      disabled={editLocked || Boolean(sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled')}
                     />
                   </div>
                   {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}

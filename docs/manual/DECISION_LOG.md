@@ -1,5 +1,12 @@
 # Decision Log
 
+## 2026-11-18 — Bookings with a spray job: needed-by date locked, booked price kept (#1947)
+
+**Decision (Mason, in chat, 2026-11-18, answering Sol round 5 on PR #1947).**
+- A section with a live spray job now keeps its needed-by date too. Draws are allocated to booking lines by needed-by date first, so re-dating the job's section could credit the job's product to another section and drop that section's real need. To change the date, change the job's own date or cancel the job first. This replaces the 2026-11-17 rule that the date may change; the name and notes still may.
+- A section with a live spray job keeps its stored line prices on a draft booking too, so a catalog price change cannot block an unrelated save. The job and invoices stay at what was booked.
+- Direct status updates that skip the save screen: accepted again as a business non-issue, with the database-level guard as a follow-up PR (same answer as Sol round 4).
+
 ## 2026-11-18 — #1947: Mason owner-accepted 3 Sol finding(s) at `5ae3ac5ae2a1`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1947 at `5ae3ac5ae2a1` (base `e0513c039664`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

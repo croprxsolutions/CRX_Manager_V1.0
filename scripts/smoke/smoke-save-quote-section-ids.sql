@@ -18,6 +18,9 @@
 --      job's section quantity, price, line order, line id (cost basis), units, its place among the
 --      sections, or moving its line away is refused SECTION_HAS_JOB_LOCKED; the section without a job may change. Once the job is
 --      cancelled its section may change. Two sections with one client_key: SECTION_ID_INVALID.
+--   L also: re-dating the job's section is refused; a catalog price change does not reprice it
+--   C  a draft booking's job section keeps its booked price after a catalog price change: an
+--      unrelated save goes through and the line's price stays (Mason, 2026-11-18)
 --   M  removing a job-free section above the job's section renumbers it and saves; a new
 --      section added above it is refused SECTION_HAS_JOB_LOCKED
 --   I  a live job blocks accept, decline and expire; a completed job's refusal says ask an admin
@@ -57,6 +60,10 @@ DECLARE
   v_price_res jsonb;
   v_count int;
   v_customer2_id uuid;
+  v_q3 uuid;
+  v_q3s uuid;
+  v_q3item text;
+  v_q3price numeric;
 BEGIN
   SELECT id INTO v_admin FROM profiles
   WHERE role = 'admin' AND is_active = true
@@ -158,7 +165,7 @@ BEGIN
   SELECT string_agg(id::text || ':' || section_name, ',' ORDER BY sort_order) INTO v_sections_before
   FROM quote_sections WHERE quote_id = v_quote_id;
   v_payload := v_payload || jsonb_build_object('row_version_expected', v_version, 'header_notes', 'L');
-  FOR v_count IN 1..8 LOOP
+  FOR v_count IN 1..9 LOOP
     CONTINUE WHEN v_count = 6;   -- (an id-less line re-matches its saved line; accepted in L ok)
     v_err := NULL;
     BEGIN
@@ -167,6 +174,7 @@ BEGIN
         jsonb_build_array(
           jsonb_build_object('id', v_s1, 'client_key', '_s1', 'section_name', 'North renamed',
             'sort_order', (v_count = 7)::int * 2,   -- 7: the section moves after South
+            'needed_by_date', (ARRAY[NULL, ((now() AT TIME ZONE 'America/Chicago')::date + 30)::text])[(v_count = 9)::int + 1],   -- 9: re-dated
             'items', CASE v_count
               WHEN 2 THEN jsonb_build_array(v_la1 || jsonb_build_object('client_key', '_k1', 'total_units_needed', 12))
               WHEN 3 THEN jsonb_build_array(v_la1 || jsonb_build_object('client_key', '_k1', 'price_override', 25, 'price_per_unit', 25))
@@ -192,10 +200,9 @@ BEGIN
      OR (SELECT total_units_needed FROM quote_items WHERE section_id = v_s1) IS DISTINCT FROM 10::numeric THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (L) a refused save changed the quote';
   END IF;
-  -- The section without a job may change; the job's section may be renamed (P1) and re-dated.
+  -- The section without a job may change; the job's section may be renamed (P1).
   v_res := save_quote(v_quote_id, v_payload, jsonb_build_array(
     jsonb_build_object('id', v_s1, 'client_key', '_s1', 'section_name', 'North renamed', 'sort_order', 0,
-      'needed_by_date', (now() AT TIME ZONE 'America/Chicago')::date + 30,
       'items', jsonb_build_array(v_la || jsonb_build_object('client_key', '_k1'))),   -- no line id: re-matched to the same line
     jsonb_build_object('id', v_s2, 'client_key', '_s2', 'section_name', 'South', 'sort_order', 1,
       'items', jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2', 'total_units_needed', 12)))),
@@ -204,7 +211,6 @@ BEGIN
   EXECUTE 'SET CONSTRAINTS ALL DEFERRED';
   v_version := (v_res->>'row_version')::bigint;
   IF (SELECT total_units_needed FROM quote_items WHERE section_id = v_s2) IS DISTINCT FROM 12::numeric
-     OR (SELECT needed_by_date FROM quote_sections WHERE id = v_s1) IS NULL
      OR (SELECT id::text FROM quote_items WHERE section_id = v_s1) IS DISTINCT FROM v_la1->>'id' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (L ok) the unlocked change did not save: %', v_res;
   END IF;
@@ -442,6 +448,50 @@ BEGIN
     END IF;
   END LOOP;
 
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK section ids kept; job link held; refusals SECTION_HAS_JOB x4, SECTION_ID_INVALID x5, BOOKING_HAS_JOB x5, SECTION_HAS_JOB_LOCKED x7';
+  -- C. A catalog price change does not reprice a draft booking's job section (Mason, 2026-11-18).
+  EXECUTE 'SET CONSTRAINTS ALL DEFERRED';   -- the I case left them immediate; a save re-inserts sections
+  v_res := save_quote(NULL, jsonb_build_object(
+      'quote_number', '[SMOKE] QSI-C-' || v_suffix,
+      'customer_id', v_customer_id, 'status', 'draft', 'tier', 1,
+      'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true),
+    jsonb_build_array(jsonb_build_object('client_key', '_c1', 'section_name', 'Catalog', 'sort_order', 0,
+      'items', jsonb_build_array(((v_lc - 'price_override') - 'price_per_unit') || jsonb_build_object('client_key', '_kc')))),
+    v_admin, 'smk-sqsi-save-c-' || v_suffix);
+  v_q3 := (v_res->>'quote_id')::uuid;
+  v_q3s := (v_res->'section_ids'->>'_c1')::uuid;
+  v_q3item := v_res->'item_ids'->>'_kc';
+  SELECT price_per_unit INTO v_q3price FROM quote_items WHERE id = v_q3item::uuid;
+  INSERT INTO jobs (job_number, customer_id, job_date, quote_id, quote_section_id)
+  VALUES ('SMK-C-' || v_suffix, v_customer_id, (now() AT TIME ZONE 'America/Chicago')::date + 7, v_q3, v_q3s);
+  v_price_res := preview_product_pricing_changes(
+    'product_page', NULL,
+    jsonb_build_array(jsonb_build_object(
+      'product_id', v_products[3],
+      'row_version', (SELECT pricing_version FROM products WHERE id = v_products[3]),
+      'pricing_mode', 'margin_driven', 'new_cost', '7.00',
+      'tier1_margin_percent', '20', 'tier2_margin_percent', '25', 'tier3_margin_percent', '30',
+      'change_reason', 'Rollback smoke section-ids catalog move')),
+    v_admin, 'smk-sqsi-price-preview-c-' || v_suffix);
+  PERFORM apply_product_pricing_change_set(
+    (v_price_res->>'change_set_id')::uuid, v_price_res->>'request_fingerprint',
+    v_admin, 'smk-sqsi-price-apply-c-' || v_suffix);
+  IF (SELECT tier1_price FROM products WHERE id = v_products[3]) IS NOT DISTINCT FROM v_q3price THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C) the catalog price did not move';
+  END IF;
+  v_res := save_quote(v_q3, jsonb_build_object(
+      'quote_number', '[SMOKE] QSI-C-' || v_suffix,
+      'customer_id', v_customer_id, 'status', 'draft', 'tier', 1, 'header_notes', 'C',
+      'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true,
+      'row_version_expected', (v_res->>'row_version')::bigint),
+    jsonb_build_array(jsonb_build_object('id', v_q3s, 'client_key', '_c1', 'section_name', 'Catalog', 'sort_order', 0,
+      'items', jsonb_build_array(((v_lc - 'price_override') - 'price_per_unit')
+        || jsonb_build_object('client_key', '_kc', 'id', v_q3item, 'price_per_unit', v_q3price)))),
+    v_admin, 'smk-sqsi-save-c2-' || v_suffix);
+  IF (SELECT price_per_unit FROM quote_items WHERE id = v_q3item::uuid) IS DISTINCT FROM v_q3price
+     OR (SELECT header_notes FROM quotes WHERE id = v_q3) IS DISTINCT FROM 'C' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C) the job section was repriced or the save did not land: %', v_res;
+  END IF;
+
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK section ids kept; job link held; refusals SECTION_HAS_JOB x4, SECTION_ID_INVALID x5, BOOKING_HAS_JOB x5, SECTION_HAS_JOB_LOCKED x8';
 END;
 $smoke$;

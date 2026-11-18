@@ -41,8 +41,8 @@ Sol's three bypass findings on #1947 on the condition that this database guard f
    the booking is accepted, declined, expired, cancelled, closed_by_application or closed_short (the scheduler's
    own refusal list). Without it, a direct job insert or re-link could put a live job on a closed booking, and a
    job created while a decline was in flight could slip past both checks. Same function settings as item 1.
-   A live job's booking and section link is frozen (Mason, 2026-11-18, "A"): unlinking or re-pointing it is
-   refused (`BOOKING_HAS_JOB`; cancel it and schedule a new one). A section-linked job also locks its section row
+   A job's booking and section link is frozen once set, whatever its status (Mason, 2026-11-18, "A"; Luna MED: a
+   cancelled job re-pointed then revived would otherwise move): unlinking or re-pointing it is refused (`BOOKING_HAS_JOB`; cancel it and schedule a new one). A section-linked job also locks its section row
    `FOR SHARE` and re-checks it still belongs to the booking it checked, so a section moving to a closed booking
    at the same moment is caught (Luna HIGH; the stop rule fired on this mechanism, and Mason chose the rule).
 1c. A `BEFORE UPDATE OF quote_id ON public.quote_sections` row trigger (Sol HIGH, round 2): a section that a live
@@ -62,8 +62,9 @@ real-schema prover under `scripts/smoke/`, this contract, DECISION_LOG.
 
 ## 2. State and failure
 
-**Rules that always hold.** After any committed statement: no quote moved into accepted/declined/expired, and
-no quote changed customer, while a live job pointed at it or its sections.
+**Rules that always hold.** After any committed statement: no quote moved into declined/expired/cancelled, or into
+accepted unless every booked product was fully drawn onto orders, and no quote changed customer, while a live job
+pointed at it or its sections; and no job's booking or section link changed once set.
 
 **Existing rows.** The trigger only fires on a change, so a quote already accepted/declined/expired with a live
 job is left as it is; only a later customer change on it is refused. No row is rewritten.

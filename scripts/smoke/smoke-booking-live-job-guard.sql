@@ -11,7 +11,7 @@
 --   6   a job on one of the booking's sections (no quote_id) blocks too; a completed job's refusal says
 --       ask an admin; a cancelled job and a soft-deleted job do not block (the decline goes through)
 --   S   closing short is refused while a job on a section (no quote_id) is scheduled; once completed it goes through
---   F   a live job's booking links cannot change (unlink or re-point); Mason 2026-11-18
+--   F   a job's booking links cannot change (unlink, re-point, re-point while cancelling or deleted); Mason 2026-11-18
 --   M   the section a live job comes from cannot move to another booking
 --   8   with the job live: sent -> revised, and a notes edit, go through
 --   5   auto_expire_quotes with two past-date bookings, one with a live job: the other expires, the one
@@ -157,13 +157,19 @@ BEGIN
   END LOOP;
 
   -- 6. A job on the section only blocks too; completed says ask an admin.
-  -- F. A live job's booking links are fixed (Mason 2026-11-18, "A"): unlinking or re-pointing it is refused.
-  FOR v_i IN 1..2 LOOP
+  -- F. A job's booking links are fixed (Mason 2026-11-18, "A"): unlinking or re-pointing it is refused, also in
+  --    the same update that cancels it (F3) and once it is deleted (F4), so it cannot be revived on another booking.
+  FOR v_i IN 1..4 LOOP
     v_err := NULL;
     BEGIN
       IF v_i = 1 THEN
         UPDATE jobs SET quote_id = NULL, quote_section_id = NULL WHERE id = v_job;
+      ELSIF v_i = 2 THEN
+        UPDATE jobs SET quote_id = v_q2 WHERE id = v_job;
+      ELSIF v_i = 3 THEN
+        UPDATE jobs SET status = 'cancelled', quote_id = v_q2 WHERE id = v_job;
       ELSE
+        UPDATE jobs SET deleted_at = now() WHERE id = v_job;
         UPDATE jobs SET quote_id = v_q2 WHERE id = v_job;
       END IF;
     EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
@@ -267,9 +273,9 @@ BEGIN
         INSERT INTO jobs (job_number, customer_id, job_date, quote_section_id)
         VALUES ('SMK-J2-' || v_suffix, v_customer_id, CURRENT_DATE + 7, v_s);
       ELSIF v_i = 3 THEN
-        -- a deleted job re-linked to B and restored in one update
-        INSERT INTO jobs (job_number, customer_id, job_date, quote_id, deleted_at)
-        VALUES ('SMK-J3-' || v_suffix, v_customer_id, CURRENT_DATE + 7, v_q, now());
+        -- a deleted, never-linked job linked to B and restored in one update
+        INSERT INTO jobs (job_number, customer_id, job_date, deleted_at)
+        VALUES ('SMK-J3-' || v_suffix, v_customer_id, CURRENT_DATE + 7, now());
         UPDATE jobs SET quote_id = v_q2, deleted_at = NULL WHERE job_number = 'SMK-J3-' || v_suffix;
       ELSE
         INSERT INTO jobs (job_number, customer_id, job_date, quote_id, deleted_at)

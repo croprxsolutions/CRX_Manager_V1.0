@@ -150,18 +150,19 @@ DECLARE
   v_section_quote_id uuid;
   v_quote record;
 BEGIN
+  -- Mason 2026-11-18 ("A"): a job's booking links are fixed once set, whatever its status, so a job cannot be
+  -- cancelled, re-pointed and revived on another booking. Nothing in the app changes them; both FKs are NO ACTION.
+  IF TG_OP = 'UPDATE' AND (OLD.quote_id IS NOT NULL OR OLD.quote_section_id IS NOT NULL)
+     AND (NEW.quote_id IS DISTINCT FROM OLD.quote_id OR NEW.quote_section_id IS DISTINCT FROM OLD.quote_section_id) THEN
+    RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % stays linked to the booking it was scheduled from. To move it, cancel it and schedule a new one.',
+      NEW.job_number
+      USING ERRCODE = 'P0001';
+  END IF;
   IF NEW.deleted_at IS NOT NULL OR NEW.status = 'cancelled' THEN
     RETURN NEW;
   END IF;
   IF TG_OP = 'UPDATE' AND OLD.deleted_at IS NULL AND OLD.status <> 'cancelled' THEN
-    IF NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id
-       AND NEW.quote_section_id IS NOT DISTINCT FROM OLD.quote_section_id THEN
-      RETURN NEW;
-    END IF;
-    -- Mason 2026-11-18 ("A"): a live job's booking links are fixed; nothing in the app changes them.
-    RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % stays linked to the booking it was scheduled from. To move it, cancel it and schedule a new one.',
-      NEW.job_number
-      USING ERRCODE = 'P0001';
+    RETURN NEW;
   END IF;
   -- The section's booking, read unlocked here, is re-checked under a section lock after the booking locks
   -- below (booking first, then section: the order save_quote locks in).

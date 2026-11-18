@@ -1,5 +1,15 @@
 # Decision Log
 
+## 2026-11-18 — #1947: Mason owner-accepted 3 Sol finding(s) at `3d71a5c062fc`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1947 at `3d71a5c062fc` (base `29682a0332c0`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270125110000_save_quote_keeps_section_ids.sql:283`, text sha256 `6ca650a316f44b81` (the wording stays with the proof, not here)
+  Mason's reason: direct expire (ref b619dec39703)
+- Finding 2 (HIGH) at `supabase/migrations/20270125110000_save_quote_keeps_section_ids.sql:283`, text sha256 `45dc1781a05db83a` (the wording stays with the proof, not here)
+  Mason's reason: convert to order (ref 5af7b46b5075)
+- Finding 3 (HIGH) at `supabase/migrations/20270125110000_save_quote_keeps_section_ids.sql:413`, text sha256 `eac6dcda4077433e` (the wording stays with the proof, not here)
+  Mason's reason: direct customer change (ref b4e55c1c42c2)
+
 ## 2026-11-18 — Bookings with a spray job: needed-by date locked, booked price kept (#1947)
 
 **Decision (Mason, in chat, 2026-11-18, answering Sol round 5 on PR #1947).**

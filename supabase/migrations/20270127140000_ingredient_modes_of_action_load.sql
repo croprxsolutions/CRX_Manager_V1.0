@@ -55,6 +55,12 @@ DECLARE
   v_unmatched text;
   v_without int;
 BEGIN
+  -- The actor columns carry no foreign key (20270108100000, 20261209100000), so a database without this profile
+  -- (staging, a rebuild) still records the approver's ID. Where the ID exists it must be an admin, never someone else.
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_actor AND role IS DISTINCT FROM 'admin') THEN
+    RAISE EXCEPTION 'MOA_LOAD_ACTOR: profile % is not an admin here; this list was approved by Mason', v_actor;
+  END IF;
+
   -- Session-only scratch tables (a second run in the same session starts clean).
   DROP TABLE IF EXISTS pg_temp.moa1_list, pg_temp.moa1_match, pg_temp.moa1_conflict, pg_temp.moa1_fill;
   CREATE TEMP TABLE moa1_list (name text NOT NULL, cas text, scheme text NOT NULL, group_code text NOT NULL,

@@ -14,7 +14,7 @@
  *           under REPEATABLE READ the second fails with a serialization error instead;
  *   K7      three admins, two removals at once on different rows: both succeed, no deadlock;
  *   K8      a payout-only profile's role is fixed both ways, so it never counts as an admin;
- *   P2      a reset row planted before the lock is relabelled unverified_;
+ *   P2      an existing reset row makes the candidate refuse (no relabel); applies once it is gone;
  *   P1      a signed-in user can no longer write the server-only auth_password_reset rows, but still logs
  *           their own activity;
  *   A1-A3   anon is refused on every public table, view, column and sequence; a signed-in admin still reads;
@@ -462,6 +462,12 @@ async function main() {
   console.log(`[case] B before the fix the only admin CAN be demoted, a rep CAN write an auth_password_reset row, and anon holds ${count(inventoryBefore)} rights in public`);
 
   stageText('candidate.sql', lf(CANDIDATE));
+  const blocked = apply('candidate.sql');
+  assert.notEqual(blocked.status, 0); assert.match(blocked.output, /SECURITY_BATCH_PREFLIGHT: auth_password_reset activity rows already exist/);
+  assert.equal(guardMd5(), GUARD_OLD, 'a refused apply changed the guard');
+  assert.equal(scalar("SELECT event_type FROM public.activity_feed WHERE description = '[PROVER] SEC planted';"), 'auth_password_reset');
+  raw("DELETE FROM public.activity_feed WHERE description = '[PROVER] SEC planted';");
+  console.log('[case] P2 an existing auth_password_reset row makes the candidate refuse and changes nothing; it applies once the row is gone');
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
   assert.notEqual(guardMd5(), GUARD_OLD);
@@ -472,8 +478,6 @@ async function main() {
   await noDeadlockCase();
   anonCases();
   policyRefuses();
-  assert.equal(scalar("SELECT event_type FROM public.activity_feed WHERE description = '[PROVER] SEC planted';"), 'unverified_auth_password_reset');
-  console.log('[case] P2 a reset row written before the lock is relabelled unverified_auth_password_reset');
   console.log('[case] P1 a rep cannot write auth_password_reset or auth_password_reset_failed rows; own activity and the screen user_password_reset row still log; forged performed_by still refused');
 
   const again = apply('candidate.sql');
@@ -497,6 +501,15 @@ async function main() {
   assert.equal(okProbe(demote(X), X), 'demoted');
   policyRefuses();
   console.log('[case] R the reverse restores the old guard (md5 411de704), keeps the reset-row lock, and exactly the anon rights the database had before');
+
+  // A server reset row written while the first apply was live keeps its label: the re-apply refuses instead.
+  raw(`INSERT INTO public.activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id)
+    VALUES ('auth_password_reset', '[PROVER] SEC server row', '${X}', 'profile', '${R}');`);
+  const held = apply('candidate.sql');
+  assert.notEqual(held.status, 0); assert.match(held.output, /auth_password_reset activity rows already exist/);
+  assert.equal(scalar("SELECT event_type FROM public.activity_feed WHERE description = '[PROVER] SEC server row';"), 'auth_password_reset');
+  raw("DELETE FROM public.activity_feed WHERE description = '[PROVER] SEC server row';");
+  console.log('[case] RH re-applying after the reverse refuses while a server reset row exists and leaves it labelled as it was');
 
   const reapply = apply('candidate.sql');
   assert.equal(reapply.status, 0, reapply.output);

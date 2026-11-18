@@ -47,7 +47,7 @@ END $md5$;
 
 -- KI-122: the activity_insert lock on the server-only auth_password_reset rows is deliberately KEPT: reopening it
 -- would let staff forge server reset records while the updated Edge Functions may still be deployed. It blocks no
--- app flow. Relabelled unverified_auth_password_reset* rows also stay as they are.
+-- app flow. Server reset rows written meanwhile stay; re-applying the candidate refuses while any exist.
 
 -- KI-123: anon's default rights on new postgres-created tables and sequences.
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT ON TABLES TO anon;

@@ -21,8 +21,9 @@
 --      that is accepted, declined, expired, cancelled, closed_by_application or closed_short (BOOKING_CLOSED; the
 --      same statuses the scheduler already refuses). An already-live job keeps moving through its own statuses,
 --      but its booking and section link is fixed: to move it, cancel it and schedule a new one (Mason, 2026-11-18).
---   1c. _enforce_section_with_live_job_stays(), a BEFORE UPDATE OF quote_id row trigger on quote_sections: a
---      section that a live job comes from cannot move to another booking (BOOKING_HAS_JOB).
+--   1c. _enforce_section_with_live_job_stays(), a BEFORE INSERT OR UPDATE OF quote_id row trigger on quote_sections:
+--      a section that a live job comes from cannot move to another booking (BOOKING_HAS_JOB), including by being
+--      deleted and re-inserted under the same id on another booking (the section FK is deferred).
 --   2. auto_expire_quotes skips a booking with a live job (the trigger would otherwise fail the whole nightly
 --      batch) and its rep gets the existing "Booking past its date" alert once per expiry date.
 --   Every other line of auto_expire_quotes is its 20261029100000 body (pinned below).
@@ -216,14 +217,31 @@ AS $function$
 DECLARE
   v_job_number text;
 BEGIN
-  IF NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id THEN
-    RETURN NEW;
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id THEN
+      RETURN NEW;
+    END IF;
+    SELECT j.job_number INTO v_job_number
+    FROM public.jobs j
+    WHERE j.quote_section_id = OLD.id AND j.deleted_at IS NULL AND j.status <> 'cancelled'
+    ORDER BY j.job_number, j.id
+    LIMIT 1;
+  ELSE
+    -- INSERT: the section FK is deferred, so save_quote can delete and re-insert a section with a job under
+    -- the same id. A live job already pointing at the new id must stay on the booking it was scheduled from
+    -- (Sol HIGH r3; Mason 2026-11-18, "close it"): the job's own booking, or, for a job linked by section
+    -- only, any booking that is not closed.
+    SELECT j.job_number INTO v_job_number
+    FROM public.jobs j
+    WHERE j.quote_section_id = NEW.id AND j.deleted_at IS NULL AND j.status <> 'cancelled'
+      AND (j.quote_id IS DISTINCT FROM NEW.quote_id)
+      AND (j.quote_id IS NOT NULL OR EXISTS (
+        SELECT 1 FROM public.quotes q
+        WHERE q.id = NEW.quote_id
+          AND q.status IN ('accepted', 'declined', 'expired', 'cancelled', 'closed_by_application', 'closed_short')))
+    ORDER BY j.job_number, j.id
+    LIMIT 1;
   END IF;
-  SELECT j.job_number INTO v_job_number
-  FROM public.jobs j
-  WHERE j.quote_section_id = OLD.id AND j.deleted_at IS NULL AND j.status <> 'cancelled'
-  ORDER BY j.job_number, j.id
-  LIMIT 1;
   IF FOUND THEN
     RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % was made from this section, so the section cannot move to another booking.',
       v_job_number
@@ -237,7 +255,7 @@ ALTER FUNCTION public._enforce_section_with_live_job_stays() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._enforce_section_with_live_job_stays() FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER quote_sections_live_job_stays
-  BEFORE UPDATE OF quote_id ON public.quote_sections
+  BEFORE INSERT OR UPDATE OF quote_id ON public.quote_sections
   FOR EACH ROW
   EXECUTE FUNCTION public._enforce_section_with_live_job_stays();
 

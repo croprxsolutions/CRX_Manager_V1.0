@@ -13,6 +13,7 @@
 --   S   closing short is refused while a job on a section (no quote_id) is scheduled; once completed it goes through
 --   F   a job's booking links cannot change (unlink, re-point, re-point while cancelling or deleted); Mason 2026-11-18
 --   M   the section a live job comes from cannot move to another booking
+--   R   nor be deleted and re-created under the same id on a closed booking; re-created on its own booking is fine
 --   8   with the job live: sent -> revised, and a notes edit, go through
 --   5   auto_expire_quotes with two past-date bookings, one with a live job: the other expires, the one
 --       with the job stays sent, the run does not fail, and its rep gets one "Booking past its date" alert
@@ -258,6 +259,47 @@ BEGIN
   IF (SELECT count(*) FROM notifications WHERE related_entity_id = v_q AND notification_type = 'booking_past_expiry') <> 1 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (5) a second run alerted again';
   END IF;
+
+  -- R. The section FK is deferred: with a live job on A's section, deleting the section and re-inserting it under
+  --    the same id on the expired booking B is refused (Sol HIGH r3; Mason 2026-11-18 "close it"); re-inserting it
+  --    on A, as save_quote does, is not. Twice: a job linked to booking and section (how the scheduler makes it),
+  --    then one linked by section only. Each re-insert is rolled back (a section delete cascades its lines).
+  FOR v_i IN 1..2 LOOP
+    INSERT INTO jobs (job_number, customer_id, job_date, quote_id, quote_section_id)
+    VALUES ('SMK-R' || v_i || '-' || v_suffix, v_customer_id, (now() AT TIME ZONE 'America/Chicago')::date + 7,
+            CASE WHEN v_i = 1 THEN v_q END, v_s)
+    RETURNING id INTO v_job;
+    v_err := NULL;
+    BEGIN
+      DECLARE v_row quote_sections%ROWTYPE;
+      BEGIN
+        SELECT * INTO v_row FROM quote_sections WHERE id = v_s;
+        DELETE FROM quote_sections WHERE id = v_s;
+        v_row.quote_id := v_q2;
+        INSERT INTO quote_sections SELECT v_row.*;
+      END;
+    EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+    END;
+    IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_HAS_JOB: spray job SMK-R' || v_i || '-' || v_suffix || ' was made from this section, so the section cannot move to another booking.' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (R%) a section with a live job was re-created on a closed booking: %', v_i, v_err;
+    END IF;
+    v_refusals := v_refusals + 1;
+    v_err := NULL;
+    BEGIN
+      DECLARE v_row quote_sections%ROWTYPE;
+      BEGIN
+        SELECT * INTO v_row FROM quote_sections WHERE id = v_s;
+        DELETE FROM quote_sections WHERE id = v_s;
+        INSERT INTO quote_sections SELECT v_row.*;
+        RAISE EXCEPTION 'SMK_R_REINSERT_OK';
+      END;
+    EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+    END;
+    IF v_err IS DISTINCT FROM 'SMK_R_REINSERT_OK' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (R%) re-inserting the section on its own booking was refused: %', v_i, v_err;
+    END IF;
+    UPDATE jobs SET deleted_at = now() WHERE id = v_job;
+  END LOOP;
 
   -- J. The other direction: B is now expired. A job cannot become live on it by a direct insert (on the
   --    booking or on its section), a re-link, or an un-delete; a cancelled or deleted job may still be written,

@@ -45,8 +45,11 @@ Sol's three bypass findings on #1947 on the condition that this database guard f
    cancelled job re-pointed then revived would otherwise move): unlinking or re-pointing it is refused (`BOOKING_HAS_JOB`; cancel it and schedule a new one). A section-linked job also locks its section row
    `FOR SHARE` and re-checks it still belongs to the booking it checked, so a section moving to a closed booking
    at the same moment is caught (Luna HIGH; the stop rule fired on this mechanism, and Mason chose the rule).
-1c. A `BEFORE UPDATE OF quote_id ON public.quote_sections` row trigger (Sol HIGH, round 2): a section that a live
-   job comes from cannot move to another booking (`BOOKING_HAS_JOB`). A section-linked job's booking is its
+1c. A `BEFORE INSERT OR UPDATE OF quote_id ON public.quote_sections` row trigger (Sol HIGH, rounds 2 and 3): a
+   section that a live job comes from cannot move to another booking (`BOOKING_HAS_JOB`), also not by being
+   deleted and re-created under the same id (the section FK is deferred so save_quote can do exactly that on the
+   same booking). On re-insert the section must come back on its job's booking; for a job linked by section only
+   (the scheduler always sets both), on a booking that is not closed (Mason, 2026-11-18, "close it"). A section-linked job's booking is its
    section's booking, so a move would otherwise put a live job on a closed booking, or empty the old booking so it
    could close, without firing either trigger above. Nothing in the app moves sections today.
 2. `auto_expire_quotes` re-emitted with one more filter: it skips a booking with a live job, so the trigger
@@ -110,6 +113,8 @@ Database only. No screen change: the screen already shows a database message as 
 13. The section a live job comes from cannot be moved to another booking.
 14. A live job cannot be unlinked from its booking or re-pointed to another one; a job attach racing a section
     move to a closed booking waits for it, then is refused, with no job left on the section.
+15. A section with a live job deleted and re-created under the same id on a closed booking is refused; re-created
+    on its own booking (how save_quote saves) it goes through.
 
 ## Challenge (Astra, gpt-6-astra high, 2026-11-18): settled
 

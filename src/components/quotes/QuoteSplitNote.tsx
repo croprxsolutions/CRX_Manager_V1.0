@@ -8,7 +8,7 @@ export type SplitNote =
   | { kind: 'offer'; customer: string; split: CommissionSplit }
   | null;
 
-const LINK = 'shrink-0 font-medium text-crx-green hover:underline focus-visible:underline focus-visible:outline-none';
+const LINK = 'shrink-0 font-medium text-crx-green hover:underline focus-visible:underline focus-visible:outline-none disabled:text-gray-400 disabled:no-underline';
 
 function noteText(note: NonNullable<SplitNote>): string {
   if (note.kind === 'none') return `${note.customer} has no split. Pick one.`;
@@ -20,16 +20,17 @@ function noteText(note: NonNullable<SplitNote>): string {
  * The one fixed helper line under the commission split (DESIGN.md Inputs): always one line tall, so nothing below it
  * moves. A long note is cut with an ellipsis (full text on hover); the Use it / Keep mine links always show.
  */
-export default function QuoteSplitNote({ note, onUse, onKeep }: { note: SplitNote; onUse: () => void; onKeep: () => void }) {
+export default function QuoteSplitNote({ note, onUse, onKeep, disabled }: { note: SplitNote; onUse: () => void; onKeep: () => void; disabled?: boolean }) {
   const text = note ? noteText(note) : '';
   return (
     <p aria-live="polite" className="mt-1 flex h-5 min-w-0 items-center gap-x-2 text-xs text-secondary">
       {note && <span className={`min-w-0 truncate${note.kind === 'offer' ? ' text-nav-dark' : ''}`} title={text}>{text}</span>}
       {note?.kind === 'offer' && (
         <>
-          <button type="button" className={LINK} onClick={onUse}>Use it</button>
+          {/* Locked with the split itself (saving, converting, read-only), so a save can't miss the choice (Luna). */}
+          <button type="button" className={LINK} onClick={onUse} disabled={disabled}>Use it</button>
           <span aria-hidden="true" className="shrink-0 text-gray-400">·</span>
-          <button type="button" className={LINK} onClick={onKeep}>Keep mine</button>
+          <button type="button" className={LINK} onClick={onKeep} disabled={disabled}>Keep mine</button>
         </>
       )}
     </p>

@@ -4807,7 +4807,7 @@ export default function QuoteBuilder() {
               }}
               disabled={editLocked}
             />
-            <QuoteSplitNote note={splitNote} onUse={takeOfferedSplit} onKeep={() => setSplitNote(null)} />
+            <QuoteSplitNote note={splitNote} onUse={takeOfferedSplit} onKeep={() => setSplitNote(null)} disabled={editLocked} />
           </div>
           <div className="flex items-start justify-between gap-3 self-start rounded-lg border border-gray-200 px-3.5 py-1">
             <Switch

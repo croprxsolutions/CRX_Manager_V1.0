@@ -305,5 +305,5 @@ supabase/migrations/20261101120000_allocate_payment_error_shows_dollars.sql text
 
 # KI-31: the save_field body is pinned by the live-sweep fingerprint; keep it LF on every checkout.
 supabase/migrations/20261107140000_save_field_refuses_missing_field.sql text eol=lf
-supabase/migrations/20270127100000_security_batch_ki121_ki123.sql text eol=lf
+supabase/migrations/20270127130000_security_batch_ki121_ki123.sql text eol=lf
 scripts/smoke/security-batch-ki123-reverse.sql text eol=lf

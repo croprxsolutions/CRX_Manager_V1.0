@@ -7,7 +7,7 @@
 // payout profile), then the server writes its own activity_feed row, then Auth
 // changes the password. No row, no reset. The auth_password_reset* event types
 // are server-only: the activity_insert policy refuses them from signed-in users
-// (migration 20270127100000), so a staff member cannot fabricate one. Supabase Auth's admin password update
+// (migration 20270127130000), so a staff member cannot fabricate one. Supabase Auth's admin password update
 // already ends the target's existing sign-ins (GoTrue Logout in the same
 // transaction), so nothing else is needed for that.
 

@@ -12,5 +12,5 @@
 - **KI-124:** five end-to-end test files read the database address and public key from the test environment instead of
   hard-coded copies.
 
-Migration `20270127100000_security_batch_ki121_ki123` (record in `docs/reference/migrations.d/`). Contract:
+Migration `20270127130000_security_batch_ki121_ki123` (record in `docs/reference/migrations.d/`). Contract:
 `docs/plans/2026-11-18-security-batch-ki121-124-CONTRACT.md`. This PR targets `staging`.

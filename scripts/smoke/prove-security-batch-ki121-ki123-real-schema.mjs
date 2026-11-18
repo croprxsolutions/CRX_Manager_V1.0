@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Real-schema proof for the security batch (contract docs/plans/2026-11-18-security-batch-ki121-124-CONTRACT.md):
- *   20270127100000_security_batch_ki121_ki123.sql (the candidate)
+ *   20270127130000_security_batch_ki121_ki123.sql (the candidate)
  *   scripts/smoke/security-batch-ki123-reverse.sql (its rollback)
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
@@ -41,7 +41,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270127100000_security_batch_ki121_ki123.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270127130000_security_batch_ki121_ki123.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'security-batch-ki123-reverse.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);

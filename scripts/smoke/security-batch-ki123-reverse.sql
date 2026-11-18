@@ -1,4 +1,4 @@
--- Rollback for 20270127100000_security_batch_ki121_ki123.sql. Restores exactly what live had on 2026-11-18
+-- Rollback for 20270127130000_security_batch_ki121_ki123.sql. Restores exactly what live had on 2026-11-18
 -- (read-only inventory of anon grants in public), not a blanket re-grant, and the old last-admin guard.
 -- Run as postgres in one transaction. Objects created after the migration stay closed to anon.
 -- Objects added after 2026-11-18 are not re-granted, and listed ones that no longer exist are skipped: this fails toward less access.

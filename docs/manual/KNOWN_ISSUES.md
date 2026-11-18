@@ -242,7 +242,7 @@ and disable them on the screen for non-admins.
 **LOW · FIX IN REVIEW (not live) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #7) · Claude**
 `_guard_last_active_admin` fires only on deactivation, not a role change, so the last admin can demote themselves and
 nobody can reach Settings without database access. 5 active admins today; the screen warns. Fix: extend the guard to
-role changes. Fix in review: `20270127100000_security_batch_ki121_ki123` (the guard also refuses a role change, and two
+role changes. Fix in review: `20270127130000_security_batch_ki121_ki123` (the guard also refuses a role change, and two
 admins removing each other at once cannot both succeed).
 
 ### KI-122 — An admin password reset leaves the user's existing sign-ins open and is not audited
@@ -259,7 +259,7 @@ naming the admin before the password changes (no row, no reset). Not deployed.
 **LOW (defence in depth) · FIX IN REVIEW (not live) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #11) · Claude**
 Row security blocks every signed-out read today (all public tables have RLS and policies), but table read grants to
 the signed-out role remain, so one future policy mistake would expose data. Fix: one migration revoking those grants on
-tables the login page does not need. Table list held privately. Fix in review: `20270127100000_security_batch_ki121_ki123`
+tables the login page does not need. Table list held privately. Fix in review: `20270127130000_security_batch_ki121_ki123`
 removes every signed-out read and sequence right in `public` and the default for new tables.
 
 ### KI-124 — The public (anon) key is hard-coded in 5 end-to-end test files

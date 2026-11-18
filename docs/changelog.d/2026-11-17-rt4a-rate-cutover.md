@@ -6,4 +6,6 @@
 - While a group uses its approved rate, its rate, unit, suggested text and form, its RT-3 rows and its outcome are frozen by database triggers, and the rate lock cannot be turned off. A size added to it takes the approved rate.
 - A switch that keeps the same rate is refused when a size's saved per-acre prices are out of date.
 - A size cannot move into or out of a group that uses its approved rate; switch the group back first. Both Piksi groups are held by ID. While a switch runs, blend recipe and blend ticket lines wait.
+- Taha's review (2026-11-18): while a group uses its approved rate in a new unit, new blend recipe lines and blank-unit blend ticket lines on its sizes are refused, so switching back cannot get stuck; deleted recipes no longer block a switch back.
+- Mason (2026-11-18): a switch that changes the rate rewrites the suggested-rate text from the approved rate (for example `1.8 Lb/acre`); switching back puts the old text back.
 - Proof: `node scripts/smoke/prove-rate-cutover-real-schema.mjs` (`RATE_CUTOVER_PROOF_PASS`). No screen uses the new functions yet; the pilot runs from Mason's admin login after the live apply.

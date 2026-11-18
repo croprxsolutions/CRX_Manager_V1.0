@@ -35,12 +35,11 @@ BEGIN
      IS DISTINCT FROM 'CHECK ((event_type = ANY (ARRAY[''created''::text, ''updated''::text, ''size_added''::text, ''size_moved''::text, ''identity_corrected''::text, ''rates_set''::text, ''rates_corrected''::text])))' THEN
     RAISE EXCEPTION 'PREFLIGHT_RATE_CUTOVER_EVENT_TYPES_CHANGED';
   END IF;
-  -- Hold list (Mason, 2026-11-17: "Keep both on today's values"): each ID must still name its Piksi parent.
+  -- Hold list (Mason, 2026-11-17: "Keep both on today's values"): each ID must still name its Piksi parent, and no
+  -- other parent may carry that name. A database without either (staging's test data) passes.
   IF EXISTS (SELECT 1 FROM (VALUES ('afdae5f9-3410-4f17-975b-07a1650089ae'::uuid, 'Piksi Dust Plus'),
                                    ('c9933638-612a-407a-a4a8-6422b5e38c9c'::uuid, 'Piksi Dust Infurrow')) h(id, name)
-               LEFT JOIN public.product_parents p ON p.id = h.id
-              WHERE (p.id IS NULL AND EXISTS (SELECT 1 FROM public.product_parents))
-                 OR (p.id IS NOT NULL AND p.name IS DISTINCT FROM h.name)) THEN
+               JOIN public.product_parents p ON (p.id = h.id) <> (p.name = h.name)) THEN
     RAISE EXCEPTION 'PREFLIGHT_RATE_CUTOVER_HOLD_LIST_CHANGED: a held Piksi parent moved or was renamed';
   END IF;
 END;
@@ -153,6 +152,47 @@ REVOKE ALL ON FUNCTION public.guard_product_parent_member_source() FROM PUBLIC, 
 CREATE TRIGGER trg_product_parent_members_guard_rate_source BEFORE UPDATE OF parent_id OR DELETE
   ON public.product_parent_members FOR EACH ROW EXECUTE FUNCTION public.guard_product_parent_member_source();
 
+-- While an approved parent's unit differs from its old one, no blend recipe line and no blank-unit blend ticket line
+-- may start using one of its sizes: those lines re-read the product's unit, so a switch back (and so a rate unlock)
+-- would be refused. Ordering: _rate_cutover_plan holds SHARE on both blend tables until commit, so a blend write
+-- either finishes first (and the switch sees it) or waits and then reads the committed source here.
+CREATE FUNCTION public.guard_blend_line_rate_source() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_name text;
+BEGIN
+  IF TG_TABLE_NAME = 'blend_recipe_items' THEN
+    IF TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id
+       AND NEW.recipe_id IS NOT DISTINCT FROM OLD.recipe_id THEN
+      RETURN NEW;
+    END IF;
+  ELSE
+    IF NULLIF(btrim(NEW.rate_per_acre_unit), '') IS NOT NULL
+       OR (TG_OP = 'UPDATE' AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id
+           AND NULLIF(btrim(OLD.rate_per_acre_unit), '') IS NULL) THEN
+      RETURN NEW;
+    END IF;
+  END IF;
+  SELECT pp.name INTO v_name
+    FROM public.product_parent_members m
+    JOIN public.product_parents pp ON pp.id = m.parent_id AND pp.rate_source = 'approved'
+    JOIN public.product_parent_events e ON e.id = pp.rate_source_event_id
+   WHERE m.product_id = NEW.product_id
+     AND NULLIF(btrim(e.after_values->'legacy'->>'rate_unit'), '') IS DISTINCT FROM NULLIF(btrim(pp.rate_unit), '');
+  IF v_name IS NOT NULL THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_RATE_APPROVED_BLEND: "%" uses its approved rate in a new unit; give the blend line its own rate unit or switch "%" back first',
+      v_name, v_name USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public.guard_blend_line_rate_source() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.guard_blend_line_rate_source() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER trg_blend_recipe_items_guard_rate_source BEFORE INSERT OR UPDATE OF product_id, recipe_id
+  ON public.blend_recipe_items FOR EACH ROW EXECUTE FUNCTION public.guard_blend_line_rate_source();
+CREATE TRIGGER trg_blend_ticket_products_guard_rate_source BEFORE INSERT OR UPDATE OF product_id, rate_per_acre_unit
+  ON public.blend_ticket_products FOR EACH ROW EXECUTE FUNCTION public.guard_blend_line_rate_source();
+
 -- Mason, 2026-11-17 (decision 3): rates stay locked while any parent uses its approved rate.
 CREATE FUNCTION public.guard_product_rate_unlock() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
@@ -190,6 +230,7 @@ DECLARE
   v_cur_unit text;
   v_target_rate numeric;
   v_target_unit text;
+  v_target_text text;
   v_changes boolean;
   v_expected jsonb;
   v_approved jsonb;
@@ -293,23 +334,37 @@ BEGIN
     END IF;
     v_target_rate := (v_event.after_values->'legacy'->>'rate_per_acre')::numeric;
     v_target_unit := NULLIF(btrim(v_event.after_values->'legacy'->>'rate_unit'), '');
+    v_target_text := v_event.after_values->'legacy'->>'suggested_rate';
     v_expected := jsonb_build_object('parent_version', v_parent.parent_version, 'event_id', v_event.id);
   END IF;
   IF v_parent.product_form IN ('seed', 'each') THEN v_target_unit := NULL; END IF;
+  -- Suggested text (Mason, 2026-11-18, "Rewrite from approved"): a promote that moves the rate or unit rewrites it
+  -- from the approved row (blank with no per-acre default); restore puts the snapshot's text back.
+  IF p_direction = 'promote' THEN
+    v_target_text := CASE
+      WHEN v_target_rate IS NOT DISTINCT FROM v_parent.rate_per_acre AND v_target_unit IS NOT DISTINCT FROM v_cur_unit
+        THEN v_parent.suggested_rate
+      WHEN v_target_rate IS NULL THEN NULL
+      ELSE trim_scale(v_target_rate)::text || ' ' || v_target_unit || '/acre' END;
+  END IF;
 
   -- Blend recipes and blank-unit blend lines re-read the product's current unit; a unit change under them is refused.
+  -- A switch back skips lines of deleted recipes (the app soft-deletes); a promote counts them, since an undelete
+  -- would bring them back under the new unit.
   IF v_target_unit IS DISTINCT FROM v_cur_unit
-     AND (EXISTS (SELECT 1 FROM public.blend_recipe_items i WHERE i.product_id = ANY(v_sizes))
+     AND (EXISTS (SELECT 1 FROM public.blend_recipe_items i JOIN public.blend_recipes br ON br.id = i.recipe_id
+                   WHERE i.product_id = ANY(v_sizes) AND (p_direction = 'promote' OR br.deleted_at IS NULL))
           OR EXISTS (SELECT 1 FROM public.blend_ticket_products b WHERE b.product_id = ANY(v_sizes)
                        AND NULLIF(btrim(b.rate_per_acre_unit), '') IS NULL)) THEN
     RAISE EXCEPTION 'PRODUCT_PARENT_CUTOVER_BLEND_UNIT: a blend recipe or blend ticket line uses "%" without its own unit; the unit cannot change',
       v_parent.name;
   END IF;
 
-  v_changes := v_target_rate IS DISTINCT FROM v_parent.rate_per_acre OR v_target_unit IS DISTINCT FROM v_cur_unit;
+  v_changes := v_target_rate IS DISTINCT FROM v_parent.rate_per_acre OR v_target_unit IS DISTINCT FROM v_cur_unit
+    OR NULLIF(btrim(v_target_text), '') IS DISTINCT FROM NULLIF(btrim(v_parent.suggested_rate), '');
   -- Each size's snapshot and its per-acre prices at the target, in the shape _apply_parent_rates checks. An old
   -- unit that no longer passes for a size refuses here (PRODUCT_RATE_UNIT_INVALID) and the parent stays as it is.
-  v_preview := public.preview_parent_rates(p_parent_id, v_target_rate, v_target_unit, v_parent.suggested_rate);
+  v_preview := public.preview_parent_rates(p_parent_id, v_target_rate, v_target_unit, v_target_text);
   v_expected := v_expected || jsonb_build_object('sizes', v_preview->'sizes');
   -- An unchanged promote writes no prices, so every size's saved per-acre prices must already be right. (Restore
   -- is not refused here: switching back must stay possible.)
@@ -322,13 +377,14 @@ BEGIN
   RETURN jsonb_build_object('parent_id', p_parent_id, 'name', v_parent.name, 'direction', p_direction,
     'rate_source', v_parent.rate_source, 'outcome', v_outcome.outcome, 'changes', v_changes,
     'current', jsonb_build_object('rate_per_acre', v_parent.rate_per_acre::text, 'rate_unit', v_parent.rate_unit),
-    'target', jsonb_build_object('rate_per_acre', v_target_rate::text, 'rate_unit', v_target_unit),
+    'target', jsonb_build_object('rate_per_acre', v_target_rate::text, 'rate_unit', v_target_unit,
+                                 'suggested_rate', v_target_text),
     'expected', v_expected,
     'snapshot', CASE WHEN p_direction = 'promote' THEN jsonb_build_object('v', 1,
       'legacy', jsonb_build_object('rate_per_acre', v_parent.rate_per_acre::text, 'rate_unit', v_parent.rate_unit,
                                    'suggested_rate', v_parent.suggested_rate),
       'sizes', (SELECT jsonb_agg(jsonb_build_object('product_id', p.id, 'rate_per_acre', p.rate_per_acre::text,
-                                                    'rate_unit', p.rate_unit) ORDER BY p.id)
+                                                    'rate_unit', p.rate_unit, 'suggested_rate', p.suggested_rate) ORDER BY p.id)
                   FROM public.products p WHERE p.id = ANY(v_sizes)),
       'approved', v_approved) END);
 END;
@@ -385,7 +441,7 @@ BEGIN
   SELECT * INTO v_before FROM public.product_parents WHERE id = p_parent_id;
   IF (v_plan->>'changes')::boolean THEN
     v_apply := public._apply_parent_rates(p_parent_id, v_before.parent_version,
-      (v_plan->'target'->>'rate_per_acre')::numeric, v_plan->'target'->>'rate_unit', v_before.suggested_rate,
+      (v_plan->'target'->>'rate_per_acre')::numeric, v_plan->'target'->>'rate_unit', v_plan->'target'->>'suggested_rate',
       v_plan->'expected'->'sizes', true, v_reason);
   END IF;
   IF p_direction = 'promote' THEN
@@ -428,6 +484,7 @@ BEGIN
      OR has_function_privilege('authenticated', 'public.guard_product_rate_review_source()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.guard_product_rate_unlock()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.guard_product_parent_member_source()', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.guard_blend_line_rate_source()', 'EXECUTE')
      OR has_function_privilege('anon', 'public.preview_parent_rate_cutover(uuid,text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.commit_parent_rate_cutover(uuid,text,jsonb,text,text)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.preview_parent_rate_cutover(uuid,text)', 'EXECUTE')

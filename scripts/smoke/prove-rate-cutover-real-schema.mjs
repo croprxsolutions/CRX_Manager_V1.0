@@ -31,6 +31,9 @@ const PIKSI = 'afdae5f9-3410-4f17-975b-07a1650089ae';
 const PIKSI_SIZE = '7c7a0000-0000-4000-8000-0000000000f1';
 const INFURROW = 'c9933638-612a-407a-a4a8-6422b5e38c9c';
 const INFURROW_SIZE = '7c7a0000-0000-4000-8000-0000000000f2';
+const RECIPE = '7c7a0000-0000-4000-8000-0000000000b1';
+const DELETED_RECIPE = '7c7a0000-0000-4000-8000-0000000000b2';
+const TICKET = '7c7a0000-0000-4000-8000-0000000000c1';
 const sq = (s) => (s === null || s === undefined ? 'NULL' : `'${String(s).replaceAll("'", "''")}'`);
 const num = (n) => (n === null || n === undefined ? 'NULL' : `${n}::numeric`);
 const asAdmin = (sql) => psql(sql, { user: 'supabase_admin' });
@@ -41,7 +44,7 @@ const runCandidate = (prefix = '') => docker(['exec', '-i', NAME, 'psql', '-U', 
 // name, form, stock units, parent rate, rate unit, suggested text, tier price per size.
 const FIXTURES = [
   ['MSO', 'liquid', ['Gal'], 9.6, 'oz', '2 qt/100 Gal', [30]],
-  ['Smart', 'dry', ['Lb', 'Lb'], 1.8, 'Dry oz', null, [19.65, 20]],
+  ['Smart', 'dry', ['Lb', 'Lb'], 1.8, 'Dry oz', '1.8 dry oz/acre', [19.65, 20]],
   ['NoDefault', 'liquid', ['Gal'], 2, 'Pt', null, [40]],
   ['SeedOne', 'seed', ['Unit'], 1, null, null, [300]],
   ['Drafts', 'liquid', ['Gal'], 1, 'qt', null, [10]],
@@ -156,8 +159,9 @@ function seedFixtures() {
     INSERT INTO public.product_parent_members (product_id, parent_id, size_role, added_by) VALUES ('${INFURROW_SIZE}', '${INFURROW}', 'package', '${ADMIN}');
     UPDATE public.products SET category = 'Herbicide' WHERE id = '${SIZES.Differs[1]}';
     UPDATE public.product_parents SET is_active = false WHERE id = '${P.Inactive}';
-    INSERT INTO public.blend_recipes (id, name, recipe_type, created_by) VALUES ('7c7a0000-0000-4000-8000-0000000000b1', '[RT4] Recipe', 'generic', '${ADMIN}');
-    INSERT INTO public.blend_recipe_items (recipe_id, product_id) VALUES ('7c7a0000-0000-4000-8000-0000000000b1', '${SIZES.Blend[0]}');`);
+    INSERT INTO public.blend_recipes (id, name, recipe_type, created_by) VALUES ('${RECIPE}', '[RT4] Recipe', 'generic', '${ADMIN}');
+    INSERT INTO public.blend_recipe_items (recipe_id, product_id) VALUES ('${RECIPE}', '${SIZES.Blend[0]}');
+    INSERT INTO public.blend_tickets (id, ticket_number, uploaded_by) VALUES ('${TICKET}', 'RT4-T1', '${ADMIN}');`);
   const rates = []; const outcomes = [];
   for (const [name, [rows, outcome]] of Object.entries(REVIEW)) {
     for (const [basis, source, rec, unit, dflt, status] of rows) {
@@ -185,6 +189,19 @@ function main() {
     { input: `BEGIN; SET LOCAL session_replication_role = replica; UPDATE public.product_parents SET name = 'Piksi' WHERE id = '${PIKSI}';
       SET LOCAL session_replication_role = origin;\n${candidate}\nROLLBACK;`, allowFailure: true });
   assert.notEqual(renamed.status, 0); assert.match(renamed.stderr, /PREFLIGHT_RATE_CUTOVER_HOLD_LIST_CHANGED/, renamed.stderr);
+  // The held name on another parent (the held ID gone) refuses too; a database with neither Piksi parent (staging) applies.
+  const moved = docker(['exec', '-i', NAME, 'psql', '-U', 'supabase_admin', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'],
+    { input: `BEGIN; SET LOCAL session_replication_role = replica; DELETE FROM public.product_parent_members WHERE parent_id = '${PIKSI}'; DELETE FROM public.product_rates WHERE parent_id = '${PIKSI}';
+      DELETE FROM public.product_parent_rate_outcomes WHERE parent_id = '${PIKSI}'; DELETE FROM public.product_parents WHERE id = '${PIKSI}';
+      UPDATE public.product_parents SET name = 'Piksi Dust Plus' WHERE id = '${P.MSO}';
+      SET LOCAL session_replication_role = origin;\n${candidate}\nROLLBACK;`, allowFailure: true });
+  assert.notEqual(moved.status, 0); assert.match(moved.stderr, /PREFLIGHT_RATE_CUTOVER_HOLD_LIST_CHANGED/, moved.stderr);
+  const noPiksi = docker(['exec', '-i', NAME, 'psql', '-U', 'supabase_admin', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'],
+    { input: `BEGIN; SET LOCAL session_replication_role = replica; DELETE FROM public.product_parent_members WHERE parent_id IN ('${PIKSI}', '${INFURROW}');
+      DELETE FROM public.product_rates WHERE parent_id IN ('${PIKSI}', '${INFURROW}'); DELETE FROM public.product_parent_rate_outcomes WHERE parent_id IN ('${PIKSI}', '${INFURROW}');
+      DELETE FROM public.product_parents WHERE id IN ('${PIKSI}', '${INFURROW}');
+      SET LOCAL session_replication_role = origin;\n${candidate}\nROLLBACK;`, allowFailure: true });
+  assert.equal(noPiksi.status, 0, `a database without the Piksi parents must apply:\n${noPiksi.stderr}`);
   const applied = runCandidate();
   assert.equal(applied.status, 0, `candidate failed:\n${applied.stderr}`);
   const again = runCandidate();
@@ -242,6 +259,23 @@ function main() {
   refused(attempt(ADMIN, asUser(`r := public.commit_parent_rate_cutover('${P.Smart}', 'promote', ${sent}, 'other', 'rt4-smart-1');`)),
     /IDEMPOTENCY_PAYLOAD_MISMATCH/);
   ineligible(P.Smart, 'promote', /PRODUCT_PARENT_CUTOVER_ALREADY_APPROVED/);
+  // Suggested text is rewritten from the approved row on the parent and every size; the snapshot keeps the old text.
+  const texts = () => row(`SELECT coalesce(suggested_rate, 'null') FROM public.product_parents WHERE id = '${P.Smart}'`)
+    + '|' + row(`SELECT string_agg(coalesce(suggested_rate, 'null'), ';' ORDER BY id) FROM public.products WHERE id = ANY('{${SIZES.Smart}}');`);
+  assert.equal(texts(), '1.8 Lb/acre|1.8 Lb/acre;1.8 Lb/acre');
+  const oldTexts = row(`SELECT (after_values->'legacy'->>'suggested_rate') || '|' || (SELECT string_agg(s->>'suggested_rate', ';' ORDER BY s->>'product_id')
+    FROM jsonb_array_elements(after_values->'sizes') s) FROM public.product_parent_events WHERE id = ${promoted.event_id};`);
+  assert.equal(oldTexts, '1.8 dry oz/acre|1.8 dry oz/acre;1.8 dry oz/acre');
+
+  // Taha MED: while Smart's unit differs from its old one, no blend line may start re-reading it (rolled back).
+  const blendFrozen = /PRODUCT_PARENT_RATE_APPROVED_BLEND/;
+  refused(attempt(ADMIN, `INSERT INTO public.blend_recipe_items (recipe_id, product_id) VALUES ('${RECIPE}', '${SIZES.Smart[0]}');`), blendFrozen);
+  refused(attempt(ADMIN, `UPDATE public.blend_recipe_items SET product_id = '${SIZES.Smart[1]}' WHERE recipe_id = '${RECIPE}';`), blendFrozen);
+  refused(attempt(ADMIN, `INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id) VALUES ('${TICKET}', '${SIZES.Smart[0]}');`), blendFrozen);
+  refused(attempt(ADMIN, `INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, rate_per_acre_unit) VALUES ('${TICKET}', '${SIZES.Smart[0]}', '  ');`), blendFrozen);
+  ok(attempt(ADMIN, `INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, rate_per_acre_unit) VALUES ('${TICKET}', '${SIZES.Smart[0]}', 'Lb');`));
+  refused(attempt(ADMIN, `INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, rate_per_acre_unit) VALUES ('${TICKET}', '${SIZES.Smart[0]}', 'Lb')
+    RETURNING id INTO v; UPDATE public.blend_ticket_products SET rate_per_acre_unit = NULL WHERE id = v::uuid;`), blendFrozen);
 
   // P6: an approved parent's rates are frozen everywhere (rolled back).
   const frozen = /PRODUCT_PARENT_RATE_APPROVED/;
@@ -273,14 +307,28 @@ function main() {
   assert.equal(row(`SELECT rate_per_acre || ' ' || rate_unit FROM public.products WHERE id = '${added.product_id}';`), '1.8 Lb');
 
   // P5 back: a price change since the switch; restore brings back 1.8 Dry oz on all three sizes at today's prices.
-  raw(`UPDATE public.products SET tier1_price = 21 WHERE id = '${SIZES.Smart[0]}';`);
+  // A line of a deleted recipe (written past the freeze) does not block it; a line of a live recipe does (rolled back).
+  raw(`UPDATE public.products SET tier1_price = 21 WHERE id = '${SIZES.Smart[0]}';
+    INSERT INTO public.blend_recipes (id, name, recipe_type, created_by, deleted_at) VALUES ('${DELETED_RECIPE}', '[RT4] Deleted', 'generic', '${ADMIN}', now());
+    INSERT INTO public.blend_recipe_items (recipe_id, product_id) VALUES ('${DELETED_RECIPE}', '${SIZES.Smart[0]}');`);
+  const liveLine = docker(['exec', '-i', NAME, 'psql', '-U', 'supabase_admin', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'],
+    { input: `BEGIN; UPDATE public.blend_recipes SET deleted_at = NULL WHERE id = '${DELETED_RECIPE}';
+      SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+      SELECT set_config('request.jwt.claim.sub', '${ADMIN}', true); SET LOCAL ROLE authenticated;
+      SELECT public.preview_parent_rate_cutover('${P.Smart}', 'restore')->>'refusal'; ROLLBACK;`, allowFailure: true });
+  assert.equal(liveLine.status, 0, liveLine.stderr); assert.match(liveLine.stdout, /PRODUCT_PARENT_CUTOVER_BLEND_UNIT/, liveLine.stdout);
   const restored = go(P.Smart, 'restore', 'rt4-smart-2', { commit: true, reason: 'switch back' });
+  raw(`DELETE FROM public.blend_recipe_items WHERE recipe_id = '${DELETED_RECIPE}'; DELETE FROM public.blend_recipes WHERE id = '${DELETED_RECIPE}';`);
   assert.equal(restored.rate_source, 'legacy'); assert.equal(restored.rate_unit, 'Dry oz'); assert.equal(restored.rate_per_acre, '1.8');
   assert.equal(row(`SELECT rate_source || '|' || (rate_source_event_id IS NULL) FROM public.product_parents WHERE id = '${P.Smart}';`), 'legacy|true');
   assert.equal(row(`SELECT string_agg(rate_per_acre || ' ' || rate_unit, ';') FROM public.products WHERE id = ANY('{${SIZES.Smart}}');`), '1.8 Dry oz;1.8 Dry oz;1.8 Dry oz');
   assert.equal(row(`SELECT tier1_price_per_acre FROM public.products WHERE id = '${SIZES.Smart[0]}';`), '2.36');
   assert.equal(row(`SELECT (after_values->>'promoted_event_id') = '${promoted.event_id}' FROM public.product_parent_events WHERE id = ${restored.event_id} AND event_type = 'rates_restored';`), 't');
   ineligible(P.Smart, 'restore', /PRODUCT_PARENT_CUTOVER_ALREADY_LEGACY/);
+  // Restore puts the exact old suggested text back on the parent and every size (the added one too).
+  assert.equal(texts(), '1.8 dry oz/acre|1.8 dry oz/acre;1.8 dry oz/acre;1.8 dry oz/acre');
+  // Legacy again: blend lines on its sizes are allowed (rolled back).
+  ok(attempt(ADMIN, `INSERT INTO public.blend_recipe_items (recipe_id, product_id) VALUES ('${RECIPE}', '${SIZES.Smart[0]}');`));
 
   // No change: MSO's approved 9.6 fl_oz keeps its own "oz" spelling; only the source and version move.
   const msoSizes = md5Rows(SIZES.MSO);
@@ -292,7 +340,9 @@ function main() {
   raw(`UPDATE public.products SET tier1_price_per_acre = ${msoT1} WHERE id = '${SIZES.MSO[0]}';`);
   const mso = go(P.MSO, 'promote', 'rt4-mso-1', { commit: true });
   assert.equal(mso.changed, false); assert.equal(mso.rate_unit, 'oz'); assert.equal(mso.parent_version, msoVersion + 1);
-  assert.equal(md5Rows(SIZES.MSO), msoSizes, 'a no-change switch wrote a size');
+  assert.equal(md5Rows(SIZES.MSO), msoSizes, 'a no-change switch wrote a size (or its suggested text)');
+  // Approved but in its old unit: blend lines stay allowed (rolled back).
+  ok(attempt(ADMIN, `INSERT INTO public.blend_recipe_items (recipe_id, product_id) VALUES ('${RECIPE}', '${SIZES.MSO[0]}');`));
   // No per-acre default: the rate is blanked, then restored.
   go(P.NoDefault, 'promote', 'rt4-nodefault-1', { commit: true });
   assert.equal(row(`SELECT coalesce(rate_per_acre::text, 'null') || '|' || coalesce(rate_unit, 'null') FROM public.product_parents WHERE id = '${P.NoDefault}';`), 'null|null');

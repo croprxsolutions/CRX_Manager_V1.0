@@ -357,8 +357,9 @@ BEGIN
          (v_p[22], v_customer, 5, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-4'), v_admin, true),
          (v_p[10], v_customer, 4, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-4'), v_admin, true),
          (v_p[23], v_customer, 20, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P23'), v_admin, true);
-  INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, created_by, is_active, expires_at)
-  VALUES (v_p[22], v_customer, 7, 'manual', v_admin, true, v_t - 1);
+  -- source_id set: the standalone-insert guard (20260908130000) refuses an unsourced manual hold outside its RPC.
+  INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active, expires_at)
+  VALUES (v_p[22], v_customer, 7, 'manual', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-1'), v_admin, true, v_t - 1);
 
   -- P13 draws: an order of 60 from the booking, and a job from its section drawing 40.
   SELECT quote_id, (section_ids->>'_s')::uuid INTO v_q, v_s1 FROM smk_pp_bookings WHERE tag = 'P13';

@@ -94,6 +94,11 @@ test('PRs are grouped by kind: tooling scopes are Engineering, back-merges are l
     'docs(plans): CMP-2': 'docs',
     'Quotes redesign 2/4: quotes list': 'other',
     'refactor!: x': 'engineering',
+    'perf(products): faster search': 'fixes',
+    'perf(ci): faster checks': 'engineering',
+    'feat(products, ci): update checks': 'engineering',
+    'feat(release-flow): Slack posts': 'engineering',
+    'feat(billing 4/4): invoice PDF again': 'features',
     'Back-merge main into staging after #1858': null,
     'Merge branch main': null,
   };
@@ -114,7 +119,7 @@ test('the open card says what is in the release: top 3 per listed group, counts 
   const what = msg.attachments[0].blocks.find((b) => b.text?.text?.includes('New features')).text.text;
   assert.match(what, /^\*:sparkles: New features \(5\)\*\n• Thing 0 <https:\/\/x.example\/10\|#10>/);
   assert.match(what, /_…and 2 more_/);
-  assert.match(what, /\*:bug: Bug fixes \(1\)\*\n• Stock units cannot change once used <https:\/\/x.example\/20\|#20>/);
+  assert.match(what, /\*:bug: Fixes and improvements \(1\)\*\n• Stock units cannot change once used <https:\/\/x.example\/20\|#20>/);
   assert.match(what, /\*:hammer_and_wrench: Engineering\* 1  ·  \*:memo: Docs and records\* 1$/);
   assert.doesNotMatch(what, /held one|Back-merge|<!here>/);
   // A marker-only card (merged) has no titles, so no changes section.
@@ -139,7 +144,7 @@ test('syncCard posts a new card with group counts in its marker, then edits it i
 });
 
 test('the marker keeps group counts, and nothing else under grp', () => {
-  const m = readMarker('<!-- crx-slack {"grp":{"features":3,"fixes":2,"evil":1,"docs":-1,"other":"x"}} -->');
+  const m = readMarker('<!-- crx-slack {"grp":{"features":3,"fixes":2,"evil":1,"docs":-1,"other":"x","constructor":1,"toString":2}} -->');
   assert.deepEqual(m, { grp: { features: 3, fixes: 2 } });
 });
 

@@ -39,7 +39,7 @@ export function readMarker(body) {
   for (const k of ['gate', 'done', 'warned']) if (typeof v[k] === 'boolean') out[k] = v[k];
   for (const k of ['mig', 'orph', 'at']) if (Number.isSafeInteger(v[k]) && v[k] >= 0) out[k] = v[k];
   if (v.grp && typeof v.grp === 'object' && !Array.isArray(v.grp)) {
-    out.grp = Object.fromEntries(Object.entries(v.grp).filter(([k, n]) => k in GROUPS && Number.isSafeInteger(n) && n >= 0));
+    out.grp = Object.fromEntries(Object.entries(v.grp).filter(([k, n]) => Object.hasOwn(GROUPS, k) && Number.isSafeInteger(n) && n >= 0));
   }
   return out;
 }
@@ -54,14 +54,15 @@ export function writeMarker(body, marker) {
 // Back-merges are plumbing and left out.
 const GROUPS = {
   features: ':sparkles: New features',
-  fixes: ':bug: Bug fixes',
+  fixes: ':bug: Fixes and improvements',
   other: ':jigsaw: Other changes',
   engineering: ':hammer_and_wrench: Engineering',
   docs: ':memo: Docs and records',
 };
 const LISTED = ['features', 'fixes', 'other'];
-const TOOLING_TYPES = new Set(['ci', 'build', 'test', 'chore', 'refactor', 'perf', 'style', 'harness']);
-const TOOLING_SCOPES = /^(ci|guards?|sol|sol-accept|luna|prover|proofs|pre-push|agents?|release|hooks?|harness|local-app|staging|smoke|sweeps|deps|worktree|review|tooling)$/;
+const TOOLING_TYPES = new Set(['ci', 'build', 'test', 'chore', 'refactor', 'style', 'harness']);
+// A scope counts with its suffixes too: release-flow, sol-accept, hooks-x.
+const TOOLING_SCOPES = /^(ci|guards?|sol|luna|codex|prover|proofs?|pre-push|agents?|release|hooks?|harness|local-app|staging|smoke|sweeps|deps|worktree|review|tooling|workflows?)(-[a-z0-9-]+)?$/;
 const CONVENTIONAL = /^(\w+)(?:\(([^)]*)\))?!?:\s*/;
 export function changeGroup(title) {
   const t = String(title ?? '');
@@ -69,11 +70,12 @@ export function changeGroup(title) {
   const m = CONVENTIONAL.exec(t);
   if (!m) return 'other';
   const type = m[1].toLowerCase();
-  const scope = (m[2] ?? '').trim().toLowerCase().split(/[\s,]/)[0];
+  // Every listed scope counts: feat(products, ci) touches tooling, so it is Engineering.
+  const scopes = (m[2] ?? '').toLowerCase().split(/[\s,/]+/).filter(Boolean);
   if (type === 'docs') return 'docs';
-  if (TOOLING_TYPES.has(type) || TOOLING_SCOPES.test(scope)) return 'engineering';
+  if (TOOLING_TYPES.has(type) || scopes.some((sc) => TOOLING_SCOPES.test(sc))) return 'engineering';
   if (type === 'feat') return 'features';
-  if (type === 'fix') return 'fixes';
+  if (type === 'fix' || type === 'perf') return 'fixes';
   return 'other';
 }
 // A title without its "type(scope):" prefix, for people reading Slack.

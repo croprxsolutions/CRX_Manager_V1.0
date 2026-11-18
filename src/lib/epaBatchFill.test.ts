@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { batchDecision, epaNameMatches } from './epaBatchFill';
+import { batchDecision, epaNameMatches, errorText } from './epaBatchFill';
 import type { EpaProposalItem } from '../types';
 
 const ing = (key: string, pct: number | null, cas: string | null = '1912-24-9', cls: EpaProposalItem['class'] = 'add'): EpaProposalItem => ({
@@ -77,12 +77,21 @@ describe('fetchBatchCandidates reads', () => {
     const registry: Record<string, string[]> = JSON.parse(readFileSync(join(__dirname, '..', '..', '.claude', 'schema-registry.json'), 'utf8')).columns;
     const source = readFileSync(join(__dirname, 'epaBatchFill.ts'), 'utf8');
     const reads = [...source.matchAll(/readAll<[^>]*>\(\s*'(\w+)',\s*'([^']+)',\s*'(\w+)'/g)];
-    expect(reads).toHaveLength(9);
+    expect(reads).toHaveLength(10);
     for (const [, table, columns, order] of reads) {
       const cols = columns.split(',').map((c) => c.trim());
       for (const col of cols) expect(registry[table], `${table}.${col}`).toContain(col);
       expect(cols, `${table} order`).toContain(order);
     }
+  });
+});
+
+describe('errorText', () => {
+  it('shows the message of a plain database error object, not [object Object]', () => {
+    expect(errorText({ code: 'P0001', message: 'EPA_REGISTRATION_MISSING: EPA registration 1381-158 does not exist yet' }))
+      .toBe('EPA_REGISTRATION_MISSING: EPA registration 1381-158 does not exist yet');
+    expect(errorText(new Error('boom'))).toBe('boom');
+    expect(errorText('plain')).toBe('plain');
   });
 });
 

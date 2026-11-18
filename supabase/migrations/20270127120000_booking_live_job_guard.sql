@@ -26,6 +26,8 @@
 --      A live job linked to a booking is for that booking's customer (JOB_NEEDS_BOOKING; the scheduler always
 --      sets it; Sol HIGH r5; postflight-checked, 0 linked live jobs on live 2026-11-18), and for a signed-in caller
 --      who is neither admin nor sales rep any refusal reads as the jobs row policy's own, so reveals no booking details.
+--      A job first becoming live on a booking starts as scheduled, as the scheduler makes it, so any sales rep can
+--      cancel it (admins and system sessions exempt; Sol HIGH r6), and the booking must exist and not be deleted.
 --   1c. _enforce_section_with_live_job_stays(), a BEFORE INSERT OR UPDATE OF id, quote_id row trigger on quote_sections:
 --      a section that a live job comes from cannot move to another booking (BOOKING_HAS_JOB), including by being
 --      deleted and re-inserted under the same id on another booking (the section FK is deferred).
@@ -178,16 +180,37 @@ BEGIN
      AND NEW.customer_id IS NOT DISTINCT FROM OLD.customer_id THEN
     RETURN NEW;
   END IF;
+  -- Sol HIGH r6: a job first becoming live on a booking (inserted, linked, un-cancelled or un-deleted) starts as
+  -- scheduled, as the scheduler makes it, so any sales rep can cancel it; a rep cannot plant a job in a later
+  -- status that holds another rep's booking open. Admins (who restore jobs) and system sessions are exempt.
+  IF (NEW.quote_id IS NOT NULL OR NEW.quote_section_id IS NOT NULL) AND NEW.status <> 'scheduled'
+     AND (TG_OP = 'INSERT' OR OLD.deleted_at IS NOT NULL OR OLD.status = 'cancelled'
+          OR (OLD.quote_id IS NULL AND OLD.quote_section_id IS NULL))
+     AND auth.uid() IS NOT NULL AND NOT public.is_admin() THEN
+    RAISE EXCEPTION 'JOB_NEEDS_BOOKING: spray job % must start as scheduled to be linked to a booking. Schedule it from the booking.',
+      NEW.job_number
+      USING ERRCODE = 'P0001';
+  END IF;
   IF NEW.quote_id IS NOT NULL THEN
-    SELECT q.quote_number, q.status, q.customer_id INTO v_quote FROM public.quotes q WHERE q.id = NEW.quote_id FOR SHARE;
-    IF FOUND AND v_quote.status IN ('accepted', 'declined', 'expired', 'cancelled', 'closed_by_application', 'closed_short') THEN
+    SELECT q.quote_number, q.status, q.customer_id, q.deleted_at INTO v_quote FROM public.quotes q WHERE q.id = NEW.quote_id FOR SHARE;
+    -- Sol MED r6: a booking not visible yet (a concurrent insert) or soft-deleted cannot take a live job.
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'JOB_NEEDS_BOOKING: spray job % names a booking that does not exist.', NEW.job_number
+        USING ERRCODE = 'P0001';
+    END IF;
+    IF v_quote.deleted_at IS NOT NULL THEN
+      RAISE EXCEPTION 'BOOKING_CLOSED: booking % is deleted, so a spray job cannot be scheduled from it.',
+        v_quote.quote_number
+        USING ERRCODE = 'P0001';
+    END IF;
+    IF v_quote.status IN ('accepted', 'declined', 'expired', 'cancelled', 'closed_by_application', 'closed_short') THEN
       RAISE EXCEPTION 'BOOKING_CLOSED: booking % is %, so a spray job cannot be scheduled from it.',
         v_quote.quote_number, v_quote.status
         USING ERRCODE = 'P0001';
     END IF;
     -- Sol HIGH r5: a live job is for its booking's customer, as the scheduler always sets it, so another
     -- customer's job cannot hold someone else's booking open.
-    IF FOUND AND NEW.customer_id IS DISTINCT FROM v_quote.customer_id THEN
+    IF NEW.customer_id IS DISTINCT FROM v_quote.customer_id THEN
       RAISE EXCEPTION 'JOB_NEEDS_BOOKING: spray job % is for a different customer than booking %.',
         NEW.job_number, v_quote.quote_number
         USING ERRCODE = 'P0001';

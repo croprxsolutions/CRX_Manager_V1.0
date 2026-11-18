@@ -24,6 +24,7 @@
 --       (BOOKING_CLOSED); a cancelled job may be written; a live job on an open booking still starts
 --       J7/J8 a live job for another customer cannot link to a booking, nor move off its booking's customer;
 --       J9 a caller who is neither admin nor sales rep is refused with the row policy's generic error, no booking details
+--       J10 a sales rep cannot link a job to a booking in any status but scheduled; J11 nor to a deleted booking
 --   D   with a live job: a Partial Order of part of the booking keeps it sent; the one that draws the last
 --       booked unit closes it as accepted (Mason 2026-11-18)
 --
@@ -434,6 +435,38 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   IF v_err IS DISTINCT FROM '42501 new row violates row-level security policy for table "jobs"' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (J9) a non-rep caller was not refused generically on a closed booking: %', v_err;
+  END IF;
+  v_refusals := v_refusals + 1;
+  -- J10 (Sol HIGH r6). A sales rep cannot plant an already-invoiced job on open booking A: a job first linked
+  -- to a booking starts as scheduled, which any rep can cancel.
+  v_err := (SELECT id::text FROM profiles WHERE role = 'sales_rep' AND is_active = true ORDER BY created_at LIMIT 1);
+  IF v_err IS NULL THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: an active sales rep profile is required (the real-schema prover seeds one)';
+  END IF;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_err, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_err, true);
+  BEGIN
+    INSERT INTO jobs (job_number, customer_id, job_date, quote_id, status)
+    VALUES ('SMK-J10-' || v_suffix, v_customer_id, CURRENT_DATE + 7, v_q, 'invoiced');
+    v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  IF v_err IS NULL OR v_err NOT LIKE 'JOB_NEEDS_BOOKING: spray job SMK-J10-' || v_suffix || ' must start as scheduled to be linked to a booking.%' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (J10) a rep planted an invoiced job on a booking: %', v_err;
+  END IF;
+  v_refusals := v_refusals + 1;
+  -- J11 (Sol MED r6). A soft-deleted booking that is still sent cannot take a live job.
+  BEGIN
+    UPDATE quotes SET deleted_at = now() WHERE id = v_q;
+    INSERT INTO jobs (job_number, customer_id, job_date, quote_id)
+    VALUES ('SMK-J11-' || v_suffix, v_customer_id, CURRENT_DATE + 7, v_q);
+    v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
+  IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_CLOSED: booking % is deleted, so a spray job cannot be scheduled from it.' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (J11) a live job was linked to a deleted booking: %', v_err;
   END IF;
   v_refusals := v_refusals + 1;
   INSERT INTO jobs (job_number, customer_id, job_date, quote_id, status)

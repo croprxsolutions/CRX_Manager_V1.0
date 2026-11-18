@@ -1,5 +1,5 @@
 import type { Invoice } from '../types';
-import { takesChargeLines } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
+import { isBillSplitInvoice, takesChargeLines } from '../../supabase/functions/_shared/pdf/invoicePdf.ts';
 
 export type InvoiceRowPdfSource = Invoice & { customer_name: string; salesman_name: string | null };
 
@@ -15,6 +15,7 @@ function rowText(inv: InvoiceRowPdfSource) {
     due_date: inv.due_date || undefined,
     invoice_type: inv.invoice_type || 'chemical_sale',
     status: inv.status || 'draft',
+    bill_split_on_load: isBillSplitInvoice(inv),
     customer_name: inv.customer_name,
     salesman_name: inv.salesman_name || undefined,
     purchase_order_ref: inv.purchase_order_ref || undefined,

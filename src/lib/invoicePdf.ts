@@ -38,6 +38,7 @@ export {
   assertInvoiceLinesLoaded,
   groupReturnCreditDisplayItems,
   InvoiceDetailsUnavailableError,
+  isBillSplitInvoice,
   readsBillSplitPayers,
   loadBillSplitPayers,
   InvoiceLinesUnavailableError,

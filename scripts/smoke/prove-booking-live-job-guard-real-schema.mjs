@@ -352,6 +352,23 @@ function raceSection() {
     after: scalar(`SELECT (SELECT quote_number FROM quotes WHERE id = qs.quote_id) || '/' || (SELECT count(*) FROM jobs WHERE quote_section_id = qs.id) FROM quote_sections qs WHERE qs.id = '${s}';`) };
 }
 
+// A decline of RACE3 holds its row uncommitted; meanwhile RACE4's section, which a job linked by section only comes
+// from, is deleted and re-created under the same id on RACE3. It must wait, then be refused (Luna HIGH, #1959).
+function raceReinsert() {
+  const target = quoteId('RACE3');
+  const s = scalar(`SELECT id FROM quote_sections WHERE quote_id = '${quoteId('RACE4')}';`);
+  psql(`INSERT INTO jobs (job_number, customer_id, job_date, quote_section_id) SELECT 'J-PRV-RACE4', c.id, CURRENT_DATE + 7, '${s}' FROM customers c WHERE c.farm_name = '[PROVER] RACE4 Farm';`);
+  docker(['exec', '-d', NAME, 'psql', '-U', 'postgres', '-d', DB, '-X', '-q', '-c',
+    `BEGIN; UPDATE quotes SET status = 'declined' WHERE id = '${target}'; SELECT pg_sleep(4); COMMIT;`]);
+  wait(1500);
+  assert.equal(scalar("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(4)%' AND pid <> pg_backend_pid();"), '1',
+    'the declining session is not holding RACE3');
+  const r = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true,
+    input: `BEGIN; CREATE TEMP TABLE prv_s AS SELECT * FROM quote_sections WHERE id = '${s}'; DELETE FROM quote_sections WHERE id = '${s}'; UPDATE prv_s SET quote_id = '${target}'; INSERT INTO quote_sections SELECT * FROM prv_s; COMMIT;` });
+  return { status: r.status, output: `${r.stdout}\n${r.stderr}`,
+    after: scalar(`SELECT (SELECT status FROM quotes WHERE id = '${target}') || '/' || (SELECT quote_number FROM quotes q JOIN quote_sections qs ON qs.quote_id = q.id WHERE qs.id = '${s}');`) };
+}
+
 async function main() {
   if (REUSE) {
     // Reuse writes seed rows and replaces unit_conversions: only on a kept, network-less prover container, on a copied database.
@@ -360,7 +377,7 @@ async function main() {
     assert.ok(process.env.CRX_PROVER_DB && DB !== 'postgres', 'CRX_PROVER_REUSE needs CRX_PROVER_DB naming a copy, not postgres');
   } else buildContainer();
   seed();
-  for (const tag of ['REP', 'RACE', 'RACE2']) psql(FIXTURE(tag));
+  for (const tag of ['REP', 'RACE', 'RACE2', 'RACE3', 'RACE4']) psql(FIXTURE(tag));
 
   // 1. BEFORE: the rep's direct decline of a booking with a live job goes through.
   assert.equal(okProbe(REP_UPDATE('REP', 'declined'), REP), 'declined', 'before the candidate the rep decline should go through');
@@ -402,6 +419,11 @@ async function main() {
   assert.match(moved.output, /BOOKING_CLOSED: the booking section changed while this spray job was being scheduled/);
   assert.equal(moved.after, '[PROVER] RACE2/0');
   console.log('[case] AFTER: a job attach racing a section move to a closed booking waits for it, then is refused; no job on the section');
+  const recreated = raceReinsert();
+  assert.notEqual(recreated.status, 0, `re-creating a section with a live job on a booking being declined went through: ${recreated.output}`);
+  assert.match(recreated.output, /BOOKING_HAS_JOB: spray job J-PRV-RACE4 was made from this section, so the section cannot move to another booking/);
+  assert.equal(recreated.after, 'declined/[PROVER] RACE4');
+  console.log('[case] AFTER: re-creating a section with a live job on a booking being declined waits for it, then is refused; the section stays put');
   for (const f of REGRESSION) {
     const after = chainOutcome(f);
     assert.equal(after, before[f], `${f} ends differently after the candidate`);

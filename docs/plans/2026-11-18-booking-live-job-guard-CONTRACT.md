@@ -114,7 +114,8 @@ Database only. No screen change: the screen already shows a database message as 
 14. A live job cannot be unlinked from its booking or re-pointed to another one; a job attach racing a section
     move to a closed booking waits for it, then is refused, with no job left on the section.
 15. A section with a live job deleted and re-created under the same id on a closed booking is refused; re-created
-    on its own booking (how save_quote saves) it goes through.
+    on its own booking (how save_quote saves) it goes through. Re-created on a booking being declined at the same
+    moment, it waits for the decline (the target booking is locked `FOR SHARE` first), then is refused (Luna HIGH).
 
 ## Challenge (Astra, gpt-6-astra high, 2026-11-18): settled
 

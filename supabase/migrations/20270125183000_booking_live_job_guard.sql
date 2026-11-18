@@ -230,7 +230,12 @@ BEGIN
     -- INSERT: the section FK is deferred, so save_quote can delete and re-insert a section with a job under
     -- the same id. A live job already pointing at the new id must stay on the booking it was scheduled from
     -- (Sol HIGH r3; Mason 2026-11-18, "close it"): the job's own booking, or, for a job linked by section
-    -- only, any booking that is not closed.
+    -- only, any booking that is not closed. The target booking is locked first (as the jobs trigger does), so a
+    -- decline of it at the same moment either waits for this section and then sees the job, or is seen here.
+    IF EXISTS (SELECT 1 FROM public.jobs j
+               WHERE j.quote_section_id = NEW.id AND j.deleted_at IS NULL AND j.status <> 'cancelled') THEN
+      PERFORM 1 FROM public.quotes q WHERE q.id = NEW.quote_id FOR SHARE;
+    END IF;
     SELECT j.job_number INTO v_job_number
     FROM public.jobs j
     WHERE j.quote_section_id = NEW.id AND j.deleted_at IS NULL AND j.status <> 'cancelled'

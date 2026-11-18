@@ -30,8 +30,11 @@
 --     _save_field_app_split_invoice_impl prices each billing-set member from their own quote, on the job's date
 --     (else the invoice date). Nothing else in either body changes.
 --  4. create_invoice_from_blend_ticket locks the job's quote row (FOR UPDATE, before its section, as save_quote
---     orders them) and runs the sent-price lock before any price is read or invoice number drawn. A never-sent job
---     quote still prices the blend, exactly as Convert and Schedule Job allow (Mason, 2026-10-13/14).
+--     orders them) and runs the sent-price lock before any price is read or invoice number drawn. The job quote
+--     prices only the grower who owns it, and only if sent, written on or before the application date (ticket
+--     date, else job date) and not expired by it; every other grower bills their list price (Mason, 2026-11-18).
+--     The field-app resend refusal adds that the price can be typed; a typed per-person split price skips that
+--     grower's quote (Taha's review).
 --
 --  5. _preview_field_app_invoice_split_impl_20260908 (the invoice screen's preview) picks the same quotes per
 --     customer (no locks; the save still runs the sent-price lock), so the preview shows the price the save bills.
@@ -125,6 +128,7 @@ DECLARE
   v_name   text;
   v_key    text;
   v_cached text;
+  v_msg    text;
 BEGIN
   -- KI-81 (Mason, 2026-11-17): a field-application chemical takes a quote price only from an eligible quote
   -- (_field_app_quote_eligible) sent to the grower being billed (callers pass that one grower: "own quote
@@ -152,7 +156,16 @@ BEGIN
   LOOP
     -- Held FOR SHARE until the invoice commits, so save_quote or a send (FOR UPDATE) cannot change the
     -- prices between this check and the invoice line.
-    PERFORM public._assert_quote_prices_as_sent(v_quote);
+    BEGIN
+      PERFORM public._assert_quote_prices_as_sent(v_quote);
+    EXCEPTION WHEN raise_exception THEN
+      -- KI-81 (Taha's review): on a field-app invoice staff may also type the price instead of resending.
+      GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+      IF v_msg LIKE 'QUOTE_RESEND_REQUIRED:%' THEN
+        RAISE EXCEPTION '% Or type the price on this invoice line, then save again.', v_msg USING ERRCODE = 'P0001';
+      END IF;
+      RAISE;
+    END;
     v_quotes := v_quotes || v_quote;
   END LOOP;
 
@@ -308,6 +321,7 @@ DECLARE
   v_zero_line           jsonb;
   v_zero_lines          jsonb;
   v_zero_quoted         boolean;
+  v_app_date            date;     -- KI-81: the application date the job quote must be valid on
   -- Blend invoice approval binding (20261021070000)
   v_unmatched           int;
   v_zero_grower         boolean;
@@ -517,6 +531,10 @@ BEGIN
   END IF;
 
   v_quote_section_id := NULL;
+  -- KI-81: the application date is the ticket's date, else the job's date, else today (Chicago).
+  v_app_date := COALESCE(v_ticket.ticket_date::date,
+                         (SELECT j.job_date FROM jobs j WHERE j.id = v_ticket.job_id)::date,
+                         (now() AT TIME ZONE 'America/Chicago')::date);
   IF v_ticket.job_id IS NOT NULL THEN
     SELECT j.quote_section_id INTO v_quote_section_id FROM jobs j WHERE j.id = v_ticket.job_id;
   END IF;
@@ -528,7 +546,14 @@ BEGIN
         WHERE qs.id = v_quote_section_id
           AND q.customer_id = v_ticket.customer_id
           AND q.deleted_at IS NULL
-          AND q.id = (SELECT j.quote_id FROM jobs j WHERE j.id = v_ticket.job_id)) THEN
+          AND q.id = (SELECT j.quote_id FROM jobs j WHERE j.id = v_ticket.job_id)
+          -- KI-81 (Mason, 2026-11-18 "Yes, same rules"): as the field-app paths, the quote must have been
+          -- sent (a version exists; not a draft, declined or cancelled quote), written on or before the
+          -- application date and not expired by it. Checked after the quote row lock above.
+          AND q.status IN ('sent', 'revised', 'accepted', 'expired', 'closed_by_application', 'closed_short')
+          AND EXISTS (SELECT 1 FROM quote_versions v WHERE v.quote_id = q.id)
+          AND (q.created_at AT TIME ZONE 'America/Chicago')::date <= v_app_date
+          AND (q.expires_at IS NULL OR q.expires_at >= v_app_date)) THEN
     v_quote_section_id := NULL;
   END IF;
   -- 20261021070000: hold the quote prices still until this invoice commits, so the $0 check
@@ -565,6 +590,7 @@ BEGIN
   IF v_quote_section_id IS NOT NULL
      AND EXISTS (SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
                   WHERE (r.value->>'price_override_cents') IS NULL
+                    AND (r.value->>'customer_id')::uuid = v_ticket.customer_id  -- KI-81: own quote only
                     AND (r.value->>'share_acres')::numeric > 0) THEN
     SELECT jsonb_agg(jsonb_build_object(
              'blend_ticket_product_id', btp.id,
@@ -611,7 +637,7 @@ BEGIN
              AND NOT public._blend_quote_pick_valid_20261020(
                    v_quote_section_id, v_ticket.customer_id, b.product_id, b.unit_price_cents)) btp
     CROSS JOIN LATERAL (
-      SELECT DISTINCT COALESCE((c.value->>'tier')::int, 1) AS tier
+      SELECT DISTINCT COALESCE((c.value->>'tier')::int, 1) AS tier, (c.value->>'customer_id')::uuid AS customer_id
         FROM jsonb_array_elements(v_customers) AS c(value)
        WHERE EXISTS (
          SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
@@ -622,6 +648,7 @@ BEGIN
    WHERE NOT EXISTS (
            SELECT 1 FROM quote_items qi
             WHERE v_quote_section_id IS NOT NULL
+              AND cust.customer_id = v_ticket.customer_id  -- KI-81: another grower pays the list price
               AND qi.section_id = v_quote_section_id
               AND qi.product_id = btp.product_id
               AND qi.price_per_unit >= 0 AND qi.price_per_unit < 'Infinity'::numeric AND qi.price_per_unit = ROUND(qi.price_per_unit, 2))
@@ -666,6 +693,7 @@ BEGIN
                  COALESCE(y.price_cents = 0
                           AND EXISTS (SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
                                        WHERE (r.value->>'price_override_cents') IS NULL
+                                         AND (r.value->>'customer_id')::uuid = v_ticket.customer_id  -- KI-81
                                          AND (r.value->>'share_acres')::numeric > 0), false) AS quoted_zero,
                  EXISTS (SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
                           WHERE (r.value->>'price_override_cents') IS NOT NULL
@@ -928,7 +956,10 @@ BEGIN
         -- Goal 3 pricing: a price staff picked from this job's quote bills as quoted, but only
         -- while it still matches the current quote, product and customer; a stale or hand-set
         -- value is ignored (the pre-checks above already asked again or tier-priced the line).
-        IF public._blend_quote_pick_valid_20261020(
+        -- KI-81 (Mason, 2026-11-18): own quote only; every other grower on the ticket pays the list price.
+        IF v_customer_id IS DISTINCT FROM v_ticket.customer_id THEN
+          NULL;
+        ELSIF public._blend_quote_pick_valid_20261020(
              v_quote_section_id, v_ticket.customer_id, v_btp.product_id, v_btp.unit_price_cents) THEN
           v_unit_price   := v_btp.unit_price_cents;
           v_quoted_price := v_unit_price;
@@ -2444,7 +2475,7 @@ BEGIN
                  resolve_field_app_chemical_price(
                     v_product_id, ARRAY(SELECT jsonb_array_elements_text(v_member_fields -> m.cust)::uuid),
                     COALESCE((SELECT c.assigned_tier FROM customers c WHERE c.id = m.cust::uuid), 1),
-                    v_chem_manual, ARRAY[m.cust::uuid],
+                    v_chem_manual, CASE WHEN m.cust = ANY (COALESCE(v_caller_override, '{}'::text[])) THEN '{}'::uuid[] ELSE ARRAY[m.cust::uuid] END,  -- KI-81: a typed per-person price skips their quote
                     -- KI-81: on the date this grower's child invoice carries (the job's date first).
                     COALESCE(v_job_app_date, (p_invoice->>'invoice_date')::date,
                              (SELECT i.invoice_date FROM invoices i
@@ -2470,6 +2501,7 @@ BEGIN
         IF v_chem_manual IS NULL AND EXISTS (
           SELECT 1 FROM unnest(v_members) AS m(cust)
            WHERE COALESCE((v_chem_price_map->>m.cust)::bigint, 0) <= 0
+             AND NOT (m.cust = ANY (COALESCE(v_caller_override, '{}'::text[])))  -- KI-81: their typed price bills
         ) THEN
           RAISE EXCEPTION 'SPLIT_CHEMICAL_PRICE_UNRESOLVED: chemical line % has no resolvable price (no field quote and no tier price) for one or more co-owners — set the product''s tier pricing / a field quote, or enter a manual override, before saving', v_idx
             USING ERRCODE = 'invalid_parameter_value';
@@ -2487,7 +2519,7 @@ BEGIN
          WHERE c.id = v_rep_cust;
         v_price_res      := resolve_field_app_chemical_price(
                               v_product_id, ARRAY(SELECT jsonb_array_elements_text(v_member_fields -> v_rep_cust::text)::uuid),
-                              COALESCE(v_rep_tier, 1), v_chem_manual, ARRAY[v_rep_cust],
+                              COALESCE(v_rep_tier, 1), v_chem_manual, CASE WHEN v_rep_cust::text = ANY (COALESCE(v_caller_override, '{}'::text[])) THEN '{}'::uuid[] ELSE ARRAY[v_rep_cust::text::uuid] END,
                               COALESCE(v_job_app_date, (p_invoice->>'invoice_date')::date,
                              (SELECT i.invoice_date FROM invoices i
                                WHERE i.field_app_billing_set_id = v_set_id AND i.customer_id = v_rep_cust AND i.deleted_at IS NULL
@@ -3471,9 +3503,9 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '81bcfd088498f0cb1624f161e1a55e46', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
+        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'c7b7d17afe702f4908b9789e8d79e38f', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
         ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '14e32574403a249a9a138a2546f6809d', ARRAY['postgres', 'service_role'], 'v'),
-        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '43a7cc9d3ce8e579297410e463709c04', ARRAY['postgres', 'service_role'], 'v'),
+        ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '962abea61f909003b93cb4a430784fce', ARRAY['postgres', 'service_role'], 'v'),
         ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'fb26feb7877ba20adf8acff1b41be6c9', ARRAY['postgres'], 's')
       ) AS pin(fn, sig, body_md5, execs, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
@@ -3503,7 +3535,7 @@ BEGIN
      OR (SELECT count(*) FROM pg_proc o WHERE o.pronamespace = 'public'::regnamespace AND o.proname = 'resolve_field_app_chemical_price') <> 1
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)')) IS DISTINCT FROM '2f6fe91f7c639d953e3d8c525c06f168'
      OR (SELECT provolatile FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)')) <> 'v'
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)')) IS DISTINCT FROM '23fd278cd6d7bff920e21d9f482da9d9'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)')) IS DISTINCT FROM 'd2d182551c76b841220e9b4a5329025a'
      OR (SELECT prosecdef FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)'))
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_quote_eligible(quotes,uuid,uuid[],date)')) IS DISTINCT FROM '21eace1e5236db37b4e4e039631eefc4'
      OR (SELECT prosecdef OR provolatile <> 's' FROM pg_proc WHERE oid = to_regprocedure('public._field_app_quote_eligible(quotes,uuid,uuid[],date)'))

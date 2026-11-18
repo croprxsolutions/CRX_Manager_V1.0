@@ -15,8 +15,11 @@
   quote: the price list, as before. If an eligible quote changes while one save is pricing several growers, the
   save refuses `FIELD_APP_QUOTE_PRICE_CHANGED` ("save again") rather than price them differently.
 - The blend-ticket invoice priced from the job's quote without the lock; it now locks that quote and runs the lock
-  before any price is read or invoice number drawn (`QUOTE_RESEND_REQUIRED`). A never-sent job quote still prices
-  the blend, as Convert and Schedule Job allow.
+  before any price is read or invoice number drawn (`QUOTE_RESEND_REQUIRED`). The job quote now prices only the
+  grower who owns it, and only if it was sent, written on or before the application date and not expired by it;
+  every other grower on the ticket bills their list price (Mason, 2026-11-18).
+- On a field-app invoice the resend refusal also says the price can be typed, and a per-person typed price on a split
+  bill no longer needs that grower's quote to pass the lock.
 - The invoice screen's preview uses the same rule, so it shows what the save will bill.
 - New private `_field_app_quote_eligible` and `_field_app_sent_quote_price_cents` (no API role may run them); the private
   `resolve_field_app_chemical_price` gains the billed growers and the application date (old signature dropped; still

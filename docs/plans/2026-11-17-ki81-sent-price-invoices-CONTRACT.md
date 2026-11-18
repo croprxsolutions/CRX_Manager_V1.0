@@ -56,9 +56,11 @@ Read at `origin/staging` 10070370e (2026-11-17). Decision: Mason, 2026-11-17 (DE
 - Editing an existing draft field-app invoice re-prices its lines today (the save rebuilds them); after this change
   that rebuild uses the new rule, so an edit can now refuse or move a line from "quoted" to the price list. Live has
   0 quoted field-app lines (3 field-app invoices), so no current invoice changes; this is the intended rule going forward.
-- Blend invoices follow the lock exactly as Convert and Schedule Job do: a never-sent (draft) job quote still prices
-  the blend (Mason, 2026-10-13/14: a draft keeps its own prices). The field-app rule is narrower because its lookup
-  is not tied to a quote staff chose (Mason's 2026-11-17 answer 1).
+- Blend invoices (Mason, 2026-11-18, answering Taha's review: "Yes, same rules"): the job's quote prices a blend
+  line only for the grower who owns that quote, and only if it was sent, written on or before the application date
+  (the ticket date, else the job date) and not expired by it. Every other grower on the ticket, and the owner when the
+  job quote fails those checks, bills their list price. This replaces the earlier blend rule (a never-sent job quote
+  priced the blend for every grower). A grower's separate quote, other than the job's, does not price a blend.
 - Timing: a retry or double click runs the existing idempotency of each save unchanged; a quote re-sent in between
   is simply the newer sent price. Locks: field-app saves take FOR SHARE on eligible quotes (shared locks never block
   each other, so two invoice saves cannot deadlock on quotes); the blend invoice takes FOR UPDATE on its one job quote.
@@ -78,7 +80,8 @@ Database only, one PR to `staging`; the screens already show server errors. No s
 4. When the only quote on the field is a draft, declined, cancelled or deleted quote, or another customer's, or expired before the application date, then it bills the tier price.
 5. When two eligible quotes list the product on the field at different prices, then it refuses FIELD_APP_QUOTE_PRICE_CONFLICT; a manual price saves.
 6. Split-bill save: cases 1, 2 and 4 through `_save_field_app_split_invoice_impl`.
-7. Blend invoice: the job's quote re-priced and not re-sent refuses QUOTE_RESEND_REQUIRED; sent price bills; never-sent quote bills as today.
+7. Blend invoice: the job's quote re-priced and not re-sent refuses QUOTE_RESEND_REQUIRED; sent price bills; a never-sent,
+   declined, expired or later-written job quote bills the list price; on a shared field only the quote's grower bills it.
 9. When a field-app save holds a quote and save_quote edits that quote's price at once, then save_quote waits and the invoice bills the sent price.
 8. Rollback script restores all five bodies byte-identical (md5).
 10. Own quote only: on a shared field only grower B has a sent quote; B bills it, A bills A's tier (single and split saves).
@@ -152,3 +155,14 @@ Mason, 2026-11-17 (in session):
   price the others): pricing is now per grower, so both go away.
 - The preview runs no sent-price lock (it is read-only); a quote changed and not re-sent previews its current price and
   the save refuses "send the quote again", which is the message the grower-facing step needs.
+
+## PR review (Taha, 2026-11-18)
+
+- Blend invoices follow decisions 1, 3 and 4 (Mason, 2026-11-18): see the blend rule above; smoke B1-B7.
+- Split save: a grower whose per-person price was typed is not looked up on their quote, so a quote needing a resend
+  does not block the typed price, and the other growers keep their own price and source.
+- Field-app paths: the resend refusal adds "Or type the price on this invoice line, then save again." The quote and
+  blend paths keep the shared message (they have no typed price).
+- Left as they are, to raise with Mason separately: a lower price recorded through save_quote after the send bills
+  without a resend (27 Oct override rule); a quote revised after the application bills the later sent version (the
+  date rule reads the quote's creation date).

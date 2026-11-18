@@ -263,13 +263,13 @@ function refusedProbe(sql, pattern, uid) {
 }
 
 const id = (s) => `a81a81a8-0000-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), A = id('c1'), B = id('c2'), C = id('c3'), G = id('f1'), F = id('f2'), P = id('d1'), BP = id('d2');
+const ADMIN = id('a1'), A = id('c1'), B = id('c2'), C = id('c3'), G = id('f1'), F = id('f2'), H = id('f3'), P = id('d1'), BP = id('d2');
 const FNS = ['create_invoice_from_blend_ticket', '_save_field_app_invoice_impl_20260714', '_save_field_app_split_invoice_impl',
   '_preview_field_app_invoice_split_impl_20260908', 'resolve_field_app_chemical_price', '_field_app_sent_quote_price_cents', '_field_app_quote_eligible'];
 const OLD = 'create_invoice_from_blend_ticket:a6f5c6e72d6632313549313b34f406ad,_save_field_app_invoice_impl_20260714:0f5da38476fe174cd25c9bf3e364055f,'
   + '_save_field_app_split_invoice_impl:a69f21d8e9f32fc6fecb38ac3a54801c,_preview_field_app_invoice_split_impl_20260908:83f6600412ced085d0876a3c7339ff12,'
   + 'resolve_field_app_chemical_price:d2617d60d7b6e5b922bc3e3be4e5850b';
-const NEW = 'create_invoice_from_blend_ticket:c7b7d17afe702f4908b9789e8d79e38f,_save_field_app_invoice_impl_20260714:14e32574403a249a9a138a2546f6809d,'
+const NEW = 'create_invoice_from_blend_ticket:ec10eefd63439cf1b8e24becf7f2ccf8,_save_field_app_invoice_impl_20260714:14e32574403a249a9a138a2546f6809d,'
   + '_save_field_app_split_invoice_impl:962abea61f909003b93cb4a430784fce,_preview_field_app_invoice_split_impl_20260908:fb26feb7877ba20adf8acff1b41be6c9,'
   + 'resolve_field_app_chemical_price:2f6fe91f7c639d953e3d8c525c06f168,_field_app_sent_quote_price_cents:d2d182551c76b841220e9b4a5329025a,'
   + '_field_app_quote_eligible:21eace1e5236db37b4e4e039631eefc4';
@@ -289,9 +289,10 @@ function seed() {
       ('${P}', '[PROVER] KI81 Gallon chem', 'K81-GAL', 'liquid', 'Gal', 'Gal', 'oz', 'Gal', 5, 10, 10, 10, true),
       ('${BP}', '[PROVER] KI81 Blend chem', 'K81-BLEND', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 5, 10, 10, 10, true);
     INSERT INTO public.fields (id, customer_id, field_name, total_acres, is_active) VALUES
-      ('${G}', '${A}', '[PROVER] KI81 field A', 100, true), ('${F}', '${A}', '[PROVER] KI81 field A+B', 100, true);
+      ('${G}', '${A}', '[PROVER] KI81 field A', 100, true), ('${F}', '${A}', '[PROVER] KI81 field A+B', 100, true),
+      ('${H}', '${B}', '[PROVER] KI81 field B', 100, true);
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary, price_override_cents) VALUES
-      ('${G}', '${A}', 100, true, NULL), ('${F}', '${A}', 50, true, NULL), ('${F}', '${B}', 50, false, NULL);
+      ('${G}', '${A}', 100, true, NULL), ('${F}', '${A}', 50, true, NULL), ('${F}', '${B}', 50, false, NULL), ('${H}', '${B}', 100, true, NULL);
     DELETE FROM public.app_settings WHERE setting_key = 'per_line_split_billing_enabled';
     INSERT INTO public.app_settings (setting_key, setting_value) VALUES ('per_line_split_billing_enabled', 'true');`);
   // Seeding helpers for the chain (test data only, never shipped). k81.quote writes a quote, one section on the
@@ -404,7 +405,7 @@ function seed() {
         p_by, NULL, 'k81-split-' || gen_random_uuid());
       RETURN (SELECT sum(total_amount_cents) FROM invoices WHERE invoice_group_id = (v_res->>'invoice_group_id')::uuid AND deleted_at IS NULL);
     END $f$;`);
-  console.log('[prover] committed test rows: growers A, B, C; field G (A) and field F (A 50% / B 50%); a $10.00 Gal chemical and a blend chemical');
+  console.log('[prover] committed test rows: growers A, B, C; field G (A), field F (A 50% / B 50%) and field H (B); a $10.00 Gal chemical and a blend chemical');
 }
 
 function runChain() {
@@ -488,7 +489,7 @@ async function main() {
   const after = runChain();
   assert.equal(after.status, 0, after.output);
   assert.match(after.output, /SMOKE_PASS_ROLLBACK/);
-  console.log('[case] F1-F8, P1-P3, X1-X4, B1-B3 pass: sent price bills; a planted price record refuses; unsent change refuses; recorded change bills; ineligible quotes give the tier price; two prices refuse, a typed price saves; a co-owner\'s quote prices only that co-owner, only on a field that co-owner has a share of; a quote written after the application date does not count; the preview shows what the save bills; split and blend follow the same rule');
+  console.log('[case] F1-F8, P1-P3, X1-X4, B1-B11 pass: sent price bills; a planted price record refuses; unsent change refuses; recorded change bills; ineligible quotes give the tier price; two prices refuse, a typed price saves; a co-owner\'s quote prices only that co-owner, only on a field that co-owner has a share of; a quote written after the application date does not count; the preview shows what the save bills; split and blend follow the same rule; a blend co-owner bills their own quote, and a job quote that prices nobody is not checked');
 
   await concurrencyCase();
   grantCase();

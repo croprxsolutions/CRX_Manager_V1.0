@@ -17,7 +17,8 @@
 - The blend-ticket invoice priced from the job's quote without the lock; it now locks that quote and runs the lock
   before any price is read or invoice number drawn (`QUOTE_RESEND_REQUIRED`). The job quote now prices only the
   grower who owns it, and only if it was sent, written on or before the application date and not expired by it;
-  every other grower on the ticket bills their list price (Mason, 2026-11-18).
+  every other grower on the ticket is priced from their own quote as on a field-app invoice, else their list price
+  (Mason, 2026-11-18). A job quote that prices nobody on the ticket is no longer locked or checked.
 - On a field-app invoice the resend refusal also says the price can be typed, and a per-person typed price on a split
   bill no longer needs that grower's quote to pass the lock.
 - The invoice screen's preview uses the same rule, so it shows what the save will bill.

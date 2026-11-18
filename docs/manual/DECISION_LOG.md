@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-18 — #1946 (KI-81): a blend co-owner is priced from their own quote
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, use B's quote").** Answering Taha's re-review of PR #1946: on a blend ticket, a grower who does not own the job's quote is priced from their own sent, valid quote, as a field-application invoice prices them, else their list price. This replaces the sentence below that every other grower bills their list price.
+**What it does:** a shared field bills each grower the same price whether it is invoiced from a blend ticket or a field application.
+
 ## 2026-11-18 — #1946 (KI-81): blend-ticket invoices follow the same quote rules
 
 **Decision (Mason, in chat, 2026-11-18: "Yes, same rules").** Answering Taha's review of PR #1946: a blend-ticket invoice follows decisions "Own quote only", "Sent + not expired" and "Valid + written before". The job's quote prices a blend line only for the grower who owns it, and only if it was sent, written on or before the application date and not expired by it; every other grower on the ticket bills their list price. This replaces the earlier blend rule that billed the job's quote price (draft quotes included) to every grower on the ticket.

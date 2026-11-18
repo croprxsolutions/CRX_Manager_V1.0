@@ -32,7 +32,9 @@
 --  4. create_invoice_from_blend_ticket locks the job's quote row (FOR UPDATE, before its section, as save_quote
 --     orders them) and runs the sent-price lock before any price is read or invoice number drawn. The job quote
 --     prices only the grower who owns it, and only if sent, written on or before the application date (ticket
---     date, else job date) and not expired by it; every other grower bills their list price (Mason, 2026-11-18).
+--     date, else job date) and not expired by it; every other grower is priced from their own quote as the
+--     field-app paths are (2), else their list price (Mason, 2026-11-18). When the owner has no per-unit share the
+--     job quote prices nothing and is not locked or checked (Taha's re-review).
 --     The field-app resend refusal adds that the price can be typed; a typed per-person split price skips that
 --     grower's quote (Taha's review).
 --
@@ -322,6 +324,10 @@ DECLARE
   v_zero_lines          jsonb;
   v_zero_quoted         boolean;
   v_app_date            date;     -- KI-81: the application date the job quote must be valid on
+  v_own_prices          jsonb := '{}'::jsonb;  -- KI-81: each other grower's own sent-quote price, "grower|product"
+  v_own_row             record;
+  v_own_cents           bigint;
+  v_own_msg             text;
   -- Blend invoice approval binding (20261021070000)
   v_unmatched           int;
   v_zero_grower         boolean;
@@ -556,6 +562,16 @@ BEGIN
           AND (q.expires_at IS NULL OR q.expires_at >= v_app_date)) THEN
     v_quote_section_id := NULL;
   END IF;
+  -- KI-81 (Taha's re-review, 2026-11-18): the job's quote prices only its owner's per-unit share. When the
+  -- owner has none on this ticket the quote prices nothing, so it is neither locked nor held to the
+  -- sent-price lock: another grower's invoice is never refused because the owner's quote needs a resend.
+  IF v_quote_section_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
+        WHERE (r.value->>'price_override_cents') IS NULL
+          AND (r.value->>'customer_id')::uuid = v_ticket.customer_id
+          AND (r.value->>'share_acres')::numeric > 0) THEN
+    v_quote_section_id := NULL;
+  END IF;
   -- 20261021070000: hold the quote prices still until this invoice commits, so the $0 check
   -- below and the billing loop read the same prices (an approval covers only what it showed).
   -- KI-81 (Mason, 2026-11-17): the job's quote row first (save_quote's lock order), then the
@@ -577,6 +593,50 @@ BEGIN
                    WHERE btp.blend_ticket_id = p_blend_ticket_id AND btp.product_id IS NOT NULL)
    ORDER BY p.id
      FOR SHARE OF p;
+
+  -- KI-81 (Mason, 2026-11-18, "Yes, use B's quote"): a grower who does not own the job's quote is priced from
+  -- their OWN quote, as the field-application invoices are (_field_app_sent_quote_price_cents: a quote sent
+  -- to that grower for a ticket field where they have a per-unit share, written on or before the application date, not expired
+  -- by it, its prices as sent, one price), else their list price. Worked out here, before any price check
+  -- or invoice number, for each such grower with a per-unit share and each product with a rate; the checks
+  -- and the billing loop below read this map. The helper holds those quotes FOR SHARE until commit.
+  FOR v_own_row IN
+    SELECT DISTINCT (r.value->>'customer_id')::uuid AS customer_id, btp.product_id
+      FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
+     CROSS JOIN blend_ticket_products btp
+     WHERE btp.blend_ticket_id = p_blend_ticket_id
+       AND btp.product_id IS NOT NULL
+       AND COALESCE(btp.rate_per_acre, 0) > 0
+       AND (r.value->>'price_override_cents') IS NULL
+       AND (r.value->>'share_acres')::numeric > 0
+       AND (r.value->>'customer_id')::uuid IS DISTINCT FROM v_ticket.customer_id
+     ORDER BY 1, 2
+  LOOP
+    BEGIN
+      v_own_cents := public._field_app_sent_quote_price_cents(
+        v_own_row.product_id,
+        -- only the fields where this grower has a per-unit share, as the split save passes each member's fields
+        ARRAY(SELECT DISTINCT (r.value->>'field_id')::uuid
+                FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
+               WHERE (r.value->>'customer_id')::uuid = v_own_row.customer_id
+                 AND (r.value->>'price_override_cents') IS NULL
+                 AND (r.value->>'share_acres')::numeric > 0
+               ORDER BY 1),
+        ARRAY[v_own_row.customer_id], v_app_date);
+    EXCEPTION WHEN raise_exception THEN
+      -- A blend ticket has no per-grower typed price, so the grower's quote is fixed or resent instead.
+      GET STACKED DIAGNOSTICS v_own_msg = MESSAGE_TEXT;
+      IF v_own_msg LIKE 'QUOTE_RESEND_REQUIRED:%' OR v_own_msg LIKE 'FIELD_APP_QUOTE_PRICE_CONFLICT:%' THEN
+        RAISE EXCEPTION '%', regexp_replace(v_own_msg,
+          ' (Or type the price on this invoice line|Type the agreed price on that line), then save again.$',
+          ' Fix or resend that grower''s quote, then create this invoice again.') USING ERRCODE = 'P0001';
+      END IF;
+      RAISE;
+    END;
+    IF v_own_cents IS NOT NULL THEN
+      v_own_prices := v_own_prices || jsonb_build_object(v_own_row.customer_id::text || '|' || v_own_row.product_id::text, v_own_cents);
+    END IF;
+  END LOOP;
 
   -- Goal 3 pricing (20261020210000), both before any invoice number or row:
   -- (1) The job's quote lists a product more than once at different prices. Taking one at
@@ -652,6 +712,7 @@ BEGIN
               AND qi.section_id = v_quote_section_id
               AND qi.product_id = btp.product_id
               AND qi.price_per_unit >= 0 AND qi.price_per_unit < 'Infinity'::numeric AND qi.price_per_unit = ROUND(qi.price_per_unit, 2))
+     AND NOT (v_own_prices ? (cust.customer_id::text || '|' || btp.product_id::text))  -- KI-81: own quote
      AND public._blend_tier_price_cents_20261020(cust.tier, btp.tier1_price, btp.tier2_price, btp.tier3_price) IS NULL;
   IF v_unpriced IS NOT NULL THEN
     RAISE EXCEPTION 'BLEND_TICKET_PRICE_MISSING: product(s) have no price on the price list: %', v_unpriced;
@@ -694,7 +755,13 @@ BEGIN
                           AND EXISTS (SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
                                        WHERE (r.value->>'price_override_cents') IS NULL
                                          AND (r.value->>'customer_id')::uuid = v_ticket.customer_id  -- KI-81
-                                         AND (r.value->>'share_acres')::numeric > 0), false) AS quoted_zero,
+                                         AND (r.value->>'share_acres')::numeric > 0), false)
+                 -- KI-81: another grower's own quote lists it at $0
+                 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
+                             WHERE (r.value->>'price_override_cents') IS NULL
+                               AND (r.value->>'share_acres')::numeric > 0
+                               AND (r.value->>'customer_id')::uuid IS DISTINCT FROM v_ticket.customer_id
+                               AND (v_own_prices ->> (((r.value->>'customer_id')::uuid)::text || '|' || y.product_id::text))::bigint = 0) AS quoted_zero,
                  EXISTS (SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
                           WHERE (r.value->>'price_override_cents') IS NOT NULL
                             AND (r.value->>'share_acres')::numeric > 0) AS in_grower_share
@@ -956,9 +1023,14 @@ BEGIN
         -- Goal 3 pricing: a price staff picked from this job's quote bills as quoted, but only
         -- while it still matches the current quote, product and customer; a stale or hand-set
         -- value is ignored (the pre-checks above already asked again or tier-priced the line).
-        -- KI-81 (Mason, 2026-11-18): own quote only; every other grower on the ticket pays the list price.
+        -- KI-81 (Mason, 2026-11-18): the job's quote prices only its owner; every other grower takes the
+        -- price from their own quote worked out above, else the list price.
         IF v_customer_id IS DISTINCT FROM v_ticket.customer_id THEN
-          NULL;
+          v_unit_price := (v_own_prices ->> (v_customer_id::text || '|' || v_btp.product_id::text))::bigint;
+          IF v_unit_price IS NOT NULL THEN
+            v_quoted_price := v_unit_price;
+            v_price_source := 'quoted';
+          END IF;
         ELSIF public._blend_quote_pick_valid_20261020(
              v_quote_section_id, v_ticket.customer_id, v_btp.product_id, v_btp.unit_price_cents) THEN
           v_unit_price   := v_btp.unit_price_cents;
@@ -3503,7 +3575,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'c7b7d17afe702f4908b9789e8d79e38f', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
+        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'ec10eefd63439cf1b8e24becf7f2ccf8', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
         ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '14e32574403a249a9a138a2546f6809d', ARRAY['postgres', 'service_role'], 'v'),
         ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '962abea61f909003b93cb4a430784fce', ARRAY['postgres', 'service_role'], 'v'),
         ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'fb26feb7877ba20adf8acff1b41be6c9', ARRAY['postgres'], 's')

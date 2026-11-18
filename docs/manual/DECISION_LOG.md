@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-18 — #1879 may have one more Sol round
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, one more round").** PR #1879 (brand quantities on paperwork) may have one more Sol round (round 6 as the counter reads it).
+**Why:** the new head only merges current `staging` into the branch, with no change to the PR's own code; Sol now reviews it against `origin/staging`.
+**What it does:** unlocks one Sol review of the new head. Every other gate is unchanged: it still needs a clean Sol review and green checks before it merges into `staging`.
+
 ## 2026-11-17 — #1879 and #1940 may have one more Sol round each
 
 **Decision (Mason, in chat, 2026-11-17: "Yes, confirmed").** PR #1879 (brand quantities on paperwork) and PR #1940 (inventory cleanup KI-161/150/163) may each have one more Sol round (round 21 and round 20 as the counter reads them).

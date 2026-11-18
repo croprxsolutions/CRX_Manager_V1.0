@@ -5,6 +5,7 @@ import { describeSplit } from '../../lib/commissionSplitSource';
 export type SplitNote =
   | { kind: 'from'; customer: string; split: CommissionSplit }
   | { kind: 'none'; customer: string }
+  | { kind: 'kept'; customer: string }
   | { kind: 'offer'; customer: string; split: CommissionSplit }
   | null;
 
@@ -12,6 +13,7 @@ const LINK = 'shrink-0 font-medium text-crx-green hover:underline focus-visible:
 
 function noteText(note: NonNullable<SplitNote>): string {
   if (note.kind === 'none') return `${note.customer} has no split. Pick one.`;
+  if (note.kind === 'kept') return `${note.customer} has no split. Yours is kept.`;
   if (note.kind === 'from') return note.split.splits.length ? `From ${note.customer}'s split.` : `From ${note.customer}'s split: no commission.`;
   return `Use ${note.customer}'s split (${describeSplit(note.split)})?`;
 }

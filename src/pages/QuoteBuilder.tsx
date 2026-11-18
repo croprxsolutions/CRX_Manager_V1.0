@@ -577,10 +577,11 @@ export default function QuoteBuilder() {
   // changed it this session (see src/lib/commissionSplitConcurrency.ts).
   const loadedCommissionSplitRef = useRef<CommissionSplit | null>(null);
   const commissionSplitTouchedRef = useRef(false);
-  // Where the split came from, or a pending choice to take the customer's (plan 2026-11-18); and whether someone
-  // typed it by hand, which a customer change must never overwrite.
+  // Where the split came from, or a pending choice to take the customer's (plan 2026-11-18); and the split the app
+  // last put there. A split that differs from it was changed by hand, which a customer change must never overwrite
+  // (a touch that leaves the same split is not a change: Taha's test, 18 Nov).
   const [splitNote, setSplitNote] = useState<SplitNote>(null);
-  const splitTypedRef = useRef(false);
+  const autoSplitRef = useRef<CommissionSplit>(NEW_QUOTE_SPLIT);
   const [quoteNumber, setQuoteNumber] = useState('');
   // Only a new quote allocates a number; an existing quote's number arrives with its row.
   const [quoteNumberLoading, setQuoteNumberLoading] = useState(!id);
@@ -1522,7 +1523,7 @@ export default function QuoteBuilder() {
     loadedCommissionSplitRef.current = q.commission_split ?? null;
     commissionSplitTouchedRef.current = false;
     setSplitNote(null);
-    splitTypedRef.current = false;
+    autoSplitRef.current = q.commission_split ?? { splits: [] };
     setQuoteCreatedAt(q.created_at || null);
     savedLineIdsRef.current = new Map(
       localSections.flatMap((s) => s.items)
@@ -1727,12 +1728,15 @@ export default function QuoteBuilder() {
   // by hand, or a saved quote's, is only replaced when the user picks Use it.
   const applyCustomerSplit = (cust: QuoteCustomer) => {
     const theirs = customerSplit(cust.default_commission_split);
-    if (isEditing || splitTypedRef.current) {
-      setSplitNote(theirs && !sameSplit(theirs, commissionSplit) ? { kind: 'offer', customer: cust.farm_name, split: theirs } : null);
+    if (isEditing || !sameSplit(commissionSplit, autoSplitRef.current)) {
+      // Say why the split stayed when the customer has none to offer.
+      if (!theirs) setSplitNote({ kind: 'kept', customer: cust.farm_name });
+      else setSplitNote(sameSplit(theirs, commissionSplit) ? null : { kind: 'offer', customer: cust.farm_name, split: theirs });
       return;
     }
     // A customer never given a split starts the blank row; an empty split is "no commission" and is taken as is.
     setCommissionSplit(theirs ?? NEW_QUOTE_SPLIT);
+    autoSplitRef.current = theirs ?? NEW_QUOTE_SPLIT;
     commissionSplitTouchedRef.current = true;
     setSplitNote(theirs ? { kind: 'from', customer: cust.farm_name, split: theirs } : { kind: 'none', customer: cust.farm_name });
   };
@@ -1740,7 +1744,7 @@ export default function QuoteBuilder() {
     if (splitNote?.kind !== 'offer') return;
     setCommissionSplit(splitNote.split);
     commissionSplitTouchedRef.current = true;
-    splitTypedRef.current = false;
+    autoSplitRef.current = splitNote.split;
     setSplitNote({ kind: 'from', customer: splitNote.customer, split: splitNote.split });
   };
 
@@ -4801,7 +4805,6 @@ export default function QuoteBuilder() {
               value={commissionSplit}
               onChange={(val) => {
                 commissionSplitTouchedRef.current = true;
-                splitTypedRef.current = true;
                 setSplitNote((note) => (note?.kind === 'offer' ? note : null));
                 setCommissionSplit(val);
               }}

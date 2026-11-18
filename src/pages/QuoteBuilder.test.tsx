@@ -6749,4 +6749,30 @@ describe('QuoteBuilder commission split from the customer', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Use it' })).not.toBeInTheDocument());
     expect(percent(1)).toBe('90');
   });
+
+  // Taha's manual test, 18 Nov: Big Sky, then Cedar Creek, kept 60/40 with no note at all.
+  it('a touch that leaves the customer\'s split as it was does not count as typed: the next customer still resets it', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Big Sky Farms 18');
+    await waitFor(() => expect(percent(1)).toBe('60'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '61' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '60' } });
+    await pick('Cedar Creek Farms 12');
+    await waitFor(() => expect(screen.queryByRole('spinbutton', { name: 'Commission percentage for split 2' })).not.toBeInTheDocument());
+    expect(percent(1)).toBe('100');
+    expect(screen.getByText('Cedar Creek Farms 12 has no split. Pick one.')).toBeInTheDocument();
+  });
+
+  it('a split changed by hand stays for a customer with none, and the note says it was kept', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Big Sky Farms 18');
+    await waitFor(() => expect(percent(1)).toBe('60'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '70' } });
+    await pick('Cedar Creek Farms 12');
+    expect(await screen.findByText('Cedar Creek Farms 12 has no split. Yours is kept.')).toBeInTheDocument();
+    expect(percent(1)).toBe('70');
+    expect(percent(2)).toBe('40');
+  });
 });

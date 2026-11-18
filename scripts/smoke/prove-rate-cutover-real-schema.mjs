@@ -29,6 +29,8 @@ const REP = USERS.rep;
 const OLD_ADMIN = '7c7a0000-0000-4000-8000-0000000000a9';
 const PIKSI = 'afdae5f9-3410-4f17-975b-07a1650089ae';
 const PIKSI_SIZE = '7c7a0000-0000-4000-8000-0000000000f1';
+const INFURROW = 'c9933638-612a-407a-a4a8-6422b5e38c9c';
+const INFURROW_SIZE = '7c7a0000-0000-4000-8000-0000000000f2';
 const sq = (s) => (s === null || s === undefined ? 'NULL' : `'${String(s).replaceAll("'", "''")}'`);
 const num = (n) => (n === null || n === undefined ? 'NULL' : `${n}::numeric`);
 const asAdmin = (sql) => psql(sql, { user: 'supabase_admin' });
@@ -62,6 +64,8 @@ const REVIEW = {
   Differs: [[['per_acre', 'house_standard', 1, 'qt', true, 'approved']], 'approved_default'],
   Inactive: [[['per_acre', 'house_standard', 1, 'qt', true, 'approved']], 'approved_default'],
   Piksi: [[['per_acre', 'house_standard', 18, 'mg', true, 'approved']], 'approved_default'],
+  // Held too; given an approved default here so only the hold can refuse it.
+  Infurrow: [[['per_acre', 'house_standard', 18, 'mg', true, 'approved']], 'approved_default'],
 };
 
 const MK = `
@@ -137,13 +141,19 @@ function seedFixtures() {
     ok(attempt(ADMIN, `PERFORM rt4_proof.rates(${sq(name)}, ${num(rate)}, ${sq(unit)}, ${sq(text)});`, { commit: true }));
   }
   // Held parent (Mason, 2026-11-17), at its live ID; a size whose category differs; an inactive parent; a blend recipe.
-  P.Piksi = PIKSI;
+  P.Piksi = PIKSI; P.Infurrow = INFURROW;
   raw(`INSERT INTO public.product_parents (id, name, product_form, rate_per_acre, rate_unit, suggested_rate, created_by, updated_by)
       VALUES ('${PIKSI}', 'Piksi Dust Plus', 'dry', 18, 'MG', '18 grams per Acre', '${ADMIN}', '${ADMIN}');
     INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, rate_unit, rate_per_acre, suggested_rate,
         tier1_price, tier2_price, tier3_price, pricing_version, is_active)
       VALUES ('${PIKSI_SIZE}', 'Piksi Dust Plus - 1800G Jar', 'RT4-PIKSI', 'dry', 'MG', 'MG', 'MG', 18, '18 grams per Acre', 0.2, 0.2, 0.2, 1, true);
     INSERT INTO public.product_parent_members (product_id, parent_id, size_role, added_by) VALUES ('${PIKSI_SIZE}', '${PIKSI}', 'package', '${ADMIN}');
+    INSERT INTO public.product_parents (id, name, product_form, rate_per_acre, rate_unit, suggested_rate, created_by, updated_by)
+      VALUES ('${INFURROW}', 'Piksi Dust Infurrow', 'dry', 18, 'MG', '18 grams per Acre', '${ADMIN}', '${ADMIN}');
+    INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, rate_unit, rate_per_acre, suggested_rate,
+        tier1_price, tier2_price, tier3_price, pricing_version, is_active)
+      VALUES ('${INFURROW_SIZE}', 'Piksi Dust Infurrow - Jar', 'RT4-INFURROW', 'dry', 'MG', 'MG', 'MG', 18, '18 grams per Acre', 0.2, 0.2, 0.2, 1, true);
+    INSERT INTO public.product_parent_members (product_id, parent_id, size_role, added_by) VALUES ('${INFURROW_SIZE}', '${INFURROW}', 'package', '${ADMIN}');
     UPDATE public.products SET category = 'Herbicide' WHERE id = '${SIZES.Differs[1]}';
     UPDATE public.product_parents SET is_active = false WHERE id = '${P.Inactive}';
     INSERT INTO public.blend_recipes (id, name, recipe_type, created_by) VALUES ('7c7a0000-0000-4000-8000-0000000000b1', '[RT4] Recipe', 'generic', '${ADMIN}');
@@ -185,6 +195,7 @@ function main() {
 
   // P2: refusals in the plan.
   ineligible(P.Piksi, 'promote', /PRODUCT_PARENT_CUTOVER_HELD/);
+  ineligible(P.Infurrow, 'promote', /PRODUCT_PARENT_CUTOVER_HELD/);
   ineligible(P.Drafts, 'promote', /PRODUCT_PARENT_CUTOVER_DRAFTS/);
   ineligible(P.Needs, 'promote', /PRODUCT_PARENT_CUTOVER_NOT_DECIDED.*needs_label_data/);
   ineligible(P.Undecided, 'promote', /PRODUCT_PARENT_CUTOVER_NOT_DECIDED.*undecided/);
@@ -249,6 +260,10 @@ function main() {
   refused(attempt(ADMIN, `UPDATE public.product_parents SET rate_source = 'legacy', rate_source_event_id = NULL WHERE id = '${P.Smart}';`), frozen);
   refused(attempt(ADMIN, `UPDATE public.products SET rate_per_acre = 2 WHERE id = '${SIZES.Smart[0]}';`), /PRODUCT_|locked/i);
   // The rate lock covers moves: a size whose live rate differs from the destination's cannot move (shown on the preview).
+  // Sizes cannot leave or join an approved parent, even where the rates match (the move RPC writes this row).
+  refused(attempt(ADMIN, `UPDATE public.product_parent_members SET parent_id = '${P.MSO}' WHERE product_id = '${SIZES.Smart[0]}';`), frozen);
+  refused(attempt(ADMIN, `UPDATE public.product_parent_members SET parent_id = '${P.Smart}' WHERE product_id = '${SIZES.MSO[0]}';`), frozen);
+  refused(attempt(ADMIN, `DELETE FROM public.product_parent_members WHERE product_id = '${SIZES.Smart[0]}';`), frozen);
   assert.match(attempt(ADMIN, asUser(`v := public.preview_move_product_size('${SIZES.Smart[1]}', '${P.Blend}')->>'refusal';`)), /^ok\|PRODUCT_RATES_LOCKED: the move would change/);
 
   // P8: a size added to an approved parent takes the approved rate.

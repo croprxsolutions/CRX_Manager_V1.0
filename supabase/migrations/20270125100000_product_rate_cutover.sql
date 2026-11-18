@@ -35,12 +35,13 @@ BEGIN
      IS DISTINCT FROM 'CHECK ((event_type = ANY (ARRAY[''created''::text, ''updated''::text, ''size_added''::text, ''size_moved''::text, ''identity_corrected''::text, ''rates_set''::text, ''rates_corrected''::text])))' THEN
     RAISE EXCEPTION 'PREFLIGHT_RATE_CUTOVER_EVENT_TYPES_CHANGED';
   END IF;
-  -- Hold list (Mason, 2026-11-17: "Keep both on today's values"): the ID must still be Piksi Dust Plus.
-  IF EXISTS (SELECT 1 FROM public.product_parents WHERE id = 'afdae5f9-3410-4f17-975b-07a1650089ae'
-               AND name IS DISTINCT FROM 'Piksi Dust Plus')
-     OR (EXISTS (SELECT 1 FROM public.product_parents)
-         AND NOT EXISTS (SELECT 1 FROM public.product_parents WHERE id = 'afdae5f9-3410-4f17-975b-07a1650089ae')) THEN
-    RAISE EXCEPTION 'PREFLIGHT_RATE_CUTOVER_HOLD_LIST_CHANGED: the held Piksi Dust Plus parent moved or was renamed';
+  -- Hold list (Mason, 2026-11-17: "Keep both on today's values"): each ID must still name its Piksi parent.
+  IF EXISTS (SELECT 1 FROM (VALUES ('afdae5f9-3410-4f17-975b-07a1650089ae'::uuid, 'Piksi Dust Plus'),
+                                   ('c9933638-612a-407a-a4a8-6422b5e38c9c'::uuid, 'Piksi Dust Infurrow')) h(id, name)
+               LEFT JOIN public.product_parents p ON p.id = h.id
+              WHERE (p.id IS NULL AND EXISTS (SELECT 1 FROM public.product_parents))
+                 OR (p.id IS NOT NULL AND p.name IS DISTINCT FROM h.name)) THEN
+    RAISE EXCEPTION 'PREFLIGHT_RATE_CUTOVER_HOLD_LIST_CHANGED: a held Piksi parent moved or was renamed';
   END IF;
 END;
 $preflight$;
@@ -129,6 +130,29 @@ CREATE TRIGGER trg_product_rates_guard_rate_source BEFORE INSERT OR UPDATE OR DE
 CREATE TRIGGER trg_product_parent_rate_outcomes_guard_rate_source BEFORE INSERT OR UPDATE OR DELETE
   ON public.product_parent_rate_outcomes FOR EACH ROW EXECUTE FUNCTION public.guard_product_rate_review_source();
 
+-- A size cannot move into or out of an approved parent: an emptied parent could not switch back (and rates could
+-- not unlock), and a size moved in would take the old rate on a switch back. New sizes still join (they copy).
+CREATE FUNCTION public.guard_product_parent_member_source() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_ids uuid[] := CASE TG_OP WHEN 'DELETE' THEN ARRAY[OLD.parent_id] ELSE ARRAY[OLD.parent_id, NEW.parent_id] END;
+  v_name text;
+BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.parent_id IS NOT DISTINCT FROM OLD.parent_id THEN RETURN NEW; END IF;
+  PERFORM 1 FROM public.product_parents WHERE id = ANY(v_ids) ORDER BY id FOR SHARE;
+  SELECT name INTO v_name FROM public.product_parents WHERE id = ANY(v_ids) AND rate_source = 'approved' ORDER BY id LIMIT 1;
+  IF v_name IS NOT NULL THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_RATE_APPROVED: "%" uses its approved rate; switch it back to the old rate before moving sizes', v_name
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$function$;
+ALTER FUNCTION public.guard_product_parent_member_source() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.guard_product_parent_member_source() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER trg_product_parent_members_guard_rate_source BEFORE UPDATE OF parent_id OR DELETE
+  ON public.product_parent_members FOR EACH ROW EXECUTE FUNCTION public.guard_product_parent_member_source();
+
 -- Mason, 2026-11-17 (decision 3): rates stay locked while any parent uses its approved rate.
 CREATE FUNCTION public.guard_product_rate_unlock() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $function$
@@ -179,6 +203,9 @@ BEGIN
   IF v_locked IS NOT TRUE THEN
     RAISE EXCEPTION 'PRODUCT_PARENT_CUTOVER_LOCK_OFF: turn the rate lock on first';
   END IF;
+  -- Blend lines re-read a size's unit, so no blend line may be added or edited (a unit blanked) while the
+  -- check below runs and until commit. Taken before the size locks, the order blend writers use.
+  LOCK TABLE public.blend_recipe_items, public.blend_ticket_products IN SHARE MODE;
   SELECT parent_version INTO v_version FROM public.product_parents WHERE id = p_parent_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_PARENT_NOT_FOUND'; END IF;
   v_sizes := public._lock_product_parent(p_parent_id, v_version);
@@ -210,7 +237,7 @@ BEGIN
     IF NOT v_parent.is_active THEN
       RAISE EXCEPTION 'PRODUCT_PARENT_CUTOVER_INACTIVE: "%" is inactive', v_parent.name;
     END IF;
-    IF p_parent_id = 'afdae5f9-3410-4f17-975b-07a1650089ae'::uuid THEN
+    IF p_parent_id IN ('afdae5f9-3410-4f17-975b-07a1650089ae'::uuid, 'c9933638-612a-407a-a4a8-6422b5e38c9c'::uuid) THEN
       RAISE EXCEPTION 'PRODUCT_PARENT_CUTOVER_HELD: "%" stays on today''s rate (Mason, 2026-11-17)', v_parent.name;
     END IF;
     IF EXISTS (SELECT 1 FROM public.product_rates WHERE parent_id = p_parent_id AND status <> 'approved') THEN
@@ -393,6 +420,7 @@ BEGIN
      OR has_function_privilege('authenticated', 'public.guard_product_parent_rate_source()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.guard_product_rate_review_source()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.guard_product_rate_unlock()', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.guard_product_parent_member_source()', 'EXECUTE')
      OR has_function_privilege('anon', 'public.preview_parent_rate_cutover(uuid,text)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.commit_parent_rate_cutover(uuid,text,jsonb,text,text)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.preview_parent_rate_cutover(uuid,text)', 'EXECUTE')

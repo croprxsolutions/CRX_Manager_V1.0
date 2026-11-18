@@ -33,8 +33,8 @@ Sol's three bypass findings on #1947 on the condition that this database guard f
    count as drawn. Convert to Order refuses any booking with draws, so it cannot use this.
    It also refuses `closed_short` while a scheduled or in-progress job comes from the booking or one of its
    sections (Sol HIGH, 2026-11-18): closing short releases the booking's holds, and the existing rule
-   (`20261105160000`) checked only jobs linked by `quote_id`. A completed job does not block it, as before. `closed_by_application` and `closed_short` stay allowed:
-   job-driven closures set them.
+   (`20261105160000`) checked only jobs linked by `quote_id`. A completed job does not block it, as before. `closed_by_application` stays allowed:
+   a job-driven closure sets it.
 1b. The other side of the same rule (added after the Astra challenge): a `BEFORE INSERT OR UPDATE OF quote_id,
    quote_section_id, status, deleted_at ON public.jobs` row trigger. When a job becomes live on a booking (new,
    re-linked, un-cancelled or un-deleted), it locks that booking row `FOR SHARE` and refuses `BOOKING_CLOSED` if

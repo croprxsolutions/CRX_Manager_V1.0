@@ -2,7 +2,7 @@
 
 ## 2026-11-18 — Sol round 5 on PR #1974 (#1959 booking live-job guard)
 
-**Decision (Mason, in chat, 2026-11-18: "yes, run Sol round 5").** Sol round 4 on PR #1974 found a HIGH on the nightly alert (planned bookings, the only kind the scheduler makes jobs from, were left out) and a MED on section id renames; both are fixed. This is a new finding area, not the section-move mechanism Mason already ruled on, so he approved one more Sol round rather than a re-plan.
+**Decision (Mason, in chat, 2026-11-18: "yes, run Sol round 5").** Sol round 4 on PR #1974 found a HIGH on the nightly alert (planned bookings, the only kind the scheduler makes jobs from, were left out) and a MED on section id renames; both are fixed. This is a new finding area, not the section-move mechanism Mason already ruled on, so he approved one more Sol round rather than a re-plan. Later the same day (Mason, in chat: "i approve up to 3 more rounds before coming to me") he widened this to up to three more review rounds on PR #1974 (Sol rounds 5-7) before the stop-and-ask rule applies again.
 
 ## 2026-11-18 — Bookings with a live spray job: the database enforces the rules; nightly expiry skips them; Cancel blocked (#1959)
 

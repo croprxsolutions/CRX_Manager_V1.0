@@ -2236,10 +2236,10 @@ describe('QuoteBuilder', () => {
     expect(mockRpc.mock.calls.some(([name]) => name === 'create_job_from_quote_section')).toBe(false);
   });
 
-  // Bookings Phase A (20270125173000): timing and confidence per section; never on the PDF.
+  // Bookings Phase A (20270127110000): timing and confidence per section, on every booking, not only Planned ones; never on the PDF.
   it('sends each section’s timing and confidence, and a timing pick fills an empty needed-by date', async () => {
     const fixture = makeQuoteFixture('draft', 7);
-    const quote = { ...fixture.quote, is_planned: true };
+    const quote = { ...fixture.quote, is_planned: false };
     const section = { ...fixture.section, timing: 'pre_plant', confidence: 'firm' };
     mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item] : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? [fixture.product] : [], error: null }));
     let saves = 0;
@@ -5998,7 +5998,11 @@ describe('QuoteBuilder', () => {
     it.each(['accepted', 'sent'] as const)('a %s quote shows its fields disabled and no add actions; collapse and tabs still work', async (status) => {
       serveLines('Product', {}, status);
       await screen.findAllByRole('spinbutton', { name: 'Price per unit' });
-      for (const input of screen.getAllByRole('spinbutton')) expect(input).toBeDisabled();
+      // The Needed-by date picker's segments are spinbuttons that mark themselves aria-disabled.
+      for (const input of screen.getAllByRole('spinbutton')) {
+        if (input.getAttribute('aria-disabled') !== 'true') expect(input).toBeDisabled();
+      }
+      expect(screen.getAllByRole('spinbutton', { name: /Needed by/ }).length).toBeGreaterThan(0);
       expect(screen.getByRole('textbox', { name: 'Section name' })).toBeDisabled();
       expect(screen.getByRole('textbox', { name: /Note at the top/ })).toBeDisabled();
       expect(screen.getByRole('button', { name: /Pricing tier/ })).toBeDisabled();

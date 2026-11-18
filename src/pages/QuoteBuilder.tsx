@@ -5354,67 +5354,66 @@ export default function QuoteBuilder() {
                   Job {sectionJobs[sec.id].job_number} was scheduled from this section. Its products, quantities, prices, needed-by date and field stay as booked; a new name or notes here does not change the job, so change those on the job too.
                 </p>
               )}
-              {isPlanned && (
-                <div className="order-last w-full flex flex-wrap items-start gap-x-6 gap-y-1">
-                  <div className="w-full sm:w-52">
-                    <div className="mb-1 flex items-center gap-1 text-sm font-medium text-secondary">
-                      Needed by
-                      <HelpTip text="When the customer needs the product, not when the quote expires. Used for inventory forecasting and delivery scheduling." />
-                    </div>
-                    <DatePicker
-                      aria-label="Needed by"
-                      value={sec.needed_by_date || null}
-                      onChange={(value) => updateSectionField(sec._key, 'needed_by_date', value || null)}
-                      disabled={editLocked || Boolean(sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled')}
-                    />
+              {/* Planning picks feed the purchasing plan on every booking; only a Planned booking holds stock. */}
+              <div className="order-last w-full flex flex-wrap items-start gap-x-6 gap-y-1">
+                <div className="w-full sm:w-52">
+                  <div className="mb-1 flex items-center gap-1 text-sm font-medium text-secondary">
+                    Needed by
+                    <HelpTip text="When the customer needs the product, not when the quote expires. Used for inventory forecasting and delivery scheduling." />
                   </div>
-                  <div className="w-full sm:w-40">
-                    <Select
-                      id={`section-timing-${sec._key}`}
-                      label="Timing"
-                      placeholder="Not set"
-                      options={TIMING_OPTIONS}
-                      value={sec.timing ?? ''}
-                      onChange={(e) => setSectionTiming(sec._key, (e.target.value || null) as BookingTiming | null)}
-                      disabled={planningLocked || !timingWindows}
-                    />
-                  </div>
-                  <div className="w-full sm:w-40">
-                    <Select
-                      id={`section-confidence-${sec._key}`}
-                      label="Confidence"
-                      placeholder="Not set"
-                      options={CONFIDENCE_OPTIONS}
-                      value={sec.confidence ?? ''}
-                      onChange={(e) => updateSectionField(sec._key, 'confidence', e.target.value || null)}
-                      disabled={planningLocked}
-                    />
-                  </div>
-                  {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}
-                  {quoteId && activePlannedHolds.length > 0 && (
-                    <div className="sm:pt-8 flex flex-col items-start gap-0.5 text-xs text-secondary">
-                      {Array.from(new Set(sec.items.map((item) => item.product_id).filter(Boolean))).map((productId) => {
-                        const holds = activePlannedHolds.filter((candidate) => candidate.product_id === productId);
-                        if (holds.length === 0) return null;
-                        const heldQuantity = holds.reduce((sum, hold) => sum + hold.quantity, 0);
-                        const earliestExpiry = holds.reduce<string | null>((earliest, hold) => {
-                          if (hold.expires_at == null) return earliest;
-                          return earliest == null || hold.expires_at < earliest ? hold.expires_at : earliest;
-                        }, null);
-                        const unit = products.find((product) => product.id === productId)?.inventory_unit;
-                        const isLapsed = earliestExpiry != null && earliestExpiry.slice(0, 10) <= localToday();
-                        return (
-                          <span key={productId}>
-                            Held: {heldQuantity}{unit ? ` ${unit}` : ''} &middot; {earliestExpiry ? (
-                              <>expires <span className={isLapsed ? 'text-red-600 font-medium' : undefined}>{parseLocalDate(earliestExpiry.slice(0, 10)).toLocaleDateString()}{isLapsed ? ' (lapsed)' : ''}</span></>
-                            ) : 'no expiry (no needed-by date)'}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <DatePicker
+                    aria-label="Needed by"
+                    value={sec.needed_by_date || null}
+                    onChange={(value) => updateSectionField(sec._key, 'needed_by_date', value || null)}
+                    disabled={editLocked || Boolean(sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled')}
+                  />
                 </div>
-              )}
+                <div className="w-full sm:w-40">
+                  <Select
+                    id={`section-timing-${sec._key}`}
+                    label="Timing"
+                    placeholder="Not set"
+                    options={TIMING_OPTIONS}
+                    value={sec.timing ?? ''}
+                    onChange={(e) => setSectionTiming(sec._key, (e.target.value || null) as BookingTiming | null)}
+                    disabled={planningLocked || !timingWindows}
+                  />
+                </div>
+                <div className="w-full sm:w-40">
+                  <Select
+                    id={`section-confidence-${sec._key}`}
+                    label="Confidence"
+                    placeholder="Not set"
+                    options={CONFIDENCE_OPTIONS}
+                    value={sec.confidence ?? ''}
+                    onChange={(e) => updateSectionField(sec._key, 'confidence', e.target.value || null)}
+                    disabled={planningLocked}
+                  />
+                </div>
+                {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}
+                {isPlanned && quoteId && activePlannedHolds.length > 0 && (
+                  <div className="sm:pt-8 flex flex-col items-start gap-0.5 text-xs text-secondary">
+                    {Array.from(new Set(sec.items.map((item) => item.product_id).filter(Boolean))).map((productId) => {
+                      const holds = activePlannedHolds.filter((candidate) => candidate.product_id === productId);
+                      if (holds.length === 0) return null;
+                      const heldQuantity = holds.reduce((sum, hold) => sum + hold.quantity, 0);
+                      const earliestExpiry = holds.reduce<string | null>((earliest, hold) => {
+                        if (hold.expires_at == null) return earliest;
+                        return earliest == null || hold.expires_at < earliest ? hold.expires_at : earliest;
+                      }, null);
+                      const unit = products.find((product) => product.id === productId)?.inventory_unit;
+                      const isLapsed = earliestExpiry != null && earliestExpiry.slice(0, 10) <= localToday();
+                      return (
+                        <span key={productId}>
+                          Held: {heldQuantity}{unit ? ` ${unit}` : ''} &middot; {earliestExpiry ? (
+                            <>expires <span className={isLapsed ? 'text-red-600 font-medium' : undefined}>{parseLocalDate(earliestExpiry.slice(0, 10)).toLocaleDateString()}{isLapsed ? ' (lapsed)' : ''}</span></>
+                          ) : 'no expiry (no needed-by date)'}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
 
             {!isCollapsed && (

@@ -70,7 +70,7 @@ const landingOk = () => ({ ok: true });
 // A valid content-bound Sol proof. Since Mason's autonomous-landing rule
 // (2026-09-26) EVERY apply needs one, armed or not, so the known-good fixture
 // carries it by default and each case removes or breaks it on purpose.
-const goodCodex = { queryHash: HASH, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high", timestamp: iso(0) };
+const goodCodex = { queryHash: HASH, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high", timestamp: iso(0) };
 /** Build a fixture project dir. Pass overrides to break exactly one thing. */
 function fixture({
   snapshot = { captured_at: iso(0), applied: [{ version: "20260101000000", name: "20260101000000_baseline" }] },
@@ -202,7 +202,7 @@ allows(evaluate(fixture()), "known-good UNARMED fixture (both reviewers + fresh 
     migrationsDir: path.join(root, "supabase", "migrations"),
     fromName: MIG,
     toName: RESTAMPED,
-    model: "gpt-6-sol",
+    model: "gpt-6.2-sol",
     effort: "high",
   });
   ok(!carried.problem, `the restamp carry succeeds (${carried.problem})`);
@@ -701,6 +701,8 @@ denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, queryH
   "Sol high-effort gate", "armed run refuses a Codex proof bound to different SQL");
 denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, model: "gpt-6-luna" } })),
   "Sol high-effort gate", "armed run refuses the wrong Codex model");
+denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, model: "gpt-6-sol" } })),
+  "Sol high-effort gate", "a proof from the retired gpt-6-sol pin no longer counts (moved to gpt-6.2-sol 2026-11-18)");
 denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, reasoning_effort: "medium" } })),
   "Sol high-effort gate", "armed run refuses the wrong reasoning effort");
 denies(evaluate(fixture({ autopilot: armed(), codexProof: { ...goodCodex, timestamp: iso(-25 * 60 * 60 * 1000) } })),
@@ -1629,7 +1631,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   const BASE_SHA = "b".repeat(40);
   const gateDir = tempDir("crx-landing-gate-");
   mkdirSync(path.join(gateDir, ".claude", "session-state"), { recursive: true });
-  const goodProof = { codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high",
+  const goodProof = { codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
     head_sha: HEAD_SHA, base_sha: BASE_SHA, timestamp: new Date().toISOString() };
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`), JSON.stringify(goodProof));
   const readyPr = {
@@ -1969,17 +1971,17 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ pr: { mergeStateStatus: "BLOCKED" } }), "not merge-ready", "a PR that is not CLEAN is refused");
   refused(gate({ pr: { statusCheckRollup: [{ ...readyPr.statusCheckRollup[0], conclusion: "FAILURE" }] } }), "not merge-ready",
     "a failed check is refused");
-  refused(gate({ pr: { baseRefOid: "d".repeat(40) } }), "no fresh gpt-6-sol/high proof", "a proof bound to another base is refused");
+  refused(gate({ pr: { baseRefOid: "d".repeat(40) } }), "no fresh gpt-6.2-sol/high proof", "a proof bound to another base is refused");
   refused(gate({ migName: "" }), "migration name is missing", "no migration name fails closed");
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`),
     JSON.stringify({ ...goodProof, model: "gpt-6-luna" }));
-  refused(gate(), "no fresh gpt-6-sol/high proof", "a non-Sol proof is refused");
+  refused(gate(), "no fresh gpt-6.2-sol/high proof", "a non-Sol proof is refused");
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`),
     JSON.stringify({ ...goodProof, timestamp: new Date(Date.now() - 2 * 60 * 60_000).toISOString() }));
   ok(gate().ok === true, "a two-hour-old exact-head Sol proof still passes the apply gate (Mason, 2026-10-29)");
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`),
     JSON.stringify({ ...goodProof, timestamp: new Date(Date.now() - 25 * 60 * 60_000).toISOString() }));
-  refused(gate(), "no fresh gpt-6-sol/high proof", "a proof older than 24 hours is refused");
+  refused(gate(), "no fresh gpt-6.2-sol/high proof", "a proof older than 24 hours is refused");
 }
 
 // ── OWNER APPROVAL (Mason, 2026-09-29): his Windows Hello signature lets a parked

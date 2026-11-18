@@ -40,7 +40,7 @@ import { checkMigrationOrdering } from "./migration-ordering-lib.mjs";
 import { checkPendingMigrations } from "./migration-pending-lib.mjs";
 import { evaluateLandingGate } from "./migration-landing-gate-lib.mjs";
 
-export const REQUIRED_CODEX_MODEL = "gpt-6-sol";
+export const REQUIRED_CODEX_MODEL = "gpt-6.2-sol";
 export const REQUIRED_CODEX_EFFORT = "high";
 // Reviewer and Sol proofs for a NON-destructive apply last 24 hours (Mason,
 // 2026-10-29: "Yes, as Sol says" — routine migration reviews last 24 hours, with
@@ -892,7 +892,7 @@ export function evaluateMigrationApply({
   // AUTONOMOUS LANDING (Mason, 2026-09-26). The rule-set that used to apply only
   // to an armed hands-free run now applies in EVERY session: a NON-destructive
   // migration with a fresh, content-bound reviewer proof (both reviewers) and a
-  // fresh content-bound gpt-6-sol/high Codex proof applies with no per-migration
+  // fresh content-bound gpt-6.2-sol/high Codex proof applies with no per-migration
   // ask. That is what Mason confirmed; the proof checks below are unchanged, they
   // simply stopped being optional outside autopilot. A DESTRUCTIVE migration is
   // still Mason's: refused for agents in every session unless Mason approved THIS
@@ -1062,7 +1062,7 @@ export function evaluateMigrationApply({
     //   1. Exact content binding is already mandatory for every apply above;
     //      it is repeated here as defense in depth.
     //   2. The reviewer proof names BOTH required reviewers.
-    //   3. A fresh, content-bound Codex gpt-6-sol/high proof (a separate reviewer
+    //   3. A fresh, content-bound Codex gpt-6.2-sol/high proof (a separate reviewer
     //      gate actually ran — Mason's "ran, not queued" rule). Honest-mistake
     //      net: a determined agent could forge it — the residual documented in
     //      docs/manual/KNOWN_ISSUES.md §4b proof self-attestation.
@@ -1096,7 +1096,7 @@ export function evaluateMigrationApply({
     // .claude/session-state/codex-review-mig-<safeName>.json:
     //   { "queryHash": <sha256 of the EXACT transmitted SQL>,
     //     "verdict": "clean" | "ship" | "ship-with-followups",
-    //     "model": "gpt-6-sol",
+    //     "model": "gpt-6.2-sol",
     //     "reasoning_effort": "high",
     //     "timestamp": <ISO-8601, under 24 hours old> }
     // Write it ONLY after an ACTUAL /codex-review run on this migration this

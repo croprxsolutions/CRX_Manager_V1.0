@@ -72,7 +72,7 @@ invoke Codex through the `node scripts/overnight-codex-gate.mjs` wrapper** — i
 `Bash(node scripts/:*)` permission allow-list, so an UNATTENDED run never pauses for approval (a raw
 `codex exec` is NOT allow-listed and would stall the loop). The wrapper resolves the binary
 version-proof, isolates user configuration, runs an ephemeral `codex exec --sandbox read-only` with
-the tier pinned explicitly, and closes stdin. Pass `--sol --reason "<why>"` to escalate one pass to `gpt-6-sol` at
+the tier pinned explicitly, and closes stdin. Pass `--sol --reason "<why>"` to escalate one pass to `gpt-6.2-sol` at
 high effort when Luna is plainly out of its depth. The wrapper **refuses `--sol` without `--reason`**
 and logs that reason to the trace file, so escalated spend in an unattended run is never silent;
 copy it into `REPORT.md` alongside the model and effort. The wrapper is advisory either way and

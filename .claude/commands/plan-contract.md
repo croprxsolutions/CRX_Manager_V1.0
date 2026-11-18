@@ -50,7 +50,7 @@ Write `docs/plans/<YYYY-MM-DD>-<slug>-CONTRACT.md`, or add a "Behavior contract"
 
 Give the other model the contract plus its sources: the relevant schema lines, RPC bodies, policies and screen code, with file paths. Include brief, evidence-backed reasons for key constraints. Leave out the author, any self-assessment, and any request to approve.
 
-- **From Claude:** use the `codex` skill with `gpt-6-astra` at `high` and its packet method.
+- **From Claude:** use the `codex` skill with `gpt-6.2-astra` at `high` and its packet method.
 - **From Codex:** save the prompt, contract and sources as one packet file in a scratch folder outside the repo, then run `node scripts/run-claude-review.mjs --scope uncommitted --topic plan-contract --prompt-file` followed by that file's path. The packet is what gets challenged; any uncommitted code in the diff is extra context.
 
 Prompt: "Assume this behavior contract is wrong. Report every counterexample (who does what, and the wrong result), missing decision, missing evidence you would need, screen/server/RLS mismatch, legacy-row gap, timing, undo or rollout hole, and a smaller design that still meets the outcome. Label each finding DEFECT, DECISION, MISSING-EVIDENCE or SUGGESTION, with severity. End with FINDINGS <n>." There is no approve verdict. When a change reuses an already-settled contract unchanged, challenge only what is new.

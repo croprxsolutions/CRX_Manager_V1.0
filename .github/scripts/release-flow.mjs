@@ -452,15 +452,15 @@ function cardState(plan) {
 function slackPrs(plan) {
   return plan.prs.map((p) => {
     const texts = [p.body, ...(p.comments ?? [])];
-    return { number: p.number, title: p.title, url: `${REPO_URL()}/pull/${p.number}`, state: prState(p), proof: proofLink(texts), held: heldOffNote(texts) };
+    return { number: p.number, title: p.title, url: `${REPO_URL()}/pull/${p.number}`, state: prState(p), proof: proofLink(texts), held: heldOffNote(texts), users: usersSee(p.body) };
   });
 }
 
 // Posts the release card, or edits it in place. Returns the marker to save and the thread replies
 // for what changed, which are posted only once that marker is saved (a failed save can't repeat them).
-async function syncCard({ cardMessage, slack, threadUpdates }, plan, prUrl, prev) {
-  const now = cardState(plan);
+async function syncCard({ cardMessage, groupCounts, slack, threadUpdates }, plan, prUrl, prev) {
   const prs = slackPrs(plan);
+  const now = { ...cardState(plan), grp: groupCounts(prs) };
   const msg = cardMessage(now, { prs, prUrl, compareUrl: `${REPO_URL()}/compare/main...release/next` });
   const ch = process.env.SLACK_RELEASE_CHANNEL;
   if (!prev?.ts || prev.ch !== ch) return { marker: { ts: (await slack('chat.postMessage', msg)).ts, ch, ...now }, replies: [] };
@@ -644,13 +644,21 @@ const commands = {
         if (thread) await trySlack(() => slack('chat.postMessage', { thread_ts: thread, text: `:twisted_rightwards_arrows: Merged into main by ${K.esc(by)}. Tag ${v} and its GitHub Release follow.` }));
         const notes = K.parseReleaseNotes(git('show', `${sha}:src/releaseNotes.ts`));
         const live = await trySlack(() => slack('chat.postMessage', K.liveMessage({
-          version: v, items: notes?.items ?? [], prCount: card ? Object.keys(card.states ?? {}).length : null, migrations: card?.mig ?? null,
+          version: v, items: notes?.items ?? [], prCount: card ? Object.keys(card.states ?? {}).length : null, migrations: card?.mig ?? null, groups: card?.grp,
           mergedBy: by, tagUrl, changelogUrl: `${REPO_URL()}/blob/main/CHANGELOG.md`, prUrl: pr.html_url,
         })));
         thread ??= live?.ts ?? null;
       }
     } else if (isReleaseOrHotfixHead(pr.head.ref)) {
-      thread = (await trySlack(() => slack('chat.postMessage', K.hotfixMessage({ number: pr.number, title: pr.title, url: pr.html_url, mergedBy: by, releasesUrl: `${REPO_URL()}/releases` }))))?.ts ?? null;
+      thread = (await trySlack(async () => {
+        // What it touched, for the post; if the file list can't be read, the post just leaves that out.
+        const files = await gh(`/pulls/${pr.number}/files?per_page=100`).then((fs) => fs.map((f) => f.filename), () => null);
+        return slack('chat.postMessage', K.hotfixMessage({
+          number: pr.number, title: pr.title, url: pr.html_url, mergedBy: by, releasesUrl: `${REPO_URL()}/releases`, users: usersSee(pr.body),
+          migrations: files && files.filter((f) => /^supabase\/migrations\/[^/]+\.sql$/.test(f)).length,
+          app: files && files.some((f) => /^(src|supabase|public)\//.test(f)),
+        }));
+      }))?.ts ?? null;
     } else return 0;
     // The back-merge (new, or already open and now carrying this too) follows the newest thread.
     // Its marker is saved before the post, so a failed save never repeats one.

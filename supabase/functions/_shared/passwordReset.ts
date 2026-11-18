@@ -98,7 +98,7 @@ export async function adminResetPassword(
       .from("activity_feed")
       .insert(auditRow(callerId, userId, "auth_password_reset_failed", `${description} (request ${requestId})`));
     if (failAuditError) {
-      console.error("password reset: could not record the Auth failure", failAuditError.message);
+      console.warn("password reset: could not record the Auth failure", failAuditError.message);
     }
   };
 

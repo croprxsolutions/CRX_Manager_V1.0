@@ -1,5 +1,5 @@
 -- ============================================================================
--- 20270125173000_booking_timing_purchasing_plan
+-- 20270127110000_booking_timing_purchasing_plan
 -- Bookings Phase A, PR 1b (docs/plans/2026-11-17-bookings-phase-a-CONTRACT.md v4 "PR 1b";
 -- plan docs/plans/2026-11-17-bookings-phases-B-C-prepay-PLAN.md v2 A-R2..A-R5 and v3 Phase A).
 --

@@ -18,7 +18,8 @@
 --   P13  booking 100, order draw 60, job draw 40: 0 + 60 + 40 = 100; after the order is
 --        cancelled (draw returned) 60 + 40; after the job completes, what is still owed
 --   P14  order draws come off the LATEST-needed line first (drawn, section unknown);
---        draws of 150 against 100 booked put 50 in Over-drawn
+--        draws of 150 against 100 booked put 50 in Over-drawn; an unknown draw of 100 on product 25
+--        (Maybe 100 at +30, Firm 100 at +150) comes off the Maybe line, so Firm 100 stays committed
 --   P15  draft, closed_short, accepted-with-cancelled-order: nothing; accepted never ordered counts
 --   P16  review list from 14 days before the window end (timed and untimed)
 --   P17  Firm with no date (its booking also has a dated +60 line of 9, drawn 9 by an order: the
@@ -71,16 +72,16 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Purchasing Farm ' || v_suffix) RETURNING id INTO v_customer;
-  -- Products 1..24, all stocked in Gal except 20 (stocked by the 2.5 GL jug); every product is inserted before any is priced
+  -- Products 1..25, all stocked in Gal except 20 (stocked by the 2.5 GL jug); every product is inserted before any is priced
   -- (pricing sets a transaction-wide mode).
-  FOR v_i IN 1..24 LOOP
+  FOR v_i IN 1..25 LOOP
     INSERT INTO products (product_name, unit_size, inventory_unit, product_form)
     VALUES ('[SMOKE] Purchasing ' || lpad(v_i::text, 2, '0') || ' ' || v_suffix,
             (ARRAY['Gal', '2.5 GL'])[(v_i = 20)::int + 1], (ARRAY['Gal', NULL])[(v_i = 20)::int + 1], 'liquid')
     RETURNING id INTO v_pid;
     v_p := v_p || v_pid;
   END LOOP;
-  FOR v_i IN 1..24 LOOP
+  FOR v_i IN 1..25 LOOP
     v_price_res := preview_product_pricing_changes('product_page', NULL,
       jsonb_build_array(jsonb_build_object(
         'product_id', v_p[v_i], 'row_version', (SELECT pricing_version FROM products WHERE id = v_p[v_i]),
@@ -246,6 +247,14 @@ BEGIN
         'needed_by_date', v_t + 150, 'confidence', 'firm',
         'items', jsonb_build_array(jsonb_build_object('client_key', '_kb', 'product_id', v_p[8], 'sort_order', 0,
           'calc_mode', 'units_direct', 'total_units_needed', 100, 'price_override', 20, 'price_per_unit', 20,
+          'current_cost', 6, 'unit_size', 'Gal', 'acres', 0),
+          jsonb_build_object('client_key', '_kd', 'product_id', v_p[25], 'sort_order', 1,
+          'calc_mode', 'units_direct', 'total_units_needed', 100, 'price_override', 20, 'price_per_unit', 20,
+          'current_cost', 6, 'unit_size', 'Gal', 'acres', 0))),
+      jsonb_build_object('client_key', '_c', 'section_name', 'P14 maybe', 'sort_order', 2,
+        'needed_by_date', v_t + 30, 'confidence', 'maybe',
+        'items', jsonb_build_array(jsonb_build_object('client_key', '_ke', 'product_id', v_p[25], 'sort_order', 0,
+          'calc_mode', 'units_direct', 'total_units_needed', 100, 'price_override', 20, 'price_per_unit', 20,
           'current_cost', 6, 'unit_size', 'Gal', 'acres', 0)))),
     v_admin, 'smk-pp14-' || v_suffix);
   INSERT INTO smk_pp_bookings VALUES ('P14', (v_res->>'quote_id')::uuid, v_res->'section_ids');
@@ -378,7 +387,7 @@ BEGIN
 
   -- P14 draws: 60 from the order side on product 8; 150 on product 9.
   SELECT quote_id INTO v_q FROM smk_pp_bookings WHERE tag = 'P14';
-  INSERT INTO quote_product_draws (quote_id, product_id, quantity_drawn) VALUES (v_q, v_p[8], 60), (v_q, v_p[9], 150);
+  INSERT INTO quote_product_draws (quote_id, product_id, quantity_drawn) VALUES (v_q, v_p[8], 60), (v_q, v_p[9], 150), (v_q, v_p[25], 100);
 
   -- P21 draws: a job from the late section (+150) drawing 100.
   SELECT quote_id, (section_ids->>'_b')::uuid INTO v_q, v_s2 FROM smk_pp_bookings WHERE tag = 'P21';
@@ -475,6 +484,14 @@ BEGIN
   IF (v_x->>'over_drawn')::numeric <> 50 OR NOT (v_x->'reasons' ? 'over_drawn')
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P14 over-drawn) %', v_x;
+  END IF;
+  SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[25];
+  IF (v_x->>'committed')::numeric IS DISTINCT FROM 100
+     OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r
+          WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 150) IS DISTINCT FROM 100
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r
+                 WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 30) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P14 confidence) %', v_x;
   END IF;
   v_n := v_n + 1;
 

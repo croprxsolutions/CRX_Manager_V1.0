@@ -1137,6 +1137,8 @@ BEGIN
   -- LATEST-needed lines first. Totals stay exact and needs can only move earlier, so the plan
   -- never buys short or late while the real section of an order draw is unknown (Phase B records it).
   -- Undated lines come off last, so a Firm line with no date stays on the needs-a-date list.
+  -- Less sure lines come off before surer ones (Maybe, then Likely or unset, then Firm), so an
+  -- unknown draw never erases Firm demand while a Maybe line of the same product stays.
   s2a AS (
     SELECT s1.*, GREATEST(COALESCE(dt.total, 0) - COALESCE(ap1.applied, 0), 0) AS pool
       FROM s1
@@ -1147,7 +1149,8 @@ BEGIN
     SELECT s2a.*,
            s2a.rem1 - LEAST(s2a.rem1, GREATEST(0, s2a.pool
              - (SUM(s2a.rem1) OVER (PARTITION BY s2a.quote_id, s2a.product_id
-                                    ORDER BY s2a.needed_by_date DESC NULLS LAST, s2a.s_sort DESC, s2a.i_sort DESC, s2a.item_id DESC
+                                    ORDER BY CASE s2a.confidence WHEN 'maybe' THEN 0 WHEN 'firm' THEN 2 ELSE 1 END,
+                                             s2a.needed_by_date DESC NULLS LAST, s2a.s_sort DESC, s2a.i_sort DESC, s2a.item_id DESC
                                     ROWS UNBOUNDED PRECEDING) - s2a.rem1))) AS rem
       FROM s2a
   ),
@@ -1432,7 +1435,7 @@ BEGIN
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '37d8b7e9d4fae8380bd3d2c6245e58f5' THEN
+     IS DISTINCT FROM 'f291afae5ebfa2a5d0d4ac1c22d5c399' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF (SELECT count(*) FROM pg_proc p

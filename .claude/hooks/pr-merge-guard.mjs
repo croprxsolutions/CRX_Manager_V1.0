@@ -284,14 +284,17 @@ const projectDir = path.resolve(
 
 // The hard gates spend ONE budget between them (see createHardGateBudget). This
 // guard runs under merge-guard-launcher.mjs, which denies a possible merge if the
-// guard is still running at 36s; the hook entry in .claude/settings.json allows
-// 45s so the launcher can still answer. The reserve covers what process.uptime()
+// guard is still running at 96s; the hook entry in .claude/settings.json allows
+// 105s so the launcher can still answer. The reserve covers what process.uptime()
 // cannot see plus writing the verdict. The advisory lookup
 // is NOT on this budget: it keeps its own deadline and fails open by design, so a
 // slow GitHub there must not turn into a denial.
-const HOOK_TIMEOUT_MS = 30_000;
+// A slow GitHub answers in ~25s (10s caps refused merges with ETIMEDOUT on
+// 2026-11-16 and 11-18). The budget admits a call only if a full per-call cap
+// still fits, so the total grows with the cap: 90s - 3s fits three slow calls.
+const HOOK_TIMEOUT_MS = 90_000;
 const HOOK_RESERVE_MS = 3_000;
-const GH_CALL_TIMEOUT_MS = 10_000;
+const GH_CALL_TIMEOUT_MS = 25_000;
 const hardGateBudget = createHardGateBudget({
   deadlineMs: hookDeadlineMs(HOOK_TIMEOUT_MS, HOOK_RESERVE_MS),
   callTimeoutMs: GH_CALL_TIMEOUT_MS,

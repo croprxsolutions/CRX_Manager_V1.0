@@ -325,9 +325,9 @@ ok(res.status === 0 && res.stdout === "" && !/did not finish/.test(res.stderr),
 // The deadline path through main(): a copy of the launcher with a short deadline,
 // next to a hanging guard. Only the one timing constant differs from the real file.
 const source = readFileSync(LAUNCHER, "utf8");
-ok(/export const KILL_AFTER_MS = 36_000;/.test(source), "the launcher's deadline constant is where the copy expects it");
+ok(/export const KILL_AFTER_MS = 96_000;/.test(source), "the launcher's deadline constant is where the copy expects it");
 const shortLauncher = path.join(tmp, "merge-guard-launcher.mjs");
-writeFileSync(shortLauncher, source.replace("export const KILL_AFTER_MS = 36_000;", "export const KILL_AFTER_MS = 2_000;"));
+writeFileSync(shortLauncher, source.replace("export const KILL_AFTER_MS = 96_000;", "export const KILL_AFTER_MS = 2_000;"));
 started = Date.now();
 res = launch(shortLauncher, guards.hang, MERGE);
 elapsed = Date.now() - started;

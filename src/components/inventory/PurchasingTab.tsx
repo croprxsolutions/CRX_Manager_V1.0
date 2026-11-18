@@ -104,7 +104,7 @@ function ProductDetails({ p }: { p: PlanProduct }) {
 export default function PurchasingTab() {
   const { toast } = useToast();
   const [plan, setPlan] = useState<PurchasingPlan | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const requestId = useRef(0);

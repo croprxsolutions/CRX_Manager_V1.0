@@ -10,8 +10,7 @@ import { Sentry } from '../../lib/sentry';
 
 // Read-only view of get_purchasing_plan (20270125173000). Quantities are in each product's stock unit.
 type Qty = number | string;
-interface Suggestion { need_date: string; order_by: string; order_now: boolean; quantity: Qty;
-  later_po: { po_id: string; po_number: string; expected_date: string } | null }
+interface Suggestion { need_date: string; order_by: string; order_now: boolean; quantity: Qty }
 interface DemandRow { kind: 'booking' | 'order' | 'job' | 'hold'; class: 'committed' | 'could_add' | 'shown';
   bucket: string; need_date: string | null; overdue: boolean; quantity: Qty; confidence: string | null;
   estimated: boolean | null; quote_number: string | null; order_number: string | null; job_number: string | null;
@@ -45,9 +44,6 @@ const day = (d: string | null) => (d ? new Date(`${d}T00:00:00`).toLocaleDateStr
 export function suggestionText(s: Suggestion, unit: string | null): string {
   const n = `${qty(s.quantity)}${unit ? ` ${unit}` : ''}`;
   const order = s.order_now ? `Order ${n} now` : `Order ${n} by ${day(s.order_by)}`;
-  if (s.later_po) {
-    return `PO ${s.later_po.po_number} arrives ${day(s.later_po.expected_date)}, after the need on ${day(s.need_date)}: expedite it, or ${order.charAt(0).toLowerCase()}${order.slice(1)}`;
-  }
   return `${order} (needed ${day(s.need_date)})`;
 }
 

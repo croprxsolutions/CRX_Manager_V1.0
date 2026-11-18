@@ -22,8 +22,8 @@ const PLAN: PurchasingPlan = {
     product_id: 'p1', product_name: 'Herbicide X', stock_unit: 'Gal', on_hand: 100, incoming: 0, drafted: 5,
     committed: 160, suggested: 110, could_add: 0, over_drawn: 0, not_complete: true, reasons: ['needs_date'],
     suggestions: [
-      { need_date: '2027-03-01', order_by: '2027-02-15', order_now: false, quantity: 30, later_po: null },
-      { need_date: '2027-04-01', order_by: '2027-03-18', order_now: false, quantity: 80, later_po: null },
+      { need_date: '2027-03-01', order_by: '2027-02-15', order_now: false, quantity: 30 },
+      { need_date: '2027-04-01', order_by: '2027-03-18', order_now: false, quantity: 80 },
     ],
     rows: [{ kind: 'order', class: 'committed', bucket: 'dated', need_date: '2027-02-01', overdue: false, quantity: 50,
       confidence: null, estimated: null, quote_number: null, order_number: 'O-9', job_number: null, customer_name: 'West Farm', section_name: null }],
@@ -59,11 +59,10 @@ describe('PurchasingTab', () => {
     expect(screen.queryByText(/Nothing to buy/)).not.toBeInTheDocument();
   });
 
-  it('words a late PO as expedite-or-order, and an overdue need as order now', () => {
-    expect(suggestionText({ need_date: '2027-03-02', order_by: '2027-02-16', order_now: false, quantity: 100,
-      later_po: { po_id: 'x', po_number: 'PO-7', expected_date: '2027-03-28' } }, 'Gal'))
-      .toBe('PO PO-7 arrives Mar 28, 2027, after the need on Mar 2, 2027: expedite it, or order 100 Gal by Feb 16, 2027');
-    expect(suggestionText({ need_date: '2027-02-05', order_by: '2027-02-01', order_now: true, quantity: 10, later_po: null }, null))
+  it('words a need as order-by, and an overdue need as order now', () => {
+    expect(suggestionText({ need_date: '2027-03-02', order_by: '2027-02-16', order_now: false, quantity: 100 }, 'Gal'))
+      .toBe('Order 100 Gal by Feb 16, 2027 (needed Mar 2, 2027)');
+    expect(suggestionText({ need_date: '2027-02-05', order_by: '2027-02-01', order_now: true, quantity: 10 }, null))
       .toBe('Order 10 now (needed Feb 5, 2027)');
   });
 });

@@ -1081,17 +1081,21 @@ BEGIN
        AND (q.status IN ('sent', 'revised')
             OR (q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.quote_id = q.id)))
   ),
-  bl AS (
+  bla AS (
     SELECT qi.id AS item_id, eq.id AS quote_id, qi.product_id, s.id AS section_id, s.needed_by_date,
            s.timing, s.confidence, COALESCE(s.sort_order, 0) AS s_sort, COALESCE(qi.sort_order, 0) AS i_sort,
            GREATEST(COALESCE(qi.total_units_needed, 0), 0) AS qty,
-           -- A line saved in a unit that no longer matches the stock unit is listed under Check units.
+           -- A line saved in a unit that no longer matches the stock unit is set aside (Mason, 2026-11-18):
+           -- listed under Check units only; it absorbs no draw and covers no hold.
            NOT _unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)) AS unit_problem
       FROM eq
       JOIN quote_items qi ON qi.quote_id = eq.id
       JOIN products p ON p.id = qi.product_id
       LEFT JOIN quote_sections s ON s.id = qi.section_id
      WHERE qi.product_id IS NOT NULL
+  ),
+  bl AS (
+    SELECT * FROM bla WHERE NOT bla.unit_problem
   ),
   -- Draws. A job draw belongs to the job's section when that section is on the same booking;
   -- an order draw (quote_product_draws) never records a section.
@@ -1159,6 +1163,14 @@ BEGIN
            s2.section_id, s2.confidence, (s2.rem < s2.rem1) AS estimated, s2.unit_problem,
            (SELECT eq.customer_id FROM eq WHERE eq.id = s2.quote_id) AS customer_id
       FROM s2 WHERE s2.rem > 0
+    UNION ALL
+    -- Set-aside lines (unit does not match stock): Check units, in full.
+    SELECT bla.product_id, 'booking',
+           CASE bla.confidence WHEN 'firm' THEN 'committed' WHEN 'maybe' THEN 'shown' ELSE 'could_add' END,
+           bla.needed_by_date, bla.qty, bla.quote_id, NULL::uuid, NULL::uuid,
+           bla.section_id, bla.confidence, false, true,
+           (SELECT eq.customer_id FROM eq WHERE eq.id = bla.quote_id)
+      FROM bla WHERE bla.unit_problem AND bla.qty > 0
     UNION ALL
     -- Open orders: dated by the earliest scheduled, undelivered delivery of the line, else today.
     SELECT oi.product_id, 'order', 'committed',
@@ -1416,7 +1428,7 @@ BEGIN
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM 'a7599eb261b285b5de0315ecfdafda8c' THEN
+     IS DISTINCT FROM 'c4b12fc8df5cee3b1a290155e31c4d23' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF (SELECT count(*) FROM pg_proc p

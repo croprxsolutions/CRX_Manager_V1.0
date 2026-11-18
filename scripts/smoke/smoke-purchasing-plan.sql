@@ -10,7 +10,8 @@
 --   P10  Firm 100 at +100, a PO of 100 due +126, Likely 100 at +130: one suggestion of
 --        100 naming the later PO; could add 0
 --   P11  on hand -10 and nothing else: order 10 now
---   P23  a booking line saved in lb on a Gal product: Check units, not counted
+--   P23  a booking line saved in lb on a Gal product: Check units, not counted; it does not cover its
+--        booking's crop-program hold (20), which counts
 --   P24  Firm 100 at +100 and a PO of only 10 due +126: buy 100, and the small PO is not offered instead
 --   P12  a late PO counts today (flagged), an undated PO is listed not counted, a
 --        draft PO shows as drafted; the product is not complete
@@ -342,7 +343,8 @@ BEGIN
   INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active)
   VALUES (v_p[22], v_customer, 20, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-1'), v_admin, true),
          (v_p[22], v_customer, 5, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-4'), v_admin, true),
-         (v_p[10], v_customer, 4, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-4'), v_admin, true);
+         (v_p[10], v_customer, 4, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-4'), v_admin, true),
+         (v_p[23], v_customer, 20, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P23'), v_admin, true);
 
   -- P13 draws: an order of 60 from the booking, and a job from its section drawing 40.
   SELECT quote_id, (section_ids->>'_s')::uuid INTO v_q, v_s1 FROM smk_pp_bookings WHERE tag = 'P13';
@@ -491,8 +493,9 @@ BEGIN
 
   -- P23
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[23];
-  IF NOT (v_x->'reasons' ? 'check_units') OR (v_x->>'committed')::numeric <> 0 OR jsonb_array_length(v_x->'suggestions') <> 0
-     OR v_x->'rows'->0->>'bucket' <> 'check_units' THEN
+  IF NOT (v_x->'reasons' ? 'check_units') OR (v_x->>'committed')::numeric <> 20
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'bucket' = 'check_units' AND (r->>'quantity')::numeric = 50)
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND (r->>'quantity')::numeric = 20) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P23 booking line in another unit) %', v_x;
   END IF;
   v_n := v_n + 1;

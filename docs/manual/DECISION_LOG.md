@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-18 — Purchasing plan: booking lines in a unit that no longer matches stock are set aside (Bookings PR 1b)
+
+**Decision (Mason, in chat, 2026-11-18).** A booking line saved in a unit that no longer matches the product's stock unit is listed only under Check units in `get_purchasing_plan`: it is not counted as demand, absorbs no order or job draw, and does not stand in for its booking's crop-program hold (which then counts). Chosen over accepting the gap, after Luna raised HIGHs on how such lines interacted with draws and holds (third round on that mechanism). Live had 0 such lines on 2026-11-18; screens do not allow a stock-unit change on a saved product.
+
 ## 2026-11-18 — #1947: Mason owner-accepted 3 Sol finding(s) at `3d71a5c062fc`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1947 at `3d71a5c062fc` (base `29682a0332c0`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

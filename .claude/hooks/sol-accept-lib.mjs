@@ -26,7 +26,7 @@ export const SOL_FINDING_COUNT_TOKEN = "SOL_FINDING_COUNT";
 export const SOL_BLOCKERS_PURPOSE = "crx-sol-blockers-v1";
 export const OWNER_SOL_ACCEPT_PURPOSE = "crx-owner-sol-accept-v1";
 export const OWNER_SOL_ACCEPT_VIA = "chat-reply-accept";
-export const SOL_MODEL = "gpt-6-sol";
+export const SOL_MODEL = "gpt-6.2-sol";
 export const SOL_EFFORT = "high";
 // The blockers record lives as long as a Sol proof would (codex-push-lib SOL_PROOF_MAX_AGE_MS).
 export const SOL_BLOCKERS_MAX_AGE_MS = 24 * 60 * 60 * 1000;

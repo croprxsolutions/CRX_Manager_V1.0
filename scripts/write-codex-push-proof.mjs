@@ -681,7 +681,7 @@ export function runCodexWithSandboxFallback({
   return { result: fallback, codexBin: fallbackBin, fallbackUsed: true, primaryResult: primary };
 }
 
-export const CODEX_REVIEW_MODEL = "gpt-6-sol";
+export const CODEX_REVIEW_MODEL = "gpt-6.2-sol";
 export const CODEX_REVIEW_EFFORT = "high";
 export const CODEX_REVIEW_PERMISSION_PROFILE = "packet-review";
 
@@ -853,7 +853,7 @@ export function codexConfiguredModel({
   } catch {
     return "unknown";
   }
-  // Top-level `model = "gpt-6-sol"`, before any [section] header — a `model`
+  // Top-level `model = "gpt-6.2-sol"`, before any [section] header — a `model`
   // key inside a [profiles.x] block is not the default this run will use.
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();

@@ -11,6 +11,10 @@
 **Decision (Mason, in chat, 2026-11-18: "Yes, one more round").** PR #1940 (inventory cleanup KI-161/150/163) may have one more Sol round (round 5 as the counter reads it).
 **Why:** since the last round the branch merged current `staging`, gave its migration a new stamp (`20270126110000`), locks the order line `FOR UPDATE` so two follow-up deliveries queue, and its rollback narrows the cycle-count columns back to 2 places; the prover passes.
 **What it does:** unlocks one Sol review of the new head. Every other gate is unchanged: it still needs a clean Sol review and green checks before it merges into `staging`.
+## 2026-11-18 — Codex Sol and Astra move to the 6.2 models
+
+**Decision (Mason):** use `gpt-6.2-sol` and `gpt-6.2-astra` instead of the older Sol and Astra. The Sol ship gate, every guard that checks a Sol proof, the scripts and the skills all move together; Luna stays `gpt-6-luna` (no 6.2 Luna exists for this account, probed 2026-11-18).
+**What this forbids/implies:** a `gpt-6-sol` proof no longer satisfies any gate; open PRs re-run Sol after this lands. No validator accepts both models during the switch. This replaces the 2026-11-06 "wait for a side-by-side" note on moving Sol.
 
 ## 2026-11-18 — #1946 (KI-81): a blend ticket's own grower falls back to their own quote
 

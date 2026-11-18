@@ -2,25 +2,25 @@
 
 Read this only when choosing a Codex (OpenAI) model or reasoning effort, writing a Codex prompt, or changing a script that runs `codex`. The shared owner, safety, delivery, and verification rules remain in `AGENTS.md`; the Claude equivalent is `docs/reference/claude-model-tuning.md`.
 
-Last verified: 2026-09-26 (against the pins on `main` after PR #796); model availability re-probed 2026-11-06.
+Last verified: 2026-09-26 (against the pins on `main` after PR #796); pins moved to the 6.2 Sol and Astra models 2026-11-18.
 
 ## The GPT-6 family
 
-OpenAI's current models are GPT-6 Astra (`gpt-6-astra`, most capable, launched early September 2026), GPT-6 Sol (`gpt-6-sol`, complex coding and agentic work, launched 2026-09-22), and GPT-6 Luna (`gpt-6-luna`, fast and cheap for focused high-volume work, launched 2026-09-22). Reasoning effort is `none`, `low`, `medium`, `high`, `xhigh`, or `max`. `gpt-6-terra` and `gpt-6-spark` are refused for this account on the current CLI, so the retired three-tier split collapsed onto Luna (volume) and Sol (money). `gpt-6.1-luna` is refused too (probed 2026-11-01 beside a bogus control), so `gpt-6-luna` is the newest Luna. Re-probed 2026-11-03 beside a bogus control: `gpt-6-terra` is still refused, while `gpt-6.1-terra` answers. Re-probed 2026-11-06 on `codex-cli` 0.166.0 beside a bogus control: `gpt-6.1-terra` and `gpt-6.1-sol` answer; `gpt-6.1-luna` is refused exactly like the bogus name, so it does not exist for this account. Mason chose not to add Terra as a reviewer (`docs/manual/DECISION_LOG.md`, 2026-11-06). Mason's `codex` skill maps "terra" to `gpt-6.1-terra` for hand-run builds and second opinions only; no script pins it and no gate accepts it. `gpt-6.1-sol` also appears in the CLI's model list, but the gates stay on `gpt-6-sol` until a deliberate pin move (below).
+OpenAI's current models are GPT-6 Astra (`gpt-6.2-astra`, most capable, launched early September 2026), GPT-6 Sol (`gpt-6.2-sol`, complex coding and agentic work, launched 2026-09-22), and GPT-6 Luna (`gpt-6-luna`, fast and cheap for focused high-volume work, launched 2026-09-22). Reasoning effort is `none`, `low`, `medium`, `high`, `xhigh`, or `max`. `gpt-6-terra` and `gpt-6-spark` are refused for this account on the current CLI, so the retired three-tier split collapsed onto Luna (volume) and Sol (money). `gpt-6.1-luna` is refused too (probed 2026-11-01 beside a bogus control), so `gpt-6-luna` is the newest Luna. Re-probed 2026-11-03 beside a bogus control: `gpt-6-terra` is still refused, while `gpt-6.1-terra` answers. Re-probed 2026-11-06 on `codex-cli` 0.166.0 beside a bogus control: `gpt-6.1-terra` and `gpt-6.1-sol` answer; `gpt-6.1-luna` is refused exactly like the bogus name, so it does not exist for this account. Mason chose not to add Terra as a reviewer (`docs/manual/DECISION_LOG.md`, 2026-11-06). Mason's `codex` skill maps "terra" to `gpt-6.1-terra` for hand-run builds and second opinions only; no script pins it and no gate accepts it. **2026-11-18 (Mason): Sol and Astra moved to `gpt-6.2-sol` and `gpt-6.2-astra`.** Probed that day on `codex-cli` 0.166.0 beside a bogus control: both answer; `gpt-6.2-luna` is refused like the bogus name, so Luna stays `gpt-6-luna`. The Sol gate and every script pin now use `gpt-6.2-sol`; a proof minted on `gpt-6-sol` no longer counts.
 
 ## Which model does which job
 
-Mason's standing decisions: the 2026-09-20 tier split (Luna iterates, Sol is the once-at-the-end gate for risky work), moved to GPT-6 and with Luna as builder on 2026-09-23 (PR #796), plus Astra for plan review on 2026-09-25. Every scripted call pins the model below; the proof gates accept only `gpt-6-sol` at `high`.
+Mason's standing decisions: the 2026-09-20 tier split (Luna iterates, Sol is the once-at-the-end gate for risky work), moved to GPT-6 and with Luna as builder on 2026-09-23 (PR #796), plus Astra for plan review on 2026-09-25. Every scripted call pins the model below; the proof gates accept only `gpt-6.2-sol` at `high`.
 
 | Job | Model | Effort | Where it is pinned |
 |---|---|---|---|
 | Iterating code review (advisory, every kind of work) | `gpt-6-luna` | `xhigh` | `scripts/luna-review.mjs` `LUNA_MODEL` (`/codex-review` Step 3A), `scripts/overnight-codex-gate.mjs` |
-| Early escalation of one review round for genuinely complex work (say why) | `gpt-6-sol` | `high` | `overnight-codex-gate.mjs --sol` |
-| Final exact-SHA ship gate for risky work (the only proof the push, merge, and migration guards accept) | `gpt-6-sol` | `high` | `scripts/write-codex-push-proof.mjs`, `.claude/hooks/codex-push-lib.mjs`, `.claude/hooks/migration-apply-lib.mjs`, `.codex/hooks/production-action-guard.mjs` |
+| Early escalation of one review round for genuinely complex work (say why) | `gpt-6.2-sol` | `high` | `overnight-codex-gate.mjs --sol` |
+| Final exact-SHA ship gate for risky work (the only proof the push, merge, and migration guards accept) | `gpt-6.2-sol` | `high` | `scripts/write-codex-push-proof.mjs`, `.claude/hooks/codex-push-lib.mjs`, `.claude/hooks/migration-apply-lib.mjs`, `.codex/hooks/production-action-guard.mjs` |
 | Builder for a standard or mechanical unit | `gpt-6-luna` | `xhigh` | `scripts/codex-build.mjs` default |
-| Builder for a money, database, or complex unit | `gpt-6-sol` | `xhigh` (script default) | the mission doc passes `--model gpt-6-sol` |
+| Builder for a money, database, or complex unit | `gpt-6.2-sol` | `xhigh` (script default) | the mission doc passes `--model gpt-6.2-sol` |
 | Read-only bug hunter | `gpt-6-luna` | not pinned (CLI default) | `scripts/codex-hunt.mjs` |
-| Plan, spec, or architecture review; a problem two review rounds could not settle | `gpt-6-astra` | `high`; `max` only for a foundation-wide or money-critical plan | run by hand (no script), e.g. `docs/plans/2026-09-11-open-pr-backlog-plan.md` |
+| Plan, spec, or architecture review; a problem two review rounds could not settle | `gpt-6.2-astra` | `high`; `max` only for a foundation-wide or money-critical plan | run by hand (no script), e.g. `docs/plans/2026-09-11-open-pr-backlog-plan.md` |
 
 Never lower effort on a money, RLS, or migration path to save tokens. Never run a Luna round through `scripts/write-codex-push-proof.mjs`: it unlinks the existing proof for that HEAD when it starts.
 

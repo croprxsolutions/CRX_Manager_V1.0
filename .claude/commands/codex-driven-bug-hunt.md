@@ -45,7 +45,7 @@ On top of it, **this loop deliberately launches the hunter with no database conn
 > **The fix-glance is an advisory Luna pass, not a ship gate — the name is historical.** It mints
 > no proof. A green row authorizes a commit to the *debug branch* only. Any fix touching money,
 > inventory, auth, RLS, migrations, permissions or an Edge Function still needs the exact-SHA
-> `gpt-6-sol` proof from `/codex-review` Step 3B before it can be pushed, and the push guard will
+> `gpt-6.2-sol` proof from `/codex-review` Step 3B before it can be pushed, and the push guard will
 > refuse it without one. Never read a Luna `VERDICT: SHIP` as that proof.
 
 > **All shell snippets below run in Claude Code's Bash tool (POSIX sh / git-bash), not PowerShell.** The loop session must run them via the Bash tool.
@@ -120,7 +120,7 @@ git status --porcelain                       # the staged set MUST equal what th
 { echo "Review this staged diff for the CRX codex-driven hunt. It must fully fix: <finding>. Judge correctness + money / idempotency / actor / lifecycle bugs + whether it introduces a NEW bug. Output 'VERDICT: SHIP' or 'VERDICT: NEEDS-WORK — <reason>'. Diff:"; git diff --cached; } > .claude/session-state/codex-fix-glance-prompt.txt
 # Adversarial review gate — use the gate wrapper (pins the model explicitly, --ignore-user-config,
 # read-only), NOT the read-only hunter wrapper. Defaults to gpt-6-luna at xhigh since 2026-09-20;
-# add `--sol --reason "<why>"` for a gpt-6-sol/high pass on genuinely complex work; the wrapper
+# add `--sol --reason "<why>"` for a gpt-6.2-sol/high pass on genuinely complex work; the wrapper
 # REFUSES --sol without a reason, so escalated spend is never silent. stdout = verdict, stderr = trace.
 node scripts/overnight-codex-gate.mjs .claude/session-state/codex-fix-glance-prompt.txt --timeout 600 \
   > .claude/session-state/codex-fix-glance-latest.txt 2> .claude/session-state/codex-fix-glance-trace.txt

@@ -160,7 +160,7 @@ assert.deepEqual(
     "--ephemeral",
     "--ignore-user-config",
     "--model",
-    "gpt-6-sol",
+    "gpt-6.2-sol",
     "-c",
     'model_reasoning_effort="high"',
     "-c",
@@ -1910,7 +1910,7 @@ not json
       const base = solReviewBase(repo, featureHead, stagingTip);
       assert.equal(base, stagingTip, "staging base: a head containing origin/staging keeps it");
       assert.deepEqual(names(base, featureHead), ["mine.ts"], "staging base: the review diff is only the branch's own file");
-      const proof = { codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high", head_sha: featureHead, base_sha: base, timestamp: new Date().toISOString() };
+      const proof = { codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high", head_sha: featureHead, base_sha: base, timestamp: new Date().toISOString() };
       assert.ok(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: stagingTip, isAncestor }), "staging base: the merge gate accepts it into staging");
       assert.equal(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: mainTip, isAncestor }), false, "staging base: the same proof is refused for a merge into main");
       // A branch that undoes unreleased staging work: the main base hides the undo, the staging base shows it.
@@ -1978,7 +1978,7 @@ not json
         assert.equal(solReviewBase(repo, git("rev-parse", "HEAD"), movedMain), branchHead, "review base: a migration branch is also reviewed from the fork point; the apply gate later needs a main merge plus carry-forward");
         // The proof the fork-point review mints passes the merge gate's base check.
         const isAncestor = (a, b) => spawnSync("git", ["merge-base", "--is-ancestor", a, b], { cwd: repo }).status === 0;
-        const forkProof = { codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high", head_sha: featureHead, base_sha: branchHead, timestamp: new Date().toISOString() };
+        const forkProof = { codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high", head_sha: featureHead, base_sha: branchHead, timestamp: new Date().toISOString() };
         assert.ok(proofValidForMerge({ data: forkProof, headSha: featureHead, nowMs: Date.now(), baseSha: movedMain, isAncestor }), "review base: the merge gate accepts a proof bound to the fork point");
         git("checkout", "-q", "main");
       }

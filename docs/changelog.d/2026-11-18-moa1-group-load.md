@@ -5,6 +5,6 @@
   the ingredients already in the system, matched by CAS number (or by exact name where a CAS is missing). Each group keeps its source.
 - Never overwrites a group list someone already saved; skips and reports any ingredient the list would give two
   different codes; reports list rows that matched no ingredient. Running it again changes nothing.
-- It refuses to run while only a few listed ingredients exist (fewer than 60 of 123), so it cannot be recorded as
+- It refuses to run while only a few listed ingredients exist (fewer than 60 ingredients matched while EPA-sourced ingredients exist), so it cannot be recorded as
   done before the EPA batch fill. Groups attach to existing ingredient rows, so the live apply should follow the EPA batch fill on live (which adds
   most ingredients). Ingredients added later get their groups with the per-ingredient editor.

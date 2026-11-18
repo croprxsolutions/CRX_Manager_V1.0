@@ -1,7 +1,7 @@
 // Run: node --test .github/scripts/release-slack.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, link, readMarker, writeMarker, changeGroup, groupCounts, cardMessage, threadUpdates, liveMessage, hotfixMessage, parseReleaseNotes, trySlack, slackConfigured, backMergeText } from './release-slack.mjs';
+import { esc, link, readMarker, writeMarker, changeGroup, groupCounts, hotfixFacts, cardMessage, threadUpdates, liveMessage, hotfixMessage, parseReleaseNotes, trySlack, slackConfigured, backMergeText } from './release-slack.mjs';
 import { releaseNotesModule } from './release-flow.mjs';
 
 const texts = (msg) => JSON.stringify(msg);
@@ -156,6 +156,7 @@ test('the live post lists what users see, escaped and capped', () => {
   assert.match(texts(msg), /14 PR\(s\) · 3 migration\(s\)/);
   assert.match(texts(msg), /:tada: CRX Manager v0.2.0 is live/);
   assert.match(texts(liveMessage({ ...r, groups: { features: 25, fixes: 39, docs: 2 }, migrations: 40 })), /:sparkles: 25 feature\(s\) · :bug: 39 fix\(es\) · :file_cabinet: 40 database change\(s\) · Merged by taha/);
+  assert.match(texts(liveMessage({ ...r, groups: { features: 2 }, migrations: 0 })), /:sparkles: 2 feature\(s\) · No database changes · Merged by taha/);
   assert.match(texts(msg), /• Tax &lt;!channel&gt;/);
   assert.match(texts(msg), /…and 5 more in the release notes/);
   assert.match(texts(liveMessage({ ...r, items: [], prCount: null, migrations: null })), /Nothing user-facing this time/);
@@ -174,6 +175,10 @@ test('hotfix and back-merge texts link the PR', () => {
   const app = hotfixMessage({ number: 9, title: 'hotfix: x', url: 'https://x.example/9', mergedBy: 'm', releasesUrl: 'https://x.example/r', users: ['Tax <!channel> fixed'], migrations: 2, app: true });
   assert.match(texts(app), /:package: App change · :file_cabinet: 2 database change\(s\)/);
   assert.match(texts(app), /• Tax &lt;!channel&gt; fixed/);
+  assert.deepEqual(hotfixFacts(null), {});
+  assert.deepEqual(hotfixFacts(['.github/workflows/ci.yml', 'docs/x.md']), { migrations: 0, app: false });
+  assert.deepEqual(hotfixFacts(['package.json', 'package-lock.json']), { migrations: 0, app: true });
+  assert.deepEqual(hotfixFacts(['supabase/migrations/20270101000000_a.sql', 'supabase/migrations/README.md', 'src/x.ts']), { migrations: 1, app: true });
   assert.match(backMergeText('overdue', 8, 'https://x.example/8'), /<https:\/\/x.example\/8\|#8> is still open/);
   assert.match(backMergeText('carried', 8, 'https://x.example/8'), /is still open and now carries this too/);
   assert.match(backMergeText('squashed', 8, 'https://x.example/8'), /merged by squash or rebase, so staging still lacks main's history/);

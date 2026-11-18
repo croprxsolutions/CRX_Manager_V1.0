@@ -652,11 +652,20 @@ const commands = {
     } else if (isReleaseOrHotfixHead(pr.head.ref)) {
       thread = (await trySlack(async () => {
         // What it touched, for the post; if the file list can't be read, the post just leaves that out.
-        const files = await gh(`/pulls/${pr.number}/files?per_page=100`).then((fs) => fs.map((f) => f.filename), () => null);
+        let files = [];
+        try {
+          // Every page (GitHub lists at most 3,000 files, 100 a page), so a late migration still counts.
+          for (let page = 1; page <= 30; page++) {
+            const batch = await gh(`/pulls/${pr.number}/files?per_page=100&page=${page}`);
+            files.push(...batch.map((f) => f.filename));
+            if (batch.length < 100) break;
+          }
+        } catch {
+          files = null;
+        }
         return slack('chat.postMessage', K.hotfixMessage({
           number: pr.number, title: pr.title, url: pr.html_url, mergedBy: by, releasesUrl: `${REPO_URL()}/releases`, users: usersSee(pr.body),
-          migrations: files && files.filter((f) => /^supabase\/migrations\/[^/]+\.sql$/.test(f)).length,
-          app: files && files.some((f) => /^(src|supabase|public)\//.test(f)),
+          ...K.hotfixFacts(files),
         }));
       }))?.ts ?? null;
     } else return 0;

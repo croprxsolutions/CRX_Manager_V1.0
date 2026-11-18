@@ -88,7 +88,7 @@ export function groupCounts(prs) {
 }
 const countLine = (grp, mig) => [
   ...['features', 'fixes'].filter((k) => grp?.[k]).map((k) => `${GROUPS[k].split(' ')[0]} ${grp[k]} ${k === 'features' ? 'feature(s)' : 'fix(es)'}`),
-  mig ? `:file_cabinet: ${mig} database change(s)` : null,
+  mig == null ? null : mig ? `:file_cabinet: ${mig} database change(s)` : 'No database changes',
 ].filter(Boolean);
 
 const COLORS = { open: '#BA7517', ready: '#185FA5', merged: '#3B6D11', squashed: '#A32D2D', hotfix: '#993C1D' };
@@ -198,6 +198,13 @@ export function liveMessage(r) {
     }],
   };
 }
+
+// From a hotfix's changed files: how many migrations, and whether it touches the shipped app (not only
+// tooling). Unknown files (null) give nothing, and the post leaves both out.
+export const hotfixFacts = (files) => (files ? {
+  migrations: files.filter((f) => /^supabase\/migrations\/[^/]+\.sql$/.test(f)).length,
+  app: files.some((f) => /^(src|supabase|public)\/|^(package(-lock)?\.json|index\.html|vite\.config\.\w+)$/.test(f)),
+} : {});
 
 // A hotfix on main. h: { number, title, url, mergedBy, releasesUrl, users (what users see),
 // migrations (count), app (touches the app, not only tooling) }; the last three may be unknown.

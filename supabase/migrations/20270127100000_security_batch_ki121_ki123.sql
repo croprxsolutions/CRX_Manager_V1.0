@@ -1,5 +1,6 @@
 -- Security batch (contract: docs/plans/2026-11-18-security-batch-ki121-124-CONTRACT.md)
 --   KI-121  the last active admin can no longer stop being one by a ROLE change (deactivation was already refused).
+--   KI-122  signed-in users can no longer write the server-only auth_password_reset* activity rows.
 --   KI-123  the signed-out role (anon) loses every read on public tables, views and sequences (and its leftover
 --           sequence write rights), and objects postgres creates later no longer grant it any.
 -- Non-destructive: no row is changed. Rollback: scripts/smoke/security-batch-ki123-reverse.sql (exact live grants
@@ -16,6 +17,16 @@ BEGIN
   IF (SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public._guard_last_active_admin()'::regprocedure)
        IS DISTINCT FROM '411de704268c49ac63b2755486b61ad5' THEN
     RAISE EXCEPTION 'SECURITY_BATCH_PREFLIGHT: _guard_last_active_admin() is not the expected body';
+  END IF;
+  IF NOT EXISTS (
+       SELECT 1 FROM pg_policy
+        WHERE polrelid = 'public.activity_feed'::regclass
+          AND polname = 'activity_insert'
+          AND polcmd = 'a'
+          AND polroles = ARRAY['authenticated'::regrole]::oid[]
+          AND polqual IS NULL
+          AND pg_get_expr(polwithcheck, polrelid) = '(performed_by = ( SELECT auth.uid() AS uid))') THEN
+    RAISE EXCEPTION 'SECURITY_BATCH_PREFLIGHT: activity_insert is not the expected policy';
   END IF;
 END
 $preflight$;
@@ -72,12 +83,19 @@ COMMENT ON FUNCTION public._guard_last_active_admin() IS
 
 REVOKE ALL ON FUNCTION public._guard_last_active_admin() FROM PUBLIC, anon, authenticated;
 
-DROP TRIGGER IF EXISTS trg_guard_last_active_admin ON public.profiles;
-CREATE TRIGGER trg_guard_last_active_admin
+-- Replaced in place: there is no moment without the guard, even if statements were run one by one.
+CREATE OR REPLACE TRIGGER trg_guard_last_active_admin
   BEFORE UPDATE OF is_active, role ON public.profiles
   FOR EACH ROW
   WHEN (OLD.is_active IS DISTINCT FROM NEW.is_active OR OLD.role IS DISTINCT FROM NEW.role)
   EXECUTE FUNCTION public._guard_last_active_admin();
+
+-- ---------------------------------------------------------------------------
+-- KI-122: the Edge Functions (service role, which bypasses RLS) write the auth_password_reset rows;
+-- a signed-in user may still log their own activity, but not under those server-only event types.
+-- ---------------------------------------------------------------------------
+ALTER POLICY activity_insert ON public.activity_feed
+  WITH CHECK (performed_by = (SELECT auth.uid()) AND event_type NOT LIKE 'auth\_password\_reset%');
 
 -- ---------------------------------------------------------------------------
 -- KI-123: the signed-out role reads nothing in public.
@@ -149,8 +167,16 @@ BEGIN
         WHERE d.defaclrole = 'postgres'::regrole
           AND d.defaclnamespace IN ('public'::regnamespace, 0)
           AND d.defaclobjtype IN ('r', 'S')
-          AND x.grantee = 'anon'::regrole) THEN
-    RAISE EXCEPTION 'SECURITY_BATCH_POSTFLIGHT: postgres still grants anon rights on new tables or sequences';
+          AND x.grantee IN ('anon'::regrole, 0)) THEN
+    RAISE EXCEPTION 'SECURITY_BATCH_POSTFLIGHT: postgres still grants anon or PUBLIC rights on new tables or sequences';
+  END IF;
+
+  IF NOT EXISTS (
+       SELECT 1 FROM pg_policy
+        WHERE polrelid = 'public.activity_feed'::regclass
+          AND polname = 'activity_insert'
+          AND strpos(pg_get_expr(polwithcheck, polrelid), 'event_type !~~ ''auth\_password\_reset%''::text') > 0) THEN
+    RAISE EXCEPTION 'SECURITY_BATCH_POSTFLIGHT: activity_insert does not refuse the server-only reset rows';
   END IF;
 
   IF NOT EXISTS (

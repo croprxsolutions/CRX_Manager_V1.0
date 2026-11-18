@@ -5,7 +5,7 @@
   remove or deactivate the only active admin".
 - **KI-122:** both admin password-reset paths share one helper that refuses unless the target user loads, writes the
   server's own activity record naming the admin before the password changes (no record, no reset), and records a
-  failed reset. Live Auth already ends the user's existing sign-ins on such a reset. Edge Functions not deployed:
+  failed reset. Signed-in users can no longer write those server records themselves. Live Auth already ends the user's existing sign-ins on such a reset. Edge Functions not deployed:
   that needs Mason's approval.
 - **KI-123:** the signed-out role loses every read and sequence right on app tables, and new tables no longer grant it
   any. Row security already blocked those reads; this removes the second layer's gap.

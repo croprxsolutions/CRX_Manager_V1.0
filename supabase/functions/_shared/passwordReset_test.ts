@@ -53,7 +53,7 @@ Deno.test("writes the audit row naming the verified admin before changing the pa
   const { client, log, rows } = fake();
   const out = await adminResetPassword(client, ADMIN, TARGET, "longenough");
   assertEquals(out, { status: 200, body: { success: true } });
-  assertEquals(log, [`lookup:profiles:${TARGET}`, "insert:activity_feed:user_password_reset", `auth:${TARGET}`]);
+  assertEquals(log, [`lookup:profiles:${TARGET}`, "insert:activity_feed:auth_password_reset", `auth:${TARGET}`]);
   assertEquals(rows[0].performed_by, ADMIN);
   assertEquals(rows[0].related_entity_type, "profile");
   assertEquals(rows[0].related_entity_id, TARGET);
@@ -86,7 +86,7 @@ Deno.test("records a failed row when Auth refuses the change", async () => {
   const { client, log } = fake({ authError: { message: "weak password" } });
   const out = await adminResetPassword(client, ADMIN, TARGET, "longenough");
   assertEquals(out, { status: 400, body: { error: "weak password" } });
-  assertEquals(log[log.length - 1], "insert:activity_feed:user_password_reset_failed");
+  assertEquals(log[log.length - 1], "insert:activity_feed:auth_password_reset_failed");
 });
 
 Deno.test("validates input before touching anything", async () => {

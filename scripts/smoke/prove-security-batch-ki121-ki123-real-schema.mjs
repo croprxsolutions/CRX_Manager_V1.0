@@ -13,6 +13,8 @@
  *   K6      two admins demoting each other at once: the second waits on the first, then is refused;
  *           under REPEATABLE READ the second fails with a serialization error instead;
  *   K7      three admins, two removals at once on different rows: both succeed, no deadlock;
+ *   P1      a signed-in user can no longer write the server-only auth_password_reset rows, but still logs
+ *           their own activity;
  *   A1-A3   anon is refused on every public table, view, column and sequence; a signed-in admin still reads;
  *           a table, view and sequence postgres creates afterwards give anon nothing;
  *   again   a second apply refuses (SECURITY_BATCH_PREFLIGHT);
@@ -36,6 +38,8 @@ const REUSE = process.env.CRX_PROVER_REUSE;
 if (REUSE && !/^crx-sec-/.test(REUSE)) throw new Error('CRX_PROVER_REUSE must name a kept crx-sec- container');
 const NAME = REUSE || `crx-sec-${process.pid}-${Date.now().toString(36)}`;
 const DB = process.env.CRX_PROVER_DB || 'postgres';
+// A plain database name only: psql -d also accepts a connection string, which could point outside the container.
+if (!/^[a-z_][a-z0-9_]{0,62}$/.test(DB)) throw new Error('CRX_PROVER_DB must be a plain database name in the kept container');
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -267,6 +271,15 @@ function refusedProbe(sql, pattern, uid) {
 const id = (s) => `5ec5ec5e-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const X = id('a1'), Y = id('a2'), R = id('b1');
 const GUARD_OLD = '411de704268c49ac63b2755486b61ad5';
+const logAs = (eventType, by) => `INSERT INTO public.activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id)
+  VALUES ('${eventType}', '[PROVER] SEC', '${by}', 'profile', '${X}') RETURNING 'logged';`;
+function policyRefuses() {
+  refusedProbe(logAs('auth_password_reset', R), /row-level security/, R);
+  refusedProbe(logAs('auth_password_reset_failed', R), /row-level security/, R);
+  assert.equal(okProbe(logAs('quote_created', R), R), 'logged');
+  assert.equal(okProbe(logAs('user_password_reset', X), X), 'logged');
+  refusedProbe(logAs('quote_created', X), /row-level security/, R);
+}
 const guardMd5 = () => scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'public._guard_last_active_admin()'::regprocedure;");
 const activeAdmins = () => scalar("SELECT coalesce(string_agg(id::text, ',' ORDER BY id), '') FROM public.profiles WHERE role = 'admin' AND is_active;");
 // Every anon right in public as md5:count: table/view SELECT, column-only SELECT, sequence rights.
@@ -437,7 +450,8 @@ async function main() {
   const itemsBefore = anonItems();
   assert.notEqual(count(inventoryBefore), '0');
   assert.equal(okProbe(demote(X), X), 'demoted', 'before the fix the last admin should be demotable (KI-121)');
-  console.log(`[case] B before the fix the only admin CAN be demoted, and anon holds ${count(inventoryBefore)} rights in public`);
+  assert.equal(okProbe(logAs('auth_password_reset', R), R), 'logged');
+  console.log(`[case] B before the fix the only admin CAN be demoted, a rep CAN write an auth_password_reset row, and anon holds ${count(inventoryBefore)} rights in public`);
 
   stageText('candidate.sql', lf(CANDIDATE));
   const first = apply('candidate.sql');
@@ -449,6 +463,8 @@ async function main() {
   await raceCase('REPEATABLE READ');
   await noDeadlockCase();
   anonCases();
+  policyRefuses();
+  console.log('[case] P1 a rep cannot write auth_password_reset or auth_password_reset_failed rows; own activity and the screen user_password_reset row still log; forged performed_by still refused');
 
   const again = apply('candidate.sql');
   assert.notEqual(again.status, 0); assert.match(again.output, /SECURITY_BATCH_PREFLIGHT/);
@@ -469,12 +485,14 @@ async function main() {
   assert.equal(inventoryAfter, inventoryBefore, "the reverse did not restore anon's rights exactly as they were");
   setAdmins([X]);
   assert.equal(okProbe(demote(X), X), 'demoted');
-  console.log('[case] R the reverse restores the old guard (md5 411de704) and exactly the anon rights the database had before');
+  assert.equal(okProbe(logAs('auth_password_reset', R), R), 'logged');
+  console.log('[case] R the reverse restores the old guard (md5 411de704), the old activity_insert policy and exactly the anon rights the database had before');
 
   const reapply = apply('candidate.sql');
   assert.equal(reapply.status, 0, reapply.output);
   refusedProbe(demote(X), /LAST_ACTIVE_ADMIN/, X);
   assert.equal(count(anonInventory()), '0');
+  policyRefuses();
   console.log('[case] RA the candidate re-applies after the reverse and the guard and lockdown hold again');
   console.log('SECURITY_BATCH_KI121_KI123_PROOF_PASS');
 }

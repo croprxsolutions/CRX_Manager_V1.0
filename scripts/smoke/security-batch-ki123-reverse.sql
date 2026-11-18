@@ -45,6 +45,10 @@ DO $md5$ BEGIN
   END IF;
 END $md5$;
 
+-- KI-122: the original activity_insert policy (signed-in users log any event under their own id).
+ALTER POLICY activity_insert ON public.activity_feed
+  WITH CHECK (performed_by = (SELECT auth.uid()));
+
 -- KI-123: anon's default rights on new postgres-created tables and sequences.
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT ON TABLES TO anon;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT, UPDATE, USAGE ON SEQUENCES TO anon;

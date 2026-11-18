@@ -68,9 +68,10 @@ Corrections to sections 1–4 above (these win where they differ):
   `entity_recipient` before calling Auth (fail closed, settles #20); (b) writes an `activity_feed` row with
   `performed_by = <verified caller id>`, `related_entity_type 'profile'`, `related_entity_id = target` **before**
   calling Auth and refuses the reset if that insert fails (so no password changes without a record: settles #15,
-  #51); (c) on an Auth failure, writes a second row saying the reset failed. Rows are `user_password_reset`
-  ("requested") and `user_password_reset_failed`. The screen keeps its own client log line for now (no unlogged
-  window during rollout; the server row is told apart by its `related_entity_id`): settles #51, #52, #53. Removing the
+  #51); (c) on an Auth failure, writes a second row saying the reset failed. Rows are `auth_password_reset`
+  ("started") and `auth_password_reset_failed`; the migration makes the `activity_insert` policy refuse those two
+  event types from signed-in users, so only the server (service role) can write them (Sol round 1, 2026-11-18). The screen keeps its own client log line for now (no unlogged
+  window during rollout; it keeps the `user_password_reset` type, so it stays apart from the server rows): settles #51, #52, #53. Removing the
   client line is a follow-up after Mason approves and the deploy is verified.
 - **KI-121 lock (revised after review, 2026-11-18).** The guard takes `pg_advisory_xact_lock(hashtext('crx_last_active_admin'))`
   only when an active admin loses that status (#11). Under READ COMMITTED (what PostgREST RPCs use) it then counts the

@@ -28,6 +28,17 @@ BEGIN
   IF to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)') IS NULL OR to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)') IS NULL OR to_regprocedure('public._field_app_quote_eligible(quotes,uuid,uuid[],date)') IS NULL THEN
     RAISE EXCEPTION 'KI81_REVERSE_PREFLIGHT: 20270125163000 is not applied';
   END IF;
+  -- Luna r11: the three new functions too must be exactly what 20270125163000 installed (a later hotfix to one is
+  -- not silently dropped), and the two helpers still closed to every API role.
+  IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)')) IS DISTINCT FROM '2f6fe91f7c639d953e3d8c525c06f168'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)')) IS DISTINCT FROM 'd2d182551c76b841220e9b4a5329025a'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_quote_eligible(quotes,uuid,uuid[],date)')) IS DISTINCT FROM '21eace1e5236db37b4e4e039631eefc4'
+     OR has_function_privilege('anon', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._field_app_quote_eligible(quotes,uuid,uuid[],date)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'KI81_REVERSE_PREFLIGHT: the resolver or helpers are not the ones 20270125163000 installs';
+  END IF;
 END;
 $pre$;
 DROP FUNCTION public.resolve_field_app_chemical_price(uuid, uuid[], integer, bigint, uuid[], date);

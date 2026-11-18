@@ -17,6 +17,7 @@ for (const name of ['20270104120000_delivery_brands.sql', '20270105110000_epa_ch
 // The real follow-ups redefine rate-review functions: refused.
 assert.ok(rateReviewTouch(file('20270110110000_inactive_rate_review_cleanup.sql')));
 assert.ok(rateReviewTouch(file('20270120100000_priority_integrity_followups.sql')));
+assert.ok(rateReviewTouch(file('20270125100000_product_rate_cutover.sql')));
 
 const fn = (body) => `CREATE OR REPLACE FUNCTION public.f() RETURNS void LANGUAGE plpgsql AS $fn$\nBEGIN\n${body}\nEND;\n$fn$;`;
 const readOnly = [

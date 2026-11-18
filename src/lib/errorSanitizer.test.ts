@@ -94,6 +94,7 @@ describe('sanitizeError', () => {
     ['PRODUCT_STOCK_UNIT_UNKNOWN', '"Tote" is not a known unit; pick a stock unit from the list.'],
     ['PRODUCT_UNIT_HAS_STOCK', 'this product\'s stock unit cannot change to "Qt" while it has stock counted in "Gal". Bring its stock to zero (or convert it) first.'],
     ['STOCK_ROW_UNIT_NOT_STOCK_UNIT', 'this stock row is in "Qt" but the product is stocked in "Gal".'],
+    ['PRODUCT_UNIT_HAS_HISTORY', 'this product\'s stock unit cannot change to "Qt" because it already has orders, purchases, deliveries, returns, stock movements or holds (order ORD-0001, return RMA-0001). Set up a new product for the new unit.'],
   ])('explains a %s refusal without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
   });
@@ -617,6 +618,8 @@ describe('product setup and import refusals (20261107090000)', () => {
       .toBe('Set the sales tax rate in Settings first. No changes were saved');
     expect(sanitizeError('SALES_TAX_STALE: this draft\'s sales tax is out of date; save it again, then post'))
       .toBe("This draft's sales tax is out of date. Save it again, then post");
+    expect(sanitizeError("SALES_TAX_BOX_MISMATCH: this draft is untaxed but its sale's sales tax box is on; switch the box over and back, ending at the setting you want, to re-apply it to the sale's drafts (a split draft that can't be edited: set the box back to match it, or void the group and redraft it), then post"))
+      .toBe("This draft's sales tax doesn't match its sale's Sales tax box. Switch the box over and back, ending at the setting you want, to re-apply it to the sale's drafts (a split draft that can't be edited: set the box back to match it, or void and redraft its group), then post");
     expect(sanitizeError('SALES_TAX_ORDER_CLOSED: a cancelled or voided sale can\'t change'))
       .toBe("This sale is cancelled or voided, so its sales tax can't change");
   });

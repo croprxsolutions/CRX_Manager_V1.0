@@ -1,8 +1,9 @@
 // Run: node --test .github/scripts/release-slack.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, link, readMarker, writeMarker, cardMessage, threadUpdates, liveMessage, hotfixMessage, parseReleaseNotes, trySlack, slackConfigured, backMergeText } from './release-slack.mjs';
-import { releaseNotesModule } from './release-flow.mjs';
+import { esc, link, readMarker, writeMarker, changeGroup, groupCounts, hotfixFacts, cardMessage, threadUpdates, liveMessage, hotfixMessage, parseReleaseNotes, trySlack, slackConfigured, backMergeText } from './release-slack.mjs';
+import { releaseNotesModule, syncCard } from './release-flow.mjs';
+import * as S from './release-slack.mjs';
 
 const texts = (msg) => JSON.stringify(msg);
 const on = { SLACK_RELEASE_TOKEN: 'xoxb-test', SLACK_RELEASE_CHANNEL: 'C123' };
@@ -50,10 +51,11 @@ test('the open card counts states, lists what needs proof and links the PR', () 
   assert.equal(msg.text, 'Release v0.2.0: candidate');
   const [{ color, blocks }] = msg.attachments;
   assert.equal(color, '#BA7517');
-  assert.equal(blocks[0].text.text, 'Release v0.2.0 · candidate');
-  assert.match(blocks[1].elements[0].text, /4 PR\(s\) from staging · 3 migration\(s\) for live/);
+  assert.equal(blocks[0].text.text, ':rocket: Release v0.2.0 · candidate');
+  assert.equal(blocks[1].elements[0].text, '2026-11-19 · 3 PR(s) shipping · 3 database change(s) for live · 1 held back');
   assert.deepEqual(blocks[2].fields.map((f) => f.text.split('\n')[1]), ['1', '2', '1', ':hourglass_flowing_sand: Waiting on 2']);
-  assert.match(blocks[3].text.text, /<https:\/\/github.com\/o\/r\/pull\/2\|#2> fix: &lt;!here&gt; b/);
+  const waitingList = blocks.find((b) => b.text?.text?.startsWith('*:hourglass_flowing_sand: Needs proof on staging*'));
+  assert.match(waitingList.text.text, /<https:\/\/github.com\/o\/r\/pull\/2\|#2> &lt;!here&gt; b/);
   assert.doesNotMatch(texts(msg), /<!here>/);
   assert.deepEqual(blocks.at(-1).elements.map((e) => e.text.text), ['Open release PR', 'Compare main…release']);
 });
@@ -76,6 +78,74 @@ test('a long waiting list is cut at 8, and orphan commits show', () => {
   assert.match(texts(msg), /…and 3 more/);
   assert.match(texts(msg), /2 commit\(s\) on staging without a PR/);
   assert.match(texts(msg), /Waiting on 13/);
+});
+
+test('PRs are grouped by kind: tooling scopes are Engineering, back-merges are left out', () => {
+  const cases = {
+    'feat(products): resistance groups': 'features',
+    'feat(billing 4/4): invoice PDF': 'features',
+    'fix(units): stock unit fixed': 'fixes',
+    'fix: round previews': 'fixes',
+    'feat(ci): release PR': 'engineering',
+    'fix(sol-accept): owner accept': 'engineering',
+    'feat(guards): landing claim': 'engineering',
+    'chore(staging): bring staging up to main': 'engineering',
+    'test(smoke): more': 'engineering',
+    'docs(plans): CMP-2': 'docs',
+    'Quotes redesign 2/4: quotes list': 'other',
+    'refactor!: x': 'engineering',
+    'perf(products): faster search': 'fixes',
+    'perf(ci): faster checks': 'engineering',
+    'feat(products, ci): update checks': 'engineering',
+    'feat(release-flow): Slack posts': 'engineering',
+    'feat(billing 4/4): invoice PDF again': 'features',
+    'Back-merge main into staging after #1858': null,
+    'Merge branch main': null,
+  };
+  for (const [title, want] of Object.entries(cases)) assert.equal(changeGroup(title), want, title);
+  assert.deepEqual(groupCounts([...prs, { number: 5, title: 'Back-merge x', state: 'verified' }]), { features: 1, fixes: 1, other: 1 });
+});
+
+test('the open card says what is in the release: top 3 per listed group, counts for tooling', () => {
+  const many = [
+    ...Array.from({ length: 5 }, (_, i) => ({ number: 10 + i, title: `feat(products): thing ${i}`, url: `https://x.example/${10 + i}`, state: 'verified' })),
+    { number: 20, title: 'fix(units): <!here> unit', url: 'https://x.example/20', state: 'verified', users: ['Stock units cannot change once used'] },
+    { number: 21, title: 'feat(ci): tooling', url: 'https://x.example/21', state: 'verified' },
+    { number: 22, title: 'docs(plans): plan', url: 'https://x.example/22', state: 'verified' },
+    { number: 23, title: 'feat: held one', url: 'https://x.example/23', state: 'held', held: 'flag x' },
+    { number: 24, title: 'Back-merge main into staging', url: 'https://x.example/24', state: 'verified' },
+  ];
+  const msg = cardMessage({ ...state, states: {} }, { prs: many });
+  const what = msg.attachments[0].blocks.find((b) => b.text?.text?.includes('New features')).text.text;
+  assert.match(what, /^\*:sparkles: New features \(5\)\*\n• Thing 0 <https:\/\/x.example\/10\|#10>/);
+  assert.match(what, /_…and 2 more_/);
+  assert.match(what, /\*:bug: Fixes and improvements \(1\)\*\n• Stock units cannot change once used <https:\/\/x.example\/20\|#20>/);
+  assert.match(what, /\*:hammer_and_wrench: Engineering\* 1  ·  \*:memo: Docs and records\* 1$/);
+  assert.doesNotMatch(what, /held one|Back-merge|<!here>/);
+  // A marker-only card (merged) has no titles, so no changes section.
+  assert.ok(!texts(cardMessage(state, { phase: 'merged' })).includes('New features'));
+});
+
+test('syncCard posts a new card with group counts in its marker, then edits it in place', async () => {
+  process.env.GITHUB_REPOSITORY = 'o/r';
+  process.env.SLACK_RELEASE_CHANNEL = 'C1';
+  const calls = [];
+  const kit = { ...S, slack: async (method, body) => (calls.push({ method, body }), { ts: '7.7' }) };
+  const pr = (number, title, labels = []) => ({ number, title, body: 'Staging proof: https://x.example/p', labels, comments: [] });
+  const plan = { version: 'v0.2.0', date: '2026-11-19', prs: [pr(1, 'feat(products): a', ['verified-on-staging']), pr(2, 'Back-merge main into staging', ['verified-on-staging'])], gate: { ok: true }, migrations: [], orphans: [] };
+  const first = await syncCard(kit, plan, 'https://x.example/pr', null);
+  assert.deepEqual(first.marker.grp, { features: 1 });
+  assert.equal(first.marker.ts, '7.7');
+  assert.equal(calls[0].method, 'chat.postMessage');
+  assert.match(texts(calls[0].body), /1 PR\(s\) shipping/);
+  const again = await syncCard(kit, plan, 'https://x.example/pr', first.marker);
+  assert.equal(calls[1].method, 'chat.update');
+  assert.deepEqual(again.marker.grp, { features: 1 });
+});
+
+test('the marker keeps group counts, and nothing else under grp', () => {
+  const m = readMarker('<!-- crx-slack {"grp":{"features":3,"fixes":2,"evil":1,"docs":-1,"other":"x","constructor":1,"toString":2}} -->');
+  assert.deepEqual(m, { grp: { features: 3, fixes: 2 } });
 });
 
 test('thread replies say what changed, and nothing on the first post', () => {
@@ -105,7 +175,11 @@ test('the live post lists what users see, escaped and capped', () => {
   const r = { version: 'v0.2.0', items: ['Tax <!channel>', ...Array.from({ length: 16 }, (_, i) => `item ${i}`)], prCount: 14, migrations: 3, mergedBy: 'taha', tagUrl: 'https://x.example/t', changelogUrl: 'https://x.example/c', prUrl: 'https://x.example/p' };
   const msg = liveMessage(r);
   assert.equal(msg.text, 'v0.2.0 is live');
-  assert.match(texts(msg), /Merged by taha · 14 PR\(s\) · 3 migration\(s\)/);
+  assert.match(texts(msg), /Merged by taha/);
+  assert.match(texts(msg), /14 PR\(s\) · 3 migration\(s\)/);
+  assert.match(texts(msg), /:tada: CRX Manager v0.2.0 is live/);
+  assert.match(texts(liveMessage({ ...r, groups: { features: 25, fixes: 39, docs: 2 }, migrations: 40 })), /:sparkles: 25 feature\(s\) · :bug: 39 fix\(es\) · :file_cabinet: 40 database change\(s\) · Merged by taha/);
+  assert.match(texts(liveMessage({ ...r, groups: { features: 2 }, migrations: 0 })), /:sparkles: 2 feature\(s\) · No database changes · Merged by taha/);
   assert.match(texts(msg), /• Tax &lt;!channel&gt;/);
   assert.match(texts(msg), /…and 5 more in the release notes/);
   assert.match(texts(liveMessage({ ...r, items: [], prCount: null, migrations: null })), /Nothing user-facing this time/);
@@ -113,7 +187,21 @@ test('the live post lists what users see, escaped and capped', () => {
 });
 
 test('hotfix and back-merge texts link the PR', () => {
-  assert.match(texts(hotfixMessage({ number: 7, title: 'fix: <b>', url: 'https://x.example/7', mergedBy: 'm', releasesUrl: 'https://x.example/r' })), /<https:\/\/x.example\/7\|#7> fix: &lt;b&gt;/);
+  const bare = hotfixMessage({ number: 7, title: 'fix: <b>', url: 'https://x.example/7', mergedBy: 'm', releasesUrl: 'https://x.example/r' });
+  assert.match(texts(bare), /\*What changed\*\\n<https:\/\/x.example\/7\|#7> &lt;b&gt;/);
+  assert.doesNotMatch(texts(bare), /What users see|database|Engineering/);
+  const full = hotfixMessage({ number: 9, title: 'hotfix: workflows match', url: 'https://x.example/9', mergedBy: 'taha', releasesUrl: 'https://x.example/r', users: [], migrations: 0, app: false });
+  assert.match(texts(full), /:adhesive_bandage: Hotfix #9 is on main/);
+  assert.match(texts(full), /Merged by taha · :hammer_and_wrench: Engineering · No database changes · its tag/);
+  assert.match(texts(full), /#9> Workflows match/);
+  assert.match(texts(full), /What users see\*\\n_Nothing user-facing._/);
+  const app = hotfixMessage({ number: 9, title: 'hotfix: x', url: 'https://x.example/9', mergedBy: 'm', releasesUrl: 'https://x.example/r', users: ['Tax <!channel> fixed'], migrations: 2, app: true });
+  assert.match(texts(app), /:package: App change · :file_cabinet: 2 database change\(s\)/);
+  assert.match(texts(app), /• Tax &lt;!channel&gt; fixed/);
+  assert.deepEqual(hotfixFacts(null), {});
+  assert.deepEqual(hotfixFacts(['.github/workflows/ci.yml', 'docs/x.md']), { migrations: 0, app: false });
+  assert.deepEqual(hotfixFacts(['package.json', 'package-lock.json']), { migrations: 0, app: true });
+  assert.deepEqual(hotfixFacts(['supabase/migrations/20270101000000_a.sql', 'supabase/migrations/README.md', 'src/x.ts']), { migrations: 1, app: true });
   assert.match(backMergeText('overdue', 8, 'https://x.example/8'), /<https:\/\/x.example\/8\|#8> is still open/);
   assert.match(backMergeText('carried', 8, 'https://x.example/8'), /is still open and now carries this too/);
   assert.match(backMergeText('squashed', 8, 'https://x.example/8'), /merged by squash or rebase, so staging still lacks main's history/);

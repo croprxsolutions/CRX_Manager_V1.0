@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-17 for the live ledger only (latest live row `20261113011216`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
+**Last verified:** 2026-11-18 for the live ledger only (latest live row `20261113011216`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -513,7 +513,7 @@ live when this was written.
   commission split). UNVERIFIED, LOW.
 
 ### KI-81 — Two invoice paths read a quote line's current price, not the price the customer was sent
-**MED · OPEN (found 2026-10-25, To-Do 1.2 follow-up) · money · Claude (Mason, 2026-11-17: fix now; supersedes 2026-10-27 "fix later")**
+**MED · FIX IN REVIEW (Claude, `20270125163000_ki81_invoices_bill_sent_quote_price.sql`, to staging; found 2026-10-25, To-Do 1.2 follow-up) · money (Mason, 2026-11-17: fix now; supersedes 2026-10-27 "fix later")**
 The sent-price lock (`20261027040000`, live since 2026-10-27, ledger `20261027123725`) gates Convert, Partial Order and Schedule Job, which copy quote prices into
 orders and job lines. Two later paths read `quote_items.price_per_unit` live instead (read from live bodies
 2026-10-25): `create_invoice_from_blend_ticket` (through `set_blend_ticket_product_quote_price` /
@@ -527,6 +527,11 @@ Claude C-9). With `20261029120000`, a logged approved price change needs no re-s
 cascades away. But the field-app lookup is `ORDER BY qi.id LIMIT 1` over UUIDs, so it is effectively random, not
 "first". It also has no season filter: last season's quote, or another grower's quote on the same field, can price
 this year's invoice. Fix: pick the eligible quote by customer, status and season. Repair step 4 (To-Do 0.17).
+The fix (contract `docs/plans/2026-11-17-ki81-sent-price-invoices-CONTRACT.md`): a field-app chemical takes a quote price only from the
+billed grower's own sent quote (Mason, 2026-11-17, "Own quote only"), not draft, declined, cancelled or deleted, not expired by the application date
+and written on or before it, on a field the grower has a share of, and passing the sent-price lock; two different prices refuse until the price is typed. The invoice preview shares the save's quote eligibility (`_field_app_quote_eligible`) but does not run the sent-price check: a quote changed since its send previews its current price, and the save refuses `QUOTE_RESEND_REQUIRED`. A preview price is not approval to bill it. The
+blend-ticket invoice runs the lock on the job's quote first. Proven on a real-schema replay
+(`scripts/smoke/prove-ki81-sent-quote-price-real-schema.mjs`).
 
 ### KI-82 — The open quote screen can show a stale cost for a line it just saved
 **LOW · FIX IN REVIEW (Taha, branch `taha/quote-saved-line-cost`; found 2026-10-27, Sol review of PR #1105) · money (display only)**
@@ -595,11 +600,15 @@ this number is fixed and live (archive, 2026-11-05).
 RT-1's draft rates (`20261229110000`, live 2026-11-10) copy these as they are; nothing here is fixed yet. RT-2 step 1
 (PR #1706, open) has its unit converter live (`20261229160000`, ledger `20261110061547`); its spelling remap
 `20261229170000` is not live (2026-11-10). Derive notes the basis doubts (`basis_suspect`, `unit_not_for_form`, no basis), but not the Piksi grams: its house row is an `18 mg/acre` quoting default beside an `18 g/acre` label row, so RT-3 must fix it before any draft is approved.
+**Derived on live 2026-11-17** (714 drafts, [run record](../changelog.d/2026-11-17-rt1-derivation-run.md)): as predicted, `Piksi Dust Plus` has an `18 mg` per-acre house draft proposed as the quoting default beside an `18 g` label draft; `Piksi Dust Infurrow` has a `6 mg` house draft (not default). The two dry `oz` products got no house draft (`unit_not_for_form`).
 - Seed treatments: the 9 liquid seed treatments with `/unit` text store the per-seed-unit number as a per-acre rate
   (Ilevo 2.5 Gal: `1.18 oz` "per acre", text `1.18 oz/unit`), so a quote multiplies it by acres. RT-3.
 - Liquid unit on a dry product: `Autumn Super 51 WDG` and `Cimarron Plus - 10 oz` are dry with `rate_unit = 'oz'`.
   RT-2 (spellings).
 - Milligrams: the two `Piksi Dust` products store `MG` while their text says grams (`18 grams per Acre`). RT-3.
+  Update 2026-11-17: Mason chose to keep both on today's values ("priced each for jar and by mg, which is actually
+  gram's price"); RT-4a's switch refuses Piksi Dust Plus by ID and Infurrow is `needs_label_data`. The MG -> g rename
+  waits for RT-4b.
 - Per ton or per gallon: `BW-NLockDown`, `NanoCote Core` and `Tempo SC Ultra` have rates with no RT-1 basis. RT-3.
 
 ### KI-110 — Three small invoicing findings from the October admin-only invoicing review

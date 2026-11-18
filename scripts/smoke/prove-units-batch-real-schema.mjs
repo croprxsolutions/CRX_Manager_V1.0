@@ -4,6 +4,7 @@
  * docs/plans/2026-11-15-product-master-steps-1-3-CONTRACT.md, PR A):
  *   20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql (data correction, the candidate)
  *   20270121110000_line_unit_is_stock_unit.sql (the rules, its follow-up)
+ *   20270121120000_stock_unit_keeps_history.sql (no stock-unit change under history in the old unit; Sol HIGH)
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
  * replays every post-baseline migration before the candidate, seeds live's pinned rows (same ids, units and
@@ -17,7 +18,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,7 +33,8 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql');
 const RULES = path.join(MIGRATIONS, '20270121110000_line_unit_is_stock_unit.sql');
-const FOLLOW_UPS = [RULES];
+const HISTORY = path.join(MIGRATIONS, '20270121120000_stock_unit_keeps_history.sql');
+const FOLLOW_UPS = [RULES, HISTORY];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
@@ -587,6 +589,102 @@ function rulesCases() {
   console.log('[case] 5 on-order equals the open PO remainder on every stock row');
 }
 
+async function historyCases() {
+  // Sol HIGH on 20270121110000:248: the unit-change guard saw only open lines and stock. In each probe the Gal product
+  // is cleared of open lines and stock (as in case 2b) and given closed history in "Gal".
+  const LIFT = 'ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_setup_fields;';
+  // Every Gal line and receipt from earlier cases is removed (guards off for the clean-up only), and stock zeroed.
+  const CLEAR = `${LIFT} SET session_replication_role = replica;
+    DELETE FROM public.receiving_records WHERE product_id = '${GAL}'; DELETE FROM public.delivery_items WHERE product_id = '${GAL}';
+    DELETE FROM public.order_items WHERE product_id = '${GAL}'; DELETE FROM public.purchase_order_items WHERE product_id = '${GAL}';
+    DELETE FROM public.inventory_transactions WHERE product_id = '${GAL}'; DELETE FROM public.inventory_holds WHERE product_id = '${GAL}';
+    SET session_replication_role = origin;
+    UPDATE public.inventory SET quantity_available = 0, quantity_on_order = 0 WHERE id = '${GAL_INV}';`;
+  const TO_QT = `UPDATE public.products SET inventory_unit = 'Qt', unit_size = 'Qt' WHERE id = '${GAL}';`;
+  const RET = id('c41'), RET_ITEM = id('c42'), RPO_LINE = id('b51'), DONE_O = id('e51'), DONE_D = id('f51');
+  const replica = (sql) => `SET session_replication_role = replica; ${sql} SET session_replication_role = origin;`;
+  const RETURN = (status, restocked = false, unit = 'Gal') => replica(`
+    INSERT INTO public.returns (id, return_number, customer_id, status, requested_by) VALUES ('${RET}', 'U-R1', '${CUST}', '${status}', '${ADMIN}');
+    INSERT INTO public.return_items (id, return_id, product_id, quantity, unit, restock, restocked) VALUES ('${RET_ITEM}', '${RET}', '${GAL}', 2, '${unit}', true, ${restocked});`);
+  const RECEIVED_PO = `INSERT INTO public.purchase_order_items (id, purchase_order_id, product_id, unit_size, quantity_ordered, quantity_received, unit_cost)
+      VALUES ('${RPO_LINE}', '${PO11}', '${GAL}', 'Gal', 4, 4, 24);`;
+  const DONE_ORDER = (unit) => replica(`
+    INSERT INTO public.orders (id, order_number, customer_id, status) VALUES ('${DONE_O}', 'U-O9', '${CUST}', 'fulfilled');
+    INSERT INTO public.order_items (order_id, product_id, unit_size, total_units_needed, quantity_delivered, quantity_remaining, price_per_unit)
+      VALUES ('${DONE_O}', '${GAL}', ${unit}, 1, 1, 0, 30);`);
+  const DONE_DELIVERY = (unit) => replica(`
+    INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, status) VALUES ('${DONE_D}', 'U-D9', '${O1}', '${CUST}', '${ADMIN}', 'completed');
+    INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size) VALUES ('${DONE_D}', '${PINNED.oi.corn}', '${GAL}', 1, ${unit});`);
+  const RECEIPT_ONLY = replica(`INSERT INTO public.receiving_records (purchase_order_id, po_item_id, product_id, quantity_received, received_by)
+      VALUES ('${PO11}', '${PINNED.poi.corn}', '${GAL}', 1, '${ADMIN}');`);
+  const MOVEMENT = replica(`INSERT INTO public.inventory_transactions (product_id, transaction_type, quantity, performed_by)
+      VALUES ('${GAL}', 'adjusted', -1, '${ADMIN}');`);
+  const HOLD = (active) => replica(`INSERT INTO public.inventory_holds (product_id, quantity, created_by, is_active) VALUES ('${GAL}', 1, '${ADMIN}', ${active});`);
+  const asAdmin = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);`;
+  const receiveReturn = `${asAdmin} SELECT public._receive_return_impl_20260714('${RET}', '${ADMIN}', NULL) IS NOT NULL;`;
+
+  // Before (the HIGH): the change saves, then the approved return cannot be received and the receipt cannot be undone.
+  refusedProbe(`${CLEAR} ${RETURN('approved')} ${TO_QT} ${receiveReturn}`, /RETURN_CREDIT_INVENTORY_UNIT_MISMATCH/);
+  refusedProbe(`${CLEAR} ${RECEIVED_PO} ${TO_QT}
+    UPDATE public.purchase_order_items SET quantity_received = 0 WHERE id = '${RPO_LINE}';`,
+  /LINE_UNIT_NOT_STOCK_UNIT: this purchase order line is in "Gal" but the product is stocked in "Qt"/);
+  // Control: without the change the same return restocks 2 Gal.
+  assert.equal(okProbe(`${CLEAR} ${RETURN('approved')} ${receiveReturn}
+    SELECT quantity_available::numeric(10,0) || ' ' || unit_size FROM public.inventory WHERE id = '${GAL_INV}';`), '2 Gal');
+  console.log('[case] H0 before: a Gal -> Qt change saves under Gal history, then an approved Gal return cannot be received (RETURN_CREDIT_INVENTORY_UNIT_MISMATCH) and a received Gal PO line cannot be undone (LINE_UNIT_NOT_STOCK_UNIT); with no change the return restocks 2 Gal');
+
+  stageText('history.sql', lf(HISTORY));
+  const first = apply('history.sql');
+  assert.equal(first.status, 0, first.output);
+  const again = apply('history.sql');
+  assert.notEqual(again.status, 0); assert.match(again.output, /PREFLIGHT_UNITS_DRIFT: _refuse_stock_unit_change_with_history already exists/);
+  for (const role of ['anon', 'authenticated', 'service_role']) {
+    for (const fn of ['_refuse_stock_unit_change_with_history', '_history_row_locks_product']) {
+      assert.equal(scalar(`SELECT has_function_privilege('${role}', 'public.${fn}()', 'EXECUTE');`), 'f', `${role} cannot run ${fn}`);
+    }
+  }
+  const HIST = 'PRODUCT_UNIT_HAS_HISTORY: this product\'s stock unit cannot change to "Qt" because it already has orders, purchases, deliveries, returns, stock movements or holds \\(.*';
+  // Refused for any history, whatever its status or unit (blank too).
+  for (const [pre, who] of [[RETURN('requested'), 'return U-R1'], [RETURN('approved'), 'return U-R1'], [RETURN('approved', true), 'return U-R1'],
+    [RETURN('received'), 'return U-R1'], [RETURN('approved', false, 'Qt'), 'return U-R1'], [RECEIVED_PO, 'PO PO-2026-0011'],
+    [RECEIPT_ONLY, 'PO PO-2026-0011'], [MOVEMENT, 'stock movements or holds'], [HOLD(true), 'stock movements or holds'], [DONE_ORDER("'Gal'"), 'order U-O9'], [DONE_ORDER('NULL'), 'order U-O9'], [DONE_DELIVERY("'Gal'"), 'delivery U-D9'], [DONE_DELIVERY("' '"), 'delivery U-D9']]) {
+    refusedProbe(`${CLEAR} ${pre} ${TO_QT}`, new RegExp(`${HIST}${who}`));
+  }
+  // Allowed: no history at all (the empty stock row is relabelled); a case or outer-space change over history.
+  assert.equal(okProbe(`${CLEAR} ${HOLD(false)} ${TO_QT} SELECT p.inventory_unit || '/' || i.unit_size FROM public.products p, public.inventory i
+    WHERE p.id = '${GAL}' AND i.id = '${GAL_INV}';`), 'Qt/Qt');
+  assert.equal(okProbe(`${CLEAR} ${RECEIVED_PO} ${RETURN('approved')} ${DONE_ORDER("'Gal'")}
+    ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_units; UPDATE public.products SET inventory_unit = 'GAL', unit_size = 'GAL' WHERE id = '${GAL}';
+    SELECT inventory_unit FROM public.products WHERE id = '${GAL}';`), 'GAL');
+  // Open lines still answer first.
+  refusedProbe(`${LIFT} ${TO_QT}`, /PRODUCT_UNIT_HAS_OPEN_LINES/);
+  // Serialized: while another session holds an uncommitted return line for the product, the unit change waits.
+  assert.equal(scalar("SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_history_row_locks_product' AND tgenabled = 'O';"), '2');
+  const holdAndChange = async (write) => {
+    const holder = spawn('docker', psqlArgs(), { cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
+    let held = '';
+    holder.stdout.on('data', (d) => { held += d; }); holder.stderr.on('data', (d) => { held += d; });
+    const holderDone = new Promise((resolve) => holder.on('close', resolve));
+    holder.stdin.end(`BEGIN; ${write} SELECT 'HOLDING'; SELECT pg_sleep(6); ROLLBACK;\n`);
+    for (let i = 0; i < 100 && !held.includes('HOLDING'); i += 1) await new Promise((r) => setTimeout(r, 100));
+    assert.match(held, /HOLDING/, `the row was written with its trigger on:\n${held}`);
+    refusedProbe(`SET lock_timeout = '1s'; ${TO_QT}`, /lock timeout/);
+    assert.equal(await holderDone, 0, held);
+  };
+  await holdAndChange(`SET session_replication_role = replica;
+    INSERT INTO public.returns (id, return_number, customer_id, status, requested_by) VALUES ('${RET}', 'U-R1', '${CUST}', 'requested', '${ADMIN}');
+    SET session_replication_role = origin;
+    INSERT INTO public.return_items (id, return_id, product_id, quantity, unit, restock) VALUES ('${RET_ITEM}', '${RET}', '${GAL}', 2, 'Gal', true);`);
+  // Holds are created only through create_inventory_hold; re-activating an ended one fires the same lock.
+  await holdAndChange(`SET session_replication_role = replica;
+    INSERT INTO public.inventory_holds (id, product_id, quantity, created_by, is_active) VALUES ('${id('c43')}', '${GAL}', 1, '${ADMIN}', false);
+    SET session_replication_role = origin;
+    UPDATE public.inventory_holds SET is_active = true WHERE id = '${id('c43')}';`);
+  // Control: with no session holding a line, the same change is not blocked (it meets the open-lines rule instead).
+  refusedProbe(`SET lock_timeout = '1s'; ${TO_QT}`, /PRODUCT_UNIT_HAS_OPEN_LINES/);
+  console.log('[case] H1 Gal -> Qt is refused (PRODUCT_UNIT_HAS_HISTORY, naming the record) for any history: a requested, approved, restocked, received or Qt return; a received PO line; a receipt alone; a stock movement alone; an active hold; a fulfilled order line in Gal or blank; a completed delivery line in Gal or blank. With no history (an ended hold does not count) it saves and relabels the empty stock row; "GAL" (case only) saves over history; open lines still report PRODUCT_UNIT_HAS_OPEN_LINES first; an uncommitted return line or hold in another session makes the change wait (lock timeout); the functions are private; a second apply refuses');
+}
+
 function quoteCases() {
   // product_price_per_acre: unknown unit -> no figure; a known unit gives the same figure as before.
   assert.equal(okProbe(`SELECT coalesce(public.product_price_per_acre(30, 16, 'bogus', 'Gal', 'Gal')::text, 'null');`), 'null');
@@ -617,9 +715,14 @@ ${line(null, 10).replace(/;$/, ' RETURNING rate_unit;')}`), 'Lb');
 function rollbackCases() {
   const DATA_REV = path.join(ROOT, 'scripts', 'smoke', 'ki137-units-data-reverse.sql');
   const RULES_REV = path.join(ROOT, 'scripts', 'smoke', 'units-batch-rules-reverse.sql');
-  stageText('data-rev.sql', lf(DATA_REV)); stageText('rules-rev.sql', lf(RULES_REV));
+  const HISTORY_REV = path.join(ROOT, 'scripts', 'smoke', 'stock-unit-history-guard-reverse.sql');
+  stageText('data-rev.sql', lf(DATA_REV)); stageText('rules-rev.sql', lf(RULES_REV)); stageText('history-rev.sql', lf(HISTORY_REV));
   const early = apply('data-rev.sql');
   assert.notEqual(early.status, 0); assert.match(early.output, /KI137_REVERSE_ORDER/);
+  const r0 = apply('history-rev.sql'); assert.equal(r0.status, 0, r0.output);
+  assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_product_unit_keeps_history';"), 0);
+  assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_history_row_locks_product';"), 0);
+  assert.equal(n("SELECT count(*) FROM pg_proc WHERE proname IN ('_refuse_stock_unit_change_with_history', '_history_row_locks_product');"), 0);
   const r1 = apply('rules-rev.sql'); assert.equal(r1.status, 0, r1.output);
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE proname = 'product_price_per_acre';"), fnBefore, "live's per-acre body is back");
   assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_fill_order_line_unit';"), 1);
@@ -635,7 +738,7 @@ ${lf(DATA_REV)}`);
   raw(`DELETE FROM public.order_items WHERE id = '${id('e41')}'; UPDATE public.purchase_order_items SET unit_size = NULL WHERE id = '${BLANK_PO_LINE}';`);
   assert.equal(labels(), labelsBefore, 'every unit label is back');
   assert.equal(n(`SELECT count(*) FROM public.product_cost_basis WHERE product_id IN ('${CORN}', '${SOY}') AND effective_to IS NULL AND cost_cents IN (10000, 20050);`), 2);
-  console.log('[case] R rollback: the data reverse refuses before the rules reverse and after any later write; rules reverse restores the live per-acre body and the old fill trigger; data reverse restores every label, one open basis each at the same cents');
+  console.log('[case] R rollback: the history reverse drops its triggers and functions; the data reverse refuses before the rules reverse and after any later write; rules reverse restores the live per-acre body and the old fill trigger; data reverse restores every label, one open basis each at the same cents');
 }
 
 async function main() {
@@ -645,6 +748,7 @@ async function main() {
   driftCase();
   dataCases();
   rulesCases();
+  await historyCases();
   quoteCases();
   rollbackCases();
   console.log('UNITS_BATCH_PROOF_PASS');

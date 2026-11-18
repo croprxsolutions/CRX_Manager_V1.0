@@ -1,10 +1,78 @@
 # Decision Log
 
+## 2026-11-18 — #1946 (KI-81): a blend ticket's own grower falls back to their own quote
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, price the owner from their own quote").** Answering Taha's second re-review of PR #1946: when the job's quote gives no usable price for a product (no job quote, or it is declined, expired, unsent or does not list the product), the ticket's own grower is priced from their own sent, valid quote, as every other grower and the field-application invoices are; a usable job-quote price still wins.
+**What it does:** where the job's quote gives no usable price, the owner is priced by the same own-quote rules a field-application invoice uses. A usable job-quote price still wins on the blend ticket, so the two paths can bill the owner differently when the job's quote is not on the owner's field.
+**Supersedes:** the owner part of "2026-11-18 — #1946 (KI-81): blend-ticket invoices follow the same quote rules" (the owner billed their list price when the job's quote gave no price).
+
+## 2026-11-18 — #1946 (KI-81): a blend co-owner is priced from their own quote
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, use B's quote").** Answering Taha's re-review of PR #1946: on a blend ticket, a grower who does not own the job's quote is priced from their own sent, valid quote, as a field-application invoice prices them, else their list price.
+**What it does:** a co-owner is priced by the same own-quote rules a field-application invoice uses.
+**Supersedes:** in "2026-11-18 — #1946 (KI-81): blend-ticket invoices follow the same quote rules", the rule that every other grower on the ticket bills their list price.
+
+## 2026-11-18 — #1946 (KI-81): blend-ticket invoices follow the same quote rules
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, same rules").** Answering Taha's review of PR #1946: a blend-ticket invoice follows decisions "Own quote only", "Sent + not expired" and "Valid + written before". The job's quote prices a blend line only for the grower who owns it, and only if it was sent, written on or before the application date and not expired by it; every other grower on the ticket bills their list price. This replaces the earlier blend rule that billed the job's quote price (draft quotes included) to every grower on the ticket.
+**What it does:** the blend invoice stops giving one grower's quote price to another grower on a shared field, and stops billing from a declined, expired, never-sent or later-written quote. "Stop, type the price" still applies. Every other gate is unchanged.
+
+## 2026-11-17 — #1946 (KI-81): each grower on a split bill records their own price source
+
+**Decision (Mason, in chat, 2026-11-17: "Each records its own").** On PR #1946, when one grower on a split field-application bill pays their own quoted price and another pays the price list, each grower's invoice line and line share record that grower's own price source ('quoted' or 'tier'), not the largest-share grower's.
+**What it does:** follows from his earlier "Own quote only" rule; the split save keeps a per-grower source next to the per-grower price. Amounts are unchanged. Every other gate is unchanged.
+## 2026-11-18 — #1879 may have one more Sol round
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, one more round").** PR #1879 (brand quantities on paperwork) may have one more Sol round (round 6 as the counter reads it).
+**Why:** the new head only merges current `staging` into the branch, with no change to the PR's own code; Sol now reviews it against `origin/staging`.
+**What it does:** unlocks one Sol review of the new head. Every other gate is unchanged: it still needs a clean Sol review and green checks before it merges into `staging`.
+
 ## 2026-11-17 — #1879 and #1940 may have one more Sol round each
 
 **Decision (Mason, in chat, 2026-11-17: "Yes, confirmed").** PR #1879 (brand quantities on paperwork) and PR #1940 (inventory cleanup KI-161/150/163) may each have one more Sol round (round 21 and round 20 as the counter reads them).
 **Why:** both were clean at Sol before; the new heads only merge current `staging` (which brought the npm audit exception from #1941) plus this entry, with no change to either PR's own code.
 **What it does:** unlocks one Sol review of each PR's new head. Every other gate is unchanged: each still needs a clean Sol review and green checks before it merges into `staging`.
+## 2026-11-18 — #1947: Mason owner-accepted 3 Sol finding(s) at `3d71a5c062fc`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1947 at `3d71a5c062fc` (base `29682a0332c0`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270125110000_save_quote_keeps_section_ids.sql:283`, text sha256 `6ca650a316f44b81` (the wording stays with the proof, not here)
+  Mason's reason: direct expire (ref b619dec39703)
+- Finding 2 (HIGH) at `supabase/migrations/20270125110000_save_quote_keeps_section_ids.sql:283`, text sha256 `45dc1781a05db83a` (the wording stays with the proof, not here)
+  Mason's reason: convert to order (ref 5af7b46b5075)
+- Finding 3 (HIGH) at `supabase/migrations/20270125110000_save_quote_keeps_section_ids.sql:413`, text sha256 `eac6dcda4077433e` (the wording stays with the proof, not here)
+  Mason's reason: direct customer change (ref b4e55c1c42c2)
+
+## 2026-11-18 — Bookings with a spray job: needed-by date locked, booked price kept (#1947)
+
+**Decision (Mason, in chat, 2026-11-18, answering Sol round 5 on PR #1947).**
+- A section with a live spray job now keeps its needed-by date too. Draws are allocated to booking lines by needed-by date first, so re-dating the job's section could credit the job's product to another section and drop that section's real need. To change the date, change the job's own date or cancel the job first. This replaces the 2026-11-17 rule that the date may change; the name and notes still may.
+- A section with a live spray job keeps its stored line prices on a draft booking too, so a catalog price change cannot block an unrelated save. The job and invoices stay at what was booked.
+- Direct status updates that skip the save screen: accepted again as a business non-issue, with the database-level guard as a follow-up PR (same answer as Sol round 4).
+
+## 2026-11-18 — #1947: Mason owner-accepted 3 Sol finding(s) at `5ae3ac5ae2a1`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1947 at `5ae3ac5ae2a1` (base `e0513c039664`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270124100000_save_quote_keeps_section_ids.sql:408`, text sha256 `6b651be2d534d26a` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our business (ref 67c08159f5fe)
+- Finding 2 (HIGH) at `supabase/migrations/20270124100000_save_quote_keeps_section_ids.sql:281`, text sha256 `08dcd0576823f9e1` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 721b16345165)
+- Finding 3 (HIGH) at `supabase/migrations/20270124100000_save_quote_keeps_section_ids.sql:433`, text sha256 `6de210e7c7e47c0e` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 9c35e45c14ff)
+
+## 2026-11-17 — Bookings with a spray job: section edits warn, accept/decline/expire blocked
+
+**Decision (Mason, in chat, 2026-11-17, answering Sol round 3 on Bookings Phase A PR 1a).**
+- A section a spray job was scheduled from may still get a new name, notes or needed-by date. The save goes through and the booking warns that the job keeps its own copy, so change those on the job too (warn, not block).
+- A booking with a spray job that is not cancelled (scheduled, in progress, completed or invoiced) cannot be marked accepted, declined or expired; cancel the job first (`BOOKING_HAS_JOB`). Widened by Mason after Sol round 3 on the PR: expiring dropped the job's booking draw, and accepting after a completed job left a booking that cannot become a sale order.
+- The section's products, quantities, prices, line order, place and field stay locked while the job is live (Sol rounds 1-2).
+## 2026-11-17 — RT-3 first rate review: Mason's rules
+
+**Decision (Mason, in chat, 2026-11-17).** Approve today's per-acre rate as the quoting default where it matches the label text or there is no per-acre text; treat loose notes like "1-2pt" as per acre; seed treatments get no per-acre default; per-ton and per-gallon products wait for label data; Piksi Dust Plus is 18 g per acre and Smart Choice 15G is 1.8 lb per acre. Saved on live: 670 rates approved, 361 products with an approved default, 14 with none, 7 needing label data, 14 held for him (listed in `docs/changelog.d/2026-11-17-rt1-derivation-run.md`). Nothing quotes from these until RT-4.
+Later the same day Mason settled the 14 held: today's rate kept on the 9 that differ from the label; Verdict 14 oz (corn); PeKacid 4 oz per acre with a label of 1-4 lb per 100 gal solution; Autumn Super 51 WDG and Cimarron Plus no default; Piksi Dust Infurrow needs label data. Every active product with rates now has a decision.
+
+## 2026-11-17 — RT-1 draft rates derived on live
+
+**Decision (Mason, in chat in the RT-1 run session, 2026-11-17: "Yes, run it").** Run `derive_draft_product_rates` once on live for the 413 active product parents, from Mason's admin login. Result: 714 draft rows on 396 parents and 181 notes; no product, parent, quote or invoice changed. The drafts are used nowhere until RT-4. Next: Mason reviews them in the rate review workbook (RT-3), then the rate lock and RT-4. Details: `docs/changelog.d/2026-11-17-rt1-derivation-run.md`.
 
 ## 2026-11-17 — CMP-2 plan approved with one change: the generic build is always the yardstick
 
@@ -22,6 +90,12 @@
 - **FAM-1, RET-1, IMG-1:** still "later". **BLK-1b / costing foundation:** stays parked.
 - **KI-81:** fix now; Claude builds it (PR to `staging`, real-schema proof), checked against Taha's open #1576.
 - **#1879:** update onto current `staging` (keep Taha's #1873 invoice layout) and land it; it is Mason's PR, not Taha's.
+## 2026-11-17 — Bookings plan settled; applicator auto-invoicing is ON HOLD (do not start)
+
+**Decision (Mason, in chat, 2026-11-17: "lets not do phase c the auto invoice put that section on hold for our big field application redisgn in futre"; "make sure we dont start the auto bill feature").**
+- The bookings plan is settled: Phase A (`docs/plans/2026-11-17-bookings-phase-a-CONTRACT.md`), then Phase B, then Prepay (`docs/plans/2026-11-17-bookings-phases-B-C-prepay-PLAN.md`, v3).
+- **Do not build Phase C**: applicator job completion automatically creating invoices (D7 in the plan). It waits for the future field-application redesign. Its notes in the plan are input to that redesign only. Do not add, enable or extend any automatic invoice on job completion, and do not change `auto_draft_invoice_on_job_completion` or the job-completion invoicing path as part of the bookings work.
+- Linked prepay keeps a booking's prices locked even after the money is spent on other charges, until the prepay is refunded or voided.
 
 ## 2026-11-17 — #1896: Mason owner-accepted 4 Sol finding(s) at `ed0ec3c3c777`
 

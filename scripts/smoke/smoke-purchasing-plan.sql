@@ -24,7 +24,8 @@
 --   P20  job lines in qt and Gal convert; a '2.5 GL' line counts on a product stocked by that
 --        jug and goes to Check units on a Gal product
 --   P21  a job's draw comes off its own (August) section: March still needs 100
---   P22  a draft booking's crop-program hold (20) counts now; an accepted booking's hold (5) does not
+--   P22  a draft booking's crop-program hold (20) counts now; a counted booking's hold on a product it books (10) does not;
+--        its hold on a product it does not book (5 of product 22) does
 --   P8   an applicator and a caller with no user are refused
 --
 -- HOW TO RUN: execute this whole file as ONE statement. It ALWAYS ends with
@@ -315,10 +316,12 @@ BEGIN
   INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id, quote_id)
   VALUES ('SMK-PP15-' || v_suffix, v_customer, v_t, 'cancelled', v_admin,
           (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-3'));
-  -- P22 holds on product 22: one on the draft booking, one on the accepted-never-ordered booking.
+  -- P22 holds: product 22 on the draft booking and on the accepted-never-ordered booking (which books only
+  -- product 10, so its product 22 hold counts); product 10 on that booking (its own line; does not count).
   INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active)
   VALUES (v_p[22], v_customer, 20, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-1'), v_admin, true),
-         (v_p[22], v_customer, 5, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-4'), v_admin, true);
+         (v_p[22], v_customer, 5, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-4'), v_admin, true),
+         (v_p[10], v_customer, 4, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-4'), v_admin, true);
 
   -- P13 draws: an order of 60 from the booking, and a job from its section drawing 40.
   SELECT quote_id, (section_ids->>'_s')::uuid INTO v_q, v_s1 FROM smk_pp_bookings WHERE tag = 'P13';
@@ -437,10 +440,10 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
-  -- P22: product 22. Only the draft booking's hold counts.
+  -- P22: product 22. The draft booking's hold and the counted booking's hold on a product it does not book.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[22];
-  IF (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 20
-     OR (v_x->>'committed')::numeric <> 20 THEN
+  IF (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 25
+     OR (v_x->>'committed')::numeric <> 25 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P22) %', v_x;
   END IF;
   v_n := v_n + 1;

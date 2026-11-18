@@ -1184,15 +1184,16 @@ BEGIN
            AND jc.customer_supplied IS NOT TRUE AND COALESCE(jc.quantity, 0) > 0
       ) x
     UNION ALL
-    -- Manual holds, and crop-program holds whose booking is not counted above (a draft Planned
-    -- booking, or one that is gone or closed), count now. A counted booking's holds are its own lines.
+    -- Manual holds, and crop-program holds whose booking does not count that product above (a
+    -- draft Planned booking, one that is gone or closed, or one with no line for the product),
+    -- count now. A counted booking's hold on a product it books is that booking's own line.
     SELECT ih.product_id, 'hold', 'committed', (SELECT today FROM prm), ih.quantity, NULL::uuid, NULL::uuid, NULL::uuid,
            NULL::uuid, NULL::text, false, false, ih.customer_id
       FROM inventory_holds ih
      WHERE ih.is_active = true AND ih.quantity > 0
        AND (ih.hold_type = 'manual'
             OR (ih.hold_type = 'crop_program'
-                AND NOT EXISTS (SELECT 1 FROM eq WHERE eq.id = ih.source_id)))
+                AND NOT EXISTS (SELECT 1 FROM bl WHERE bl.quote_id = ih.source_id AND bl.product_id = ih.product_id)))
   ),
   demb AS (
     SELECT dem.*,
@@ -1412,7 +1413,7 @@ BEGIN
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM 'e7758fc5071fb1e12cdb8385200a5e48' THEN
+     IS DISTINCT FROM '52e114f8acbff3cff81bc63885db93f7' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF (SELECT count(*) FROM pg_proc p

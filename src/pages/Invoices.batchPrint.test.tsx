@@ -141,6 +141,17 @@ describe('Invoices — Print Selected', () => {
     ]);
   });
 
+  it('passes the stored Bill Split identity through the invoices-list print builder', async () => {
+    const split = { ...posted, invoice_group_id: 'stored-group', delivery_id: 'stored-delivery' };
+    H.tables.invoices = [split];
+    H.tables.invoice_items = [{ ...line, brand_lines: [{ brand_key: 'a', brand_name: 'Alpha', epa_registration: '1-1', quantity: 5, line_delivered: 5, delivery_item_id: 'trip-1' }] }];
+    await printSelected();
+    await waitFor(() => expect(H.printed).toHaveBeenCalledTimes(1));
+    const printed = H.printed.mock.calls[0][0][0];
+    expect(printed.bill_split_on_load).toBe(true);
+    expect(printed.items[0].brand_lines[0]).toMatchObject({ brand_name: 'Alpha', quantity: 5 });
+  });
+
   it("a payer's misc charge invoice in a Bill Split is printed with the payer table on too", async () => {
     const split = { ...posted, invoice_type: 'misc_charge', invoice_group_id: 'g1', delivery_id: 'd1', customer: { farm_name: 'Farmer' } };
     H.tables.invoices = [

@@ -2166,6 +2166,76 @@ describe('QuoteBuilder', () => {
     expect(sentLines(1).map((line) => line.id)).toEqual(['saved-1-0', 'saved-1-1']);
   });
 
+  // save_quote kept a section (and the spray job scheduled from it) only when the save names it (20270125110000).
+  it('names each saved section on every save and installs the ids the save returns', async () => {
+    const { quote, product, section, item } = makeQuoteFixture('draft', 7);
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote : table === 'quote_sections' ? [section] : table === 'quote_items' ? [item] : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? [product] : [], error: null }));
+    let saves = 0;
+    mockRpc.mockImplementation((name: string, args: { p_sections?: Array<{ client_key: string }> }) => {
+      if (name !== 'save_quote') return Promise.resolve({ data: null, error: null });
+      saves += 1;
+      // The first reply carries no map (a receipt cached before it existed); the second mints new ids.
+      const sectionIds = saves === 1 ? undefined : Object.fromEntries((args.p_sections ?? []).map((s) => [s.client_key, `sec-${saves}`]));
+      return Promise.resolve({ data: { status: 'saved', quote_id: quote.id, row_version: 7 + saves, item_ids: {}, section_ids: sectionIds }, error: null });
+    });
+    const sent = (call: number) => mockRpc.mock.calls.filter(([name]) => name === 'save_quote')[call][1] as {
+      p_quote_payload: { section_ids_v1?: boolean };
+      p_sections: Array<{ id: string | null; client_key: string }>;
+    };
+    const edit = async (from: string, to: string, count: number) => {
+      fireEvent.change(await screen.findByDisplayValue(from), { target: { value: to } });
+      fireEvent.click(screen.getByText('Save draft'));
+      await waitFor(() => expect(saves).toBe(count));
+      await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+    };
+
+    renderQuoteBuilder(quote.id);
+    await edit('Version test header', 'First edit', 1);
+    expect(sent(0).p_quote_payload.section_ids_v1).toBe(true);
+    expect(sent(0).p_sections.map((s) => s.id)).toEqual([section.id]);
+    expect(sent(0).p_sections[0].client_key).toBeTruthy();
+    // No map in the reply: the sections were re-created, so the old id is not sent again.
+    await edit('First edit', 'Second edit', 2);
+    expect(sent(1).p_sections.map((s) => s.id)).toEqual([null]);
+    await edit('Second edit', 'Third edit', 3);
+    expect(sent(2).p_sections.map((s) => s.id)).toEqual(['sec-2']);
+  });
+
+  it('warns that a section with a live job keeps its lines and that a new name, notes or date does not reach the job', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, is_planned: true };
+    const section = { ...fixture.section, field_id: 'field-1' };
+    const job = { id: 'job-7', job_number: 'J-7', status: 'scheduled', quote_section_id: section.id };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote
+      : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item]
+        : table === 'products' ? [fixture.product] : table === 'fields' ? [HOME_QUARTER_OF_CUSTOMER_1]
+          : table === 'jobs' ? [job] : [], error: null }));
+    renderQuoteBuilder(quote.id);
+    expect(await screen.findByText(/Job J-7 was scheduled from this section. Its products, quantities, prices, needed-by date and field stay as booked; a new name or notes here does not change the job/)).toBeInTheDocument();
+  });
+
+  it('refuses Schedule job on a section whose id a save did not return, and says to save and reload', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, is_planned: true };
+    const section = { ...fixture.section, field_id: 'field-1' };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote
+      : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item]
+        : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+          : table === 'products' ? [fixture.product] : table === 'fields' ? [HOME_QUARTER_OF_CUSTOMER_1] : [], error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+      ? { data: { status: 'saved', quote_id: quote.id, row_version: 8, item_ids: {} }, error: null }
+      : { data: null, error: null }));
+    renderQuoteBuilder(quote.id);
+    fireEvent.change(await screen.findByDisplayValue('Version test header'), { target: { value: 'First edit' } });
+    fireEvent.click(screen.getByText('Save draft'));
+    await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+    fireEvent.click(await screen.findByRole('button', { name: 'Schedule job' }));
+    // No draft confirmation first: the rep is told at once (Sol round 3 LOW).
+    expect(screen.queryByRole('button', { name: 'Schedule anyway' })).not.toBeInTheDocument();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'This section is not saved yet. Save the quote, then reload it if this message comes back, before scheduling a job from it.'));
+    expect(mockRpc.mock.calls.some(([name]) => name === 'create_job_from_quote_section')).toBe(false);
+  });
+
   it('stops naming a line as its saved line once it is switched to another product, even if switched back', async () => {
     const fixture = makeQuoteFixture('draft', 7);
     const alpha = { ...fixture.product, product_name: 'Alpha Chem' };

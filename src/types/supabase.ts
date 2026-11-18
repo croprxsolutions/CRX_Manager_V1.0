@@ -10610,6 +10610,8 @@ export type Database = {
           parent_version: number
           product_form: string
           rate_per_acre: number | null
+          rate_source: string
+          rate_source_event_id: number | null
           rate_unit: string | null
           safener: string | null
           suggested_rate: string | null
@@ -10630,6 +10632,8 @@ export type Database = {
           parent_version?: number
           product_form: string
           rate_per_acre?: number | null
+          rate_source?: string
+          rate_source_event_id?: number | null
           rate_unit?: string | null
           safener?: string | null
           suggested_rate?: string | null
@@ -10650,6 +10654,8 @@ export type Database = {
           parent_version?: number
           product_form?: string
           rate_per_acre?: number | null
+          rate_source?: string
+          rate_source_event_id?: number | null
           rate_unit?: string | null
           safener?: string | null
           suggested_rate?: string | null
@@ -10665,6 +10671,13 @@ export type Database = {
             referencedRelation: "product_categories"
             referencedColumns: ["name"]
           },
+          {
+            foreignKeyName: "product_parents_rate_source_event_fk"
+            columns: ["rate_source_event_id"]
+            isOneToOne: false
+            referencedRelation: "product_parent_events"
+            referencedColumns: ["id"]
+          },
         ]
       }
       product_rate_correction_passes: {
@@ -10678,6 +10691,21 @@ export type Database = {
         }
         Update: {
           product_id?: string
+          txid?: number
+        }
+        Relationships: []
+      }
+      product_rate_cutover_passes: {
+        Row: {
+          parent_id: string
+          txid: number
+        }
+        Insert: {
+          parent_id: string
+          txid: number
+        }
+        Update: {
+          parent_id?: string
           txid?: number
         }
         Relationships: []
@@ -17087,6 +17115,10 @@ export type Database = {
         Args: { p_item: Json }
         Returns: number
       }
+      _rate_cutover_plan: {
+        Args: { p_direction: string; p_parent_id: string }
+        Returns: Json
+      }
       _reactivate_vendor_replay_impl_20261015: {
         Args: { p_idempotency_key?: string; p_vendor_id: string }
         Returns: Json
@@ -18621,6 +18653,16 @@ export type Database = {
           p_phi_days?: number
           p_rei_hours?: number
           p_signal_word?: string
+        }
+        Returns: Json
+      }
+      commit_parent_rate_cutover: {
+        Args: {
+          p_direction: string
+          p_expected: Json
+          p_idempotency_key?: string
+          p_parent_id: string
+          p_reason: string
         }
         Returns: Json
       }
@@ -20811,6 +20853,10 @@ export type Database = {
       }
       preview_parent_chemistry_correction: {
         Args: { p_changes: Json; p_parent_id: string }
+        Returns: Json
+      }
+      preview_parent_rate_cutover: {
+        Args: { p_direction: string; p_parent_id: string }
         Returns: Json
       }
       preview_parent_rates: {

@@ -35,6 +35,10 @@ const CANDIDATE = path.join(MIGRATIONS, '20270104110000_product_rate_review.sql'
 const FOLLOW_UPS = [
   path.join(MIGRATIONS, '20270110110000_inactive_rate_review_cleanup.sql'),
   path.join(MIGRATIONS, '20270120100000_priority_integrity_followups.sql'),
+  // RT-4a (listed for ordering only, NOT applied): it adds triggers on product_rates and the outcomes that refuse
+  // writes for a parent switched to its approved rate; no parent here is switched. Its own proof is
+  // scripts/smoke/prove-rate-cutover-real-schema.mjs, which replays this whole chain first.
+  path.join(MIGRATIONS, '20270125100000_product_rate_cutover.sql'),
 ];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

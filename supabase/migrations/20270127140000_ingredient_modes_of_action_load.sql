@@ -15,9 +15,10 @@
 -- A salt or ester is listed as its own form with its own group (its acid's group: one mode of action), because
 -- EPA-committed forms carry no acid link; its note names the acid.
 --
--- Rules (sheet 3.6): active ingredients only; an ingredient that already has an active list is never touched;
--- an ingredient that two list rows would give different codes in one scheme is skipped and reported, never
--- guessed; one 'updated' event per filled ingredient (before [], after the new list, attributed to Mason, who
+-- Rules (sheet 3.6): active ingredients only; the CAS decides when both sides have one; refuses (MOA_LOAD_TOO_EARLY)
+-- when only 1-59 of the 123 list rows match, i.e. before the EPA batch fill; never touches an ingredient that has or
+-- had a group row, or that already shows its acid's groups; skips and reports an ingredient the list would give two
+-- groups, or whose name is listed but whose CAS says another chemical; one 'updated' event per filled ingredient (before [], after the new list, attributed to Mason, who
 -- approved the list). Safe to re-run: a second run finds every matched list filled and writes nothing.
 -- Reports (NOTICE): rows written, ingredients filled, kept, skipped, list rows matching no ingredient, and
 -- active ingredients still without a group.
@@ -40,8 +41,9 @@ BEGIN
 END
 $preflight$;
 
--- No ingredient or group changes while the load reads and writes (the editor and the EPA commit wait a moment).
-LOCK TABLE public.active_ingredients, public.active_ingredient_modes_of_action IN SHARE ROW EXCLUSIVE MODE;
+-- No group changes while the load reads and writes (the editor waits a moment). Only the group table is locked,
+-- so an ingredient edit holding its row never waits on this lock while the load waits on that row (Sol r1 MED).
+LOCK TABLE public.active_ingredient_modes_of_action IN SHARE ROW EXCLUSIVE MODE;
 
 DO $load$
 DECLARE
@@ -54,6 +56,7 @@ DECLARE
   v_skipped text;
   v_unmatched text;
   v_without int;
+  v_matched int;
 BEGIN
   -- The actor columns carry no foreign key (20270108100000, 20261209100000), so a database without this profile
   -- (staging, a rebuild) still records the approver's ID. Where the ID exists it must be an admin, never someone else.
@@ -194,25 +197,46 @@ BEGIN
     RAISE EXCEPTION 'MOA_LOAD_LIST: expected 123 group rows, found %', (SELECT count(*) FROM moa1_list);
   END IF;
 
-  -- Each list row against each active ingredient it names, by CAS or by name.
+  -- Each list row against each active ingredient it names. The CAS decides whenever both sides carry one; the name
+  -- (name_key rule) counts only when the list row or the ingredient has no CAS (Sol r1 HIGH).
   CREATE TEMP TABLE moa1_match ON COMMIT DROP AS
   SELECT DISTINCT a.id AS ingredient_id, l.name AS list_name, l.scheme, l.group_code, l.source_note
     FROM moa1_list l
     JOIN public.active_ingredients a
       ON a.status = 'active'
      AND ((l.cas IS NOT NULL AND btrim(a.cas) = l.cas)
-          OR a.name_key = lower(regexp_replace(btrim(l.name), '\s+', ' ', 'g')));
+          OR (a.name_key = lower(regexp_replace(btrim(l.name), '\s+', ' ', 'g'))
+              AND (l.cas IS NULL OR NULLIF(btrim(a.cas), '') IS NULL)));
 
-  -- Ingredients that two list rows would give different codes in one scheme: skipped, never guessed.
+  -- Too early (Sol r1 HIGH): groups attach only to ingredients that exist, and a migration runs once. Before the EPA
+  -- batch fill the catalog holds a handful of the listed ingredients (8 on live, 2026-11-18), so a load then would be
+  -- recorded as done while missing most of the list. Refuse below 60 of the 123 list rows matched. A database with
+  -- none of them (a schema rebuild, invented test data) writes nothing.
+  SELECT count(DISTINCT list_name) INTO v_matched FROM moa1_match;
+  IF v_matched BETWEEN 1 AND 59 THEN
+    RAISE EXCEPTION 'MOA_LOAD_TOO_EARLY: only % of the 123 listed ingredients exist here; run the EPA batch fill first',
+      v_matched;
+  END IF;
+
+  -- Skipped and reported, never guessed: an ingredient the list would give two different groups, and one whose name
+  -- is a listed ingredient's while its CAS says another chemical (Sol r1 HIGH).
   CREATE TEMP TABLE moa1_conflict ON COMMIT DROP AS
-  SELECT DISTINCT ingredient_id FROM moa1_match GROUP BY ingredient_id, scheme HAVING count(DISTINCT group_code) > 1;
+  SELECT ingredient_id FROM moa1_match GROUP BY ingredient_id HAVING count(DISTINCT scheme || ' ' || group_code) > 1
+  UNION
+  SELECT a.id FROM moa1_list l
+    JOIN public.active_ingredients a
+      ON a.status = 'active' AND a.name_key = lower(regexp_replace(btrim(l.name), '\s+', ' ', 'g'))
+     AND l.cas IS NOT NULL AND NULLIF(btrim(a.cas), '') IS NOT NULL AND btrim(a.cas) <> l.cas;
 
-  -- Ingredients to fill: matched, no conflict, no active list yet.
+  -- To fill: matched, not skipped, never had any group row (a list an admin emptied stays empty: Sol r1 MED), and not
+  -- already showing its acid's groups (its own list would stop later fixes to the acid reaching it: Sol r1 MED).
   CREATE TEMP TABLE moa1_fill ON COMMIT DROP AS
   SELECT DISTINCT m.ingredient_id FROM moa1_match m
+    JOIN public.active_ingredients a ON a.id = m.ingredient_id
    WHERE m.ingredient_id NOT IN (SELECT ingredient_id FROM moa1_conflict)
+     AND NOT EXISTS (SELECT 1 FROM public.active_ingredient_modes_of_action o WHERE o.ingredient_id = m.ingredient_id)
      AND NOT EXISTS (SELECT 1 FROM public.active_ingredient_modes_of_action o
-                      WHERE o.ingredient_id = m.ingredient_id AND o.status = 'active');
+                      WHERE o.ingredient_id = a.canonical_ingredient_id AND o.status = 'active');
 
   -- One row per ingredient, scheme and code. When two list rows agree (cyfluthrin and beta-cyfluthrin share a
   -- CAS), the note of the row named like the ingredient wins, else the first by name.
@@ -255,7 +279,7 @@ BEGIN
      AND NOT EXISTS (SELECT 1 FROM public.active_ingredient_modes_of_action o
                       WHERE o.ingredient_id = a.id AND o.status = 'active');
 
-  RAISE NOTICE 'MOA_LOAD: % group rows written on % ingredients; % matched ingredients already had a list (kept)',
+  RAISE NOTICE 'MOA_LOAD: % group rows written on % ingredients; % matched ingredients kept as they were (own or acid list, or groups an admin removed)',
     v_rows, v_filled, v_kept;
   RAISE NOTICE 'MOA_LOAD: skipped (list rows disagree): %', COALESCE(v_skipped, 'none');
   RAISE NOTICE 'MOA_LOAD: list rows matching no active ingredient: %', COALESCE(v_unmatched, 'none');

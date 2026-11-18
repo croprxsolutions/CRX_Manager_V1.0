@@ -34,11 +34,13 @@ export default function EpaBatchFill({ onRunEnd }: { onRunEnd: () => void }) {
   const [confirming, setConfirming] = useState(false);
   const stopRef = useRef(false);
 
+  const loadSeq = useRef(0);
   const load = useCallback(() => {
+    const seq = ++loadSeq.current; // only the newest load may set the list
     setCandidates(null);
-    fetchBatchCandidates().then(setCandidates).catch((error: unknown) => {
+    fetchBatchCandidates().then((next) => { if (seq === loadSeq.current) setCandidates(next); }).catch((error: unknown) => {
       Sentry.captureException(error, { extra: { context: 'fetchBatchCandidates' } });
-      setCandidates('failed');
+      if (seq === loadSeq.current) setCandidates('failed');
     });
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -73,6 +75,7 @@ export default function EpaBatchFill({ onRunEnd }: { onRunEnd: () => void }) {
         if (stopRef.current) break;
         const base = { parentId: candidate.parentId, name: candidate.name, epaNumber: candidate.epaNumber };
         save([...log, { ...base, outcome: 'unknown', detail: IN_PROGRESS }]);
+        setResults([...log, { ...base, outcome: 'unknown', detail: 'Working on it…' }]);
         let result: BatchResult;
         let stop = false;
         try {

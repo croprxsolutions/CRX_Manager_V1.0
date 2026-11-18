@@ -65,7 +65,7 @@ const isMonthDay = (v: unknown): v is string => {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(5, 10) === v;
 };
 
-/** booking_timing_windows (20270125173000). Bad JSON or a bad month-day falls back to the default per timing. */
+/** booking_timing_windows (20270127110000). Bad JSON or a bad month-day falls back to the default per timing. */
 export function parseTimingWindows(raw: string | null): TimingWindows {
   let parsed: unknown = null;
   try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
@@ -77,10 +77,16 @@ export function parseTimingWindows(raw: string | null): TimingWindows {
   return out;
 }
 
-export const loadTimingWindows = async () => parseTimingWindows(await readAppSetting('booking_timing_windows').catch(() => null));
+// The row is seeded by the migration, so null means the read failed: no windows, and the Timing pick stays off rather than saving default dates.
+export const loadTimingWindows = async (): Promise<TimingWindows | null> => {
+  const raw = await readAppSetting('booking_timing_windows').catch(() => null);
+  return raw == null ? null : parseTimingWindows(raw);
+};
 
 /**
  * A-R1: the start of the window that contains today, else of the next one (YYYY-MM-DD).
+ * Never a past date: inside a window that already began it is today, since a past needed-by date
+ * would end a Planned booking's stock hold at once (Sol, PR #1980).
  * A window whose end comes before its start runs into the next year.
  */
 export function timingWindowStart(windows: TimingWindows, timing: BookingTiming, today: string): string {
@@ -89,7 +95,7 @@ export function timingWindowStart(windows: TimingWindows, timing: BookingTiming,
   for (const y of [year - 1, year, year + 1]) {
     const s = `${y}-${start}`;
     const e = `${end < start ? y + 1 : y}-${end}`;
-    if (e >= today) return s;
+    if (e >= today) return s < today ? today : s;
   }
   return `${year + 1}-${start}`;
 }

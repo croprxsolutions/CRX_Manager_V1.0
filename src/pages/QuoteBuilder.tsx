@@ -5365,7 +5365,7 @@ export default function QuoteBuilder() {
                     aria-label="Needed by"
                     value={sec.needed_by_date || null}
                     onChange={(value) => updateSectionField(sec._key, 'needed_by_date', value || null)}
-                    disabled={editLocked || Boolean(sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled')}
+                    disabled={planningLocked || Boolean(sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled')}
                   />
                 </div>
                 <div className="w-full sm:w-40">
@@ -5379,17 +5379,20 @@ export default function QuoteBuilder() {
                     disabled={planningLocked || !timingWindows}
                   />
                 </div>
-                <div className="w-full sm:w-40">
-                  <Select
-                    id={`section-confidence-${sec._key}`}
-                    label="Confidence"
-                    placeholder="Not set"
-                    options={CONFIDENCE_OPTIONS}
-                    value={sec.confidence ?? ''}
-                    onChange={(e) => updateSectionField(sec._key, 'confidence', e.target.value || null)}
-                    disabled={planningLocked}
-                  />
-                </div>
+                {/* Internal rating: hidden in Customer view, like costs. */}
+                {!customerView && (
+                  <div className="w-full sm:w-40">
+                    <Select
+                      id={`section-confidence-${sec._key}`}
+                      label="Confidence"
+                      placeholder="Not set"
+                      options={CONFIDENCE_OPTIONS}
+                      value={sec.confidence ?? ''}
+                      onChange={(e) => updateSectionField(sec._key, 'confidence', e.target.value || null)}
+                      disabled={planningLocked}
+                    />
+                  </div>
+                )}
                 {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}
                 {isPlanned && quoteId && activePlannedHolds.length > 0 && (
                   <div className="sm:pt-8 flex flex-col items-start gap-0.5 text-xs text-secondary">

@@ -2241,7 +2241,8 @@ describe('QuoteBuilder', () => {
     const fixture = makeQuoteFixture('draft', 7);
     const quote = { ...fixture.quote, is_planned: false };
     const section = { ...fixture.section, timing: 'pre_plant', confidence: 'firm' };
-    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item] : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? [fixture.product] : [], error: null }));
+    // '{}' parses to the default windows; with no row the Timing pick stays off (a failed read).
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'app_settings' ? { setting_value: '{}' } : table === 'quotes' ? quote : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item] : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? [fixture.product] : [], error: null }));
     let saves = 0;
     mockRpc.mockImplementation((name: string) => {
       if (name !== 'save_quote') return Promise.resolve({ data: null, error: null });
@@ -2306,6 +2307,8 @@ describe('QuoteBuilder', () => {
       await waitFor(() => expect(timing.value).toBe('in_season'));
       expect(timing).toBeDisabled();
       expect(screen.getByLabelText('Confidence')).toBeDisabled();
+      // The price-only path refuses a planning change, so the date is read-only too.
+      for (const seg of screen.getAllByRole('spinbutton', { name: /Needed by/ })) expect(seg).toHaveAttribute('aria-disabled', 'true');
     } finally {
       authState.role = 'admin';
     }
@@ -5602,8 +5605,10 @@ describe('QuoteBuilder', () => {
       serve('draft');
       await waitFor(() => expect(figure('Total cost')).toBe('$12.00'));
       fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+      expect(screen.getByLabelText('Confidence')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('menuitem', { name: /Customer view/ }));
       expect(figure('Quote total')).toBe('$20.00');
+      expect(screen.queryByLabelText('Confidence')).not.toBeInTheDocument();
       expect(within(summary()).queryByText('Total cost')).not.toBeInTheDocument();
       expect(within(summary()).queryByText('Profit · margin')).not.toBeInTheDocument();
       expect(summary().textContent).not.toMatch(/\$12\.00|\$8\.00|40\.0%/);

@@ -11,18 +11,19 @@ describe('booking timing windows', () => {
     expect(w.late_summer).toEqual(DEFAULT_TIMING_WINDOWS.late_summer);
   });
 
-  it('fills the current window start when today is inside it, else the next one (A-R1)', () => {
+  it('fills the next window start, or today when today is inside a window (A-R1; never a past date)', () => {
     const w = DEFAULT_TIMING_WINDOWS;
     expect(timingWindowStart(w, 'pre_plant', '2027-02-01')).toBe('2027-03-01');
-    expect(timingWindowStart(w, 'pre_plant', '2027-04-10')).toBe('2027-03-01');
-    expect(timingWindowStart(w, 'pre_plant', '2027-05-15')).toBe('2027-03-01');
+    expect(timingWindowStart(w, 'pre_plant', '2027-04-10')).toBe('2027-04-10');
+    expect(timingWindowStart(w, 'pre_plant', '2027-05-15')).toBe('2027-05-15');
+    expect(timingWindowStart(w, 'pre_plant', '2027-03-01')).toBe('2027-03-01');
     expect(timingWindowStart(w, 'pre_plant', '2027-05-16')).toBe('2028-03-01');
     expect(timingWindowStart(w, 'late_summer', '2027-11-01')).toBe('2028-07-16');
   });
 
   it('handles a window that runs into the next year', () => {
     const w = { ...DEFAULT_TIMING_WINDOWS, pre_plant: { start: '11-01', end: '02-15' } };
-    expect(timingWindowStart(w, 'pre_plant', '2027-01-20')).toBe('2026-11-01');
+    expect(timingWindowStart(w, 'pre_plant', '2027-01-20')).toBe('2027-01-20');
     expect(timingWindowStart(w, 'pre_plant', '2027-03-01')).toBe('2027-11-01');
   });
 });

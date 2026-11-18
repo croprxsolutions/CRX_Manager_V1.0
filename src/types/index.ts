@@ -840,7 +840,7 @@ export interface QuoteSection {
   section_header_notes: string | null;
   needed_by_date: string | null;
   field_id: string | null;
-  /** 20270125173000; absent before that migration. */
+  /** 20270127110000; absent before that migration. */
   timing?: 'pre_plant' | 'in_season' | 'late_summer' | null;
   confidence?: 'firm' | 'likely' | 'maybe' | null;
 }

@@ -11,7 +11,7 @@ vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 
 import PurchasingTab, { suggestionText, type PurchasingPlan } from './PurchasingTab';
 
-// Shaped like get_purchasing_plan's answer (20270125173000); numerics arrive as JSON numbers.
+// Shaped like get_purchasing_plan's answer (20270127110000); numerics arrive as JSON numbers.
 const PLAN: PurchasingPlan = {
   today: '2027-02-01', lead_days: 14, months_ahead: 6, horizon_end: '2027-07-31',
   firm_needs_date: [{ quote_number: 'Q-1', customer_name: 'North Farm', section_name: 'Field A', product_name: 'Herbicide X', quantity: 40 }],
@@ -25,8 +25,10 @@ const PLAN: PurchasingPlan = {
       { need_date: '2027-03-01', order_by: '2027-02-15', order_now: false, quantity: 30 },
       { need_date: '2027-04-01', order_by: '2027-03-18', order_now: false, quantity: 80 },
     ],
-    rows: [{ kind: 'order', class: 'committed', bucket: 'dated', need_date: '2027-02-01', overdue: false, quantity: 50,
-      confidence: null, estimated: null, quote_number: null, order_number: 'O-9', job_number: null, customer_name: 'West Farm', section_name: null }],
+    rows: [{ kind: 'order', class: 'committed', bucket: 'dated', need_date: '2027-02-01', raw_date: '2027-02-01', overdue: false, quantity: 50,
+      confidence: null, estimated: null, quote_number: null, order_number: 'O-9', job_number: null, customer_name: 'West Farm', section_name: null },
+    { kind: 'hold', class: 'committed', bucket: 'dated', need_date: '2027-01-20', raw_date: '2027-01-05', overdue: true, quantity: 5,
+      confidence: null, estimated: null, quote_number: null, order_number: null, job_number: null, customer_name: null, section_name: null }],
     purchase_orders: [],
   }],
 };
@@ -49,6 +51,9 @@ describe('PurchasingTab', () => {
     expect(screen.getByText(/Order 30 Gal by Feb 15, 2027/)).toBeInTheDocument();
     expect(screen.getByText(/Order 80 Gal by Mar 18, 2027/)).toBeInTheDocument();
     expect(screen.getByText('Order O-9')).toBeInTheDocument();
+    // An overdue line shows its original date; a hold is not assumed to be manual.
+    expect(screen.getByText('Jan 5, 2027 · overdue')).toBeInTheDocument();
+    expect(screen.getByText('Stock hold')).toBeInTheDocument();
     expect(screen.getByText(/Not complete: firm need without a date/)).toBeInTheDocument();
   });
 

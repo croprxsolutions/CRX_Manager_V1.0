@@ -8,11 +8,11 @@ import { useToast } from '../ui/Toast';
 import { supabase, assertRpcResult } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 
-// Read-only view of get_purchasing_plan (20270125173000). Quantities are in each product's stock unit.
+// Read-only view of get_purchasing_plan (20270127110000). Quantities are in each product's stock unit.
 type Qty = number | string;
 interface Suggestion { need_date: string; order_by: string; order_now: boolean; quantity: Qty }
 interface DemandRow { kind: 'booking' | 'order' | 'job' | 'hold'; class: 'committed' | 'could_add' | 'shown';
-  bucket: string; need_date: string | null; overdue: boolean; quantity: Qty; confidence: string | null;
+  bucket: string; need_date: string | null; overdue: boolean; raw_date: string | null; quantity: Qty; confidence: string | null;
   estimated: boolean | null; quote_number: string | null; order_number: string | null; job_number: string | null;
   customer_name: string | null; section_name: string | null }
 interface PlanPo { po_id: string; po_number: string; status: string; expected_date: string | null; flag: string; quantity: Qty }
@@ -51,7 +51,7 @@ export function suggestionText(s: Suggestion, unit: string | null): string {
 function sourceOf(r: DemandRow): string {
   if (r.kind === 'order') return `Order ${r.order_number ?? ''}`;
   if (r.kind === 'job') return `Job ${r.job_number ?? ''}`;
-  if (r.kind === 'hold') return 'Manual hold';
+  if (r.kind === 'hold') return 'Stock hold';
   return `Booking ${r.quote_number ?? ''}${r.section_name ? ` · ${r.section_name}` : ''}`;
 }
 
@@ -76,8 +76,7 @@ function ProductDetails({ p }: { p: PlanProduct }) {
             {p.rows.map((r, i) => (
               <tr key={i} className="border-t border-gray-200">
                 <td className="py-1 pr-3">
-                  {r.bucket === 'needs_date' ? 'Needs date' : r.bucket === 'check_units' ? 'Check units' : r.bucket === 'later' ? `Later (${day(r.need_date)})` : day(r.need_date)}
-                  {r.overdue && ' · overdue'}
+                  {r.bucket === 'needs_date' ? 'Needs date' : r.bucket === 'check_units' ? 'Check units' : r.bucket === 'later' ? `Later (${day(r.need_date)})` : r.overdue ? `${day(r.raw_date)} · overdue` : day(r.need_date)}
                 </td>
                 <td className="py-1 pr-3">{sourceOf(r)}{r.estimated && ' (estimated)'}</td>
                 <td className="py-1 pr-3">{r.customer_name ?? '—'}</td>
@@ -179,7 +178,7 @@ export default function PurchasingTab() {
         <Card>
           <h4 className="font-semibold text-nav-dark">Drawn, section unknown</h4>
           <p className="text-sm text-secondary mb-2">
-            Already drawn from these bookings by orders or jobs that do not record which section they came from. The plan takes it off each booking's latest-needed lines (estimated) so needs only move earlier.
+            Already drawn from these bookings by orders or jobs that do not record which section they came from. The plan takes it off each booking's least certain lines first (Maybe, then Likely or not set, then Firm), latest-needed first within each (estimated).
           </p>
           <ul className="text-sm space-y-1">
             {plan.drawn_section_unknown.map((r, i) => (
@@ -226,7 +225,7 @@ export default function PurchasingTab() {
               <thead>
                 <tr className="border-b border-gray-200 text-secondary">
                   <th className="px-3 py-2 text-left font-medium">Product</th>
-                  <th className="px-3 py-2 text-right font-medium">On hand</th>
+                  <th className="px-3 py-2 text-right font-medium">On hand (Main Warehouse)</th>
                   <th className="px-3 py-2 text-right font-medium">Incoming</th>
                   <th className="px-3 py-2 text-right font-medium">Committed</th>
                   <th className="px-3 py-2 text-right font-medium">To buy</th>

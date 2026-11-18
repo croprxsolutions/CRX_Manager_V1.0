@@ -11,6 +11,7 @@
 --   6   a job on one of the booking's sections (no quote_id) blocks too; a completed job's refusal says
 --       ask an admin; a cancelled job and a soft-deleted job do not block (the decline goes through)
 --   S   closing short is refused while a job on a section (no quote_id) is scheduled; once completed it goes through
+--   M   the section a live job comes from cannot move to another booking
 --   8   with the job live: sent -> revised, and a notes edit, go through
 --   5   auto_expire_quotes with two past-date bookings, one with a live job: the other expires, the one
 --       with the job stays sent, the run does not fail, and its rep gets one "Booking past its date" alert
@@ -173,6 +174,16 @@ BEGIN
   END;
   IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_HAS_JOB: spray job SMK-LJ-% so the booking cannot be closed short. Cancel or complete the job first.' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (S) closing short with a scheduled section job was not refused: %', v_err;
+  END IF;
+  v_refusals := v_refusals + 1;
+  -- M. The section its live job comes from cannot move to booking B (Sol HIGH, #1959).
+  v_err := NULL;
+  BEGIN
+    UPDATE quote_sections SET quote_id = v_q2 WHERE id = v_s;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
+  IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_HAS_JOB: spray job SMK-LJ-' || v_suffix || ' was made from this section, so the section cannot move to another booking.' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (M) a section with a live job moved to another booking: %', v_err;
   END IF;
   v_refusals := v_refusals + 1;
   UPDATE jobs SET status = 'in_progress' WHERE id = v_job;

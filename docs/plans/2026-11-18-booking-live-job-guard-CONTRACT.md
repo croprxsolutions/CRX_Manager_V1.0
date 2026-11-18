@@ -41,6 +41,10 @@ Sol's three bypass findings on #1947 on the condition that this database guard f
    the booking is accepted, declined, expired, cancelled, closed_by_application or closed_short (the scheduler's
    own refusal list). Without it, a direct job insert or re-link could put a live job on a closed booking, and a
    job created while a decline was in flight could slip past both checks. Same function settings as item 1.
+1c. A `BEFORE UPDATE OF quote_id ON public.quote_sections` row trigger (Sol HIGH, round 2): a section that a live
+   job comes from cannot move to another booking (`BOOKING_HAS_JOB`). A section-linked job's booking is its
+   section's booking, so a move would otherwise put a live job on a closed booking, or empty the old booking so it
+   could close, without firing either trigger above. Nothing in the app moves sections today.
 2. `auto_expire_quotes` re-emitted with one more filter: it skips a booking with a live job, so the trigger
    never fires inside the nightly batch and one booking cannot fail the whole run. Its rep gets the existing
    "Booking past its date" alert once per expiry date, with wording that names the spray job.
@@ -98,6 +102,7 @@ Database only. No screen change: the screen already shows a database message as 
     booked unit closes it as accepted and the job stays live.
 12. Closing short is refused while a job linked only through a section is scheduled; once that job is
     completed, closing short goes through.
+13. The section a live job comes from cannot be moved to another booking.
 
 ## Challenge (Astra, gpt-6-astra high, 2026-11-18): settled
 

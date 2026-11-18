@@ -20,6 +20,8 @@
 --      deleted_at row trigger on jobs: a job cannot become live (inserted, re-linked, or un-deleted) on a booking
 --      that is accepted, declined, expired, cancelled, closed_by_application or closed_short (BOOKING_CLOSED; the
 --      same statuses the scheduler already refuses). An already-live job keeps moving through its own statuses.
+--   1c. _enforce_section_with_live_job_stays(), a BEFORE UPDATE OF quote_id row trigger on quote_sections: a
+--      section that a live job comes from cannot move to another booking (BOOKING_HAS_JOB).
 --   2. auto_expire_quotes skips a booking with a live job (the trigger would otherwise fail the whole nightly
 --      batch) and its rep gets the existing "Booking past its date" alert once per expiry date.
 --   Every other line of auto_expire_quotes is its 20261029100000 body (pinned below).
@@ -29,8 +31,8 @@
 --   on a change). No row changes.
 --
 -- ROLLBACK (its own reviewed migration; stores no data, but reopens the bypasses and lets the nightly expiry
---   close bookings with a live job again): drop triggers quotes_booking_live_job_rules and
---   jobs_live_on_open_booking and their functions; re-run the 20261029100000 body of auto_expire_quotes after
+--   close bookings with a live job again): drop triggers quotes_booking_live_job_rules,
+--   jobs_live_on_open_booking and quote_sections_live_job_stays and their functions; re-run the 20261029100000 body of auto_expire_quotes after
 --   checking it is still this file's body.
 
 SET LOCAL lock_timeout = '5s';
@@ -44,6 +46,8 @@ BEGIN
   END IF;
   IF to_regprocedure('public._enforce_booking_live_job_rules()') IS NOT NULL
      OR to_regprocedure('public._enforce_job_live_on_open_booking()') IS NOT NULL
+     OR to_regprocedure('public._enforce_section_with_live_job_stays()') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.quote_sections'::regclass AND tgname = 'quote_sections_live_job_stays')
      OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.quotes'::regclass AND tgname = 'quotes_booking_live_job_rules')
      OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.jobs'::regclass AND tgname = 'jobs_live_on_open_booking') THEN
     RAISE EXCEPTION 'PREFLIGHT_LIVE_JOB_GUARD_EXISTS: the booking live-job guard already exists; re-read live first';
@@ -179,6 +183,43 @@ CREATE TRIGGER jobs_live_on_open_booking
   BEFORE INSERT OR UPDATE OF quote_id, quote_section_id, status, deleted_at ON public.jobs
   FOR EACH ROW
   EXECUTE FUNCTION public._enforce_job_live_on_open_booking();
+
+-- 1c. A section's booking decides a section-linked job's booking, so a section with a live job cannot move to
+--     another booking (Sol HIGH, #1959): the move would leave a live job on a closed booking, or empty the old
+--     one so it could close, without touching either trigger above. Nothing in the app moves sections today.
+CREATE FUNCTION public._enforce_section_with_live_job_stays()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_job_number text;
+BEGIN
+  IF NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id THEN
+    RETURN NEW;
+  END IF;
+  SELECT j.job_number INTO v_job_number
+  FROM public.jobs j
+  WHERE j.quote_section_id = OLD.id AND j.deleted_at IS NULL AND j.status <> 'cancelled'
+  ORDER BY j.job_number, j.id
+  LIMIT 1;
+  IF FOUND THEN
+    RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % was made from this section, so the section cannot move to another booking.',
+      v_job_number
+      USING ERRCODE = 'P0001';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+ALTER FUNCTION public._enforce_section_with_live_job_stays() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._enforce_section_with_live_job_stays() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER quote_sections_live_job_stays
+  BEFORE UPDATE OF quote_id ON public.quote_sections
+  FOR EACH ROW
+  EXECUTE FUNCTION public._enforce_section_with_live_job_stays();
 
 -- 2. The nightly expiry skips a booking with a live job and alerts its rep instead.
 CREATE OR REPLACE FUNCTION public.auto_expire_quotes()
@@ -338,7 +379,8 @@ DECLARE
 BEGIN
   FOR v_g IN SELECT * FROM (VALUES
       ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules'),
-      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking')) AS g(fn, tbl, tg)
+      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking'),
+      ('public._enforce_section_with_live_job_stays()', 'public.quote_sections', 'quote_sections_live_job_stays')) AS g(fn, tbl, tg)
   LOOP
     SELECT * INTO v_p FROM pg_proc WHERE oid = v_g.fn::regprocedure;
     IF v_p.proowner <> 'postgres'::regrole OR NOT v_p.prosecdef

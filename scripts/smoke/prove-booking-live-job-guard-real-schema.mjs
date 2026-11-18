@@ -48,7 +48,7 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate changes or relies on.
-const TOUCHED = /(auto_expire_quotes|_enforce_booking_live_job_rules|quotes_booking_live_job_rules)/i;
+const TOUCHED = /(auto_expire_quotes|_enforce_booking_live_job_rules|quotes_booking_live_job_rules|_enforce_job_live_on_open_booking|jobs_live_on_open_booking|_enforce_section_with_live_job_stays|quote_sections_live_job_stays)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"

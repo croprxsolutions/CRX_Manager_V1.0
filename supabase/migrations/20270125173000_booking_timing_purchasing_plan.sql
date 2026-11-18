@@ -1254,6 +1254,7 @@ BEGIN
       FROM products p LEFT JOIN onhand oh ON oh.product_id = p.id
      WHERE EXISTS (SELECT 1 FROM demb WHERE demb.product_id = p.id)
         OR EXISTS (SELECT 1 FROM po WHERE po.product_id = p.id)
+        OR EXISTS (SELECT 1 FROM overdrawn WHERE overdrawn.product_id = p.id)
         OR COALESCE(oh.qty, 0) < 0
   ),
   -- Rule 5: per product and date, supply before demand, starting at on hand.
@@ -1435,7 +1436,7 @@ BEGIN
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM 'f291afae5ebfa2a5d0d4ac1c22d5c399' THEN
+     IS DISTINCT FROM 'ca40c7d73a8af64d4f5944f524c1a1f4' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF (SELECT count(*) FROM pg_proc p

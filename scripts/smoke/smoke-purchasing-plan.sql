@@ -481,12 +481,12 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (P14) %', v_x;
   END IF;
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[9];
-  IF (v_x->>'over_drawn')::numeric <> 50 OR NOT (v_x->'reasons' ? 'over_drawn')
+  IF v_x IS NULL OR (v_x->>'over_drawn')::numeric IS DISTINCT FROM 50 OR NOT (v_x->'reasons' ? 'over_drawn')
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P14 over-drawn) %', v_x;
   END IF;
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[25];
-  IF (v_x->>'committed')::numeric IS DISTINCT FROM 100
+  IF v_x IS NULL OR (v_x->>'committed')::numeric IS DISTINCT FROM 100
      OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r
           WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 150) IS DISTINCT FROM 100
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r

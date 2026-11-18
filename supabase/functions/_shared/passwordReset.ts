@@ -84,16 +84,26 @@ export async function adminResetPassword(
     return { status: 500, body: { error: "Could not record the reset. Password not changed." } };
   }
 
-  const { error: updateError } = await adminClient.auth.admin.updateUserById(userId, { password });
-  if (updateError) {
-    // Best effort: the request row is already written, so a failed second row
-    // still leaves a record that a reset was attempted; log it for the function logs.
+  // Best effort: the request row is already written, so a failed second row
+  // still leaves a record that a reset was attempted; log it for the function logs.
+  const recordFailure = async (description: string) => {
     const { error: failAuditError } = await adminClient
       .from("activity_feed")
-      .insert(auditRow(callerId, userId, "auth_password_reset_failed", "Auth returned an error; the password was most likely not changed"));
+      .insert(auditRow(callerId, userId, "auth_password_reset_failed", description));
     if (failAuditError) {
       console.error("password reset: could not record the Auth failure", failAuditError.message);
     }
+  };
+
+  let updateError: DbError;
+  try {
+    ({ error: updateError } = await adminClient.auth.admin.updateUserById(userId, { password }));
+  } catch (_thrown) {
+    await recordFailure("Auth did not answer; the password may or may not have changed");
+    return { status: 502, body: { error: "Auth did not answer. Check whether the new password works before retrying." } };
+  }
+  if (updateError) {
+    await recordFailure("Auth returned an error; the password was most likely not changed");
     return { status: 400, body: { error: updateError.message } };
   }
 

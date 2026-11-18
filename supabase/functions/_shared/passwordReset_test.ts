@@ -10,6 +10,7 @@ type Opts = {
   profile?: { data: { role?: string | null } | null; error: { message: string } | null };
   insertErrors?: Array<{ message: string } | null>;
   authError?: { message: string } | null;
+  authThrows?: boolean;
 };
 
 function fake(opts: Opts = {}) {
@@ -38,6 +39,7 @@ function fake(opts: Opts = {}) {
       admin: {
         updateUserById: (id) => {
           log.push(`auth:${id}`);
+          if (opts.authThrows) return Promise.reject(new Error("network"));
           return Promise.resolve({ error: opts.authError ?? null });
         },
       },
@@ -86,6 +88,13 @@ Deno.test("records a failed row when Auth refuses the change", async () => {
   const { client, log } = fake({ authError: { message: "weak password" } });
   const out = await adminResetPassword(client, ADMIN, TARGET, "longenough");
   assertEquals(out, { status: 400, body: { error: "weak password" } });
+  assertEquals(log[log.length - 1], "insert:activity_feed:auth_password_reset_failed");
+});
+
+Deno.test("records a failed row when the Auth call throws", async () => {
+  const { client, log } = fake({ authThrows: true });
+  const out = await adminResetPassword(client, ADMIN, TARGET, "longenough");
+  assertEquals(out.status, 502);
   assertEquals(log[log.length - 1], "insert:activity_feed:auth_password_reset_failed");
 });
 

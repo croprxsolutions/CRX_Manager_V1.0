@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-18 — #1940 may have one more Sol round
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, one more round").** PR #1940 (inventory cleanup KI-161/150/163) may have one more Sol round (round 5 as the counter reads it).
+**Why:** since the last round the branch merged current `staging`, gave its migration a new stamp (`20270126110000`), locks the order line `FOR UPDATE` so two follow-up deliveries queue, and its rollback narrows the cycle-count columns back to 2 places; the prover passes.
+**What it does:** unlocks one Sol review of the new head. Every other gate is unchanged: it still needs a clean Sol review and green checks before it merges into `staging`.
+
 ## 2026-11-18 — #1946 (KI-81): a blend ticket's own grower falls back to their own quote
 
 **Decision (Mason, in chat, 2026-11-18: "Yes, price the owner from their own quote").** Answering Taha's second re-review of PR #1946: when the job's quote gives no usable price for a product (no job quote, or it is declined, expired, unsent or does not list the product), the ticket's own grower is priced from their own sent, valid quote, as every other grower and the field-application invoices are; a usable job-quote price still wins.

@@ -84,3 +84,16 @@ describe('fetchBatchCandidates reads', () => {
     }
   });
 });
+
+describe('startTabRun', () => {
+  it('refuses a second run while one is going, and allows one after it ends', async () => {
+    let finish!: () => void;
+    const { startTabRun, currentTabRun } = await import('./epaBatchFill');
+    expect(startTabRun(() => new Promise<void>((resolve) => { finish = resolve; }))).toBe(true);
+    expect(startTabRun(async () => {})).toBe(false);
+    finish();
+    await currentTabRun();
+    expect(currentTabRun()).toBeNull();
+    expect(startTabRun(async () => {})).toBe(true);
+  });
+});

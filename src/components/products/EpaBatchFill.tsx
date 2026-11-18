@@ -4,7 +4,7 @@ import Card from '../ui/Card';
 import Button from '../ui/Button';
 import ConfirmModal from '../ui/ConfirmModal';
 import { Sentry } from '../../lib/sentry';
-import { BatchDeadlineError, fetchBatchCandidates, runBatchParent, type BatchCandidate, type BatchResult } from '../../lib/epaBatchFill';
+import { BatchDeadlineError, currentTabRun, fetchBatchCandidates, startTabRun, runBatchParent, type BatchCandidate, type BatchResult } from '../../lib/epaBatchFill';
 
 const STORAGE_KEY = 'epaBatchFill:lastRun';
 const OUTCOME_LABEL: Record<BatchResult['outcome'], string> = {
@@ -32,7 +32,6 @@ export default function EpaBatchFill({ onRunEnd }: { onRunEnd: () => void }) {
   const [results, setResults] = useState<BatchResult[]>(readSaved);
   const [running, setRunning] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const runningRef = useRef(false);
   const stopRef = useRef(false);
 
   const load = useCallback(() => {
@@ -44,14 +43,25 @@ export default function EpaBatchFill({ onRunEnd }: { onRunEnd: () => void }) {
   }, []);
   useEffect(() => { load(); }, [load]);
   // Leaving the page (or signing out) stops the run after the current product.
-  useEffect(() => () => { stopRef.current = true; }, []);
+  useEffect(() => {
+    let mounted = true;
+    const earlier = currentTabRun();
+    if (earlier) {
+      // Reopened while an earlier run finishes its current product: wait for it, then show its results.
+      setRunning(true);
+      void earlier.finally(() => { if (mounted) { setRunning(false); setResults(readSaved()); load(); } });
+    }
+    return () => { mounted = false; stopRef.current = true; };
+  }, [load]);
 
   const runnable = Array.isArray(candidates) ? candidates.filter((c): c is Runnable => c.skip === null && c.epaNumber !== null) : [];
   const skipped = Array.isArray(candidates) ? candidates.filter((c) => c.skip !== null) : [];
 
-  const run = async () => {
-    if (runningRef.current) return;
-    runningRef.current = true;
+  const run = () => {
+    startTabRun(runQueue);
+  };
+
+  const runQueue = async () => {
     stopRef.current = false;
     setRunning(true);
     const runId = crypto.randomUUID();
@@ -82,7 +92,6 @@ export default function EpaBatchFill({ onRunEnd }: { onRunEnd: () => void }) {
         if (stop) break;
       }
     } finally {
-      runningRef.current = false;
       setRunning(false);
       setTicked(new Set());
       load();

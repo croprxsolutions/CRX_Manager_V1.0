@@ -153,8 +153,10 @@ Rule changes adopted (supersede §2 where they differ):
 ## Mason's decisions (in-session, 2026-11-18)
 
 1. **Label facts: ingredients only.** Every label item is sent `accept: false`, blank fills included. Mason accepted that
-   blank signal word / label date are then not queued and need a later lookup per product. A label `differs`, a
-   `rup_upgrade`, or EPA saying *cancelled* still sends the whole proposal to a person (an existing value disagreeing
+   blank signal word / label date are then not queued and need a later lookup per product. A label `differs` (signal word
+   or label date/link), a `rup_upgrade`, or EPA saying *cancelled* still sends the whole proposal to a person. The one
+   exception is registration status `differs` with EPA saying *active*: status is never written (D-T) and ours is
+   `unknown` on all 347 registrations, so blocking it would block every product (an existing value disagreeing
    with EPA is a discrepancy, not a blank).
 2. **Name check: required.** A whole word of EPA's product name must equal the first word of the parent, a size or a brand
    name (re-read just before commit), else the proposal waits for a person. EPA alternate brand names are not in the

@@ -98,6 +98,8 @@ const CAS_PATTERN = /^\d{2,7}-\d{2}-\d$/;
 const pctUnits = (value: number) => Math.round(value * 100_000);
 
 function labelBlocks(item: EpaProposalItem): string | null {
+  // Status is never written (D-T) and is 'unknown' on every registration, so "EPA says active" is always a difference;
+  // blocking it would block every product. Only EPA saying cancelled needs a person (contract, Astra settlement).
   if (item.item_id === 'label:registration_status') {
     return item.epa === true ? 'EPA lists the registration as cancelled' : null;
   }
@@ -216,7 +218,7 @@ async function stillEligible(candidate: BatchCandidate & { epaNumber: string }, 
 /** Runs one parent. Throws only when the outcome is uncertain; the caller reports it and counts it as an error. */
 export async function runBatchParent(runId: string, candidate: BatchCandidate & { epaNumber: string }): Promise<BatchResult> {
   const base = { parentId: candidate.parentId, name: candidate.name, epaNumber: candidate.epaNumber };
-  const blocked = await stillEligible(candidate, Date.now());
+  const blocked = await withDeadline(stillEligible(candidate, Date.now()));
   if (blocked) return { ...base, outcome: 'skipped', detail: blocked };
   const key = `batch:${runId}:${candidate.parentId}`;
   const started = await once(() => startEpaLookup(candidate.parentId, candidate.epaNumber, `${key}:start`));
@@ -229,7 +231,7 @@ export async function runBatchParent(runId: string, candidate: BatchCandidate & 
     return { ...base, outcome: 'needs_person', detail: `EPA lookup failed: ${record.reason ?? 'unknown reason'}` };
   }
   if (!record.proposal_id) throw new Error('EPA lookup reply named no proposal');
-  const { data, error } = await supabaseUntyped.from('epa_chemistry_proposals').select('*').eq('id', record.proposal_id).maybeSingle();
+  const { data, error } = await withDeadline(Promise.resolve(supabaseUntyped.from('epa_chemistry_proposals').select('*').eq('id', record.proposal_id).maybeSingle()));
   if (error) throw error;
   const proposal = data as EpaChemistryProposal | null;
   if (!proposal || proposal.parent_id !== candidate.parentId || proposal.epa_registration !== candidate.epaNumber
@@ -237,7 +239,7 @@ export async function runBatchParent(runId: string, candidate: BatchCandidate & 
     throw new Error('The saved proposal does not match this lookup');
   }
   // Re-read everything the decision rests on: numbers, ingredients, other proposals and the names (Luna, 2026-11-18).
-  const [changed, appNames] = await Promise.all([stillEligible(candidate, Date.now(), proposal.id), fetchAppNames(candidate.parentId)]);
+  const [changed, appNames] = await withDeadline(Promise.all([stillEligible(candidate, Date.now(), proposal.id), fetchAppNames(candidate.parentId)]));
   if (changed) return { ...base, outcome: 'needs_person', detail: `${changed}; the proposal waits for a person` };
   const decision = batchDecision(proposal, appNames);
   if (!decision.commit) return { ...base, outcome: 'needs_person', detail: decision.reason };
@@ -245,4 +247,14 @@ export async function runBatchParent(runId: string, candidate: BatchCandidate & 
   if (result.status === 'held') return { ...base, outcome: 'needs_person', detail: `On hold (${result.hold_reason})` };
   const written = Object.entries(result.commit_result).filter(([id, r]) => r === 'written' && id.startsWith('ing:')).length;
   return { ...base, outcome: 'saved', detail: `${written} ingredient${written === 1 ? '' : 's'} saved` };
+}
+
+// One run per tab, kept outside the card: leaving and reopening the page must not start a second run beside it.
+let activeRun: Promise<void> | null = null;
+export const currentTabRun = (): Promise<void> | null => activeRun;
+/** Starts the run unless one is already going in this tab; returns false when it refused. */
+export function startTabRun(run: () => Promise<void>): boolean {
+  if (activeRun) return false;
+  activeRun = run().finally(() => { activeRun = null; });
+  return true;
 }

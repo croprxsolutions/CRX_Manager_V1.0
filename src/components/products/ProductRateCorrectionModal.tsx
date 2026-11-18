@@ -64,7 +64,10 @@ export default function ProductRateCorrectionModal({ open, product, profileId, u
   const canSave = rateValid && reason.trim() !== '' && !saving && Number.isInteger(product.pricing_version);
 
   const refuse = (error: unknown) => {
-    toast('error', sanitizeError(error));
+    // RT-4b: the product page's rate boxes are read-only, so point at the open-rates tool instead.
+    toast('error', hasRpcCode(error, RpcErrorCodes.PRODUCT_RATES_NOT_LOCKED)
+      ? 'Rates are open now. Change this product\'s rates in the Setup Workbook\'s Rates tab on the Products page.'
+      : sanitizeError(error));
     // The product or the lock changed since this page loaded it: reload rather than retry.
     if (hasRpcCode(error, RpcErrorCodes.PRODUCT_RATES_STALE) || hasRpcCode(error, RpcErrorCodes.PRODUCT_RATES_NOT_LOCKED)) onCorrected();
     // A unit conversion changed since the preview: show the new prices before another save.

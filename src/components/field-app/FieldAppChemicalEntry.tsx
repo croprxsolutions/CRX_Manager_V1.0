@@ -337,12 +337,12 @@ export default function FieldAppChemicalEntry({
       product_name: product.product_name,
       rate_per_acre: product.rate_per_acre || null,
       rate_unit: product.product_form === 'seed' || product.product_form === 'each'
-        ? product.inventory_unit || '' : product.rate_unit || product.inventory_unit || 'oz',
-      unit: product.inventory_unit || 'oz',
+        ? product.inventory_unit || '' : product.rate_unit || product.inventory_unit || '',
+      unit: product.inventory_unit || '',
       // Exact cents; a price the whole-cent parser refuses previews as $0 (the server prices the line)
       unit_price_cents: parseDollarsToCents(String(tierPrice(product, primaryCustomerTier))) ?? 0,
       tier_prices: { tier1_price: product.tier1_price, tier2_price: product.tier2_price, tier3_price: product.tier3_price },
-      price_unit: product.inventory_unit || 'oz',
+      price_unit: product.inventory_unit || '',
       inventory_unit: product.inventory_unit,
       unit_cost_cents: Math.round((product.current_cost || 0) * 100),
       epa_registration: product.epa_registration || undefined,
@@ -570,10 +570,11 @@ export default function FieldAppChemicalEntry({
                     onChange={(e) => updateLine(line.id, { rate_unit: e.target.value })}
                     className="w-full px-1 py-1 border rounded text-center text-sm disabled:bg-gray-100 disabled:text-gray-500"
                   >
-                    {/* Codex P1: the blank option is a disabled placeholder only — a field-app
-                        line always has a rate_unit (set on product select), and actively blanking
-                        it would zero the preview here while the server falls back to unit_size and
-                        still invoices non-zero. Disabled => can't be selected. */}
+                    {/* Codex P1: the blank option is a disabled placeholder only — actively blanking
+                        a rate_unit would zero the preview here while the server falls back to unit_size
+                        and still invoices non-zero. Disabled => can't be selected. A product with no
+                        rate or stock unit starts blank (RT-4b); the server refuses that line until its
+                        units are fixed (FIELD_APP_UNIT_UNCONVERTIBLE). */}
                     <option value="" disabled>--</option>
                     {line.rate_unit && !rateUnitOptionsForProduct(unitConversions, line.product_form, line.inventory_unit ?? line.price_unit).some((uc) => uc.unit === line.rate_unit) && (
                       <option value={line.rate_unit}>{line.rate_unit}</option>

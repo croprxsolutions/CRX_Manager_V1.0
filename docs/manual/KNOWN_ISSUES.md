@@ -608,7 +608,7 @@ RT-1's draft rates (`20261229110000`, live 2026-11-10) copy these as they are; n
 - Milligrams: the two `Piksi Dust` products store `MG` while their text says grams (`18 grams per Acre`). RT-3.
   Update 2026-11-17: Mason chose to keep both on today's values ("priced each for jar and by mg, which is actually
   gram's price"); RT-4a's switch refuses Piksi Dust Plus by ID and Infurrow is `needs_label_data`. The MG -> g rename
-  waits for RT-4b.
+  is out of RT-4b (2026-11-18) by that decision; it waits for a label check and Mason's go.
 - Per ton or per gallon: `BW-NLockDown`, `NanoCote Core` and `Tempo SC Ultra` have rates with no RT-1 basis. RT-3.
 
 ### KI-110 — Three small invoicing findings from the October admin-only invoicing review

@@ -35,10 +35,16 @@ const CANDIDATE = path.join(MIGRATIONS, '20270104110000_product_rate_review.sql'
 const FOLLOW_UPS = [
   path.join(MIGRATIONS, '20270110110000_inactive_rate_review_cleanup.sql'),
   path.join(MIGRATIONS, '20270120100000_priority_integrity_followups.sql'),
+  // KI-137 (ordering only, NOT applied): a one-time product relabel that only reads product_rate_lock (it refuses
+  // while rates are locked); it changes no RT-3 table, function or grant.
+  path.join(MIGRATIONS, '20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql'),
   // RT-4a (listed for ordering only, NOT applied): it adds triggers on product_rates and the outcomes that refuse
   // writes for a parent switched to its approved rate; no parent here is switched. Its own proof is
   // scripts/smoke/prove-rate-cutover-real-schema.mjs, which replays this whole chain first.
   path.join(MIGRATIONS, '20270125100000_product_rate_cutover.sql'),
+  // RT-4b (ordering only, NOT applied): revokes direct writes to products' rate columns; it names the rate
+  // helpers only in postflight EXECUTE checks. Its own proof is scripts/smoke/prove-rate-writers-real-schema.mjs.
+  path.join(MIGRATIONS, '20270126100000_product_rate_direct_writes_revoked.sql'),
 ];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

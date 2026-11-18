@@ -3,12 +3,13 @@
  * Real-schema proof for 20270125183000_booking_live_job_guard (#1959; contract
  * docs/plans/2026-11-18-booking-live-job-guard-CONTRACT.md). Container setup and replay copied from
  * prove-save-quote-section-ids-real-schema.mjs. Then:
- *   1. BEFORE: the bypasses are real: a direct decline and a convert of a booking with a live job go
- *      through. Records how each existing quote chain ends; the new chain fails.
+ *   1. BEFORE: the bypass is real: a sales rep's direct decline of a booking with a live job goes
+ *      through. Records how each existing chain ends; the new chain fails at its first case (the
+ *      convert, nightly-expiry and job-side cases are proven only in the AFTER run).
  *   2. The candidate applies; a second apply is refused by its preflight.
- *   3. AFTER: smoke-booking-live-job-guard.sql passes; a sales rep's direct decline (the screen's path,
- *      under RLS) is refused BOOKING_HAS_JOB; concurrent schedule-job and accept serialize; every
- *      existing quote chain ends exactly as before.
+ *   3. AFTER: smoke-booking-live-job-guard.sql passes; a sales rep's direct decline and cancel (the
+ *      screen's path, under RLS) are refused BOOKING_HAS_JOB; a decline and a job insert serialize in
+ *      both orders; every existing chain ends exactly as before.
  *
  * Run: node scripts/smoke/prove-booking-live-job-guard-real-schema.mjs   (needs Docker)
  * Prints BOOKING_LIVE_JOB_GUARD_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.

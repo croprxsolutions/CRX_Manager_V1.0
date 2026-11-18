@@ -156,6 +156,7 @@ Rule changes adopted (supersede §2 where they differ):
    blank signal word / label date are then not queued and need a later lookup per product. A label `differs`, a
    `rup_upgrade`, or EPA saying *cancelled* still sends the whole proposal to a person (an existing value disagreeing
    with EPA is a discrepancy, not a blank).
-2. **Name check: required.** EPA product/alt names must share a first word with the app parent or brand name, else the
-   proposal waits for a person. This replaces "never run a number the preview did not find": a not-found number records
+2. **Name check: required.** A whole word of EPA's product name must equal the first word of the parent, a size or a brand
+   name (re-read just before commit), else the proposal waits for a person. EPA alternate brand names are not in the
+   saved proposal, so they are not used: stricter, more products wait for a person. This replaces "never run a number the preview did not find": a not-found number records
    a failure (existing behavior) and is listed for a person; a found-but-wrong number fails the name check.

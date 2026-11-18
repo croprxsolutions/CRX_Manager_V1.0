@@ -4,7 +4,7 @@ import Card from '../ui/Card';
 import Button from '../ui/Button';
 import ConfirmModal from '../ui/ConfirmModal';
 import { Sentry } from '../../lib/sentry';
-import { fetchBatchCandidates, runBatchParent, type BatchCandidate, type BatchResult } from '../../lib/epaBatchFill';
+import { BatchDeadlineError, fetchBatchCandidates, runBatchParent, type BatchCandidate, type BatchResult } from '../../lib/epaBatchFill';
 
 const STORAGE_KEY = 'epaBatchFill:lastRun';
 const OUTCOME_LABEL: Record<BatchResult['outcome'], string> = {
@@ -13,9 +13,14 @@ const OUTCOME_LABEL: Record<BatchResult['outcome'], string> = {
 
 type Runnable = BatchCandidate & { epaNumber: string };
 
+// The run's results, plus the product in progress saved as "uncertain" first, so a reload mid-request still shows it.
 function readSaved(): BatchResult[] {
   try { return JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? '[]') as BatchResult[]; } catch { return []; }
 }
+function save(results: BatchResult[]) {
+  try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(results)); } catch { /* storage full or blocked: the list on screen still shows it */ }
+}
+const IN_PROGRESS = 'In progress when the page closed: open the product to see whether it saved';
 
 /**
  * EPA batch fill (admin): looks up many products' EPA numbers one at a time and saves plain new ingredients only.
@@ -52,30 +57,37 @@ export default function EpaBatchFill({ onRunEnd }: { onRunEnd: () => void }) {
     const runId = crypto.randomUUID();
     const queue = runnable.filter((c) => ticked.has(c.parentId));
     let log: BatchResult[] = [];
-    const push = (result: BatchResult) => {
-      log = [...log, result];
-      setResults(log);
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(log));
-    };
     let errorsInRow = 0;
-    for (const candidate of queue) {
-      if (stopRef.current) break;
-      try {
-        push(await runBatchParent(runId, candidate));
-        errorsInRow = 0;
-      } catch (error: unknown) {
-        Sentry.captureException(error, { extra: { context: 'runBatchParent', parentId: candidate.parentId } });
-        const message = error instanceof Error ? error.message : String(error);
-        push({ parentId: candidate.parentId, name: candidate.name, epaNumber: candidate.epaNumber, outcome: 'unknown', detail: message });
-        errorsInRow += 1;
-        if (errorsInRow >= 2) break; // EPA or the app is struggling: stop rather than churn through the list.
+    try {
+      for (const candidate of queue) {
+        if (stopRef.current) break;
+        const base = { parentId: candidate.parentId, name: candidate.name, epaNumber: candidate.epaNumber };
+        save([...log, { ...base, outcome: 'unknown', detail: IN_PROGRESS }]);
+        let result: BatchResult;
+        let stop = false;
+        try {
+          result = await runBatchParent(runId, candidate);
+          errorsInRow = 0;
+        } catch (error: unknown) {
+          Sentry.captureException(error, { extra: { context: 'runBatchParent', parentId: candidate.parentId } });
+          const message = error instanceof Error ? error.message : String(error);
+          result = { ...base, outcome: 'unknown', detail: `${message}. Open the product to see whether it saved` };
+          errorsInRow += 1;
+          // A request past its deadline may still be running; two errors in a row means EPA or the app is struggling.
+          stop = error instanceof BatchDeadlineError || errorsInRow >= 2;
+        }
+        log = [...log, result];
+        setResults(log);
+        save(log);
+        if (stop) break;
       }
+    } finally {
+      runningRef.current = false;
+      setRunning(false);
+      setTicked(new Set());
+      load();
+      onRunEnd();
     }
-    runningRef.current = false;
-    setRunning(false);
-    setTicked(new Set());
-    load();
-    onRunEnd();
   };
 
   const toggle = (id: string) => setTicked((prev) => {

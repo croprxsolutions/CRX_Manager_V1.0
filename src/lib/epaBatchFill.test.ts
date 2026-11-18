@@ -22,6 +22,8 @@ describe('epaNameMatches', () => {
     expect(epaNameMatches('CAPTURE 2 EC', ['Brigade', 'Bifenthrin 2EC'])).toBe(false);
     expect(epaNameMatches('DU PONT DEMOSAN T SEED FUNGICIDE', ['Atrazine 90 DF'])).toBe(false);
     expect(epaNameMatches(null, names)).toBe(false);
+    expect(epaNameMatches('SURFACE HERBICIDE', ['Ace'])).toBe(false); // whole words only, never a substring
+    expect(epaNameMatches('Lumax® EZ Herbicide', ['Lumax EZ'])).toBe(true);
   });
 });
 
@@ -43,11 +45,13 @@ describe('batchDecision', () => {
     ['cancelled', proposal([ing('a', 10)], { isCancelled: true }), /cancelled/],
     ['no ingredients', proposal([label('signal_word', 'fill')]), /no ingredients/],
     ['no CAS', proposal([ing('a', 10, null, 'add_name_only')]), /needs a person/],
-    ['conflict', proposal([ing('a', 10, '1-1-1', 'epa_conflict')]), /needs a person/],
-    ['retired', proposal([ing('a', 10, '1-1-1', 'ingredient_retired')]), /needs a person/],
+    ['conflict', proposal([ing('a', 10, '94-75-7', 'epa_conflict')]), /needs a person/],
+    ['retired', proposal([ing('a', 10, '94-75-7', 'ingredient_retired')]), /needs a person/],
+    ['blank CAS', proposal([ing('a', 10, '   ')]), /needs a person/],
+    ['malformed CAS', proposal([ing('a', 10, 'n/a')]), /needs a person/],
     ['null percent', proposal([ing('a', null)]), /no percent/],
     ['zero percent', proposal([ing('a', 0)]), /no percent/],
-    ['over 100', proposal([ing('a', 60), ing('b', 40.0001, '2-2-2')]), /more than 100/],
+    ['over 100', proposal([ing('a', 60), ing('b', 40.0001, '51218-45-2')]), /more than 100/],
     ['signal word differs', proposal([ing('a', 10), label('signal_word', 'differs')]), /differs/],
     ['restricted use', proposal([ing('a', 10), label('rup_status', 'rup_upgrade', 'yes')]), /restricted/],
     ['EPA says cancelled', proposal([ing('a', 10), label('registration_status', 'differs', true)]), /cancelled/],
@@ -58,7 +62,7 @@ describe('batchDecision', () => {
   });
 
   it('accepts percents summing to exactly 100 despite float drift', () => {
-    expect(batchDecision(proposal([ing('a', 33.3333), ing('b', 33.3333, '2-2-2'), ing('c', 33.3334, '3-3-3')]), names).commit).toBe(true);
+    expect(batchDecision(proposal([ing('a', 33.3333), ing('b', 33.3333, '51218-45-2'), ing('c', 33.3334, '94-75-7')]), names).commit).toBe(true);
   });
 
   it('refuses a proposal that is not open', () => {

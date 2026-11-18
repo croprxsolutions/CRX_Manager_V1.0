@@ -81,17 +81,18 @@ export async function fetchBatchCandidates(now = Date.now()): Promise<BatchCandi
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+const words = (s: string) => s.toLowerCase().split(/[\s\-/]+/).map((w) => w.replace(/[^a-z0-9]/g, '')).filter(Boolean);
 
-/** EPA's product name contains the first word of at least one app name (the preview's test; catches wrong numbers). */
+/** A word of EPA's product name equals the first word of at least one app name (catches wrong numbers). */
 export function epaNameMatches(epaProductName: string | null | undefined, appNames: string[]): boolean {
-  const epa = norm(epaProductName ?? '');
-  if (!epa) return false;
+  const epa = new Set(words(epaProductName ?? ''));
   return appNames.some((name) => {
-    const first = norm(name.trim().split(/[\s\-/]/)[0] ?? '');
-    return first.length > 0 && epa.includes(first);
+    const first = words(name)[0];
+    return first !== undefined && epa.has(first);
   });
 }
+
+const CAS_PATTERN = /^\d{2,7}-\d{2}-\d$/;
 
 // Percent in hundred-thousandths, so a sum is exact (EPA gives at most four decimals).
 const pctUnits = (value: number) => Math.round(value * 100_000);
@@ -124,7 +125,7 @@ function ingredientsBlock(ingredients: EpaProposalItem[]): string | null {
   for (const item of ingredients) {
     const change = item.change ?? {};
     const pct = change.strength_value;
-    if (item.class !== 'add' || typeof change.cas !== 'string' || change.cas === '') return `Ingredient needs a person (${item.class})`;
+    if (item.class !== 'add' || typeof change.cas !== 'string' || !CAS_PATTERN.test(change.cas)) return `Ingredient needs a person (${item.class})`;
     if (typeof pct !== 'number' || !Number.isFinite(pct) || pct <= 0) return 'Ingredient has no percent';
     total += pctUnits(pct);
   }
@@ -151,14 +152,45 @@ export function batchDecision(proposal: Pick<EpaChemistryProposal, 'status' | 'i
 export type BatchOutcome = 'saved' | 'needs_person' | 'skipped' | 'failed' | 'unknown';
 export interface BatchResult { parentId: string; name: string; epaNumber: string; outcome: BatchOutcome; detail: string }
 
+/** A request outlived its deadline; it may still finish, so the run stops instead of starting another product. */
+export class BatchDeadlineError extends Error {}
+
 function withDeadline<T>(promise: Promise<T>): Promise<T> {
-  return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(
-    () => reject(new Error('No reply within 60 seconds')), REQUEST_DEADLINE_MS))]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new BatchDeadlineError('No reply within 60 seconds')), REQUEST_DEADLINE_MS);
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 }
 
 /** One retry with the same key: the server replays a saved receipt, so a lost reply never writes twice. */
 async function once<T>(call: () => Promise<T>): Promise<T> {
-  try { return await withDeadline(call()); } catch { return withDeadline(call()); }
+  try {
+    return await withDeadline(call());
+  } catch (error: unknown) {
+    if (error instanceof BatchDeadlineError) throw error; // the first call may still be running
+    return withDeadline(call());
+  }
+}
+
+/** The parent's current names: its own, its sizes', its active brands' and its sizes' legacy brands'. */
+async function fetchAppNames(parentId: string): Promise<string[]> {
+  const get = async <T>(q: PromiseLike<{ data: unknown; error: unknown }>) => {
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data ?? []) as T[];
+  };
+  const [parents, members, brands] = await Promise.all([
+    get<{ name: string }>(supabaseUntyped.from('product_parents').select('name').eq('id', parentId)),
+    get<{ product_id: string }>(supabaseUntyped.from('product_parent_members').select('product_id').eq('parent_id', parentId)),
+    get<{ brand_name: string }>(supabaseUntyped.from('product_parent_brands').select('brand_name').eq('parent_id', parentId).eq('status', 'active')),
+  ]);
+  const ids = members.map((m) => m.product_id);
+  const [sizes, legacy] = ids.length === 0 ? [[], []] : await Promise.all([
+    get<{ product_name: string }>(supabaseUntyped.from('products').select('product_name').in('id', ids)),
+    get<{ brand_name: string }>(supabaseUntyped.from('product_brands').select('brand_name').in('product_id', ids)),
+  ]);
+  return [...parents.map((p) => p.name), ...sizes.map((p) => p.product_name), ...brands.map((b) => b.brand_name), ...legacy.map((b) => b.brand_name)];
 }
 
 async function ingredientCount(parentId: string): Promise<number> {
@@ -170,13 +202,13 @@ async function ingredientCount(parentId: string): Promise<number> {
 }
 
 /** Fresh checks right before a write: still empty, still exactly this one number, nothing else running or waiting. */
-async function stillEligible(candidate: BatchCandidate & { epaNumber: string }, now: number): Promise<string | null> {
+async function stillEligible(candidate: BatchCandidate & { epaNumber: string }, now: number, ownProposalId?: string): Promise<string | null> {
   const [state, count] = await Promise.all([fetchParentEpaState(candidate.parentId), ingredientCount(candidate.parentId)]);
   if (count > 0) return 'Ingredients were added meanwhile';
   if (state.numbers.length !== 1 || state.numbers[0] !== candidate.epaNumber) return 'Its EPA numbers changed';
   const mine = (r: { epa_registration: string }) => r.epa_registration === candidate.epaNumber;
   if (state.lookups.some((l) => mine(l) && l.status === 'pending' && now - Date.parse(l.requested_at) < LOOKUP_EXPIRY_MS)) return 'A lookup is running';
-  if (state.proposals.some((p) => mine(p) && ['proposed', 'held', 'rejected'].includes(p.status))) return 'A proposal is waiting or was rejected';
+  if (state.proposals.some((p) => mine(p) && p.id !== ownProposalId && ['proposed', 'held', 'rejected'].includes(p.status))) return 'A proposal is waiting or was rejected';
   if (state.failures.some(mine)) return 'A lookup failed before';
   return null;
 }
@@ -204,9 +236,11 @@ export async function runBatchParent(runId: string, candidate: BatchCandidate & 
       || proposal.lookup_id !== started.lookup_id) {
     throw new Error('The saved proposal does not match this lookup');
   }
-  const decision = batchDecision(proposal, candidate.appNames);
+  // Re-read everything the decision rests on: numbers, ingredients, other proposals and the names (Luna, 2026-11-18).
+  const [changed, appNames] = await Promise.all([stillEligible(candidate, Date.now(), proposal.id), fetchAppNames(candidate.parentId)]);
+  if (changed) return { ...base, outcome: 'needs_person', detail: `${changed}; the proposal waits for a person` };
+  const decision = batchDecision(proposal, appNames);
   if (!decision.commit) return { ...base, outcome: 'needs_person', detail: decision.reason };
-  if ((await ingredientCount(candidate.parentId)) > 0) return { ...base, outcome: 'skipped', detail: 'Ingredients were added meanwhile' };
   const result = await once(() => commitEpaProposal(proposal.id, proposal.proposal_version, decision.decisions, `${key}:commit`));
   if (result.status === 'held') return { ...base, outcome: 'needs_person', detail: `On hold (${result.hold_reason})` };
   const written = Object.entries(result.commit_result).filter(([id, r]) => r === 'written' && id.startsWith('ing:')).length;

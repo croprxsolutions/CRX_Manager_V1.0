@@ -239,6 +239,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    "Only an admin or the sale's own rep can turn sales tax on or off for this sale. No changes were saved"],
   [/^SALES_TAX_RATE_MISSING\b/i, 'Set the sales tax rate in Settings first. No changes were saved'],
   [/^SALES_TAX_STALE\b/i, "This draft's sales tax is out of date. Save it again, then post"],
+  [/^SALES_TAX_BOX_MISMATCH\b/i,
+   "This draft's sales tax doesn't match its sale's Sales tax box. Switch the box over and back, ending at the setting you want, to re-apply it to the sale's drafts (a split draft that can't be edited: set the box back to match it, or void and redraft its group), then post"],
   [/^SALES_TAX_ORDER_CLOSED\b/i, "This sale is cancelled or voided, so its sales tax can't change"],
   // Split-billed orders (20261021155000): each payer returns only what its own invoices billed.
   [/^RETURN_QUANTITY_EXCEEDS_BILLED_SHARE\b/i,
@@ -454,7 +456,7 @@ export function sanitizeError(error: unknown): string {
   const chemPriceRequired = message.match(/^CHEM_PRICE_REQUIRED:\s*(.+)$/s);
   if (chemPriceRequired) return `Nothing was saved. ${chemPriceRequired[1].trim()}`;
   // Unit rules (20270121110000): the server sentence names the unit and what to do, so it is kept.
-  const unitRule = message.match(/^(?:LINE_UNIT_NOT_STOCK_UNIT|PRODUCT_UNIT_HAS_OPEN_LINES|PRODUCT_UNIT_HAS_STOCK|STOCK_ROW_UNIT_NOT_STOCK_UNIT|PRODUCT_STOCK_UNIT_UNKNOWN|QUOTE_RATE_UNIT_UNKNOWN|QUOTE_STOCK_UNIT_UNKNOWN):\s*(.+)$/s);
+  const unitRule = message.match(/^(?:LINE_UNIT_NOT_STOCK_UNIT|PRODUCT_UNIT_HAS_OPEN_LINES|PRODUCT_UNIT_HAS_STOCK|PRODUCT_UNIT_HAS_HISTORY|STOCK_ROW_UNIT_NOT_STOCK_UNIT|PRODUCT_STOCK_UNIT_UNKNOWN|QUOTE_RATE_UNIT_UNKNOWN|QUOTE_STOCK_UNIT_UNKNOWN):\s*(.+)$/s);
   if (unitRule) return `Nothing was saved. ${unitRule[1].trim()}`;
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.
   const countRule = message.match(/^(?:CYCLE_COUNT_ROW_ALREADY_OPEN|CYCLE_COUNT_ROW_WRONG_PLACE|CYCLE_COUNT_REOPEN_FORBIDDEN|CYCLE_COUNT_REVERSE_BLOCKED):\s*(.+)$/s);

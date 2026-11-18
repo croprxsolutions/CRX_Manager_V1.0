@@ -135,7 +135,7 @@ DECLARE
   -- never sent follows the catalog as before (Mason, 2026-10-14).
   v_price_locked boolean := false;
   v_carry_prices jsonb := '{}'::jsonb;
-  -- SECTION IDS (20270124100000, bookings Phase A PR 1a). A screen that sends
+  -- SECTION IDS (20270125110000, bookings Phase A PR 1a). A screen that sends
   -- section_ids_v1 = true names each saved section by its id, and the section is
   -- re-inserted under that same id, so a spray job scheduled from it keeps its link.
   v_section_ids_v1 boolean := COALESCE(p_quote_payload->'section_ids_v1' = 'true'::jsonb, false);
@@ -281,16 +281,20 @@ BEGIN
       -- (i) a booking with a live spray job cannot be accepted, declined or expired: the job
       -- must be cancelled first (Mason, 2026-11-17).
       IF v_status IN ('accepted', 'declined', 'expired') THEN
-        SELECT j.job_number INTO v_section_job
+        SELECT j.job_number, j.status INTO v_section_job
         FROM jobs j
         WHERE (j.quote_id = p_quote_id
                OR j.quote_section_id IN (SELECT qs.id FROM quote_sections qs WHERE qs.quote_id = p_quote_id))
           AND j.deleted_at IS NULL AND j.status <> 'cancelled'
         ORDER BY j.job_number, j.id
         LIMIT 1;
-        IF FOUND THEN
+        IF FOUND AND v_section_job.status IN ('scheduled', 'in_progress') THEN
           RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % was made from this booking, so the booking cannot be marked %. Cancel the job first.',
             v_section_job.job_number, v_status
+            USING ERRCODE = 'P0001';
+        ELSIF FOUND THEN
+          RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % was made from this booking and is %, so the booking cannot be marked %. Ask an admin.',
+            v_section_job.job_number, v_section_job.status, v_status
             USING ERRCODE = 'P0001';
         END IF;
       END IF;
@@ -420,14 +424,16 @@ BEGIN
     END IF;
     -- (h) remember each section with a live job: its field and lines, as stored. Compared
     -- after the server has priced the new lines (below).
-    SELECT COALESCE(jsonb_object_agg(s.id::text, jsonb_build_object('job', s.job_number, 'section', s.section_name, 'sig', s.sig)), '{}'::jsonb)
+    SELECT COALESCE(jsonb_object_agg(s.id::text, jsonb_build_object('job', s.job_number, 'section', s.section_name, 'sig', s.sig, 'above', s.above)), '{}'::jsonb)
       INTO v_locked_sections
     FROM (
       SELECT qs.id, qs.section_name,
              (SELECT j.job_number FROM jobs j
                WHERE j.quote_section_id = qs.id AND j.deleted_at IS NULL AND j.status <> 'cancelled'
                ORDER BY j.job_number, j.id LIMIT 1) AS job_number,
-             jsonb_build_object('field', qs.field_id, 'sort', qs.sort_order, 'lines', COALESCE((
+             (SELECT COALESCE(jsonb_agg(o.id ORDER BY o.id), '[]'::jsonb) FROM quote_sections o
+               WHERE o.quote_id = qs.quote_id AND (o.sort_order, o.id) < (qs.sort_order, qs.id)) AS above,
+             jsonb_build_object('field', qs.field_id, 'lines', COALESCE((
                SELECT jsonb_agg(jsonb_build_object(
                         'id', qi.id, 'sort', qi.sort_order, 'product', qi.product_id,
                         'qty', trim_scale(qi.total_units_needed), 'price', trim_scale(qi.price_per_unit),
@@ -851,10 +857,13 @@ BEGIN
   END IF;
 
   -- SECTION IDS (h): a section with a live job kept its field and lines exactly (same
-  -- expression as the snapshot above, on the lines as now stored and priced).
+  -- expression as the snapshot above, on the lines as now stored and priced), and its place:
+  -- the sections above it are the ones that were above it before, less any removed. Holds are
+  -- allocated in section order, so a section moved or added above it is refused; removing one
+  -- above it only renumbers (Taha's review on PR #1947).
   FOR v_locked_key IN SELECT jsonb_object_keys(v_locked_sections)
   LOOP
-    IF (SELECT jsonb_build_object('field', qs.field_id, 'sort', qs.sort_order, 'lines', COALESCE((
+    IF (SELECT jsonb_build_object('field', qs.field_id, 'lines', COALESCE((
                SELECT jsonb_agg(jsonb_build_object(
                         'id', qi.id, 'sort', qi.sort_order, 'product', qi.product_id,
                         'qty', trim_scale(qi.total_units_needed), 'price', trim_scale(qi.price_per_unit),
@@ -863,7 +872,15 @@ BEGIN
                       ORDER BY qi.sort_order, qi.id)
                  FROM quote_items qi WHERE qi.section_id = qs.id), '[]'::jsonb))
           FROM quote_sections qs WHERE qs.id = v_locked_key::uuid)
-       IS DISTINCT FROM v_locked_sections->v_locked_key->'sig' THEN
+       IS DISTINCT FROM v_locked_sections->v_locked_key->'sig'
+       OR (SELECT COALESCE(jsonb_agg(o.id ORDER BY o.id), '[]'::jsonb)
+             FROM quote_sections o JOIN quote_sections qs ON qs.id = v_locked_key::uuid
+            WHERE o.quote_id = qs.quote_id AND (o.sort_order, o.id) < (qs.sort_order, qs.id))
+          IS DISTINCT FROM
+          (SELECT COALESCE(jsonb_agg(o.id ORDER BY o.id), '[]'::jsonb)
+             FROM quote_sections o
+            WHERE o.quote_id = v_quote_id
+              AND o.id::text IN (SELECT jsonb_array_elements_text(v_locked_sections->v_locked_key->'above'))) THEN
       RAISE EXCEPTION 'SECTION_HAS_JOB_LOCKED: job % was scheduled from section "%", so its products, quantities, prices, line order, place and field cannot change. Change the job, or add a new section for new work.',
         v_locked_sections->v_locked_key->>'job', v_locked_sections->v_locked_key->>'section'
         USING ERRCODE = 'P0001';
@@ -990,7 +1007,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public._save_quote_below_cost_impl_20260810(uuid,jsonb,jsonb,uuid,text)'::regprocedure)
-     IS DISTINCT FROM 'bbf87a65c4554d3960e4bc14e9d7531c' THEN
+     IS DISTINCT FROM '94d61890073fd187178ed62641c6be69' THEN
     RAISE EXCEPTION 'POSTFLIGHT_SAVE_QUOTE: the new body did not install';
   END IF;
   IF NOT EXISTS (

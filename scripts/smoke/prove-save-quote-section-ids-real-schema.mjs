@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270124100000_save_quote_keeps_section_ids (bookings Phase A, PR 1a;
+ * Real-schema proof for 20270125110000_save_quote_keeps_section_ids (bookings Phase A, PR 1a;
  * contract docs/plans/2026-11-17-bookings-phase-a-CONTRACT.md, v4 "PR 1a").
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17
@@ -32,7 +32,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270124100000_save_quote_keeps_section_ids.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270125110000_save_quote_keeps_section_ids.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([

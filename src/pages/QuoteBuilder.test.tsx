@@ -2166,7 +2166,7 @@ describe('QuoteBuilder', () => {
     expect(sentLines(1).map((line) => line.id)).toEqual(['saved-1-0', 'saved-1-1']);
   });
 
-  // save_quote kept a section (and the spray job scheduled from it) only when the save names it (20270124100000).
+  // save_quote kept a section (and the spray job scheduled from it) only when the save names it (20270125110000).
   it('names each saved section on every save and installs the ids the save returns', async () => {
     const { quote, product, section, item } = makeQuoteFixture('draft', 7);
     mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote : table === 'quote_sections' ? [section] : table === 'quote_items' ? [item] : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? [product] : [], error: null }));

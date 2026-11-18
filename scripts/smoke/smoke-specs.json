@@ -1019,7 +1019,7 @@
     "save_quote_section_ids": {
       "chain": "smoke-save-quote-section-ids.sql",
       "container_prover": "prove-save-quote-section-ids-real-schema.mjs",
-      "description": "REQUIRES 20270124100000. Bookings Phase A PR 1a: a marked save (section_ids_v1) that names its sections keeps their ids, so a job scheduled from a section stays linked (deferred FK checked immediately); dropping a section a job references (active, cancelled or soft-deleted job, marked or old unmarked save) is refused SECTION_HAS_JOB and the booking is unchanged; another quote's id, a repeated id, a non-uuid and any id on a new quote are refused SECTION_ID_INVALID; an unmarked save without jobs still works and gets new ids; a replay returns the same section_ids. Terminal rollback.",
+      "description": "REQUIRES 20270125110000. Bookings Phase A PR 1a: a marked save (section_ids_v1) that names its sections keeps their ids, so a job scheduled from a section stays linked (deferred FK checked immediately); dropping a section a job references (active, cancelled or soft-deleted job, marked or old unmarked save) is refused SECTION_HAS_JOB and the booking is unchanged; another quote's id, a repeated id, a non-uuid and any id on a new quote are refused SECTION_ID_INVALID; an unmarked save without jobs still works and gets new ids; a replay returns the same section_ids. Terminal rollback.",
       "covers": [
         "save_quote"
       ],

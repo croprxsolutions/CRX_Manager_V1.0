@@ -2740,7 +2740,7 @@ export default function QuoteBuilder() {
         await refreshPriceChanges(result.quote_id);
         if (editingSessionChanged()) return null;
       }
-      // save_quote answers each section's id (section_ids, 20270124100000); the next save names them
+      // save_quote answers each section's id (section_ids, 20270125110000); the next save names them
       // so the section, and any job scheduled from it, is kept. A reply without the map (a receipt
       // cached before it existed) means the sections were re-created, so the old ids are dropped.
       const sectionIds = result.section_ids && typeof result.section_ids === 'object' && !Array.isArray(result.section_ids)

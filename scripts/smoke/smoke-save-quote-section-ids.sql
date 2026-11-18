@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: a booking with a spray job can be saved (bookings Phase A, PR 1a)
 -- ----------------------------------------------------------------------------
--- REQUIRES 20270124100000_save_quote_keeps_section_ids. Proof cases P1-P4 of
+-- REQUIRES 20270125110000_save_quote_keeps_section_ids. Proof cases P1-P4 of
 -- docs/plans/2026-11-17-bookings-phase-a-CONTRACT.md, through the real save_quote:
 --   1. a new quote with two sections returns section_ids keyed by client_key
 --   P1 a job points at section S1; a save with the marker naming both sections
@@ -18,6 +18,9 @@
 --      job's section quantity, price, line order, line id (cost basis), units, its place among the
 --      sections, or moving its line away is refused SECTION_HAS_JOB_LOCKED; the section without a job may change. Once the job is
 --      cancelled its section may change. Two sections with one client_key: SECTION_ID_INVALID.
+--   M  removing a job-free section above the job's section renumbers it and saves; a new
+--      section added above it is refused SECTION_HAS_JOB_LOCKED
+--   I  a live job blocks accept, decline and expire; a completed job's refusal says ask an admin
 --
 -- HOW TO RUN: execute this whole file as ONE statement. It ALWAYS ends with
 -- RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK ...', so nothing persists. Any other error is a failure.
@@ -47,6 +50,7 @@ DECLARE
   v_payload2 jsonb;
   v_s1 uuid;
   v_s2 uuid;
+  v_s0 uuid;
   v_q2s1 uuid;
   v_job_id uuid;
   v_sections_before text;
@@ -203,6 +207,43 @@ BEGIN
      OR (SELECT needed_by_date FROM quote_sections WHERE id = v_s1) IS NULL
      OR (SELECT id::text FROM quote_items WHERE section_id = v_s1) IS DISTINCT FROM v_la1->>'id' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (L ok) the unlocked change did not save: %', v_res;
+  END IF;
+
+  -- M. A job-free section above the job's section can be removed (the screen renumbers the
+  --    rest 1..n); a new section added above it is refused (Taha's review on PR #1947).
+  INSERT INTO quote_sections (quote_id, section_name, sort_order)
+  VALUES (v_quote_id, 'Prep', 0) RETURNING id INTO v_s0;
+  UPDATE quote_sections SET sort_order = sort_order + 1 WHERE quote_id = v_quote_id AND id <> v_s0;
+  SELECT row_version INTO v_version FROM quotes WHERE id = v_quote_id;
+  v_payload := v_payload || jsonb_build_object('row_version_expected', v_version);   -- header notes stay 'L' (P2 checks them)
+  v_res := save_quote(v_quote_id, v_payload, jsonb_build_array(
+    jsonb_build_object('id', v_s1, 'client_key', '_s1', 'section_name', 'North renamed', 'sort_order', 0,
+      'items', jsonb_build_array(v_la1 || jsonb_build_object('client_key', '_k1'))),
+    jsonb_build_object('id', v_s2, 'client_key', '_s2', 'section_name', 'South', 'sort_order', 1,
+      'items', jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2', 'total_units_needed', 12)))),
+    v_admin, 'smk-sqsi-save-m-' || v_suffix);
+  EXECUTE 'SET CONSTRAINTS ALL IMMEDIATE';
+  EXECUTE 'SET CONSTRAINTS ALL DEFERRED';
+  v_version := (v_res->>'row_version')::bigint;
+  IF EXISTS (SELECT 1 FROM quote_sections WHERE id = v_s0)
+     OR (SELECT sort_order FROM quote_sections WHERE id = v_s1) IS DISTINCT FROM 0
+     OR (SELECT quote_section_id FROM jobs WHERE id = v_job_id) IS DISTINCT FROM v_s1 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (M) removing the section above the job did not save: %', v_res;
+  END IF;
+  v_payload := v_payload || jsonb_build_object('row_version_expected', v_version);
+  v_err := NULL;
+  BEGIN
+    PERFORM save_quote(v_quote_id, v_payload, jsonb_build_array(
+      jsonb_build_object('client_key', '_s3', 'section_name', 'New top', 'sort_order', 0, 'items', '[]'::jsonb),
+      jsonb_build_object('id', v_s1, 'client_key', '_s1', 'section_name', 'North renamed', 'sort_order', 1,
+        'items', jsonb_build_array(v_la1 || jsonb_build_object('client_key', '_k1'))),
+      jsonb_build_object('id', v_s2, 'client_key', '_s2', 'section_name', 'South', 'sort_order', 2,
+        'items', jsonb_build_array(v_lb || jsonb_build_object('client_key', '_k2', 'total_units_needed', 12)))),
+      v_admin, 'smk-sqsi-save-m2-' || v_suffix);
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
+  IF v_err IS NULL OR v_err NOT LIKE 'SECTION_HAS_JOB_LOCKED:%' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (M) a new section above the job was not refused: %', COALESCE(v_err, 'success');
   END IF;
 
 
@@ -395,8 +436,12 @@ BEGIN
     IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_HAS_JOB:%' THEN
       RAISE EXCEPTION 'SMOKE_FAIL: (I.%) expected BOOKING_HAS_JOB, got %', v_count, COALESCE(v_err, 'success');
     END IF;
+    IF (v_count < 4 AND v_err NOT LIKE '%Cancel the job first.')
+       OR (v_count = 4 AND v_err NOT LIKE '%is completed,%Ask an admin.') THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (I.%) the refusal names the wrong next step: %', v_count, v_err;
+    END IF;
   END LOOP;
 
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK section ids kept; job link held; refusals SECTION_HAS_JOB x4, SECTION_ID_INVALID x5, BOOKING_HAS_JOB x5, SECTION_HAS_JOB_LOCKED x6';
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK section ids kept; job link held; refusals SECTION_HAS_JOB x4, SECTION_ID_INVALID x5, BOOKING_HAS_JOB x5, SECTION_HAS_JOB_LOCKED x7';
 END;
 $smoke$;

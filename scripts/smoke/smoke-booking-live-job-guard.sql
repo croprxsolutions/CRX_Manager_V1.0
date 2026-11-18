@@ -278,6 +278,24 @@ BEGIN
   IF (SELECT count(*) FROM notifications WHERE related_entity_id = v_q AND notification_type = 'booking_past_expiry') <> 1 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (5) a second run alerted again';
   END IF;
+  -- 5P. A planned booking (the only kind the scheduler makes jobs from) with a live job also alerts once and
+  --     stays sent (Sol HIGH r4). Rolled back.
+  v_err := NULL;
+  BEGIN
+    DELETE FROM notifications WHERE related_entity_id = v_q AND notification_type = 'booking_past_expiry';
+    UPDATE quotes SET is_planned = true WHERE id = v_q;
+    PERFORM auto_expire_quotes();
+    IF (SELECT status FROM quotes WHERE id = v_q) <> 'sent'
+       OR (SELECT count(*) FROM notifications WHERE related_entity_id = v_q AND notification_type = 'booking_past_expiry'
+             AND message LIKE '%with a spray job made from it, so it stays open. Re-check it with the grower.') <> 1 THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (5P) a planned booking with a live job did not alert exactly once';
+    END IF;
+    RAISE EXCEPTION 'SMOKE_5P_OK';
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
+  IF v_err IS DISTINCT FROM 'SMOKE_5P_OK' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (5P) %', v_err;
+  END IF;
 
   -- R. The section FK is deferred: with a live job on A's section, deleting the section and re-inserting it under
   --    the same id on the expired booking B is refused (Sol HIGH r3; Mason 2026-11-18 "close it"); re-inserting it
@@ -314,6 +332,24 @@ BEGIN
   IF v_err IS DISTINCT FROM 'SMK_R_REINSERT_OK' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (R) re-inserting the section on its own booking was refused: %', v_err;
   END IF;
+  -- R2/R3 (Sol MED r4): the section's id cannot be renamed away, and another booking's section cannot be
+  --    renamed onto it after it is deleted (rolled back).
+  FOR v_i IN 2..3 LOOP
+    v_err := NULL;
+    BEGIN
+      IF v_i = 2 THEN
+        UPDATE quote_sections SET id = gen_random_uuid() WHERE id = v_s;
+      ELSE
+        DELETE FROM quote_sections WHERE id = v_s;
+        UPDATE quote_sections SET id = v_s WHERE id = (SELECT id FROM quote_sections WHERE quote_id = v_q2 LIMIT 1);
+      END IF;
+    EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+    END;
+    IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_HAS_JOB: spray job SMK-R-' || v_suffix || ' was made from this section, so the section cannot move to another booking.' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (R%) a section id with a live job was renamed: %', v_i, v_err;
+    END IF;
+    v_refusals := v_refusals + 1;
+  END LOOP;
   UPDATE jobs SET deleted_at = now() WHERE id = v_job;
 
   -- J. The other direction: B is now expired. A job cannot become live on it by a direct insert (on the

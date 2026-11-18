@@ -23,7 +23,7 @@
 --      but its booking and section link is fixed: to move it, cancel it and schedule a new one (Mason, 2026-11-18).
 --      A job made from a section must also name that section's booking (JOB_NEEDS_BOOKING; the scheduler always
 --      does; Mason, 2026-11-18, "Require both"); the postflight checks no live row breaks this (0 on live).
---   1c. _enforce_section_with_live_job_stays(), a BEFORE INSERT OR UPDATE OF quote_id row trigger on quote_sections:
+--   1c. _enforce_section_with_live_job_stays(), a BEFORE INSERT OR UPDATE OF id, quote_id row trigger on quote_sections:
 --      a section that a live job comes from cannot move to another booking (BOOKING_HAS_JOB), including by being
 --      deleted and re-inserted under the same id on another booking (the section FK is deferred).
 --   2. auto_expire_quotes skips a booking with a live job (the trigger would otherwise fail the whole nightly
@@ -219,16 +219,18 @@ DECLARE
   v_job_number text;
 BEGIN
   IF TG_OP = 'UPDATE' THEN
-    IF NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id THEN
+    IF NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id AND NEW.id = OLD.id THEN
       RETURN NEW;
     END IF;
+    -- Moving it, or renaming its id (Sol MED r4: a rename lets another booking's section take the old id).
     SELECT j.job_number INTO v_job_number
     FROM public.jobs j
     WHERE j.quote_section_id = OLD.id AND j.deleted_at IS NULL AND j.status <> 'cancelled'
     ORDER BY j.job_number, j.id
     LIMIT 1;
-  ELSE
-    -- INSERT: the section FK is deferred, so save_quote can delete and re-insert a section with a job under
+  END IF;
+  IF NOT FOUND AND (TG_OP = 'INSERT' OR NEW.id <> OLD.id) THEN
+    -- INSERT, or a section renamed to an id a live job points at: the section FK is deferred, so save_quote can delete and re-insert a section with a job under
     -- the same id. A live job already pointing at the new id must stay on the booking it was scheduled from
     -- (Sol HIGH r3; Mason 2026-11-18, "close it"), which every live section job names (1b, and the postflight
     -- below checks existing rows), so this is a plain comparison.
@@ -239,7 +241,7 @@ BEGIN
     ORDER BY j.job_number, j.id
     LIMIT 1;
   END IF;
-  IF FOUND THEN
+  IF v_job_number IS NOT NULL THEN
     RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % was made from this section, so the section cannot move to another booking.',
       v_job_number
       USING ERRCODE = 'P0001';
@@ -252,7 +254,7 @@ ALTER FUNCTION public._enforce_section_with_live_job_stays() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._enforce_section_with_live_job_stays() FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER quote_sections_live_job_stays
-  BEFORE INSERT OR UPDATE OF quote_id ON public.quote_sections
+  BEFORE INSERT OR UPDATE OF id, quote_id ON public.quote_sections
   FOR EACH ROW
   EXECUTE FUNCTION public._enforce_section_with_live_job_stays();
 
@@ -358,12 +360,12 @@ BEGIN
   WHERE q.expires_at < CURRENT_DATE
     AND q.status IN ('sent', 'revised')
     AND q.deleted_at IS NULL
-    AND q.is_planned = false
     AND (
-      EXISTS (
+      (q.is_planned = false AND EXISTS (
         SELECT 1 FROM public.quote_product_draws d
         WHERE d.quote_id = q.id AND d.quantity_drawn > 0
-      )
+      ))
+      -- #1959 (Sol HIGH r4): the scheduler only makes jobs from planned bookings, so a job alerts planned or not.
       OR EXISTS (
         SELECT 1 FROM public.jobs j
         WHERE (j.quote_id = q.id

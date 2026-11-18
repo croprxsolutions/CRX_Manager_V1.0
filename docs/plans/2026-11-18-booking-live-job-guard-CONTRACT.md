@@ -30,7 +30,10 @@ Sol's three bypass findings on #1947 on the condition that this database guard f
    It also refuses `cancelled` (Mason, 2026-11-18). One exception (Mason, 2026-11-18, "Let it close"): `accepted`
    goes through once every booked product is fully drawn onto orders (`quote_product_draws`), which is how
    `draw_down_quote` closes a booking on its last draw (`20261029110000`); a booking with nothing booked does not
-   count as drawn. Convert to Order refuses any booking with draws, so it cannot use this. `closed_by_application` and `closed_short` stay allowed:
+   count as drawn. Convert to Order refuses any booking with draws, so it cannot use this.
+   It also refuses `closed_short` while a scheduled or in-progress job comes from the booking or one of its
+   sections (Sol HIGH, 2026-11-18): closing short releases the booking's holds, and the existing rule
+   (`20261105160000`) checked only jobs linked by `quote_id`. A completed job does not block it, as before. `closed_by_application` and `closed_short` stay allowed:
    job-driven closures set them.
 1b. The other side of the same rule (added after the Astra challenge): a `BEFORE INSERT OR UPDATE OF quote_id,
    quote_section_id, status, deleted_at ON public.jobs` row trigger. When a job becomes live on a booking (new,
@@ -93,6 +96,8 @@ Database only. No screen change: the screen already shows a database message as 
     existing live job elsewhere can still move between its own statuses.
 11. With a live job, a Partial Order of part of the booking keeps it sent; the Partial Order that draws the last
     booked unit closes it as accepted and the job stays live.
+12. Closing short is refused while a job linked only through a section is scheduled; once that job is
+    completed, closing short goes through.
 
 ## Challenge (Astra, gpt-6-astra high, 2026-11-18): settled
 

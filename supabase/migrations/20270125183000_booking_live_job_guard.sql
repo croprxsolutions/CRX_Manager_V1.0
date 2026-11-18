@@ -11,7 +11,9 @@
 --      While a live job exists (on the quote or one of its sections; not cancelled, not deleted) it refuses
 --      BOOKING_HAS_JOB when status changes to accepted, declined, expired or cancelled, or customer_id
 --      changes. One exception (Mason 2026-11-18): accepted goes through once every booked product is fully
---      drawn onto orders, which is how draw_down_quote closes a booking on its last draw. SECURITY DEFINER so a caller whose RLS hides the job is still refused. Job scheduling locks
+--      drawn onto orders, which is how draw_down_quote closes a booking on its last draw. It also refuses
+--      closed_short while a scheduled or in-progress job comes from the booking or a section (closing short
+--      releases the holds; the 20261105160000 rule checked quote_id only). SECURITY DEFINER so a caller whose RLS hides the job is still refused. Job scheduling locks
 --      the quote row FOR UPDATE first (_create_job_from_quote_section_replay_impl_20261015) and refuses a
 --      booking already in those statuses, so the two serialize on the quote row.
 --   1b. _enforce_job_live_on_open_booking(), a BEFORE INSERT OR UPDATE OF quote_id, quote_section_id, status,
@@ -59,6 +61,22 @@ AS $function$
 DECLARE
   v_job record;
 BEGIN
+  -- Sol HIGH (#1959): closing short releases the booking's holds. The existing rule (20261105160000) refuses
+  -- it only for scheduled/in-progress jobs linked by quote_id; a job linked through a section counts too.
+  IF NEW.status IS DISTINCT FROM OLD.status AND NEW.status = 'closed_short' THEN
+    SELECT j.job_number INTO v_job
+    FROM public.jobs j
+    WHERE (j.quote_id = NEW.id
+           OR j.quote_section_id IN (SELECT qs.id FROM public.quote_sections qs WHERE qs.quote_id = NEW.id))
+      AND j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')
+    ORDER BY j.job_number, j.id
+    LIMIT 1;
+    IF FOUND THEN
+      RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % was made from this booking, so the booking cannot be closed short. Cancel or complete the job first.',
+        v_job.job_number
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
   IF NOT ((NEW.status IS DISTINCT FROM OLD.status AND NEW.status IN ('accepted', 'declined', 'expired', 'cancelled'))
           OR NEW.customer_id IS DISTINCT FROM OLD.customer_id) THEN
     RETURN NEW;

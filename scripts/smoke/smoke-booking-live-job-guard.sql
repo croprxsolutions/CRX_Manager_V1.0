@@ -10,6 +10,7 @@
 --   4   a direct customer change is refused BOOKING_HAS_JOB
 --   6   a job on one of the booking's sections (no quote_id) blocks too; a completed job's refusal says
 --       ask an admin; a cancelled job and a soft-deleted job do not block (the decline goes through)
+--   S   closing short is refused while a job on a section (no quote_id) is scheduled; once completed it goes through
 --   8   with the job live: sent -> revised, and a notes edit, go through
 --   5   auto_expire_quotes with two past-date bookings, one with a live job: the other expires, the one
 --       with the job stays sent, the run does not fail, and its rep gets one "Booking past its date" alert
@@ -164,8 +165,31 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (6) a job on the section did not block decline: %', v_err;
   END IF;
   v_refusals := v_refusals + 1;
+  -- S. Closing short releases the holds: refused while the section's job is scheduled (Sol HIGH, #1959).
+  v_err := NULL;
+  BEGIN
+    UPDATE quotes SET status = 'closed_short' WHERE id = v_q;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
+  IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_HAS_JOB: spray job SMK-LJ-% so the booking cannot be closed short. Cancel or complete the job first.' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (S) closing short with a scheduled section job was not refused: %', v_err;
+  END IF;
+  v_refusals := v_refusals + 1;
   UPDATE jobs SET status = 'in_progress' WHERE id = v_job;
   UPDATE jobs SET status = 'completed' WHERE id = v_job;
+  -- S. With the job completed, closing short goes through (rolled back).
+  v_err := NULL;
+  BEGIN
+    UPDATE quotes SET status = 'closed_short' WHERE id = v_q;
+    IF (SELECT status FROM quotes WHERE id = v_q) <> 'closed_short' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (S) close short did not land';
+    END IF;
+    RAISE EXCEPTION 'SMOKE_INNER_OK';
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
+  IF v_err IS DISTINCT FROM 'SMOKE_INNER_OK' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (S) closing short with only a completed job was refused: %', v_err;
+  END IF;
   v_err := NULL;
   BEGIN
     UPDATE quotes SET status = 'accepted' WHERE id = v_q;

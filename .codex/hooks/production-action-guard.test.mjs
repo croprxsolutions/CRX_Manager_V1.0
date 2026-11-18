@@ -605,7 +605,7 @@ try {
   assert.equal(ordinaryMerge.blocked, true, "a non-risky PR merge into main still needs the Sol proof");
   assert.match(ordinaryMerge.reason, /every merge into main needs an exact-SHA Sol proof/, "and says it is the landing rule, not a risk finding");
   writeProof(ordinary.repo, {
-    codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high",
+    codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
     head_sha: ordinary.sha, base_sha: ordinary.base, timestamp: new Date().toISOString(),
   });
   assert.equal(evaluateProductionAction({
@@ -692,7 +692,7 @@ try {
   ]) {
     const branch = makeRepo("src/components/Label.tsx", "export const label = 'reviewed';\n");
     writeProof(branch.repo, {
-      codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high",
+      codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
       head_sha: branch.sha, base_sha: branch.base, timestamp: new Date().toISOString(),
     });
     mkdirSync(path.join(branch.repo, ...path.dirname(later).split("/")), { recursive: true });
@@ -1439,7 +1439,7 @@ try {
   const valid = {
     codex_ran: true,
     verdict: "clean",
-    model: "gpt-6-sol",
+    model: "gpt-6.2-sol",
     reasoning_effort: "high",
     head_sha: risky.sha,
     base_sha: risky.base,
@@ -1577,7 +1577,7 @@ try {
   writeProof(risky.repo, {
     codex_ran: true,
     verdict: "clean",
-    model: "gpt-6-sol",
+    model: "gpt-6.2-sol",
     reasoning_effort: "high",
     head_sha: risky.sha,
     timestamp: new Date(now).toISOString(),

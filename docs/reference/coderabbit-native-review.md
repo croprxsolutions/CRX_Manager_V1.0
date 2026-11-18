@@ -233,7 +233,7 @@ Provider documentation:
 ## Autonomous landing (Mason, 2026-09-26)
 
 Mason's standing rule (see `docs/manual/DECISION_LOG.md`, 2026-09-26, as
-amended 2026-10-19): once a fresh exact-SHA `gpt-6-sol` high review of the FINAL
+amended 2026-10-19): once a fresh exact-SHA `gpt-6.2-sol` high review of the FINAL
 head is clean and every required check is green, the agent merges by itself. The
 merge gates enforce it — both `.claude/hooks/pr-merge-guard.mjs` and
 `.codex/hooks/production-action-guard.mjs` deny a merge into `main` unless the

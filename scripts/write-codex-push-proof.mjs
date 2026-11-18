@@ -1293,7 +1293,7 @@ export function captureReviewOutput(root, result, runInfo = {}) {
 // merge needs the same reads, so Sol spent then would be wasted. `--carry-forward`
 // does not run it: that path costs no full review.
 export const SOL_PREFLIGHT_QUIET_MS = 15 * 60 * 1000;
-const PREFLIGHT_GH_TIMEOUT_MS = 20_000;
+const PREFLIGHT_GH_TIMEOUT_MS = 60_000; // gh took ~25s on 2026-11-17 and the 20s cap refused Sol
 const CODEX_REVIEW_STATE_RE = /<!--\s*codex-review-state:v1\s+(\{.*?\})\s*-->/s;
 
 // The commit the Codex App last reviewed, from its summary comment. Only a

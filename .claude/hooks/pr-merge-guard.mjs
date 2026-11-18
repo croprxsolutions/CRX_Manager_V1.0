@@ -284,14 +284,18 @@ const projectDir = path.resolve(
 
 // The hard gates spend ONE budget between them (see createHardGateBudget). This
 // guard runs under merge-guard-launcher.mjs, which denies a possible merge if the
-// guard is still running at 36s; the hook entry in .claude/settings.json allows
-// 45s so the launcher can still answer. The reserve covers what process.uptime()
+// guard is still running at 270s; the hook entry in .claude/settings.json allows
+// 280s so the launcher can still answer. The reserve covers what process.uptime()
 // cannot see plus writing the verdict. The advisory lookup
 // is NOT on this budget: it keeps its own deadline and fails open by design, so a
 // slow GitHub there must not turn into a denial.
-const HOOK_TIMEOUT_MS = 30_000;
+// Slow GitHub (2026-11-16 and 11-18): 10s caps refused merges with ETIMEDOUT. A
+// staging merge makes 8 hard-gate calls, and a call is admitted only if a full
+// cap still fits, so 177s fits 8 calls at ~15s each with any one taking 25s. A
+// GitHub that does not answer still denies, at the first call's 25s cap.
+const HOOK_TIMEOUT_MS = 180_000;
 const HOOK_RESERVE_MS = 3_000;
-const GH_CALL_TIMEOUT_MS = 10_000;
+const GH_CALL_TIMEOUT_MS = 25_000;
 const hardGateBudget = createHardGateBudget({
   deadlineMs: hookDeadlineMs(HOOK_TIMEOUT_MS, HOOK_RESERVE_MS),
   callTimeoutMs: GH_CALL_TIMEOUT_MS,
@@ -310,7 +314,7 @@ function gh(args, timeout = GH_CALL_TIMEOUT_MS) {
 // The money-PR CodeRabbit requirement read makes up to three calls inside the
 // advisory budget, so each gets a shorter cap: a call is only started if it can
 // finish before the budget ends (readCodeRabbitRequirement).
-const REQUIREMENT_CALL_TIMEOUT_MS = 5_000;
+const REQUIREMENT_CALL_TIMEOUT_MS = 20_000;
 
 // Every gh call a HARD gate makes goes through here. deny() exits, so a refused
 // call can never be caught and reinterpreted by the gate that made it.
@@ -348,9 +352,9 @@ function listWorktreesFromProjectDir() {
 // notice and merges. See the header of codex-bot-review-lib.mjs for why this one
 // predicate does not fail closed like its neighbours.
 //
-// RUNS LAST, AND THAT IS THE POINT (Codex round 6). This hook gets 30 seconds
-// (.claude/settings.json). Each gh call is capped at 10s, and this lookup makes
-// up to four of them, so it can alone outlive the hook. A PreToolUse hook killed
+// RUNS LAST, AND THAT IS THE POINT (Codex round 6). The hard gates may spend up
+// to 177s and this lookup up to 75s more (four calls); started first, a slow
+// lookup could eat the hard gates' time before they ran. A PreToolUse hook killed
 // mid-call emits nothing, and a hook that emits nothing does NOT deny — so
 // @speed-bump — the ORDERING protects the hard gates; this lookup is not one.
 // running an advisory, fail-open lookup BEFORE the green-pipeline, risky-diff and
@@ -359,7 +363,8 @@ function listWorktreesFromProjectDir() {
 // had their chance, at a point where the alternative is returning ALLOW anyway.
 // Do not move it earlier "so the reader sees it first".
 // The launcher denies a merge if the guard runs past its own deadline.
-const CODEX_ADVISORY_BUDGET_MS = 15_000;
+// 75s: its four calls at ~15s each, with room for a cap to start the last.
+const CODEX_ADVISORY_BUDGET_MS = 75_000;
 
 // DEFERRED PAST EVERY MERGE IN THE COMMAND (Codex round 8, SEC-001). Running
 // last within ONE merge was not enough: `gh pr merge 1 && gh pr merge 2` gates

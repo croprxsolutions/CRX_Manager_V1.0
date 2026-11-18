@@ -41,6 +41,10 @@ Sol's three bypass findings on #1947 on the condition that this database guard f
    the booking is accepted, declined, expired, cancelled, closed_by_application or closed_short (the scheduler's
    own refusal list). Without it, a direct job insert or re-link could put a live job on a closed booking, and a
    job created while a decline was in flight could slip past both checks. Same function settings as item 1.
+   A live job's booking and section link is frozen (Mason, 2026-11-18, "A"): unlinking or re-pointing it is
+   refused (`BOOKING_HAS_JOB`; cancel it and schedule a new one). A section-linked job also locks its section row
+   `FOR SHARE` and re-checks it still belongs to the booking it checked, so a section moving to a closed booking
+   at the same moment is caught (Luna HIGH; the stop rule fired on this mechanism, and Mason chose the rule).
 1c. A `BEFORE UPDATE OF quote_id ON public.quote_sections` row trigger (Sol HIGH, round 2): a section that a live
    job comes from cannot move to another booking (`BOOKING_HAS_JOB`). A section-linked job's booking is its
    section's booking, so a move would otherwise put a live job on a closed booking, or empty the old booking so it
@@ -103,6 +107,8 @@ Database only. No screen change: the screen already shows a database message as 
 12. Closing short is refused while a job linked only through a section is scheduled; once that job is
     completed, closing short goes through.
 13. The section a live job comes from cannot be moved to another booking.
+14. A live job cannot be unlinked from its booking or re-pointed to another one; a job attach racing a section
+    move to a closed booking waits for it, then is refused, with no job left on the section.
 
 ## Challenge (Astra, gpt-6-astra high, 2026-11-18): settled
 
@@ -122,7 +128,8 @@ Database only. No screen change: the screen already shows a database message as 
 ## Business decisions (settled)
 
 **Mason, 2026-11-18 (relayed from the Phase A session, his words: "yes to both"):** 1 = (a) skip and alert the
-rep once; 2 = block Cancel too. Built that way.
+rep once; 2 = block Cancel too. Built that way. Later the same day: "Let it close" (a Partial Order's last draw
+closes the booking), and "A" (a live job's booking link is fixed; cancel and reschedule to move it).
 
 1. **Nightly auto-expire and a booking with a live job.** Options: (a) skip it, and alert its rep once per
    expiry date with the existing "Booking past its date" notice; (b) skip it silently; (c) let the trigger refuse

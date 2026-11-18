@@ -337,6 +337,21 @@ function raceReverse() {
     after: scalar(`SELECT status || '/' || (SELECT count(*) FROM jobs WHERE quote_id = '${q}') FROM quotes WHERE id = '${q}';`) };
 }
 
+// A section moving to the closed RACE2 booking holds its row uncommitted; a job attached to that section meanwhile
+// (having read its old, open booking) must wait, then be refused once the move commits (Luna HIGH, #1959).
+function raceSection() {
+  const s = scalar(`SELECT id FROM quote_sections WHERE quote_id = '${quoteId('RACE')}';`);
+  docker(['exec', '-d', NAME, 'psql', '-U', 'postgres', '-d', DB, '-X', '-q', '-c',
+    `BEGIN; UPDATE quote_sections SET quote_id = '${quoteId('RACE2')}' WHERE id = '${s}'; SELECT pg_sleep(4); COMMIT;`]);
+  wait(1500);
+  assert.equal(scalar("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(4)%' AND pid <> pg_backend_pid();"), '1',
+    'the section-moving session is not holding the section');
+  const r = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true,
+    input: `INSERT INTO jobs (job_number, customer_id, job_date, quote_section_id) SELECT 'J-PRV-RACE3', c.id, CURRENT_DATE + 7, '${s}' FROM customers c WHERE c.farm_name = '[PROVER] RACE Farm';` });
+  return { status: r.status, output: `${r.stdout}\n${r.stderr}`,
+    after: scalar(`SELECT (SELECT quote_number FROM quotes WHERE id = qs.quote_id) || '/' || (SELECT count(*) FROM jobs WHERE quote_section_id = qs.id) FROM quote_sections qs WHERE qs.id = '${s}';`) };
+}
+
 async function main() {
   if (REUSE) {
     // Reuse writes seed rows and replaces unit_conversions: only on a kept, network-less prover container, on a copied database.
@@ -382,6 +397,11 @@ async function main() {
   assert.match(reversed.output, /BOOKING_CLOSED: booking \[PROVER\] RACE2 is declined/);
   assert.equal(reversed.after, 'declined/0');
   console.log('[case] AFTER: a job insert racing a decline waits for it, then is refused BOOKING_CLOSED; the booking is declined with no job');
+  const moved = raceSection();
+  assert.notEqual(moved.status, 0, `the job attach racing a section move went through: ${moved.output}`);
+  assert.match(moved.output, /BOOKING_CLOSED: the booking section changed while this spray job was being scheduled/);
+  assert.equal(moved.after, '[PROVER] RACE2/0');
+  console.log('[case] AFTER: a job attach racing a section move to a closed booking waits for it, then is refused; no job on the section');
   for (const f of REGRESSION) {
     const after = chainOutcome(f);
     assert.equal(after, before[f], `${f} ends differently after the candidate`);

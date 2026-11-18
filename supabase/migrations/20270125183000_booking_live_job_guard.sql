@@ -19,7 +19,8 @@
 --   1b. _enforce_job_live_on_open_booking(), a BEFORE INSERT OR UPDATE OF quote_id, quote_section_id, status,
 --      deleted_at row trigger on jobs: a job cannot become live (inserted, re-linked, or un-deleted) on a booking
 --      that is accepted, declined, expired, cancelled, closed_by_application or closed_short (BOOKING_CLOSED; the
---      same statuses the scheduler already refuses). An already-live job keeps moving through its own statuses.
+--      same statuses the scheduler already refuses). An already-live job keeps moving through its own statuses,
+--      but its booking and section link is fixed: to move it, cancel it and schedule a new one (Mason, 2026-11-18).
 --   1c. _enforce_section_with_live_job_stays(), a BEFORE UPDATE OF quote_id row trigger on quote_sections: a
 --      section that a live job comes from cannot move to another booking (BOOKING_HAS_JOB).
 --   2. auto_expire_quotes skips a booking with a live job (the trigger would otherwise fail the whole nightly
@@ -136,7 +137,8 @@ CREATE TRIGGER quotes_booking_live_job_rules
 -- 1b. The other direction: a job cannot become live on a closed booking (a direct insert, re-link,
 --     or un-delete under RLS would otherwise skip the scheduler's own status check). Same statuses the
 --     scheduler (_create_job_from_quote_section_replay_impl_20261015) refuses. The booking row is locked
---     FOR SHARE, so this and a booking status change serialize on that row.
+--     FOR SHARE, so this and a booking status change serialize on that row; the section row too, so a
+--     section moving to a closed booking meanwhile is caught. A live job's booking/section link is frozen.
 CREATE FUNCTION public._enforce_job_live_on_open_booking()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -145,23 +147,29 @@ CREATE FUNCTION public._enforce_job_live_on_open_booking()
 AS $function$
 DECLARE
   v_quote_id uuid;
+  v_section_quote_id uuid;
   v_quote record;
 BEGIN
   IF NEW.deleted_at IS NOT NULL OR NEW.status = 'cancelled' THEN
     RETURN NEW;
   END IF;
-  IF TG_OP = 'UPDATE'
-     AND OLD.deleted_at IS NULL AND OLD.status <> 'cancelled'
-     AND NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id
-     AND NEW.quote_section_id IS NOT DISTINCT FROM OLD.quote_section_id THEN
-    RETURN NEW;
+  IF TG_OP = 'UPDATE' AND OLD.deleted_at IS NULL AND OLD.status <> 'cancelled' THEN
+    IF NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id
+       AND NEW.quote_section_id IS NOT DISTINCT FROM OLD.quote_section_id THEN
+      RETURN NEW;
+    END IF;
+    -- Mason 2026-11-18 ("A"): a live job's booking links are fixed; nothing in the app changes them.
+    RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % stays linked to the booking it was scheduled from. To move it, cancel it and schedule a new one.',
+      NEW.job_number
+      USING ERRCODE = 'P0001';
+  END IF;
+  -- The section's booking, read unlocked here, is re-checked under a section lock after the booking locks
+  -- below (booking first, then section: the order save_quote locks in).
+  IF NEW.quote_section_id IS NOT NULL THEN
+    SELECT qs.quote_id INTO v_section_quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id;
   END IF;
   FOR v_quote_id IN
-    SELECT DISTINCT x.id FROM (
-      SELECT NEW.quote_id AS id
-      UNION ALL
-      SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id
-    ) x
+    SELECT DISTINCT x.id FROM (VALUES (NEW.quote_id), (v_section_quote_id)) AS x(id)
     WHERE x.id IS NOT NULL
     ORDER BY x.id
   LOOP
@@ -172,6 +180,17 @@ BEGIN
         USING ERRCODE = 'P0001';
     END IF;
   END LOOP;
+  -- A section moving at the same moment: wait for it, then refuse if it no longer belongs to the booking
+  -- checked above (Luna HIGH, #1959). Its own trigger refuses the move once this job is committed.
+  IF NEW.quote_section_id IS NOT NULL THEN
+    PERFORM 1 FROM public.quote_sections qs
+    WHERE qs.id = NEW.quote_section_id AND qs.quote_id IS NOT DISTINCT FROM v_section_quote_id
+    FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'BOOKING_CLOSED: the booking section changed while this spray job was being scheduled. Try again.'
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
   RETURN NEW;
 END;
 $function$;

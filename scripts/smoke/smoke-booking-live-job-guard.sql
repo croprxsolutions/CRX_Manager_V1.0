@@ -11,6 +11,7 @@
 --   6   a job on one of the booking's sections (no quote_id) blocks too; a completed job's refusal says
 --       ask an admin; a cancelled job and a soft-deleted job do not block (the decline goes through)
 --   S   closing short is refused while a job on a section (no quote_id) is scheduled; once completed it goes through
+--   F   a live job's booking links cannot change (unlink or re-point); Mason 2026-11-18
 --   M   the section a live job comes from cannot move to another booking
 --   8   with the job live: sent -> revised, and a notes edit, go through
 --   5   auto_expire_quotes with two past-date bookings, one with a live job: the other expires, the one
@@ -156,7 +157,27 @@ BEGIN
   END LOOP;
 
   -- 6. A job on the section only blocks too; completed says ask an admin.
-  UPDATE jobs SET quote_id = NULL WHERE id = v_job;
+  -- F. A live job's booking links are fixed (Mason 2026-11-18, "A"): unlinking or re-pointing it is refused.
+  FOR v_i IN 1..2 LOOP
+    v_err := NULL;
+    BEGIN
+      IF v_i = 1 THEN
+        UPDATE jobs SET quote_id = NULL, quote_section_id = NULL WHERE id = v_job;
+      ELSE
+        UPDATE jobs SET quote_id = v_q2 WHERE id = v_job;
+      END IF;
+    EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+    END;
+    IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_HAS_JOB: spray job SMK-LJ-' || v_suffix || ' stays linked to the booking it was scheduled from. To move it, cancel it and schedule a new one.' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (F%) a live job''s booking link changed: %', v_i, v_err;
+    END IF;
+    v_refusals := v_refusals + 1;
+  END LOOP;
+  -- From here the job is linked through the section only.
+  UPDATE jobs SET deleted_at = now() WHERE id = v_job;
+  INSERT INTO jobs (job_number, customer_id, job_date, quote_section_id)
+  VALUES ('SMK-LJ-' || v_suffix || '-S', v_customer_id, (now() AT TIME ZONE 'America/Chicago')::date + 7, v_s)
+  RETURNING id INTO v_job;
   v_err := NULL;
   BEGIN
     UPDATE quotes SET status = 'declined' WHERE id = v_q;
@@ -182,7 +203,7 @@ BEGIN
     UPDATE quote_sections SET quote_id = v_q2 WHERE id = v_s;
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
   END;
-  IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_HAS_JOB: spray job SMK-LJ-' || v_suffix || ' was made from this section, so the section cannot move to another booking.' THEN
+  IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_HAS_JOB: spray job SMK-LJ-' || v_suffix || '-S was made from this section, so the section cannot move to another booking.' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (M) a section with a live job moved to another booking: %', v_err;
   END IF;
   v_refusals := v_refusals + 1;
@@ -246,7 +267,10 @@ BEGIN
         INSERT INTO jobs (job_number, customer_id, job_date, quote_section_id)
         VALUES ('SMK-J2-' || v_suffix, v_customer_id, CURRENT_DATE + 7, v_s);
       ELSIF v_i = 3 THEN
-        UPDATE jobs SET quote_id = v_q2 WHERE job_number = 'SMK-LJ2-' || v_suffix;
+        -- a deleted job re-linked to B and restored in one update
+        INSERT INTO jobs (job_number, customer_id, job_date, quote_id, deleted_at)
+        VALUES ('SMK-J3-' || v_suffix, v_customer_id, CURRENT_DATE + 7, v_q, now());
+        UPDATE jobs SET quote_id = v_q2, deleted_at = NULL WHERE job_number = 'SMK-J3-' || v_suffix;
       ELSE
         INSERT INTO jobs (job_number, customer_id, job_date, quote_id, deleted_at)
         VALUES ('SMK-J4-' || v_suffix, v_customer_id, CURRENT_DATE + 7, v_q2, now());

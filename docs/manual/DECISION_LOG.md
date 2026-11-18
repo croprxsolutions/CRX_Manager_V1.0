@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-18 — Purchasing plan: no "expedite a later PO" alternative; a Maybe booking's held stock follows its confidence (Bookings PR 1b)
+
+**Decision (Mason, in chat, 2026-11-18), after Sol round 3 on Bookings PR 1b raised a HIGH on each rule (third round on each).** (1) `get_purchasing_plan` suggestions no longer carry a `later_po` "expedite this PO instead" alternative: it could not show the shortage that moving a PO earlier leaves for a later need. Open POs stay listed; it may return later, built to re-plan the knock-on need. (2) A crop-program hold on a booking that books that product follows the booking's confidence: when the booking is Maybe, its held stock is not counted as spoken for (Mason chose this over always counting held stock). Mason accepts the resulting gap, where a Firm need elsewhere can look covered by stock held for a Maybe booking.
+
 ## 2026-11-18 — Purchasing plan: booking lines in a unit that no longer matches stock are set aside (Bookings PR 1b)
 
 **Decision (Mason, in chat, 2026-11-18).** A booking line saved in a unit that no longer matches the product's stock unit is listed only under Check units in `get_purchasing_plan`: it is not counted as demand, absorbs no order or job draw, and does not stand in for its booking's crop-program hold (which then counts). Chosen over accepting the gap, after Luna raised HIGHs on how such lines interacted with draws and holds (third round on that mechanism). Live had 0 such lines on 2026-11-18; screens do not allow a stock-unit change on a saved product.

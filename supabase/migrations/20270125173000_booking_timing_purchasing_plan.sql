@@ -1369,10 +1369,9 @@ BEGIN
                           'need_date', sg.d,
                           'order_by', GREATEST(sg.d - prm.lead_days, prm.today),
                           'order_now', sg.d - prm.lead_days <= prm.today,
-                          'quantity', sg.qty,
-                          'later_po', (SELECT jsonb_build_object('po_id', po.po_id, 'po_number', po.po_number, 'expected_date', po.raw_date)
-                                         FROM po WHERE po.product_id = sg.product_id AND po.flag IN ('counted', 'later') AND po.eff_date > sg.d AND po.qty >= sg.qty
-                                        ORDER BY po.eff_date, po.po_number LIMIT 1))
+                          -- No "expedite a later PO instead" alternative (Mason, 2026-11-18): it could not show
+                          -- the shortage that moving a PO earlier leaves behind. Open POs stay listed.
+                          'quantity', sg.qty)
                           ORDER BY sg.d)
                    FROM sugg sg WHERE sg.product_id = prod.product_id AND sg.qty > 0), '[]'::jsonb),
                'months', (
@@ -1430,7 +1429,7 @@ BEGIN
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM 'c3b7b4387fba94d85d7feda0c846e9e4' THEN
+     IS DISTINCT FROM 'bdfa0118406913ad035a2eab708fbcde' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF (SELECT count(*) FROM pg_proc p

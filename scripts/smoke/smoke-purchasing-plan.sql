@@ -8,11 +8,11 @@
 --        Firm 80 at +131: order 30 by +86, order 80 by +117, suggested 110
 --   P9b  an order line is dated by its earliest scheduled, undelivered delivery
 --   P10  Firm 100 at +100, a PO of 100 due +126, Likely 100 at +130: one suggestion of
---        100 naming the later PO; could add 0
+--        100, with no "expedite the later PO" alternative; could add 0
 --   P11  on hand -10 and nothing else: order 10 now
 --   P23  a booking line saved in lb on a Gal product: Check units, not counted; it does not cover its
 --        booking's crop-program hold (20), which counts
---   P24  Firm 100 at +100 and a PO of only 10 due +126: buy 100, and the small PO is not offered instead
+--   P24  Firm 100 at +100 and a PO of only 10 due +126: buy 100, no PO offered instead
 --   P12  a late PO counts today (flagged), an undated PO is listed not counted, a
 --        draft PO shows as drafted; the product is not complete
 --   P13  booking 100, order draw 60, job draw 40: 0 + 60 + 40 = 100; after the order is
@@ -417,7 +417,7 @@ BEGIN
   IF (v_x->>'suggested')::numeric <> 100 OR (v_x->>'could_add')::numeric <> 0 OR (v_x->>'incoming')::numeric <> 100
      OR jsonb_array_length(v_x->'suggestions') <> 1
      OR (v_x->'suggestions'->0->>'need_date')::date <> v_t + 100 OR (v_x->'suggestions'->0->>'quantity')::numeric <> 100
-     OR v_x->'suggestions'->0->'later_po'->>'po_number' IS DISTINCT FROM 'SMK-PP10-' || v_suffix THEN
+     OR v_x->'suggestions'->0 ? 'later_po' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P10) %', v_x;
   END IF;
   v_n := v_n + 1;
@@ -508,7 +508,7 @@ BEGIN
   -- P24
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[24];
   IF jsonb_array_length(v_x->'suggestions') <> 1 OR (v_x->'suggestions'->0->>'quantity')::numeric <> 100
-     OR v_x->'suggestions'->0->'later_po' <> 'null'::jsonb THEN
+     OR v_x->'suggestions'->0 ? 'later_po' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P24 small later PO) %', v_x;
   END IF;
   v_n := v_n + 1;

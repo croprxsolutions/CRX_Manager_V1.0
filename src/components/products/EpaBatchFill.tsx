@@ -4,7 +4,7 @@ import Card from '../ui/Card';
 import Button from '../ui/Button';
 import ConfirmModal from '../ui/ConfirmModal';
 import { Sentry } from '../../lib/sentry';
-import { BatchDeadlineError, currentTabRun, fetchBatchCandidates, startTabRun, runBatchParent, type BatchCandidate, type BatchResult } from '../../lib/epaBatchFill';
+import { BatchDeadlineError, currentTabRun, errorText, fetchBatchCandidates, startTabRun, runBatchParent, type BatchCandidate, type BatchResult } from '../../lib/epaBatchFill';
 
 const STORAGE_KEY = 'epaBatchFill:lastRun';
 const OUTCOME_LABEL: Record<BatchResult['outcome'], string> = {
@@ -83,7 +83,7 @@ export default function EpaBatchFill({ onRunEnd }: { onRunEnd: () => void }) {
           errorsInRow = 0;
         } catch (error: unknown) {
           Sentry.captureException(error, { extra: { context: 'runBatchParent', parentId: candidate.parentId } });
-          const message = error instanceof Error ? error.message : String(error);
+          const message = errorText(error);
           result = { ...base, outcome: 'unknown', detail: `${message}. Open the product to see whether it saved` };
           errorsInRow += 1;
           // A request past its deadline may still be running; two errors in a row means EPA or the app is struggling.

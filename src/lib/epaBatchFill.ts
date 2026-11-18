@@ -106,33 +106,38 @@ function labelBlocks(item: EpaProposalItem): string | null {
 
 export type BatchDecision = { commit: true; decisions: EpaDecision[]; ingredients: number } | { commit: false; reason: string };
 
-/** Whether the batch may commit this proposal, and the explicit decisions it sends: ingredients yes, every label no. */
-export function batchDecision(proposal: Pick<EpaChemistryProposal, 'status' | 'items' | 'epa_summary'>, appNames: string[]): BatchDecision {
-  if (proposal.status !== 'proposed') return { commit: false, reason: `Proposal is ${proposal.status}` };
-  const summary = proposal.epa_summary ?? {};
-  if (summary.needsManual === true) return { commit: false, reason: 'EPA marks this record for manual checking' };
-  if (summary.base_label_note === true) return { commit: false, reason: 'Distributor number: EPA has only the base label' };
-  if (summary.isCancelled === true) return { commit: false, reason: 'EPA lists the registration as cancelled' };
+/** The EPA record itself needs a person: flagged, distributor, cancelled, or not this product by name. */
+function recordBlocks(summary: Record<string, unknown>, appNames: string[]): string | null {
+  if (summary.needsManual === true) return 'EPA marks this record for manual checking';
+  if (summary.base_label_note === true) return 'Distributor number: EPA has only the base label';
+  if (summary.isCancelled === true) return 'EPA lists the registration as cancelled';
   if (!epaNameMatches(summary.productname as string | undefined, appNames)) {
-    return { commit: false, reason: `EPA name "${String(summary.productname ?? '')}" does not match this product` };
+    return `EPA name "${String(summary.productname ?? '')}" does not match this product`;
   }
-  const ingredients = proposal.items.filter((i) => i.kind === 'ingredient');
-  if (ingredients.length === 0) return { commit: false, reason: 'EPA lists no ingredients' };
+  return null;
+}
+
+/** Every ingredient is a plain new one with a CAS number and a positive percent, and they sum to 100 or less. */
+function ingredientsBlock(ingredients: EpaProposalItem[]): string | null {
+  if (ingredients.length === 0) return 'EPA lists no ingredients';
   let total = 0;
   for (const item of ingredients) {
     const change = item.change ?? {};
     const pct = change.strength_value;
-    if (item.class !== 'add' || typeof change.cas !== 'string' || change.cas === '') {
-      return { commit: false, reason: `Ingredient needs a person (${item.class})` };
-    }
-    if (typeof pct !== 'number' || !Number.isFinite(pct) || pct <= 0) return { commit: false, reason: 'Ingredient has no percent' };
+    if (item.class !== 'add' || typeof change.cas !== 'string' || change.cas === '') return `Ingredient needs a person (${item.class})`;
+    if (typeof pct !== 'number' || !Number.isFinite(pct) || pct <= 0) return 'Ingredient has no percent';
     total += pctUnits(pct);
   }
-  if (total > pctUnits(100)) return { commit: false, reason: 'Ingredient percents add up to more than 100' };
-  for (const item of proposal.items.filter((i) => i.kind === 'label')) {
-    const reason = labelBlocks(item);
-    if (reason) return { commit: false, reason };
-  }
+  return total > pctUnits(100) ? 'Ingredient percents add up to more than 100' : null;
+}
+
+/** Whether the batch may commit this proposal, and the explicit decisions it sends: ingredients yes, every label no. */
+export function batchDecision(proposal: Pick<EpaChemistryProposal, 'status' | 'items' | 'epa_summary'>, appNames: string[]): BatchDecision {
+  if (proposal.status !== 'proposed') return { commit: false, reason: `Proposal is ${proposal.status}` };
+  const ingredients = proposal.items.filter((i) => i.kind === 'ingredient');
+  const reason = recordBlocks(proposal.epa_summary ?? {}, appNames) ?? ingredientsBlock(ingredients)
+    ?? proposal.items.filter((i) => i.kind === 'label').map(labelBlocks).find((r) => r !== null) ?? null;
+  if (reason) return { commit: false, reason };
   const decisions = proposal.items.filter((i) => WRITABLE_CLASSES.has(i.class))
     .map((i) => ({ item_id: i.item_id, accept: i.kind === 'ingredient' }));
   // Every item the server could write is decided explicitly; only ingredient adds are accepted.

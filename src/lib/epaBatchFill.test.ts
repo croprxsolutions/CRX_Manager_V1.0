@@ -53,6 +53,7 @@ describe('batchDecision', () => {
     ['zero percent', proposal([ing('a', 0)]), /no percent/],
     ['over 100', proposal([ing('a', 60), ing('b', 40.0001, '51218-45-2')]), /more than 100/],
     ['signal word differs', proposal([ing('a', 10), label('signal_word', 'differs')]), /differs/],
+    ['newer label over an existing date', proposal([ing('a', 10), { ...label('label_document', 'fill', {}), current: { label_accepted_on: '2020-01-01', label_url: null } }]), /newer label/],
     ['restricted use', proposal([ing('a', 10), label('rup_status', 'rup_upgrade', 'yes')]), /restricted/],
     ['EPA says cancelled', proposal([ing('a', 10), label('registration_status', 'differs', true)]), /cancelled/],
   ])('leaves it for a person: %s', (_name, p, reason) => {

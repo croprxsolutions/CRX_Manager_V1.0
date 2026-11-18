@@ -103,6 +103,11 @@ function labelBlocks(item: EpaProposalItem): string | null {
   if (item.item_id === 'label:registration_status') {
     return item.epa === true ? 'EPA lists the registration as cancelled' : null;
   }
+  if (item.item_id === 'label:label_document' && item.class === 'fill') {
+    // A newer EPA label over an existing date or link is a change, not a blank (Codex App, 2026-11-18).
+    const current = item.current as { label_accepted_on?: unknown; label_url?: unknown } | null;
+    return current?.label_accepted_on == null && current?.label_url == null ? null : 'EPA has a newer label than the one recorded';
+  }
   if (item.class === 'fill' || item.class === 'confirm' || item.class === 'matches') return null;
   return item.class === 'rup_upgrade' ? 'EPA lists it as restricted use' : `Label fact differs (${item.item_id.replace(/^label:/, '')})`;
 }
@@ -228,6 +233,8 @@ export async function runBatchParent(runId: string, candidate: BatchCandidate & 
   }));
   if (record.outcome === 'failure') {
     if (!record.failure_id) throw new Error('EPA lookup reply named no failure');
+    // EPA unreachable or unreadable counts as an error, so an outage stops the run instead of failing every product.
+    if (record.reason === 'upstream_error' || record.reason === 'invalid_result') throw new Error(`EPA lookup failed (${record.reason}); recorded for a person`);
     return { ...base, outcome: 'needs_person', detail: `EPA lookup failed: ${record.reason ?? 'unknown reason'}` };
   }
   if (!record.proposal_id) throw new Error('EPA lookup reply named no proposal');

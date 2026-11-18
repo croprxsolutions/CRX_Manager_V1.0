@@ -2470,6 +2470,8 @@ export default function QuoteBuilder() {
       header_notes: headerNotes || null,
       footer_notes: footerNotes || null,
       is_planned: isPlanned,
+      // The server keeps each section's id (and the jobs scheduled from it) only when told the screen sends them.
+      section_ids_v1: true,
       ...(newStatus === 'sent' ? { sent_at: new Date(saveAttemptAtMs).toISOString() } : {}),
     };
 
@@ -2489,6 +2491,9 @@ export default function QuoteBuilder() {
 
     // Build sections JSON for the atomic RPC
     const sectionsPayload = sections.map((sec) => ({
+      // A section id names a section of THIS saved quote; a new quote has none to name.
+      id: quoteId ? sec.id ?? null : null,
+      client_key: sec._key,
       section_name: sec.section_name,
       sort_order: sec.sort_order,
       section_notes: sec.section_notes || null,
@@ -2648,7 +2653,7 @@ export default function QuoteBuilder() {
         return null;
       }
 
-      const result = assertRpcResult<{ quote_id: string; commission_split?: CommissionSplit | null; row_version?: unknown; item_ids?: Record<string, unknown> | null; item_prices?: Record<string, unknown> | null }>(data, 'save_quote');
+      const result = assertRpcResult<{ quote_id: string; commission_split?: CommissionSplit | null; row_version?: unknown; item_ids?: Record<string, unknown> | null; item_prices?: Record<string, unknown> | null; section_ids?: Record<string, unknown> | null }>(data, 'save_quote');
       // A save_quote that answers with an EMPTY payload and no error is ambiguous —
       // the row may already be committed — so retiring the key first would send the
       // user's retry under a fresh key the server cannot replay, writing the quote
@@ -2735,6 +2740,17 @@ export default function QuoteBuilder() {
         await refreshPriceChanges(result.quote_id);
         if (editingSessionChanged()) return null;
       }
+      // save_quote answers each section's id (section_ids, 20270125110000); the next save names them
+      // so the section, and any job scheduled from it, is kept. A reply without the map (a receipt
+      // cached before it existed) means the sections were re-created, so the old ids are dropped.
+      const sectionIds = result.section_ids && typeof result.section_ids === 'object' && !Array.isArray(result.section_ids)
+        ? result.section_ids
+        : null;
+      setSections((prev) => prev.map((sec) => {
+        const id = sectionIds?.[sec._key];
+        if (typeof id === 'string') return { ...sec, id };
+        return sectionIds ? sec : { ...sec, id: undefined };
+      }));
       // The save committed, but conversion and other chained actions must not
       // continue unless this tab can install the exact authoritative token.
       if (!installAuthoritativeQuoteRowVersion(result.row_version, 'saved')) {
@@ -3577,6 +3593,9 @@ export default function QuoteBuilder() {
         staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
         setStaleSaveOpen(true);
         toast('error', 'The quote changed before the version could be restored. Reload and review it before trying again.');
+      } else if (String((error as { message?: unknown }).message ?? '').includes('jobs_quote_section_id_fkey')) {
+        // A restore re-creates every section, so it cannot keep the section a spray job was scheduled from.
+        toast('error', 'This booking has a spray job, so an earlier version cannot be restored. Edit the booking directly instead.');
       } else {
         toast('error', 'Failed to restore version');
       }
@@ -3598,7 +3617,12 @@ export default function QuoteBuilder() {
 
   const handleScheduleJob = async (sectionKey: string) => {
     const sec = sections.find((s) => s._key === sectionKey);
-    if (!sec?.id || !quoteId || !profile) return;
+    if (!sec || !quoteId || !profile) return;
+    // A section with no saved id (new, or re-created by a save whose reply had no section map) cannot be named.
+    if (!sec.id) {
+      toast('error', 'This section is not saved yet. Save the quote, then reload it if this message comes back, before scheduling a job from it.');
+      return;
+    }
     // U13 (#111): create_job_from_quote_section only inserts a job_fields row
     // `IF v_section.field_id IS NOT NULL` — a field-less section would silently
     // create a job with ZERO locations (no acres, nothing to apply chemicals on
@@ -5258,8 +5282,8 @@ export default function QuoteBuilder() {
                     </Badge>
                   </button>
                 )}
-                {canScheduleJobs && quoteId && sec.id && sec.items.length > 0 && !sectionJobs[sec.id] && (
-                  <Button variant="ghost" size="sm" icon={<CalendarClock className="w-3.5 h-3.5" />} showChevron={false} onClick={() => currentStatus === 'draft' ? setConfirmDraftScheduleKey(sec._key) : handleScheduleJob(sec._key)} loading={schedulingJobSectionKey === sec._key} className="min-h-11 md:min-h-10">
+                {canScheduleJobs && quoteId && sec.items.length > 0 && !(sec.id && sectionJobs[sec.id]) && (
+                  <Button variant="ghost" size="sm" icon={<CalendarClock className="w-3.5 h-3.5" />} showChevron={false} onClick={() => sec.id && currentStatus === 'draft' ? setConfirmDraftScheduleKey(sec._key) : handleScheduleJob(sec._key)} loading={schedulingJobSectionKey === sec._key} className="min-h-11 md:min-h-10">
                     Schedule job
                   </Button>
                 )}
@@ -5283,6 +5307,11 @@ export default function QuoteBuilder() {
                   items={[{ id: 'remove-section', label: 'Remove section', icon: <Trash2 className="w-4 h-4" />, danger: true, onAction: () => removeSection(sec._key) }]}
                 />
               )}
+              {sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled' && (
+                <p className="order-last w-full text-xs text-amber-700">
+                  Job {sectionJobs[sec.id].job_number} was scheduled from this section. Its products, quantities, prices, needed-by date and field stay as booked; a new name or notes here does not change the job, so change those on the job too.
+                </p>
+              )}
               {isPlanned && (
                 <div className="order-last w-full flex flex-wrap items-start gap-x-6 gap-y-1">
                   <div className="w-full sm:w-52">
@@ -5294,7 +5323,7 @@ export default function QuoteBuilder() {
                       aria-label="Needed by"
                       value={sec.needed_by_date || null}
                       onChange={(value) => updateSectionField(sec._key, 'needed_by_date', value || null)}
-                      disabled={editLocked}
+                      disabled={editLocked || Boolean(sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled')}
                     />
                   </div>
                   {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}

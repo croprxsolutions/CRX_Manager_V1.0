@@ -107,6 +107,8 @@ import { lineNeedsRemoveConfirm, primaryAction, todaysPricesMessage } from '../l
 import { formatChargedOn } from '../lib/lastChargedPrices';
 import { quoteBadgeVariant, quoteStatusLabel } from '../lib/quoteStatusLabel';
 import CommissionSplitEditor from '../components/ui/CommissionSplitEditor';
+import QuoteSplitNote, { type SplitNote } from '../components/quotes/QuoteSplitNote';
+import { customerSplit, sameSplit } from '../lib/commissionSplitSource';
 import { useStaleQuoteCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
 import { FullToteOnlyBadge, PolicyBadge, normalizeReturnPolicy, productPackageText, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
@@ -388,6 +390,9 @@ function reportUntrustworthyQuoteVersions(unreadable: UnreadableQuoteVersion[], 
   });
 }
 
+// What a new quote's commission split starts as before a customer with a split is picked.
+const NEW_QUOTE_SPLIT: CommissionSplit = { splits: [{ recipient: '', percentage: 100 }] };
+
 export default function QuoteBuilder() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -567,13 +572,15 @@ export default function QuoteBuilder() {
   }, []);
   const [headerNotes, setHeaderNotes] = useState('');
   const [footerNotes, setFooterNotes] = useState('');
-  const [commissionSplit, setCommissionSplit] = useState<CommissionSplit>({
-    splits: [{ recipient: '', percentage: 100 }],
-  });
+  const [commissionSplit, setCommissionSplit] = useState<CommissionSplit>(NEW_QUOTE_SPLIT);
   // Lost-update guard: split as loaded from the DB, and whether the user has
   // changed it this session (see src/lib/commissionSplitConcurrency.ts).
   const loadedCommissionSplitRef = useRef<CommissionSplit | null>(null);
   const commissionSplitTouchedRef = useRef(false);
+  // Where the split came from, or a pending choice to take the customer's (plan 2026-11-18); and whether someone
+  // typed it by hand, which a customer change must never overwrite.
+  const [splitNote, setSplitNote] = useState<SplitNote>(null);
+  const splitTypedRef = useRef(false);
   const [quoteNumber, setQuoteNumber] = useState('');
   // Only a new quote allocates a number; an existing quote's number arrives with its row.
   const [quoteNumberLoading, setQuoteNumberLoading] = useState(!id);
@@ -1514,6 +1521,8 @@ export default function QuoteBuilder() {
     setCommissionSplit(q.commission_split ?? { splits: [] });
     loadedCommissionSplitRef.current = q.commission_split ?? null;
     commissionSplitTouchedRef.current = false;
+    setSplitNote(null);
+    splitTypedRef.current = false;
     setQuoteCreatedAt(q.created_at || null);
     savedLineIdsRef.current = new Map(
       localSections.flatMap((s) => s.items)
@@ -1714,6 +1723,27 @@ export default function QuoteBuilder() {
   // factor of 1, so a tier change waits for them. With no lines there is nothing to reprice.
   const repriceBlocked = !referenceDataReady && sections.some((sec) => sec.items.length > 0);
 
+  // A new quote's split follows the picked customer (Mason, 17 Nov), empty when the customer has none. A split typed
+  // by hand, or a saved quote's, is only replaced when the user picks Use it.
+  const applyCustomerSplit = (cust: QuoteCustomer) => {
+    const theirs = customerSplit(cust.default_commission_split);
+    if (isEditing || splitTypedRef.current) {
+      setSplitNote(theirs && !sameSplit(theirs, commissionSplit) ? { kind: 'offer', customer: cust.farm_name, split: theirs } : null);
+      return;
+    }
+    // A customer saved with an empty split means no commission (saves as is); one never set starts the blank row.
+    setCommissionSplit(theirs ?? (cust.default_commission_split ? { splits: [] } : NEW_QUOTE_SPLIT));
+    commissionSplitTouchedRef.current = true;
+    setSplitNote({ kind: theirs ? 'from' : 'none', customer: cust.farm_name });
+  };
+  const takeOfferedSplit = () => {
+    if (splitNote?.kind !== 'offer') return;
+    setCommissionSplit(splitNote.split);
+    commissionSplitTouchedRef.current = true;
+    splitTypedRef.current = false;
+    setSplitNote({ kind: 'from', customer: splitNote.customer });
+  };
+
   const handleCustomerChange = (cust: QuoteCustomer | null): boolean => {
     if (!cust) {
       setCustomerId('');
@@ -1728,10 +1758,7 @@ export default function QuoteBuilder() {
     setCustomerRow(cust);
     setCustomerLoadError(null);
     setTier(cust.assigned_tier);
-    if (cust.default_commission_split) {
-      setCommissionSplit(cust.default_commission_split);
-      commissionSplitTouchedRef.current = true;
-    }
+    applyCustomerSplit(cust);
     recalcAllForTier(cust.assigned_tier);
     // A section's field must belong to the quote's customer: clear any that does not. A saved
     // field still loading by id is kept; the unresolved-field check blocks saving until it loads.
@@ -4766,15 +4793,20 @@ export default function QuoteBuilder() {
           </div>
         </div>
         <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-4 border-t border-cream-dark pt-4 lg:grid-cols-2">
-          <CommissionSplitEditor
-            label="Commission split"
-            value={commissionSplit}
-            onChange={(val) => {
-              commissionSplitTouchedRef.current = true;
-              setCommissionSplit(val);
-            }}
-            disabled={editLocked}
-          />
+          <div className="min-w-0">
+            <CommissionSplitEditor
+              label="Commission split"
+              value={commissionSplit}
+              onChange={(val) => {
+                commissionSplitTouchedRef.current = true;
+                splitTypedRef.current = true;
+                setSplitNote((note) => (note?.kind === 'offer' ? note : null));
+                setCommissionSplit(val);
+              }}
+              disabled={editLocked}
+            />
+            <QuoteSplitNote note={splitNote} onUse={takeOfferedSplit} onKeep={() => setSplitNote(null)} />
+          </div>
           <div className="flex items-start justify-between gap-3 self-start rounded-lg border border-gray-200 px-3.5 py-1">
             <Switch
               label="Planned program"

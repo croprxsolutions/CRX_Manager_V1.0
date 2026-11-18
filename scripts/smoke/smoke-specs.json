@@ -2135,6 +2135,14 @@
       "covers": ["_recompute_standing_discount_20261231", "_sales_tax_expected_20261231", "_sales_tax_setting_rate_20261231", "_sales_tax_record_rate_20261231", "guard_sales_tax_line_scope_20261231", "guard_sales_tax_current_on_post_20261231", "set_order_sales_tax", "_standing_discount_net_cents_20261231", "_return_customer_line_share", "create_return", "issue_return_credit", "unpost_invoice_group", "save_invoice", "post_invoice", "post_invoice_group", "complete_delivery"],
       "area": ["billing", "regression"]
     },
+    "draft_tax_follows_box": {
+      "chain": "smoke-draft-tax-follows-box.sql",
+      "container_only": true,
+      "container_prover": "prove-draft-tax-follows-box-real-schema.mjs",
+      "description": "CONTAINER ONLY. Migration 20270124140000: a Bill Split payer draft the tax box had to keep (it can't be re-saved) can't post with tax that contradicts its sale's box, ticked or unticked (SALES_TAX_BOX_MISMATCH), and posts once the box matches; with the M4 switch off a ticked sale's untaxed draft posts; once on it is refused until the box is unticked and ticked. Terminal rollback.",
+      "covers": ["guard_sales_tax_box_on_post_20270124", "set_order_sales_tax", "post_invoice", "post_invoice_group"],
+      "area": ["billing", "regression"]
+    },
     "billing_m4_switch": {
       "chain": "smoke-billing-m4-switch.sql",
       "description": "Migration 20270117140000: with the M4 switch off (live until commission), ticking a sale's sales tax, a customer standing discount above 0 and a sale's own discount above 0 are refused (BILLING_M4_OFF), while unticking, 0 and \"the customer's rate\" work; a signed-in admin can read the switch but not change it, the anonymous role can't read it; switched on, all three work. Terminal rollback.",

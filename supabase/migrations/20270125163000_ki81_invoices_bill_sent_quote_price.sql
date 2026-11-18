@@ -713,9 +713,7 @@ BEGIN
     FROM (SELECT b.*, p.product_name AS full_product_name, p.tier1_price, p.tier2_price, p.tier3_price
             FROM blend_ticket_products b
             JOIN products p ON p.id = b.product_id
-           WHERE b.blend_ticket_id = p_blend_ticket_id
-             AND NOT public._blend_quote_pick_valid_20261020(
-                   v_quote_section_id, v_ticket.customer_id, b.product_id, b.unit_price_cents)) btp
+           WHERE b.blend_ticket_id = p_blend_ticket_id) btp
     CROSS JOIN LATERAL (
       SELECT DISTINCT COALESCE((c.value->>'tier')::int, 1) AS tier, (c.value->>'customer_id')::uuid AS customer_id
         FROM jsonb_array_elements(v_customers) AS c(value)
@@ -725,7 +723,12 @@ BEGIN
             AND (r.value->>'price_override_cents') IS NULL
             AND (r.value->>'share_acres')::numeric > 0)
     ) cust
-   WHERE NOT EXISTS (
+   -- KI-81 (CodeRabbit): a valid pick prices only the job quote's own grower; every other grower still needs a
+   -- price here, so a missing one refuses before any invoice number is drawn.
+   WHERE NOT (cust.customer_id = v_ticket.customer_id
+              AND public._blend_quote_pick_valid_20261020(
+                    v_quote_section_id, v_ticket.customer_id, btp.product_id, btp.unit_price_cents))
+     AND NOT EXISTS (
            SELECT 1 FROM quote_items qi
             WHERE v_quote_section_id IS NOT NULL
               AND cust.customer_id = v_ticket.customer_id  -- KI-81: another grower pays the list price
@@ -3379,7 +3382,9 @@ BEGIN
                                        AND i.customer_id = v_customer_id AND i.deleted_at IS NULL
                                        AND i.status IN ('draft', 'unposted')  -- as the save: a voided child is replaced, dated today
                                      ORDER BY i.invoice_date DESC LIMIT 1),
-                                   (SELECT invoice_date FROM invoices WHERE id = p_invoice_id AND status IN ('draft', 'unposted')),
+                                   -- CodeRabbit: the edited invoice's date only for its own grower; a new member's invoice is dated today
+                                   (SELECT invoice_date FROM invoices WHERE id = p_invoice_id AND customer_id = v_customer_id
+                                                                         AND status IN ('draft', 'unposted')),
                                    (now() AT TIME ZONE 'America/Chicago')::date);
     v_customer_total := 0;
     v_customer_lines := '[]'::jsonb;
@@ -3597,10 +3602,10 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'c346584675d8e9cfcbd9a6e20bb89bf8', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
+        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '14fbea62837d72dc76da8c38dd690234', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
         ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '14e32574403a249a9a138a2546f6809d', ARRAY['postgres', 'service_role'], 'v'),
         ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '962abea61f909003b93cb4a430784fce', ARRAY['postgres', 'service_role'], 'v'),
-        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'fb26feb7877ba20adf8acff1b41be6c9', ARRAY['postgres'], 's')
+        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '97c05bf6abe6303d3d3c3b2720a5f104', ARRAY['postgres'], 's')
       ) AS pin(fn, sig, body_md5, execs, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL

@@ -57,6 +57,8 @@ DECLARE
   v_job    uuid;
   v_t      uuid;
   v_n      int;
+  v_n2     int;
+  v_n3     int;
   v_case   text;
   v_kind   text;
 BEGIN
@@ -190,14 +192,19 @@ BEGIN
   -- F8 + P3: B's quote is on field G, where only A has a share; an invoice for G and F bills both at tier.
   BEGIN
     v_q := k81.quote(c_b, c_g, c_p, 20.00, 'sent', v_today, true);
-    SELECT count(*) INTO v_n FROM k81.preview(ARRAY[c_g, c_f], c_p) pv WHERE pv.unit_price_cents <> 1000;
-    IF v_n <> 0 THEN
+    -- CodeRabbit: exactly one row each for A and B, both at the tier price (a missing or NULL row fails).
+    SELECT count(*) FILTER (WHERE pv.customer_id IN (c_a, c_b) AND pv.unit_price_cents IS NOT DISTINCT FROM 1000),
+           count(DISTINCT pv.customer_id), count(*)
+      INTO v_n, v_n2, v_n3 FROM k81.preview(ARRAY[c_g, c_f], c_p) pv;
+    IF v_n <> 2 OR v_n2 <> 2 OR v_n3 <> 2 THEN
       RAISE EXCEPTION 'SMOKE_FAIL(P3): the preview used a quote on a field the grower has no share of: %',
         (SELECT jsonb_agg(to_jsonb(pv)) FROM k81.preview(ARRAY[c_g, c_f], c_p) pv);
     END IF;
-    SELECT count(*) INTO v_n FROM k81.save_single_all(c_admin, ARRAY[c_g, c_f], c_p) s
-     WHERE s.unit_price_cents <> 1000 OR s.price_source <> 'tier';
-    IF v_n <> 0 THEN
+    SELECT count(*) FILTER (WHERE s.customer_id IN (c_a, c_b) AND s.unit_price_cents IS NOT DISTINCT FROM 1000
+                                  AND s.price_source IS NOT DISTINCT FROM 'tier'),
+           count(DISTINCT s.customer_id), count(*)
+      INTO v_n, v_n2, v_n3 FROM k81.save_single_all(c_admin, ARRAY[c_g, c_f], c_p) s;
+    IF v_n <> 2 OR v_n2 <> 2 OR v_n3 <> 2 THEN
       RAISE EXCEPTION 'SMOKE_FAIL(F8): a quote on a field the grower has no share of priced their invoice';
     END IF;
     RAISE EXCEPTION 'K81_UNDO';

@@ -3,12 +3,14 @@
 ## 2026-11-18 — #1946 (KI-81): a blend ticket's own grower falls back to their own quote
 
 **Decision (Mason, in chat, 2026-11-18: "Yes, price the owner from their own quote").** Answering Taha's second re-review of PR #1946: when the job's quote gives no usable price for a product (no job quote, or it is declined, expired, unsent or does not list the product), the ticket's own grower is priced from their own sent, valid quote, as every other grower and the field-application invoices are; a usable job-quote price still wins.
-**What it does:** every grower on a shared field bills the same price from a blend ticket as from a field application.
+**What it does:** where the job's quote gives no usable price, the owner is priced by the same own-quote rules a field-application invoice uses. A usable job-quote price still wins on the blend ticket, so the two paths can bill the owner differently when the job's quote is not on the owner's field.
+**Supersedes:** the owner part of "2026-11-18 — #1946 (KI-81): blend-ticket invoices follow the same quote rules" (the owner billed their list price when the job's quote gave no price).
 
 ## 2026-11-18 — #1946 (KI-81): a blend co-owner is priced from their own quote
 
-**Decision (Mason, in chat, 2026-11-18: "Yes, use B's quote").** Answering Taha's re-review of PR #1946: on a blend ticket, a grower who does not own the job's quote is priced from their own sent, valid quote, as a field-application invoice prices them, else their list price. This replaces the sentence below that every other grower bills their list price.
-**What it does:** a shared field bills each grower the same price whether it is invoiced from a blend ticket or a field application.
+**Decision (Mason, in chat, 2026-11-18: "Yes, use B's quote").** Answering Taha's re-review of PR #1946: on a blend ticket, a grower who does not own the job's quote is priced from their own sent, valid quote, as a field-application invoice prices them, else their list price.
+**What it does:** a co-owner is priced by the same own-quote rules a field-application invoice uses.
+**Supersedes:** in "2026-11-18 — #1946 (KI-81): blend-ticket invoices follow the same quote rules", the rule that every other grower on the ticket bills their list price.
 
 ## 2026-11-18 — #1946 (KI-81): blend-ticket invoices follow the same quote rules
 

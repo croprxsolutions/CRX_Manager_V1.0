@@ -134,7 +134,8 @@ function restoreLiveBodies() {
     /CREATE OR REPLACE FUNCTION validate_product_units\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$;/)
     .replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');  // same bytes on an LF or CRLF checkout
   const field = bodyFrom('20260630180000_field_app_pricing_unit_fix.sql',
-    /CREATE OR REPLACE FUNCTION public.field_app_priced_quantity\([\s\S]*?AS \$fapq\$([\s\S]*?)\$fapq\$;/);
+    /CREATE OR REPLACE FUNCTION public.field_app_priced_quantity\([\s\S]*?AS \$fapq\$([\s\S]*?)\$fapq\$;/)
+    .replaceAll('\r\n', '\n');  // pinned live body is LF (file is eol=lf); same bytes on any checkout
   const seededConvert = bodyFrom(FORMS_SEED_EACH,
     /CREATE OR REPLACE FUNCTION public.convert_to_gl_lb\([\s\S]*?AS \$function\$([\s\S]*?)\$function\$;/).replaceAll('\r\n', '\n');
   const seedArm = "  IF lower(coalesce(p_product_form, '')) IN ('seed','each') THEN RETURN QUERY SELECT NULL::numeric, NULL::text; RETURN; END IF;\n";
@@ -269,8 +270,8 @@ const FNS = ['create_invoice_from_blend_ticket', '_save_field_app_invoice_impl_2
 const OLD = 'create_invoice_from_blend_ticket:a6f5c6e72d6632313549313b34f406ad,_save_field_app_invoice_impl_20260714:0f5da38476fe174cd25c9bf3e364055f,'
   + '_save_field_app_split_invoice_impl:a69f21d8e9f32fc6fecb38ac3a54801c,_preview_field_app_invoice_split_impl_20260908:83f6600412ced085d0876a3c7339ff12,'
   + 'resolve_field_app_chemical_price:d2617d60d7b6e5b922bc3e3be4e5850b';
-const NEW = 'create_invoice_from_blend_ticket:c346584675d8e9cfcbd9a6e20bb89bf8,_save_field_app_invoice_impl_20260714:14e32574403a249a9a138a2546f6809d,'
-  + '_save_field_app_split_invoice_impl:962abea61f909003b93cb4a430784fce,_preview_field_app_invoice_split_impl_20260908:fb26feb7877ba20adf8acff1b41be6c9,'
+const NEW = 'create_invoice_from_blend_ticket:14fbea62837d72dc76da8c38dd690234,_save_field_app_invoice_impl_20260714:14e32574403a249a9a138a2546f6809d,'
+  + '_save_field_app_split_invoice_impl:962abea61f909003b93cb4a430784fce,_preview_field_app_invoice_split_impl_20260908:97c05bf6abe6303d3d3c3b2720a5f104,'
   + 'resolve_field_app_chemical_price:2f6fe91f7c639d953e3d8c525c06f168,_field_app_sent_quote_price_cents:d2d182551c76b841220e9b4a5329025a,'
   + '_field_app_quote_eligible:21eace1e5236db37b4e4e039631eefc4';
 const ASSERT_MD5 = '4e3bca2b48a4af44de9d1f219a880586';
@@ -416,7 +417,8 @@ function runChain() {
 // C9: a field-app save holds a sent quote (FOR SHARE) until its transaction ends; save_quote's first step, the quote
 // row lock FOR UPDATE, must wait for it, so the price cannot change between the check and the invoice line.
 async function concurrencyCase() {
-  const q = scalar(`SELECT k81.quote('${A}', '${G}', '${P}', 20.00, 'sent', (now() AT TIME ZONE 'America/Chicago')::date, true);`);
+  // Expires tomorrow, so a save that starts just after midnight (Chicago) still finds it eligible.
+  const q = scalar(`SELECT k81.quote('${A}', '${G}', '${P}', 20.00, 'sent', (now() AT TIME ZONE 'America/Chicago')::date + 1, true);`);
   const held = spawn('docker', [...psqlArgs(), '-A', '-t'], { cwd: ROOT });
   let out = '';
   held.stdout.on('data', (d) => { out += d; }); held.stderr.on('data', (d) => { out += d; });
@@ -431,7 +433,8 @@ ROLLBACK;
   for (let i = 0; i < 40 && !waited; i += 1) {
     wait(250);
     waited = scalar(`SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-      WHERE l.locktype = 'tuple' OR (a.query LIKE '%pg_sleep(6)%' AND a.state = 'active');`) !== '0';
+      WHERE a.pid <> pg_backend_pid()  -- not this polling query, whose own text contains the pattern
+        AND (l.locktype = 'tuple' OR (a.query LIKE '%pg_sleep(6)%' AND a.state = 'active'));`) !== '0';
   }
   assert.ok(waited, `the held save never reached its sleep:\n${out}`);
   const r = probe(`SET LOCAL lock_timeout = '1s';\nSELECT 1 FROM public.quotes WHERE id = '${q}' FOR UPDATE;`);

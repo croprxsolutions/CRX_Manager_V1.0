@@ -31,7 +31,9 @@ Read at `origin/staging` 10070370e (2026-11-17). Decision: Mason, 2026-11-17 (DE
   2. `resolve_field_app_chemical_price` takes the billing customers and the application date and uses (1).
   3. The single and split field-app saves use (1)/(2) once per billed grower; nothing else in their bodies changes.
   5. The invoice screen's preview (`_preview_field_app_invoice_split_impl_20260908`) picks the same quotes per grower
-     through the shared `_field_app_quote_eligible`, so the preview shows what the save bills (Sol round 2).
+     through the shared `_field_app_quote_eligible` (Sol round 2). It does not run the sent-price check: a quote changed
+     since its send previews its current price and the save refuses `QUOTE_RESEND_REQUIRED`, so a preview price is
+     not approval to bill it.
   4. The blend invoice locks the job's quote row and runs the lock before any price is read or invoice number drawn.
 - Eligible quote (field-app): its customer is the grower being billed (Mason, 2026-11-17, "Own quote only": on a
   shared field each grower pays their own quoted price, else the price list; a co-owner's quote never prices
@@ -137,7 +139,8 @@ Settled by evidence or an existing decision (no change):
 - Outside this change, owned by the existing send workflow and lock (17, 18, 19), the wrappers' role checks (27), the
   screens (29, 30: the server already chose the quote price; messages say what to do, and a typed price saves),
   idempotency (24) and transaction atomicity (25; invoice-number gaps already happen on any refused save).
-- Grants and rollback (26, 28, 34): the prover checks the helper and the new resolver are closed to API roles, only
+- Grants and rollback (26, 28, 34): the prover checks the helpers are executable by no API role and the new resolver by neither `anon` nor
+  `authenticated` (the existing `service_role` grant is preserved), only
   one resolver signature exists, and the reverse restores all five bodies byte-identical, the old resolver closed,
   and the helper dropped. Undo of a successful draft re-price (35) is a normal draft edit. Rollout (36): staging-first
   release flow. Audit references on invoice lines (33): not needed for this fix.
@@ -191,3 +194,21 @@ Mason, 2026-11-17 (in session):
 - Left as they are, to raise with Mason separately: a lower price recorded through save_quote after the send bills
   without a resend (27 Oct override rule); a quote revised after the application bills the later sent version (the
   date rule reads the quote's creation date).
+
+## CodeRabbit full review (2026-11-18, review 5960636802 on 92042080f)
+
+- Fixed (billing logic, back to Taha): the blend precheck applied a valid pick to every grower, though a pick prices only
+  the job quote's grower, so another grower with no price passed the precheck and refused later, after an invoice
+  number was drawn; the pick now exempts only the ticket's own grower. The split preview priced a new group member on
+  the edited invoice's date; that date is now used only for the edited invoice's own grower (the save dates a new
+  member's invoice today).
+- Fixed (rollback and tests): the reverse documents `psql -X -v ON_ERROR_STOP=1 -1 -f`, pins the headers of the three
+  functions it drops, checks all three API roles on both helpers, recreates the old resolver with `CREATE FUNCTION`,
+  and grants and verifies its `service_role` EXECUTE; F8/P3 assert each grower's row; C9's quote stays eligible across
+  midnight and its readiness poll ignores itself; the pinned `field_app_priced_quantity` body is LF on any checkout.
+- Refuted: (a) $0 approval bound to its growers: the approval window shows line, product, cost and kind, never a
+  grower, so what the admin approved is unchanged, and each grower's $0 is the price that grower was sent.
+  (b) split prices from one snapshot: each grower is priced only from their own quote (no cross-grower invariant), so
+  the outcome equals each grower's line priced at a moment their own quote was in that state (settled, Luna r2).
+  (c) a forward rollback migration: the reverse is the reviewed rollback artifact; if it is ever needed it ships as a
+  new migration then. (d) "STATUS UNKNOWN" header: the record uses the repo's `LOCAL CANDIDATE — NOT APPLIED` form.

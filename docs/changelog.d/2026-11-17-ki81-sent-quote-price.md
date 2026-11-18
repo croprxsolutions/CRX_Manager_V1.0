@@ -23,10 +23,10 @@
   sent-price lock.
 - On a field-app invoice the resend refusal also says the price can be typed, and a per-person typed price on a split
   bill no longer needs that grower's quote to pass the lock.
-- The invoice screen's preview uses the same rule, so it shows what the save will bill.
+- The invoice screen's preview shares the save's quote eligibility (`_field_app_quote_eligible`) but does not run the sent-price check: a quote changed since its send previews its current price, and the save refuses `QUOTE_RESEND_REQUIRED`. A preview price is not approval to bill it.
 - New private `_field_app_quote_eligible` and `_field_app_sent_quote_price_cents` (no API role may run them); the private
-  `resolve_field_app_chemical_price` gains the billed growers and the application date (old signature dropped; still
-  closed to API roles). The public RPCs keep their names and arguments, so the deployed screens are unchanged.
+  `resolve_field_app_chemical_price` gains the billed growers and the application date (old signature dropped; not
+  executable by `anon` or `authenticated`; the existing `service_role` grant is preserved). The public RPCs keep their names and arguments, so the deployed screens are unchanged.
 - Live, read-only 2026-11-17: no stored invoice line was priced from a quote by these paths, and none is re-priced.
 - Proof: `node scripts/smoke/prove-ki81-sent-quote-price-real-schema.mjs` (KI81_SENT_QUOTE_PRICE_PROOF_PASS).
   Rollback: `scripts/smoke/ki81-sent-quote-price-reverse.sql` (restores all five bodies by md5, drops the helpers).

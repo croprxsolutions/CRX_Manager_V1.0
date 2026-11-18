@@ -1,14 +1,15 @@
 -- Reverse of 20270125163000_ki81_invoices_bill_sent_quote_price: restores the five bodies it replaced and drops
--- the two helpers. Run as ONE transaction (psql -1). Proven by scripts/smoke/prove-ki81-sent-quote-price-real-schema.mjs.
+-- the two helpers. Run as ONE transaction that stops on the first error: psql -X -v ON_ERROR_STOP=1 -1 -f <this file>
+-- (CodeRabbit: without ON_ERROR_STOP a refusal can still exit 0). Proven by scripts/smoke/prove-ki81-sent-quote-price-real-schema.mjs.
 DO $pre$
 BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'c346584675d8e9cfcbd9a6e20bb89bf8', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
+        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '14fbea62837d72dc76da8c38dd690234', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
         ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '14e32574403a249a9a138a2546f6809d', ARRAY['postgres', 'service_role'], 'v'),
         ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '962abea61f909003b93cb4a430784fce', ARRAY['postgres', 'service_role'], 'v'),
-        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'fb26feb7877ba20adf8acff1b41be6c9', ARRAY['postgres'], 's')
+        ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '97c05bf6abe6303d3d3c3b2720a5f104', ARRAY['postgres'], 's')
       ) AS pin(fn, sig, body_md5, execs, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL
@@ -35,14 +36,24 @@ BEGIN
      OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._field_app_quote_eligible(quotes,uuid,uuid[],date)')) IS DISTINCT FROM '21eace1e5236db37b4e4e039631eefc4'
      OR has_function_privilege('anon', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public._field_app_quote_eligible(quotes,uuid,uuid[],date)', 'EXECUTE') THEN
+     OR has_function_privilege('service_role', 'public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public._field_app_quote_eligible(quotes,uuid,uuid[],date)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._field_app_quote_eligible(quotes,uuid,uuid[],date)', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._field_app_quote_eligible(quotes,uuid,uuid[],date)', 'EXECUTE')
+     -- CodeRabbit: their headers too (owner, rights, search_path, volatility), not only their bodies.
+     OR EXISTS (SELECT 1 FROM (VALUES ('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint,uuid[],date)', true, 'v'), ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', false, 'v'), ('public._field_app_quote_eligible(quotes,uuid,uuid[],date)', false, 's'))
+                  AS h(sig, secdef, vol)
+                  JOIN pg_proc p ON p.oid = to_regprocedure(h.sig)
+                 WHERE p.proowner <> 'postgres'::regrole OR p.prosecdef <> h.secdef OR p.provolatile::text <> h.vol
+                    OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]) THEN
     RAISE EXCEPTION 'KI81_REVERSE_PREFLIGHT: the resolver or helpers are not the ones 20270125163000 installs';
   END IF;
 END;
 $pre$;
 DROP FUNCTION public.resolve_field_app_chemical_price(uuid, uuid[], integer, bigint, uuid[], date);
-CREATE OR REPLACE FUNCTION public.resolve_field_app_chemical_price(
+CREATE FUNCTION public.resolve_field_app_chemical_price(
   p_product_id         uuid,
   p_field_ids          uuid[],
   p_tier               integer,
@@ -98,6 +109,7 @@ $fn$;
 ALTER FUNCTION public.resolve_field_app_chemical_price(uuid, uuid[], integer, bigint) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.resolve_field_app_chemical_price(uuid, uuid[], integer, bigint)
   FROM public, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.resolve_field_app_chemical_price(uuid, uuid[], integer, bigint) TO service_role;  -- as the baseline
 CREATE OR REPLACE FUNCTION public.create_invoice_from_blend_ticket(p_blend_ticket_id uuid, p_created_by uuid, p_idempotency_key text DEFAULT NULL::text, p_below_cost_reason text DEFAULT NULL::text, p_approved_zero_lines jsonb DEFAULT NULL::jsonb)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -3276,8 +3288,11 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'KI81_REVERSE_POSTFLIGHT: a restored body, header or grant differs';
   END IF;
-  IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint)')) IS DISTINCT FROM 'd2617d60d7b6e5b922bc3e3be4e5850b' THEN
-    RAISE EXCEPTION 'KI81_REVERSE_POSTFLIGHT: the resolver body differs';
+  IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint)')) IS DISTINCT FROM 'd2617d60d7b6e5b922bc3e3be4e5850b'
+     OR NOT has_function_privilege('service_role', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.resolve_field_app_chemical_price(uuid,uuid[],integer,bigint)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'KI81_REVERSE_POSTFLIGHT: the resolver body or grants differ';
   END IF;
 END;
 $post$;

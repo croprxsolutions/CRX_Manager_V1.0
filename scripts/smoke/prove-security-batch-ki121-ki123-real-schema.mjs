@@ -13,6 +13,7 @@
  *   K6      two admins demoting each other at once: the second waits on the first, then is refused;
  *           under REPEATABLE READ the second fails with a serialization error instead;
  *   K7      three admins, two removals at once on different rows: both succeed, no deadlock;
+ *   K8      a payout-only profile's role is fixed both ways, so it never counts as an admin;
  *   P2      a reset row planted before the lock is relabelled unverified_;
  *   P1      a signed-in user can no longer write the server-only auth_password_reset rows, but still logs
  *           their own activity;
@@ -336,6 +337,14 @@ function guardCases() {
   setAdmins([X, Y]);
   refusedProbe(`UPDATE public.profiles SET role = 'sales_rep' WHERE id IN ('${X}', '${Y}');`, /LAST_ACTIVE_ADMIN/, X);
   console.log('[case] K5 one statement demoting every admin at once is refused');
+  // Plant a payout-only profile with triggers off, as the 20260516090000 seed made them.
+  raw(`UPDATE public.profiles SET role = 'entity_recipient', is_active = true WHERE id = '${Y}';`);
+  refusedProbe(`UPDATE public.profiles SET role = 'admin' WHERE id = '${Y}';`, /PAYOUT_PROFILE_ROLE/, X);
+  assert.match(probe(viaRpc(Y, 'admin'), X).output, /PAYOUT_PROFILE_ROLE/);
+  refusedProbe(`UPDATE public.profiles SET role = 'entity_recipient' WHERE id = '${R}';`, /PAYOUT_PROFILE_ROLE/, X);
+  refusedProbe(demote(X), /LAST_ACTIVE_ADMIN/, X);
+  setAdmins([X]);
+  console.log('[case] K8 a payout-only profile cannot be made an admin (direct update and admin_update_profile) or count as one, and no profile can become one');
 }
 
 function session(sql) {

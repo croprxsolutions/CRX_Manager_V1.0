@@ -9,14 +9,16 @@
 
 import { Page } from '@playwright/test';
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL!;
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? '';
 const ANON_KEY =
   process.env.VITE_SUPABASE_ANON_KEY!;
-// The app's stored sign-in, named after the project in the URL the tests run against.
-const AUTH_KEY = `sb-${new URL(SUPABASE_URL).hostname.split('.')[0]}-auth-token`;
+// Only a hosted project origin: the session token goes to this URL, and the stored sign-in is named after its project.
+const PROJECT = /^https:\/\/([a-z0-9]{20})\.supabase\.co$/.exec(SUPABASE_URL)?.[1];
+if (!PROJECT) throw new Error('VITE_SUPABASE_URL must be https://<project>.supabase.co');
+const AUTH_KEY = `sb-${PROJECT}-auth-token`;
 
 /** Extract the access_token from Supabase's localStorage entry */
-async function getToken(page: Page): Promise<string> {
+export async function getToken(page: Page): Promise<string> {
   return page.evaluate((authKey) => {
     const raw = localStorage.getItem(authKey);
     if (!raw) return '';

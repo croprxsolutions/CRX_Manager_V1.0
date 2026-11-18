@@ -46,6 +46,13 @@ AS $function$
 DECLARE
   v_others integer;
 BEGIN
+  -- A payout-only profile never gains a usable login (20260516090000), so it can never count as an
+  -- admin, and a person's profile never becomes one: its role is fixed both ways.
+  IF (OLD.role = 'entity_recipient') IS DISTINCT FROM (NEW.role = 'entity_recipient') THEN
+    RAISE EXCEPTION 'PAYOUT_PROFILE_ROLE: a payout-only profile keeps its role, and no other profile can take it'
+      USING ERRCODE = '42501';
+  END IF;
+
   IF OLD.role = 'admin' AND OLD.is_active = true
      AND (NEW.role IS DISTINCT FROM 'admin' OR NEW.is_active IS DISTINCT FROM true)
   THEN
@@ -82,7 +89,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public._guard_last_active_admin() IS
-  'Refuses to deactivate or demote the last active admin, which would lock the account out of its own app (KI-121).';
+  'Refuses to deactivate or demote the last active admin, which would lock the account out of its own app (KI-121), and any role change into or out of the payout-only entity_recipient role.';
 
 REVOKE ALL ON FUNCTION public._guard_last_active_admin() FROM PUBLIC, anon, authenticated;
 

@@ -1,5 +1,12 @@
 # Decision Log
 
+## 2026-11-18 — Bookings with a live spray job: the database enforces the rules; nightly expiry skips them; Cancel blocked (#1959)
+
+**Decision (Mason, in chat, 2026-11-18: "yes to both").**
+- The nightly auto-expire skips a past-date booking that has a live spray job (not cancelled, not deleted) and sends its rep the existing "Booking past its date" alert once per expiry date, instead of failing the night's batch.
+- Cancelling a booking is blocked while a live spray job comes from it, with the same "cancel the job first" message as accept, decline and expire (extends the 2026-11-17 rule).
+- The rules (no accept, decline, expire or cancel, and no customer change, while a live job exists) now hold in the database for every write path, not only the booking save. Contract: `docs/plans/2026-11-18-booking-live-job-guard-CONTRACT.md`.
+
 ## 2026-11-18 — #1947: Mason owner-accepted 3 Sol finding(s) at `3d71a5c062fc`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1947 at `3d71a5c062fc` (base `29682a0332c0`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

@@ -30,7 +30,7 @@
 --        jug and goes to Check units on a Gal product
 --   P21  a job's draw comes off its own (August) section: March still needs 100
 --   P22  a draft booking's crop-program hold (20) counts now; a counted booking's hold on a product it books (10) does not;
---        its hold on a product it does not book (5 of product 22) does
+--        its hold on a product it does not book (5 of product 22) does; an expired manual hold (7) does not
 --   P8   an applicator and a caller with no user are refused
 --
 -- HOW TO RUN: execute this whole file as ONE statement. It ALWAYS ends with
@@ -176,9 +176,9 @@ BEGIN
       jsonb_build_array(jsonb_build_object('client_key', '_s', 'section_name', 'P' || v_i, 'sort_order', 0,
           'needed_by_date', v_t + 100, 'confidence', 'firm',
           'items', jsonb_build_array(jsonb_build_object('client_key', '_k', 'product_id', v_p[v_i], 'sort_order', 0,
-            'calc_mode', 'units_direct', 'total_units_needed', CASE v_i WHEN 23 THEN 50 ELSE 100 END,
+            'calc_mode', 'units_direct', 'total_units_needed', (ARRAY[50, 100])[v_i - 22],
             'price_override', 20, 'price_per_unit', 20, 'current_cost', 6,
-            'unit_size', CASE v_i WHEN 23 THEN 'lb' ELSE 'Gal' END, 'acres', 0)))),
+            'unit_size', (ARRAY['lb', 'Gal'])[v_i - 22], 'acres', 0)))),
       v_admin, 'smk-pp' || v_i || '-' || v_suffix);
     INSERT INTO smk_pp_bookings VALUES ('P' || v_i, (v_res->>'quote_id')::uuid, v_res->'section_ids');
   END LOOP;
@@ -357,6 +357,8 @@ BEGIN
          (v_p[22], v_customer, 5, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-4'), v_admin, true),
          (v_p[10], v_customer, 4, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-4'), v_admin, true),
          (v_p[23], v_customer, 20, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P23'), v_admin, true);
+  INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, created_by, is_active, expires_at)
+  VALUES (v_p[22], v_customer, 7, 'manual', v_admin, true, v_t - 1);
 
   -- P13 draws: an order of 60 from the booking, and a job from its section drawing 40.
   SELECT quote_id, (section_ids->>'_s')::uuid INTO v_q, v_s1 FROM smk_pp_bookings WHERE tag = 'P13';

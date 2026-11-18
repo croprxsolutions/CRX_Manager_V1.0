@@ -1209,6 +1209,8 @@ BEGIN
            NULL::uuid, NULL::text, false, false, ih.customer_id
       FROM inventory_holds ih
      WHERE ih.is_active = true AND ih.quantity > 0
+       -- An expired hold reserves nothing (as in the inventory position, 20261204100000).
+       AND (ih.expires_at IS NULL OR ih.expires_at >= (SELECT today FROM prm))
        AND (ih.hold_type = 'manual'
             OR (ih.hold_type = 'crop_program'
                 AND NOT EXISTS (SELECT 1 FROM bl WHERE bl.quote_id = ih.source_id AND bl.product_id = ih.product_id)))
@@ -1430,7 +1432,7 @@ BEGIN
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '441e931194b994dfed1cdb1ee2d83ea8' THEN
+     IS DISTINCT FROM '37d8b7e9d4fae8380bd3d2c6245e58f5' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF (SELECT count(*) FROM pg_proc p

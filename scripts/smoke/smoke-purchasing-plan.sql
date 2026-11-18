@@ -23,7 +23,8 @@
 --   P16  review list from 14 days before the window end (timed and untimed)
 --   P17  Firm with no date, a job line in a foreign unit: each in its
 --        bucket, not complete, no suggestion
---   P18  an order line counts only its quantity_remaining
+--   P18  an order line counts only its quantity_remaining; a delivery covering only part of it
+--        does not move its need date (it stays today)
 --   P20  job lines in qt and Gal convert; a '2.5 GL' line counts on a product stocked by that
 --        jug and goes to Check units on a Gal product
 --   P21  a job's draw comes off its own (August) section: March still needs 100
@@ -137,7 +138,11 @@ BEGIN
   -- P18: product 3. Ordered 10, 6 delivered: demand is the 4 remaining.
   INSERT INTO order_items (order_id, product_id, product_name, unit_size, price_per_unit, cost_per_unit,
     total_units_needed, total_price, quantity_delivered, quantity_remaining)
-  VALUES (v_order, v_p[3], '[SMOKE] P18', 'Gal', 20, 6, 10, 200, 6, 4);
+  VALUES (v_order, v_p[3], '[SMOKE] P18', 'Gal', 20, 6, 10, 200, 6, 4) RETURNING id INTO v_line;
+  INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+  VALUES ('SMK-PP18-' || v_suffix, v_order, v_customer, 'scheduled', v_t + 30, v_admin) RETURNING id INTO v_job;
+  INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+  VALUES (v_job, v_line, v_p[3], 2, 'Gal');
   PERFORM set_config('app.crx_below_cost_operation', '', true);
 
   -- P10: product 4. Firm 100 at +100 and Likely 100 at +130 (two sections, one booking); PO 100 due +126.

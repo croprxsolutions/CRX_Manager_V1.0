@@ -1172,12 +1172,14 @@ BEGIN
            (SELECT eq.customer_id FROM eq WHERE eq.id = bla.quote_id)
       FROM bla WHERE bla.unit_problem AND bla.qty > 0
     UNION ALL
-    -- Open orders: dated by the earliest scheduled, undelivered delivery of the line, else today.
+    -- Open orders: dated by the earliest scheduled, undelivered delivery of the line only when the
+    -- scheduled deliveries cover all of what remains; otherwise today, so the plan never buys late.
     SELECT oi.product_id, 'order', 'committed',
            COALESCE((SELECT MIN(d.scheduled_date)
                        FROM delivery_items di JOIN deliveries d ON d.id = di.delivery_id
                       WHERE di.order_item_id = oi.id AND d.deleted_at IS NULL
-                        AND d.status IN ('scheduled', 'in_progress') AND d.scheduled_date IS NOT NULL),
+                        AND d.status IN ('scheduled', 'in_progress') AND d.scheduled_date IS NOT NULL
+                     HAVING SUM(COALESCE(di.quantity, 0)) >= oi.quantity_remaining),
                     (SELECT today FROM prm)),
            oi.quantity_remaining, o.quote_id, o.id, NULL::uuid, NULL::uuid, NULL::text, false, false, o.customer_id
       FROM order_items oi JOIN orders o ON o.id = oi.order_id
@@ -1428,7 +1430,7 @@ BEGIN
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM 'c4b12fc8df5cee3b1a290155e31c4d23' THEN
+     IS DISTINCT FROM 'c3b7b4387fba94d85d7feda0c846e9e4' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF (SELECT count(*) FROM pg_proc p

@@ -269,7 +269,7 @@ const FNS = ['create_invoice_from_blend_ticket', '_save_field_app_invoice_impl_2
 const OLD = 'create_invoice_from_blend_ticket:a6f5c6e72d6632313549313b34f406ad,_save_field_app_invoice_impl_20260714:0f5da38476fe174cd25c9bf3e364055f,'
   + '_save_field_app_split_invoice_impl:a69f21d8e9f32fc6fecb38ac3a54801c,_preview_field_app_invoice_split_impl_20260908:83f6600412ced085d0876a3c7339ff12,'
   + 'resolve_field_app_chemical_price:d2617d60d7b6e5b922bc3e3be4e5850b';
-const NEW = 'create_invoice_from_blend_ticket:2c66a626d624a64a97cbeebf8295deee,_save_field_app_invoice_impl_20260714:14e32574403a249a9a138a2546f6809d,'
+const NEW = 'create_invoice_from_blend_ticket:c346584675d8e9cfcbd9a6e20bb89bf8,_save_field_app_invoice_impl_20260714:14e32574403a249a9a138a2546f6809d,'
   + '_save_field_app_split_invoice_impl:962abea61f909003b93cb4a430784fce,_preview_field_app_invoice_split_impl_20260908:fb26feb7877ba20adf8acff1b41be6c9,'
   + 'resolve_field_app_chemical_price:2f6fe91f7c639d953e3d8c525c06f168,_field_app_sent_quote_price_cents:d2d182551c76b841220e9b4a5329025a,'
   + '_field_app_quote_eligible:21eace1e5236db37b4e4e039631eefc4';
@@ -489,7 +489,7 @@ async function main() {
   const after = runChain();
   assert.equal(after.status, 0, after.output);
   assert.match(after.output, /SMOKE_PASS_ROLLBACK/);
-  console.log('[case] F1-F8, P1-P3, X1-X4, B1-B13 pass: sent price bills; a planted price record refuses; unsent change refuses; recorded change bills; ineligible quotes give the tier price; two prices refuse, a typed price saves; a co-owner\'s quote prices only that co-owner, only on a field that co-owner has a share of; a quote written after the application date does not count; the preview shows what the save bills; split and blend follow the same rule; a blend co-owner, and the owner when the job quote gives no price, bills their own quote, and a job quote that prices nobody is not checked');
+  console.log('[case] F1-F8, P1-P3, X1-X4, B1-B16 pass: sent price bills; a planted price record refuses; unsent change refuses; recorded change bills; ineligible quotes give the tier price; two prices refuse, a typed price saves; a co-owner\'s quote prices only that co-owner, only on a field that co-owner has a share of; a quote written after the application date does not count; the preview shows what the save bills; split and blend follow the same rule; a blend co-owner, and the owner when the job quote gives no price, bills their own quote, and a job quote that prices nobody (no owner share, or none of the ticket products) is not checked');
 
   await concurrencyCase();
   grantCase();

@@ -64,15 +64,18 @@ Read at `origin/staging` 10070370e (2026-11-17). Decision: Mason, 2026-11-17 (DE
   invoice (Mason, 2026-11-18, answering Taha's re-review: "Yes, use B's quote"): a sent, valid quote to that grower
   for a ticket field where they have a per-unit share, else their list price. A resend or two-price problem on it
   refuses and asks for the quote to be fixed or resent (a blend ticket has no per-grower typed price); a $0 on it takes
-  the below-cost approval. When the owner has no per-unit share the job quote prices nobody and skips the sent-price
-  lock (its row lock stays). The owner too is priced from their own quote for a product the job quote gives no
-  usable price for (Mason, 2026-11-18, "Yes, use A's quote"); a usable job-quote price still wins. The refusal names
+  the below-cost approval. When the owner has no per-unit share, or the job quote has no usable price for any product
+  on the ticket, it prices nobody and skips the sent-price lock (its row lock stays). The owner too is priced from their own quote for a product the job quote gives no
+  usable price for (Mason, 2026-11-18, "Yes, price the owner from their own quote"); a usable job-quote price still wins. The refusal names
   the grower whose quote to fix.
 - Timing: a retry or double click runs the existing idempotency of each save unchanged; a quote re-sent in between
   is simply the newer sent price. Locks: field-app saves take FOR SHARE on eligible quotes (shared locks never block
   each other, so two invoice saves cannot deadlock on quotes); the blend invoice takes FOR UPDATE on its one job quote,
   then FOR SHARE on the other growers' own quotes. Two blend invoices whose job quotes are each the other's co-owner
-  quote can deadlock; PostgreSQL then cancels one with nothing written, and it is created again.
+  quote can deadlock; PostgreSQL then cancels one with nothing written, and it is created again. The same holds for
+  two blend invoices for the same grower on the same field where each job quote leaves out a product the other prices
+  (each locks its own job quote FOR UPDATE, then the other's FOR SHARE through the owner's own-quote lookup): one is
+  cancelled (40P01), nothing is written, and creating it again works (Taha's re-review at 6328b47c5; accepted).
   `save_quote` and the send path lock one quote and never wait on invoices, blend tickets or fields, so no cycle with
   either invoice path. Proof case 9 runs a save_quote against a held field-app save.
 - Undo: nothing new; a refused save writes nothing.
@@ -93,7 +96,9 @@ Database only, one PR to `staging`; the screens already show server errors. No s
    declined, expired or later-written job quote bills the list price; on a shared field only the quote's grower bills it
    (B1-B7). A co-owner's own sent quote prices their share; an unsent change to it refuses; $0 on it asks for the
    below-cost approval; a job quote that prices nobody is not checked (B8-B11). With no usable job-quote price the
-   owner bills their own sent quote; a usable job quote still wins (B12-B13).
+   owner bills their own sent quote; a usable job quote still wins (B12-B13). A job quote listing no ticket product
+   prices nothing, so its unsent change does not refuse (B14). With no job quote each grower on a shared
+   field bills their own sent quote (B15); the owner's own $0 quote asks for the below-cost approval (B16).
 9. When a field-app save holds a quote and save_quote edits that quote's price at once, then save_quote waits and the invoice bills the sent price.
 8. Rollback script restores all five bodies byte-identical (md5).
 10. Own quote only: on a shared field only grower B has a sent quote; B bills it, A bills A's tier (single and split saves).
@@ -177,8 +182,12 @@ Mason, 2026-11-17 (in session):
   blend paths keep the shared message (they have no typed price).
 - Re-review (Taha, 2026-11-18): Mason answered "Yes, use B's quote", so a blend co-owner bills their own quote
   (B8, B9, B11); and the job quote skips the sent-price lock when its owner has no per-unit share (B10).
-- Second re-review (Taha, 2026-11-18): Mason answered "Yes, use A's quote": the owner falls back to their own quote
+- Second re-review (Taha, 2026-11-18): Mason answered "Yes, price the owner from their own quote": the owner falls back to their own quote
   when the job quote gives no usable price (B12, B13); the refusal names the grower.
+- Luna r12 (MED, fixed): a job quote listing none of the ticket's products still ran the sent-price lock, so an
+  unsent change to an unrelated product refused the invoice. It now prices nobody and skips the lock (B14).
+  Luna r12's BLOCKER (resolver loses its service_role grant) was refuted: the baseline's explicit grant and the
+  default grant the recreated resolver receives are the same ACL entry, and the prover's ACL postflight passes.
 - Left as they are, to raise with Mason separately: a lower price recorded through save_quote after the send bills
   without a resend (27 Oct override rule); a quote revised after the application bills the later sent version (the
   date rule reads the quote's creation date).

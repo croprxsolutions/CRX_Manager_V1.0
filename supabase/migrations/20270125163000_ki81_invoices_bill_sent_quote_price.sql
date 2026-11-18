@@ -563,13 +563,22 @@ BEGIN
     v_quote_section_id := NULL;
   END IF;
   -- KI-81 (Taha's re-review, 2026-11-18): the job's quote prices only its owner's per-unit share. When the
-  -- owner has none on this ticket the quote prices nothing, so it is not held to the sent-price lock (its row
-  -- lock above stays): another grower's invoice is never refused because the owner's quote needs a resend.
-  IF v_quote_section_id IS NOT NULL AND NOT EXISTS (
+  -- owner has none on this ticket, or the quote has no usable price for any product on it (Luna r12), the quote
+  -- prices nothing, so it is not held to the sent-price lock (its row lock above stays): an invoice is never
+  -- refused because a quote that prices none of it needs a resend.
+  IF v_quote_section_id IS NOT NULL AND (NOT EXISTS (
        SELECT 1 FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)
         WHERE (r.value->>'price_override_cents') IS NULL
           AND (r.value->>'customer_id')::uuid = v_ticket.customer_id
-          AND (r.value->>'share_acres')::numeric > 0) THEN
+          AND (r.value->>'share_acres')::numeric > 0)
+     OR NOT EXISTS (
+       SELECT 1 FROM quote_items qi
+         JOIN blend_ticket_products btp ON btp.product_id = qi.product_id
+        WHERE qi.section_id = v_quote_section_id
+          AND btp.blend_ticket_id = p_blend_ticket_id
+          AND COALESCE(btp.rate_per_acre, 0) > 0
+          AND qi.price_per_unit >= 0 AND qi.price_per_unit < 'Infinity'::numeric
+          AND qi.price_per_unit = ROUND(qi.price_per_unit, 2))) THEN
     v_quote_section_id := NULL;
   END IF;
   -- 20261021070000: hold the quote prices still until this invoice commits, so the $0 check
@@ -594,7 +603,7 @@ BEGIN
    ORDER BY p.id
      FOR SHARE OF p;
 
-  -- KI-81 (Mason, 2026-11-18, "Yes, use B's quote" and "Yes, use A's quote"): a grower who does not own the job's
+  -- KI-81 (Mason, 2026-11-18, "Yes, use B's quote" and "Yes, price the owner from their own quote"): a grower who does not own the job's
   -- quote, and the owner for a product the job's quote does not price, is priced from their OWN quote, as the
   -- field-application invoices are (_field_app_sent_quote_price_cents: a quote sent
   -- to that grower for a ticket field where they have a per-unit share, written on or before the application date, not expired
@@ -3588,7 +3597,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '2c66a626d624a64a97cbeebf8295deee', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
+        ('create_invoice_from_blend_ticket', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'c346584675d8e9cfcbd9a6e20bb89bf8', ARRAY['authenticated', 'postgres', 'service_role'], 'v'),
         ('_save_field_app_invoice_impl_20260714', 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '14e32574403a249a9a138a2546f6809d', ARRAY['postgres', 'service_role'], 'v'),
         ('_save_field_app_split_invoice_impl', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '962abea61f909003b93cb4a430784fce', ARRAY['postgres', 'service_role'], 'v'),
         ('_preview_field_app_invoice_split_impl_20260908', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'fb26feb7877ba20adf8acff1b41be6c9', ARRAY['postgres'], 's')

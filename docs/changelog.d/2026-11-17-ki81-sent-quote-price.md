@@ -19,7 +19,8 @@
   grower who owns it, and only if it was sent, written on or before the application date and not expired by it;
   every other grower on the ticket, and the owner for a product the job quote does not price, is priced from their
   own quote as on a field-app invoice, else their list price (Mason, 2026-11-18). A job quote that prices nobody on
-  the ticket no longer runs the sent-price lock.
+  the ticket (its owner has no per-unit share, or it prices none of the ticket's products) no longer runs the
+  sent-price lock.
 - On a field-app invoice the resend refusal also says the price can be typed, and a per-person typed price on a split
   bill no longer needs that grower's quote to pass the lock.
 - The invoice screen's preview uses the same rule, so it shows what the save will bill.

@@ -7,6 +7,17 @@
 ## 2026-11-18 — Purchasing plan: booking lines in a unit that no longer matches stock are set aside (Bookings PR 1b, #1971)
 
 **Decision (Mason, in chat, 2026-11-18).** A booking line saved in a unit that no longer matches the product's stock unit is listed only under Check units in `get_purchasing_plan`: it is not counted as demand, absorbs no order or job draw, and does not stand in for its booking's crop-program hold (which then counts). Chosen over accepting the gap, after Luna raised HIGHs on how such lines interacted with draws and holds (third round on that mechanism). Live had 0 such lines on 2026-11-18; screens do not allow a stock-unit change on a saved product.
+## 2026-11-18 — #1940 may have a sixth Sol round; Mason accepts the missing-stock-row deadlock
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, do that").** PR #1940 (inventory cleanup KI-161/150/163) may have one more Sol round (round 6 as the counter reads it). Sol round 5 found 3 HIGHs. Mason accepts the first two as a business non-issue: two delivery or job completions sharing two products that have never had a Main Warehouse stock row, listed in opposite order, can still deadlock. Postgres cancels one, nothing is half-saved, it is retried, and it already happens today; this PR fixes the common case (rows exist). The third (the rollback rounding saved 4-place counts) is fixed.
+**Why:** the stock-lock mechanism has produced a new HIGH in three rounds, so per the contract it stops being patched; the rare case fails safely.
+**What it does:** unlocks one Sol review of the new head. If that review raises only the accepted deadlock case, it goes through the `accept <code>` owner-acceptance step; any other finding stops the merge. It still needs green checks before it merges into `staging`.
+
+## 2026-11-18 — #1940 may have one more Sol round
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, one more round").** PR #1940 (inventory cleanup KI-161/150/163) may have one more Sol round (round 5 as the counter reads it).
+**Why:** since the last round the branch merged current `staging`, gave its migration a new stamp (`20270126110000`), locks the order line `FOR UPDATE` so two follow-up deliveries queue, and its rollback narrows the cycle-count columns back to 2 places; the prover passes.
+**What it does:** unlocks one Sol review of the new head. Every other gate is unchanged: it still needs a clean Sol review and green checks before it merges into `staging`.
 ## 2026-11-18 — Codex Sol and Astra move to the 6.2 models
 
 **Decision (Mason):** use `gpt-6.2-sol` and `gpt-6.2-astra` instead of the older Sol and Astra. The Sol ship gate, every guard that checks a Sol proof, the scripts and the skills all move together; Luna stays `gpt-6-luna` (no 6.2 Luna exists for this account, probed 2026-11-18).

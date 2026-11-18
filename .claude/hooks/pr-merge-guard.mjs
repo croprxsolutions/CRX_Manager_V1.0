@@ -352,9 +352,9 @@ function listWorktreesFromProjectDir() {
 // notice and merges. See the header of codex-bot-review-lib.mjs for why this one
 // predicate does not fail closed like its neighbours.
 //
-// RUNS LAST, AND THAT IS THE POINT (Codex round 6). This hook gets 30 seconds
-// (.claude/settings.json). Each gh call is capped at 25s, and this lookup makes
-// up to four of them, so it can alone outlive the hook. A PreToolUse hook killed
+// RUNS LAST, AND THAT IS THE POINT (Codex round 6). The hard gates may spend up
+// to 177s and this lookup up to 75s more (four calls); started first, a slow
+// lookup could eat the hard gates' time before they ran. A PreToolUse hook killed
 // mid-call emits nothing, and a hook that emits nothing does NOT deny — so
 // @speed-bump — the ORDERING protects the hard gates; this lookup is not one.
 // running an advisory, fail-open lookup BEFORE the green-pipeline, risky-diff and

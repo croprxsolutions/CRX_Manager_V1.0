@@ -10,6 +10,8 @@
 --   P10  Firm 100 at +100, a PO of 100 due +126, Likely 100 at +130: one suggestion of
 --        100 naming the later PO; could add 0
 --   P11  on hand -10 and nothing else: order 10 now
+--   P23  a booking line saved in lb on a Gal product: Check units, not counted
+--   P24  Firm 100 at +100 and a PO of only 10 due +126: buy 100, and the small PO is not offered instead
 --   P12  a late PO counts today (flagged), an undated PO is listed not counted, a
 --        draft PO shows as drafted; the product is not complete
 --   P13  booking 100, order draw 60, job draw 40: 0 + 60 + 40 = 100; after the order is
@@ -158,6 +160,25 @@ BEGIN
   VALUES ('SMK-PP10-' || v_suffix, '[SMOKE] Vendor', 'submitted', v_t + 126, v_admin) RETURNING id INTO v_po;
   INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity_ordered, quantity_received, unit_cost, unit_size)
   VALUES (v_po, v_p[4], 100, 0, 6, 'Gal');
+
+  -- P23: product 23, a line in lb (the stock unit is Gal). P24: product 24, Firm 100 at +100; PO of 10 due +126.
+  FOR v_i IN 23..24 LOOP
+    v_res := save_quote(NULL, jsonb_build_object(
+        'quote_number', '[SMOKE] PP' || v_i || '-' || v_suffix, 'customer_id', v_customer, 'status', 'draft',
+        'tier', 1, 'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true),
+      jsonb_build_array(jsonb_build_object('client_key', '_s', 'section_name', 'P' || v_i, 'sort_order', 0,
+          'needed_by_date', v_t + 100, 'confidence', 'firm',
+          'items', jsonb_build_array(jsonb_build_object('client_key', '_k', 'product_id', v_p[v_i], 'sort_order', 0,
+            'calc_mode', 'units_direct', 'total_units_needed', CASE v_i WHEN 23 THEN 50 ELSE 100 END,
+            'price_override', 20, 'price_per_unit', 20, 'current_cost', 6,
+            'unit_size', CASE v_i WHEN 23 THEN 'lb' ELSE 'Gal' END, 'acres', 0)))),
+      v_admin, 'smk-pp' || v_i || '-' || v_suffix);
+    INSERT INTO smk_pp_bookings VALUES ('P' || v_i, (v_res->>'quote_id')::uuid, v_res->'section_ids');
+  END LOOP;
+  INSERT INTO purchase_orders (po_number, vendor, status, expected_delivery_date, created_by)
+  VALUES ('SMK-PP24-' || v_suffix, '[SMOKE] Vendor', 'submitted', v_t + 126, v_admin) RETURNING id INTO v_po;
+  INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity_ordered, quantity_received, unit_cost, unit_size)
+  VALUES (v_po, v_p[24], 10, 0, 6, 'Gal');
 
   -- P11: product 5. On hand -10 and nothing else.
   INSERT INTO inventory (product_id, location, quantity_available, quantity_prebooked, quantity_on_order)
@@ -465,6 +486,22 @@ BEGIN
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan->'review') r
                      WHERE (r->>'quote_id')::uuid = v_q AND r->>'timing' = 'late_summer' AND (r->>'window_end')::date = v_t + 14) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P16) %', (SELECT jsonb_agg(r) FROM jsonb_array_elements(v_plan->'review') r WHERE (r->>'quote_id')::uuid = v_q);
+  END IF;
+  v_n := v_n + 1;
+
+  -- P23
+  SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[23];
+  IF NOT (v_x->'reasons' ? 'check_units') OR (v_x->>'committed')::numeric <> 0 OR jsonb_array_length(v_x->'suggestions') <> 0
+     OR v_x->'rows'->0->>'bucket' <> 'check_units' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P23 booking line in another unit) %', v_x;
+  END IF;
+  v_n := v_n + 1;
+
+  -- P24
+  SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[24];
+  IF jsonb_array_length(v_x->'suggestions') <> 1 OR (v_x->'suggestions'->0->>'quantity')::numeric <> 100
+     OR v_x->'suggestions'->0->'later_po' <> 'null'::jsonb THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P24 small later PO) %', v_x;
   END IF;
   v_n := v_n + 1;
 

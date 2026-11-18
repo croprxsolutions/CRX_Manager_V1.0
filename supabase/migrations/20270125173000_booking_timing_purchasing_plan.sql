@@ -1084,9 +1084,12 @@ BEGIN
   bl AS (
     SELECT qi.id AS item_id, eq.id AS quote_id, qi.product_id, s.id AS section_id, s.needed_by_date,
            s.timing, s.confidence, COALESCE(s.sort_order, 0) AS s_sort, COALESCE(qi.sort_order, 0) AS i_sort,
-           GREATEST(COALESCE(qi.total_units_needed, 0), 0) AS qty
+           GREATEST(COALESCE(qi.total_units_needed, 0), 0) AS qty,
+           -- A line saved in a unit that no longer matches the stock unit is listed under Check units.
+           NOT _unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)) AS unit_problem
       FROM eq
       JOIN quote_items qi ON qi.quote_id = eq.id
+      JOIN products p ON p.id = qi.product_id
       LEFT JOIN quote_sections s ON s.id = qi.section_id
      WHERE qi.product_id IS NOT NULL
   ),
@@ -1153,7 +1156,7 @@ BEGIN
     SELECT s2.product_id, 'booking'::text AS kind,
            CASE s2.confidence WHEN 'firm' THEN 'committed' WHEN 'maybe' THEN 'shown' ELSE 'could_add' END AS cls,
            s2.needed_by_date AS raw_date, s2.rem AS qty, s2.quote_id, NULL::uuid AS order_id, NULL::uuid AS job_id,
-           s2.section_id, s2.confidence, (s2.rem < s2.rem1) AS estimated, false AS unit_problem,
+           s2.section_id, s2.confidence, (s2.rem < s2.rem1) AS estimated, s2.unit_problem,
            (SELECT eq.customer_id FROM eq WHERE eq.id = s2.quote_id) AS customer_id
       FROM s2 WHERE s2.rem > 0
     UNION ALL
@@ -1354,7 +1357,7 @@ BEGIN
                           'order_now', sg.d - prm.lead_days <= prm.today,
                           'quantity', sg.qty,
                           'later_po', (SELECT jsonb_build_object('po_id', po.po_id, 'po_number', po.po_number, 'expected_date', po.raw_date)
-                                         FROM po WHERE po.product_id = sg.product_id AND po.flag IN ('counted', 'later') AND po.eff_date > sg.d
+                                         FROM po WHERE po.product_id = sg.product_id AND po.flag IN ('counted', 'later') AND po.eff_date > sg.d AND po.qty >= sg.qty
                                         ORDER BY po.eff_date, po.po_number LIMIT 1))
                           ORDER BY sg.d)
                    FROM sugg sg WHERE sg.product_id = prod.product_id AND sg.qty > 0), '[]'::jsonb),
@@ -1413,7 +1416,7 @@ BEGIN
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM 'a030711a74ac307438dc07fd4b7bb22a' THEN
+     IS DISTINCT FROM 'a7599eb261b285b5de0315ecfdafda8c' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF (SELECT count(*) FROM pg_proc p

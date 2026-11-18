@@ -21,7 +21,8 @@
 --        draws of 150 against 100 booked put 50 in Over-drawn
 --   P15  draft, closed_short, accepted-with-cancelled-order: nothing; accepted never ordered counts
 --   P16  review list from 14 days before the window end (timed and untimed)
---   P17  Firm with no date, a job line in a foreign unit: each in its
+--   P17  Firm with no date (its booking also has a dated +60 line of 9, drawn 9 by an order: the
+--        draw comes off the dated line, so the undated one stays listed), a job line in a foreign unit: each in its
 --        bucket, not complete, no suggestion
 --   P18  an order line counts only its quantity_remaining; a delivery covering only part of it
 --        does not move its need date (it stays today)
@@ -297,9 +298,15 @@ BEGIN
       'confidence', 'firm',
       'items', jsonb_build_array(jsonb_build_object('client_key', '_k', 'product_id', v_p[15], 'sort_order', 0,
         'calc_mode', 'units_direct', 'total_units_needed', 9, 'price_override', 20, 'price_per_unit', 20,
+        'current_cost', 6, 'unit_size', 'Gal', 'acres', 0))),
+      jsonb_build_object('client_key', '_t', 'section_name', 'P17 dated', 'sort_order', 1,
+      'needed_by_date', v_t + 60, 'confidence', 'firm',
+      'items', jsonb_build_array(jsonb_build_object('client_key', '_kt', 'product_id', v_p[15], 'sort_order', 0,
+        'calc_mode', 'units_direct', 'total_units_needed', 9, 'price_override', 20, 'price_per_unit', 20,
         'current_cost', 6, 'unit_size', 'Gal', 'acres', 0)))),
     v_admin, 'smk-pp17-' || v_suffix);
   INSERT INTO smk_pp_bookings VALUES ('P17', (v_res->>'quote_id')::uuid, v_res->'section_ids');
+  INSERT INTO quote_product_draws (quote_id, product_id, quantity_drawn) VALUES ((v_res->>'quote_id')::uuid, v_p[15], 9);
   INSERT INTO jobs (job_number, customer_id, status, job_date, created_by)
   VALUES ('SMK-PP17A-' || v_suffix, v_customer, 'scheduled', v_t + 20, v_admin) RETURNING id INTO v_job;
   INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order) VALUES (v_job, v_p[16], 12, 'lb', 1);

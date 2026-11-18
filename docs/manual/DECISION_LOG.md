@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-18 — #1971: Mason owner-accepted 1 Sol finding(s) at `3d37b06e956c`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1971 at `3d37b06e956c` (base `59a711b8cd8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270127110000_booking_timing_purchasing_plan.sql:51`, text sha256 `f2a425bd7657e590` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our busines (ref 19f21d343eea)
+
 ## 2026-11-18 — Purchasing plan: no "expedite a later PO" alternative; a Maybe booking's held stock follows its confidence (Bookings PR 1b, #1971)
 
 **Decision (Mason, in chat, 2026-11-18), after Sol round 3 on Bookings PR 1b raised a HIGH on each rule (third round on each).** (1) `get_purchasing_plan` suggestions no longer carry a `later_po` "expedite this PO instead" alternative: it could not show the shortage that moving a PO earlier leaves for a later need. Open POs stay listed; it may return later, built to re-plan the knock-on need. (2) A crop-program hold on a booking that books that product follows the booking's confidence: when the booking is Maybe, its held stock is not counted as spoken for (Mason chose this over always counting held stock). Mason accepts the resulting gap, where a Firm need elsewhere can look covered by stock held for a Maybe booking.

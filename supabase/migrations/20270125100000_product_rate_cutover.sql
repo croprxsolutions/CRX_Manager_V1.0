@@ -311,6 +311,13 @@ BEGIN
   -- unit that no longer passes for a size refuses here (PRODUCT_RATE_UNIT_INVALID) and the parent stays as it is.
   v_preview := public.preview_parent_rates(p_parent_id, v_target_rate, v_target_unit, v_parent.suggested_rate);
   v_expected := v_expected || jsonb_build_object('sizes', v_preview->'sizes');
+  -- An unchanged promote writes no prices, so every size's saved per-acre prices must already be right. (Restore
+  -- is not refused here: switching back must stay possible.)
+  IF p_direction = 'promote' AND NOT v_changes
+     AND EXISTS (SELECT 1 FROM jsonb_array_elements(v_preview->'sizes') s WHERE s->'prices' IS DISTINCT FROM s->'before_prices') THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_CUTOVER_PRICES_STALE: a size of "%" has saved per-acre prices that do not match its rate; correct them first',
+      v_parent.name;
+  END IF;
 
   RETURN jsonb_build_object('parent_id', p_parent_id, 'name', v_parent.name, 'direction', p_direction,
     'rate_source', v_parent.rate_source, 'outcome', v_outcome.outcome, 'changes', v_changes,

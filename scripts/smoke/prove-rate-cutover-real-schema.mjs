@@ -285,6 +285,11 @@ function main() {
   // No change: MSO's approved 9.6 fl_oz keeps its own "oz" spelling; only the source and version move.
   const msoSizes = md5Rows(SIZES.MSO);
   const msoVersion = Number(row(`SELECT parent_version FROM public.product_parents WHERE id = '${P.MSO}';`));
+  // An unchanged promote writes no prices, so a size whose saved per-acre price is stale refuses it.
+  const msoT1 = row(`SELECT tier1_price_per_acre::text FROM public.products WHERE id = '${SIZES.MSO[0]}';`);
+  raw(`UPDATE public.products SET tier1_price_per_acre = tier1_price_per_acre + 1 WHERE id = '${SIZES.MSO[0]}';`);
+  ineligible(P.MSO, 'promote', /PRODUCT_PARENT_CUTOVER_PRICES_STALE/);
+  raw(`UPDATE public.products SET tier1_price_per_acre = ${msoT1} WHERE id = '${SIZES.MSO[0]}';`);
   const mso = go(P.MSO, 'promote', 'rt4-mso-1', { commit: true });
   assert.equal(mso.changed, false); assert.equal(mso.rate_unit, 'oz'); assert.equal(mso.parent_version, msoVersion + 1);
   assert.equal(md5Rows(SIZES.MSO), msoSizes, 'a no-change switch wrote a size');

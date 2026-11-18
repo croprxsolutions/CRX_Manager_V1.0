@@ -31,6 +31,7 @@ Write `docs/plans/<YYYY-MM-DD>-<slug>-CONTRACT.md`, or add a "Behavior contract"
    - Who may act, on which records. Every action the screen offers must be allowed by the server; the screen may offer less than the server allows.
    - How the server enforces this, including `SECURITY DEFINER` functions that bypass RLS.
    - Which values the screen sends are only locators, and what the server derives or checks itself: the actor, scope, price, status, and that supplied records belong together, per record for bulk actions.
+   - **Price source by path and role.** When the change touches pricing, price sources or quote eligibility on more than one invoice path, add a table: one row per affected path (field-app single save, split save, invoice preview, blend-ticket invoice, quote), one column per grower role (ticket or job owner, co-owner on a shared field, grower with a typed price, grower with a grower-share override). Every cell names the price source. Every cell that differs between paths goes into one combined Open business decision, asked before building (KI-81, PR #1946, found these one Taha review at a time).
 2. **State and failure.**
    - **Rules that always hold**, and the transaction that keeps them, plus what happens to effects outside it (emails, receipts, files).
    - **Existing rows.** What old rows mean, what new writes do, how every reader treats each allowed value, and writes from the already-deployed app during rollout. Include the read-only query and its expected result.

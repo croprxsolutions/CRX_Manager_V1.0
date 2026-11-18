@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270125183000_booking_live_job_guard (#1959; contract
+ * Real-schema proof for 20270127120000_booking_live_job_guard (#1959; contract
  * docs/plans/2026-11-18-booking-live-job-guard-CONTRACT.md). Container setup and replay copied from
  * prove-save-quote-section-ids-real-schema.mjs. Then:
  *   1. BEFORE: the bypass is real: a sales rep's direct decline of a booking with a live job goes
@@ -30,7 +30,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270125183000_booking_live_job_guard.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270127120000_booking_live_job_guard.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([

@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: the live-job booking rules hold for every write path (#1959)
 -- ----------------------------------------------------------------------------
--- REQUIRES 20270125183000_booking_live_job_guard. Proof cases of
+-- REQUIRES 20270127120000_booking_live_job_guard. Proof cases of
 -- docs/plans/2026-11-18-booking-live-job-guard-CONTRACT.md, through direct UPDATEs (the booking
 -- screen's Decline/Cancel path), convert_quote_to_order and auto_expire_quotes:
 --   1/2 a sent booking with a scheduled job on it: a direct UPDATE to accepted, declined, expired or

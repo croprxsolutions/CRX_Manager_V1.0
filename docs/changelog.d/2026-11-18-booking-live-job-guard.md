@@ -1,6 +1,6 @@
 ## 2026-11-18 — A booking with a live spray job keeps its rules on every path (#1959)
 
-- New migration `20270125183000_booking_live_job_guard.sql` (not applied live; record in `docs/reference/migrations.d/`).
+- New migration `20270127120000_booking_live_job_guard.sql` (not applied live; record in `docs/reference/migrations.d/`).
 - While a spray job that is not cancelled or deleted comes from a booking, the database itself now refuses marking the booking accepted, declined, expired or cancelled, and refuses a customer change, with the same plain message the booking save gives (`BOOKING_HAS_JOB`). Before, only the booking save enforced it: the Decline and Cancel buttons, Convert to Order and the nightly expiry could skip it.
 - One exception (Mason, 2026-11-18): a Partial Order that draws the last booked product still closes the booking as accepted, even with a live job.
 - Closing a booking short (which frees its held stock) is now refused while a scheduled or in-progress job comes from any of its sections, not only from the booking itself.

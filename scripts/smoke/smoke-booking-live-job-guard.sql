@@ -19,7 +19,8 @@
 --   5   auto_expire_quotes with two past-date bookings, one with a live job: the other expires, the one
 --       with the job stays sent, the run does not fail, and its rep gets one "Booking past its date" alert
 --       naming the spray job; a second run adds no second alert
---   J   on the expired booking a job cannot become live: direct insert on it or its section, re-link, un-delete
+--   J   on the expired booking a job cannot become live: direct insert on it or its section, re-link, un-delete,
+--       or a live unlinked job gaining a link (a section-only link is refused JOB_NEEDS_BOOKING)
 --       (BOOKING_CLOSED); a cancelled job may be written; a live job on an open booking still starts
 --   D   with a live job: a Partial Order of part of the booking keeps it sent; the one that draws the last
 --       booked unit closes it as accepted (Mason 2026-11-18)
@@ -319,7 +320,7 @@ BEGIN
   --    booking or on its section), a re-link, or an un-delete; a cancelled or deleted job may still be written,
   --    and a live job on an open booking keeps moving through its own statuses.
   SELECT id INTO v_s FROM quote_sections WHERE quote_id = v_q2;
-  FOR v_i IN 1..4 LOOP
+  FOR v_i IN 1..5 LOOP
     v_err := NULL;
     BEGIN
       IF v_i = 1 THEN
@@ -333,10 +334,15 @@ BEGIN
         INSERT INTO jobs (job_number, customer_id, job_date, deleted_at)
         VALUES ('SMK-J3-' || v_suffix, v_customer_id, CURRENT_DATE + 7, now());
         UPDATE jobs SET quote_id = v_q2, deleted_at = NULL WHERE job_number = 'SMK-J3-' || v_suffix;
-      ELSE
+      ELSIF v_i = 4 THEN
         INSERT INTO jobs (job_number, customer_id, job_date, quote_id, deleted_at)
         VALUES ('SMK-J4-' || v_suffix, v_customer_id, CURRENT_DATE + 7, v_q2, now());
         UPDATE jobs SET deleted_at = NULL WHERE job_number = 'SMK-J4-' || v_suffix;
+      ELSE
+        -- a live, never-linked job gaining a link to B (Luna HIGH)
+        INSERT INTO jobs (job_number, customer_id, job_date)
+        VALUES ('SMK-J5L-' || v_suffix, v_customer_id, CURRENT_DATE + 7);
+        UPDATE jobs SET quote_id = v_q2 WHERE job_number = 'SMK-J5L-' || v_suffix;
       END IF;
     EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
     END;
@@ -345,6 +351,18 @@ BEGIN
     END IF;
     v_refusals := v_refusals + 1;
   END LOOP;
+  -- J6. A live, never-linked job gaining only a section link is refused JOB_NEEDS_BOOKING (Luna HIGH).
+  v_err := NULL;
+  BEGIN
+    INSERT INTO jobs (job_number, customer_id, job_date)
+    VALUES ('SMK-J6-' || v_suffix, v_customer_id, CURRENT_DATE + 7);
+    UPDATE jobs SET quote_section_id = v_s WHERE job_number = 'SMK-J6-' || v_suffix;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
+  IF v_err IS NULL OR v_err NOT LIKE 'JOB_NEEDS_BOOKING: spray job SMK-J6-' || v_suffix || ' comes from a booking section, so it must also name that section''s booking.' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (J6) a live job gained a section link without its booking: %', v_err;
+  END IF;
+  v_refusals := v_refusals + 1;
   INSERT INTO jobs (job_number, customer_id, job_date, quote_id, status)
   VALUES ('SMK-J5-' || v_suffix, v_customer_id, CURRENT_DATE + 7, v_q2, 'cancelled');
   UPDATE jobs SET status = 'in_progress' WHERE job_number = 'SMK-LJ2-' || v_suffix;

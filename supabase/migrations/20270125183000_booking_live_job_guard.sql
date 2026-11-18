@@ -163,7 +163,9 @@ BEGIN
   IF NEW.deleted_at IS NOT NULL OR NEW.status = 'cancelled' THEN
     RETURN NEW;
   END IF;
-  IF TG_OP = 'UPDATE' AND OLD.deleted_at IS NULL AND OLD.status <> 'cancelled' THEN
+  -- A live job that stays live with the same links needs no re-check; one first gaining a link does (Luna HIGH).
+  IF TG_OP = 'UPDATE' AND OLD.deleted_at IS NULL AND OLD.status <> 'cancelled'
+     AND NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id AND NEW.quote_section_id IS NOT DISTINCT FROM OLD.quote_section_id THEN
     RETURN NEW;
   END IF;
   IF NEW.quote_id IS NOT NULL THEN

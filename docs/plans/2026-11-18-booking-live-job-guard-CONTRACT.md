@@ -105,7 +105,7 @@ Database only. No screen change: the screen already shows a database message as 
 9. Every existing chain that writes jobs or quote statuses, converts or auto-expires (37 chains) ends exactly as
    before. Result 2026-11-18: 38 chains; 11 run end to end, the rest stop at their own fixture setup on the
    prover database, the same way before and after.
-10. On an expired booking, a live job cannot be inserted (by quote or by section), re-linked to it, or
+10. On an expired booking, a live job cannot be inserted (by quote or by section), re-linked to it, first linked to it while live, or
     un-deleted onto it (`BOOKING_CLOSED` naming the booking); a cancelled job can still be recorded, and an
     existing live job elsewhere can still move between its own statuses.
 11. With a live job, a Partial Order of part of the booking keeps it sent; the Partial Order that draws the last

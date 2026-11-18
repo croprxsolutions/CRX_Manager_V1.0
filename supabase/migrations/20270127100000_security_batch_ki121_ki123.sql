@@ -3,7 +3,7 @@
 --   KI-122  signed-in users can no longer write the server-only auth_password_reset* activity rows.
 --   KI-123  the signed-out role (anon) loses every read on public tables, views and sequences (and its leftover
 --           sequence write rights), and objects postgres creates later no longer grant it any.
--- Non-destructive: no row is changed. Rollback: scripts/smoke/security-batch-ki123-reverse.sql (exact live grants
+-- Non-destructive: no row is deleted; earlier auth_password_reset* activity rows (none on live) are relabelled. Rollback: scripts/smoke/security-batch-ki123-reverse.sql (exact live grants
 -- read 2026-11-18) plus the KI-121 body restore in the same file.
 
 -- profiles is read by almost every RLS check: fail fast rather than queue every request behind the trigger swap.
@@ -25,7 +25,10 @@ BEGIN
           AND polcmd = 'a'
           AND polroles = ARRAY['authenticated'::regrole]::oid[]
           AND polqual IS NULL
-          AND pg_get_expr(polwithcheck, polrelid) = '(performed_by = ( SELECT auth.uid() AS uid))') THEN
+          -- The original check, or this file's (the rollback keeps the reset-row lock on purpose).
+          AND pg_get_expr(polwithcheck, polrelid) IN (
+                '(performed_by = ( SELECT auth.uid() AS uid))',
+                '((performed_by = ( SELECT auth.uid() AS uid)) AND (event_type !~~ ''auth\_password\_reset%''::text))')) THEN
     RAISE EXCEPTION 'SECURITY_BATCH_PREFLIGHT: activity_insert is not the expected policy';
   END IF;
 END
@@ -96,6 +99,13 @@ CREATE OR REPLACE TRIGGER trg_guard_last_active_admin
 -- ---------------------------------------------------------------------------
 ALTER POLICY activity_insert ON public.activity_feed
   WITH CHECK (performed_by = (SELECT auth.uid()) AND event_type NOT LIKE 'auth\_password\_reset%');
+
+-- Rows of those types written before this point could have come from any signed-in user: relabel them so no
+-- earlier row can pass for a server record (live had none on 2026-11-18). ALTER POLICY above holds the table's
+-- exclusive lock, so no new row of the old kind can commit in between.
+UPDATE public.activity_feed
+   SET event_type = 'unverified_' || event_type
+ WHERE event_type LIKE 'auth\_password\_reset%';
 
 -- ---------------------------------------------------------------------------
 -- KI-123: the signed-out role reads nothing in public.
@@ -177,6 +187,9 @@ BEGIN
           AND polname = 'activity_insert'
           AND strpos(pg_get_expr(polwithcheck, polrelid), 'event_type !~~ ''auth\_password\_reset%''::text') > 0) THEN
     RAISE EXCEPTION 'SECURITY_BATCH_POSTFLIGHT: activity_insert does not refuse the server-only reset rows';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.activity_feed WHERE event_type LIKE 'auth\_password\_reset%') THEN
+    RAISE EXCEPTION 'SECURITY_BATCH_POSTFLIGHT: an earlier auth_password_reset row was not relabelled';
   END IF;
 
   IF NOT EXISTS (

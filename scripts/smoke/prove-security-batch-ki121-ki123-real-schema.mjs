@@ -13,6 +13,7 @@
  *   K6      two admins demoting each other at once: the second waits on the first, then is refused;
  *           under REPEATABLE READ the second fails with a serialization error instead;
  *   K7      three admins, two removals at once on different rows: both succeed, no deadlock;
+ *   P2      a reset row planted before the lock is relabelled unverified_;
  *   P1      a signed-in user can no longer write the server-only auth_password_reset rows, but still logs
  *           their own activity;
  *   A1-A3   anon is refused on every public table, view, column and sequence; a signed-in admin still reads;
@@ -33,13 +34,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-// Iterating: CRX_PROVER_REUSE=<kept container> CRX_PROVER_DB=<a copy of its replayed database> skips the replay.
-const REUSE = process.env.CRX_PROVER_REUSE;
-if (REUSE && !/^crx-sec-/.test(REUSE)) throw new Error('CRX_PROVER_REUSE must name a kept crx-sec- container');
-const NAME = REUSE || `crx-sec-${process.pid}-${Date.now().toString(36)}`;
-const DB = process.env.CRX_PROVER_DB || 'postgres';
-// A plain database name only: psql -d also accepts a connection string, which could point outside the container.
-if (!/^[a-z_][a-z0-9_]{0,62}$/.test(DB)) throw new Error('CRX_PROVER_DB must be a plain database name in the kept container');
+// Always a fresh, network-disabled container: there is no reuse mode, so the proof can only write to its own database.
+const NAME = `crx-sec-${process.pid}-${Date.now().toString(36)}`;
+const DB = 'postgres';
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -442,7 +439,7 @@ SELECT has_table_privilege('anon', 'public.zz_sec_probe', 'SELECT')::text || has
 }
 
 async function main() {
-  if (!REUSE) buildContainer();
+  buildContainer();
   installLiveAuthUid();
   seed();
   assert.equal(guardMd5(), GUARD_OLD, 'the guard before the candidate is not the reviewed live body');
@@ -451,6 +448,8 @@ async function main() {
   assert.notEqual(count(inventoryBefore), '0');
   assert.equal(okProbe(demote(X), X), 'demoted', 'before the fix the last admin should be demotable (KI-121)');
   assert.equal(okProbe(logAs('auth_password_reset', R), R), 'logged');
+  psql(`INSERT INTO public.activity_feed (event_type, description, performed_by, related_entity_type, related_entity_id)
+    VALUES ('auth_password_reset', '[PROVER] SEC planted', '${R}', 'profile', '${X}');`);
   console.log(`[case] B before the fix the only admin CAN be demoted, a rep CAN write an auth_password_reset row, and anon holds ${count(inventoryBefore)} rights in public`);
 
   stageText('candidate.sql', lf(CANDIDATE));
@@ -464,6 +463,8 @@ async function main() {
   await noDeadlockCase();
   anonCases();
   policyRefuses();
+  assert.equal(scalar("SELECT event_type FROM public.activity_feed WHERE description = '[PROVER] SEC planted';"), 'unverified_auth_password_reset');
+  console.log('[case] P2 a reset row written before the lock is relabelled unverified_auth_password_reset');
   console.log('[case] P1 a rep cannot write auth_password_reset or auth_password_reset_failed rows; own activity and the screen user_password_reset row still log; forged performed_by still refused');
 
   const again = apply('candidate.sql');
@@ -485,8 +486,8 @@ async function main() {
   assert.equal(inventoryAfter, inventoryBefore, "the reverse did not restore anon's rights exactly as they were");
   setAdmins([X]);
   assert.equal(okProbe(demote(X), X), 'demoted');
-  assert.equal(okProbe(logAs('auth_password_reset', R), R), 'logged');
-  console.log('[case] R the reverse restores the old guard (md5 411de704), the old activity_insert policy and exactly the anon rights the database had before');
+  policyRefuses();
+  console.log('[case] R the reverse restores the old guard (md5 411de704), keeps the reset-row lock, and exactly the anon rights the database had before');
 
   const reapply = apply('candidate.sql');
   assert.equal(reapply.status, 0, reapply.output);
@@ -498,4 +499,4 @@ async function main() {
 }
 
 try { await main(); }
-finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }
+finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

@@ -69,10 +69,10 @@ Deno.test("refuses without changing the password when the audit row cannot be wr
 });
 
 Deno.test("fails closed when the target lookup errors or finds nobody", async () => {
-  for (const profile of [{ data: null, error: { message: "boom" } }, { data: null, error: null }]) {
+  for (const [profile, status] of [[{ data: null, error: { message: "boom" } }, 500], [{ data: null, error: null }, 404]] as const) {
     const { client, log } = fake({ profile });
     const out = await adminResetPassword(client, ADMIN, TARGET, "longenough");
-    assertEquals(out.status === 500 || out.status === 404, true);
+    assertEquals(out.status, status);
     assertEquals(log.length, 1, "no insert and no Auth call");
   }
 });
@@ -99,7 +99,7 @@ Deno.test("records a failed row when the Auth call throws", async () => {
 });
 
 Deno.test("validates input before touching anything", async () => {
-  for (const [id, pw] of [[undefined, "longenough"], [TARGET, ""], [TARGET, "short"], [TARGET, 12345678]]) {
+  for (const [id, pw] of [[undefined, "longenough"], ["not-a-uuid", "longenough"], [TARGET, ""], [TARGET, "short"], [TARGET, 12345678]]) {
     const { client, log } = fake();
     const out = await adminResetPassword(client, ADMIN, id, pw);
     assertEquals(out.status, 400);

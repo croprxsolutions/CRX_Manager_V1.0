@@ -36,6 +36,8 @@ export interface ResetOutcome {
   body: { success: true } | { error: string };
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function auditRow(callerId: string, userId: string, eventType: string, description: string) {
   return {
     event_type: eventType,
@@ -54,6 +56,9 @@ export async function adminResetPassword(
 ): Promise<ResetOutcome> {
   if (typeof userId !== "string" || !userId || typeof password !== "string" || !password) {
     return { status: 400, body: { error: "user_id and password are required" } };
+  }
+  if (!UUID.test(userId)) {
+    return { status: 400, body: { error: "user_id must be a user id" } };
   }
   if (password.length < 8) {
     return { status: 400, body: { error: "Password must be at least 8 characters" } };
@@ -77,9 +82,11 @@ export async function adminResetPassword(
     return { status: 403, body: { error: "Cannot reset password for service profiles" } };
   }
 
+  // Ties the started row to its failure row when one admin resets the same user twice.
+  const requestId = crypto.randomUUID();
   const { error: auditError } = await adminClient
     .from("activity_feed")
-    .insert(auditRow(callerId, userId, "auth_password_reset", "Admin started a password reset for this user (a failure row follows if Auth refused it)"));
+    .insert(auditRow(callerId, userId, "auth_password_reset", `Admin started a password reset for this user (request ${requestId}; a failure row follows if Auth refused it)`));
   if (auditError) {
     return { status: 500, body: { error: "Could not record the reset. Password not changed." } };
   }
@@ -89,7 +96,7 @@ export async function adminResetPassword(
   const recordFailure = async (description: string) => {
     const { error: failAuditError } = await adminClient
       .from("activity_feed")
-      .insert(auditRow(callerId, userId, "auth_password_reset_failed", description));
+      .insert(auditRow(callerId, userId, "auth_password_reset_failed", `${description} (request ${requestId})`));
     if (failAuditError) {
       console.error("password reset: could not record the Auth failure", failAuditError.message);
     }

@@ -45,9 +45,9 @@ DO $md5$ BEGIN
   END IF;
 END $md5$;
 
--- KI-122: the original activity_insert policy (signed-in users log any event under their own id).
-ALTER POLICY activity_insert ON public.activity_feed
-  WITH CHECK (performed_by = (SELECT auth.uid()));
+-- KI-122: the activity_insert lock on the server-only auth_password_reset rows is deliberately KEPT: reopening it
+-- would let staff forge server reset records while the updated Edge Functions may still be deployed. It blocks no
+-- app flow. Relabelled unverified_auth_password_reset* rows also stay as they are.
 
 -- KI-123: anon's default rights on new postgres-created tables and sequences.
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT ON TABLES TO anon;

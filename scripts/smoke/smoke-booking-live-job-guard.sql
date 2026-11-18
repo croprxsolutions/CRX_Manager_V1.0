@@ -22,6 +22,8 @@
 --   J   on the expired booking a job cannot become live: direct insert on it or its section, re-link, un-delete,
 --       or a live unlinked job gaining a link (a section-only link is refused JOB_NEEDS_BOOKING)
 --       (BOOKING_CLOSED); a cancelled job may be written; a live job on an open booking still starts
+--       J7/J8 a live job for another customer cannot link to a booking, nor move off its booking's customer;
+--       J9 a caller who is neither admin nor sales rep is refused with the row policy's generic error, no booking details
 --   D   with a live job: a Partial Order of part of the booking keeps it sent; the one that draws the last
 --       booked unit closes it as accepted (Mason 2026-11-18)
 --
@@ -397,6 +399,41 @@ BEGIN
   END;
   IF v_err IS NULL OR v_err NOT LIKE 'JOB_NEEDS_BOOKING: spray job SMK-J6-' || v_suffix || ' comes from a booking section, so it must also name that section''s booking.' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (J6) a live job gained a section link without its booking: %', v_err;
+  END IF;
+  v_refusals := v_refusals + 1;
+  -- J7/J8 (Sol HIGH r5). A live job for another customer cannot link to open booking A, and A's live job
+  -- cannot be moved to another customer: refused JOB_NEEDS_BOOKING.
+  FOR v_i IN 7..8 LOOP
+    v_err := NULL;
+    BEGIN
+      IF v_i = 7 THEN
+        INSERT INTO jobs (job_number, customer_id, job_date, quote_id)
+        VALUES ('SMK-J7-' || v_suffix, v_customer2_id, CURRENT_DATE + 7, v_q);
+      ELSE
+        UPDATE jobs SET customer_id = v_customer2_id WHERE job_number = 'SMK-LJ2-' || v_suffix;
+      END IF;
+    EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+    END;
+    IF v_err IS NULL OR v_err NOT LIKE 'JOB_NEEDS_BOOKING: spray job SMK-%-' || v_suffix || ' is for a different customer than booking %' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (J%) a live job was linked to another customer''s booking: %', v_i, v_err;
+    END IF;
+    v_refusals := v_refusals + 1;
+  END LOOP;
+  -- J9 (Sol HIGH r5). A signed-in caller who is neither admin nor sales rep gets no booking details from the
+  -- trigger (the jobs row policy refuses that caller's write; this owner session skips the policy).
+  v_err := gen_random_uuid()::text;  -- a signed-in user with no profile: not admin, not sales rep
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_err, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_err, true);
+  BEGIN
+    INSERT INTO jobs (job_number, customer_id, job_date, quote_id)
+    VALUES ('SMK-J9-' || v_suffix, v_customer_id, CURRENT_DATE + 7, v_q2);
+    v_err := NULL;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLSTATE || ' ' || SQLERRM;
+  END;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+  IF v_err IS DISTINCT FROM '42501 new row violates row-level security policy for table "jobs"' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (J9) a non-rep caller was not refused generically on a closed booking: %', v_err;
   END IF;
   v_refusals := v_refusals + 1;
   INSERT INTO jobs (job_number, customer_id, job_date, quote_id, status)

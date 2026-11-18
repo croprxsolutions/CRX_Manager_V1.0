@@ -16,13 +16,16 @@
 --      releases the holds; the 20261105160000 rule checked quote_id only). SECURITY DEFINER so a caller whose RLS hides the job is still refused. Job scheduling locks
 --      the quote row FOR UPDATE first (_create_job_from_quote_section_replay_impl_20261015) and refuses a
 --      booking already in those statuses, so the two serialize on the quote row.
---   1b. _enforce_job_live_on_open_booking(), a BEFORE INSERT OR UPDATE OF quote_id, quote_section_id, status,
+--   1b. _enforce_job_live_on_open_booking(), a BEFORE INSERT OR UPDATE OF quote_id, quote_section_id, customer_id, status,
 --      deleted_at row trigger on jobs: a job cannot become live (inserted, re-linked, or un-deleted) on a booking
 --      that is accepted, declined, expired, cancelled, closed_by_application or closed_short (BOOKING_CLOSED; the
 --      same statuses the scheduler already refuses). An already-live job keeps moving through its own statuses,
 --      but its booking and section link is fixed: to move it, cancel it and schedule a new one (Mason, 2026-11-18).
 --      A job made from a section must also name that section's booking (JOB_NEEDS_BOOKING; the scheduler always
 --      does; Mason, 2026-11-18, "Require both"); the postflight checks no live row breaks this (0 on live).
+--      A live job linked to a booking is for that booking's customer (JOB_NEEDS_BOOKING; the scheduler always
+--      sets it; Sol HIGH r5; postflight-checked, 0 linked live jobs on live 2026-11-18), and for a signed-in caller
+--      who is neither admin nor sales rep any refusal reads as the jobs row policy's own, so reveals no booking details.
 --   1c. _enforce_section_with_live_job_stays(), a BEFORE INSERT OR UPDATE OF id, quote_id row trigger on quote_sections:
 --      a section that a live job comes from cannot move to another booking (BOOKING_HAS_JOB), including by being
 --      deleted and re-inserted under the same id on another booking (the section FK is deferred).
@@ -151,6 +154,7 @@ AS $function$
 DECLARE
   v_section_quote_id uuid;
   v_quote record;
+  v_hide boolean;
 BEGIN
   -- Mason 2026-11-18 ("A"): a job's booking links are fixed once set, whatever its status, so a job cannot be
   -- cancelled, re-pointed and revived on another booking. Nothing in the app changes them; both FKs are NO ACTION.
@@ -163,16 +167,29 @@ BEGIN
   IF NEW.deleted_at IS NOT NULL OR NEW.status = 'cancelled' THEN
     RETURN NEW;
   END IF;
-  -- A live job that stays live with the same links needs no re-check; one first gaining a link does (Luna HIGH).
+  -- Sol HIGH r5: this trigger runs before the jobs row policy, so for a signed-in caller who is neither admin
+  -- nor sales rep (who cannot read bookings) every refusal below is replaced by the row policy's own refusal,
+  -- revealing no booking number or status. The checks still run for them (fail closed).
+  v_hide := auth.uid() IS NOT NULL AND NOT (public.is_admin() OR public.is_sales_rep());
+  BEGIN
+  -- A live job that stays live with the same links and customer needs no re-check; one first gaining a link does (Luna HIGH).
   IF TG_OP = 'UPDATE' AND OLD.deleted_at IS NULL AND OLD.status <> 'cancelled'
-     AND NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id AND NEW.quote_section_id IS NOT DISTINCT FROM OLD.quote_section_id THEN
+     AND NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id AND NEW.quote_section_id IS NOT DISTINCT FROM OLD.quote_section_id
+     AND NEW.customer_id IS NOT DISTINCT FROM OLD.customer_id THEN
     RETURN NEW;
   END IF;
   IF NEW.quote_id IS NOT NULL THEN
-    SELECT q.quote_number, q.status INTO v_quote FROM public.quotes q WHERE q.id = NEW.quote_id FOR SHARE;
+    SELECT q.quote_number, q.status, q.customer_id INTO v_quote FROM public.quotes q WHERE q.id = NEW.quote_id FOR SHARE;
     IF FOUND AND v_quote.status IN ('accepted', 'declined', 'expired', 'cancelled', 'closed_by_application', 'closed_short') THEN
       RAISE EXCEPTION 'BOOKING_CLOSED: booking % is %, so a spray job cannot be scheduled from it.',
         v_quote.quote_number, v_quote.status
+        USING ERRCODE = 'P0001';
+    END IF;
+    -- Sol HIGH r5: a live job is for its booking's customer, as the scheduler always sets it, so another
+    -- customer's job cannot hold someone else's booking open.
+    IF FOUND AND NEW.customer_id IS DISTINCT FROM v_quote.customer_id THEN
+      RAISE EXCEPTION 'JOB_NEEDS_BOOKING: spray job % is for a different customer than booking %.',
+        NEW.job_number, v_quote.quote_number
         USING ERRCODE = 'P0001';
     END IF;
   END IF;
@@ -194,6 +211,12 @@ BEGIN
         USING ERRCODE = 'P0001';
     END IF;
   END IF;
+  EXCEPTION WHEN raise_exception THEN
+    IF v_hide THEN
+      RAISE EXCEPTION 'new row violates row-level security policy for table "jobs"' USING ERRCODE = '42501';
+    END IF;
+    RAISE;
+  END;
   RETURN NEW;
 END;
 $function$;
@@ -202,7 +225,7 @@ ALTER FUNCTION public._enforce_job_live_on_open_booking() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._enforce_job_live_on_open_booking() FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER jobs_live_on_open_booking
-  BEFORE INSERT OR UPDATE OF quote_id, quote_section_id, status, deleted_at ON public.jobs
+  BEFORE INSERT OR UPDATE OF quote_id, quote_section_id, customer_id, status, deleted_at ON public.jobs
   FOR EACH ROW
   EXECUTE FUNCTION public._enforce_job_live_on_open_booking();
 
@@ -446,6 +469,10 @@ BEGIN
              WHERE j.quote_section_id IS NOT NULL AND j.deleted_at IS NULL AND j.status <> 'cancelled'
                AND j.quote_id IS DISTINCT FROM qs.quote_id) THEN
     RAISE EXCEPTION 'POSTFLIGHT_SECTION_JOB_BOOKING: a live spray job from a section does not name that section''s booking; re-read live first';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.jobs j JOIN public.quotes q ON q.id = j.quote_id
+             WHERE j.deleted_at IS NULL AND j.status <> 'cancelled' AND j.customer_id IS DISTINCT FROM q.customer_id) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_JOB_CUSTOMER: a live spray job is for a different customer than its booking; re-read live first';
   END IF;
 END
 $postflight$;

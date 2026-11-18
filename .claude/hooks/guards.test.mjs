@@ -543,7 +543,7 @@ ok(!contentIsRisky("+  const label = 'hello world';"), "an ordinary diff is not 
 const good = {
   codex_ran: true,
   verdict: "clean",
-  model: "gpt-6-sol",
+  model: "gpt-6.2-sol",
   reasoning_effort: "high",
   head_sha: "abc",
   timestamp: new Date().toISOString(),

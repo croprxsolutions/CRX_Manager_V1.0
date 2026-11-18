@@ -72,7 +72,7 @@ const record = buildBlockersRecord({ headSha: H1, baseSha: BASE, findings: parse
 assert.equal(blockersRecordProblem(record, { headSha: H1, nowMs: NOW }), null, "record: valid for its own head");
 assert.match(blockersRecordProblem(record, { headSha: H2, nowMs: NOW }), /different head/, "record: refused for another head");
 assert.match(blockersRecordProblem(record, { headSha: H1, nowMs: NOW + 24 * 60 * 60 * 1000 }), /older than 24 hours/, "record: stale after 24 hours");
-assert.match(blockersRecordProblem({ ...record, model: "gpt-6-luna" }, { headSha: H1, nowMs: NOW }), /not from gpt-6-sol/, "record: only a Sol run counts");
+assert.match(blockersRecordProblem({ ...record, model: "gpt-6-luna" }, { headSha: H1, nowMs: NOW }), /not from gpt-6.2-sol/, "record: only a Sol run counts");
 
 // ── Mason's reply ───────────────────────────────────────────────────────────
 assert.deepEqual(acceptFromReply("accept 123456 we never sell before switch-on"), { code: "123456", reason: "we never sell before switch-on" });

@@ -14,6 +14,10 @@
 - **Mason, 2026-11-18 (typed in chat: "close it"):** that includes a section deleted and re-created under the same id: it can only come back on the booking its job came from (Sol round 3).
 - **Mason, 2026-11-18 ("Require both (Recommended)", relayed):** every spray job made from a booking section must also name that booking; the database refuses one that does not. The scheduler already does this; live had no section-linked job breaking it.
 - The rules (no accept, decline, expire or cancel, and no customer change, while a live job exists) now hold in the database for every write path, not only the booking save. Contract: `docs/plans/2026-11-18-booking-live-job-guard-CONTRACT.md`.
+## 2026-11-18 — Codex Sol and Astra move to the 6.2 models
+
+**Decision (Mason):** use `gpt-6.2-sol` and `gpt-6.2-astra` instead of the older Sol and Astra. The Sol ship gate, every guard that checks a Sol proof, the scripts and the skills all move together; Luna stays `gpt-6-luna` (no 6.2 Luna exists for this account, probed 2026-11-18).
+**What this forbids/implies:** a `gpt-6-sol` proof no longer satisfies any gate; open PRs re-run Sol after this lands. No validator accepts both models during the switch. This replaces the 2026-11-06 "wait for a side-by-side" note on moving Sol.
 
 ## 2026-11-18 — #1946 (KI-81): a blend ticket's own grower falls back to their own quote
 

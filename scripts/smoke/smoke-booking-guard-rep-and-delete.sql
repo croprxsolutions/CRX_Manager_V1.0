@@ -6,8 +6,9 @@
 --   N1  rep B can start that job (in_progress stays cancellable by any rep) but cannot mark it completed
 --       (BOOKING_NOT_YOURS; jobs move scheduled -> in_progress -> completed -> invoiced), not even while
 --       soft-deleting it in the same update (N1b)
---   N2  rep A (the booking's rep), an admin, a system session (no auth.uid()) and the job's applicator (as
---       complete_job runs it) can each mark it completed
+--   N2  rep A (the booking's rep), an admin and a system session (no auth.uid()) can each mark it completed.
+--       The assigned applicator completes it only through complete_job; prove-booking-guard-rep-and-delete-real-schema.mjs
+--       checks that path under the row policies (Luna r1, r4).
 --   D1  rep A cannot soft-delete booking A while the job is scheduled or in progress (BOOKING_HAS_JOB)
 --   D2  once the job is completed, or cancelled, the delete goes through; a booking with no job deletes as before
 --   D3  a notes edit and a status-only change with the job live behave as before (sent -> revised goes through)
@@ -121,7 +122,7 @@ BEGIN
   END IF;
 
   -- N2. Each allowed caller can complete it (each in a sub-transaction that is undone).
-  FOREACH v_who IN ARRAY ARRAY[v_rep_a, v_admin, v_appl, NULL] LOOP
+  FOREACH v_who IN ARRAY ARRAY[v_rep_a, v_admin, NULL] LOOP
     PERFORM set_config('request.jwt.claims', CASE WHEN v_who IS NULL THEN '' ELSE json_build_object('sub', v_who, 'role', 'authenticated')::text END, true);
     PERFORM set_config('request.jwt.claim.sub', COALESCE(v_who::text, ''), true);
     BEGIN
@@ -155,6 +156,6 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (D2) deleting with a cancelled job, or with no job, did not go through';
   END IF;
 
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK booking guard rep and delete: % refusals, owner/admin/applicator/system complete, delete after complete or cancel', v_n;
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK booking guard rep and delete: % refusals, owner/admin/system complete, delete after complete or cancel', v_n;
 END;
 $smoke$;

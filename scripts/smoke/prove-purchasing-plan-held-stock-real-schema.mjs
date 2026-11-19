@@ -5,7 +5,7 @@
  * prove-booking-timing-purchasing-plan-real-schema.mjs: the checked-in production schema baseline in a
  * network-disabled Supabase PostgreSQL 17 container, every post-baseline migration before the candidate
  * replayed (20270127110000 included), then:
- *   1. BEFORE: smoke-purchasing-plan.sql fails (its P14 earliest-first draw and P26/P27/P28 groups need the candidate);
+ *   1. BEFORE: smoke-purchasing-plan.sql fails (its P14 document-order draw and P26/P27/P28 groups need the candidate);
  *      smoke-booking-planning-fields.sql passes.
  *   2. The candidate applies; a second apply is refused by its preflight (PREFLIGHT_PLAN_DRIFT).
  *   3. AFTER: both chains pass; the function stays SECURITY DEFINER, search_path pinned, anon refused, authenticated allowed.
@@ -257,7 +257,8 @@ const ADMIN = 'a7100000-0000-4000-8000-0000000000b2';
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
-    ('${ADMIN}', 'ppho-admin@example.invalid', '{"full_name":"[PROVER] Held Stock Admin","role":"admin"}'::jsonb);`);
+    ('${ADMIN}', 'ppho-admin@example.invalid', '{"full_name":"[PROVER] Held Stock Admin","role":"admin"}'::jsonb)
+    ON CONFLICT (id) DO NOTHING;`); // reuse mode: a copied database already has this user
   raw(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
     DELETE FROM public.unit_conversions;
     INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};`);
@@ -281,8 +282,8 @@ async function main() {
   // 1. BEFORE
   const planBefore = chainOutcome('smoke-purchasing-plan.sql');
   assert.doesNotMatch(planBefore, /SMOKE_PASS_ROLLBACK/, 'smoke-purchasing-plan.sql must fail before the candidate');
-  // P14 is the first group the old body fails now: its unknown draw came off the latest line (Taha on #1989).
-  assert.match(planBefore, /SMOKE_FAIL: \(P14\)/, `the old plan must fail at the earliest-first draw case: ${planBefore}`);
+  // P14 is the first group the old body fails now: its unknown draw came off the latest line, not the first listed (#1989).
+  assert.match(planBefore, /SMOKE_FAIL: \(P14\)/, `the old plan must fail at the document-order draw case: ${planBefore}`);
   console.log(`[case] BEFORE: smoke-purchasing-plan.sql: ${planBefore.slice(0, 120)}`);
   assert.match(chainOutcome('smoke-booking-planning-fields.sql'), /^SMOKE_PASS_ROLLBACK/);
 

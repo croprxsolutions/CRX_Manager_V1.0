@@ -20,8 +20,9 @@
 --      first); the rest of a crop-program hold counts at its booking's need date (its expiry less
 --      14 days, as _sync_planned_holds sets it), so it never makes the plan "order now" by itself
 --      (Mason, 2026-11-18, "I agree cap it").
---   5. A draw whose section is unknown (an order's) comes off the earliest-needed lines first, as
---      _sync_planned_holds consumes it (Taha on #1989; replaces 110000's latest-first rule).
+--   5. An order draw comes off the booking line its order line names (order_items.quote_item_id),
+--      and any draw left over comes off the lines top-down in document order, as draw_down_quote
+--      takes it (Mason, 2026-11-19, after Sol round 3 on #1989; replaces 110000's latest-first rule).
 -- ROLLBACK: re-run the get_purchasing_plan CREATE from 20270127110000 as CREATE OR REPLACE
 --   (read-only function; no data to restore).
 -- ============================================================================
@@ -175,23 +176,48 @@ BEGIN
   ap1 AS (
     SELECT quote_id, product_id, SUM(qty - rem1) AS applied, SUM(qty) AS booked FROM s1 GROUP BY quote_id, product_id
   ),
-  -- Step 2: every other draw (order draws, and job draws beyond their section) comes off the
-  -- EARLIEST-needed lines first, undated last, then section and line order: the same order the
-  -- stock-hold sync uses (_sync_planned_holds, 20260702171000), so the plan and the stored holds
-  -- agree on which line an unknown draw came from (Taha on #1989, Mason 2026-11-18; contract rule 1, P14).
+  -- Step 2 follows the draw writer (draw_down_quote; Mason, 2026-11-19, "a", after Sol round 3 on #1989).
+  -- An order draw comes off the booking line its order line names (order_items.quote_item_id; a
+  -- cancelled order keeps only what it delivered; voided orders return their draw), then whatever
+  -- is left of the draws (unstamped legacy draws, job draws beyond their section) comes off the lines
+  -- top-down in document order, as the writer's own front-walk takes it.
+  odl AS (
+    SELECT o.quote_id, oi.product_id, oi.quote_item_id AS item_id,
+           SUM(CASE WHEN o.status = 'cancelled' THEN COALESCE(oi.quantity_delivered, 0)
+                    ELSE COALESCE(oi.total_units_needed, 0) END) AS drawn
+      FROM orders o
+      JOIN eq ON eq.id = o.quote_id
+      JOIN order_items oi ON oi.order_id = o.id
+     WHERE o.booking_draw IS TRUE AND o.status <> 'voided' AND oi.quote_item_id IS NOT NULL
+     GROUP BY o.quote_id, oi.product_id, oi.quote_item_id
+  ),
   s2a AS (
-    SELECT s1.*, GREATEST(COALESCE(dt.total, 0) - COALESCE(ap1.applied, 0), 0) AS pool
+    SELECT s1.*, GREATEST(COALESCE(dt.total, 0) - COALESCE(ap1.applied, 0), 0) AS pool,
+           LEAST(s1.rem1, GREATEST(COALESCE(odl.drawn, 0), 0)) AS st0
       FROM s1
       LEFT JOIN dt ON dt.quote_id = s1.quote_id AND dt.product_id = s1.product_id
       LEFT JOIN ap1 ON ap1.quote_id = s1.quote_id AND ap1.product_id = s1.product_id
+      LEFT JOIN odl ON odl.quote_id = s1.quote_id AND odl.product_id = s1.product_id AND odl.item_id = s1.item_id
+  ),
+  -- The stamped part never exceeds the draws on record (the ledger total stays authoritative).
+  s2b AS (
+    SELECT s2a.*,
+           LEAST(s2a.st0, GREATEST(0, s2a.pool
+             - (SUM(s2a.st0) OVER (PARTITION BY s2a.quote_id, s2a.product_id
+                                   ORDER BY s2a.s_sort, s2a.i_sort, s2a.item_id ROWS UNBOUNDED PRECEDING) - s2a.st0))) AS st
+      FROM s2a
+  ),
+  s2c AS (
+    SELECT s2b.*, s2b.rem1 - s2b.st AS r1,
+           s2b.pool - SUM(s2b.st) OVER (PARTITION BY s2b.quote_id, s2b.product_id) AS pool2
+      FROM s2b
   ),
   s2 AS (
-    SELECT s2a.*,
-           s2a.rem1 - LEAST(s2a.rem1, GREATEST(0, s2a.pool
-             - (SUM(s2a.rem1) OVER (PARTITION BY s2a.quote_id, s2a.product_id
-                                    ORDER BY s2a.needed_by_date NULLS LAST, s2a.s_sort, s2a.i_sort, s2a.item_id
-                                    ROWS UNBOUNDED PRECEDING) - s2a.rem1))) AS rem
-      FROM s2a
+    SELECT s2c.*,
+           s2c.r1 - LEAST(s2c.r1, GREATEST(0, s2c.pool2
+             - (SUM(s2c.r1) OVER (PARTITION BY s2c.quote_id, s2c.product_id
+                                  ORDER BY s2c.s_sort, s2c.i_sort, s2c.item_id ROWS UNBOUNDED PRECEDING) - s2c.r1))) AS rem
+      FROM s2c
   ),
   overdrawn AS (
     SELECT dt.quote_id, dt.product_id, dt.total - COALESCE(ap1.booked, 0) AS qty
@@ -234,12 +260,15 @@ BEGIN
   ),
   -- Holds that count now take the shelf first (manual, then crop-program by need date), but only
   -- up to the stock on it (Mason, 2026-11-18, "I agree cap it"): the rest of a crop-program hold
-  -- falls to its booking line's need date (the hold sync sets expiry = need date + 14 days, at UTC
-  -- midnight), as it would once the booking is sent; a manual hold has no date, so its rest stays today.
+  -- falls to its booking line's need date (the hold sync sets the expiry date = need date + 14 days),
+  -- as it would once the booking is sent. A manual hold, a hold with no booking behind it, and an
+  -- infinite expiry (an 'infinity' need date, which a counted line also treats as no date) stay today.
   hnow0 AS (
     SELECT h.*,
-           CASE WHEN h.hold_type = 'crop_program' AND h.expires_at IS NOT NULL
-                THEN GREATEST((SELECT today FROM prm), (h.expires_at AT TIME ZONE 'UTC')::date - 14)
+           CASE WHEN h.hold_type = 'crop_program' AND isfinite(h.expires_at)
+                     AND h.expires_at > (SELECT today FROM prm)
+                     AND EXISTS (SELECT 1 FROM quotes q WHERE q.id = h.source_id)
+                THEN GREATEST((SELECT today FROM prm), h.expires_at - 14)
                 ELSE (SELECT today FROM prm) END AS rest_date
       FROM hraw h WHERE h.hold_use = 'now'
   ),
@@ -318,7 +347,7 @@ BEGIN
     SELECT s3.product_id, 'booking'::text AS kind,
            CASE s3.confidence WHEN 'firm' THEN 'committed' WHEN 'maybe' THEN 'shown' ELSE 'could_add' END AS cls,
            s3.needed_by_date AS raw_date, s3.qty_left AS qty, s3.quote_id, NULL::uuid AS order_id, NULL::uuid AS job_id,
-           s3.section_id, s3.confidence, (s3.rem < s3.rem1) AS estimated, s3.unit_problem,
+           s3.section_id, s3.confidence, (s3.rem < s3.r1) AS estimated, s3.unit_problem,
            (SELECT eq.customer_id FROM eq WHERE eq.id = s3.quote_id) AS customer_id
       FROM s3 WHERE s3.qty_left > 0
     UNION ALL
@@ -596,7 +625,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '7fae31f7ab46ee175006adefb8e7fdf9' THEN
+     IS DISTINCT FROM '9c2f6f23d70bdc7b9b7652ef64c1936c' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

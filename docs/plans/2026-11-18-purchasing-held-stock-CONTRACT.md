@@ -33,7 +33,7 @@ held than the shelf has, the unbacked part stays as the booking line (its own da
 4. **Output.** The held part of each line becomes a `hold` row: committed, dated today, with the line's booking,
    section and confidence (or its job). A hold's rest beyond its lines is a `hold` row with its source. The rest of
    each line stays as before (same class, date, bucket). Line qty = held part + rest; nothing double-counted.
-5. **Unchanged:** manual holds, crop holds of non-counted bookings and of bookings with a set-aside line, draws,
+5. **Unchanged** (except as rules 7 and 8 change them): manual holds, crop holds of non-counted bookings and of bookings with a set-aside line, draws,
    orders, POs, the review list (`rev` still uses the line's full remaining). The Firm-needs-a-date list and the
    `needs_date` reason read the lines before the hold split, so a held undated Firm line is still listed.
 7. **Cap on holds that count today (Mason, 2026-11-18, "I agree cap it", after Taha's review of #1989).** A manual hold or
@@ -42,10 +42,16 @@ held than the shelf has, the unbacked part stays as the booking line (its own da
    expiry less 14 days (as `_sync_planned_holds` sets it), never before today; a manual hold's rest (and a hold with
    no expiry) stays dated today. Covered holds are backed by the shelf left after the capped part. So a draft booking's
    Firm 500 with 13 on hand holds 13 today and 487 at its need date, never "order 487 now" (smoke P28).
-8. **Draw order (Taha on #1989).** A draw whose section is unknown (an order's) comes off the booking's lines earliest
-   need date first (undated last), then section and line, as `_sync_planned_holds` consumes it. This replaces the
-   `20270127110000` least-sure, latest-first rule, so the plan and the holds agree on which line is still open
-   (Jan Firm 100 + Mar Maybe 100, 100 drawn, 13 on hand: 13 held, 87 Maybe shown, nothing to buy; smoke P28, P14).
+8. **Draw order (Mason, 2026-11-19: "a", after Taha's review and Sol round 3 on #1989).** The plan follows the draw
+   writer (`draw_down_quote`): an order draw comes off the booking line its order line names
+   (`order_items.quote_item_id`; a cancelled order keeps only what it delivered, a voided one none), capped by the
+   ledger total; whatever is left (legacy unstamped draws, job draws beyond their section) comes off the lines
+   top-down in document order (section, then line), as the writer's front-walk takes it. A line drawn by a named
+   order line is exact; only the front-walk part is marked estimated. This replaces the `20270127110000`
+   least-sure, latest-first rule. (Jan Firm 100 listed before Mar Maybe 100, 100 drawn, 13 on hand: 13 held,
+   87 Maybe shown, nothing to buy; an order naming the Maybe line leaves the Firm line needed; smoke P28, P14.)
+   `_sync_planned_holds` still consumes draws by need date: a pre-existing mismatch with the writer, left as a
+   follow-up.
 6. **Window MEDs.** A timing window is taken from settings only when both `start` and `end` are valid month-days
    (as `parseTimingWindows` on the screen does); otherwise both fall back to that timing's default. When `end` is
    before `start` (window crosses New Year) and the needed-by month-day is on/after `start`, the window end is in

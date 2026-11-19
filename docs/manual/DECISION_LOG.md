@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-19 — Purchasing plan: order draws follow the line the order names, else document order (#1989)
+
+**Decision (Mason, in chat, 2026-11-19: "a"), after Sol round 3 on PR #1989.** `get_purchasing_plan` takes an order draw off the booking line its order line names (`order_items.quote_item_id`, as `draw_down_quote` stamps it), and any draw left over off the lines top-down in document order, the way the writer itself takes it. Chosen over "earliest-needed first" (Taha's review): going by date could erase a Firm line the order never drew and suggest buying nothing.
+**Supersedes:** the "earliest-needed lines first" draw order in the entry below. `_sync_planned_holds` still goes by date; that mismatch predates this PR and is a follow-up.
+
 ## 2026-11-18 — Purchasing plan: holds that count today are capped at the shelf; unknown draws come off the earliest lines (#1989)
 
 **Decision (Mason, in chat, 2026-11-18: "I agree cap it"), after Taha's review of PR #1989.** In `get_purchasing_plan`, a manual hold or a crop-program hold that does not cover its booking's own line (for example a draft booking's) counts today only up to the stock on the shelf; the rest of a crop-program hold counts at its booking's need date, the same way a sent booking's line does, so a hold never makes the plan say "order now" for stock nobody needs yet. Also from Taha's review: a draw whose section is unknown (an order's) now comes off the earliest-needed lines first, matching how `_sync_planned_holds` consumes draws.

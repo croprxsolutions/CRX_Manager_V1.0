@@ -188,7 +188,9 @@ BEGIN
          OR v_item->'change'->>'cas' !~ '^[0-9]{2,7}-[0-9]{2}-[0-9]$' THEN
         v_why := format('ingredient needs a person (%s)', v_item->>'class');
       ELSIF jsonb_typeof(v_item->'change'->'strength_value') IS DISTINCT FROM 'number'
-         OR (v_item->'change'->>'strength_value')::numeric <= 0 THEN
+         OR (v_item->'change'->>'strength_value')::numeric <= 0
+         OR v_item->'change'->>'strength_unit' IS DISTINCT FROM 'pct_ww'
+         OR v_item->'change'->>'strength_basis' IS DISTINCT FROM 'active_ingredient' THEN
         v_why := 'ingredient has no percent';
       ELSE
         v_total := v_total + (v_item->'change'->>'strength_value')::numeric;
@@ -204,7 +206,11 @@ BEGIN
     FOR v_item IN SELECT e FROM jsonb_array_elements(public._epa_proposal_items(v_p.parent_id, v_p.epa_registration, v_p.epa_input)) e
                    WHERE e->>'kind' = 'label' LOOP
       IF v_item->>'item_id' = 'label:registration_status' THEN
-        IF v_item->'epa' = 'true'::jsonb THEN v_why := 'EPA lists the registration as cancelled'; END IF;
+        -- Its class is always a difference (status is never written and is usually 'unknown'), so only cancelled,
+        -- by EPA or as recorded here, needs a person.
+        IF v_item->'epa' = 'true'::jsonb OR v_item->'current' = '"cancelled"'::jsonb THEN
+          v_why := 'the registration is cancelled';
+        END IF;
       ELSIF v_item->>'item_id' = 'label:label_document' AND v_item->>'class' = 'fill' THEN
         IF COALESCE(v_item->'current'->'label_accepted_on', 'null'::jsonb) <> 'null'::jsonb
            OR COALESCE(v_item->'current'->'label_url', 'null'::jsonb) <> 'null'::jsonb THEN

@@ -36,7 +36,7 @@ const ADMIN2 = id('a9');
 const REP = USERS.rep;
 const SERVICE = 'service';
 // One product (parent) per case, each with its own EPA number; S* is a size of it carrying the same number.
-const CASES = ['hole', 'b1', 'b2', 'b3', 'r1', 'r2', 'c1', 'c2', 'c3', 'c4', 'c5'];
+const CASES = ['hole', 'b1', 'b2', 'b3', 'r1', 'r2', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
 const P = Object.fromEntries(CASES.map((k, i) => [k, id(`e${i + 1}`)]));
 const S = Object.fromEntries(CASES.map((k, i) => [k, id(`f${i + 1}`)]));
 const NUM = Object.fromEntries(CASES.map((k, i) => [k, `${701 + i}-1`]));
@@ -221,6 +221,14 @@ async function main() {
   refused(ADMIN, BATCH(c3), /EPA_BATCH_NOT_ELIGIBLE: label fact differs \(signal_word\); nothing was saved/);
   assert.equal(proposal(c3).status, 'proposed'); assert.equal(ingredients('c3'), 0);
   console.log('[epa-batch] C3: a label fact edited since the lookup: refused');
+
+  // C6: the registration is recorded as cancelled here after the lookup (EPA said it was not).
+  const c6 = propose('c6');
+  const v6 = scalar(`SELECT registration_version FROM public.epa_registrations WHERE epa_registration = '${NUM.c6}';`);
+  js(ADMIN2, `SELECT public.set_epa_registration('${NUM.c6}', ${v6}, '{"registration_status":"cancelled","cancelled_on":"2026-11-01"}'::jsonb, 'prover edit', NULL, '${key('e')}');`);
+  refused(ADMIN, BATCH(c6), /EPA_BATCH_NOT_ELIGIBLE: the registration is cancelled; nothing was saved/);
+  assert.equal(ingredients('c6'), 0);
+  console.log('[epa-batch] C6: registration cancelled since the lookup: refused');
 
   // C4 / C5: another lookup of the number is running, or one failed (rows as start/record_epa_lookup write them).
   const c4 = propose('c4');

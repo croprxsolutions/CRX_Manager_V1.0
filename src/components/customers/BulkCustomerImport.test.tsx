@@ -148,13 +148,14 @@ describe('BulkCustomerImport', () => {
   it('refuses unquoted thousands and bad acreage instead of saving the wrong number', async () => {
     const { container } = render(<BulkCustomerImport {...defaultProps} />);
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
-    fireEvent.change(input, { target: { files: [new File(['farm_name,total_acres,notes\nA Farm,1,200,x\nB Farm,12abc\nC Farm,"1,2"\nD Farm,0\nE Farm,0x10\n'], 'c.csv', { type: 'text/csv' })] } });
+    fireEvent.change(input, { target: { files: [new File([`farm_name,total_acres,notes\nA Farm,1,200,x\nB Farm,12abc\nC Farm,"1,2"\nD Farm,0\nE Farm,0x10\nF Farm,.5\nG Farm,${'9'.repeat(400)}\n`], 'c.csv', { type: 'text/csv' })] } });
     fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
     expect(await screen.findByText(/Row 2: More values than column headers/)).toBeInTheDocument();
     expect(screen.getByText('Row 3: Invalid total acres: 12abc')).toBeInTheDocument();
     expect(screen.getByText('Row 4: Invalid total acres: 1,2')).toBeInTheDocument();
     expect(screen.getByText('Row 6: Invalid total acres: 0x10')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Import 1 Customer(s)' })).toBeInTheDocument();
+    expect(screen.getByText(/^Row 8: Invalid total acres: 9{400}$/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import 2 Customer(s)' })).toBeInTheDocument(); // D (0) and F (.5)
   });
 
   it('makes an admin row with an unclear tier invalid instead of using the default', async () => {

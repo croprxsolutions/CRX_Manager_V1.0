@@ -41,7 +41,9 @@ const ACRE_FIELDS = ['total_acres', 'corn_acres', 'soybean_acres', 'other_acres'
 function parseAcres(value: string): number | null {
   const cleaned = /^\d{1,3}(,\d{3})+(\.\d+)?$/.test(value) ? value.replace(/,/g, '') : value;
   // Plain decimals only: Number() would also read "0x10" as 16 or "1e3" as 1000.
-  return /^\d+(\.\d+)?$/.test(cleaned) ? Number(cleaned) : null;
+  if (!/^(\d+(\.\d+)?|\.\d+)$/.test(cleaned)) return null;
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : null;
 }
 
 interface ValidationResult {
@@ -82,6 +84,11 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
+      // Any new pick, even a rejected one, retires the old preview and any parse still running.
+      parseRun.current++;
+      setParsing(false);
+      setValidation(null);
+      setUploadResults(null);
       if (selectedFile.size > 10 * 1024 * 1024) {
         toast('error', 'File too large. Maximum size is 10MB.');
         e.target.value = '';
@@ -96,10 +103,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
         setFile(null);
         return;
       }
-      parseRun.current++;
       setFile(selectedFile);
-      setValidation(null);
-      setUploadResults(null);
     }
   };
 
@@ -235,7 +239,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
       if (!isCSVFile(file)) {
         const ocrResult = await parseWithVisionOCR(file, defaultTier);
         if (run === parseRun.current) setValidation(ocrResult);
-        setParsing(false);
+        if (run === parseRun.current) setParsing(false);
         return;
       }
 
@@ -244,13 +248,13 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
 
       if (rows.length === 0) {
         toast('error', 'No valid data found in file');
-        setParsing(false);
+        if (run === parseRun.current) setParsing(false);
         return;
       }
 
       if (rows.length > MAX_ROWS) {
         toast('error', `File has ${rows.length} rows. Maximum is ${MAX_ROWS}. Please split your file into smaller batches.`);
-        setParsing(false);
+        if (run === parseRun.current) setParsing(false);
         return;
       }
 
@@ -264,7 +268,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
 
       if (!Object.values(fieldMapping).includes('farm_name')) {
         toast('error', 'Could not find farm name column. Ensure your CSV has a "farm_name" or "farm" column.');
-        setParsing(false);
+        if (run === parseRun.current) setParsing(false);
         return;
       }
 
@@ -343,7 +347,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
     } catch {
       toast('error', 'Failed to parse file. Please ensure it is a valid CSV.');
     }
-    setParsing(false);
+    if (run === parseRun.current) setParsing(false);
   };
 
   const handleUpload = async () => {
@@ -395,6 +399,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
   const handleClose = () => {
     if (uploading) return; // closing mid-import would hide which rows saved
     parseRun.current++;
+    setParsing(false);
     setFile(null);
     setValidation(null);
     setUploadResults(null);

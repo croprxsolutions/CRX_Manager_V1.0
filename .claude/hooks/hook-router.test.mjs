@@ -160,9 +160,10 @@ eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "git status" }
   eq(await warn({ number: 9, state: "OPEN", mergeStateStatus: "CLEAN" }), "", "clean PR is silent");
   eq(await warn({ number: 9, state: "MERGED", mergeStateStatus: "DIRTY" }), "", "closed PR is silent");
   eq(await warn(new Error("ETIMEDOUT")), "", "gh error or timeout is silent");
-  eq(pushDir('git -C "C:/a b" push', "C:/cwd").replace(/\\/g, "/"), "C:/a b", "git -C folder wins");
+  // Expected values go through path.resolve: CI runs on Linux, where "C:/a b" is a relative path.
+  eq(pushDir('git -C "C:/a b" push', "C:/cwd"), path.resolve("C:/cwd", "C:/a b"), "git -C folder wins");
   eq(pushDir("git push", "C:/cwd"), "C:/cwd", "plain push uses the tool cwd");
-  eq(pushDir("git -C C:/repoA status; git -C C:/repoB push origin HEAD", "C:/cwd").replace(/\\/g, "/"), "C:/repoB", "only the push's own -C counts");
+  eq(pushDir("git -C C:/repoA status; git -C C:/repoB push origin HEAD", "C:/cwd"), path.resolve("C:/cwd", "C:/repoB"), "only the push's own -C counts");
 }
 
 const claude = JSON.parse(readFileSync(path.join(ROOT, ".claude", "settings.json"), "utf8"));

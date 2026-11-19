@@ -22,6 +22,9 @@ describe('customerSplit', () => {
       { splits: [{ recipient: 'A', percentage: 60 }, { recipient: 'B', percentage: 30 }] },
       { splits: [{ recipient: ' ', percentage: 100 }] },
       { splits: [{ recipient: 'A', percentage: 60 }, { recipient: 'B', percentage: 40.004 }] },
+      { splits: [{ recipient: 'A', percentage: 60.000000001 }, { recipient: 'B', percentage: 40 }] },
+      // eslint-disable-next-line no-sparse-arrays
+      { splits: [, { recipient: 'A', percentage: 100 }] },
       { splits: 'A' },
       null,
       undefined,
@@ -34,6 +37,15 @@ describe('customerSplit', () => {
 describe('sameSplit', () => {
   it('ignores row order: the same people at the same percentages is the same split (Sol LOW)', () => {
     expect(sameSplit(s(['A', 60], ['B', 40]), s(['B', 40], ['A', 60]))).toBe(true);
+  });
+
+  it('tells NaN and Infinity apart (Sol LOW)', () => {
+    expect(sameSplit(s(['A', Number.NaN]), s(['A', Number.POSITIVE_INFINITY]))).toBe(false);
+  });
+
+  it('accepts shares in hundredths that add to exactly 100', () => {
+    expect(customerSplit(s(['A', 33.33], ['B', 33.33], ['C', 33.34]))).not.toBeNull();
+    expect(customerSplit(s(['A', 0.29], ['B', 99.71]))).not.toBeNull();
   });
 
   it('differs on any recipient or percentage', () => {

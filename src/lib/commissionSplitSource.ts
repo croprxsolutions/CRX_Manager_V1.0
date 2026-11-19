@@ -13,14 +13,16 @@ export function customerSplit(split: CommissionSplit | null | undefined): Commis
   const rowOk = (r: unknown) =>
     !!r && typeof r === 'object' && typeof (r as { recipient?: unknown }).recipient === 'string'
     && (r as { recipient: string }).recipient.trim() !== ''
-    && Number.isFinite(pct(r)) && pct(r) >= 0 && pct(r) <= 100 && Math.abs(pct(r) * 100 - cents(pct(r))) < 1e-6;
-  if (!split || !Array.isArray(split.splits) || !split.splits.every(rowOk)) return null;
+    && Number.isFinite(pct(r)) && pct(r) >= 0 && pct(r) <= 100 && cents(pct(r)) / 100 === pct(r);
+  // Array.from turns a hole into undefined, so a sparse list can't skip the row check (Sol LOW).
+  if (!split || !Array.isArray(split.splits) || !Array.from(split.splits).every(rowOk)) return null;
   const total = split.splits.reduce((sum, r) => sum + cents(r.percentage), 0);
   return split.splits.length === 0 || total === 10000 ? split : null;
 }
 
 /** Same recipients at the same percentages, in any row order (Sol LOW, 19 Nov). */
 export function sameSplit(a: CommissionSplit, b: CommissionSplit): boolean {
-  const key = (s: CommissionSplit) => JSON.stringify(s.splits.map(({ recipient, percentage }) => [recipient, percentage]).sort());
+  // String() keeps NaN and Infinity apart, where JSON would write both as null (Sol LOW).
+  const key = (s: CommissionSplit) => s.splits.map(({ recipient, percentage }) => `${recipient}\u0000${String(percentage)}`).sort().join('\u0001');
   return key(a) === key(b);
 }

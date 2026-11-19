@@ -582,10 +582,6 @@ export default function QuoteBuilder() {
   // (a touch that leaves the same split is not a change: Taha's test, 18 Nov).
   const [splitNote, setSplitNote] = useState<SplitNote>(null);
   const autoSplitRef = useRef<CommissionSplit>(NEW_QUOTE_SPLIT);
-  // The note for that split ("From X's split" or "X has no split"), shown again when a hand edit puts it back
-  // (Sol LOWs, 19 Nov); and the split editor, which takes focus when an offer is answered.
-  const autoNoteRef = useRef<SplitNote>(null);
-  const splitBoxRef = useRef<HTMLDivElement>(null);
   const [quoteNumber, setQuoteNumber] = useState('');
   // Only a new quote allocates a number; an existing quote's number arrives with its row.
   const [quoteNumberLoading, setQuoteNumberLoading] = useState(!id);
@@ -1528,7 +1524,6 @@ export default function QuoteBuilder() {
     commissionSplitTouchedRef.current = false;
     setSplitNote(null);
     autoSplitRef.current = q.commission_split ?? { splits: [] };
-    autoNoteRef.current = null;
     setQuoteCreatedAt(q.created_at || null);
     savedLineIdsRef.current = new Map(
       localSections.flatMap((s) => s.items)
@@ -1729,46 +1724,30 @@ export default function QuoteBuilder() {
   // factor of 1, so a tier change waits for them. With no lines there is nothing to reprice.
   const repriceBlocked = !referenceDataReady && sections.some((sec) => sec.items.length > 0);
 
-  // A new quote's split follows the picked customer (Mason, 17 Nov), empty when the customer has none. A split typed
-  // by hand, or a saved quote's, is only replaced when the user picks Use it.
+  // A new quote's split follows the picked customer (Mason, 17 Nov) while it is still what the app put there; a split
+  // changed by hand, or a saved quote's, is never replaced and nothing asks (Taha option A, 19 Nov: the offer
+  // machinery drew Sol HIGHs three rounds running). A touch that leaves the same split is not a change (Taha, 18 Nov).
   const applyCustomerSplit = (cust: QuoteCustomer) => {
-    const theirs = customerSplit(cust.default_commission_split);
     if (isEditing || !sameSplit(commissionSplit, autoSplitRef.current)) {
-      // Say why the split stayed when the customer has none to offer.
-      if (!theirs) setSplitNote({ kind: 'kept', customer: cust.farm_name });
-      else setSplitNote(sameSplit(theirs, commissionSplit) ? null : { kind: 'offer', customer: cust.farm_name, split: theirs });
+      setSplitNote(null);
       return;
     }
-    // A customer never given a split starts the blank row; an empty split is "no commission" and is taken as is.
+    const theirs = customerSplit(cust.default_commission_split);
     setCommissionSplit(theirs ?? NEW_QUOTE_SPLIT);
     autoSplitRef.current = theirs ?? NEW_QUOTE_SPLIT;
     commissionSplitTouchedRef.current = true;
-    autoNoteRef.current = theirs ? { kind: 'from', customer: cust.farm_name, split: theirs } : { kind: 'none', customer: cust.farm_name };
-    setSplitNote(autoNoteRef.current);
-  };
-  // The answered offer's buttons go away, so focus moves to the split itself (Sol LOW, 19 Nov).
-  const focusSplit = () => splitBoxRef.current?.querySelector<HTMLElement>('input, select, button')?.focus();
-  const takeOfferedSplit = () => {
-    if (splitNote?.kind !== 'offer') return;
-    setCommissionSplit(splitNote.split);
-    commissionSplitTouchedRef.current = true;
-    autoSplitRef.current = splitNote.split;
-    autoNoteRef.current = { kind: 'from', customer: splitNote.customer, split: splitNote.split };
-    setSplitNote(autoNoteRef.current);
-    focusSplit();
+    setSplitNote(theirs ? { kind: 'from', customer: cust.farm_name, split: theirs } : { kind: 'none', customer: cust.farm_name });
   };
 
   const handleCustomerChange = (cust: QuoteCustomer | null): boolean => {
     if (!cust) {
       setCustomerId('');
-      // An offer belongs to the customer it names: with no customer there is nothing to take (Luna, 18 Nov).
       setSplitNote(null);
       // A new quote's split that only came from that customer goes with them, so the next one can't inherit it
       // (Sol MED, 19 Nov). A split changed by hand stays.
       if (!isEditing && sameSplit(commissionSplit, autoSplitRef.current)) {
         setCommissionSplit(NEW_QUOTE_SPLIT);
         autoSplitRef.current = NEW_QUOTE_SPLIT;
-        autoNoteRef.current = null;
       }
       return true;
     }
@@ -4816,20 +4795,18 @@ export default function QuoteBuilder() {
           </div>
         </div>
         <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-4 border-t border-cream-dark pt-4 lg:grid-cols-2">
-          <div className="min-w-0" ref={splitBoxRef}>
+          <div className="min-w-0">
             <CommissionSplitEditor
               label="Commission split"
               value={commissionSplit}
               onChange={(val) => {
                 commissionSplitTouchedRef.current = true;
-                // Any hand edit answers a waiting offer, so Use it can't overwrite it (Luna MED); putting the app's
-                // split back shows its note again (Sol LOW, 19 Nov).
-                setSplitNote((note) => (note?.kind !== 'offer' && sameSplit(val, autoSplitRef.current) ? autoNoteRef.current : null));
+                setSplitNote(null);
                 setCommissionSplit(val);
               }}
               disabled={editLocked}
             />
-            <QuoteSplitNote note={splitNote} onUse={takeOfferedSplit} onKeep={() => { setSplitNote(null); focusSplit(); }} disabled={editLocked} />
+            <QuoteSplitNote note={splitNote} />
           </div>
           <div className="flex items-start justify-between gap-3 self-start rounded-lg border border-gray-200 px-3.5 py-1">
             <Switch

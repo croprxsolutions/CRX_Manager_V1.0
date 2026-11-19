@@ -20,6 +20,8 @@ describe('customerSplit', () => {
       { splits: [{ recipient: 'A', percentage: '100' }] },
       { splits: [{ recipient: 'A', percentage: -10 }, { recipient: 'B', percentage: 110 }] },
       { splits: [{ recipient: 'A', percentage: 60 }, { recipient: 'B', percentage: 30 }] },
+      { splits: [{ recipient: ' ', percentage: 100 }] },
+      { splits: [{ recipient: 'A', percentage: 60 }, { recipient: 'B', percentage: 40.004 }] },
       { splits: 'A' },
       null,
       undefined,

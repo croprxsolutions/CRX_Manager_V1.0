@@ -46,6 +46,7 @@ Final form: judge a function at its final form across `supabase/migrations/` and
 ### CHECK 5 — Actor-forgery anti-pattern
 Pattern: function accepts `p_performed_by uuid` (or similar actor parameter) but does NOT validate `p_performed_by IS DISTINCT FROM auth.uid()` and `RAISE EXCEPTION 'ACTOR_MISMATCH'`.
 Severity: **HIGH** — exact pattern from `unapply_credit_memo` (B5).
+Exempt: an internal helper only the database owner can run, meaning that at its final form across `supabase/migrations/` its EXECUTE is revoked from `PUBLIC`, `anon`, `authenticated` and `service_role`, and every caller passes an actor bound to `auth.uid()` (Mason, 2026-11-19). Name the revoke and the callers in your report. A helper any API role can still execute is not exempt.
 Canonical actor-binding pattern:
 ```sql
 v_actor := auth.uid();

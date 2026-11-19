@@ -49,6 +49,17 @@ BEGIN
       RAISE EXCEPTION 'INV_EDGE_PREFLIGHT: % is not the reviewed body', v_fn.sig;
     END IF;
   END LOOP;
+  -- A line saved before this migration keeps its 4-place baseline; where on-hand has more places it would complete
+  -- off the counted figure, so the migration waits until such a count is completed or cancelled (Luna r1).
+  IF EXISTS (SELECT 1
+               FROM public.cycle_count_items cci
+               JOIN public.cycle_counts cc ON cc.id = cci.cycle_count_id
+               JOIN public.inventory i ON i.id = cci.inventory_id
+              WHERE cc.status = 'in_progress'
+                AND cci.counted_qty IS NOT NULL
+                AND i.quantity_available <> round(i.quantity_available, 4)) THEN
+    RAISE EXCEPTION 'INV_EDGE_PREFLIGHT: an open stock count has a saved line on stock with more than 4 decimals; complete or cancel that count first';
+  END IF;
 END;
 $preflight$;
 
@@ -138,6 +149,10 @@ BEGIN
       IF FOUND THEN
         -- Exact (#1942): Complete adds counted - expected to current on-hand, so a rounded on-hand would miss the count.
         v_expected := COALESCE(v_on_hand, 0);
+        -- The baseline column no longer has a typmod to refuse a non-finite on-hand (Luna r1).
+        IF v_expected::text IN ('NaN', 'Infinity', '-Infinity') THEN
+          RAISE EXCEPTION 'CYCLE_COUNT_ON_HAND_INVALID: this product''s on-hand is not a number; fix the stock row first.' USING ERRCODE = 'check_violation';
+        END IF;
       END IF;
     END IF;
     v_variance := round(p_counted_qty, 4) - v_expected;
@@ -888,7 +903,7 @@ BEGIN
       FROM (VALUES
         ('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', '8e7c2672a06acf1d3be5874ad1a76241'),
         ('public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', '70e318a7f05d51d2cf6c3c6ea6226379'),
-        ('public.update_cycle_count_item(uuid,numeric,text,uuid,text)', '77811ce610822ba28295a5950b22ef95'),
+        ('public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'a0575bba2827e38fd4161ad3924e8978'),
         ('public._guard_order_item_delivery_lineage()', '8e4160c1209a9dde5518edbcef5d281b')
       ) AS x(sig, body_md5)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(x.sig)

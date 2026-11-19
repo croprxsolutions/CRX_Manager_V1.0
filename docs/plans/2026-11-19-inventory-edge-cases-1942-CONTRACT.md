@@ -38,6 +38,9 @@ keeps its `authenticated` and `service_role` execute: the count screen calls it,
   `update_cycle_count_item` stores the exact on-hand (no rounding), so `variance = counted - on-hand` exactly.
   Complete then lands on the counted figure, plus any stock move between Save and Complete, as today.
 - **Unchanged.** Its percentage and the rest of the body. The baseline is still taken when Save reaches the database.
+- **Luna r1.** A non-finite on-hand is refused (`CYCLE_COUNT_ON_HAND_INVALID`), since the column no longer refuses it.
+  The migration refuses to apply while an open count has a saved line on stock with more than 4 decimals; complete
+  or cancel that count first.
 
 ### C. The `app.admin_override` escape on order-line edits
 - **Fact.** `_guard_order_item_delivery_lineage` (BEFORE UPDATE OF `order_id`, `product_id` ON `order_items`) returns
@@ -98,10 +101,11 @@ keeps its `authenticated` and `service_role` execute: the count screen calls it,
   rewrite). Old stored expected and variance values keep their 4 places. Missing stock rows are created only by a
   completion, as today. No existing delivery, ledger row or flag is rewritten, so a past two-line shortage stays
   unflagged.
-- **Open counts at apply.** A count line saved before the apply keeps its 4-place baseline and completes as before.
+- **Open counts at apply.** A count line saved before the apply keeps its 4-place baseline. Where on-hand has 4 places
+  or fewer that baseline is exact, so it completes correctly. Where on-hand has more, the migration refuses to apply
+  until that count is completed or cancelled (Luna r1).
   - Pre-apply read-only check (UNVERIFIED): `SELECT count(*) FROM cycle_counts WHERE status = 'in_progress'`,
     expected 0.
-  - If it is not 0, re-save those lines after the apply.
 - **Timing.**
   - Two completions sharing products, with or without stock rows: one waits, with no deadlock.
   - A retry of a completion returns its saved receipt before any new check, because the wrapper's checks and row

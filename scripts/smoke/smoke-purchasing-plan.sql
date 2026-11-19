@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: the read-only Purchasing buy plan (bookings Phase A, PR 1b)
 -- ----------------------------------------------------------------------------
--- REQUIRES 20270127110000_booking_timing_purchasing_plan and 20270127150000 (P26-P30). Proof cases of
+-- REQUIRES 20270127110000_booking_timing_purchasing_plan and 20270128150000 (P26-P30). Proof cases of
 -- docs/plans/2026-11-17-bookings-phase-a-CONTRACT.md (v4) and plan v3, against
 -- get_purchasing_plan(12). Dates are relative to today (Chicago) so the chain never ages.
 --   P9   on hand 100, Firm 80 at +100, an open order of 50 (no delivery: needed today),
@@ -377,7 +377,7 @@ BEGIN
     v_admin, 'smk-pp21-' || v_suffix);
   INSERT INTO smk_pp_bookings VALUES ('P21', (v_res->>'quote_id')::uuid, v_res->'section_ids');
 
-  -- P26 (20270127150000, held stock never reads as free): one booking.
+  -- P26 (20270128150000, held stock never reads as free): one booking.
   --   _a Maybe at +60: product 28 (100), 29 (100), 30 (100), 33 (20); _b Firm at +400: product 31 (100);
   --   _c Firm, no date: product 32 (50); _d pre_plant, Likely, needed Dec 31 this year: product 34 (5);
   --   _e Firm at +30: product 35 (40), 37 (50), 38 (0); _f Maybe at +10: product 37 (50).
@@ -499,19 +499,26 @@ BEGIN
     v_admin, 'smk-pp29t-' || v_suffix);
   INSERT INTO smk_pp_bookings VALUES ('P29T', (v_res->>'quote_id')::uuid, v_res->'section_ids');
   -- P30, product 45: booking P30M Maybe 100 at +60 (held in full below); booking P30F Firm 100 at +20; no stock.
-  FOR v_i IN 1..2 LOOP
-    v_res := save_quote(NULL, jsonb_build_object(
-        'quote_number', '[SMOKE] PP30' || v_i || '-' || v_suffix, 'customer_id', v_customer, 'status', 'draft',
-        'tier', 1, 'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true),
-      jsonb_build_array(jsonb_build_object('client_key', '_a', 'section_name', 'P30', 'sort_order', 0,
-        'needed_by_date', v_t + CASE v_i WHEN 1 THEN 60 ELSE 20 END,
-        'confidence', CASE v_i WHEN 1 THEN 'maybe' ELSE 'firm' END,
-        'items', jsonb_build_array(jsonb_build_object('client_key', '_ka', 'product_id', v_p[45], 'sort_order', 0,
-          'calc_mode', 'units_direct', 'total_units_needed', 100, 'price_override', 20, 'price_per_unit', 20,
-          'current_cost', 6, 'unit_size', 'Gal', 'acres', 0)))),
-      v_admin, 'smk-pp30' || v_i || '-' || v_suffix);
-    INSERT INTO smk_pp_bookings VALUES (CASE v_i WHEN 1 THEN 'P30M' ELSE 'P30F' END, (v_res->>'quote_id')::uuid, v_res->'section_ids');
-  END LOOP;
+  v_res := save_quote(NULL, jsonb_build_object(
+      'quote_number', '[SMOKE] PP30M-' || v_suffix, 'customer_id', v_customer, 'status', 'draft',
+      'tier', 1, 'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true),
+    jsonb_build_array(jsonb_build_object('client_key', '_a', 'section_name', 'P30', 'sort_order', 0,
+      'needed_by_date', v_t + 60, 'confidence', 'maybe',
+      'items', jsonb_build_array(jsonb_build_object('client_key', '_ka', 'product_id', v_p[45], 'sort_order', 0,
+        'calc_mode', 'units_direct', 'total_units_needed', 100, 'price_override', 20, 'price_per_unit', 20,
+        'current_cost', 6, 'unit_size', 'Gal', 'acres', 0)))),
+    v_admin, 'smk-pp30m-' || v_suffix);
+  INSERT INTO smk_pp_bookings VALUES ('P30M', (v_res->>'quote_id')::uuid, v_res->'section_ids');
+  v_res := save_quote(NULL, jsonb_build_object(
+      'quote_number', '[SMOKE] PP30F-' || v_suffix, 'customer_id', v_customer, 'status', 'draft',
+      'tier', 1, 'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true),
+    jsonb_build_array(jsonb_build_object('client_key', '_a', 'section_name', 'P30', 'sort_order', 0,
+      'needed_by_date', v_t + 20, 'confidence', 'firm',
+      'items', jsonb_build_array(jsonb_build_object('client_key', '_ka', 'product_id', v_p[45], 'sort_order', 0,
+        'calc_mode', 'units_direct', 'total_units_needed', 100, 'price_override', 20, 'price_per_unit', 20,
+        'current_cost', 6, 'unit_size', 'Gal', 'acres', 0)))),
+    v_admin, 'smk-pp30f-' || v_suffix);
+  INSERT INTO smk_pp_bookings VALUES ('P30F', (v_res->>'quote_id')::uuid, v_res->'section_ids');
   INSERT INTO purchase_orders (po_number, vendor, status, expected_delivery_date, created_by)
   VALUES ('SMK-PP30-' || v_suffix, '[SMOKE] Vendor', 'submitted', v_t + 10, v_admin) RETURNING id INTO v_po;
   INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity_ordered, quantity_received, unit_cost, unit_size)
@@ -887,7 +894,7 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
-  -- P26 (20270127150000): held stock never reads as free; a hold never makes the plan buy on its own.
+  -- P26 (20270128150000): held stock never reads as free; a hold never makes the plan buy on its own.
   SELECT quote_id INTO v_q FROM smk_pp_bookings WHERE tag = 'P26';
   -- a: 100 on hand all held for the Maybe line, plus an order of 100 today: buy 100.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[28];
@@ -1041,7 +1048,7 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
-  -- P27 (20270127150000, #1977 MEDs): the P26 window section (pre_plant, needed Dec 31 this year).
+  -- P27 (20270128150000, #1977 MEDs): the P26 window section (pre_plant, needed Dec 31 this year).
   -- A window crossing New Year (start 12-31, end today) ends next year, so it is not yet on the review list
   -- (the old rule ended it today). Skipped on Dec 31 (the window then does not cross) and Feb 29 (not a month-day).
   SELECT (section_ids->>'_d')::uuid INTO v_s1 FROM smk_pp_bookings WHERE tag = 'P26';

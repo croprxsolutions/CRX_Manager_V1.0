@@ -1,5 +1,5 @@
 -- ============================================================================
--- 20270127150000_purchasing_plan_held_stock_never_free
+-- 20270128150000_purchasing_plan_held_stock_never_free
 -- Bookings Phase A follow-up (contract docs/plans/2026-11-18-purchasing-held-stock-CONTRACT.md).
 --
 -- WHY: get_purchasing_plan (20270127110000) dropped a crop-program hold whose booking books

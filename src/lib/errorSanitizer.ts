@@ -358,7 +358,7 @@ export function sanitizeError(error: unknown): string {
     const detail = message.slice('CUSTOMER_HAS_OPEN_WORK'.length).replace(/^:\s*/, '')
       .replace(/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '').trim();
     return detail ? `${detail.charAt(0).toUpperCase()}${detail.slice(1)}.`
-      : 'This customer still has open work (orders, deliveries, holds, quotes, invoices, spray jobs, blend tickets, returns or prepay money). Finish, bill or settle it before deactivating it.';
+      : 'This customer still has open work (orders, deliveries, holds, quotes, invoices, spray jobs, returns or prepay money). Finish, bill or settle it before deactivating it.';
   }
   // Rate lock (20261107060000), product parents (20261108120000), tote fill (20261117130000) and weights (20261207100000), chemistry (20261209100000), crop + timing choices (20261229120000): the server text after the token is the operator's answer.
   const rateRefusal = message.match(/^(?:PRODUCT_RATES_LOCKED|PRODUCT_RATES_STALE|PRODUCT_RATE_INVALID|PRODUCT_RATE_DUPLICATE_PRODUCT|PRODUCT_RATE_LOCK_UNCHANGED|PRODUCT_RATE_CORRECTION_NO_CHANGE|PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATES_NOT_LOCKED|PRODUCT_RATE_PREVIEW_CHANGED|PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK|REASON_TOO_LONG|PRODUCT_PARENT_[A-Z_]+|WORKBOOK_(?:WEIGHTS|INGREDIENTS)_REFUSED|WORKBOOK_NOTHING_TO_SAVE|TOTE_FILL_[A-Z_]+|PRODUCT_WEIGHT_[A-Z_]+|CHEMISTRY_[A-Z_]+|INGREDIENT_[A-Z_]+|COST_REFERENCE_[A-Z_]+|USE_TIMING_[A-Z_]+|REASON_REQUIRED|EVIDENCE_REQUIRED|EVIDENCE_TOO_LONG):\s*(.+)$/s)?.[1];

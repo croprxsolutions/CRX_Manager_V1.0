@@ -38,7 +38,7 @@ const C = Object.fromEntries(['order', 'partial', 'sched', 'inprog', 'hold', 'qd
   'posted', 'overdue', 'closed', 'clean', 'inactive', 'bulkok', 'many', 'dorder', 'qaccdel',
   'idraft', 'iunposted', 'jsched', 'jinprog', 'jdone', 'rapproved', 'rreceived', 'prepay',
   // Phase 2 (issue #2000).
-  'owner', 'splitpay', 'itemshare', 'sharedeliv', 'fieldshare', 'jvoided', 'jdeleted', 'ticket', 'ticketvoid', 'longname', 'closed2'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
+  'owner', 'splitpay', 'itemshare', 'sharedeliv', 'longname', 'closed2'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
 const N = Object.fromEntries(Object.keys(C).map((k) => [k, `[KI148] ${k}`]));
 
 // One statement as `role`, signed in as `uid` (null: no claims at all); the last output line is the answer.
@@ -56,20 +56,11 @@ const refused = (uid, sql, pattern, opts) => {
 };
 const active = (cid) => scalar(`SELECT is_active FROM public.customers WHERE id = '${cid}';`);
 
-// Phase 2 fixtures (issue #2000); ids: orders 5xx, jobs 6xx, invoices 7xx, blend tickets 8xx.
+// Phase 2 fixtures (issue #2000); ids: orders 5xx.
 const X = (n) => `'${id(n)}'`;
 function seed2(order) {
-  const inv = (n, cid, status, { job = 'NULL', ticket = 'NULL', deleted = 'NULL' } = {}) => `INSERT INTO public.invoices
-    (id, invoice_number, customer_id, status, posted_at, job_id, blend_ticket_id, deleted_at)
-    VALUES (${X(n)}, 'KI148-I${n}', '${cid}', '${status}', ${['draft', 'unposted', 'cancelled'].includes(status) ? 'NULL' : 'now()'}, ${job}, ${ticket}, ${deleted});`;
-  const job = (n, cid, status, invoice = 'NULL') => `INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, invoice_id)
-    VALUES (${X(n)}, 'KI148-J${n}', '${cid}', current_date, '${status}', ${invoice});`;
-  const ticket = (n, cid, review, payment, { job: j = 'NULL', deleted = 'NULL' } = {}) => `INSERT INTO public.blend_tickets
-    (id, ticket_number, uploaded_by, customer_id, review_status, payment_status, job_id, deleted_at)
-    VALUES (${X(n)}, 'KI148-T${n}', '${ADMIN}', '${cid}', '${review}', '${payment}', ${j}, ${deleted});`;
   const ord = (n, status) => `INSERT INTO public.orders (id, order_number, customer_id, status) VALUES (${X(n)}, 'KI148-O${n}', '${C.owner}', '${status}');`;
   const share = (n, cid) => `INSERT INTO public.order_shares (order_id, customer_id, customer_name, split_percentage, amount_cents) VALUES (${X(n)}, '${cid}', '${N.owner}', 50, 0);`;
-  const fshare = (n, cid) => `INSERT INTO public.job_field_shares (job_id, field_id, customer_id, split_pct) VALUES (${X(n)}, gen_random_uuid(), '${cid}', 50);`;
   return `
     -- Split payers: a share of another customer's open order, of one of its lines, of its undelivered delivery.
     ${ord('501', 'confirmed')} ${share('501', C.splitpay)}
@@ -77,35 +68,11 @@ function seed2(order) {
     INSERT INTO public.order_item_shares (order_item_id, customer_id, split_percentage) VALUES (${X('5f2')}, '${C.itemshare}', 50);
     ${ord('503', 'fulfilled')} ${share('503', C.sharedeliv)}
     INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, status) VALUES ('KI148-D503', ${X('503')}, '${C.owner}', '${ADMIN}', 'scheduled');
-    -- Field-split owner of another customer's scheduled job.
-    ${job('601', C.owner, 'scheduled')} ${fshare('601', C.fieldshare)}
-    -- Completed jobs whose only invoice is voided, or deleted: not billed.
-    ${inv('701', C.jvoided, 'voided')} ${job('602', C.jvoided, 'completed', X('701'))}
-    ${inv('702', C.jdeleted, 'paid', { deleted: 'now()' })} ${job('603', C.jdeleted, 'completed', X('702'))}
-    -- Approved unbilled blend tickets (one with only a voided invoice).
-    ${ticket('801', C.ticket, 'approved', 'unbilled')}
-    ${ticket('802', C.ticketvoid, 'approved', 'unbilled')} ${inv('703', C.ticketvoid, 'voided', { ticket: X('802') })}
     ${order(C.longname, 'confirmed')}
     UPDATE public.customers SET farm_name = '[KI148] ' || repeat('L', 100) WHERE id = '${C.longname}';
     -- closed2: none of this is open.
     INSERT INTO public.inventory_holds (product_id, customer_id, quantity, created_by, is_active) VALUES ('${PRODUCT}', '${C.closed2}', 0, '${ADMIN}', true);
-    ${ord('504', 'cancelled')} ${share('504', C.closed2)}
-    ${job('604', C.owner, 'cancelled')} ${fshare('604', C.closed2)}
-    -- A completed job billed through its blend ticket (Taha: it blocked for good).
-    ${job('605', C.closed2, 'completed')} ${ticket('803', C.closed2, 'approved', 'billed', { job: X('605') })}
-    ${inv('704', C.closed2, 'paid', { ticket: X('803') })}
-    -- A completed job billed by a split invoice made from it (invoices.job_id) with no jobs.invoice_id.
-    ${job('606', C.closed2, 'completed')} ${inv('705', C.closed2, 'paid', { job: X('606') })}
-    -- Tickets: one whose payment_status drifted but a live invoice bills it; one on an invoiced job (also field-shared).
-    ${ticket('804', C.closed2, 'approved', 'unbilled')} ${inv('706', C.closed2, 'paid', { ticket: X('804') })}
-    ${inv('707', C.closed2, 'paid')} ${job('607', C.closed2, 'invoiced', X('707'))}
-    ${ticket('805', C.closed2, 'approved', 'unbilled', { job: X('607') })} ${fshare('607', C.closed2)}
-    -- Astra #1: a ticket on a job billed only through jobs.invoice_id (no reverse link): one answer, billed.
-    ${inv('708', C.closed2, 'paid')} ${job('608', C.closed2, 'completed', X('708'))}
-    ${ticket('80b', C.closed2, 'approved', 'unbilled', { job: X('608') })}
-    ${ticket('806', C.closed2, 'approved', 'no_charge')} ${ticket('807', C.closed2, 'approved', 'prepaid')}
-    ${ticket('808', C.closed2, 'unreviewed', 'unbilled')} ${ticket('809', C.closed2, 'rejected', 'unbilled')}
-    ${ticket('80a', C.closed2, 'approved', 'unbilled', { deleted: 'now()' })}`;
+    ${ord('504', 'cancelled')} ${share('504', C.closed2)}`;
 }
 
 // Sol r4 (issue #2000): a hold "expiring today" turns expired at Chicago midnight. Never seed within 10 minutes of it.
@@ -256,10 +223,10 @@ async function main() {
   assert.equal(active(C.clean), 'f');
   console.log('KI148_DEACTIVATION_PROOF_PASS');
 
-  // Phase 2 (issue #2000): before the follow-up, the new kinds slip through and the billed-by-ticket job blocks.
-  for (const k of ['splitpay', 'itemshare', 'sharedeliv', 'fieldshare', 'jvoided', 'jdeleted', 'ticket', 'ticketvoid']) assert.equal(allowed(ADMIN, deactivate(C[k])), '1');
+  // Phase 2 (issue #2000): before the follow-up, split payers slip through and a zero hold blocks.
+  for (const k of ['splitpay', 'itemshare', 'sharedeliv']) assert.equal(allowed(ADMIN, deactivate(C[k])), '1');
   refused(ADMIN, deactivate(C.closed2), /CUSTOMER_HAS_OPEN_WORK/);
-  console.log('[ki148-2000] BEFORE: split payers, field-split owners, unbilled tickets and voided-invoice jobs deactivate; a job billed through its ticket blocks');
+  console.log('[ki148-2000] BEFORE: split payers deactivate; an active hold for zero blocks');
   const applyFollowup = () => docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'], { input: followup, allowFailure: true });
   const first = applyFollowup();
   assert.equal(first.status, 0, `follow-up failed:\n${first.stderr}`);
@@ -268,23 +235,21 @@ async function main() {
   console.log('[ki148-2000] follow-up applied; postflight passed; a second apply is refused');
 
   const kinds2 = { ...kinds, jsched: /1 open or unbilled spray job\(s\)\./, jinprog: /1 open or unbilled spray job\(s\)\./, jdone: /1 open or unbilled spray job\(s\)\./,
-    splitpay: /1 open order\(s\)\./, itemshare: /1 open order\(s\)\./, sharedeliv: /1 undelivered delivery\(ies\)\./,
-    fieldshare: /1 open or unbilled spray job\(s\)\./, jvoided: /1 open or unbilled spray job\(s\)\./, jdeleted: /1 open or unbilled spray job\(s\)\./,
-    ticket: /1 unbilled blend ticket\(s\)\./, ticketvoid: /1 unbilled blend ticket\(s\)\./ };
+    splitpay: /1 open order\(s\)\./, itemshare: /1 open order\(s\)\./, sharedeliv: /1 undelivered delivery\(ies\)\./ };
   for (const [k, pattern] of Object.entries(kinds2)) {
     refused(ADMIN, deactivate(C[k]), new RegExp(`CUSTOMER_HAS_OPEN_WORK: nothing was deactivated\\. \\[KI148\\] ${k} still has ${pattern.source}`));
     assert.equal(active(C[k]), 't');
   }
-  refused(REP, deactivate(C.fieldshare), /CUSTOMER_HAS_OPEN_WORK/);
-  refused(null, deactivate(C.ticket), /CUSTOMER_HAS_OPEN_WORK/, { role: 'service_role' });
-  console.log('[ki148-2000] refused: every phase-1 kind again (jobs now "open or unbilled spray job(s)"), a split payer of an open order, of an order line, of an undelivered delivery, a field-split owner of a scheduled job, a completed job whose invoice is voided or deleted, approved unbilled blend tickets (one with only a voided invoice); rep and service_role too');
+  refused(REP, deactivate(C.itemshare), /CUSTOMER_HAS_OPEN_WORK/);
+  refused(null, deactivate(C.splitpay), /CUSTOMER_HAS_OPEN_WORK/, { role: 'service_role' });
+  console.log('[ki148-2000] refused: every phase-1 kind again (jobs now "open or unbilled spray job(s)"), a split payer of an open order, of an order line, of an undelivered delivery; rep and service_role too');
   refused(ADMIN, deactivate(C.longname), /nothing was deactivated\. \[KI148\] L{51}… still has 1 open order\(s\)\./);
   console.log('[ki148-2000] a 108-character farm name is cut to 60 characters in the sentence');
 
   assert.equal(allowed(ADMIN, deactivate(C.closed2)), '1');
   assert.equal(allowed(REP, deactivate(C.closed2)), '1');
   assert.equal(allowed(ADMIN, deactivate(C.closed)), '1');
-  console.log('[ki148-2000] allowed (admin and rep): an active hold for zero, a share of a cancelled order, a ticket on a job billed only through its own invoice, a field share of a cancelled or invoiced job, a job billed through its blend ticket, a job billed by a split invoice, a ticket billed despite its unbilled flag, a ticket on an invoiced job, billed/no-charge/prepaid/unreviewed/rejected/deleted tickets; phase-1 closed work still allowed');
+  console.log('[ki148-2000] allowed (admin and rep): an active hold for zero, a share of a cancelled order; phase-1 closed work still allowed');
   console.log('KI148_FOLLOWUP_PROOF_PASS');
 }
 

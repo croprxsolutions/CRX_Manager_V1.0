@@ -6,20 +6,12 @@
 --   The deactivation guard now also counts, and stops miscounting:
 --   - Split payers: a customer with a share of another customer's open order (order_shares
 --     or order_item_shares) is refused while that order is open or its delivery undelivered.
---   - Field-split owners: a customer with a job_field_shares row on another customer's open or
---     unbilled spray job is refused.
---   - Approved blend tickets not yet billed (review_status approved, payment_status unbilled, as the
---     Unbilled Applications panel lists them), unless a live invoice bills the ticket or its job is billed.
---   - A completed job counts as billed only while it is billed: 'invoiced', or a live invoice (not
---     voided, cancelled or deleted) bills it through jobs.invoice_id, invoices.job_id, or one of its blend
---     tickets (the test transfer_job_to_invoice uses to refuse double billing). A job pointing at a voided
---     or deleted invoice is unbilled again; a job billed through its blend ticket no longer blocks forever.
 --   - A hold for zero (or less) no longer blocks; the hold test is `is_active = true`, the form the
 --     partial index idx_inventory_holds_customer uses. One Chicago date for the whole check.
---   - Wording: "open or unbilled spray job(s)", "unbilled blend ticket(s)"; a farm name over 60
---     characters shows its first 59 and "…".
---   Everything else in 20270128140000 is unchanged (quotes, invoices, returns, prepay: those
---   follow-ups belong to Taha's billing work until 2026-12-15 and are left as they are).
+--   - Wording: "open or unbilled spray job(s)"; a farm name over 60 characters shows its first 59 and "…".
+--   Everything else in 20270128140000 is unchanged, including which spray jobs count (quotes, invoices,
+--   returns, prepay, field-split job owners, blend tickets and when a job counts as billed decide who is
+--   billed for what: those follow-ups belong to Taha's billing work until 2026-12-15).
 --
 -- HOW: CREATE OR REPLACE of guard_customer_deactivation_open_work_20270128() only; same owner,
 --   SECURITY DEFINER, search_path, revoked EXECUTE and trigger. Still one statement, one snapshot,
@@ -49,9 +41,10 @@ BEGIN
   IF position('KI148_FOLLOWUP_V1' IN v_src) > 0 THEN
     RAISE EXCEPTION 'KI148_FOLLOWUP_PREFLIGHT: the follow-up guard is already in place';
   END IF;
-  -- Replace only the exact body 20270128140000 installed, never a different later version.
-  IF md5(v_src) <> '357ee3570f4d06cd260dbe061b290ef8' THEN
-    RAISE EXCEPTION 'KI148_FOLLOWUP_PREFLIGHT: the deactivation guard is not the 20270128140000 version (md5 %)', md5(v_src);
+  -- Replace only the exact body 20270128140000 installed, never a different later version. Carriage
+  -- returns are ignored: the repo stores the file with LF, a Windows checkout may run it with CRLF.
+  IF md5(replace(v_src, E'\r', '')) <> '357ee3570f4d06cd260dbe061b290ef8' THEN
+    RAISE EXCEPTION 'KI148_FOLLOWUP_PREFLIGHT: the deactivation guard is not the 20270128140000 version (md5 %)', md5(replace(v_src, E'\r', ''));
   END IF;
   -- Every column the new checks read must exist.
   IF (SELECT count(*) FROM information_schema.columns
@@ -60,11 +53,7 @@ BEGIN
            ('order_shares','order_id'), ('order_shares','customer_id'),
            ('order_item_shares','order_item_id'), ('order_item_shares','customer_id'),
            ('order_items','id'), ('order_items','order_id'),
-           ('job_field_shares','job_id'), ('job_field_shares','customer_id'),
-           ('jobs','id'), ('invoices','id'), ('invoices','job_id'), ('invoices','blend_ticket_id'),
-           ('blend_tickets','id'), ('blend_tickets','customer_id'), ('blend_tickets','job_id'),
-           ('blend_tickets','review_status'), ('blend_tickets','payment_status'), ('blend_tickets','deleted_at'),
-           ('inventory_holds','quantity'))) <> 19 THEN
+           ('inventory_holds','quantity'))) <> 7 THEN
     RAISE EXCEPTION 'KI148_FOLLOWUP_PREFLIGHT: a column the guard reads is missing';
   END IF;
 END
@@ -84,7 +73,6 @@ DECLARE
   v_quotes bigint;
   v_invoices bigint;
   v_jobs bigint;
-  v_tickets bigint;
   v_returns bigint;
   v_name text;
   v_today date;
@@ -107,27 +95,6 @@ BEGIN
     SELECT o.id, o.status, o.deleted_at FROM public.order_item_shares s
       JOIN public.order_items oi ON oi.id = s.order_item_id JOIN public.orders o ON o.id = oi.order_id
      WHERE s.customer_id = OLD.id
-  ), my_jobs AS (
-    -- Jobs the customer owns or holds a field share of (issue #2000: field-split owners).
-    SELECT j.id, j.status FROM public.jobs j WHERE j.customer_id = OLD.id AND j.deleted_at IS NULL
-    UNION
-    SELECT j.id, j.status FROM public.job_field_shares s JOIN public.jobs j ON j.id = s.job_id
-     WHERE s.customer_id = OLD.id AND j.deleted_at IS NULL
-  ), billed_jobs AS (
-    -- One definition for jobs and tickets: a job is billed while it is 'invoiced' or a live invoice (not
-    -- voided, cancelled or deleted) bills it: its own (jobs.invoice_id), a split invoice made from it
-    -- (invoices.job_id), or one for one of its blend tickets (transfer_job_to_invoice refuses it then).
-    SELECT j.id FROM public.jobs j
-     WHERE j.id IN (SELECT m.id FROM my_jobs m
-                    UNION
-                    SELECT bt.job_id FROM public.blend_tickets bt WHERE bt.customer_id = OLD.id AND bt.job_id IS NOT NULL)
-       AND (j.status = 'invoiced'
-            OR EXISTS (SELECT 1 FROM public.invoices i
-                        WHERE (i.id = j.invoice_id OR i.job_id = j.id)
-                          AND i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled'))
-            OR EXISTS (SELECT 1 FROM public.blend_tickets bt JOIN public.invoices i ON i.blend_ticket_id = bt.id
-                        WHERE bt.job_id = j.id AND bt.deleted_at IS NULL
-                          AND i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled')))
   )
   SELECT
     (SELECT count(*) FROM my_orders o WHERE o.deleted_at IS NULL AND o.status IN ('confirmed', 'partially_fulfilled')),
@@ -151,20 +118,13 @@ BEGIN
       WHERE i.customer_id = OLD.id AND i.deleted_at IS NULL
         -- Draft and unposted invoices still bill (Mason, 2026-11-19).
         AND i.status IN ('draft', 'unposted', 'posted', 'overdue')),
-    (SELECT count(*) FROM my_jobs j
-      WHERE j.status IN ('scheduled', 'in_progress')
-         OR (j.status = 'completed' AND j.id NOT IN (SELECT b.id FROM billed_jobs b))),
-    -- Approved, unbilled, undeleted tickets (as the Unbilled Applications panel lists them), unless a live
-    -- invoice bills the ticket or its job is billed (the blend-ticket invoice refuses a billed job).
-    (SELECT count(*) FROM public.blend_tickets bt
-      WHERE bt.customer_id = OLD.id AND bt.deleted_at IS NULL
-        AND bt.review_status = 'approved' AND bt.payment_status = 'unbilled'
-        AND NOT EXISTS (SELECT 1 FROM public.invoices i
-                         WHERE i.blend_ticket_id = bt.id AND i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled'))
-        AND (bt.job_id IS NULL OR bt.job_id NOT IN (SELECT b.id FROM billed_jobs b))),
+    -- Unchanged from 20270128140000: a completed job with no invoice has not been billed yet.
+    (SELECT count(*) FROM public.jobs j
+      WHERE j.customer_id = OLD.id AND j.deleted_at IS NULL
+        AND (j.status IN ('scheduled', 'in_progress') OR (j.status = 'completed' AND j.invoice_id IS NULL))),
     (SELECT count(*) FROM public.returns r
       WHERE r.customer_id = OLD.id AND r.deleted_at IS NULL AND r.status IN ('approved', 'received'))
-  INTO v_orders, v_deliveries, v_holds, v_quotes, v_invoices, v_jobs, v_tickets, v_returns;
+  INTO v_orders, v_deliveries, v_holds, v_quotes, v_invoices, v_jobs, v_returns;
   IF v_orders > 0 THEN v_open := v_open || format('%s open order(s)', v_orders); END IF;
   IF v_deliveries > 0 THEN v_open := v_open || format('%s undelivered delivery(ies)', v_deliveries); END IF;
   IF v_holds > 0 THEN v_open := v_open || format('%s active stock hold(s)', v_holds); END IF;
@@ -172,7 +132,6 @@ BEGIN
   -- No invoice count: the rep guard keeps invoice detail to itself for reps.
   IF v_invoices > 0 THEN v_open := v_open || 'open invoices'::text; END IF;
   IF v_jobs > 0 THEN v_open := v_open || format('%s open or unbilled spray job(s)', v_jobs); END IF;
-  IF v_tickets > 0 THEN v_open := v_open || format('%s unbilled blend ticket(s)', v_tickets); END IF;
   IF v_returns > 0 THEN v_open := v_open || format('%s return(s) awaiting credit', v_returns); END IF;
   -- No amount: the balance is the customer's money, not something this message needs to show.
   IF COALESCE(OLD.prepay_balance_cents, 0) <> 0 THEN v_open := v_open || 'prepay money on account'::text; END IF;

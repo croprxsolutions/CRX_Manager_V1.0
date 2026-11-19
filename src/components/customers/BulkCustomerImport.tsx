@@ -105,6 +105,29 @@ function parseAcres(value: string): number | null {
   return Number.isFinite(num) ? num : null;
 }
 
+/**
+ * An unquoted "1,200" that still fits the column count reads as 1 acre plus "200" in the next column.
+ * Returns the joined "1,200" for that shape (so the row is refused), else ''.
+ * shortcut: not checked when the next column is also acres ("500,300" is real total + corn acres),
+ * so "1,200" there still splits; upgrade if such files show up.
+ */
+function unquotedThousands({ cols, quoted }: Pick<CsvRecord, 'cols' | 'quoted'>, idx: number, nextField: string | undefined): string {
+  const next = cols[idx + 1];
+  if (quoted[idx] || quoted[idx + 1] || next === undefined) return '';
+  if (!/^\d{1,3}$/.test(cols[idx]) || !/^\d{3}(\.\d+)?$/.test(next)) return '';
+  return (ACRE_FIELDS as readonly string[]).includes(nextField ?? '') ? '' : `${cols[idx]},${next}`;
+}
+
+/** The acreage in cell idx, or the row's error message when it is not a clear number. */
+function readAcres(record: Pick<CsvRecord, 'cols' | 'quoted'>, idx: number, field: string, nextField: string | undefined): number | string {
+  const value = record.cols[idx];
+  const label = field.replace('_', ' ');
+  const num = parseAcres(value);
+  if (num === null) return `Invalid ${label}: ${value}`;
+  const split = unquotedThousands(record, idx, nextField);
+  return split ? `Unclear ${label}: ${split} has a comma but no quotes. Put quotes around numbers with commas, like "1,200"` : num;
+}
+
 interface ValidationResult {
   valid: ImportRow[];
   invalid: Array<{ row: number; error: string; data: Record<string, string> }>;
@@ -314,18 +337,9 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
               if (value) customer[field] = value;
             } else if ((ACRE_FIELDS as readonly string[]).includes(field)) {
               if (value) {
-                const num = parseAcres(value);
-                const next = cols[colIdx + 1];
-                if (num === null) badValue ||= `Invalid ${field.replace('_', ' ')}: ${value}`;
-                // An unquoted "1,200" that still fits the column count reads as 1 acre plus "200" in the next
-                // column. Refuse that shape rather than save 1 acre.
-                // shortcut: not checked when the next column is also acres ("500,300" is real total + corn
-                // acres), so "1,200" there still splits; upgrade if such files show up.
-                else if (/^\d{1,3}$/.test(value) && !quoted[colIdx] && next !== undefined && !quoted[colIdx + 1] &&
-                    /^\d{3}(\.\d+)?$/.test(next) && !(ACRE_FIELDS as readonly string[]).includes(fieldMapping[colIdx + 1])) {
-                  badValue ||= `Unclear ${field.replace('_', ' ')}: ${value},${next} has a comma but no quotes. Put quotes around numbers with commas, like "1,200"`;
-                }
-                else customer[field as typeof ACRE_FIELDS[number]] = num;
+                const acres = readAcres({ cols, quoted }, colIdx, field, fieldMapping[colIdx + 1]);
+                if (typeof acres === 'string') badValue ||= acres;
+                else customer[field as typeof ACRE_FIELDS[number]] = acres;
               }
             } else if (field === 'assigned_tier' && isAdmin) {
               // The tier sets prices: an unclear one is an invalid row, never a guess or the default.

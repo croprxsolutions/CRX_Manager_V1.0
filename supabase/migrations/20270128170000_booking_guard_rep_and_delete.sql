@@ -25,7 +25,8 @@
 --      Apply this file as one transaction, as every migration is: the postflight can refuse after the replacements.
 --   Rule 1 checks the rep against every booking a job names (its quote_id and its section's booking; Sol r1), with
 --      those bookings locked FOR SHARE (Sol r2). A job reopened from completed or invoiced (an admin override) on a
---      deleted booking, or one closed short, declined, expired or cancelled, is refused BOOKING_CLOSED (Sol HIGH r2, r3).
+--      deleted or closed booking (the scheduler's closed statuses) is refused BOOKING_CLOSED (Sol HIGH r2, r3; Taha).
+--   The apply holds quotes and jobs in SHARE ROW EXCLUSIVE mode, so no write lands between its checks (Sol r5).
 --   Postflight refuses the apply if a booking deleted earlier still has a scheduled or in-progress job (Sol HIGH r3).
 --   Pre- and postflight pin both triggers' timing, events, columns, function and absence of a WHEN clause (Sol r1).
 --   Every other line of both functions is its 20270127120000 body (pinned below by md5).
@@ -40,6 +41,9 @@
 --   as BEFORE UPDATE OF status, customer_id. That reopens both gaps.
 
 SET LOCAL lock_timeout = '5s';
+-- Sol r2 MED, r5 HIGH: hold off every booking and job write for the apply, so a write in flight finishes first and
+-- none lands between the preflight, the replacements and the postflight scan (a few hundred ms).
+LOCK TABLE public.quotes, public.jobs IN SHARE ROW EXCLUSIVE MODE;
 
 DO $preflight$
 BEGIN
@@ -116,12 +120,13 @@ BEGIN
         USING ERRCODE = 'P0001';
     END IF;
   END IF;
-  -- Sol HIGH r2, r3: a booking can now be deleted once its job is completed, and closed short, declined, expired or
-  -- cancelled (each releases its holds); an override that reopens that job (completed or invoiced back to scheduled
-  -- or in progress) must not leave live work on such a booking. The bookings are locked first (in id order), so a
-  -- delete or close running at the same time is waited for, and then refused because the job is live.
+  -- Sol HIGH r2, r3; Luna HIGH r9 (Taha 2026-11-20, "refuse all closed"): a booking can be deleted or closed once its
+  -- job is completed; an override that reopens that job (completed or invoiced back to scheduled or in progress, and
+  -- not deleted) must not leave live work on it. Same closed statuses the scheduler refuses.
+  -- The bookings are locked first (in id order), so a delete or close running at the same time is waited for, and
+  -- then refused because the job is live.
   IF TG_OP = 'UPDATE' AND OLD.status IN ('completed', 'invoiced') AND NEW.status IN ('scheduled', 'in_progress')
-     AND (NEW.quote_id IS NOT NULL OR NEW.quote_section_id IS NOT NULL) THEN
+     AND NEW.deleted_at IS NULL AND (NEW.quote_id IS NOT NULL OR NEW.quote_section_id IS NOT NULL) THEN
     PERFORM 1 FROM public.quotes q
     WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
     ORDER BY q.id
@@ -129,7 +134,8 @@ BEGIN
     SELECT q.quote_number, CASE WHEN q.deleted_at IS NOT NULL THEN 'deleted' ELSE q.status END AS state INTO v_quote
     FROM public.quotes q
     WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
-      AND (q.deleted_at IS NOT NULL OR q.status IN ('closed_short', 'declined', 'expired', 'cancelled'))
+      AND (q.deleted_at IS NOT NULL
+           OR q.status IN ('accepted', 'declined', 'expired', 'cancelled', 'closed_by_application', 'closed_short'))
     ORDER BY q.quote_number
     LIMIT 1;
     IF FOUND THEN
@@ -333,7 +339,7 @@ DECLARE
 BEGIN
   FOR v_g IN SELECT * FROM (VALUES
       ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', '9beb84454834da47d80e2c2a05a8a25d'),
-      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', '0b9c1774f2602bc299fb54ebc2c6e756')) AS g(fn, tbl, tg, body_md5)
+      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', '08a8fed5fb807e1763cf40886078fc4c')) AS g(fn, tbl, tg, body_md5)
   LOOP
     SELECT * INTO v_p FROM pg_proc WHERE oid = v_g.fn::regprocedure;
     IF v_p.proowner <> 'postgres'::regrole OR NOT v_p.prosecdef

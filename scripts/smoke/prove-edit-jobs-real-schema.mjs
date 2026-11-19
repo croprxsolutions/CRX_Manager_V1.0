@@ -290,6 +290,11 @@ function seed() {
   raw(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
     UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id IN ('${REP}', '${REP2}');
     UPDATE public.profiles SET role = 'applicator', is_active = true WHERE id = '${APPL}';
+    UPDATE public.profiles SET role = 'admin', is_active = true
+     WHERE id IN ('e1100000-0000-4000-8000-0000000000a5', '4c4d0000-0000-4000-8000-0000000000a1', '4c4d0000-0000-4000-8000-0000000000a2');
+    UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '4c4d0000-0000-4000-8000-0000000000b1';
+    UPDATE public.profiles SET role = 'applicator', is_active = true
+     WHERE id IN ('e1100000-0000-4000-8000-0000000000d6', '4c4d0000-0000-4000-8000-0000000000c1');
     DELETE FROM public.unit_conversions;
     INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};`);
 }

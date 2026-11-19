@@ -120,6 +120,7 @@ Releases of CRX Manager, newest first.
 * bring staging up to main (replaces #1742) (#1750)
 
 #### 🧩 Other
+* rls reviewer CHECK 4: final form + revoked helpers (release #1990) (#2006)
 * wait longer for slow GitHub (merge gate 25s/call, Sol preflight 60s) (#1962)
 * Quotes redesign 4/4: preview, PDF and bulk import (#1901)
 * Quotes redesign 3/4: quote builder (#1900)

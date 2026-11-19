@@ -36,6 +36,7 @@ Releases of CRX Manager, newest first.
 * environment banner and tab title prefix (STAGING amber, LOCAL blue) (#1714)
 
 #### 🐛 Bug Fixes
+* sql-column-check covers comma FROM lists, three-part and quoted names (#1906) (#2033)
 * booked job completes only by its rep or an admin; no booking delete with a live job (#1990 Sol 3, Sol 4) (#2026)
 * KI-81 unit — never bill a quote price in a unit the product is no longer stocked in (v0.1.0 Sol HIGH) (#2025)
 * db-apply stops on KI-137 while its rows still need it; a moved one-shot entry is allowed (v0.1.0 Sol 1 + 5) (#2015)

@@ -130,4 +130,5 @@ MED:      <count>
 
 - The schema registry is the source of truth, but it's a snapshot. If a check feels ambiguous, say "Verify against live DB via Supabase MCP" rather than guessing.
 - Do NOT modify any files. You are read-only.
+- Final form (Mason, 2026-11-19): when a later migration file in `supabase/migrations/` fixes a defect in this file's function or trigger, judge it at that final form: report it as MED naming the later file, not BLOCKER/HIGH. Exception: a defect that can make this file's OWN apply fail or write wrong data before the later file runs (a backfill or one-time step inside this file) keeps its severity; say what live condition would trigger it so it can be checked read-only before the apply.
 - If you find ZERO drift issues, recommend the orchestrator proceed to `rls-security-reviewer` (the other gate) before applying.

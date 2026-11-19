@@ -17,6 +17,54 @@
 ## 2026-11-18 — Security batch: refuse, never relabel, existing password-reset activity rows (#1981)
 
 **Decision (Mason, in chat, 2026-11-18), after Sol round 4 on #1981 raised a HIGH on the reset-audit rows (third round on that mechanism).** Migration `20270127130000` no longer relabels earlier `auth_password_reset*` activity rows as `unverified_`: its preflight refuses to apply while any such row exists, and a person reviews them first. Chosen over keeping the relabel, which would have mislabelled genuine server records on a re-apply after rollback. Live had 0 such rows on 2026-11-18. Sol round 5 on #1981 may run.
+## 2026-11-19 — #1974: Mason owner-accepted 3 Sol finding(s) at `a84b2ab1e795`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1974 at `a84b2ab1e795` (base `0c63a967772d`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270127120000_booking_live_job_guard.sql:186`, text sha256 `fb32d1c770179a1a` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen in our buisness (ref ef24b79ecb30)
+- Finding 2 (HIGH) at `supabase/migrations/20270127120000_booking_live_job_guard.sql:97`, text sha256 `3e9eed573b6c94b8` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen in our buisness (ref 8d6231b9e781)
+- Finding 3 (HIGH) at `docs/manual/DECISION_LOG.md:11`, text sha256 `72ac1cc3159989e0` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business) (ref a7d915179b07)
+
+## 2026-11-19 — #1974 may have a ninth Sol round
+
+**Decision (Mason, in chat, 2026-11-19: "Approve round 9").** PR #1974 (#1959 booking live-job guard) may have one more Sol round (round 9).
+**Why:** round 8 was spent on `cf833149` by an earlier session that saved no proof, and the head then had to take a merge of `staging` (GitHub cannot apply the DECISION_LOG union merge) plus the decision-log note below. No migration or app code of #1974 changed.
+
+## 2026-11-18 — #1974: answers to Taha's re-review (admin path; closing with a scheduled job)
+
+**Decision (Mason, in chat, 2026-11-18: "1 yes I agree" / "Warn don't block").**
+- A rep can't decline a booking whose linked job is completed. The intended fix is the admin path: with `app.admin_override` on, cancel the job, then decline (or close the booking short or as applied). No dedicated admin button.
+- Closing a booking as applied while a job on it is still scheduled stays allowed; the screen should warn first. Not part of #1974 (it doesn't touch `close_quote_as_applied`); a follow-up.
+- Taha's LOW (a job linked only by booking skips the scheduler's section and planned checks) is at the line Mason owner-accepted in Sol round 7 (`20270127120000_booking_live_job_guard.sql:178`), so it is treated as covered by that acceptance.
+
+## 2026-11-18 — #1974 may have an eighth Sol round to replace a lost proof
+
+**Decision (Mason, in chat, 2026-11-18: "I approve the 8th round").** PR #1974 (#1959 booking live-job guard) may have one more Sol round (round 8).
+**Why:** the owner-accepted Sol proof for #1974 lived in the folder of the session that built it, which was deleted; it could not be carried across the later `staging` merge, so the merge gate had no proof. No code changed since Mason's acceptance.
+**What it does:** unlocks one full Sol review of the current head. If Sol raises the finding Mason already accepted, he re-accepts it with `accept <code>`; any new BLOCKER/HIGH goes back to him. Every other gate is unchanged.
+
+## 2026-11-18 — #1974: Mason owner-accepted 1 Sol finding(s) at `c465339bc70c`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1974 at `c465339bc70c` (base `59a711b8cd8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270127120000_booking_live_job_guard.sql:178`, text sha256 `2a84b5eee3c4c51b` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref b798ec12d11b)
+
+## 2026-11-18 — Sol round 5 on PR #1974 (#1959 booking live-job guard)
+
+**Decision (Mason, in chat, 2026-11-18: "yes, run Sol round 5").** Sol round 4 on PR #1974 found a HIGH on the nightly alert (planned bookings, the only kind the scheduler makes jobs from, were left out) and a MED on section id renames; both are fixed. This is a new finding area, not the section-move mechanism Mason already ruled on, so he approved one more Sol round rather than a re-plan. Later the same day (Mason, in chat: "i approve up to 3 more rounds before coming to me") he widened this to up to three more review rounds on PR #1974 (Sol rounds 5-7) before the stop-and-ask rule applies again.
+
+## 2026-11-18 — Bookings with a live spray job: the database enforces the rules; nightly expiry skips them; Cancel blocked (#1959)
+
+**Decision (Mason, in chat, 2026-11-18: "yes to both").**
+- The nightly auto-expire skips a past-date booking that has a live spray job (not cancelled, not deleted) and sends its rep the existing "Booking past its date" alert once per expiry date, instead of failing the night's batch.
+- Cancelling a booking is blocked while a live spray job comes from it, with the same "cancel the job first" message as accept, decline and expire (extends the 2026-11-17 rule).
+- **Mason, 2026-11-18 ("Let it close (Recommended)"):** a booking may still close as accepted, even with a live spray job, once every booked product is fully drawn onto orders; that is how a Partial Order closes a booking on its last draw. Without this, that sale would fail.
+- **Mason, 2026-11-18 (typed in chat: "A"):** a live spray job's link to its booking and section is fixed. To move a job to another booking, cancel it and schedule a new one; a section with a live job stays on its booking.
+- **Mason, 2026-11-18 (typed in chat: "close it"):** that includes a section deleted and re-created under the same id: it can only come back on the booking its job came from (Sol round 3).
+- **Mason, 2026-11-18 ("Require both (Recommended)", relayed):** every spray job made from a booking section must also name that booking; the database refuses one that does not. The scheduler already does this; live had no section-linked job breaking it.
+- The rules (no accept, decline, expire or cancel, and no customer change, while a live job exists) now hold in the database for every write path, not only the booking save. Contract: `docs/plans/2026-11-18-booking-live-job-guard-CONTRACT.md`.
 ## 2026-11-18 — #1982 may have a fifth Sol round; the cycle-count page locks behind its confirmations
 
 **Decision (Mason, in chat, 2026-11-18: "Yes, round 5").** PR #1982 (cycle-count confirmations open on top of the count window) may have one more Sol round (round 5).

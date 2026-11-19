@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-19 — #1985: two more Sol rounds for the MOA-1 group load
+
+**Decision (Mason, 2026-11-19, in chat).** PR #1985 may have up to two more Sol rounds (rounds 5 and 6). Since round 4 the load's SQL is unchanged: the branch only merged staging and re-dated the migration file. The load stays as built: it matches ingredients by exact CAS number only and has no in-migration readiness check (Mason, 2026-11-18). It merges into staging only after release PR #1990 is in main and the live EPA batch fill has run.
+
 ## 2026-11-18 — #1985: Mason owner-accepted 2 Sol finding(s) at `9f609cefac7e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1985 at `9f609cefac7e` (base `5f87729d2685`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

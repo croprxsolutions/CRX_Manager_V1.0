@@ -68,21 +68,14 @@ BEGIN
       NEW.job_number
       USING ERRCODE = 'P0001';
   END IF;
-  IF NEW.deleted_at IS NOT NULL OR NEW.status = 'cancelled' THEN
-    RETURN NEW;
-  END IF;
-  -- Sol HIGH r5: this trigger runs before the jobs row policy, so for a signed-in caller who is neither admin
-  -- nor sales rep (who cannot read bookings) every refusal below is replaced by the row policy's own refusal,
-  -- revealing no booking number or status. The checks still run for them (fail closed).
-  v_hide := auth.uid() IS NOT NULL AND NOT (public.is_admin() OR public.is_sales_rep());
-  BEGIN
   -- PR-D1 (#1990 Sol 3; Mason 2026-11-19): a completed job holds its booking open until an admin clears it, and
   -- any sales rep may update any job (jobs_update), so a rep could block another rep's booking. Once a job is
   -- linked to a booking, only that booking's rep (quotes.created_by, the owner the quotes row policy uses) or an
   -- admin moves it out of a live status into completed (or invoiced, reachable from there only by an override).
   -- completed -> invoiced is billing: the job already holds the booking, so that move is not checked (Luna r1).
   -- Applicators get here only through complete_job, which already limits them to their own job, so only sales
-  -- reps are checked; system sessions (no auth.uid()) stay exempt.
+  -- reps are checked; system sessions (no auth.uid()) stay exempt. Checked before the deleted/cancelled return, so
+  -- completing and soft-deleting in one statement is refused too (attack F1).
   IF TG_OP = 'UPDATE' AND NEW.status IN ('completed', 'invoiced') AND OLD.status NOT IN ('completed', 'invoiced')
      AND (NEW.quote_id IS NOT NULL OR NEW.quote_section_id IS NOT NULL)
      AND auth.uid() IS NOT NULL AND NOT public.is_admin() AND public.is_sales_rep() THEN
@@ -95,6 +88,14 @@ BEGIN
         USING ERRCODE = 'P0001';
     END IF;
   END IF;
+  IF NEW.deleted_at IS NOT NULL OR NEW.status = 'cancelled' THEN
+    RETURN NEW;
+  END IF;
+  -- Sol HIGH r5: this trigger runs before the jobs row policy, so for a signed-in caller who is neither admin
+  -- nor sales rep (who cannot read bookings) every refusal below is replaced by the row policy's own refusal,
+  -- revealing no booking number or status. The checks still run for them (fail closed).
+  v_hide := auth.uid() IS NOT NULL AND NOT (public.is_admin() OR public.is_sales_rep());
+  BEGIN
   -- A live job that stays live with the same links and customer needs no re-check; one first gaining a link does (Luna HIGH).
   IF TG_OP = 'UPDATE' AND OLD.deleted_at IS NULL AND OLD.status <> 'cancelled'
      AND NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id AND NEW.quote_section_id IS NOT DISTINCT FROM OLD.quote_section_id
@@ -271,7 +272,7 @@ DECLARE
 BEGIN
   FOR v_g IN SELECT * FROM (VALUES
       ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', 'cannot be deleted. Cancel or complete the job first.', 'cbd9ddb81d3572caaf13ad72b89141a9'),
-      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', '29cb6c9157e10ad83e909bae1a10a7b9')) AS g(fn, tbl, tg, marker, body_md5)
+      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', '67ee48a537da881e397e101b9cb394d2')) AS g(fn, tbl, tg, marker, body_md5)
   LOOP
     SELECT * INTO v_p FROM pg_proc WHERE oid = v_g.fn::regprocedure;
     IF v_p.proowner <> 'postgres'::regrole OR NOT v_p.prosecdef

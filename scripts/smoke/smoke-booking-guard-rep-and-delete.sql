@@ -4,7 +4,8 @@
 -- REQUIRES 20270128170000_booking_guard_rep_and_delete. Booking A belongs to rep A and has a scheduled spray
 -- job made from its section:
 --   N1  rep B can start that job (in_progress stays cancellable by any rep) but cannot mark it completed
---       (BOOKING_NOT_YOURS; jobs move scheduled -> in_progress -> completed -> invoiced)
+--       (BOOKING_NOT_YOURS; jobs move scheduled -> in_progress -> completed -> invoiced), not even while
+--       soft-deleting it in the same update (N1b)
 --   N2  rep A (the booking's rep), an admin, a system session (no auth.uid()) and the job's applicator (as
 --       complete_job runs it) can each mark it completed
 --   D1  rep A cannot soft-delete booking A while the job is scheduled or in progress (BOOKING_HAS_JOB)
@@ -84,6 +85,16 @@ BEGIN
   IF v_err IS NULL OR v_err <> 'BOOKING_NOT_YOURS: spray job SMK-D1-' || v_sfx || ' comes from booking [SMOKE] D1-A-' || v_sfx
        || ', which is another rep''s, so only that rep or an admin can mark it completed.' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (N1) rep B completing rep A''s booked job was not refused BOOKING_NOT_YOURS: %', v_err;
+  END IF;
+  v_n := v_n + 1;
+  -- N1b (attack F1). Nor by completing and soft-deleting it in the same statement.
+  v_err := NULL;
+  BEGIN
+    UPDATE jobs SET status = 'completed', deleted_at = now() WHERE id = v_job;
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+  END;
+  IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_NOT_YOURS: spray job SMK-D1-%' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (N1b) rep B completing and deleting rep A''s booked job in one update was not refused: %', v_err;
   END IF;
   v_n := v_n + 1;
   IF (SELECT status FROM jobs WHERE id = v_job) <> 'in_progress' THEN

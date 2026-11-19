@@ -53,6 +53,19 @@ export async function commitEpaProposal(
   return assertRpcResult<EpaCommitResult>(data, 'commit_epa_proposal');
 }
 
+/** The batch fill's save: the database re-checks, under the save's own locks, that the product still has exactly this
+ * one EPA number, no other proposal and no ingredients, and refuses with EPA_BATCH_NOT_ELIGIBLE otherwise (#1976). */
+export async function commitEpaProposalBatch(
+  proposalId: string, expectedVersion: number, decisions: EpaDecision[], idempotencyKey: string,
+): Promise<EpaCommitResult> {
+  const { data, error } = await supabaseUntyped.rpc('commit_epa_proposal_batch', {
+    p_proposal_id: proposalId, p_expected_proposal_version: expectedVersion, p_decisions: decisions,
+    p_idempotency_key: idempotencyKey,
+  });
+  if (error) throw error;
+  return assertRpcResult<EpaCommitResult>(data, 'commit_epa_proposal_batch');
+}
+
 export async function rejectEpaProposal(proposalId: string, expectedVersion: number, reason: string, idempotencyKey: string): Promise<void> {
   const { data, error } = await supabaseUntyped.rpc('reject_epa_proposal', {
     p_proposal_id: proposalId, p_expected_proposal_version: expectedVersion, p_reason: reason, p_idempotency_key: idempotencyKey,

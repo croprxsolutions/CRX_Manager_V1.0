@@ -134,6 +134,8 @@ Rule changes adopted (supersede §2 where they differ):
 - **Exactly-one-number race (F7) and concurrent supersede (F9, F10):** re-read the number count and open proposals in the
   browser immediately before start and before commit; a remaining race needs two admins acting on the same product in
   the same seconds. Accepted residual risk (two admins total), not closed server-side; §2 wording corrected.
+  **Closed server-side 2026-11-19 (issue #1976):** the batch now saves through `commit_epa_proposal_batch`
+  (`20270130100000`), which re-checks one number, no other proposal and no ingredients under the save's own locks.
 - **Held rules (F5, F6):** §2 overstated. Actual: chemistry is version-checked from *recording*, and registration changes
   hold only when a label item is accepted. Batch re-reads both before commit.
 - **Result identity (F23):** the loop requires `proposal_id` on a proposal outcome and re-fetches that proposal, checking

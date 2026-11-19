@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Upload, CheckCircle, AlertCircle, FileText, Sparkles } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
@@ -76,6 +76,8 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
   const [uploading, setUploading] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [uploadResults, setUploadResults] = useState<{ success: number; failed: FailedRow[]; skipped: number } | null>(null);
+  // Bumped when the file changes or the modal closes, so a slow parse of an older file is dropped.
+  const parseRun = useRef(0);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -94,6 +96,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
         setFile(null);
         return;
       }
+      parseRun.current++;
       setFile(selectedFile);
       setValidation(null);
       setUploadResults(null);
@@ -222,6 +225,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
       toast('error', 'Your profile is still loading. Try again in a moment.');
       return;
     }
+    const run = ++parseRun.current;
     setParsing(true);
 
     try {
@@ -230,7 +234,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
       // Route: CSV → client-side parser, PDF/Image → Vision OCR
       if (!isCSVFile(file)) {
         const ocrResult = await parseWithVisionOCR(file, defaultTier);
-        setValidation(ocrResult);
+        if (run === parseRun.current) setValidation(ocrResult);
         setParsing(false);
         return;
       }
@@ -336,7 +340,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
         valid.push({ ...(customer as ParsedCustomer), row: line, key: crypto.randomUUID() });
       });
 
-      setValidation({ valid, invalid });
+      if (run === parseRun.current) setValidation({ valid, invalid });
     } catch {
       toast('error', 'Failed to parse file. Please ensure it is a valid CSV.');
     }
@@ -391,6 +395,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
 
   const handleClose = () => {
     if (uploading) return; // closing mid-import would hide which rows saved
+    parseRun.current++;
     setFile(null);
     setValidation(null);
     setUploadResults(null);
@@ -547,6 +552,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
                 variant="secondary"
                 disabled={uploading}
                 onClick={() => {
+                  parseRun.current++;
                   setFile(null);
                   setValidation(null);
                 }}

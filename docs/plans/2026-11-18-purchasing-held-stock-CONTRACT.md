@@ -5,7 +5,7 @@ Read at `origin/staging` `a93fb9e85`. Fixes Sol round 2 HIGH on #1980 and two DB
 ## Decision (Mason, in chat, 2026-11-18: "1")
 
 Reverses the 2026-11-18 DECISION_LOG rule (2) "a Maybe booking's held stock follows its confidence".
-**Held stock always counts as spoken for, but a booking's hold never makes the plan buy on its own.** If more is
+**Held stock always counts as spoken for, but a hold covering its own booking's (or job's) lines never makes the plan buy on its own.** (A draft booking's hold, or one with no counted line of the product, still counts today as before.) If more is
 held than the shelf has, the unbacked part stays as the booking line (its own date and confidence), as today.
 
 ## Outcome and authority

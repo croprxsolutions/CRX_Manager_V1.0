@@ -70,6 +70,7 @@ DECLARE
   v_plan jsonb;
   v_x jsonb;
   v_err text;
+  v_d date;
   v_n int := 0;
 BEGIN
   SELECT id INTO v_admin FROM profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at LIMIT 1;
@@ -452,7 +453,9 @@ BEGIN
   SELECT v_p[x.i], v_customer, x.q, 'crop_program', v_q, v_admin, true
     FROM (VALUES (28, 100), (29, 100), (30, 100), (31, 100), (32, 50), (33, 20), (35, 100), (37, 50)) x(i, q);
   INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active)
-  VALUES (v_p[33], v_customer, 30, 'manual', v_q, v_admin, true);
+  VALUES (v_p[33], v_customer, 30, 'manual', v_q, v_admin, true),
+  -- A legacy hold whose quantity is not a number is ignored (P26g still buys exactly 60).
+         (v_p[35], v_customer, 'NaN'::numeric, 'crop_program', v_q, v_admin, true);
   -- Product 36: an active job of 100 at +5 with its job hold of 100.
   INSERT INTO jobs (job_number, customer_id, status, job_date, created_by)
   VALUES ('SMK-PP26H-' || v_suffix, v_customer, 'scheduled', v_t + 5, v_admin) RETURNING id INTO v_job;
@@ -562,8 +565,8 @@ BEGIN
   -- P13 active: booking 0 + order 60 + job 40.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[7];
   IF v_x IS NULL OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking') <> 0
-     OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'order') <> 60
-     OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'job') <> 40
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'order') <> 60
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'job') <> 40
      OR (v_x->>'committed')::numeric <> 100 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P13 active) %', v_x;
   END IF;
@@ -571,9 +574,9 @@ BEGIN
 
   -- P14: the late line (+150) loses the 60 first; the early line keeps 100.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[8];
-  IF v_x IS NULL OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r
+  IF v_x IS NULL OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
        WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 60) <> 100
-     OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
           WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 150 AND (r->>'estimated')::boolean) <> 40
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan->'drawn_section_unknown') d
                      WHERE (d->>'product_id')::uuid = v_p[8] AND (d->>'quantity')::numeric = 60) THEN
@@ -586,7 +589,7 @@ BEGIN
   END IF;
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[25];
   IF v_x IS NULL OR (v_x->>'committed')::numeric IS DISTINCT FROM 100
-     OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
           WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 150) IS DISTINCT FROM 100
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r
                  WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 30) THEN
@@ -605,7 +608,7 @@ BEGIN
 
   -- P22: product 22. The draft booking's hold and the counted booking's hold on a product it does not book.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[22];
-  IF v_x IS NULL OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 25
+  IF v_x IS NULL OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 25
      OR (v_x->>'committed')::numeric <> 25 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P22) %', v_x;
   END IF;
@@ -680,7 +683,7 @@ BEGIN
 
   -- P21: the early section still needs 100; the late section is covered by its own job.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[19];
-  IF v_x IS NULL OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r
+  IF v_x IS NULL OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
        WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 60 AND NOT (r->>'estimated')::boolean) <> 100
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 150)
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan->'drawn_section_unknown') d WHERE (d->>'product_id')::uuid = v_p[19]) THEN
@@ -694,7 +697,7 @@ BEGIN
    WHERE quote_id = (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P13') AND product_id = v_p[7];
   v_plan := get_purchasing_plan(12);
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[7];
-  IF v_x IS NULL OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking') <> 60
+  IF v_x IS NULL OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking') <> 60
      OR (v_x->>'committed')::numeric <> 100 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P13 order cancelled) %', v_x;
   END IF;
@@ -734,21 +737,21 @@ BEGIN
   -- c: 60 on the shelf against a hold of 100: 60 held today, 40 Maybe shown, nothing to buy.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[30];
   IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0
-     OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 60
-     OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'class' = 'shown') <> 40 THEN
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 60
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'class' = 'shown') <> 40 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26c part-backed hold) %', v_x;
   END IF;
   -- d: a held Firm line beyond the horizon takes the stock now: the order of 100 today is bought.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[31];
   IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100 OR v_x->'reasons' ? 'later'
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking')
-     OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND r->>'confidence' = 'firm') <> 100 THEN
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND r->>'confidence' = 'firm') <> 100 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26d held later Firm) %', v_x;
   END IF;
   -- e: a held undated Firm line is still listed under Firm needs a date; nothing to buy.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[32];
   IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0
-     OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 50
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 50
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan->'firm_needs_date') f
                      WHERE (f->>'product_id')::uuid = v_p[32] AND (f->>'quantity')::numeric = 50) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26e held undated Firm) % %', v_x, v_plan->'firm_needs_date';
@@ -756,7 +759,7 @@ BEGIN
   -- f: a manual hold already takes all 30 on hand: the booking's hold is backed by nothing.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[33];
   IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0
-     OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 30
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 30
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'class' = 'shown'
                      AND (r->>'quantity')::numeric = 20) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26f manual hold first) %', v_x;
@@ -764,7 +767,7 @@ BEGIN
   -- g: a hold of 100 beside a Firm line of only 40: the other 60 stays held, so the order of 60 today is bought.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[35];
   IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 60
-     OR (SELECT SUM((r->>'quantity')::numeric) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 100
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 100
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26g hold larger than its lines) %', v_x;
   END IF;
@@ -809,6 +812,22 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL: (P27 invalid start) %', get_purchasing_plan(12)->'review';
     END IF;
   END IF;
+  -- Extreme finite needed-by dates under a window crossing New Year: the plan still answers (Sol, #1980 r1).
+  UPDATE app_settings SET setting_value = jsonb_set(setting_value::jsonb, '{pre_plant}',
+      jsonb_build_object('start', '11-01', 'end', '02-15'))::text
+   WHERE setting_key = 'booking_timing_windows';
+  FOREACH v_d IN ARRAY ARRAY['0001-12-31 BC'::date, '5874897-12-31'::date] LOOP
+    UPDATE quote_sections SET needed_by_date = v_d WHERE id = v_s1;
+    v_err := NULL;
+    BEGIN
+      PERFORM get_purchasing_plan(12);
+    EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
+    END;
+    IF v_err IS NOT NULL THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (P27 extreme date %) %', v_d, v_err;
+    END IF;
+  END LOOP;
+  UPDATE quote_sections SET needed_by_date = make_date(extract(year FROM v_t)::int, 12, 31) WHERE id = v_s1;
   v_n := v_n + 1;
 
   -- P8: an applicator, and a caller with no user, are refused.

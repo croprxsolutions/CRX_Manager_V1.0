@@ -220,7 +220,7 @@ BEGIN
                 WHEN ih.hold_type IN ('manual', 'crop_program') THEN 'now'
            END AS hold_use
       FROM inventory_holds ih
-     WHERE ih.is_active = true AND ih.quantity > 0
+     WHERE ih.is_active = true AND ih.quantity > 0 AND ih.quantity <> 'NaN'::numeric
        AND (ih.expires_at IS NULL OR ih.expires_at >= (SELECT today FROM prm))
        AND ih.hold_type IN ('manual', 'crop_program', 'job')
   ),
@@ -250,16 +250,17 @@ BEGIN
     SELECT 'job', x.job_id, x.product_id, x.line_id, 0, x.job_date, 0, 0, x.qty
       FROM jcl x WHERE NOT x.unit_problem AND x.qty > 0
   ),
+  hsum AS (
+    SELECT hold_type, source_id, product_id, SUM(qty) AS qty FROM hcl0 GROUP BY hold_type, source_id, product_id
+  ),
   hcl AS (
     SELECT l.* FROM hcl0 l
       JOIN hcov c ON c.hold_type = l.hold_type AND c.source_id = l.source_id AND c.product_id = l.product_id
     UNION ALL
-    SELECT c.hold_type, c.source_id, c.product_id, NULL::uuid, 3, NULL::date, 0, 0,
-           c.held - COALESCE((SELECT SUM(l.qty) FROM hcl0 l WHERE l.hold_type = c.hold_type AND l.source_id = c.source_id
-                                                        AND l.product_id = c.product_id), 0)
+    SELECT c.hold_type, c.source_id, c.product_id, NULL::uuid, 3, NULL::date, 0, 0, c.held - COALESCE(s.qty, 0)
       FROM hcov c
-     WHERE c.held > COALESCE((SELECT SUM(l.qty) FROM hcl0 l WHERE l.hold_type = c.hold_type AND l.source_id = c.source_id
-                                                          AND l.product_id = c.product_id), 0)
+      LEFT JOIN hsum s ON s.hold_type = c.hold_type AND s.source_id = c.source_id AND s.product_id = c.product_id
+     WHERE c.held > COALESCE(s.qty, 0)
   ),
   -- Each line takes at most its quantity and its own hold's remainder, then at most the product's
   -- backed stock remainder, in one order (rnk, need date with undated last, source, section, line).
@@ -443,8 +444,11 @@ BEGIN
     SELECT s2.quote_id, s2.section_id, s2.timing, s2.confidence, s2.needed_by_date,
            CASE WHEN we.end_md IS NOT NULL
                 THEN make_date(extract(year FROM s2.needed_by_date)::int
+                                 -- (date parts, not to_char, so any finite date works; no year 0 or past the date range)
                                  + CASE WHEN we.end_md COLLATE "C" < we.start_md COLLATE "C"
-                                         AND to_char(s2.needed_by_date, 'MM-DD') COLLATE "C" >= we.start_md COLLATE "C"
+                                         AND extract(month FROM s2.needed_by_date) * 100 + extract(day FROM s2.needed_by_date)
+                                             >= substr(we.start_md, 1, 2)::int * 100 + substr(we.start_md, 4, 2)::int
+                                         AND extract(year FROM s2.needed_by_date) BETWEEN 1 AND 5874896
                                         THEN 1 ELSE 0 END,
                                substr(we.end_md, 1, 2)::int, substr(we.end_md, 4, 2)::int)
                 ELSE s2.needed_by_date END AS window_end,
@@ -565,7 +569,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '2f3e68a8d01aaf39da391ce1c640b064' THEN
+     IS DISTINCT FROM '61772d9644e91a782281baf8e8642800' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

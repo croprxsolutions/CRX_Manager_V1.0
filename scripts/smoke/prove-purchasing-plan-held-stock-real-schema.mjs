@@ -8,7 +8,7 @@
  *   1. BEFORE: smoke-purchasing-plan.sql fails (its P26/P27 groups need the candidate);
  *      smoke-booking-planning-fields.sql passes.
  *   2. The candidate applies; a second apply is refused by its preflight (PREFLIGHT_PLAN_DRIFT).
- *   3. AFTER: both chains pass; the function stays SECURITY DEFINER, search_path pinned, authenticated only.
+ *   3. AFTER: both chains pass; the function stays SECURITY DEFINER, search_path pinned, anon refused, authenticated allowed.
  *
  * Run: node scripts/smoke/prove-purchasing-plan-held-stock-real-schema.mjs   (needs Docker)
  * Prints PURCHASING_PLAN_HELD_STOCK_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
@@ -21,7 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-// Iterating: CRX_PROVER_REUSE=<kept container> CRX_PROVER_DB=<a copy of its replayed database> skips the replay.
+// Iterating: CRX_PROVER_REUSE=<kept container> CRX_PROVER_DB=crx_copy_<name> (a copy of its replayed database) skips the replay.
 const REUSE = process.env.CRX_PROVER_REUSE;
 const NAME = REUSE || `crx-ppho-${process.pid}-${Date.now().toString(36)}`;
 const DB = process.env.CRX_PROVER_DB || 'postgres';
@@ -274,7 +274,7 @@ async function main() {
   if (REUSE) {
     assert.match(REUSE, /^crx-[a-z0-9-]+$/, 'CRX_PROVER_REUSE must name a kept prover container (crx-...)');
     assert.equal(docker(['inspect', '-f', '{{.HostConfig.NetworkMode}}', REUSE]).stdout.trim(), 'none', 'CRX_PROVER_REUSE must be a network-less prover container');
-    assert.ok(process.env.CRX_PROVER_DB && DB !== 'postgres', 'CRX_PROVER_REUSE needs CRX_PROVER_DB naming a copy, not postgres');
+    assert.match(DB, /^crx_copy_[a-z0-9_]+$/, 'CRX_PROVER_REUSE needs CRX_PROVER_DB naming a disposable copy (crx_copy_...), never the replayed database');
   } else buildContainer();
   seed();
 
@@ -303,7 +303,7 @@ async function main() {
   assert.equal(scalar(`SELECT p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']
       AND NOT has_function_privilege('anon', p.oid, 'EXECUTE') AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
       FROM pg_proc p WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure;`), 't');
-  console.log('[case] AFTER: SECURITY DEFINER, search_path pinned, EXECUTE for authenticated only');
+  console.log('[case] AFTER: SECURITY DEFINER, search_path pinned, anon refused, authenticated allowed');
   console.log('PURCHASING_PLAN_HELD_STOCK_PROOF_PASS');
 }
 

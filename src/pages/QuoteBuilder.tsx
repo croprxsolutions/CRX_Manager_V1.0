@@ -107,6 +107,8 @@ import { lineNeedsRemoveConfirm, primaryAction, todaysPricesMessage } from '../l
 import { formatChargedOn } from '../lib/lastChargedPrices';
 import { quoteBadgeVariant, quoteStatusLabel } from '../lib/quoteStatusLabel';
 import CommissionSplitEditor from '../components/ui/CommissionSplitEditor';
+import QuoteSplitNote, { type SplitNote } from '../components/quotes/QuoteSplitNote';
+import { customerSplit, sameSplit } from '../lib/commissionSplitSource';
 import { useStaleQuoteCheck } from '../hooks/useGuardrails';
 import GuardrailBanner from '../components/ui/GuardrailBanner';
 import { FullToteOnlyBadge, PolicyBadge, normalizeReturnPolicy, productPackageText, type ProductOptionPresentationModel } from '../components/products/ProductOptionPresentation';
@@ -388,6 +390,9 @@ function reportUntrustworthyQuoteVersions(unreadable: UnreadableQuoteVersion[], 
   });
 }
 
+// What a new quote's commission split starts as before a customer with a split is picked.
+const NEW_QUOTE_SPLIT: CommissionSplit = { splits: [{ recipient: '', percentage: 100 }] };
+
 export default function QuoteBuilder() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -567,13 +572,20 @@ export default function QuoteBuilder() {
   }, []);
   const [headerNotes, setHeaderNotes] = useState('');
   const [footerNotes, setFooterNotes] = useState('');
-  const [commissionSplit, setCommissionSplit] = useState<CommissionSplit>({
-    splits: [{ recipient: '', percentage: 100 }],
-  });
+  const [commissionSplit, setCommissionSplit] = useState<CommissionSplit>(NEW_QUOTE_SPLIT);
   // Lost-update guard: split as loaded from the DB, and whether the user has
   // changed it this session (see src/lib/commissionSplitConcurrency.ts).
   const loadedCommissionSplitRef = useRef<CommissionSplit | null>(null);
   const commissionSplitTouchedRef = useRef(false);
+  // Where the split came from, or a pending choice to take the customer's (plan 2026-11-18); and the split the app
+  // last put there. A split that differs from it was changed by hand, which a customer change must never overwrite
+  // (a touch that leaves the same split is not a change: Taha's test, 18 Nov).
+  const [splitNote, setSplitNote] = useState<SplitNote>(null);
+  const autoSplitRef = useRef<CommissionSplit>(NEW_QUOTE_SPLIT);
+  // The split as last set, read by the customer handlers so a clear and a pick in one batch see the same value as
+  // the ref they compare it to (Sol MED, 19 Nov). Every write goes through putSplit.
+  const splitNowRef = useRef<CommissionSplit>(NEW_QUOTE_SPLIT);
+  const putSplit = (v: CommissionSplit) => { splitNowRef.current = v; setCommissionSplit(v); };
   const [quoteNumber, setQuoteNumber] = useState('');
   // Only a new quote allocates a number; an existing quote's number arrives with its row.
   const [quoteNumberLoading, setQuoteNumberLoading] = useState(!id);
@@ -1511,9 +1523,11 @@ export default function QuoteBuilder() {
     setStatus(q.status);
     setIsPlanned(q.is_planned || false);
     setWasPlanned(q.is_planned || false);
-    setCommissionSplit(q.commission_split ?? { splits: [] });
+    putSplit(q.commission_split ?? { splits: [] });
     loadedCommissionSplitRef.current = q.commission_split ?? null;
     commissionSplitTouchedRef.current = false;
+    setSplitNote(null);
+    autoSplitRef.current = q.commission_split ?? { splits: [] };
     setQuoteCreatedAt(q.created_at || null);
     savedLineIdsRef.current = new Map(
       localSections.flatMap((s) => s.items)
@@ -1714,9 +1728,32 @@ export default function QuoteBuilder() {
   // factor of 1, so a tier change waits for them. With no lines there is nothing to reprice.
   const repriceBlocked = !referenceDataReady && sections.some((sec) => sec.items.length > 0);
 
+  // A new quote's split follows the picked customer (Mason, 17 Nov) while it is still what the app put there; a split
+  // changed by hand, or a saved quote's, is never replaced and nothing asks (Taha option A, 19 Nov: the offer
+  // machinery drew Sol HIGHs three rounds running). A touch that leaves the same split is not a change (Taha, 18 Nov).
+  const applyCustomerSplit = (cust: QuoteCustomer) => {
+    if (isEditing || !sameSplit(splitNowRef.current, autoSplitRef.current)) {
+      setSplitNote(null);
+      // A kept typed split is measured against the blank row from now on, not the last customer's (Sol MED).
+      if (!isEditing) autoSplitRef.current = NEW_QUOTE_SPLIT;
+      return;
+    }
+    const theirs = customerSplit(cust.default_commission_split);
+    putSplit(theirs ?? NEW_QUOTE_SPLIT);
+    autoSplitRef.current = theirs ?? NEW_QUOTE_SPLIT;
+    commissionSplitTouchedRef.current = true;
+    setSplitNote(theirs ? { kind: 'from', customer: cust.farm_name, split: theirs }
+      : { kind: 'none', customer: cust.farm_name, unusable: cust.default_commission_split != null }); // Sol LOW
+  };
+
   const handleCustomerChange = (cust: QuoteCustomer | null): boolean => {
     if (!cust) {
       setCustomerId('');
+      setSplitNote(null);
+      // A new quote's split that only came from that customer goes with them; a split changed by hand stays. With
+      // no customer the blank row is what counts as untouched, so typing their old split back counts as typed (Sol MEDs).
+      if (!isEditing && sameSplit(splitNowRef.current, autoSplitRef.current)) putSplit(NEW_QUOTE_SPLIT);
+      if (!isEditing) autoSplitRef.current = NEW_QUOTE_SPLIT;
       return true;
     }
     if (repriceBlocked) {
@@ -1728,10 +1765,7 @@ export default function QuoteBuilder() {
     setCustomerRow(cust);
     setCustomerLoadError(null);
     setTier(cust.assigned_tier);
-    if (cust.default_commission_split) {
-      setCommissionSplit(cust.default_commission_split);
-      commissionSplitTouchedRef.current = true;
-    }
+    applyCustomerSplit(cust);
     recalcAllForTier(cust.assigned_tier);
     // A section's field must belong to the quote's customer: clear any that does not. A saved
     // field still loading by id is kept; the unresolved-field check blocks saving until it loads.
@@ -4766,15 +4800,19 @@ export default function QuoteBuilder() {
           </div>
         </div>
         <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-4 border-t border-cream-dark pt-4 lg:grid-cols-2">
-          <CommissionSplitEditor
-            label="Commission split"
-            value={commissionSplit}
-            onChange={(val) => {
-              commissionSplitTouchedRef.current = true;
-              setCommissionSplit(val);
-            }}
-            disabled={editLocked}
-          />
+          <div className="min-w-0">
+            <CommissionSplitEditor
+              label="Commission split"
+              value={commissionSplit}
+              onChange={(val) => {
+                commissionSplitTouchedRef.current = true;
+                setSplitNote(null);
+                putSplit(val);
+              }}
+              disabled={editLocked}
+            />
+            <QuoteSplitNote note={splitNote} />
+          </div>
           <div className="flex items-start justify-between gap-3 self-start rounded-lg border border-gray-200 px-3.5 py-1">
             <Switch
               label="Planned program"

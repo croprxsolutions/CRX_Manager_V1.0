@@ -15,7 +15,7 @@
 
 import { test, expect, Page } from '@playwright/test';
 import { login } from '../utils/auth';
-import { supabaseRest, supabaseRpc, asArray } from './utils/supabase-helpers';
+import { getToken, supabaseRest, supabaseRpc, asArray } from './utils/supabase-helpers';
 import {
   navAndStabilize,
   assertNoCriticalErrors,
@@ -48,16 +48,7 @@ test.describe.serial('Stream 4 — Financials', () => {
     await page.waitForTimeout(2000);
 
     // Verify auth token is available for subsequent DB queries
-    const token = await page.evaluate(() => {
-      const raw = localStorage.getItem('sb-rhyzpcqhnizqbxphqdkr-auth-token');
-      if (!raw) return '';
-      try {
-        const session = JSON.parse(raw);
-        return session.access_token || '';
-      } catch {
-        return '';
-      }
-    });
+    const token = await getToken(page);
     expect(token).toBeTruthy();
   });
 

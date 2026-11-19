@@ -2176,6 +2176,12 @@
       "description": "REQUIRES 20270107100000 (#1810 follow-up). On an invented product with one Glyphosate row, an admin starts an EPA lookup and the epa-lookup role records an answer listing Glyphosate by CAS under a 250-character name: the proposal shows that entry as an unticked conflict with no change, shows the product's row beside it, and does not list the row as missing from EPA. Fails before the migration. Terminal rollback.",
       "covers": ["_epa_proposal_items", "start_epa_lookup", "record_epa_lookup", "_epa_lookup_input"],
       "area": ["regression"]
+    },
+    "farm_group_no_loops": {
+      "chain": "smoke-farm_group_no_loops.sql",
+      "description": "REQUIRES 20270127200000 (KI-146). An admin builds invented customers A > B > C through save_customer; putting A under its grandchild C is refused and A keeps no parent; get_customer_farm_group from C returns A, B and C with only A marked parent. Fails before the migration. Terminal rollback.",
+      "covers": ["get_customer_farm_group", "guard_customer_parent_no_loop_20270127", "save_customer"],
+      "area": ["regression"]
     }
   }
 }

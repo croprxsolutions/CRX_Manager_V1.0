@@ -35,6 +35,7 @@ Releases of CRX Manager, newest first.
 * environment banner and tab title prefix (STAGING amber, LOCAL blue) (#1714)
 
 #### 🐛 Bug Fixes
+* enforce the live-job booking rules in the database for every write path (#1959) (#1974)
 * KI-145 bulk customer import saves through save_customer (#1993)
 * Cycle Counts confirm dialogs open on top of the count window (#1982)
 * batch fill skips EPA numbers not set up yet, shows real error text (#1978)

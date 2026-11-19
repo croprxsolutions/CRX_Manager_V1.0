@@ -338,7 +338,7 @@ test('oneShotStops: a one-shot whose check finds its rows uncorrected stops the 
   const holds = (sql) => (asked.push(sql), sql === 'CHECK_KI137');
   const stops = oneShotStops({ steps, stopIf, holds });
   assert.equal(stops.length, 1);
-  assert.match(stops[0], /^20270121100000_ki137 is a one-shot .* still holds the rows it corrects.*psql -f supabase\/migrations\/20270121100000_ki137\.sql/);
+  assert.match(stops[0], /^20270121100000_ki137 is a one-shot .* still holds the rows it corrects.*-1 -f supabase\/migrations\/20270121100000_ki137\.sql/);
   assert.deepEqual(asked, ['CHECK_KI137'], 'only listed one-shots are checked; a run step and an unlisted one-shot are not');
   assert.deepEqual(oneShotStops({ steps, stopIf, holds: () => false }), [], 'rows already corrected: recorded as before');
   assert.deepEqual(oneShotStops({ steps, holds }), [], 'no checks in the registry: old behaviour');
@@ -349,4 +349,23 @@ test('one-shot-migrations.json: every stop_if_still_needed entry is a listed one
   const stems = Object.keys(reg.stop_if_still_needed ?? {});
   assert.ok(stems.includes('20270121100000_ki137_powder_keg_each_piksi_mg_labels'));
   assert.deepEqual(oneShotListProblems({ base: reg.one_shot, head: reg.one_shot, stopIf: reg.stop_if_still_needed, added: [] }), []);
+});
+
+test('oneShotListProblems: a stop check stays with its one-shot and holds SQL text (Sol r1, #1990)', () => {
+  const one = { '20261231110000_fix': 'why' };
+  const check = { '20261231110000_fix': 'EXISTS (SELECT 1)' };
+  assert.deepEqual(oneShotListProblems({ base: one, head: one, stopIfBase: check, stopIf: check, added: [] }), []);
+  assert.match(oneShotListProblems({ base: one, head: one, stopIfBase: check, stopIf: {}, added: [] })[0], /check for 20261231110000_fix was removed/, 'deleting a check is refused');
+  const pairs = [{ from: '20261231110000_fix.sql', to: '20270109100100_fix.sql' }];
+  const both = { ...one, '20270109100100_fix': 'why' };
+  assert.match(oneShotListProblems({ base: one, head: both, stopIfBase: check, stopIf: check, added: ['20270109100100_fix.sql'], pairs }).join(' '), /left behind its restamp/, 'a check left under the old name is refused');
+  assert.deepEqual(oneShotListProblems({ base: one, head: both, stopIfBase: check, stopIf: { '20270109100100_fix': 'EXISTS (SELECT 1)' }, added: ['20270109100100_fix.sql'], pairs }), [], 'a check moved with its restamp: fine');
+  assert.match(oneShotListProblems({ base: one, head: one, stopIfBase: check, stopIf: { '20261231110000_fix': null }, added: [] })[0], /is not SQL text/, 'a null check is refused');
+  assert.match(oneShotListProblems({ base: one, head: one, stopIf: { '20261231110000_fix': '  ' }, added: [] })[0], /is not SQL text/, 'an empty check is refused');
+});
+
+test('oneShotStops: the message names the target database and a one-transaction, stop-on-error psql', () => {
+  const [m] = oneShotStops({ steps: [{ stem: '20270121100000_ki137', run: false }], stopIf: { '20270121100000_ki137': 'X' }, holds: () => true, ref: 'fsnjredpmakbmhwowjjt' });
+  assert.match(m, /this database \(fsnjredpmakbmhwowjjt\)/);
+  assert.match(m, /psql "<fsnjredpmakbmhwowjjt connection URL>" -v ON_ERROR_STOP=1 -1 -f supabase\/migrations\/20270121100000_ki137\.sql/);
 });

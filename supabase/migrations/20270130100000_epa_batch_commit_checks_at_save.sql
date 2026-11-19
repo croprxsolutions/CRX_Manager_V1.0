@@ -17,11 +17,12 @@
 --       normalized as _parent_chemistry_epa_refusal reads them) is the proposal's number;
 --     - the product has no ingredient row (the batch only fills empty products);
 --     - no other proposal for that product and number is proposed, held or rejected, no other lookup of it is
---       running (under 30 minutes old) and none ever failed;
+--       running (under 30 minutes old), none ever failed, and this lookup replaced no proposal recorded meanwhile;
+--     - the registration was not edited since the lookup (its version is the proposal's);
 --     - EPA's record is not flagged, a distributor's or cancelled, and its product name matches a current app name;
 --     - every ingredient is a plain add with a CAS number and a percent, 100 at most in all;
 --     - the label, re-sorted now, has only blanks, confirmations and matches (a fact edited since the lookup
---       sends it to a person).
+--       sends it to a person), and EPA's restricted-use yes is already recorded here.
 --   It refuses with EPA_BATCH_DECISION_INVALID when the decisions would not write exactly every ingredient add (a
 --   label item left out takes its default, so each must be declined). Then it calls commit_epa_proposal unchanged,
 --   in the same transaction. The product page keeps calling commit_epa_proposal directly; only the batch calls this.
@@ -139,6 +140,9 @@ BEGIN
                  WHERE o.parent_id = v_p.parent_id AND o.epa_registration = v_p.epa_registration AND o.id <> v_p.id
                    AND o.status IN ('proposed', 'held', 'rejected')) THEN
     v_why := 'another proposal is waiting or was rejected';
+  ELSIF EXISTS (SELECT 1 FROM public.epa_chemistry_proposals o WHERE o.superseded_by_lookup_id = v_p.lookup_id) THEN
+    -- This lookup replaced a proposal recorded after the screen's check (a person's): it waits for a person too.
+    v_why := 'it replaced another proposal recorded meanwhile';
   ELSIF EXISTS (SELECT 1 FROM public.epa_lookups l
                  WHERE l.parent_id = v_p.parent_id AND l.epa_registration = v_p.epa_registration AND l.id <> v_p.lookup_id
                    AND l.status = 'pending' AND l.requested_at > now() - interval '30 minutes') THEN
@@ -146,6 +150,10 @@ BEGIN
   ELSIF EXISTS (SELECT 1 FROM public.epa_lookup_failures f
                  WHERE f.parent_id = v_p.parent_id AND f.epa_registration = v_p.epa_registration) THEN
     v_why := 'a lookup of this number failed';
+  ELSIF (SELECT r.registration_version FROM public.epa_registrations r WHERE r.epa_registration = v_p.epa_registration)
+          IS DISTINCT FROM v_p.registration_version THEN
+    -- Any edit to the registration since the lookup, even of a fact EPA did not send (step 5 also compares values).
+    v_why := 'the EPA registration was edited since the lookup';
   -- 2. The EPA record (frozen on the proposal): not flagged, not a distributor's, not cancelled.
   ELSIF v_p.epa_summary->'needsManual' = 'true'::jsonb THEN
     v_why := 'EPA marks this record for manual checking';
@@ -222,6 +230,9 @@ BEGIN
            OR COALESCE(v_item->'current'->'label_url', 'null'::jsonb) <> 'null'::jsonb THEN
           v_why := 'EPA has a newer label than the one recorded';
         END IF;
+      ELSIF v_item->>'item_id' = 'label:rup_status' AND v_item->'epa' = '"yes"'::jsonb AND v_item->>'class' <> 'confirm' THEN
+        -- Restricted use by EPA and not yet yes here: recording it lists sales that need records, so a person decides.
+        v_why := 'EPA lists it as restricted use';
       ELSIF v_item->>'class' NOT IN ('fill', 'confirm', 'matches') THEN
         v_why := CASE WHEN v_item->>'class' = 'rup_upgrade' THEN 'EPA lists it as restricted use'
                       ELSE format('label fact differs (%s)', regexp_replace(v_item->>'item_id', '^label:', '')) END;

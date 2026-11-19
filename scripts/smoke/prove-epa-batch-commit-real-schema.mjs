@@ -36,7 +36,7 @@ const ADMIN2 = id('a9');
 const REP = USERS.rep;
 const SERVICE = 'service';
 // One product (parent) per case, each with its own EPA number; S* is a size of it carrying the same number.
-const CASES = ['hole', 'b1', 'b2', 'b3', 'r1', 'r2', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7'];
+const CASES = ['hole', 'b1', 'b2', 'b3', 'r1', 'r2', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9'];
 const P = Object.fromEntries(CASES.map((k, i) => [k, id(`e${i + 1}`)]));
 const S = Object.fromEntries(CASES.map((k, i) => [k, id(`f${i + 1}`)]));
 const NUM = Object.fromEntries(CASES.map((k, i) => [k, `${701 + i}-1`]));
@@ -70,9 +70,10 @@ const refused = (uid, sql, pattern) => { const r = as(uid, sql); assert.notEqual
 
 let seq = 0;
 const key = (tag) => `epa-batch-${tag}-${++seq}`;
+let epaRup = 'No'; // what EPA's record says about restricted use (C8 sets Yes)
 const found = (num, productname = `[PROVER] ${num}`) => ({
   found: true, regType: 'section3', eparegno: num, productname, manufacturer: 'Prover Co', productStatus: 'Registered',
-  latestLabelPdfUrl: null, signalWordCanonical: 'Caution', needsManual: false, isCancelled: false, rupYn: 'No',
+  latestLabelPdfUrl: null, signalWordCanonical: 'Caution', needsManual: false, isCancelled: false, rupYn: epaRup,
   activeIngredients: [{ name: 'Atrazine', percent: 42.6, pcCode: null, casNumber: '1912-24-9' }], labelPdfs: [],
 });
 const START = (k, uid = ADMIN) => js(uid, `SELECT public.start_epa_lookup('${P[k]}', '${NUM[k]}', '${key('s')}');`);
@@ -222,7 +223,7 @@ async function main() {
   const c3 = propose('c3');
   const v3 = scalar(`SELECT registration_version FROM public.epa_registrations WHERE epa_registration = '${NUM.c3}';`);
   js(ADMIN2, `SELECT public.set_epa_registration('${NUM.c3}', ${v3}, '{"signal_word":"Danger"}'::jsonb, 'prover edit', NULL, '${key('e')}');`);
-  refused(ADMIN, BATCH(c3), /EPA_BATCH_NOT_ELIGIBLE: label fact changed since the lookup \(signal_word\); nothing was saved/);
+  refused(ADMIN, BATCH(c3), /EPA_BATCH_NOT_ELIGIBLE: the EPA registration was edited since the lookup; nothing was saved/);
   assert.equal(proposal(c3).status, 'proposed'); assert.equal(ingredients('c3'), 0);
   console.log('[epa-batch] C3: a label fact edited since the lookup: refused');
 
@@ -230,7 +231,7 @@ async function main() {
   const c6 = propose('c6');
   const v6 = scalar(`SELECT registration_version FROM public.epa_registrations WHERE epa_registration = '${NUM.c6}';`);
   js(ADMIN2, `SELECT public.set_epa_registration('${NUM.c6}', ${v6}, '{"registration_status":"cancelled","cancelled_on":"2026-11-01"}'::jsonb, 'prover edit', NULL, '${key('e')}');`);
-  refused(ADMIN, BATCH(c6), /EPA_BATCH_NOT_ELIGIBLE: label fact changed since the lookup \(registration_status\); nothing was saved/);
+  refused(ADMIN, BATCH(c6), /EPA_BATCH_NOT_ELIGIBLE: the EPA registration was edited since the lookup; nothing was saved/);
   assert.equal(ingredients('c6'), 0);
   console.log('[epa-batch] C6: registration cancelled since the lookup: refused');
 
@@ -243,9 +244,28 @@ async function main() {
   const c7 = propose('c7');
   assert.equal(proposal(c7).items.find((i) => i.item_id === 'label:signal_word')?.class, 'confirm');
   setWord('c7', null);
-  refused(ADMIN, BATCH(c7), /EPA_BATCH_NOT_ELIGIBLE: label fact changed since the lookup \(signal_word\); nothing was saved/);
+  refused(ADMIN, BATCH(c7), /EPA_BATCH_NOT_ELIGIBLE: the EPA registration was edited since the lookup; nothing was saved/);
   assert.equal(ingredients('c7'), 0);
   console.log('[epa-batch] C7: a matching label fact cleared since the lookup: refused');
+
+  // C8: EPA says restricted use and the registration here is still unknown: a person records it, not the batch.
+  psql(`UPDATE public.epa_registrations SET rup_status = 'unknown' WHERE epa_registration = '${NUM.c8}';`, { user: 'supabase_admin' });
+  epaRup = 'Yes';
+  const c8 = propose('c8');
+  epaRup = 'No';
+  assert.equal(proposal(c8).items.find((i) => i.item_id === 'label:rup_status')?.class, 'fill');
+  refused(ADMIN, BATCH(c8), /EPA_BATCH_NOT_ELIGIBLE: EPA lists it as restricted use; nothing was saved/);
+  assert.equal(ingredients('c8'), 0);
+  console.log('[epa-batch] C8: EPA says restricted use, registration unknown here: refused');
+
+  // C9: a person records a proposal after the screen's last check; the batch's lookup then starts (only the newest
+  // lookup may record) and its recording replaces the person's: the batch save is refused so it is not silently lost.
+  const persons = propose('c9', ADMIN2);
+  const c9 = RECORD(START('c9').lookup_id, NUM.c9).proposal_id;
+  assert.equal(proposal(persons).status, 'superseded');
+  refused(ADMIN, BATCH(c9), /EPA_BATCH_NOT_ELIGIBLE: it replaced another proposal recorded meanwhile; nothing was saved/);
+  assert.equal(ingredients('c9'), 0);
+  console.log('[epa-batch] C9: the batch lookup replaced a proposal recorded meanwhile: refused');
 
   // C4 / C5: another lookup of the number is running, or one failed (rows as start/record_epa_lookup write them).
   const c4 = propose('c4');

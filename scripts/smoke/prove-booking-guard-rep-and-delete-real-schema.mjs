@@ -305,7 +305,7 @@ BEGIN
 END $fx$;`;
 const quoteId = (tag) => scalar(`SELECT id FROM quotes WHERE quote_number = '[PROVER] ${tag}';`);
 const jobOf = (tag) => `(SELECT id FROM jobs WHERE job_number = 'J-PRV-${tag}')`;
-const COMPLETE = (tag) => `UPDATE jobs SET status = 'completed' WHERE id = ${jobOf(tag)} RETURNING status;`;
+const COMPLETE = (tag) => `UPDATE jobs SET status = 'in_progress' WHERE id = ${jobOf(tag)};\nUPDATE jobs SET status = 'completed' WHERE id = ${jobOf(tag)} RETURNING status;`;
 const DELETE = (tag) => `UPDATE quotes SET deleted_at = now() WHERE quote_number = '[PROVER] ${tag}' RETURNING deleted_at IS NOT NULL;`;
 
 // A job is being scheduled the way _create_job_from_quote_section does (booking row FOR UPDATE, then the insert) and

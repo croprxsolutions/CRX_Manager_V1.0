@@ -36,6 +36,7 @@ Releases of CRX Manager, newest first.
 * environment banner and tab title prefix (STAGING amber, LOCAL blue) (#1714)
 
 #### 🐛 Bug Fixes
+* Sol + apply-review fixes for v0.1.0 (#1990) (#2044)
 * sql-column-check checks a select-list alias after a comma and a quoted "public" schema (#2040)
 * REDEFINED guards ignore SQL comments and catch renames (#1910) (#2027)
 * sql-column-check covers comma FROM lists, three-part and quoted names (#1906) (#2033)
@@ -95,6 +96,7 @@ Releases of CRX Manager, newest first.
 * staging DB job accepts existing odd-stamp and self-wrapping migrations (#1749)
 
 #### 🧹 Refactors & Chore
+* apply priority follow-ups in the rate-review prover (#1928) (#2042)
 * live apply evidence in three billing migration records (v0.1.0 apply review) (#2037)
 * release #1990 may have its Sol review (#2003)
 * #1981 security batch row (#2002)

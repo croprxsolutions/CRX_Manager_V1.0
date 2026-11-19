@@ -3,7 +3,7 @@ import { Upload, CheckCircle, AlertCircle, FileText, Sparkles } from 'lucide-rea
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
-import { supabase, checkMutationResult } from '../../lib/db';
+import { supabase, assertRpcResult, sanitizeError } from '../../lib/db';
 import { processDocumentWithOCR, isCSVFile, isOCRSupported } from '../../lib/documentOCR';
 import { Sentry } from '../../lib/sentry';
 import { loadDefaultTier } from '../../lib/appSettingDefaults';
@@ -31,10 +31,25 @@ interface ParsedCustomer {
   notes?: string;
 }
 
+// row = the file's line number (OCR: the item's position); key = this row's save_customer idempotency key.
+type ImportRow = ParsedCustomer & { row: number; key: string };
+type FailedRow = { row: number; farm_name: string; error: string };
+
+const ACRE_FIELDS = ['total_acres', 'corn_acres', 'soybean_acres', 'other_acres'] as const;
+
+/** A supplied acreage as a number, or null when it is not a valid one. "1,200" is 1200 (KI-145); "1,2" is not valid. */
+function parseAcres(value: string): number | null {
+  const cleaned = /^\d{1,3}(,\d{3})+(\.\d+)?$/.test(value) ? value.replace(/,/g, '') : value;
+  const num = Number(cleaned);
+  return cleaned !== '' && Number.isFinite(num) && num >= 0 ? num : null;
+}
+
 interface ValidationResult {
-  valid: ParsedCustomer[];
+  valid: ImportRow[];
   invalid: Array<{ row: number; error: string; data: Record<string, string> }>;
 }
+
+const UNCONFIRMED = 'No answer from the server: this customer may have saved. Check the Customers list before importing it again.';
 
 const FIELD_MAPPINGS: Record<string, string[]> = {
   farm_name: ['farm_name', 'farm', 'farm_name', 'customer', 'customer_name', 'business_name'],
@@ -54,12 +69,13 @@ const FIELD_MAPPINGS: Record<string, string[]> = {
 export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCustomerImportProps) {
   const { toast } = useToast();
   // Price tiers are admin-only (Mason 2026-11-01): a rep's rows always start on the Default Tier.
-  const isAdmin = useAuth().profile?.role === 'admin';
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
   const [file, setFile] = useState<File | null>(null);
   const [parsing, setParsing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [uploadResults, setUploadResults] = useState<{ success: number; failed: number } | null>(null);
+  const [uploadResults, setUploadResults] = useState<{ success: number; failed: FailedRow[]; skipped: number } | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -67,6 +83,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
       if (selectedFile.size > 10 * 1024 * 1024) {
         toast('error', 'File too large. Maximum size is 10MB.');
         e.target.value = '';
+        setFile(null);
         return;
       }
       const isCSV = isCSVFile(selectedFile);
@@ -74,6 +91,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
       if (!isCSV && !isOCR) {
         toast('error', 'Invalid file type. Please upload a CSV, PDF, or image file.');
         e.target.value = '';
+        setFile(null);
         return;
       }
       setFile(selectedFile);
@@ -125,24 +143,26 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
     return result;
   };
 
-  const parseCSV = (text: string): { headers: string[]; rows: string[][] } => {
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) return { headers: [], rows: [] };
+  const parseCSV = (text: string): { headers: string[]; rows: Array<{ line: number; cols: string[] }> } => {
+    const lines = text.split('\n');
+    const headerIdx = lines.findIndex((l) => l.trim() !== '');
+    if (headerIdx < 0) return { headers: [], rows: [] };
 
-    const headers = parseCSVLine(lines[0]);
-    const rows: string[][] = [];
+    const headers = parseCSVLine(lines[headerIdx]);
+    const rows: Array<{ line: number; cols: string[] }> = [];
 
-    for (let i = 1; i < lines.length; i++) {
+    for (let i = headerIdx + 1; i < lines.length; i++) {
       const cols = parseCSVLine(lines[i]);
-      if (cols.length > 0 && cols[0]) {
-        rows.push(cols);
+      // Only a fully empty line is skipped: a blank first cell is checked below, not dropped (KI-145).
+      if (cols.some(Boolean)) {
+        rows.push({ line: i + 1, cols });
       }
     }
 
     return { headers, rows };
   };
 
-  const parseWithVisionOCR = async (file: File, defaultTier: number): Promise<{ valid: ParsedCustomer[]; invalid: Array<{ row: number; error: string; data: Record<string, string> }> }> => {
+  const parseWithVisionOCR = async (file: File, defaultTier: number): Promise<ValidationResult> => {
     const result = await processDocumentWithOCR(file, 'customer_list');
 
     if (!result.success || !result.parsed_data) {
@@ -166,16 +186,23 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
       return { valid: [], invalid: [] };
     }
 
-    const valid: ParsedCustomer[] = [];
-    const invalid: Array<{ row: number; error: string; data: Record<string, string> }> = [];
+    if (data.items.length > MAX_ROWS) {
+      toast('error', `Document has ${data.items.length} customers. Maximum is ${MAX_ROWS}. Please split it into smaller batches.`);
+      return { valid: [], invalid: [] };
+    }
+
+    const valid: ImportRow[] = [];
+    const invalid: ValidationResult['invalid'] = [];
 
     data.items.forEach((item, idx) => {
-      if (!item.farm_name) {
+      if (!item.farm_name?.trim()) {
         invalid.push({ row: idx + 1, error: 'Missing farm name', data: { ...item } as unknown as Record<string, string> });
         return;
       }
       valid.push({
-        farm_name: item.farm_name,
+        row: idx + 1,
+        key: crypto.randomUUID(),
+        farm_name: item.farm_name.trim(),
         contact_name: item.contact_name,
         phone: item.phone,
         email: item.email,
@@ -190,6 +217,11 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
 
   const handleParse = async () => {
     if (!file) return;
+    // The rep/admin rules below depend on who is signed in; never guess while the profile is loading.
+    if (!profile?.id) {
+      toast('error', 'Your profile is still loading. Try again in a moment.');
+      return;
+    }
     setParsing(true);
 
     try {
@@ -232,12 +264,19 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
         return;
       }
 
-      const valid: ParsedCustomer[] = [];
-      const invalid: Array<{ row: number; error: string; data: Record<string, string> }> = [];
+      const valid: ImportRow[] = [];
+      const invalid: ValidationResult['invalid'] = [];
 
-      rows.forEach((cols, idx) => {
+      rows.forEach(({ line, cols }) => {
         const customer: Partial<ParsedCustomer> = {};
         const rowData: Record<string, string> = {};
+        let badValue = '';
+
+        // An unquoted "1,200" splits into extra cells and shifts every later column.
+        if (cols.length > headers.length) {
+          invalid.push({ row: line, error: 'More values than column headers. Put quotes around numbers with commas, like "1,200"', data: rowData });
+          return;
+        }
 
         cols.forEach((value, colIdx) => {
           const field = fieldMapping[colIdx];
@@ -248,11 +287,11 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
                 field === 'email' || field === 'billing_address' || field === 'payment_terms' ||
                 field === 'notes') {
               if (value) customer[field] = value;
-            } else if (field === 'total_acres' || field === 'corn_acres' ||
-                       field === 'soybean_acres' || field === 'other_acres') {
-              const num = parseFloat(value);
-              if (!isNaN(num) && num >= 0) {
-                customer[field] = num;
+            } else if ((ACRE_FIELDS as readonly string[]).includes(field)) {
+              if (value) {
+                const num = parseAcres(value);
+                if (num === null) badValue ||= `Invalid ${field.replace('_', ' ')}: ${value}`;
+                else customer[field as typeof ACRE_FIELDS[number]] = num;
               }
             } else if (field === 'assigned_tier' && isAdmin) {
               const tier = parseInt(value);
@@ -265,10 +304,15 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
 
         if (!customer.farm_name) {
           invalid.push({
-            row: idx + 2,
+            row: line,
             error: 'Missing farm name',
             data: rowData,
           });
+          return;
+        }
+
+        if (badValue) {
+          invalid.push({ row: line, error: badValue, data: rowData });
           return;
         }
 
@@ -277,7 +321,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
           const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
           if (!emailRegex.test(customer.email)) {
             invalid.push({
-              row: idx + 2,
+              row: line,
               error: `Invalid email: ${customer.email}`,
               data: rowData,
             });
@@ -289,7 +333,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
           customer.assigned_tier = defaultTier;
         }
 
-        valid.push(customer as ParsedCustomer);
+        valid.push({ ...(customer as ParsedCustomer), row: line, key: crypto.randomUUID() });
       });
 
       setValidation({ valid, invalid });
@@ -304,36 +348,49 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
     setUploading(true);
 
     let success = 0;
-    let failed = 0;
+    const failed: FailedRow[] = [];
 
-    for (const customer of validation.valid) {
-      const customerResult = await supabase.from('customers').insert({
-        ...customer,
-        is_active: true,
-      }).select();
-
-      if (customerResult.error) {
-        Sentry.captureException(toSentryError(customerResult.error), { extra: { context: 'Failed to insert customer' } });
-        failed++;
-      } else {
-        try { checkMutationResult(customerResult, 'Insert customer'); } catch (e) { Sentry.captureException(toSentryError(e)); failed++; continue; }
+    // Each row goes through save_customer, as the New Customer page does: the server checks the
+    // actor, role, a rep's self-assignment and tier, and writes the activity row (KI-145).
+    for (const { row, key, ...customer } of validation.valid) {
+      try {
+        const { data, error } = await supabase.rpc('save_customer', {
+          // save_customer accepts NULL p_customer_id to create (the generated type narrows it to string).
+          p_customer_id: null as unknown as string,
+          // A rep must assign the customer to themselves; an admin's import stays unassigned, as before.
+          p_customer_payload: { ...customer, assigned_sales_rep: isAdmin ? null : profile?.id ?? null, is_active: true },
+          p_addresses: [],
+          p_performed_by: profile?.id as string,
+          p_idempotency_key: key,
+        });
+        if (error) {
+          // A database refusal has a code; without one the request may never have been answered.
+          failed.push({ row, farm_name: customer.farm_name, error: error.code ? sanitizeError(error) : UNCONFIRMED });
+          if (!error.code) Sentry.captureException(toSentryError(error), { extra: { context: 'Bulk customer import row' } });
+          continue;
+        }
+        assertRpcResult(data, 'save_customer');
         success++;
+      } catch (e) {
+        Sentry.captureException(toSentryError(e), { extra: { context: 'Bulk customer import row' } });
+        failed.push({ row, farm_name: customer.farm_name, error: UNCONFIRMED });
       }
     }
 
-    setUploadResults({ success, failed });
+    setUploadResults({ success, failed, skipped: validation.invalid.length });
     setUploading(false);
 
     if (success > 0) {
       toast('success', `Successfully imported ${success} customer(s)`);
       onSuccess();
     }
-    if (failed > 0) {
-      toast('error', `Failed to import ${failed} customer(s)`);
+    if (failed.length > 0) {
+      toast('error', `Failed to import ${failed.length} customer(s)`);
     }
   };
 
   const handleClose = () => {
+    if (uploading) return; // closing mid-import would hide which rows saved
     setFile(null);
     setValidation(null);
     setUploadResults(null);
@@ -451,17 +508,27 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
 
         {uploadResults && (
           <div className="p-4 bg-green-50 border border-green-100 rounded-lg text-center">
-            <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-2" />
+            {uploadResults.success > 0
+              ? <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-2" />
+              : <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-2" />}
             <h4 className="text-sm font-medium text-nav-dark mb-1">Import Complete</h4>
             <p className="text-xs text-secondary">
               Successfully imported {uploadResults.success} customer(s)
-              {uploadResults.failed > 0 && `, ${uploadResults.failed} failed`}
+              {uploadResults.failed.length > 0 && `, ${uploadResults.failed.length} failed`}
+              {uploadResults.skipped > 0 && `, ${uploadResults.skipped} invalid row(s) skipped`}
             </p>
+            {uploadResults.failed.length > 0 && (
+              <div className="mt-3 p-3 bg-red-50 border border-red-100 rounded-lg max-h-32 overflow-y-auto text-left space-y-1">
+                {uploadResults.failed.map((f) => (
+                  <p key={f.row} className="text-xs text-secondary">Row {f.row} ({f.farm_name}): {f.error}</p>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={handleClose}>
+          <Button variant="secondary" onClick={handleClose} disabled={uploading}>
             {uploadResults ? 'Close' : 'Cancel'}
           </Button>
           {!validation && !uploadResults && (
@@ -478,6 +545,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
             <>
               <Button
                 variant="secondary"
+                disabled={uploading}
                 onClick={() => {
                   setFile(null);
                   setValidation(null);

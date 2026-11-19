@@ -184,7 +184,7 @@ function evaluatePush(repo, nowMs = Date.now(), command = "git push origin HEAD:
 }
 
 // Every spawnSync below launches a guard and waits for its verdict. The hook
-// runtime's own 15s limit and the guard's internal 5s git/gh caps bound what
+// runtime's own 255s limit and the guard's internal 5s git / 25s gh caps bound what
 // happens INSIDE the guard, not this outer call — so a wedged guard would hang
 // the suite until the CI job timeout, where the failure reads as "CI is slow"
 // rather than "a guard hung" (CodeRabbit, 2026-09-09). Generous enough that a
@@ -2620,12 +2620,12 @@ try {
       nowMs: now,
       runGh: slowGh,
       clock: () => virtualNow,
-      hardGateDeadlineMs: virtualNow + 12_500, // the real hook's: 15s less its 2.5s reserve
+      hardGateDeadlineMs: virtualNow + 252_500, // the real hook's: 255s less its 2.5s reserve
     });
     return { verdict, resolved: resolved.filter(Boolean) };
   };
 
-  const slow = budgetRun(4_000);
+  const slow = budgetRun(120_000);
   assert.equal(slow.verdict.blocked, true, "merges whose calls would outrun the hook are DENIED, not left for the hook to be killed mid-call");
   assert.match(String(slow.verdict.reason), /time limit/, "the denial is the budget's — not a fail-open notice or an unrelated gate");
   assert.equal(slow.resolved.includes("789"), false, "the budget refuses BEFORE a call that could not finish, so the last merge is never started");
@@ -2658,11 +2658,11 @@ try {
       runGit: slowGit,
       runGh: () => mainPrJson,
       clock: () => virtualNow,
-      hardGateDeadlineMs: virtualNow + 12_500,
+      hardGateDeadlineMs: virtualNow + 252_500,
     });
     return { verdict, gitCalls };
   };
-  const slowPushes = pushBudgetRun(4_000);
+  const slowPushes = pushBudgetRun(120_000);
   assert.equal(slowPushes.verdict.blocked, true, "pushes whose git calls would outrun the hook are DENIED");
   assert.match(String(slowPushes.verdict.reason), /push checks could not finish/, "the denial is the budget's, and it names the push");
   assert.ok(slowPushes.gitCalls <= 3, `the budget refuses before a call that could not finish (made ${slowPushes.gitCalls})`);
@@ -2770,13 +2770,13 @@ try {
     const started = Date.now();
     const verdict = evaluateReady(huge);
     assert.equal(verdict.blocked, true, "a ~100 KB command is still refused");
-    assert.ok(Date.now() - started < 5000, `…and answered well inside the 15 s hook limit (took ${Date.now() - started} ms)`);
+    assert.ok(Date.now() - started < 5000, `…and answered well inside the hook limit (took ${Date.now() - started} ms)`);
   }
 
-  // The budget admits a call on the assumption it lasts at most ONE 5-second
-  // timeout. defaultRunGh tries `gh` then the absolute gh.exe on Windows; if a
-  // timed-out `gh` fell through to the second candidate, one admitted call could
-  // last ten seconds and a chain could outrun the hook (Codex sol, 2026-09-14).
+  // The budget admits a call on the assumption it lasts at most ONE per-call
+  // timeout (CODEX_CALL_TIMEOUT_MS, 25s for gh). defaultRunGh tries `gh` then the
+  // absolute gh.exe on Windows; if a timed-out `gh` fell through to the second
+  // candidate, one admitted call could last two caps and a chain could outrun the hook (Codex sol, 2026-09-14).
   const guardSource = (await import("node:fs")).readFileSync(
     new URL("./production-action-guard.mjs", import.meta.url),
     "utf8",
@@ -2943,9 +2943,9 @@ try {
       nowMs: now,
       rawThreads: true,
       clock: () => virtualNow,
-      hardGateDeadlineMs: virtualNow + 12_500,
+      hardGateDeadlineMs: virtualNow + 252_500,
       runGh: (args) => {
-        if (isAdvisoryMetaCall(args)) { virtualNow += 8_000; return advisoryMetaJson; } // slow but successful
+        if (isAdvisoryMetaCall(args)) { virtualNow += 230_000; return advisoryMetaJson; } // slow but successful
         if (Array.isArray(args) && args.includes("graphql")) return NO_THREADS_JSON;
         return mainPrJson;
       },

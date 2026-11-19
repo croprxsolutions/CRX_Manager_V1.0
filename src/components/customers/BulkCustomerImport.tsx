@@ -40,8 +40,8 @@ const ACRE_FIELDS = ['total_acres', 'corn_acres', 'soybean_acres', 'other_acres'
 /** A supplied acreage as a number, or null when it is not a valid one. "1,200" is 1200 (KI-145); "1,2" is not valid. */
 function parseAcres(value: string): number | null {
   const cleaned = /^\d{1,3}(,\d{3})+(\.\d+)?$/.test(value) ? value.replace(/,/g, '') : value;
-  const num = Number(cleaned);
-  return cleaned !== '' && Number.isFinite(num) && num >= 0 ? num : null;
+  // Plain decimals only: Number() would also read "0x10" as 16 or "1e3" as 1000.
+  return /^\d+(\.\d+)?$/.test(cleaned) ? Number(cleaned) : null;
 }
 
 interface ValidationResult {

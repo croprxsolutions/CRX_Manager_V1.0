@@ -379,7 +379,8 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
 
   return (
     <>
-    <Modal open={open} onClose={handleClose} title="Bulk Customer" accent="Import" maxWidth="max-w-3xl">
+    {/* While the confirm is open, Escape, the X and the backdrop close only the confirm, never the import. */}
+    <Modal open={open} onClose={handleClose} closeDisabled={confirmClose} title="Bulk Customer" accent="Import" maxWidth="max-w-3xl">
       <div className="space-y-4">
         <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg">
           <h4 className="text-sm font-medium text-nav-dark mb-2 flex items-center gap-2">

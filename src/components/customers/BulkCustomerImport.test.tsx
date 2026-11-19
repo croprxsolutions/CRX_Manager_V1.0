@@ -166,6 +166,12 @@ describe('BulkCustomerImport', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
     expect(screen.getByRole('button', { name: 'Retry 1 Unanswered Row(s)' })).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
+    // Escape with the confirm open closes only the confirm, not the import (both modals listen for it).
+    fireEvent.click(footerClose());
+    await screen.findByRole('button', { name: 'Close anyway' });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Retry 1 Unanswered Row(s)' })).toBeInTheDocument();
     fireEvent.click(footerClose());
     fireEvent.click(await screen.findByRole('button', { name: 'Close anyway' }));
     expect(onClose).toHaveBeenCalledTimes(1);

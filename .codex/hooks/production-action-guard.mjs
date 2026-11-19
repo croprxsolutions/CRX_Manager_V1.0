@@ -1552,9 +1552,12 @@ export function evaluateProductionAction({
       if (destinations.length === 1 && destinations[0] === rawBranch) {
         try { destinations.push(runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"], pushRepoDir).replace(/^[^/]+\//, "")); } catch { /* no upstream */ }
       }
-      for (const destination of destinations) {
-        const refusal = claim(destination, "push", true);
-        if (refusal) return denied(`CODEX PRODUCTION GATE: ${refusal}`);
+      // Check every destination before recording any, so a refused multi-ref push claims nothing.
+      for (const record of [false, true]) {
+        for (const destination of destinations) {
+          const refusal = claim(destination, "push", record);
+          if (refusal) return denied(`CODEX PRODUCTION GATE: ${refusal}`);
+        }
       }
     }
 

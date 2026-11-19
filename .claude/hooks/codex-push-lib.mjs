@@ -3685,6 +3685,8 @@ export function headContainsBaseOnGitHub({ baseSha, headSha, repo, gh }) {
 
 // The one merge-base GitHub's compare reports for `headSha` and `baseSha` (#1913),
 // or null for an unusable SHA or answer. Throws on a failed call; callers treat that as null.
+// shortcut: GitHub's compare names one merge-base, so a criss-cross history with two is not
+// refused here as the local check refuses it; still stricter than the old any-ancestor rule.
 export function mergeBaseOnGitHub({ baseSha, headSha, repo, gh }) {
   const SHA = /^[0-9a-f]{40}$/i;
   const repoPath = ghApiRepoPath(repo);

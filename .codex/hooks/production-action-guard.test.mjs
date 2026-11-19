@@ -4024,6 +4024,9 @@ try {
       assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/other"]?.session, "codex-C", "#1948: ...and claims its destination");
       assert.match(pushAs("codex-D", "git push origin HEAD:claude/other").reason || "", /CODEX PRODUCTION GATE: LANDING CLAIM/, "#1948: another session's push to it is refused");
       assert.equal(pushAs("codex-D", "git push --dry-run origin HEAD:claude/other").blocked, false, "#1948: a dry run is never refused");
+      // Luna MED: a multi-ref push refused on one destination claims none of the others.
+      assert.match(pushAs("codex-D", "git push origin HEAD:claude/free HEAD:claude/other").reason || "", /LANDING CLAIM/, "#1948: a multi-ref push touching a claimed branch is refused");
+      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/free"], undefined, "#1948: ...and its free destination stays unclaimed");
     }
     PIN = ` --match-head-commit ${stale.sha}`; // the cases below use the original head again
 

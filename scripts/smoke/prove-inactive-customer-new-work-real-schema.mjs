@@ -59,8 +59,8 @@ let n = 0;
 const newOrder = (cid, status = 'confirmed') => `INSERT INTO public.orders (order_number, customer_id, status) VALUES ('NW-O${++n}', '${cid}', '${status}');`;
 const newDelivery = (cid, orderId) => `INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, status)
   VALUES ('NW-D${++n}', '${orderId}', '${cid}', '${ADMIN}', 'scheduled');`;
-const newHold = (cid) => `INSERT INTO public.inventory_holds (product_id, customer_id, quantity, created_by, is_active, hold_type)
-  VALUES ('${PRODUCT}', '${cid}', 1, '${ADMIN}', true, 'job');`;
+const newHold = (cid, source = null) => `INSERT INTO public.inventory_holds (product_id, customer_id, quantity, created_by, is_active, hold_type, source_id)
+  VALUES ('${PRODUCT}', '${cid}', 1, '${ADMIN}', true, 'job', ${source ? `'${source}'` : 'NULL'});`;
 const newJob = (cid, status = 'scheduled') => `INSERT INTO public.jobs (job_number, customer_id, job_date, status) VALUES ('NW-J${++n}', '${cid}', current_date, '${status}');`;
 
 function seed() {
@@ -131,16 +131,16 @@ async function main() {
   const inserts = {
     order: (c) => newOrder(c), 'closed order': (c) => newOrder(c, 'fulfilled'),
     delivery: (c) => newDelivery(c, c === ACTIVE ? R.activeDone : R.inactiveDone),
-    job: (c) => newJob(c), 'cancelled job': (c) => newJob(c, 'cancelled'),
+    'job-type hold with no source': (c) => newHold(c), job: (c) => newJob(c), 'cancelled job': (c) => newJob(c, 'cancelled'),
   };
   for (const sql of Object.values(inserts)) {
     allowed(sql(ACTIVE));
     refused(sql(INACTIVE));
     refused(sql(INACTIVE), W, { role: 'service_role' }, null);
   }
-  // A hold built from a job follows its job (starting an existing job rebuilds its holds): not refused here.
-  allowed(newHold(INACTIVE));
-  console.log('[new-work] new order (open or closed), delivery and spray job: refused for the inactive customer as postgres and service_role; saved for the active one; a job-built hold is left to its job');
+  // A hold built from a job (source set) follows its job (starting an existing job rebuilds its holds).
+  allowed(newHold(INACTIVE, R.openJob));
+  console.log('[new-work] new order (open or closed), delivery, source-free hold of any type and spray job: refused for the inactive customer as postgres and service_role; saved for the active one; a job-built hold is left to its job');
   // Signed-in admin and rep (the guard ignores who is asking; row-level security does not hide the flag).
   for (const uid of [ADMIN, REP]) refused(newJob(INACTIVE), W, { role: 'authenticated' }, uid);
   // A driver may not add a spray job: the same permission error for either customer, so it reveals no status.

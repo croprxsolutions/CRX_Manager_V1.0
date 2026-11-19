@@ -21,7 +21,7 @@ customer whose `customers.is_active` is false. "Becomes open work" means:
 |---|---|---|
 | orders | any INSERT; an UPDATE where (the row is open afterwards and was not open before) or its `customer_id` changed (open or closed) | `status IN ('confirmed','partially_fulfilled')`, `deleted_at IS NULL` |
 | deliveries | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` or `order_id` changed | `status IN ('scheduled','in_progress')`, `deleted_at IS NULL` |
-| inventory_holds (stand-alone only: `manual`, or `crop_program` with no source; Sol r1 #5) | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` changed | `is_active` and not expired (`expires_at` null or ≥ today, Chicago) |
+| inventory_holds (every hold with no `source_id`; a sourced hold follows its job, quote or booking; Sol r1 #5, Luna) | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` changed | `is_active` and not expired (`expires_at` null or ≥ today, Chicago) |
 | jobs | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` changed | `status IN ('scheduled','in_progress')`, or `completed` with no `invoice_id`; `deleted_at IS NULL` |
 
 The customer checked is the row's `customer_id`; for a delivery also its order's `customer_id`
@@ -171,8 +171,9 @@ change is the sanitizer sentence, which is safe before or after the migration.
   order; follow-up delivery never updates the order.
 - #3 MED (customer row not visible) → refused unless every named customer is found and locked.
 - #4 MED (REPEATABLE READ) → accepted, as before (no app path uses it).
-- #5 MED (job start rebuilds its holds) → only stand-alone holds are checked, the rule the
-  inactive-product hold guard uses; a sourced hold follows its job, quote or booking. This also
+- #5 MED (job start rebuilds its holds) → only holds with no `source_id` are checked, whatever
+  their type (Luna r2: a type-only rule let a source-free 'job' hold through); a sourced hold
+  follows its job, quote or booking (every live builder sets `source_id`). This also
   takes quote holds out of scope (Taha's).
 - #6 MED → preflight also requires KI-148's trigger attached and enabled.
 - #7 MED → triggers added orders, deliveries, jobs, then inventory_holds.

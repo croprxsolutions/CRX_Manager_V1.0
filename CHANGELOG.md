@@ -36,6 +36,7 @@ Releases of CRX Manager, newest first.
 * environment banner and tab title prefix (STAGING amber, LOCAL blue) (#1714)
 
 #### 🐛 Bug Fixes
+* deactivating a customer checks its open work (KI-148) (#1997)
 * KI-146 farm groups cannot loop and include grandchildren (#1991)
 * last-admin guard on role change, server-only reset audit, anon lockdown (KI-121..124) (#1981)
 * enforce the live-job booking rules in the database for every write path (#1959) (#1974)

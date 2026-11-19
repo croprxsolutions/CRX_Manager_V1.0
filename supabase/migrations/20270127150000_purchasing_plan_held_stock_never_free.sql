@@ -435,8 +435,10 @@ BEGIN
       FROM hnow h LEFT JOIN clt t ON t.ckind = 'now' AND t.ckey = h.hold_id
      WHERE h.quantity - h.on_shelf - COALESCE(t.q, 0) > 0
     UNION ALL
-    -- Rule 6: each hold part claiming incoming stock, committed on its PO's date.
-    SELECT m.product_id, 'hold', 'committed', m.d, m.q,
+    -- Rule 6: each hold part claiming incoming stock, committed on its PO's date, or on its own earlier
+    -- committed date (a Firm line's, a job's, a hold's rest), so a late PO never makes a need look timely.
+    SELECT m.product_id, 'hold', 'committed',
+           LEAST(m.d, CASE WHEN s2.confidence = 'firm' THEN s2.needed_by_date END, x.job_date, h.rest_date), m.q,
            COALESCE(s2.quote_id, x.quote_id, CASE WHEN m.ckind = 'crop_program_rest' THEN m.ckey END),
            NULL::uuid,
            COALESCE(x.job_id, CASE WHEN m.ckind = 'job_rest' THEN m.ckey END),
@@ -654,7 +656,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '2d241326c51cabea75d26103dd8cbf7e' THEN
+     IS DISTINCT FROM 'f0c891e7240b8a50b8f97038532efaaa' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

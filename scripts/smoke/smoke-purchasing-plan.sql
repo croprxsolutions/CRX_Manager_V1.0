@@ -48,7 +48,8 @@
 --   P29  draws ignore line position: tied sections (product 43) still lose the Maybe line first; 100 drawn
 --        against Firm 100 + Maybe 50 leaves Firm 50 (product 44)
 --   P30  Sol round 5 on #1989: a hold not on the shelf takes incoming PO stock first (Mason, 2026-11-19):
---        0 on hand, Maybe 100 held, PO 100 at +10, another booking's Firm 100 at +20: buy 100, not 0
+--        0 on hand, Maybe 100 held, PO 100 at +10, another booking's Firm 100 at +20: buy 100, not 0;
+--        a held Firm 100 at +1 with a PO of 100 at +10 keeps its +1 date: buy 100 (product 46)
 --   P27  a window crossing New Year ends next year; an invalid start month-day falls back the whole window
 --   P8   an applicator and a caller with no user are refused
 --
@@ -91,16 +92,16 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Purchasing Farm ' || v_suffix) RETURNING id INTO v_customer;
-  -- Products 1..45, all stocked in Gal except 20 (stocked by the 2.5 GL jug); every product is inserted before any is priced
+  -- Products 1..46, all stocked in Gal except 20 (stocked by the 2.5 GL jug); every product is inserted before any is priced
   -- (pricing sets a transaction-wide mode).
-  FOR v_i IN 1..45 LOOP
+  FOR v_i IN 1..46 LOOP
     INSERT INTO products (product_name, unit_size, inventory_unit, product_form)
     VALUES ('[SMOKE] Purchasing ' || lpad(v_i::text, 2, '0') || ' ' || v_suffix,
             (ARRAY['Gal', '2.5 GL'])[(v_i = 20)::int + 1], (ARRAY['Gal', NULL])[(v_i = 20)::int + 1], 'liquid')
     RETURNING id INTO v_pid;
     v_p := v_p || v_pid;
   END LOOP;
-  FOR v_i IN 1..45 LOOP
+  FOR v_i IN 1..46 LOOP
     v_price_res := preview_product_pricing_changes('product_page', NULL,
       jsonb_build_array(jsonb_build_object(
         'product_id', v_p[v_i], 'row_version', (SELECT pricing_version FROM products WHERE id = v_p[v_i]),
@@ -515,6 +516,21 @@ BEGIN
   VALUES ('SMK-PP30-' || v_suffix, '[SMOKE] Vendor', 'submitted', v_t + 10, v_admin) RETURNING id INTO v_po;
   INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity_ordered, quantity_received, unit_cost, unit_size)
   VALUES (v_po, v_p[45], 100, 0, 6, 'Gal');
+  -- P30E, product 46: Firm 100 at +1, held in full below; PO of 100 at +10; no stock.
+  v_res := save_quote(NULL, jsonb_build_object(
+      'quote_number', '[SMOKE] PP30E-' || v_suffix, 'customer_id', v_customer, 'status', 'draft',
+      'tier', 1, 'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true),
+    jsonb_build_array(jsonb_build_object('client_key', '_a', 'section_name', 'P30E', 'sort_order', 0,
+      'needed_by_date', v_t + 1, 'confidence', 'firm',
+      'items', jsonb_build_array(jsonb_build_object('client_key', '_ka', 'product_id', v_p[46], 'sort_order', 0,
+        'calc_mode', 'units_direct', 'total_units_needed', 100, 'price_override', 20, 'price_per_unit', 20,
+        'current_cost', 6, 'unit_size', 'Gal', 'acres', 0)))),
+    v_admin, 'smk-pp30e-' || v_suffix);
+  INSERT INTO smk_pp_bookings VALUES ('P30E', (v_res->>'quote_id')::uuid, v_res->'section_ids');
+  INSERT INTO purchase_orders (po_number, vendor, status, expected_delivery_date, created_by)
+  VALUES ('SMK-PP30E-' || v_suffix, '[SMOKE] Vendor', 'submitted', v_t + 10, v_admin) RETURNING id INTO v_po;
+  INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity_ordered, quantity_received, unit_cost, unit_size)
+  VALUES (v_po, v_p[46], 100, 0, 6, 'Gal');
   -- P29X, product 44: Firm 100 at +30 listed first, Maybe 50 at +60 second.
   v_res := save_quote(NULL, jsonb_build_object(
       'quote_number', '[SMOKE] PP29X-' || v_suffix, 'customer_id', v_customer, 'status', 'draft',
@@ -597,6 +613,9 @@ BEGIN
   INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active, expires_at)
   VALUES (v_p[45], v_customer, 100, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P30M'), v_admin, true,
           v_t + 74);
+  INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active, expires_at)
+  VALUES (v_p[46], v_customer, 100, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P30E'), v_admin, true,
+          v_t + 15);
   -- P29X: a delivered order of 100 naming the Maybe line of 50.
   SELECT quote_id, (section_ids->>'_b')::uuid INTO v_q, v_s2 FROM smk_pp_bookings WHERE tag = 'P29X';
   INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id, quote_id, booking_draw)
@@ -1012,6 +1031,13 @@ BEGIN
           WHERE r->>'kind' = 'hold' AND (r->>'raw_date')::date = v_t + 10) <> 100
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P30 a hold takes incoming stock first) %', v_x;
+  END IF;
+  -- 46: the held Firm line is needed at +1, before the PO lands at +10: buy 100 for +1, not 0.
+  SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[46];
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
+          WHERE r->>'kind' = 'hold' AND (r->>'raw_date')::date = v_t + 1) <> 100 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P30 a late PO keeps the earlier need date) %', v_x;
   END IF;
   v_n := v_n + 1;
 

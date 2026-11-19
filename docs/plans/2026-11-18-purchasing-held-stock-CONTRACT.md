@@ -51,7 +51,7 @@ held than the shelf has, the unbacked part stays as the booking line (its own da
    P29, P14).
 9. **Holds take incoming stock first (Mason, 2026-11-19, after Sol round 5 on #1989).** The part of a hold not on the
    shelf takes incoming PO stock first, on each PO's date (holds that count now first, then covered holds in rule 3's
-   order), as the hold does when the stock is received; that part is a committed hold row on the PO's date and only
+   order), as the hold does when the stock is received; that part is a committed hold row on the PO's date (or on its own earlier committed date: a Firm line's, a job's, a hold's rest; Codex App on #1989) and only
    the rest of a PO is free for other demand. With no PO, rules 3 and 7 are unchanged: a hold never makes the plan
    buy on its own. (0 on hand, Maybe 100 held, PO 100 at +10, another booking's Firm 100 at +20: buy 100; smoke P30.)
 6. **Window MEDs.** A timing window is taken from settings only when both `start` and `end` are valid month-days

@@ -2934,6 +2934,10 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry it.
   'set_registration_adjuvants',
+  // 20270129150000 (#1942, local candidate): re-emits the private completion body under its current name
+  // (20270126110000 renamed it, so no generated type carries it yet); keyed by complete_delivery's p_idempotency_key.
+  // Prune once the generated types carry it.
+  '_complete_delivery_authorized_impl_20270122',
 ]);
 
 /**

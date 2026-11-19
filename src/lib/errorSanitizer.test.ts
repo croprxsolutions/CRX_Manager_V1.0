@@ -74,6 +74,12 @@ describe('sanitizeError', () => {
   ])('explains a delivery-line refusal %s (20270126110000) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
   });
+  it.each([
+    ['DELIVERY_QUANTITIES_STALE', "this delivery's lines changed since the screen loaded them; reload it and enter the quantities again."],
+    ['DELIVERY_QUANTITIES_INVALID', 'every delivered quantity must be a number; reload the delivery and enter the quantities again.'],
+  ])('explains a refused partial completion %s (20270129150000) without the raw token', (token, sentence) => {
+    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
+  });
   it('explains a not-a-number count (20270126110000)', () => {
     expect(sanitizeError({ code: '23514', message: 'CYCLE_COUNT_QTY_INVALID: the counted quantity must be a number.' }))
       .toBe('Nothing was saved. the counted quantity must be a number.');

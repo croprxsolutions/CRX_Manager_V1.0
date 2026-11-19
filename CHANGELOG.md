@@ -124,6 +124,8 @@ Releases of CRX Manager, newest first.
 * bring staging up to main (replaces #1742) (#1750)
 
 #### 🧩 Other
+* session-staleness: count CREATE OR REPLACE FUNCTION and trigger migrations as pending (#749) (#2031)
+* Sol proof script: print the round line on the clean-worktree refusal (#1930) (#2029)
 * Codex merge check waits longer for a slow GitHub (#1963) (#2024)
 * rls reviewer CHECK 4: final form + revoked helpers (release #1990) (#2006)
 * wait longer for slow GitHub (merge gate 25s/call, Sol preflight 60s) (#1962)

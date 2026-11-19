@@ -298,10 +298,9 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
                 else customer[field as typeof ACRE_FIELDS[number]] = num;
               }
             } else if (field === 'assigned_tier' && isAdmin) {
-              const tier = parseInt(value);
-              if ([1, 2, 3].includes(tier)) {
-                customer[field] = tier;
-              }
+              // The tier sets prices: an unclear one is an invalid row, never a guess or the default.
+              if (/^[123]$/.test(value)) customer[field] = Number(value);
+              else if (value) badValue ||= `Invalid tier: ${value}`;
             }
           }
         });

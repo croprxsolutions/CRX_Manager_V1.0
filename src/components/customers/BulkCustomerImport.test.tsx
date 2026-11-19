@@ -157,6 +157,16 @@ describe('BulkCustomerImport', () => {
     expect(screen.getByRole('button', { name: 'Import 1 Customer(s)' })).toBeInTheDocument();
   });
 
+  it('makes an admin row with an unclear tier invalid instead of using the default', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['farm_name,tier\nA Farm,Tier 2\nB Farm,2.5\nC Farm,2\nD Farm,\n'], 'c.csv', { type: 'text/csv' })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText('Row 2: Invalid tier: Tier 2')).toBeInTheDocument();
+    expect(screen.getByText('Row 3: Invalid tier: 2.5')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import 2 Customer(s)' })).toBeInTheDocument();
+  });
+
   it('shows file upload area', () => {
     render(<BulkCustomerImport {...defaultProps} />);
     expect(screen.getByText(/csv/i)).toBeInTheDocument();

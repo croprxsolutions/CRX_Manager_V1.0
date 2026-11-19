@@ -1149,12 +1149,13 @@ insert as a rep fails RLS, the new path saves with the rep and one activity row,
 Not fixed here: duplicate check on re-import (KI-77), quoted values spanning lines, in-place retry of unanswered rows.
 
 ### KI-146 — Farm groups (parent customer) can form a loop, and grandchildren are left out
-**LOW-MED · OPEN · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #5) · Claude (fix on staging, not live)**
+**LOW-MED · FIXED ON STAGING (PR #1991, merged 2026-11-19; live with the next release) · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #5) · Claude**
 `get_customer_farm_group` recurses with no loop guard and returns only the top parent's direct children; the picker and
 `save_customer` accept any parent. A loop makes the Sales Reports farm-group view time out. Live data is clean. Fix:
 `20270127200000_ki146_farm_group_no_loops.sql`: a trigger on `customers` refuses a parent that is the customer itself or
 below it (every write path); the read walks distinct ids with `UNION` and returns every descendant. Contract:
-`docs/plans/2026-11-18-ki146-farm-group-loops-CONTRACT.md`.
+`docs/plans/2026-11-18-ki146-farm-group-loops-CONTRACT.md`. Farm groups may be any depth (Mason, 2026-11-18). Follow-ups:
+#1995 (Orders/Deliveries lists show the top parent), #1996 (Sales Reports stale farm-group responses).
 
 ### KI-147 — Customer payment terms are free text and anything unrecognized becomes Net 30
 **LOW · OPEN · customers/AR · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #6) · unassigned**

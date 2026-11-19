@@ -56,6 +56,11 @@ The deactivation guard (`20270128140000`) waits for new orders, deliveries, hold
 then checks all five at once. Existing work switched back to open by a status change in the same moment, or work added
 after the deactivation, is not caught. The stop rule fired (Sol r1, Luna r2, Luna r3 HIGHs on this timing mechanism);
 Mason chose to accept the limit rather than build "an inactive customer can never have open work" (follow-up).
+## 2026-11-19 — Release #1990 may have its Sol review past the round cap
+
+**Decision (Mason, in chat, 2026-11-19: "yes, Sol may review release #1990").** The weekly release PR #1990 (`release/next` into `main`) may have its Sol review although the round counter reads 49.
+**Why:** the counter counts every Sol-reviewed commit the release contains, so the 48 earlier rounds are the week's feature PRs' own reviews, not repeated findings on the release.
+**What it does:** lets Sol review the release head before its migrations go live. Every other gate is unchanged: a clean Sol review of the exact release head, green checks, Taha's `Ready to merge`, and Mason's own approval for each migration the apply guard parks.
 
 ## 2026-11-19 — #1991: Mason owner-accepted 1 Sol finding(s) at `25a163b7ad7b`
 

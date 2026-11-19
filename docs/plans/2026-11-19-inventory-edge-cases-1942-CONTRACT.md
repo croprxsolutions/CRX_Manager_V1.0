@@ -27,7 +27,9 @@ keeps its `authenticated` and `service_role` execute: the count screen calls it,
   for an earlier one.
 - **Afterwards.** The body finds the row (0 on hand), warns short and deducts as today.
 - **Not in progress.** A delivery not `in_progress` (refused by the body, or an idempotent replay) creates nothing.
-  Its rows are still locked as today.
+  Its rows are still locked as today. The same goes for a key that already has a saved completion receipt, even on
+  another delivery (Luna r3): the body answers from the receipt before its status check, so the wrapper checks no
+  figures and creates no row for it.
 
 ### B. On-hand with more than 4 decimals (a count misses the counted figure)
 - **Fact.** `update_cycle_count_item` (20270126110000) stores `expected_qty = round(on-hand, 4)` and

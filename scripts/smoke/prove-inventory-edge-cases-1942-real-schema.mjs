@@ -435,7 +435,11 @@ async function afterCases() {
     ${complete(DC, null, 'ie-replay')}
     SELECT (SELECT status FROM public.deliveries WHERE id = '${DC}') || '/' || ${rowCount(P7)};`), 'completed/0');
   assert.match(probe(complete(id('f9'))).output, /Delivery not found/);
-  console.log('[case] A two completions creating rows for the same two new products in opposite line order both finish (one waits, no deadlock); a completion ends at minus its quantities on rows flagged manufactured at delivery, its delivered rows flagged for review; a retry of a completed delivery returns its receipt and creates no row; an unknown delivery is still refused by the body');
+  // A key already used by another delivery's completion returns that receipt and creates no row here (Luna r3).
+  assert.equal(okProbe(`${complete(DE, null, 'ie-reuse')}
+    ${complete(DC, null, 'ie-reuse')}
+    SELECT (SELECT status FROM public.deliveries WHERE id = '${DC}') || '/' || ${rowCount(P4)} || '/' || ${rowCount(P5)};`), 'in_progress/0/0');
+  console.log('[case] A two completions creating rows for the same two new products in opposite line order both finish (one waits, no deadlock); a completion ends at minus its quantities on rows flagged manufactured at delivery, its delivered rows flagged for review; a retry of a completed delivery returns its receipt and creates no row, nor does a key already used by another delivery; an unknown delivery is still refused by the body');
 
   // B
   assert.deepEqual(countAndComplete(), [12.35, 12.3456789]);

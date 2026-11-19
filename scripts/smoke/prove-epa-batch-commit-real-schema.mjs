@@ -204,9 +204,13 @@ async function main() {
   assert.ok(proposal(c1).items.some((i) => i.kind === 'label' && WRITABLE.has(i.class) && i.accept_default === true),
     'C1 needs a label item that would be written by default');
   const reg1 = registration('c1');
-  refused(ADMIN, BATCH(c1, key('c'), ingredientsOnly(c1)), /EPA_BATCH_DECISION_INVALID: the batch saves ingredients only/);
+  refused(ADMIN, BATCH(c1, key('c'), ingredientsOnly(c1)), /EPA_BATCH_DECISION_INVALID: the batch saves every ingredient and nothing else/);
   assert.equal(proposal(c1).status, 'proposed'); assert.equal(ingredients('c1'), 0); assert.equal(registration('c1'), reg1);
   console.log('[epa-batch] C1: a label item left to its default: refused, nothing written, registration unchanged');
+  const declined = decisions(c1).map((d) => (d.item_id.startsWith('ing:') ? { ...d, accept: false } : d));
+  refused(ADMIN, BATCH(c1, key('c'), declined), /EPA_BATCH_DECISION_INVALID/);
+  assert.equal(ingredients('c1'), 0);
+  console.log('[epa-batch] C1: an ingredient declined: refused (the batch saves every ingredient or none)');
 
   // C2: EPA's name shares no word with the product's names.
   const c2 = propose('c2', ADMIN, 'Zolto Fungicide');

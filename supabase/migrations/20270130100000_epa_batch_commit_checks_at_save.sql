@@ -22,7 +22,7 @@
 --     - every ingredient is a plain add with a CAS number and a percent, 100 at most in all;
 --     - the label, re-sorted now, has only blanks, confirmations and matches (a fact edited since the lookup
 --       sends it to a person).
---   It refuses with EPA_BATCH_DECISION_INVALID when the decisions would write anything but an ingredient add (a
+--   It refuses with EPA_BATCH_DECISION_INVALID when the decisions would not write exactly every ingredient add (a
 --   label item left out takes its default, so each must be declined). Then it calls commit_epa_proposal unchanged,
 --   in the same transaction. The product page keeps calling commit_epa_proposal directly; only the batch calls this.
 --
@@ -228,14 +228,15 @@ BEGIN
     RAISE EXCEPTION 'EPA_BATCH_NOT_ELIGIBLE: %; nothing was saved', v_why;
   END IF;
 
-  -- 6. The decisions: only ingredient adds are written. A label item left out takes its default, so each must be declined.
+  -- 6. The decisions: every ingredient add and nothing else is written. A label item left out takes its default, so each must be declined.
   IF jsonb_typeof(p_decisions) = 'array' AND EXISTS (
        SELECT 1 FROM jsonb_array_elements(v_p.items) e
         WHERE e->>'class' IN ('add', 'add_name_only', 'fill', 'confirm', 'rup_upgrade')
-          AND NOT (e->>'kind' = 'ingredient' AND e->>'class' = 'add')
-          AND COALESCE((SELECT d->'accept' FROM jsonb_array_elements(p_decisions) d
-                         WHERE d->>'item_id' = e->>'item_id' LIMIT 1), e->'accept_default') = 'true'::jsonb) THEN
-    RAISE EXCEPTION 'EPA_BATCH_DECISION_INVALID: the batch saves ingredients only; decline every other item';
+          -- accepted exactly when it is an ingredient add: all of EPA's ingredients, nothing else
+          AND (COALESCE((SELECT d->'accept' FROM jsonb_array_elements(p_decisions) d
+                          WHERE d->>'item_id' = e->>'item_id' LIMIT 1), e->'accept_default') = 'true'::jsonb)
+              IS DISTINCT FROM (e->>'kind' = 'ingredient' AND e->>'class' = 'add')) THEN
+    RAISE EXCEPTION 'EPA_BATCH_DECISION_INVALID: the batch saves every ingredient and nothing else; accept each ingredient, decline every other item';
   END IF;
   -- commit_epa_proposal re-checks the decisions' shape and writes; same transaction, locks already held.
   RETURN public.commit_epa_proposal(p_proposal_id, p_expected_proposal_version, p_decisions, p_idempotency_key);

@@ -87,6 +87,7 @@ Releases of CRX Manager, newest first.
 * staging DB job accepts existing odd-stamp and self-wrapping migrations (#1749)
 
 #### 🧹 Refactors & Chore
+* release #1990 may have its Sol review (#2003)
 * #1981 security batch row (#2002)
 * mark fixed on staging and log the pilot row (#2001)
 * quote PDF footer test compares the website exactly (CodeQL on #1990) (#1994)

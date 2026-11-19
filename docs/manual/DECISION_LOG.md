@@ -1,5 +1,23 @@
 # Decision Log
 
+## 2026-11-19 — #1997: Mason owner-accepted 7 Sol finding(s) at `994795d9e03e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1997 at `994795d9e03e` (base `ded769b690d0`) found 7 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:129`, text sha256 `de58d9c249796ea0` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 790e8f66a328)
+- Finding 2 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:112`, text sha256 `2eab717a1e5f38e1` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref a4294f160ded)
+- Finding 3 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:96`, text sha256 `8c37547165bb427d` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref d574a68b7024)
+- Finding 4 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:92`, text sha256 `09b0e88a75b60ff8` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref b5b91eeb8e56)
+- Finding 5 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:116`, text sha256 `3a0bd176d900fbcc` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref dbf01fddb2a5)
+- Finding 6 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:115`, text sha256 `762db17704647daf` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 32f20e28e41c)
+- Finding 7 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:90`, text sha256 `a40417b90ac4c30a` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 7d89581b0add)
+
 ## 2026-11-19 — #1997 may have up to three more Sol rounds (6-8)
 
 **Decision (Mason, in chat, 2026-11-19: "Approve up to 3 more").** PR #1997 (KI-148 customer deactivation) may have Sol rounds 6 to 8.

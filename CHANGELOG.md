@@ -82,6 +82,7 @@ Releases of CRX Manager, newest first.
 * staging DB job accepts existing odd-stamp and self-wrapping migrations (#1749)
 
 #### 🧹 Refactors & Chore
+* release and hotfix PRs into main may call RPCs their own migrations create (unblocks v0.1.0) (#1992)
 * price-source table by invoice path and grower role (#1961)
 * move Codex Sol and Astra pins to 6.2 (#1972)
 * Bump the minor-and-patch group with 9 updates (#1902)

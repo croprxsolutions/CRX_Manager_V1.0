@@ -19262,6 +19262,16 @@ export type Database = {
         }
         Returns: Json
       }
+      edit_jobs: {
+        Args: {
+          p_action?: string
+          p_changes?: Json
+          p_idempotency_key?: string
+          p_job_ids: string[]
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
       edit_prepay_credit: {
         Args: {
           p_bucket_label?: string

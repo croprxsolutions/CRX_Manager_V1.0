@@ -10,8 +10,8 @@
  * does not, a bulk update is all-or-nothing, and an already-inactive customer stays editable.
  *
  * Phase 2 (issue #2000) then applies 20270129170000_customer_deactivation_open_work_followups and checks
- * split payers, field-split owners, unbilled blend tickets, jobs billed or unbilled by live invoices only,
- * empty holds, the new wording and the 60-character farm name (contract section "Follow-up (issue #2000)").
+ * split payers of open orders and undelivered deliveries, empty holds, the new wording and the 60-character
+ * farm name (contract section "Follow-up (issue #2000)").
  *
  * Run: node scripts/smoke/prove-ki148-customer-deactivation-real-schema.mjs   (needs Docker)
  * Prints KI148_DEACTIVATION_PROOF_PASS, then KI148_FOLLOWUP_PROOF_PASS, on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.

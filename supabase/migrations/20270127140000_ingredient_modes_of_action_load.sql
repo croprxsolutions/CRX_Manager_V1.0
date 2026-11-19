@@ -19,23 +19,26 @@
 -- * Match: the CAS decides whenever the list row and the ingredient both carry one. The name (name_key rule:
 --   lower case, spaces collapsed) counts only when one side has no CAS, and only when exactly one active
 --   ingredient has that name.
--- * Too early: refuses (MOA_LOAD_TOO_EARLY) when fewer than 60 distinct ingredients match while EPA-sourced
---   ingredients exist, i.e. before the EPA batch fill (live on 2026-11-18: 8). A database with no EPA-sourced
---   ingredient at all (a schema rebuild, invented test data) writes nothing.
--- * Skipped and reported, never guessed: an ingredient the list would give two different groups, and one whose
---   name is listed while its CAS says another chemical.
+-- * When it runs (Mason, 2026-11-18, after Sol r3): no in-migration readiness check. It fills whatever matches
+--   when it runs. Timing is a release step: it reaches staging only once staging holds the EPA batch fill, and
+--   live only in a release after Mason confirms the live EPA batch has run (the live apply needs his yes, shown
+--   the matched count first).
+-- * Skipped and reported, never guessed: an ingredient the list would give two different groups, one whose
+--   name is listed while its CAS says another chemical, and an acid with a linked form whose list an admin
+--   emptied (filling the acid would show its groups on that form again).
 -- * Never touched: a retired ingredient; one that has or ever had a group row (a list an admin emptied stays
 --   empty); a salt or ester whose linked acid already has groups or gets them in this load (it shows the acid's).
 -- * One 'updated' event per filled ingredient (before [], after the new list), attributed to Mason, who approved
 --   the list. A second run finds every matched ingredient filled and writes nothing.
--- * Locks: the group table exclusively (the group editor and product pages wait the moment the load takes) and
---   the active ingredient rows for share (no CAS or name change mid-load). A clash with an in-flight editor save
---   ends in one of the two aborting, never a mixed write.
+-- * Locks: only the ingredient-list advisory lock (hashtext('crx.active_ingredients')) that every ingredient,
+--   chemistry and group writer takes first, so no ingredient or group changes mid-load and the order cannot
+--   invert. Reads (product pages) never wait.
 -- Reports (NOTICE): rows written, ingredients filled, kept, skipped, list rows matching no ingredient, and
 -- active ingredients showing no group.
 --
--- Rollback: retire the rows this wrote (status 'retired', row_version + 1) through set_active_ingredient_modes
--- per ingredient, or one reviewed migration; events stay (append-only history). Nothing else is written.
+-- Rollback: retire the rows this wrote that nobody has touched since (created_by = the approver ID below and
+-- row_version = 1; an admin edit raises row_version) through set_active_ingredient_modes per ingredient, or one
+-- reviewed migration; events stay (append-only history). Nothing else is written.
 -- ORDERING: after 20270108100000_ingredient_modes_of_action and every older migration.
 -- ============================================================================================================
 
@@ -52,8 +55,6 @@ BEGIN
 END
 $preflight$;
 
-LOCK TABLE public.active_ingredient_modes_of_action IN ACCESS EXCLUSIVE MODE;
-
 DO $load$
 DECLARE
   -- Mason's admin profile; he approved this list (2026-11-18). Records who approved it, not a permission check.
@@ -62,7 +63,6 @@ DECLARE
   v_rows int;
   v_filled int;
   v_kept int;
-  v_matched int;
   v_skipped text;
   v_unmatched text;
   v_without int;
@@ -73,8 +73,8 @@ BEGIN
     RAISE EXCEPTION 'MOA_LOAD_ACTOR: profile % is not an admin here; this list was approved by Mason', v_actor;
   END IF;
 
-  -- No CAS, name or status change on an active ingredient until this commits.
-  PERFORM 1 FROM public.active_ingredients WHERE status = 'active' FOR SHARE;
+  -- Every ingredient, chemistry and group writer takes this lock first: nothing changes under the load.
+  PERFORM pg_advisory_xact_lock(hashtext('crx.active_ingredients'));
 
   CREATE TEMP TABLE moa1_list (name text NOT NULL, cas text, scheme text NOT NULL, group_code text NOT NULL,
                                source_note text NOT NULL) ON COMMIT DROP;
@@ -221,22 +221,18 @@ BEGIN
       OR (i.name_key = lower(regexp_replace(btrim(l.name), '\s+', ' ', 'g'))
           AND (l.cas IS NULL OR i.cas IS NULL) AND i.name_unique);
 
-  SELECT count(DISTINCT ingredient_id) INTO v_matched FROM moa1_match;
-  IF NOT EXISTS (SELECT 1 FROM public.product_parent_ingredients WHERE source = 'epa_lookup') THEN
-    RAISE NOTICE 'MOA_LOAD: no EPA-sourced ingredient here (a rebuild or test database); nothing written';
-    RETURN;
-  END IF;
-  IF v_matched < 60 THEN
-    RAISE EXCEPTION 'MOA_LOAD_TOO_EARLY: only % listed ingredients exist here (60 needed); run the EPA batch fill first',
-      v_matched;
-  END IF;
-
   CREATE TEMP TABLE moa1_conflict ON COMMIT DROP AS
   SELECT ingredient_id FROM moa1_match GROUP BY ingredient_id HAVING count(DISTINCT scheme || ' ' || group_code) > 1
   UNION
   SELECT i.id FROM moa1_list l
     JOIN moa1_ing i ON i.name_key = lower(regexp_replace(btrim(l.name), '\s+', ' ', 'g'))
-   WHERE l.cas IS NOT NULL AND i.cas IS NOT NULL AND i.cas <> l.cas;
+   WHERE l.cas IS NOT NULL AND i.cas IS NOT NULL AND i.cas <> l.cas
+  UNION
+  SELECT f.canonical_ingredient_id FROM moa1_ing f
+   WHERE f.canonical_ingredient_id IS NOT NULL
+     AND EXISTS (SELECT 1 FROM public.active_ingredient_modes_of_action o WHERE o.ingredient_id = f.id)
+     AND NOT EXISTS (SELECT 1 FROM public.active_ingredient_modes_of_action o
+                      WHERE o.ingredient_id = f.id AND o.status = 'active');
 
   -- Matched, not skipped, never had a group row.
   CREATE TEMP TABLE moa1_candidate ON COMMIT DROP AS
@@ -292,7 +288,7 @@ BEGIN
                       WHERE o.status = 'active' AND (o.ingredient_id = i.id OR o.ingredient_id = i.canonical_ingredient_id));
 
   RAISE NOTICE 'MOA_LOAD: % group rows written on % ingredients; % matched ingredients kept as they were', v_rows, v_filled, v_kept;
-  RAISE NOTICE 'MOA_LOAD: skipped (list disagrees or CAS says another chemical): %', COALESCE(v_skipped, 'none');
+  RAISE NOTICE 'MOA_LOAD: skipped (list disagrees, CAS says another chemical, or a linked form was emptied): %', COALESCE(v_skipped, 'none');
   RAISE NOTICE 'MOA_LOAD: list rows matching no active ingredient: %', COALESCE(v_unmatched, 'none');
   RAISE NOTICE 'MOA_LOAD: active ingredients showing no group: %', v_without;
 END

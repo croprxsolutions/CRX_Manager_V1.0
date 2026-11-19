@@ -85,8 +85,8 @@ BEGIN
   END IF;
 
   -- Belt-and-braces: re-assert the hardened grants in the same run
-  IF has_function_privilege('authenticated', 'public.auto_expire_quotes()', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.auto_expire_quotes()', 'EXECUTE') THEN
+  IF has_function_privilege('authenticated', to_regproc('public.auto_expire_quotes')::oid, 'EXECUTE')
+     OR has_function_privilege('anon', to_regproc('public.auto_expire_quotes')::oid, 'EXECUTE') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: authenticated/anon can EXECUTE auto_expire_quotes — 20260609203541 hardening regressed';
   END IF;
 

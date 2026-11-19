@@ -75,6 +75,12 @@ allows("select x.quantity from orders o, lateral (select 1 as quantity) x", "lat
 allows("select oi.quantity from orders o, order_items oi(quantity)", "comma-listed alias with column list");
 allows("select o.id from orders o order by o.id, o.status", "ORDER BY commas are not tables");
 allows("select oi.quantity from orders o group by o.id, oi", "GROUP BY commas are not tables");
+refuses("select p.nope from orders o, jsonb_array_elements('[]'::jsonb) f, products p", ["p.nope"], "table after a function in the comma list");
+refuses("select p.nope from orders o, (select 1) x, lateral public.fn(o.id) as y(a, b), products p", ["p.nope"], "table after subquery and lateral function");
+refuses("select p.nope from orders o(a, b), products p", ["p.nope"], "table after an alias column list");
+allows("select p.id from orders o, jsonb_array_elements('[]'::jsonb) f, products p", "correct table after a function");
+allows("select z.nope from orders o where exists (select 1 from order_items oi, f(oi.id) y) z, products z", "a subquery's comma list does not leak out");
+allows("select 1 from products p where exists (select 1 from public.return_rows() p where p.value = 1)", "inner function alias shadows outer alias (Luna #1906 r1)");
 // Three-part public.table.column.
 refuses("select public.products.price_per_acre from public.products", ["public.products.price_per_acre"], "three-part name");
 refuses("select public.order_items.quantity from orders, order_items", ["public.order_items.quantity"], "three-part name, comma list");
@@ -117,6 +123,7 @@ writeFileSync(path.join(migDir, "20261101000000_old.sql"), "alter table products
 writeFileSync(path.join(migDir, "20261113000000_new.sql"), "alter table order_items add column quantity numeric;\n-- mentions price_per_acre in passing\nupdate products set rate_unit = 'oz';");
 writeFileSync(path.join(migDir, "20261113100000_commented.sql"),
   "-- alter table order_items add column commented_col int;\n/* alter table order_items add column commented_col int; */\n" +
+  "/* outer /* nested */ alter table order_items add column nested_col int; */\n" +
   "alter table \"order_items\" add column \"later_col\" int; select 1;");
 // Adds the column to a DIFFERENT table: must not excuse products.unit_cost.
 writeFileSync(path.join(migDir, "20261114000000_other.sql"),
@@ -146,6 +153,8 @@ assert.equal(run("select 'column-check: skip', p.default_rate_unit from products
   "skip marker inside a string does not skip"); pass++;
 assert.equal(run("select oi.commented_col from order_items oi")?.hookSpecificOutput?.permissionDecision, "deny",
   "a column added only in a comment of a newer migration does not excuse it"); pass++;
+assert.equal(run("select oi.nested_col from order_items oi")?.hookSpecificOutput?.permissionDecision, "deny",
+  "a column added only inside a nested block comment does not excuse it"); pass++;
 assert.equal(run("select oi.later_col from order_items oi"), null, "column added by a newer migration's quoted ADD COLUMN"); pass++;
 assert.equal(run("select p.default_rate_unit from products p", "mcp__supabase__list_tables"), null, "other tools ignored"); pass++;
 // An unreadable newer migration (here a folder named .sql) allows the query rather than refuse a maybe-valid one.

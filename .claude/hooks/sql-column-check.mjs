@@ -45,9 +45,26 @@ export function hasSkipMarker(sql) {
   return comments(sql).some((c) => /column-check:\s*skip/i.test(c));
 }
 
-// Comments become a space; strings and quoted identifiers stay as written.
+// Comments become a space (block comments nest, as in Postgres); strings and quoted
+// identifiers stay as written, since a migration's EXECUTE '...' can really add a column.
+const TOKEN_AT = new RegExp(TOKEN_RE.source, "y");
 export function stripComments(sql) {
-  return String(sql).replace(TOKEN_RE, (t) => (isComment(t) ? " " : t));
+  const s = String(sql);
+  let out = "";
+  for (let i = 0; i < s.length;) {
+    if (s.startsWith("/*", i)) {
+      let depth = 0;
+      while (i < s.length) {
+        if (s.startsWith("/*", i)) { depth++; i += 2; } else if (s.startsWith("*/", i)) { i += 2; if (--depth === 0) break; } else i++;
+      }
+      out += " ";
+      continue;
+    }
+    TOKEN_AT.lastIndex = i;
+    const t = TOKEN_AT.exec(s)?.[0];
+    if (t) { out += t.startsWith("--") ? " " : t; i += t.length; } else out += s[i++];
+  }
+  return out;
 }
 
 // Strings become '', comments a space. A quoted identifier that is plain lowercase
@@ -104,26 +121,45 @@ export function findBadColumns(sql, columnsByTable) {
       if (!NOT_ALIAS.has(m[1]) && startsFromItem(stmt, open.get(m.index))) bind(m[1], null);
     }
 
-    // Binds one FROM/JOIN item; returns whether a ", next_table" may follow it.
+    // Binds one FROM/JOIN item; returns whether a ", next_item" may follow it.
     const item = ([, first, second, rawAlias, aliasCols]) => {
       const schema = second ? first : "public";
       const table = second || first;
       const alias = rawAlias && !NOT_ALIAS.has(rawAlias) ? rawAlias : null;
       const known = schema === "public" && !ctes.has(table) && Array.isArray(columnsByTable[table]);
       bind(alias || table, known && !aliasCols ? table : null);
-      return !aliasCols && (!rawAlias || alias !== null);
+      return !rawAlias || alias !== null;
     };
     const tableRef = String.raw`(?:only\s+)?([a-z_]\w*)(?:\.([a-z_]\w*))?(?!\s*\(|\w|\.)(?:\s+(?:as\s+)?([a-z_]\w*))?(\s*\()?`;
     const fromRe = new RegExp(String.raw`\b(?:from|join)\s+${tableRef}`, "g");
     const commaRe = new RegExp(String.raw`\s*,\s*${tableRef}`, "y");
+    // A function or subquery in a comma list: ", fn(" or ", (" (LATERAL allowed).
+    const parenItemRe = /\s*,\s*(?:lateral\s+)?(?:[a-z_]\w*(?:\s*\.\s*[a-z_]\w*)?\s*)?\(/y;
+    const aliasRe = /\s+(?:as\s+)?([a-z_]\w*)(\s*\()?/y;
+    const close = new Map([...open].map(([c, o]) => [o, c]));
+    // Index just past the ")" matching the "(" that ends at `at`, or -1.
+    const past = (at) => (close.has(at - 1) ? close.get(at - 1) + 1 : -1);
     for (const m of stmt.matchAll(fromRe)) {
-      // Tables listed after a comma: FROM orders o, order_items oi.
-      for (let more = item(m), at = m.index + m[0].length; more;) {
+      // Tables listed after a comma: FROM orders o, order_items oi. A function, a
+      // subquery or an alias column list in the list is stepped over, not a stop.
+      let c = m;
+      for (let at = 0; ;) {
+        if (c) {
+          if (!item(c)) break;
+          at = c.index + c[0].length;
+          if (c[4]) at = past(at);
+        } else {
+          parenItemRe.lastIndex = at;
+          if (!parenItemRe.exec(stmt)) break;
+          at = past(parenItemRe.lastIndex);
+          aliasRe.lastIndex = at;
+          const a = at >= 0 ? aliasRe.exec(stmt) : null;
+          if (a && !NOT_ALIAS.has(a[1])) at = a[2] ? past(aliasRe.lastIndex) : aliasRe.lastIndex;
+        }
+        if (at < 0) break;
         commaRe.lastIndex = at;
-        const c = commaRe.exec(stmt);
-        if (!c || NOT_ALIAS.has(c[1])) break;
-        more = item(c);
-        at = commaRe.lastIndex;
+        c = commaRe.exec(stmt);
+        if (c && NOT_ALIAS.has(c[1])) c = null;
       }
     }
 

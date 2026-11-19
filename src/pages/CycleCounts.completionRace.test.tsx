@@ -211,5 +211,28 @@ describe('CycleCounts completion race', () => {
     const confirm = await screen.findByRole('alertdialog', { name: 'Cancel Cycle Count' });
     const detail = screen.getByRole('dialog');
     expect(detail.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // Escape closes only the confirm; the count window stays open.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  // Sol HIGH (#1982): a completion still loading could open "Complete Anyway" hidden
+  // under the Cancel confirm, where Enter would complete the count.
+  it('blocks Cancel Count while a completion is still loading', async () => {
+    render(<CycleCounts />);
+    await waitFor(() => expect(screen.getByText('CC-1001')).toBeTruthy());
+    fireEvent.click(screen.getByText('CC-1001'));
+    await waitFor(() => expect(heldItemQueries.length).toBe(1));
+    await release(0);
+    await waitFor(() => expect(screen.getByText('ALPHA PRODUCT')).toBeTruthy());
+
+    fireEvent.click(screen.getByText(/Complete & Apply Adjustments/));
+    await waitFor(() => expect(heldItemQueries.length).toBe(2));
+    const cancel = screen.getByRole('button', { name: /Cancel Count/ });
+    expect((cancel as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(cancel);
+    expect(screen.queryByRole('alertdialog', { name: 'Cancel Cycle Count' })).toBeNull();
   });
 });

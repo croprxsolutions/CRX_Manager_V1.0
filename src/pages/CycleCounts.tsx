@@ -922,6 +922,8 @@ export default function CycleCounts() {
   // Cancel cycle count
   const handleCancel = () => {
     if (!activeCount || !profile) return;
+    // A completion still loading could open its own confirm under this one (Sol HIGH, #1982).
+    if (completionInFlightRef.current) return;
     setCancelConfirmOpen(true);
   };
 
@@ -1149,7 +1151,9 @@ export default function CycleCounts() {
       <Modal
         open={showDetail}
         onClose={closeDetail}
-        title={activeCount ? `Cycle Count: ${activeCount.count_number}` : 'Cycle Count'}
+        // Escape on an open confirm must close only the confirm, not this window too.
+        closeDisabled={completeConfirmOpen || cancelConfirmOpen || reverseConfirmOpen}
+        title={activeCount ? `Cycle Count:${activeCount.count_number}` : 'Cycle Count'}
         size="large"
       >
         {activeCount && (
@@ -1275,6 +1279,7 @@ export default function CycleCounts() {
                 <Button
                   variant="secondary"
                   onClick={handleCancel}
+                  disabled={completing || preparingCompletion}
                   icon={<XCircle className="w-4 h-4" />}
                 >
                   Cancel Count

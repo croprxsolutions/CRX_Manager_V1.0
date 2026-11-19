@@ -4,6 +4,12 @@
 
 **Decision (Mason, in chat, 2026-11-18: "Fill chemistry first").** Live check that day: 0 `active_ingredients`, 0 parents with ingredient rows, 0 mode-of-action rows, 0 `ingredient_map` rows. The comparison is built entirely from ingredient strengths, so a page built now would show every row as incomplete. He was offered "build now on test data" and "a price-per-acre slice only", and chose to fill the chemistry first.
 **What this forbids/implies:** no CMP-2 code starts until the "Start when" list in `docs/plans/2026-11-18-product-CMP2-BUILD-SHEET.md` is met: chemistry filled (DM-4 EPA lookup, DM-1b workbook or reviewed manual entry), MOA-1 landed with its group load, and RT-4 live. The next Product Master step is filling the chemistry, not CMP-2.
+## 2026-11-18 — #1982 may have a fifth Sol round; the cycle-count page locks behind its confirmations
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, round 5").** PR #1982 (cycle-count confirmations open on top of the count window) may have one more Sol round (round 5).
+**Why:** Sol rounds 1-4 each found a new way for keyboard focus to get behind a confirmation box (the shared Modal's focus trap only wraps at its ends; `components/ui` is hands-off until Taha's UI PRs land). Instead of closing one path per round, the whole cycle-count page (list and count window) is now inert while any confirmation is open, and opening or closing a count window closes every open confirmation.
+**What it does:** unlocks one Sol review of the new head. Every other gate is unchanged: it still needs a clean Sol review, green checks and Taha's 4-hour hold before it merges into `staging`. Remaining smaller items: #1987.
+
 ## 2026-11-18 — #1971: Mason owner-accepted 1 Sol finding(s) at `3d37b06e956c`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1971 at `3d37b06e956c` (base `59a711b8cd8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

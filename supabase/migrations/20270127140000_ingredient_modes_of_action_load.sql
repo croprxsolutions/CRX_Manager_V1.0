@@ -222,7 +222,11 @@ BEGIN
           AND (l.cas IS NULL OR i.cas IS NULL) AND i.name_unique);
 
   SELECT count(DISTINCT ingredient_id) INTO v_matched FROM moa1_match;
-  IF v_matched < 60 AND EXISTS (SELECT 1 FROM public.product_parent_ingredients WHERE source = 'epa_lookup') THEN
+  IF NOT EXISTS (SELECT 1 FROM public.product_parent_ingredients WHERE source = 'epa_lookup') THEN
+    RAISE NOTICE 'MOA_LOAD: no EPA-sourced ingredient here (a rebuild or test database); nothing written';
+    RETURN;
+  END IF;
+  IF v_matched < 60 THEN
     RAISE EXCEPTION 'MOA_LOAD_TOO_EARLY: only % listed ingredients exist here (60 needed); run the EPA batch fill first',
       v_matched;
   END IF;

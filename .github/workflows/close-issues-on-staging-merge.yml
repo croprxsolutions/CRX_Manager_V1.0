@@ -27,16 +27,25 @@ jobs:
       BODY: ${{ github.event.pull_request.body }}
     steps:
       - run: |
-          nums=$(printf '%s\n' "$BODY" \
+          # Drop fenced code blocks (examples), then split "Closes #1, closes #2" onto separate lines.
+          nums=$(printf '%s\n' "$BODY" | tr -d '\r' \
+            | awk '/^[[:space:]]*(```|~~~)/ { fence = !fence; next } !fence' \
+            | sed 's/[,;][[:space:]]*/\n/g' \
             | grep -oiE '^[[:space:]]*([-*][[:space:]]+)?(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*:?[[:space:]]+#[0-9]+' \
             | grep -oE '[0-9]+$' | sort -un || true)
           [ -z "$nums" ] && { echo "No closing references in #$PR."; exit 0; }
+          failed=0
           for n in $nums; do
             info=$(gh api "repos/$GH_REPO/issues/$n" --jq '[.state, (.pull_request != null)] | @tsv' 2>/dev/null) \
               || { echo "::warning::#$n not found"; continue; }
             state=${info%%$'\t'*}; is_pr=${info##*$'\t'}
             if [ "$is_pr" = "true" ] || [ "$state" != "open" ]; then echo "Skip #$n ($state, pr=$is_pr)"; continue; fi
-            gh issue close "$n" --reason completed \
-              --comment "Fixed by #$PR, merged into staging. It goes live with the next release."
-            echo "Closed #$n"
+            # One failed close must not skip the rest; the job still fails at the end so it is seen.
+            if gh issue close "$n" --reason completed \
+              --comment "Fixed by #$PR, merged into staging. It goes live with the next release."; then
+              echo "Closed #$n"
+            else
+              echo "::error::Could not close #$n"; failed=1
+            fi
           done
+          exit $failed

@@ -31,6 +31,10 @@
 
 SET LOCAL lock_timeout = '5s';
 
+-- Taken before the open-count check below, so no count can be saved between the check and the column change (Luna r4).
+-- The ALTER TABLE in B takes this same lock anyway.
+LOCK TABLE public.cycle_count_items IN ACCESS EXCLUSIVE MODE;
+
 DO $preflight$
 DECLARE
   v_fn record;

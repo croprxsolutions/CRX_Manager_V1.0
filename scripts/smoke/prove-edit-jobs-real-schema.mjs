@@ -4,10 +4,11 @@
  * Container setup and replay copied from prove-booking-guard-rep-and-delete-real-schema.mjs. Then:
  *   1. BEFORE: edit_jobs does not exist and smoke-edit-jobs.sql fails.
  *   2. The candidate applies; a second apply is refused.
- *   3. AFTER: smoke-edit-jobs.sql passes (contract proof cases 1-11, plus the Astra re-check cases);
- *      two simultaneous calls with one key make one change and the second replays the first's result;
+ *   3. AFTER: smoke-edit-jobs.sql passes (contract proof cases 1-10b; dispatch closure is not exercised);
+ *      a rep cancels a job scheduled from their open booking (case 11, the booking guard replayed from staging);
+ *      two simultaneous calls with one key make one change (no second write) and the second replays the first;
  *      two simultaneous calls with different keys over the same jobs in opposite order both finish (no deadlock);
- *      every existing job chain ends exactly as before.
+ *      every listed existing job chain passes both before and after the candidate.
  *
  * Run: node scripts/smoke/prove-edit-jobs-real-schema.mjs   (needs Docker)
  * Prints EDIT_JOBS_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
@@ -256,12 +257,16 @@ const REP2 = 'e1100000-0000-4000-8000-0000000000c3';
 const APPL = 'e1100000-0000-4000-8000-0000000000d4';
 const CHAIN = 'smoke-edit-jobs.sql';
 const SIG = 'public.edit_jobs(uuid[],jsonb,text,uuid,text)';
-// Existing chains that write jobs; each must end the same way before and after the candidate.
-const REGRESSION = ('smoke-billed-job-immutability smoke-booking-live-job-guard smoke-booking-guard-rep-and-delete '
-  + 'smoke-dispatch-job-locations smoke-undispatch-job-locations smoke-transfer-invoice-to-job '
-  + 'smoke-transfer_job_invoice_column_fixes smoke-transfer_job_invoice_machine_fee smoke-field-invoice-loop '
-  + 'smoke-job_from_quote_activity_feed_fix smoke-delivery-job-replay-binding-batch3a smoke-ops-replay-binding-batch4e '
-  + 'smoke-get-jobs-billed-customers smoke-field-functions-require-field-access smoke-offline-action-receipts')
+// Existing chains that write jobs; each must pass before and after the candidate.
+// Left out because they fail on the current schema before this change, for reasons seeding cannot fix
+// (checked 2026-11-19 in the replayed container): billed-job-immutability, transfer-invoice-to-job and
+// transfer_job_invoice_column_fixes insert products with no cost (COST_BASIS_REQUIRED); dispatch- and
+// undispatch-job-locations call without a replay key (IDEMPOTENCY_KEY_REQUIRED); transfer_job_invoice_machine_fee
+// finds no governed product under its price ceilings; job_from_quote_activity_feed_fix uses rate unit "gal/acre"
+// (QUOTE_RATE_UNIT_UNKNOWN); delivery-job-replay-binding-batch3a sends no completion evidence;
+// field-functions-require-field-access needs 20261217100000, which this replay marks ledger-only.
+const REGRESSION = ('smoke-booking-live-job-guard smoke-booking-guard-rep-and-delete smoke-field-invoice-loop '
+  + 'smoke-ops-replay-binding-batch4e smoke-get-jobs-billed-customers smoke-offline-action-receipts')
   .split(' ').map((s) => `${s}.sql`);
 
 function seed() {
@@ -274,7 +279,14 @@ function seed() {
     ('${ADMIN}', 'ejob-admin@example.invalid', '{"full_name":"[PROVER] EJ Admin","role":"admin"}'::jsonb),
     ('${REP}', 'ejob-rep@example.invalid', '{"full_name":"[PROVER] EJ Rep","role":"sales_rep"}'::jsonb),
     ('${REP2}', 'ejob-rep2@example.invalid', '{"full_name":"[PROVER] EJ Rep 2","role":"sales_rep"}'::jsonb),
-    ('${APPL}', 'ejob-appl@example.invalid', '{"full_name":"[PROVER] EJ Applicator","role":"applicator"}'::jsonb);`);
+    ('${APPL}', 'ejob-appl@example.invalid', '{"full_name":"[PROVER] EJ Applicator","role":"applicator"}'::jsonb),
+    ('e1100000-0000-4000-8000-0000000000a5', 'ejob-admin2@example.invalid', '{"full_name":"[PROVER] EJ Admin 2","role":"admin"}'::jsonb),
+    ('e1100000-0000-4000-8000-0000000000d6', 'ejob-appl2@example.invalid', '{"full_name":"[PROVER] EJ Applicator 2","role":"applicator"}'::jsonb),
+    -- the invented profiles smoke-ops-replay-binding-batch4e expects
+    ('4c4d0000-0000-4000-8000-0000000000a1', 'ejob-inv-a1@example.invalid', '{"full_name":"[PROVER] Admin","role":"admin"}'::jsonb),
+    ('4c4d0000-0000-4000-8000-0000000000a2', 'ejob-inv-a2@example.invalid', '{"full_name":"[PROVER] Admin B","role":"admin"}'::jsonb),
+    ('4c4d0000-0000-4000-8000-0000000000b1', 'ejob-inv-b1@example.invalid', '{"full_name":"[PROVER] Rep","role":"sales_rep"}'::jsonb),
+    ('4c4d0000-0000-4000-8000-0000000000c1', 'ejob-inv-c1@example.invalid', '{"full_name":"[PROVER] Applicator","role":"applicator"}'::jsonb);`);
   raw(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
     UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id IN ('${REP}', '${REP2}');
     UPDATE public.profiles SET role = 'applicator', is_active = true WHERE id = '${APPL}';
@@ -297,9 +309,10 @@ function race(firstIds, secondIds, firstKey, secondKey, comment) {
   wait(1500);
   assert.equal(scalar("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(4)%' AND pid <> pg_backend_pid();"), '1',
     'the first session is not holding its call open');
+  const sentAt = scalar('SELECT clock_timestamp();');
   const second = secondKey === firstKey ? `{"loader_comment":"${comment}-1"}` : `{"loader_comment":"${comment}-2"}`;
   const r = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: call(secondIds, second, secondKey) });
-  return { status: r.status, output: `${r.stdout}\n${r.stderr}`, last: r.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? '' };
+  return { status: r.status, output: `${r.stdout}\n${r.stderr}`, last: r.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? '', sentAt };
 }
 
 async function main() {
@@ -315,7 +328,10 @@ async function main() {
   const chainBefore = chainOutcome(CHAIN).outcome;
   assert.doesNotMatch(chainBefore, /^SMOKE_PASS_ROLLBACK/, 'the new chain must fail before the candidate');
   console.log(`[case] BEFORE: edit_jobs is missing; the new chain fails (${chainBefore.slice(0, 80)})`);
+  // Every listed chain must really pass here, before and after: a chain that stops at its own setup proves nothing.
   const before = Object.fromEntries(REGRESSION.map((f) => [f, chainOutcome(f).outcome]));
+  const notPassing = REGRESSION.filter((f) => !/^SMOKE_PASS_ROLLBACK/.test(before[f]));
+  assert.deepEqual(notPassing.map((f) => `${f}: ${before[f]}`), [], 'regression chains must pass before the candidate');
 
   // 2. Apply, then a second apply is refused.
   stageText('candidate.sql', lf(CANDIDATE));
@@ -334,11 +350,34 @@ async function main() {
   assert.ok(timing, 'the 500-job case did not report its time');
   console.log(`[case] AFTER: smoke-edit-jobs.sql passes (P1-P5, C1-C10); 500 jobs edited + cancelled in ${timing[1]} ms`);
 
+  // Case 11: a rep cancels the scheduled job made from their own open booking (committed; disposable container).
+  psql(`DO $fx$
+  DECLARE v_c uuid; v_q uuid; v_s uuid;
+  BEGIN
+    INSERT INTO customers (farm_name) VALUES ('[PROVER] EJ Booking Farm') RETURNING id INTO v_c;
+    INSERT INTO quotes (quote_number, customer_id, status, tier, created_by) VALUES ('[PROVER] EJ BOOK', v_c, 'draft', 1, '${REP}') RETURNING id INTO v_q;
+    INSERT INTO quote_sections (quote_id, section_name, sort_order) VALUES (v_q, 'North', 0) RETURNING id INTO v_s;
+    INSERT INTO quote_versions (quote_id, sent_by, snapshot_data) VALUES (v_q, '${ADMIN}', '{}'::jsonb);
+    UPDATE quotes SET status = 'sent' WHERE id = v_q;
+    INSERT INTO jobs (job_number, customer_id, job_date, quote_id, quote_section_id)
+      VALUES ('J-PRV-EJBOOK', v_c, (now() AT TIME ZONE 'America/Chicago')::date + 7, v_q, v_s);
+  END $fx$;`);
+  const booked = scalar("SELECT id FROM jobs WHERE job_number = 'J-PRV-EJBOOK';");
+  const bookedRes = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `SELECT set_config('request.jwt.claims', '{"sub":"${REP}","role":"authenticated"}', false);
+    SET ROLE authenticated;
+    SELECT public.edit_jobs(ARRAY['${booked}']::uuid[], NULL, 'cancel', '${REP}', 'ej-booked-cancel');` });
+  assert.equal(bookedRes.status, 0, `${bookedRes.stdout}\n${bookedRes.stderr}`);
+  assert.equal(scalar(`SELECT status FROM jobs WHERE id = '${booked}';`), 'cancelled');
+  console.log('[case] a rep cancels the job scheduled from their open booking; the booking guard allows it');
+
   // Simultaneous calls (committed fixtures; the container is disposable).
   psql(`INSERT INTO customers (farm_name) VALUES ('[PROVER] EJ Race Farm');
     INSERT INTO jobs (job_number, customer_id, job_date) SELECT 'J-PRV-EJ' || g, (SELECT id FROM customers WHERE farm_name = '[PROVER] EJ Race Farm'), CURRENT_DATE + 7 FROM generate_series(1, 2) g;`);
   const [A, B] = [1, 2].map((g) => scalar(`SELECT id FROM jobs WHERE job_number = 'J-PRV-EJ${g}';`));
   const same = race([A, B], [B, A], 'ej-race-same', 'ej-race-same', 'same');
+  // updated_at is the writing transaction's start; the first session started before the second was sent.
+  assert.equal(scalar(`SELECT count(*) FROM jobs WHERE id IN ('${A}', '${B}') AND updated_at < '${same.sentAt}'::timestamptz;`), '2',
+    'the replayed call wrote the jobs again');
   assert.equal(same.status, 0, same.output);
   assert.equal(scalar("SELECT count(*) FROM idempotency_keys WHERE idempotency_key = 'ej-race-same';"), '1');
   assert.equal(scalar(`SELECT count(*) FROM jobs WHERE id IN ('${A}', '${B}') AND loader_comment = 'same-1';`), '2');
@@ -351,9 +390,9 @@ async function main() {
 
   for (const f of REGRESSION) {
     const now = chainOutcome(f).outcome;
-    assert.equal(now, before[f], `${f} changed: before "${before[f]}", after "${now}"`);
+    assert.match(now, /^SMOKE_PASS_ROLLBACK/, `${f} no longer passes after the candidate: ${now}`);
   }
-  console.log(`[case] AFTER: ${REGRESSION.length} existing job chains end exactly as before`);
+  console.log(`[case] AFTER: ${REGRESSION.length} existing job chains pass before and after`);
   console.log('EDIT_JOBS_PROOF_PASS');
 }
 

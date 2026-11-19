@@ -3,6 +3,8 @@
 -- migration 20270131100000_job_writes_through_rpcs.sql
 -- Contract: docs/plans/2026-11-19-job-writes-through-rpcs-CONTRACT.md (proof cases 1-11)
 --
+-- CONTAINER ONLY (smoke-specs container_only): probe P5 deactivates a sales rep inside the transaction,
+-- which locks that user's auth session rows until rollback; never run it against a live database.
 -- Every call runs as a signed-in user (SET LOCAL ROLE authenticated + jwt sub); checks read as owner.
 --   P1-P5  auth probes: no user, anon, applicator, forged actor, inactive admin -> refused, nothing written
 --   C1  rep cancels {scheduled, in_progress, completed, deleted, missing}: 2 cancelled, 3 skipped with reasons;
@@ -10,12 +12,12 @@
 --   C2  same key + same payload replays; same key + other ids refused
 --   C3  delete {scheduled, completed, invoiced}: 2 deleted, invoiced skipped and still live
 --   C4  refused shapes and values (other columns, null job_date, wrong types, bad numbers, delete+changes)
---   C5  {loader_comment} only changes that column; {batch_ref: null} clears; absent keys untouched
+--   C5  {loader_comment} only changes that column; null clears; batch_ref set then cleared; absent keys untouched
 --   C6  expired license refused; no license rows allowed (today's rule)
 --   C7  rep schedule_date on {scheduled, invoiced} -> whole call refused, nothing changed; admin -> both updated
 --   C8  changes + cancel on {scheduled, completed}: both dated, only scheduled cancelled
---   C9  rep changes + cancel on {scheduled, invoiced}: billed lock aborts all, scheduled not cancelled
---   C10 500 scheduled jobs, changes + cancel in one call: all updated and cancelled (timed)
+--   C9  rep changes + cancel on {scheduled (sorts first), invoiced}: billed lock aborts all, scheduled not cancelled
+--   C10 500 scheduled jobs holding stock, changes + cancel in one call: all updated, cancelled, holds released, under 4 s
 -- Ends in RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'. Any other error = FAIL.
 -- ============================================================================
 DO $smoke$
@@ -35,13 +37,16 @@ DECLARE
   v_date   date := (now() AT TIME ZONE 'America/Chicago')::date + 20;
   v_many   uuid[];
   v_t0     timestamptz;
+  v_batch  uuid;
+  v_ms     numeric;
 BEGIN
   SELECT id INTO v_admin FROM profiles WHERE role = 'admin' AND is_active ORDER BY created_at LIMIT 1;
   SELECT id INTO v_rep   FROM profiles WHERE role = 'sales_rep' AND is_active ORDER BY created_at LIMIT 1;
   SELECT id INTO v_rep2  FROM profiles WHERE role = 'sales_rep' AND is_active AND id <> v_rep ORDER BY created_at LIMIT 1;
-  SELECT id INTO v_appl  FROM profiles WHERE role = 'applicator' AND is_active ORDER BY created_at LIMIT 1;
+  SELECT id INTO v_appl  FROM profiles p WHERE role = 'applicator' AND is_active
+     AND NOT EXISTS (SELECT 1 FROM applicator_licenses l WHERE l.profile_id = p.id) ORDER BY created_at LIMIT 1;
   IF v_admin IS NULL OR v_rep IS NULL OR v_rep2 IS NULL OR v_appl IS NULL THEN
-    RAISE EXCEPTION 'SMOKE_SETUP: need an active admin, two sales reps and an applicator';
+    RAISE EXCEPTION 'SMOKE_SETUP: need an active admin, two sales reps and an applicator with no license rows';
   END IF;
 
   -- ── SETUP (owner) ─────────────────────────────────────────────────────────
@@ -285,6 +290,19 @@ BEGIN
   IF v_r.schedule_date IS NOT NULL OR v_r.carrier_rate_gpa IS DISTINCT FROM 7.5 OR v_r.loader_comment IS DISTINCT FROM 'fill north tank' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: C5 null did not clear or an absent key changed';
   END IF;
+  INSERT INTO job_batches (name, created_by) VALUES ('[SMOKE] EJ batch ' || v_sfx, v_admin) RETURNING id INTO v_batch;
+  SET LOCAL ROLE authenticated;
+  PERFORM edit_jobs(ARRAY[v_jS2], jsonb_build_object('batch_ref', v_batch), NULL, v_rep, 'ej-c5c-' || v_sfx);
+  RESET ROLE;
+  SELECT count(*) INTO v_n FROM jobs WHERE id = v_jS2 AND batch_ref = v_batch;
+  IF v_n <> 1 THEN RAISE EXCEPTION 'SMOKE_FAIL: C5 batch not set'; END IF;
+  SET LOCAL ROLE authenticated;
+  PERFORM edit_jobs(ARRAY[v_jS2], '{"batch_ref": null}', NULL, v_rep, 'ej-c5d-' || v_sfx);
+  RESET ROLE;
+  SELECT * INTO v_r FROM jobs WHERE id = v_jS2;
+  IF v_r.batch_ref IS NOT NULL OR v_r.carrier_rate_gpa IS DISTINCT FROM 7.5 OR v_r.loader_comment IS DISTINCT FROM 'fill north tank' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: C5 batch not cleared or another field changed';
+  END IF;
 
   -- ── C6 license rule (unchanged) ───────────────────────────────────────────
   UPDATE jobs SET applicator_id = NULL WHERE id = v_jS2;
@@ -343,8 +361,12 @@ BEGIN
   IF v_n <> 1 THEN RAISE EXCEPTION 'SMOKE_FAIL: C8 scheduled job not cancelled'; END IF;
 
   -- ── C9 combined call: a refused patch on the invoiced job aborts the scheduled cancel too ──
-  INSERT INTO jobs (job_number, customer_id, job_date, schedule_date, created_by)
-    VALUES ('[SMOKE] EJ-S3-' || v_sfx, v_cust, CURRENT_DATE + 5, v_date, v_admin) RETURNING id INTO v_jS2;
+  -- The scheduled job's id sorts before the invoiced one, so it is edited and cancelled first and the
+  -- refusal must undo both.
+  INSERT INTO jobs (id, job_number, customer_id, job_date, schedule_date, created_by)
+    VALUES (('00000000-0000-4000-8000-' || substr(md5(v_sfx), 1, 12))::uuid, '[SMOKE] EJ-S3-' || v_sfx, v_cust,
+            CURRENT_DATE + 5, v_date, v_admin) RETURNING id INTO v_jS2;
+  IF v_jS2 > v_jI THEN RAISE EXCEPTION 'SMOKE_SETUP: C9 job does not sort first'; END IF;
   SET LOCAL ROLE authenticated;
   BEGIN
     PERFORM edit_jobs(ARRAY[v_jS2, v_jI], jsonb_build_object('schedule_date', v_date + 1), 'cancel', v_rep, 'ej-c9-' || v_sfx);
@@ -364,11 +386,20 @@ BEGIN
     SELECT '[SMOKE] EJ-M' || g || '-' || v_sfx, v_cust, CURRENT_DATE + 5, v_admin FROM generate_series(1, 500) g
     RETURNING id)
   SELECT array_agg(id) INTO v_many FROM ins;
+  INSERT INTO job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit, cost_per_unit_cents, price_per_unit_cents, sort_order)
+    SELECT j, v_prod, 1, 'GL', 0.5, 'PT', 2000, 5000, 1 FROM unnest(v_many) j;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  PERFORM _sync_job_holds(j, v_admin) FROM unnest(v_many) j;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
+  SELECT count(DISTINCT source_id) INTO v_n FROM inventory_holds WHERE source_id = ANY (v_many) AND hold_type = 'job';
+  IF v_n <> 500 THEN RAISE EXCEPTION 'SMOKE_SETUP: C10 % of 500 jobs hold stock', v_n; END IF;
   v_t0 := clock_timestamp();
   SET LOCAL ROLE authenticated;
   v_res := edit_jobs(v_many, jsonb_build_object('job_date', v_date), 'cancel', v_rep, 'ej-c10-' || v_sfx);
   RESET ROLE;
-  RAISE NOTICE 'C10 500 jobs edited + cancelled in % ms', round(extract(epoch FROM clock_timestamp() - v_t0) * 1000);
+  v_ms := round(extract(epoch FROM clock_timestamp() - v_t0) * 1000);
+  RAISE NOTICE 'C10 500 jobs edited + cancelled in % ms', v_ms;
+  IF v_ms > 4000 THEN RAISE EXCEPTION 'SMOKE_FAIL: C10 took % ms, over half the 8 s request limit', v_ms; END IF;
   IF jsonb_array_length(v_res -> 'updated') <> 500 OR jsonb_array_length(v_res -> 'cancelled') <> 500
      OR jsonb_array_length(v_res -> 'skipped') <> 0 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: C10 counts %/%/%', jsonb_array_length(v_res -> 'updated'),
@@ -376,6 +407,8 @@ BEGIN
   END IF;
   SELECT count(*) INTO v_n FROM jobs WHERE id = ANY (v_many) AND status = 'cancelled' AND job_date = v_date;
   IF v_n <> 500 THEN RAISE EXCEPTION 'SMOKE_FAIL: C10 % of 500 saved', v_n; END IF;
+  SELECT count(*) INTO v_n FROM inventory_holds WHERE source_id = ANY (v_many) AND hold_type = 'job';
+  IF v_n <> 0 THEN RAISE EXCEPTION 'SMOKE_FAIL: C10 % stock hold(s) left on cancelled jobs', v_n; END IF;
 
   RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';
 END

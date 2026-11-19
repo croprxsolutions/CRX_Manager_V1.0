@@ -1,7 +1,8 @@
 // Run: node --test .github/scripts/db-apply.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift, schemaDiff, applyUserProblem, realStamp, planRestamps, restampPairs, restampSql, unmatchedRestamps, migrationChanges, renameTargetProblem } from './db-apply.mjs';
+import { readFileSync } from 'node:fs';
+import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift, schemaDiff, applyUserProblem, realStamp, planRestamps, restampPairs, restampSql, unmatchedRestamps, migrationChanges, renameTargetProblem, oneShotListProblems, oneShotStops } from './db-apply.mjs';
 
 const f = (stems) => stems.map((s) => `${s}.sql`);
 
@@ -296,7 +297,7 @@ test('stampProblems: into staging, a new migration must also be newer than main 
 test('migrationChanges: a restamp is no edit only into staging, for a file not on main; a restamped one-shot stays one (Mason/Sol, #1837)', () => {
   const blobs = { '20261231110000_m4b.sql': 'b1', '20270109100100_m4b.sql': 'b1' };
   const base = { deleted: ['20261231110000_m4b.sql'], added: ['20270109100100_m4b.sql'], removedOrEdited: ['20261231110000_m4b.sql'], baseBlob: (f) => blobs[f] ?? null, headBlob: (f) => blobs[f] ?? null };
-  assert.deepEqual(migrationChanges({ ...base, toStaging: true, onMain: () => false }), { changed: [], problems: [] }, 'staging-only file: a restamp');
+  assert.deepEqual(migrationChanges({ ...base, toStaging: true, onMain: () => false }), { changed: [], problems: [], pairs: [{ from: '20261231110000_m4b.sql', to: '20270109100100_m4b.sql' }] }, 'staging-only file: a restamp');
   assert.deepEqual(migrationChanges({ ...base, toStaging: true, onMain: () => true }).changed, ['20261231110000_m4b.sql'], 'the old file is on main (live): refused');
   assert.deepEqual(migrationChanges({ ...base, toStaging: false, onMain: () => false }).changed, ['20261231110000_m4b.sql'], 'into main: refused');
   assert.deepEqual(migrationChanges({ ...base, removedOrEdited: ['20261231110000_m4b.sql', '20260901000000_x.sql'], deleted: ['20261231110000_m4b.sql', '20260901000000_x.sql'], toStaging: true, onMain: () => false }).changed, ['20260901000000_x.sql'], 'a plain delete still counts');
@@ -316,4 +317,36 @@ test('renameTargetProblem: ledger rows are renamed on staging only (Sol, #1837)'
   assert.match(renameTargetProblem(true, 'rhyzpcqhnizqbxphqdkr'), /staging database only/);
   assert.match(renameTargetProblem(true, 'abcdefghijklmnopqrst'), /staging database only/);
   assert.equal(renameTargetProblem(false, 'rhyzpcqhnizqbxphqdkr'), null);
+});
+
+test('oneShotListProblems: a one-shot leaves the list only when this PR restamps it into a listed name (Sol, #1990)', () => {
+  const pairs = [{ from: '20261231110000_fix.sql', to: '20270109100100_fix.sql' }];
+  const base = { '20261231110000_fix': 'why' };
+  assert.deepEqual(oneShotListProblems({ base, head: { '20270109100100_fix': 'why' }, added: ['20270109100100_fix.sql'], pairs }), [], 'restamp with the entry moved: fine');
+  assert.deepEqual(oneShotListProblems({ base, head: { '20261231110000_fix': 'why', '20270109100100_fix': 'why' }, added: ['20270109100100_fix.sql'], pairs }), [], 'both names kept: fine');
+  assert.match(oneShotListProblems({ base, head: {}, added: ['20270109100100_fix.sql'], pairs })[0], /20261231110000_fix was removed/, 'restamped, but the new name is not listed: refused');
+  assert.match(oneShotListProblems({ base, head: {}, added: [] })[0], /was removed/, 'no restamp: refused');
+  assert.match(oneShotListProblems({ base, head: { '20270109100100_other': 'x' }, added: [], pairs: [{ from: '20261231110000_fix.sql', to: '20270109100100_fix.sql' }] }).join(' '), /20261231110000_fix was removed/, 'a different name listed does not count');
+  assert.match(oneShotListProblems({ base: {}, head: { '20261231110000_old': 'x' }, added: [] })[0], /isn't a new file/, 'an existing file cannot become a one-shot');
+  assert.match(oneShotListProblems({ base, head: base, stopIf: { '20270101000000_ordinary': 'true' }, added: [] })[0], /not a one-shot/, 'a check must name a one-shot');
+});
+
+test('oneShotStops: a one-shot whose check finds its rows uncorrected stops the run; others are only recorded (Sol, #1990)', () => {
+  const steps = [{ stem: '20270121100000_ki137', run: false }, { stem: '20270121110000_next', run: true }, { stem: '20261007150100_old', run: false }];
+  const stopIf = { '20270121100000_ki137': 'CHECK_KI137', '20270121110000_next': 'CHECK_RUN' };
+  const asked = [];
+  const holds = (sql) => (asked.push(sql), sql === 'CHECK_KI137');
+  const stops = oneShotStops({ steps, stopIf, holds });
+  assert.equal(stops.length, 1);
+  assert.match(stops[0], /^20270121100000_ki137 is a one-shot .* still holds the rows it corrects.*psql -f supabase\/migrations\/20270121100000_ki137\.sql/);
+  assert.deepEqual(asked, ['CHECK_KI137'], 'only listed one-shots are checked; a run step and an unlisted one-shot are not');
+  assert.deepEqual(oneShotStops({ steps, stopIf, holds: () => false }), [], 'rows already corrected: recorded as before');
+  assert.deepEqual(oneShotStops({ steps, holds }), [], 'no checks in the registry: old behaviour');
+});
+
+test('one-shot-migrations.json: every stop_if_still_needed entry is a listed one-shot (KI-137)', () => {
+  const reg = JSON.parse(readFileSync(new URL('../../supabase/baselines/one-shot-migrations.json', import.meta.url), 'utf8'));
+  const stems = Object.keys(reg.stop_if_still_needed ?? {});
+  assert.ok(stems.includes('20270121100000_ki137_powder_keg_each_piksi_mg_labels'));
+  assert.deepEqual(oneShotListProblems({ base: reg.one_shot, head: reg.one_shot, stopIf: reg.stop_if_still_needed, added: [] }), []);
 });

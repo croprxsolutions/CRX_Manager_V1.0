@@ -17,7 +17,11 @@
     "",
     "Add an entry the moment a one-shot data migration is written. Schema and",
     "function migrations do NOT belong here — they are idempotent by contract",
-    "and the replay plan must keep rebuilding them."
+    "and the replay plan must keep rebuilding them.",
+    "",
+    "stop_if_still_needed: for a one-shot, a SQL condition that is true while a database still holds the",
+    "rows it corrects. .github/scripts/db-apply.mjs runs it before recording that one-shot and stops loudly",
+    "when it is true (a restore of live data from before the fix): apply the file by hand, then re-run."
   ],
   "one_shot": {
     "20260810025159_backfill_stale_line_profit": "Recomputed line-level profit for a 37-row population approved on 2026-08-09. Authorized by row/order/price counts, not by row identity — a different population with the same counts would satisfy that guard. Applied live; per AGENTS.md an applied migration is never edited, so containment lives here.",
@@ -27,5 +31,8 @@
     "20261214100000_ki30_epa_registration_corrections": "Sets the EPA registration number on 48 named products to EPA's registry value (KI-30), owner-approved and applied live 2026-11-08. Bound to the live product ids, names and stored numbers at that moment; on any other population (a fresh build, or a restore that already holds the corrected numbers) its preflight refuses with KI30_ROW_MOVED. After a restore the corrected numbers come back with the data.",
     "20270101010000_unit_spellings_remap": "Moves 20 named products onto one unit spelling (RT-2 step 1: Oz to oz, Qt to qt with their inventory snapshots, LB to Lb on Imazuron Herbicide and its product family). Mason chose the spellings on 2026-11-09; the 2026-11-10 family redesign needs his fresh live-apply approval, and no earlier approval covers it. Bound to the live product ids, names, forms, current spellings, product families, the 14 unit_conversions rows and the old-spelling inventory snapshot count at that moment; on any other population its preflight refuses (RT2A_ROW_MOVED, RT2A_UNITS_DRIFT, RT2A_INVENTORY_DRIFT, RT2A_FAMILY_OR_WEIGHT). After a restore the remapped spellings come back with the data.",
     "20270121100000_ki137_powder_keg_each_piksi_mg_labels": "Moves Powder Keg Corn and Soybeans from Lb to Ea (product, family, stock rows, open order lines; a new cost basis at the same cents) and relabels Piksi Dust Plus's stock row and open PO, order and delivery lines from Dry oz to MG (KI-137, Mason 2026-11-13). Bound to the live product, family, cost-basis, stock-row and line ids, units and quantities at that moment; on any other population its preflight refuses (KI137_ROW_MOVED, KI137_UNLISTED_OPEN_LINE). After a restore the new labels come back with the data; relabels Treaty Extra's received PO-2026-0011 line and its stock row from \"oz\" to \"Dry oz\" (same size)."
+  },
+  "stop_if_still_needed": {
+    "20270121100000_ki137_powder_keg_each_piksi_mg_labels": "EXISTS (SELECT 1 FROM public.products WHERE id IN ('0b2e713b-4962-4c49-ae3a-6074ddac1464', '17ccc5ba-7e98-49bf-9510-4d57c0eda962') AND inventory_unit = 'Lb') OR EXISTS (SELECT 1 FROM public.inventory WHERE product_id = '36732b8d-b4ed-4643-8a13-d793975d13c7' AND unit_size = 'Dry oz')"
   }
 }

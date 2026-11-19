@@ -261,7 +261,36 @@ export function migrationChanges({ toStaging, removedOrEdited, deleted, added, b
   const targets = new Set(pairs.map((p) => p.to));
   if (tops) problems.push(...added.filter((f) => !targets.has(f) && f.slice(0, 14) < tops).map((f) => `${f}: sorts below ${tops}, a migration this PR restamps; on main it would run first. Stamp it after the restamps`));
   const restamped = new Set(pairs.map((p) => p.from));
-  return { changed: removedOrEdited.filter((f) => !restamped.has(f)), problems };
+  return { changed: removedOrEdited.filter((f) => !restamped.has(f)), problems, pairs };
+}
+
+// PR check: the one-shot list moves only on purpose. A stem may leave it only when this PR restamps that
+// file into a new name the list now holds (migrationChanges already refuses a restamp that drops it; Sol,
+// #1990). A stem may join it only as a new file in this PR. Every stop_if_still_needed entry names a one-shot.
+export function oneShotListProblems({ base = {}, head = {}, stopIf = {}, added, pairs = [] }) {
+  const stem = (f) => f.replace(/\.sql$/, '');
+  const movedTo = new Map(pairs.map((p) => [stem(p.from), stem(p.to)]));
+  const problems = [];
+  for (const s of Object.keys(base)) {
+    if (!Object.hasOwn(head, s) && !Object.hasOwn(head, movedTo.get(s) ?? '')) problems.push(`one-shot-migrations.json: ${s} was removed from the one-shot list; a record-only data migration would then run`);
+  }
+  for (const s of Object.keys(head)) {
+    if (!Object.hasOwn(base, s) && !added.includes(`${s}.sql`)) problems.push(`one-shot-migrations.json: ${s} was added as a one-shot but isn't a new file in this PR (an existing migration can't become record-only)`);
+  }
+  for (const s of Object.keys(stopIf)) {
+    if (!Object.hasOwn(head, s)) problems.push(`one-shot-migrations.json: stop_if_still_needed names ${s}, which is not a one-shot`);
+  }
+  return problems;
+}
+
+// Apply: a one-shot is recorded, never run, on the assumption that this database doesn't hold the rows it
+// corrects (a restore brings them corrected). Where the registry gives a check (stop_if_still_needed) and it
+// finds those rows uncorrected here, recording would leave them wrong and a later migration may refuse: stop
+// before writing anything and say how to fix it (Sol, #1990). holds(sql) runs the check on the target.
+export function oneShotStops({ steps, stopIf = {}, holds }) {
+  return steps
+    .filter(({ stem, run }) => !run && Object.hasOwn(stopIf, stem) && holds(stopIf[stem]))
+    .map(({ stem }) => `${stem} is a one-shot (recorded here, never run), but this database still holds the rows it corrects, so recording it would leave them wrong and a later migration may refuse. If this database is a restore of live data from before ${stem}, apply that file to it by hand first (psql -f supabase/migrations/${stem}.sql; its own preflight checks every row), then run this again: it is then only recorded. Nothing was written.`);
 }
 
 // Drift between the ledger and the repo, for rows after the baseline: a row with no migration file
@@ -365,9 +394,11 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRest
   const manifest = JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/manifest.json'), 'utf8'));
   const highWater = manifest.migrations_high_water;
   if (!/^\d{14}$/.test(highWater ?? '')) throw new Error('STOPPED: supabase/baselines/manifest.json has no valid migrations_high_water');
-  const registry = JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/one-shot-migrations.json'), 'utf8')).one_shot;
+  const oneShotFile = JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/one-shot-migrations.json'), 'utf8'));
+  const registry = oneShotFile.one_shot;
   if (!registry || typeof registry !== 'object') throw new Error('STOPPED: supabase/baselines/one-shot-migrations.json has no one_shot list');
   const oneShots = new Set(Object.keys(registry));
+  const stopIf = oneShotFile.stop_if_still_needed ?? {};
   const allSql = readdirSync(migDir).filter((n) => n.endsWith('.sql'));
   const badNames = allSql.filter((n) => n > highWater && !NAME.test(n.slice(0, -4)));
   if (badNames.length) throw new Error(`STOPPED before applying anything: badly named migration file(s): ${badNames.join(', ')} (<14-digit stamp>_<lower_snake>.sql)`);
@@ -417,6 +448,8 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRest
     ...bare.flatMap((stem) => fileProblems(stem, fileBytes(stem), { forRun: false })),
   ];
   if (problems.length) throw new Error(`STOPPED before applying anything: ${problems.join('; ')}`);
+  const stops = oneShotStops({ steps, stopIf, holds: (sql) => query(dbUrl, `SELECT CASE WHEN (${sql}) THEN 1 ELSE 0 END`)[0] === '1' });
+  if (stops.length) throw new Error(`STOPPED before applying anything: ${stops.join('; ')}`);
 
   if (restamps.length) {
     const f = path.join(work, 'restamps.sql');
@@ -574,12 +607,7 @@ const commands = {
       const stem = f.replace(/\.sql$/, '');
       return fileProblems(stem, readFileSync(path.join('supabase/migrations', f)), { forRun: !Object.hasOwn(oneShots ?? {}, stem) });
     }));
-    for (const stem of Object.keys(oBase?.one_shot ?? {})) {
-      if (!(stem in (oHead?.one_shot ?? {}))) problems.push(`one-shot-migrations.json: ${stem} was removed from the one-shot list; a record-only data migration would then run`);
-    }
-    for (const stem of Object.keys(oHead?.one_shot ?? {})) {
-      if (!(stem in (oBase?.one_shot ?? {})) && !added.includes(`${stem}.sql`)) problems.push(`one-shot-migrations.json: ${stem} was added as a one-shot but isn't a new file in this PR (an existing migration can't become record-only)`);
-    }
+    problems.push(...oneShotListProblems({ base: oBase?.one_shot ?? {}, head: oneShots ?? {}, stopIf: oHead?.stop_if_still_needed ?? {}, added, pairs: moved.pairs }));
     for (const p of problems) console.log(`::error::${p}`);
     return problems.length ? 1 : 0;
   },

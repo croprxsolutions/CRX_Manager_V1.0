@@ -709,7 +709,7 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh, claim = 
   // checked here, recorded at the command's allow point, so a denied merge claims nothing.
   const claimed = claim ? claim(pullRequest.headRefName, "merge", false) : "";
   if (claimed) return denied(`CODEX PRODUCTION GATE: ${claimed}`);
-  claimBranches.push(pullRequest.headRefName);
+  claimBranches.push({ branch: pullRequest.headRefName, action: "merge" });
   const base = normalize(pullRequest.baseRefName).toLowerCase();
   if (base === "master" || base === "production") {
     return denied(`CODEX PRODUCTION GATE: merges to protected branch ${base} remain blocked.`);
@@ -1288,8 +1288,8 @@ export function evaluateProductionAction({
       if (hardGateBudget.exhausted) return denied(hardGateBudgetDenial("CODEX PRODUCTION GATE"));
       if (advisory) return advisory;
     }
-    for (const claimBranch of claim ? connectorClaims : []) {
-      const refusal = claim(claimBranch, "merge", true);
+    for (const { branch: claimBranch, action } of claim ? connectorClaims : []) {
+      const refusal = claim(claimBranch, action, true);
       if (refusal) return denied(`CODEX PRODUCTION GATE: ${refusal}`);
     }
     return { blocked: false };
@@ -1544,20 +1544,17 @@ export function evaluateProductionAction({
     }
 
     // Landing claim (pr-claim-lib.mjs, fail open; #1948) — mirror of codex-push-guard.mjs:
-    // the first session to push a PR branch claims it. A dry run writes nothing, so claims nothing.
+    // the first session to push a PR branch claims it. Checked here, recorded at the
+    // command's allow point, so a refused command claims nothing. A dry run claims nothing.
+    // shortcut: a ref-less push to a differently named upstream claims only the local branch
+    // name (fail open; Codex App P2 on #2041); resolve @{push} only when no refspec was given.
     if (claim && !/(?:^|\s)(?:--dry-run|-n)(?=\s|$)/.test(segment)) {
       let destinations = [];
       try { destinations = pushDestinationBranches(segment, rawBranch); } catch { /* fail open */ }
-      // A ref-less push may land on a differently named upstream (push.default=upstream): claim that too.
-      if (destinations.length === 1 && destinations[0] === rawBranch) {
-        try { destinations.push(runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}"], pushRepoDir).replace(/^[^/]+\//, "")); } catch { /* no upstream */ }
-      }
-      // Check every destination before recording any, so a refused multi-ref push claims nothing.
-      for (const record of [false, true]) {
-        for (const destination of destinations) {
-          const refusal = claim(destination, "push", record);
-          if (refusal) return denied(`CODEX PRODUCTION GATE: ${refusal}`);
-        }
+      for (const destination of destinations) {
+        const refusal = claim(destination, "push", false);
+        if (refusal) return denied(`CODEX PRODUCTION GATE: ${refusal}`);
+        claimBranches.push({ branch: destination, action: "push" });
       }
     }
 
@@ -1598,9 +1595,9 @@ export function evaluateProductionAction({
     if (hardGateBudget.exhausted) return denied(hardGateBudgetDenial("CODEX PRODUCTION GATE"));
     if (advisory) return advisory;
   }
-  // Every merge cleared every gate: record the claims; a session that claimed in between still wins.
-  for (const claimBranch of claim ? claimBranches : []) {
-    const refusal = claim(claimBranch, "merge", true);
+  // Every push and merge cleared every gate: record the claims; a session that claimed in between still wins.
+  for (const { branch: claimBranch, action } of claim ? claimBranches : []) {
+    const refusal = claim(claimBranch, action, true);
     if (refusal) return denied(`CODEX PRODUCTION GATE: ${refusal}`);
   }
   return { blocked: false };

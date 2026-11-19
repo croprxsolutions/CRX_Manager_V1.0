@@ -4027,6 +4027,14 @@ try {
       // Luna MED: a multi-ref push refused on one destination claims none of the others.
       assert.match(pushAs("codex-D", "git push origin HEAD:claude/free HEAD:claude/other").reason || "", /LANDING CLAIM/, "#1948: a multi-ref push touching a claimed branch is refused");
       assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/free"], undefined, "#1948: ...and its free destination stays unclaimed");
+      // Codex App P2 on #2041: a push in a command refused later claims nothing.
+      assert.equal(pushAs("codex-D", "git push origin HEAD:claude/free && git push --force origin HEAD:claude/x").blocked, true, "a command with a forced push is refused");
+      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/free"], undefined, "#1948: ...and its allowed push claims nothing");
+      // Codex App P2 on #2041: an explicit refspec claims only its destination, never the upstream.
+      git(stale.repo, ["config", "branch.feature/test.remote", "origin"]);
+      git(stale.repo, ["config", "branch.feature/test.merge", "refs/heads/claude/other"]);
+      assert.equal(pushAs("codex-E", "git push origin HEAD:claude/mine").blocked, false, "#1948: an explicit refspec is not refused for another session's upstream");
+      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/mine"]?.session, "codex-E", "#1948: ...and claims its own destination at the allow point");
     }
     PIN = ` --match-head-commit ${stale.sha}`; // the cases below use the original head again
 

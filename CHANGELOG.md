@@ -5,6 +5,7 @@ Releases of CRX Manager, newest first.
 ## v0.1.0 (2026-11-19)
 
 #### ✨ New Features
+* a new quote's commission split starts from the customer's split (#1999)
 * RT-4b product rates change only through the rate tools (#1973)
 * section timing and confidence; read-only purchasing plan (Phase A PR 1b) (#1971)
 * batch fill ingredients from EPA on the EPA lookups page (#1975)

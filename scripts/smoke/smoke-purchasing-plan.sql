@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: the read-only Purchasing buy plan (bookings Phase A, PR 1b)
 -- ----------------------------------------------------------------------------
--- REQUIRES 20270127110000_booking_timing_purchasing_plan and 20270127150000 (P26, P27). Proof cases of
+-- REQUIRES 20270127110000_booking_timing_purchasing_plan and 20270127150000 (P26-P30). Proof cases of
 -- docs/plans/2026-11-17-bookings-phase-a-CONTRACT.md (v4) and plan v3, against
 -- get_purchasing_plan(12). Dates are relative to today (Chicago) so the chain never ages.
 --   P9   on hand 100, Firm 80 at +100, an open order of 50 (no delivery: needed today),
@@ -17,12 +17,12 @@
 --        draft PO shows as drafted; the product is not complete
 --   P13  booking 100, order draw 60, job draw 40: 0 + 60 + 40 = 100; after the order is
 --        cancelled (draw returned) 60 + 40; after the job completes, what is still owed
---   P14  a draw with no recorded line comes off the booking's lines top-down in document order, as
---        draw_down_quote takes it (estimated); draws of 150 against 100 booked put 50 in Over-drawn; an unknown
---        draw of 100 on product 25 (Firm 100 at +150 listed before Maybe 100 at +30) comes off the Firm line
+--   P14  order draws come off the LATEST-needed line first (drawn, section unknown);
+--        draws of 150 against 100 booked put 50 in Over-drawn; an unknown draw of 100 on product 25
+--        (Maybe 100 at +30, Firm 100 at +150) comes off the Maybe line, so Firm 100 stays committed
 --   P15  draft, closed_short, accepted-with-cancelled-order: nothing; accepted never ordered counts
 --   P16  review list from 14 days before the window end (timed and untimed)
---   P17  Firm with no date (its booking also lists first a dated +60 line of 9, drawn 9 by an order: the
+--   P17  Firm with no date (its booking also has a dated +60 line of 9, drawn 9 by an order: the
 --        draw comes off the dated line, so the undated one stays listed), a job line in a foreign unit: each in its
 --        bucket, not complete, no suggestion
 --   P18  an order line counts only its quantity_remaining; a delivery covering only part of it
@@ -42,13 +42,13 @@
 --        a booking line of 0 covers no hold
 --   P28  Taha's cases on #1989 (Mason, 2026-11-18, "I agree cap it"): a draft booking's hold of 500 (Firm, +45)
 --        with 13 on hand holds 13 today and 487 at +45, never "order 487 now"; a sent booking with Firm 100 at +45
---        and Maybe 100 at +120, 100 drawn by an order and 100 held, 13 on hand: the draw takes the earlier Firm
---        line, so 13 held (Maybe) and 87 Maybe shown, nothing to buy; an order line naming the booking's
---        second (Maybe) line draws that line, not the Firm line listed first (Sol round 3 on #1989)
---   P29  Sol round 4 on #1989: two sections tied at the same position are walked by line position, as
---        draw_down_quote does (product 43: a draw of 100 takes the Maybe line at position 0, the Firm line
---        at position 1 stays); a named line drawn past its size keeps the excess as Over-drawn, never
---        moving it onto another line (product 44: Maybe line of 50 drawn 100, Firm 100 stays, 50 over-drawn)
+--        and Maybe 100 at +120, 100 drawn by an order and 100 held, 13 on hand: the draw takes the less sure
+--        Maybe line (the safe guess; Mason, 2026-11-19), so 13 held and 87 Firm to buy; an order naming the
+--        Maybe line leaves the Firm line listed first needed
+--   P29  draws ignore line position: tied sections (product 43) still lose the Maybe line first; 100 drawn
+--        against Firm 100 + Maybe 50 leaves Firm 50 (product 44)
+--   P30  Sol round 5 on #1989: a hold not on the shelf takes incoming PO stock first (Mason, 2026-11-19):
+--        0 on hand, Maybe 100 held, PO 100 at +10, another booking's Firm 100 at +20: buy 100, not 0
 --   P27  a window crossing New Year ends next year; an invalid start month-day falls back the whole window
 --   P8   an applicator and a caller with no user are refused
 --
@@ -91,16 +91,16 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Purchasing Farm ' || v_suffix) RETURNING id INTO v_customer;
-  -- Products 1..44, all stocked in Gal except 20 (stocked by the 2.5 GL jug); every product is inserted before any is priced
+  -- Products 1..45, all stocked in Gal except 20 (stocked by the 2.5 GL jug); every product is inserted before any is priced
   -- (pricing sets a transaction-wide mode).
-  FOR v_i IN 1..44 LOOP
+  FOR v_i IN 1..45 LOOP
     INSERT INTO products (product_name, unit_size, inventory_unit, product_form)
     VALUES ('[SMOKE] Purchasing ' || lpad(v_i::text, 2, '0') || ' ' || v_suffix,
             (ARRAY['Gal', '2.5 GL'])[(v_i = 20)::int + 1], (ARRAY['Gal', NULL])[(v_i = 20)::int + 1], 'liquid')
     RETURNING id INTO v_pid;
     v_p := v_p || v_pid;
   END LOOP;
-  FOR v_i IN 1..44 LOOP
+  FOR v_i IN 1..45 LOOP
     v_price_res := preview_product_pricing_changes('product_page', NULL,
       jsonb_build_array(jsonb_build_object(
         'product_id', v_p[v_i], 'row_version', (SELECT pricing_version FROM products WHERE id = v_p[v_i]),
@@ -331,12 +331,12 @@ BEGIN
   v_res := save_quote(NULL, jsonb_build_object(
       'quote_number', '[SMOKE] PP17-' || v_suffix, 'customer_id', v_customer, 'status', 'draft',
       'tier', 1, 'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true),
-    jsonb_build_array(jsonb_build_object('client_key', '_s', 'section_name', 'P17', 'sort_order', 1,
+    jsonb_build_array(jsonb_build_object('client_key', '_s', 'section_name', 'P17', 'sort_order', 0,
       'confidence', 'firm',
       'items', jsonb_build_array(jsonb_build_object('client_key', '_k', 'product_id', v_p[15], 'sort_order', 0,
         'calc_mode', 'units_direct', 'total_units_needed', 9, 'price_override', 20, 'price_per_unit', 20,
         'current_cost', 6, 'unit_size', 'Gal', 'acres', 0))),
-      jsonb_build_object('client_key', '_t', 'section_name', 'P17 dated', 'sort_order', 0,
+      jsonb_build_object('client_key', '_t', 'section_name', 'P17 dated', 'sort_order', 1,
       'needed_by_date', v_t + 60, 'confidence', 'firm',
       'items', jsonb_build_array(jsonb_build_object('client_key', '_kt', 'product_id', v_p[15], 'sort_order', 0,
         'calc_mode', 'units_direct', 'total_units_needed', 9, 'price_override', 20, 'price_per_unit', 20,
@@ -497,6 +497,24 @@ BEGIN
           'current_cost', 6, 'unit_size', 'Gal', 'acres', 0)))),
     v_admin, 'smk-pp29t-' || v_suffix);
   INSERT INTO smk_pp_bookings VALUES ('P29T', (v_res->>'quote_id')::uuid, v_res->'section_ids');
+  -- P30, product 45: booking P30M Maybe 100 at +60 (held in full below); booking P30F Firm 100 at +20; no stock.
+  FOR v_i IN 1..2 LOOP
+    v_res := save_quote(NULL, jsonb_build_object(
+        'quote_number', '[SMOKE] PP30' || v_i || '-' || v_suffix, 'customer_id', v_customer, 'status', 'draft',
+        'tier', 1, 'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true),
+      jsonb_build_array(jsonb_build_object('client_key', '_a', 'section_name', 'P30', 'sort_order', 0,
+        'needed_by_date', v_t + CASE v_i WHEN 1 THEN 60 ELSE 20 END,
+        'confidence', CASE v_i WHEN 1 THEN 'maybe' ELSE 'firm' END,
+        'items', jsonb_build_array(jsonb_build_object('client_key', '_ka', 'product_id', v_p[45], 'sort_order', 0,
+          'calc_mode', 'units_direct', 'total_units_needed', 100, 'price_override', 20, 'price_per_unit', 20,
+          'current_cost', 6, 'unit_size', 'Gal', 'acres', 0)))),
+      v_admin, 'smk-pp30' || v_i || '-' || v_suffix);
+    INSERT INTO smk_pp_bookings VALUES (CASE v_i WHEN 1 THEN 'P30M' ELSE 'P30F' END, (v_res->>'quote_id')::uuid, v_res->'section_ids');
+  END LOOP;
+  INSERT INTO purchase_orders (po_number, vendor, status, expected_delivery_date, created_by)
+  VALUES ('SMK-PP30-' || v_suffix, '[SMOKE] Vendor', 'submitted', v_t + 10, v_admin) RETURNING id INTO v_po;
+  INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity_ordered, quantity_received, unit_cost, unit_size)
+  VALUES (v_po, v_p[45], 100, 0, 6, 'Gal');
   -- P29X, product 44: Firm 100 at +30 listed first, Maybe 50 at +60 second.
   v_res := save_quote(NULL, jsonb_build_object(
       'quote_number', '[SMOKE] PP29X-' || v_suffix, 'customer_id', v_customer, 'status', 'draft',
@@ -561,7 +579,7 @@ BEGIN
   -- need date + 14 days, as _sync_planned_holds sets it.
   INSERT INTO quote_product_draws (quote_id, product_id, quantity_drawn)
   VALUES ((SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P28'), v_p[40], 100);
-  -- P28S: a delivered booking-draw order whose line names the Maybe line (as draw_down_quote stamps it).
+  -- P28S: a delivered booking-draw order whose line names the Maybe line.
   SELECT quote_id, (section_ids->>'_b')::uuid INTO v_q, v_s2 FROM smk_pp_bookings WHERE tag = 'P28S';
   INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id, quote_id, booking_draw)
   VALUES ('SMK-PP28S-' || v_suffix, v_customer, v_t, 'confirmed', v_admin, v_q, true) RETURNING id INTO v_order;
@@ -575,6 +593,10 @@ BEGIN
   -- P29T: 100 drawn with no recorded line.
   INSERT INTO quote_product_draws (quote_id, product_id, quantity_drawn)
   VALUES ((SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P29T'), v_p[43], 100);
+  -- P30: the Maybe booking's hold of 100 (nothing on the shelf).
+  INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active, expires_at)
+  VALUES (v_p[45], v_customer, 100, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P30M'), v_admin, true,
+          v_t + 74);
   -- P29X: a delivered order of 100 naming the Maybe line of 50.
   SELECT quote_id, (section_ids->>'_b')::uuid INTO v_q, v_s2 FROM smk_pp_bookings WHERE tag = 'P29X';
   INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id, quote_id, booking_draw)
@@ -703,12 +725,12 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
-  -- P14: the early line (+60) loses the 60 first; the late line keeps 100.
+  -- P14: the late line (+150) loses the 60 first; the early line keeps 100.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[8];
   IF v_x IS NULL OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-       WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 150) <> 100
+       WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 60) <> 100
      OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 60 AND (r->>'estimated')::boolean) <> 40
+          WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 150 AND (r->>'estimated')::boolean) <> 40
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan->'drawn_section_unknown') d
                      WHERE (d->>'product_id')::uuid = v_p[8] AND (d->>'quantity')::numeric = 60) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P14) %', v_x;
@@ -719,11 +741,11 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (P14 over-drawn) %', v_x;
   END IF;
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[25];
-  IF v_x IS NULL OR (v_x->>'committed')::numeric IS DISTINCT FROM 0
+  IF v_x IS NULL OR (v_x->>'committed')::numeric IS DISTINCT FROM 100
      OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 30 AND r->>'class' = 'shown') IS DISTINCT FROM 100
+          WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 150) IS DISTINCT FROM 100
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r
-                 WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 150) THEN
+                 WHERE r->>'kind' = 'booking' AND (r->>'raw_date')::date = v_t + 30) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P14 confidence) %', v_x;
   END IF;
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[26];
@@ -940,47 +962,56 @@ BEGIN
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P28 draft hold capped at the shelf) %', v_x;
   END IF;
-  -- 40: the unrecorded draw of 100 takes the Firm line listed first; the hold backs 13 of the Maybe line; nothing to buy.
+  -- 40: the draw of 100 takes the less sure Maybe line; the hold backs 13 of the Firm line; buy the other 87.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[40];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 87
      OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'hold' AND r->>'confidence' = 'maybe') <> 13
+          WHERE r->>'kind' = 'hold' AND r->>'confidence' = 'firm') <> 13
      OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'booking' AND r->>'class' = 'shown' AND r->>'confidence' = 'maybe') <> 87
-     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'firm') THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P28 draw in document order) %', v_x;
+          WHERE r->>'kind' = 'booking' AND r->>'class' = 'committed' AND r->>'confidence' = 'firm') <> 87
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P28 draw off the less sure line) %', v_x;
   END IF;
   -- 41: a hold with an infinite expiry has no need date: it counts today, so its 50 is bought now.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[41];
   IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 50 OR (v_x->'suggestions'->0->>'need_date')::date <> v_t THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P28 infinite hold expiry) %', v_x;
   END IF;
-  -- 42: the order line names the Maybe line, so the Firm 100 at +7 is still needed: buy 100, not 0.
+  -- 42: the draw comes off the Maybe line, so the Firm 100 at +7 is still needed: buy 100, not 0.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[42];
   IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100
      OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
           WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'firm' AND NOT (r->>'estimated')::boolean) <> 100
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe') THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P28 order line names its booking line) %', v_x;
+    RAISE EXCEPTION 'SMOKE_FAIL: (P28 Firm line listed first stays needed) %', v_x;
   END IF;
   v_n := v_n + 1;
 
-  -- P29 (Sol round 4 on #1989). 43: tied sections walk by line position, so the Maybe line takes the draw.
+  -- P29. 43: tied sections, the Maybe line still takes the draw.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[43];
   IF v_x IS NULL
      OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
           WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'firm' AND (r->>'raw_date')::date = v_t + 150) <> 100
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe') THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P29 tied sections follow line position) %', v_x;
+    RAISE EXCEPTION 'SMOKE_FAIL: (P29 tied sections) %', v_x;
   END IF;
-  -- 44: the 50 drawn past the Maybe line is over-drawn; the Firm 100 stays needed; nothing is "section unknown".
+  -- 44: 100 drawn of 150 booked: the Maybe 50 goes first, then 50 of the Firm line (estimated); nothing over-drawn.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[44];
-  IF v_x IS NULL OR (v_x->>'over_drawn')::numeric IS DISTINCT FROM 50 OR NOT (v_x->'reasons' ? 'over_drawn')
+  IF v_x IS NULL OR COALESCE((v_x->>'over_drawn')::numeric, 0) <> 0
      OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'firm' AND NOT (r->>'estimated')::boolean) <> 100
-     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe')
-     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan->'drawn_section_unknown') d WHERE (d->>'product_id')::uuid = v_p[44]) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P29 named-line excess is over-drawn) %', v_x;
+          WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'firm' AND (r->>'estimated')::boolean) <> 50
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P29 draw past a line) %', v_x;
+  END IF;
+  v_n := v_n + 1;
+
+  -- P30: the Maybe hold takes the PO's 100 on its date, so the other booking's Firm 100 at +20 is bought.
+  SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[45];
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
+          WHERE r->>'kind' = 'hold' AND (r->>'raw_date')::date = v_t + 10) <> 100
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P30 a hold takes incoming stock first) %', v_x;
   END IF;
   v_n := v_n + 1;
 

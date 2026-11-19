@@ -42,19 +42,18 @@ held than the shelf has, the unbacked part stays as the booking line (its own da
    expiry less 14 days (as `_sync_planned_holds` sets it), never before today; a manual hold's rest (and a hold with
    no expiry) stays dated today. Covered holds are backed by the shelf left after the capped part. So a draft booking's
    Firm 500 with 13 on hand holds 13 today and 487 at its need date, never "order 487 now" (smoke P28).
-8. **Draw order (Mason, 2026-11-19: "a", after Taha's review and Sol round 3 on #1989).** The plan follows the draw
-   writer (`draw_down_quote`): an order draw comes off the booking line its order line names
-   (`order_items.quote_item_id`; a cancelled order keeps only what it delivered, a voided one none), capped by the
-   ledger total, and never more than that line still has: a claim past a line revised smaller stays unabsorbed and
-   shows as Over-drawn, never as another line's draw (Sol round 4). Whatever is left (legacy unstamped draws, job
-   draws beyond their section) comes off the lines top-down in the writer's exact order (section position, line
-   position, line id; NULLs last), as its front-walk takes it. Draws credited to a named line are not listed as
-   section unknown. A line drawn by a named
-   order line is exact; only the front-walk part is marked estimated. This replaces the `20270127110000`
-   least-sure, latest-first rule. (Jan Firm 100 listed before Mar Maybe 100, 100 drawn, 13 on hand: 13 held,
-   87 Maybe shown, nothing to buy; an order naming the Maybe line leaves the Firm line needed; smoke P28, P29, P14.)
-   `_sync_planned_holds` still consumes draws by need date: a pre-existing mismatch with the writer, left as a
-   follow-up.
+8. **Draw order (Mason, 2026-11-19, after Sol round 5 on #1989: "the safe guess").** Draws keep the
+   `20270127110000` rule: a draw that is not a job's own section comes off the least-sure, latest-needed lines first,
+   so it never erases Firm demand while a Maybe line of the product stays. Matching each order to the line it names
+   was tried in rounds 3-5 and drew a new Sol HIGH each round (a job and an order on the same line made the plan buy
+   300 for 200 of demand). Accepted cost: when an order really drew a Firm line, the plan may suggest buying for that
+   Firm line again (Taha's case: Jan Firm 100 + Mar Maybe 100, 100 drawn, 13 on hand: 13 held, 87 to buy; smoke P28,
+   P29, P14).
+9. **Holds take incoming stock first (Mason, 2026-11-19, after Sol round 5 on #1989).** The part of a hold not on the
+   shelf takes incoming PO stock first, on each PO's date (holds that count now first, then covered holds in rule 3's
+   order), as the hold does when the stock is received; that part is a committed hold row on the PO's date and only
+   the rest of a PO is free for other demand. With no PO, rules 3 and 7 are unchanged: a hold never makes the plan
+   buy on its own. (0 on hand, Maybe 100 held, PO 100 at +10, another booking's Firm 100 at +20: buy 100; smoke P30.)
 6. **Window MEDs.** A timing window is taken from settings only when both `start` and `end` are valid month-days
    (as `parseTimingWindows` on the screen does); otherwise both fall back to that timing's default. When `end` is
    before `start` (window crosses New Year) and the needed-by month-day is on/after `start`, the window end is in

@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-19 — Purchasing plan: the safe draw guess, and holds take incoming stock first (#1989)
+
+**Decision (Mason, in chat, 2026-11-19), after Sol round 5 on PR #1989** (third round in a row with a HIGH on draw allocation, so the business trade-off was put to him). (1) "Safe guess": draws keep the `20270127110000` least-sure, latest-first rule; matching each order to the line it names is dropped. Accepted cost: the plan may suggest buying for a Firm line an order already drew. (2) "Holds claim POs first": the part of a hold not on the shelf takes incoming purchase-order stock first, on each PO's date, as the hold does on receipt.
+**Supersedes:** the "order draws follow the line the order names" entry below.
+
 ## 2026-11-19 — Sol round 5 approved for PR #1989 (purchasing plan held stock)
 
 **Decision (Mason, in chat, 2026-11-19: "ok round 5").** A fifth Sol round may run on PR #1989 after the round-4 fixes (draw order matching `draw_down_quote` exactly; a named line's excess shown as over-drawn). If round 5 raises another BLOCKER or HIGH on the draw-allocation mechanism, stop patching and put the business trade-off to Mason (AGENTS.md, Operating Contract).

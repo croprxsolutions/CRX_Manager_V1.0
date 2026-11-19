@@ -282,8 +282,8 @@ async function main() {
   // 1. BEFORE
   const planBefore = chainOutcome('smoke-purchasing-plan.sql');
   assert.doesNotMatch(planBefore, /SMOKE_PASS_ROLLBACK/, 'smoke-purchasing-plan.sql must fail before the candidate');
-  // P14 is the first group the old body fails now: its unknown draw came off the latest line, not the first listed (#1989).
-  assert.match(planBefore, /SMOKE_FAIL: \(P14\)/, `the old plan must fail at the document-order draw case: ${planBefore}`);
+  // The old body fails at the first held-stock group (P26): stock held for a Maybe booking read as free.
+  assert.match(planBefore, /SMOKE_FAIL: \(P26/, `the old plan must fail at a held-stock case: ${planBefore}`);
   console.log(`[case] BEFORE: smoke-purchasing-plan.sql: ${planBefore.slice(0, 120)}`);
   assert.match(chainOutcome('smoke-booking-planning-fields.sql'), /^SMOKE_PASS_ROLLBACK/);
 

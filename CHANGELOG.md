@@ -36,6 +36,7 @@ Releases of CRX Manager, newest first.
 * environment banner and tab title prefix (STAGING amber, LOCAL blue) (#1714)
 
 #### 🐛 Bug Fixes
+* last-admin guard on role change, server-only reset audit, anon lockdown (KI-121..124) (#1981)
 * enforce the live-job booking rules in the database for every write path (#1959) (#1974)
 * KI-145 bulk customer import saves through save_customer (#1993)
 * Cycle Counts confirm dialogs open on top of the count window (#1982)

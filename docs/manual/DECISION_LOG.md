@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-19 — #1989: Mason owner-accepted 1 Sol finding(s) at `eb7dc3196550`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1989 at `eb7dc3196550` (base `b81667dddc5b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270128150000_purchasing_plan_held_stock_never_free.sql:357`, text sha256 `26b59541609dbae7` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref afd784259870)
+
 ## 2026-11-19 — Purchasing plan: the safe draw guess, and holds take incoming stock first (#1989)
 
 **Decision (Mason, in chat, 2026-11-19), after Sol round 5 on PR #1989** (third round in a row with a HIGH on draw allocation, so the business trade-off was put to him). (1) "Safe guess": draws keep the `20270127110000` least-sure, latest-first rule; matching each order to the line it names is dropped. Accepted cost: the plan may suggest buying for a Firm line an order already drew. (2) "Holds claim POs first": the part of a hold not on the shelf takes incoming purchase-order stock first, on each PO's date, as the hold does on receipt.

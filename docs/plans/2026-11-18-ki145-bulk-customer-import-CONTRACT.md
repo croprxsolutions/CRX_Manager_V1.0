@@ -49,9 +49,10 @@ One screen PR to `staging`. No database change, so no DB-first split. Off the So
    still import (component test).
 5. When a rep's file says tier 3, then the Default Tier is sent and the server accepts it (existing test + local app).
 
-## Open business decisions
+## Business decisions
 
-None.
+- **An admin's imported customers stay unassigned** (Mason, 2026-11-19, answering Taha's PR #1993 question). The
+  New Customer page starts on the signed-in user; the import does not, as before. Reps' rows are assigned to the rep.
 
 ## Cold challenge (Astra gpt-6.2-astra high, 2026-11-18, FINDINGS 32) — settlement
 

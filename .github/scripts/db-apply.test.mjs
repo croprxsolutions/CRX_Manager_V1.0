@@ -343,7 +343,7 @@ test('oneShotStops: a one-shot whose check finds its rows uncorrected stops the 
   assert.equal(out.length, 1);
   assert.match(out[0], /^20270121100000_ki137 is a one-shot .*this database \(fsnjredpmakbmhwowjjt\) still holds rows it corrects/);
   assert.match(out[0], /Never apply it to live/);
-  assert.match(out[0], /psql "<fsnjredpmakbmhwowjjt connection URL>" -v ON_ERROR_STOP=1 -1 -f supabase\/migrations\/20270121100000_ki137\.sql/);
+  assert.match(out[0], /never on the command line\): psql -v ON_ERROR_STOP=1 -1 -f supabase\/migrations\/20270121100000_ki137\.sql/);
   assert.match(out[0], /If its preflight refuses, or those rows were changed on purpose after it, ask Mason/);
   assert.equal(oneShotStops({ steps, stops, holds: () => undefined }).length, 1, 'an unclear result stops (fails closed)');
   assert.deepEqual(asked, ['CHECK_KI137'], 'only a pending one-shot with a check is checked');

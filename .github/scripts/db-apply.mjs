@@ -303,7 +303,7 @@ export const ONE_SHOT_STOPS = {
 export function oneShotStops({ steps, stops = ONE_SHOT_STOPS, holds, ref }) {
   return steps
     .filter(({ stem, run }) => !run && Object.hasOwn(stops, stem) && holds(stops[stem]) !== false)
-    .map(({ stem }) => `${stem} is a one-shot (recorded here, never run), but this database (${ref}) still holds rows it corrects, so recording it would leave them wrong and a later migration may refuse. Never apply it to live this way (live runs it through the release). If this database is a restore of live data from before ${stem}, apply that file to THIS database by hand first, in one transaction: psql "<${ref} connection URL>" -v ON_ERROR_STOP=1 -1 -f supabase/migrations/${stem}.sql, then run this again (it is then only recorded). If its preflight refuses, or those rows were changed on purpose after it, ask Mason. Nothing was written.`);
+    .map(({ stem }) => `${stem} is a one-shot (recorded here, never run), but this database (${ref}) still holds rows it corrects, so recording it would leave them wrong and a later migration may refuse. Never apply it to live this way (live runs it through the release). If this database is a restore of live data from before ${stem}, apply that file to THIS database by hand first, in one transaction, with its connection in PGHOST/PGUSER/PGDATABASE and the password in ~/.pgpass (never on the command line): psql -v ON_ERROR_STOP=1 -1 -f supabase/migrations/${stem}.sql, then run this again (it is then only recorded). If its preflight refuses, or those rows were changed on purpose after it, ask Mason. Nothing was written.`);
 }
 
 // Drift between the ledger and the repo, for rows after the baseline: a row with no migration file

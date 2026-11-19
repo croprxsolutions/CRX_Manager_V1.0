@@ -94,6 +94,7 @@ Releases of CRX Manager, newest first.
 * staging DB job accepts existing odd-stamp and self-wrapping migrations (#1749)
 
 #### 🧹 Refactors & Chore
+* live apply evidence in three billing migration records (v0.1.0 apply review) (#2037)
 * release #1990 may have its Sol review (#2003)
 * #1981 security batch row (#2002)
 * mark fixed on staging and log the pilot row (#2001)

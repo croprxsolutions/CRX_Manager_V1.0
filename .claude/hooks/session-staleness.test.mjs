@@ -96,7 +96,8 @@ try {
     "20260914100100_next_invoice_number_year_chicago.sql": "CREATE OR REPLACE FUNCTION public.f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;",
     "20260914100300_refuse_stale_commission_payment.sql": "create   or\n  replace function public.g() returns void language sql as $$ $$;",
     "20260914100900_repair_commission_history_label.sql": "CREATE OR REPLACE FUNCTION public.h() RETURNS void LANGUAGE sql AS $$ $$;",
-    "20260914101000_trigger_only.sql": "DROP TRIGGER IF EXISTS t ON widgets; CREATE TRIGGER t AFTER INSERT ON widgets FOR EACH ROW EXECUTE FUNCTION public.f();",
+    "20260914101000_create_trigger_only.sql": "CREATE TRIGGER t AFTER INSERT ON widgets FOR EACH ROW EXECUTE FUNCTION public.f();",
+    "20260914101100_drop_trigger_only.sql": "DROP TRIGGER IF EXISTS invoice_guard ON invoices;",
   };
   scaffold(dirOrReplace, {
     _meta: { migrations_high_water: "20260101000000", applied_migration_names: [] },

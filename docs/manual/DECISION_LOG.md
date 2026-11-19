@@ -1,5 +1,16 @@
 # Decision Log
 
+## 2026-11-19 — #1991: Mason owner-accepted 1 Sol finding(s) at `25a163b7ad7b`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1991 at `25a163b7ad7b` (base `0c63a967772d`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270127200000_ki146_farm_group_no_loops.sql:70`, text sha256 `816a8ed2f633f4ff` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 71b7669ab8e4)
+
+## 2026-11-18 — #1991: Mason owner-accepted 1 Sol finding(s) at `a18f7b2f4886`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1991 at `a18f7b2f4886` (base `a93fb9e85265`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270127200000_ki146_farm_group_no_loops.sql:70`, text sha256 `5811d486bcdcd6e2` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref e9f14c614cdb)
 ## 2026-11-19 — #1981: Mason owner-accepted 2 Sol finding(s) at `5b12081fb2dc`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1981 at `5b12081fb2dc` (base `0c63a967772d`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

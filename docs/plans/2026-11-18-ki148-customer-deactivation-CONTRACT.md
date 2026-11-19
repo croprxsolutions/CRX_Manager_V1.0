@@ -143,46 +143,43 @@ Recommendation: not now; it would also block finishing the legacy customer's two
 Read at `origin/staging` 62ccaeaa2. Migration `20270129170000_customer_deactivation_open_work_followups.sql`
 re-emits only the guard function (same owner, mode, search_path, ACL, trigger; still one snapshot, no
 locks). Its preflight requires the exact `20270128140000` body (md5, carriage returns ignored), so it never
-overwrites a different later version. Both migrations ship in the same release (neither is live), so no
-deactivation lands between them.
+overwrites a different later version. Both migrations ship in the same release (neither is live).
 
 | Change | Rule | Source |
 |---|---|---|
-| Split payers | An order counts for every customer named in `order_shares` for it or in `order_item_shares` for one of its lines, as well as its owner; so do its undelivered deliveries. Being named is enough (the CHECK keeps every share above 0%). Deliberately the stricter side: a payer whose line share overrides the order share, or whose own line already shipped, still blocks until the order closes | registry `order_shares`, `order_item_shares` |
 | Hold | `is_active = true` (the partial index's form) and `quantity > 0`; one Chicago date per check | `idx_inventory_holds_customer`; registry |
 | Wording | "open or unbilled spray job(s)"; a farm name over 60 characters shows its first 59 and "…" | Taha; Sol r4, r5 |
 
-Which spray jobs count is unchanged from `20270128140000` (scheduled, in progress, or completed with no
-`invoice_id`).
+Everything else that counts as open work is unchanged from `20270128140000`.
 
 Not done here (Taha owns quotes, bookings, invoices, billing, prepay and credits until 2026-12-15):
 prepay recorded as credits with a zero cached total; a fully applied credit memo still `posted`; showing
 a rep only the invoices that rep can see; the voided-then-deleted order that reopens an accepted quote
 (the purchasing plan's quote rule); a completed field-allocated delivery whose split invoices are not
-made yet. Also moved there after Sol's 2026-11-19 review (round 1, five HIGH findings), because each needs
-the billing rule for who is billed for a spray job or blend ticket: field-split job owners (a job's payers
-also come from field billing defaults with no `job_field_shares` row), approved unbilled blend tickets (a
-ticket's grower can be billed by split through field billing), and when a completed job counts as billed
-(split invoices where one is cancelled, jobs with several tickets, a stale `invoiced` status, a job billed
-through its blend ticket). A first version that guessed these rules was built, cold-challenged and
-withdrawn.
+made yet. Also moved there after Sol's 2026-11-19 reviews (round 1: five HIGH, round 2: one HIGH), because
+each needs the billing rule for who pays for a sale, spray job or blend ticket:
+- split payers of another customer's order: payers come from `order_shares`, `order_item_shares` and,
+  for field-allocated orders, field billing defaults with no share row;
+- field-split job owners: a job's payers also come from field billing defaults with no
+  `job_field_shares` row;
+- approved unbilled blend tickets: a ticket's grower can be billed by split through field billing;
+- when a completed job counts as billed: split invoices where one is cancelled, jobs with several
+  tickets, a stale `invoiced` status, a job billed through its blend ticket.
+Versions that guessed these rules were built, cold-challenged and withdrawn; the fix should reuse the
+billing engine's own payer rule (for sales, `_bill_split_line_shares` plus the field-allocation path).
 
-Proof cases (prover phase 2, `KI148_FOLLOWUP_PROOF_PASS`; each refused case is a customer with only that
-blocker): before the follow-up, a split payer of an open order, of an order line and of an undelivered
-delivery all deactivate, and an active hold for zero blocks; after it, each split payer is refused (admin,
-rep, service_role), every phase-1 kind is still refused by the replacement body (jobs with the new
-wording), and an active zero hold and a share of a cancelled order do not block (admin and rep). A
-108-character farm name appears as 59 characters plus "…". A second apply is refused. The prover waits
-out the 10 minutes before Chicago midnight so its "expires today" hold keeps its day (Sol r4).
+Proof cases (prover phase 2, `KI148_FOLLOWUP_PROOF_PASS`): before the follow-up an active hold for zero
+blocks; after it, every phase-1 kind is still refused by the replacement body (admin, rep, service_role;
+jobs with the new wording), and an active zero hold does not block (admin and rep). A 108-character farm
+name appears as 59 characters plus "…". A second apply is refused. The prover waits out the 10 minutes
+before Chicago midnight so its "expires today" hold keeps its day (Sol r4).
 
 **Cold challenge (Astra `gpt-6.2-astra` high, 2026-11-19, 36 findings) on the first, wider version.**
 Kept from it: one Chicago date per check (#27), exact name cut (#22), rollback text that can run (#29),
 exact-predecessor preflight and a marker instead of a wording check (#31), isolated proof cases (#35).
-#12 (0% shares) is settled by the CHECK. The job, ticket and field-share findings (#1–#11) left with that
-scope. Timing (#24–#26) stays the accepted point-in-time limit. Disclosure (#19–#20): reps read every
-customer's orders (`20261013220000_reps_work_any_customer`), and the counts name no other customer.
-Rollout (#30): both migrations land in one release. Legacy rows (#18): inactive customers are never
-re-checked, by design. Cost (#34): the trigger runs only when a customer is deactivated. Runner (#32):
-the release apply runs the file as one transaction, which the prover mirrors (`psql -1`).
+The share, job, ticket and field-share findings left with that scope. Timing (#24–#26) stays the accepted
+point-in-time limit. Rollout (#30): both migrations land in one release. Legacy rows (#18): inactive
+customers are never re-checked, by design. Runner (#32): the release apply runs the file as one
+transaction, which the prover mirrors (`psql -1`).
 
 Open business decision (unchanged, for Mason): should an inactive customer refuse any new work?

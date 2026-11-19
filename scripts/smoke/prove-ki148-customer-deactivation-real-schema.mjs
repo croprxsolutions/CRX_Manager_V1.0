@@ -10,8 +10,7 @@
  * does not, a bulk update is all-or-nothing, and an already-inactive customer stays editable.
  *
  * Phase 2 (issue #2000) then applies 20270129170000_customer_deactivation_open_work_followups and checks
- * split payers of open orders and undelivered deliveries, empty holds, the new wording and the 60-character
- * farm name (contract section "Follow-up (issue #2000)").
+ * empty holds, the new wording and the 60-character farm name (contract section "Follow-up (issue #2000)").
  *
  * Run: node scripts/smoke/prove-ki148-customer-deactivation-real-schema.mjs   (needs Docker)
  * Prints KI148_DEACTIVATION_PROOF_PASS, then KI148_FOLLOWUP_PROOF_PASS, on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
@@ -38,7 +37,7 @@ const C = Object.fromEntries(['order', 'partial', 'sched', 'inprog', 'hold', 'qd
   'posted', 'overdue', 'closed', 'clean', 'inactive', 'bulkok', 'many', 'dorder', 'qaccdel',
   'idraft', 'iunposted', 'jsched', 'jinprog', 'jdone', 'rapproved', 'rreceived', 'prepay',
   // Phase 2 (issue #2000).
-  'owner', 'splitpay', 'itemshare', 'sharedeliv', 'longname', 'closed2'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
+  'longname', 'closed2'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
 const N = Object.fromEntries(Object.keys(C).map((k) => [k, `[KI148] ${k}`]));
 
 // One statement as `role`, signed in as `uid` (null: no claims at all); the last output line is the answer.
@@ -56,23 +55,13 @@ const refused = (uid, sql, pattern, opts) => {
 };
 const active = (cid) => scalar(`SELECT is_active FROM public.customers WHERE id = '${cid}';`);
 
-// Phase 2 fixtures (issue #2000); ids: orders 5xx.
-const X = (n) => `'${id(n)}'`;
+// Phase 2 fixtures (issue #2000).
 function seed2(order) {
-  const ord = (n, status) => `INSERT INTO public.orders (id, order_number, customer_id, status) VALUES (${X(n)}, 'KI148-O${n}', '${C.owner}', '${status}');`;
-  const share = (n, cid) => `INSERT INTO public.order_shares (order_id, customer_id, customer_name, split_percentage, amount_cents) VALUES (${X(n)}, '${cid}', '${N.owner}', 50, 0);`;
   return `
-    -- Split payers: a share of another customer's open order, of one of its lines, of its undelivered delivery.
-    ${ord('501', 'confirmed')} ${share('501', C.splitpay)}
-    ${ord('502', 'confirmed')} INSERT INTO public.order_items (id, order_id, product_id) VALUES (${X('5f2')}, ${X('502')}, '${PRODUCT}');
-    INSERT INTO public.order_item_shares (order_item_id, customer_id, split_percentage) VALUES (${X('5f2')}, '${C.itemshare}', 50);
-    ${ord('503', 'fulfilled')} ${share('503', C.sharedeliv)}
-    INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, status) VALUES ('KI148-D503', ${X('503')}, '${C.owner}', '${ADMIN}', 'scheduled');
     ${order(C.longname, 'confirmed')}
     UPDATE public.customers SET farm_name = '[KI148] ' || repeat('L', 100) WHERE id = '${C.longname}';
     -- closed2: none of this is open.
-    INSERT INTO public.inventory_holds (product_id, customer_id, quantity, created_by, is_active) VALUES ('${PRODUCT}', '${C.closed2}', 0, '${ADMIN}', true);
-    ${ord('504', 'cancelled')} ${share('504', C.closed2)}`;
+    INSERT INTO public.inventory_holds (product_id, customer_id, quantity, created_by, is_active) VALUES ('${PRODUCT}', '${C.closed2}', 0, '${ADMIN}', true);`;
 }
 
 // Sol r4 (issue #2000): a hold "expiring today" turns expired at Chicago midnight. Never seed within 10 minutes of it.
@@ -223,10 +212,9 @@ async function main() {
   assert.equal(active(C.clean), 'f');
   console.log('KI148_DEACTIVATION_PROOF_PASS');
 
-  // Phase 2 (issue #2000): before the follow-up, split payers slip through and a zero hold blocks.
-  for (const k of ['splitpay', 'itemshare', 'sharedeliv']) assert.equal(allowed(ADMIN, deactivate(C[k])), '1');
+  // Phase 2 (issue #2000): before the follow-up, a zero hold blocks.
   refused(ADMIN, deactivate(C.closed2), /CUSTOMER_HAS_OPEN_WORK/);
-  console.log('[ki148-2000] BEFORE: split payers deactivate; an active hold for zero blocks');
+  console.log('[ki148-2000] BEFORE: an active hold for zero blocks');
   const applyFollowup = () => docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'], { input: followup, allowFailure: true });
   const first = applyFollowup();
   assert.equal(first.status, 0, `follow-up failed:\n${first.stderr}`);
@@ -234,22 +222,21 @@ async function main() {
   assert.notEqual(twice.status, 0); assert.match(twice.stderr, /KI148_FOLLOWUP_PREFLIGHT: the follow-up guard is already in place/);
   console.log('[ki148-2000] follow-up applied; postflight passed; a second apply is refused');
 
-  const kinds2 = { ...kinds, jsched: /1 open or unbilled spray job\(s\)\./, jinprog: /1 open or unbilled spray job\(s\)\./, jdone: /1 open or unbilled spray job\(s\)\./,
-    splitpay: /1 open order\(s\)\./, itemshare: /1 open order\(s\)\./, sharedeliv: /1 undelivered delivery\(ies\)\./ };
+  const kinds2 = { ...kinds, jsched: /1 open or unbilled spray job\(s\)\./, jinprog: /1 open or unbilled spray job\(s\)\./, jdone: /1 open or unbilled spray job\(s\)\./ };
   for (const [k, pattern] of Object.entries(kinds2)) {
     refused(ADMIN, deactivate(C[k]), new RegExp(`CUSTOMER_HAS_OPEN_WORK: nothing was deactivated\\. \\[KI148\\] ${k} still has ${pattern.source}`));
     assert.equal(active(C[k]), 't');
   }
-  refused(REP, deactivate(C.itemshare), /CUSTOMER_HAS_OPEN_WORK/);
-  refused(null, deactivate(C.splitpay), /CUSTOMER_HAS_OPEN_WORK/, { role: 'service_role' });
-  console.log('[ki148-2000] refused: every phase-1 kind again (jobs now "open or unbilled spray job(s)"), a split payer of an open order, of an order line, of an undelivered delivery; rep and service_role too');
+  refused(REP, deactivate(C.jdone), /1 open or unbilled spray job\(s\)/);
+  refused(null, deactivate(C.jdone), /1 open or unbilled spray job\(s\)/, { role: 'service_role' });
+  console.log('[ki148-2000] refused: every phase-1 kind again (jobs now "open or unbilled spray job(s)"); rep and service_role too');
   refused(ADMIN, deactivate(C.longname), /nothing was deactivated\. \[KI148\] L{51}… still has 1 open order\(s\)\./);
   console.log('[ki148-2000] a 108-character farm name is cut to 60 characters in the sentence');
 
   assert.equal(allowed(ADMIN, deactivate(C.closed2)), '1');
   assert.equal(allowed(REP, deactivate(C.closed2)), '1');
   assert.equal(allowed(ADMIN, deactivate(C.closed)), '1');
-  console.log('[ki148-2000] allowed (admin and rep): an active hold for zero, a share of a cancelled order; phase-1 closed work still allowed');
+  console.log('[ki148-2000] allowed (admin and rep): an active hold for zero; phase-1 closed work still allowed');
   console.log('KI148_FOLLOWUP_PROOF_PASS');
 }
 

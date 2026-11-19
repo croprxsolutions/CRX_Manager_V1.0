@@ -3,15 +3,13 @@
 --
 -- WHAT (issue #2000, follow-ups to KI-148 / 20270128140000; contract
 --   docs/plans/2026-11-18-ki148-customer-deactivation-CONTRACT.md, section "Follow-up (issue #2000)"):
---   The deactivation guard now also counts, and stops miscounting:
---   - Split payers: a customer with a share of another customer's open order (order_shares
---     or order_item_shares) is refused while that order is open or its delivery undelivered.
+--   Polish only; what counts as open work is unchanged except holds:
 --   - A hold for zero (or less) no longer blocks; the hold test is `is_active = true`, the form the
 --     partial index idx_inventory_holds_customer uses. One Chicago date for the whole check.
 --   - Wording: "open or unbilled spray job(s)"; a farm name over 60 characters shows its first 59 and "…".
---   Everything else in 20270128140000 is unchanged, including which spray jobs count (quotes, invoices,
---   returns, prepay, field-split job owners, blend tickets and when a job counts as billed decide who is
---   billed for what: those follow-ups belong to Taha's billing work until 2026-12-15).
+--   Not here (Taha's billing work until 2026-12-15): split payers of another customer's order (they come
+--   from order_shares, order_item_shares and field billing defaults), field-split job owners, blend
+--   tickets, when a job counts as billed, quotes, invoices, returns and prepay.
 --
 -- HOW: CREATE OR REPLACE of guard_customer_deactivation_open_work_20270128() only; same owner,
 --   SECURITY DEFINER, search_path, revoked EXECUTE and trigger. Still one statement, one snapshot,
@@ -46,14 +44,9 @@ BEGIN
   IF md5(replace(v_src, E'\r', '')) <> '357ee3570f4d06cd260dbe061b290ef8' THEN
     RAISE EXCEPTION 'KI148_FOLLOWUP_PREFLIGHT: the deactivation guard is not the 20270128140000 version (md5 %)', md5(replace(v_src, E'\r', ''));
   END IF;
-  -- Every column the new checks read must exist.
-  IF (SELECT count(*) FROM information_schema.columns
-       WHERE table_schema = 'public'
-         AND (table_name, column_name) IN (
-           ('order_shares','order_id'), ('order_shares','customer_id'),
-           ('order_item_shares','order_item_id'), ('order_item_shares','customer_id'),
-           ('order_items','id'), ('order_items','order_id'),
-           ('inventory_holds','quantity'))) <> 7 THEN
+  -- The one column the new check reads must exist.
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'inventory_holds' AND column_name = 'quantity') THEN
     RAISE EXCEPTION 'KI148_FOLLOWUP_PREFLIGHT: a column the guard reads is missing';
   END IF;
 END
@@ -85,25 +78,16 @@ BEGIN
   v_today := (clock_timestamp() AT TIME ZONE 'America/Chicago')::date;
   -- One statement, so all counts read the same committed state. No row locks (Mason, 2026-11-19:
   -- locking drew deadlocks with payments and billing; the split-second gap is accepted instead).
-  WITH my_orders AS (
-    -- Orders the customer owns or pays a share of (issue #2000: split payers; shares are always above 0%).
-    SELECT o.id, o.status, o.deleted_at FROM public.orders o WHERE o.customer_id = OLD.id
-    UNION
-    SELECT o.id, o.status, o.deleted_at FROM public.order_shares s JOIN public.orders o ON o.id = s.order_id
-     WHERE s.customer_id = OLD.id
-    UNION
-    SELECT o.id, o.status, o.deleted_at FROM public.order_item_shares s
-      JOIN public.order_items oi ON oi.id = s.order_item_id JOIN public.orders o ON o.id = oi.order_id
-     WHERE s.customer_id = OLD.id
-  )
   SELECT
-    (SELECT count(*) FROM my_orders o WHERE o.deleted_at IS NULL AND o.status IN ('confirmed', 'partially_fulfilled')),
+    (SELECT count(*) FROM public.orders o
+      WHERE o.customer_id = OLD.id AND o.deleted_at IS NULL
+        AND o.status IN ('confirmed', 'partially_fulfilled')),
     (SELECT count(*) FROM (
        SELECT d.id FROM public.deliveries d
         WHERE d.customer_id = OLD.id AND d.deleted_at IS NULL AND d.status IN ('scheduled', 'in_progress')
        UNION
-       SELECT d.id FROM my_orders o JOIN public.deliveries d ON d.order_id = o.id
-        WHERE d.deleted_at IS NULL AND d.status IN ('scheduled', 'in_progress')) dd),
+       SELECT d.id FROM public.orders o JOIN public.deliveries d ON d.order_id = o.id
+        WHERE o.customer_id = OLD.id AND d.deleted_at IS NULL AND d.status IN ('scheduled', 'in_progress')) dd),
     -- An expired or empty hold no longer reserves stock (the purchasing plan never counts one either).
     -- `is_active = true` matches the partial index idx_inventory_holds_customer.
     (SELECT count(*) FROM public.inventory_holds h

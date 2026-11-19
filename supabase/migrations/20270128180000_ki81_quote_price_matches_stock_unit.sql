@@ -12,8 +12,9 @@
 -- WHAT (two functions re-emitted from 20270125163000, each unchanged apart from one inserted check):
 --  0. New private _quote_item_sent_unit_20270128(quote, item, live unit): the unit the grower was last SENT for that
 --     line (the latest quote_versions snapshot that lists it), else the live unit. A line counts as mismatched when
---     either its live unit or its sent unit doesn't match the stock unit, so editing a sent line's unit (Lb -> Gal at
---     the same price) without a resend can't make a price the grower saw per Lb bill per Gal (attack run, F1b).
+--     either its live unit or its sent unit doesn't match the stock unit, or either is blank or unrecorded (Taha
+--     2026-11-19: an unknown unit stops and asks too), so editing a sent line's unit (Lb -> Gal at the same price)
+--     without a resend can't make a price the grower saw per Lb bill per Gal (attack run, F1b; Luna/Sol r2).
 --  1. _field_app_sent_quote_price_cents (the single field-app save, the split save through
 --     resolve_field_app_chemical_price, and a blend-ticket grower's own quote): after the eligible quotes are
 --     locked, a priced line for the product on those fields whose unit doesn't match the stock unit
@@ -67,10 +68,11 @@ LANGUAGE sql
 STABLE
 SET search_path = public, pg_temp
 AS $fn$
-  -- KI-81 unit: the unit the grower was last sent for this quote line (the newest sent version that lists it), else
-  -- the line's live unit. A malformed snapshot (sections or items not an array) counts as no unit sent.
+  -- KI-81 unit: the unit the grower was last sent for this quote line (the newest sent version that lists it); '' when
+  -- that version lists the line without a unit (unknown, so callers stop and ask); the live unit when no sent version
+  -- lists the line. A malformed snapshot (sections or items not an array) lists nothing.
   SELECT COALESCE(
-           (SELECT NULLIF(btrim(it.value->>'unit_size', E' \t\r\n' || chr(160)), '')
+           (SELECT COALESCE(btrim(it.value->>'unit_size', E' \t\r\n' || chr(160)), '')
               FROM public.quote_versions v
              CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(v.snapshot_data->'sections') = 'array'
                                                           THEN v.snapshot_data->'sections' ELSE '[]'::jsonb END) s(value)
@@ -150,8 +152,8 @@ BEGIN
   PERFORM 1 FROM products WHERE id = p_product_id FOR SHARE;
   SELECT format('%s is quoted per %s but is now stocked per %s, so that quote price can''t be billed.',
                 COALESCE(p.product_name, 'A product'),
-                CASE WHEN public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
-                     THEN btrim(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size)) ELSE btrim(qi.unit_size) END,
+                COALESCE(NULLIF(CASE WHEN public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)) AND COALESCE(btrim(qi.unit_size), '') <> ''
+                     THEN btrim(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size)) ELSE btrim(qi.unit_size) END, ''), 'an unrecorded unit'),
                 COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
     INTO v_msg
     FROM quote_sections qs
@@ -161,7 +163,9 @@ BEGIN
      AND qs.field_id = ANY (p_field_ids)
      AND qi.product_id = p_product_id
      AND qi.price_per_unit >= 0
-     AND (NOT public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
+     AND (COALESCE(btrim(qi.unit_size, E' \t\r\n' || chr(160)), '') = ''
+          OR COALESCE(btrim(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size), E' \t\r\n' || chr(160)), '') = ''
+          OR NOT public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
           OR NOT public._unit_matches_stock_unit(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size), COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)))
    ORDER BY qi.id
    LIMIT 1;
@@ -657,33 +661,39 @@ BEGIN
   IF v_quote_section_id IS NOT NULL THEN
     SELECT format('%s is quoted per %s but is now stocked per %s, so that quote price can''t be billed.',
                   COALESCE(p.product_name, 'A product'),
-                  CASE WHEN public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
-                     THEN btrim(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size)) ELSE btrim(qi.unit_size) END,
+                  COALESCE(NULLIF(CASE WHEN public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)) AND COALESCE(btrim(qi.unit_size), '') <> ''
+                     THEN btrim(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size)) ELSE btrim(qi.unit_size) END, ''), 'an unrecorded unit'),
                   COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
       INTO v_unit_msg
-      FROM quote_items qi
+      FROM blend_ticket_products btp
+      JOIN quote_items qi ON qi.section_id = v_quote_section_id AND qi.product_id = btp.product_id
       JOIN products p ON p.id = qi.product_id
-     WHERE qi.section_id = v_quote_section_id
-       AND qi.product_id IN (SELECT btp.product_id FROM blend_ticket_products btp
-                              WHERE btp.blend_ticket_id = p_blend_ticket_id AND COALESCE(btp.rate_per_acre, 0) > 0)
+     WHERE btp.blend_ticket_id = p_blend_ticket_id
+       AND COALESCE(btp.rate_per_acre, 0) > 0
        AND qi.price_per_unit >= 0 AND qi.price_per_unit < 'Infinity'::numeric
        AND qi.price_per_unit = ROUND(qi.price_per_unit, 2)
-       AND (NOT public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
+       AND (COALESCE(btrim(qi.unit_size, E' \t\r\n' || chr(160)), '') = ''
+          OR COALESCE(btrim(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size), E' \t\r\n' || chr(160)), '') = ''
+          OR NOT public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
           OR NOT public._unit_matches_stock_unit(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size), COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)))
-       AND NOT EXISTS (
-             SELECT 1 FROM blend_ticket_products b2
-              WHERE b2.blend_ticket_id = p_blend_ticket_id
-                AND b2.product_id = qi.product_id
-                AND public._blend_quote_pick_valid_20261020(
-                      v_quote_section_id, v_ticket.customer_id, b2.product_id, b2.unit_price_cents)
+       -- Per ticket line (Luna/Sol r2): a line whose valid stored pick is a usable quote price on a matching-unit
+       -- line bills that pick; every other line could bill this quote line's price, so it stops.
+       AND NOT (public._blend_quote_pick_valid_20261020(
+                  v_quote_section_id, v_ticket.customer_id, btp.product_id, btp.unit_price_cents)
                 AND EXISTS (SELECT 1 FROM quote_items q2
                              WHERE q2.section_id = v_quote_section_id
-                               AND q2.product_id = b2.product_id
-                               AND ROUND(q2.price_per_unit * 100)::bigint = b2.unit_price_cents
+                               AND q2.product_id = btp.product_id
+                               AND q2.price_per_unit >= 0 AND q2.price_per_unit < 'Infinity'::numeric
+                               AND q2.price_per_unit = ROUND(q2.price_per_unit, 2)
+                               AND ROUND(q2.price_per_unit * 100)::bigint = btp.unit_price_cents
+                               AND COALESCE(btrim(q2.unit_size, E' 	
+' || chr(160)), '') <> ''
+                               AND COALESCE(btrim(public._quote_item_sent_unit_20270128(q2.quote_id, q2.id, q2.unit_size), E' 	
+' || chr(160)), '') <> ''
                                AND public._unit_matches_stock_unit(q2.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
                                AND public._unit_matches_stock_unit(
                                      public._quote_item_sent_unit_20270128(q2.quote_id, q2.id, q2.unit_size), COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))))
-     ORDER BY qi.id
+     ORDER BY btp.sequence_order, btp.id, qi.id
      LIMIT 1;
     IF v_unit_msg IS NOT NULL THEN
       RAISE EXCEPTION 'QUOTE_RESEND_REQUIRED: % Fix or resend the quote for %, then create this invoice again.', v_unit_msg,
@@ -1227,8 +1237,8 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'fb1ff053894ca9807e038d071ea6654a', false, 'v'),
-        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '8637fa41a20b2e0334a46ddd714a4d48', true, 'v')
+        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', '75115013a02cd759a3e783651d047d4f', false, 'v'),
+        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '4404058c118092578a483ec8cbee7bc1', true, 'v')
       ) AS pin(sig, body_md5, secdef, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL

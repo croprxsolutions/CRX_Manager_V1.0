@@ -6,7 +6,11 @@
 --   an open order (confirmed or partially fulfilled), an undelivered delivery (scheduled or in
 --   progress, of the customer or of one of its orders), an active, unexpired stock hold, an open quote
 --   (draft, sent or revised, or accepted with no undeleted order, as the purchasing plan counts it), or an
---   open invoice (posted or overdue). Deleted rows never count. The refusal names the customer and what is open:
+--   invoice not yet settled (draft, unposted, posted or overdue), a spray job not yet billed (scheduled,
+--   in progress, or completed with no invoice), a return waiting for its credit (approved or received),
+--   or prepay money on account (prepay balance not zero). Mason, 2026-11-19, on Taha's review: unbilled
+--   work and unapplied prepay must block, because statements, finance charges and the prepay runs skip
+--   inactive customers. Deleted rows never count. The refusal names the customer and what is open:
 --   CUSTOMER_HAS_OPEN_WORK. It applies to everyone and every path (Customers bulk Deactivate,
 --   the edit page through save_customer, a direct API update, server functions).
 --
@@ -16,7 +20,7 @@
 --   name sorts after customers_guard_rep_edit_20261013, so a rep's forbidden edit keeps its own error.
 --   Only admins and sales reps may update customers (policy customers_update), and both read every
 --   customer's work, so the counts it names reveal nothing new; invoices are named without a count.
---   CONSISTENCY: one statement counts all five kinds from one snapshot. It takes no extra locks.
+--   CONSISTENCY: one statement counts every kind from one snapshot. It takes no extra locks.
 --   LIMIT (accepted by Mason 2026-11-18 and 2026-11-19, see the KI-148 contract): a point-in-time check.
 --   Work created or reopened by a transaction that has not committed when the check runs, or work added
 --   after the deactivation, is not caught. Waiting for such work with row locks was tried and dropped:
@@ -52,7 +56,10 @@ BEGIN
            ('deliveries','id'), ('deliveries','customer_id'), ('deliveries','order_id'), ('deliveries','status'), ('deliveries','deleted_at'),
            ('inventory_holds','customer_id'), ('inventory_holds','is_active'), ('inventory_holds','expires_at'),
            ('quotes','id'), ('quotes','customer_id'), ('quotes','status'), ('quotes','deleted_at'),
-           ('invoices','customer_id'), ('invoices','status'), ('invoices','deleted_at'))) <> 23 THEN
+           ('invoices','customer_id'), ('invoices','status'), ('invoices','deleted_at'),
+           ('jobs','customer_id'), ('jobs','status'), ('jobs','deleted_at'), ('jobs','invoice_id'),
+           ('returns','customer_id'), ('returns','status'), ('returns','deleted_at'),
+           ('customers','prepay_balance_cents'))) <> 31 THEN
     RAISE EXCEPTION 'KI148_PREFLIGHT: a column the guard reads is missing';
   END IF;
 END
@@ -70,13 +77,15 @@ DECLARE
   v_holds bigint;
   v_quotes bigint;
   v_invoices bigint;
+  v_jobs bigint;
+  v_returns bigint;
   v_open text[] := ARRAY[]::text[];
 BEGIN
   -- Only the active -> inactive change is checked; already-inactive customers stay editable.
   IF NOT (OLD.is_active IS TRUE AND NEW.is_active IS NOT TRUE) THEN
     RETURN NEW;
   END IF;
-  -- One statement, so all five counts read the same committed state. No row locks (Mason, 2026-11-19:
+  -- One statement, so all counts read the same committed state. No row locks (Mason, 2026-11-19:
   -- locking drew deadlocks with payments and billing; the split-second gap is accepted instead).
   SELECT
     (SELECT count(*) FROM public.orders o
@@ -99,16 +108,27 @@ BEGIN
              OR (q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM public.orders o WHERE o.quote_id = q.id AND o.deleted_at IS NULL)))),
     (SELECT count(*) FROM public.invoices i
       WHERE i.customer_id = OLD.id AND i.deleted_at IS NULL
-        AND i.status IN ('posted', 'overdue'))
-  INTO v_orders, v_deliveries, v_holds, v_quotes, v_invoices;
+        -- Draft and unposted invoices still bill (Mason, 2026-11-19).
+        AND i.status IN ('draft', 'unposted', 'posted', 'overdue')),
+    -- A completed job with no invoice has not been billed yet ('invoiced' is the billed state).
+    (SELECT count(*) FROM public.jobs j
+      WHERE j.customer_id = OLD.id AND j.deleted_at IS NULL
+        AND (j.status IN ('scheduled', 'in_progress') OR (j.status = 'completed' AND j.invoice_id IS NULL))),
+    (SELECT count(*) FROM public.returns r
+      WHERE r.customer_id = OLD.id AND r.deleted_at IS NULL AND r.status IN ('approved', 'received'))
+  INTO v_orders, v_deliveries, v_holds, v_quotes, v_invoices, v_jobs, v_returns;
   IF v_orders > 0 THEN v_open := v_open || format('%s open order(s)', v_orders); END IF;
   IF v_deliveries > 0 THEN v_open := v_open || format('%s undelivered delivery(ies)', v_deliveries); END IF;
   IF v_holds > 0 THEN v_open := v_open || format('%s active stock hold(s)', v_holds); END IF;
   IF v_quotes > 0 THEN v_open := v_open || format('%s open quote(s)', v_quotes); END IF;
   -- No invoice count: the rep guard keeps invoice detail to itself for reps.
   IF v_invoices > 0 THEN v_open := v_open || 'open invoices'::text; END IF;
+  IF v_jobs > 0 THEN v_open := v_open || format('%s unbilled spray job(s)', v_jobs); END IF;
+  IF v_returns > 0 THEN v_open := v_open || format('%s return(s) awaiting credit', v_returns); END IF;
+  -- No amount: the balance is the customer's money, not something this message needs to show.
+  IF COALESCE(OLD.prepay_balance_cents, 0) <> 0 THEN v_open := v_open || 'prepay money on account'::text; END IF;
   IF cardinality(v_open) > 0 THEN
-    RAISE EXCEPTION 'CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. % still has %. Finish or cancel its orders, deliveries and quotes, release its holds and settle or void its invoices first',
+    RAISE EXCEPTION 'CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. % still has %. Finish or cancel that work, bill it, credit its returns and use up or refund its prepay first',
       COALESCE(NULLIF(btrim(OLD.farm_name), ''), 'this customer'), array_to_string(v_open, ', ');
   END IF;
   RETURN NEW;

@@ -1159,7 +1159,9 @@ days)", and have `save_customer` refuse terms the parser would default.
 `guard_customer_rep_edit_20261013` checks only posted/overdue invoices, and only for reps (admins skip it: To-Do
 decision 20); the Customers bulk Deactivate checks invoices only. Live: 1 inactive customer (deactivated 2026-02-06)
 still has 2 confirmed orders (To-Do decision 23). Fix: a new trigger refuses switching a customer from active to
-inactive while it has open orders, undelivered deliveries, active holds, open quotes or open invoices, for every role
+inactive while it has open orders, undelivered deliveries, active holds, open quotes, unsettled invoices (draft and
+unposted too), unbilled spray jobs, returns awaiting credit or prepay money on account (the last four added by Mason,
+2026-11-19, on Taha's review), for every role
 including admins (decision 20 answered 2026-11-18), and names what is open (`CUSTOMER_HAS_OPEN_WORK`); the bulk
 Deactivate and the edit page both hit it. The live inactive customer stays as it is (decision 23) and stays editable. It checks everything
 at once. Accepted limit (Mason, 2026-11-18 and 2026-11-19): work being saved at the same moment as the deactivation,

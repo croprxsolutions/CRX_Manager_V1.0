@@ -1,5 +1,16 @@
 # Decision Log
 
+## 2026-11-19 — KI-148 (#1997): unbilled work and prepay block deactivation; Sol round 5
+
+**Decision (Mason, in chat, 2026-11-19, on Taha's review of PR #1997).**
+- Deactivation is also refused while the customer has a draft or unposted invoice, a spray job not yet billed
+  (scheduled, in progress, or completed with no invoice), or prepay money on account (balance not zero).
+  **Why:** statements, finance charges and the prepay apply and reconcile runs read only active customers, so that
+  money would drop out of them.
+- An approved or received return still waiting for its credit also blocks. A farm-group parent with active children
+  does not.
+- PR #1997 may have a fifth Sol round (round 5) to review this change.
+
 ## 2026-11-19 — KI-148: no lock; Mason removes the wait-for-work lock from the deactivation guard
 
 The `FOR UPDATE` wait added after Sol round 1 drew HIGHs five rounds running (deadlocks with payments and billing,

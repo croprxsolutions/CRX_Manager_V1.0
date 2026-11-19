@@ -13,7 +13,14 @@ while it still has open work. "Open work" is:
 | Delivery | `deliveries.status IN ('scheduled','in_progress')`, `deleted_at IS NULL`, on the customer's row **or** on one of its orders | registry `deliveries.status` |
 | Hold | `inventory_holds.is_active` and not expired (`expires_at` null or ≥ today, Chicago), any hold type | live table; every hold writer sets `customer_id`; the purchasing plan never counts an expired hold |
 | Quote | `quotes.status IN ('draft','sent','revised')`, `deleted_at IS NULL`, or `accepted` with no undeleted order (`orders.quote_id`), the purchasing plan's rule (Sol r2, r3). A converted quote's open part is its order | `QUOTE_TO_DELIVERY.md` lines 13, 64 |
-| Invoice | `invoices.status IN ('posted','overdue')`, `deleted_at IS NULL` (today's rule, now for every role) | `_customer_has_open_invoice_20261013` |
+| Invoice | `invoices.status IN ('draft','unposted','posted','overdue')`, `deleted_at IS NULL` (draft and unposted added by Mason, 2026-11-19, on Taha's review: they still bill) | registry `invoices.status` |
+| Spray job | `jobs.status IN ('scheduled','in_progress')`, or `completed` with no `invoice_id` (not yet billed; `invoiced` is billed), `deleted_at IS NULL` (Mason, 2026-11-19) | registry `jobs.status` |
+| Return | `returns.status IN ('approved','received')` (waiting for its credit), `deleted_at IS NULL` (Mason, 2026-11-19) | registry `returns.status` |
+| Prepay | `customers.prepay_balance_cents <> 0` (Mason, 2026-11-19: the prepay runs skip inactive customers) | live column |
+
+Not blocking (Mason, 2026-11-19): a farm-group parent with active children; a return still `requested`.
+Why the 2026-11-19 additions: statements, finance charges and the prepay apply/reconcile runs read only
+active customers, so unbilled work or unapplied prepay on an inactive customer would leave those runs.
 
 **Decisions it carries out.**
 - To-Do decision 20 (admins skip the open-invoice check): answered in the task brief from the parent
@@ -28,7 +35,7 @@ rep guard, so a rep's forbidden edit keeps its own error). Its function
 `search_path = public, pg_temp`, EXECUTE revoked from everyone (a trigger function needs no grant to
 fire; the existing guard has the same ACL). It acts only when `OLD.is_active IS TRUE AND NEW.is_active
 IS NOT TRUE`, counts each kind with owner rights, and refuses with
-`CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. <farm name> still has <n open order(s), ...>. Finish or cancel its orders, deliveries and quotes, release its holds and settle or void its invoices first`.
+`CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. <farm name> still has <n open order(s), ...>. Finish or cancel that work, bill it, credit its returns and use up or refund its prepay first`.
 The existing rep guard `guard_customer_rep_edit_20261013` is **not** re-emitted; its rep-only invoice
 check stays (a rep with open invoices still sees `CUSTOMER_HAS_OPEN_INVOICES` first).
 
@@ -91,10 +98,12 @@ migration after merge; production follows the release flow (migration applied be
 2. Same for a sales rep, for a direct update as `postgres`, and as `service_role`: refused.
 3. Each kind alone refuses: part-filled order, scheduled delivery, in-progress delivery, a delivery
    whose row names another customer but whose order is this one, active hold (also one expiring
-   today), draft/sent/revised quote, posted invoice, overdue invoice. Several kinds name every count.
+   today), draft/sent/revised quote, draft/unposted/posted/overdue invoice, scheduled/in-progress job,
+   completed job with no invoice, approved/received return, prepay balance. Several kinds name every count.
 4. When the work is closed (order fulfilled/cancelled/voided/deleted, delivery completed/cancelled/
    voided, hold inactive or expired yesterday, quote declined/expired/cancelled/closed_*/accepted
-   with its order or a deleted draft, invoice draft/unposted/paid/voided/cancelled), then deactivation succeeds.
+   with its order or a deleted draft, invoice paid/voided/cancelled or deleted, job cancelled/invoiced/completed
+   with an invoice or deleted, return requested/credited/rejected/cancelled or deleted, zero prepay), then deactivation succeeds.
 5. Bulk: one statement deactivating two customers, one blocked → refused, both stay active.
 6. An inactive customer with open orders can still be edited by an admin and a rep, and reactivated;
    deactivating it again is checked.

@@ -29,7 +29,8 @@ const PRODUCT = id('d1');
 
 // One customer per case; `c` + suffix is its fixture id.
 const C = Object.fromEntries(['order', 'partial', 'sched', 'inprog', 'hold', 'qdraft', 'qsent', 'qrevised', 'qacc',
-  'posted', 'overdue', 'closed', 'clean', 'inactive', 'bulkok', 'many', 'dorder', 'qaccdel'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
+  'posted', 'overdue', 'closed', 'clean', 'inactive', 'bulkok', 'many', 'dorder', 'qaccdel',
+  'idraft', 'iunposted', 'jsched', 'jinprog', 'jdone', 'rapproved', 'rreceived', 'prepay'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
 const N = Object.fromEntries(Object.keys(C).map((k) => [k, `[KI148] ${k}`]));
 
 // One statement as `role`, signed in as `uid` (null: no claims at all); the last output line is the answer.
@@ -63,6 +64,11 @@ function seed() {
     VALUES ('KI148-D${++n}', '${fulfilled(cid)}', '${onRow}', '${ADMIN}', '${status}');`;
   const hold = (cid, on, expires = 'NULL') => `INSERT INTO public.inventory_holds (product_id, customer_id, quantity, created_by, is_active, expires_at)
     VALUES ('${PRODUCT}', '${cid}', 1, '${ADMIN}', ${on}, ${expires});`;
+  const job = (cid, status, inv = 'NULL') => `INSERT INTO public.jobs (job_number, customer_id, job_date, status, invoice_id)
+    VALUES ('KI148-J${++n}', '${cid}', current_date, '${status}', ${inv});`;
+  const ret = (cid, status) => `INSERT INTO public.returns (return_number, customer_id, status, cancellation_reason)
+    VALUES ('KI148-R${++n}', '${cid}', '${status}', ${status === 'cancelled' ? "'test'" : 'NULL'});`;
+  const paidInvoice = `(SELECT id FROM public.invoices WHERE customer_id = '${C.closed}' AND status = 'paid')`;
   const doneOrder = (cid) => `INSERT INTO public.orders (id, order_number, customer_id, status) VALUES ('${fulfilled(cid)}', 'KI148-F${cid.slice(-2)}', '${cid}', 'fulfilled');`;
   psql(`BEGIN; SET LOCAL session_replication_role = replica; ${claims(ADMIN)}
     INSERT INTO public.customers (id, farm_name, is_active) VALUES ${customers};
@@ -81,6 +87,15 @@ function seed() {
     ${quote(C.qrevised, 'revised')}
     ${invoice(C.posted, 'posted')}
     ${invoice(C.overdue, 'overdue')}
+    -- Unbilled work and unapplied prepay (Mason, 2026-11-19, on Taha's review).
+    ${invoice(C.idraft, 'draft')}
+    ${invoice(C.iunposted, 'unposted')}
+    ${job(C.jsched, 'scheduled')}
+    ${job(C.jinprog, 'in_progress')}
+    ${job(C.jdone, 'completed')}
+    ${ret(C.rapproved, 'approved')}
+    ${ret(C.rreceived, 'received')}
+    UPDATE public.customers SET prepay_balance_cents = 50000 WHERE id = '${C.prepay}';
     -- Closed work of every kind: none of it is open.
     ${order(C.closed, 'cancelled')} ${order(C.closed, 'voided')}
     UPDATE public.orders SET deleted_at = now() WHERE order_number = 'KI148-O${n}';
@@ -95,7 +110,12 @@ function seed() {
     ${quote(C.qaccdel, 'accepted', `'${id('a2')}'`)} ${order(C.qaccdel, 'cancelled', `'${id('a2')}'`)}
     UPDATE public.orders SET deleted_at = now() WHERE order_number = 'KI148-O${n}';
     ${quote(C.closed, 'draft')} UPDATE public.quotes SET deleted_at = now() WHERE quote_number = 'KI148-Q${n}';
-    ${['draft', 'unposted', 'paid', 'voided', 'cancelled'].map((s) => invoice(C.closed, s)).join('\n')}
+    ${['paid', 'voided', 'cancelled'].map((s) => invoice(C.closed, s)).join('\n')}
+    ${invoice(C.closed, 'draft')} UPDATE public.invoices SET deleted_at = now() WHERE invoice_number = 'KI148-I${n}';
+    ${job(C.closed, 'cancelled')} ${job(C.closed, 'invoiced', paidInvoice)} ${job(C.closed, 'completed', paidInvoice)}
+    ${job(C.closed, 'scheduled')} UPDATE public.jobs SET deleted_at = now() WHERE job_number = 'KI148-J${n}';
+    ${['requested', 'credited', 'rejected', 'cancelled'].map((s) => ret(C.closed, s)).join('\n')}
+    ${ret(C.closed, 'approved')} UPDATE public.returns SET deleted_at = now() WHERE return_number = 'KI148-R${n}';
     -- The live case (To-Do decision 23): inactive with 2 confirmed orders.
     ${order(C.inactive, 'confirmed')} ${order(C.inactive, 'confirmed')}
     -- Several kinds at once, for the message.
@@ -120,12 +140,14 @@ async function main() {
   // Cases 1-3: every kind of open work refuses, for an admin; the row stays active.
   const kinds = { order: /1 open order\(s\)/, partial: /1 open order\(s\)/, sched: /1 undelivered delivery/, inprog: /1 undelivered delivery/,
     hold: /2 active stock hold/, dorder: /1 undelivered delivery/, qdraft: /1 open quote/, qsent: /1 open quote/, qrevised: /1 open quote/, qacc: /1 open quote/, qaccdel: /1 open quote/,
-    posted: /open invoices\./, overdue: /open invoices\./ };
+    posted: /open invoices\./, overdue: /open invoices\./, idraft: /open invoices\./, iunposted: /open invoices\./,
+    jsched: /1 unbilled spray job\(s\)\./, jinprog: /1 unbilled spray job\(s\)\./, jdone: /1 unbilled spray job\(s\)\./,
+    rapproved: /1 return\(s\) awaiting credit\./, rreceived: /1 return\(s\) awaiting credit\./, prepay: /prepay money on account\./ };
   for (const [k, pattern] of Object.entries(kinds)) {
     refused(ADMIN, deactivate(C[k]), new RegExp(`CUSTOMER_HAS_OPEN_WORK: nothing was deactivated\\. \\[KI148\\] ${k} still has ${pattern.source}`));
     assert.equal(active(C[k]), 't');
   }
-  console.log('[ki148] admin refused for each kind: open/part-filled order, scheduled/in-progress delivery (also one whose row names another customer but whose order is this one), active hold (one expiring today), draft/sent/revised quote, accepted quote with no order, posted/overdue invoice');
+  console.log('[ki148] admin refused for each kind: open/part-filled order, scheduled/in-progress delivery (also one whose row names another customer but whose order is this one), active hold (one expiring today), draft/sent/revised quote, accepted quote with no order, draft/unposted/posted/overdue invoice, scheduled/in-progress/uninvoiced completed job, approved/received return, prepay balance');
   refused(REP, deactivate(C.sched), /CUSTOMER_HAS_OPEN_WORK/);
   refused(REP, deactivate(C.hold), /CUSTOMER_HAS_OPEN_WORK/);
   refused(ADMIN, deactivate(C.order), /CUSTOMER_HAS_OPEN_WORK/, { role: 'postgres' });
@@ -144,7 +166,7 @@ async function main() {
   // Case 4: closed work of every kind does not block; neither does no work.
   assert.equal(allowed(ADMIN, deactivate(C.closed)), '1');
   assert.equal(allowed(REP, deactivate(C.clean)), '1');
-  console.log('[ki148] closed work (fulfilled/cancelled/voided/deleted orders, completed/cancelled/voided deliveries, inactive or expired hold, closed, accepted-with-order and deleted quotes, draft/paid/voided invoices) does not block; admin and rep deactivate');
+  console.log('[ki148] closed work (fulfilled/cancelled/voided/deleted orders, completed/cancelled/voided deliveries, inactive or expired hold, closed, accepted-with-order and deleted quotes, paid/voided/cancelled/deleted invoices, cancelled/invoiced/billed/deleted jobs, requested/credited/rejected/cancelled/deleted returns, zero prepay) does not block; admin and rep deactivate');
 
   // Case 5: bulk is all-or-nothing.
   refused(ADMIN, deactivate([C.bulkok, C.order]), /CUSTOMER_HAS_OPEN_WORK: nothing was deactivated\. \[KI148\] order/);

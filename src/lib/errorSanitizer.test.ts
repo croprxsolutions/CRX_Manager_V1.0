@@ -329,8 +329,8 @@ describe('sanitizeError', () => {
     }
     expect(sanitizeError('CUSTOMER_HAS_OPEN_INVOICES: this customer has posted or overdue invoices; resolve them before deactivating it'))
       .toBe('This customer has posted or overdue invoices. Resolve them before deactivating the customer');
-    expect(sanitizeError({ message: 'CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. Smith Farms still has 2 open order(s), 1 open quote(s). Finish or cancel its orders, deliveries and quotes, release its holds and settle or void its invoices first' }))
-      .toBe('Nothing was deactivated. Smith Farms still has 2 open order(s), 1 open quote(s). Finish or cancel its orders, deliveries and quotes, release its holds and settle or void its invoices first.');
+    expect(sanitizeError({ message: 'CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. Smith Farms still has 2 open order(s), 1 open quote(s). Finish or cancel that work, bill it, credit its returns and use up or refund its prepay first' }))
+      .toBe('Nothing was deactivated. Smith Farms still has 2 open order(s), 1 open quote(s). Finish or cancel that work, bill it, credit its returns and use up or refund its prepay first.');
     expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK')).toContain('before deactivating it');
     expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. \u202Esmraf\u202C\u061C still has open invoices. Settle them first'))
       .toBe('Nothing was deactivated. smraf still has open invoices. Settle them first.');

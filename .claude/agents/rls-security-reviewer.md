@@ -41,7 +41,7 @@ Severity: **BLOCKER**.
 Pattern: any function that performs INSERT/UPDATE/DELETE and does NOT accept a parameter named `p_idempotency_key text DEFAULT NULL`.
 Severity: **HIGH** — double-submit risk on frontend retries.
 Exempt: read-only functions, trigger functions, internal helpers called only from other SECDEF functions (look for `-- idempotency-body-check: exempt` marker). An internal helper whose EXECUTE the same migration revokes from `PUBLIC`, `anon`, `authenticated` and `service_role` is exempt even without the marker (Mason, 2026-11-19).
-Final form: if a later migration file in `supabase/migrations/` re-creates the same function signature with `p_idempotency_key text DEFAULT NULL`, judge the function at that final form and report no CHECK 4 finding (Mason, 2026-11-19). A key that is required but lacks `DEFAULT NULL` in its final form is still a finding.
+Final form: judge a function at its final form across `supabase/migrations/` and report no CHECK 4 finding when a later migration file fixes it, either by re-creating the same signature with `p_idempotency_key text DEFAULT NULL` or, for an internal helper, by revoking its EXECUTE from `PUBLIC`, `anon`, `authenticated` and `service_role` (Mason, 2026-11-19). Name that later file in your report. A key that is required but lacks `DEFAULT NULL` in its final form is still a finding.
 
 ### CHECK 5 — Actor-forgery anti-pattern
 Pattern: function accepts `p_performed_by uuid` (or similar actor parameter) but does NOT validate `p_performed_by IS DISTINCT FROM auth.uid()` and `RAISE EXCEPTION 'ACTOR_MISMATCH'`.

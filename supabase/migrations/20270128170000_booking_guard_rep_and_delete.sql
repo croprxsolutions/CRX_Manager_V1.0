@@ -1,0 +1,294 @@
+-- PR-D1, release v0.1.0 (#1990): two booking guard gaps Sol found in 20270127120000_booking_live_job_guard.
+--
+-- WHY (Mason cannot owner-accept these, so they are fixed before go-live):
+--   Sol 3 (:178): the jobs trigger returns early on a status-only change of an already-linked live job, and
+--     jobs_update lets any sales rep update any job. A rep could mark another rep's booked job completed; a
+--     completed job keeps the booking from being declined or cancelled, and only an admin can clear it.
+--   Sol 4 (:141): the quotes trigger fires on UPDATE OF status, customer_id only, so a soft delete (deleted_at)
+--     skipped it and a booking could be deleted with a spray job still scheduled or in progress from it.
+--
+-- WHAT:
+--   1. _enforce_job_live_on_open_booking(): once a job is linked to a booking (quote_id or quote_section_id), a
+--      signed-in sales rep who is not that booking's rep (quotes.created_by) cannot move it from a live status to
+--      completed or invoiced (BOOKING_NOT_YOURS; Mason 2026-11-19). Admins and system sessions are exempt.
+--      Applicators are not checked: they reach this only through complete_job, which already allows only the
+--      job's assigned applicator or its sole dispatchee, and jobs_update refuses them a direct write.
+--   2. _enforce_booking_live_job_rules(): a soft delete of a booking (deleted_at set) is refused BOOKING_HAS_JOB
+--      while a scheduled or in-progress job comes from the booking or one of its sections. A completed or
+--      cancelled job does not block; closing as applied stays allowed by design (20260703200000:369).
+--      Its trigger quotes_booking_live_job_rules now fires on UPDATE OF status, customer_id, deleted_at.
+--   Every other line of both functions is its 20270127120000 body (pinned below by md5).
+--
+-- NOT CHANGED: _enforce_section_with_live_job_stays, auto_expire_quotes, complete_job, start_job, save_quote,
+--   grants and row policies. No row changes: a booking already deleted with a live job, or a job already completed
+--   by another rep, stays as it is (the triggers fire only on a change).
+--
+-- ROLLBACK (its own reviewed migration; stores no data): re-create both functions from their 20270127120000
+--   bodies after checking the live bodies still match this file's, and re-create quotes_booking_live_job_rules
+--   as BEFORE UPDATE OF status, customer_id. That reopens both gaps.
+
+SET LOCAL lock_timeout = '5s';
+
+DO $preflight$
+BEGIN
+  IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._enforce_booking_live_job_rules()'))
+       IS DISTINCT FROM 'f1469138008d7c047f63998208520435'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._enforce_job_live_on_open_booking()'))
+       IS DISTINCT FROM '88d20c67d9b32cf11ac192bf0b451748' THEN
+    RAISE EXCEPTION 'PREFLIGHT_LIVE_JOB_GUARD_DRIFT: the booking live-job guard functions are not the reviewed 20270127120000 bodies; re-read live first';
+  END IF;
+  IF (SELECT array_agg(a.attname::text ORDER BY a.attname)
+        FROM pg_trigger t JOIN pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr)
+       WHERE t.tgrelid = 'public.quotes'::regclass AND t.tgname = 'quotes_booking_live_job_rules')
+       IS DISTINCT FROM ARRAY['customer_id', 'status'] THEN
+    RAISE EXCEPTION 'PREFLIGHT_LIVE_JOB_GUARD_DRIFT: trigger quotes_booking_live_job_rules does not fire on exactly status, customer_id';
+  END IF;
+END
+$preflight$;
+
+-- 1. A booked job moves to completed or invoiced only by its booking's rep or an admin (Sol 3).
+CREATE OR REPLACE FUNCTION public._enforce_job_live_on_open_booking()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_section_quote_id uuid;
+  v_quote record;
+  v_hide boolean;
+BEGIN
+  -- Mason 2026-11-18 ("A"): a job's booking links are fixed once set, whatever its status, so a job cannot be
+  -- cancelled, re-pointed and revived on another booking. Nothing in the app changes them; both FKs are NO ACTION.
+  IF TG_OP = 'UPDATE' AND (OLD.quote_id IS NOT NULL OR OLD.quote_section_id IS NOT NULL)
+     AND (NEW.quote_id IS DISTINCT FROM OLD.quote_id OR NEW.quote_section_id IS DISTINCT FROM OLD.quote_section_id) THEN
+    RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % stays linked to the booking it was scheduled from. To move it, cancel it and schedule a new one.',
+      NEW.job_number
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.deleted_at IS NOT NULL OR NEW.status = 'cancelled' THEN
+    RETURN NEW;
+  END IF;
+  -- Sol HIGH r5: this trigger runs before the jobs row policy, so for a signed-in caller who is neither admin
+  -- nor sales rep (who cannot read bookings) every refusal below is replaced by the row policy's own refusal,
+  -- revealing no booking number or status. The checks still run for them (fail closed).
+  v_hide := auth.uid() IS NOT NULL AND NOT (public.is_admin() OR public.is_sales_rep());
+  BEGIN
+  -- PR-D1 (#1990 Sol 3; Mason 2026-11-19): a completed job holds its booking open until an admin clears it, and
+  -- any sales rep may update any job (jobs_update), so a rep could block another rep's booking. Once a job is
+  -- linked to a booking, only that booking's rep (quotes.created_by, the owner the quotes row policy uses) or an
+  -- admin moves it to completed or invoiced. Applicators get here only through complete_job, which already limits
+  -- them to their own job, so only sales reps are checked; system sessions (no auth.uid()) stay exempt.
+  IF TG_OP = 'UPDATE' AND NEW.status IN ('completed', 'invoiced') AND OLD.status NOT IN ('completed', 'invoiced')
+     AND (NEW.quote_id IS NOT NULL OR NEW.quote_section_id IS NOT NULL)
+     AND auth.uid() IS NOT NULL AND NOT public.is_admin() AND public.is_sales_rep() THEN
+    SELECT q.quote_number, q.created_by INTO v_quote
+    FROM public.quotes q
+    WHERE q.id = COALESCE(NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id));
+    IF v_quote.created_by IS DISTINCT FROM auth.uid() THEN
+      RAISE EXCEPTION 'BOOKING_NOT_YOURS: spray job % comes from booking %, which is another rep''s, so only that rep or an admin can mark it %.',
+        NEW.job_number, v_quote.quote_number, NEW.status
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+  -- A live job that stays live with the same links and customer needs no re-check; one first gaining a link does (Luna HIGH).
+  IF TG_OP = 'UPDATE' AND OLD.deleted_at IS NULL AND OLD.status <> 'cancelled'
+     AND NEW.quote_id IS NOT DISTINCT FROM OLD.quote_id AND NEW.quote_section_id IS NOT DISTINCT FROM OLD.quote_section_id
+     AND NEW.customer_id IS NOT DISTINCT FROM OLD.customer_id THEN
+    RETURN NEW;
+  END IF;
+  -- Sol HIGH r6: a job first becoming live on a booking (inserted, linked, un-cancelled or un-deleted) starts as
+  -- scheduled, as the scheduler makes it, so any sales rep can cancel it; a rep cannot plant a job in a later
+  -- status that holds another rep's booking open. Admins (who restore jobs) and system sessions are exempt.
+  IF (NEW.quote_id IS NOT NULL OR NEW.quote_section_id IS NOT NULL) AND NEW.status <> 'scheduled'
+     AND (TG_OP = 'INSERT' OR OLD.deleted_at IS NOT NULL OR OLD.status = 'cancelled'
+          OR (OLD.quote_id IS NULL AND OLD.quote_section_id IS NULL))
+     AND auth.uid() IS NOT NULL AND NOT public.is_admin() THEN
+    RAISE EXCEPTION 'JOB_NEEDS_BOOKING: spray job % must start as scheduled to be linked to a booking. Schedule it from the booking.',
+      NEW.job_number
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.quote_id IS NOT NULL THEN
+    SELECT q.quote_number, q.status, q.customer_id, q.deleted_at INTO v_quote FROM public.quotes q WHERE q.id = NEW.quote_id FOR SHARE;
+    -- Sol MED r6: a booking not visible yet (a concurrent insert) or soft-deleted cannot take a live job.
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'JOB_NEEDS_BOOKING: spray job % names a booking that does not exist.', NEW.job_number
+        USING ERRCODE = 'P0001';
+    END IF;
+    IF v_quote.deleted_at IS NOT NULL THEN
+      RAISE EXCEPTION 'BOOKING_CLOSED: booking % is deleted, so a spray job cannot be scheduled from it.',
+        v_quote.quote_number
+        USING ERRCODE = 'P0001';
+    END IF;
+    IF v_quote.status IN ('accepted', 'declined', 'expired', 'cancelled', 'closed_by_application', 'closed_short') THEN
+      RAISE EXCEPTION 'BOOKING_CLOSED: booking % is %, so a spray job cannot be scheduled from it.',
+        v_quote.quote_number, v_quote.status
+        USING ERRCODE = 'P0001';
+    END IF;
+    -- Sol HIGH r5: a live job is for its booking's customer, as the scheduler always sets it, so another
+    -- customer's job cannot hold someone else's booking open.
+    IF NEW.customer_id IS DISTINCT FROM v_quote.customer_id THEN
+      RAISE EXCEPTION 'JOB_NEEDS_BOOKING: spray job % is for a different customer than booking %.',
+        NEW.job_number, v_quote.quote_number
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+  -- Mason 2026-11-18 ("Require both"): a job made from a section also names that section's booking, as the
+  -- scheduler always does. The section row is checked under a lock taken after the booking's (the order
+  -- save_quote locks in), so a section moving at the same moment is waited for, then refused (Luna HIGH).
+  IF NEW.quote_section_id IS NOT NULL THEN
+    SELECT qs.quote_id INTO v_section_quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id;
+    PERFORM 1 FROM public.quote_sections qs
+    WHERE qs.id = NEW.quote_section_id AND qs.quote_id = NEW.quote_id
+    FOR SHARE;
+    IF NOT FOUND THEN
+      IF NEW.quote_id IS NOT NULL AND v_section_quote_id IS NOT DISTINCT FROM NEW.quote_id THEN
+        RAISE EXCEPTION 'BOOKING_CLOSED: the booking section changed while this spray job was being scheduled. Try again.'
+          USING ERRCODE = 'P0001';
+      END IF;
+      RAISE EXCEPTION 'JOB_NEEDS_BOOKING: spray job % comes from a booking section, so it must also name that section''s booking.',
+        NEW.job_number
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+  EXCEPTION WHEN raise_exception THEN
+    IF v_hide THEN
+      RAISE EXCEPTION 'new row violates row-level security policy for table "jobs"' USING ERRCODE = '42501';
+    END IF;
+    RAISE;
+  END;
+  RETURN NEW;
+END;
+$function$;
+
+ALTER FUNCTION public._enforce_job_live_on_open_booking() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._enforce_job_live_on_open_booking() FROM PUBLIC, anon, authenticated, service_role;
+
+-- 2. A booking with a scheduled or in-progress job cannot be soft-deleted (Sol 4).
+CREATE OR REPLACE FUNCTION public._enforce_booking_live_job_rules()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_job record;
+BEGIN
+  -- PR-D1 (#1990 Sol 4): a soft delete skipped this trigger (it fired on status and customer_id only), so a
+  -- booking could be deleted with a spray job still scheduled or in progress from it. Refused while one comes
+  -- from the booking or one of its sections; a completed or cancelled job does not block.
+  IF OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL THEN
+    SELECT j.job_number INTO v_job
+    FROM public.jobs j
+    WHERE (j.quote_id = NEW.id
+           OR j.quote_section_id IN (SELECT qs.id FROM public.quote_sections qs WHERE qs.quote_id = NEW.id))
+      AND j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')
+    ORDER BY j.job_number, j.id
+    LIMIT 1;
+    IF FOUND THEN
+      RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % was made from this booking, so the booking cannot be deleted. Cancel or complete the job first.',
+        v_job.job_number
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+  -- Sol HIGH (#1959): closing short releases the booking's holds. The existing rule (20261105160000) refuses
+  -- it only for scheduled/in-progress jobs linked by quote_id; a job linked through a section counts too.
+  IF NEW.status IS DISTINCT FROM OLD.status AND NEW.status = 'closed_short' THEN
+    SELECT j.job_number INTO v_job
+    FROM public.jobs j
+    WHERE (j.quote_id = NEW.id
+           OR j.quote_section_id IN (SELECT qs.id FROM public.quote_sections qs WHERE qs.quote_id = NEW.id))
+      AND j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')
+    ORDER BY j.job_number, j.id
+    LIMIT 1;
+    IF FOUND THEN
+      RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % was made from this booking, so the booking cannot be closed short. Cancel or complete the job first.',
+        v_job.job_number
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+  IF NOT ((NEW.status IS DISTINCT FROM OLD.status AND NEW.status IN ('accepted', 'declined', 'expired', 'cancelled'))
+          OR NEW.customer_id IS DISTINCT FROM OLD.customer_id) THEN
+    RETURN NEW;
+  END IF;
+  SELECT j.job_number, j.status INTO v_job
+  FROM public.jobs j
+  WHERE (j.quote_id = NEW.id
+         OR j.quote_section_id IN (SELECT qs.id FROM public.quote_sections qs WHERE qs.quote_id = NEW.id))
+    AND j.deleted_at IS NULL AND j.status <> 'cancelled'
+  ORDER BY j.job_number, j.id
+  LIMIT 1;
+  IF NOT FOUND THEN
+    RETURN NEW;
+  END IF;
+  -- Mason 2026-11-18 ("Let it close"): a booking whose every booked product is fully drawn onto orders
+  -- may close as accepted even with a live job; draw_down_quote does this on its last draw (the same
+  -- per-product test as 20261029110000, but a booking with nothing booked does not count as drawn).
+  IF NEW.status = 'accepted' AND NEW.customer_id IS NOT DISTINCT FROM OLD.customer_id
+     AND EXISTS (SELECT 1 FROM public.quote_items qi WHERE qi.quote_id = NEW.id
+                 GROUP BY qi.product_id HAVING SUM(COALESCE(qi.total_units_needed, 0)) > 0)
+     AND NOT EXISTS (
+       SELECT 1
+       FROM (SELECT qi.product_id, SUM(COALESCE(qi.total_units_needed, 0)) AS booked
+             FROM public.quote_items qi WHERE qi.quote_id = NEW.id GROUP BY qi.product_id) b
+       LEFT JOIN public.quote_product_draws d ON d.quote_id = NEW.id AND d.product_id = b.product_id
+       WHERE b.booked > 0 AND COALESCE(d.quantity_drawn, 0) < b.booked) THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.customer_id IS DISTINCT FROM OLD.customer_id THEN
+    RAISE EXCEPTION 'BOOKING_HAS_JOB: job % was scheduled from this booking, so its customer cannot change. Cancel the job first, or start a new booking.',
+      v_job.job_number
+      USING ERRCODE = 'P0001';
+  ELSIF v_job.status IN ('scheduled', 'in_progress') THEN
+    RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % was made from this booking, so the booking cannot be marked %. Cancel the job first.',
+      v_job.job_number, NEW.status
+      USING ERRCODE = 'P0001';
+  ELSE
+    RAISE EXCEPTION 'BOOKING_HAS_JOB: spray job % was made from this booking and is %, so the booking cannot be marked %. Ask an admin.',
+      v_job.job_number, v_job.status, NEW.status
+      USING ERRCODE = 'P0001';
+  END IF;
+END;
+$function$;
+
+ALTER FUNCTION public._enforce_booking_live_job_rules() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._enforce_booking_live_job_rules() FROM PUBLIC, anon, authenticated, service_role;
+
+DROP TRIGGER quotes_booking_live_job_rules ON public.quotes;
+CREATE TRIGGER quotes_booking_live_job_rules
+  BEFORE UPDATE OF status, customer_id, deleted_at ON public.quotes
+  FOR EACH ROW
+  EXECUTE FUNCTION public._enforce_booking_live_job_rules();
+
+DO $postflight$
+DECLARE
+  v_p pg_proc%ROWTYPE;
+  v_g record;
+BEGIN
+  FOR v_g IN SELECT * FROM (VALUES
+      ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', 'cannot be deleted. Cancel or complete the job first.', 'cbd9ddb81d3572caaf13ad72b89141a9'),
+      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', '1e80aba49f5194fe3a4f201ad42b3f22')) AS g(fn, tbl, tg, marker, body_md5)
+  LOOP
+    SELECT * INTO v_p FROM pg_proc WHERE oid = v_g.fn::regprocedure;
+    IF v_p.proowner <> 'postgres'::regrole OR NOT v_p.prosecdef
+       OR v_p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
+       OR EXISTS (SELECT 1 FROM aclexplode(v_p.proacl) a WHERE a.privilege_type = 'EXECUTE' AND a.grantee <> 'postgres'::regrole)
+       OR position(v_g.marker IN v_p.prosrc) = 0
+       OR md5(replace(v_p.prosrc, chr(13), '')) <> v_g.body_md5 THEN
+      RAISE EXCEPTION 'POSTFLIGHT_LIVE_JOB_GUARD: % is not the new body, postgres-owned, definer, pinned search_path, no outside EXECUTE', v_g.fn;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = v_g.tbl::regclass
+                    AND tgname = v_g.tg AND tgenabled = 'O' AND tgfoid = v_g.fn::regprocedure) THEN
+      RAISE EXCEPTION 'POSTFLIGHT_LIVE_JOB_GUARD: trigger % is missing or disabled', v_g.tg;
+    END IF;
+  END LOOP;
+  IF (SELECT array_agg(a.attname::text ORDER BY a.attname)
+        FROM pg_trigger t JOIN pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr)
+       WHERE t.tgrelid = 'public.quotes'::regclass AND t.tgname = 'quotes_booking_live_job_rules')
+       IS DISTINCT FROM ARRAY['customer_id', 'deleted_at', 'status']
+     OR (SELECT t.tgtype FROM pg_trigger t WHERE t.tgrelid = 'public.quotes'::regclass AND t.tgname = 'quotes_booking_live_job_rules')
+       <> 19 THEN
+    RAISE EXCEPTION 'POSTFLIGHT_LIVE_JOB_GUARD: quotes_booking_live_job_rules is not BEFORE UPDATE FOR EACH ROW OF status, customer_id, deleted_at';
+  END IF;
+END
+$postflight$;

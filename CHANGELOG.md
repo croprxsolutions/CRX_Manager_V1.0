@@ -36,6 +36,7 @@ Releases of CRX Manager, newest first.
 * environment banner and tab title prefix (STAGING amber, LOCAL blue) (#1714)
 
 #### 🐛 Bug Fixes
+* REDEFINED guards ignore SQL comments and catch renames (#1910) (#2027)
 * sql-column-check covers comma FROM lists, three-part and quoted names (#1906) (#2033)
 * booked job completes only by its rep or an admin; no booking delete with a live job (#1990 Sol 3, Sol 4) (#2026)
 * KI-81 unit — never bill a quote price in a unit the product is no longer stocked in (v0.1.0 Sol HIGH) (#2025)
@@ -125,6 +126,7 @@ Releases of CRX Manager, newest first.
 * bring staging up to main (replaces #1742) (#1750)
 
 #### 🧩 Other
+* Reset-order scanner: a regex after a statement block's } is hidden (#686) (#2034)
 * session-staleness: count CREATE OR REPLACE FUNCTION and trigger migrations as pending (#749) (#2031)
 * Sol proof script: print the round line on the clean-worktree refusal (#1930) (#2029)
 * Codex merge check waits longer for a slow GitHub (#1963) (#2024)

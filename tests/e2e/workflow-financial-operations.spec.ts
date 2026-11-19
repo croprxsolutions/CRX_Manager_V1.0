@@ -2,6 +2,11 @@ import { test, expect, Page } from '@playwright/test';
 import { login } from './utils/auth';
 import { moreAction } from './utils/more-actions';
 
+// Read in Node and passed into the page: the browser has no process.env.
+const SUPA = { url: process.env.VITE_SUPABASE_URL!, key: process.env.VITE_SUPABASE_ANON_KEY! };
+// The app's stored sign-in, named after the project in the URL the tests run against.
+const AUTH_KEY = `sb-${new URL(SUPA.url).hostname.split('.')[0]}-auth-token`;
+
 /**
  * Financial Operations E2E Gate Test
  *
@@ -51,15 +56,15 @@ async function waitForPage(page: Page, ms = 2000) {
 
 // ── Helper: get Supabase session info from localStorage ──────────────
 async function getSupabaseSession(page: Page): Promise<{ token: string; userId: string }> {
-  return page.evaluate(() => {
-    const raw = localStorage.getItem('sb-rhyzpcqhnizqbxphqdkr-auth-token');
+  return page.evaluate((authKey) => {
+    const raw = localStorage.getItem(authKey);
     if (!raw) return { token: '', userId: '' };
     const session = JSON.parse(raw);
     return {
       token: session.access_token || '',
       userId: session.user?.id || '',
     };
-  });
+  }, AUTH_KEY);
 }
 
 // ── Helper: Supabase REST API call (runs in browser context) ─────────
@@ -71,14 +76,14 @@ async function supabaseRest(
 ): Promise<unknown> {
   const { token } = await getSupabaseSession(page);
   return page.evaluate(
-    async ({ method, path, body, token }) => {
+    async ({ method, path, body, token, supa }) => {
       const resp = await fetch(
-        `https://rhyzpcqhnizqbxphqdkr.supabase.co/rest/v1/${path}`,
+        `${supa.url}/rest/v1/${path}`,
         {
           method,
           headers: {
             apikey:
-              'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoeXpwY3Fobml6cWJ4cGhxZGtyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTM2NDAsImV4cCI6MjA4NTk2OTY0MH0.WR0vAi_KeGF0OoJ8_dFH7uW6ael9M5xnm6OUo2IZy7U',
+              supa.key,
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
             Prefer: 'return=representation',
@@ -93,7 +98,7 @@ async function supabaseRest(
         return text;
       }
     },
-    { method, path, body, token }
+    { method, path, body, token, supa: SUPA }
   );
 }
 

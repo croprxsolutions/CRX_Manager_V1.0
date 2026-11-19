@@ -29,8 +29,9 @@
 --   Every other line of both functions is its 20270127120000 body (pinned below by md5).
 --
 -- NOT CHANGED: _enforce_section_with_live_job_stays, auto_expire_quotes, complete_job, start_job, save_quote,
---   grants and row policies. No row changes: a booking already deleted with a live job, or a job already completed
---   by another rep, stays as it is (the triggers fire only on a change).
+--   grants and row policies. No row changes: a job already completed by another rep stays as it is (the triggers
+--   fire only on a change); a booking deleted earlier that still has a scheduled or in-progress job blocks the
+--   apply (postflight).
 --
 -- ROLLBACK (its own reviewed migration; stores no data): re-create both functions from their 20270127120000
 --   bodies after checking the live bodies still match this file's, and re-create quotes_booking_live_job_rules
@@ -326,14 +327,13 @@ DECLARE
   v_g record;
 BEGIN
   FOR v_g IN SELECT * FROM (VALUES
-      ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', 'cannot be deleted. Cancel or complete the job first.', '9845ed22d07de03c8b3c7afe5356352c'),
-      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', '0b9c1774f2602bc299fb54ebc2c6e756')) AS g(fn, tbl, tg, marker, body_md5)
+      ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', '9845ed22d07de03c8b3c7afe5356352c'),
+      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', '0b9c1774f2602bc299fb54ebc2c6e756')) AS g(fn, tbl, tg, body_md5)
   LOOP
     SELECT * INTO v_p FROM pg_proc WHERE oid = v_g.fn::regprocedure;
     IF v_p.proowner <> 'postgres'::regrole OR NOT v_p.prosecdef
        OR v_p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
        OR EXISTS (SELECT 1 FROM aclexplode(v_p.proacl) a WHERE a.privilege_type = 'EXECUTE' AND a.grantee <> 'postgres'::regrole)
-       OR position(v_g.marker IN v_p.prosrc) = 0
        OR md5(replace(v_p.prosrc, chr(13), '')) <> v_g.body_md5 THEN
       RAISE EXCEPTION 'POSTFLIGHT_LIVE_JOB_GUARD: % is not the new body, postgres-owned, definer, pinned search_path, no outside EXECUTE', v_g.fn;
     END IF;

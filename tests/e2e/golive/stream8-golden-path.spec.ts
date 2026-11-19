@@ -14,7 +14,7 @@
 
 import { test, expect, Page } from '@playwright/test';
 import { login } from '../utils/auth';
-import { supabaseRest, asArray } from './utils/supabase-helpers';
+import { getToken, supabaseRest, asArray } from './utils/supabase-helpers';
 import {
   navAndStabilize,
   assertNoCriticalErrors,
@@ -46,16 +46,7 @@ test.describe.serial('Stream 8 — Golden Path', () => {
     expect(url).not.toContain('/login');
 
     // Verify auth token exists for subsequent DB queries
-    const token = await page.evaluate(() => {
-      const raw = localStorage.getItem('sb-rhyzpcqhnizqbxphqdkr-auth-token');
-      if (!raw) return '';
-      try {
-        const session = JSON.parse(raw);
-        return session.access_token || '';
-      } catch {
-        return '';
-      }
-    });
+    const token = await getToken(page);
     expect(token).toBeTruthy();
   });
 

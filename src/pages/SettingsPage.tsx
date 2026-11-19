@@ -885,7 +885,7 @@ export default function SettingsPage() {
         // trg_guard_last_active_admin refuses to deactivate the last active admin,
         // which would otherwise lock the account out of its own app.
         toast('error', /LAST_ACTIVE_ADMIN/.test(String((error as { message?: string })?.message ?? ''))
-          ? 'You cannot deactivate the only active admin. Make someone else an active admin first.'
+          ? 'You cannot remove or deactivate the only active admin. Make someone else an active admin first.'
           : sanitizeError(error));
       } else {
         const updateResult = assertRpcResult<{ error?: string }>(data, 'admin_update_profile');

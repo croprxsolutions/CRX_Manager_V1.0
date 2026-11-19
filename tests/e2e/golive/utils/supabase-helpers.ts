@@ -9,14 +9,18 @@
 
 import { Page } from '@playwright/test';
 
-const SUPABASE_URL = 'https://rhyzpcqhnizqbxphqdkr.supabase.co';
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? '';
 const ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoeXpwY3Fobml6cWJ4cGhxZGtyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTM2NDAsImV4cCI6MjA4NTk2OTY0MH0.WR0vAi_KeGF0OoJ8_dFH7uW6ael9M5xnm6OUo2IZy7U';
+  process.env.VITE_SUPABASE_ANON_KEY!;
+// Only a hosted project origin: the session token goes to this URL, and the stored sign-in is named after its project.
+const PROJECT = /^https:\/\/([a-z0-9]{20})\.supabase\.co$/.exec(SUPABASE_URL)?.[1];
+if (!PROJECT) throw new Error('VITE_SUPABASE_URL must be https://<project>.supabase.co');
+const AUTH_KEY = `sb-${PROJECT}-auth-token`;
 
 /** Extract the access_token from Supabase's localStorage entry */
-async function getToken(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const raw = localStorage.getItem('sb-rhyzpcqhnizqbxphqdkr-auth-token');
+export async function getToken(page: Page): Promise<string> {
+  return page.evaluate((authKey) => {
+    const raw = localStorage.getItem(authKey);
     if (!raw) return '';
     try {
       const session = JSON.parse(raw);
@@ -24,7 +28,7 @@ async function getToken(page: Page): Promise<string> {
     } catch {
       return '';
     }
-  });
+  }, AUTH_KEY);
 }
 
 /**

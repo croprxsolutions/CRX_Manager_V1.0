@@ -434,8 +434,11 @@ describe('generateQuotePdf', () => {
         name: 'Test Ag Co', phone: '555-0199', email: 'office@testag.test', address: '1 Main St, Town, IL',
       });
       await generateQuotePdf(makeLongQuoteData(40));
+      // The footer joins its parts with '  •  ', so the website is a whole word; an exact word match also keeps
+      // CodeQL's URL-substring rule (js/incomplete-url-substring-sanitization) quiet on this test.
+      const site = 'www.croprxsolutions.com';
       for (const page of [1, 2]) {
-        const footer = textOnPage(page).filter((t) => typeof t === 'string' && t.split(/\s+/).includes('www.croprxsolutions.com')).join(' ');
+        const footer = textOnPage(page).filter((t) => typeof t === 'string' && t.split(/\s+/).some((w) => w === site)).join(' ');
         expect(footer).toContain('Test Ag Co');
         expect(footer).toContain('office@testag.test');
         expect(footer).toContain('Prices valid for the period shown above. Subject to product availability.');

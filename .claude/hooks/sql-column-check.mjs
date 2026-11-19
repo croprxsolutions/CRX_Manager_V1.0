@@ -10,11 +10,12 @@
 // cannot resolve is allowed — CTE names, subquery or function aliases, aliases
 // with column lists, aliases bound to two sources, non-public schemas
 // (information_schema, pg_catalog), quoted identifiers, tables not in the
-// registry. A missing or unreadable registry allows the query. A column named
-// in a migration newer than the registry is allowed (the registry may be stale).
-// Escape hatch: `-- column-check: skip` anywhere in the query.
-// shortcut: tables after a comma in FROM and three-part names (schema.table.col)
-// are not checked; add them only if guessed columns keep slipping through there.
+// registry. A missing or unreadable registry, or migrations folder, allows the
+// query. A column added by a migration newer than the registry is allowed (the
+// registry may be stale); comments in that migration do not count.
+// Escape hatch: `-- column-check: skip` in a comment of the query.
+// shortcut: a column added by a newer migration file is allowed even if that file
+// is not applied live yet; the hook cannot see live, and guessing would refuse valid queries.
 // Fail-open: no onFailure "block"; a crash allows the call.
 // @proven-by sql-column-check.test.mjs
 
@@ -27,22 +28,68 @@ const NOT_ALIAS = new Set(("where on using join inner left right full outer cros
   "having limit offset union intersect except window for fetch returning set as with tablesample only").split(" "));
 
 // Every table has these, though the registry does not list them.
-const SYSTEM_COLUMNS = new Set(["ctid", "oid", "xmin", "xmax", "cmin", "cmax", "tableoid"]);
+// (`oid` is not one: user tables have had no oid column since PostgreSQL 12.)
+const SYSTEM_COLUMNS = new Set(["ctid", "xmin", "xmax", "cmin", "cmax", "tableoid"]);
 
-// One left-to-right pass so `--` inside a string, or a quote inside a comment,
-// cannot desynchronize the others. Quoted identifiers become "q" (never matched).
+// Words the parser below reads as SQL; a quoted identifier spelling one stays opaque.
+const PARSED_WORDS = new Set([...NOT_ALIAS, "from", "select", "not", "materialized", "public"]);
+
+// Dollar-quoted text, strings, quoted identifiers and comments, left to right in one
+// pass so `--` inside a string, or a quote inside a comment, cannot desynchronize the others.
+const TOKEN_RE = /\$([A-Za-z_]\w*)?\$[\s\S]*?\$\1\$|[eE]'(?:[^'\\]|\\[\s\S]|'')*'|'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|\/\*[\s\S]*?\*\//g;
+const isComment = (t) => t.startsWith("--") || t.startsWith("/*");
+const comments = (sql) => [...String(sql).matchAll(TOKEN_RE)].map((m) => m[0]).filter(isComment);
+
+// The skip marker counts only inside a comment, not inside a string.
+export function hasSkipMarker(sql) {
+  return comments(sql).some((c) => /column-check:\s*skip/i.test(c));
+}
+
+// Comments become a space; strings and quoted identifiers stay as written.
+export function stripComments(sql) {
+  return String(sql).replace(TOKEN_RE, (t) => (isComment(t) ? " " : t));
+}
+
+// Strings become '', comments a space. A quoted identifier that is plain lowercase
+// ("p", "order_items") means the same unquoted, so it is unquoted; any other becomes "q" (never matched).
 function stripSql(sql) {
   return String(sql)
-    .replace(/\$([A-Za-z_]\w*)?\$[\s\S]*?\$\1\$|[eE]'(?:[^'\\]|\\[\s\S]|'')*'|'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|\/\*[\s\S]*?\*\//g,
-      (t) => (t[0] === '"' ? '"q"' : t[0] === "'" || /^e'/i.test(t) ? "''" : " "))
+    .replace(TOKEN_RE, (t) => {
+      if (t[0] === '"') {
+        const name = t.slice(1, -1);
+        return /^[a-z_][a-z0-9_]*$/.test(name) && !PARSED_WORDS.has(name) ? name : '"q"';
+      }
+      return t[0] === "'" || /^e'/i.test(t) ? "''" : " ";
+    })
     .toLowerCase();
+}
+
+// Index of the "(" matching each ")" in a statement (strings already blanked).
+function openParens(stmt) {
+  const open = new Map(), stack = [];
+  for (let i = 0; i < stmt.length; i++) {
+    if (stmt[i] === "(") stack.push(i);
+    else if (stmt[i] === ")" && stack.length) open.set(i, stack.pop());
+  }
+  return open;
+}
+
+// True when the parenthesis opening at `at` starts a FROM item: a subquery, or a
+// function call, right after FROM, JOIN, LATERAL, ONLY or a comma. A comma may also
+// start a select-list item; it still counts here (unresolvable, the safe side).
+function startsFromItem(stmt, at) {
+  if (at === undefined) return true;
+  let before = stmt.slice(0, at).trimEnd();
+  const fn = before.match(/(?:[a-z_]\w*\s*\.\s*)?([a-z_]\w*)$/);
+  if (fn && !/^(?:from|join|lateral|only)$/.test(fn[1])) before = before.slice(0, fn.index).trimEnd();
+  return /(?:\b(?:from|join|lateral|only)|,)$/.test(before);
 }
 
 // Returns [{ ref, table, column }] for every reference that is certainly wrong.
 export function findBadColumns(sql, columnsByTable) {
   if (!columnsByTable || typeof columnsByTable !== "object") return [];
   // Postgres block comments nest; the stripper does not, so skip such a query.
-  if (/\/\*(?:(?!\*\/)[\s\S])*\/\*/.test(String(sql))) return [];
+  if (comments(sql).some((c) => c.startsWith("/*") && c.slice(2).includes("/*"))) return [];
   const bad = [];
   for (const stmt of stripSql(sql).split(";")) {
     const ctes = new Set();
@@ -50,18 +97,34 @@ export function findBadColumns(sql, columnsByTable) {
 
     const bindings = new Map(); // qualifier -> Set of table names (null = unresolvable)
     const bind = (q, t) => { if (!bindings.has(q)) bindings.set(q, new Set()); bindings.get(q).add(t); };
-    // Subquery / function aliases: ") alias" — never resolvable.
-    for (const m of stmt.matchAll(/\)\s+(?:as\s+)?([a-z_]\w*)/g)) if (!NOT_ALIAS.has(m[1])) bind(m[1], null);
+    // Subquery / function aliases in FROM: ") alias" — never resolvable. An output
+    // name in the select list (count(*) as oi) is not a source and binds nothing.
+    const open = openParens(stmt);
+    for (const m of stmt.matchAll(/\)\s+(?:as\s+)?([a-z_]\w*)/g)) {
+      if (!NOT_ALIAS.has(m[1]) && startsFromItem(stmt, open.get(m.index))) bind(m[1], null);
+    }
 
-    const fromRe = /\b(?:from|join)\s+(?:only\s+)?([a-z_]\w*)(?:\.([a-z_]\w*))?(?!\s*\(|\w|\.)(?:\s+(?:as\s+)?([a-z_]\w*))?(\s*\()?/g;
-    for (const m of stmt.matchAll(fromRe)) {
-      const [, first, second, rawAlias, aliasCols] = m;
+    // Binds one FROM/JOIN item; returns whether a ", next_table" may follow it.
+    const item = ([, first, second, rawAlias, aliasCols]) => {
       const schema = second ? first : "public";
       const table = second || first;
       const alias = rawAlias && !NOT_ALIAS.has(rawAlias) ? rawAlias : null;
       const known = schema === "public" && !ctes.has(table) && Array.isArray(columnsByTable[table]);
-      const qualifier = alias || table;
-      bind(qualifier, known && !aliasCols ? table : null);
+      bind(alias || table, known && !aliasCols ? table : null);
+      return !aliasCols && (!rawAlias || alias !== null);
+    };
+    const tableRef = String.raw`(?:only\s+)?([a-z_]\w*)(?:\.([a-z_]\w*))?(?!\s*\(|\w|\.)(?:\s+(?:as\s+)?([a-z_]\w*))?(\s*\()?`;
+    const fromRe = new RegExp(String.raw`\b(?:from|join)\s+${tableRef}`, "g");
+    const commaRe = new RegExp(String.raw`\s*,\s*${tableRef}`, "y");
+    for (const m of stmt.matchAll(fromRe)) {
+      // Tables listed after a comma: FROM orders o, order_items oi.
+      for (let more = item(m), at = m.index + m[0].length; more;) {
+        commaRe.lastIndex = at;
+        const c = commaRe.exec(stmt);
+        if (!c || NOT_ALIAS.has(c[1])) break;
+        more = item(c);
+        at = commaRe.lastIndex;
+      }
     }
 
     for (const m of stmt.matchAll(/(?<![\w.$"])([a-z_]\w*)\.([a-z_]\w*)(?![\w.$"(]|\s*\()/g)) {
@@ -72,20 +135,29 @@ export function findBadColumns(sql, columnsByTable) {
       if (!table) continue;
       if (!SYSTEM_COLUMNS.has(column) && !columnsByTable[table].includes(column)) bad.push({ ref: `${q}.${column}`, table, column });
     }
+    // public.table.column: valid only when the table is in FROM without an alias.
+    for (const m of stmt.matchAll(/(?<![\w.$"])public\.([a-z_]\w*)\.([a-z_]\w*)(?![\w.$"(]|\s*\()/g)) {
+      const [, table, column] = m;
+      const tables = bindings.get(table);
+      if (!tables || tables.size !== 1 || !tables.has(table) || ctes.has(table)) continue;
+      if (!SYSTEM_COLUMNS.has(column) && !columnsByTable[table].includes(column)) bad.push({ ref: `public.${table}.${column}`, table, column });
+    }
   }
   const seen = new Set();
   return bad.filter((b) => !seen.has(b.ref) && seen.add(b.ref));
 }
 
-// Migrations stamped after the registry's high water: the registry may not
-// have their columns yet (see addedSinceRegistry).
-function newerMigrations(migrationsDir, highWater) {
+// Migrations stamped after the registry's high water, comments removed: the
+// registry may not have their columns yet (see addedSinceRegistry). null when the
+// folder or any such file cannot be read: the caller then allows the query, since
+// the unread file may be the one that adds the column.
+export function newerMigrations(migrationsDir, highWater) {
   try {
     if (!highWater) return [];
     return readdirSync(migrationsDir)
       .filter((f) => f.endsWith(".sql") && (f.match(/^(\d+)/)?.[1] || "") > String(highWater))
-      .map((f) => readFileSync(path.join(migrationsDir, f), "utf8").toLowerCase());
-  } catch { return []; }
+      .map((f) => stripComments(readFileSync(path.join(migrationsDir, f), "utf8")).toLowerCase());
+  } catch { return null; }
 }
 
 // One statement in a newer migration both names this table (ALTER TABLE or a view of
@@ -105,7 +177,7 @@ function main() {
   try { payload = JSON.parse(readFileSync(0, "utf8")); } catch { return; }
   if (!/execute_sql/i.test(String(payload?.tool_name || ""))) return;
   const sql = String(payload?.tool_input?.query || "");
-  if (!sql || /column-check:\s*skip/i.test(sql)) return;
+  if (!sql || hasSkipMarker(sql)) return;
 
   const here = path.dirname(fileURLToPath(import.meta.url));
   let registry;
@@ -114,6 +186,7 @@ function main() {
   let bad = findBadColumns(sql, registry?.columns);
   if (bad.length === 0) return;
   const newer = newerMigrations(path.join(here, "..", "..", "supabase", "migrations"), registry?._meta?.migrations_high_water);
+  if (newer === null) return;
   bad = bad.filter((b) => !addedSinceRegistry(newer, b.table, b.column));
   if (bad.length === 0) return;
 

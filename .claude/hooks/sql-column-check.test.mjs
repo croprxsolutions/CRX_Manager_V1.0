@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { findBadColumns } from "./sql-column-check.mjs";
+import { findBadColumns, hasSkipMarker } from "./sql-column-check.mjs";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -48,7 +48,8 @@ allows("select p.anything from products p(a, b)", "table alias with column list"
 allows("select p.quantity from products p join lateral (select 1 as quantity) p2 on true where exists (select 1 from orders p)", "alias bound twice");
 allows("select w.thing from widgets w", "table not in registry");
 allows("select 'oi.quantity' as label, oi.id from order_items oi -- oi.quantity", "strings and comments ignored");
-allows(`select "p"."price_per_acre" from products p`, "quoted identifiers skipped");
+allows(`select "P"."Price_Per_Acre" from products p`, "mixed-case quoted identifiers are a different name: skipped");
+allows(`select "from".x from products "from"`, "a quoted SQL word stays opaque");
 allows("select public.fn_x(oi.id) from order_items oi", "schema-qualified function call");
 allows("select 1.5 * oi.acres from order_items oi", "numbers");
 allows("select oi.* from order_items oi", "star");
@@ -62,6 +63,47 @@ allows(`select regexp_replace(p.prosrc, '--[^\\n]*', ' ', 'g'), p.proconfig
 allows("select e'it\\'s -- x', p.price_per_acre from products p join pg_proc p on true", "E-string with escaped quote");
 assert.deepEqual(findBadColumns("select oi.quantity from order_items oi", null), [], "no registry"); pass++;
 
+// --- #1906: cases the first version let through ---
+// Tables after a comma in FROM.
+refuses("select o.id, oi.quantity from orders o, order_items oi where oi.order_id = o.id", ["oi.quantity"], "comma-listed table");
+refuses("select oi.quantity from orders o, public.order_items as oi, products p", ["oi.quantity"], "comma list with AS and schema");
+refuses("select products.price_per_acre from orders, products", ["products.price_per_acre"], "comma-listed bare table");
+allows("select oi.quantity_delivered, p.rate_unit from orders o, order_items oi, products p", "correct comma list");
+allows("select e.value from orders o, jsonb_array_elements('[]'::jsonb) e", "function after a comma");
+allows("select x.quantity from orders o, (select 1 as quantity) x", "subquery after a comma");
+allows("select x.quantity from orders o, lateral (select 1 as quantity) x", "lateral subquery after a comma");
+allows("select oi.quantity from orders o, order_items oi(quantity)", "comma-listed alias with column list");
+allows("select o.id from orders o order by o.id, o.status", "ORDER BY commas are not tables");
+allows("select oi.quantity from orders o group by o.id, oi", "GROUP BY commas are not tables");
+// Three-part public.table.column.
+refuses("select public.products.price_per_acre from public.products", ["public.products.price_per_acre"], "three-part name");
+refuses("select public.order_items.quantity from orders, order_items", ["public.order_items.quantity"], "three-part name, comma list");
+allows("select public.products.rate_unit from products", "correct three-part name");
+allows("select public.products.price_per_acre from products p", "three-part name with an aliased table is not resolvable here");
+allows("select other.products.price_per_acre from other.products", "non-public three-part name");
+// Quoted identifiers that mean the same unquoted.
+refuses(`select "p"."price_per_acre" from products p`, ["p.price_per_acre"], "quoted lowercase identifiers");
+refuses(`select oi.quantity from "order_items" oi`, ["oi.quantity"], "quoted lowercase table name");
+allows(`select "p"."rate_unit" from "products" "p"`, "correct quoted identifiers");
+// An AS output name equal to a table alias does not hide the alias.
+refuses("select count(*) as oi, oi.quantity from order_items oi group by oi.id", ["oi.quantity"], "output name equals alias");
+refuses("select (select 1) oi, oi.quantity from order_items oi", ["oi.quantity"], "scalar subquery output name");
+refuses("select sum(oi.acres) over (partition by oi.order_id) as oi, oi.quantity from order_items oi", ["oi.quantity"], "window output name");
+allows("select oi.quantity from order_items oi join (select 1 as quantity) oi on true", "subquery in JOIN still binds its alias");
+allows("select oi.quantity from orders o join lateral public.fn(o.id) oi on true", "schema-qualified function in FROM still binds");
+allows("select p.quantity from orders o cross join lateral (select 1 as quantity) as p", "lateral subquery still binds");
+// "/*" inside a string no longer skips the query.
+refuses("select '/*', '/*', p.price_per_acre from products p", ["p.price_per_acre"], "comment opener inside strings");
+refuses("select $x$ /* /* $x$, p.price_per_acre from products p", ["p.price_per_acre"], "comment opener inside dollar quotes");
+// oid is not a column every table has.
+refuses("select oi.oid from order_items oi", ["oi.oid"], "oid on a user table");
+allows("select c.oid from pg_catalog.pg_class c", "oid on a catalog table");
+// The skip marker counts only in a comment.
+assert.equal(hasSkipMarker("select 'column-check: skip', 1"), false, "marker inside a string"); pass++;
+assert.equal(hasSkipMarker("select $$ column-check: skip $$"), false, "marker inside dollar quotes"); pass++;
+assert.equal(hasSkipMarker("select 1 -- column-check: skip"), true, "marker in a line comment"); pass++;
+assert.equal(hasSkipMarker("/* column-check: skip */ select 1"), true, "marker in a block comment"); pass++;
+
 // --- End to end: the hook process itself, isolated copy beside a crafted registry ---
 const tmp = tempDir("crx-sql-column-");
 const hooksDir = path.join(tmp, ".claude", "hooks");
@@ -73,6 +115,9 @@ const registryPath = path.join(tmp, ".claude", "schema-registry.json");
 writeFileSync(registryPath, JSON.stringify({ _meta: { generated_at: "2026-11-12", migrations_high_water: "20261112000000" }, columns: COLUMNS }));
 writeFileSync(path.join(migDir, "20261101000000_old.sql"), "alter table products add column default_rate_unit text;");
 writeFileSync(path.join(migDir, "20261113000000_new.sql"), "alter table order_items add column quantity numeric;\n-- mentions price_per_acre in passing\nupdate products set rate_unit = 'oz';");
+writeFileSync(path.join(migDir, "20261113100000_commented.sql"),
+  "-- alter table order_items add column commented_col int;\n/* alter table order_items add column commented_col int; */\n" +
+  "alter table \"order_items\" add column \"later_col\" int; select 1;");
 // Adds the column to a DIFFERENT table: must not excuse products.unit_cost.
 writeFileSync(path.join(migDir, "20261114000000_other.sql"),
   "alter table products add column sku_extra text;\nalter table orders add column unit_cost bigint;");
@@ -97,7 +142,15 @@ assert.equal(run("select p.price_per_acre from products p")?.hookSpecificOutput?
 assert.equal(run("select p.unit_cost from products p")?.hookSpecificOutput?.permissionDecision, "deny",
   "a column added to another table does not excuse it"); pass++;
 assert.equal(run("-- column-check: skip\nselect p.default_rate_unit from products p"), null, "skip marker"); pass++;
+assert.equal(run("select 'column-check: skip', p.default_rate_unit from products p")?.hookSpecificOutput?.permissionDecision, "deny",
+  "skip marker inside a string does not skip"); pass++;
+assert.equal(run("select oi.commented_col from order_items oi")?.hookSpecificOutput?.permissionDecision, "deny",
+  "a column added only in a comment of a newer migration does not excuse it"); pass++;
+assert.equal(run("select oi.later_col from order_items oi"), null, "column added by a newer migration's quoted ADD COLUMN"); pass++;
 assert.equal(run("select p.default_rate_unit from products p", "mcp__supabase__list_tables"), null, "other tools ignored"); pass++;
+// An unreadable newer migration (here a folder named .sql) allows the query rather than refuse a maybe-valid one.
+mkdirSync(path.join(migDir, "20261115000000_unreadable.sql"));
+assert.equal(run("select p.default_rate_unit from products p"), null, "unreadable newer migration allows"); pass++;
 writeFileSync(registryPath, "{ not json");
 assert.equal(run("select p.default_rate_unit from products p"), null, "unreadable registry allows"); pass++;
 

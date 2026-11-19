@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-19 — #1974 may have a ninth Sol round
+
+**Decision (Mason, in chat, 2026-11-19: "Approve round 9").** PR #1974 (#1959 booking live-job guard) may have one more Sol round (round 9).
+**Why:** round 8 was spent on `cf833149` by an earlier session that saved no proof, and the head then had to take a merge of `staging` (GitHub cannot apply the DECISION_LOG union merge) plus the decision-log note below. No migration or app code of #1974 changed.
+
 ## 2026-11-18 — #1974: answers to Taha's re-review (admin path; closing with a scheduled job)
 
 **Decision (Mason, in chat, 2026-11-18: "1 yes I agree" / "Warn don't block").**

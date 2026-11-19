@@ -19,14 +19,16 @@ function noteText(note: NonNullable<SplitNote>): string {
 }
 
 /**
- * The one fixed helper line under the commission split (DESIGN.md Inputs): always one line tall, so nothing below it
- * moves. A long note is cut with an ellipsis (full text on hover); the Use it / Keep mine links always show.
+ * The one fixed helper line under the commission split (DESIGN.md Inputs): one line tall, so nothing below it moves,
+ * and a long note is cut with an ellipsis (full text on hover). An offer is the exception on a phone: there is no
+ * hover, and the split must be readable before Use it, so it wraps there (Sol MED, Taha option a, 19 Nov).
  */
 export default function QuoteSplitNote({ note, onUse, onKeep, disabled }: { note: SplitNote; onUse: () => void; onKeep: () => void; disabled?: boolean }) {
   const text = note ? noteText(note) : '';
+  const offer = note?.kind === 'offer';
   return (
-    <p aria-live="polite" className="mt-1 flex h-5 min-w-0 items-center gap-x-2 text-xs text-secondary">
-      {note && <span className={`min-w-0 truncate${note.kind === 'offer' ? ' text-nav-dark' : ''}`} title={text}>{text}</span>}
+    <p aria-live="polite" className={`mt-1 flex min-w-0 items-center gap-x-2 text-xs text-secondary ${offer ? 'min-h-5 flex-wrap sm:h-5 sm:flex-nowrap' : 'h-5'}`}>
+      {note && <span className={`min-w-0 ${offer ? 'text-nav-dark sm:truncate' : 'truncate'}`} title={text}>{text}</span>}
       {note?.kind === 'offer' && (
         <>
           {/* Locked with the split itself (saving, converting, read-only), so a save can't miss the choice (Luna). */}

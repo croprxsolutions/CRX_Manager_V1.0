@@ -5,15 +5,24 @@ import QuoteSplitNote from './QuoteSplitNote';
 const offer = { kind: 'offer' as const, customer: 'Big Sky Farms 18', split: { splits: [{ recipient: 'Test Rep One', percentage: 60 }, { recipient: 'Test Rep Two', percentage: 40 }] } };
 
 describe('QuoteSplitNote', () => {
-  it('offers the customer split on one fixed line, full text on hover', () => {
+  it('an offer wraps on a phone so the whole split can be read before Use it; one line from sm up (Sol MED, Taha option a)', () => {
     const onUse = vi.fn();
     render(<QuoteSplitNote note={offer} onUse={onUse} onKeep={vi.fn()} />);
     const text = screen.getByText("Use Big Sky Farms 18's split (Test Rep One 60% · Test Rep Two 40%)?");
-    expect(text).toHaveClass('truncate');
+    expect(text).not.toHaveClass('truncate');
+    expect(text).toHaveClass('sm:truncate');
     expect(text).toHaveAttribute('title', text.textContent);
-    expect(text.parentElement).toHaveClass('h-5');
+    expect(text.parentElement).toHaveClass('min-h-5', 'flex-wrap', 'sm:h-5', 'sm:flex-nowrap');
+    expect(text.parentElement).not.toHaveClass('h-5');
     fireEvent.click(screen.getByRole('button', { name: 'Use it' }));
     expect(onUse).toHaveBeenCalledTimes(1);
+  });
+
+  it('every other note stays on one fixed line', () => {
+    render(<QuoteSplitNote note={{ kind: 'from', customer: 'Big Sky Farms 18', split: offer.split }} onUse={vi.fn()} onKeep={vi.fn()} />);
+    const text = screen.getByText("From Big Sky Farms 18's split.");
+    expect(text).toHaveClass('truncate');
+    expect(text.parentElement).toHaveClass('h-5');
   });
 
   it('locks Use it and Keep mine while the split is locked (a save in flight)', () => {

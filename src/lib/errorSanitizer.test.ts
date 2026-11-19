@@ -332,6 +332,8 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ message: 'CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. Smith Farms still has 2 open order(s), 1 open quote(s). Finish or cancel its orders, deliveries and quotes, release its holds and settle or void its invoices first' }))
       .toBe('Nothing was deactivated. Smith Farms still has 2 open order(s), 1 open quote(s). Finish or cancel its orders, deliveries and quotes, release its holds and settle or void its invoices first.');
     expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK')).toContain('before deactivating it');
+    expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. ‮smraf‬ still has open invoices. Settle them first'))
+      .toBe('Nothing was deactivated. smraf still has open invoices. Settle them first.');
     expect(sanitizeError('PREPAY_BALANCE_SERVER_ONLY: a prepay balance changes only through prepayments and payments'))
       .toBe('A prepay balance changes only through prepayments and payments');
     expect(sanitizeError('RETURN_CREDIT_UNIT_MISMATCH')).toContain('original sale');

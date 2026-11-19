@@ -13,6 +13,7 @@
  * Prints KI148_DEACTIVATION_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -29,13 +30,13 @@ const PRODUCT = id('d1');
 
 // One customer per case; `c` + suffix is its fixture id.
 const C = Object.fromEntries(['order', 'partial', 'sched', 'inprog', 'hold', 'qdraft', 'qsent', 'qrevised', 'qacc',
-  'posted', 'overdue', 'closed', 'clean', 'inactive', 'bulkok', 'many', 'dorder'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
+  'posted', 'overdue', 'closed', 'clean', 'inactive', 'bulkok', 'many', 'dorder', 'race'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
 const N = Object.fromEntries(Object.keys(C).map((k) => [k, `[KI148] ${k}`]));
 
-// One statement as `role`, signed in as `uid`; the last output line is the answer.
+// One statement as `role`, signed in as `uid` (null: no claims at all); the last output line is the answer.
 function run(uid, sql, { role = 'authenticated', commit = false } = {}) {
   const r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'],
-    { input: `BEGIN;\n${claims(uid)}\n${role === 'postgres' ? '' : `SET LOCAL ROLE ${role};`}\n${sql}\n${commit ? 'COMMIT' : 'ROLLBACK'};`, allowFailure: true });
+    { input: `BEGIN;\n${uid ? claims(uid) : ''}\n${role === 'postgres' ? '' : `SET LOCAL ROLE ${role};`}\n${sql}\n${commit ? 'COMMIT' : 'ROLLBACK'};`, allowFailure: true });
   return { status: r.status, out: r.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? '', err: r.stderr };
 }
 const count = (sql) => `WITH w AS (${sql} RETURNING 1) SELECT count(*) FROM w;`;
@@ -48,8 +49,7 @@ const refused = (uid, sql, pattern, opts) => {
 const active = (cid) => scalar(`SELECT is_active FROM public.customers WHERE id = '${cid}';`);
 
 function seed() {
-  // CRX_PROVER_REUSE=1 with UNDO_PATHS_CONTAINER: seed a kept container that failed before any commit.
-  if (process.env.CRX_PROVER_REUSE !== '1') { buildContainer({ stopBefore: CANDIDATE }); seedUsers(); }
+  buildContainer({ stopBefore: CANDIDATE }); seedUsers();
   // Fixtures go in past every other trigger (replica), as the other provers seed them; the checks run normally.
   const customers = Object.keys(C).map((k) => `('${C[k]}', '${N[k]}', ${k === 'inactive' ? 'false' : 'true'})`).join(',');
   let n = 0;
@@ -99,7 +99,7 @@ function seed() {
     COMMIT;`, { user: 'supabase_admin' });
 }
 
-function main() {
+async function main() {
   seed();
   // Case 8, before: an admin can deactivate a customer with an open order today (rolled back).
   assert.equal(allowed(ADMIN, deactivate(C.order)), '1');
@@ -116,7 +116,7 @@ function main() {
   // Cases 1-3: every kind of open work refuses, for an admin; the row stays active.
   const kinds = { order: /1 open order\(s\)/, partial: /1 open order\(s\)/, sched: /1 undelivered delivery/, inprog: /1 undelivered delivery/,
     hold: /2 active stock hold/, dorder: /1 undelivered delivery/, qdraft: /1 open quote/, qsent: /1 open quote/, qrevised: /1 open quote/,
-    posted: /1 open invoice/, overdue: /1 open invoice/ };
+    posted: /open invoices\./, overdue: /open invoices\./ };
   for (const [k, pattern] of Object.entries(kinds)) {
     refused(ADMIN, deactivate(C[k]), new RegExp(`CUSTOMER_HAS_OPEN_WORK: nothing was deactivated\\. \\[KI148\\] ${k} still has ${pattern.source}`));
     assert.equal(active(C[k]), 't');
@@ -126,13 +126,36 @@ function main() {
   refused(REP, deactivate(C.hold), /CUSTOMER_HAS_OPEN_WORK/);
   refused(ADMIN, deactivate(C.order), /CUSTOMER_HAS_OPEN_WORK/, { role: 'postgres' });
   refused(ADMIN, deactivate(C.qdraft), /CUSTOMER_HAS_OPEN_WORK/, { role: 'service_role' });
-  console.log('[ki148] sales rep, server role (postgres) and service_role refused too');
+  refused(null, deactivate(C.hold), /CUSTOMER_HAS_OPEN_WORK/, { role: 'service_role' });
+  refused(null, deactivate(C.posted), /CUSTOMER_HAS_OPEN_WORK/, { role: 'postgres' });
+  console.log('[ki148] sales rep, server role (postgres) and service_role refused too, with and without a signed-in user');
   // The rep guard still answers first for a rep's forbidden edit made together with a deactivation.
   refused(REP, count(`UPDATE public.customers SET is_active = false, assigned_tier = 3 WHERE id = '${C.order}'`), /TIER_ADMIN_ONLY/);
   refused(REP, deactivate(C.posted), /CUSTOMER_HAS_OPEN_INVOICES/);
   console.log('[ki148] a rep\'s tier change with a deactivation still gets TIER_ADMIN_ONLY; a rep\'s open-invoice case keeps CUSTOMER_HAS_OPEN_INVOICES');
-  refused(ADMIN, deactivate(C.many), /\[KI148\] many still has 2 open order\(s\), 1 undelivered delivery\(ies\), 1 open quote\(s\), 1 open invoice\(s\)\. Finish or cancel/);
-  console.log('[ki148] the refusal names the customer and every open kind with counts');
+  refused(ADMIN, deactivate(C.many), /\[KI148\] many still has 2 open order\(s\), 1 undelivered delivery\(ies\), 1 open quote\(s\), open invoices\. Finish or cancel/);
+  console.log('[ki148] the refusal names the customer and every open kind (with counts, except invoices)');
+
+  // Sol round 1: a transaction still creating an order when the deactivation runs is waited for, then seen.
+  const creator = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'],
+    { stdio: ['pipe', 'ignore', 'pipe'] });
+  let creatorErr = '';
+  creator.stderr.on('data', (b) => { creatorErr += b; });
+  const creatorDone = new Promise((resolve) => creator.on('close', resolve));
+  creator.stdin.end(`BEGIN; ${claims(ADMIN)}
+    INSERT INTO public.orders (order_number, customer_id, status) VALUES ('KI148-RACE', '${C.race}', 'confirmed');
+    SELECT pg_sleep(4); COMMIT;\n`);
+  // Wait until the insert is done and the creator sleeps, holding its key-share lock on the customer row.
+  for (let i = 0; i < 100 && scalar(`SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE 'SELECT pg_sleep(4)%';`) !== '1'; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  const started = Date.now();
+  refused(ADMIN, deactivate(C.race), /\[KI148\] race still has 1 open order\(s\)/);
+  const waited = Date.now() - started;
+  assert.equal(await creatorDone, 0, `the creating transaction failed:\n${creatorErr}`);
+  assert.ok(waited >= 1500, `the deactivation did not wait for the creating transaction (${waited} ms)`);
+  assert.equal(active(C.race), 't');
+  console.log(`[ki148] a deactivation during an uncommitted order insert waits for it (${waited} ms), then refuses`);
 
   // Case 4: closed work of every kind does not block; neither does no work.
   assert.equal(allowed(ADMIN, deactivate(C.closed)), '1');
@@ -157,4 +180,4 @@ function main() {
   console.log('KI148_DEACTIVATION_PROOF_PASS');
 }
 
-try { main(); } finally { if (!KEEP) removeContainer(); else console.log(`Kept ${NAME}`); }
+try { await main(); } finally { if (!KEEP) removeContainer(); else console.log(`Kept ${NAME}`); }

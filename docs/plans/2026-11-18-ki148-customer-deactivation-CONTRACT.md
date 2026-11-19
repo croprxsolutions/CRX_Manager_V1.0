@@ -36,8 +36,8 @@ Why not edit the existing guard: it is SECURITY INVOKER on purpose (its prepay r
 `current_user = 'authenticated'`), and it returns early for admins.
 
 **Paths covered** (all write `customers.is_active` through UPDATE, so the trigger sees them all):
-Customers bulk Deactivate (direct update), customer edit page (`save_customer`), Bulk Customer Import,
-direct API. No live function sets customers inactive (live `pg_proc` search, 2026-11-18); no other
+Customers bulk Deactivate (direct update), customer edit page (`save_customer`), direct API. (Bulk
+Customer Import only inserts new customers, active, so it never deactivates.) No live function sets customers inactive (live `pg_proc` search, 2026-11-18); no other
 customers trigger changes `is_active`. `customers.is_active` is `NOT NULL DEFAULT true` (live).
 Reactivating and every other edit of an already-inactive customer are untouched.
 
@@ -65,8 +65,13 @@ Files: the migration, `docs/reference/migrations.d/<stem>.md`, `docs/changelog.d
 - **Already-deployed app during rollout:** unchanged screen; its error shows through `sanitizeError`
   (a generic message until the new sanitizer ships). No break.
 - **Timing.** Double click / retry: a refused deactivation changes nothing and a repeat is refused
-  again; a repeated success is inactive→inactive and not checked. **Limit: point-in-time check.**
-  Work made open after the check (a concurrent create, or a later restore/reopen) is not caught.
+  again; a repeated success is inactive→inactive and not checked. **Concurrency (Sol round 1 HIGH):**
+  the guard first locks the customer row `FOR UPDATE`, which waits for any transaction still inserting
+  an order, delivery, hold, quote or invoice for it (each insert's foreign key check holds a key-share
+  lock on the row until commit), then counts all five kinds in one statement, so one snapshot. A
+  booking's final draw that commits an order, accepts its quote and releases its holds is therefore
+  seen whole. **Remaining limit:** existing work reopened by a status change (no new row) during the
+  check or later, and work added after the deactivation, are not caught.
   Closing that fully means "an inactive customer can never get open work": a guard on five tables that
   would also stop the legacy customer's two orders from being delivered. That is a separate business
   decision, raised to Mason as a follow-up. No idempotency key: this is a trigger, not an RPC.

@@ -354,7 +354,9 @@ export function sanitizeError(error: unknown): string {
   }
   // KI-148 (20270128140000): the server names the customer and what is still open.
   if (/^CUSTOMER_HAS_OPEN_WORK(?::|$)/.test(message)) {
-    const detail = message.slice('CUSTOMER_HAS_OPEN_WORK'.length).replace(/^:\s*/, '').trim();
+    // The farm name is typed by users: drop text-direction controls so it cannot reorder the sentence.
+    const detail = message.slice('CUSTOMER_HAS_OPEN_WORK'.length).replace(/^:\s*/, '')
+      .replace(/[‎‏‪-‮⁦-⁩]/g, '').trim();
     return detail ? `${detail.charAt(0).toUpperCase()}${detail.slice(1)}.`
       : 'This customer still has open orders, deliveries, holds, quotes or invoices. Finish or cancel them before deactivating it.';
   }

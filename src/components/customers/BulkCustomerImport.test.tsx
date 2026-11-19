@@ -149,6 +149,28 @@ describe('BulkCustomerImport', () => {
     expect(screen.getByText(/Row 2 \(Lost Farm\): No answer from the server: this customer may have saved/)).toBeInTheDocument();
   });
 
+  // The modal's corner X is also named Close; this is the footer button.
+  const footerClose = () => screen.getAllByRole('button', { name: 'Close' }).find((b) => b.textContent?.trim() === 'Close') as HTMLElement;
+
+  it('asks before closing while a row has no server answer, since re-importing could save it twice', async () => {
+    rpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const onClose = vi.fn();
+    const { container } = render(<BulkCustomerImport {...defaultProps} onClose={onClose} />);
+    pick(container, 'farm_name\nLost Farm\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Import 1 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    fireEvent.click(footerClose());
+    expect(await screen.findByText(/1 row\(s\) got no answer from the server and may have saved/)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
+    expect(screen.getByRole('button', { name: 'Retry 1 Unanswered Row(s)' })).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(footerClose());
+    fireEvent.click(await screen.findByRole('button', { name: 'Close anyway' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('refuses unquoted thousands and bad acreage instead of saving the wrong number', async () => {
     const { container } = render(<BulkCustomerImport {...defaultProps} />);
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;

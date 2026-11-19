@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Upload, CheckCircle, AlertCircle, FileText, Sparkles } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
+import ConfirmModal from '../ui/ConfirmModal';
 import { useToast } from '../ui/Toast';
 import { supabase, assertRpcResult, sanitizeError } from '../../lib/db';
 import { processDocumentWithOCR, isCSVFile, isOCRSupported } from '../../lib/documentOCR';
@@ -195,6 +196,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
   const [uploading, setUploading] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [uploadResults, setUploadResults] = useState<{ success: number; failed: FailedRow[]; skipped: number } | null>(null);
+  const [confirmClose, setConfirmClose] = useState(false);
   // Bumped when the file changes or the modal closes, so a slow parse of an older file is dropped.
   const parseRun = useRef(0);
 
@@ -495,8 +497,16 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
     setUploading(false);
   };
 
+  const unanswered = uploadResults?.failed.filter((f) => f.retry).length ?? 0;
+
   const handleClose = () => {
     if (uploading) return; // closing mid-import would hide which rows saved
+    // Closing drops the unanswered rows' keys; re-importing the file then gets new keys and can save them twice.
+    if (unanswered > 0 && !confirmClose) {
+      setConfirmClose(true);
+      return;
+    }
+    setConfirmClose(false);
     parseRun.current++;
     setParsing(false);
     setFile(null);
@@ -506,6 +516,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
   };
 
   return (
+    <>
     <Modal open={open} onClose={handleClose} title="Bulk Customer" accent="Import" maxWidth="max-w-3xl">
       <div className="space-y-4">
         <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg">
@@ -616,8 +627,8 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
               <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg max-h-32 overflow-y-auto">
                 <p className="text-xs font-medium text-secondary mb-1">Will import, but check these rows:</p>
                 <div className="space-y-1">
-                  {validation.warnings.map((w) => (
-                    <p key={w.row} className="text-xs text-secondary">
+                  {validation.warnings.map((w, idx) => (
+                    <p key={idx} className="text-xs text-secondary">
                       Row {w.row}: {w.warning}
                     </p>
                   ))}
@@ -654,7 +665,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
           </Button>
           {uploadResults?.failed.some((f) => f.retry) && (
             <Button onClick={handleRetry} disabled={uploading} loading={uploading}>
-              Retry {uploadResults.failed.filter((f) => f.retry).length} Unanswered Row(s)
+              Retry {unanswered} Unanswered Row(s)
             </Button>
           )}
           {!validation && !uploadResults && (
@@ -692,5 +703,16 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
         </div>
       </div>
     </Modal>
+    <ConfirmModal
+      open={confirmClose}
+      onClose={() => setConfirmClose(false)}
+      onConfirm={handleClose}
+      title="Close without retrying?"
+      message={`${unanswered} row(s) got no answer from the server and may have saved. Retry is the safe way to finish them. If you close and import the file again, those customers can be saved twice.`}
+      confirmLabel="Close anyway"
+      cancelLabel="Go back"
+      variant="warning"
+    />
+    </>
   );
 }

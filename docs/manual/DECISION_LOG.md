@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-19 — KI-148: no lock; Mason removes the wait-for-work lock from the deactivation guard
+
+The `FOR UPDATE` wait added after Sol round 1 drew HIGHs five rounds running (deadlocks with payments and billing,
+deliveries filed under another customer). Mason chose to remove it: the guard counts all five kinds in one statement
+with no row locks, and work saved at the same moment as the deactivation is not caught (extends the 2026-11-18 entry).
+
 ## 2026-11-18 — KI-148: Mason accepts the split-second limit on customer deactivation
 
 The deactivation guard (`20270128140000`) waits for new orders, deliveries, holds, quotes and invoices still being saved,

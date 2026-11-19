@@ -1155,9 +1155,9 @@ decision 20); the Customers bulk Deactivate checks invoices only. Live: 1 inacti
 still has 2 confirmed orders (To-Do decision 23). Fix: a new trigger refuses switching a customer from active to
 inactive while it has open orders, undelivered deliveries, active holds, open quotes or open invoices, for every role
 including admins (decision 20 answered 2026-11-18), and names what is open (`CUSTOMER_HAS_OPEN_WORK`); the bulk
-Deactivate and the edit page both hit it. The live inactive customer stays as it is (decision 23) and stays editable. It waits for any work
-still being created for the customer, then checks everything at once. Accepted limit: existing work reopened by a
-status change during or after the deactivation is not caught. Proof:
+Deactivate and the edit page both hit it. The live inactive customer stays as it is (decision 23) and stays editable. It checks everything
+at once. Accepted limit (Mason, 2026-11-18 and 2026-11-19): work being saved at the same moment as the deactivation,
+or added after it, is not caught. Proof:
 `node scripts/smoke/prove-ki148-customer-deactivation-real-schema.mjs`.
 
 ### KI-149 — Crop Programs and job print defaults let reps edit but only admins can save

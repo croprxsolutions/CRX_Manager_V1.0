@@ -5,7 +5,7 @@
 --   A customer cannot be switched from active to inactive while it still has open work:
 --   an open order (confirmed or partially fulfilled), an undelivered delivery (scheduled or in
 --   progress, of the customer or of one of its orders), an active, unexpired stock hold, an open quote
---   (draft, sent or revised, or accepted with no order yet, as the purchasing plan counts it), or an
+--   (draft, sent or revised, or accepted with no undeleted order, as the purchasing plan counts it), or an
 --   open invoice (posted or overdue). Deleted rows never count. The refusal names the customer and what is open:
 --   CUSTOMER_HAS_OPEN_WORK. It applies to everyone and every path (Customers bulk Deactivate,
 --   the edit page through save_customer, a direct API update, server functions).
@@ -16,16 +16,12 @@
 --   name sorts after customers_guard_rep_edit_20261013, so a rep's forbidden edit keeps its own error.
 --   Only admins and sales reps may update customers (policy customers_update), and both read every
 --   customer's work, so the counts it names reveal nothing new; invoices are named without a count.
---   CONSISTENCY: it first locks the customer row FOR UPDATE, which waits for every transaction still
---   inserting an order, delivery, hold, quote or invoice for it (each insert's foreign key check holds a
---   key-share lock on the row until commit; every delivery path refuses a customer other than its
---   order's) and makes later inserts wait for the deactivation; then one statement counts all five
---   kinds from one snapshot. It refuses outside READ COMMITTED (CUSTOMER_DEACTIVATION_ISOLATION), whose
---   fixed snapshot would not see work committed while it waited; every app path is read committed.
---   LIMIT (accepted, see the KI-148 contract): work that already exists and is reopened by a status
---   change (no new row) in a transaction committing during the check, or later, is not caught; and
---   work added after the deactivation lands on an inactive customer, as on any inactive customer today
---   (whether inactive customers should refuse new work is a separate decision in the contract).
+--   CONSISTENCY: one statement counts all five kinds from one snapshot. It takes no extra locks.
+--   LIMIT (accepted by Mason 2026-11-18 and 2026-11-19, see the KI-148 contract): a point-in-time check.
+--   Work created or reopened by a transaction that has not committed when the check runs, or work added
+--   after the deactivation, is not caught. Waiting for such work with row locks was tried and dropped:
+--   it could deadlock with payments, deliveries and billing (Sol rounds 2 and 3). Whether inactive
+--   customers should refuse new work is a separate decision in the contract.
 --
 -- NOT CHANGED: guard_customer_rep_edit_20261013 and its trigger (its rep-only open-invoice rule
 --   stays, now a duplicate), save_customer, every policy and grant. No column or row changes.
@@ -80,18 +76,8 @@ BEGIN
   IF NOT (OLD.is_active IS TRUE AND NEW.is_active IS NOT TRUE) THEN
     RETURN NEW;
   END IF;
-  -- Wait for any transaction still creating work for this customer: every insert into the five tables
-  -- holds a key-share lock on this row (its foreign key check) until it commits, and FOR UPDATE waits
-  -- for it. Work inserted after this point waits for the deactivation instead.
-  -- (No order-row lock: every delivery path refuses a customer that differs from its order's, so a
-  -- delivery insert locks this row too; locking orders here could deadlock with billing, Sol r2.)
-  -- The count below needs a fresh snapshot after the lock, which only READ COMMITTED (every app path) gives.
-  IF current_setting('transaction_isolation') <> 'read committed' THEN
-    RAISE EXCEPTION 'CUSTOMER_DEACTIVATION_ISOLATION: a customer can only be deactivated in a read-committed transaction'
-      USING ERRCODE = 'check_violation';
-  END IF;
-  PERFORM 1 FROM public.customers c WHERE c.id = OLD.id FOR UPDATE;
-  -- One statement, so all five counts read the same committed state.
+  -- One statement, so all five counts read the same committed state. No row locks (Mason, 2026-11-19:
+  -- locking drew deadlocks with payments and billing; the split-second gap is accepted instead).
   SELECT
     (SELECT count(*) FROM public.orders o
       WHERE o.customer_id = OLD.id AND o.deleted_at IS NULL
@@ -105,12 +91,12 @@ BEGIN
     -- An expired hold no longer reserves stock (the purchasing plan never counts one either).
     (SELECT count(*) FROM public.inventory_holds h
       WHERE h.customer_id = OLD.id AND h.is_active IS TRUE
-        AND (h.expires_at IS NULL OR h.expires_at >= (now() AT TIME ZONE 'America/Chicago')::date)),
+        AND (h.expires_at IS NULL OR h.expires_at >= (clock_timestamp() AT TIME ZONE 'America/Chicago')::date)),
     (SELECT count(*) FROM public.quotes q
       WHERE q.customer_id = OLD.id AND q.deleted_at IS NULL
         -- An accepted quote with no order still promises product (the purchasing plan's rule).
         AND (q.status IN ('draft', 'sent', 'revised')
-             OR (q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM public.orders o WHERE o.quote_id = q.id)))),
+             OR (q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM public.orders o WHERE o.quote_id = q.id AND o.deleted_at IS NULL)))),
     (SELECT count(*) FROM public.invoices i
       WHERE i.customer_id = OLD.id AND i.deleted_at IS NULL
         AND i.status IN ('posted', 'overdue'))
@@ -143,7 +129,6 @@ BEGIN
   -- tgtype 19 = ROW | BEFORE | UPDATE; tgattr = is_active only. Structural, so search_path cannot change it.
   IF p.oid IS NULL
      OR position('CUSTOMER_HAS_OPEN_WORK' IN p.prosrc) = 0
-     OR position('FOR UPDATE' IN p.prosrc) = 0
      OR p.proowner <> 'postgres'::regrole OR NOT p.prosecdef
      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
      OR p.proacl IS DISTINCT FROM ARRAY['postgres=X/postgres']::aclitem[]

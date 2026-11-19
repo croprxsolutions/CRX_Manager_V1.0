@@ -12,7 +12,7 @@ while it still has open work. "Open work" is:
 | Order | `orders.status IN ('confirmed','partially_fulfilled')`, `deleted_at IS NULL` | registry `orders.status` |
 | Delivery | `deliveries.status IN ('scheduled','in_progress')`, `deleted_at IS NULL`, on the customer's row **or** on one of its orders | registry `deliveries.status` |
 | Hold | `inventory_holds.is_active` and not expired (`expires_at` null or ≥ today, Chicago), any hold type | live table; every hold writer sets `customer_id`; the purchasing plan never counts an expired hold |
-| Quote | `quotes.status IN ('draft','sent','revised')`, `deleted_at IS NULL`, or `accepted` with no order (`orders.quote_id`), the purchasing plan's rule (Sol r2). A converted quote's open part is its order | `QUOTE_TO_DELIVERY.md` lines 13, 64 |
+| Quote | `quotes.status IN ('draft','sent','revised')`, `deleted_at IS NULL`, or `accepted` with no undeleted order (`orders.quote_id`), the purchasing plan's rule (Sol r2, r3). A converted quote's open part is its order | `QUOTE_TO_DELIVERY.md` lines 13, 64 |
 | Invoice | `invoices.status IN ('posted','overdue')`, `deleted_at IS NULL` (today's rule, now for every role) | `_customer_has_open_invoice_20261013` |
 
 **Decisions it carries out.**
@@ -67,20 +67,13 @@ Files: the migration, `docs/reference/migrations.d/<stem>.md`, `docs/changelog.d
 - **Already-deployed app during rollout:** unchanged screen; its error shows through `sanitizeError`
   (a generic message until the new sanitizer ships). No break.
 - **Timing.** Double click / retry: a refused deactivation changes nothing and a repeat is refused
-  again; a repeated success is inactive→inactive and not checked. **Concurrency (Sol round 1 HIGH):**
-  the guard first locks the customer row `FOR UPDATE`, which waits for any transaction still inserting
-  an order, delivery, hold, quote or invoice for it (each insert's foreign key check holds a key-share
-  lock on the row until commit), then counts all five kinds in one statement, so one snapshot. Every
-  delivery path refuses a customer other than its order's (`CUSTOMER_ORDER_MISMATCH`; quick and
-  follow-up deliveries copy it), so no order-row lock is taken: Luna r2 asked for one and Sol r2 showed
-  it could deadlock with invoice backfill, so it was removed. Outside READ COMMITTED (whose snapshot
-  stays fixed while it waits) the guard refuses: `CUSTOMER_DEACTIVATION_ISOLATION` (Sol r2); every app
-  path is read committed. A
-  booking's final draw that commits an order, accepts its quote and releases its holds is therefore
-  seen whole. **Remaining limit:** existing work reopened by a status change (no new row) during the
-  check or later, and work added after the deactivation, are not caught. **Mason accepted this limit
-  on 2026-11-18** (stop rule after Sol r1, Luna r2 and Luna r3 HIGHs on the same timing mechanism).
-  Closing that fully means "an inactive customer can never get open work": a guard on five tables that
+  again; a repeated success is inactive→inactive and not checked. **Concurrency:** all five kinds are counted in one
+  statement, so one snapshot (Sol r1: separate queries could see different moments). The guard takes no
+  row locks. Waiting for in-flight work with `FOR UPDATE` (rounds 1-3) drew deadlocks with payments,
+  billing and delivery work (Sol r2, r3); **Mason chose 2026-11-19 to remove the lock** and accept the
+  point-in-time gap. **Remaining limit (Mason accepted 2026-11-18 and 2026-11-19):** work created or
+  reopened by a transaction not yet committed when the check runs, and work added after the
+  deactivation, are not caught. Closing that fully means "an inactive customer can never get open work": a guard on five tables that
   would also stop the legacy customer's two orders from being delivered. That is a separate business
   decision, raised to Mason as a follow-up. No idempotency key: this is a trigger, not an RPC.
   Indexes on `customer_id` exist for all five tables.

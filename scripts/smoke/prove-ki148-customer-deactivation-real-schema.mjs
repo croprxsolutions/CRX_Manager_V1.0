@@ -13,7 +13,6 @@
  * Prints KI148_DEACTIVATION_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -30,13 +29,13 @@ const PRODUCT = id('d1');
 
 // One customer per case; `c` + suffix is its fixture id.
 const C = Object.fromEntries(['order', 'partial', 'sched', 'inprog', 'hold', 'qdraft', 'qsent', 'qrevised', 'qacc',
-  'posted', 'overdue', 'closed', 'clean', 'inactive', 'bulkok', 'many', 'dorder', 'race', 'race2'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
+  'posted', 'overdue', 'closed', 'clean', 'inactive', 'bulkok', 'many', 'dorder', 'qaccdel'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
 const N = Object.fromEntries(Object.keys(C).map((k) => [k, `[KI148] ${k}`]));
 
 // One statement as `role`, signed in as `uid` (null: no claims at all); the last output line is the answer.
-function run(uid, sql, { role = 'authenticated', commit = false, iso = '' } = {}) {
+function run(uid, sql, { role = 'authenticated', commit = false } = {}) {
   const r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'],
-    { input: `BEGIN${iso ? ` ISOLATION LEVEL ${iso}` : ''};\n${uid ? claims(uid) : ''}\n${role === 'postgres' ? '' : `SET LOCAL ROLE ${role};`}\n${sql}\n${commit ? 'COMMIT' : 'ROLLBACK'};`, allowFailure: true });
+    { input: `BEGIN;\n${uid ? claims(uid) : ''}\n${role === 'postgres' ? '' : `SET LOCAL ROLE ${role};`}\n${sql}\n${commit ? 'COMMIT' : 'ROLLBACK'};`, allowFailure: true });
   return { status: r.status, out: r.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? '', err: r.stderr };
 }
 const count = (sql) => `WITH w AS (${sql} RETURNING 1) SELECT count(*) FROM w;`;
@@ -92,6 +91,9 @@ function seed() {
     ${quote(C.closed, 'accepted', `'${id('a1')}'`)} ${order(C.closed, 'fulfilled', `'${id('a1')}'`)}
     -- An accepted quote with no order still promises product (the purchasing plan counts it).
     ${quote(C.qacc, 'accepted')}
+    -- Its only order was soft-deleted: the accepted quote is open again.
+    ${quote(C.qaccdel, 'accepted', `'${id('a2')}'`)} ${order(C.qaccdel, 'cancelled', `'${id('a2')}'`)}
+    UPDATE public.orders SET deleted_at = now() WHERE order_number = 'KI148-O${n}';
     ${quote(C.closed, 'draft')} UPDATE public.quotes SET deleted_at = now() WHERE quote_number = 'KI148-Q${n}';
     ${['draft', 'unposted', 'paid', 'voided', 'cancelled'].map((s) => invoice(C.closed, s)).join('\n')}
     -- The live case (To-Do decision 23): inactive with 2 confirmed orders.
@@ -117,7 +119,7 @@ async function main() {
 
   // Cases 1-3: every kind of open work refuses, for an admin; the row stays active.
   const kinds = { order: /1 open order\(s\)/, partial: /1 open order\(s\)/, sched: /1 undelivered delivery/, inprog: /1 undelivered delivery/,
-    hold: /2 active stock hold/, dorder: /1 undelivered delivery/, qdraft: /1 open quote/, qsent: /1 open quote/, qrevised: /1 open quote/, qacc: /1 open quote/,
+    hold: /2 active stock hold/, dorder: /1 undelivered delivery/, qdraft: /1 open quote/, qsent: /1 open quote/, qrevised: /1 open quote/, qacc: /1 open quote/, qaccdel: /1 open quote/,
     posted: /open invoices\./, overdue: /open invoices\./ };
   for (const [k, pattern] of Object.entries(kinds)) {
     refused(ADMIN, deactivate(C[k]), new RegExp(`CUSTOMER_HAS_OPEN_WORK: nothing was deactivated\\. \\[KI148\\] ${k} still has ${pattern.source}`));
@@ -138,41 +140,6 @@ async function main() {
   refused(ADMIN, deactivate(C.many), /\[KI148\] many still has 2 open order\(s\), 1 undelivered delivery\(ies\), 1 open quote\(s\), open invoices\. Finish or cancel/);
   console.log('[ki148] the refusal names the customer and every open kind (with counts, except invoices)');
 
-  // Sol round 1 / Luna round 2: a transaction still creating work when the deactivation runs is waited for, then seen.
-  async function race(cid, insert, pattern, what) {
-    const creator = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'],
-      { stdio: ['pipe', 'ignore', 'pipe'] });
-    let creatorErr = '';
-    creator.stderr.on('data', (b) => { creatorErr += b; });
-    const creatorDone = new Promise((resolve) => creator.on('close', resolve));
-    creator.stdin.end(`BEGIN; ${claims(ADMIN)}
-${insert}
-SELECT pg_sleep(6); COMMIT;
-`);
-    // Wait until the insert is done and the creator sleeps, holding its key-share lock.
-    for (let i = 0; i < 100 && scalar(`SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE 'SELECT pg_sleep(6)%';`) !== '1'; i++) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    const started = Date.now();
-    refused(ADMIN, deactivate(cid), pattern);
-    const waited = Date.now() - started;
-    assert.equal(await creatorDone, 0, `the creating transaction failed:
-${creatorErr}`);
-    assert.ok(waited >= 1000, `the deactivation did not wait for the creating transaction (${waited} ms)`);
-    assert.equal(active(cid), 't');
-    console.log(`[ki148] a deactivation during an uncommitted ${what} waits for it (${waited} ms), then refuses`);
-  }
-  await race(C.race, `INSERT INTO public.orders (order_number, customer_id, status) VALUES ('KI148-RACE', '${C.race}', 'confirmed');`,
-    /\[KI148\] race still has 1 open order\(s\)/, 'order insert');
-  await race(C.race2, `INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, status)
-      VALUES ('KI148-RACE-D', '${id(`f${C.race2.slice(-2)}`)}', '${C.race2}', '${ADMIN}', 'scheduled');`,
-    /\[KI148\] race2 still has 1 undelivered delivery/, 'delivery insert');
-  // Sol round 2: outside READ COMMITTED the snapshot is fixed, so the guard refuses to run at all.
-  for (const level of ['REPEATABLE READ', 'SERIALIZABLE']) {
-    refused(ADMIN, deactivate(C.clean), /CUSTOMER_DEACTIVATION_ISOLATION/, { iso: level });
-  }
-  assert.equal(active(C.clean), 't');
-  console.log('[ki148] repeatable-read and serializable deactivations are refused (CUSTOMER_DEACTIVATION_ISOLATION)');
 
   // Case 4: closed work of every kind does not block; neither does no work.
   assert.equal(allowed(ADMIN, deactivate(C.closed)), '1');

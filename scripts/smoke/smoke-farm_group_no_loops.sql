@@ -45,7 +45,7 @@ BEGIN
   END IF;
 
   SELECT string_agg(CASE g.id WHEN v_a THEN 'A' WHEN v_b THEN 'B' WHEN v_c THEN 'C' ELSE '?' END
-           || CASE WHEN g.is_parent THEN '*' ELSE '' END, ',' ORDER BY g.farm_name)
+           || repeat('*', g.is_parent::int), ',' ORDER BY g.farm_name)
     INTO v_group FROM public.get_customer_farm_group(v_c) g;
   EXECUTE 'RESET ROLE';
   IF v_group IS DISTINCT FROM 'A*,B,C' THEN

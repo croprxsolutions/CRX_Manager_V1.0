@@ -88,6 +88,24 @@ try {
   r = runHook(dirD);
   ok(!additionalContextOf(r).includes("BEHIND"), "FIX1: schema-neutral migration not flagged regardless of name-list membership");
 
+  // ── #749: the keyword pre-filter must see CREATE OR REPLACE FUNCTION (the
+  // repo's usual function form) and triggers. Before the fix, these three
+  // real pending files were dropped from the warning (8 pending, 5 shown). ──
+  const dirOrReplace = path.join(tmpRoot, "or-replace");
+  const orReplaceFiles = {
+    "20260914100100_next_invoice_number_year_chicago.sql": "CREATE OR REPLACE FUNCTION public.f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;",
+    "20260914100300_refuse_stale_commission_payment.sql": "create   or\n  replace function public.g() returns void language sql as $$ $$;",
+    "20260914100900_repair_commission_history_label.sql": "CREATE OR REPLACE FUNCTION public.h() RETURNS void LANGUAGE sql AS $$ $$;",
+    "20260914101000_trigger_only.sql": "DROP TRIGGER IF EXISTS t ON widgets; CREATE TRIGGER t AFTER INSERT ON widgets FOR EACH ROW EXECUTE FUNCTION public.f();",
+  };
+  scaffold(dirOrReplace, {
+    _meta: { migrations_high_water: "20260101000000", applied_migration_names: [] },
+  }, orReplaceFiles);
+  r = runHook(dirOrReplace);
+  for (const name of Object.keys(orReplaceFiles)) {
+    ok(additionalContextOf(r).includes(name), `#749: ${name} is listed as pending`);
+  }
+
   // ── FIX 1: migrations at/under the high-water mark are never candidates,
   // even if genuinely absent from the applied-name list (old pre-existing
   // drift is out of scope — see code comment) ─────────────────────────────

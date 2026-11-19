@@ -204,7 +204,7 @@ BEGIN
     SELECT s2a.*,
            LEAST(s2a.st0, GREATEST(0, s2a.pool
              - (SUM(s2a.st0) OVER (PARTITION BY s2a.quote_id, s2a.product_id
-                                   ORDER BY s2a.s_sort, s2a.i_sort, s2a.item_id ROWS UNBOUNDED PRECEDING) - s2a.st0))) AS st
+                                   ORDER BY s2a.s_sort, s2a.section_id, s2a.i_sort, s2a.item_id ROWS UNBOUNDED PRECEDING) - s2a.st0))) AS st
       FROM s2a
   ),
   s2c AS (
@@ -216,7 +216,7 @@ BEGIN
     SELECT s2c.*,
            s2c.r1 - LEAST(s2c.r1, GREATEST(0, s2c.pool2
              - (SUM(s2c.r1) OVER (PARTITION BY s2c.quote_id, s2c.product_id
-                                  ORDER BY s2c.s_sort, s2c.i_sort, s2c.item_id ROWS UNBOUNDED PRECEDING) - s2c.r1))) AS rem
+                                  ORDER BY s2c.s_sort, s2c.section_id, s2c.i_sort, s2c.item_id ROWS UNBOUNDED PRECEDING) - s2c.r1))) AS rem
       FROM s2c
   ),
   overdrawn AS (
@@ -296,10 +296,10 @@ BEGIN
   hcl0 AS (
     SELECT 'crop_program'::text AS hold_type, s2.quote_id AS source_id, s2.product_id, s2.item_id AS line_id,
            CASE s2.confidence WHEN 'firm' THEN 0 WHEN 'maybe' THEN 2 ELSE 1 END AS rnk,
-           s2.needed_by_date AS d, s2.s_sort, s2.i_sort, s2.rem AS qty
+           s2.needed_by_date AS d, s2.s_sort, s2.section_id AS sec, s2.i_sort, s2.rem AS qty
       FROM s2 WHERE s2.rem > 0
     UNION ALL
-    SELECT 'job', x.job_id, x.product_id, x.line_id, 0, x.job_date, 0, 0, x.qty
+    SELECT 'job', x.job_id, x.product_id, x.line_id, 0, x.job_date, 0, NULL::uuid, 0, x.qty
       FROM jcl x WHERE NOT x.unit_problem AND x.qty > 0
   ),
   hsum AS (
@@ -309,7 +309,7 @@ BEGIN
     SELECT l.* FROM hcl0 l
       JOIN hcov c ON c.hold_type = l.hold_type AND c.source_id = l.source_id AND c.product_id = l.product_id
     UNION ALL
-    SELECT c.hold_type, c.source_id, c.product_id, NULL::uuid, 3, NULL::date, 0, 0, c.held - COALESCE(s.qty, 0)
+    SELECT c.hold_type, c.source_id, c.product_id, NULL::uuid, 3, NULL::date, 0, NULL::uuid, 0, c.held - COALESCE(s.qty, 0)
       FROM hcov c
       LEFT JOIN hsum s ON s.hold_type = c.hold_type AND s.source_id = c.source_id AND s.product_id = c.product_id
      WHERE c.held > COALESCE(s.qty, 0)
@@ -321,7 +321,7 @@ BEGIN
            LEAST(hcl.qty, GREATEST(0, c.held - (SUM(hcl.qty) OVER wq - hcl.qty))) AS h1
       FROM hcl JOIN hcov c ON c.hold_type = hcl.hold_type AND c.source_id = hcl.source_id AND c.product_id = hcl.product_id
     WINDOW wq AS (PARTITION BY hcl.hold_type, hcl.source_id, hcl.product_id
-                  ORDER BY hcl.rnk, hcl.d NULLS LAST, hcl.s_sort, hcl.i_sort, hcl.line_id
+                  ORDER BY hcl.rnk, hcl.d NULLS LAST, hcl.s_sort, hcl.sec, hcl.i_sort, hcl.line_id
                   ROWS UNBOUNDED PRECEDING)
   ),
   hl AS (
@@ -329,7 +329,7 @@ BEGIN
            LEAST(hl1.h1, GREATEST(0, hb.qty - (SUM(hl1.h1) OVER wp - hl1.h1))) AS held
       FROM hl1 JOIN hback hb ON hb.product_id = hl1.product_id
     WINDOW wp AS (PARTITION BY hl1.product_id
-                  ORDER BY hl1.rnk, hl1.d NULLS LAST, hl1.hold_type, hl1.source_id, hl1.s_sort, hl1.i_sort, hl1.line_id
+                  ORDER BY hl1.rnk, hl1.d NULLS LAST, hl1.hold_type, hl1.source_id, hl1.s_sort, hl1.sec, hl1.i_sort, hl1.line_id
                   ROWS UNBOUNDED PRECEDING)
   ),
   -- Each counted booking line, split into its held part (hq) and the rest (qty_left).
@@ -625,7 +625,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '9c2f6f23d70bdc7b9b7652ef64c1936c' THEN
+     IS DISTINCT FROM 'dd1428ec6d09563beb8eed1bc72cca49' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

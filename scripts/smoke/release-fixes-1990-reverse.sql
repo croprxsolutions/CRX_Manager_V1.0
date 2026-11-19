@@ -13,7 +13,7 @@ BEGIN
       ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '493f1256b3699729ccbfd5bfe67d9707'),
       ('public._refuse_stock_unit_change_with_history()', '20f02f8606621be4bc042d7787c34cdb'),
       ('public.get_purchasing_plan(integer)', 'e196689d988d1da81ff9e2c3e9208762'),
-      ('public.auto_expire_quotes(text)', 'a4bfbedc36d1a78dab3382f52368720d')) AS s(sig, md5)
+      ('public.auto_expire_quotes(text)', '1f9f7ffad3513fdc8280a1e714bcc3a3')) AS s(sig, md5)
    WHERE (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure(s.sig)) IS DISTINCT FROM s.md5;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'RELEASE_FIXES_REVERSE_PREFLIGHT: not the 20270129160000 body: %', v_bad;

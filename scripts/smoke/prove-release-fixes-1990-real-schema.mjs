@@ -28,6 +28,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const REUSE = process.env.CRX_PROVER_REUSE;
 const NAME = REUSE || `crx-rf90-${process.pid}-${Date.now().toString(36)}`;
 const DB = process.env.CRX_PROVER_DB || 'postgres';
+// Shell commands below name the database; only a bare name is accepted (Sol r1).
+if (!/^[a-z0-9_]+$/.test(DB)) throw new Error('CRX_PROVER_DB must be a bare database name (a-z, 0-9, _)');
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -271,7 +273,7 @@ const OLD_BODIES = '_preview_field_app_invoice_split_impl_20260908:97c05bf6abe63
 const NEW_BODIES = '_preview_field_app_invoice_split_impl_20260908:493f1256b3699729ccbfd5bfe67d9707,'
   + '_refuse_stock_unit_change_with_history:20f02f8606621be4bc042d7787c34cdb,'
   + '_save_field_app_invoice_impl_20260714:6cbd5936bdb6af9eed48dedcfa2cebc6,'
-  + 'auto_expire_quotes:a4bfbedc36d1a78dab3382f52368720d,get_purchasing_plan:e196689d988d1da81ff9e2c3e9208762';
+  + 'auto_expire_quotes:1f9f7ffad3513fdc8280a1e714bcc3a3,get_purchasing_plan:e196689d988d1da81ff9e2c3e9208762';
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -399,19 +401,26 @@ COMMIT;
 SQL`]);
   wait(1500);
   assert.equal(scalar("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(4)%' AND pid <> pg_backend_pid();"), '1', 'the first sweep is not holding');
+  const t0 = Date.now();
   psql('SELECT public.auto_expire_quotes();');
+  const waited = Date.now() - t0;
   for (let i = 0; i < 60 && scalar("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(4)%' AND pid <> pg_backend_pid();") !== '0'; i += 1) wait(250);
-  return scalar(`SELECT count(*) FROM public.notifications WHERE related_entity_id = '${q}' AND notification_type = 'booking_past_expiry';`);
+  return { waited, alerts: scalar(`SELECT count(*) FROM public.notifications WHERE related_entity_id = '${q}' AND notification_type = 'booking_past_expiry';`) };
 }
 
 async function main() {
   if (REUSE) {
     assert.match(REUSE, /^crx-[a-z0-9-]+$/, 'CRX_PROVER_REUSE must name a kept prover container (crx-...)');
     assert.equal(docker(['inspect', '-f', '{{.HostConfig.NetworkMode}}', REUSE]).stdout.trim(), 'none', 'CRX_PROVER_REUSE must be a network-less prover container');
-    assert.ok(/^[a-z0-9_]+$/.test(DB) && DB !== 'postgres', 'CRX_PROVER_REUSE needs CRX_PROVER_DB naming a copy (a bare database name), not postgres');
+    // Sol r1: only a fresh run copy (CREATE DATABASE rf90_run_<n> TEMPLATE <replayed db> OWNER postgres), checked
+    // untouched before anything is written: the five replayed bodies, no seed rows and the setup guard still on.
+    assert.match(DB, /^rf90_run_[a-z0-9_]+$/, 'CRX_PROVER_REUSE needs CRX_PROVER_DB naming a fresh copy called rf90_run_<n>');
   } else buildContainer();
-  seed();
   assert.equal(bodies(), OLD_BODIES, 'the replayed bodies are not the ones the candidate expects');
+  assert.equal(scalar(`SELECT (SELECT count(*) FROM auth.users WHERE id = '${ADMIN}') + (SELECT count(*) FROM pg_namespace WHERE nspname = 'k81')
+    + (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.products'::regclass AND tgname = 'trg_validate_product_setup_fields' AND tgenabled = 'D');`),
+    '0', 'this database was already used by a proof run: make a fresh copy');
+  seed();
   psql(`SELECT k81.quote('${A}', '${PA}', '${P}', 60.00, 'sent', (now() AT TIME ZONE 'America/Chicago')::date + 1, true);`);
   planFixture();
 
@@ -429,8 +438,9 @@ async function main() {
   assert.equal(planBefore, 'none', `before: the booking should be missing from the plan (got ${planBefore})`);
   console.log(`[before] purchasing plan: the accepted 100 Gal booking with only a deleted order shows ${planBefore}`);
   const expBefore = expiryRace(expiryFixture(), 'before');
-  assert.equal(expBefore, '2', `before: two overlapping sweeps should alert twice (got ${expBefore})`);
-  console.log(`[before] auto_expire_quotes: two overlapping sweeps sent ${expBefore} past-date alerts for one booking`);
+  assert.equal(expBefore.alerts, '2', `before: two overlapping sweeps should alert twice (got ${expBefore.alerts})`);
+  assert.ok(expBefore.waited < 1500, `before: the second sweep should not wait (${expBefore.waited} ms)`);
+  console.log(`[before] auto_expire_quotes: two overlapping sweeps sent ${expBefore.alerts} past-date alerts for one booking (the second ran at once, ${expBefore.waited} ms)`);
   refusedProbe("SELECT public.auto_expire_quotes('rf90-k0');", /function public\.auto_expire_quotes\(unknown\) does not exist/);
   console.log('[before] auto_expire_quotes takes no idempotency key');
 
@@ -477,8 +487,12 @@ async function main() {
   raw(`UPDATE public.orders SET deleted_at = now() WHERE order_number = '[PROVER] RF90-DEL';`);
   console.log(`[after] purchasing plan: the booking shows ${planAfter} Gal; with its order not deleted it still shows none, as before`);
   const expAfter = expiryRace(expiryFixture(), 'after');
-  assert.equal(expAfter, '1', `after: overlapping sweeps must alert once (got ${expAfter})`);
-  console.log(`[after] auto_expire_quotes: two overlapping sweeps send ${expAfter} alert (the second waits, then sees the first)`);
+  assert.equal(expAfter.alerts, '1', `after: overlapping sweeps must alert once (got ${expAfter.alerts})`);
+  assert.ok(expAfter.waited >= 1500, `after: the second sweep must wait for the first (${expAfter.waited} ms)`);
+  console.log(`[after] auto_expire_quotes: two overlapping sweeps send ${expAfter.alerts} alert (the second waited ${expAfter.waited} ms, then saw the first)`);
+  refusedProbe('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ; SELECT public.auto_expire_quotes();',
+    /AUTO_EXPIRE_NEEDS_READ_COMMITTED: run the quote expiry sweep in a READ COMMITTED transaction \(this one is repeatable read\)/);
+  console.log('[after] auto_expire_quotes at REPEATABLE READ is refused AUTO_EXPIRE_NEEDS_READ_COMMITTED');
   const k1 = scalar("SELECT public.auto_expire_quotes('rf90-k1');");
   // An undrawn quote past its date: a real run would now expire it; the repeated key must not.
   psql(`SELECT k81.quote('${A}', NULL, '${P}', 20.00, 'sent', (now() AT TIME ZONE 'America/Chicago')::date - 30, false);`);

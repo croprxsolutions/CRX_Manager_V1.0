@@ -22,7 +22,9 @@
 -- 4. auto_expire_quotes (apply review CHECK 4, 20270127120000:484). It takes p_idempotency_key text DEFAULT NULL
 --    (a repeated key returns the first run's result) and runs one at a time under a transaction advisory lock, so
 --    an overlapping run (a retry or a manual call beside the 06:05 cron) waits, then sees the first run's work
---    and sends no booking alert twice. service_role keeps EXECUTE; the cron line resolves to the new signature.
+--    and sends no booking alert twice; outside READ COMMITTED it is refused (AUTO_EXPIRE_NEEDS_READ_COMMITTED), since a
+--    waiting REPEATABLE READ run would keep its old snapshot. service_role keeps EXECUTE; the cron line (READ
+--    COMMITTED) resolves to the new signature.
 --
 -- Every function is re-created from its latest reviewed body (pinned by md5 below); none is re-read with
 -- pg_get_functiondef. No data changes.
@@ -56,6 +58,10 @@ BEGIN
   END IF;
   IF to_regprocedure('public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)') IS NULL THEN
     RAISE EXCEPTION 'RELEASE_FIXES_PREFLIGHT: _save_field_app_split_invoice_impl is missing';
+  END IF;
+  -- The rollback re-grants it, so it must hold now (as 20270125163000 left it).
+  IF NOT has_function_privilege('service_role', 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'RELEASE_FIXES_PREFLIGHT: service_role has no EXECUTE on _save_field_app_split_invoice_impl (not the 20270125163000 grants)';
   END IF;
 END;
 $preflight$;
@@ -1557,6 +1563,12 @@ DECLARE
 BEGIN
   -- #1990 apply review: runs take turns (the nightly job and any manual or retried call), so a second run waits, then
   -- sees the first one's expiries and alerts and sends none twice; a repeated key returns the first result.
+  -- A waiting REPEATABLE READ or SERIALIZABLE run would keep its first snapshot and miss those alerts (the cron runs
+  -- READ COMMITTED).
+  IF current_setting('transaction_isolation') NOT IN ('read committed', 'read uncommitted') THEN
+    RAISE EXCEPTION 'AUTO_EXPIRE_NEEDS_READ_COMMITTED: run the quote expiry sweep in a READ COMMITTED transaction (this one is %).',
+      current_setting('transaction_isolation') USING ERRCODE = 'serialization_failure';
+  END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended('crx:auto_expire_quotes', 0));
   IF p_idempotency_key IS NOT NULL THEN
     v_cached := check_idempotency(p_idempotency_key, 'auto_expire_quotes');
@@ -1718,7 +1730,7 @@ BEGIN
       ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '493f1256b3699729ccbfd5bfe67d9707'),
       ('public._refuse_stock_unit_change_with_history()', '20f02f8606621be4bc042d7787c34cdb'),
       ('public.get_purchasing_plan(integer)', 'e196689d988d1da81ff9e2c3e9208762'),
-      ('public.auto_expire_quotes(text)', 'a4bfbedc36d1a78dab3382f52368720d')) AS s(sig, md5)
+      ('public.auto_expire_quotes(text)', '1f9f7ffad3513fdc8280a1e714bcc3a3')) AS s(sig, md5)
     LEFT JOIN pg_proc p ON p.oid = to_regprocedure(s.sig)
    WHERE md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM s.md5
       OR p.proowner <> 'postgres'::regrole OR NOT p.prosecdef

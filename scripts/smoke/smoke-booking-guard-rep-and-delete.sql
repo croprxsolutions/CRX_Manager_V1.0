@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: booking guard gaps from the release Sol review (#1990, PR-D1)
 -- ----------------------------------------------------------------------------
--- REQUIRES 20270128170000_booking_guard_rep_and_delete. Booking A belongs to rep A and has a scheduled spray
+-- REQUIRES 20270129150000_booking_guard_rep_and_delete. Booking A belongs to rep A and has a scheduled spray
 -- job made from its section:
 --   N1  rep B can start that job (in_progress stays cancellable by any rep) but cannot mark it completed
 --       (BOOKING_NOT_YOURS; jobs move scheduled -> in_progress -> completed -> invoiced), not even while

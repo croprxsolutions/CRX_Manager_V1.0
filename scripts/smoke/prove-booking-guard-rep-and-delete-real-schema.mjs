@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270128170000_booking_guard_rep_and_delete (PR-D1, release #1990 Sol 3 and Sol 4).
+ * Real-schema proof for 20270129150000_booking_guard_rep_and_delete (PR-D1, release #1990 Sol 3 and Sol 4).
  * Container setup and replay copied from prove-booking-live-job-guard-real-schema.mjs. Then:
  *   1. BEFORE: both gaps are real: a sales rep marks another rep's booked job completed by a direct update,
  *      and a rep soft-deletes their booking while a job is scheduled from it. The new chain fails.
@@ -28,7 +28,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270128170000_booking_guard_rep_and_delete.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270129150000_booking_guard_rep_and_delete.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([

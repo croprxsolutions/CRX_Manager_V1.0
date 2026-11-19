@@ -1,6 +1,6 @@
 ## 2026-11-19 — Booking guard: another rep's job, and deleting a booking with a live job (#1990 Sol 3, Sol 4)
 
-- New migration `20270128170000_booking_guard_rep_and_delete.sql` (not applied live; record in `docs/reference/migrations.d/`).
+- New migration `20270129150000_booking_guard_rep_and_delete.sql` (not applied live; record in `docs/reference/migrations.d/`).
 - A spray job made from a booking can be marked completed only by that booking's rep or an admin (Mason, 2026-11-19); moving it straight from scheduled or in progress to invoiced is refused the same way. Billing an already completed job (completed to invoiced) is unchanged: the job already holds the booking, and invoicing bills any rep's job. Before, any sales rep could complete another rep's booked job, and a completed job keeps the booking from being declined or cancelled until an admin steps in. The applicator assigned to the job still completes it in the field as before.
 - A booking cannot be deleted while a spray job made from it (or from one of its sections) is scheduled or in progress: "Cancel or complete the job first." Before, deleting skipped the booking's job check.
 - Proof: container prover (before: both gaps are real; after: the new chain passes, both refusals hold under the row policies, a delete and a job schedule serialize in both orders, and the existing chains, the #1959 chain included, end exactly as before). Not yet verified on staging.

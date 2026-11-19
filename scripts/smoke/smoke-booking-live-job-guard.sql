@@ -458,7 +458,7 @@ BEGIN
   END IF;
   v_refusals := v_refusals + 1;
   -- J11 (Sol MED r6). A soft-deleted booking that is still sent cannot take a live job. Its own live job is
-  -- cancelled first (undone with the block): since 20270128170000 a booking with a live job cannot be deleted.
+  -- cancelled first (undone with the block): since 20270129150000 a booking with a live job cannot be deleted.
   BEGIN
     UPDATE jobs SET status = 'cancelled' WHERE job_number = 'SMK-LJ2-' || v_suffix;
     UPDATE quotes SET deleted_at = now() WHERE id = v_q;

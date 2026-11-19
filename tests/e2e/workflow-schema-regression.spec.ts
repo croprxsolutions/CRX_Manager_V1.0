@@ -1,6 +1,11 @@
 import { test, expect, Page } from '@playwright/test';
 import { login } from './utils/auth';
 
+// Read in Node and passed into the page: the browser has no process.env.
+const SUPA = { url: process.env.VITE_SUPABASE_URL!, key: process.env.VITE_SUPABASE_ANON_KEY! };
+// The app's stored sign-in, named after the project in the URL the tests run against.
+const AUTH_KEY = `sb-${new URL(SUPA.url).hostname.split('.')[0]}-auth-token`;
+
 /**
  * Schema Regression & Data Flow E2E Tests
  *
@@ -32,22 +37,22 @@ async function supabaseRest(
   path: string,
   body?: Record<string, unknown>
 ): Promise<unknown> {
-  const token = await page.evaluate(() => {
-    const raw = localStorage.getItem('sb-rhyzpcqhnizqbxphqdkr-auth-token');
+  const token = await page.evaluate((authKey) => {
+    const raw = localStorage.getItem(authKey);
     if (!raw) return '';
     const session = JSON.parse(raw);
     return session.access_token || '';
-  });
+  }, AUTH_KEY);
 
   return page.evaluate(
-    async ({ method, path, body, token }) => {
+    async ({ method, path, body, token, supa }) => {
       const resp = await fetch(
-        `https://rhyzpcqhnizqbxphqdkr.supabase.co/rest/v1/${path}`,
+        `${supa.url}/rest/v1/${path}`,
         {
           method,
           headers: {
             apikey:
-              'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoeXpwY3Fobml6cWJ4cGhxZGtyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTM2NDAsImV4cCI6MjA4NTk2OTY0MH0.WR0vAi_KeGF0OoJ8_dFH7uW6ael9M5xnm6OUo2IZy7U',
+              supa.key,
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
             Prefer: 'return=representation',
@@ -62,7 +67,7 @@ async function supabaseRest(
         return text;
       }
     },
-    { method, path, body, token }
+    { method, path, body, token, supa: SUPA }
   );
 }
 
@@ -72,22 +77,22 @@ async function supabaseRpc(
   functionName: string,
   params?: Record<string, unknown>
 ): Promise<unknown> {
-  const token = await page.evaluate(() => {
-    const raw = localStorage.getItem('sb-rhyzpcqhnizqbxphqdkr-auth-token');
+  const token = await page.evaluate((authKey) => {
+    const raw = localStorage.getItem(authKey);
     if (!raw) return '';
     const session = JSON.parse(raw);
     return session.access_token || '';
-  });
+  }, AUTH_KEY);
 
   return page.evaluate(
-    async ({ functionName, params, token }) => {
+    async ({ functionName, params, token, supa }) => {
       const resp = await fetch(
-        `https://rhyzpcqhnizqbxphqdkr.supabase.co/rest/v1/rpc/${functionName}`,
+        `${supa.url}/rest/v1/rpc/${functionName}`,
         {
           method: 'POST',
           headers: {
             apikey:
-              'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoeXpwY3Fobml6cWJ4cGhxZGtyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTM2NDAsImV4cCI6MjA4NTk2OTY0MH0.WR0vAi_KeGF0OoJ8_dFH7uW6ael9M5xnm6OUo2IZy7U',
+              supa.key,
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
@@ -101,7 +106,7 @@ async function supabaseRpc(
         return text;
       }
     },
-    { functionName, params, token }
+    { functionName, params, token, supa: SUPA }
   );
 }
 

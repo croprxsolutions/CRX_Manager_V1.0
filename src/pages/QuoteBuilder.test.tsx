@@ -6775,4 +6775,51 @@ describe('QuoteBuilder commission split from the customer', () => {
     expect(percent(1)).toBe('70');
     expect(percent(2)).toBe('40');
   });
+
+  it('a customer whose stored split is damaged is picked cleanly: tier set, no crash, treated as no split (Sol HIGH)', async () => {
+    const damaged = { ...noSplit, id: 'customer-4', farm_name: 'Elm Row Farms 4', assigned_tier: 2, default_commission_split: { splits: [null] } };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'customers' ? [damaged] : [], error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'generate_quote_number' ? { data: 'Q-2026-0100', error: null } : { data: null, error: null }));
+    renderQuoteBuilder();
+    await pick('Elm Row Farms 4');
+    expect(await screen.findByText('Elm Row Farms 4 has no split. Pick one.')).toBeInTheDocument();
+    expect(percent(1)).toBe('100');
+  });
+
+  it('clearing the customer also drops a split that only came from them, so the next customer never inherits it (Sol MED)', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Big Sky Farms 18');
+    await waitFor(() => expect(percent(2)).toBe('40'));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear customer' }));
+    await waitFor(() => expect(screen.queryByRole('spinbutton', { name: 'Commission percentage for split 2' })).not.toBeInTheDocument());
+    expect(percent(1)).toBe('100');
+    expect(screen.queryByText(FROM)).not.toBeInTheDocument();
+  });
+
+  it('typing the offered split by hand settles the offer (Sol LOW)', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    fireEvent.change(await screen.findByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '90' } });
+    await pick('Big Sky Farms 18');
+    expect(await screen.findByText(OFFER)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Use it' }));
+    await waitFor(() => expect(percent(1)).toBe('60'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '61' } });
+    await pick('Big Sky Farms 18');
+    expect(await screen.findByText(OFFER)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '60' } });
+    await waitFor(() => expect(screen.queryByText(OFFER)).not.toBeInTheDocument());
+  });
+
+  it('putting the customer\'s split back by hand brings back where it came from (Sol LOW)', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Big Sky Farms 18');
+    await waitFor(() => expect(screen.getByText(FROM)).toBeInTheDocument());
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '61' } });
+    await waitFor(() => expect(screen.queryByText(FROM)).not.toBeInTheDocument());
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '60' } });
+    expect(await screen.findByText(FROM)).toBeInTheDocument();
+  });
 });

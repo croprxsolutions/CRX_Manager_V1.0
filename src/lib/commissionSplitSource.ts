@@ -5,12 +5,17 @@ import type { CommissionSplit } from '../types';
  * and is returned as is, so a quote can take it like any other split (Luna, 18 Nov).
  */
 export function customerSplit(split: CommissionSplit | null | undefined): CommissionSplit | null {
-  return Array.isArray(split?.splits) ? split : null;
+  // A damaged stored split (a null row, a missing name or percentage) counts as never set, so picking the customer
+  // can't throw half way through its updates (Sol HIGH, 19 Nov).
+  const rowOk = (r: unknown) =>
+    !!r && typeof r === 'object' && typeof (r as { recipient?: unknown }).recipient === 'string'
+    && Number.isFinite((r as { percentage?: unknown }).percentage);
+  return split && Array.isArray(split.splits) && split.splits.every(rowOk) ? split : null;
 }
 
-/** Same recipients and percentages in the same order. */
+/** Same recipients at the same percentages, in any row order (Sol LOW, 19 Nov). */
 export function sameSplit(a: CommissionSplit, b: CommissionSplit): boolean {
-  const key = (s: CommissionSplit) => JSON.stringify(s.splits.map(({ recipient, percentage }) => [recipient, percentage]));
+  const key = (s: CommissionSplit) => JSON.stringify(s.splits.map(({ recipient, percentage }) => [recipient, percentage]).sort());
   return key(a) === key(b);
 }
 

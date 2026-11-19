@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-18 — #1981: Mason owner-accepted 1 Sol finding(s) at `cc76d83defe0`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1981 at `cc76d83defe0` (base `5f87729d2685`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270127130000_security_batch_ki121_ki123.sql:116`, text sha256 `df7f6d7c8cdfd3eb` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business) (ref 9182dd28109e)
+
 ## 2026-11-18 — Security batch: refuse, never relabel, existing password-reset activity rows (#1981)
 
 **Decision (Mason, in chat, 2026-11-18), after Sol round 4 on #1981 raised a HIGH on the reset-audit rows (third round on that mechanism).** Migration `20270127130000` no longer relabels earlier `auth_password_reset*` activity rows as `unverified_`: its preflight refuses to apply while any such row exists, and a person reviews them first. Chosen over keeping the relabel, which would have mislabelled genuine server records on a re-apply after rollback. Live had 0 such rows on 2026-11-18. Sol round 5 on #1981 may run.

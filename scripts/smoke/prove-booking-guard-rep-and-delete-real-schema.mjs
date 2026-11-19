@@ -414,6 +414,14 @@ ROLLBACK;` });
   assert.notEqual(rr.status, 0, `a delete at REPEATABLE READ went through: ${rr.stdout}`);
   assert.match(`${rr.stdout}\n${rr.stderr}`, /BOOKING_DELETE_NEEDS_READ_COMMITTED: delete booking \[PROVER\] REP in a READ COMMITTED transaction/);
   console.log('[case] AFTER: a booking delete at REPEATABLE READ is refused BOOKING_DELETE_NEEDS_READ_COMMITTED');
+  // Sol HIGH r2: after its job completes the booking may be deleted; an admin override cannot then reopen the job on it.
+  refusedProbe(`UPDATE jobs SET status = 'in_progress' WHERE id = ${jobOf('REP')};
+UPDATE jobs SET status = 'completed' WHERE id = ${jobOf('REP')};
+${DELETE('REP')}
+SELECT set_config('app.admin_override', 'true', true);
+UPDATE jobs SET status = 'in_progress' WHERE id = ${jobOf('REP')} RETURNING status;`,
+    /BOOKING_CLOSED: booking \[PROVER\] REP is deleted, so spray job J-PRV-REP cannot be reopened\./);
+  console.log('[case] AFTER: a completed job on a booking deleted after completion cannot be reopened, even by an override');
   // Sol r1: a legacy job whose quote_id is rep 2's booking but whose section is on rep 1's booking: rep 2 cannot complete it.
   raw(`INSERT INTO quotes (quote_number, customer_id, status, tier, created_by)
          SELECT '[PROVER] OTHER', customer_id, 'sent', 1, '${REP2}' FROM quotes WHERE quote_number = '[PROVER] REP';

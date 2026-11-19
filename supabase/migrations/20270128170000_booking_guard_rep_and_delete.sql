@@ -21,7 +21,9 @@
 --      Its trigger quotes_booking_live_job_rules now fires on UPDATE OF status, customer_id, deleted_at.
 --      A soft delete at REPEATABLE READ or SERIALIZABLE is refused (BOOKING_DELETE_NEEDS_READ_COMMITTED; Sol r1): there the
 --      check would read the transaction's first snapshot and could miss a job scheduled meanwhile. The app runs READ COMMITTED.
---   Rule 1 checks the rep against every booking a job names (its quote_id and its section's booking; Sol r1).
+--   Rule 1 checks the rep against every booking a job names (its quote_id and its section's booking; Sol r1), with
+--      those bookings locked FOR SHARE (Sol r2). A job reopened from completed or invoiced (an admin override) on a
+--      deleted booking is refused BOOKING_CLOSED (Sol HIGH r2), so deleting after completion cannot leave live work.
 --   Pre- and postflight pin both triggers' timing, events, columns, function and absence of a WHEN clause (Sol r1).
 --   Every other line of both functions is its 20270127120000 body (pinned below by md5).
 --
@@ -92,7 +94,11 @@ BEGIN
      AND (NEW.quote_id IS NOT NULL OR NEW.quote_section_id IS NOT NULL)
      AND auth.uid() IS NOT NULL AND NOT public.is_admin() AND public.is_sales_rep() THEN
     -- Both links are checked (Sol HIGH r1): a legacy row whose quote_id and section disagree is refused unless the
-    -- caller is the rep of every booking it names.
+    -- caller is the rep of every booking it names. The bookings are locked first (Sol MED r2), so an owner change
+    -- committed meanwhile is waited for, or at REPEATABLE READ fails to serialize, rather than read stale.
+    PERFORM 1 FROM public.quotes q
+    WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
+    FOR SHARE;
     SELECT q.quote_number INTO v_quote
     FROM public.quotes q
     WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
@@ -102,6 +108,46 @@ BEGIN
     IF FOUND THEN
       RAISE EXCEPTION 'BOOKING_NOT_YOURS: spray job % comes from booking %, which is another rep''s, so only that rep or an admin can mark it %.',
         NEW.job_number, v_quote.quote_number, NEW.status
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+  -- Sol HIGH r2: a booking can now be deleted once its job is completed; an override that reopens that job
+  -- (completed or invoiced back to scheduled or in progress) must not leave live work on the deleted booking. The
+  -- bookings are locked first, so a delete running at the same time is waited for (and then refused, as the job is live).
+  IF TG_OP = 'UPDATE' AND OLD.status IN ('completed', 'invoiced') AND NEW.status IN ('scheduled', 'in_progress')
+     AND (NEW.quote_id IS NOT NULL OR NEW.quote_section_id IS NOT NULL) THEN
+    PERFORM 1 FROM public.quotes q
+    WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
+    FOR SHARE;
+    SELECT q.quote_number INTO v_quote
+    FROM public.quotes q
+    WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
+      AND q.deleted_at IS NOT NULL
+    ORDER BY q.quote_number
+    LIMIT 1;
+    IF FOUND THEN
+      RAISE EXCEPTION 'BOOKING_CLOSED: booking % is deleted, so spray job % cannot be reopened.',
+        v_quote.quote_number, NEW.job_number
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+  -- Sol HIGH r2: a booking can now be deleted once its job is completed; an override that reopens that job
+  -- (completed or invoiced back to scheduled or in progress) must not leave live work on the deleted booking. The
+  -- bookings are locked first, so a delete running at the same time is waited for (and then refused, as the job is live).
+  IF TG_OP = 'UPDATE' AND OLD.status IN ('completed', 'invoiced') AND NEW.status IN ('scheduled', 'in_progress')
+     AND (NEW.quote_id IS NOT NULL OR NEW.quote_section_id IS NOT NULL) THEN
+    PERFORM 1 FROM public.quotes q
+    WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
+    FOR SHARE;
+    SELECT q.quote_number INTO v_quote
+    FROM public.quotes q
+    WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
+      AND q.deleted_at IS NOT NULL
+    ORDER BY q.quote_number
+    LIMIT 1;
+    IF FOUND THEN
+      RAISE EXCEPTION 'BOOKING_CLOSED: booking % is deleted, so spray job % cannot be reopened.',
+        v_quote.quote_number, NEW.job_number
         USING ERRCODE = 'P0001';
     END IF;
   END IF;
@@ -203,7 +249,7 @@ BEGIN
     -- Sol HIGH r1: at REPEATABLE READ or SERIALIZABLE the check below reads the transaction's first snapshot, so a
     -- job committed meanwhile by a scheduler that only locked this booking would be missed. The app always runs
     -- READ COMMITTED, where the check sees it once the booking row lock is granted.
-    IF current_setting('transaction_isolation') <> 'read committed' THEN
+    IF current_setting('transaction_isolation') NOT IN ('read committed', 'read uncommitted') THEN
       RAISE EXCEPTION 'BOOKING_DELETE_NEEDS_READ_COMMITTED: delete booking % in a READ COMMITTED transaction, so a spray job scheduled meanwhile is seen.',
         NEW.quote_number
         USING ERRCODE = 'P0001';
@@ -296,8 +342,8 @@ DECLARE
   v_g record;
 BEGIN
   FOR v_g IN SELECT * FROM (VALUES
-      ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', 'cannot be deleted. Cancel or complete the job first.', '813dbfe7f6c2ac3e08892c4cefd0477c'),
-      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', '771382f9e89fbe8038b6bcd802b6766c')) AS g(fn, tbl, tg, marker, body_md5)
+      ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', 'cannot be deleted. Cancel or complete the job first.', '9845ed22d07de03c8b3c7afe5356352c'),
+      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', '191275c09c51fbd3ecf63cfab72e29fd')) AS g(fn, tbl, tg, marker, body_md5)
   LOOP
     SELECT * INTO v_p FROM pg_proc WHERE oid = v_g.fn::regprocedure;
     IF v_p.proowner <> 'postgres'::regrole OR NOT v_p.prosecdef

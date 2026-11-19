@@ -1,24 +1,33 @@
 -- Rollback for supabase/migrations/20270129150000_inventory_edge_cases_1942.sql (proven by
--- scripts/smoke/prove-inventory-edge-cases-1942-real-schema.mjs). Restores the four previous bodies (md5-checked) and
--- narrows cycle_count_items.expected_qty and variance back to numeric(14,4), rounding a stored value with more than 4
--- places to 4 (the old behaviour: an open count then completes as it did before #1942). It refuses (ROLLBACK_REFUSED,
--- nothing changed) only when a value is too large for numeric(14,4).
+-- scripts/smoke/prove-inventory-edge-cases-1942-real-schema.mjs). It first checks that the four bodies are still the ones
+-- #1942 installed (ROLLBACK_REFUSED otherwise, nothing changed), then restores the four previous bodies (md5-checked).
+-- cycle_count_items.expected_qty and variance stay plain numeric, with their finite check: narrowing them back would
+-- round away the exact baseline and adjustment of counts saved meanwhile (Sol r1). The restored
+-- update_cycle_count_item stores 4 places again, which plain numeric holds as is.
 -- To use it live, copy it into a new migration through the gates (without the BEGIN / COMMIT lines).
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
 DO $refuse$
+DECLARE
+  v_fn record;
 BEGIN
-  IF EXISTS (SELECT 1 FROM public.cycle_count_items
-              WHERE abs(round(expected_qty, 4)) >= 1e10 OR abs(round(variance, 4)) >= 1e10) THEN
-    RAISE EXCEPTION 'ROLLBACK_REFUSED: a count line is too large for numeric(14,4)';
-  END IF;
+  FOR v_fn IN
+    SELECT x.sig, x.body_md5, p.oid, p.prosrc
+      FROM (VALUES
+        ('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', 'ea8a950809a76e810b2090dcd129d85c'),
+        ('public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', '70e318a7f05d51d2cf6c3c6ea6226379'),
+        ('public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'a0575bba2827e38fd4161ad3924e8978'),
+        ('public._guard_order_item_delivery_lineage()', '8e4160c1209a9dde5518edbcef5d281b')
+      ) AS x(sig, body_md5)
+      LEFT JOIN pg_proc p ON p.oid = to_regprocedure(x.sig)
+  LOOP
+    IF v_fn.oid IS NULL OR md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM v_fn.body_md5 THEN
+      RAISE EXCEPTION 'ROLLBACK_REFUSED: % is not the reviewed body', v_fn.sig;
+    END IF;
+  END LOOP;
 END;
 $refuse$;
-
-ALTER TABLE public.cycle_count_items
-  ALTER COLUMN expected_qty TYPE numeric(14,4) USING round(expected_qty, 4),
-  ALTER COLUMN variance TYPE numeric(14,4) USING round(variance, 4);
 
 CREATE OR REPLACE FUNCTION public.update_cycle_count_item(
   p_item_id uuid,

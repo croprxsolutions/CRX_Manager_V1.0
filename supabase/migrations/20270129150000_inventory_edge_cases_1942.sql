@@ -69,6 +69,10 @@ $preflight$;
 ALTER TABLE public.cycle_count_items
   ALTER COLUMN expected_qty TYPE numeric,
   ALTER COLUMN variance TYPE numeric;
+-- numeric(14,4) refused a non-finite value; plain numeric does not, so the table keeps refusing it (Sol r1).
+ALTER TABLE public.cycle_count_items
+  ADD CONSTRAINT cycle_count_items_expected_variance_finite
+  CHECK (expected_qty NOT IN ('NaN', 'Infinity', '-Infinity') AND variance NOT IN ('NaN', 'Infinity', '-Infinity'));
 
 CREATE OR REPLACE FUNCTION public.update_cycle_count_item(
   p_item_id uuid,
@@ -942,6 +946,10 @@ BEGIN
          AND column_name IN ('expected_qty', 'counted_qty', 'variance'))
      IS DISTINCT FROM 'counted_qty:14,4 expected_qty:-,- variance:-,-' THEN
     RAISE EXCEPTION 'INV_EDGE_POSTFLIGHT: count columns are not as reviewed';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.cycle_count_items'::regclass
+                    AND conname = 'cycle_count_items_expected_variance_finite' AND contype = 'c' AND convalidated) THEN
+    RAISE EXCEPTION 'INV_EDGE_POSTFLIGHT: the finite-count constraint is missing';
   END IF;
   IF (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.order_items'::regclass
         AND tgname = 'guard_order_item_delivery_lineage' AND tgenabled = 'O') <> 1 THEN

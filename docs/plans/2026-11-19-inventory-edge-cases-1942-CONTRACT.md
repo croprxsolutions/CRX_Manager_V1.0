@@ -81,10 +81,11 @@ keeps its `authenticated` and `service_role` execute: the count screen calls it,
 
   Both refusals are `check_violation`, and nothing moves. The screen says to reload. SQL NULL (full delivery) behaves
   as today.
-- **Offline receipts.** `process_offline_action` (20260714203709) catches the refusal. SQLSTATE class 23 marks the saved
-  receipt `needs_review` with `PAYLOAD_INVALID` ("Office review is required"). The receipt keeps its quantities and
-  signature for the office. A stale offline receipt therefore reaches office review instead of silently delivering the
-  wrong figures; it is not lost.
+- **Offline receipts (corrected after Sol r1).** A queued offline receipt calls `complete_delivery` without completion
+  evidence, so since 20261022075000 it stops at `COMPLETION_EVIDENCE_REQUIRED` before reaching D's checks.
+  `process_offline_action` (20260714203709) then marks it `needs_review` (`PAYLOAD_INVALID`, office review) with its
+  quantities and signature kept, as today. D's refusal is reached by the screens' online completion. Were the queue
+  to send evidence later, D's refusal (also `check_violation`, class 23) lands in the same office review.
 
 ### E. Astra 36: the same product on two lines can go short without a warning
 - **Fact.** The body's first loop compares each line's quantity with on-hand on its own, before any deduction. Two
@@ -114,11 +115,11 @@ keeps its `authenticated` and `service_role` execute: the count screen calls it,
     creation run only while the delivery is `in_progress`, and the receipt is checked before the body's status check.
 - **Rollout.** The deployed screens send every loaded line id with a number. Only a stale screen, or an offline receipt
   for a delivery edited in the meantime, sees the new refusal.
-- **Undo.** The rollback script restores the four previous bodies (md5-checked) and narrows the two count columns back
-  to `numeric(14,4)`.
-  - A stored value with more than 4 places is rounded to 4. This is the pre-#1942 behaviour: an open count then
-    completes as it did before.
-  - It refuses, changing nothing, only when a value is too large for `numeric(14,4)`.
+- **Undo (revised after Sol r1).** The rollback script first checks the four bodies are still #1942's, refusing with
+  nothing replaced if a later change touched one. It then restores the four previous bodies (md5-checked).
+  - The two count columns stay plain `numeric` with their finite check. Narrowing them back would round away the exact
+    baseline and adjustment of counts saved under #1942, which Complete and a later reversal use.
+  - The restored function stores 4 places again, which plain `numeric` holds unchanged.
 
 ## 3. Delivery
 One DB PR to `staging`, plus the new messages in `src/lib/errorSanitizer.ts` (shown only when the database refuses).
@@ -152,8 +153,9 @@ One DB PR to `staging`, plus the new messages in `src/lib/errorSanitizer.ts` (sh
   - Functions stay `SECURITY DEFINER` with `search_path = public, pg_temp` and no anon execute.
   - Only `update_cycle_count_item` keeps `authenticated` execute.
   - A second apply refuses.
-  - The rollback refuses on an oversized value, then restores the old bodies and column types, rounding a 7-place
-    value to 4.
+  - The table refuses a non-finite baseline from any writer.
+  - The rollback refuses while a body has drifted, then restores the old bodies and keeps a 7-place baseline exact.
+- **Race overlap.** The proof checks that both completions' transactions were open at the same time.
 
 ## Cold challenge (gpt-6.2-astra high, 46 findings): how each was settled
 
@@ -165,11 +167,13 @@ One DB PR to `staging`, plus the new messages in `src/lib/errorSanitizer.ts` (sh
 - #22: the override census now includes the delivery-line deletes.
 - #7, #44: A and E use one ordered per-product pass.
 - #37, #38: E warns once per product, independent of line order.
-- #41 (BLOCKER), #42: the rollback rounds instead of refusing, and refuses only on overflow.
+- #41 (BLOCKER), #42: the rollback no longer refuses on extra places. Revised after Sol r1: it keeps the exact columns
+  instead of rounding them.
 
 **Settled by evidence**
 - #30, #33: both screens send every line or none.
-- #34: an offline refusal goes to office review with the receipt kept (`process_offline_action`, 20260714203709).
+- #34: an offline receipt reaches office review with the receipt kept (`process_offline_action`, 20260714203709),
+  today for missing completion evidence (see D, corrected after Sol r1).
 - #36: a refusal moves nothing (proof case D).
 - #2: a replay is answered from the receipt before the status checks.
 - #23: the postflight checks the trigger is attached and enabled.

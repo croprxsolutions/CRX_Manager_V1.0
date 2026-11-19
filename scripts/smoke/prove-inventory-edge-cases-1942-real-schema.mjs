@@ -19,10 +19,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-// Iterating: CRX_PROVER_REUSE=<kept container> CRX_PROVER_DB=<a copy of its replayed database> skips the replay.
-const REUSE = process.env.CRX_PROVER_REUSE;
-const NAME = REUSE || `crx-invedge-${process.pid}-${Date.now().toString(36)}`;
-const DB = process.env.CRX_PROVER_DB || 'postgres';
+// Always a disposable container this run creates (no reuse of another container or database: Sol r1).
+const NAME = `crx-invedge-${process.pid}-${Date.now().toString(36)}`;
+const DB = 'postgres';
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -334,12 +333,16 @@ const replica = (sql) => `SET session_replication_role = replica; ${sql} SET ses
 // planner hash-joins from products (product order); with a larger products table it walks the delivery's lines
 // (line order), the order that can deadlock, so the race sessions are held to that plan.
 const LIVE_PLAN = 'SET enable_hashjoin = off; SET enable_mergejoin = off;';
+const STAMP = (k) => `SELECT '${k} ' || extract(epoch FROM clock_timestamp());`;
 async function creationRace() {
   const [t1, t2] = await Promise.all([
-    session(`${LIVE_PLAN} BEGIN; ${complete(DC)} SELECT 'T1 done ' || ${onHand(P4)} || ' ' || ${onHand(P5)}; ROLLBACK;`),
-    session(`${LIVE_PLAN} BEGIN; ${complete(DD)} SELECT 'T2 done ' || ${onHand(P4)} || ' ' || ${onHand(P5)}; ROLLBACK;`, 500),
+    session(`${LIVE_PLAN} BEGIN; ${STAMP('S')} ${complete(DC)} SELECT 'T1 done ' || ${onHand(P4)} || ' ' || ${onHand(P5)}; ${STAMP('E')} ROLLBACK;`),
+    session(`${LIVE_PLAN} BEGIN; ${STAMP('S')} ${complete(DD)} SELECT 'T2 done ' || ${onHand(P4)} || ' ' || ${onHand(P5)}; ${STAMP('E')} ROLLBACK;`, 500),
   ]);
-  return { t1, t2, deadlocked: /deadlock detected/.test(t1.out + t2.out) };
+  const at = (out, k) => Number((out.match(new RegExp(`^${k} ([0-9.]+)$`, 'm')) ?? [])[1]);
+  // Both transactions were open at once: each started before the other ended.
+  const overlapped = at(t2.out, 'S') < at(t1.out, 'E') && at(t1.out, 'S') < at(t2.out, 'E');
+  return { t1, t2, overlapped, deadlocked: /deadlock detected/.test(t1.out + t2.out) };
 }
 
 // B: count 12.35 on the 7-place row (as the signed-in admin), optionally move stock between Save and Complete.
@@ -420,6 +423,7 @@ async function afterCases() {
   // A
   const race = await creationRace();
   assert.ok(!race.deadlocked, `no deadlock expected:\n${race.t1.out}\n${race.t2.out}`);
+  assert.ok(race.overlapped, `the two completions must run at the same time:\n${race.t1.out}\n${race.t2.out}`);
   assert.match(race.t1.out, /T1 done -2 -3/, race.t1.out);
   assert.match(race.t2.out, /T2 done -2 -3/, race.t2.out);
   assert.equal(okProbe(`${complete(DC)} SELECT ${onHand(P4)} || '/' || ${onHand(P5)} || '/' || (SELECT bool_and(manufactured_at_delivery) FROM public.inventory WHERE product_id IN ('${P4}', '${P5}'))
@@ -446,7 +450,8 @@ async function afterCases() {
   assert.deepEqual(countAndComplete(1), [13.35, 12.3456789]);
   refusedProbe(`${replica(`UPDATE public.inventory SET quantity_available = 'Infinity' WHERE id = '${INV3}';`)}
     ${asAdmin} SELECT public.update_cycle_count_item('${CCI}', 12.35, NULL, '${ADMIN}', 'ie-cc-inf');`, /CYCLE_COUNT_ON_HAND_INVALID/);
-  console.log('[case] B as the signed-in admin, a 12.35 count on 12.3456789 stores the exact on-hand and completes at exactly 12.35; a +1 stock move between Save and Complete carries through (13.35); an on-hand that is not a number is refused, not stored');
+  refusedProbe(`INSERT INTO public.cycle_count_items (cycle_count_id, product_id, expected_qty) VALUES ('${CC}', '${P6}', 'Infinity');`, /cycle_count_items_expected_variance_finite/);
+  console.log('[case] B as the signed-in admin, a 12.35 count on 12.3456789 stores the exact on-hand and completes at exactly 12.35; a +1 stock move between Save and Complete carries through (13.35); an on-hand that is not a number is refused, not stored, and the table refuses a non-finite baseline from any writer');
 
   // C
   refusedProbe(moveLine(OE1, `product_id = '${P4}'`), /ORDER_ITEM_DELIVERY_LINEAGE_LOCKED/);
@@ -477,30 +482,28 @@ async function afterCases() {
 function rollbackCases() {
   psql('DROP TRIGGER zz_prover_slow_new_stock_row ON public.inventory; DROP FUNCTION public.zz_prover_slow_new_stock_row();', { user: 'supabase_admin' });
   stageText('reverse.sql', lf(REVERSE));
-  raw(`UPDATE public.cycle_count_items SET expected_qty = 12.3456789, variance = 1e11 WHERE id = '${CCI}';`);
+  // A body changed after #1942 (here: a later fix to the guard) stops the rollback before anything is replaced.
+  psql(`CREATE OR REPLACE FUNCTION public._guard_order_item_delivery_lineage() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $g$ BEGIN RETURN NEW; END $g$;`, { user: 'supabase_admin' });
   const refused = apply('reverse.sql');
-  assert.notEqual(refused.status, 0, 'a value too large for numeric(14,4) must stop the rollback');
-  assert.match(refused.output, /ROLLBACK_REFUSED/, refused.output);
-  assert.equal(scalar(`SELECT coalesce(numeric_scale::text, '-') FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'cycle_count_items' AND column_name = 'variance';`), '-', 'the refused rollback changed nothing');
-  raw(`UPDATE public.cycle_count_items SET variance = 0.0043211 WHERE id = '${CCI}';`);
+  assert.notEqual(refused.status, 0, 'a drifted body must stop the rollback');
+  assert.match(refused.output, /ROLLBACK_REFUSED: public\._guard_order_item_delivery_lineage\(\) is not the reviewed body/, refused.output);
+  assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'::regprocedure;`), '70e318a7f05d51d2cf6c3c6ea6226379', 'the refused rollback replaced nothing');
+  const guardOnly = lf(CANDIDATE).match(/CREATE OR REPLACE FUNCTION public\._guard_order_item_delivery_lineage\(\)[\s\S]*?\$function\$;/)[0];
+  psql(guardOnly, { user: 'supabase_admin' });
+  // An exact count saved under #1942 keeps every digit through the rollback.
+  raw(`UPDATE public.cycle_count_items SET expected_qty = 12.3456789, variance = 0.0043211 WHERE id = '${CCI}';`);
   const r = apply('reverse.sql');
   assert.equal(r.status, 0, r.output);
-  assert.equal(scalar(`SELECT string_agg(column_name || ':' || numeric_precision || ',' || numeric_scale, ' ' ORDER BY column_name) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'cycle_count_items' AND column_name IN ('counted_qty', 'expected_qty', 'variance');`), 'counted_qty:14,4 expected_qty:14,4 variance:14,4');
-  assert.equal(scalar(`SELECT expected_qty || '/' || variance FROM public.cycle_count_items WHERE id = '${CCI}';`), '12.3457/0.0043');
+  assert.equal(scalar(`SELECT string_agg(column_name || ':' || coalesce(numeric_precision::text, '-') || ',' || coalesce(numeric_scale::text, '-'), ' ' ORDER BY column_name) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'cycle_count_items' AND column_name IN ('counted_qty', 'expected_qty', 'variance');`), 'counted_qty:14,4 expected_qty:-,- variance:-,-');
+  assert.equal(scalar(`SELECT expected_qty || '/' || variance FROM public.cycle_count_items WHERE id = '${CCI}';`), '12.3456789/0.0043211');
   assert.match(okProbe(moveLine(OE1, `product_id = '${P4}'`)), new RegExp(`^${P4}/`));
   assert.equal(twoLines(payloads.missingLine), '1/0/0');
   assert.equal(scalar(`SELECT has_function_privilege('authenticated', 'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', 'EXECUTE');`), 'f');
-  console.log('[case] R rollback refuses, changing nothing, while a count value is too large for numeric(14,4); then restores the four previous bodies (md5-checked in the script), narrows the count columns back to numeric(14,4) rounding a 7-place value to 4, and the old behaviour returns (the override moves the line, a missing line ships in full); the wrapper stays private');
+  console.log('[case] R rollback refuses, replacing nothing, while a body is not the one #1942 installed; then restores the four previous bodies (md5-checked in the script), keeps the exact count columns (a 7-place baseline keeps every digit), and the old behaviour returns (the override moves the line, a missing line ships in full); the wrapper stays private');
 }
 
 async function main() {
-  if (!REUSE) buildContainer();
-  if (process.env.CRX_PROVER_BUILD_ONLY === '1') {
-    // pg_cron and pg_net hold connections to the source database; end them so it can be copied.
-    docker([...psqlArgs('supabase_admin').map((a) => (a === DB ? 'template1' : a)), '-c', `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DB}' AND pid <> pg_backend_pid();`, '-c', `CREATE DATABASE invedge_base TEMPLATE ${DB} OWNER postgres;`]);
-    console.log(`[prover] built ${NAME}; replayed database copied to invedge_base`);
-    return;
-  }
+  buildContainer();
   seed();
   await beforeCases();
   await afterCases();
@@ -509,4 +512,4 @@ async function main() {
 }
 
 try { await main(); }
-finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }
+finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

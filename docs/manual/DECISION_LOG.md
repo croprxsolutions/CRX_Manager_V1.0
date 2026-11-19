@@ -1,5 +1,12 @@
 # Decision Log
 
+## 2026-11-18 — #1974: answers to Taha's re-review (admin path; closing with a scheduled job)
+
+**Decision (Mason, in chat, 2026-11-18: "1 yes I agree" / "Warn don't block").**
+- A rep can't decline a booking whose linked job is completed. The intended fix is the admin path: with `app.admin_override` on, cancel the job, then decline (or close the booking short or as applied). No dedicated admin button.
+- Closing a booking as applied while a job on it is still scheduled stays allowed; the screen should warn first. Not part of #1974 (it doesn't touch `close_quote_as_applied`); a follow-up.
+- Taha's LOW (a job linked only by booking skips the scheduler's section and planned checks) is at the line Mason owner-accepted in Sol round 7 (`20270127120000_booking_live_job_guard.sql:178`), so it is treated as covered by that acceptance.
+
 ## 2026-11-18 — #1974 may have an eighth Sol round to replace a lost proof
 
 **Decision (Mason, in chat, 2026-11-18: "I approve the 8th round").** PR #1974 (#1959 booking live-job guard) may have one more Sol round (round 8).

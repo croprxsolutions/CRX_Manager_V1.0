@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-18 — Purchasing plan: holds that count today are capped at the shelf; unknown draws come off the earliest lines (#1989)
+
+**Decision (Mason, in chat, 2026-11-18: "I agree cap it"), after Taha's review of PR #1989.** In `get_purchasing_plan`, a manual hold or a crop-program hold that does not cover its booking's own line (for example a draft booking's) counts today only up to the stock on the shelf; the rest of a crop-program hold counts at its booking's need date, the same way a sent booking's line does, so a hold never makes the plan say "order now" for stock nobody needs yet. Also from Taha's review: a draw whose section is unknown (an order's) now comes off the earliest-needed lines first, matching how `_sync_planned_holds` consumes draws.
+**Supersedes:** the "least-sure first, latest first" draw order of `20270127110000` (#1971), and the "still counts today as before" wording for uncovered holds in the entry below.
+
 ## 2026-11-18 — Purchasing plan: held stock always counts as spoken for (reverses rule 2 of the #1971 entry below)
 
 **Decision (Mason, in chat, 2026-11-18: "1").** After Sol round 2 on PR #1980 found that stock held for a Maybe booking read as free, Mason chose: held stock is always spoken for in `get_purchasing_plan`, whatever the booking's confidence, but a hold never makes the plan buy on its own. A hold covering its booking's (or job's) own lines counts today only up to the stock on the shelf left after other holds, backing Firm lines first; the unbacked part stays as the booking line with its own date and confidence (a Maybe line stays shown only).

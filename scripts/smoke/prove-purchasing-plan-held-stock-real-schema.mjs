@@ -5,7 +5,7 @@
  * prove-booking-timing-purchasing-plan-real-schema.mjs: the checked-in production schema baseline in a
  * network-disabled Supabase PostgreSQL 17 container, every post-baseline migration before the candidate
  * replayed (20270127110000 included), then:
- *   1. BEFORE: smoke-purchasing-plan.sql fails (its P26/P27 groups need the candidate);
+ *   1. BEFORE: smoke-purchasing-plan.sql fails (its P14 earliest-first draw and P26/P27/P28 groups need the candidate);
  *      smoke-booking-planning-fields.sql passes.
  *   2. The candidate applies; a second apply is refused by its preflight (PREFLIGHT_PLAN_DRIFT).
  *   3. AFTER: both chains pass; the function stays SECURITY DEFINER, search_path pinned, anon refused, authenticated allowed.
@@ -281,7 +281,8 @@ async function main() {
   // 1. BEFORE
   const planBefore = chainOutcome('smoke-purchasing-plan.sql');
   assert.doesNotMatch(planBefore, /SMOKE_PASS_ROLLBACK/, 'smoke-purchasing-plan.sql must fail before the candidate');
-  assert.match(planBefore, /SMOKE_FAIL: \(P26a/, `the old plan must fail at the held Maybe case: ${planBefore}`);
+  // P14 is the first group the old body fails now: its unknown draw came off the latest line (Taha on #1989).
+  assert.match(planBefore, /SMOKE_FAIL: \(P14\)/, `the old plan must fail at the earliest-first draw case: ${planBefore}`);
   console.log(`[case] BEFORE: smoke-purchasing-plan.sql: ${planBefore.slice(0, 120)}`);
   assert.match(chainOutcome('smoke-booking-planning-fields.sql'), /^SMOKE_PASS_ROLLBACK/);
 

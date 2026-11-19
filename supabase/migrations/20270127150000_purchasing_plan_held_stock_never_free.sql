@@ -15,6 +15,13 @@
 --      are valid month-days, else both fall back to the default (as the Quote Builder does); a
 --      window whose end is before its start ends in the next year for a needed-by date on or
 --      after its start.
+--   4. A hold still counted as before (manual, or a crop-program hold not covering its booking's own
+--      line, e.g. a draft booking's) counts today only up to the stock on the shelf (manual holds
+--      first); the rest of a crop-program hold counts at its booking's need date (its expiry less
+--      14 days, as _sync_planned_holds sets it), so it never makes the plan "order now" by itself
+--      (Mason, 2026-11-18, "I agree cap it").
+--   5. A draw whose section is unknown (an order's) comes off the earliest-needed lines first, as
+--      _sync_planned_holds consumes it (Taha on #1989; replaces 110000's latest-first rule).
 -- ROLLBACK: re-run the get_purchasing_plan CREATE from 20270127110000 as CREATE OR REPLACE
 --   (read-only function; no data to restore).
 -- ============================================================================
@@ -169,11 +176,9 @@ BEGIN
     SELECT quote_id, product_id, SUM(qty - rem1) AS applied, SUM(qty) AS booked FROM s1 GROUP BY quote_id, product_id
   ),
   -- Step 2: every other draw (order draws, and job draws beyond their section) comes off the
-  -- LATEST-needed lines first. Totals stay exact and needs can only move earlier, so the plan
-  -- never buys short or late while the real section of an order draw is unknown (Phase B records it).
-  -- Undated lines come off last, so a Firm line with no date stays on the needs-a-date list.
-  -- Less sure lines come off before surer ones (Maybe, then Likely or unset, then Firm), so an
-  -- unknown draw never erases Firm demand while a Maybe line of the same product stays.
+  -- EARLIEST-needed lines first, undated last, then section and line order: the same order the
+  -- stock-hold sync uses (_sync_planned_holds, 20260702171000), so the plan and the stored holds
+  -- agree on which line an unknown draw came from (Taha on #1989, Mason 2026-11-18; contract rule 1, P14).
   s2a AS (
     SELECT s1.*, GREATEST(COALESCE(dt.total, 0) - COALESCE(ap1.applied, 0), 0) AS pool
       FROM s1
@@ -184,8 +189,7 @@ BEGIN
     SELECT s2a.*,
            s2a.rem1 - LEAST(s2a.rem1, GREATEST(0, s2a.pool
              - (SUM(s2a.rem1) OVER (PARTITION BY s2a.quote_id, s2a.product_id
-                                    ORDER BY CASE s2a.confidence WHEN 'maybe' THEN 0 WHEN 'firm' THEN 2 ELSE 1 END,
-                                             s2a.needed_by_date DESC NULLS LAST, s2a.s_sort DESC, s2a.i_sort DESC, s2a.item_id DESC
+                                    ORDER BY s2a.needed_by_date NULLS LAST, s2a.s_sort, s2a.i_sort, s2a.item_id
                                     ROWS UNBOUNDED PRECEDING) - s2a.rem1))) AS rem
       FROM s2a
   ),
@@ -207,7 +211,7 @@ BEGIN
   -- no counted line of the product, or one beside a set-aside line, which it may belong to) counts
   -- now. Any other job hold is left out, as before (its job line is counted, or listed under Check units).
   hraw AS (
-    SELECT ih.product_id, ih.quantity, ih.source_id, ih.customer_id, ih.hold_type,
+    SELECT ih.id AS hold_id, ih.product_id, ih.quantity, ih.source_id, ih.customer_id, ih.hold_type, ih.expires_at,
            CASE WHEN ih.hold_type = 'crop_program'
                  AND EXISTS (SELECT 1 FROM bl WHERE bl.quote_id = ih.source_id AND bl.product_id = ih.product_id AND bl.qty > 0)
                  AND NOT EXISTS (SELECT 1 FROM bla WHERE bla.quote_id = ih.source_id AND bla.product_id = ih.product_id
@@ -228,12 +232,31 @@ BEGIN
     SELECT hold_type, source_id, product_id, SUM(quantity) AS held
       FROM hraw WHERE hold_use = 'covered' GROUP BY hold_type, source_id, product_id
   ),
+  -- Holds that count now take the shelf first (manual, then crop-program by need date), but only
+  -- up to the stock on it (Mason, 2026-11-18, "I agree cap it"): the rest of a crop-program hold
+  -- falls to its booking line's need date (the hold sync sets expiry = need date + 14 days, at UTC
+  -- midnight), as it would once the booking is sent; a manual hold has no date, so its rest stays today.
+  hnow0 AS (
+    SELECT h.*,
+           CASE WHEN h.hold_type = 'crop_program' AND h.expires_at IS NOT NULL
+                THEN GREATEST((SELECT today FROM prm), (h.expires_at AT TIME ZONE 'UTC')::date - 14)
+                ELSE (SELECT today FROM prm) END AS rest_date
+      FROM hraw h WHERE h.hold_use = 'now'
+  ),
+  hnow AS (
+    SELECT h.*,
+           LEAST(h.quantity, GREATEST(0, COALESCE(oh.qty, 0) - (SUM(h.quantity) OVER w - h.quantity))) AS on_shelf
+      FROM hnow0 h LEFT JOIN onhand oh ON oh.product_id = h.product_id
+    WINDOW w AS (PARTITION BY h.product_id
+                 ORDER BY CASE h.hold_type WHEN 'manual' THEN 0 ELSE 1 END, h.rest_date, h.source_id, h.hold_id
+                 ROWS UNBOUNDED PRECEDING)
+  ),
   -- Held stock never reads as free, but a hold never makes the plan buy on its own (Mason, 2026-11-18):
   -- covered holds are backed only by the stock on the shelf left after the holds that count now.
   hback AS (
     SELECT c.product_id,
            LEAST(c.held, GREATEST(COALESCE((SELECT oh.qty FROM onhand oh WHERE oh.product_id = c.product_id), 0)
-                                  - COALESCE((SELECT SUM(h.quantity) FROM hraw h WHERE h.product_id = c.product_id AND h.hold_use = 'now'), 0),
+                                  - COALESCE((SELECT SUM(h.on_shelf) FROM hnow h WHERE h.product_id = c.product_id), 0),
                                   0)) AS qty
       FROM (SELECT product_id, SUM(held) AS held FROM hcov GROUP BY product_id) c
   ),
@@ -345,10 +368,14 @@ BEGIN
            x.quote_section_id, NULL::text, false, x.unit_problem, x.customer_id
       FROM jcl2 x WHERE x.qty_left > 0
     UNION ALL
-    -- Holds that count now (hraw).
-    SELECT h.product_id, 'hold', 'committed', (SELECT today FROM prm), h.quantity, NULL::uuid, NULL::uuid, NULL::uuid,
+    -- Holds that count now: the part on the shelf today, the rest by its date (hnow).
+    SELECT h.product_id, 'hold', 'committed', (SELECT today FROM prm), h.on_shelf, NULL::uuid, NULL::uuid, NULL::uuid,
            NULL::uuid, NULL::text, false, false, h.customer_id
-      FROM hraw h WHERE h.hold_use = 'now'
+      FROM hnow h WHERE h.on_shelf > 0
+    UNION ALL
+    SELECT h.product_id, 'hold', 'committed', h.rest_date, h.quantity - h.on_shelf, NULL::uuid, NULL::uuid, NULL::uuid,
+           NULL::uuid, NULL::text, false, false, h.customer_id
+      FROM hnow h WHERE h.quantity > h.on_shelf
   ),
   demb AS (
     SELECT dem.*,
@@ -569,7 +596,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '86e6b577702ccc862363e046e1b81167' THEN
+     IS DISTINCT FROM '7fae31f7ab46ee175006adefb8e7fdf9' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

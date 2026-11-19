@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-19 — Release #1990 may have its Sol review past the round cap
+
+**Decision (Mason, in chat, 2026-11-19: "yes, Sol may review release #1990").** The weekly release PR #1990 (`release/next` into `main`) may have its Sol review although the round counter reads 49.
+**Why:** the counter counts every Sol-reviewed commit the release contains, so the 48 earlier rounds are the week's feature PRs' own reviews, not repeated findings on the release.
+**What it does:** lets Sol review the release head before its migrations go live. Every other gate is unchanged: a clean Sol review of the exact release head, green checks, Taha's `Ready to merge`, and Mason's own approval for each migration the apply guard parks.
+
 ## 2026-11-19 — #1991: Mason owner-accepted 1 Sol finding(s) at `25a163b7ad7b`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1991 at `25a163b7ad7b` (base `0c63a967772d`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

@@ -258,7 +258,7 @@ function refusedProbe(sql, pattern, uid) {
 
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'release-fixes-1990-reverse.sql');
 const id = (s) => `a81a81a8-0000-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), A = id('c1'), G = id('f1'), PA = id('f4'), P = id('d1'), SU = id('d5'), PP = id('d6');
+const ADMIN = id('a1'), A = id('c1'), B = id('c2'), G = id('f1'), PA = id('f4'), Z = id('f5'), P = id('d1'), SU = id('d5'), PP = id('d6');
 const SPLIT = 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)';
 const FNS = ['_save_field_app_invoice_impl_20260714', '_preview_field_app_invoice_split_impl_20260908',
   '_refuse_stock_unit_change_with_history', 'get_purchasing_plan', 'auto_expire_quotes'];
@@ -270,10 +270,10 @@ const OLD_BODIES = '_preview_field_app_invoice_split_impl_20260908:97c05bf6abe63
   + '_refuse_stock_unit_change_with_history:edb18d7a09c0475bf1c6316c8d2d11e2,'
   + '_save_field_app_invoice_impl_20260714:14e32574403a249a9a138a2546f6809d,'
   + 'auto_expire_quotes:92a217ecd60983a8ee53271edc86d79d,get_purchasing_plan:25b0591e2df6d2c34d3aaaf9e5df5e71';
-const NEW_BODIES = '_preview_field_app_invoice_split_impl_20260908:493f1256b3699729ccbfd5bfe67d9707,'
+const NEW_BODIES = '_preview_field_app_invoice_split_impl_20260908:15d627b08c6775fb74cd1fa78163a6d2,'
   + '_refuse_stock_unit_change_with_history:20f02f8606621be4bc042d7787c34cdb,'
-  + '_save_field_app_invoice_impl_20260714:6cbd5936bdb6af9eed48dedcfa2cebc6,'
-  + 'auto_expire_quotes:1f9f7ffad3513fdc8280a1e714bcc3a3,get_purchasing_plan:e196689d988d1da81ff9e2c3e9208762';
+  + '_save_field_app_invoice_impl_20260714:6669d1eaa0a42bf47f8ba84de45d774a,'
+  + 'auto_expire_quotes:f677101398caef2eb0b195a42af5e38f,get_purchasing_plan:c36fde7853b4bc1297d8fc70200a459d';
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -281,16 +281,18 @@ function seed() {
   raw(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
     DELETE FROM public.unit_conversions;
     INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};
-    INSERT INTO public.customers (id, farm_name, assigned_tier, is_active) VALUES ('${A}', '[PROVER] RF90 Farm A', 1, true);
+    INSERT INTO public.customers (id, farm_name, assigned_tier, is_active) VALUES ('${A}', '[PROVER] RF90 Farm A', 1, true), ('${B}', '[PROVER] RF90 Farm B', 1, true);
     INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
         current_cost, tier1_price, tier2_price, tier3_price, is_active) VALUES
       ('${P}', '[PROVER] RF90 Gallon chem', 'RF90-GAL', 'liquid', 'Gal', 'Gal', 'oz', 'Gal', 5, 10, 10, 10, true),
       ('${SU}', '[PROVER] RF90 Unit chem', 'RF90-UNIT', 'liquid', 'Gal', 'Gal', 'oz', 'Gal', 5, 10, 10, 10, true),
       ('${PP}', '[PROVER] RF90 Plan chem', 'RF90-PLAN', 'liquid', 'Gal', 'Gal', 'oz', 'Gal', 5, 10, 10, 10, true);
     INSERT INTO public.fields (id, customer_id, field_name, total_acres, is_active) VALUES
-      ('${G}', '${A}', '[PROVER] RF90 per-unit field', 100, true), ('${PA}', '${A}', '[PROVER] RF90 per-acre field', 100, true);
+      ('${G}', '${A}', '[PROVER] RF90 per-unit field', 100, true), ('${PA}', '${A}', '[PROVER] RF90 per-acre field', 100, true),
+      ('${Z}', '${B}', '[PROVER] RF90 sliver field', 100, true);
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary, price_override_cents) VALUES
-      ('${G}', '${A}', 100, true, NULL), ('${PA}', '${A}', 100, true, 5000);
+      ('${G}', '${A}', 100, true, NULL), ('${PA}', '${A}', 100, true, 5000),
+      ('${Z}', '${B}', 99.96, true, NULL), ('${Z}', '${A}', 0.04, false, NULL);
     DELETE FROM public.app_settings WHERE setting_key = 'per_line_split_billing_enabled';
     INSERT INTO public.app_settings (setting_key, setting_value) VALUES ('per_line_split_billing_enabled', 'true');`);
   // Test-only helpers (prover database only): k81.quote is the KI-81 prover's sent-quote fixture.
@@ -349,6 +351,8 @@ function seed() {
 // 1. KI-81: A's per-unit chemical on the per-unit field, while a $60 quote sits on A's per-acre field.
 const SAVE = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
 SELECT string_agg(unit_price_cents || ':' || price_source, ',' ORDER BY unit_price_cents) FROM k81.save_single_all('${ADMIN}', ARRAY['${G}', '${PA}']::uuid[], '${P}') WHERE customer_id = '${A}';`;
+// The same, adding a field where A's 0.04% share of 10 acres rounds to 0.00 acres and that carries a $12 quote.
+const SAVE_Z = SAVE.replace(`ARRAY['${G}', '${PA}']`, `ARRAY['${G}', '${PA}', '${Z}']`);
 const PREVIEW = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
 SELECT string_agg(unit_price_cents::text, ',' ORDER BY unit_price_cents) FROM k81.preview(ARRAY['${G}', '${PA}']::uuid[], '${P}') WHERE customer_id = '${A}';`;
 
@@ -382,6 +386,7 @@ function planFixture() {
   raw(`UPDATE public.quote_items SET total_units_needed = 100 WHERE quote_id = '${planQuote}';
     INSERT INTO public.orders (order_number, customer_id, quote_id, status, deleted_at) VALUES ('[PROVER] RF90-DEL', '${A}', '${planQuote}', 'cancelled', now());`);
 }
+const PREVIEW_Z = () => PREVIEW.replace(`ARRAY['${G}', '${PA}']`, `ARRAY['${G}', '${PA}', '${Z}']`);
 const PLAN = () => `SELECT COALESCE((SELECT sum((r->>'quantity')::numeric)::text FROM jsonb_array_elements(get_purchasing_plan(12)->'products') p,
   jsonb_array_elements(p->'rows') r WHERE r->>'quote_id' = '${planQuote}'), 'none');`;
 
@@ -459,6 +464,10 @@ async function main() {
   assert.equal(saveAfter, '0:manual,1000:tier', `after: the per-unit line should take the $10 list price (got ${saveAfter})`);
   assert.equal(previewAfter, '1000', `after: the preview should show $10 (got ${previewAfter})`);
   console.log(`[after] KI-81: the per-acre field's quote no longer prices it: save ${saveAfter}, preview ${previewAfter}`);
+  psql(`SELECT k81.quote('${A}', '${Z}', '${P}', 12.00, 'sent', (now() AT TIME ZONE 'America/Chicago')::date + 1, true);`);
+  const sliver = okProbe(SAVE_Z), sliverPreview = okProbe(PREVIEW_Z());
+  assert.equal(sliver, '0:manual,1000:tier'); assert.equal(sliverPreview, '1000');
+  console.log(`[after] KI-81 (Sol r2): a $12 quote on a field where A's share rounds to no acres does not price it either: save ${sliver}, preview ${sliverPreview}`);
   psql(`SELECT k81.quote('${A}', '${G}', '${P}', 8.00, 'sent', (now() AT TIME ZONE 'America/Chicago')::date + 1, true);`);
   const own = okProbe(SAVE), ownPreview = okProbe(PREVIEW);
   assert.equal(own, '0:manual,800:quoted'); assert.equal(ownPreview, '800');
@@ -485,7 +494,10 @@ async function main() {
   raw(`UPDATE public.orders SET deleted_at = NULL WHERE order_number = '[PROVER] RF90-DEL';`);
   assert.equal(okProbe(PLAN(), ADMIN), 'none', 'a live (cancelled) order still stands for the booking');
   raw(`UPDATE public.orders SET deleted_at = now() WHERE order_number = '[PROVER] RF90-DEL';`);
-  console.log(`[after] purchasing plan: the booking shows ${planAfter} Gal; with its order not deleted it still shows none, as before`);
+  raw(`INSERT INTO public.quote_product_draws (quote_id, product_id, quantity_drawn) VALUES ('${planQuote}', '${PP}', 100);`);
+  assert.equal(okProbe(PLAN(), ADMIN), 'none', 'a deleted order whose booking was drawn (a voided whole conversion) still stands for it');
+  raw(`DELETE FROM public.quote_product_draws WHERE quote_id = '${planQuote}';`);
+  console.log(`[after] purchasing plan: the booking shows ${planAfter} Gal; with its order not deleted, or deleted after the booking was drawn (Sol r2), it shows none, as before`);
   const expAfter = expiryRace(expiryFixture(), 'after');
   assert.equal(expAfter.alerts, '1', `after: overlapping sweeps must alert once (got ${expAfter.alerts})`);
   assert.ok(expAfter.waited >= 1500, `after: the second sweep must wait for the first (${expAfter.waited} ms)`);

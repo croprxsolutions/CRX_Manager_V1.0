@@ -9,14 +9,20 @@ DECLARE
 BEGIN
   SELECT string_agg(s.sig, ', ') INTO v_bad
     FROM (VALUES
-      ('public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '6cbd5936bdb6af9eed48dedcfa2cebc6'),
-      ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '493f1256b3699729ccbfd5bfe67d9707'),
+      ('public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '6669d1eaa0a42bf47f8ba84de45d774a'),
+      ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '15d627b08c6775fb74cd1fa78163a6d2'),
       ('public._refuse_stock_unit_change_with_history()', '20f02f8606621be4bc042d7787c34cdb'),
-      ('public.get_purchasing_plan(integer)', 'e196689d988d1da81ff9e2c3e9208762'),
-      ('public.auto_expire_quotes(text)', '1f9f7ffad3513fdc8280a1e714bcc3a3')) AS s(sig, md5)
+      ('public.get_purchasing_plan(integer)', 'c36fde7853b4bc1297d8fc70200a459d'),
+      ('public.auto_expire_quotes(text)', 'f677101398caef2eb0b195a42af5e38f'),
+      ('public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '962abea61f909003b93cb4a430784fce')) AS s(sig, md5)
    WHERE (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure(s.sig)) IS DISTINCT FROM s.md5;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'RELEASE_FIXES_REVERSE_PREFLIGHT: not the 20270129160000 body: %', v_bad;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
+              WHERE p.oid = 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)'::regprocedure
+                AND a.privilege_type = 'EXECUTE' AND a.grantee <> p.proowner) THEN
+    RAISE EXCEPTION 'RELEASE_FIXES_REVERSE_PREFLIGHT: _save_field_app_split_invoice_impl grants changed since 20270129160000';
   END IF;
 END;
 $reverse_preflight$;

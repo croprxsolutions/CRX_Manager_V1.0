@@ -5,8 +5,8 @@
 --    price_override_cents). A $60/gal quote on a per-acre field could then price the per-unit chemical on another
 --    field: 10 gal billed $600 instead of the $300 list price. Now only the per-unit fields' quotes count, in the
 --    save (_save_field_app_invoice_impl_20260714) and in the preview the invoice screen shows
---    (_preview_field_app_invoice_split_impl_20260908). One WHERE condition each; every other line is the
---    20270125163000 body.
+--    (_preview_field_app_invoice_split_impl_20260908). A field whose share rounds to no acres does not count either
+--    (Sol r2). Two WHERE conditions each; every other line is the 20270125163000 body.
 --    Apply review CHECK 4 (20270125163000:1926): _save_field_app_split_invoice_impl takes p_idempotency_key with no
 --    DEFAULT NULL and kept service_role EXECUTE. Its only caller is the save_field_app_split_invoice wrapper (a
 --    postgres-owned SECURITY DEFINER that takes and enforces the key), so EXECUTE is revoked from every API role,
@@ -18,7 +18,8 @@
 --    isolation level (PRODUCT_UNIT_CHANGE_NEEDS_READ_COMMITTED). The app and reviewed migrations run READ COMMITTED.
 -- 3. Purchasing plan (Sol HIGH, 20270127110000:1084). An accepted booking whose only linked order was soft-deleted
 --    dropped out of the plan (the booking looked ordered; the open-order list skips deleted orders), so its demand
---    showed 0. The order check now ignores soft-deleted orders, as 20270128140000:108 does.
+--    showed 0. The order check now ignores soft-deleted orders, as 20270128140000:108 does, unless product was drawn
+--    from the booking (a voided whole conversion keeps its draw; the booking stays converted; Sol r2).
 -- 4. auto_expire_quotes (apply review CHECK 4, 20270127120000:484). It takes p_idempotency_key text DEFAULT NULL
 --    (a repeated key returns the first run's result) and runs one at a time under a transaction advisory lock, so
 --    an overlapping run (a retry or a manual call beside the 06:05 cron) waits, then sees the first run's work
@@ -48,7 +49,9 @@ BEGIN
       ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '97c05bf6abe6303d3d3c3b2720a5f104'),
       ('public._refuse_stock_unit_change_with_history()', 'edb18d7a09c0475bf1c6316c8d2d11e2'),
       ('public.get_purchasing_plan(integer)', '25b0591e2df6d2c34d3aaaf9e5df5e71'),
-      ('public.auto_expire_quotes()', '92a217ecd60983a8ee53271edc86d79d')) AS s(sig, md5)
+      ('public.auto_expire_quotes()', '92a217ecd60983a8ee53271edc86d79d'),
+      -- Not replaced; pinned so the rollback's re-grant goes back onto the body it was granted on.
+      ('public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '962abea61f909003b93cb4a430784fce')) AS s(sig, md5)
    WHERE (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure(s.sig)) IS DISTINCT FROM s.md5;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'RELEASE_FIXES_PREFLIGHT: not the reviewed body (missing, drifted or already replaced): %', v_bad;
@@ -503,11 +506,12 @@ BEGIN
 
           IF v_unit_price IS NULL AND (v_chem->>'product_id') IS NOT NULL THEN
             -- KI-81 (Mason, 2026-11-17): only the price this customer was sent, on a field they have a share of.
-            -- #1990 Sol: and that is billed per unit here; a per-acre field's quote never prices another field's units.
+            -- #1990 Sol: and that is billed per unit here, on some acres; a per-acre field's quote, or one on a field
+            -- whose share rounds to no acres, never prices another field's units.
             v_qi_price := public._field_app_sent_quote_price_cents(
                             (v_chem->>'product_id')::uuid,
                             ARRAY(SELECT DISTINCT (r->>'field_id')::uuid FROM jsonb_array_elements(v_shares -> 'rows') r
-                                     WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0 AND (r->>'price_override_cents') IS NULL),
+                                     WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0 AND COALESCE((r->>'share_acres')::numeric, 0) > 0 AND (r->>'price_override_cents') IS NULL),
                             ARRAY[v_customer_id], v_quote_price_date);
             IF v_qi_price IS NOT NULL THEN
               v_unit_price   := v_qi_price::bigint;
@@ -930,12 +934,12 @@ BEGIN
             FROM quotes q
             JOIN quote_sections qs ON qs.quote_id = q.id
                                   AND qs.field_id = ANY(ARRAY(SELECT DISTINCT (r->>'field_id')::uuid FROM jsonb_array_elements(v_shares -> 'rows') r
-                                     WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0 AND (r->>'price_override_cents') IS NULL))
+                                     WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0 AND COALESCE((r->>'share_acres')::numeric, 0) > 0 AND (r->>'price_override_cents') IS NULL))
             JOIN quote_items qi ON qi.section_id = qs.id AND qi.quote_id = qs.quote_id
            WHERE q.customer_id = v_customer_id
              AND public._field_app_quote_eligible(q, (v_chem->>'product_id')::uuid,
                    ARRAY(SELECT DISTINCT (r->>'field_id')::uuid FROM jsonb_array_elements(v_shares -> 'rows') r
-                                     WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0 AND (r->>'price_override_cents') IS NULL), v_quote_price_date)
+                                     WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0 AND COALESCE((r->>'share_acres')::numeric, 0) > 0 AND (r->>'price_override_cents') IS NULL), v_quote_price_date)
              AND qi.product_id = (v_chem->>'product_id')::uuid
              AND qi.price_per_unit >= 0;
           IF cardinality(v_qi_prices) > 1 THEN
@@ -1186,8 +1190,10 @@ BEGIN
       FROM quotes q
      WHERE q.deleted_at IS NULL
        AND (q.status IN ('sent', 'revised')
-            -- #1990 Sol: a soft-deleted order no longer stands for the booking (as 20270128140000 counts it).
-            OR (q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.quote_id = q.id AND o.deleted_at IS NULL)))
+            -- #1990 Sol: a soft-deleted order no longer stands for the booking (as 20270128140000 counts it), unless
+            -- product was drawn from the booking (a voided whole conversion keeps its draw: the booking stays converted).
+            OR (q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.quote_id = q.id
+                  AND (o.deleted_at IS NULL OR EXISTS (SELECT 1 FROM quote_product_draws d WHERE d.quote_id = q.id AND d.quantity_drawn > 0)))))
   ),
   bla AS (
     SELECT qi.id AS item_id, eq.id AS quote_id, qi.product_id, s.id AS section_id,
@@ -1595,7 +1601,7 @@ BEGIN
       -- from under the forecast). Staff close planned quotes by hand if needed.
       AND q.is_planned = false
       -- #1959 (Mason 2026-11-17): a booking with a live spray job cannot expire; the
-      -- quotes_booking_live_job_rules trigger would refuse it and fail the whole batch.
+      -- booking live-job trigger would refuse it and fail the whole batch.
       AND NOT EXISTS (
         SELECT 1 FROM public.jobs j
         WHERE (j.quote_id = q.id
@@ -1726,11 +1732,11 @@ DECLARE
 BEGIN
   SELECT string_agg(s.sig, ', ') INTO v_bad
     FROM (VALUES
-      ('public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '6cbd5936bdb6af9eed48dedcfa2cebc6'),
-      ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '493f1256b3699729ccbfd5bfe67d9707'),
+      ('public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '6669d1eaa0a42bf47f8ba84de45d774a'),
+      ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '15d627b08c6775fb74cd1fa78163a6d2'),
       ('public._refuse_stock_unit_change_with_history()', '20f02f8606621be4bc042d7787c34cdb'),
-      ('public.get_purchasing_plan(integer)', 'e196689d988d1da81ff9e2c3e9208762'),
-      ('public.auto_expire_quotes(text)', '1f9f7ffad3513fdc8280a1e714bcc3a3')) AS s(sig, md5)
+      ('public.get_purchasing_plan(integer)', 'c36fde7853b4bc1297d8fc70200a459d'),
+      ('public.auto_expire_quotes(text)', 'f677101398caef2eb0b195a42af5e38f')) AS s(sig, md5)
     LEFT JOIN pg_proc p ON p.oid = to_regprocedure(s.sig)
    WHERE md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM s.md5
       OR p.proowner <> 'postgres'::regrole OR NOT p.prosecdef

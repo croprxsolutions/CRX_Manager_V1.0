@@ -10,6 +10,10 @@
 -- so it is rare.
 --
 -- WHAT (each function re-emitted from 20270125163000, unchanged apart from one inserted check):
+--  0. New private _quote_item_sent_unit_20270128(quote, item, live unit): the unit the grower was last SENT for that
+--     line (the latest quote_versions snapshot that lists it), else the live unit. A line counts as mismatched when
+--     either its live unit or its sent unit doesn't match the stock unit, so editing a sent line's unit (Lb -> Gal at
+--     the same price) without a resend can't make a price the grower saw per Lb bill per Gal (attack run, F1b).
 --  1. _field_app_sent_quote_price_cents (the single field-app save, the split save through
 --     resolve_field_app_chemical_price, and a blend-ticket grower's own quote): after the eligible quotes are
 --     locked, a priced line for the product on those fields whose unit doesn't match the stock unit
@@ -33,6 +37,9 @@ BEGIN
   IF to_regprocedure('public._unit_matches_stock_unit(text,text)') IS NULL THEN
     RAISE EXCEPTION 'KI81_UNIT_PREFLIGHT: _unit_matches_stock_unit (20270121110000) is missing';
   END IF;
+  IF to_regprocedure('public._quote_item_sent_unit_20270128(uuid,uuid,text)') IS NOT NULL THEN
+    RAISE EXCEPTION 'KI81_UNIT_PREFLIGHT: _quote_item_sent_unit_20270128 already exists (already applied)';
+  END IF;
   IF EXISTS (
     SELECT 1
       FROM (VALUES
@@ -51,6 +58,30 @@ BEGIN
     JOIN pg_proc p ON p.oid = to_regprocedure(s.sig)), true);
 END;
 $preflight$;
+
+CREATE FUNCTION public._quote_item_sent_unit_20270128(p_quote_id uuid, p_item_id uuid, p_live_unit text)
+RETURNS text
+LANGUAGE sql
+STABLE
+SET search_path = public, pg_temp
+AS $fn$
+  -- KI-81 unit: the unit the grower was last sent for this quote line (the newest sent version that lists it), else
+  -- the line's live unit. A malformed snapshot (sections or items not an array) counts as no unit sent.
+  SELECT COALESCE(
+           (SELECT NULLIF(btrim(it.value->>'unit_size', E' \t\r\n' || chr(160)), '')
+              FROM public.quote_versions v
+             CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(v.snapshot_data->'sections') = 'array'
+                                                          THEN v.snapshot_data->'sections' ELSE '[]'::jsonb END) s(value)
+             CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(s.value->'items') = 'array'
+                                                          THEN s.value->'items' ELSE '[]'::jsonb END) it(value)
+             WHERE v.quote_id = p_quote_id
+               AND it.value->>'quote_item_id' = p_item_id::text
+             ORDER BY v.version_number DESC
+             LIMIT 1),
+           p_live_unit)
+$fn$;
+ALTER FUNCTION public._quote_item_sent_unit_20270128(uuid, uuid, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._quote_item_sent_unit_20270128(uuid, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public._field_app_sent_quote_price_cents(
   p_product_id   uuid,
@@ -114,7 +145,9 @@ BEGIN
   -- in. When that no longer matches the product's stock unit (the unit invoice lines bill in), its price can't be
   -- billed as is, so stop and name it instead of billing $X per lb as $X per oz or falling back to the list price.
   SELECT format('%s is quoted per %s but is now stocked per %s, so that quote price can''t be billed.',
-                COALESCE(p.product_name, 'A product'), btrim(qi.unit_size),
+                COALESCE(p.product_name, 'A product'),
+                CASE WHEN public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
+                     THEN btrim(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size)) ELSE btrim(qi.unit_size) END,
                 COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
     INTO v_msg
     FROM quote_sections qs
@@ -124,7 +157,8 @@ BEGIN
      AND qs.field_id = ANY (p_field_ids)
      AND qi.product_id = p_product_id
      AND qi.price_per_unit >= 0
-     AND NOT public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
+     AND (NOT public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
+          OR NOT public._unit_matches_stock_unit(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size), COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)))
    ORDER BY qi.id
    LIMIT 1;
   IF v_msg IS NOT NULL THEN
@@ -505,7 +539,9 @@ BEGIN
   -- invoice before any number is drawn; a blend ticket has no typed price, so the quote is fixed or resent.
   IF v_quote_section_id IS NOT NULL THEN
     SELECT format('%s is quoted per %s but is now stocked per %s, so that quote price can''t be billed.',
-                  COALESCE(p.product_name, 'A product'), btrim(qi.unit_size),
+                  COALESCE(p.product_name, 'A product'),
+                CASE WHEN public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
+                     THEN btrim(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size)) ELSE btrim(qi.unit_size) END,
                   COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
       INTO v_unit_msg
       FROM quote_items qi
@@ -515,7 +551,8 @@ BEGIN
                               WHERE btp.blend_ticket_id = p_blend_ticket_id AND COALESCE(btp.rate_per_acre, 0) > 0)
        AND qi.price_per_unit >= 0 AND qi.price_per_unit < 'Infinity'::numeric
        AND qi.price_per_unit = ROUND(qi.price_per_unit, 2)
-       AND NOT public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
+       AND (NOT public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
+          OR NOT public._unit_matches_stock_unit(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size), COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)))
      ORDER BY qi.id
      LIMIT 1;
     IF v_unit_msg IS NOT NULL THEN
@@ -1359,9 +1396,11 @@ BEGIN
                                      WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0), v_quote_price_date)
              AND qi.product_id = (v_chem->>'product_id')::uuid
              AND qi.price_per_unit >= 0
-             AND NOT public._unit_matches_stock_unit(qi.unit_size,
-                   (SELECT COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size) FROM products p WHERE p.id = qi.product_id))) THEN
-            RAISE EXCEPTION 'QUOTE_RESEND_REQUIRED: % is quoted in a unit that no longer matches its stock unit, so that quote price can''t be billed. Or type the price on this invoice line, then save again.',
+             AND EXISTS (SELECT 1 FROM products p WHERE p.id = qi.product_id
+                          AND (NOT public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
+                               OR NOT public._unit_matches_stock_unit(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size),
+                                        COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))))) THEN
+            RAISE EXCEPTION 'QUOTE_RESEND_REQUIRED: % is quoted (or was sent) in a unit that no longer matches its stock unit, so that quote price can''t be billed. Or type the price on this invoice line, then save again.',
               COALESCE((SELECT product_name FROM products WHERE id = (v_chem->>'product_id')::uuid), 'A product')
               USING ERRCODE = 'P0001';
           END IF;
@@ -1501,9 +1540,9 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', '93db5d2810b53c0c6d205be2547c2b34', false, 'v'),
-        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'ad5af70df2812e94863815772a7a7d26', true, 'v'),
-        ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', 'e2542c848b022b5919fd1b95c28fa36c', true, 's')
+        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', '2b674d06c64723d2fa8546e01f73c912', false, 'v'),
+        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'a6d1093f3472c9ada74a9b1593f49bf1', true, 'v'),
+        ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '202f01d553d81d295dcb0a8fd2e5d320', true, 's')
       ) AS pin(sig, body_md5, secdef, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL
@@ -1513,6 +1552,14 @@ BEGIN
         OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
   ) THEN
     RAISE EXCEPTION 'KI81_UNIT_POSTFLIGHT: a re-emitted function is not the body, security mode, volatility or search_path this file installs';
+  END IF;
+  IF to_regprocedure('public._quote_item_sent_unit_20270128(uuid,uuid,text)') IS NULL
+     OR (SELECT prosecdef OR provolatile <> 's' OR proowner <> 'postgres'::regrole
+           FROM pg_proc WHERE oid = to_regprocedure('public._quote_item_sent_unit_20270128(uuid,uuid,text)'))
+     OR has_function_privilege('anon', 'public._quote_item_sent_unit_20270128(uuid,uuid,text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._quote_item_sent_unit_20270128(uuid,uuid,text)', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._quote_item_sent_unit_20270128(uuid,uuid,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'KI81_UNIT_POSTFLIGHT: _quote_item_sent_unit_20270128 is not the private, stable, postgres-owned helper this file installs';
   END IF;
   IF current_setting('crx.ki81u_xid', true) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'KI81_UNIT_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';

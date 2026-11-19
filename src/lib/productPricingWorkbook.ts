@@ -80,7 +80,7 @@ const EDITABLE_HEADERS = new Set<PricingWorkbookHeader>([
   'tier3_price',
   'change_reason',
   'price_source',
-  // Rates are read-only here (WP-PM-11a-1): they change on the product page, or by correction while locked.
+  // Rates are read-only here (WP-PM-11a-1): they change with the rate tools (Correct rates, Parent rates, Setup Workbook Rates tab).
   'use_timing',
   'internal_notes',
   'quoting_notes',

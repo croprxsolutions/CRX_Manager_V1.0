@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift, schemaDiff, applyUserProblem, realStamp, planRestamps, restampPairs, restampSql, unmatchedRestamps, migrationChanges, renameTargetProblem, oneShotListProblems, oneShotStops } from './db-apply.mjs';
+import { planMigrations, dollarTag, wrapperSql, isNoTransaction, stampProblems, refuseTarget, urlRef, fileProblems, sqlSkeleton, ledgerDrift, schemaDiff, applyUserProblem, realStamp, planRestamps, restampPairs, restampSql, unmatchedRestamps, migrationChanges, renameTargetProblem, oneShotListProblems, oneShotStops, ONE_SHOT_STOPS } from './db-apply.mjs';
 
 const f = (stems) => stems.map((s) => `${s}.sql`);
 
@@ -323,49 +323,38 @@ test('oneShotListProblems: a one-shot leaves the list only when this PR restamps
   const pairs = [{ from: '20261231110000_fix.sql', to: '20270109100100_fix.sql' }];
   const base = { '20261231110000_fix': 'why' };
   assert.deepEqual(oneShotListProblems({ base, head: { '20270109100100_fix': 'why' }, added: ['20270109100100_fix.sql'], pairs }), [], 'restamp with the entry moved: fine');
-  assert.deepEqual(oneShotListProblems({ base, head: { '20261231110000_fix': 'why', '20270109100100_fix': 'why' }, added: ['20270109100100_fix.sql'], pairs }), [], 'both names kept: fine');
+  assert.deepEqual(oneShotListProblems({ base, head: { ...base, '20270109100100_fix': 'why' }, added: ['20270109100100_fix.sql'], pairs }), [], 'both names kept: fine');
   assert.match(oneShotListProblems({ base, head: {}, added: ['20270109100100_fix.sql'], pairs })[0], /20261231110000_fix was removed/, 'restamped, but the new name is not listed: refused');
   assert.match(oneShotListProblems({ base, head: {}, added: [] })[0], /was removed/, 'no restamp: refused');
-  assert.match(oneShotListProblems({ base, head: { '20270109100100_other': 'x' }, added: [], pairs: [{ from: '20261231110000_fix.sql', to: '20270109100100_fix.sql' }] }).join(' '), /20261231110000_fix was removed/, 'a different name listed does not count');
   assert.match(oneShotListProblems({ base: {}, head: { '20261231110000_old': 'x' }, added: [] })[0], /isn't a new file/, 'an existing file cannot become a one-shot');
-  assert.match(oneShotListProblems({ base, head: base, stopIf: { '20270101000000_ordinary': 'true' }, added: [] })[0], /not a one-shot/, 'a check must name a one-shot');
+  // Keeping only the old entry while restamping the file is refused one step earlier (Luna r2, #1990):
+  const blobs = { '20261231110000_fix.sql': 'b1', '20270109100100_fix.sql': 'b1' };
+  const moved = migrationChanges({ deleted: ['20261231110000_fix.sql'], added: ['20270109100100_fix.sql'], removedOrEdited: ['20261231110000_fix.sql'], baseBlob: (f) => blobs[f] ?? null, headBlob: (f) => blobs[f] ?? null, toStaging: true, onMain: () => false, oneShotsBase: base, oneShotsHead: base });
+  assert.match(moved.problems[0], /restamps the one-shot 20261231110000_fix; add 20270109100100_fix/);
 });
 
 test('oneShotStops: a one-shot whose check finds its rows uncorrected stops the run; others are only recorded (Sol, #1990)', () => {
   const steps = [{ stem: '20270121100000_ki137', run: false }, { stem: '20270121110000_next', run: true }, { stem: '20261007150100_old', run: false }];
-  const stopIf = { '20270121100000_ki137': 'CHECK_KI137', '20270121110000_next': 'CHECK_RUN' };
+  const stops = { '20270121100000_ki137': 'CHECK_KI137', '20270121110000_next': 'CHECK_RUN' };
   const asked = [];
   const holds = (sql) => (asked.push(sql), sql === 'CHECK_KI137');
-  const stops = oneShotStops({ steps, stopIf, holds });
-  assert.equal(stops.length, 1);
-  assert.match(stops[0], /^20270121100000_ki137 is a one-shot .* still holds the rows it corrects.*-1 -f supabase\/migrations\/20270121100000_ki137\.sql/);
-  assert.deepEqual(asked, ['CHECK_KI137'], 'only listed one-shots are checked; a run step and an unlisted one-shot are not');
-  assert.deepEqual(oneShotStops({ steps, stopIf, holds: () => false }), [], 'rows already corrected: recorded as before');
-  assert.deepEqual(oneShotStops({ steps, holds }), [], 'no checks in the registry: old behaviour');
+  const out = oneShotStops({ steps, stops, holds, ref: 'fsnjredpmakbmhwowjjt' });
+  assert.equal(out.length, 1);
+  assert.match(out[0], /^20270121100000_ki137 is a one-shot .*this database \(fsnjredpmakbmhwowjjt\) still holds rows it corrects/);
+  assert.match(out[0], /Never apply it to live/);
+  assert.match(out[0], /psql "<fsnjredpmakbmhwowjjt connection URL>" -v ON_ERROR_STOP=1 -1 -f supabase\/migrations\/20270121100000_ki137\.sql/);
+  assert.match(out[0], /If its preflight refuses, the rows moved since it was written: ask Mason/);
+  assert.deepEqual(asked, ['CHECK_KI137'], 'only a pending one-shot with a check is checked');
+  assert.deepEqual(oneShotStops({ steps, stops, holds: () => false }), [], 'rows corrected: recorded as before');
 });
 
-test('one-shot-migrations.json: every stop_if_still_needed entry is a listed one-shot (KI-137)', () => {
-  const reg = JSON.parse(readFileSync(new URL('../../supabase/baselines/one-shot-migrations.json', import.meta.url), 'utf8'));
-  const stems = Object.keys(reg.stop_if_still_needed ?? {});
-  assert.ok(stems.includes('20270121100000_ki137_powder_keg_each_piksi_mg_labels'));
-  assert.deepEqual(oneShotListProblems({ base: reg.one_shot, head: reg.one_shot, stopIf: reg.stop_if_still_needed, added: [] }), []);
-});
-
-test('oneShotListProblems: a stop check stays with its one-shot and holds SQL text (Sol r1, #1990)', () => {
-  const one = { '20261231110000_fix': 'why' };
-  const check = { '20261231110000_fix': 'EXISTS (SELECT 1)' };
-  assert.deepEqual(oneShotListProblems({ base: one, head: one, stopIfBase: check, stopIf: check, added: [] }), []);
-  assert.match(oneShotListProblems({ base: one, head: one, stopIfBase: check, stopIf: {}, added: [] })[0], /check for 20261231110000_fix was removed/, 'deleting a check is refused');
-  const pairs = [{ from: '20261231110000_fix.sql', to: '20270109100100_fix.sql' }];
-  const both = { ...one, '20270109100100_fix': 'why' };
-  assert.match(oneShotListProblems({ base: one, head: both, stopIfBase: check, stopIf: check, added: ['20270109100100_fix.sql'], pairs }).join(' '), /left behind its restamp/, 'a check left under the old name is refused');
-  assert.deepEqual(oneShotListProblems({ base: one, head: both, stopIfBase: check, stopIf: { '20270109100100_fix': 'EXISTS (SELECT 1)' }, added: ['20270109100100_fix.sql'], pairs }), [], 'a check moved with its restamp: fine');
-  assert.match(oneShotListProblems({ base: one, head: one, stopIfBase: check, stopIf: { '20261231110000_fix': null }, added: [] })[0], /is not SQL text/, 'a null check is refused');
-  assert.match(oneShotListProblems({ base: one, head: one, stopIf: { '20261231110000_fix': '  ' }, added: [] })[0], /is not SQL text/, 'an empty check is refused');
-});
-
-test('oneShotStops: the message names the target database and a one-transaction, stop-on-error psql', () => {
-  const [m] = oneShotStops({ steps: [{ stem: '20270121100000_ki137', run: false }], stopIf: { '20270121100000_ki137': 'X' }, holds: () => true, ref: 'fsnjredpmakbmhwowjjt' });
-  assert.match(m, /this database \(fsnjredpmakbmhwowjjt\)/);
-  assert.match(m, /psql "<fsnjredpmakbmhwowjjt connection URL>" -v ON_ERROR_STOP=1 -1 -f supabase\/migrations\/20270121100000_ki137\.sql/);
+test('ONE_SHOT_STOPS: every check belongs to a listed one-shot whose file exists, so a restamp has to move it', () => {
+  const reg = JSON.parse(readFileSync(new URL('../../supabase/baselines/one-shot-migrations.json', import.meta.url), 'utf8')).one_shot;
+  for (const [stem, sql] of Object.entries(ONE_SHOT_STOPS)) {
+    assert.ok(Object.hasOwn(reg, stem), `${stem} is a listed one-shot`);
+    assert.ok(readFileSync(new URL(`../../supabase/migrations/${stem}.sql`, import.meta.url)).length > 0, `${stem}.sql exists`);
+    assert.match(sql, /^EXISTS \(SELECT 1 FROM public\./, `${stem}: a boolean EXISTS check`);
+    assert.doesNotMatch(sql, /;/, `${stem}: one expression, no statement break`);
+  }
+  assert.ok(Object.keys(ONE_SHOT_STOPS).some((s) => s.includes('_ki137_')), 'KI-137 has a check');
 });

@@ -266,39 +266,43 @@ export function migrationChanges({ toStaging, removedOrEdited, deleted, added, b
 
 // PR check: the one-shot list moves only on purpose. A stem may leave it only when this PR restamps that
 // file into a new name the list now holds (migrationChanges already refuses a restamp that drops it; Sol,
-// #1990). A stem may join it only as a new file in this PR. Every stop_if_still_needed entry names a one-shot
-// and holds SQL text; an entry stays (under the new name when its file is restamped) once it exists.
-export function oneShotListProblems({ base = {}, head = {}, stopIfBase = {}, stopIf = {}, added, pairs = [] }) {
+// #1990). A stem may join it only as a new file in this PR.
+export function oneShotListProblems({ base = {}, head = {}, added, pairs = [] }) {
   const stem = (f) => f.replace(/\.sql$/, '');
   const movedTo = new Map(pairs.map((p) => [stem(p.from), stem(p.to)]));
-  const kept = (list, s) => Object.hasOwn(list, s) || Object.hasOwn(list, movedTo.get(s) ?? '');
   const problems = [];
   for (const s of Object.keys(base)) {
-    if (!kept(head, s)) problems.push(`one-shot-migrations.json: ${s} was removed from the one-shot list; a record-only data migration would then run`);
+    if (!Object.hasOwn(head, s) && !Object.hasOwn(head, movedTo.get(s) ?? '')) problems.push(`one-shot-migrations.json: ${s} was removed from the one-shot list; a record-only data migration would then run`);
   }
   for (const s of Object.keys(head)) {
     if (!Object.hasOwn(base, s) && !added.includes(`${s}.sql`)) problems.push(`one-shot-migrations.json: ${s} was added as a one-shot but isn't a new file in this PR (an existing migration can't become record-only)`);
   }
-  for (const s of Object.keys(stopIfBase)) {
-    if (!(Object.hasOwn(stopIf, movedTo.get(s) ?? '') || (!movedTo.has(s) && Object.hasOwn(stopIf, s)))) problems.push(`one-shot-migrations.json: the stop_if_still_needed check for ${s} was removed or left behind its restamp`);
-  }
-  for (const [s, sql] of Object.entries(stopIf)) {
-    if (!Object.hasOwn(head, s)) problems.push(`one-shot-migrations.json: stop_if_still_needed names ${s}, which is not a one-shot`);
-    if (typeof sql !== 'string' || !sql.trim()) problems.push(`one-shot-migrations.json: stop_if_still_needed for ${s} is not SQL text`);
-  }
   return problems;
 }
 
-// Apply: a one-shot is recorded, never run, on the assumption that this database doesn't hold the rows it
-// corrects (a restore brings them corrected). Where the registry gives a check (stop_if_still_needed) and it
-// finds those rows uncorrected here, recording would leave them wrong and a later migration may refuse: stop
-// before writing anything and say how to fix it (Sol, #1990). holds(sql) runs the check on the target, read
-// only; anything but a plain false counts as "still needs it". A check reads only schema that exists before any
-// pending migration (it runs before the first one).
-export function oneShotStops({ steps, stopIf = {}, holds, ref }) {
+// A one-shot is recorded, never run, because a restore brings its rows already corrected. For KI-137 a staging
+// copy restored from live data from before it would keep the old labels, and 20270121110000 would then refuse
+// (Sol, #1990). Before recording it, db-apply runs this check (read only) and stops loudly while any row KI-137
+// relabels exists with a label other than its corrected one, or a Powder Keg family still has the old rate
+// unit (Taha, 2026-11-19: a loud stop, no automatic run). Reviewed code, not data: a test keeps each key a
+// listed one-shot, so a restamp has to move it. Uses only schema older than every pending migration.
+const ids = (...a) => a.map((x) => `'${x}'`).join(', ');
+export const ONE_SHOT_STOPS = {
+  '20270121100000_ki137_powder_keg_each_piksi_mg_labels': [
+    `EXISTS (SELECT 1 FROM public.products WHERE id IN (${ids('0b2e713b-4962-4c49-ae3a-6074ddac1464', '17ccc5ba-7e98-49bf-9510-4d57c0eda962')}) AND inventory_unit IS DISTINCT FROM 'Ea')`,
+    `EXISTS (SELECT 1 FROM public.product_parents WHERE id IN (${ids('8a1f87bf-9732-4046-b464-8bb5e0ee97b9', '7a565acf-19e8-416e-9373-817ca065ae8a')}) AND rate_unit = 'Lb')`,
+    `EXISTS (SELECT 1 FROM public.inventory WHERE (id IN (${ids('a1396a1c-7cbf-48f7-b98d-83e36ad7de25', 'd847d5c1-0676-4e7e-addf-3e1640e216db')}) AND unit_size IS DISTINCT FROM 'Ea') OR (id = '40224943-7238-4504-ae72-1dbc0ad0bdf6' AND unit_size IS DISTINCT FROM 'MG') OR (id = '687b3d54-1f4e-4ae1-9a5f-afa0542e94c2' AND unit_size IS DISTINCT FROM 'Dry oz'))`,
+    `EXISTS (SELECT 1 FROM public.order_items WHERE (id IN (${ids('41ce7cfe-ad47-4fe3-9ace-9b694338ec34', 'b24ffb13-7925-4c03-8ffd-bdcbb00ad0ca')}) AND unit_size IS DISTINCT FROM 'Ea') OR (id IN (${ids('69766da1-a9bf-4fc6-90c0-f9ced47556bc', 'c12acb4c-45ec-424e-bb13-9566ea3c73f9', 'c8fd3a29-e44b-4ba5-9318-b574845d69a4')}) AND unit_size IS DISTINCT FROM 'MG'))`,
+    `EXISTS (SELECT 1 FROM public.delivery_items WHERE id = 'd33b3ba5-8c72-49e5-81a1-6a60a5507c93' AND unit_size IS DISTINCT FROM 'MG')`,
+    `EXISTS (SELECT 1 FROM public.purchase_order_items WHERE (id = '59a5c466-7e4a-46d8-a65c-55cd8397d52c' AND unit_size IS DISTINCT FROM 'MG') OR (id = '46142f54-0e4d-4259-b749-f24e4101b062' AND unit_size IS DISTINCT FROM 'Dry oz'))`,
+  ].join(' OR '),
+};
+
+// holds(sql) runs a check on the target, read only; anything but a plain false counts as "still needs it".
+export function oneShotStops({ steps, stops = ONE_SHOT_STOPS, holds, ref }) {
   return steps
-    .filter(({ stem, run }) => !run && Object.hasOwn(stopIf, stem) && holds(stopIf[stem]))
-    .map(({ stem }) => `${stem} is a one-shot (recorded here, never run), but this database (${ref}) still holds the rows it corrects, so recording it would leave them wrong and a later migration may refuse. If it is a restore of live data from before ${stem}, apply that file to THIS database by hand first, in one transaction: psql "<${ref} connection URL>" -v ON_ERROR_STOP=1 -1 -f supabase/migrations/${stem}.sql (its own preflight checks every row); then run this again: it is then only recorded. Nothing was written.`);
+    .filter(({ stem, run }) => !run && Object.hasOwn(stops, stem) && holds(stops[stem]))
+    .map(({ stem }) => `${stem} is a one-shot (recorded here, never run), but this database (${ref}) still holds rows it corrects, so recording it would leave them wrong and a later migration may refuse. Never apply it to live this way (live runs it through the release). If this database is a restore of live data from before ${stem}, apply that file to THIS database by hand first, in one transaction: psql "<${ref} connection URL>" -v ON_ERROR_STOP=1 -1 -f supabase/migrations/${stem}.sql, then run this again (it is then only recorded). If its preflight refuses, the rows moved since it was written: ask Mason. Nothing was written.`);
 }
 
 // Drift between the ledger and the repo, for rows after the baseline: a row with no migration file
@@ -406,7 +410,6 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRest
   const registry = oneShotFile.one_shot;
   if (!registry || typeof registry !== 'object') throw new Error('STOPPED: supabase/baselines/one-shot-migrations.json has no one_shot list');
   const oneShots = new Set(Object.keys(registry));
-  const stopIf = oneShotFile.stop_if_still_needed ?? {};
   const allSql = readdirSync(migDir).filter((n) => n.endsWith('.sql'));
   const badNames = allSql.filter((n) => n > highWater && !NAME.test(n.slice(0, -4)));
   if (badNames.length) throw new Error(`STOPPED before applying anything: badly named migration file(s): ${badNames.join(', ')} (<14-digit stamp>_<lower_snake>.sql)`);
@@ -456,7 +459,7 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRest
     ...bare.flatMap((stem) => fileProblems(stem, fileBytes(stem), { forRun: false })),
   ];
   if (problems.length) throw new Error(`STOPPED before applying anything: ${problems.join('; ')}`);
-  const stops = oneShotStops({ steps, stopIf, ref: expectedRef, holds: (sql) => query(dbUrl, `BEGIN READ ONLY; SELECT CASE WHEN (${sql}) IS NOT FALSE THEN 1 ELSE 0 END; ROLLBACK;`)[0] !== '0' });
+  const stops = oneShotStops({ steps, ref: expectedRef, holds: (sql) => query(dbUrl, `BEGIN READ ONLY; SELECT CASE WHEN (${sql}) IS NOT FALSE THEN 1 ELSE 0 END; ROLLBACK;`)[0] !== '0' });
   if (stops.length) throw new Error(`STOPPED before applying anything: ${stops.join('; ')}`);
 
   if (restamps.length) {
@@ -615,7 +618,7 @@ const commands = {
       const stem = f.replace(/\.sql$/, '');
       return fileProblems(stem, readFileSync(path.join('supabase/migrations', f)), { forRun: !Object.hasOwn(oneShots ?? {}, stem) });
     }));
-    problems.push(...oneShotListProblems({ base: oBase?.one_shot ?? {}, head: oneShots ?? {}, stopIfBase: oBase?.stop_if_still_needed ?? {}, stopIf: oHead?.stop_if_still_needed ?? {}, added, pairs: moved.pairs }));
+    problems.push(...oneShotListProblems({ base: oBase?.one_shot ?? {}, head: oneShots ?? {}, added, pairs: moved.pairs }));
     for (const p of problems) console.log(`::error::${p}`);
     return problems.length ? 1 : 0;
   },

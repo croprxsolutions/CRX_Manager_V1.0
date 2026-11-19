@@ -36,6 +36,7 @@ Releases of CRX Manager, newest first.
 * environment banner and tab title prefix (STAGING amber, LOCAL blue) (#1714)
 
 #### 🐛 Bug Fixes
+* sql-column-check checks a select-list alias after a comma and a quoted "public" schema (#2040)
 * REDEFINED guards ignore SQL comments and catch renames (#1910) (#2027)
 * sql-column-check covers comma FROM lists, three-part and quoted names (#1906) (#2033)
 * booked job completes only by its rep or an admin; no booking delete with a live job (#1990 Sol 3, Sol 4) (#2026)

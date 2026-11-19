@@ -305,8 +305,16 @@ vi.mock('../lib/emailService', () => ({ sendEmail: mockSendEmail, pdfToBase64: v
 vi.mock('../lib/rupCompliance', () => ({
   checkRUPCompliance: vi.fn().mockResolvedValue({ compliant: true, warnings: [], rupProductNames: [] }),
 }));
+// A stand-in with the real editor's percentage boxes (same labels), so a test can read and type the split.
 vi.mock('../components/ui/CommissionSplitEditor', () => ({
-  default: () => <div data-testid="commission-split-editor">CommissionSplitEditor</div>,
+  default: ({ value, onChange, disabled }: { value: { splits: Array<{ recipient: string; percentage: number }> }; onChange: (v: unknown) => void; disabled?: boolean }) => (
+    <div data-testid="commission-split-editor">CommissionSplitEditor
+      {value.splits.map((split, i) => (
+        <input key={i} type="number" aria-label={`Commission percentage for split ${i + 1}`} data-recipient={split.recipient} value={split.percentage} disabled={disabled}
+          onChange={(e) => onChange({ splits: value.splits.map((s, j) => (j === i ? { ...s, percentage: Number(e.target.value) } : s)) })} />
+      ))}
+    </div>
+  ),
 }));
 vi.mock('../components/ui/UnsavedChangesModal', () => ({ default: () => null }));
 // Has its own tests (LastChargedPrices.test.tsx); here a marker stands in, so its load and Retry stay
@@ -6632,5 +6640,176 @@ describe('QuoteBuilder label adjuvants', () => {
     renderQuoteBuilder(fixture.quote.id);
     expect(await screen.findAllByText('Couldn\'t check the label')).toHaveLength(1);
     expect(screen.queryByText(/not reviewed/)).not.toBeInTheDocument();
+  });
+});
+
+// Mason, 17 Nov: a quote's commission split starts from the customer's split (plan 2026-11-18). A split typed by
+// hand, or one a saved quote already has, is never replaced without the user choosing to.
+describe('QuoteBuilder commission split from the customer', () => {
+  const SPLIT = { splits: [{ recipient: 'Test Rep One', percentage: 60 }, { recipient: 'Test Rep Two', percentage: 40 }] };
+  const withSplit = { id: 'customer-1', farm_name: 'Big Sky Farms 18', assigned_tier: 1, is_active: true, default_commission_split: SPLIT };
+  const noSplit = { id: 'customer-2', farm_name: 'Cedar Creek Farms 12', assigned_tier: 1, is_active: true, default_commission_split: null };
+  const percent = (n: number) => (screen.getByRole('spinbutton', { name: `Commission percentage for split ${n}` }) as HTMLInputElement).value;
+  const FROM = "From Big Sky Farms 18's split.";
+  const NONE = 'Cedar Creek Farms 12 has no split. Pick one.';
+  const pick = async (name: string) => {
+    const clear = screen.queryByRole('button', { name: 'Clear customer' });
+    if (clear) fireEvent.click(clear);
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Customer' }), { target: { value: name.split(' ')[0] } });
+    fireEvent.click(await screen.findByRole('option', { name: new RegExp(name) }));
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    quoteIdempotencyState.reset();
+    quoteIdempotencyHandles.clear();
+    sessionStorage.clear();
+    dirtyStates.length = 0;
+    authState.role = 'admin';
+  });
+
+  function serveNew(customers: unknown[] = [withSplit, noSplit]) {
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'customers' ? customers : [], error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'generate_quote_number' ? { data: 'Q-2026-0100', error: null } : { data: null, error: null }));
+  }
+
+  it.each(['admin', 'sales_rep'])('a new quote takes the picked customer\'s split and says where it came from (%s)', async (role) => {
+    authState.role = role;
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Big Sky Farms 18');
+    await waitFor(() => expect(percent(1)).toBe('60'));
+    expect(percent(2)).toBe('40');
+    expect(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' })).toHaveAttribute('data-recipient', 'Test Rep One');
+    expect(screen.getByText(FROM)).toBeInTheDocument();
+  });
+
+  it('a customer with no split resets it to the blank row, never keeping the previous customer\'s split', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Big Sky Farms 18');
+    await waitFor(() => expect(percent(2)).toBe('40'));
+    await pick('Cedar Creek Farms 12');
+    await waitFor(() => expect(screen.queryByRole('spinbutton', { name: 'Commission percentage for split 2' })).not.toBeInTheDocument());
+    expect(percent(1)).toBe('100');
+    expect(screen.getByText(NONE)).toBeInTheDocument();
+    expect(screen.queryByText(FROM)).not.toBeInTheDocument();
+  });
+
+  it('a split changed by hand is never replaced by a customer, and nothing asks', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    fireEvent.change(await screen.findByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '90' } });
+    await pick('Big Sky Farms 18');
+    await screen.findByRole('button', { name: 'Clear customer' });
+    expect(percent(1)).toBe('90');
+    expect(screen.queryByRole('spinbutton', { name: 'Commission percentage for split 2' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use it' })).not.toBeInTheDocument();
+    expect(screen.queryByText(FROM)).not.toBeInTheDocument();
+  });
+
+  it('editing the customer\'s split by hand removes "From …", and the next customer leaves the edit alone', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Big Sky Farms 18');
+    await waitFor(() => expect(screen.getByText(FROM)).toBeInTheDocument());
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '70' } });
+    await waitFor(() => expect(screen.queryByText(FROM)).not.toBeInTheDocument());
+    await pick('Cedar Creek Farms 12');
+    await screen.findByRole('button', { name: 'Clear customer' });
+    expect(percent(1)).toBe('70');
+    expect(percent(2)).toBe('40');
+    expect(screen.queryByText(NONE)).not.toBeInTheDocument();
+  });
+
+  // Taha's manual test, 18 Nov: Big Sky, then Cedar Creek, kept 60/40 with no note at all.
+  it('a touch that leaves the customer\'s split as it was does not count as an edit: the next customer still resets it', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Big Sky Farms 18');
+    await waitFor(() => expect(percent(1)).toBe('60'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '61' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '60' } });
+    await pick('Cedar Creek Farms 12');
+    await waitFor(() => expect(screen.queryByRole('spinbutton', { name: 'Commission percentage for split 2' })).not.toBeInTheDocument());
+    expect(percent(1)).toBe('100');
+    expect(screen.getByText(NONE)).toBeInTheDocument();
+  });
+
+  it('clearing the customer also drops a split that only came from them (Sol MED)', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Big Sky Farms 18');
+    await waitFor(() => expect(percent(2)).toBe('40'));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear customer' }));
+    await waitFor(() => expect(screen.queryByRole('spinbutton', { name: 'Commission percentage for split 2' })).not.toBeInTheDocument());
+    expect(percent(1)).toBe('100');
+    expect(screen.queryByText(FROM)).not.toBeInTheDocument();
+  });
+
+  it('after the customer is cleared, a split typed to match their old one still counts as typed (Sol MED)', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Big Sky Farms 18');
+    await waitFor(() => expect(percent(1)).toBe('60'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '70' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear customer' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Clear customer' })).not.toBeInTheDocument());
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '60' } });
+    await pick('Cedar Creek Farms 12');
+    await screen.findByRole('button', { name: 'Clear customer' });
+    expect(percent(1)).toBe('60');
+    expect(percent(2)).toBe('40');
+    expect(screen.queryByText(NONE)).not.toBeInTheDocument();
+  });
+
+  it('switching straight to another customer with a typed split keeps it typed, even when typed back to the first customer\'s (Sol MED)', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Big Sky Farms 18');
+    await waitFor(() => expect(percent(1)).toBe('60'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '70' } });
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Customer' }), { target: { value: 'Cedar' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Cedar Creek Farms 12/ }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Customer' })).toHaveValue('Cedar Creek Farms 12'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '60' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear customer' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Clear customer' })).not.toBeInTheDocument());
+    expect(percent(1)).toBe('60');
+    expect(percent(2)).toBe('40');
+  });
+
+  it('a customer with a stored split that can\'t be used says so, rather than "has no split" (Sol LOW)', async () => {
+    const unusable = { ...noSplit, id: 'customer-5', farm_name: 'Fox Hill Farms 5', default_commission_split: { splits: [{ recipient: 'A', percentage: '60' }, { recipient: 'B', percentage: '40' }] } };
+    serveNew([unusable]);
+    renderQuoteBuilder();
+    await pick('Fox Hill Farms 5');
+    expect(await screen.findByText("Fox Hill Farms 5's saved split can't be used. Pick one.")).toBeInTheDocument();
+    expect(percent(1)).toBe('100');
+  });
+
+  it('a customer whose stored split is damaged is picked cleanly: tier set, the split can\'t be used (Sol HIGH)', async () => {
+    const damaged = { ...noSplit, id: 'customer-4', farm_name: 'Elm Row Farms 4', assigned_tier: 2, default_commission_split: { splits: [null] } };
+    serveNew([damaged]);
+    renderQuoteBuilder();
+    await pick('Elm Row Farms 4');
+    expect(await screen.findByText("Elm Row Farms 4's saved split can't be used. Pick one.")).toBeInTheDocument();
+    expect(percent(1)).toBe('100');
+    expect(screen.getByRole('button', { name: /Pricing tier/ })).toHaveTextContent('Tier 2');
+  });
+
+  it('a saved quote keeps its own split when its customer changes, and nothing asks', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, customer_id: 'customer-2', customer: noSplit, commission_split: { splits: [{ recipient: 'Test Admin', percentage: 100 }] } };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote : table === 'quote_sections' ? [fixture.section] : table === 'quote_items' ? [fixture.item] : table === 'customers' ? [withSplit, noSplit] : table === 'products' ? [fixture.product] : [], error: null }));
+    renderQuoteBuilder(quote.id);
+    await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' })).toHaveAttribute('data-recipient', 'Test Admin'));
+    await pick('Big Sky Farms 18');
+    await screen.findByRole('button', { name: 'Clear customer' });
+    expect(percent(1)).toBe('100');
+    expect(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' })).toHaveAttribute('data-recipient', 'Test Admin');
+    expect(screen.queryByRole('spinbutton', { name: 'Commission percentage for split 2' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use it' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/'s split\.|has no split/)).not.toBeInTheDocument();
   });
 });

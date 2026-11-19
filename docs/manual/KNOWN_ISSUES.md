@@ -239,29 +239,35 @@ application service). Fix if Mason agrees (To-Do decision 18): add these fields 
 and disable them on the screen for non-admins.
 
 ### KI-121 — The last active admin can remove their own admin role
-**LOW · OPEN · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #7) · unassigned**
+**LOW · FIX IN REVIEW (not live) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #7) · Claude**
 `_guard_last_active_admin` fires only on deactivation, not a role change, so the last admin can demote themselves and
 nobody can reach Settings without database access. 5 active admins today; the screen warns. Fix: extend the guard to
-role changes.
+role changes. Fix in review: `20270127130000_security_batch_ki121_ki123` (the guard also refuses a role change, and two
+admins removing each other at once cannot both succeed).
 
 ### KI-122 — An admin password reset leaves the user's existing sign-ins open and is not audited
-**LOW · OPEN · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #11) · unassigned**
+**LOW · FIX IN REVIEW (not live; Edge deploy needs Mason) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #11) · Claude**
 Both reset paths (`create-user` `reset_password` and `reset-user-password`) only set the new password: the account's
 existing sessions stay signed in, and no record says which admin reset whose password. Deactivation, by contrast, ends
 sessions. Fix: end the target's sessions after a reset and write an audit row. Read from code; not tested live. Edge
-Function deploys need Mason's approval.
+Function deploys need Mason's approval. Correction (2026-11-18): live Auth (GoTrue v2.198.0) already ends every
+session on an admin password update, so only the audit half was real. Fix in review: both functions share
+`_shared/passwordReset.ts`, which refuses unless the target loads, and writes the server's own `activity_feed` row
+naming the admin before the password changes (no row, no reset). Not deployed.
 
 ### KI-123 — The signed-out role keeps read grants it does not need
-**LOW (defence in depth) · OPEN · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #11) · unassigned**
+**LOW (defence in depth) · FIX IN REVIEW (not live) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #11) · Claude**
 Row security blocks every signed-out read today (all public tables have RLS and policies), but table read grants to
 the signed-out role remain, so one future policy mistake would expose data. Fix: one migration revoking those grants on
-tables the login page does not need. Table list held privately.
+tables the login page does not need. Table list held privately. Fix in review: `20270127130000_security_batch_ki121_ki123`
+removes every signed-out read and sequence right in `public` and the default for new tables.
 
 ### KI-124 — The public (anon) key is hard-coded in 5 end-to-end test files
-**LOW (informational) · OPEN · security/tooling · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #12) · unassigned**
+**LOW (informational) · FIX IN REVIEW · security/tooling · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #12) · Claude**
 The key is meant to be public, but rotating it would silently break `tests/e2e/golive/utils/supabase-helpers.ts`,
 `tests/e2e/workflow-financial-operations.spec.ts`, `workflow-job-lifecycle.spec.ts`, `workflow-schema-regression.spec.ts`
-and `comprehensive-ui-workflow.spec.ts`. No secret keys were found. Fix: read it from `process.env`.
+and `comprehensive-ui-workflow.spec.ts`. No secret keys were found. Fix: read it from `process.env`. Fix in review: the 5
+files read the URL and key from the E2E environment (which also refuses production).
 
 ## Money
 
@@ -1129,18 +1135,27 @@ names from products. Live: 3 POs match no vendor (PO-2026-0030, PO-2026-0018, PO
 Fix: add `vendor_id` set by `save_purchase_order`, keep the text as a snapshot; backfilling the 3 is To-Do decision 23.
 
 ### KI-145 — Bulk Customer Import fails for every rep and misreads some files silently
-**MED · OPEN · customers/imports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #4) · unassigned**
+**MED · FIX IN REVIEW (Claude, screen-only, PR #1993 to staging; [contract](../plans/2026-11-18-ki145-bulk-customer-import-CONTRACT.md)) · customers/imports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #4)**
 The button shows for reps, but the direct insert never sets `assigned_sales_rep`, which the insert policy requires of
 reps, so every row fails with a generic error (inferred from live policy; not clicked through). For admins, "1,200"
 acres saves as 1, and rows with a blank first cell vanish uncounted. It also skips `save_customer` (no activity row).
 Duplicate detection is KI-77. Fix: set the rep (or use `save_customer`), strip thousands separators, count blank rows
 as invalid, show each row's error.
+**Fix (2026-11-18):** each row now goes through `save_customer` (a rep's rows are assigned to that rep; one
+`customer_created` activity row each); `"1,200"` reads as 1200 and unparseable acreage or an unquoted `1,200` makes the
+row invalid with a reason; blank-first-cell rows are counted with their file line; the result lists each refused row
+and its reason, and a row with no server answer says it may have saved. Proved on the local test copy: the old direct
+insert as a rep fails RLS, the new path saves with the rep and one activity row, a refused middle row writes nothing.
+Not fixed here: duplicate check on re-import (KI-77), quoted values spanning lines, in-place retry of unanswered rows.
 
 ### KI-146 — Farm groups (parent customer) can form a loop, and grandchildren are left out
-**LOW-MED · OPEN · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #5) · unassigned**
+**LOW-MED · FIXED ON STAGING (PR #1991, merged 2026-11-19; live with the next release) · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #5) · Claude**
 `get_customer_farm_group` recurses with no loop guard and returns only the top parent's direct children; the picker and
 `save_customer` accept any parent. A loop makes the Sales Reports farm-group view time out. Live data is clean. Fix:
-refuse self, descendant or child parents in `save_customer`; use `UNION` with a depth cap.
+`20270127200000_ki146_farm_group_no_loops.sql`: a trigger on `customers` refuses a parent that is the customer itself or
+below it (every write path); the read walks distinct ids with `UNION` and returns every descendant. Contract:
+`docs/plans/2026-11-18-ki146-farm-group-loops-CONTRACT.md`. Farm groups may be any depth (Mason, 2026-11-18). Follow-ups:
+#1995 (Orders/Deliveries lists show the top parent), #1996 (Sales Reports stale farm-group responses).
 
 ### KI-147 — Customer payment terms are free text and anything unrecognized becomes Net 30
 **LOW · OPEN · customers/AR · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #6) · unassigned**

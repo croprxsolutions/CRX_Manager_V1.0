@@ -38,7 +38,8 @@
 --   P26  held stock never reads as free (Mason, 2026-11-18): a hold covering its booking's own line is
 --        backed by stock on the shelf (after other holds) and counts today; an unbacked hold buys nothing;
 --        a held undated Firm line stays on Firm needs a date; a hold larger than its lines keeps the rest held;
---        a job hold takes the shelf now; held stock backs a booking's Firm line before its Maybe line
+--        a job hold takes the shelf now; held stock backs a booking's Firm line before its Maybe line;
+--        a booking line of 0 covers no hold
 --   P27  a window crossing New Year ends next year; an invalid start month-day falls back the whole window
 --   P8   an applicator and a caller with no user are refused
 --
@@ -81,16 +82,16 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Purchasing Farm ' || v_suffix) RETURNING id INTO v_customer;
-  -- Products 1..37, all stocked in Gal except 20 (stocked by the 2.5 GL jug); every product is inserted before any is priced
+  -- Products 1..38, all stocked in Gal except 20 (stocked by the 2.5 GL jug); every product is inserted before any is priced
   -- (pricing sets a transaction-wide mode).
-  FOR v_i IN 1..37 LOOP
+  FOR v_i IN 1..38 LOOP
     INSERT INTO products (product_name, unit_size, inventory_unit, product_form)
     VALUES ('[SMOKE] Purchasing ' || lpad(v_i::text, 2, '0') || ' ' || v_suffix,
             (ARRAY['Gal', '2.5 GL'])[(v_i = 20)::int + 1], (ARRAY['Gal', NULL])[(v_i = 20)::int + 1], 'liquid')
     RETURNING id INTO v_pid;
     v_p := v_p || v_pid;
   END LOOP;
-  FOR v_i IN 1..37 LOOP
+  FOR v_i IN 1..38 LOOP
     v_price_res := preview_product_pricing_changes('product_page', NULL,
       jsonb_build_array(jsonb_build_object(
         'product_id', v_p[v_i], 'row_version', (SELECT pricing_version FROM products WHERE id = v_p[v_i]),
@@ -369,7 +370,7 @@ BEGIN
   -- P26 (20270127150000, held stock never reads as free): one booking.
   --   _a Maybe at +60: product 28 (100), 29 (100), 30 (100), 33 (20); _b Firm at +400: product 31 (100);
   --   _c Firm, no date: product 32 (50); _d pre_plant, Likely, needed Dec 31 this year: product 34 (5);
-  --   _e Firm at +30: product 35 (40), 37 (50); _f Maybe at +10: product 37 (50).
+  --   _e Firm at +30: product 35 (40), 37 (50), 38 (0); _f Maybe at +10: product 37 (50).
   -- On hand: 28 100, 29 none, 30 60, 31 100, 32 50, 33 30, 35 100, 36 100, 37 50.
   -- Open orders needed today: 28 100, 31 100, 35 60, 36 100. Product 36: an active job at +5 of 100 (no booking).
   v_res := save_quote(NULL, jsonb_build_object(
@@ -402,7 +403,7 @@ BEGIN
         'items', (SELECT jsonb_agg(jsonb_build_object('client_key', '_ke' || x.i, 'product_id', v_p[x.i], 'sort_order', x.i,
                     'calc_mode', 'units_direct', 'total_units_needed', x.q, 'price_override', 20, 'price_per_unit', 20,
                     'current_cost', 6, 'unit_size', 'Gal', 'acres', 0))
-                    FROM (VALUES (35, 40), (37, 50)) x(i, q))),
+                    FROM (VALUES (35, 40), (37, 50), (38, 0)) x(i, q))),
       jsonb_build_object('client_key', '_f', 'section_name', 'P26 maybe sooner', 'sort_order', 5,
         'needed_by_date', v_t + 10, 'confidence', 'maybe',
         'items', jsonb_build_array(jsonb_build_object('client_key', '_kf', 'product_id', v_p[37], 'sort_order', 0,
@@ -412,7 +413,7 @@ BEGIN
   INSERT INTO smk_pp_bookings VALUES ('P26', (v_res->>'quote_id')::uuid, v_res->'section_ids');
   INSERT INTO inventory (product_id, location, quantity_available, quantity_prebooked, quantity_on_order)
   SELECT v_p[x.i], 'Main Warehouse', x.q, 0, 0
-    FROM (VALUES (28, 100), (30, 60), (31, 100), (32, 50), (33, 30), (35, 100), (36, 100), (37, 50)) x(i, q);
+    FROM (VALUES (28, 100), (30, 60), (31, 100), (32, 50), (33, 30), (35, 100), (36, 100), (37, 50), (38, 60)) x(i, q);
   INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id)
   VALUES ('SMK-PP26-' || v_suffix, v_customer, v_t, 'confirmed', v_admin) RETURNING id INTO v_order;
   PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
@@ -451,7 +452,7 @@ BEGIN
   SELECT quote_id INTO v_q FROM smk_pp_bookings WHERE tag = 'P26';
   INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active)
   SELECT v_p[x.i], v_customer, x.q, 'crop_program', v_q, v_admin, true
-    FROM (VALUES (28, 100), (29, 100), (30, 100), (31, 100), (32, 50), (33, 20), (35, 100), (37, 50)) x(i, q);
+    FROM (VALUES (28, 100), (29, 100), (30, 100), (31, 100), (32, 50), (33, 20), (35, 100), (37, 50), (38, 100)) x(i, q);
   INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active)
   VALUES (v_p[33], v_customer, 30, 'manual', v_q, v_admin, true),
   -- A legacy hold whose quantity is not finite is ignored (P26g still buys exactly 60).
@@ -787,6 +788,12 @@ BEGIN
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'class' = 'shown'
                      AND (r->>'quantity')::numeric = 50) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26i Firm before Maybe) %', v_x;
+  END IF;
+  -- j: a booking line of 0 is no line: its hold of 100 counts today in full; 60 on hand, so buy 40.
+  SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[38];
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 40
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 100 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P26j zero booking line) %', v_x;
   END IF;
   v_n := v_n + 1;
 

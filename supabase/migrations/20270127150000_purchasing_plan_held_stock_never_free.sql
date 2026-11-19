@@ -209,7 +209,7 @@ BEGIN
   hraw AS (
     SELECT ih.product_id, ih.quantity, ih.source_id, ih.customer_id, ih.hold_type,
            CASE WHEN ih.hold_type = 'crop_program'
-                 AND EXISTS (SELECT 1 FROM bl WHERE bl.quote_id = ih.source_id AND bl.product_id = ih.product_id)
+                 AND EXISTS (SELECT 1 FROM bl WHERE bl.quote_id = ih.source_id AND bl.product_id = ih.product_id AND bl.qty > 0)
                  AND NOT EXISTS (SELECT 1 FROM bla WHERE bla.quote_id = ih.source_id AND bla.product_id = ih.product_id
                                                      AND bla.unit_problem AND bla.qty > 0)
                   THEN 'covered'
@@ -569,7 +569,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '50e85ea5ad26e2377a4af873f9c64d73' THEN
+     IS DISTINCT FROM '86e6b577702ccc862363e046e1b81167' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

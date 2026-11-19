@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-19 — #1980: Mason owner-accepted 1 Sol finding(s) at `e2225f84faab`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1980 at `e2225f84faab` (base `5f87729d2685`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/components/inventory/PurchasingTab.tsx:250`, text sha256 `472a69929a17b261` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref e8d08e3a7329)
+
 ## 2026-11-18 — #1971: Mason owner-accepted 1 Sol finding(s) at `3d37b06e956c`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1971 at `3d37b06e956c` (base `59a711b8cd8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

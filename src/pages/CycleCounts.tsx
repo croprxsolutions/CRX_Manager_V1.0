@@ -1153,7 +1153,7 @@ export default function CycleCounts() {
         onClose={closeDetail}
         // Escape on an open confirm must close only the confirm, not this window too.
         closeDisabled={completeConfirmOpen || cancelConfirmOpen || reverseConfirmOpen}
-        title={activeCount ? `Cycle Count:${activeCount.count_number}` : 'Cycle Count'}
+        title={activeCount ? `Cycle Count: ${activeCount.count_number}` : 'Cycle Count'}
         size="large"
       >
         {activeCount && (

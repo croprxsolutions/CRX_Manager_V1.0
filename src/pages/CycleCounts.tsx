@@ -106,9 +106,29 @@ export default function CycleCounts() {
   const [completeConfirmCountId, setCompleteConfirmCountId] = useState<string | null>(null);
   const [completeConfirmMsg, setCompleteConfirmMsg] = useState("");
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  // Which count each confirm was opened for: a confirm acts only on that count (Sol r3, #1982).
+  const [cancelConfirmCountId, setCancelConfirmCountId] = useState<string | null>(null);
+  const [reverseConfirmCountId, setReverseConfirmCountId] = useState<string | null>(null);
   const [reversing, setReversing] = useState(false);
   const [reverseConfirmOpen, setReverseConfirmOpen] = useState(false);
   const confirmOpen = completeConfirmOpen || cancelConfirmOpen || reverseConfirmOpen;
+  // If the count on screen changes (or its window closes) under an open confirm, close the
+  // confirm: it was a question about the earlier count.
+  const shownCountId = showDetail ? activeCount?.id ?? null : null;
+  useEffect(() => {
+    if (cancelConfirmCountId && cancelConfirmCountId !== shownCountId) {
+      setCancelConfirmOpen(false);
+      setCancelConfirmCountId(null);
+    }
+    if (reverseConfirmCountId && reverseConfirmCountId !== shownCountId) {
+      setReverseConfirmOpen(false);
+      setReverseConfirmCountId(null);
+    }
+    if (completeConfirmCountId && completeConfirmCountId !== shownCountId) {
+      setCompleteConfirmOpen(false);
+      setCompleteConfirmCountId(null);
+    }
+  }, [shownCountId, cancelConfirmCountId, reverseConfirmCountId, completeConfirmCountId]);
   const [preparingCompletion, setPreparingCompletion] = useState(false);
   const itemWriteQueuesRef = useRef(new Map<string, Promise<void>>());
   // Each pending write carries its own cycle_count_id. Completion may only wait
@@ -925,12 +945,19 @@ export default function CycleCounts() {
     if (!activeCount || !profile) return;
     // A completion still loading could open its own confirm under this one (Sol HIGH, #1982).
     if (completionInFlightRef.current) return;
+    setCancelConfirmCountId(activeCount.id);
     setCancelConfirmOpen(true);
   };
 
   const executeCancelCount = async () => {
+    const confirmedFor = cancelConfirmCountId;
     setCancelConfirmOpen(false);
+    setCancelConfirmCountId(null);
     if (!activeCount || !profile) return;
+    if (confirmedFor !== activeCount.id) {
+      toast('error', 'That confirmation was for a different cycle count. Open the count you want to cancel and try again.');
+      return;
+    }
 
     await runCriticalAction({
       action: async () => {
@@ -958,12 +985,19 @@ export default function CycleCounts() {
   // Reverse a completed cycle count (undo inventory adjustments)
   const handleReverse = () => {
     if (!activeCount || !profile) return;
+    setReverseConfirmCountId(activeCount.id);
     setReverseConfirmOpen(true);
   };
 
   const doReverse = async () => {
-    if (!activeCount || !profile) return;
+    const confirmedFor = reverseConfirmCountId;
     setReverseConfirmOpen(false);
+    setReverseConfirmCountId(null);
+    if (!activeCount || !profile) return;
+    if (confirmedFor !== activeCount.id) {
+      toast('error', 'That confirmation was for a different cycle count. Open the count you want to reverse and try again.');
+      return;
+    }
 
     setReversing(true);
     try {

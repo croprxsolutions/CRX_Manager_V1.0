@@ -239,4 +239,27 @@ describe('CycleCounts completion race', () => {
     fireEvent.click(cancel);
     expect(screen.queryByRole('alertdialog', { name: 'Cancel Cycle Count' })).toBeNull();
   });
+
+  // Sol r3 (#1982): a confirm opened for count A must never act on count B, however
+  // focus reaches the list behind it. Switching counts closes the stale confirm.
+  it('closes the Cancel confirmation when the count behind it changes', async () => {
+    render(<CycleCounts />);
+    await waitFor(() => expect(screen.getByText('CC-1001')).toBeTruthy());
+    fireEvent.click(screen.getByText('CC-1001'));
+    await waitFor(() => expect(heldItemQueries.length).toBe(1));
+    await release(0);
+    await waitFor(() => expect(screen.getByText('ALPHA PRODUCT')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Cancel Count/ }));
+    await screen.findByRole('alertdialog', { name: 'Cancel Cycle Count' });
+
+    // Count B is opened behind the still-open confirm (jsdom does not enforce inert).
+    fireEvent.click(screen.getByText('CC-2002'));
+    await waitFor(() => expect(heldItemQueries.length).toBe(2));
+    await release(1);
+    await waitFor(() => expect(screen.getByText('BRAVO PRODUCT')).toBeTruthy());
+
+    expect(screen.queryByRole('alertdialog', { name: 'Cancel Cycle Count' })).toBeNull();
+    expect(H.rpc.mock.calls.filter((call) => call[0] === 'cancel_cycle_count')).toEqual([]);
+  });
 });

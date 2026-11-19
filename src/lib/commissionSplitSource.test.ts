@@ -23,6 +23,7 @@ describe('customerSplit', () => {
       { splits: [{ recipient: ' ', percentage: 100 }] },
       { splits: [{ recipient: 'A', percentage: 0 }, { recipient: 'B', percentage: 100 }] },
       { splits: [{ recipient: 'A', percentage: 60 }, { recipient: 'B', percentage: 40.02 }] },
+      { splits: [{ recipient: 'A', percentage: 60 }, { recipient: 'B', percentage: 40.0100000005 }] },
       // eslint-disable-next-line no-sparse-arrays
       { splits: [, { recipient: 'A', percentage: 100 }] },
       { splits: 'A' },
@@ -47,6 +48,7 @@ describe('sameSplit', () => {
     expect(customerSplit(s(['A', 33.333], ['B', 66.667]))).not.toBeNull();
     expect(customerSplit(s(['A', 33.33], ['B', 33.33], ['C', 33.33]))).not.toBeNull();
     expect(customerSplit(s(['A', 60], ['B', 40.004]))).not.toBeNull();
+    expect(customerSplit(s(['A', 60], ['B', 40.01]))).not.toBeNull();
   });
 
   it('a recipient name can\'t fake another split through separators (Sol LOW)', () => {

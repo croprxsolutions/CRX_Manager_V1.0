@@ -6763,12 +6763,37 @@ describe('QuoteBuilder commission split from the customer', () => {
     expect(screen.queryByText(NONE)).not.toBeInTheDocument();
   });
 
-  it('a customer whose stored split is damaged is picked cleanly: tier set, treated as no split (Sol HIGH)', async () => {
+  it('switching straight to another customer with a typed split keeps it typed, even when typed back to the first customer\'s (Sol MED)', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Big Sky Farms 18');
+    await waitFor(() => expect(percent(1)).toBe('60'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '70' } });
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Customer' }), { target: { value: 'Cedar' } });
+    fireEvent.click(await screen.findByRole('option', { name: /Cedar Creek Farms 12/ }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Customer' })).toHaveValue('Cedar Creek Farms 12'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '60' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear customer' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Clear customer' })).not.toBeInTheDocument());
+    expect(percent(1)).toBe('60');
+    expect(percent(2)).toBe('40');
+  });
+
+  it('a customer with a stored split that can\'t be used says so, rather than "has no split" (Sol LOW)', async () => {
+    const unusable = { ...noSplit, id: 'customer-5', farm_name: 'Fox Hill Farms 5', default_commission_split: { splits: [{ recipient: 'A', percentage: '60' }, { recipient: 'B', percentage: '40' }] } };
+    serveNew([unusable]);
+    renderQuoteBuilder();
+    await pick('Fox Hill Farms 5');
+    expect(await screen.findByText("Fox Hill Farms 5's saved split can't be used. Pick one.")).toBeInTheDocument();
+    expect(percent(1)).toBe('100');
+  });
+
+  it('a customer whose stored split is damaged is picked cleanly: tier set, the split can\'t be used (Sol HIGH)', async () => {
     const damaged = { ...noSplit, id: 'customer-4', farm_name: 'Elm Row Farms 4', assigned_tier: 2, default_commission_split: { splits: [null] } };
     serveNew([damaged]);
     renderQuoteBuilder();
     await pick('Elm Row Farms 4');
-    expect(await screen.findByText('Elm Row Farms 4 has no split. Pick one.')).toBeInTheDocument();
+    expect(await screen.findByText("Elm Row Farms 4's saved split can't be used. Pick one.")).toBeInTheDocument();
     expect(percent(1)).toBe('100');
     expect(screen.getByRole('button', { name: /Pricing tier/ })).toHaveTextContent('Tier 2');
   });

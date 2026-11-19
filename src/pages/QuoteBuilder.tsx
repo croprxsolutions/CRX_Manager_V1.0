@@ -1734,13 +1734,16 @@ export default function QuoteBuilder() {
   const applyCustomerSplit = (cust: QuoteCustomer) => {
     if (isEditing || !sameSplit(splitNowRef.current, autoSplitRef.current)) {
       setSplitNote(null);
+      // A kept typed split is measured against the blank row from now on, not the last customer's (Sol MED).
+      if (!isEditing) autoSplitRef.current = NEW_QUOTE_SPLIT;
       return;
     }
     const theirs = customerSplit(cust.default_commission_split);
     putSplit(theirs ?? NEW_QUOTE_SPLIT);
     autoSplitRef.current = theirs ?? NEW_QUOTE_SPLIT;
     commissionSplitTouchedRef.current = true;
-    setSplitNote(theirs ? { kind: 'from', customer: cust.farm_name, split: theirs } : { kind: 'none', customer: cust.farm_name });
+    setSplitNote(theirs ? { kind: 'from', customer: cust.farm_name, split: theirs }
+      : { kind: 'none', customer: cust.farm_name, unusable: cust.default_commission_split != null }); // Sol LOW
   };
 
   const handleCustomerChange = (cust: QuoteCustomer | null): boolean => {

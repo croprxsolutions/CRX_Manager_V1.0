@@ -14,8 +14,10 @@ export function customerSplit(split: CommissionSplit | null | undefined): Commis
     && (r as { recipient: string }).recipient.trim() !== ''
     && Number.isFinite(pct(r)) && pct(r) > 0 && pct(r) <= 100;
   if (!split || !Array.isArray(split.splits) || !Array.from(split.splits).every(rowOk)) return null;
-  const total = split.splits.reduce((sum, r) => sum + r.percentage, 0);
-  return split.splits.length === 0 || Math.abs(total - 100) <= 0.01 + 1e-9 ? split : null;
+  // Summed in billionths of a percent, so float noise neither passes nor fails a split the database would judge
+  // the other way (Sol MED).
+  const total = split.splits.reduce((sum, r) => sum + Math.round(r.percentage * 1e9), 0);
+  return split.splits.length === 0 || Math.abs(total - 100e9) <= 1e7 ? split : null;
 }
 
 /** Same recipients at the same percentages, in any row order (Sol LOW, 19 Nov). */

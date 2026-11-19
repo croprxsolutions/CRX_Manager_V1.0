@@ -4,6 +4,68 @@
 
 **Decision (Mason, in chat, 2026-11-18: "Fill chemistry first").** Live check that day: 0 `active_ingredients`, 0 parents with ingredient rows, 0 mode-of-action rows, 0 `ingredient_map` rows. The comparison is built entirely from ingredient strengths, so a page built now would show every row as incomplete. He was offered "build now on test data" and "a price-per-acre slice only", and chose to fill the chemistry first.
 **What this forbids/implies:** no CMP-2 code starts until the "Start when" list in `docs/plans/2026-11-18-product-CMP2-BUILD-SHEET.md` is met: chemistry filled (DM-4 EPA lookup, DM-1b workbook or reviewed manual entry), MOA-1 landed with its group load, and RT-4 live. The next Product Master step is filling the chemistry, not CMP-2.
+## 2026-11-19 — #1997: Mason owner-accepted 7 Sol finding(s) at `994795d9e03e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1997 at `994795d9e03e` (base `ded769b690d0`) found 7 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:129`, text sha256 `de58d9c249796ea0` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 790e8f66a328)
+- Finding 2 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:112`, text sha256 `2eab717a1e5f38e1` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref a4294f160ded)
+- Finding 3 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:96`, text sha256 `8c37547165bb427d` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref d574a68b7024)
+- Finding 4 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:92`, text sha256 `09b0e88a75b60ff8` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref b5b91eeb8e56)
+- Finding 5 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:116`, text sha256 `3a0bd176d900fbcc` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref dbf01fddb2a5)
+- Finding 6 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:115`, text sha256 `762db17704647daf` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 32f20e28e41c)
+- Finding 7 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:90`, text sha256 `a40417b90ac4c30a` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 7d89581b0add)
+
+## 2026-11-19 — #1997 may have up to three more Sol rounds (6-8)
+
+**Decision (Mason, in chat, 2026-11-19: "Approve up to 3 more").** PR #1997 (KI-148 customer deactivation) may have Sol rounds 6 to 8.
+**Why:** the branch had to merge `staging` to clear a decision-log conflict. That brought other people's database changes into its diff, so the merge gate needs a fresh Sol review. The KI-148 code is unchanged since round 5.
+
+## 2026-11-19 — #1997: Mason owner-accepted 3 Sol finding(s) at `9db7ae3c3924`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1997 at `9db7ae3c3924` (base `872252698adb`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:129`, text sha256 `293dc845726365fc` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 51f9d23991cf)
+- Finding 2 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:92`, text sha256 `ccdc0f56b1a9e785` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref dde574efc71c)
+- Finding 3 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:115`, text sha256 `24b7481390411b3e` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref d9410fa1767f)
+
+## 2026-11-19 — KI-148 (#1997): unbilled work and prepay block deactivation; Sol round 5
+
+**Decision (Mason, in chat, 2026-11-19, on Taha's review of PR #1997).**
+- Deactivation is also refused while the customer has a draft or unposted invoice, a spray job not yet billed
+  (scheduled, in progress, or completed with no invoice), or prepay money on account (balance not zero).
+  **Why:** statements, finance charges and the prepay apply and reconcile runs read only active customers, so that
+  money would drop out of them.
+- An approved or received return still waiting for its credit also blocks. A farm-group parent with active children
+  does not.
+- PR #1997 may have a fifth Sol round (round 5) to review this change.
+
+## 2026-11-19 — KI-148: no lock; Mason removes the wait-for-work lock from the deactivation guard
+
+The `FOR UPDATE` wait added after Sol round 1 drew HIGHs five rounds running (deadlocks with payments and billing,
+deliveries filed under another customer). Mason chose to remove it: the guard counts all five kinds in one statement
+with no row locks, and work saved at the same moment as the deactivation is not caught (extends the 2026-11-18 entry).
+
+## 2026-11-18 — KI-148: Mason accepts the split-second limit on customer deactivation
+
+The deactivation guard (`20270128140000`) waits for new orders, deliveries, holds, quotes and invoices still being saved,
+then checks all five at once. Existing work switched back to open by a status change in the same moment, or work added
+after the deactivation, is not caught. The stop rule fired (Sol r1, Luna r2, Luna r3 HIGHs on this timing mechanism);
+Mason chose to accept the limit rather than build "an inactive customer can never have open work" (follow-up).
+## 2026-11-19 — Release #1990 may have its Sol review past the round cap
+
+**Decision (Mason, in chat, 2026-11-19: "yes, Sol may review release #1990").** The weekly release PR #1990 (`release/next` into `main`) may have its Sol review although the round counter reads 49.
+**Why:** the counter counts every Sol-reviewed commit the release contains, so the 48 earlier rounds are the week's feature PRs' own reviews, not repeated findings on the release.
+**What it does:** lets Sol review the release head before its migrations go live. Every other gate is unchanged: a clean Sol review of the exact release head, green checks, Taha's `Ready to merge`, and Mason's own approval for each migration the apply guard parks.
+
 ## 2026-11-19 — #1991: Mason owner-accepted 1 Sol finding(s) at `25a163b7ad7b`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1991 at `25a163b7ad7b` (base `0c63a967772d`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
@@ -80,6 +142,7 @@
 - **Mason, 2026-11-18 (typed in chat: "close it"):** that includes a section deleted and re-created under the same id: it can only come back on the booking its job came from (Sol round 3).
 - **Mason, 2026-11-18 ("Require both (Recommended)", relayed):** every spray job made from a booking section must also name that booking; the database refuses one that does not. The scheduler already does this; live had no section-linked job breaking it.
 - The rules (no accept, decline, expire or cancel, and no customer change, while a live job exists) now hold in the database for every write path, not only the booking save. Contract: `docs/plans/2026-11-18-booking-live-job-guard-CONTRACT.md`.
+
 ## 2026-11-18 — #1982 may have a fifth Sol round; the cycle-count page locks behind its confirmations
 
 **Decision (Mason, in chat, 2026-11-18: "Yes, round 5").** PR #1982 (cycle-count confirmations open on top of the count window) may have one more Sol round (round 5).

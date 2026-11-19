@@ -209,6 +209,22 @@ describe('BulkCustomerImport', () => {
     ]);
   });
 
+  it('warns but still imports a crop of 1-999 followed by a larger 3-digit crop (maybe an unquoted "1,200")', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,corn_acres,soybean_acres\nSplit Farm,1,200\nReal Farm,300,200\nBig Farm,40,1500\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText('Row 2: Check acres: corn acres 1 and soybean acres 200 might be one number, 1,200. Put quotes around numbers with commas, like "1,200"')).toBeInTheDocument();
+    expect(screen.queryByText(/Row 3:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Row 4:/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import 3 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    expect(payloads().map((a) => a.p_customer_payload)).toEqual([
+      expect.objectContaining({ farm_name: 'Split Farm', corn_acres: 1, soybean_acres: 200 }),
+      expect.objectContaining({ farm_name: 'Real Farm', corn_acres: 300, soybean_acres: 200 }),
+      expect.objectContaining({ farm_name: 'Big Farm', corn_acres: 40, soybean_acres: 1500 }),
+    ]);
+  });
+
   it('refuses an unquoted "5,000" that splits into total acres 5 and corn acres 000', async () => {
     const { container } = render(<BulkCustomerImport {...defaultProps} />);
     pick(container, 'farm_name,total_acres,corn_acres\nSmith Farm,5,000\nReal Farm,500,300\n');

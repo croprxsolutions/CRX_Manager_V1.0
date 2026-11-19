@@ -112,8 +112,8 @@ function parseAcres(value: string): number | null {
  * Not checked when the next column is also acres ("500,300" is real total + corn acres) unless that
  * cell starts with 0 ("5,000": no real acreage is written "000"), or it is a total of 1-999 followed
  * by a larger crop ("1,200" = 1 + 200; Mason, 2026-11-19). A total of 0, or a crop above the total
- * in any other shape, imports with the cropAcresOverTotal warning.
- * shortcut: a split between two crop columns with no total still saves; upgrade if such files show up.
+ * in any other shape, imports with the cropAcresOverTotal warning. A split between two crop columns
+ * imports with the cropSplitWarning warning.
  */
 function unquotedThousands({ cols, quoted }: Pick<CsvRecord, 'cols' | 'quoted'>, idx: number, field: string, nextField: string | undefined): string {
   const next = cols[idx + 1];
@@ -122,6 +122,22 @@ function unquotedThousands({ cols, quoted }: Pick<CsvRecord, 'cols' | 'quoted'>,
   const total = Number(cols[idx]);
   const splitTotal = field === 'total_acres' && total > 0 && Number(next) > total;
   return (ACRE_FIELDS as readonly string[]).includes(nextField ?? '') && !next.startsWith('0') && !splitTotal ? '' : `${cols[idx]},${next}`;
+}
+
+const CROP_FIELDS: readonly string[] = ['corn_acres', 'soybean_acres', 'other_acres'];
+
+/**
+ * A crop of 1-999 followed by a larger 3-digit crop is the shape an unquoted "1,200" leaves between
+ * two crop columns, but can be real, so the row imports with this warning (Mason, 2026-11-19); else ''.
+ */
+function cropSplitWarning({ cols, quoted }: Pick<CsvRecord, 'cols' | 'quoted'>, idx: number, field: string, nextField: string | undefined): string {
+  const next = cols[idx + 1];
+  if (!CROP_FIELDS.includes(field) || !CROP_FIELDS.includes(nextField ?? '')) return '';
+  if (quoted[idx] || quoted[idx + 1] || next === undefined) return '';
+  if (!/^\d{1,3}$/.test(cols[idx]) || !/^\d{3}$/.test(next)) return '';
+  const crop = Number(cols[idx]);
+  if (crop === 0 || Number(next) <= crop) return '';
+  return `Check acres: ${field.replace('_', ' ')} ${cols[idx]} and ${(nextField ?? '').replace('_', ' ')} ${next} might be one number, ${cols[idx]},${next}. Put quotes around numbers with commas, like "1,200"`;
 }
 
 /** The acreage in cell idx, or the row's error message when it is not a clear number. */
@@ -339,6 +355,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
         const customer: Partial<ParsedCustomer> = {};
         const rowData: Record<string, string> = {};
         let badValue = '';
+        let splitWarning = '';
 
         // An unquoted "1,200" splits into extra cells and shifts every later column.
         if (cols.length > headers.length) {
@@ -360,6 +377,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
                 const acres = readAcres({ cols, quoted }, colIdx, field, fieldMapping[colIdx + 1]);
                 if (typeof acres === 'string') badValue ||= acres;
                 else customer[field as typeof ACRE_FIELDS[number]] = acres;
+                splitWarning ||= cropSplitWarning({ cols, quoted }, colIdx, field, fieldMapping[colIdx + 1]);
               }
             } else if (field === 'assigned_tier' && isAdmin) {
               // The tier sets prices: an unclear one is an invalid row, never a guess or the default.
@@ -402,6 +420,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
 
         const overTotal = cropAcresOverTotal(customer);
         if (overTotal) warnings.push({ row: line, warning: overTotal });
+        if (splitWarning) warnings.push({ row: line, warning: splitWarning });
         valid.push({ ...(customer as ParsedCustomer), row: line, key: crypto.randomUUID() });
       });
 

@@ -9,8 +9,10 @@
 --
 -- WHAT:
 --   1. _enforce_job_live_on_open_booking(): once a job is linked to a booking (quote_id or quote_section_id), a
---      signed-in sales rep who is not that booking's rep (quotes.created_by) cannot move it from a live status to
---      completed or invoiced (BOOKING_NOT_YOURS; Mason 2026-11-19). Admins and system sessions are exempt.
+--      signed-in sales rep who is not that booking's rep (quotes.created_by) cannot move it from a live status
+--      (scheduled, in_progress, or cancelled through an override) to completed or invoiced (BOOKING_NOT_YOURS;
+--      Mason 2026-11-19). completed -> invoiced is billing and is not checked: the job already holds the booking,
+--      and the invoicing functions bill any rep's job. Admins and system sessions are exempt.
 --      Applicators are not checked: they reach this only through complete_job, which already allows only the
 --      job's assigned applicator or its sole dispatchee, and jobs_update refuses them a direct write.
 --   2. _enforce_booking_live_job_rules(): a soft delete of a booking (deleted_at set) is refused BOOKING_HAS_JOB
@@ -77,8 +79,10 @@ BEGIN
   -- PR-D1 (#1990 Sol 3; Mason 2026-11-19): a completed job holds its booking open until an admin clears it, and
   -- any sales rep may update any job (jobs_update), so a rep could block another rep's booking. Once a job is
   -- linked to a booking, only that booking's rep (quotes.created_by, the owner the quotes row policy uses) or an
-  -- admin moves it to completed or invoiced. Applicators get here only through complete_job, which already limits
-  -- them to their own job, so only sales reps are checked; system sessions (no auth.uid()) stay exempt.
+  -- admin moves it out of a live status into completed (or invoiced, reachable from there only by an override).
+  -- completed -> invoiced is billing: the job already holds the booking, so that move is not checked (Luna r1).
+  -- Applicators get here only through complete_job, which already limits them to their own job, so only sales
+  -- reps are checked; system sessions (no auth.uid()) stay exempt.
   IF TG_OP = 'UPDATE' AND NEW.status IN ('completed', 'invoiced') AND OLD.status NOT IN ('completed', 'invoiced')
      AND (NEW.quote_id IS NOT NULL OR NEW.quote_section_id IS NOT NULL)
      AND auth.uid() IS NOT NULL AND NOT public.is_admin() AND public.is_sales_rep() THEN
@@ -267,7 +271,7 @@ DECLARE
 BEGIN
   FOR v_g IN SELECT * FROM (VALUES
       ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', 'cannot be deleted. Cancel or complete the job first.', 'cbd9ddb81d3572caaf13ad72b89141a9'),
-      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', '1e80aba49f5194fe3a4f201ad42b3f22')) AS g(fn, tbl, tg, marker, body_md5)
+      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', '29cb6c9157e10ad83e909bae1a10a7b9')) AS g(fn, tbl, tg, marker, body_md5)
   LOOP
     SELECT * INTO v_p FROM pg_proc WHERE oid = v_g.fn::regprocedure;
     IF v_p.proowner <> 'postgres'::regrole OR NOT v_p.prosecdef

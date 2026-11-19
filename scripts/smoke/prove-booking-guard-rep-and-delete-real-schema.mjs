@@ -254,6 +254,7 @@ const ADMIN = 'b1100000-0000-4000-8000-0000000000a1';
 const REP = 'b1100000-0000-4000-8000-0000000000b2';
 const CHAIN = 'smoke-booking-guard-rep-and-delete.sql';
 const REP2 = 'b1100000-0000-4000-8000-0000000000c3';
+const APPL = 'b1100000-0000-4000-8000-0000000000d4';
 // Existing chains that write jobs or quote statuses, convert or auto-expire; each must end the same way before
 // and after the candidate (some stop at their own setup on this database, the same way both times).
 const REGRESSION = [
@@ -276,9 +277,11 @@ function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
     ('${ADMIN}', 'bljg-admin@example.invalid', '{"full_name":"[PROVER] Live Job Admin","role":"admin"}'::jsonb),
     ('${REP}', 'bljg-rep@example.invalid', '{"full_name":"[PROVER] Live Job Rep","role":"sales_rep"}'::jsonb),
-    ('${REP2}', 'bgrd-rep2@example.invalid', '{"full_name":"[PROVER] Other Rep","role":"sales_rep"}'::jsonb);`);
+    ('${REP2}', 'bgrd-rep2@example.invalid', '{"full_name":"[PROVER] Other Rep","role":"sales_rep"}'::jsonb),
+    ('${APPL}', 'bgrd-appl@example.invalid', '{"full_name":"[PROVER] Applicator","role":"applicator"}'::jsonb);`);
   raw(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
     UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id IN ('${REP}', '${REP2}');
+    UPDATE public.profiles SET role = 'applicator', is_active = true WHERE id = '${APPL}';
     DELETE FROM public.unit_conversions;
     INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};`);
 }
@@ -347,6 +350,7 @@ async function main() {
   } else buildContainer();
   seed();
   for (const tag of ['REP', 'RACE', 'RACE2']) psql(FIXTURE(tag));
+  psql(`UPDATE jobs SET applicator_id = '${APPL}' WHERE job_number = 'J-PRV-REP';`);
 
   // 1. BEFORE: both gaps are real (rolled-back probes, as the signed-in user under RLS).
   assert.equal(okProbe(COMPLETE('REP'), REP2), 'completed', 'before the candidate rep 2 completing rep 1\'s booked job should go through');
@@ -377,6 +381,15 @@ async function main() {
   assert.equal(okProbe(COMPLETE('REP'), REP), 'completed', "the booking's own rep can complete the job");
   assert.equal(okProbe(COMPLETE('REP'), ADMIN), 'completed', 'an admin can complete the job');
   console.log("[case] AFTER: under RLS another rep's complete is refused BOOKING_NOT_YOURS; the booking's rep and an admin complete it");
+  // The app's own path (Luna MED r1): start_job then complete_job, as the signed-in user under RLS.
+  const RPC = (who, k) => `SELECT start_job(${jobOf('REP')}, '${who}', 'bgrd-s-${k}');
+SELECT complete_job(${jobOf('REP')}, '{}'::jsonb, '${who}', 'bgrd-c-${k}') IS NOT NULL;
+RESET ROLE;
+SELECT status FROM jobs WHERE job_number = 'J-PRV-REP';`;
+  refusedProbe(RPC(REP2, 'b'), /BOOKING_NOT_YOURS: spray job J-PRV-REP comes from booking \[PROVER\] REP/, REP2);
+  assert.equal(okProbe(RPC(APPL, 'a'), APPL), 'completed', 'the assigned applicator completes the job through complete_job');
+  assert.equal(okProbe(RPC(REP, 'r'), REP), 'completed', "the booking's rep completes the job through complete_job");
+  console.log("[case] AFTER: through start_job + complete_job, another rep is refused BOOKING_NOT_YOURS; the assigned applicator and the booking's rep complete it");
   refusedProbe(DELETE('REP'), /BOOKING_HAS_JOB: spray job J-PRV-REP was made from this booking, so the booking cannot be deleted\. Cancel or complete the job first\./, REP);
   assert.equal(okProbe(`UPDATE jobs SET status = 'cancelled' WHERE id = ${jobOf('REP')};\n${DELETE('REP')}`, REP), 't', 'after cancelling the job the rep can delete the booking');
   console.log('[case] AFTER: under RLS the rep\'s delete is refused BOOKING_HAS_JOB while the job is live; after cancelling it the delete goes through');

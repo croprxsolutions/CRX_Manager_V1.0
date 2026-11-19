@@ -19,8 +19,10 @@
 --      while a scheduled or in-progress job comes from the booking or one of its sections. A completed or
 --      cancelled job does not block; closing as applied stays allowed by design (20260703200000:369).
 --      Its trigger quotes_booking_live_job_rules now fires on UPDATE OF status, customer_id, deleted_at.
---      A soft delete at REPEATABLE READ or SERIALIZABLE is refused (BOOKING_DELETE_NEEDS_READ_COMMITTED; Sol r1): there the
---      check would read the transaction's first snapshot and could miss a job scheduled meanwhile. The app runs READ COMMITTED.
+--      A soft delete, a close (accepted, declined, expired, cancelled, closed_short) or a customer change at REPEATABLE
+--      READ or SERIALIZABLE is refused (BOOKING_NEEDS_READ_COMMITTED; Sol r1, r4): there the job checks would read the
+--      transaction's first snapshot and could miss a job scheduled or reopened meanwhile. The app runs READ COMMITTED.
+--      Apply this file as one transaction, as every migration is: the postflight can refuse after the replacements.
 --   Rule 1 checks the rep against every booking a job names (its quote_id and its section's booking; Sol r1), with
 --      those bookings locked FOR SHARE (Sol r2). A job reopened from completed or invoiced (an admin override) on a
 --      deleted booking, or one closed short, declined, expired or cancelled, is refused BOOKING_CLOSED (Sol HIGH r2, r3).
@@ -227,18 +229,21 @@ AS $function$
 DECLARE
   v_job record;
 BEGIN
+  -- Sol HIGH r1, r4: every check below reads jobs. At REPEATABLE READ or SERIALIZABLE it would read the transaction's
+  -- first snapshot and could miss a job scheduled, or reopened, meanwhile by a session that only locked this booking.
+  -- The app always runs READ COMMITTED, where the checks see it once the booking row lock is granted.
+  IF ((OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL)
+      OR (NEW.status IS DISTINCT FROM OLD.status AND NEW.status IN ('accepted', 'declined', 'expired', 'cancelled', 'closed_short'))
+      OR NEW.customer_id IS DISTINCT FROM OLD.customer_id)
+     AND current_setting('transaction_isolation') NOT IN ('read committed', 'read uncommitted') THEN
+    RAISE EXCEPTION 'BOOKING_NEEDS_READ_COMMITTED: change booking % in a READ COMMITTED transaction, so a spray job scheduled or reopened meanwhile is seen.',
+      NEW.quote_number
+      USING ERRCODE = 'P0001';
+  END IF;
   -- PR-D1 (#1990 Sol 4): a soft delete skipped this trigger (it fired on status and customer_id only), so a
   -- booking could be deleted with a spray job still scheduled or in progress from it. Refused while one comes
   -- from the booking or one of its sections; a completed or cancelled job does not block.
   IF OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL THEN
-    -- Sol HIGH r1: at REPEATABLE READ or SERIALIZABLE the check below reads the transaction's first snapshot, so a
-    -- job committed meanwhile by a scheduler that only locked this booking would be missed. The app always runs
-    -- READ COMMITTED, where the check sees it once the booking row lock is granted.
-    IF current_setting('transaction_isolation') NOT IN ('read committed', 'read uncommitted') THEN
-      RAISE EXCEPTION 'BOOKING_DELETE_NEEDS_READ_COMMITTED: delete booking % in a READ COMMITTED transaction, so a spray job scheduled meanwhile is seen.',
-        NEW.quote_number
-        USING ERRCODE = 'P0001';
-    END IF;
     SELECT j.job_number INTO v_job
     FROM public.jobs j
     WHERE (j.quote_id = NEW.id
@@ -327,7 +332,7 @@ DECLARE
   v_g record;
 BEGIN
   FOR v_g IN SELECT * FROM (VALUES
-      ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', '9845ed22d07de03c8b3c7afe5356352c'),
+      ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', '9beb84454834da47d80e2c2a05a8a25d'),
       ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', '0b9c1774f2602bc299fb54ebc2c6e756')) AS g(fn, tbl, tg, body_md5)
   LOOP
     SELECT * INTO v_p FROM pg_proc WHERE oid = v_g.fn::regprocedure;

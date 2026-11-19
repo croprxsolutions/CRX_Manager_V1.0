@@ -412,8 +412,8 @@ UPDATE jobs SET status = 'cancelled' WHERE id = ${jobOf('REP')};
 ${DELETE('REP')}
 ROLLBACK;` });
   assert.notEqual(rr.status, 0, `a delete at REPEATABLE READ went through: ${rr.stdout}`);
-  assert.match(`${rr.stdout}\n${rr.stderr}`, /BOOKING_DELETE_NEEDS_READ_COMMITTED: delete booking \[PROVER\] REP in a READ COMMITTED transaction/);
-  console.log('[case] AFTER: a booking delete at REPEATABLE READ is refused BOOKING_DELETE_NEEDS_READ_COMMITTED');
+  assert.match(`${rr.stdout}\n${rr.stderr}`, /BOOKING_NEEDS_READ_COMMITTED: change booking \[PROVER\] REP in a READ COMMITTED transaction/);
+  console.log('[case] AFTER: a booking delete at REPEATABLE READ is refused BOOKING_NEEDS_READ_COMMITTED');
   // Sol HIGH r2: after its job completes the booking may be deleted; an admin override cannot then reopen the job on it.
   refusedProbe(`UPDATE jobs SET status = 'in_progress' WHERE id = ${jobOf('REP')};
 UPDATE jobs SET status = 'completed' WHERE id = ${jobOf('REP')};

@@ -544,6 +544,8 @@ function maskNonCode(code: string): string {
   // any other `}` (object literal, method or arrow body) ends an operand and keeps division.
   const blockBrace: boolean[] = [];
   let blockCloseAt = -1;
+  const functionDeclHead: boolean[] = [];
+  let functionDeclCloseAt = -1;
   // Where the closing `/` of the most recent masked regex literal landed in `out`.
   let regexCloseAt = -1;
 
@@ -575,14 +577,40 @@ function maskNonCode(code: string): string {
     return /^(if|for|while|switch|catch)$/.test(word);
   }
 
-  // A `{` opens a statement block only at a statement start: at the beginning, after `;`, `{`
-  // (not a template's `${`) or `}`, after a control head's `)`, or after else/do/try/finally.
+  // True when a statement can start just after index `end`: at the beginning, or after `;`,
+  // `}` or a `{` that is not a template's `${`.
+  function statementStartsAfter(end: number): boolean {
+    let j = end;
+    while (j >= 0 && /\s/.test(out[j])) j -= 1;
+    return j < 0 || out[j] === ';' || out[j] === '}' || (out[j] === '{' && out[j - 1] !== '$');
+  }
+
+  // A `(` opens a function DECLARATION's parameters (`function f(`, `async function* f(`,
+  // `export default function f(`) when `function` starts a statement; its body is a block.
+  // A function expression (`x = function f() {} / 2`) is an operand, so it is not one.
+  function opensFunctionDeclHead(): boolean {
+    const [name, beforeName] = wordBefore(out.length - 1);
+    if (!name || name === 'function') return false;
+    let m = beforeName;
+    while (m >= 0 && /[\s*]/.test(out[m])) m -= 1;
+    let [word, before] = wordBefore(m);
+    if (word !== 'function') return false;
+    for (;;) {
+      [word, m] = wordBefore(before);
+      if (!/^(async|export|default)$/.test(word)) break;
+      before = m;
+    }
+    return statementStartsAfter(before);
+  }
+
+  // A `{` opens a statement block only at a statement start, after a control head's or a
+  // function declaration's `)`, or after else/do/try/finally. Class bodies and labelled
+  // blocks are not tracked, so a regex after their `}` still reads as division.
   function opensBlock(): boolean {
     let j = out.length - 1;
     while (j >= 0 && /\s/.test(out[j])) j -= 1;
-    if (j < 0 || out[j] === ';' || out[j] === '}') return true;
-    if (out[j] === '{') return out[j - 1] !== '$';
-    if (out[j] === ')') return controlCloseAt === j;
+    if (statementStartsAfter(j)) return true;
+    if (out[j] === ')') return controlCloseAt === j || functionDeclCloseAt === j;
     const [word, before] = wordBefore(j);
     return /^(else|do|try|finally)$/.test(word) && !isPropertyName(before);
   }
@@ -718,8 +746,10 @@ function maskNonCode(code: string): string {
       }
       if (c === '(') {
         controlHead.push(opensControlHead());
-      } else if (c === ')' && controlHead.pop()) {
-        controlCloseAt = out.length;
+        functionDeclHead.push(opensFunctionDeclHead());
+      } else if (c === ')') {
+        if (controlHead.pop()) controlCloseAt = out.length;
+        if (functionDeclHead.pop()) functionDeclCloseAt = out.length;
       } else if (c === '{') {
         blockBrace.push(opensBlock());
       } else if (c === '}' && blockBrace.pop()) {
@@ -1005,12 +1035,17 @@ describe('F1 guard — resets are verified outside the pinned files, and the pin
     expect(classify(['  try { go(); } finally {} /query.throwOnError()/.test(value);', reset], 2)).toBeNull();
     expect(classify(['  else {} /onClick=/.test(v);', reset], 2)).toBeNull();
     expect(classify(['  {', '  }', '  /getIdempotencyBindingRejection/.test(value);', reset], 4)).toBeNull();
+    // A function declaration's body is a statement block too (Luna, #686 round 1).
+    expect(classify(['  function f() {} /getIdempotencyBindingRejection/.test(value);', reset], 2)).toBeNull();
+    expect(classify(['  export async function* f(a) {} /query.throwOnError()/.test(value);', reset], 2)).toBeNull();
 
     // Positive controls: an object literal or a template interpolation's braces end an
     // operand, so the `/` after them is still division and the code after it stays visible.
     expect(classify(['  const r = ({a: 1}) / 2 + getIdempotencyBindingRejection(error) / 3;', reset], 2)).toBe('recovery');
     expect(classify(['  const r = x = {a: 1} / 2 + getIdempotencyBindingRejection(error) / 3;', reset], 2)).toBe('recovery');
     expect(classify(['  const r = `${ {a: 1} / 2 + getIdempotencyBindingRejection(error) / 3 }`;', reset], 2)).toBe('recovery');
+    // A function EXPRESSION is an operand, so the `/` after its body is division.
+    expect(classify(['  const r = function f() {} / 2 + getIdempotencyBindingRejection(error) / 3;', reset], 2)).toBe('recovery');
     // A method body's `}` is not tracked as a block, so it keeps the old division reading.
     expect(classify(['  const o = { m() {} / 2 + getIdempotencyBindingRejection(error) / 3 };', reset], 2)).toBe('recovery');
   });

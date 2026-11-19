@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-18 — #1982 may have a fifth Sol round; the cycle-count page locks behind its confirmations
+
+**Decision (Mason, in chat, 2026-11-18: "Yes, round 5").** PR #1982 (cycle-count confirmations open on top of the count window) may have one more Sol round (round 5).
+**Why:** Sol rounds 1-4 each found a new way for keyboard focus to get behind a confirmation box (the shared Modal's focus trap only wraps at its ends; `components/ui` is hands-off until Taha's UI PRs land). Instead of closing one path per round, the whole cycle-count page (list and count window) is now inert while any confirmation is open, and opening or closing a count window closes every open confirmation.
+**What it does:** unlocks one Sol review of the new head. Every other gate is unchanged: it still needs a clean Sol review, green checks and Taha's 4-hour hold before it merges into `staging`. Remaining smaller items: #1987.
+
 ## 2026-11-18 — #1971: Mason owner-accepted 1 Sol finding(s) at `3d37b06e956c`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1971 at `3d37b06e956c` (base `59a711b8cd8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

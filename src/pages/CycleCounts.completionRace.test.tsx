@@ -262,4 +262,25 @@ describe('CycleCounts completion race', () => {
     expect(screen.queryByRole('alertdialog', { name: 'Cancel Cycle Count' })).toBeNull();
     expect(H.rpc.mock.calls.filter((call) => call[0] === 'cancel_cycle_count')).toEqual([]);
   });
+
+  // Sol r4 (#1982): a confirm must not survive reopening the SAME count, and nothing on the
+  // page (the count list included) can take focus behind an open confirm.
+  it('locks the whole page behind a confirm and closes it when the same count is reopened', async () => {
+    render(<CycleCounts />);
+    await waitFor(() => expect(screen.getByText('CC-1001')).toBeTruthy());
+    fireEvent.click(screen.getByText('CC-1001'));
+    await waitFor(() => expect(heldItemQueries.length).toBe(1));
+    await release(0);
+    await waitFor(() => expect(screen.getByText('ALPHA PRODUCT')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Cancel Count/ }));
+    await screen.findByRole('alertdialog', { name: 'Cancel Cycle Count' });
+    expect(screen.getByText('CC-2002').closest('[inert]')).toBeTruthy();
+
+    // jsdom does not enforce inert, so reach the list anyway and reopen the same count.
+    fireEvent.click(screen.getAllByText('CC-1001')[0]);
+    await waitFor(() => expect(screen.queryByRole('alertdialog', { name: 'Cancel Cycle Count' })).toBeNull());
+    expect(screen.getByText('CC-2002').closest('[inert]')).toBeNull();
+    expect(H.rpc.mock.calls.filter((call) => call[0] === 'cancel_cycle_count')).toEqual([]);
+  });
 });

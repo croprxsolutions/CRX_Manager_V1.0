@@ -345,7 +345,19 @@ export default function CycleCounts() {
   // which bumps the session — including reopening the same count. With the modal
   // closed there is nothing on screen to paint over, so the late write is harmless
   // and the completion the operator requested still lands.
+  // Opening or closing any count window ends every open confirm: each one was a question
+  // about the window as it stood (Sol r4, #1982 — reopening the same count must not keep it).
+  const closeAllConfirms = () => {
+    setCompleteConfirmOpen(false);
+    setCompleteConfirmCountId(null);
+    setCancelConfirmOpen(false);
+    setCancelConfirmCountId(null);
+    setReverseConfirmOpen(false);
+    setReverseConfirmCountId(null);
+  };
+
   const closeDetail = () => {
+    closeAllConfirms();
     setShowDetail(false);
   };
 
@@ -373,6 +385,7 @@ export default function CycleCounts() {
     detailSessionRef.current = session;
     const isCurrentSession = () => detailSessionRef.current === session;
 
+    closeAllConfirms();
     setActiveCount(count);
     setShowDetail(true);
     setLoadingItems(true);
@@ -1096,6 +1109,9 @@ export default function CycleCounts() {
 
   return (
     <div className="space-y-4">
+      {/* The whole page (list and count window) is inert while a confirm is open, so focus
+          can never reach anything behind a confirm (Sol r2-r4, #1982; Mason approved r5). */}
+      <div className="space-y-4" inert={confirmOpen}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <h2 className="text-xl font-semibold font-heading text-nav-dark">
           Cycle Counts
@@ -1192,9 +1208,7 @@ export default function CycleCounts() {
         size="large"
       >
         {activeCount && (
-          // inert: while a confirm is open, keyboard focus cannot slip back to this window's
-          // inventory actions (Sol HIGH r2, #1982).
-          <div className="space-y-4" inert={confirmOpen}>
+          <div className="space-y-4">
             {/* Summary bar */}
             <div className="flex items-center gap-4 text-sm">
               <div>
@@ -1345,6 +1359,7 @@ export default function CycleCounts() {
           </div>
         )}
       </Modal>
+      </div>
 
       {/* Confirm Modals: after the detail Modal so they stack on top of it (both z-50) */}
       <ConfirmModal

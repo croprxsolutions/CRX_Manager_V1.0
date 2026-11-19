@@ -64,6 +64,7 @@ import HelpTip from '../components/ui/HelpTip';
 import DeliveryCalendar from '../components/deliveries/DeliveryCalendar';
 import type { Delivery, DeliveryCompletionEvidence, DeliveryEvidencePhoto, Profile } from '../types';
 import { toSentryError } from '../lib/sentryError';
+import { farmGroupTopName, type FarmGroupNode } from '../lib/farmGroupTop';
 
 /* ─── Row type ─── */
 interface DeliveryRow extends Delivery {
@@ -898,14 +899,19 @@ export default function Deliveries() {
         Sentry.captureException(unassignedErr, { tags: { source: 'fetch', page: 'deliveries' } });
         return;
       }
-      const pIds = [...new Set(
+      // Fetch the parents, then their parents, up to each group's top (#1995). Each round asks only for ids not
+      // asked before, so a loop in the data still ends.
+      const pMap: Record<string, FarmGroupNode> = {};
+      const asked = new Set<string>();
+      let pIds = [...new Set(
         (data || []).map((d: Record<string, unknown>) => (d.customer as { parent_customer_id?: string })?.parent_customer_id).filter(Boolean) as string[]
       )];
-      const pMap: Record<string, string> = {};
-      if (pIds.length > 0) {
-        const { data: parents, error: pErr } = await supabase.from('customers').select('id, farm_name').in('id', pIds);
-        if (pErr) Sentry.captureException(pErr, { tags: { source: 'fetch', page: 'deliveries' } });
-        (parents || []).forEach((p) => { pMap[p.id] = p.farm_name; });
+      while (pIds.length > 0) {
+        pIds.forEach((pid) => asked.add(pid));
+        const { data: parents, error: pErr } = await supabase.from('customers').select('id, farm_name, parent_customer_id').in('id', pIds);
+        if (pErr) { Sentry.captureException(pErr, { tags: { source: 'fetch', page: 'deliveries' } }); break; }
+        (parents || []).forEach((p) => { pMap[p.id] = p; });
+        pIds = [...new Set((parents || []).map((p) => p.parent_customer_id).filter((pid): pid is string => !!pid && !asked.has(pid)))];
       }
       const rows = (data || []).map((d) => {
         const cust = d.customer as { farm_name?: string; parent_customer_id?: string } | null;
@@ -914,7 +920,7 @@ export default function Deliveries() {
           customer_name: cust?.farm_name || 'Unknown',
           driver_name: 'Unassigned',
           item_count: 0,
-          farm_group_name: cust?.parent_customer_id ? pMap[cust.parent_customer_id] || null : null,
+          farm_group_name: farmGroupTopName(cust?.parent_customer_id, pMap),
         };
       });
       setUnassigned(rows as DeliveryRow[]);

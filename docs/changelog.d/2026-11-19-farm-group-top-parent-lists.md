@@ -1,0 +1,8 @@
+## 2026-11-19 - #1995: Orders and Deliveries lists show the farm group's top parent
+
+- Migration `20270128195000_farm_group_top_parent_lists.sql` re-creates `get_orders_keyset_page` and `get_deliveries_keyset_page` (same signatures, results, SECURITY INVOKER, grants and comments). Their "farm group" column and search now use the TOP parent of a multi-level group (A > B > C: C's rows show and are found by "A"), matching Sales Reports' `get_customer_farm_group`. The offset wrappers `get_orders_page` and `get_deliveries_page` call them, so they follow.
+- Loops: the walk recurses on customer ids with UNION, so it always ends; a looped customer (only possible past KI-146's trigger) shows its direct parent, as before. A customer with no parent, and the top farm itself, show no group, as before.
+- The driver dashboard's unassigned-deliveries card (`src/pages/Deliveries.tsx`) walks up to the top parent the same way (`src/lib/farmGroupTop.ts`).
+- The preflight refuses unless both functions still have their 20261125100000 / 20261202100000 bodies (md5 read from the rebuilt local database, not from live). No table, row, policy or grant changes.
+- Proof: `node scripts/smoke/prove-farm-group-top-parent-lists-real-schema.mjs` (`FARM_GROUP_TOP_PARENT_PROOF_PASS`): before the migration C showed "B"; after, every level shows the top, search by the top finds the whole group, a forced loop returns, autocommit and re-apply are refused. `src/lib/farmGroupTop.test.ts` covers the screen helper.
+- Not verified: live (not applied; live has no grandchildren today, so the lists show the same names there).

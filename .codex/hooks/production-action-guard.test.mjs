@@ -2773,10 +2773,10 @@ try {
     assert.ok(Date.now() - started < 5000, `…and answered well inside the hook limit (took ${Date.now() - started} ms)`);
   }
 
-  // The budget admits a call on the assumption it lasts at most ONE 5-second
-  // timeout. defaultRunGh tries `gh` then the absolute gh.exe on Windows; if a
-  // timed-out `gh` fell through to the second candidate, one admitted call could
-  // last ten seconds and a chain could outrun the hook (Codex sol, 2026-09-14).
+  // The budget admits a call on the assumption it lasts at most ONE per-call
+  // timeout (CODEX_CALL_TIMEOUT_MS, 25s for gh). defaultRunGh tries `gh` then the
+  // absolute gh.exe on Windows; if a timed-out `gh` fell through to the second
+  // candidate, one admitted call could last two caps and a chain could outrun the hook (Codex sol, 2026-09-14).
   const guardSource = (await import("node:fs")).readFileSync(
     new URL("./production-action-guard.mjs", import.meta.url),
     "utf8",

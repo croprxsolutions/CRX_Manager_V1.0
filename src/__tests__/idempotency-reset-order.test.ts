@@ -590,29 +590,34 @@ function maskNonCode(code: string): string {
   // A function expression (`x = function f() {} / 2`) is an operand, so it is not one.
   function opensFunctionDeclHead(): boolean {
     const [name, beforeName] = wordBefore(out.length - 1);
-    if (!name || name === 'function') return false;
+    if (!name) return false;
+    // `export default function (` is the one anonymous declaration.
+    const anonymous = name === 'function';
     let m = beforeName;
     while (m >= 0 && /[\s*]/.test(out[m])) m -= 1;
-    let [word, before] = wordBefore(m);
+    let [word, before] = anonymous ? [name, beforeName] : wordBefore(m);
     if (word !== 'function') return false;
+    let sawDefault = false;
     for (;;) {
       [word, m] = wordBefore(before);
       if (!/^(async|export|default)$/.test(word)) break;
+      sawDefault ||= word === 'default';
       before = m;
     }
-    return statementStartsAfter(before);
+    return (!anonymous || sawDefault) && statementStartsAfter(before);
   }
 
   // A `{` opens a statement block only at a statement start, after a control head's or a
-  // function declaration's `)`, or after else/do/try/finally. Class bodies and labelled
-  // blocks are not tracked, so a regex after their `}` still reads as division.
+  // function declaration's `)`, or after else/do/try/finally or a binding-less `catch`.
+  // shortcut: class bodies, labelled blocks and a statement after a line with no `;` (ASI)
+  // are not tracked, so a regex after their `}` still reads as division; a real lexer is the upgrade.
   function opensBlock(): boolean {
     let j = out.length - 1;
     while (j >= 0 && /\s/.test(out[j])) j -= 1;
     if (statementStartsAfter(j)) return true;
     if (out[j] === ')') return controlCloseAt === j || functionDeclCloseAt === j;
     const [word, before] = wordBefore(j);
-    return /^(else|do|try|finally)$/.test(word) && !isPropertyName(before);
+    return /^(else|do|try|finally|catch)$/.test(word) && !isPropertyName(before);
   }
 
   function regexCanStart(): boolean {
@@ -1038,6 +1043,8 @@ describe('F1 guard — resets are verified outside the pinned files, and the pin
     // A function declaration's body is a statement block too (Luna, #686 round 1).
     expect(classify(['  function f() {} /getIdempotencyBindingRejection/.test(value);', reset], 2)).toBeNull();
     expect(classify(['  export async function* f(a) {} /query.throwOnError()/.test(value);', reset], 2)).toBeNull();
+    expect(classify(['  export default function () {} /getIdempotencyBindingRejection/.test(value);', reset], 2)).toBeNull();
+    expect(classify(['  try { go(); } catch {} /getIdempotencyBindingRejection/.test(value);', reset], 2)).toBeNull();
 
     // Positive controls: an object literal or a template interpolation's braces end an
     // operand, so the `/` after them is still division and the code after it stays visible.
@@ -1046,8 +1053,7 @@ describe('F1 guard — resets are verified outside the pinned files, and the pin
     expect(classify(['  const r = `${ {a: 1} / 2 + getIdempotencyBindingRejection(error) / 3 }`;', reset], 2)).toBe('recovery');
     // A function EXPRESSION is an operand, so the `/` after its body is division.
     expect(classify(['  const r = function f() {} / 2 + getIdempotencyBindingRejection(error) / 3;', reset], 2)).toBe('recovery');
-    // A method body's `}` is not tracked as a block, so it keeps the old division reading.
-    expect(classify(['  const o = { m() {} / 2 + getIdempotencyBindingRejection(error) / 3 };', reset], 2)).toBe('recovery');
+    expect(classify(['  const r = function () {} / 2 + getIdempotencyBindingRejection(error) / 3;', reset], 2)).toBe('recovery');
   });
 
   // CodeRabbit (PR #668, round 5): keyword detection read a property NAME as a keyword, so the

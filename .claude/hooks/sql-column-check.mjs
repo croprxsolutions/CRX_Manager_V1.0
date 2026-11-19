@@ -9,8 +9,8 @@
 // Conservative by design (a false alarm is worse than a miss): anything it
 // cannot resolve is allowed — CTE names, subquery or function aliases, aliases
 // with column lists, aliases bound to two sources, non-public schemas
-// (information_schema, pg_catalog), quoted identifiers, tables not in the
-// registry. A missing or unreadable registry, or migrations folder, allows the
+// (information_schema, pg_catalog), quoted identifiers other than plain lowercase
+// ones ("public", "p"), tables not in the registry. A missing or unreadable registry, or migrations folder, allows the
 // query. A column added by a migration newer than the registry is allowed (the
 // registry may be stale); comments in that migration do not count.
 // Escape hatch: `-- column-check: skip` in a comment of the query.
@@ -32,7 +32,7 @@ const NOT_ALIAS = new Set(("where on using join inner left right full outer cros
 const SYSTEM_COLUMNS = new Set(["ctid", "xmin", "xmax", "cmin", "cmax", "tableoid"]);
 
 // Words the parser below reads as SQL; a quoted identifier spelling one stays opaque.
-const PARSED_WORDS = new Set([...NOT_ALIAS, "from", "select", "not", "materialized", "public"]);
+const PARSED_WORDS = new Set([...NOT_ALIAS, "from", "select", "not", "materialized"]);
 
 // Dollar-quoted text, strings, quoted identifiers and comments, left to right in one
 // pass so `--` inside a string, or a quote inside a comment, cannot desynchronize the others.
@@ -92,14 +92,27 @@ function openParens(stmt) {
 }
 
 // True when the parenthesis opening at `at` starts a FROM item: a subquery, or a
-// function call, right after FROM, JOIN, LATERAL, ONLY or a comma. A comma may also
-// start a select-list item; it still counts here (unresolvable, the safe side).
-function startsFromItem(stmt, at) {
+// function call, right after FROM, JOIN, LATERAL, ONLY or a comma. A comma whose
+// clause (same parenthesis depth) is the select list is not one (#2035); any other
+// comma still counts (unresolvable, the safe side).
+function startsFromItem(stmt, at, open) {
   if (at === undefined) return true;
   let before = stmt.slice(0, at).trimEnd();
   const fn = before.match(/(?:[a-z_]\w*\s*\.\s*)?([a-z_]\w*)$/);
   if (fn && !/^(?:from|join|lateral|only)$/.test(fn[1])) before = before.slice(0, fn.index).trimEnd();
-  return /(?:\b(?:from|join|lateral|only)|,)$/.test(before);
+  if (/\b(?:from|join|lateral|only)$/.test(before)) return true;
+  return before.endsWith(",") && clauseBefore(stmt, before.length - 1, open) !== "select";
+}
+
+// The last clause keyword before `at` at the same parenthesis depth, or null.
+const CLAUSE_RE = /\b(select|from|join|on|using|where|group|having|window|order|limit|offset|returning|values|set|union|intersect|except)\b/g;
+function clauseBefore(stmt, at, open) {
+  const parts = [];
+  for (let i = at - 1, end = at; ; i--) {
+    if (i < 0 || stmt[i] === "(") { parts.push(stmt.slice(i + 1, end)); break; }
+    if (stmt[i] === ")" && open.has(i)) { parts.push(stmt.slice(i + 1, end)); i = open.get(i); end = i; parts.push(" "); }
+  }
+  return [...parts.reverse().join("").matchAll(CLAUSE_RE)].pop()?.[1] ?? null;
 }
 
 // Returns [{ ref, table, column }] for every reference that is certainly wrong.
@@ -118,7 +131,7 @@ export function findBadColumns(sql, columnsByTable) {
     // name in the select list (count(*) as oi) is not a source and binds nothing.
     const open = openParens(stmt);
     for (const m of stmt.matchAll(/\)\s+(?:as\s+)?([a-z_]\w*)/g)) {
-      if (!NOT_ALIAS.has(m[1]) && startsFromItem(stmt, open.get(m.index))) bind(m[1], null);
+      if (!NOT_ALIAS.has(m[1]) && startsFromItem(stmt, open.get(m.index), open)) bind(m[1], null);
     }
 
     // Binds one FROM/JOIN item; returns whether a ", next_item" may follow it.

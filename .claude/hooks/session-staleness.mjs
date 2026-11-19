@@ -100,11 +100,13 @@ function backupMarkerPath() {
   return best ?? localPath;
 }
 
+// Keyword pre-filter, not a semantic judgement: any DDL keyword that could
+// touch the registry counts, including CREATE OR REPLACE FUNCTION (#749).
 function migrationMayAffectSchemaRegistry(sql) {
   const withoutComments = String(sql)
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/--[^\r\n]*/g, " ");
-  return /\b(?:create|alter|drop)\s+(?:table|function|type|sequence)\b|\b(?:add|drop)\s+constraint\b/i.test(withoutComments);
+  return /\b(?:create|alter|drop)\s+(?:or\s+replace\s+)?(?:table|function|type|sequence|trigger|view|policy)\b|\b(?:add|drop)\s+constraint\b/i.test(withoutComments);
 }
 
 // ─── CHECK 1 — schema registry staleness (content-based, not mtime) ──────

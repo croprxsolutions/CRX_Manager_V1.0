@@ -21,8 +21,8 @@ describe('customerSplit', () => {
       { splits: [{ recipient: 'A', percentage: -10 }, { recipient: 'B', percentage: 110 }] },
       { splits: [{ recipient: 'A', percentage: 60 }, { recipient: 'B', percentage: 30 }] },
       { splits: [{ recipient: ' ', percentage: 100 }] },
-      { splits: [{ recipient: 'A', percentage: 60 }, { recipient: 'B', percentage: 40.004 }] },
-      { splits: [{ recipient: 'A', percentage: 60.000000001 }, { recipient: 'B', percentage: 40 }] },
+      { splits: [{ recipient: 'A', percentage: 0 }, { recipient: 'B', percentage: 100 }] },
+      { splits: [{ recipient: 'A', percentage: 60 }, { recipient: 'B', percentage: 40.02 }] },
       // eslint-disable-next-line no-sparse-arrays
       { splits: [, { recipient: 'A', percentage: 100 }] },
       { splits: 'A' },
@@ -43,9 +43,14 @@ describe('sameSplit', () => {
     expect(sameSplit(s(['A', Number.NaN]), s(['A', Number.POSITIVE_INFINITY]))).toBe(false);
   });
 
-  it('accepts shares in hundredths that add to exactly 100', () => {
-    expect(customerSplit(s(['A', 33.33], ['B', 33.33], ['C', 33.34]))).not.toBeNull();
-    expect(customerSplit(s(['A', 0.29], ['B', 99.71]))).not.toBeNull();
+  it('accepts exactly what the database accepts: each share above 0 and up to 100, totalling 100 within 0.01 (Sol MED)', () => {
+    expect(customerSplit(s(['A', 33.333], ['B', 66.667]))).not.toBeNull();
+    expect(customerSplit(s(['A', 33.33], ['B', 33.33], ['C', 33.33]))).not.toBeNull();
+    expect(customerSplit(s(['A', 60], ['B', 40.004]))).not.toBeNull();
+  });
+
+  it('a recipient name can\'t fake another split through separators (Sol LOW)', () => {
+    expect(sameSplit(s(['A', 0], ['B', 100]), s(['A\u00000\u0001B', 100]))).toBe(false);
   });
 
   it('differs on any recipient or percentage', () => {

@@ -6747,6 +6747,22 @@ describe('QuoteBuilder commission split from the customer', () => {
     expect(screen.queryByText(FROM)).not.toBeInTheDocument();
   });
 
+  it('after the customer is cleared, a split typed to match their old one still counts as typed (Sol MED)', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Big Sky Farms 18');
+    await waitFor(() => expect(percent(1)).toBe('60'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '70' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear customer' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Clear customer' })).not.toBeInTheDocument());
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '60' } });
+    await pick('Cedar Creek Farms 12');
+    await screen.findByRole('button', { name: 'Clear customer' });
+    expect(percent(1)).toBe('60');
+    expect(percent(2)).toBe('40');
+    expect(screen.queryByText(NONE)).not.toBeInTheDocument();
+  });
+
   it('a customer whose stored split is damaged is picked cleanly: tier set, treated as no split (Sol HIGH)', async () => {
     const damaged = { ...noSplit, id: 'customer-4', farm_name: 'Elm Row Farms 4', assigned_tier: 2, default_commission_split: { splits: [null] } };
     serveNew([damaged]);

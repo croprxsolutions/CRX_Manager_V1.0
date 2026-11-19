@@ -1747,12 +1747,10 @@ export default function QuoteBuilder() {
     if (!cust) {
       setCustomerId('');
       setSplitNote(null);
-      // A new quote's split that only came from that customer goes with them, so the next one can't inherit it
-      // (Sol MED, 19 Nov). A split changed by hand stays.
-      if (!isEditing && sameSplit(splitNowRef.current, autoSplitRef.current)) {
-        putSplit(NEW_QUOTE_SPLIT);
-        autoSplitRef.current = NEW_QUOTE_SPLIT;
-      }
+      // A new quote's split that only came from that customer goes with them; a split changed by hand stays. With
+      // no customer the blank row is what counts as untouched, so typing their old split back counts as typed (Sol MEDs).
+      if (!isEditing && sameSplit(splitNowRef.current, autoSplitRef.current)) putSplit(NEW_QUOTE_SPLIT);
+      if (!isEditing) autoSplitRef.current = NEW_QUOTE_SPLIT;
       return true;
     }
     if (repriceBlocked) {

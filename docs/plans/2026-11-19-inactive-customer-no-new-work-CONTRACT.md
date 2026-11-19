@@ -21,7 +21,7 @@ customer whose `customers.is_active` is false. "Becomes open work" means:
 |---|---|---|
 | orders | any INSERT; an UPDATE where (the row is open afterwards and was not open before) or its `customer_id` changed (open or closed) | `status IN ('confirmed','partially_fulfilled')`, `deleted_at IS NULL` |
 | deliveries | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` or `order_id` changed | `status IN ('scheduled','in_progress')`, `deleted_at IS NULL` |
-| inventory_holds | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` changed | `is_active` and not expired (`expires_at` null or ≥ today, Chicago) |
+| inventory_holds (stand-alone only: `manual`, or `crop_program` with no source; Sol r1 #5) | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` changed | `is_active` and not expired (`expires_at` null or ≥ today, Chicago) |
 | jobs | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` changed | `status IN ('scheduled','in_progress')`, or `completed` with no `invoice_id`; `deleted_at IS NULL` |
 
 The customer checked is the row's `customer_id`; for a delivery also its order's `customer_id`
@@ -38,8 +38,8 @@ allowed, so existing work of an inactive customer can still be finished down or 
 **Smallest change.** One new migration: one trigger function
 `guard_inactive_customer_new_work_20270129()` (SECURITY DEFINER, owner postgres,
 `search_path = public, pg_temp`, EXECUTE revoked from everyone, like the KI-148 guard) and four
-`BEFORE INSERT OR UPDATE ... FOR EACH ROW` triggers named `zz_inactive_customer_new_work_20270129`
-(named to fire last, so it sees the final row other BEFORE triggers produce). It reuses the existing
+`AFTER INSERT OR UPDATE ... FOR EACH ROW` triggers named `zz_inactive_customer_new_work_20270129`
+(AFTER, so every BEFORE trigger and the row-level policy check run first; Sol r1 #1). It reuses the existing
 pattern of `guard_inactive_manual_hold` / `guard_order_reopen_inactive_product` (inactive product:
 `SELECT ... FOR SHARE`, refuse with a code). Files: the migration, `docs/reference/migrations.d/<stem>.md`,
 `docs/changelog.d/…`, `scripts/smoke/prove-inactive-customer-new-work-real-schema.mjs`,
@@ -134,9 +134,8 @@ change is the sanitizer sentence, which is safe before or after the migration.
   confirmed orders, To-Do decision 23). Going forward KI-148 refuses deactivation while any of these
   four kinds is open, and this guard refuses creating them, so "growing existing open work" or an
   internal hold rebuild for an inactive customer can only touch that one legacy customer, whose
-  orders stay as they are by decision 23. A quote for an inactive customer (quotes still allowed
-  until Taha's work) that reserves stock is refused at the reservation step; that is Mason's rule
-  arriving early, named in the PR for Taha. No `INSERT INTO inventory_holds … ON CONFLICT` writer
+  orders stay as they are by decision 23. (Superseded by Sol r1 #5: quote-built holds are
+  no longer checked, so quotes stay entirely Taha's.) No `INSERT INTO inventory_holds … ON CONFLICT` writer
   exists live (#36). Voiding or deleting an invoice clears `jobs.invoice_id`
   (`_void_invoice_split_provenance_impl_20260719`, `_delete_invoices_split_provenance_impl_20260719`,
   `_transfer_invoice_to_job_replay_impl_20261015`), reopening a completed job: for an inactive
@@ -161,6 +160,24 @@ change is the sanitizer sentence, which is safe before or after the migration.
   migration and its rollback exist now); #48, #51 (one transactional migration; postflight checks all
   four triggers); #52 (deferral owner: Taha, by 2026-12-15, issue #2000); #54 (covered by #12 fix);
   #55 (see the population evidence).
+
+## Sol round 1 settlement (2026-11-19)
+
+- #1 HIGH (disclosure: a BEFORE trigger ran ahead of the row-level policy check) → AFTER triggers;
+  a driver adding a job gets the same permission error for an active and an inactive customer (proved).
+- #2 HIGH (order moved under a new delivery) → the delivery's order is locked FOR SHARE before its
+  customer is read; race 4 proves the move waits, then the lineage guard refuses it. Deadlock check:
+  `create_delivery_with_items` already locks the order FOR UPDATE; quick delivery creates its own
+  order; follow-up delivery never updates the order.
+- #3 MED (customer row not visible) → refused unless every named customer is found and locked.
+- #4 MED (REPEATABLE READ) → accepted, as before (no app path uses it).
+- #5 MED (job start rebuilds its holds) → only stand-alone holds are checked, the rule the
+  inactive-product hold guard uses; a sourced hold follows its job, quote or booking. This also
+  takes quote holds out of scope (Taha's).
+- #6 MED → preflight also requires KI-148's trigger attached and enabled.
+- #7 MED → triggers added orders, deliveries, jobs, then inventory_holds.
+- #8 LOW → the rollback race checks the first session too.
+- #9 LOW → New Delivery shows the error through `sanitizeError`.
 
 ## Open business decisions
 

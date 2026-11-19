@@ -27,6 +27,7 @@ const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDA
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const ADMIN = USERS.admin;
 const REP = USERS.rep;
+const DRIVER = USERS.driver;
 const PRODUCT = id('d1');
 const ACTIVE = id('c1'); // active customer
 const INACTIVE = id('c2'); // inactive, with open and closed work (like the live customer with 2 confirmed orders)
@@ -83,10 +84,10 @@ function seed() {
       ('${R.delDelivery}', 'NW-DDEL', '${R.inactiveDone}', '${INACTIVE}', '${ADMIN}', 'scheduled', now()),
       ('${R.activeDelivery}', 'NW-DACT', '${R.activeDone}', '${ACTIVE}', '${ADMIN}', 'scheduled', NULL);
     INSERT INTO public.inventory_holds (id, product_id, customer_id, quantity, created_by, is_active, expires_at, hold_type) VALUES
-      ('${R.offHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', false, NULL, 'job'),
-      ('${R.expiredHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', true, (now() AT TIME ZONE 'America/Chicago')::date - 1, 'job'),
-      ('${R.openHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', true, NULL, 'job'),
-      ('${R.activeHold}', '${PRODUCT}', '${ACTIVE}', 1, '${ADMIN}', true, NULL, 'job');
+      ('${R.offHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', false, NULL, 'manual'),
+      ('${R.expiredHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', true, (now() AT TIME ZONE 'America/Chicago')::date - 1, 'manual'),
+      ('${R.openHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', true, NULL, 'manual'),
+      ('${R.activeHold}', '${PRODUCT}', '${ACTIVE}', 1, '${ADMIN}', true, NULL, 'manual');
     INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, deleted_at) VALUES
       ('${R.delJob}', 'NW-JDEL', '${INACTIVE}', current_date, 'scheduled', now()),
       ('${R.openJob}', 'NW-JOPEN', '${INACTIVE}', current_date, 'scheduled', NULL),
@@ -130,16 +131,24 @@ async function main() {
   const inserts = {
     order: (c) => newOrder(c), 'closed order': (c) => newOrder(c, 'fulfilled'),
     delivery: (c) => newDelivery(c, c === ACTIVE ? R.activeDone : R.inactiveDone),
-    hold: (c) => newHold(c), job: (c) => newJob(c), 'cancelled job': (c) => newJob(c, 'cancelled'),
+    job: (c) => newJob(c), 'cancelled job': (c) => newJob(c, 'cancelled'),
   };
-  for (const [kind, sql] of Object.entries(inserts)) {
+  for (const sql of Object.values(inserts)) {
     allowed(sql(ACTIVE));
     refused(sql(INACTIVE));
     refused(sql(INACTIVE), W, { role: 'service_role' }, null);
   }
-  console.log('[new-work] new order (open or closed), delivery, hold and spray job: refused for the inactive customer as postgres and service_role; saved for the active one');
+  // A hold built from a job follows its job (starting an existing job rebuilds its holds): not refused here.
+  allowed(newHold(INACTIVE));
+  console.log('[new-work] new order (open or closed), delivery and spray job: refused for the inactive customer as postgres and service_role; saved for the active one; a job-built hold is left to its job');
   // Signed-in admin and rep (the guard ignores who is asking; row-level security does not hide the flag).
   for (const uid of [ADMIN, REP]) refused(newJob(INACTIVE), W, { role: 'authenticated' }, uid);
+  // A driver may not add a spray job: the same permission error for either customer, so it reveals no status.
+  const driverErr = (cid) => { const r = run(DRIVER, newJob(cid)); assert.notEqual(r.status, 0, 'a driver saved a spray job'); return r.err.replace(/NW-J\d+/g, ''); };
+  const [driverActive, driverInactive] = [driverErr(ACTIVE), driverErr(INACTIVE)];
+  assert.doesNotMatch(driverInactive, /CUSTOMER_INACTIVE_NEW_WORK/, driverInactive);
+  assert.equal(driverInactive, driverActive);
+  console.log(`[new-work] a driver adding a spray job gets the same permission error for an active and an inactive customer: ${driverActive.split('\n')[0]}`);
   // The real screen path for a hold: create_inventory_hold, signed in.
   const holdRpc = (cid, uid) => `SELECT (public.create_inventory_hold('${PRODUCT}', '${cid}', 1, 'manual', NULL, 'NW', '${uid}', true, 'prover', gen_random_uuid()::text)) IS NOT NULL;`;
   // Admin with force (no stock is seeded; a rep may not force, so the rep is proved on the job insert above).
@@ -218,10 +227,21 @@ async function main() {
   const r3 = await race(
     `BEGIN; UPDATE public.customers SET is_active = false WHERE id = '${RACE3}'; SELECT pg_sleep(4); ROLLBACK;`,
     `BEGIN; ${newOrder(RACE3)} COMMIT;`);
-  assert.equal(r3.b.status, 0, r3.b.err);
+  assert.equal(r3.a.status, 0, r3.a.err); assert.equal(r3.b.status, 0, r3.b.err);
   assert.ok(r3.bWaitedMs >= 1500, `the order did not wait (${r3.bWaitedMs} ms)`);
   assert.equal(scalar(`SELECT count(*) FROM public.orders WHERE customer_id = '${RACE3}';`), '1');
   console.log(`[new-work] race 3: a deactivation that rolled back released the waiting order after ${r3.bWaitedMs} ms; it was saved`);
+
+  // Case 7d: a delivery is being saved on a closed order when someone moves that order to another
+  // customer: the move waits for the delivery, then the older lineage guard refuses it.
+  const r4 = await race(
+    `BEGIN; ${newDelivery(ACTIVE, R.activeClosed)} SELECT pg_sleep(4); COMMIT;`,
+    `BEGIN; UPDATE public.orders SET customer_id = '${RACE3}' WHERE id = '${R.activeClosed}'; COMMIT;`);
+  assert.equal(r4.a.status, 0, r4.a.err);
+  assert.notEqual(r4.b.status, 0, 'the order moved under a new delivery'); assert.match(r4.b.err, /ORDER_CUSTOMER_LINEAGE_LOCKED/, r4.b.err);
+  assert.ok(r4.bWaitedMs >= 1500, `the order move did not wait for the delivery (${r4.bWaitedMs} ms)`);
+  assert.equal(scalar(`SELECT customer_id FROM public.orders WHERE id = '${R.activeClosed}';`), ACTIVE);
+  console.log(`[new-work] race 4: moving an order while a delivery on it is saved waited ${r4.bWaitedMs} ms, then was refused; the order kept its customer`);
 
   console.log('INACTIVE_CUSTOMER_NEW_WORK_PROOF_PASS');
 }

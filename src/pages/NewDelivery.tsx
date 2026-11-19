@@ -9,7 +9,7 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
-import { supabase, assertRpcResult } from '../lib/db';
+import { supabase, assertRpcResult, sanitizeError } from '../lib/db';
 import { Sentry } from '../lib/sentry';
 
 import { logActivity } from '../lib/activityLogger';
@@ -474,7 +474,7 @@ export default function NewDelivery() {
     });
 
     if (error) {
-      toast('error', error.message || 'Failed to create delivery');
+      toast('error', sanitizeError(error));
       Sentry.captureException(error, { extra: { context: 'create_delivery_with_items' } });
       setSaving(false);
       return;

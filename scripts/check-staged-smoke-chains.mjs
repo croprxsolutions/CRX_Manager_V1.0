@@ -24,18 +24,23 @@ export function smokeChainProblem(sql) {
   return verdict.reason || `classified as ${verdict.kind || "an ordinary query"}, not a rolled-back smoke`;
 }
 
+const SPECS = "scripts/smoke/smoke-specs.json";
+
 function staged(file) {
   return execFileSync("git", ["show", `:${file}`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 }
 
 function main() {
-  const files = execFileSync("git", ["diff", "--cached", "--no-renames", "--name-only", "--diff-filter=ACMR"], { encoding: "utf8" })
-    .split(/\r?\n/)
-    .filter((file) => /^scripts\/smoke\/[^/]+\.sql$/.test(file));
-  if (files.length === 0) return 0;
-  const live = liveChainPaths(staged("scripts/smoke/smoke-specs.json"));
+  const stagedPaths = execFileSync("git", ["diff", "--cached", "--no-renames", "--name-only", "-z", "--diff-filter=ACMR"], { encoding: "utf8" })
+    .split("\0");
+  const specsChanged = stagedPaths.includes(SPECS);
+  const files = stagedPaths.filter((file) => /^scripts\/smoke\/[^/]+\.sql$/.test(file));
+  if (files.length === 0 && !specsChanged) return 0;
+  const live = liveChainPaths(staged(SPECS));
+  // A spec change can promote an existing chain to live, so then every live chain is judged.
+  const toCheck = specsChanged ? [...live] : files.filter((f) => live.has(f));
   let failed = 0;
-  for (const file of files.filter((f) => live.has(f))) {
+  for (const file of toCheck) {
     const problem = smokeChainProblem(staged(file));
     if (!problem) continue;
     failed++;

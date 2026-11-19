@@ -77,6 +77,17 @@ try {
   git("add", "-A");
   assert.equal(check().status, 0, "staged unrolled chain passes");
 
+  // A spec-only change that promotes the looped container chain to live is judged too (Luna).
+  git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "seed");
+  writeFileSync(smoke("smoke-specs.json"), JSON.stringify({ specs: {
+    live: { chain: "smoke-live.sql" },
+    boxed: { chain: "smoke-boxed.sql" },
+  } }));
+  git("add", "-A");
+  res = check();
+  assert.equal(res.status, 1, "promoting a looped chain to live is refused");
+  assert.match(res.stderr, /smoke-boxed\.sql/);
+
   console.log("check-staged-smoke-chains: OK");
 } finally {
   rmSync(scratch, { recursive: true, force: true });

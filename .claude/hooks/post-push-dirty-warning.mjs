@@ -15,9 +15,12 @@ const GH_CALL_TIMEOUT_MS = 6_000;
 const RETRY_DELAY_MS = 3_000;
 
 // The folder the push ran in: `git -C <dir> push` (the push guard's required
-// spelling on this machine) wins over the tool's cwd.
+// spelling on this machine) wins over the tool's cwd. Only a -C directly before
+// `push` counts, so another command's -C in the same line is ignored.
+// shortcut: asks for the PR of the folder's current branch, not a refspec's
+// target (`git push origin a:b`); upgrade if such pushes become common here.
 export function pushDir(command, cwd) {
-  const m = /\bgit\s+-C\s+("([^"]+)"|'([^']+)'|(\S+))/.exec(String(command || ""));
+  const m = /\bgit\s+-C\s+("([^"]+)"|'([^']+)'|([^\s;&|]+))\s+push\b/.exec(String(command || ""));
   const dir = m ? m[2] || m[3] || m[4] : "";
   return dir ? path.resolve(cwd || process.cwd(), dir) : cwd || process.cwd();
 }

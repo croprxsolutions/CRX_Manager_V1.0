@@ -177,8 +177,9 @@ export default function CycleCounts() {
   // gated on still being the session that started the work.
   const detailSessionRef = useRef(0);
   const itemWriteSequenceRef = useRef(0);
-  // Whether the count window is showing, read after awaits (state would be a stale closure).
-  const detailOpenRef = useRef(false);
+  // Which count the window is showing (null when closed), read after awaits where state
+  // would be a stale closure.
+  const shownCountIdRef = useRef<string | null>(null);
 
   const isAdmin = role === 'admin';
 
@@ -368,7 +369,7 @@ export default function CycleCounts() {
   };
 
   const closeDetail = () => {
-    detailOpenRef.current = false;
+    shownCountIdRef.current = null;
     closeAllConfirms();
     setShowDetail(false);
   };
@@ -398,7 +399,7 @@ export default function CycleCounts() {
     const isCurrentSession = () => detailSessionRef.current === session;
 
     closeAllConfirms();
-    detailOpenRef.current = true;
+    shownCountIdRef.current = count.id;
     setActiveCount(count);
     setShowDetail(true);
     setLoadingItems(true);
@@ -812,7 +813,7 @@ export default function CycleCounts() {
       if (uncounted.length > 0) {
         // The window was closed while this loaded: the question has nowhere to show, so say
         // why nothing happened instead of dropping it (Sol r4, #1987).
-        if (!detailOpenRef.current) {
+        if (shownCountIdRef.current !== completingCount.id) {
           toast('warning', `Cycle count ${completingCount.count_number} was not completed: ${uncounted.length} products have not been counted yet. Open it to complete.`);
           return;
         }
@@ -987,8 +988,9 @@ export default function CycleCounts() {
       toast('error', 'That confirmation was for a different cycle count. Open the count you want to cancel and try again.');
       return;
     }
-    // A late reply must not close a window (or confirm) opened since for another count (Sol r5, #1987).
-    const session = detailSessionRef.current;
+    // A late reply closes the window only if it still shows this count, never a window or
+    // confirm opened since on another count (Sol r5, #1987).
+    const cancelledId = activeCount.id;
 
     await runCriticalAction({
       action: async () => {
@@ -1008,7 +1010,7 @@ export default function CycleCounts() {
       successMessage: `Cycle count ${activeCount.count_number} cancelled`,
       sentryTag: 'cancel_cycle_count',
       onSuccess: () => {
-        if (detailSessionRef.current === session) closeDetail();
+        if (shownCountIdRef.current === cancelledId) closeDetail();
         fetchCounts();
       },
     });
@@ -1030,7 +1032,7 @@ export default function CycleCounts() {
       toast('error', 'That confirmation was for a different cycle count. Open the count you want to reverse and try again.');
       return;
     }
-    const session = detailSessionRef.current;
+    const reversedId = activeCount.id;
 
     setReversing(true);
     try {
@@ -1046,7 +1048,7 @@ export default function CycleCounts() {
       await logActivity({ event: 'cycle_count_reversed', description: `Cycle count ${activeCount.count_number} reversed — inventory adjustments undone`, performedBy: profile.id, entityType: 'cycle_count', entityId: activeCount.id });
 
       toast('success', `Cycle count ${activeCount.count_number} reversed. Inventory restored.`);
-      if (detailSessionRef.current === session) closeDetail();
+      if (shownCountIdRef.current === reversedId) closeDetail();
       fetchCounts();
     } catch (err: unknown) {
       // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.

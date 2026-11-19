@@ -396,4 +396,25 @@ describe('CycleCounts completion race', () => {
     expect(screen.getByRole('alertdialog', { name: 'Cancel Cycle Count' })).toBeTruthy();
     expect(screen.getByRole('dialog', { name: /CC-2002/ })).toBeTruthy();
   });
+
+  // The same late reply DOES close a window reopened on the cancelled count: leaving it
+  // open would show a cancelled count as still in progress.
+  it('a late cancel reply closes the window when it shows the cancelled count again', async () => {
+    let finishCancel: () => void = () => undefined;
+    H.rpc.mockImplementation((name: string) => name === 'cancel_cycle_count'
+      ? new Promise((resolve) => { finishCancel = () => resolve({ data: { cancelled: true }, error: null }); })
+      : Promise.resolve({ data: null, error: null }));
+    render(<CycleCounts />);
+    await waitFor(() => expect(screen.getByText('CC-1001')).toBeTruthy());
+    await openCount('CC-1001', 'ALPHA PRODUCT', 0);
+
+    fireEvent.click(screen.getByRole('button', { name: /Cancel Count/ }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel Count' }));
+    await waitFor(() => expect(H.rpc).toHaveBeenCalledWith('cancel_cycle_count', expect.objectContaining({ p_cycle_count_id: COUNT_A })));
+
+    fireEvent.click(screen.getByLabelText('Close'));
+    await openCount('CC-1001', 'ALPHA PRODUCT', 1);
+    await act(async () => { finishCancel(); });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
 });

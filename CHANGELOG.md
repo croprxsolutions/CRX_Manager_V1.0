@@ -2,7 +2,7 @@
 
 Releases of CRX Manager, newest first.
 
-## v0.1.0 (2026-11-19)
+## v0.1.0 (2026-11-20)
 
 #### ✨ New Features
 * a new quote's commission split starts from the customer's split (#1999)

@@ -7,7 +7,7 @@ export interface ReleaseNotes {
 
 export const releaseNotes: ReleaseNotes = {
   "version": "0.1.0",
-  "date": "2026-11-19",
+  "date": "2026-11-20",
   "items": [
     "Invoices now bill the price that was on the quote you sent; if a quote changed since you sent it, the invoice asks you to resend it or type the price.",
     "After a deploy, one reload gets the new version and sign-in keeps working. Offline and weak-signal loading work as before.",

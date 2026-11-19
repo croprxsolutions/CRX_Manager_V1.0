@@ -454,8 +454,8 @@ BEGIN
     FROM (VALUES (28, 100), (29, 100), (30, 100), (31, 100), (32, 50), (33, 20), (35, 100), (37, 50)) x(i, q);
   INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active)
   VALUES (v_p[33], v_customer, 30, 'manual', v_q, v_admin, true),
-  -- A legacy hold whose quantity is not a number is ignored (P26g still buys exactly 60).
-         (v_p[35], v_customer, 'NaN'::numeric, 'crop_program', v_q, v_admin, true);
+  -- A legacy hold whose quantity is not finite is ignored (P26g still buys exactly 60).
+         (v_p[35], v_customer, 'Infinity'::numeric, 'crop_program', v_q, v_admin, true);
   -- Product 36: an active job of 100 at +5 with its job hold of 100.
   INSERT INTO jobs (job_number, customer_id, status, job_date, created_by)
   VALUES ('SMK-PP26H-' || v_suffix, v_customer, 'scheduled', v_t + 5, v_admin) RETURNING id INTO v_job;

@@ -220,7 +220,7 @@ BEGIN
                 WHEN ih.hold_type IN ('manual', 'crop_program') THEN 'now'
            END AS hold_use
       FROM inventory_holds ih
-     WHERE ih.is_active = true AND ih.quantity > 0 AND ih.quantity <> 'NaN'::numeric
+     WHERE ih.is_active = true AND ih.quantity > 0 AND ih.quantity < 'Infinity'::numeric  -- (also excludes NaN)
        AND (ih.expires_at IS NULL OR ih.expires_at >= (SELECT today FROM prm))
        AND ih.hold_type IN ('manual', 'crop_program', 'job')
   ),
@@ -569,7 +569,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '61772d9644e91a782281baf8e8642800' THEN
+     IS DISTINCT FROM '50e85ea5ad26e2377a4af873f9c64d73' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

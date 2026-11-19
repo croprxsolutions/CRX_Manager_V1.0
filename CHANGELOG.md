@@ -36,6 +36,7 @@ Releases of CRX Manager, newest first.
 * environment banner and tab title prefix (STAGING amber, LOCAL blue) (#1714)
 
 #### 🐛 Bug Fixes
+* KI-81 unit — never bill a quote price in a unit the product is no longer stocked in (v0.1.0 Sol HIGH) (#2025)
 * db-apply stops on KI-137 while its rows still need it; a moved one-shot entry is allowed (v0.1.0 Sol 1 + 5) (#2015)
 * the standing-discount recompute helper is internal only (v0.1.0 CHECK 4) (#2013)
 * deactivating a customer checks its open work (KI-148) (#1997)

@@ -41,8 +41,7 @@ keeps its `authenticated` and `service_role` execute: the count screen calls it,
   Complete then lands on the counted figure, plus any stock move between Save and Complete, as today.
 - **Unchanged.** Its percentage and the rest of the body. The baseline is still taken when Save reaches the database.
 - **Luna r1.** A non-finite on-hand is refused (`CYCLE_COUNT_ON_HAND_INVALID`), since the column no longer refuses it.
-  The migration refuses to apply while an open count has saved lines (their baseline was rounded at Save, Luna r2);
-  complete or cancel that count first.
+  The migration also refuses, naming the line, if a stored baseline or variance is not a number (Sol r2).
 
 ### C. The `app.admin_override` escape on order-line edits
 - **Fact.** `_guard_order_item_delivery_lineage` (BEFORE UPDATE OF `order_id`, `product_id` ON `order_items`) returns
@@ -105,16 +104,19 @@ keeps its `authenticated` and `service_role` execute: the count screen calls it,
   completion, as today. No existing delivery, ledger row or flag is rewritten, so a past two-line shortage stays
   unflagged.
 - **Open counts at apply.** A count line saved before the apply keeps a 4-place baseline rounded from on-hand at Save,
-  so the migration refuses to apply while an open count has saved lines, until it is completed or cancelled
-  (Luna r1, r2).
-  - Pre-apply read-only check (UNVERIFIED): `SELECT count(*) FROM cycle_counts WHERE status = 'in_progress'`,
-    expected 0.
+  so it can complete up to 0.00005 of a unit off, as today. The guard that blocked the apply for this drew a new HIGH
+  in three rounds; Mason dropped it (DECISION_LOG 2026-11-19: live stock is not real yet).
+  - Optional pre-apply read-only check: `SELECT count(*) FROM cycle_counts WHERE status = 'in_progress'`, ideally 0.
 - **Timing.**
   - Two completions sharing products, with or without stock rows: one waits, with no deadlock.
   - A retry of a completion returns its saved receipt before any new check, because the wrapper's checks and row
     creation run only while the delivery is `in_progress`, and the receipt is checked before the body's status check.
-- **Rollout.** The deployed screens send every loaded line id with a number. Only a stale screen, or an offline receipt
-  for a delivery edited in the meantime, sees the new refusal.
+- **Rollout.** The deployed screens send every loaded line id with a number. Only a stale online screen sees the new
+  refusal; a queued offline receipt already stops earlier (`COMPLETION_EVIDENCE_REQUIRED`) and goes to office review
+  (corrected after Sol r2).
+- **Lock order (Sol r2).** The wrapper locks every existing stock row first, in product order, as before #1942; only
+  then does it create missing rows, in product order. A writer holding an existing row while it creates a missing one
+  makes the completion wait instead of deadlocking.
 - **Undo (revised after Sol r1).** The rollback script first checks the four bodies are still #1942's, refusing with
   nothing replaced if a later change touched one. It then restores the four previous bodies (md5-checked).
   - The two count columns stay plain `numeric` with their finite check. Narrowing them back would round away the exact

@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-19 — #1942: Mason drops the open-stock-count guard from the migration
+
+**Decision (Mason, in chat via the coordinating session, 2026-11-19: "Drop the guard"; "none of the stock is real in live app so no need to be worried on that").** Migration `20270129150000_inventory_edge_cases_1942` no longer locks `cycle_count_items` or refuses to apply while an open stock count has saved lines.
+**Why:** that guard drew a new HIGH in three rounds (Luna r1, Luna r4, Sol r2), so the stop rule fired. Without it, the worst case is today's behaviour: a count saved before the apply and completed after it can land up to 0.00005 of a unit off, and only on stock with more than 4 decimals. Live stock is not real yet.
+**What it does:** the apply no longer waits on open counts. A read-only check for open counts before the apply is optional. Every other #1942 check and gate is unchanged.
+
 ## 2026-11-19 — #1997: Mason owner-accepted 7 Sol finding(s) at `994795d9e03e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1997 at `994795d9e03e` (base `ded769b690d0`) found 7 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

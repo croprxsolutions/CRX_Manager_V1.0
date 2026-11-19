@@ -2,9 +2,9 @@
 -- None is wrong on live today; each closes a case that could go wrong.
 --
 -- A. A stock row that does not exist yet: the completion wrapper (_complete_delivery_authorized_impl, 20270126110000)
---    now walks the delivery's products in product order and, for each, creates a missing Main Warehouse row exactly as
---    the body would (only while in progress, only for a product it moves) and then locks it, so two completions
---    creating rows for the same products wait instead of deadlocking.
+--    locks the delivery's existing Main Warehouse rows in product order as before, then creates each missing row
+--    exactly as the body would (only while in progress, only for a product it moves) in product order and locks it,
+--    so completions creating rows for the same products wait instead of deadlocking.
 -- B. On-hand with more than 4 decimals: cycle_count_items.expected_qty and variance become plain numeric and
 --    update_cycle_count_item stores the exact on-hand, so Complete (current on-hand + variance) lands on the count.
 -- C. _guard_order_item_delivery_lineage loses its app.admin_override early return: no flow moves an order line to
@@ -31,13 +31,13 @@
 
 SET LOCAL lock_timeout = '5s';
 
--- Taken before the open-count check below, so no count can be saved between the check and the column change (Luna r4).
--- The ALTER TABLE in B takes this same lock anyway.
-LOCK TABLE public.cycle_count_items IN ACCESS EXCLUSIVE MODE;
+-- A count saved before this apply keeps its 4-place baseline and can complete up to 0.00005 of a unit off, as today.
+-- Mason dropped the guard that blocked the apply for it (DECISION_LOG 2026-11-19); nothing else changes for open counts.
 
 DO $preflight$
 DECLARE
   v_fn record;
+  v_bad uuid;
 BEGIN
   FOR v_fn IN
     SELECT x.sig, x.body_md5, p.oid, p.prosrc
@@ -53,14 +53,11 @@ BEGIN
       RAISE EXCEPTION 'INV_EDGE_PREFLIGHT: % is not the reviewed body', v_fn.sig;
     END IF;
   END LOOP;
-  -- A line saved before this migration keeps its 4-place baseline, rounded from on-hand as it was then; it could
-  -- complete off the counted figure, so the migration waits until open counts are completed or cancelled (Luna r1, r2).
-  IF EXISTS (SELECT 1
-               FROM public.cycle_count_items cci
-               JOIN public.cycle_counts cc ON cc.id = cci.cycle_count_id
-              WHERE cc.status = 'in_progress'
-                AND cci.counted_qty IS NOT NULL) THEN
-    RAISE EXCEPTION 'INV_EDGE_PREFLIGHT: an open stock count has saved lines; complete or cancel it first';
+  SELECT id INTO v_bad FROM public.cycle_count_items
+   WHERE expected_qty IN ('NaN', 'Infinity', '-Infinity') OR variance IN ('NaN', 'Infinity', '-Infinity')
+   ORDER BY id LIMIT 1;
+  IF FOUND THEN
+    RAISE EXCEPTION 'INV_EDGE_PREFLIGHT: stock count line % has a baseline or variance that is not a number; fix it first', v_bad;
   END IF;
 END;
 $preflight$;
@@ -287,29 +284,37 @@ BEGIN
     END IF;
   END IF;
 
-  -- #1942 A: one pass in product order. While in progress, a product this completion moves that has no Main Warehouse
-  -- row gets one first, exactly as the body would create it (0 / 0, flagged manufactured at delivery); then its row is
-  -- locked. Creating and locking in the same order means two completions sharing products wait instead of deadlocking.
+  -- Existing rows are locked first, in product order, exactly as before #1942 (creating rows in between could
+  -- deadlock with a writer that holds an existing row and then creates a missing one: Sol r2).
+  PERFORM 1 FROM public.inventory i
+   WHERE i.location = 'Main Warehouse'
+     AND i.product_id IN (SELECT di.product_id FROM public.delivery_items di WHERE di.delivery_id = p_delivery_id)
+   ORDER BY i.product_id, i.id
+     FOR UPDATE;
+
+  -- #1942 A: then, in product order and only while in progress, a product this completion moves that has no Main
+  -- Warehouse row gets one, exactly as the body would create it (0 / 0, flagged manufactured at delivery), and is
+  -- locked. Two completions creating rows for the same products then wait on each other in one order, not deadlock.
   FOR v_product IN
-    SELECT di.product_id,
-           bool_or(CASE WHEN v_status = 'in_progress' THEN CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
-                   THEN GREATEST(0, LEAST((p_quantities ->> di.id::text)::numeric, di.quantity))
-                   ELSE di.quantity END > 0 ELSE false END) AS moves
+    SELECT di.product_id
       FROM public.delivery_items di
      WHERE di.delivery_id = p_delivery_id
+       AND v_status = 'in_progress'
      GROUP BY di.product_id
+    HAVING bool_or(CASE WHEN p_quantities IS NOT NULL AND p_quantities ? di.id::text
+                   THEN GREATEST(0, LEAST((p_quantities ->> di.id::text)::numeric, di.quantity))
+                   ELSE di.quantity END > 0)
      ORDER BY di.product_id
   LOOP
-    IF v_product.moves AND NOT EXISTS (
-         SELECT 1 FROM public.inventory i WHERE i.product_id = v_product.product_id AND i.location = 'Main Warehouse') THEN
+    IF NOT EXISTS (SELECT 1 FROM public.inventory i WHERE i.product_id = v_product.product_id AND i.location = 'Main Warehouse') THEN
       INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, manufactured_at_delivery)
       VALUES (v_product.product_id, 'Main Warehouse', 0, 0, true)
       ON CONFLICT DO NOTHING;
+      PERFORM 1 FROM public.inventory i
+       WHERE i.product_id = v_product.product_id AND i.location = 'Main Warehouse'
+       ORDER BY i.id
+         FOR UPDATE;
     END IF;
-    PERFORM 1 FROM public.inventory i
-     WHERE i.product_id = v_product.product_id AND i.location = 'Main Warehouse'
-     ORDER BY i.id
-       FOR UPDATE;
   END LOOP;
   RETURN public._complete_delivery_authorized_impl_20270122(
     p_delivery_id, p_signed_by, p_performed_by, p_quantities, p_issue_type, p_issue_notes, p_idempotency_key, p_completed_at);
@@ -918,7 +923,7 @@ BEGIN
   FOR v_fn IN
     SELECT x.sig, x.body_md5, p.oid, p.prosrc
       FROM (VALUES
-        ('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', 'ea8a950809a76e810b2090dcd129d85c'),
+        ('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', '447d868a0facd8bb2b3a67be8e3891be'),
         ('public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', '70e318a7f05d51d2cf6c3c6ea6226379'),
         ('public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'a0575bba2827e38fd4161ad3924e8978'),
         ('public._guard_order_item_delivery_lineage()', '8e4160c1209a9dde5518edbcef5d281b')
@@ -951,8 +956,12 @@ BEGIN
                     AND conname = 'cycle_count_items_expected_variance_finite' AND contype = 'c' AND convalidated) THEN
     RAISE EXCEPTION 'INV_EDGE_POSTFLIGHT: the finite-count constraint is missing';
   END IF;
-  IF (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.order_items'::regclass
-        AND tgname = 'guard_order_item_delivery_lineage' AND tgenabled = 'O') <> 1 THEN
+  IF (SELECT count(*) FROM pg_trigger t WHERE t.tgrelid = 'public.order_items'::regclass
+        AND t.tgname = 'guard_order_item_delivery_lineage' AND t.tgenabled = 'O'
+        AND t.tgfoid = 'public._guard_order_item_delivery_lineage()'::regprocedure
+        AND t.tgtype = 19  -- ROW | BEFORE | UPDATE
+        AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a
+              WHERE a.attrelid = t.tgrelid AND a.attnum = ANY(t.tgattr)) = ARRAY['order_id', 'product_id']) <> 1 THEN
     RAISE EXCEPTION 'INV_EDGE_POSTFLIGHT: the order-line lineage trigger is missing or disabled';
   END IF;
 END;

@@ -265,6 +265,8 @@ const id = (s) => `a9420000-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1'), CUST = id('c1');
 // P4 < P5 by id; neither has a stock row. P6 has 10 on hand; P3 holds a 7-place on-hand for the count.
 const P3 = id('b3'), P4 = id('b4'), P5 = id('b5'), P6 = id('b6');
+// P2 has no stock row and sorts before P6 (Sol r2: mixed race).
+const P2 = id('b2'), OF = id('e5'), OF2 = id('e52'), OF6 = id('e56'), DF = id('f4');
 const INV3 = id('d03'), INV6 = id('d06');
 const OC = id('e1'), OD = id('e2'), OE = id('e3'), OX = id('e4');
 const OC4 = id('e14'), OC5 = id('e15'), OD4 = id('e24'), OD5 = id('e25'), OE1 = id('e31'), OE2 = id('e32'), OX1 = id('e41');
@@ -285,7 +287,8 @@ function seed() {
       ('${P3}', '[PROVER] Counted', 'IE-P3', 'liquid', 'Gal', 'Gal', 'oz', 'Gal', 16, 24, 30, 30, 30, 1, true),
       ('${P4}', '[PROVER] New Four', 'IE-P4', 'liquid', 'Gal', 'Gal', 'oz', 'Gal', 16, 24, 30, 30, 30, 1, true),
       ('${P5}', '[PROVER] New Five', 'IE-P5', 'liquid', 'Gal', 'Gal', 'oz', 'Gal', 16, 24, 30, 30, 30, 1, true),
-      ('${P6}', '[PROVER] Two Lines', 'IE-P6', 'liquid', 'Gal', 'Gal', 'oz', 'Gal', 16, 24, 30, 30, 30, 1, true);
+      ('${P6}', '[PROVER] Two Lines', 'IE-P6', 'liquid', 'Gal', 'Gal', 'oz', 'Gal', 16, 24, 30, 30, 30, 1, true),
+      ('${P2}', '[PROVER] New Two', 'IE-P2', 'liquid', 'Gal', 'Gal', 'oz', 'Gal', 16, 24, 30, 30, 30, 1, true);
     -- Filler so the products table is real-sized: the planner then walks a delivery's lines in line order, as live does.
     INSERT INTO public.products (product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
         rate_per_acre, current_cost, tier1_price, tier2_price, tier3_price, pricing_version, is_active)
@@ -295,21 +298,24 @@ function seed() {
       ('${INV6}', '${P6}', 'Main Warehouse', 'Gal', 10, 0, 0);
     INSERT INTO public.orders (id, order_number, customer_id, status) VALUES
       ('${OC}', 'IE-OC', '${CUST}', 'confirmed'), ('${OD}', 'IE-OD', '${CUST}', 'confirmed'),
-      ('${OE}', 'IE-OE', '${CUST}', 'confirmed'), ('${OX}', 'IE-OX', '${CUST}', 'confirmed');
+      ('${OE}', 'IE-OE', '${CUST}', 'confirmed'), ('${OX}', 'IE-OX', '${CUST}', 'confirmed'), ('${OF}', 'IE-OF', '${CUST}', 'confirmed');
     INSERT INTO public.order_items (id, order_id, product_id, unit_size, total_units_needed, quantity_delivered, quantity_remaining, price_per_unit) VALUES
       ('${OC4}', '${OC}', '${P4}', 'Gal', 2, 0, 2, 30), ('${OC5}', '${OC}', '${P5}', 'Gal', 3, 0, 3, 30),
       ('${OD4}', '${OD}', '${P4}', 'Gal', 2, 0, 2, 30), ('${OD5}', '${OD}', '${P5}', 'Gal', 3, 0, 3, 30),
       ('${OE1}', '${OE}', '${P6}', 'Gal', 6, 0, 6, 30), ('${OE2}', '${OE}', '${P6}', 'Gal', 6, 0, 6, 30),
-      ('${OX1}', '${OX}', '${P6}', 'Gal', 1, 0, 1, 30);
+      ('${OX1}', '${OX}', '${P6}', 'Gal', 1, 0, 1, 30),
+      ('${OF2}', '${OF}', '${P2}', 'Gal', 1, 0, 1, 30), ('${OF6}', '${OF}', '${P6}', 'Gal', 1, 0, 1, 30);
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, status, is_quick_delivery) VALUES
       ('${DC}', 'IE-DC', '${OC}', '${CUST}', '${ADMIN}', 'in_progress', false),
       ('${DD}', 'IE-DD', '${OD}', '${CUST}', '${ADMIN}', 'in_progress', false),
-      ('${DE}', 'IE-DE', '${OE}', '${CUST}', '${ADMIN}', 'in_progress', false);
+      ('${DE}', 'IE-DE', '${OE}', '${CUST}', '${ADMIN}', 'in_progress', false),
+      ('${DF}', 'IE-DF', '${OF}', '${CUST}', '${ADMIN}', 'in_progress', false);
     -- Opposite line order for the two products with no stock row: DC is P5 then P4, DD is P4 then P5.
     INSERT INTO public.delivery_items (id, delivery_id, order_item_id, product_id, quantity, unit_size) VALUES
       ('${id('f11')}', '${DC}', '${OC5}', '${P5}', 3, 'Gal'), ('${id('f12')}', '${DC}', '${OC4}', '${P4}', 2, 'Gal'),
       ('${id('f21')}', '${DD}', '${OD4}', '${P4}', 2, 'Gal'), ('${id('f22')}', '${DD}', '${OD5}', '${P5}', 3, 'Gal'),
-      ('${E1}', '${DE}', '${OE1}', '${P6}', 6, 'Gal'), ('${E2}', '${DE}', '${OE2}', '${P6}', 6, 'Gal');
+      ('${E1}', '${DE}', '${OE1}', '${P6}', 6, 'Gal'), ('${E2}', '${DE}', '${OE2}', '${P6}', 6, 'Gal'),
+      ('${id('f41')}', '${DF}', '${OF2}', '${P2}', 1, 'Gal'), ('${id('f46')}', '${DF}', '${OF6}', '${P6}', 1, 'Gal');
     INSERT INTO public.cycle_counts (id, count_number, status, initiated_by) VALUES ('${CC}', 'IE-CC1', 'in_progress', '${ADMIN}');
     INSERT INTO public.cycle_count_items (id, cycle_count_id, product_id, inventory_id, expected_qty) VALUES ('${CCI}', '${CC}', '${P3}', '${INV3}', 12.3457);`);
   psql('ANALYZE public.products; ANALYZE public.delivery_items;', { user: 'supabase_admin' });
@@ -343,6 +349,19 @@ async function creationRace() {
   // Both transactions were open at once: each started before the other ended.
   const overlapped = at(t2.out, 'S') < at(t1.out, 'E') && at(t1.out, 'S') < at(t2.out, 'E');
   return { t1, t2, overlapped, deadlocked: /deadlock detected/.test(t1.out + t2.out) };
+}
+
+// A, mixed (Sol r2): another writer holds P6's existing row and then creates P2's missing row, while DF (P2, P6) completes.
+// Creating P2 before locking P6 would deadlock with it; locking existing rows first makes the completion wait.
+async function mixedRace() {
+  const [w, c] = await Promise.all([
+    session(`BEGIN; ${STAMP('S')} SELECT 1 FROM public.inventory WHERE id = '${INV6}' FOR UPDATE; SELECT pg_sleep(2.5);
+      INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked) VALUES ('${P2}', 'Main Warehouse', 0, 0) ON CONFLICT DO NOTHING;
+      SELECT 'W done'; ${STAMP('E')} ROLLBACK;`),
+    session(`${LIVE_PLAN} BEGIN; ${STAMP('S')} ${complete(DF)} SELECT 'C done ' || ${onHand(P2)}; ${STAMP('E')} ROLLBACK;`, 300),
+  ]);
+  const at = (out, k) => Number((out.match(new RegExp(`^${k} ([0-9.]+)$`, 'm')) ?? [])[1]);
+  return { w, c, overlapped: at(c.out, 'S') < at(w.out, 'E') && at(w.out, 'S') < at(c.out, 'E'), deadlocked: /deadlock detected/.test(w.out + c.out) };
 }
 
 // B: count 12.35 on the 7-place row (as the signed-in admin), optionally move stock between Save and Complete.
@@ -398,12 +417,11 @@ async function beforeCases() {
 
 async function afterCases() {
   stageText('candidate.sql', lf(CANDIDATE));
-  // An open count with a saved line keeps its 4-place baseline: the apply waits for it.
-  raw(`UPDATE public.cycle_count_items SET counted_qty = 12.35, expected_qty = 12.3457, variance = 0.0043, is_counted = true WHERE id = '${CCI}';`);
-  const waits = apply('candidate.sql');
-  assert.notEqual(waits.status, 0, 'the apply must wait while an open count has saved lines');
-  assert.match(waits.output, /INV_EDGE_PREFLIGHT: an open stock count has saved lines/, waits.output);
-  raw(`UPDATE public.cycle_count_items SET counted_qty = NULL, expected_qty = 12.3457, variance = NULL, is_counted = false WHERE id = '${CCI}';`);
+  raw(`UPDATE public.cycle_count_items SET expected_qty = 'NaN' WHERE id = '${CCI}';`);
+  const nan = apply('candidate.sql');
+  assert.notEqual(nan.status, 0, 'a stored NaN baseline must stop the apply');
+  assert.match(nan.output, new RegExp(`INV_EDGE_PREFLIGHT: stock count line ${CCI} has a baseline or variance that is not a number`), nan.output);
+  raw(`UPDATE public.cycle_count_items SET expected_qty = 12.3457 WHERE id = '${CCI}';`);
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
   const again = apply('candidate.sql');
@@ -418,7 +436,7 @@ async function afterCases() {
       'true,search_path=public, pg_temp,false,false', sig);
   }
   assert.equal(scalar(`SELECT has_function_privilege('authenticated', 'public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'EXECUTE')::text || has_function_privilege('anon', 'public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'EXECUTE');`), 'truefalse');
-  console.log('[case] P the migration refuses, changing nothing, while an open count has saved lines; it applies once (a second apply refuses); every function stays SECURITY DEFINER with search_path = public, pg_temp and no anon execute; only update_cycle_count_item keeps authenticated execute (the count screen)');
+  console.log('[case] P the migration refuses, changing nothing and naming the line, while a stored baseline is not a number; it applies once (a second apply refuses); every function stays SECURITY DEFINER with search_path = public, pg_temp and no anon execute; only update_cycle_count_item keeps authenticated execute (the count screen)');
 
   // A
   const race = await creationRace();
@@ -426,6 +444,11 @@ async function afterCases() {
   assert.ok(race.overlapped, `the two completions must run at the same time:\n${race.t1.out}\n${race.t2.out}`);
   assert.match(race.t1.out, /T1 done -2 -3/, race.t1.out);
   assert.match(race.t2.out, /T2 done -2 -3/, race.t2.out);
+  const mixed = await mixedRace();
+  assert.ok(!mixed.deadlocked, `no deadlock expected:\n${mixed.w.out}\n${mixed.c.out}`);
+  assert.ok(mixed.overlapped, `the writer and the completion must run at the same time:\n${mixed.w.out}\n${mixed.c.out}`);
+  assert.match(mixed.w.out, /W done/, mixed.w.out);
+  assert.match(mixed.c.out, /C done -1/, mixed.c.out);
   assert.equal(okProbe(`${complete(DC)} SELECT ${onHand(P4)} || '/' || ${onHand(P5)} || '/' || (SELECT bool_and(manufactured_at_delivery) FROM public.inventory WHERE product_id IN ('${P4}', '${P5}'))
     || '/' || (SELECT count(*) FROM public.inventory_transactions WHERE delivery_id = '${DC}' AND requires_review);`), '-2/-3/true/2');
   // A retry of a completed delivery returns its saved receipt and creates no row, even for a product it now lists.
@@ -443,7 +466,7 @@ async function afterCases() {
   assert.equal(okProbe(`${complete(DE, null, 'ie-reuse')}
     ${complete(DC, null, 'ie-reuse')}
     SELECT (SELECT status FROM public.deliveries WHERE id = '${DC}') || '/' || ${rowCount(P4)} || '/' || ${rowCount(P5)};`), 'in_progress/0/0');
-  console.log('[case] A two completions creating rows for the same two new products in opposite line order both finish (one waits, no deadlock); a completion ends at minus its quantities on rows flagged manufactured at delivery, its delivered rows flagged for review; a retry of a completed delivery returns its receipt and creates no row, nor does a key already used by another delivery; an unknown delivery is still refused by the body');
+  console.log('[case] A two completions creating rows for the same two new products in opposite line order both finish (one waits, no deadlock); a completion waits, with no deadlock, for a writer that holds an existing row and then creates a missing one; a completion ends at minus its quantities on rows flagged manufactured at delivery, its delivered rows flagged for review; a retry of a completed delivery returns its receipt and creates no row, nor does a key already used by another delivery; an unknown delivery is still refused by the body');
 
   // B
   assert.deepEqual(countAndComplete(), [12.35, 12.3456789]);
@@ -490,6 +513,12 @@ function rollbackCases() {
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'::regprocedure;`), '70e318a7f05d51d2cf6c3c6ea6226379', 'the refused rollback replaced nothing');
   const guardOnly = lf(CANDIDATE).match(/CREATE OR REPLACE FUNCTION public\._guard_order_item_delivery_lineage\(\)[\s\S]*?\$function\$;/)[0];
   psql(guardOnly, { user: 'supabase_admin' });
+  psql(`REVOKE EXECUTE ON FUNCTION public.update_cycle_count_item(uuid,numeric,text,uuid,text) FROM authenticated;`, { user: 'supabase_admin' });
+  const revoked = apply('reverse.sql');
+  assert.notEqual(revoked.status, 0, 'a later revoke must stop the rollback');
+  assert.match(revoked.output, /ROLLBACK_REFUSED: a function's security, search_path or grants changed after #1942/, revoked.output);
+  assert.equal(scalar(`SELECT has_function_privilege('authenticated', 'public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'EXECUTE');`), 'f', 'the refused rollback re-granted nothing');
+  psql(`GRANT EXECUTE ON FUNCTION public.update_cycle_count_item(uuid,numeric,text,uuid,text) TO authenticated;`, { user: 'supabase_admin' });
   // An exact count saved under #1942 keeps every digit through the rollback.
   raw(`UPDATE public.cycle_count_items SET expected_qty = 12.3456789, variance = 0.0043211 WHERE id = '${CCI}';`);
   const r = apply('reverse.sql');
@@ -499,7 +528,7 @@ function rollbackCases() {
   assert.match(okProbe(moveLine(OE1, `product_id = '${P4}'`)), new RegExp(`^${P4}/`));
   assert.equal(twoLines(payloads.missingLine), '1/0/0');
   assert.equal(scalar(`SELECT has_function_privilege('authenticated', 'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', 'EXECUTE');`), 'f');
-  console.log('[case] R rollback refuses, replacing nothing, while a body is not the one #1942 installed; then restores the four previous bodies (md5-checked in the script), keeps the exact count columns (a 7-place baseline keeps every digit), and the old behaviour returns (the override moves the line, a missing line ships in full); the wrapper stays private');
+  console.log('[case] R rollback refuses, replacing nothing, while a body is not the one #1942 installed, or while a grant changed after it (no re-grant); then restores the four previous bodies (md5-checked in the script), keeps the exact count columns (a 7-place baseline keeps every digit), and the old behaviour returns (the override moves the line, a missing line ships in full); the wrapper stays private');
 }
 
 async function main() {

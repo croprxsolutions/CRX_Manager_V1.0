@@ -15,7 +15,7 @@ BEGIN
   FOR v_fn IN
     SELECT x.sig, x.body_md5, p.oid, p.prosrc
       FROM (VALUES
-        ('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', 'ea8a950809a76e810b2090dcd129d85c'),
+        ('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', '447d868a0facd8bb2b3a67be8e3891be'),
         ('public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', '70e318a7f05d51d2cf6c3c6ea6226379'),
         ('public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'a0575bba2827e38fd4161ad3924e8978'),
         ('public._guard_order_item_delivery_lineage()', '8e4160c1209a9dde5518edbcef5d281b')
@@ -26,6 +26,18 @@ BEGIN
       RAISE EXCEPTION 'ROLLBACK_REFUSED: % is not the reviewed body', v_fn.sig;
     END IF;
   END LOOP;
+  IF EXISTS (SELECT 1 FROM pg_proc p
+              WHERE p.oid IN (SELECT to_regprocedure(s) FROM (VALUES ('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'),
+           ('public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'),
+           ('public.update_cycle_count_item(uuid,numeric,text,uuid,text)'),
+           ('public._guard_order_item_delivery_lineage()')) AS x(s))
+                AND (NOT p.prosecdef OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
+                     OR has_function_privilege('anon', p.oid, 'EXECUTE')
+                     OR (p.proname <> 'update_cycle_count_item' AND has_function_privilege('authenticated', p.oid, 'EXECUTE'))))
+     OR NOT has_function_privilege('authenticated', 'public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'EXECUTE')
+     OR NOT has_function_privilege('service_role', 'public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'ROLLBACK_REFUSED: a function''s security, search_path or grants changed after #1942';
+  END IF;
 END;
 $refuse$;
 

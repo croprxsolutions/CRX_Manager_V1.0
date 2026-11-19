@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-18 — Purchasing plan: held stock always counts as spoken for (reverses rule 2 of the #1971 entry below)
+
+**Decision (Mason, in chat, 2026-11-18: "1").** After Sol round 2 on PR #1980 found that stock held for a Maybe booking read as free, Mason chose: held stock is always spoken for in `get_purchasing_plan`, whatever the booking's confidence, but a hold never makes the plan buy on its own. A hold covering its booking's (or job's) own lines counts today only up to the stock on the shelf left after other holds, backing Firm lines first; the unbacked part stays as the booking line with its own date and confidence (a Maybe line stays shown only).
+**Supersedes:** rule (2) of "2026-11-18 — Purchasing plan: no 'expedite a later PO' alternative; a Maybe booking's held stock follows its confidence". Rule (1) stands.
+
 ## 2026-11-18 — #1971: Mason owner-accepted 1 Sol finding(s) at `3d37b06e956c`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1971 at `3d37b06e956c` (base `59a711b8cd8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

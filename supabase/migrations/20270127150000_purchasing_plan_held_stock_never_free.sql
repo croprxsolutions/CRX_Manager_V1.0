@@ -278,7 +278,7 @@ BEGIN
     SELECT h.*,
            CASE WHEN h.hold_type = 'crop_program' AND isfinite(h.expires_at)
                      AND h.expires_at > (SELECT today FROM prm)
-                     AND EXISTS (SELECT 1 FROM quotes q WHERE q.id = h.source_id)
+                     AND EXISTS (SELECT 1 FROM quotes q WHERE q.id = h.source_id AND q.deleted_at IS NULL)
                 THEN GREATEST((SELECT today FROM prm), h.expires_at - 14)
                 ELSE (SELECT today FROM prm) END AS rest_date
       FROM hraw h WHERE h.hold_use = 'now'
@@ -638,7 +638,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '2664706956f0c5304c8ab59eedbcf5e9' THEN
+     IS DISTINCT FROM '37ef9cfcbb3223016014efcca34a0c86' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

@@ -2,7 +2,7 @@
 
 Status: SETTLED 2026-11-17, after one Astra cold challenge (gpt-6-astra high, 67 findings) and one targeted re-check (19 findings); Mason answered all three business questions the same day. Grand plan: `2026-10-29-product-GRAND-PLAN.md` › RT-4 and overlap 11. RT-3 contract: `2026-11-11-product-RT3-rate-review-CONTRACT.md`. Facts read at commit `10070370e` (origin/staging) and live read-only on 2026-11-17.
 
-**Scope name.** This is **RT-4a**: promote approved rates to live per parent, with rollback. The grand plan's RT-4 "done when" also needs RT-4b (move every writer to the rate RPC, revoke direct writes (Mason-gated), drop the field app's invented `'oz'`, Piksi MG→g rename). RT-4 is not complete until RT-4b lands.
+**Scope name.** This is **RT-4a**: promote approved rates to live per parent, with rollback. The grand plan's RT-4 "done when" also needs RT-4b (move every writer to the rate RPC, revoke direct writes (Mason-gated), drop the field app's invented `'oz'`, Piksi MG→g rename). RT-4 is not complete until RT-4b lands. RT-4b's contract is `docs/plans/2026-11-18-product-RT4b-writers-CONTRACT.md`; it leaves the Piksi rename and the one-step switched-parent edit tool out.
 
 ## 1. Outcome and authority
 

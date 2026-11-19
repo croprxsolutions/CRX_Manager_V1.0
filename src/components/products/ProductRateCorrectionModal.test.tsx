@@ -2,8 +2,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Product } from '../../types';
 
-const { mockCorrect, mockPreview } = vi.hoisted(() => ({ mockCorrect: vi.fn(), mockPreview: vi.fn() }));
+const { mockCorrect, mockPreview, mockToast } = vi.hoisted(() => ({ mockCorrect: vi.fn(), mockPreview: vi.fn(), mockToast: vi.fn() }));
 vi.mock('../../lib/productRateLock', () => ({ correctProductRates: mockCorrect, previewProductRateCorrection: mockPreview }));
+vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 
 import ProductRateCorrectionModal from './ProductRateCorrectionModal';
 import { sanitizeError } from '../../lib/db';
@@ -80,6 +81,8 @@ describe('correct rates while locked', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Save correction' }));
     await waitFor(() => expect(onCorrected).toHaveBeenCalled());
+    // RT-4b: the product page's rate boxes are read-only, so the toast points at the open-rates tool.
+    expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining("Setup Workbook's Rates tab"));
   });
 
   it('asks for a new preview when the prices moved since the one shown', async () => {

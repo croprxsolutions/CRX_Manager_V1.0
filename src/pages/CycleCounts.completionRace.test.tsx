@@ -197,4 +197,90 @@ describe('CycleCounts completion race', () => {
     const completionCalls = H.rpc.mock.calls.filter((call) => call[0] === 'complete_cycle_count');
     expect(completionCalls).toEqual([]);
   });
+  // Both dialogs share z-50, so whichever comes later in the page draws on top. The
+  // Cancel Count confirm once rendered BEFORE the detail window and opened hidden behind it.
+  it('opens the Cancel Count confirmation on top of the open count', async () => {
+    render(<CycleCounts />);
+    await waitFor(() => expect(screen.getByText('CC-1001')).toBeTruthy());
+    fireEvent.click(screen.getByText('CC-1001'));
+    await waitFor(() => expect(heldItemQueries.length).toBe(1));
+    await release(0);
+    await waitFor(() => expect(screen.getByText('ALPHA PRODUCT')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Cancel Count/ }));
+    const confirm = await screen.findByRole('alertdialog', { name: 'Cancel Cycle Count' });
+    const detail = screen.getByRole('dialog');
+    expect(detail.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // The count window's inventory actions are unreachable while the confirm is open.
+    expect(screen.getByText(/Complete & Apply Adjustments/).closest('[inert]')).not.toBeNull();
+
+    // Escape closes only the confirm; the count window stays open and usable again.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getByText(/Complete & Apply Adjustments/).closest('[inert]')).toBeNull();
+  });
+
+  // Sol HIGH (#1982): a completion still loading could open "Complete Anyway" hidden
+  // under the Cancel confirm, where Enter would complete the count.
+  it('blocks Cancel Count while a completion is still loading', async () => {
+    render(<CycleCounts />);
+    await waitFor(() => expect(screen.getByText('CC-1001')).toBeTruthy());
+    fireEvent.click(screen.getByText('CC-1001'));
+    await waitFor(() => expect(heldItemQueries.length).toBe(1));
+    await release(0);
+    await waitFor(() => expect(screen.getByText('ALPHA PRODUCT')).toBeTruthy());
+
+    fireEvent.click(screen.getByText(/Complete & Apply Adjustments/));
+    await waitFor(() => expect(heldItemQueries.length).toBe(2));
+    const cancel = screen.getByRole('button', { name: /Cancel Count/ });
+    expect((cancel as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(cancel);
+    expect(screen.queryByRole('alertdialog', { name: 'Cancel Cycle Count' })).toBeNull();
+  });
+
+  // Sol r3 (#1982): a confirm opened for count A must never act on count B, however
+  // focus reaches the list behind it. Switching counts closes the stale confirm.
+  it('closes the Cancel confirmation when the count behind it changes', async () => {
+    render(<CycleCounts />);
+    await waitFor(() => expect(screen.getByText('CC-1001')).toBeTruthy());
+    fireEvent.click(screen.getByText('CC-1001'));
+    await waitFor(() => expect(heldItemQueries.length).toBe(1));
+    await release(0);
+    await waitFor(() => expect(screen.getByText('ALPHA PRODUCT')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Cancel Count/ }));
+    await screen.findByRole('alertdialog', { name: 'Cancel Cycle Count' });
+
+    // Count B is opened behind the still-open confirm (jsdom does not enforce inert).
+    fireEvent.click(screen.getByText('CC-2002'));
+    await waitFor(() => expect(heldItemQueries.length).toBe(2));
+    await release(1);
+    await waitFor(() => expect(screen.getByText('BRAVO PRODUCT')).toBeTruthy());
+
+    expect(screen.queryByRole('alertdialog', { name: 'Cancel Cycle Count' })).toBeNull();
+    expect(H.rpc.mock.calls.filter((call) => call[0] === 'cancel_cycle_count')).toEqual([]);
+  });
+
+  // Sol r4 (#1982): a confirm must not survive reopening the SAME count, and nothing on the
+  // page (the count list included) can take focus behind an open confirm.
+  it('locks the whole page behind a confirm and closes it when the same count is reopened', async () => {
+    render(<CycleCounts />);
+    await waitFor(() => expect(screen.getByText('CC-1001')).toBeTruthy());
+    fireEvent.click(screen.getByText('CC-1001'));
+    await waitFor(() => expect(heldItemQueries.length).toBe(1));
+    await release(0);
+    await waitFor(() => expect(screen.getByText('ALPHA PRODUCT')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Cancel Count/ }));
+    await screen.findByRole('alertdialog', { name: 'Cancel Cycle Count' });
+    expect(screen.getByText('CC-2002').closest('[inert]')).toBeTruthy();
+
+    // jsdom does not enforce inert, so reach the list anyway and reopen the same count.
+    fireEvent.click(screen.getAllByText('CC-1001')[0]);
+    await waitFor(() => expect(screen.queryByRole('alertdialog', { name: 'Cancel Cycle Count' })).toBeNull());
+    expect(screen.getByText('CC-2002').closest('[inert]')).toBeNull();
+    expect(H.rpc.mock.calls.filter((call) => call[0] === 'cancel_cycle_count')).toEqual([]);
+  });
 });

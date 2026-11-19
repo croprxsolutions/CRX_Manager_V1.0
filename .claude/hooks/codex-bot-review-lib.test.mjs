@@ -564,10 +564,10 @@ for (const [label, source] of [["Claude", guardSource], ["Codex", codexGuardSour
   const budgetMatch = source.match(/const CODEX_ADVISORY_BUDGET_MS = ([\d_]+);/);
   ok(budgetMatch, `the ${label} guard declares an advisory time budget`);
   const budgetMs = Number(budgetMatch[1].replace(/_/g, ""));
-  // Hook budgets: 15s for the Codex guard (.codex/hooks.json); the Claude guard's
-  // own HOOK_TIMEOUT_MS (its hard-gate budget). Half is the ceiling, so the hard
-  // gates and the notices always have room left.
-  const hookBudgetMs = label === "Codex" ? 15_000 : Number(source.match(/const HOOK_TIMEOUT_MS = ([\d_]+);/)[1].replace(/_/g, ""));
+  // Hook budgets: each guard's own hook limit (CODEX_HOOK_TIMEOUT_MS, which
+  // mirrors .codex/hooks.json; the Claude guard's HOOK_TIMEOUT_MS, its hard-gate
+  // budget). Half is the ceiling, so the hard gates and the notices always have room left.
+  const hookBudgetMs = Number(source.match(label === "Codex" ? /const CODEX_HOOK_TIMEOUT_MS = ([\d_]+);/ : /const HOOK_TIMEOUT_MS = ([\d_]+);/)[1].replace(/_/g, ""));
   ok(
     budgetMs > 0 && budgetMs <= hookBudgetMs / 2,
     `the ${label} guard's advisory budget (${budgetMs}ms) must stay at or under half its ${hookBudgetMs}ms hook timeout`,

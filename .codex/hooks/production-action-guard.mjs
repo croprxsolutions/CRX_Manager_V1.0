@@ -366,13 +366,13 @@ function defaultRunGh(args, cwd) {
       return execFileSync(executable, args, {
         cwd,
         encoding: "utf8",
-        timeout: 5000,
+        timeout: CODEX_CALL_TIMEOUT_MS,
         stdio: ["ignore", "pipe", "pipe"],
       }).trim();
     } catch (error) {
       // Only a MISSING executable moves on to the next candidate. A timed-out or
       // failed `gh` is thrown as-is: retrying it would let one admitted call run
-      // two 5-second timeouts, which the hard-gate budget counts as one
+      // two per-call timeouts, which the hard-gate budget counts as one
       // (Codex sol, 2026-09-14).
       if (error?.code !== "ENOENT") throw error;
       lastError = error;
@@ -810,19 +810,24 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
 //
 // Returns a denial verdict, or null when nothing blocks. Fails OPEN on any
 // error: see the header of codex-bot-review-lib.mjs for why this one predicate
-// does not fail closed like its neighbours here. The 7s budget stays under half
-// of the hook's 15s so the notices below can still be written. The hard-gate
-// deadline still caps it.
-const CODEX_ADVISORY_BUDGET_MS = 7_000;
+// does not fail closed like its neighbours here. The 75s budget (four calls at
+// ~15s each, room for a cap to start the last; as pr-merge-guard.mjs) stays under
+// half of the hook's limit so the notices below can still be written. The
+// hard-gate deadline still caps it.
+const CODEX_ADVISORY_BUDGET_MS = 75_000;
 
 // The hard gates' share of this hook (see createHardGateBudget). The timeout
 // mirrors this hook's entry in .codex/hooks.json and the per-call cap mirrors
 // defaultRunGit/defaultRunGh; if either changes, change it here too. The reserve
 // covers the PowerShell launcher, which process.uptime() cannot see, plus
 // writing the verdict.
-const CODEX_HOOK_TIMEOUT_MS = 15_000;
+// Slow GitHub (#1963, as #1962 did for Claude's gate): 5s gh caps refused good
+// merges. Here the advisory shares the hard-gate deadline, so the hook gets
+// Claude's 177s hard-gate room plus its 75s advisory. A GitHub that does not
+// answer still denies, at the first call's 25s cap. Git calls stay at 5s.
+const CODEX_HOOK_TIMEOUT_MS = 255_000;
 const CODEX_HOOK_RESERVE_MS = 2_500;
-const CODEX_CALL_TIMEOUT_MS = 5_000;
+const CODEX_CALL_TIMEOUT_MS = 25_000;
 
 // `deadlineMs` is SHARED across every merge in one command (Codex round 8,
 // SEC-001): the caller computes it once and passes the same value to each

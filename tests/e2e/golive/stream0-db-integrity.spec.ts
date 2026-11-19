@@ -12,7 +12,7 @@
 
 import { test, expect, Page } from '@playwright/test';
 import { login } from '../utils/auth';
-import { supabaseRest, supabaseRpc, asArray } from './utils/supabase-helpers';
+import { getToken, supabaseRest, supabaseRpc, asArray } from './utils/supabase-helpers';
 import {
   checkOrderTotals,
   checkInventoryLedger,
@@ -50,12 +50,7 @@ test.describe.serial('Stream 0 — Database Integrity', () => {
     await page.waitForTimeout(2000);
 
     // Verify we can extract the auth token
-    const token = await page.evaluate(() => {
-      const raw = localStorage.getItem('sb-rhyzpcqhnizqbxphqdkr-auth-token');
-      if (!raw) return '';
-      const session = JSON.parse(raw);
-      return session.access_token || '';
-    });
+    const token = await getToken(page);
     expect(token).toBeTruthy();
   });
 

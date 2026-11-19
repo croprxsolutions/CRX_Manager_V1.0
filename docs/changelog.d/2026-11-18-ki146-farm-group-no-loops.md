@@ -1,0 +1,8 @@
+## 2026-11-18 - KI-146: farm groups cannot loop, and include grandchildren
+
+- Migration `20270127200000_ki146_farm_group_no_loops.sql` adds a guard on customers: a parent customer cannot be the customer itself or any customer below it in its farm group. It covers the Customer screen's save, the table API and multi-row inserts, for every role, and runs only when the parent actually changes. Two people re-parenting at once are handled one at a time, and a valid save waiting behind a Customer screen save does not deadlock. Rare simultaneous parent changes on related customers (for example A under B while B goes under A) can still deadlock; PostgreSQL cancels one with a deadlock error, nothing is saved by it, and no loop is created. A parent change in a REPEATABLE READ or SERIALIZABLE transaction is refused (no app path uses one; clearing a parent still works).
+- Sales Reports' farm group (`get_customer_farm_group`) now lists the top parent and every customer below it, grandchildren included, and can no longer run forever on a loop. Same inputs, outputs, role check and grants.
+- No data changes. Live (read-only, 2026-11-18): 154 customers, 19 in farm groups, none in a loop, no grandchildren; the postflight re-checks this at apply.
+- Contract: `docs/plans/2026-11-18-ki146-farm-group-loops-CONTRACT.md` (Astra challenge settled there).
+- Proof: `node scripts/smoke/prove-farm-group-no-loops-real-schema.mjs` (`FARM_GROUP_NO_LOOPS_PROOF_PASS`).
+- Not changed: the Customer screen's parent picker still lists customers below this one (Save refuses them with a clear message); Sales Reports' existing stale-response handling when switching customers quickly.

@@ -17,8 +17,10 @@ import { supabaseRest, supabaseRpc, asArray } from './golive/utils/supabase-help
 import { parseDollarsToCents } from '../../src/lib/parseCents';
 
 // ── Node-level Supabase REST (bypasses browser context) ─────────
-const SUPA_URL = 'https://rhyzpcqhnizqbxphqdkr.supabase.co';
-const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoeXpwY3Fobml6cWJ4cGhxZGtyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTM2NDAsImV4cCI6MjA4NTk2OTY0MH0.WR0vAi_KeGF0OoJ8_dFH7uW6ael9M5xnm6OUo2IZy7U';
+const SUPA_URL = process.env.VITE_SUPABASE_URL!;
+const SUPA_KEY = process.env.VITE_SUPABASE_ANON_KEY!;
+// The app's stored sign-in, named after the project in the URL the tests run against.
+const AUTH_KEY = `sb-${new URL(SUPA_URL).hostname.split('.')[0]}-auth-token`;
 
 let _nodeToken = '';
 async function getNodeToken(): Promise<string> {
@@ -131,12 +133,12 @@ async function btnIfVisible(page: Page, name: string | RegExp, timeout = 5000): 
 }
 
 async function getUserId(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const raw = localStorage.getItem('sb-rhyzpcqhnizqbxphqdkr-auth-token');
+  return page.evaluate((authKey) => {
+    const raw = localStorage.getItem(authKey);
     if (!raw) return '00000000-0000-0000-0000-000000000000';
     try { return JSON.parse(raw)?.user?.id || '00000000-0000-0000-0000-000000000000'; }
     catch { return '00000000-0000-0000-0000-000000000000'; }
-  });
+  }, AUTH_KEY);
 }
 
 async function dismissLeaveDialog(page: Page) {

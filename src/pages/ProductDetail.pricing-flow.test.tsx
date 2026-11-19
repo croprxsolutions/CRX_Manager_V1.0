@@ -365,6 +365,8 @@ describe('ProductDetail governed pricing flow', () => {
     await waitFor(() => expect(mockProductUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ quoting_notes: 'Updated quote guidance' }),
     ));
+    // RT-4b: the database refuses direct rate writes, so a details save never sends a rate key.
+    for (const key of ['rate_per_acre', 'rate_unit', 'suggested_rate']) expect(mockProductUpdate.mock.calls[0][0]).not.toHaveProperty(key);
     expect(mockProductEq).toHaveBeenCalledWith('pricing_version', product.pricing_version);
   });
 
@@ -943,9 +945,11 @@ describe('ProductDetail governed pricing flow', () => {
     expect(screen.getByLabelText('Current Cost')).toHaveTextContent('$50.00');
   });
 
-  it('opens rate fields while rates are open, and locks them behind Correct rates while locked', async () => {
+  it('keeps rate fields read-only: open rates point at the Setup Workbook, locked rates offer Correct rates', async () => {
     const { unmount } = render(<ProductDetail />);
-    await waitFor(() => expect(screen.getByLabelText('Rate Per Acre')).toBeEnabled());
+    expect(await screen.findByTestId('product-rates-open')).toHaveTextContent("Setup Workbook's Rates tab");
+    expect(screen.getByLabelText('Rate Per Acre')).toBeDisabled();
+    expect(screen.getByLabelText('Suggested Rate')).toBeDisabled();
     expect(screen.queryByTestId('product-rates-locked')).toBeNull();
     unmount();
 
@@ -956,6 +960,7 @@ describe('ProductDetail governed pricing flow', () => {
     // The button waits for the page to learn the product has no parent.
     expect(await within(banner).findByRole('button', { name: 'Correct rates' })).toBeInTheDocument();
     expect(screen.getByLabelText('Rate Per Acre')).toBeDisabled();
+    expect(screen.queryByTestId('product-rates-open')).toBeNull();
 
     // A correction bumps pricing_version, so the cost-basis workspace reloads with the product.
     await waitFor(() => expect(mockGetCostBasisWorkspace).toHaveBeenCalled());

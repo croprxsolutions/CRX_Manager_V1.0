@@ -58,6 +58,7 @@ describe('runBatchParent save', () => {
     const r = await runBatchParent('run-1', candidate);
     expect(r).toEqual({ parentId: 'parent-1', name: 'Aatrex 4L', epaNumber: '100-1', outcome: 'needs_person',
       detail: 'Refused at save: another proposal is waiting or was rejected; nothing was saved; the proposal waits for a person' });
+    expect(commitBatch).toHaveBeenCalledTimes(1); // a refusal is the database's decision: never retried
   });
 
   it('still throws any other save error, so the run reports it', async () => {

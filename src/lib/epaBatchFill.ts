@@ -189,6 +189,7 @@ async function once<T>(call: () => Promise<T>): Promise<T> {
     return await withDeadline(call());
   } catch (error: unknown) {
     if (error instanceof BatchDeadlineError) throw error; // the first call may still be running
+    if (errorText(error).startsWith('EPA_BATCH_')) throw error; // the database's decision, not a lost reply
     return withDeadline(call());
   }
 }

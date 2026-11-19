@@ -49,16 +49,14 @@ BEGIN
       RAISE EXCEPTION 'INV_EDGE_PREFLIGHT: % is not the reviewed body', v_fn.sig;
     END IF;
   END LOOP;
-  -- A line saved before this migration keeps its 4-place baseline; where on-hand has more places it would complete
-  -- off the counted figure, so the migration waits until such a count is completed or cancelled (Luna r1).
+  -- A line saved before this migration keeps its 4-place baseline, rounded from on-hand as it was then; it could
+  -- complete off the counted figure, so the migration waits until open counts are completed or cancelled (Luna r1, r2).
   IF EXISTS (SELECT 1
                FROM public.cycle_count_items cci
                JOIN public.cycle_counts cc ON cc.id = cci.cycle_count_id
-               JOIN public.inventory i ON i.id = cci.inventory_id
               WHERE cc.status = 'in_progress'
-                AND cci.counted_qty IS NOT NULL
-                AND i.quantity_available <> round(i.quantity_available, 4)) THEN
-    RAISE EXCEPTION 'INV_EDGE_PREFLIGHT: an open stock count has a saved line on stock with more than 4 decimals; complete or cancel that count first';
+                AND cci.counted_qty IS NOT NULL) THEN
+    RAISE EXCEPTION 'INV_EDGE_PREFLIGHT: an open stock count has saved lines; complete or cancel it first';
   END IF;
 END;
 $preflight$;

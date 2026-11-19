@@ -395,11 +395,11 @@ async function beforeCases() {
 
 async function afterCases() {
   stageText('candidate.sql', lf(CANDIDATE));
-  // An open count with a line saved on the 7-place row would keep its 4-place baseline: the apply waits for it.
+  // An open count with a saved line keeps its 4-place baseline: the apply waits for it.
   raw(`UPDATE public.cycle_count_items SET counted_qty = 12.35, expected_qty = 12.3457, variance = 0.0043, is_counted = true WHERE id = '${CCI}';`);
   const waits = apply('candidate.sql');
-  assert.notEqual(waits.status, 0, 'the apply must wait while an open count has a saved line on a 7-place row');
-  assert.match(waits.output, /INV_EDGE_PREFLIGHT: an open stock count has a saved line/, waits.output);
+  assert.notEqual(waits.status, 0, 'the apply must wait while an open count has saved lines');
+  assert.match(waits.output, /INV_EDGE_PREFLIGHT: an open stock count has saved lines/, waits.output);
   raw(`UPDATE public.cycle_count_items SET counted_qty = NULL, expected_qty = 12.3457, variance = NULL, is_counted = false WHERE id = '${CCI}';`);
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
@@ -415,7 +415,7 @@ async function afterCases() {
       'true,search_path=public, pg_temp,false,false', sig);
   }
   assert.equal(scalar(`SELECT has_function_privilege('authenticated', 'public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'EXECUTE')::text || has_function_privilege('anon', 'public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'EXECUTE');`), 'truefalse');
-  console.log('[case] P the migration refuses, changing nothing, while an open count has a saved line on stock with more than 4 decimals; it applies once (a second apply refuses); every function stays SECURITY DEFINER with search_path = public, pg_temp and no anon execute; only update_cycle_count_item keeps authenticated execute (the count screen)');
+  console.log('[case] P the migration refuses, changing nothing, while an open count has saved lines; it applies once (a second apply refuses); every function stays SECURITY DEFINER with search_path = public, pg_temp and no anon execute; only update_cycle_count_item keeps authenticated execute (the count screen)');
 
   // A
   const race = await creationRace();

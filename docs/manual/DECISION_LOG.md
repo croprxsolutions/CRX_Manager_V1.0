@@ -1,5 +1,15 @@
 # Decision Log
 
+## 2026-11-19 — #1974: Mason owner-accepted 3 Sol finding(s) at `a84b2ab1e795`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1974 at `a84b2ab1e795` (base `0c63a967772d`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270127120000_booking_live_job_guard.sql:186`, text sha256 `fb32d1c770179a1a` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen in our buisness (ref ef24b79ecb30)
+- Finding 2 (HIGH) at `supabase/migrations/20270127120000_booking_live_job_guard.sql:97`, text sha256 `3e9eed573b6c94b8` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen in our buisness (ref 8d6231b9e781)
+- Finding 3 (HIGH) at `docs/manual/DECISION_LOG.md:11`, text sha256 `72ac1cc3159989e0` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business) (ref a7d915179b07)
+
 ## 2026-11-19 — #1974 may have a ninth Sol round
 
 **Decision (Mason, in chat, 2026-11-19: "Approve round 9").** PR #1974 (#1959 booking live-job guard) may have one more Sol round (round 9).

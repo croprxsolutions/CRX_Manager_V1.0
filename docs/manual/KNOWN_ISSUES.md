@@ -1129,7 +1129,7 @@ names from products. Live: 3 POs match no vendor (PO-2026-0030, PO-2026-0018, PO
 Fix: add `vendor_id` set by `save_purchase_order`, keep the text as a snapshot; backfilling the 3 is To-Do decision 23.
 
 ### KI-145 — Bulk Customer Import fails for every rep and misreads some files silently
-**MED · FIX IN REVIEW (Claude, screen-only, to staging; [contract](../plans/2026-11-18-ki145-bulk-customer-import-CONTRACT.md)) · customers/imports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #4)**
+**MED · FIX IN REVIEW (Claude, screen-only, PR #1993 to staging; [contract](../plans/2026-11-18-ki145-bulk-customer-import-CONTRACT.md)) · customers/imports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #4)**
 The button shows for reps, but the direct insert never sets `assigned_sales_rep`, which the insert policy requires of
 reps, so every row fails with a generic error (inferred from live policy; not clicked through). For admins, "1,200"
 acres saves as 1, and rows with a blank first cell vanish uncounted. It also skips `save_customer` (no activity row).

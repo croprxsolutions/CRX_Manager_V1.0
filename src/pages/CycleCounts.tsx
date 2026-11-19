@@ -106,8 +106,29 @@ export default function CycleCounts() {
   const [completeConfirmCountId, setCompleteConfirmCountId] = useState<string | null>(null);
   const [completeConfirmMsg, setCompleteConfirmMsg] = useState("");
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  // Which count each confirm was opened for: a confirm acts only on that count (Sol r3, #1982).
+  const [cancelConfirmCountId, setCancelConfirmCountId] = useState<string | null>(null);
+  const [reverseConfirmCountId, setReverseConfirmCountId] = useState<string | null>(null);
   const [reversing, setReversing] = useState(false);
   const [reverseConfirmOpen, setReverseConfirmOpen] = useState(false);
+  const confirmOpen = completeConfirmOpen || cancelConfirmOpen || reverseConfirmOpen;
+  // If the count on screen changes (or its window closes) under an open confirm, close the
+  // confirm: it was a question about the earlier count.
+  const shownCountId = showDetail ? activeCount?.id ?? null : null;
+  useEffect(() => {
+    if (cancelConfirmCountId && cancelConfirmCountId !== shownCountId) {
+      setCancelConfirmOpen(false);
+      setCancelConfirmCountId(null);
+    }
+    if (reverseConfirmCountId && reverseConfirmCountId !== shownCountId) {
+      setReverseConfirmOpen(false);
+      setReverseConfirmCountId(null);
+    }
+    if (completeConfirmCountId && completeConfirmCountId !== shownCountId) {
+      setCompleteConfirmOpen(false);
+      setCompleteConfirmCountId(null);
+    }
+  }, [shownCountId, cancelConfirmCountId, reverseConfirmCountId, completeConfirmCountId]);
   const [preparingCompletion, setPreparingCompletion] = useState(false);
   const itemWriteQueuesRef = useRef(new Map<string, Promise<void>>());
   // Each pending write carries its own cycle_count_id. Completion may only wait
@@ -324,7 +345,19 @@ export default function CycleCounts() {
   // which bumps the session — including reopening the same count. With the modal
   // closed there is nothing on screen to paint over, so the late write is harmless
   // and the completion the operator requested still lands.
+  // Opening or closing any count window ends every open confirm: each one was a question
+  // about the window as it stood (Sol r4, #1982 — reopening the same count must not keep it).
+  const closeAllConfirms = () => {
+    setCompleteConfirmOpen(false);
+    setCompleteConfirmCountId(null);
+    setCancelConfirmOpen(false);
+    setCancelConfirmCountId(null);
+    setReverseConfirmOpen(false);
+    setReverseConfirmCountId(null);
+  };
+
   const closeDetail = () => {
+    closeAllConfirms();
     setShowDetail(false);
   };
 
@@ -352,6 +385,7 @@ export default function CycleCounts() {
     detailSessionRef.current = session;
     const isCurrentSession = () => detailSessionRef.current === session;
 
+    closeAllConfirms();
     setActiveCount(count);
     setShowDetail(true);
     setLoadingItems(true);
@@ -922,12 +956,21 @@ export default function CycleCounts() {
   // Cancel cycle count
   const handleCancel = () => {
     if (!activeCount || !profile) return;
+    // A completion still loading could open its own confirm under this one (Sol HIGH, #1982).
+    if (completionInFlightRef.current) return;
+    setCancelConfirmCountId(activeCount.id);
     setCancelConfirmOpen(true);
   };
 
   const executeCancelCount = async () => {
+    const confirmedFor = cancelConfirmCountId;
     setCancelConfirmOpen(false);
+    setCancelConfirmCountId(null);
     if (!activeCount || !profile) return;
+    if (confirmedFor !== activeCount.id) {
+      toast('error', 'That confirmation was for a different cycle count. Open the count you want to cancel and try again.');
+      return;
+    }
 
     await runCriticalAction({
       action: async () => {
@@ -955,12 +998,19 @@ export default function CycleCounts() {
   // Reverse a completed cycle count (undo inventory adjustments)
   const handleReverse = () => {
     if (!activeCount || !profile) return;
+    setReverseConfirmCountId(activeCount.id);
     setReverseConfirmOpen(true);
   };
 
   const doReverse = async () => {
-    if (!activeCount || !profile) return;
+    const confirmedFor = reverseConfirmCountId;
     setReverseConfirmOpen(false);
+    setReverseConfirmCountId(null);
+    if (!activeCount || !profile) return;
+    if (confirmedFor !== activeCount.id) {
+      toast('error', 'That confirmation was for a different cycle count. Open the count you want to reverse and try again.');
+      return;
+    }
 
     setReversing(true);
     try {
@@ -1059,6 +1109,9 @@ export default function CycleCounts() {
 
   return (
     <div className="space-y-4">
+      {/* The whole page (list and count window) is inert while a confirm is open, so focus
+          can never reach anything behind a confirm (Sol r2-r4, #1982; Mason approved r5). */}
+      <div className="space-y-4" inert={confirmOpen}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <h2 className="text-xl font-semibold font-heading text-nav-dark">
           Cycle Counts
@@ -1145,41 +1198,12 @@ export default function CycleCounts() {
         </div>
       </Modal>
 
-      {/* Confirm Modals */}
-      <ConfirmModal
-        open={completeConfirmOpen}
-        onClose={() => setCompleteConfirmOpen(false)}
-        onConfirm={() => { void executeComplete(); }}
-        title="Complete with Uncounted Items"
-        message={completeConfirmMsg || `Some products have not been counted yet. Complete anyway?`}
-        confirmLabel="Complete Anyway"
-        variant="warning"
-        loading={completing || preparingCompletion}
-      />
-      <ConfirmModal
-        open={cancelConfirmOpen}
-        onClose={() => setCancelConfirmOpen(false)}
-        onConfirm={executeCancelCount}
-        title="Cancel Cycle Count"
-        message="Cancel this cycle count? No inventory adjustments will be made."
-        confirmLabel="Cancel Count"
-        variant="warning"
-      />
-      <ConfirmModal
-        open={reverseConfirmOpen}
-        onClose={() => setReverseConfirmOpen(false)}
-        onConfirm={doReverse}
-        title="Reverse Cycle Count"
-        message="Reverse this completed cycle count? All inventory adjustments will be undone."
-        confirmLabel="Reverse Count"
-        variant="danger"
-        loading={reversing}
-      />
-
       {/* Cycle Count Detail Modal */}
       <Modal
         open={showDetail}
         onClose={closeDetail}
+        // Escape on an open confirm must close only the confirm, not this window too.
+        closeDisabled={confirmOpen}
         title={activeCount ? `Cycle Count: ${activeCount.count_number}` : 'Cycle Count'}
         size="large"
       >
@@ -1306,6 +1330,7 @@ export default function CycleCounts() {
                 <Button
                   variant="secondary"
                   onClick={handleCancel}
+                  disabled={completing || preparingCompletion}
                   icon={<XCircle className="w-4 h-4" />}
                 >
                   Cancel Count
@@ -1334,6 +1359,38 @@ export default function CycleCounts() {
           </div>
         )}
       </Modal>
+      </div>
+
+      {/* Confirm Modals: after the detail Modal so they stack on top of it (both z-50) */}
+      <ConfirmModal
+        open={completeConfirmOpen}
+        onClose={() => setCompleteConfirmOpen(false)}
+        onConfirm={() => { void executeComplete(); }}
+        title="Complete with Uncounted Items"
+        message={completeConfirmMsg || `Some products have not been counted yet. Complete anyway?`}
+        confirmLabel="Complete Anyway"
+        variant="warning"
+        loading={completing || preparingCompletion}
+      />
+      <ConfirmModal
+        open={cancelConfirmOpen}
+        onClose={() => setCancelConfirmOpen(false)}
+        onConfirm={executeCancelCount}
+        title="Cancel Cycle Count"
+        message="Cancel this cycle count? No inventory adjustments will be made."
+        confirmLabel="Cancel Count"
+        variant="warning"
+      />
+      <ConfirmModal
+        open={reverseConfirmOpen}
+        onClose={() => setReverseConfirmOpen(false)}
+        onConfirm={doReverse}
+        title="Reverse Cycle Count"
+        message="Reverse this completed cycle count? All inventory adjustments will be undone."
+        confirmLabel="Reverse Count"
+        variant="danger"
+        loading={reversing}
+      />
 
     </div>
   );

@@ -45,6 +45,10 @@
 --        and Maybe 100 at +120, 100 drawn by an order and 100 held, 13 on hand: the draw takes the earlier Firm
 --        line, so 13 held (Maybe) and 87 Maybe shown, nothing to buy; an order line naming the booking's
 --        second (Maybe) line draws that line, not the Firm line listed first (Sol round 3 on #1989)
+--   P29  Sol round 4 on #1989: two sections tied at the same position are walked by line position, as
+--        draw_down_quote does (product 43: a draw of 100 takes the Maybe line at position 0, the Firm line
+--        at position 1 stays); a named line drawn past its size keeps the excess as Over-drawn, never
+--        moving it onto another line (product 44: Maybe line of 50 drawn 100, Firm 100 stays, 50 over-drawn)
 --   P27  a window crossing New Year ends next year; an invalid start month-day falls back the whole window
 --   P8   an applicator and a caller with no user are refused
 --
@@ -87,16 +91,16 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Purchasing Farm ' || v_suffix) RETURNING id INTO v_customer;
-  -- Products 1..42, all stocked in Gal except 20 (stocked by the 2.5 GL jug); every product is inserted before any is priced
+  -- Products 1..44, all stocked in Gal except 20 (stocked by the 2.5 GL jug); every product is inserted before any is priced
   -- (pricing sets a transaction-wide mode).
-  FOR v_i IN 1..42 LOOP
+  FOR v_i IN 1..44 LOOP
     INSERT INTO products (product_name, unit_size, inventory_unit, product_form)
     VALUES ('[SMOKE] Purchasing ' || lpad(v_i::text, 2, '0') || ' ' || v_suffix,
             (ARRAY['Gal', '2.5 GL'])[(v_i = 20)::int + 1], (ARRAY['Gal', NULL])[(v_i = 20)::int + 1], 'liquid')
     RETURNING id INTO v_pid;
     v_p := v_p || v_pid;
   END LOOP;
-  FOR v_i IN 1..42 LOOP
+  FOR v_i IN 1..44 LOOP
     v_price_res := preview_product_pricing_changes('product_page', NULL,
       jsonb_build_array(jsonb_build_object(
         'product_id', v_p[v_i], 'row_version', (SELECT pricing_version FROM products WHERE id = v_p[v_i]),
@@ -476,6 +480,40 @@ BEGIN
           'current_cost', 6, 'unit_size', 'Gal', 'acres', 0)))),
     v_admin, 'smk-pp28s-' || v_suffix);
   INSERT INTO smk_pp_bookings VALUES ('P28S', (v_res->>'quote_id')::uuid, v_res->'section_ids');
+  -- P29T, product 43: both sections at position 0; Firm 100 at +150 is line position 1, Maybe 100 at +30 position 0.
+  v_res := save_quote(NULL, jsonb_build_object(
+      'quote_number', '[SMOKE] PP29T-' || v_suffix, 'customer_id', v_customer, 'status', 'draft',
+      'tier', 1, 'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true),
+    jsonb_build_array(
+      jsonb_build_object('client_key', '_a', 'section_name', 'P29T a', 'sort_order', 0,
+        'needed_by_date', v_t + 150, 'confidence', 'firm',
+        'items', jsonb_build_array(jsonb_build_object('client_key', '_ka', 'product_id', v_p[43], 'sort_order', 1,
+          'calc_mode', 'units_direct', 'total_units_needed', 100, 'price_override', 20, 'price_per_unit', 20,
+          'current_cost', 6, 'unit_size', 'Gal', 'acres', 0))),
+      jsonb_build_object('client_key', '_b', 'section_name', 'P29T b', 'sort_order', 0,
+        'needed_by_date', v_t + 30, 'confidence', 'maybe',
+        'items', jsonb_build_array(jsonb_build_object('client_key', '_kb', 'product_id', v_p[43], 'sort_order', 0,
+          'calc_mode', 'units_direct', 'total_units_needed', 100, 'price_override', 20, 'price_per_unit', 20,
+          'current_cost', 6, 'unit_size', 'Gal', 'acres', 0)))),
+    v_admin, 'smk-pp29t-' || v_suffix);
+  INSERT INTO smk_pp_bookings VALUES ('P29T', (v_res->>'quote_id')::uuid, v_res->'section_ids');
+  -- P29X, product 44: Firm 100 at +30 listed first, Maybe 50 at +60 second.
+  v_res := save_quote(NULL, jsonb_build_object(
+      'quote_number', '[SMOKE] PP29X-' || v_suffix, 'customer_id', v_customer, 'status', 'draft',
+      'tier', 1, 'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true),
+    jsonb_build_array(
+      jsonb_build_object('client_key', '_a', 'section_name', 'P29X a', 'sort_order', 0,
+        'needed_by_date', v_t + 30, 'confidence', 'firm',
+        'items', jsonb_build_array(jsonb_build_object('client_key', '_ka', 'product_id', v_p[44], 'sort_order', 0,
+          'calc_mode', 'units_direct', 'total_units_needed', 100, 'price_override', 20, 'price_per_unit', 20,
+          'current_cost', 6, 'unit_size', 'Gal', 'acres', 0))),
+      jsonb_build_object('client_key', '_b', 'section_name', 'P29X b', 'sort_order', 1,
+        'needed_by_date', v_t + 60, 'confidence', 'maybe',
+        'items', jsonb_build_array(jsonb_build_object('client_key', '_kb', 'product_id', v_p[44], 'sort_order', 0,
+          'calc_mode', 'units_direct', 'total_units_needed', 50, 'price_override', 20, 'price_per_unit', 20,
+          'current_cost', 6, 'unit_size', 'Gal', 'acres', 0)))),
+    v_admin, 'smk-pp29x-' || v_suffix);
+  INSERT INTO smk_pp_bookings VALUES ('P29X', (v_res->>'quote_id')::uuid, v_res->'section_ids');
   INSERT INTO inventory (product_id, location, quantity_available, quantity_prebooked, quantity_on_order)
   VALUES (v_p[39], 'Main Warehouse', 13, 0, 0), (v_p[40], 'Main Warehouse', 13, 0, 0);
 
@@ -534,6 +572,20 @@ BEGIN
           '[SMOKE] P28S', 'Gal', 20, 6, 100, 2000, 100, 0);
   PERFORM set_config('app.crx_below_cost_operation', '', true);
   INSERT INTO quote_product_draws (quote_id, product_id, quantity_drawn) VALUES (v_q, v_p[42], 100);
+  -- P29T: 100 drawn with no recorded line.
+  INSERT INTO quote_product_draws (quote_id, product_id, quantity_drawn)
+  VALUES ((SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P29T'), v_p[43], 100);
+  -- P29X: a delivered order of 100 naming the Maybe line of 50.
+  SELECT quote_id, (section_ids->>'_b')::uuid INTO v_q, v_s2 FROM smk_pp_bookings WHERE tag = 'P29X';
+  INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id, quote_id, booking_draw)
+  VALUES ('SMK-PP29X-' || v_suffix, v_customer, v_t, 'confirmed', v_admin, v_q, true) RETURNING id INTO v_order;
+  PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
+  INSERT INTO order_items (order_id, product_id, quote_item_id, product_name, unit_size, price_per_unit, cost_per_unit,
+    total_units_needed, total_price, quantity_delivered, quantity_remaining)
+  VALUES (v_order, v_p[44], (SELECT qi.id FROM quote_items qi WHERE qi.quote_id = v_q AND qi.section_id = v_s2),
+          '[SMOKE] P29X', 'Gal', 20, 6, 100, 2000, 100, 0);
+  PERFORM set_config('app.crx_below_cost_operation', '', true);
+  INSERT INTO quote_product_draws (quote_id, product_id, quantity_drawn) VALUES (v_q, v_p[44], 100);
   INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active, expires_at)
   VALUES (v_p[39], v_customer, 500, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P28D'), v_admin, true,
           v_t + 59),
@@ -910,6 +962,25 @@ BEGIN
           WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'firm' AND NOT (r->>'estimated')::boolean) <> 100
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P28 order line names its booking line) %', v_x;
+  END IF;
+  v_n := v_n + 1;
+
+  -- P29 (Sol round 4 on #1989). 43: tied sections walk by line position, so the Maybe line takes the draw.
+  SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[43];
+  IF v_x IS NULL
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
+          WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'firm' AND (r->>'raw_date')::date = v_t + 150) <> 100
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P29 tied sections follow line position) %', v_x;
+  END IF;
+  -- 44: the 50 drawn past the Maybe line is over-drawn; the Firm 100 stays needed; nothing is "section unknown".
+  SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[44];
+  IF v_x IS NULL OR (v_x->>'over_drawn')::numeric IS DISTINCT FROM 50 OR NOT (v_x->'reasons' ? 'over_drawn')
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
+          WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'firm' AND NOT (r->>'estimated')::boolean) <> 100
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe')
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan->'drawn_section_unknown') d WHERE (d->>'product_id')::uuid = v_p[44]) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P29 named-line excess is over-drawn) %', v_x;
   END IF;
   v_n := v_n + 1;
 

@@ -45,11 +45,14 @@ held than the shelf has, the unbacked part stays as the booking line (its own da
 8. **Draw order (Mason, 2026-11-19: "a", after Taha's review and Sol round 3 on #1989).** The plan follows the draw
    writer (`draw_down_quote`): an order draw comes off the booking line its order line names
    (`order_items.quote_item_id`; a cancelled order keeps only what it delivered, a voided one none), capped by the
-   ledger total; whatever is left (legacy unstamped draws, job draws beyond their section) comes off the lines
-   top-down in document order (section, then line), as the writer's front-walk takes it. A line drawn by a named
+   ledger total, and never more than that line still has: a claim past a line revised smaller stays unabsorbed and
+   shows as Over-drawn, never as another line's draw (Sol round 4). Whatever is left (legacy unstamped draws, job
+   draws beyond their section) comes off the lines top-down in the writer's exact order (section position, line
+   position, line id; NULLs last), as its front-walk takes it. Draws credited to a named line are not listed as
+   section unknown. A line drawn by a named
    order line is exact; only the front-walk part is marked estimated. This replaces the `20270127110000`
    least-sure, latest-first rule. (Jan Firm 100 listed before Mar Maybe 100, 100 drawn, 13 on hand: 13 held,
-   87 Maybe shown, nothing to buy; an order naming the Maybe line leaves the Firm line needed; smoke P28, P14.)
+   87 Maybe shown, nothing to buy; an order naming the Maybe line leaves the Firm line needed; smoke P28, P29, P14.)
    `_sync_planned_holds` still consumes draws by need date: a pre-existing mismatch with the writer, left as a
    follow-up.
 6. **Window MEDs.** A timing window is taken from settings only when both `start` and `end` are valid month-days

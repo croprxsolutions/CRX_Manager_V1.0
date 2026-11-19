@@ -112,6 +112,7 @@ BEGIN
            -- A non-finite date ('infinity') counts as no date, so one bad section cannot fail the plan.
            CASE WHEN isfinite(s.needed_by_date) THEN s.needed_by_date END AS needed_by_date,
            s.timing, s.confidence, COALESCE(s.sort_order, 0) AS s_sort, COALESCE(qi.sort_order, 0) AS i_sort,
+           s.sort_order AS s_ord, qi.sort_order AS i_ord,  -- draw_down_quote's own line order (NULLs last)
            GREATEST(COALESCE(qi.total_units_needed, 0), 0) AS qty,
            -- A line saved in a unit that no longer matches the stock unit is set aside (Mason, 2026-11-18):
            -- listed under Check units only; it absorbs no draw and covers no hold.
@@ -193,36 +194,46 @@ BEGIN
   ),
   s2a AS (
     SELECT s1.*, GREATEST(COALESCE(dt.total, 0) - COALESCE(ap1.applied, 0), 0) AS pool,
-           LEAST(s1.rem1, GREATEST(COALESCE(odl.drawn, 0), 0)) AS st0
+           GREATEST(COALESCE(odl.drawn, 0), 0) AS sc0
       FROM s1
       LEFT JOIN dt ON dt.quote_id = s1.quote_id AND dt.product_id = s1.product_id
       LEFT JOIN ap1 ON ap1.quote_id = s1.quote_id AND ap1.product_id = s1.product_id
       LEFT JOIN odl ON odl.quote_id = s1.quote_id AND odl.product_id = s1.product_id AND odl.item_id = s1.item_id
   ),
-  -- The stamped part never exceeds the draws on record (the ledger total stays authoritative).
+  -- A named line claims its order lines' draws (sc), never more than the draws on record (the
+  -- ledger total stays authoritative). It absorbs at most what it still has (st); a claim beyond a
+  -- line revised smaller is NOT moved onto another line (the writer refuses that too): it is left
+  -- unabsorbed and shows as over-drawn below.
   s2b AS (
     SELECT s2a.*,
-           LEAST(s2a.st0, GREATEST(0, s2a.pool
-             - (SUM(s2a.st0) OVER (PARTITION BY s2a.quote_id, s2a.product_id
-                                   ORDER BY s2a.s_sort, s2a.section_id, s2a.i_sort, s2a.item_id ROWS UNBOUNDED PRECEDING) - s2a.st0))) AS st
+           LEAST(s2a.sc0, GREATEST(0, s2a.pool
+             - (SUM(s2a.sc0) OVER (PARTITION BY s2a.quote_id, s2a.product_id
+                                   ORDER BY s2a.s_ord, s2a.i_ord, s2a.item_id ROWS UNBOUNDED PRECEDING) - s2a.sc0))) AS sc
       FROM s2a
   ),
   s2c AS (
-    SELECT s2b.*, s2b.rem1 - s2b.st AS r1,
-           s2b.pool - SUM(s2b.st) OVER (PARTITION BY s2b.quote_id, s2b.product_id) AS pool2
+    SELECT s2b.*, LEAST(s2b.rem1, s2b.sc) AS st, s2b.rem1 - LEAST(s2b.rem1, s2b.sc) AS r1,
+           s2b.pool - SUM(s2b.sc) OVER (PARTITION BY s2b.quote_id, s2b.product_id) AS pool2
       FROM s2b
   ),
   s2 AS (
     SELECT s2c.*,
            s2c.r1 - LEAST(s2c.r1, GREATEST(0, s2c.pool2
              - (SUM(s2c.r1) OVER (PARTITION BY s2c.quote_id, s2c.product_id
-                                  ORDER BY s2c.s_sort, s2c.section_id, s2c.i_sort, s2c.item_id ROWS UNBOUNDED PRECEDING) - s2c.r1))) AS rem
+                                  ORDER BY s2c.s_ord, s2c.i_ord, s2c.item_id ROWS UNBOUNDED PRECEDING) - s2c.r1))) AS rem
       FROM s2c
   ),
+  -- Per booking and product: what the named lines claimed, and what step 2 absorbed.
+  s2t AS (
+    SELECT quote_id, product_id, SUM(sc) AS claimed, SUM(rem1 - rem) AS absorbed FROM s2 GROUP BY quote_id, product_id
+  ),
+  -- Draws no line could absorb: more drawn than booked, or a named line drawn past its revised size.
   overdrawn AS (
-    SELECT dt.quote_id, dt.product_id, dt.total - COALESCE(ap1.booked, 0) AS qty
-      FROM dt LEFT JOIN ap1 ON ap1.quote_id = dt.quote_id AND ap1.product_id = dt.product_id
-     WHERE dt.total > COALESCE(ap1.booked, 0)
+    SELECT dt.quote_id, dt.product_id, dt.total - COALESCE(ap1.applied, 0) - COALESCE(t.absorbed, 0) AS qty
+      FROM dt
+      LEFT JOIN ap1 ON ap1.quote_id = dt.quote_id AND ap1.product_id = dt.product_id
+      LEFT JOIN s2t t ON t.quote_id = dt.quote_id AND t.product_id = dt.product_id
+     WHERE dt.total - COALESCE(ap1.applied, 0) - COALESCE(t.absorbed, 0) > 0
   ),
   onhand AS (
     SELECT i.product_id, SUM(COALESCE(i.quantity_available, 0)) AS qty
@@ -536,12 +547,14 @@ BEGIN
     'drawn_section_unknown', COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
                'quote_id', dt.quote_id, 'quote_number', eq.quote_number, 'customer_name', c.farm_name,
-               'product_id', dt.product_id, 'product_name', p.product_name, 'quantity', dt.unknown)
+               'product_id', dt.product_id, 'product_name', p.product_name,
+               'quantity', dt.unknown - LEAST(dt.unknown, COALESCE(t.claimed, 0)))
                ORDER BY eq.quote_number, p.product_name)
         FROM dt JOIN eq ON eq.id = dt.quote_id
+        LEFT JOIN s2t t ON t.quote_id = dt.quote_id AND t.product_id = dt.product_id
         LEFT JOIN customers c ON c.id = eq.customer_id
         JOIN products p ON p.id = dt.product_id
-       WHERE dt.unknown > 0), '[]'::jsonb),
+       WHERE dt.unknown > COALESCE(t.claimed, 0)), '[]'::jsonb),
     'review', COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
                'quote_id', rev.quote_id, 'quote_number', eq.quote_number, 'customer_name', c.farm_name,
@@ -625,7 +638,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM 'dd1428ec6d09563beb8eed1bc72cca49' THEN
+     IS DISTINCT FROM '2664706956f0c5304c8ab59eedbcf5e9' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

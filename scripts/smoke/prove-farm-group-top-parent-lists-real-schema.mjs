@@ -84,9 +84,12 @@ try {
             FROM jsonb_array_elements(r->'rows') x);`);
   // A timeout set inside the probe's DO block would not bound it; a login setting bounds each new psql session.
   docker(PSQL, { input: `ALTER ROLE postgres SET statement_timeout = '5s';` });
-  assert.equal(inLoop("public.get_orders_keyset_page('2026-01-01', '2026-12-31')"), looped);
-  assert.equal(inLoop("public.get_deliveries_keyset_page('2026-06-15', '2026-06-14')"), looped);
-  docker(PSQL, { input: `ALTER ROLE postgres RESET statement_timeout;` });
+  try {
+    assert.equal(inLoop("public.get_orders_keyset_page('2026-01-01', '2026-12-31')"), looped);
+    assert.equal(inLoop("public.get_deliveries_keyset_page('2026-06-15', '2026-06-14')"), looped);
+  } finally {
+    docker(PSQL, { input: `ALTER ROLE postgres RESET statement_timeout;` });
+  }
 
   // 4. The offset wrappers follow (they call the keyset functions).
   assert.equal(attempt(admin, `${asUser(`r := public.get_orders_page('2026-01-01', '2026-12-31', 'echo');`)}

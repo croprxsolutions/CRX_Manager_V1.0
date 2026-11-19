@@ -33,7 +33,66 @@ interface ParsedCustomer {
 
 // row = the file's line number (OCR: the item's position); key = this row's save_customer idempotency key.
 type ImportRow = ParsedCustomer & { row: number; key: string };
-type FailedRow = { row: number; farm_name: string; error: string };
+// retry = the unanswered row itself, re-sent with its original key so a save that did land is not made twice.
+type FailedRow = { row: number; farm_name: string; error: string; retry?: ImportRow };
+type CsvRecord = { line: number; cols: string[]; quoted: boolean[] };
+
+/** Thrown for a file the parser cannot read safely; its message is shown to the user. */
+class CsvError extends Error {}
+
+/**
+ * Split CSV text into records. A quoted value may hold commas, "" and line breaks; a record keeps the
+ * file line it starts on. An unclosed quote would swallow every later row, so it refuses the file.
+ */
+function parseCSVRecords(text: string): CsvRecord[] {
+  const records: CsvRecord[] = [];
+  let cols: string[] = [];
+  let quoted: boolean[] = [];
+  let current = '';
+  let wasQuoted = false;
+  let inQuotes = false;
+  let line = 1;
+  let start = 1;
+  let quoteLine = 1;
+  const endCell = () => {
+    cols.push(current.trim());
+    quoted.push(wasQuoted);
+    current = '';
+    wasQuoted = false;
+  };
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"' && text[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        if (ch === '\n') line++;
+        if (ch !== '\r') current += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+      wasQuoted = true;
+      quoteLine = line;
+    } else if (ch === ',') {
+      endCell();
+    } else if (ch === '\n') {
+      endCell();
+      records.push({ line: start, cols, quoted });
+      cols = [];
+      quoted = [];
+      start = ++line;
+    } else {
+      current += ch;
+    }
+  }
+  if (inQuotes) throw new CsvError(`Line ${quoteLine} opens a quote that is never closed. Fix the quotes in that row and try again.`);
+  endCell();
+  records.push({ line: start, cols, quoted });
+  return records;
+}
 
 const ACRE_FIELDS = ['total_acres', 'corn_acres', 'soybean_acres', 'other_acres'] as const;
 
@@ -51,7 +110,7 @@ interface ValidationResult {
   invalid: Array<{ row: number; error: string; data: Record<string, string> }>;
 }
 
-const UNCONFIRMED = 'No answer from the server: this customer may have saved. Check the Customers list before importing it again.';
+const UNCONFIRMED = 'No answer from the server: this customer may have saved. Use Retry below rather than importing the file again: Retry will not save it twice.';
 
 const FIELD_MAPPINGS: Record<string, string[]> = {
   farm_name: ['farm_name', 'farm', 'farm_name', 'customer', 'customer_name', 'business_name'],
@@ -119,61 +178,17 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
 
   const MAX_ROWS = 500;
 
-  /** Parse a single CSV line respecting quoted fields (handles commas inside quotes) */
-  const parseCSVLine = (line: string): string[] => {
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (inQuotes) {
-        if (ch === '"' && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else if (ch === '"') {
-          inQuotes = false;
-        } else {
-          current += ch;
-        }
-      } else {
-        if (ch === '"') {
-          inQuotes = true;
-        } else if (ch === ',') {
-          result.push(current.trim());
-          current = '';
-        } else {
-          current += ch;
-        }
-      }
-    }
-    result.push(current.trim());
-    return result;
+  const parseCSV = (text: string): { headers: string[]; rows: CsvRecord[] } => {
+    // Only a fully empty record is skipped: a blank first cell is checked below, not dropped (KI-145).
+    const [header, ...rows] = parseCSVRecords(text).filter((r) => r.cols.some(Boolean));
+    return { headers: header?.cols ?? [], rows };
   };
 
-  const parseCSV = (text: string): { headers: string[]; rows: Array<{ line: number; cols: string[] }> } => {
-    const lines = text.split('\n');
-    const headerIdx = lines.findIndex((l) => l.trim() !== '');
-    if (headerIdx < 0) return { headers: [], rows: [] };
-
-    const headers = parseCSVLine(lines[headerIdx]);
-    const rows: Array<{ line: number; cols: string[] }> = [];
-
-    for (let i = headerIdx + 1; i < lines.length; i++) {
-      const cols = parseCSVLine(lines[i]);
-      // Only a fully empty line is skipped: a blank first cell is checked below, not dropped (KI-145).
-      if (cols.some(Boolean)) {
-        rows.push({ line: i + 1, cols });
-      }
-    }
-
-    return { headers, rows };
-  };
-
-  const parseWithVisionOCR = async (file: File, defaultTier: number): Promise<ValidationResult> => {
+  const parseWithVisionOCR = async (file: File, defaultTier: number, say: typeof toast): Promise<ValidationResult> => {
     const result = await processDocumentWithOCR(file, 'customer_list');
 
     if (!result.success || !result.parsed_data) {
-      toast('error', result.error || 'OCR processing failed. Try a clearer image or CSV instead.');
+      say('error', result.error || 'OCR processing failed. Try a clearer image or CSV instead.');
       return { valid: [], invalid: [] };
     }
 
@@ -189,12 +204,12 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
     };
 
     if (!data.items || data.items.length === 0) {
-      toast('error', 'No customers found in document.');
+      say('error', 'No customers found in document.');
       return { valid: [], invalid: [] };
     }
 
     if (data.items.length > MAX_ROWS) {
-      toast('error', `Document has ${data.items.length} customers. Maximum is ${MAX_ROWS}. Please split it into smaller batches.`);
+      say('error', `Document has ${data.items.length} customers. Maximum is ${MAX_ROWS}. Please split it into smaller batches.`);
       return { valid: [], invalid: [] };
     }
 
@@ -230,6 +245,8 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
       return;
     }
     const run = ++parseRun.current;
+    // A parse retired by a newer file pick (or by closing) stays silent.
+    const say: typeof toast = (...args) => { if (run === parseRun.current) toast(...args); };
     setParsing(true);
 
     try {
@@ -237,7 +254,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
       const defaultTier = await loadDefaultTier();
       // Route: CSV → client-side parser, PDF/Image → Vision OCR
       if (!isCSVFile(file)) {
-        const ocrResult = await parseWithVisionOCR(file, defaultTier);
+        const ocrResult = await parseWithVisionOCR(file, defaultTier, say);
         if (run === parseRun.current) setValidation(ocrResult);
         if (run === parseRun.current) setParsing(false);
         return;
@@ -247,13 +264,13 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
       const { headers, rows } = parseCSV(text);
 
       if (rows.length === 0) {
-        toast('error', 'No valid data found in file');
+        say('error', 'No valid data found in file');
         if (run === parseRun.current) setParsing(false);
         return;
       }
 
       if (rows.length > MAX_ROWS) {
-        toast('error', `File has ${rows.length} rows. Maximum is ${MAX_ROWS}. Please split your file into smaller batches.`);
+        say('error', `File has ${rows.length} rows. Maximum is ${MAX_ROWS}. Please split your file into smaller batches.`);
         if (run === parseRun.current) setParsing(false);
         return;
       }
@@ -267,7 +284,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
       });
 
       if (!Object.values(fieldMapping).includes('farm_name')) {
-        toast('error', 'Could not find farm name column. Ensure your CSV has a "farm_name" or "farm" column.');
+        say('error', 'Could not find farm name column. Ensure your CSV has a "farm_name" or "farm" column.');
         if (run === parseRun.current) setParsing(false);
         return;
       }
@@ -275,7 +292,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
       const valid: ImportRow[] = [];
       const invalid: ValidationResult['invalid'] = [];
 
-      rows.forEach(({ line, cols }) => {
+      rows.forEach(({ line, cols, quoted }) => {
         const customer: Partial<ParsedCustomer> = {};
         const rowData: Record<string, string> = {};
         let badValue = '';
@@ -298,7 +315,16 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
             } else if ((ACRE_FIELDS as readonly string[]).includes(field)) {
               if (value) {
                 const num = parseAcres(value);
+                const next = cols[colIdx + 1];
                 if (num === null) badValue ||= `Invalid ${field.replace('_', ' ')}: ${value}`;
+                // An unquoted "1,200" that still fits the column count reads as 1 acre plus "200" in the next
+                // column. Refuse that shape rather than save 1 acre.
+                // shortcut: not checked when the next column is also acres ("500,300" is real total + corn
+                // acres), so "1,200" there still splits; upgrade if such files show up.
+                else if (/^\d{1,3}$/.test(value) && !quoted[colIdx] && next !== undefined && !quoted[colIdx + 1] &&
+                    /^\d{3}(\.\d+)?$/.test(next) && !(ACRE_FIELDS as readonly string[]).includes(fieldMapping[colIdx + 1])) {
+                  badValue ||= `Unclear ${field.replace('_', ' ')}: ${value},${next} has a comma but no quotes. Put quotes around numbers with commas, like "1,200"`;
+                }
                 else customer[field as typeof ACRE_FIELDS[number]] = num;
               }
             } else if (field === 'assigned_tier' && isAdmin) {
@@ -344,22 +370,20 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
       });
 
       if (run === parseRun.current) setValidation({ valid, invalid });
-    } catch {
-      toast('error', 'Failed to parse file. Please ensure it is a valid CSV.');
+    } catch (e) {
+      say('error', e instanceof CsvError ? e.message : 'Failed to parse file. Please ensure it is a valid CSV.');
     }
     if (run === parseRun.current) setParsing(false);
   };
 
-  const handleUpload = async () => {
-    if (!validation || validation.valid.length === 0) return;
-    setUploading(true);
-
+  const saveRows = async (rows: ImportRow[]) => {
     let success = 0;
     const failed: FailedRow[] = [];
 
     // Each row goes through save_customer, as the New Customer page does: the server checks the
     // actor, role, a rep's self-assignment and tier, and writes the activity row (KI-145).
-    for (const { row, key, ...customer } of validation.valid) {
+    for (const importRow of rows) {
+      const { row, key, ...customer } = importRow;
       try {
         const { data, error } = await supabase.rpc('save_customer', {
           // save_customer accepts NULL p_customer_id to create (the generated type narrows it to string).
@@ -372,7 +396,8 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
         });
         if (error) {
           // A database refusal has a code; without one the request may never have been answered.
-          failed.push({ row, farm_name: customer.farm_name, error: error.code ? sanitizeError(error) : UNCONFIRMED });
+          if (error.code) failed.push({ row, farm_name: customer.farm_name, error: sanitizeError(error) });
+          else failed.push({ row, farm_name: customer.farm_name, error: UNCONFIRMED, retry: importRow });
           if (!error.code) Sentry.captureException(toSentryError(error), { extra: { context: 'Bulk customer import row' } });
           continue;
         }
@@ -380,12 +405,9 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
         success++;
       } catch (e) {
         Sentry.captureException(toSentryError(e), { extra: { context: 'Bulk customer import row' } });
-        failed.push({ row, farm_name: customer.farm_name, error: UNCONFIRMED });
+        failed.push({ row, farm_name: customer.farm_name, error: UNCONFIRMED, retry: importRow });
       }
     }
-
-    setUploadResults({ success, failed, skipped: validation.invalid.length });
-    setUploading(false);
 
     if (success > 0) {
       toast('success', `Successfully imported ${success} customer(s)`);
@@ -394,6 +416,28 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
     if (failed.length > 0) {
       toast('error', `Failed to import ${failed.length} customer(s)`);
     }
+    return { success, failed };
+  };
+
+  const handleUpload = async () => {
+    if (!validation || validation.valid.length === 0) return;
+    setUploading(true);
+    const { success, failed } = await saveRows(validation.valid);
+    setUploadResults({ success, failed, skipped: validation.invalid.length });
+    setUploading(false);
+  };
+
+  // Re-sends only the unanswered rows, each with its original key: one that did save comes back as saved.
+  const handleRetry = async () => {
+    if (!uploadResults) return;
+    setUploading(true);
+    const result = await saveRows(uploadResults.failed.flatMap((f) => (f.retry ? [f.retry] : [])));
+    setUploadResults({
+      success: uploadResults.success + result.success,
+      failed: [...uploadResults.failed.filter((f) => !f.retry), ...result.failed].sort((a, b) => a.row - b.row),
+      skipped: uploadResults.skipped,
+    });
+    setUploading(false);
   };
 
   const handleClose = () => {
@@ -540,6 +584,11 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
           <Button variant="secondary" onClick={handleClose} disabled={uploading}>
             {uploadResults ? 'Close' : 'Cancel'}
           </Button>
+          {uploadResults?.failed.some((f) => f.retry) && (
+            <Button onClick={handleRetry} disabled={uploading} loading={uploading}>
+              Retry {uploadResults.failed.filter((f) => f.retry).length} Unanswered Row(s)
+            </Button>
+          )}
           {!validation && !uploadResults && (
             <Button
               icon={<Upload className="w-4 h-4" />}

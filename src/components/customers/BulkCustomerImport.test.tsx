@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // Fully chainable Supabase query-builder mock
 function chainable(resolveWith: unknown = { data: [], error: null }) {
@@ -40,11 +40,15 @@ vi.mock('../../lib/documentOCR', () => ({
 const authValue = vi.hoisted(() => ({ profile: { id: 'admin-1', role: 'admin' } as { id: string; role: string } }));
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => authValue }));
 
+const toast = vi.hoisted(() => vi.fn());
 vi.mock('../ui/Toast', () => ({
-  useToast: () => ({ toast: vi.fn() }),
+  useToast: () => ({ toast }),
 }));
 
+vi.mock('../../lib/appSettingDefaults', () => ({ loadDefaultTier: vi.fn(async () => 1) }));
+
 import BulkCustomerImport from './BulkCustomerImport';
+import { loadDefaultTier } from '../../lib/appSettingDefaults';
 
 describe('BulkCustomerImport', () => {
   const defaultProps = { open: true, onClose: vi.fn(), onSuccess: vi.fn() };
@@ -166,6 +170,76 @@ describe('BulkCustomerImport', () => {
     expect(await screen.findByText('Row 2: Invalid tier: Tier 2')).toBeInTheDocument();
     expect(screen.getByText('Row 3: Invalid tier: 2.5')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import 2 Customer(s)' })).toBeInTheDocument();
+  });
+
+  // #1998: the edge cases left after KI-145.
+  function pick(container: HTMLElement, csv: string) {
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File([csv], 'c.csv', { type: 'text/csv' })] } });
+  }
+
+  it('refuses an unquoted "1,200" that still fits the columns, but keeps real adjacent numbers', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,total_acres,notes,corn_acres,soybean_acres\nBig Farm,1,200,,\nNote Farm,5,200 bu,,\nQuoted Farm,"1,200",,,\nSplit Farm,,,500,300\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText('Row 2: Unclear total acres: 1,200 has a comma but no quotes. Put quotes around numbers with commas, like "1,200"')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import 3 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    expect(payloads().map((a) => a.p_customer_payload)).toEqual([
+      expect.objectContaining({ farm_name: 'Note Farm', total_acres: 5, notes: '200 bu' }),
+      expect.objectContaining({ farm_name: 'Quoted Farm', total_acres: 1200 }),
+      expect.objectContaining({ farm_name: 'Split Farm', corn_acres: 500, soybean_acres: 300 }),
+    ]);
+  });
+
+  it('keeps a quoted value that spans lines in one record, with later rows on their file line', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,billing_address,notes\r\nLine Farm,"12 Main St\r\nSpringfield, IL","said ""hi"""\r\n,no name\r\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText('Row 4: Missing farm name')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import 1 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    expect(payloads()[0].p_customer_payload).toMatchObject({ farm_name: 'Line Farm', billing_address: '12 Main St\nSpringfield, IL', notes: 'said "hi"' });
+  });
+
+  it('refuses a file with an unclosed quote instead of swallowing later rows', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,notes\nA Farm,"oops\nB Farm,fine\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('error', 'Line 2 opens a quote that is never closed. Fix the quotes in that row and try again.'));
+    expect(screen.queryByText('Valid Customers')).not.toBeInTheDocument();
+  });
+
+  it('retries an unanswered row with its original key', async () => {
+    rpc
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({ data: { status: 'saved', customer_id: 'c-2' }, error: null })
+      .mockResolvedValueOnce({ data: { status: 'saved', customer_id: 'c-1' }, error: null });
+    await importFile('farm_name\nLost Farm\nOk Farm\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry 1 Unanswered Row(s)' }));
+    expect(await screen.findByText(/Successfully imported 2 customer/)).toBeInTheDocument();
+    const [first, , retry] = payloads();
+    expect(retry.p_idempotency_key).toBe(first.p_idempotency_key);
+    expect(retry.p_customer_payload).toEqual(first.p_customer_payload);
+    expect(screen.queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
+  });
+
+  it('offers no retry for a row the server refused', async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { code: 'P0001', message: 'REP_MUST_SELF_ASSIGN' } });
+    await importFile('farm_name\nBad Farm\n');
+    expect(screen.queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
+  });
+
+  it('drops the "No valid data" toast of a parse superseded by a newer file', async () => {
+    let releaseTier!: (tier: 1 | 2 | 3) => void;
+    vi.mocked(loadDefaultTier).mockReturnValueOnce(new Promise((r) => { releaseTier = r; }));
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    pick(container, 'farm_name\nNew Farm\n');
+    releaseTier(1);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it('shows file upload area', () => {

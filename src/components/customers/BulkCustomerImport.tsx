@@ -111,7 +111,7 @@ function parseAcres(value: string): number | null {
  * Returns the joined "1,200" for that shape (so the row is refused), else ''.
  * Not checked when the next column is also acres ("500,300" is real total + corn acres) unless that
  * cell starts with 0 ("5,000": no real acreage is written "000"); otherwise cropAcresOverTotal
- * catches the split when it leaves a crop above the total ("1,200" = 1 + 200).
+ * warns when the split leaves a crop above the total ("1,200" = 1 + 200).
  * shortcut: a split between two crop columns with no total still saves; upgrade if such files show up.
  */
 function unquotedThousands({ cols, quoted }: Pick<CsvRecord, 'cols' | 'quoted'>, idx: number, nextField: string | undefined): string {
@@ -131,7 +131,10 @@ function readAcres(record: Pick<CsvRecord, 'cols' | 'quoted'>, idx: number, fiel
   return split ? `Unclear ${label}: ${split} has a comma but no quotes. Put quotes around numbers with commas, like "1,200"` : num;
 }
 
-/** A crop's acres above the farm's total acres is impossible, so an unquoted "1,200" split them: the row's error, else ''. */
+/**
+ * A crop's acres above the farm's total acres: often an unquoted "1,200" split, but can be real
+ * (rented ground, total left at 0), so the row imports with this warning (Mason, 2026-11-19); else ''.
+ */
 function cropAcresOverTotal(customer: Partial<ParsedCustomer>): string {
   const total = customer.total_acres;
   if (total === undefined) return '';
@@ -142,6 +145,8 @@ function cropAcresOverTotal(customer: Partial<ParsedCustomer>): string {
 interface ValidationResult {
   valid: ImportRow[];
   invalid: Array<{ row: number; error: string; data: Record<string, string> }>;
+  /** Rows that still import but should be checked. */
+  warnings?: Array<{ row: number; warning: string }>;
 }
 
 const UNCONFIRMED = 'No answer from the server: this customer may have saved. Use Retry below rather than importing the file again: Retry will not save it twice.';
@@ -325,6 +330,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
 
       const valid: ImportRow[] = [];
       const invalid: ValidationResult['invalid'] = [];
+      const warnings: NonNullable<ValidationResult['warnings']> = [];
 
       rows.forEach(({ line, cols, quoted }) => {
         const customer: Partial<ParsedCustomer> = {};
@@ -369,7 +375,6 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
           return;
         }
 
-        badValue ||= cropAcresOverTotal(customer);
         if (badValue) {
           invalid.push({ row: line, error: badValue, data: rowData });
           return;
@@ -392,10 +397,12 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
           customer.assigned_tier = defaultTier;
         }
 
+        const overTotal = cropAcresOverTotal(customer);
+        if (overTotal) warnings.push({ row: line, warning: overTotal });
         valid.push({ ...(customer as ParsedCustomer), row: line, key: crypto.randomUUID() });
       });
 
-      if (run === parseRun.current) setValidation({ valid, invalid });
+      if (run === parseRun.current) setValidation({ valid, invalid, warnings });
     } catch (e) {
       say('error', e instanceof CsvError ? e.message : 'Failed to parse file. Please ensure it is a valid CSV.');
     }
@@ -577,6 +584,19 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
                   {validation.invalid.map((inv, idx) => (
                     <p key={idx} className="text-xs text-secondary">
                       Row {inv.row}: {inv.error}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!!validation.warnings?.length && (
+              <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg max-h-32 overflow-y-auto">
+                <p className="text-xs font-medium text-secondary mb-1">Will import, but check these rows:</p>
+                <div className="space-y-1">
+                  {validation.warnings.map((w) => (
+                    <p key={w.row} className="text-xs text-secondary">
+                      Row {w.row}: {w.warning}
                     </p>
                   ))}
                 </div>

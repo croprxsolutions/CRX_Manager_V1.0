@@ -7,10 +7,14 @@ import type { CommissionSplit } from '../types';
 export function customerSplit(split: CommissionSplit | null | undefined): CommissionSplit | null {
   // A damaged stored split (a null row, a missing name or percentage) counts as never set, so picking the customer
   // can't throw half way through its updates (Sol HIGH, 19 Nov).
+  // Each share 0–100%, adding up to 100% (Luna HIGH, 19 Nov).
+  const pct = (r: unknown) => (r as { percentage?: unknown }).percentage as number;
   const rowOk = (r: unknown) =>
     !!r && typeof r === 'object' && typeof (r as { recipient?: unknown }).recipient === 'string'
-    && Number.isFinite((r as { percentage?: unknown }).percentage);
-  return split && Array.isArray(split.splits) && split.splits.every(rowOk) ? split : null;
+    && Number.isFinite(pct(r)) && pct(r) >= 0 && pct(r) <= 100;
+  if (!split || !Array.isArray(split.splits) || !split.splits.every(rowOk)) return null;
+  const total = split.splits.reduce((sum, r) => sum + r.percentage, 0);
+  return split.splits.length === 0 || Math.abs(total - 100) < 0.005 ? split : null;
 }
 
 /** Same recipients at the same percentages, in any row order (Sol LOW, 19 Nov). */

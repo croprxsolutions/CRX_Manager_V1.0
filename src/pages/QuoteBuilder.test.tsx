@@ -310,7 +310,7 @@ vi.mock('../components/ui/CommissionSplitEditor', () => ({
   default: ({ value, onChange, disabled }: { value: { splits: Array<{ recipient: string; percentage: number }> }; onChange: (v: unknown) => void; disabled?: boolean }) => (
     <div data-testid="commission-split-editor">CommissionSplitEditor
       {value.splits.map((split, i) => (
-        <input key={i} type="number" aria-label={`Commission percentage for split ${i + 1}`} value={split.percentage} disabled={disabled}
+        <input key={i} type="number" aria-label={`Commission percentage for split ${i + 1}`} data-recipient={split.recipient} value={split.percentage} disabled={disabled}
           onChange={(e) => onChange({ splits: value.splits.map((s, j) => (j === i ? { ...s, percentage: Number(e.target.value) } : s)) })} />
       ))}
     </div>
@@ -6718,10 +6718,12 @@ describe('QuoteBuilder commission split from the customer', () => {
     mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote : table === 'quote_sections' ? [fixture.section] : table === 'quote_items' ? [fixture.item] : table === 'customers' ? [withSplit, noSplit] : table === 'products' ? [fixture.product] : [], error: null }));
     renderQuoteBuilder(quote.id);
     await waitFor(() => expect(percent(1)).toBe('100'));
+    expect(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' })).toHaveAttribute('data-recipient', 'Test Admin');
     expect(screen.queryByText(/has no split|'s split\./)).not.toBeInTheDocument();
     await pick('Big Sky Farms 18');
     expect(await screen.findByText(OFFER)).toBeInTheDocument();
     expect(percent(1)).toBe('100');
+    expect(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' })).toHaveAttribute('data-recipient', 'Test Admin');
     expect(screen.queryByRole('spinbutton', { name: 'Commission percentage for split 2' })).not.toBeInTheDocument();
   });
 
@@ -6784,6 +6786,41 @@ describe('QuoteBuilder commission split from the customer', () => {
     await pick('Elm Row Farms 4');
     expect(await screen.findByText('Elm Row Farms 4 has no split. Pick one.')).toBeInTheDocument();
     expect(percent(1)).toBe('100');
+    expect(screen.getByRole('button', { name: /Pricing tier/ })).toHaveTextContent('Tier 2');
+  });
+
+  it('changing the split while an offer waits settles it: Use it can no longer overwrite the edit (Luna MED)', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    fireEvent.change(await screen.findByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '90' } });
+    await pick('Big Sky Farms 18');
+    expect(await screen.findByText(OFFER)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '80' } });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Use it' })).not.toBeInTheDocument());
+    expect(percent(1)).toBe('80');
+  });
+
+  it('putting the blank split back brings back the "has no split" guidance (Sol LOW)', async () => {
+    serveNew();
+    renderQuoteBuilder();
+    await pick('Cedar Creek Farms 12');
+    expect(await screen.findByText('Cedar Creek Farms 12 has no split. Pick one.')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '90' } });
+    await waitFor(() => expect(screen.queryByText('Cedar Creek Farms 12 has no split. Pick one.')).not.toBeInTheDocument());
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '100' } });
+    expect(await screen.findByText('Cedar Creek Farms 12 has no split. Pick one.')).toBeInTheDocument();
+  });
+
+  it.each(['Use it', 'Keep mine'])('answering the offer with %s moves focus to the split, not the page (Sol LOW)', async (answer) => {
+    serveNew();
+    renderQuoteBuilder();
+    fireEvent.change(await screen.findByRole('spinbutton', { name: 'Commission percentage for split 1' }), { target: { value: '90' } });
+    await pick('Big Sky Farms 18');
+    const button = await screen.findByRole('button', { name: answer });
+    button.focus();
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.queryByRole('button', { name: answer })).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(screen.getByRole('spinbutton', { name: 'Commission percentage for split 1' }));
   });
 
   it('clearing the customer also drops a split that only came from them, so the next customer never inherits it (Sol MED)', async () => {

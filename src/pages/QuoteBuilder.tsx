@@ -582,8 +582,10 @@ export default function QuoteBuilder() {
   // (a touch that leaves the same split is not a change: Taha's test, 18 Nov).
   const [splitNote, setSplitNote] = useState<SplitNote>(null);
   const autoSplitRef = useRef<CommissionSplit>(NEW_QUOTE_SPLIT);
-  // The "From X's split" note for that split, shown again when a hand edit puts it back (Sol LOW, 19 Nov).
-  const fromNoteRef = useRef<SplitNote>(null);
+  // The note for that split ("From X's split" or "X has no split"), shown again when a hand edit puts it back
+  // (Sol LOWs, 19 Nov); and the split editor, which takes focus when an offer is answered.
+  const autoNoteRef = useRef<SplitNote>(null);
+  const splitBoxRef = useRef<HTMLDivElement>(null);
   const [quoteNumber, setQuoteNumber] = useState('');
   // Only a new quote allocates a number; an existing quote's number arrives with its row.
   const [quoteNumberLoading, setQuoteNumberLoading] = useState(!id);
@@ -1526,7 +1528,7 @@ export default function QuoteBuilder() {
     commissionSplitTouchedRef.current = false;
     setSplitNote(null);
     autoSplitRef.current = q.commission_split ?? { splits: [] };
-    fromNoteRef.current = null;
+    autoNoteRef.current = null;
     setQuoteCreatedAt(q.created_at || null);
     savedLineIdsRef.current = new Map(
       localSections.flatMap((s) => s.items)
@@ -1741,16 +1743,19 @@ export default function QuoteBuilder() {
     setCommissionSplit(theirs ?? NEW_QUOTE_SPLIT);
     autoSplitRef.current = theirs ?? NEW_QUOTE_SPLIT;
     commissionSplitTouchedRef.current = true;
-    fromNoteRef.current = theirs ? { kind: 'from', customer: cust.farm_name, split: theirs } : null;
-    setSplitNote(fromNoteRef.current ?? { kind: 'none', customer: cust.farm_name });
+    autoNoteRef.current = theirs ? { kind: 'from', customer: cust.farm_name, split: theirs } : { kind: 'none', customer: cust.farm_name };
+    setSplitNote(autoNoteRef.current);
   };
+  // The answered offer's buttons go away, so focus moves to the split itself (Sol LOW, 19 Nov).
+  const focusSplit = () => splitBoxRef.current?.querySelector<HTMLElement>('input, select, button')?.focus();
   const takeOfferedSplit = () => {
     if (splitNote?.kind !== 'offer') return;
     setCommissionSplit(splitNote.split);
     commissionSplitTouchedRef.current = true;
     autoSplitRef.current = splitNote.split;
-    fromNoteRef.current = { kind: 'from', customer: splitNote.customer, split: splitNote.split };
-    setSplitNote(fromNoteRef.current);
+    autoNoteRef.current = { kind: 'from', customer: splitNote.customer, split: splitNote.split };
+    setSplitNote(autoNoteRef.current);
+    focusSplit();
   };
 
   const handleCustomerChange = (cust: QuoteCustomer | null): boolean => {
@@ -1763,7 +1768,7 @@ export default function QuoteBuilder() {
       if (!isEditing && sameSplit(commissionSplit, autoSplitRef.current)) {
         setCommissionSplit(NEW_QUOTE_SPLIT);
         autoSplitRef.current = NEW_QUOTE_SPLIT;
-        fromNoteRef.current = null;
+        autoNoteRef.current = null;
       }
       return true;
     }
@@ -4811,23 +4816,20 @@ export default function QuoteBuilder() {
           </div>
         </div>
         <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-4 border-t border-cream-dark pt-4 lg:grid-cols-2">
-          <div className="min-w-0">
+          <div className="min-w-0" ref={splitBoxRef}>
             <CommissionSplitEditor
               label="Commission split"
               value={commissionSplit}
               onChange={(val) => {
                 commissionSplitTouchedRef.current = true;
-                // An offer stays until answered or typed in by hand; putting the customer's split back shows its
-                // source again (Sol LOWs, 19 Nov).
-                setSplitNote((note) => {
-                  if (note?.kind === 'offer') return sameSplit(val, note.split) ? null : note;
-                  return sameSplit(val, autoSplitRef.current) ? fromNoteRef.current : null;
-                });
+                // Any hand edit answers a waiting offer, so Use it can't overwrite it (Luna MED); putting the app's
+                // split back shows its note again (Sol LOW, 19 Nov).
+                setSplitNote((note) => (note?.kind !== 'offer' && sameSplit(val, autoSplitRef.current) ? autoNoteRef.current : null));
                 setCommissionSplit(val);
               }}
               disabled={editLocked}
             />
-            <QuoteSplitNote note={splitNote} onUse={takeOfferedSplit} onKeep={() => setSplitNote(null)} disabled={editLocked} />
+            <QuoteSplitNote note={splitNote} onUse={takeOfferedSplit} onKeep={() => { setSplitNote(null); focusSplit(); }} disabled={editLocked} />
           </div>
           <div className="flex items-start justify-between gap-3 self-start rounded-lg border border-gray-200 px-3.5 py-1">
             <Switch

@@ -5,14 +5,14 @@ import QuoteSplitNote from './QuoteSplitNote';
 const offer = { kind: 'offer' as const, customer: 'Big Sky Farms 18', split: { splits: [{ recipient: 'Test Rep One', percentage: 60 }, { recipient: 'Test Rep Two', percentage: 40 }] } };
 
 describe('QuoteSplitNote', () => {
-  it('an offer wraps on a phone so the whole split can be read before Use it; one line from sm up (Sol MED, Taha option a)', () => {
+  it('an offer wraps at every width so the whole split can be read before Use it, long names included (Sol MED)', () => {
     const onUse = vi.fn();
     render(<QuoteSplitNote note={offer} onUse={onUse} onKeep={vi.fn()} />);
     const text = screen.getByText("Use Big Sky Farms 18's split (Test Rep One 60% · Test Rep Two 40%)?");
     expect(text).not.toHaveClass('truncate');
-    expect(text).toHaveClass('sm:truncate');
-    expect(text).toHaveAttribute('title', text.textContent);
-    expect(text.parentElement).toHaveClass('min-h-5', 'flex-wrap', 'sm:h-5', 'sm:flex-nowrap');
+    expect(text).not.toHaveClass('sm:truncate');
+    expect(text).toHaveClass('break-words');
+    expect(text.parentElement).toHaveClass('min-h-5', 'flex-wrap');
     expect(text.parentElement).not.toHaveClass('h-5');
     fireEvent.click(screen.getByRole('button', { name: 'Use it' }));
     expect(onUse).toHaveBeenCalledTimes(1);

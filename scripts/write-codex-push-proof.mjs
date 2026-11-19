@@ -3121,6 +3121,8 @@ export function run(argv = process.argv.slice(2)) {
   const cleanBefore = worktreeIsClean(root);
   if (!cleanBefore) {
     process.stderr.write("The push-proof reviewer requires a clean worktree before building its sanitized snapshot.\n");
+    // #1930: the round count is local; the PR lookup (for the PR number) only runs on a clean worktree.
+    process.stdout.write(`Sol round: this would be round ${solRound(root, headBefore, baseBefore).round} on this branch (PR not looked up: the worktree is not clean).\n`);
     clearCodexPushProof({ root, headSha: headBefore });
     return 1;
   }

@@ -36,9 +36,10 @@
 -- Reports (NOTICE): rows written, ingredients filled, kept, skipped, list rows matching no ingredient, and
 -- active ingredients showing no group.
 --
--- Rollback: retire the rows this wrote that nobody has touched since (created_by = the approver ID below and
--- row_version = 1; an admin edit raises row_version) through set_active_ingredient_modes per ingredient, or one
--- reviewed migration; events stay (append-only history). Nothing else is written.
+-- Rollback: retire the rows this wrote that nobody has touched since: source_note ending 'MOA-1 list v2, approved
+-- by Mason 2026-11-18' (every row here carries it), created_by = the approver ID below and row_version = 1 (an
+-- admin edit raises row_version), through set_active_ingredient_modes per ingredient, or one reviewed migration;
+-- events stay (append-only history). Nothing else is written.
 -- ORDERING: after 20270108100000_ingredient_modes_of_action and every older migration.
 -- ============================================================================================================
 

@@ -1,0 +1,164 @@
+-- Written 2026-11-19. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
+-- docs/reference/migrations.d/20270129200000_inactive_customer_refuses_new_work.md.
+--
+-- WHAT (#2000; Mason, 2026-11-19: an inactive customer must be made active again before any new
+--   work is done for them): a row of orders, deliveries, inventory_holds or jobs may not become open
+--   work for an inactive customer. Refused: any INSERT for an inactive customer, and any UPDATE that
+--   leaves the row open when it was not open before (reopen, undelete, hold switched back on or its
+--   expiry pushed out), or that moves any row (open or closed) onto an inactive customer. "Open" is KI-148's meaning
+--   (20270128140000). A delivery is checked against its own customer and its order's customer.
+--   Closing, cancelling, deleting, releasing and editing an already-open row stay allowed, so an
+--   inactive customer's existing work can still be finished down or cleaned up. Refusal:
+--   CUSTOMER_INACTIVE_NEW_WORK, a fixed sentence that names no customer (the caller may not be allowed
+--   to read the order's customer). Every role and path (RPCs, direct writes, server roles).
+--   Guarantee holds for READ COMMITTED transactions (every app path); a REPEATABLE READ deactivation
+--   would count from its own older snapshot.
+--   NOT HERE (Taha's quote, invoice and booking work, until 2026-12-15): quotes, invoices, bookings.
+--
+-- HOW: one trigger function, SECURITY DEFINER (owner postgres) so row-level security cannot hide the
+--   customer's flag, EXECUTE revoked from everyone, and four BEFORE INSERT OR UPDATE row triggers
+--   named zz_... so they run after the other BEFORE triggers and see the final row.
+--   LOCKING (closes KI-148's accepted gap): the guard locks the customer row FOR SHARE before reading
+--   is_active. That conflicts with the row lock a deactivation holds, so whichever commits first wins
+--   and the other sees it: work saved during a deactivation waits and is refused; a deactivation
+--   during a work save waits and KI-148 then counts that work. FOR SHARE locks never conflict with
+--   each other, and no function that creates this work also updates customers (live pg_proc,
+--   2026-11-19), so two saves for one customer cannot deadlock on it.
+--
+-- EXISTING ROWS: none changed. Live 2026-11-19: one inactive customer has 2 confirmed orders (To-Do
+--   decision 23); they stay editable and cancellable; delivering them needs reactivation first.
+--
+-- ROLLBACK (its own reviewed migration):
+--   DROP TRIGGER zz_inactive_customer_new_work_20270129 ON public.orders;
+--   DROP TRIGGER zz_inactive_customer_new_work_20270129 ON public.deliveries;
+--   DROP TRIGGER zz_inactive_customer_new_work_20270129 ON public.inventory_holds;
+--   DROP TRIGGER zz_inactive_customer_new_work_20270129 ON public.jobs;
+--   DROP FUNCTION public.guard_inactive_customer_new_work_20270129();
+--
+-- ORDERING: after 20270128140000 (KI-148). Not re-runnable (preflight refuses).
+
+SET LOCAL lock_timeout = '5s';
+
+DO $preflight$
+BEGIN
+  -- The other half of the rule (KI-148's deactivation check) must already be installed.
+  IF to_regprocedure('public.guard_customer_deactivation_open_work_20270128()') IS NULL THEN
+    RAISE EXCEPTION 'INACTIVE_NEW_WORK_PREFLIGHT: KI-148 (20270128140000) must be applied first';
+  END IF;
+  IF to_regprocedure('public.guard_inactive_customer_new_work_20270129()') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'zz_inactive_customer_new_work_20270129') THEN
+    RAISE EXCEPTION 'INACTIVE_NEW_WORK_PREFLIGHT: the guard already exists';
+  END IF;
+  IF (SELECT count(*) FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND (table_name, column_name) IN (
+           ('customers','id'), ('customers','is_active'),
+           ('orders','id'), ('orders','customer_id'), ('orders','status'), ('orders','deleted_at'),
+           ('deliveries','customer_id'), ('deliveries','order_id'), ('deliveries','status'), ('deliveries','deleted_at'),
+           ('inventory_holds','customer_id'), ('inventory_holds','is_active'), ('inventory_holds','expires_at'),
+           ('jobs','customer_id'), ('jobs','status'), ('jobs','deleted_at'), ('jobs','invoice_id'))) <> 17 THEN
+    RAISE EXCEPTION 'INACTIVE_NEW_WORK_PREFLIGHT: a column the guard reads is missing';
+  END IF;
+END
+$preflight$;
+
+CREATE FUNCTION public.guard_inactive_customer_new_work_20270129()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_today date := (clock_timestamp() AT TIME ZONE 'America/Chicago')::date;
+  v_new_open boolean;
+  v_old_open boolean := false;
+  v_moved boolean := false;
+  v_ids uuid[];
+BEGIN
+  -- "Open" matches KI-148's deactivation check (20270128140000).
+  IF TG_TABLE_NAME = 'orders' THEN
+    v_new_open := NEW.deleted_at IS NULL AND NEW.status IN ('confirmed', 'partially_fulfilled');
+    IF TG_OP = 'UPDATE' THEN
+      v_old_open := OLD.deleted_at IS NULL AND OLD.status IN ('confirmed', 'partially_fulfilled');
+      v_moved := NEW.customer_id IS DISTINCT FROM OLD.customer_id;
+    END IF;
+    v_ids := ARRAY[NEW.customer_id];
+  ELSIF TG_TABLE_NAME = 'deliveries' THEN
+    v_new_open := NEW.deleted_at IS NULL AND NEW.status IN ('scheduled', 'in_progress');
+    IF TG_OP = 'UPDATE' THEN
+      v_old_open := OLD.deleted_at IS NULL AND OLD.status IN ('scheduled', 'in_progress');
+      v_moved := NEW.customer_id IS DISTINCT FROM OLD.customer_id OR NEW.order_id IS DISTINCT FROM OLD.order_id;
+    END IF;
+    v_ids := ARRAY[NEW.customer_id, (SELECT o.customer_id FROM public.orders o WHERE o.id = NEW.order_id)];
+  ELSIF TG_TABLE_NAME = 'inventory_holds' THEN
+    v_new_open := NEW.is_active IS TRUE AND (NEW.expires_at IS NULL OR NEW.expires_at >= v_today);
+    IF TG_OP = 'UPDATE' THEN
+      v_old_open := OLD.is_active IS TRUE AND (OLD.expires_at IS NULL OR OLD.expires_at >= v_today);
+      v_moved := NEW.customer_id IS DISTINCT FROM OLD.customer_id;
+    END IF;
+    v_ids := ARRAY[NEW.customer_id];
+  ELSIF TG_TABLE_NAME = 'jobs' THEN
+    v_new_open := NEW.deleted_at IS NULL
+      AND (NEW.status IN ('scheduled', 'in_progress') OR (NEW.status = 'completed' AND NEW.invoice_id IS NULL));
+    IF TG_OP = 'UPDATE' THEN
+      v_old_open := OLD.deleted_at IS NULL
+        AND (OLD.status IN ('scheduled', 'in_progress') OR (OLD.status = 'completed' AND OLD.invoice_id IS NULL));
+      v_moved := NEW.customer_id IS DISTINCT FROM OLD.customer_id;
+    END IF;
+    v_ids := ARRAY[NEW.customer_id];
+  ELSE
+    RAISE EXCEPTION 'INACTIVE_NEW_WORK_GUARD: unexpected table %', TG_TABLE_NAME;
+  END IF;
+
+  -- Every new row is new work; an update only when it opens the row or moves any row to a customer.
+  -- (Moving a closed order counts too: else a delivery could be added to it while it moves.)
+  IF TG_OP = 'UPDATE' AND NOT ((v_new_open AND NOT v_old_open) OR v_moved) THEN
+    RETURN NEW;
+  END IF;
+
+  -- FOR SHARE waits for a deactivation in progress, then reads its committed result; it also makes a
+  -- deactivation wait for this save, so KI-148's count sees it. Id order: no lock-order deadlock.
+  PERFORM 1 FROM public.customers c WHERE c.id = ANY (v_ids) ORDER BY c.id FOR SHARE;
+  IF EXISTS (SELECT 1 FROM public.customers c WHERE c.id = ANY (v_ids) AND c.is_active IS NOT TRUE) THEN
+    RAISE EXCEPTION 'CUSTOMER_INACTIVE_NEW_WORK: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.guard_inactive_customer_new_work_20270129() FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE TRIGGER zz_inactive_customer_new_work_20270129
+  BEFORE INSERT OR UPDATE ON public.orders
+  FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_customer_new_work_20270129();
+CREATE TRIGGER zz_inactive_customer_new_work_20270129
+  BEFORE INSERT OR UPDATE ON public.deliveries
+  FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_customer_new_work_20270129();
+CREATE TRIGGER zz_inactive_customer_new_work_20270129
+  BEFORE INSERT OR UPDATE ON public.inventory_holds
+  FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_customer_new_work_20270129();
+CREATE TRIGGER zz_inactive_customer_new_work_20270129
+  BEFORE INSERT OR UPDATE ON public.jobs
+  FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_customer_new_work_20270129();
+
+DO $postflight$
+DECLARE
+  p pg_proc%ROWTYPE;
+BEGIN
+  SELECT * INTO p FROM pg_proc WHERE oid = to_regprocedure('public.guard_inactive_customer_new_work_20270129()');
+  -- tgtype 23 = ROW | BEFORE | INSERT | UPDATE; no column list, no WHEN clause.
+  IF p.oid IS NULL
+     OR position('CUSTOMER_INACTIVE_NEW_WORK' IN p.prosrc) = 0
+     OR p.proowner <> 'postgres'::regrole OR NOT p.prosecdef
+     OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
+     OR p.proacl IS DISTINCT FROM ARRAY['postgres=X/postgres']::aclitem[]
+     OR (SELECT count(*) FROM pg_trigger t
+          WHERE t.tgname = 'zz_inactive_customer_new_work_20270129' AND t.tgfoid = p.oid
+            AND t.tgrelid IN ('public.orders'::regclass, 'public.deliveries'::regclass,
+                              'public.inventory_holds'::regclass, 'public.jobs'::regclass)
+            AND t.tgenabled = 'O' AND NOT t.tgisinternal AND t.tgqual IS NULL
+            AND t.tgtype = 23 AND t.tgnargs = 0 AND t.tgattr::text = '') <> 4 THEN
+    RAISE EXCEPTION 'INACTIVE_NEW_WORK_POSTFLIGHT: the guard lost its owner, mode, search_path, grants or triggers';
+  END IF;
+END
+$postflight$;

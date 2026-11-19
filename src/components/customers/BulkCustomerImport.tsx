@@ -110,15 +110,18 @@ function parseAcres(value: string): number | null {
  * An unquoted "1,200" that still fits the column count reads as 1 acre plus "200" in the next column.
  * Returns the joined "1,200" for that shape (so the row is refused), else ''.
  * Not checked when the next column is also acres ("500,300" is real total + corn acres) unless that
- * cell starts with 0 ("5,000": no real acreage is written "000"); otherwise cropAcresOverTotal
- * warns when the split leaves a crop above the total ("1,200" = 1 + 200).
+ * cell starts with 0 ("5,000": no real acreage is written "000"), or it is a total of 1-999 followed
+ * by a larger crop ("1,200" = 1 + 200; Mason, 2026-11-19). A total of 0, or a crop above the total
+ * in any other shape, imports with the cropAcresOverTotal warning.
  * shortcut: a split between two crop columns with no total still saves; upgrade if such files show up.
  */
-function unquotedThousands({ cols, quoted }: Pick<CsvRecord, 'cols' | 'quoted'>, idx: number, nextField: string | undefined): string {
+function unquotedThousands({ cols, quoted }: Pick<CsvRecord, 'cols' | 'quoted'>, idx: number, field: string, nextField: string | undefined): string {
   const next = cols[idx + 1];
   if (quoted[idx] || quoted[idx + 1] || next === undefined) return '';
   if (!/^\d{1,3}$/.test(cols[idx]) || !/^\d{3}(\.\d+)?$/.test(next)) return '';
-  return (ACRE_FIELDS as readonly string[]).includes(nextField ?? '') && !next.startsWith('0') ? '' : `${cols[idx]},${next}`;
+  const total = Number(cols[idx]);
+  const splitTotal = field === 'total_acres' && total > 0 && Number(next) > total;
+  return (ACRE_FIELDS as readonly string[]).includes(nextField ?? '') && !next.startsWith('0') && !splitTotal ? '' : `${cols[idx]},${next}`;
 }
 
 /** The acreage in cell idx, or the row's error message when it is not a clear number. */
@@ -127,7 +130,7 @@ function readAcres(record: Pick<CsvRecord, 'cols' | 'quoted'>, idx: number, fiel
   const label = field.replace('_', ' ');
   const num = parseAcres(value);
   if (num === null) return `Invalid ${label}: ${value}`;
-  const split = unquotedThousands(record, idx, nextField);
+  const split = unquotedThousands(record, idx, field, nextField);
   return split ? `Unclear ${label}: ${split} has a comma but no quotes. Put quotes around numbers with commas, like "1,200"` : num;
 }
 

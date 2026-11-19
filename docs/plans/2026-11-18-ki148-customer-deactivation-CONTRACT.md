@@ -72,7 +72,8 @@ Files: the migration, `docs/reference/migrations.d/<stem>.md`, `docs/changelog.d
   lock on the row until commit), then counts all five kinds in one statement, so one snapshot. A
   booking's final draw that commits an order, accepts its quote and releases its holds is therefore
   seen whole. **Remaining limit:** existing work reopened by a status change (no new row) during the
-  check or later, and work added after the deactivation, are not caught.
+  check or later, and work added after the deactivation, are not caught. **Mason accepted this limit
+  on 2026-11-18** (stop rule after Sol r1, Luna r2 and Luna r3 HIGHs on the same timing mechanism).
   Closing that fully means "an inactive customer can never get open work": a guard on five tables that
   would also stop the legacy customer's two orders from being delivered. That is a separate business
   decision, raised to Mason as a follow-up. No idempotency key: this is a trigger, not an RPC.

@@ -1,5 +1,12 @@
 # Decision Log
 
+## 2026-11-18 — KI-148: Mason accepts the split-second limit on customer deactivation
+
+The deactivation guard (`20270128140000`) waits for new orders, deliveries, holds, quotes and invoices still being saved,
+then checks all five at once. Existing work switched back to open by a status change in the same moment, or work added
+after the deactivation, is not caught. The stop rule fired (Sol r1, Luna r2, Luna r3 HIGHs on this timing mechanism);
+Mason chose to accept the limit rather than build "an inactive customer can never have open work" (follow-up).
+
 ## 2026-11-18 — #1971: Mason owner-accepted 1 Sol finding(s) at `3d37b06e956c`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1971 at `3d37b06e956c` (base `59a711b8cd8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

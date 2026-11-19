@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-18 — #1974 may have an eighth Sol round to replace a lost proof
+
+**Decision (Mason, in chat, 2026-11-18: "I approve the 8th round").** PR #1974 (#1959 booking live-job guard) may have one more Sol round (round 8).
+**Why:** the owner-accepted Sol proof for #1974 lived in the folder of the session that built it, which was deleted; it could not be carried across the later `staging` merge, so the merge gate had no proof. No code changed since Mason's acceptance.
+**What it does:** unlocks one full Sol review of the current head. If Sol raises the finding Mason already accepted, he re-accepts it with `accept <code>`; any new BLOCKER/HIGH goes back to him. Every other gate is unchanged.
+
 ## 2026-11-18 — #1974: Mason owner-accepted 1 Sol finding(s) at `c465339bc70c`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1974 at `c465339bc70c` (base `59a711b8cd8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

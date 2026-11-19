@@ -9,6 +9,7 @@ import { PROTECTED_HARNESS_FILES, canonicalizeGuardPath, evaluateProductionActio
 import { renderSweepQuery } from "../../.claude/hooks/live-testdata-lib.mjs";
 import { buildSweepQuery } from "../../scripts/db-invariant-sweeps/allowlist-match.mjs";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
+import { claimOrRefuse } from "../../.claude/hooks/pr-claim-lib.mjs";
 
 // Since 2026-10-19 (Luna round 3) the merge gate FAILS CLOSED when it cannot
 // read the PR's review threads, because unresolved CodeRabbit threads block a
@@ -1234,7 +1235,7 @@ try {
       `every listed protected file is protected by the regex too: ${file}`,
     );
   }
-  assert.equal(PROTECTED_HARNESS_FILES.length, 22, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
+  assert.equal(PROTECTED_HARNESS_FILES.length, 24, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
   // session-context-reminder writes the rules every later Codex session starts from,
   // so Codex may not edit it either.
   for (const file of [".claude/hooks/session-context-reminder.mjs", ".claude\\hooks\\session-context-reminder.mjs", ".claude/hooks/../hooks/session-context-reminder.mjs"]) {
@@ -3968,6 +3969,62 @@ try {
       "base-bound proof on a head that contains the base clears the merge gate"
     );
     console.log(`TRANSCRIPT BASEOID: head updated to contain base -> blocked=${upToDate.blocked}`);
+    const updatedPr = JSON.stringify({
+      baseRefName: "staging", baseRefOid: githubBase, headRefName: "feature/test", headRefOid: updatedHead,
+      reviewDecision: "APPROVED", mergeStateStatus: "CLEAN", statusCheckRollup: greenChecks,
+    });
+    const mergeUpdated = (extra = {}) => evaluateProductionAction({
+      toolName: "PowerShell", toolInput: { command: `gh pr merge 123 --squash${PIN}` },
+      repoDir: stale.repo, nowMs: now, runGh: () => updatedPr, ...extra,
+    });
+    // #1913: the head merged GitHub's base, so its merge-base with that base is githubBase.
+    // A proof of it bound to the OLDER main it also contains used to count (any ancestor); now refused.
+    writeProof(stale.repo, { ...valid, head_sha: updatedHead, base_sha: stale.base });
+    const olderBase = mergeUpdated();
+    assert.equal(olderBase.blocked, true, "#1913: a proof bound to an ancestor older than the merge-base is denied");
+    assert.match(String(olderBase.reason || ""), /merge-base of the reviewed head/, "#1913: the denial names the merge-base rule");
+    writeProof(stale.repo, { ...valid, head_sha: updatedHead, base_sha: githubBase });
+
+    // #1948: the landing claim runs for Codex merges too (pr-claim-lib.mjs).
+    {
+      const calls = [];
+      const claimAs = (holder) => (branch, action, record) => {
+        calls.push({ branch, action, record });
+        return holder ? `LANDING CLAIM: another session (${holder}) is landing branch "${branch}"` : "";
+      };
+      const refused = mergeUpdated({ claim: claimAs("session-A") });
+      assert.equal(refused.blocked, true, "#1948: a merge of a branch another session is landing is refused");
+      assert.match(refused.reason, /CODEX PRODUCTION GATE: LANDING CLAIM/, "#1948: the refusal is the claim's message");
+      assert.deepEqual(calls, [{ branch: "feature/test", action: "merge", record: false }], "#1948: the refused merge only checked, recorded nothing");
+      calls.length = 0;
+      assert.equal(mergeUpdated({ claim: claimAs("") }).blocked, false, "#1948: an unclaimed branch merges");
+      assert.deepEqual(calls, [
+        { branch: "feature/test", action: "merge", record: false },
+        { branch: "feature/test", action: "merge", record: true },
+      ], "#1948: the claim is checked first and recorded at the allow point");
+      calls.length = 0;
+      writeProof(stale.repo, { ...valid, head_sha: updatedHead, base_sha: stale.base });
+      assert.equal(mergeUpdated({ claim: claimAs("") }).blocked, true, "a merge denied by a later gate...");
+      assert.ok(calls.every((c) => c.record === false), "#1948: ...records no claim");
+      writeProof(stale.repo, { ...valid, head_sha: updatedHead, base_sha: githubBase });
+      // The real library, end to end: session B is refused a branch session A claimed; A is not.
+      const claimsFile = path.join(tempDir("codex-claims-"), "pr-claims.json");
+      writeFileSync(claimsFile, "{}\n");
+      const realClaim = (sessionId) => (branch, action, record) => claimOrRefuse({ file: claimsFile, branch, sessionId, action, record });
+      assert.equal(mergeUpdated({ claim: realClaim("codex-A") }).blocked, false, "#1948: the first Codex session merges and claims");
+      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["feature/test"]?.session, "codex-A", "#1948: the claim is written for that session");
+      assert.match(mergeUpdated({ claim: realClaim("claude-B") }).reason || "", /LANDING CLAIM/, "#1948: another session is then refused");
+      assert.equal(mergeUpdated({ claim: realClaim("") }).blocked, false, "#1948: no session id fails open");
+      assert.equal(mergeUpdated({ claim: realClaim("codex-A") }).blocked, false, "#1948: the holder keeps merging");
+      // Pushes claim too: a ref-less push claims the current branch, a dry run claims nothing.
+      const pushAs = (sessionId, command) => evaluateProductionAction({
+        toolName: "PowerShell", toolInput: { command }, repoDir: stale.repo, nowMs: now, claim: realClaim(sessionId),
+      });
+      assert.equal(pushAs("codex-C", "git push origin HEAD:refs/heads/claude/other").blocked, false, "#1948: a push to a free branch is allowed");
+      assert.equal(JSON.parse(readFileSync(claimsFile, "utf8"))["claude/other"]?.session, "codex-C", "#1948: ...and claims its destination");
+      assert.match(pushAs("codex-D", "git push origin HEAD:claude/other").reason || "", /CODEX PRODUCTION GATE: LANDING CLAIM/, "#1948: another session's push to it is refused");
+      assert.equal(pushAs("codex-D", "git push --dry-run origin HEAD:claude/other").blocked, false, "#1948: a dry run is never refused");
+    }
     PIN = ` --match-head-commit ${stale.sha}`; // the cases below use the original head again
 
     // A base GitHub reports but the checkout does not have must fail closed with

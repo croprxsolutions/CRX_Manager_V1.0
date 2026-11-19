@@ -36,6 +36,7 @@ Releases of CRX Manager, newest first.
 * environment banner and tab title prefix (STAGING amber, LOCAL blue) (#1714)
 
 #### 🐛 Bug Fixes
+* Sol proof base = exact merge-base (#1913); Codex runs the landing claim (#1948) (#2041)
 * Sol + apply-review fixes for v0.1.0 (#1990) (#2044)
 * sql-column-check checks a select-list alias after a comma and a quoted "public" schema (#2040)
 * REDEFINED guards ignore SQL comments and catch renames (#1910) (#2027)

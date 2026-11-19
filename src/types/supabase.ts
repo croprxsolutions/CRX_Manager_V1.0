@@ -18393,7 +18393,10 @@ export type Database = {
         }
         Returns: Json
       }
-      auto_expire_quotes: { Args: never; Returns: Json }
+      auto_expire_quotes: {
+        Args: { p_idempotency_key?: string }
+        Returns: Json
+      }
       batch_apply_all_prepayments: {
         Args: { p_idempotency_key?: string; p_performed_by?: string }
         Returns: Json

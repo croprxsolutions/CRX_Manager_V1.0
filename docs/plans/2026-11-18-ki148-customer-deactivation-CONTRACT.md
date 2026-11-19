@@ -19,8 +19,10 @@ while it still has open work. "Open work" is:
 | Prepay | `customers.prepay_balance_cents <> 0` (Mason, 2026-11-19: the prepay runs skip inactive customers) | live column |
 
 Not blocking (Mason, 2026-11-19): a farm-group parent with active children; a return still `requested`.
-Why the 2026-11-19 additions: statements, finance charges and the prepay apply/reconcile runs read only
-active customers, so unbilled work or unapplied prepay on an inactive customer would leave those runs.
+Why the 2026-11-19 additions: finance charges and the prepay apply/reconcile runs read only active
+customers, so unbilled work or unapplied prepay on an inactive customer would leave those runs.
+(Corrected for issue #2000, Sol r5: statements are not among them. The AR Aging statement picker
+searches every customer, inactive included, `ARagingStatement.paging.test.tsx`.)
 
 **Decisions it carries out.**
 - To-Do decision 20 (admins skip the open-invoice check): answered in the task brief from the parent
@@ -135,3 +137,58 @@ migration after merge; production follows the release flow (migration applied be
 None blocking. Decisions 20 and 23 are answered (above). Follow-up for Mason (not built here): should
 an inactive customer be refused any *new* order, quote, delivery or hold, closing the race?
 Recommendation: not now; it would also block finishing the legacy customer's two orders (decision 23).
+
+## Follow-up (issue #2000), 2026-11-19
+
+Read at `origin/staging` 62ccaeaa2. Migration `20270129170000_customer_deactivation_open_work_followups.sql`
+re-emits only the guard function (same owner, mode, search_path, ACL, trigger; still one snapshot, no
+locks). Its preflight requires the exact `20270128140000` body (md5), so it never overwrites a different
+later version. Both migrations ship in the same release (neither is live), so no deactivation lands
+between them.
+
+| Change | Rule | Source |
+|---|---|---|
+| Split payers | An order counts for every customer with a share of it in `order_shares` or of one of its lines in `order_item_shares`, as well as its owner; so do its undelivered deliveries. Being named with a share is enough (the payer is billed when the order delivers); a CHECK keeps every share above 0% | registry `order_shares`, `order_item_shares` |
+| Field-split owners | A job counts for every customer with a `job_field_shares` row on it, as well as its owner. The job is the unit: `transfer_job_to_invoice` bills every owner of a split job in one call | registry `job_field_shares`; transfer U7 multi-owner group |
+| Billed job | One definition, used for jobs and tickets: a job is billed while it is `invoiced` or a live invoice (not `voided`/`cancelled`, not deleted) bills it: `jobs.invoice_id`, `invoices.job_id` (split invoices), or an invoice of one of its undeleted blend tickets (the test `transfer_job_to_invoice` uses to refuse double billing). A `completed` job that is not billed counts | `20261120100000` transfer body; void resets `invoice_id` (`20270116100000`) |
+| Blend ticket | Counts for its named customer when `review_status = 'approved'`, `payment_status = 'unbilled'`, undeleted (as the Unbilled Applications panel lists them), unless a live invoice bills the ticket or its job is billed | `UnbilledApplicationsPanel.tsx` |
+| Hold | `is_active = true` (the partial index's form) and `quantity > 0` (NOT NULL, has a default); one Chicago date per check | `idx_inventory_holds_customer`; registry |
+| Wording | "open or unbilled spray job(s)", "unbilled blend ticket(s)"; a farm name over 60 characters shows its first 59 and "…" | Taha; Sol r4, r5 |
+
+Not done here (Taha owns quotes, bookings, invoices, billing, prepay and credits until 2026-12-15):
+prepay recorded as credits with a zero cached total; a fully applied credit memo still `posted`; showing
+a rep only the invoices that rep can see; the voided-then-deleted order that reopens an accepted quote
+(the purchasing plan's quote rule); a completed field-allocated delivery whose split invoices are not
+made yet.
+
+Proof cases (prover phase 2, `KI148_FOLLOWUP_PROOF_PASS`; each refused case is a customer with only that
+blocker): before the follow-up, a split payer, an order-line payer, a payer of an undelivered delivery,
+a field-split owner, a job whose invoice is voided or deleted and an approved unbilled ticket all
+deactivate, and a job billed through its ticket blocks; after it, each of the first group is refused
+(admin, rep, service_role) with its wording, every phase-1 kind is still refused by the replacement
+body, and an active zero hold, a share of a cancelled order or job, a job
+billed through its ticket or by a split invoice, a ticket on a job billed only through `jobs.invoice_id`,
+a ticket billed despite its `unbilled` flag, a ticket on an invoiced job, and
+billed/no-charge/prepaid/unreviewed/rejected/deleted tickets do not block (admin and rep). A 108-character
+farm name appears as 59 characters plus "…". A second apply is refused. The prover waits out the 10
+minutes before Chicago midnight so its "expires today" hold keeps its day (Sol r4).
+
+**Cold challenge (Astra `gpt-6.2-astra` high, 2026-11-19, 36 findings).** Fixed: one billed-job
+definition for jobs and tickets (#1), one Chicago date per check (#27), exact name cut (#22), rollback
+text that can run (#29), exact-predecessor preflight and a marker instead of a wording check (#31),
+isolated proof cases plus the decisive ticket case (#35, #1). Settled by evidence or
+existing decisions: a CHECK keeps every share above 0% (#12); the panel is a work list, not this rule's definition; the guard is stricter for a job
+pointing at a voided invoice (it still shows on the customer's jobs) and looser where a live invoice
+already bills the job (#2–#4). The job is the billing unit for split owners (#5: the transfer bills all
+owners at once). Statuses `invoiced`/`billed` are trusted as the billing record, as the transfer and the
+panel do (#6). A ticket belongs to its named customer, as the panel shows it (#8–#10); a job plus its own
+unbilled ticket counts as two records. Timing (#24–#26) stays the accepted point-in-time limit; a later
+write in the same transaction is part of it. Disclosure (#19–#20): reps read every customer's orders,
+jobs and tickets (`20261013220000_reps_work_any_customer`), and the counts name no other customer.
+Rollout (#30): both migrations land in one release. Legacy rows (#18): inactive customers are never
+re-checked, by design. Cost (#34): the trigger runs only when a customer is deactivated. Runner (#32):
+the release apply runs the file as one transaction, which the prover mirrors (`psql -1`). Line breaks in
+names (#23): the toast shows the server sentence as is. Not re-checked: #7 (`invoices.job_id` written
+only by job billing), #11 (ticket processing status), #15, #17 (legacy rows missing ids).
+
+Open business decision (unchanged, for Mason): should an inactive customer refuse any new work?

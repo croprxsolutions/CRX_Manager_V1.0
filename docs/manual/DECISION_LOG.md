@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-19 — #1997 may have up to three more Sol rounds (6-8)
+
+**Decision (Mason, in chat, 2026-11-19: "Approve up to 3 more").** PR #1997 (KI-148 customer deactivation) may have Sol rounds 6 to 8.
+**Why:** the branch had to merge `staging` to clear a decision-log conflict. That brought other people's database changes into its diff, so the merge gate needs a fresh Sol review. The KI-148 code is unchanged since round 5.
+
 ## 2026-11-19 — #1997: Mason owner-accepted 3 Sol finding(s) at `9db7ae3c3924`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1997 at `9db7ae3c3924` (base `872252698adb`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

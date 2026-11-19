@@ -9,9 +9,9 @@
 //
 // FAILS OPEN by design (Mason, 2026-10-30: fewer guards that block harmless work):
 // a missing or unreadable claim file, a missing session id, an unknown branch, or
-// any error means "no claim", never a refusal. Codex sessions are never refused:
-// both callers (codex-push-guard.mjs, pr-merge-guard.mjs) are Claude-only hooks
-// (scripts/agent-manifest-parity.mjs). @proven-by .claude/hooks/pr-claim-lib.test.mjs
+// any error means "no claim", never a refusal. Callers: Claude's codex-push-guard.mjs
+// and pr-merge-guard.mjs, and Codex's .codex/hooks/production-action-guard.mjs for
+// pushes and merges (#1948). @proven-by .claude/hooks/pr-claim-lib.test.mjs
 
 import { readFileSync, writeFileSync, renameSync, openSync, closeSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
@@ -102,7 +102,7 @@ export function claimOrRefuse({ file, branch, sessionId, action, cwd = "", now =
           `${action} is refused. Leave this PR to that session. Only if that session is finished or gone ` +
           `(ask Mason when unsure; never just to get past this), release the claim and retry: ` +
           `${/^[\w./-]+$/.test(name) ? `\`node scripts/pr-claim.mjs release ${name}\`` : "`node scripts/pr-claim.mjs release <branch>` (quote the branch name)"}. Claims expire 2 hours after ` +
-          `their last use; the check fails open on any error and never applies to Codex sessions.`
+          `their last use; the check fails open on any error.`
         );
       }
       if (record) {

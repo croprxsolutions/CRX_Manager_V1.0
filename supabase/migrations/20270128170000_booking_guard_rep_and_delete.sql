@@ -131,26 +131,6 @@ BEGIN
         USING ERRCODE = 'P0001';
     END IF;
   END IF;
-  -- Sol HIGH r2: a booking can now be deleted once its job is completed; an override that reopens that job
-  -- (completed or invoiced back to scheduled or in progress) must not leave live work on the deleted booking. The
-  -- bookings are locked first, so a delete running at the same time is waited for (and then refused, as the job is live).
-  IF TG_OP = 'UPDATE' AND OLD.status IN ('completed', 'invoiced') AND NEW.status IN ('scheduled', 'in_progress')
-     AND (NEW.quote_id IS NOT NULL OR NEW.quote_section_id IS NOT NULL) THEN
-    PERFORM 1 FROM public.quotes q
-    WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
-    FOR SHARE;
-    SELECT q.quote_number INTO v_quote
-    FROM public.quotes q
-    WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
-      AND q.deleted_at IS NOT NULL
-    ORDER BY q.quote_number
-    LIMIT 1;
-    IF FOUND THEN
-      RAISE EXCEPTION 'BOOKING_CLOSED: booking % is deleted, so spray job % cannot be reopened.',
-        v_quote.quote_number, NEW.job_number
-        USING ERRCODE = 'P0001';
-    END IF;
-  END IF;
   IF NEW.deleted_at IS NOT NULL OR NEW.status = 'cancelled' THEN
     RETURN NEW;
   END IF;
@@ -343,7 +323,7 @@ DECLARE
 BEGIN
   FOR v_g IN SELECT * FROM (VALUES
       ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', 'cannot be deleted. Cancel or complete the job first.', '9845ed22d07de03c8b3c7afe5356352c'),
-      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', '191275c09c51fbd3ecf63cfab72e29fd')) AS g(fn, tbl, tg, marker, body_md5)
+      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', 'fc51549fa40649904143afb5d261d630')) AS g(fn, tbl, tg, marker, body_md5)
   LOOP
     SELECT * INTO v_p FROM pg_proc WHERE oid = v_g.fn::regprocedure;
     IF v_p.proowner <> 'postgres'::regrole OR NOT v_p.prosecdef

@@ -12,7 +12,7 @@ while it still has open work. "Open work" is:
 | Order | `orders.status IN ('confirmed','partially_fulfilled')`, `deleted_at IS NULL` | registry `orders.status` |
 | Delivery | `deliveries.status IN ('scheduled','in_progress')`, `deleted_at IS NULL`, on the customer's row **or** on one of its orders | registry `deliveries.status` |
 | Hold | `inventory_holds.is_active` and not expired (`expires_at` null or ≥ today, Chicago), any hold type | live table; every hold writer sets `customer_id`; the purchasing plan never counts an expired hold |
-| Quote | `quotes.status IN ('draft','sent','revised')`, `deleted_at IS NULL`. `accepted` is not counted: conversion sets it, so its open part is the order | `QUOTE_TO_DELIVERY.md` lines 13, 64 |
+| Quote | `quotes.status IN ('draft','sent','revised')`, `deleted_at IS NULL`, or `accepted` with no order (`orders.quote_id`), the purchasing plan's rule (Sol r2). A converted quote's open part is its order | `QUOTE_TO_DELIVERY.md` lines 13, 64 |
 | Invoice | `invoices.status IN ('posted','overdue')`, `deleted_at IS NULL` (today's rule, now for every role) | `_customer_has_open_invoice_20261013` |
 
 **Decisions it carries out.**
@@ -49,7 +49,9 @@ deactivated and names the first blocked customer met.
 
 **Who sees the counts.** Only admins and sales reps may update customers (live policy
 `customers_update`: `is_admin() OR is_sales_rep()`), and both read every customer's work
-(`20261013220000_reps_work_any_customer`), so naming counts reveals nothing new.
+(`20261013220000_reps_work_any_customer`), so naming counts reveals nothing new. Invoices are named
+without a count; a rep who cannot read another rep's posted invoice already gets the rep guard's
+open-invoice refusal first, so that existing disclosure is unchanged (Sol r2 LOW).
 
 Files: the migration, `docs/reference/migrations.d/<stem>.md`, `docs/changelog.d/…`,
 `scripts/smoke/prove-ki148-customer-deactivation-real-schema.mjs`, `src/lib/errorSanitizer.ts`
@@ -66,10 +68,14 @@ Files: the migration, `docs/reference/migrations.d/<stem>.md`, `docs/changelog.d
   (a generic message until the new sanitizer ships). No break.
 - **Timing.** Double click / retry: a refused deactivation changes nothing and a repeat is refused
   again; a repeated success is inactive→inactive and not checked. **Concurrency (Sol round 1 HIGH):**
-  the guard first locks the customer row, then its orders (Luna round 2: a delivery added to one of
-  its orders under another customer's id), `FOR UPDATE`, which waits for any transaction still inserting
+  the guard first locks the customer row `FOR UPDATE`, which waits for any transaction still inserting
   an order, delivery, hold, quote or invoice for it (each insert's foreign key check holds a key-share
-  lock on the row until commit), then counts all five kinds in one statement, so one snapshot. A
+  lock on the row until commit), then counts all five kinds in one statement, so one snapshot. Every
+  delivery path refuses a customer other than its order's (`CUSTOMER_ORDER_MISMATCH`; quick and
+  follow-up deliveries copy it), so no order-row lock is taken: Luna r2 asked for one and Sol r2 showed
+  it could deadlock with invoice backfill, so it was removed. Outside READ COMMITTED (whose snapshot
+  stays fixed while it waits) the guard refuses: `CUSTOMER_DEACTIVATION_ISOLATION` (Sol r2); every app
+  path is read committed. A
   booking's final draw that commits an order, accepts its quote and releases its holds is therefore
   seen whole. **Remaining limit:** existing work reopened by a status change (no new row) during the
   check or later, and work added after the deactivation, are not caught. **Mason accepted this limit
@@ -94,8 +100,8 @@ migration after merge; production follows the release flow (migration applied be
    whose row names another customer but whose order is this one, active hold (also one expiring
    today), draft/sent/revised quote, posted invoice, overdue invoice. Several kinds name every count.
 4. When the work is closed (order fulfilled/cancelled/voided/deleted, delivery completed/cancelled/
-   voided, hold inactive or expired yesterday, quote declined/expired/cancelled/closed_*/accepted or a
-   deleted draft, invoice draft/unposted/paid/voided/cancelled), then deactivation succeeds.
+   voided, hold inactive or expired yesterday, quote declined/expired/cancelled/closed_*/accepted
+   with its order or a deleted draft, invoice draft/unposted/paid/voided/cancelled), then deactivation succeeds.
 5. Bulk: one statement deactivating two customers, one blocked → refused, both stay active.
 6. An inactive customer with open orders can still be edited by an admin and a rep, and reactivated;
    deactivating it again is checked.
@@ -111,7 +117,8 @@ migration after merge; production follows the release flow (migration applied be
 - Race and later reopen (1–7): kept as the stated point-in-time limit; the stronger rule is a business
   choice raised to Mason as a follow-up. No server function deactivates customers, so no
   in-transaction ordering case exists.
-- Accepted quotes (5, 8–11, 16): dropped from "open" (conversion sets `accepted`).
+- Accepted quotes (5, 8–11, 16): dropped from "open" (conversion sets `accepted`); Sol r2 then
+  brought back an accepted quote with no order, matching the purchasing plan.
 - Expired holds (15): not counted. Delivery ownership (13): counted by row or by order.
 - Invoice helper role gate (20): not used; the predicate is inline for every role.
 - Error precedence (21): trigger named to fire after the rep guard. Disclosure (22): refuted (policy facts).

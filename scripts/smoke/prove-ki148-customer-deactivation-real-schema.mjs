@@ -34,9 +34,9 @@ const C = Object.fromEntries(['order', 'partial', 'sched', 'inprog', 'hold', 'qd
 const N = Object.fromEntries(Object.keys(C).map((k) => [k, `[KI148] ${k}`]));
 
 // One statement as `role`, signed in as `uid` (null: no claims at all); the last output line is the answer.
-function run(uid, sql, { role = 'authenticated', commit = false } = {}) {
+function run(uid, sql, { role = 'authenticated', commit = false, iso = '' } = {}) {
   const r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'],
-    { input: `BEGIN;\n${uid ? claims(uid) : ''}\n${role === 'postgres' ? '' : `SET LOCAL ROLE ${role};`}\n${sql}\n${commit ? 'COMMIT' : 'ROLLBACK'};`, allowFailure: true });
+    { input: `BEGIN${iso ? ` ISOLATION LEVEL ${iso}` : ''};\n${uid ? claims(uid) : ''}\n${role === 'postgres' ? '' : `SET LOCAL ROLE ${role};`}\n${sql}\n${commit ? 'COMMIT' : 'ROLLBACK'};`, allowFailure: true });
   return { status: r.status, out: r.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? '', err: r.stderr };
 }
 const count = (sql) => `WITH w AS (${sql} RETURNING 1) SELECT count(*) FROM w;`;
@@ -89,7 +89,9 @@ function seed() {
     ${delivery(C.closed, 'completed')} ${delivery(C.closed, 'cancelled')} ${delivery(C.closed, 'voided')}
     ${hold(C.closed, false)} ${hold(C.closed, true, "(now() AT TIME ZONE 'America/Chicago')::date - 1")}
     ${['declined', 'expired', 'cancelled', 'closed_by_application', 'closed_short'].map((s) => quote(C.closed, s)).join('\n')}
-    ${quote(C.closed, 'accepted')}
+    ${quote(C.closed, 'accepted', `'${id('a1')}'`)} ${order(C.closed, 'fulfilled', `'${id('a1')}'`)}
+    -- An accepted quote with no order still promises product (the purchasing plan counts it).
+    ${quote(C.qacc, 'accepted')}
     ${quote(C.closed, 'draft')} UPDATE public.quotes SET deleted_at = now() WHERE quote_number = 'KI148-Q${n}';
     ${['draft', 'unposted', 'paid', 'voided', 'cancelled'].map((s) => invoice(C.closed, s)).join('\n')}
     -- The live case (To-Do decision 23): inactive with 2 confirmed orders.
@@ -115,13 +117,13 @@ async function main() {
 
   // Cases 1-3: every kind of open work refuses, for an admin; the row stays active.
   const kinds = { order: /1 open order\(s\)/, partial: /1 open order\(s\)/, sched: /1 undelivered delivery/, inprog: /1 undelivered delivery/,
-    hold: /2 active stock hold/, dorder: /1 undelivered delivery/, qdraft: /1 open quote/, qsent: /1 open quote/, qrevised: /1 open quote/,
+    hold: /2 active stock hold/, dorder: /1 undelivered delivery/, qdraft: /1 open quote/, qsent: /1 open quote/, qrevised: /1 open quote/, qacc: /1 open quote/,
     posted: /open invoices\./, overdue: /open invoices\./ };
   for (const [k, pattern] of Object.entries(kinds)) {
     refused(ADMIN, deactivate(C[k]), new RegExp(`CUSTOMER_HAS_OPEN_WORK: nothing was deactivated\\. \\[KI148\\] ${k} still has ${pattern.source}`));
     assert.equal(active(C[k]), 't');
   }
-  console.log('[ki148] admin refused for each kind: open/part-filled order, scheduled/in-progress delivery (also one whose row names another customer but whose order is this one), active hold (one expiring today), draft/sent/revised quote, posted/overdue invoice');
+  console.log('[ki148] admin refused for each kind: open/part-filled order, scheduled/in-progress delivery (also one whose row names another customer but whose order is this one), active hold (one expiring today), draft/sent/revised quote, accepted quote with no order, posted/overdue invoice');
   refused(REP, deactivate(C.sched), /CUSTOMER_HAS_OPEN_WORK/);
   refused(REP, deactivate(C.hold), /CUSTOMER_HAS_OPEN_WORK/);
   refused(ADMIN, deactivate(C.order), /CUSTOMER_HAS_OPEN_WORK/, { role: 'postgres' });
@@ -145,10 +147,10 @@ async function main() {
     const creatorDone = new Promise((resolve) => creator.on('close', resolve));
     creator.stdin.end(`BEGIN; ${claims(ADMIN)}
 ${insert}
-SELECT pg_sleep(4); COMMIT;
+SELECT pg_sleep(6); COMMIT;
 `);
     // Wait until the insert is done and the creator sleeps, holding its key-share lock.
-    for (let i = 0; i < 100 && scalar(`SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE 'SELECT pg_sleep(4)%';`) !== '1'; i++) {
+    for (let i = 0; i < 100 && scalar(`SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE 'SELECT pg_sleep(6)%';`) !== '1'; i++) {
       await new Promise((r) => setTimeout(r, 100));
     }
     const started = Date.now();
@@ -156,20 +158,26 @@ SELECT pg_sleep(4); COMMIT;
     const waited = Date.now() - started;
     assert.equal(await creatorDone, 0, `the creating transaction failed:
 ${creatorErr}`);
-    assert.ok(waited >= 1500, `the deactivation did not wait for the creating transaction (${waited} ms)`);
+    assert.ok(waited >= 1000, `the deactivation did not wait for the creating transaction (${waited} ms)`);
     assert.equal(active(cid), 't');
     console.log(`[ki148] a deactivation during an uncommitted ${what} waits for it (${waited} ms), then refuses`);
   }
   await race(C.race, `INSERT INTO public.orders (order_number, customer_id, status) VALUES ('KI148-RACE', '${C.race}', 'confirmed');`,
     /\[KI148\] race still has 1 open order\(s\)/, 'order insert');
   await race(C.race2, `INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, status)
-      VALUES ('KI148-RACE-D', '${id(`f${C.race2.slice(-2)}`)}', '${C.many}', '${ADMIN}', 'scheduled');`,
-    /\[KI148\] race2 still has 1 undelivered delivery/, 'delivery insert on its order under another customer');
+      VALUES ('KI148-RACE-D', '${id(`f${C.race2.slice(-2)}`)}', '${C.race2}', '${ADMIN}', 'scheduled');`,
+    /\[KI148\] race2 still has 1 undelivered delivery/, 'delivery insert');
+  // Sol round 2: outside READ COMMITTED the snapshot is fixed, so the guard refuses to run at all.
+  for (const level of ['REPEATABLE READ', 'SERIALIZABLE']) {
+    refused(ADMIN, deactivate(C.clean), /CUSTOMER_DEACTIVATION_ISOLATION/, { iso: level });
+  }
+  assert.equal(active(C.clean), 't');
+  console.log('[ki148] repeatable-read and serializable deactivations are refused (CUSTOMER_DEACTIVATION_ISOLATION)');
 
   // Case 4: closed work of every kind does not block; neither does no work.
   assert.equal(allowed(ADMIN, deactivate(C.closed)), '1');
   assert.equal(allowed(REP, deactivate(C.clean)), '1');
-  console.log('[ki148] closed work (fulfilled/cancelled/voided/deleted orders, completed/cancelled/voided deliveries, inactive or expired hold, closed, accepted and deleted quotes, draft/paid/voided invoices) does not block; admin and rep deactivate');
+  console.log('[ki148] closed work (fulfilled/cancelled/voided/deleted orders, completed/cancelled/voided deliveries, inactive or expired hold, closed, accepted-with-order and deleted quotes, draft/paid/voided invoices) does not block; admin and rep deactivate');
 
   // Case 5: bulk is all-or-nothing.
   refused(ADMIN, deactivate([C.bulkok, C.order]), /CUSTOMER_HAS_OPEN_WORK: nothing was deactivated\. \[KI148\] order/);

@@ -5,8 +5,8 @@
 --   A customer cannot be switched from active to inactive while it still has open work:
 --   an open order (confirmed or partially fulfilled), an undelivered delivery (scheduled or in
 --   progress, of the customer or of one of its orders), an active, unexpired stock hold, an open quote
---   (draft, sent or revised; an accepted quote is a converted one), or an open invoice (posted or
---   overdue). Deleted rows never count. The refusal names the customer and what is open:
+--   (draft, sent or revised, or accepted with no order yet, as the purchasing plan counts it), or an
+--   open invoice (posted or overdue). Deleted rows never count. The refusal names the customer and what is open:
 --   CUSTOMER_HAS_OPEN_WORK. It applies to everyone and every path (Customers bulk Deactivate,
 --   the edit page through save_customer, a direct API update, server functions).
 --
@@ -16,12 +16,12 @@
 --   name sorts after customers_guard_rep_edit_20261013, so a rep's forbidden edit keeps its own error.
 --   Only admins and sales reps may update customers (policy customers_update), and both read every
 --   customer's work, so the counts it names reveal nothing new; invoices are named without a count.
---   CONSISTENCY: it first locks the customer row, then its orders, FOR UPDATE, which waits for every
---   transaction still inserting an order, delivery, hold, quote or invoice for it or one of its orders
---   (each insert's foreign key check holds a key-share lock on the row until commit) and makes later
---   inserts wait for the deactivation; then one statement counts all five kinds from one snapshot.
---   A transaction that already locked one of these rows and then needs the customer row can meet the
---   deactivation in a deadlock; PostgreSQL then cancels one of the two with an error, nothing is saved.
+--   CONSISTENCY: it first locks the customer row FOR UPDATE, which waits for every transaction still
+--   inserting an order, delivery, hold, quote or invoice for it (each insert's foreign key check holds a
+--   key-share lock on the row until commit; every delivery path refuses a customer other than its
+--   order's) and makes later inserts wait for the deactivation; then one statement counts all five
+--   kinds from one snapshot. It refuses outside READ COMMITTED (CUSTOMER_DEACTIVATION_ISOLATION), whose
+--   fixed snapshot would not see work committed while it waited; every app path is read committed.
 --   LIMIT (accepted, see the KI-148 contract): work that already exists and is reopened by a status
 --   change (no new row) in a transaction committing during the check, or later, is not caught; and
 --   work added after the deactivation lands on an inactive customer, as on any inactive customer today
@@ -51,12 +51,12 @@ BEGIN
   IF (SELECT count(*) FROM information_schema.columns
        WHERE table_schema = 'public'
          AND (table_name, column_name) IN (
-           ('customers','is_active'), ('customers','farm_name'),
-           ('orders','id'), ('orders','customer_id'), ('orders','status'), ('orders','deleted_at'),
-           ('deliveries','customer_id'), ('deliveries','order_id'), ('deliveries','status'), ('deliveries','deleted_at'),
+           ('customers','id'), ('customers','is_active'), ('customers','farm_name'),
+           ('orders','id'), ('orders','quote_id'), ('orders','customer_id'), ('orders','status'), ('orders','deleted_at'),
+           ('deliveries','id'), ('deliveries','customer_id'), ('deliveries','order_id'), ('deliveries','status'), ('deliveries','deleted_at'),
            ('inventory_holds','customer_id'), ('inventory_holds','is_active'), ('inventory_holds','expires_at'),
-           ('quotes','customer_id'), ('quotes','status'), ('quotes','deleted_at'),
-           ('invoices','customer_id'), ('invoices','status'), ('invoices','deleted_at'))) <> 19 THEN
+           ('quotes','id'), ('quotes','customer_id'), ('quotes','status'), ('quotes','deleted_at'),
+           ('invoices','customer_id'), ('invoices','status'), ('invoices','deleted_at'))) <> 23 THEN
     RAISE EXCEPTION 'KI148_PREFLIGHT: a column the guard reads is missing';
   END IF;
 END
@@ -83,10 +83,14 @@ BEGIN
   -- Wait for any transaction still creating work for this customer: every insert into the five tables
   -- holds a key-share lock on this row (its foreign key check) until it commits, and FOR UPDATE waits
   -- for it. Work inserted after this point waits for the deactivation instead.
+  -- (No order-row lock: every delivery path refuses a customer that differs from its order's, so a
+  -- delivery insert locks this row too; locking orders here could deadlock with billing, Sol r2.)
+  -- The count below needs a fresh snapshot after the lock, which only READ COMMITTED (every app path) gives.
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'CUSTOMER_DEACTIVATION_ISOLATION: a customer can only be deactivated in a read-committed transaction'
+      USING ERRCODE = 'check_violation';
+  END IF;
   PERFORM 1 FROM public.customers c WHERE c.id = OLD.id FOR UPDATE;
-  -- The same for a delivery being added to one of its orders under another customer's id (Luna r2):
-  -- that insert holds a key-share lock on the order row.
-  PERFORM 1 FROM public.orders o WHERE o.customer_id = OLD.id ORDER BY o.id FOR UPDATE;
   -- One statement, so all five counts read the same committed state.
   SELECT
     (SELECT count(*) FROM public.orders o
@@ -104,7 +108,9 @@ BEGIN
         AND (h.expires_at IS NULL OR h.expires_at >= (now() AT TIME ZONE 'America/Chicago')::date)),
     (SELECT count(*) FROM public.quotes q
       WHERE q.customer_id = OLD.id AND q.deleted_at IS NULL
-        AND q.status IN ('draft', 'sent', 'revised')),
+        -- An accepted quote with no order still promises product (the purchasing plan's rule).
+        AND (q.status IN ('draft', 'sent', 'revised')
+             OR (q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM public.orders o WHERE o.quote_id = q.id)))),
     (SELECT count(*) FROM public.invoices i
       WHERE i.customer_id = OLD.id AND i.deleted_at IS NULL
         AND i.status IN ('posted', 'overdue'))

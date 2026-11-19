@@ -11,7 +11,7 @@
 --
 -- WHAT (two functions re-emitted from 20270125163000, each unchanged apart from one inserted check):
 --  0. New private _quote_item_sent_unit_20270128(quote, item): the unit the grower was last SENT for that line (the
---     newest quote_versions snapshot that lists it), else NULL. A line counts as mismatched when
+--     newest quote_versions snapshot, if it lists the line), else NULL. A line counts as mismatched when
 --     either its live unit or its sent unit doesn't match the stock unit, or either is blank or unknown, including a
 --     line no sent version lists (Taha 2026-11-19, "strict": a quote price bills only in the unit the grower was sent), so editing a sent line's unit (Lb -> Gal at the same price)
 --     without a resend can't make a price the grower saw per Lb bill per Gal (attack run, F1b; Luna/Sol r2).
@@ -68,19 +68,21 @@ LANGUAGE sql
 STABLE
 SET search_path = public, pg_temp
 AS $fn$
-  -- KI-81 unit: the unit the grower was last sent for this quote line, from the newest sent version that lists it.
-  -- NULL when no sent version lists the line or that version records no unit for it: the unit the grower saw is
+  -- KI-81 unit: the unit the grower was last sent for this quote line, from the NEWEST sent version only (a line a
+  -- later send dropped is not on the quote the grower holds; Sol r4). NULL when that version doesn't list the line or
+  -- records no unit for it: the unit the grower saw is
   -- unknown, so callers stop and ask (Taha 2026-11-19, "strict"). A malformed snapshot (sections or items not an
   -- array) lists nothing.
   SELECT it.value->>'unit_size'
-    FROM public.quote_versions v
+    FROM (SELECT v.snapshot_data FROM public.quote_versions v
+           WHERE v.quote_id = p_quote_id
+           ORDER BY v.version_number DESC
+           LIMIT 1) v
    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(v.snapshot_data->'sections') = 'array'
                                                 THEN v.snapshot_data->'sections' ELSE '[]'::jsonb END) s(value)
    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(s.value->'items') = 'array'
                                                 THEN s.value->'items' ELSE '[]'::jsonb END) it(value)
-   WHERE v.quote_id = p_quote_id
-     AND it.value->>'quote_item_id' = p_item_id::text
-   ORDER BY v.version_number DESC
+   WHERE it.value->>'quote_item_id' = p_item_id::text
    LIMIT 1
 $fn$;
 ALTER FUNCTION public._quote_item_sent_unit_20270128(uuid, uuid) OWNER TO postgres;

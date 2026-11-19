@@ -30,7 +30,7 @@ const PRODUCT = id('d1');
 
 // One customer per case; `c` + suffix is its fixture id.
 const C = Object.fromEntries(['order', 'partial', 'sched', 'inprog', 'hold', 'qdraft', 'qsent', 'qrevised', 'qacc',
-  'posted', 'overdue', 'closed', 'clean', 'inactive', 'bulkok', 'many', 'dorder', 'race'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
+  'posted', 'overdue', 'closed', 'clean', 'inactive', 'bulkok', 'many', 'dorder', 'race', 'race2'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
 const N = Object.fromEntries(Object.keys(C).map((k) => [k, `[KI148] ${k}`]));
 
 // One statement as `role`, signed in as `uid` (null: no claims at all); the last output line is the answer.
@@ -136,26 +136,35 @@ async function main() {
   refused(ADMIN, deactivate(C.many), /\[KI148\] many still has 2 open order\(s\), 1 undelivered delivery\(ies\), 1 open quote\(s\), open invoices\. Finish or cancel/);
   console.log('[ki148] the refusal names the customer and every open kind (with counts, except invoices)');
 
-  // Sol round 1: a transaction still creating an order when the deactivation runs is waited for, then seen.
-  const creator = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'],
-    { stdio: ['pipe', 'ignore', 'pipe'] });
-  let creatorErr = '';
-  creator.stderr.on('data', (b) => { creatorErr += b; });
-  const creatorDone = new Promise((resolve) => creator.on('close', resolve));
-  creator.stdin.end(`BEGIN; ${claims(ADMIN)}
-    INSERT INTO public.orders (order_number, customer_id, status) VALUES ('KI148-RACE', '${C.race}', 'confirmed');
-    SELECT pg_sleep(4); COMMIT;\n`);
-  // Wait until the insert is done and the creator sleeps, holding its key-share lock on the customer row.
-  for (let i = 0; i < 100 && scalar(`SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE 'SELECT pg_sleep(4)%';`) !== '1'; i++) {
-    await new Promise((r) => setTimeout(r, 100));
+  // Sol round 1 / Luna round 2: a transaction still creating work when the deactivation runs is waited for, then seen.
+  async function race(cid, insert, pattern, what) {
+    const creator = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'],
+      { stdio: ['pipe', 'ignore', 'pipe'] });
+    let creatorErr = '';
+    creator.stderr.on('data', (b) => { creatorErr += b; });
+    const creatorDone = new Promise((resolve) => creator.on('close', resolve));
+    creator.stdin.end(`BEGIN; ${claims(ADMIN)}
+${insert}
+SELECT pg_sleep(4); COMMIT;
+`);
+    // Wait until the insert is done and the creator sleeps, holding its key-share lock.
+    for (let i = 0; i < 100 && scalar(`SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE 'SELECT pg_sleep(4)%';`) !== '1'; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const started = Date.now();
+    refused(ADMIN, deactivate(cid), pattern);
+    const waited = Date.now() - started;
+    assert.equal(await creatorDone, 0, `the creating transaction failed:
+${creatorErr}`);
+    assert.ok(waited >= 1500, `the deactivation did not wait for the creating transaction (${waited} ms)`);
+    assert.equal(active(cid), 't');
+    console.log(`[ki148] a deactivation during an uncommitted ${what} waits for it (${waited} ms), then refuses`);
   }
-  const started = Date.now();
-  refused(ADMIN, deactivate(C.race), /\[KI148\] race still has 1 open order\(s\)/);
-  const waited = Date.now() - started;
-  assert.equal(await creatorDone, 0, `the creating transaction failed:\n${creatorErr}`);
-  assert.ok(waited >= 1500, `the deactivation did not wait for the creating transaction (${waited} ms)`);
-  assert.equal(active(C.race), 't');
-  console.log(`[ki148] a deactivation during an uncommitted order insert waits for it (${waited} ms), then refuses`);
+  await race(C.race, `INSERT INTO public.orders (order_number, customer_id, status) VALUES ('KI148-RACE', '${C.race}', 'confirmed');`,
+    /\[KI148\] race still has 1 open order\(s\)/, 'order insert');
+  await race(C.race2, `INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, status)
+      VALUES ('KI148-RACE-D', '${id(`f${C.race2.slice(-2)}`)}', '${C.many}', '${ADMIN}', 'scheduled');`,
+    /\[KI148\] race2 still has 1 undelivered delivery/, 'delivery insert on its order under another customer');
 
   // Case 4: closed work of every kind does not block; neither does no work.
   assert.equal(allowed(ADMIN, deactivate(C.closed)), '1');

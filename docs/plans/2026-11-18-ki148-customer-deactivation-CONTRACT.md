@@ -66,7 +66,8 @@ Files: the migration, `docs/reference/migrations.d/<stem>.md`, `docs/changelog.d
   (a generic message until the new sanitizer ships). No break.
 - **Timing.** Double click / retry: a refused deactivation changes nothing and a repeat is refused
   again; a repeated success is inactive→inactive and not checked. **Concurrency (Sol round 1 HIGH):**
-  the guard first locks the customer row `FOR UPDATE`, which waits for any transaction still inserting
+  the guard first locks the customer row, then its orders (Luna round 2: a delivery added to one of
+  its orders under another customer's id), `FOR UPDATE`, which waits for any transaction still inserting
   an order, delivery, hold, quote or invoice for it (each insert's foreign key check holds a key-share
   lock on the row until commit), then counts all five kinds in one statement, so one snapshot. A
   booking's final draw that commits an order, accepts its quote and releases its holds is therefore

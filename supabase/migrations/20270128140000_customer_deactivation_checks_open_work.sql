@@ -16,10 +16,12 @@
 --   name sorts after customers_guard_rep_edit_20261013, so a rep's forbidden edit keeps its own error.
 --   Only admins and sales reps may update customers (policy customers_update), and both read every
 --   customer's work, so the counts it names reveal nothing new; invoices are named without a count.
---   CONSISTENCY: it first locks the customer row FOR UPDATE, which waits for every transaction still
---   inserting an order, delivery, hold, quote or invoice for it (each insert's foreign key check holds a
---   key-share lock on the row until commit) and makes later inserts wait for the deactivation; then
---   one statement counts all five kinds from one snapshot.
+--   CONSISTENCY: it first locks the customer row, then its orders, FOR UPDATE, which waits for every
+--   transaction still inserting an order, delivery, hold, quote or invoice for it or one of its orders
+--   (each insert's foreign key check holds a key-share lock on the row until commit) and makes later
+--   inserts wait for the deactivation; then one statement counts all five kinds from one snapshot.
+--   A transaction that already locked one of these rows and then needs the customer row can meet the
+--   deactivation in a deadlock; PostgreSQL then cancels one of the two with an error, nothing is saved.
 --   LIMIT (accepted, see the KI-148 contract): work that already exists and is reopened by a status
 --   change (no new row) in a transaction committing during the check, or later, is not caught; and
 --   work added after the deactivation lands on an inactive customer, as on any inactive customer today
@@ -82,6 +84,9 @@ BEGIN
   -- holds a key-share lock on this row (its foreign key check) until it commits, and FOR UPDATE waits
   -- for it. Work inserted after this point waits for the deactivation instead.
   PERFORM 1 FROM public.customers c WHERE c.id = OLD.id FOR UPDATE;
+  -- The same for a delivery being added to one of its orders under another customer's id (Luna r2):
+  -- that insert holds a key-share lock on the order row.
+  PERFORM 1 FROM public.orders o WHERE o.customer_id = OLD.id ORDER BY o.id FOR UPDATE;
   -- One statement, so all five counts read the same committed state.
   SELECT
     (SELECT count(*) FROM public.orders o

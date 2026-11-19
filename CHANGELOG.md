@@ -35,6 +35,7 @@ Releases of CRX Manager, newest first.
 * environment banner and tab title prefix (STAGING amber, LOCAL blue) (#1714)
 
 #### 🐛 Bug Fixes
+* Cycle Counts confirm dialogs open on top of the count window (#1982)
 * batch fill skips EPA numbers not set up yet, shows real error text (#1978)
 * delivery lines match their order lines, completions lock stock in one order, stock-history gaps (KI-161, KI-150, KI-163) (#1940)
 * KI-81 invoices bill the quote price the customer was sent (#1946)

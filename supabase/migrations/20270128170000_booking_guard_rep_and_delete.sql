@@ -19,6 +19,10 @@
 --      while a scheduled or in-progress job comes from the booking or one of its sections. A completed or
 --      cancelled job does not block; closing as applied stays allowed by design (20260703200000:369).
 --      Its trigger quotes_booking_live_job_rules now fires on UPDATE OF status, customer_id, deleted_at.
+--      A soft delete at REPEATABLE READ or SERIALIZABLE is refused (BOOKING_DELETE_NEEDS_READ_COMMITTED; Sol r1): there the
+--      check would read the transaction's first snapshot and could miss a job scheduled meanwhile. The app runs READ COMMITTED.
+--   Rule 1 checks the rep against every booking a job names (its quote_id and its section's booking; Sol r1).
+--   Pre- and postflight pin both triggers' timing, events, columns, function and absence of a WHEN clause (Sol r1).
 --   Every other line of both functions is its 20270127120000 body (pinned below by md5).
 --
 -- NOT CHANGED: _enforce_section_with_live_job_stays, auto_expire_quotes, complete_job, start_job, save_quote,
@@ -39,11 +43,19 @@ BEGIN
        IS DISTINCT FROM '88d20c67d9b32cf11ac192bf0b451748' THEN
     RAISE EXCEPTION 'PREFLIGHT_LIVE_JOB_GUARD_DRIFT: the booking live-job guard functions are not the reviewed 20270127120000 bodies; re-read live first';
   END IF;
-  IF (SELECT array_agg(a.attname::text ORDER BY a.attname)
-        FROM pg_trigger t JOIN pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr)
-       WHERE t.tgrelid = 'public.quotes'::regclass AND t.tgname = 'quotes_booking_live_job_rules')
-       IS DISTINCT FROM ARRAY['customer_id', 'status'] THEN
-    RAISE EXCEPTION 'PREFLIGHT_LIVE_JOB_GUARD_DRIFT: trigger quotes_booking_live_job_rules does not fire on exactly status, customer_id';
+  -- Both triggers exactly as 20270127120000 made them (Sol r1): event, timing, columns, function, no WHEN clause.
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.quotes'::regclass AND t.tgname = 'quotes_booking_live_job_rules'
+                   AND t.tgtype = 19 AND t.tgenabled = 'O' AND t.tgqual IS NULL
+                   AND t.tgfoid = 'public._enforce_booking_live_job_rules()'::regprocedure
+                   AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a
+                         WHERE a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr)) = ARRAY['customer_id', 'status'])
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.jobs'::regclass AND t.tgname = 'jobs_live_on_open_booking'
+                   AND t.tgtype = 23 AND t.tgenabled = 'O' AND t.tgqual IS NULL
+                   AND t.tgfoid = 'public._enforce_job_live_on_open_booking()'::regprocedure
+                   AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a
+                         WHERE a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr))
+                       = ARRAY['customer_id', 'deleted_at', 'quote_id', 'quote_section_id', 'status']) THEN
+    RAISE EXCEPTION 'PREFLIGHT_LIVE_JOB_GUARD_DRIFT: quotes_booking_live_job_rules or jobs_live_on_open_booking is not as 20270127120000 made it';
   END IF;
 END
 $preflight$;
@@ -79,10 +91,15 @@ BEGIN
   IF TG_OP = 'UPDATE' AND NEW.status IN ('completed', 'invoiced') AND OLD.status NOT IN ('completed', 'invoiced')
      AND (NEW.quote_id IS NOT NULL OR NEW.quote_section_id IS NOT NULL)
      AND auth.uid() IS NOT NULL AND NOT public.is_admin() AND public.is_sales_rep() THEN
-    SELECT q.quote_number, q.created_by INTO v_quote
+    -- Both links are checked (Sol HIGH r1): a legacy row whose quote_id and section disagree is refused unless the
+    -- caller is the rep of every booking it names.
+    SELECT q.quote_number INTO v_quote
     FROM public.quotes q
-    WHERE q.id = COALESCE(NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id));
-    IF v_quote.created_by IS DISTINCT FROM auth.uid() THEN
+    WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
+      AND q.created_by IS DISTINCT FROM auth.uid()
+    ORDER BY q.quote_number
+    LIMIT 1;
+    IF FOUND THEN
       RAISE EXCEPTION 'BOOKING_NOT_YOURS: spray job % comes from booking %, which is another rep''s, so only that rep or an admin can mark it %.',
         NEW.job_number, v_quote.quote_number, NEW.status
         USING ERRCODE = 'P0001';
@@ -183,6 +200,14 @@ BEGIN
   -- booking could be deleted with a spray job still scheduled or in progress from it. Refused while one comes
   -- from the booking or one of its sections; a completed or cancelled job does not block.
   IF OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL THEN
+    -- Sol HIGH r1: at REPEATABLE READ or SERIALIZABLE the check below reads the transaction's first snapshot, so a
+    -- job committed meanwhile by a scheduler that only locked this booking would be missed. The app always runs
+    -- READ COMMITTED, where the check sees it once the booking row lock is granted.
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+      RAISE EXCEPTION 'BOOKING_DELETE_NEEDS_READ_COMMITTED: delete booking % in a READ COMMITTED transaction, so a spray job scheduled meanwhile is seen.',
+        NEW.quote_number
+        USING ERRCODE = 'P0001';
+    END IF;
     SELECT j.job_number INTO v_job
     FROM public.jobs j
     WHERE (j.quote_id = NEW.id
@@ -271,8 +296,8 @@ DECLARE
   v_g record;
 BEGIN
   FOR v_g IN SELECT * FROM (VALUES
-      ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', 'cannot be deleted. Cancel or complete the job first.', 'cbd9ddb81d3572caaf13ad72b89141a9'),
-      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', '67ee48a537da881e397e101b9cb394d2')) AS g(fn, tbl, tg, marker, body_md5)
+      ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', 'cannot be deleted. Cancel or complete the job first.', '813dbfe7f6c2ac3e08892c4cefd0477c'),
+      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', '771382f9e89fbe8038b6bcd802b6766c')) AS g(fn, tbl, tg, marker, body_md5)
   LOOP
     SELECT * INTO v_p FROM pg_proc WHERE oid = v_g.fn::regprocedure;
     IF v_p.proowner <> 'postgres'::regrole OR NOT v_p.prosecdef
@@ -287,13 +312,16 @@ BEGIN
       RAISE EXCEPTION 'POSTFLIGHT_LIVE_JOB_GUARD: trigger % is missing or disabled', v_g.tg;
     END IF;
   END LOOP;
-  IF (SELECT array_agg(a.attname::text ORDER BY a.attname)
-        FROM pg_trigger t JOIN pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr)
-       WHERE t.tgrelid = 'public.quotes'::regclass AND t.tgname = 'quotes_booking_live_job_rules')
-       IS DISTINCT FROM ARRAY['customer_id', 'deleted_at', 'status']
-     OR (SELECT t.tgtype FROM pg_trigger t WHERE t.tgrelid = 'public.quotes'::regclass AND t.tgname = 'quotes_booking_live_job_rules')
-       <> 19 THEN
-    RAISE EXCEPTION 'POSTFLIGHT_LIVE_JOB_GUARD: quotes_booking_live_job_rules is not BEFORE UPDATE FOR EACH ROW OF status, customer_id, deleted_at';
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.quotes'::regclass AND t.tgname = 'quotes_booking_live_job_rules'
+                   AND t.tgtype = 19 AND t.tgqual IS NULL
+                   AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a
+                         WHERE a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr)) = ARRAY['customer_id', 'deleted_at', 'status'])
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.jobs'::regclass AND t.tgname = 'jobs_live_on_open_booking'
+                   AND t.tgtype = 23 AND t.tgqual IS NULL
+                   AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a
+                         WHERE a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr))
+                       = ARRAY['customer_id', 'deleted_at', 'quote_id', 'quote_section_id', 'status']) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_LIVE_JOB_GUARD: a guard trigger does not fire on its events and columns (quotes: BEFORE UPDATE OF status, customer_id, deleted_at; jobs: BEFORE INSERT OR UPDATE OF quote_id, quote_section_id, customer_id, status, deleted_at), or has a WHEN clause';
   END IF;
 END
 $postflight$;

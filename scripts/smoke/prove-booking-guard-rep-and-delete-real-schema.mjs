@@ -46,7 +46,8 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate changes or relies on.
-const TOUCHED = /(_enforce_booking_live_job_rules|quotes_booking_live_job_rules|_enforce_job_live_on_open_booking|jobs_live_on_open_booking)/i;
+// Also what the proof relies on (Sol r1): completion, the job status order and the row policies on jobs and quotes.
+const TOUCHED = /(_enforce_booking_live_job_rules|quotes_booking_live_job_rules|_enforce_job_live_on_open_booking|jobs_live_on_open_booking|complete_job|start_job|_enforce_job_status_transition|jobs_update|quotes_update)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -346,7 +347,7 @@ async function main() {
     // Reuse writes seed rows and replaces unit_conversions: only on a kept, network-less prover container, on a copied database.
     assert.match(REUSE, /^crx-[a-z0-9-]+$/, 'CRX_PROVER_REUSE must name a kept prover container (crx-...)');
     assert.equal(docker(['inspect', '-f', '{{.HostConfig.NetworkMode}}', REUSE]).stdout.trim(), 'none', 'CRX_PROVER_REUSE must be a network-less prover container');
-    assert.ok(process.env.CRX_PROVER_DB && DB !== 'postgres', 'CRX_PROVER_REUSE needs CRX_PROVER_DB naming a copy, not postgres');
+    assert.ok(/^[a-z0-9_]+$/.test(DB) && DB !== 'postgres', 'CRX_PROVER_REUSE needs CRX_PROVER_DB naming a copy (a bare database name), not postgres');
   } else buildContainer();
   seed();
   for (const tag of ['REP', 'RACE', 'RACE2']) psql(FIXTURE(tag));
@@ -361,7 +362,7 @@ async function main() {
   for (const [f, o] of Object.entries(before)) console.log(`[before] ${f}: ${o.slice(0, 160)}`);
   assert.match(before['smoke-booking-live-job-guard.sql'], /^SMOKE_PASS_ROLLBACK/, 'the #1959 chain must pass before the candidate');
   const chainBefore = chainOutcome(CHAIN);
-  assert.doesNotMatch(chainBefore, /SMOKE_PASS_ROLLBACK/, 'the new chain must fail before the candidate');
+  assert.match(chainBefore, /^SMOKE_FAIL: \(D1\) deleting a booking with a scheduled job was not refused/, 'the new chain must fail before the candidate, at its first case');
   console.log(`[before] ${CHAIN}: ${chainBefore.slice(0, 160)}`);
 
   // 2. Apply, then a second apply is refused.
@@ -403,6 +404,27 @@ SELECT status FROM jobs WHERE job_number = 'J-PRV-REP';`;
   assert.match(reversed.output, /BOOKING_CLOSED: booking \[PROVER\] RACE2 is deleted/);
   assert.equal(reversed.after, 'false/0');
   console.log('[case] AFTER: a job insert racing a delete waits for it, then is refused BOOKING_CLOSED; the booking is deleted with no job');
+  // Sol r1: a delete at REPEATABLE READ is refused even with no live job (its check would read an old snapshot).
+  const rr = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `BEGIN ISOLATION LEVEL REPEATABLE READ;
+SELECT set_config('request.jwt.claims', '{"sub":"${REP}","role":"authenticated"}', true);
+SET LOCAL ROLE authenticated;
+UPDATE jobs SET status = 'cancelled' WHERE id = ${jobOf('REP')};
+${DELETE('REP')}
+ROLLBACK;` });
+  assert.notEqual(rr.status, 0, `a delete at REPEATABLE READ went through: ${rr.stdout}`);
+  assert.match(`${rr.stdout}\n${rr.stderr}`, /BOOKING_DELETE_NEEDS_READ_COMMITTED: delete booking \[PROVER\] REP in a READ COMMITTED transaction/);
+  console.log('[case] AFTER: a booking delete at REPEATABLE READ is refused BOOKING_DELETE_NEEDS_READ_COMMITTED');
+  // Sol r1: a legacy job whose quote_id is rep 2's booking but whose section is on rep 1's booking: rep 2 cannot complete it.
+  raw(`INSERT INTO quotes (quote_number, customer_id, status, tier, created_by)
+         SELECT '[PROVER] OTHER', customer_id, 'sent', 1, '${REP2}' FROM quotes WHERE quote_number = '[PROVER] REP';
+       INSERT INTO jobs (job_number, customer_id, job_date, quote_id, quote_section_id, status)
+         SELECT 'J-PRV-MIX', q.customer_id, CURRENT_DATE + 7, o.id, s.id, 'in_progress'
+           FROM quotes q JOIN quote_sections s ON s.quote_id = q.id, quotes o
+          WHERE q.quote_number = '[PROVER] REP' AND o.quote_number = '[PROVER] OTHER';`);
+  refusedProbe(`UPDATE jobs SET status = 'completed' WHERE job_number = 'J-PRV-MIX' RETURNING status;`,
+    /BOOKING_NOT_YOURS: spray job J-PRV-MIX comes from booking \[PROVER\] REP,/, REP2);
+  raw(`DELETE FROM jobs WHERE job_number = 'J-PRV-MIX'; DELETE FROM quotes WHERE quote_number = '[PROVER] OTHER';`);
+  console.log("[case] AFTER: a legacy job naming two bookings is refused unless the caller is the rep of both");
   for (const f of REGRESSION) {
     const after = chainOutcome(f);
     assert.equal(after, before[f], `${f} ends differently after the candidate`);

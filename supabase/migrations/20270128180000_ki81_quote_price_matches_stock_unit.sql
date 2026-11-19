@@ -9,7 +9,7 @@
 -- product screen locks it once set; 20270121110000 refuses a change while the product has stock or open lines),
 -- so it is rare.
 --
--- WHAT (each function re-emitted from 20270125163000, unchanged apart from one inserted check):
+-- WHAT (two functions re-emitted from 20270125163000, each unchanged apart from one inserted check):
 --  0. New private _quote_item_sent_unit_20270128(quote, item, live unit): the unit the grower was last SENT for that
 --     line (the latest quote_versions snapshot that lists it), else the live unit. A line counts as mismatched when
 --     either its live unit or its sent unit doesn't match the stock unit, so editing a sent line's unit (Lb -> Gal at
@@ -20,17 +20,20 @@
 --     (_unit_matches_stock_unit, the same test the purchasing plan uses) refuses: QUOTE_RESEND_REQUIRED, "Or
 --     type the price on this invoice line". The blend-ticket caller already rewrites that ending to "Fix or
 --     resend the quote for <farm>".
---  2. create_invoice_from_blend_ticket: after the job's quote is locked, a priced job-quote line for a product
---     on the ticket whose unit doesn't match refuses the same way, naming the farm, before any invoice number.
---  3. _preview_field_app_invoice_split_impl_20260908: the preview stops on the same line the save would.
+--  2. create_invoice_from_blend_ticket: after the product rows are held and the price choice is made, a priced
+--     job-quote line for a product on the ticket whose unit doesn't match refuses the same way, naming the farm,
+--     before any invoice number; a valid stored pick on a matching-unit line clears that product.
+-- Not re-emitted: the split preview (_preview_field_app_invoice_split_impl_20260908). It can still show such a line at
+-- the quote price; the save then refuses with this message. The preview takes no locks and bills nothing.
 -- Never a silent fallback to the list price (Taha: the grower must not be billed list price instead of the
 -- quoted deal without anyone seeing it). A typed (manual) price still saves on the field-app paths.
 -- Grants, owners, security mode, search_path and volatility are unchanged (CREATE OR REPLACE keeps the ACLs;
 -- the postflight checks them).
 --
--- Live 2026-11-19: none of these paths has billed a "quoted" field-app line or a blend-ticket invoice (KI-81
--- read 2026-11-17), so no stored invoice is affected and none is re-priced.
--- ROLLBACK: re-run the three bodies from 20270125163000 (lines 116-202, 259-1236, 3267-3578).
+-- Stored invoices are never re-priced by this file. (KI-81's read-only check of live on 2026-11-17 found no
+-- field-app line ever priced "quoted" and no blend-ticket invoice.)
+-- ROLLBACK: DROP FUNCTION public._quote_item_sent_unit_20270128(uuid, uuid, text) after re-running the two bodies
+-- from 20270125163000 (lines 116-200, 259-1236).
 
 DO $preflight$
 BEGIN
@@ -44,8 +47,7 @@ BEGIN
     SELECT 1
       FROM (VALUES
         ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'd2d182551c76b841220e9b4a5329025a'),
-        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '14fbea62837d72dc76da8c38dd690234'),
-        ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '97c05bf6abe6303d3d3c3b2720a5f104')
+        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '14fbea62837d72dc76da8c38dd690234')
       ) AS pin(sig, body_md5)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM pin.body_md5
@@ -54,7 +56,7 @@ BEGIN
   END IF;
   PERFORM set_config('crx.ki81u_xid', pg_current_xact_id()::text, true);
   PERFORM set_config('crx.ki81u_acls', (SELECT string_agg(coalesce(p.proacl::text, '') || '/' || p.proowner::regrole::text, '|' ORDER BY s.n)
-    FROM unnest(ARRAY['public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)']) WITH ORDINALITY AS s(sig, n)
+    FROM unnest(ARRAY['public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)']) WITH ORDINALITY AS s(sig, n)
     JOIN pg_proc p ON p.oid = to_regprocedure(s.sig)), true);
 END;
 $preflight$;
@@ -142,8 +144,10 @@ BEGIN
   END LOOP;
 
   -- KI-81 unit (Sol on #1990; Taha 2026-11-19, "stop and ask"): a quote line's price is per the unit it was saved
-  -- in. When that no longer matches the product's stock unit (the unit invoice lines bill in), its price can't be
-  -- billed as is, so stop and name it instead of billing $X per lb as $X per oz or falling back to the list price.
+  -- and sent in. When either no longer matches the product's stock unit (the unit invoice lines bill in), its price
+  -- can't be billed as is, so stop and name it instead of billing $X per lb as $X per oz or using the list price.
+  -- The product row is held FOR SHARE until commit, so its stock unit can't change between this check and the bill.
+  PERFORM 1 FROM products WHERE id = p_product_id FOR SHARE;
   SELECT format('%s is quoted per %s but is now stocked per %s, so that quote price can''t be billed.',
                 COALESCE(p.product_name, 'A product'),
                 CASE WHEN public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
@@ -534,33 +538,6 @@ BEGIN
     PERFORM 1 FROM quote_sections WHERE id = v_quote_section_id FOR UPDATE;
     PERFORM 1 FROM quote_items WHERE section_id = v_quote_section_id FOR SHARE;
   END IF;
-  -- KI-81 unit (Sol on #1990; Taha 2026-11-19, "stop and ask"): the job's quote prices the owner only while its
-  -- line is in the product's stock unit (the unit the invoice bills). A line saved in another unit stops the
-  -- invoice before any number is drawn; a blend ticket has no typed price, so the quote is fixed or resent.
-  IF v_quote_section_id IS NOT NULL THEN
-    SELECT format('%s is quoted per %s but is now stocked per %s, so that quote price can''t be billed.',
-                  COALESCE(p.product_name, 'A product'),
-                CASE WHEN public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
-                     THEN btrim(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size)) ELSE btrim(qi.unit_size) END,
-                  COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
-      INTO v_unit_msg
-      FROM quote_items qi
-      JOIN products p ON p.id = qi.product_id
-     WHERE qi.section_id = v_quote_section_id
-       AND qi.product_id IN (SELECT btp.product_id FROM blend_ticket_products btp
-                              WHERE btp.blend_ticket_id = p_blend_ticket_id AND COALESCE(btp.rate_per_acre, 0) > 0)
-       AND qi.price_per_unit >= 0 AND qi.price_per_unit < 'Infinity'::numeric
-       AND qi.price_per_unit = ROUND(qi.price_per_unit, 2)
-       AND (NOT public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
-          OR NOT public._unit_matches_stock_unit(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size), COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)))
-     ORDER BY qi.id
-     LIMIT 1;
-    IF v_unit_msg IS NOT NULL THEN
-      RAISE EXCEPTION 'QUOTE_RESEND_REQUIRED: % Fix or resend the quote for %, then create this invoice again.', v_unit_msg,
-        COALESCE((SELECT c.farm_name FROM customers c WHERE c.id = v_ticket.customer_id), 'that grower')
-        USING ERRCODE = 'P0001';
-    END IF;
-  END IF;
   -- 20261021070000: hold the ticket's product costs still too (FOR SHARE, as the below-cost line
   -- trigger takes them; in id order), so the cost an approval was bound to is the cost billed.
   PERFORM 1 FROM products p
@@ -669,6 +646,49 @@ BEGIN
     IF v_price_choices IS NOT NULL THEN
       RAISE EXCEPTION 'BLEND_TICKET_QUOTE_PRICE_CHOICE_REQUIRED: the quote lists a product more than once at different prices; pick the price to bill'
         USING DETAIL = jsonb_build_object('products', v_price_choices)::text;
+    END IF;
+  END IF;
+  -- KI-81 unit (Sol on #1990; Taha 2026-11-19, "stop and ask"): the job's quote prices the owner only while its
+  -- line is in the product's stock unit (live and as sent). A line in another unit stops the invoice before any
+  -- number is drawn; a blend ticket has no typed price, so the quote is fixed or resent. It runs after the product
+  -- rows are held FOR SHARE (above) and after the price choice, so where the quote lists a product more than once,
+  -- staff can pick the line in the right unit: a valid stored pick carried by a matching-unit line clears that
+  -- product (Luna r1).
+  IF v_quote_section_id IS NOT NULL THEN
+    SELECT format('%s is quoted per %s but is now stocked per %s, so that quote price can''t be billed.',
+                  COALESCE(p.product_name, 'A product'),
+                  CASE WHEN public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
+                     THEN btrim(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size)) ELSE btrim(qi.unit_size) END,
+                  COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
+      INTO v_unit_msg
+      FROM quote_items qi
+      JOIN products p ON p.id = qi.product_id
+     WHERE qi.section_id = v_quote_section_id
+       AND qi.product_id IN (SELECT btp.product_id FROM blend_ticket_products btp
+                              WHERE btp.blend_ticket_id = p_blend_ticket_id AND COALESCE(btp.rate_per_acre, 0) > 0)
+       AND qi.price_per_unit >= 0 AND qi.price_per_unit < 'Infinity'::numeric
+       AND qi.price_per_unit = ROUND(qi.price_per_unit, 2)
+       AND (NOT public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
+          OR NOT public._unit_matches_stock_unit(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size), COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)))
+       AND NOT EXISTS (
+             SELECT 1 FROM blend_ticket_products b2
+              WHERE b2.blend_ticket_id = p_blend_ticket_id
+                AND b2.product_id = qi.product_id
+                AND public._blend_quote_pick_valid_20261020(
+                      v_quote_section_id, v_ticket.customer_id, b2.product_id, b2.unit_price_cents)
+                AND EXISTS (SELECT 1 FROM quote_items q2
+                             WHERE q2.section_id = v_quote_section_id
+                               AND q2.product_id = b2.product_id
+                               AND ROUND(q2.price_per_unit * 100)::bigint = b2.unit_price_cents
+                               AND public._unit_matches_stock_unit(q2.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
+                               AND public._unit_matches_stock_unit(
+                                     public._quote_item_sent_unit_20270128(q2.quote_id, q2.id, q2.unit_size), COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))))
+     ORDER BY qi.id
+     LIMIT 1;
+    IF v_unit_msg IS NOT NULL THEN
+      RAISE EXCEPTION 'QUOTE_RESEND_REQUIRED: % Fix or resend the quote for %, then create this invoice again.', v_unit_msg,
+        COALESCE((SELECT c.farm_name FROM customers c WHERE c.id = v_ticket.customer_id), 'that grower')
+        USING ERRCODE = 'P0001';
     END IF;
   END IF;
   -- (2) A product billed at its tier price (no valid pick, no usable quote price) for a
@@ -1201,348 +1221,14 @@ BEGIN
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION public._preview_field_app_invoice_split_impl_20260908(p_locations jsonb, p_chemicals jsonb, p_application_service_id uuid DEFAULT NULL::uuid, p_invoice_id uuid DEFAULT NULL::uuid, p_invoice_date date DEFAULT NULL::date)
- RETURNS jsonb
- LANGUAGE plpgsql
- STABLE SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_field_ids         uuid[];
-  v_applied_acres_map jsonb := '{}'::jsonb;
-  v_loc               jsonb;
-  v_shares            jsonb;
-  v_customers         jsonb;
-  v_customer          jsonb;
-  v_customer_id       uuid;
-  v_customer_tier     int;
-  v_app_service       record;
-  v_per_customer      jsonb := '[]'::jsonb;
-  v_customer_lines    jsonb;
-  v_grand_total       bigint := 0;
-  v_chem              jsonb;
-  v_share_row         jsonb;
-  v_chem_qty_a        numeric;
-  v_chem_qty_b        numeric;
-  v_share_acres       numeric;
-  v_field_override    bigint;
-  v_unit_price        bigint;
-  v_extended          bigint;
-  v_fee_rate          bigint;
-  v_fee_acres         numeric;
-  v_fee_extended      bigint;
-  v_customer_total    bigint;
-  v_rate              numeric;
-  v_ta_unit           text;       -- PARKED-010: rate unit of the applied amount
-  v_inv_unit          text;       -- PARKED-010: product's sold/pricing unit
-  v_form              text;       -- PARKED-010: product_form (liquid/dry)
-  v_priced_qty        numeric;    -- PARKED-010: applied qty converted into the pricing unit
-  v_group_id          uuid;
-  v_skipped_customer_ids uuid[] := '{}';
-  v_qi_prices         bigint[];
-  v_quote_price_date  date;
-  v_surcharge_acres   numeric;
-  v_surcharge_cents   bigint;
-  v_customer_count    int;        -- CRX-SEC-001: mirrors save's single-customer test
-  v_new_season        integer;    -- CRX-SEC-001: season a NOT-YET-SAVED invoice would be filed under
-  v_row_season        integer;    -- CRX-SEC-001: season an ALREADY-SAVED member carries
-  v_price_season      integer;    -- CRX-SEC-001: the season the fee is actually priced at
-BEGIN
-  -- PARKED-007 (codex-driven cycle 5 #1 HIGH): in-body role gate — without it
-  -- ANY authenticated role (applicator, driver, etc.) can call this SECDEF
-  -- function with arbitrary field_ids and receive private customer pricing
-  -- and split detail. RLS doesn't apply (we're SECDEF), the EXECUTE grant to
-  -- `authenticated` widens beyond billing roles. Mirrors the save side's gate.
-  IF auth.uid() IS NULL THEN
-    RAISE EXCEPTION 'AUTH_REQUIRED' USING ERRCODE = 'insufficient_privilege';
-  END IF;
-  IF NOT (is_admin() OR is_sales_rep()) THEN
-    RAISE EXCEPTION 'INSUFFICIENT_ROLE: only admins or sales reps can preview field-app invoice splits'
-      USING ERRCODE = 'insufficient_privilege';
-  END IF;
-
-  FOR v_loc IN SELECT * FROM jsonb_array_elements(p_locations)
-  LOOP
-    v_field_ids := array_append(v_field_ids, (v_loc->>'field_id')::uuid);
-    v_applied_acres_map := v_applied_acres_map || jsonb_build_object(
-      v_loc->>'field_id',
-      GREATEST(COALESCE((v_loc->>'applied_acres')::numeric, 0), 0)
-    );
-  END LOOP;
-
-  IF v_field_ids IS NULL THEN
-    RETURN jsonb_build_object('per_customer', '[]'::jsonb, 'grand_total_cents', 0, 'customer_count', 0);
-  END IF;
-
-  v_shares    := derive_customer_shares_from_fields(v_field_ids, v_applied_acres_map);
-  v_customers := v_shares -> 'customers';
-  -- CRX-SEC-001 (2026-09-06): counted BEFORE the deleted-member skip, exactly like save's
-  -- v_customer_count, because save's single-customer branch tests the DERIVED list.
-  v_customer_count := jsonb_array_length(v_customers);
-  -- The season a customer WITHOUT an existing invoice would be filed under. Same expression
-  -- and same America/Chicago fallback as _save_field_app_invoice_impl_20260714's v_season, so
-  -- a preview and the save it precedes cannot land on different sides of October 1.
-  v_new_season := compute_season(COALESCE(p_invoice_date, (now() AT TIME ZONE 'America/Chicago')::date));
-
-  IF p_invoice_id IS NOT NULL THEN
-    SELECT invoice_group_id INTO v_group_id FROM invoices WHERE id = p_invoice_id;
-    IF v_group_id IS NOT NULL THEN
-      SELECT COALESCE(array_agg(DISTINCT d.customer_id), '{}') INTO v_skipped_customer_ids
-        FROM invoices d
-       WHERE d.invoice_group_id = v_group_id
-         AND d.deleted_at IS NOT NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM invoices l
-            WHERE l.invoice_group_id = v_group_id
-              AND l.customer_id = d.customer_id
-              AND l.deleted_at IS NULL
-         );
-    END IF;
-  END IF;
-
-  IF p_application_service_id IS NOT NULL THEN
-    SELECT * INTO v_app_service FROM application_services WHERE id = p_application_service_id;
-    IF NOT FOUND OR NOT v_app_service.is_active THEN
-      RAISE EXCEPTION 'Application service not found or inactive: %', p_application_service_id;
-    END IF;
-  END IF;
-
-  FOR v_customer IN SELECT * FROM jsonb_array_elements(v_customers)
-  LOOP
-    v_customer_id    := (v_customer->>'customer_id')::uuid;
-    IF v_customer_id = ANY(v_skipped_customer_ids) THEN CONTINUE; END IF;
-    v_customer_tier  := COALESCE((v_customer->>'tier')::int, 1);
-    -- KI-81 (Luna round 7): the date the save checks THIS customer's quotes on, the date their invoice will carry.
-    v_quote_price_date := COALESCE(p_invoice_date,
-                                   (SELECT i.invoice_date FROM invoices i
-                                     WHERE v_group_id IS NOT NULL AND i.invoice_group_id = v_group_id
-                                       AND i.customer_id = v_customer_id AND i.deleted_at IS NULL
-                                       AND i.status IN ('draft', 'unposted')  -- as the save: a voided child is replaced, dated today
-                                     ORDER BY i.invoice_date DESC LIMIT 1),
-                                   -- CodeRabbit: the edited invoice's date only for its own grower; a new member's invoice is dated today
-                                   (SELECT invoice_date FROM invoices WHERE id = p_invoice_id AND customer_id = v_customer_id
-                                                                         AND status IN ('draft', 'unposted')),
-                                   (now() AT TIME ZONE 'America/Chicago')::date);
-    v_customer_total := 0;
-    v_customer_lines := '[]'::jsonb;
-
-    FOR v_share_row IN
-      SELECT * FROM jsonb_array_elements(v_shares -> 'rows') AS value
-      WHERE (value->>'customer_id')::uuid = v_customer_id
-        AND (value->>'price_override_cents') IS NOT NULL
-    LOOP
-      v_share_acres    := (v_share_row->>'share_acres')::numeric;
-      v_field_override := (v_share_row->>'price_override_cents')::bigint;
-      v_extended := ROUND(v_field_override * v_share_acres)::bigint;
-      v_customer_lines := v_customer_lines || jsonb_build_object(
-        'kind', 'grower_share',
-        'description', (v_share_row->>'field_name') || ' grower share @ $' ||
-                       (v_field_override / 100.0)::numeric(12,2) || '/ac',
-        'quantity', v_share_acres,
-        'unit_price_cents', v_field_override,
-        'extended_cents', v_extended
-      );
-      v_customer_total := v_customer_total + v_extended;
-    END LOOP;
-
-    FOR v_chem IN SELECT * FROM jsonb_array_elements(p_chemicals)
-    LOOP
-      v_chem_qty_a := 0;
-      v_chem_qty_b := 0;
-      v_rate := COALESCE((v_chem->>'rate_per_acre')::numeric, 0);
-      FOR v_share_row IN
-        SELECT * FROM jsonb_array_elements(v_shares -> 'rows') AS value
-        WHERE (value->>'customer_id')::uuid = v_customer_id
-      LOOP
-        v_share_acres := (v_share_row->>'share_acres')::numeric;
-        IF (v_share_row->>'price_override_cents') IS NOT NULL THEN
-          v_chem_qty_a := v_chem_qty_a + (v_rate * v_share_acres);
-        ELSE
-          v_chem_qty_b := v_chem_qty_b + (v_rate * v_share_acres);
-        END IF;
-      END LOOP;
-
-      IF v_chem_qty_b > 0 THEN
-        v_unit_price := NULL;
-        IF v_chem ? 'manual_override' AND (v_chem->>'manual_override')::boolean = true
-           AND (v_chem->>'unit_price_cents') IS NOT NULL THEN
-          v_unit_price := (v_chem->>'unit_price_cents')::bigint;
-        END IF;
-        IF v_unit_price IS NULL AND (v_chem->>'product_id') IS NOT NULL THEN
-          -- KI-81 (Mason, 2026-11-17): only THIS customer's own sent, unexpired quote prices the chemical,
-          -- the same quotes the save uses (no locks here; the save also runs the sent-price lock).
-          SELECT array_agg(DISTINCT ROUND(qi.price_per_unit * 100)::bigint) INTO v_qi_prices
-            FROM quotes q
-            JOIN quote_sections qs ON qs.quote_id = q.id
-                                  AND qs.field_id = ANY(ARRAY(SELECT DISTINCT (r->>'field_id')::uuid FROM jsonb_array_elements(v_shares -> 'rows') r
-                                     WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0))
-            JOIN quote_items qi ON qi.section_id = qs.id AND qi.quote_id = qs.quote_id
-           WHERE q.customer_id = v_customer_id
-             AND public._field_app_quote_eligible(q, (v_chem->>'product_id')::uuid,
-                   ARRAY(SELECT DISTINCT (r->>'field_id')::uuid FROM jsonb_array_elements(v_shares -> 'rows') r
-                                     WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0), v_quote_price_date)
-             AND qi.product_id = (v_chem->>'product_id')::uuid
-             AND qi.price_per_unit >= 0;
-          -- KI-81 unit (Sol on #1990; Taha 2026-11-19): the preview stops on the same quote line the save would.
-          IF EXISTS (SELECT 1
-            FROM quotes q
-            JOIN quote_sections qs ON qs.quote_id = q.id
-                                  AND qs.field_id = ANY(ARRAY(SELECT DISTINCT (r->>'field_id')::uuid FROM jsonb_array_elements(v_shares -> 'rows') r
-                                     WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0))
-            JOIN quote_items qi ON qi.section_id = qs.id AND qi.quote_id = qs.quote_id
-           WHERE q.customer_id = v_customer_id
-             AND public._field_app_quote_eligible(q, (v_chem->>'product_id')::uuid,
-                   ARRAY(SELECT DISTINCT (r->>'field_id')::uuid FROM jsonb_array_elements(v_shares -> 'rows') r
-                                     WHERE (r->>'customer_id')::uuid = v_customer_id AND COALESCE((r->>'split_pct')::numeric, 0) > 0), v_quote_price_date)
-             AND qi.product_id = (v_chem->>'product_id')::uuid
-             AND qi.price_per_unit >= 0
-             AND EXISTS (SELECT 1 FROM products p WHERE p.id = qi.product_id
-                          AND (NOT public._unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))
-                               OR NOT public._unit_matches_stock_unit(public._quote_item_sent_unit_20270128(qi.quote_id, qi.id, qi.unit_size),
-                                        COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))))) THEN
-            RAISE EXCEPTION 'QUOTE_RESEND_REQUIRED: % is quoted (or was sent) in a unit that no longer matches its stock unit, so that quote price can''t be billed. Or type the price on this invoice line, then save again.',
-              COALESCE((SELECT product_name FROM products WHERE id = (v_chem->>'product_id')::uuid), 'A product')
-              USING ERRCODE = 'P0001';
-          END IF;
-          IF cardinality(v_qi_prices) > 1 THEN
-            RAISE EXCEPTION 'FIELD_APP_QUOTE_PRICE_CONFLICT: % is quoted at more than one price for these fields. Type the agreed price on that line, then save again.',
-              COALESCE((SELECT product_name FROM products WHERE id = (v_chem->>'product_id')::uuid), 'A product')
-              USING ERRCODE = 'P0001';
-          END IF;
-          v_unit_price := v_qi_prices[1];
-        END IF;
-        IF v_unit_price IS NULL AND (v_chem->>'product_id') IS NOT NULL THEN
-          SELECT CASE v_customer_tier
-            WHEN 1 THEN COALESCE(ROUND(p.tier1_price * 100), 0)
-            WHEN 2 THEN COALESCE(ROUND(p.tier2_price * 100), ROUND(p.tier1_price * 100), 0)
-            WHEN 3 THEN COALESCE(ROUND(p.tier3_price * 100), ROUND(p.tier1_price * 100), 0)
-            ELSE COALESCE(ROUND(p.tier1_price * 100), 0)
-          END INTO v_unit_price FROM products p WHERE p.id = (v_chem->>'product_id')::uuid;
-        END IF;
-        v_unit_price := COALESCE(v_unit_price, 0);
-
-        -- PARKED-010 (preview parity with save_field_app_invoice): the applied amount is in the
-        -- RATE unit but v_unit_price is per the product's SOLD unit; convert before pricing so this
-        -- on-page customer-split preview shows the same dollars the saved invoice will (not ~128x).
-        v_ta_unit  := COALESCE(NULLIF(v_chem->>'rate_unit', ''), NULLIF(v_chem->>'unit_size', ''));
-        v_inv_unit := NULL;
-        v_form     := NULL;
-        IF (v_chem->>'product_id') IS NOT NULL THEN
-          SELECT p.inventory_unit, p.product_form::text INTO v_inv_unit, v_form
-            FROM products p WHERE p.id = (v_chem->>'product_id')::uuid;
-        END IF;
-        v_priced_qty := field_app_priced_quantity(v_chem_qty_b, v_ta_unit, COALESCE(v_inv_unit, v_ta_unit), v_form);
-        -- Unconvertible units (save blocks with FIELD_APP_UNIT_UNCONVERTIBLE): preview the line at
-        -- $0 rather than the old ~128x figure or crashing the preview.
-        v_priced_qty := CASE WHEN v_priced_qty IS NULL THEN 0 ELSE ROUND(v_priced_qty, 4) END;
-        v_extended := ROUND(v_unit_price * v_priced_qty)::bigint;
-        v_customer_lines := v_customer_lines || jsonb_build_object(
-          'kind', 'chemical', 'description', v_chem->>'description',
-          'quantity', v_priced_qty,
-          'unit_price_cents', v_unit_price, 'extended_cents', v_extended
-        );
-        v_customer_total := v_customer_total + v_extended;
-      END IF;
-    END LOOP;
-
-    IF p_application_service_id IS NOT NULL THEN
-      -- CRX-SEC-001: resolve the season THIS customer's invoice is (or would be) filed under,
-      -- reproducing _save_field_app_invoice_impl_20260714's branch order exactly:
-      --   1. an existing live member of the group  -> that row's stored season
-      --   2. a single-customer edit of p_invoice_id -> that row's stored season
-      --   3. otherwise (a new invoice)              -> compute_season(invoice date)
-      -- Save never re-seasons an existing invoice (DECISION_LOG 2026-09-04), so branches 1
-      -- and 2 must read the STORED season rather than recompute one.
-      --
-      -- v_row_season is reset at the top of every iteration. The hazard is not the SELECT INTO
-      -- itself -- PL/pgSQL assigns NULL to the target when the query returns no row -- it is the
-      -- IF/ELSIF below, which can take NEITHER branch (no group, and either no p_invoice_id or a
-      -- multi-customer split). In that case nothing assigns v_row_season at all and, without this
-      -- reset, it would still hold the PREVIOUS customer's season and price this customer's fee
-      -- against the wrong year. The reset makes branch 3 reachable rather than inherited.
-      --
-      -- COALESCE treats "no row found" and "row found with a NULL season" the same way, falling
-      -- through to the computed season where save would instead match no rate row and use the
-      -- service default. That divergence cannot occur today because invoices.season is NOT NULL
-      -- with a default; if that constraint is ever relaxed, this line must be revisited.
-      v_row_season := NULL;
-      IF v_group_id IS NOT NULL THEN
-        SELECT i.season INTO v_row_season
-          FROM invoices i
-         WHERE i.invoice_group_id = v_group_id
-           AND i.customer_id      = v_customer_id
-           AND i.deleted_at IS NULL
-         LIMIT 1;
-      ELSIF p_invoice_id IS NOT NULL AND v_customer_count = 1 THEN
-        SELECT i.season INTO v_row_season FROM invoices i WHERE i.id = p_invoice_id;
-      END IF;
-      v_price_season := COALESCE(v_row_season, v_new_season);
-
-      SELECT car.rate_per_acre_cents INTO v_fee_rate
-        FROM customer_application_rates car
-       WHERE car.customer_id = v_customer_id
-         AND car.application_service_id = p_application_service_id
-         AND car.season = v_price_season LIMIT 1;
-      IF v_fee_rate IS NULL THEN v_fee_rate := v_app_service.default_rate_per_acre_cents; END IF;
-      SELECT COALESCE(SUM((value->>'share_acres')::numeric), 0) INTO v_fee_acres
-        FROM jsonb_array_elements(v_shares -> 'rows') AS value
-       WHERE (value->>'customer_id')::uuid = v_customer_id
-         AND (value->>'price_override_cents') IS NULL;
-      IF v_fee_rate > 0 AND v_fee_acres > 0 THEN
-        v_fee_extended := ROUND(v_fee_rate * v_fee_acres)::bigint;
-        v_customer_lines := v_customer_lines || jsonb_build_object(
-          'kind', 'service_fee', 'description', v_app_service.name,
-          'quantity', v_fee_acres, 'unit_price_cents', v_fee_rate,
-          'extended_cents', v_fee_extended
-        );
-        v_customer_total := v_customer_total + v_fee_extended;
-      END IF;
-    END IF;
-
-    SELECT COALESCE(SUM((value->>'share_acres')::numeric), 0) INTO v_surcharge_acres
-      FROM jsonb_array_elements(v_shares -> 'rows') AS value
-     WHERE (value->>'customer_id')::uuid = v_customer_id
-       AND (value->>'price_override_cents') IS NULL;
-
-    v_surcharge_cents := compute_fuel_surcharge_cents(v_surcharge_acres, v_customer_total);
-
-    IF v_surcharge_cents > 0 THEN
-      v_customer_lines := v_customer_lines || jsonb_build_object(
-        'kind', 'fuel_surcharge', 'description', 'Fuel Surcharge',
-        'quantity', 1, 'unit_price_cents', v_surcharge_cents,
-        'extended_cents', v_surcharge_cents
-      );
-      v_customer_total := v_customer_total + v_surcharge_cents;
-    END IF;
-
-    v_per_customer := v_per_customer || jsonb_build_object(
-      'customer_id',   v_customer_id,
-      'customer_name', v_customer->>'customer_name',
-      'is_primary',    COALESCE((v_customer->>'is_primary')::boolean, false),
-      'tier',          v_customer_tier,
-      'total_cents',   v_customer_total,
-      'lines',         v_customer_lines
-    );
-    v_grand_total := v_grand_total + v_customer_total;
-  END LOOP;
-
-  RETURN jsonb_build_object(
-    'per_customer',      v_per_customer,
-    'grand_total_cents', v_grand_total,
-    'customer_count',    jsonb_array_length(v_per_customer),
-    'shares_detail',     v_shares
-  );
-END;
-$function$;
 
 DO $postflight$
 BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', '2b674d06c64723d2fa8546e01f73c912', false, 'v'),
-        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'a6d1093f3472c9ada74a9b1593f49bf1', true, 'v'),
-        ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '202f01d553d81d295dcb0a8fd2e5d320', true, 's')
+        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'fb1ff053894ca9807e038d071ea6654a', false, 'v'),
+        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '8637fa41a20b2e0334a46ddd714a4d48', true, 'v')
       ) AS pin(sig, body_md5, secdef, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL
@@ -1565,7 +1251,7 @@ BEGIN
     RAISE EXCEPTION 'KI81_UNIT_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT string_agg(coalesce(p.proacl::text, '') || '/' || p.proowner::regrole::text, '|' ORDER BY s.n)
-        FROM unnest(ARRAY['public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)']) WITH ORDINALITY AS s(sig, n)
+        FROM unnest(ARRAY['public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)']) WITH ORDINALITY AS s(sig, n)
         JOIN pg_proc p ON p.oid = to_regprocedure(s.sig)) IS DISTINCT FROM current_setting('crx.ki81u_acls', true) THEN
     RAISE EXCEPTION 'KI81_UNIT_POSTFLIGHT: an owner or ACL changed across the replacement';
   END IF;

@@ -520,8 +520,8 @@ function stripCommentsOnly(code: string): string {
  * closing `/`. A `)` counts only when it closes an `if`, `for` (including `for await`), `while`, `switch` or `catch`
  * head — never a method named like one, such as `helpers.if(a)` — so a regex written as a control
  * statement's BODY is masked while division after an ordinary `)` is not (CodeRabbit, PR #638). This is still a scanner, not a TypeScript lexer:
- * a regex written after `]`, `}` or `<` is read as division and its text stays visible, as it
- * always was, and a `//` inside JSX text still masks the rest of its line.
+ * a `}` counts only when it closes a statement block (#686); a regex written after `]`, `<` or any
+ * other `}` is read as division and its text stays visible, as it always was, and a `//` inside JSX text still masks the rest of its line.
  */
 function maskNonCode(code: string): string {
   let out = '';
@@ -540,6 +540,10 @@ function maskNonCode(code: string): string {
   // `(` opened such a head and where its matching `)` landed in `out`.
   const controlHead: boolean[] = [];
   let controlCloseAt = -1;
+  // Same for `{`: a statement block's `}` ends a statement, so a regex may follow it (#686);
+  // any other `}` (object literal, method or arrow body) ends an operand and keeps division.
+  const blockBrace: boolean[] = [];
+  let blockCloseAt = -1;
   // Where the closing `/` of the most recent masked regex literal landed in `out`.
   let regexCloseAt = -1;
 
@@ -571,12 +575,25 @@ function maskNonCode(code: string): string {
     return /^(if|for|while|switch|catch)$/.test(word);
   }
 
+  // A `{` opens a statement block only at a statement start: at the beginning, after `;`, `{`
+  // (not a template's `${`) or `}`, after a control head's `)`, or after else/do/try/finally.
+  function opensBlock(): boolean {
+    let j = out.length - 1;
+    while (j >= 0 && /\s/.test(out[j])) j -= 1;
+    if (j < 0 || out[j] === ';' || out[j] === '}') return true;
+    if (out[j] === '{') return out[j - 1] !== '$';
+    if (out[j] === ')') return controlCloseAt === j;
+    const [word, before] = wordBefore(j);
+    return /^(else|do|try|finally)$/.test(word) && !isPropertyName(before);
+  }
+
   function regexCanStart(): boolean {
     let j = out.length - 1;
     while (j >= 0 && /\s/.test(out[j])) j -= 1;
     if (j < 0) return true;
     if (out[j] === '>') return out[j - 1] === '=';
     if (out[j] === ')') return controlCloseAt === j;
+    if (out[j] === '}') return blockCloseAt === j;
     // A `/` in `out` is a division operator (comments are blanked), so a regex may follow it
     // (`value / /re/.test(v)`, CodeRabbit, PR #697) — unless it is the closing `/` of a masked
     // regex literal with no flags, which ends an operand (`/x/ / 2`).
@@ -703,6 +720,10 @@ function maskNonCode(code: string): string {
         controlHead.push(opensControlHead());
       } else if (c === ')' && controlHead.pop()) {
         controlCloseAt = out.length;
+      } else if (c === '{') {
+        blockBrace.push(opensBlock());
+      } else if (c === '}' && blockBrace.pop()) {
+        blockCloseAt = out.length;
       }
       keep();
     }
@@ -974,6 +995,24 @@ describe('F1 guard — resets are verified outside the pinned files, and the pin
     expect(classify(['  const rate = await (a + b) / 2 + getIdempotencyBindingRejection(error) / 3;', reset], 2)).toBe('recovery');
     expect(classify(['  if (isReady) total = count / 2 + getIdempotencyBindingRejection(error) / 3;', reset], 2)).toBe('recovery');
     expect(classify(['  if (ready) handleRecovery(getIdempotencyBindingRejection(error));', reset], 2)).toBe('recovery');
+  });
+
+  // #686: every `/` after `}` was read as division, so a regex right after a statement
+  // block's `}` stayed visible and its text could supply an excuse.
+  it('a regex right after a statement block cannot excuse a reset', () => {
+    const reset = '  idem.resetKey();';
+    expect(classify(['  if (ready) {} /getIdempotencyBindingRejection/.test(value);', reset], 2)).toBeNull();
+    expect(classify(['  try { go(); } finally {} /query.throwOnError()/.test(value);', reset], 2)).toBeNull();
+    expect(classify(['  else {} /onClick=/.test(v);', reset], 2)).toBeNull();
+    expect(classify(['  {', '  }', '  /getIdempotencyBindingRejection/.test(value);', reset], 4)).toBeNull();
+
+    // Positive controls: an object literal or a template interpolation's braces end an
+    // operand, so the `/` after them is still division and the code after it stays visible.
+    expect(classify(['  const r = ({a: 1}) / 2 + getIdempotencyBindingRejection(error) / 3;', reset], 2)).toBe('recovery');
+    expect(classify(['  const r = x = {a: 1} / 2 + getIdempotencyBindingRejection(error) / 3;', reset], 2)).toBe('recovery');
+    expect(classify(['  const r = `${ {a: 1} / 2 + getIdempotencyBindingRejection(error) / 3 }`;', reset], 2)).toBe('recovery');
+    // A method body's `}` is not tracked as a block, so it keeps the old division reading.
+    expect(classify(['  const o = { m() {} / 2 + getIdempotencyBindingRejection(error) / 3 };', reset], 2)).toBe('recovery');
   });
 
   // CodeRabbit (PR #668, round 5): keyword detection read a property NAME as a keyword, so the

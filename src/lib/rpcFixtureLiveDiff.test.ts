@@ -63,12 +63,42 @@ const QUEUED_FUNCTIONS = new Set(Object.keys(QUEUED_MIGRATION_FUNCTIONS));
 
 // Staging-first release flow (Mason approved 2026-11-10): the staging DB job applies every checked-in migration when
 // a PR merges into staging, so a PR into staging (or a push to it) may call an RPC that a checked-in migration creates.
-// Into main (and in a local run) the live rule stands: the release PR can't merge until the function is live and the
-// snapshot above is regenerated, so production never gets a caller before its function.
-const RPC_GATE_TARGET = process.env.GITHUB_BASE_REF || process.env.GITHUB_REF_NAME || '';
+// The release PR (release/next) and a hotfix/<name> PR into main get the same rule (Taha, 2026-11-19): their migrations
+// are applied live from the PR itself just before it merges, and that apply gate needs every check green first, so
+// requiring the function live here deadlocked the v0.1.0 release. Every migration already on main is live, so this
+// only admits the PR's own migrations. Only a branch of this repository counts (a fork's "hotfix/x" does not), and
+// only a push to main (the merge of one of those PRs) follows the same rule, or main stays red until the snapshot is
+// regenerated. A manual run on main and a local run keep the live rule.
+// Regenerate the snapshot after each release's live apply.
+type GateEnv = { base?: string; head?: string; headRepo?: string; repo?: string; refName?: string; event?: string };
+function rpcGateTarget({ base, head, headRepo, repo, refName, event }: GateEnv): string {
+  if (base === 'main') {
+    const ours = Boolean(repo) && headRepo === repo;
+    return ours && /^(release\/next|hotfix\/[\w.-]+)$/.test(head ?? '') ? 'release' : 'main';
+  }
+  if (base) return base;
+  if (refName === 'main') return event === 'push' ? 'release' : 'main';
+  return refName || '';
+}
+// The PR's head repository, from the event payload (absent or unreadable: not ours, so the live rule).
+function headRepoOf(eventPath: string | undefined): string | undefined {
+  try {
+    return eventPath ? JSON.parse(readFileSync(eventPath, 'utf8'))?.pull_request?.head?.repo?.full_name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+const RPC_GATE_TARGET = rpcGateTarget({
+  base: process.env.GITHUB_BASE_REF,
+  head: process.env.GITHUB_HEAD_REF,
+  headRepo: headRepoOf(process.env.GITHUB_EVENT_PATH),
+  repo: process.env.GITHUB_REPOSITORY,
+  refName: process.env.GITHUB_REF_NAME,
+  event: process.env.GITHUB_EVENT_NAME,
+});
 
 function rpcCallAllowed(rpc: string, live: Set<string>, fromMigrations: Set<string>, target: string): boolean {
-  return live.has(rpc) || (target === 'staging' && fromMigrations.has(rpc));
+  return live.has(rpc) || ((target === 'staging' || target === 'release') && fromMigrations.has(rpc));
 }
 
 // -------------------------------------------------------------------------
@@ -412,6 +442,28 @@ describe('Live pg_proc snapshot integrity', () => {
     expect(rpcCallAllowed('set_new_thing', live, fromMigrations, '')).toBe(false);
     expect(rpcCallAllowed('set_new_thing', live, fromMigrations, 'staging')).toBe(true);
     expect(rpcCallAllowed('no_such_rpc', live, fromMigrations, 'staging')).toBe(false);
+    expect(rpcCallAllowed('set_new_thing', live, fromMigrations, 'release')).toBe(true);
+    expect(rpcCallAllowed('no_such_rpc', live, fromMigrations, 'release')).toBe(false);
+  });
+
+  it('a release or hotfix PR of this repo into main, or a push to main, gets the migration rule; nothing else does', () => {
+    const pr = { base: 'main', repo: 'o/r', headRepo: 'o/r' };
+    expect(rpcGateTarget({ ...pr, head: 'release/next' })).toBe('release');
+    expect(rpcGateTarget({ ...pr, head: 'hotfix/release-slack-messages' })).toBe('release');
+    expect(rpcGateTarget({ ...pr, head: 'hotfix/urgent', headRepo: 'fork/r' })).toBe('main');
+    expect(rpcGateTarget({ ...pr, head: 'release/next', headRepo: undefined })).toBe('main');
+    expect(rpcGateTarget({ ...pr, head: 'release/next', repo: undefined, headRepo: undefined })).toBe('main');
+    expect(rpcGateTarget({ ...pr, head: 'claude/feature' })).toBe('main');
+    expect(rpcGateTarget({ ...pr, head: 'release/next-evil/x' })).toBe('main');
+    expect(rpcGateTarget({ ...pr, head: 'hotfix/a/b' })).toBe('main');
+    expect(rpcGateTarget({ ...pr, head: undefined })).toBe('main');
+    expect(rpcGateTarget({ base: 'staging', head: 'claude/feature' })).toBe('staging');
+    expect(rpcGateTarget({ refName: 'main', event: 'push' })).toBe('release');
+    expect(rpcGateTarget({ refName: 'main', event: 'workflow_dispatch' })).toBe('main');
+    expect(rpcGateTarget({ refName: 'staging', event: 'push' })).toBe('staging');
+    expect(rpcGateTarget({})).toBe('');
+    expect(headRepoOf(undefined)).toBeUndefined();
+    expect(headRepoOf('/no/such/event.json')).toBeUndefined();
   });
 
   it('reads the functions every checked-in migration creates', () => {

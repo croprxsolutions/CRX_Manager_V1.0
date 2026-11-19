@@ -327,6 +327,7 @@ test('oneShotListProblems: a one-shot leaves the list only when this PR restamps
   assert.match(oneShotListProblems({ base, head: {}, added: ['20270109100100_fix.sql'], pairs })[0], /20261231110000_fix was removed/, 'restamped, but the new name is not listed: refused');
   assert.match(oneShotListProblems({ base, head: {}, added: [] })[0], /was removed/, 'no restamp: refused');
   assert.match(oneShotListProblems({ base: {}, head: { '20261231110000_old': 'x' }, added: [] })[0], /isn't a new file/, 'an existing file cannot become a one-shot');
+  assert.match(oneShotListProblems({ base: {}, head: { '20270109100100_fix': 'x' }, added: ['20270109100100_fix.sql'], pairs })[0], /isn't a new file/, 'an ordinary file restamped into a one-shot is refused here too (Luna r3, #1990)');
   // Keeping only the old entry while restamping the file is refused one step earlier (Luna r2, #1990):
   const blobs = { '20261231110000_fix.sql': 'b1', '20270109100100_fix.sql': 'b1' };
   const moved = migrationChanges({ deleted: ['20261231110000_fix.sql'], added: ['20270109100100_fix.sql'], removedOrEdited: ['20261231110000_fix.sql'], baseBlob: (f) => blobs[f] ?? null, headBlob: (f) => blobs[f] ?? null, toStaging: true, onMain: () => false, oneShotsBase: base, oneShotsHead: base });
@@ -343,7 +344,8 @@ test('oneShotStops: a one-shot whose check finds its rows uncorrected stops the 
   assert.match(out[0], /^20270121100000_ki137 is a one-shot .*this database \(fsnjredpmakbmhwowjjt\) still holds rows it corrects/);
   assert.match(out[0], /Never apply it to live/);
   assert.match(out[0], /psql "<fsnjredpmakbmhwowjjt connection URL>" -v ON_ERROR_STOP=1 -1 -f supabase\/migrations\/20270121100000_ki137\.sql/);
-  assert.match(out[0], /If its preflight refuses, the rows moved since it was written: ask Mason/);
+  assert.match(out[0], /If its preflight refuses, or those rows were changed on purpose after it, ask Mason/);
+  assert.equal(oneShotStops({ steps, stops, holds: () => undefined }).length, 1, 'an unclear result stops (fails closed)');
   assert.deepEqual(asked, ['CHECK_KI137'], 'only a pending one-shot with a check is checked');
   assert.deepEqual(oneShotStops({ steps, stops, holds: () => false }), [], 'rows corrected: recorded as before');
 });

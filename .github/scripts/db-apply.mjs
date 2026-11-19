@@ -274,8 +274,9 @@ export function oneShotListProblems({ base = {}, head = {}, added, pairs = [] })
   for (const s of Object.keys(base)) {
     if (!Object.hasOwn(head, s) && !Object.hasOwn(head, movedTo.get(s) ?? '')) problems.push(`one-shot-migrations.json: ${s} was removed from the one-shot list; a record-only data migration would then run`);
   }
+  const restampedInto = new Set(movedTo.values());
   for (const s of Object.keys(head)) {
-    if (!Object.hasOwn(base, s) && !added.includes(`${s}.sql`)) problems.push(`one-shot-migrations.json: ${s} was added as a one-shot but isn't a new file in this PR (an existing migration can't become record-only)`);
+    if (!Object.hasOwn(base, s) && (!added.includes(`${s}.sql`) || (restampedInto.has(s) && ![...movedTo].some(([from, to]) => to === s && Object.hasOwn(base, from))))) problems.push(`one-shot-migrations.json: ${s} was added as a one-shot but isn't a new file in this PR (an existing migration can't become record-only)`);
   }
   return problems;
 }
@@ -298,11 +299,11 @@ export const ONE_SHOT_STOPS = {
   ].join(' OR '),
 };
 
-// holds(sql) runs a check on the target, read only; anything but a plain false counts as "still needs it".
+// holds(sql) runs a check on the target, read only; anything but false (an error, null) counts as "still needs it".
 export function oneShotStops({ steps, stops = ONE_SHOT_STOPS, holds, ref }) {
   return steps
-    .filter(({ stem, run }) => !run && Object.hasOwn(stops, stem) && holds(stops[stem]))
-    .map(({ stem }) => `${stem} is a one-shot (recorded here, never run), but this database (${ref}) still holds rows it corrects, so recording it would leave them wrong and a later migration may refuse. Never apply it to live this way (live runs it through the release). If this database is a restore of live data from before ${stem}, apply that file to THIS database by hand first, in one transaction: psql "<${ref} connection URL>" -v ON_ERROR_STOP=1 -1 -f supabase/migrations/${stem}.sql, then run this again (it is then only recorded). If its preflight refuses, the rows moved since it was written: ask Mason. Nothing was written.`);
+    .filter(({ stem, run }) => !run && Object.hasOwn(stops, stem) && holds(stops[stem]) !== false)
+    .map(({ stem }) => `${stem} is a one-shot (recorded here, never run), but this database (${ref}) still holds rows it corrects, so recording it would leave them wrong and a later migration may refuse. Never apply it to live this way (live runs it through the release). If this database is a restore of live data from before ${stem}, apply that file to THIS database by hand first, in one transaction: psql "<${ref} connection URL>" -v ON_ERROR_STOP=1 -1 -f supabase/migrations/${stem}.sql, then run this again (it is then only recorded). If its preflight refuses, or those rows were changed on purpose after it, ask Mason. Nothing was written.`);
 }
 
 // Drift between the ledger and the repo, for rows after the baseline: a row with no migration file

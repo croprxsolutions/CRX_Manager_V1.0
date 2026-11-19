@@ -5,6 +5,7 @@
  *   20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql (data correction, the candidate)
  *   20270121110000_line_unit_is_stock_unit.sql (the rules, its follow-up)
  *   20270121120000_stock_unit_keeps_history.sql (no stock-unit change under history in the old unit; Sol HIGH)
+ *   20270129140000_stock_unit_history_names_movements_holds.sql (#1957: the refusal names a movement or hold once)
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
  * replays every post-baseline migration before the candidate, seeds live's pinned rows (same ids, units and
@@ -34,8 +35,10 @@ const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql');
 const RULES = path.join(MIGRATIONS, '20270121110000_line_unit_is_stock_unit.sql');
 const HISTORY = path.join(MIGRATIONS, '20270121120000_stock_unit_keeps_history.sql');
-const FOLLOW_UPS = [RULES, HISTORY];
-const LATER_READ_ONLY = new Set([]);
+const WORDING = path.join(MIGRATIONS, '20270129140000_stock_unit_history_names_movements_holds.sql');
+const FOLLOW_UPS = [RULES, HISTORY, WORDING];
+// Later files that only call _unit_matches_stock_unit (new delivery-line and booking checks); neither redefines what this proof covers.
+const LATER_READ_ONLY = new Set(['20270126110000_inventory_cleanup_ki161_163_150.sql', '20270127110000_booking_timing_purchasing_plan.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -682,6 +685,25 @@ async function historyCases() {
     UPDATE public.inventory_holds SET is_active = true WHERE id = '${id('c43')}';`);
   // Control: with no session holding a line, the same change is not blocked (it meets the open-lines rule instead).
   refusedProbe(`SET lock_timeout = '1s'; ${TO_QT}`, /PRODUCT_UNIT_HAS_OPEN_LINES/);
+  // #1957: with no order, delivery, PO, return or receipt row, the brackets repeated the sentence; now they name which.
+  const BOTH = `${MOVEMENT} ${HOLD(true)}`;
+  for (const pre of [MOVEMENT, HOLD(true), BOTH]) refusedProbe(`${CLEAR} ${pre} ${TO_QT}`, /holds \(stock movements or holds\)\. Set up/);
+  stageText('wording.sql', lf(WORDING));
+  const w1 = apply('wording.sql'); assert.equal(w1.status, 0, w1.output);
+  const w2 = apply('wording.sql'); assert.notEqual(w2.status, 0); assert.match(w2.output, /PREFLIGHT_UNITS_DRIFT: _refuse_stock_unit_change_with_history is missing, changed, or already re-emitted/);
+  for (const role of ['anon', 'authenticated', 'service_role']) {
+    assert.equal(scalar(`SELECT has_function_privilege('${role}', 'public._refuse_stock_unit_change_with_history()', 'EXECUTE');`), 'f', `${role} cannot run the re-emitted guard`);
+  }
+  assert.equal(scalar("SELECT prosecdef::text || ' ' || array_to_string(proconfig, ',') FROM pg_proc WHERE oid = 'public._refuse_stock_unit_change_with_history()'::regprocedure;"), 'true search_path=public, pg_temp');
+  for (const [pre, who] of [[MOVEMENT, 'stock movements'], [HOLD(true), 'an active hold'], [BOTH, 'stock movements and an active hold'],
+    [`${MOVEMENT} ${RETURN('approved')}`, 'return U-R1'], [`${HOLD(true)} ${DONE_ORDER("'Gal'")}`, 'order U-O9']]) {
+    refusedProbe(`${CLEAR} ${pre} ${TO_QT}`, new RegExp(`${HIST.slice(0, -2)}${who}\\)\\. Set up a new product for the new unit\\.`));
+  }
+  // Unchanged decision: no history (an ended hold) still saves; a case-only change over history still saves.
+  assert.equal(okProbe(`${CLEAR} ${HOLD(false)} ${TO_QT} SELECT inventory_unit FROM public.products WHERE id = '${GAL}';`), 'Qt');
+  assert.equal(okProbe(`${CLEAR} ${BOTH} ALTER TABLE public.products DISABLE TRIGGER trg_validate_product_units;
+    UPDATE public.products SET inventory_unit = 'GAL', unit_size = 'GAL' WHERE id = '${GAL}'; SELECT inventory_unit FROM public.products WHERE id = '${GAL}';`), 'GAL');
+  console.log('[case] H2 #1957 before: a movement, an active hold, or both alone read "(stock movements or holds)"; after 20270129140000 they read "(stock movements)", "(an active hold)", "(stock movements and an active hold)"; a named record still wins; no history and case-only still save; the guard stays private, SECURITY DEFINER with search_path; a second apply refuses');
   console.log('[case] H1 Gal -> Qt is refused (PRODUCT_UNIT_HAS_HISTORY, naming the record) for any history: a requested, approved, restocked, received or Qt return; a received PO line; a receipt alone; a stock movement alone; an active hold; a fulfilled order line in Gal or blank; a completed delivery line in Gal or blank. With no history (an ended hold does not count) it saves and relabels the empty stock row; "GAL" (case only) saves over history; open lines still report PRODUCT_UNIT_HAS_OPEN_LINES first; an uncommitted return line or hold in another session makes the change wait (lock timeout); the functions are private; a second apply refuses');
 }
 
@@ -719,6 +741,11 @@ function rollbackCases() {
   stageText('data-rev.sql', lf(DATA_REV)); stageText('rules-rev.sql', lf(RULES_REV)); stageText('history-rev.sql', lf(HISTORY_REV));
   const early = apply('data-rev.sql');
   assert.notEqual(early.status, 0); assert.match(early.output, /KI137_REVERSE_ORDER/);
+  const WORDING_REV = path.join(ROOT, 'scripts', 'smoke', 'stock-unit-history-wording-reverse.sql');
+  stageText('wording-rev.sql', lf(WORDING_REV));
+  const rw = apply('wording-rev.sql'); assert.equal(rw.status, 0, rw.output);
+  assert.equal(scalar("SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._refuse_stock_unit_change_with_history()'::regprocedure;"), 'edb18d7a09c0475bf1c6316c8d2d11e2', 'the 20270121120000 body is back');
+  assert.equal(scalar("SELECT has_function_privilege('authenticated', 'public._refuse_stock_unit_change_with_history()', 'EXECUTE');"), 'f');
   const r0 = apply('history-rev.sql'); assert.equal(r0.status, 0, r0.output);
   assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_product_unit_keeps_history';"), 0);
   assert.equal(n("SELECT count(*) FROM pg_trigger WHERE tgname = 'a2_history_row_locks_product';"), 0);
@@ -738,7 +765,7 @@ ${lf(DATA_REV)}`);
   raw(`DELETE FROM public.order_items WHERE id = '${id('e41')}'; UPDATE public.purchase_order_items SET unit_size = NULL WHERE id = '${BLANK_PO_LINE}';`);
   assert.equal(labels(), labelsBefore, 'every unit label is back');
   assert.equal(n(`SELECT count(*) FROM public.product_cost_basis WHERE product_id IN ('${CORN}', '${SOY}') AND effective_to IS NULL AND cost_cents IN (10000, 20050);`), 2);
-  console.log('[case] R rollback: the history reverse drops its triggers and functions; the data reverse refuses before the rules reverse and after any later write; rules reverse restores the live per-acre body and the old fill trigger; data reverse restores every label, one open basis each at the same cents');
+  console.log('[case] R rollback: the wording reverse restores the 20270121120000 body (md5) and keeps it private; the history reverse drops its triggers and functions; the data reverse refuses before the rules reverse and after any later write; rules reverse restores the live per-acre body and the old fill trigger; data reverse restores every label, one open basis each at the same cents');
 }
 
 async function main() {

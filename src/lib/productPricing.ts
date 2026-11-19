@@ -554,7 +554,7 @@ export function assertWorkbookLeavesRatesAlone(result: PricingPreviewResult): vo
     .filter((row) => PRODUCT_RATE_KEYS.some((key) => row.effect?.product_info_changes?.[key] !== undefined))
     .map((row) => row.effect?.product_name ?? `row ${row.sequence}`);
   if (names.length > 0) {
-    throw new Error('Nothing was saved. Rates are read-only in the price workbook; change them on the product page. '
+    throw new Error("Nothing was saved. Rates are read-only in the price workbook; change them with Correct rates on the product page, Parent rates, or the Setup Workbook's Rates tab. "
       + `Rate cells were changed for: ${names.slice(0, 20).join(', ')}`);
   }
 }

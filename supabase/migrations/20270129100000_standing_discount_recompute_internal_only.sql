@@ -27,6 +27,16 @@ BEGIN
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'POSTFLIGHT_RECOMPUTE_HELPER_STILL_GRANTED: %', v_bad;
   END IF;
+  -- ...and no API role reaches it another way (an inherited membership), while its owner still can.
+  SELECT string_agg(r.role, ', ') INTO v_bad
+    FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) r(role)
+   WHERE has_function_privilege(r.role, c_helper, 'EXECUTE');
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'POSTFLIGHT_RECOMPUTE_HELPER_STILL_EXECUTABLE: %', v_bad;
+  END IF;
+  IF NOT has_function_privilege((SELECT proowner FROM pg_proc WHERE oid = c_helper), c_helper, 'EXECUTE') THEN
+    RAISE EXCEPTION 'POSTFLIGHT_RECOMPUTE_HELPER_OWNER_CANNOT_EXECUTE';
+  END IF;
 
   SELECT string_agg(c.sig, ', ') INTO v_bad
     FROM unnest(ARRAY['public.set_invoice_standing_discount(uuid,numeric,text)',

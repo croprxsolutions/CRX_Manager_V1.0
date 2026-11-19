@@ -356,7 +356,7 @@ export function sanitizeError(error: unknown): string {
   if (/^CUSTOMER_HAS_OPEN_WORK(?::|$)/.test(message)) {
     // The farm name is typed by users: drop text-direction controls so it cannot reorder the sentence.
     const detail = message.slice('CUSTOMER_HAS_OPEN_WORK'.length).replace(/^:\s*/, '')
-      .replace(/[‎‏‪-‮⁦-⁩]/g, '').trim();
+      .replace(/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '').trim();
     return detail ? `${detail.charAt(0).toUpperCase()}${detail.slice(1)}.`
       : 'This customer still has open orders, deliveries, holds, quotes or invoices. Finish or cancel them before deactivating it.';
   }

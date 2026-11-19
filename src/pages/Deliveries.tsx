@@ -903,13 +903,15 @@ export default function Deliveries() {
       // asked before, so a loop in the data still ends.
       const pMap: Record<string, FarmGroupNode> = {};
       const asked = new Set<string>();
+      // A failed round leaves the walk short of the top, so show no group rather than a middle parent.
+      let walkFailed = false;
       let pIds = [...new Set(
         (data || []).map((d: Record<string, unknown>) => (d.customer as { parent_customer_id?: string })?.parent_customer_id).filter(Boolean) as string[]
       )];
       while (pIds.length > 0) {
         pIds.forEach((pid) => asked.add(pid));
         const { data: parents, error: pErr } = await supabase.from('customers').select('id, farm_name, parent_customer_id').in('id', pIds);
-        if (pErr) { Sentry.captureException(pErr, { tags: { source: 'fetch', page: 'deliveries' } }); break; }
+        if (pErr) { Sentry.captureException(pErr, { tags: { source: 'fetch', page: 'deliveries' } }); walkFailed = true; break; }
         (parents || []).forEach((p) => { pMap[p.id] = p; });
         pIds = [...new Set((parents || []).map((p) => p.parent_customer_id).filter((pid): pid is string => !!pid && !asked.has(pid)))];
       }
@@ -920,7 +922,7 @@ export default function Deliveries() {
           customer_name: cust?.farm_name || 'Unknown',
           driver_name: 'Unassigned',
           item_count: 0,
-          farm_group_name: farmGroupTopName(cust?.parent_customer_id, pMap),
+          farm_group_name: walkFailed ? null : farmGroupTopName(cust?.parent_customer_id, pMap),
         };
       });
       setUnassigned(rows as DeliveryRow[]);

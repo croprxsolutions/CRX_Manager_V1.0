@@ -192,6 +192,18 @@ describe('BulkCustomerImport', () => {
     ]);
   });
 
+  it('refuses an unquoted "1,200" split across two acreage columns when the crop comes out above the total', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,total_acres,corn_acres,soybean_acres\nSplit Farm,1,200,\nReal Farm,500,300,200\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText('Row 2: Unclear acres: corn acres (200) is more than total acres (1). Put quotes around numbers with commas, like "1,200"')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import 1 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    expect(payloads().map((a) => a.p_customer_payload)).toEqual([
+      expect.objectContaining({ farm_name: 'Real Farm', total_acres: 500, corn_acres: 300, soybean_acres: 200 }),
+    ]);
+  });
+
   it('keeps a quoted value that spans lines in one record, with later rows on their file line', async () => {
     const { container } = render(<BulkCustomerImport {...defaultProps} />);
     pick(container, 'farm_name,billing_address,notes\r\nLine Farm,"12 Main St\r\nSpringfield, IL","said ""hi"""\r\n,no name\r\n');

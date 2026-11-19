@@ -108,8 +108,9 @@ function parseAcres(value: string): number | null {
 /**
  * An unquoted "1,200" that still fits the column count reads as 1 acre plus "200" in the next column.
  * Returns the joined "1,200" for that shape (so the row is refused), else ''.
- * shortcut: not checked when the next column is also acres ("500,300" is real total + corn acres),
- * so "1,200" there still splits; upgrade if such files show up.
+ * Not checked when the next column is also acres ("500,300" is real total + corn acres); there
+ * cropAcresOverTotal catches the split when it leaves a crop above the total ("1,200" = 1 + 200).
+ * shortcut: a split between two crop columns with no total still saves; upgrade if such files show up.
  */
 function unquotedThousands({ cols, quoted }: Pick<CsvRecord, 'cols' | 'quoted'>, idx: number, nextField: string | undefined): string {
   const next = cols[idx + 1];
@@ -126,6 +127,14 @@ function readAcres(record: Pick<CsvRecord, 'cols' | 'quoted'>, idx: number, fiel
   if (num === null) return `Invalid ${label}: ${value}`;
   const split = unquotedThousands(record, idx, nextField);
   return split ? `Unclear ${label}: ${split} has a comma but no quotes. Put quotes around numbers with commas, like "1,200"` : num;
+}
+
+/** A crop's acres above the farm's total acres is impossible, so an unquoted "1,200" split them: the row's error, else ''. */
+function cropAcresOverTotal(customer: Partial<ParsedCustomer>): string {
+  const total = customer.total_acres;
+  if (total === undefined) return '';
+  const crop = (['corn_acres', 'soybean_acres', 'other_acres'] as const).find((f) => (customer[f] ?? 0) > total);
+  return crop ? `Unclear acres: ${crop.replace('_', ' ')} (${customer[crop]}) is more than total acres (${total}). Put quotes around numbers with commas, like "1,200"` : '';
 }
 
 interface ValidationResult {
@@ -358,6 +367,7 @@ export default function BulkCustomerImport({ open, onClose, onSuccess }: BulkCus
           return;
         }
 
+        badValue ||= cropAcresOverTotal(customer);
         if (badValue) {
           invalid.push({ row: line, error: badValue, data: rowData });
           return;

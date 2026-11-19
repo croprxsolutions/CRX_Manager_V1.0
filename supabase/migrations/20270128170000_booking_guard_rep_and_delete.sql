@@ -23,7 +23,8 @@
 --      check would read the transaction's first snapshot and could miss a job scheduled meanwhile. The app runs READ COMMITTED.
 --   Rule 1 checks the rep against every booking a job names (its quote_id and its section's booking; Sol r1), with
 --      those bookings locked FOR SHARE (Sol r2). A job reopened from completed or invoiced (an admin override) on a
---      deleted booking is refused BOOKING_CLOSED (Sol HIGH r2), so deleting after completion cannot leave live work.
+--      deleted booking, or one closed short, declined, expired or cancelled, is refused BOOKING_CLOSED (Sol HIGH r2, r3).
+--   Postflight refuses the apply if a booking deleted earlier still has a scheduled or in-progress job (Sol HIGH r3).
 --   Pre- and postflight pin both triggers' timing, events, columns, function and absence of a WHEN clause (Sol r1).
 --   Every other line of both functions is its 20270127120000 body (pinned below by md5).
 --
@@ -98,6 +99,7 @@ BEGIN
     -- committed meanwhile is waited for, or at REPEATABLE READ fails to serialize, rather than read stale.
     PERFORM 1 FROM public.quotes q
     WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
+    ORDER BY q.id
     FOR SHARE;
     SELECT q.quote_number INTO v_quote
     FROM public.quotes q
@@ -111,23 +113,25 @@ BEGIN
         USING ERRCODE = 'P0001';
     END IF;
   END IF;
-  -- Sol HIGH r2: a booking can now be deleted once its job is completed; an override that reopens that job
-  -- (completed or invoiced back to scheduled or in progress) must not leave live work on the deleted booking. The
-  -- bookings are locked first, so a delete running at the same time is waited for (and then refused, as the job is live).
+  -- Sol HIGH r2, r3: a booking can now be deleted once its job is completed, and closed short, declined, expired or
+  -- cancelled (each releases its holds); an override that reopens that job (completed or invoiced back to scheduled
+  -- or in progress) must not leave live work on such a booking. The bookings are locked first (in id order), so a
+  -- delete or close running at the same time is waited for, and then refused because the job is live.
   IF TG_OP = 'UPDATE' AND OLD.status IN ('completed', 'invoiced') AND NEW.status IN ('scheduled', 'in_progress')
      AND (NEW.quote_id IS NOT NULL OR NEW.quote_section_id IS NOT NULL) THEN
     PERFORM 1 FROM public.quotes q
     WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
+    ORDER BY q.id
     FOR SHARE;
-    SELECT q.quote_number INTO v_quote
+    SELECT q.quote_number, CASE WHEN q.deleted_at IS NOT NULL THEN 'deleted' ELSE q.status END AS state INTO v_quote
     FROM public.quotes q
     WHERE q.id IN (NEW.quote_id, (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = NEW.quote_section_id))
-      AND q.deleted_at IS NOT NULL
+      AND (q.deleted_at IS NOT NULL OR q.status IN ('closed_short', 'declined', 'expired', 'cancelled'))
     ORDER BY q.quote_number
     LIMIT 1;
     IF FOUND THEN
-      RAISE EXCEPTION 'BOOKING_CLOSED: booking % is deleted, so spray job % cannot be reopened.',
-        v_quote.quote_number, NEW.job_number
+      RAISE EXCEPTION 'BOOKING_CLOSED: booking % is %, so spray job % cannot be reopened.',
+        v_quote.quote_number, v_quote.state, NEW.job_number
         USING ERRCODE = 'P0001';
     END IF;
   END IF;
@@ -323,7 +327,7 @@ DECLARE
 BEGIN
   FOR v_g IN SELECT * FROM (VALUES
       ('public._enforce_booking_live_job_rules()', 'public.quotes', 'quotes_booking_live_job_rules', 'cannot be deleted. Cancel or complete the job first.', '9845ed22d07de03c8b3c7afe5356352c'),
-      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', 'fc51549fa40649904143afb5d261d630')) AS g(fn, tbl, tg, marker, body_md5)
+      ('public._enforce_job_live_on_open_booking()', 'public.jobs', 'jobs_live_on_open_booking', 'BOOKING_NOT_YOURS', '0b9c1774f2602bc299fb54ebc2c6e756')) AS g(fn, tbl, tg, marker, body_md5)
   LOOP
     SELECT * INTO v_p FROM pg_proc WHERE oid = v_g.fn::regprocedure;
     IF v_p.proowner <> 'postgres'::regrole OR NOT v_p.prosecdef
@@ -348,6 +352,13 @@ BEGIN
                          WHERE a.attrelid = t.tgrelid AND a.attnum = ANY (t.tgattr))
                        = ARRAY['customer_id', 'deleted_at', 'quote_id', 'quote_section_id', 'status']) THEN
     RAISE EXCEPTION 'POSTFLIGHT_LIVE_JOB_GUARD: a guard trigger does not fire on its events and columns (quotes: BEFORE UPDATE OF status, customer_id, deleted_at; jobs: BEFORE INSERT OR UPDATE OF quote_id, quote_section_id, customer_id, status, deleted_at), or has a WHEN clause';
+  END IF;
+  -- Sol HIGH r3: no booking deleted before this migration may still have a scheduled or in-progress job (quotes is
+  -- locked by the trigger re-create above, so no booking is deleted in between); if one exists, re-read live first.
+  IF EXISTS (SELECT 1 FROM public.jobs j JOIN public.quotes q
+               ON q.id = j.quote_id OR q.id = (SELECT qs.quote_id FROM public.quote_sections qs WHERE qs.id = j.quote_section_id)
+             WHERE q.deleted_at IS NOT NULL AND j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_DELETED_BOOKING_LIVE_JOB: a deleted booking still has a scheduled or in-progress spray job; re-read live first';
   END IF;
 END
 $postflight$;

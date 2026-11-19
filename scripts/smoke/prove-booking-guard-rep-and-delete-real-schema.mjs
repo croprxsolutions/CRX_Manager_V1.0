@@ -422,6 +422,14 @@ SELECT set_config('app.admin_override', 'true', true);
 UPDATE jobs SET status = 'in_progress' WHERE id = ${jobOf('REP')} RETURNING status;`,
     /BOOKING_CLOSED: booking \[PROVER\] REP is deleted, so spray job J-PRV-REP cannot be reopened\./);
   console.log('[case] AFTER: a completed job on a booking deleted after completion cannot be reopened, even by an override');
+  // Sol HIGH r3: nor on a booking closed short after completion (closing short released its holds).
+  refusedProbe(`UPDATE jobs SET status = 'in_progress' WHERE id = ${jobOf('REP')};
+UPDATE jobs SET status = 'completed' WHERE id = ${jobOf('REP')};
+UPDATE quotes SET status = 'closed_short' WHERE quote_number = '[PROVER] REP';
+SELECT set_config('app.admin_override', 'true', true);
+UPDATE jobs SET status = 'in_progress' WHERE id = ${jobOf('REP')} RETURNING status;`,
+    /BOOKING_CLOSED: booking \[PROVER\] REP is closed_short, so spray job J-PRV-REP cannot be reopened\./);
+  console.log('[case] AFTER: a completed job on a booking closed short after completion cannot be reopened, even by an override');
   // Sol r1: a legacy job whose quote_id is rep 2's booking but whose section is on rep 1's booking: rep 2 cannot complete it.
   raw(`INSERT INTO quotes (quote_number, customer_id, status, tier, created_by)
          SELECT '[PROVER] OTHER', customer_id, 'sent', 1, '${REP2}' FROM quotes WHERE quote_number = '[PROVER] REP';

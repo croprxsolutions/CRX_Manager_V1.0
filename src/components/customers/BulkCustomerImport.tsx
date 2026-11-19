@@ -72,7 +72,8 @@ function parseCSVRecords(text: string): CsvRecord[] {
         if (ch === '\n') line++;
         if (ch !== '\r') current += ch;
       }
-    } else if (ch === '"') {
+    } else if (ch === '"' && current.trim() === '') {
+      // Only a quote at the start of a cell opens one; a mid-cell inch mark (12" tile) is plain text.
       inQuotes = true;
       wasQuoted = true;
       quoteLine = line;
@@ -108,15 +109,16 @@ function parseAcres(value: string): number | null {
 /**
  * An unquoted "1,200" that still fits the column count reads as 1 acre plus "200" in the next column.
  * Returns the joined "1,200" for that shape (so the row is refused), else ''.
- * Not checked when the next column is also acres ("500,300" is real total + corn acres); there
- * cropAcresOverTotal catches the split when it leaves a crop above the total ("1,200" = 1 + 200).
+ * Not checked when the next column is also acres ("500,300" is real total + corn acres) unless that
+ * cell starts with 0 ("5,000": no real acreage is written "000"); otherwise cropAcresOverTotal
+ * catches the split when it leaves a crop above the total ("1,200" = 1 + 200).
  * shortcut: a split between two crop columns with no total still saves; upgrade if such files show up.
  */
 function unquotedThousands({ cols, quoted }: Pick<CsvRecord, 'cols' | 'quoted'>, idx: number, nextField: string | undefined): string {
   const next = cols[idx + 1];
   if (quoted[idx] || quoted[idx + 1] || next === undefined) return '';
   if (!/^\d{1,3}$/.test(cols[idx]) || !/^\d{3}(\.\d+)?$/.test(next)) return '';
-  return (ACRE_FIELDS as readonly string[]).includes(nextField ?? '') ? '' : `${cols[idx]},${next}`;
+  return (ACRE_FIELDS as readonly string[]).includes(nextField ?? '') && !next.startsWith('0') ? '' : `${cols[idx]},${next}`;
 }
 
 /** The acreage in cell idx, or the row's error message when it is not a clear number. */
@@ -134,7 +136,7 @@ function cropAcresOverTotal(customer: Partial<ParsedCustomer>): string {
   const total = customer.total_acres;
   if (total === undefined) return '';
   const crop = (['corn_acres', 'soybean_acres', 'other_acres'] as const).find((f) => (customer[f] ?? 0) > total);
-  return crop ? `Unclear acres: ${crop.replace('_', ' ')} (${customer[crop]}) is more than total acres (${total}). Put quotes around numbers with commas, like "1,200"` : '';
+  return crop ? `Unclear acres: ${crop.replace('_', ' ')} (${customer[crop]}) is more than total acres (${total}). Check the acres, or put quotes around numbers with commas, like "1,200"` : '';
 }
 
 interface ValidationResult {

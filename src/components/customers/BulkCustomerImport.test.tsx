@@ -196,11 +196,36 @@ describe('BulkCustomerImport', () => {
     const { container } = render(<BulkCustomerImport {...defaultProps} />);
     pick(container, 'farm_name,total_acres,corn_acres,soybean_acres\nSplit Farm,1,200,\nReal Farm,500,300,200\n');
     fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
-    expect(await screen.findByText('Row 2: Unclear acres: corn acres (200) is more than total acres (1). Put quotes around numbers with commas, like "1,200"')).toBeInTheDocument();
+    expect(await screen.findByText('Row 2: Unclear acres: corn acres (200) is more than total acres (1). Check the acres, or put quotes around numbers with commas, like "1,200"')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Import 1 Customer(s)' }));
     await screen.findByText('Import Complete');
     expect(payloads().map((a) => a.p_customer_payload)).toEqual([
       expect.objectContaining({ farm_name: 'Real Farm', total_acres: 500, corn_acres: 300, soybean_acres: 200 }),
+    ]);
+  });
+
+  it('refuses an unquoted "5,000" that splits into total acres 5 and corn acres 000', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,total_acres,corn_acres\nSmith Farm,5,000\nReal Farm,500,300\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText('Row 2: Unclear total acres: 5,000 has a comma but no quotes. Put quotes around numbers with commas, like "1,200"')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import 1 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    expect(payloads().map((a) => a.p_customer_payload)).toEqual([
+      expect.objectContaining({ farm_name: 'Real Farm', total_acres: 500, corn_acres: 300 }),
+    ]);
+  });
+
+  it('keeps an inch mark inside a cell as text instead of opening a quote', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,notes\nA Farm,12" tile\nB Farm,6" tile\nC Farm,ok\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Import 3 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    expect(payloads().map((a) => a.p_customer_payload)).toEqual([
+      expect.objectContaining({ farm_name: 'A Farm', notes: '12" tile' }),
+      expect.objectContaining({ farm_name: 'B Farm', notes: '6" tile' }),
+      expect.objectContaining({ farm_name: 'C Farm', notes: 'ok' }),
     ]);
   });
 

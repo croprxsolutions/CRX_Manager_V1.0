@@ -88,6 +88,9 @@ BEGIN
     md5(jsonb_build_object('actor_id', v_actor, 'proposal_id', p_proposal_id,
       'expected_version', p_expected_proposal_version, 'decisions', p_decisions)::text));
   IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
+  IF jsonb_typeof(p_decisions) IS DISTINCT FROM 'array' OR jsonb_array_length(p_decisions) > 500 THEN
+    RAISE EXCEPTION 'EPA_DECISION_INVALID: send the decisions as a list of {item_id, accept}';  -- commit_epa_proposal's check, before any lock
+  END IF;
   -- The checks read after the locks, so each statement needs a fresh snapshot (as move_product_size).
   IF current_setting('transaction_isolation') <> 'read committed' THEN
     RAISE EXCEPTION 'PRODUCT_PARENT_READ_COMMITTED_REQUIRED: parents are written only in READ COMMITTED transactions'
@@ -156,7 +159,7 @@ BEGIN
   IF v_why IS NULL THEN
     SELECT COALESCE(array_agg(x.w), '{}') INTO v_epa_words
       FROM (SELECT regexp_replace(t, '[^a-z0-9]', '', 'g') AS w
-              FROM regexp_split_to_table(lower(COALESCE(v_p.epa_summary->>'productname', '')), '[[:space:]/-]+') t) x
+              FROM regexp_split_to_table(lower(COALESCE(v_p.epa_summary->>'productname', '')), '[[:space:]\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff/-]+') t) x
      WHERE x.w <> '';
     IF NOT EXISTS (
       SELECT 1
@@ -171,7 +174,7 @@ BEGIN
                WHERE m.parent_id = v_p.parent_id) names
        CROSS JOIN LATERAL (
          SELECT x.w FROM (SELECT regexp_replace(r.t, '[^a-z0-9]', '', 'g') AS w, r.o
-                            FROM regexp_split_to_table(lower(COALESCE(names.n, '')), '[[:space:]/-]+') WITH ORDINALITY AS r(t, o)) x
+                            FROM regexp_split_to_table(lower(COALESCE(names.n, '')), '[[:space:]\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff/-]+') WITH ORDINALITY AS r(t, o)) x
           WHERE x.w <> '' ORDER BY x.o LIMIT 1) first_word
        WHERE first_word.w = ANY (v_epa_words)) THEN
       v_why := format('EPA name "%s" does not match this product', COALESCE(v_p.epa_summary->>'productname', ''));
@@ -205,7 +208,10 @@ BEGIN
   IF v_why IS NULL THEN
     FOR v_item IN SELECT e FROM jsonb_array_elements(public._epa_proposal_items(v_p.parent_id, v_p.epa_registration, v_p.epa_input)) e
                    WHERE e->>'kind' = 'label' LOOP
-      IF v_item->>'item_id' = 'label:registration_status' THEN
+      IF (SELECT f->'current' FROM jsonb_array_elements(v_p.items) f WHERE f->>'item_id' = v_item->>'item_id')
+           IS DISTINCT FROM v_item->'current' THEN
+        v_why := format('label fact changed since the lookup (%s)', regexp_replace(v_item->>'item_id', '^label:', ''));
+      ELSIF v_item->>'item_id' = 'label:registration_status' THEN
         -- Its class is always a difference (status is never written and is usually 'unknown'), so only cancelled,
         -- by EPA or as recorded here, needs a person.
         IF v_item->'epa' = 'true'::jsonb OR v_item->'current' = '"cancelled"'::jsonb THEN
@@ -229,7 +235,7 @@ BEGIN
   END IF;
 
   -- 6. The decisions: every ingredient add and nothing else is written. A label item left out takes its default, so each must be declined.
-  IF jsonb_typeof(p_decisions) = 'array' AND EXISTS (
+  IF EXISTS (
        SELECT 1 FROM jsonb_array_elements(v_p.items) e
         WHERE e->>'class' IN ('add', 'add_name_only', 'fill', 'confirm', 'rup_upgrade')
           -- accepted exactly when it is an ingredient add: all of EPA's ingredients, nothing else

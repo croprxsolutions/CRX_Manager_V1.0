@@ -87,6 +87,7 @@ Releases of CRX Manager, newest first.
 * staging DB job accepts existing odd-stamp and self-wrapping migrations (#1749)
 
 #### 🧹 Refactors & Chore
+* mark fixed on staging and log the pilot row (#2001)
 * quote PDF footer test compares the website exactly (CodeQL on #1990) (#1994)
 * release and hotfix PRs into main may call RPCs their own migrations create (unblocks v0.1.0) (#1992)
 * price-source table by invoice path and grower role (#1961)

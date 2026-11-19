@@ -8,7 +8,9 @@
  *      adjust stock; a same-key retry returns the first answer and writes nothing more;
  *   2. keys with a newline, tab, control character, space or non-ASCII letter, a blank key and NULL are refused
  *      with IDEMPOTENCY_KEY_REQUIRED, and nothing changes (no stock, ledger or receipt row);
- *   3. a second apply is refused by the preflight.
+ *   3. follow-up 20270129120000: no public function keeps the weak check, and each of the 20 functions with the
+ *      strict check refuses a newline key, while a normal key gets past the key check (rolled back);
+ *   4. a second apply of either migration is refused by its preflight.
  *
  * Run: node scripts/smoke/prove-adjust-inventory-key-real-schema.mjs   (needs Docker; never touches live)
  * Reuse a built database: UNDO_PATHS_CONTAINER=<name> ADJUST_KEY_PROOF_REUSE=1 (left running).
@@ -20,7 +22,8 @@ import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, scalar, attempt, asUser, refuse, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
 const CANDIDATE = '20270129110000_adjust_inventory_key_printable_only.sql';
-const reuse = process.env.ADJUST_KEY_PROOF_REUSE === '1';
+const FOLLOW_UP = '20270129120000_idempotency_keys_printable_only.sql';
+const reuse =process.env.ADJUST_KEY_PROOF_REUSE === '1';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PROD = '7c7a0000-0000-4000-8000-000019120001';
 const INV = '7c7a0000-0000-4000-8000-000019120002';
@@ -72,12 +75,60 @@ INSERT INTO public.inventory (id, product_id, location, quantity_available, quan
     assert.equal(got, 'ok|IDEMPOTENCY_KEY_REQUIRED: adjust_inventory requires p_idempotency_key|unchanged=true', label);
   }
 
-  // 3. A second apply is refused by the preflight.
-  docker(['exec', '-i', NAME, 'sh', '-c', 'cat > /tmp/ak-candidate.sql'], { input: candidate });
-  const again = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', '/tmp/ak-candidate.sql'], { allowFailure: true });
-  assert.notEqual(again.status, 0, 'a second apply must be refused');
-  assert.match(again.stderr, /ADJUST_INVENTORY_KEY_1912_BASELINE_DRIFT/);
-  console.log('[adjust-key] second apply refused by the preflight');
+  // 3. Follow-up (20270129120000): no public function keeps the weak check, and each of the 20 functions with the
+  //    strict check refuses 'abc' + newline with IDEMPOTENCY_KEY_REQUIRED, while the same call with a normal key
+  //    gets past the key check (it fails later on the dummy arguments, or not at all). Every other argument is
+  //    NULL except: the actor arguments (signed-in admin), a reason, and hold type 'manual', so earlier checks pass.
+  //    Rolled back.
+  assert.equal(scalar(`SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND prosrc LIKE '%COLLATE "C" !~ ''[!-~]''%';`), '0',
+    'no public function may keep the weak key check');
+  const probe = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { input: `BEGIN;
+SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+DO $p$
+DECLARE f record; v_args text; v_out text; v_bad text; k text;
+BEGIN
+  FOR f IN SELECT p.oid::regprocedure::text AS sig, p.proname, p.proargnames, p.pronargs, p.proargtypes::oid[] AS types
+             FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosrc LIKE '%COLLATE "C" ~ ''[^!-~]''%' ORDER BY 1
+  LOOP
+    FOREACH k IN ARRAY ARRAY['abc' || E'\\n', 'proof:' || gen_random_uuid()] LOOP
+      SELECT string_agg(CASE
+          WHEN f.proargnames[i] = 'p_idempotency_key' THEN quote_literal(k)
+          WHEN f.proargnames[i] ~ '(_by|^p_actor_id)$' THEN quote_literal('${ADMIN}') || '::uuid'
+          WHEN f.proargnames[i] ~ 'reason' THEN '''[1912] proof reason'''
+          WHEN f.proargnames[i] = 'p_hold_type' THEN '''manual'''
+          ELSE 'NULL::' || format_type(f.types[i - 1], NULL) END, ', ' ORDER BY i)
+        INTO v_args FROM generate_series(1, f.pronargs) i;
+      BEGIN
+        EXECUTE format('SELECT public.%I(%s)', f.proname, v_args);
+        v_out := 'returned';
+      EXCEPTION WHEN OTHERS THEN v_out := SQLERRM;
+      END;
+      IF v_bad IS NULL THEN v_bad := v_out; ELSE
+        RAISE NOTICE 'PROBE|%|%|%', f.sig, v_bad LIKE 'IDEMPOTENCY_KEY_REQUIRED%', v_out NOT LIKE 'IDEMPOTENCY_KEY_REQUIRED%';
+        v_bad := NULL;
+      END IF;
+    END LOOP;
+  END LOOP;
+END $p$;
+ROLLBACK;` });
+  const probes = [...probe.stderr.matchAll(/PROBE\|([^|]+)\|(\w+)\|(\w+)/g)].map((m) => [m[1], m[2], m[3]]);
+  for (const [sig, bad, good] of probes) console.log(`[adjust-key] ${sig}: newline key refused=${bad}, normal key passes key check=${good}`);
+  assert.equal(probes.length, 20, 'expected 20 functions with the strict check (adjust_inventory + 19)');
+  assert.deepEqual(probes.filter(([, bad, good]) => bad !== 't' || good !== 't'), [], 'every function must refuse only the bad key');
+
+  // 3b. The return sweep pins each return wrapper's exact body; its re-pinned hashes match the new bodies.
+  const returnSweep = readFileSync(path.join(ROOT, 'scripts', 'db-invariant-sweeps', 'predicates', 'return-credit-intent-binding.sql'), 'utf8').replace(/;\s*$/, '');
+  const flagged = show('return-credit-intent-binding rows', scalar(`SELECT count(*) FROM (${returnSweep}) s;`));
+  assert.equal(flagged, '0', 'the return sweep must pass on the new bodies');
+
+  // 4. A second apply of either migration is refused by its preflight.
+  const follow = readFileSync(path.join(ROOT, 'supabase', 'migrations', FOLLOW_UP), 'utf8').replaceAll('\r\n', '\n');
+  for (const [file, sql, marker] of [[CANDIDATE, candidate, /ADJUST_INVENTORY_KEY_1912_BASELINE_DRIFT/], [FOLLOW_UP, follow, /IDEM_KEY_PRINTABLE_1912_BASELINE_DRIFT/]]) {
+    const again = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'], { input: sql, allowFailure: true });
+    assert.notEqual(again.status, 0, `a second apply of ${file} must be refused`);
+    assert.match(again.stderr, marker);
+    console.log(`[adjust-key] second apply of ${file} refused by the preflight`);
+  }
   console.log('\nADJUST_INVENTORY_KEY_PROOF_PASS');
 } finally {
   if (!reuse) removeContainer();

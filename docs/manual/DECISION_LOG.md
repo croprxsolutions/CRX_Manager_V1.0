@@ -1,5 +1,15 @@
 # Decision Log
 
+## 2026-11-19 — #1997: Mason owner-accepted 3 Sol finding(s) at `9db7ae3c3924`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1997 at `9db7ae3c3924` (base `872252698adb`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:129`, text sha256 `293dc845726365fc` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 51f9d23991cf)
+- Finding 2 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:92`, text sha256 `ccdc0f56b1a9e785` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref dde574efc71c)
+- Finding 3 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:115`, text sha256 `24b7481390411b3e` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref d9410fa1767f)
+
 ## 2026-11-19 — KI-148 (#1997): unbilled work and prepay block deactivation; Sol round 5
 
 **Decision (Mason, in chat, 2026-11-19, on Taha's review of PR #1997).**

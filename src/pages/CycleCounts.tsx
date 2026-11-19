@@ -108,6 +108,7 @@ export default function CycleCounts() {
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [reversing, setReversing] = useState(false);
   const [reverseConfirmOpen, setReverseConfirmOpen] = useState(false);
+  const confirmOpen = completeConfirmOpen || cancelConfirmOpen || reverseConfirmOpen;
   const [preparingCompletion, setPreparingCompletion] = useState(false);
   const itemWriteQueuesRef = useRef(new Map<string, Promise<void>>());
   // Each pending write carries its own cycle_count_id. Completion may only wait
@@ -1152,12 +1153,14 @@ export default function CycleCounts() {
         open={showDetail}
         onClose={closeDetail}
         // Escape on an open confirm must close only the confirm, not this window too.
-        closeDisabled={completeConfirmOpen || cancelConfirmOpen || reverseConfirmOpen}
+        closeDisabled={confirmOpen}
         title={activeCount ? `Cycle Count: ${activeCount.count_number}` : 'Cycle Count'}
         size="large"
       >
         {activeCount && (
-          <div className="space-y-4">
+          // inert: while a confirm is open, keyboard focus cannot slip back to this window's
+          // inventory actions (Sol HIGH r2, #1982).
+          <div className="space-y-4" inert={confirmOpen}>
             {/* Summary bar */}
             <div className="flex items-center gap-4 text-sm">
               <div>

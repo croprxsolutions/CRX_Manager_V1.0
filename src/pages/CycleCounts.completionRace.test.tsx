@@ -212,10 +212,14 @@ describe('CycleCounts completion race', () => {
     const detail = screen.getByRole('dialog');
     expect(detail.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // Escape closes only the confirm; the count window stays open.
+    // The count window's inventory actions are unreachable while the confirm is open.
+    expect(screen.getByText(/Complete & Apply Adjustments/).closest('[inert]')).not.toBeNull();
+
+    // Escape closes only the confirm; the count window stays open and usable again.
     fireEvent.keyDown(document, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
     expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getByText(/Complete & Apply Adjustments/).closest('[inert]')).toBeNull();
   });
 
   // Sol HIGH (#1982): a completion still loading could open "Complete Anyway" hidden

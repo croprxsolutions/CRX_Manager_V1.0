@@ -63,12 +63,21 @@ const QUEUED_FUNCTIONS = new Set(Object.keys(QUEUED_MIGRATION_FUNCTIONS));
 
 // Staging-first release flow (Mason approved 2026-11-10): the staging DB job applies every checked-in migration when
 // a PR merges into staging, so a PR into staging (or a push to it) may call an RPC that a checked-in migration creates.
-// Into main (and in a local run) the live rule stands: the release PR can't merge until the function is live and the
-// snapshot above is regenerated, so production never gets a caller before its function.
-const RPC_GATE_TARGET = process.env.GITHUB_BASE_REF || process.env.GITHUB_REF_NAME || '';
+// The release PR (release/next) and a hotfix/<name> PR into main get the same rule (Taha, 2026-11-19): their migrations
+// are applied live from the PR itself just before it merges, and that apply gate needs every check green first, so
+// requiring the function live here deadlocked the v0.1.0 release. Every migration already on main is live, so this
+// only admits the PR's own migrations. A push to main (the merge of one of those PRs) follows the same rule, or main
+// stays red until the snapshot is regenerated. A local run keeps the live rule.
+// Regenerate the snapshot after each release's live apply.
+function rpcGateTarget(base: string | undefined, head: string | undefined, refName: string | undefined): string {
+  if (base === 'main') return /^(release\/next|hotfix\/[\w.-]+)$/.test(head ?? '') ? 'release' : 'main';
+  if (base) return base;
+  return refName === 'main' ? 'release' : refName || '';
+}
+const RPC_GATE_TARGET = rpcGateTarget(process.env.GITHUB_BASE_REF, process.env.GITHUB_HEAD_REF, process.env.GITHUB_REF_NAME);
 
 function rpcCallAllowed(rpc: string, live: Set<string>, fromMigrations: Set<string>, target: string): boolean {
-  return live.has(rpc) || (target === 'staging' && fromMigrations.has(rpc));
+  return live.has(rpc) || ((target === 'staging' || target === 'release') && fromMigrations.has(rpc));
 }
 
 // -------------------------------------------------------------------------
@@ -412,6 +421,21 @@ describe('Live pg_proc snapshot integrity', () => {
     expect(rpcCallAllowed('set_new_thing', live, fromMigrations, '')).toBe(false);
     expect(rpcCallAllowed('set_new_thing', live, fromMigrations, 'staging')).toBe(true);
     expect(rpcCallAllowed('no_such_rpc', live, fromMigrations, 'staging')).toBe(false);
+    expect(rpcCallAllowed('set_new_thing', live, fromMigrations, 'release')).toBe(true);
+    expect(rpcCallAllowed('no_such_rpc', live, fromMigrations, 'release')).toBe(false);
+  });
+
+  it('a release or hotfix PR into main, or a push to main, gets the migration rule; any other PR into main does not', () => {
+    expect(rpcGateTarget('main', 'release/next', 'x')).toBe('release');
+    expect(rpcGateTarget('main', 'hotfix/release-slack-messages', 'x')).toBe('release');
+    expect(rpcGateTarget('main', 'claude/feature', 'x')).toBe('main');
+    expect(rpcGateTarget('main', 'release/next-evil/x', 'x')).toBe('main');
+    expect(rpcGateTarget('main', 'hotfix/a/b', 'x')).toBe('main');
+    expect(rpcGateTarget('main', undefined, 'x')).toBe('main');
+    expect(rpcGateTarget('staging', 'claude/feature', 'x')).toBe('staging');
+    expect(rpcGateTarget('', '', 'main')).toBe('release');
+    expect(rpcGateTarget('', '', 'staging')).toBe('staging');
+    expect(rpcGateTarget(undefined, undefined, undefined)).toBe('');
   });
 
   it('reads the functions every checked-in migration creates', () => {

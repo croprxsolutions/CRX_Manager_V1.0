@@ -435,7 +435,7 @@ describe('generateQuotePdf', () => {
       });
       await generateQuotePdf(makeLongQuoteData(40));
       for (const page of [1, 2]) {
-        const footer = textOnPage(page).filter((t) => typeof t === 'string' && t.includes('www.croprxsolutions.com')).join(' ');
+        const footer = textOnPage(page).filter((t) => typeof t === 'string' && t.split(/\s+/).includes('www.croprxsolutions.com')).join(' ');
         expect(footer).toContain('Test Ag Co');
         expect(footer).toContain('office@testag.test');
         expect(footer).toContain('Prices valid for the period shown above. Subject to product availability.');

@@ -57,7 +57,7 @@ export function describeEditJobsResult(result: EditJobsResult, action: EditJobsA
   if (result.cancelled.length > 0) parts.push(`${parts.length ? result.cancelled.length : jobs(result.cancelled.length)} cancelled.`);
   if (result.deleted.length > 0) parts.push(`${parts.length ? result.deleted.length : jobs(result.deleted.length)} deleted.`);
 
-  const verb = action === 'delete' ? 'deleted' : 'cancelled';
+  const verb = action === 'delete' ? 'deleted' : action === 'cancel' ? 'cancelled' : 'changed';
   const byStatus = new Map<string, number>();
   let gone = 0;
   for (const s of result.skipped) {

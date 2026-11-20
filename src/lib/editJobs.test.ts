@@ -22,6 +22,7 @@ describe('describeEditJobsResult', () => {
     expect(editJobsChangedNothing(all)).toBe(true);
     expect(describeEditJobsResult(all, 'cancel')).toBe('1 already in progress and could not be cancelled.');
     expect(describeEditJobsResult(r({}), null)).toBe('Nothing changed.');
+    expect(describeEditJobsResult(all, null)).toBe('1 already in progress and could not be changed.');
   });
 });
 

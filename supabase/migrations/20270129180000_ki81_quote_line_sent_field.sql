@@ -17,7 +17,8 @@
 --     Also (Luna/Sol r1 on this fix): (a) a sent quote that listed the product on one of the billed fields, but whose line
 --     is no longer on that field with that product (moved, removed or swapped with no resend), stops instead of dropping that field to the list
 --     price; (b) one quote price is billed for the whole line, so a product quoted on some of the billed fields but not
---     others stops instead of spreading one field's price.
+--     others stops instead of spreading one field's price. Every candidate quote of the billed growers is held FOR SHARE
+--     first (id order), so the pick and these scans read one state (Sol r3).
 --  2. create_invoice_from_blend_ticket: the job-quote check counts a moved line like a unit mismatch (named "was moved
 --     to another field"), a stored pick clears a ticket line only on an unmoved, matching-unit line, and a ticket that
 --     bills the owner per unit on a field other than the job quote section's field stops (Luna/Sol r1), as does a line the
@@ -112,6 +113,15 @@ BEGIN
              array_to_string(ARRAY(SELECT DISTINCT f FROM unnest(p_field_ids) f ORDER BY 1), ','),
              array_to_string(ARRAY(SELECT DISTINCT c FROM unnest(p_customer_ids) c ORDER BY 1), ','), p_on));
   v_cached := current_setting(v_key, true);
+  -- KI-81 field (Sol r3 on this fix): hold every candidate quote of these growers FOR SHARE first, in id order, so the
+  -- eligibility pick below and the moved-line scans after it read one state: a resend or line move (save_quote and the
+  -- send take the quote FOR UPDATE) waits for this invoice instead of landing between them.
+  PERFORM 1 FROM quotes q
+   WHERE q.customer_id = ANY (p_customer_ids)
+     AND q.deleted_at IS NULL
+     AND q.status IN ('sent', 'revised', 'accepted', 'expired', 'closed_by_application', 'closed_short')
+   ORDER BY q.id
+     FOR SHARE OF q;
   FOR v_quote IN
     SELECT q.id
       FROM quotes q
@@ -1328,7 +1338,7 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'a204c0911f7f3c04a2213de61f1eea32', false, 'v'),
+        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', '99f1900dcdbcc089cd0b12d26d5d61b7', false, 'v'),
         ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'cdff857346b0b04aa387f934ef500bbc', true, 'v')
       ) AS pin(sig, body_md5, secdef, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)

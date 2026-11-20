@@ -199,7 +199,7 @@ BEGIN
   IF v_item.sort_order <> 1 OR v_item.acres <> 100 OR v_item.rate_per_acre <> 0.5 THEN
     RAISE EXCEPTION 'FAIL: Alpha sort/acres/rate %/%/%', v_item.sort_order, v_item.acres, v_item.rate_per_acre;
   END IF;
-  IF v_item.total_applied <> 50 OR v_item.total_applied_gl_lb <> 6.25 OR v_item.gl_lb_unit IS DISTINCT FROM 'Gal' THEN
+  IF v_item.total_applied <> 50 OR v_item.total_applied_gl_lb <> 6.25 OR v_item.gl_lb_unit IS DISTINCT FROM 'GL' THEN
     RAISE EXCEPTION 'FAIL: Alpha applied math %/%/%', v_item.total_applied, v_item.total_applied_gl_lb, v_item.gl_lb_unit;
   END IF;
 

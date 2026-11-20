@@ -106,7 +106,7 @@ export default function JobBatchAssignModal({
       onClose();
       return;
     }
-    if (!profile) return;
+    if (!profile) { toast('error', 'Your sign-in is still loading. Try again in a moment.'); return; }
     if (selectedJobIds.length > EDIT_JOBS_MAX) {
       toast('error', `Select at most ${EDIT_JOBS_MAX} jobs at a time (${selectedJobIds.length} selected).`);
       return;

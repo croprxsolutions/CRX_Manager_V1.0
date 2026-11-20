@@ -3306,7 +3306,7 @@ export default function JobDetail() {
       toast('error', `Cannot cancel a job in '${status}' status — only scheduled or in-progress jobs can be cancelled`);
       return;
     }
-    if (!profile) return;
+    if (!profile) { toast('error', 'Your sign-in is still loading. Try again in a moment.'); return; }
     setCancelling(true);
     const cancelScope = editJobsScope([id!], null, 'cancel');
     try {

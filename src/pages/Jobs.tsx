@@ -1448,7 +1448,7 @@ export default function Jobs() {
   };
 
   const handleDelete = async () => {
-    if (!profile) return;
+    if (!profile) { toast('error', 'Your sign-in is still loading. Try again in a moment.'); return; }
     // REPORTABLE broadened selection to include invoiced jobs (so they can be
     // summarized/exported). Delete stays gated to DELETABLE: invoiced/cancelled
     // jobs are never sent. The server re-checks each job's status under lock and

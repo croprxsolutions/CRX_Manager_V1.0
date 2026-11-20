@@ -76,8 +76,8 @@ BEGIN
   -- Creation is a pricing-free shell under supplier-pricing governance. This chain
   -- supplies its manual unit_price_cents on the invoice line. Establish its cost
   -- through the public governed pricing route; never disable the cost guard.
-  INSERT INTO products (product_name, unit_size, product_form)
-    VALUES ('[SMOKE] Split Prod '||v_sfx, 'gal', 'liquid') RETURNING id INTO v_prod;
+  INSERT INTO products (product_name, unit_size, inventory_unit, product_form)
+    VALUES ('[SMOKE] Split Prod '||v_sfx, 'gal', 'gal', 'liquid') RETURNING id INTO v_prod;
   v_pricing_preview := public.preview_product_cost_basis_changes(
     'product_page', NULL,
     jsonb_build_array(jsonb_build_object(

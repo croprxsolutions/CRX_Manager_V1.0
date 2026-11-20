@@ -35,7 +35,9 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270129160000_release_fixes_1990.sql');
-const FOLLOW_UPS = [];
+// 20270129171000 (same release) replaces three of these bodies on top of this candidate's, adding only the
+// sold-unit refusal and ACTOR_MISMATCH; its own prover (prove-field-app-no-sold-unit-real-schema.mjs) covers it.
+const FOLLOW_UPS = [path.join(MIGRATIONS, '20270129171000_field_app_refuses_product_without_sold_unit.sql')];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

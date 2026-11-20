@@ -131,23 +131,15 @@ check("agents never approve a pull request (#1838 HIGH 2)", () => {
   for (const t of ["gh pr review 5 --comment -b 'approve later'", "gh pr view 5 --json reviewDecision", "gh pr review 5 -r", "rg APPROVED src/"]) assert.equal(prApprovalProblem(t), null, t);
 });
 
-check("staging merges wait while the release is being applied (#1838 MED 2)", () => {
+check("staging is frozen for agents while a release PR is open (#1838 MED 2, widened 2026-11-20)", () => {
   const gh = (answers) => (args) => { const a = answers.find(([re]) => re.test(args.join(" "))); if (!a) throw new Error(`unexpected ${args.join(" ")}`); if (a[1] instanceof Error) throw a[1]; return a[1]; };
   const list = /pulls\?base=main&state=open/;
-  const comments = /issues\/77\/comments/;
-  const HEAD = "abcdef123456".padEnd(40, "0");
-  const open = `77 ${HEAD}`;
-  const c = (login, body) => JSON.stringify({ login, at: "2026-11-19T09:00:00Z", body });
   const run = (answers) => releaseFreezeProblem({ repo: "o/r", gh: gh(answers) });
   assert.equal(run([[list, ""]]), null, "no release PR open");
-  assert.equal(run([[list, open], [comments, c("someone", "Staging proof: x")]]), null, "release open, nothing applied yet");
-  assert.match(run([[list, open], [comments, c("masonwells1", "note\nApplied live: 20270110100000_x")]]), /#77.*being applied live/);
-  assert.match(run([[list, open], [comments, c("TahaKhanAbdalli", "Ready to merge: abcdef123456")]]), /#77/, "Taha's go-ahead for the current head starts the freeze, with no expiry");
-  assert.equal(run([[list, open], [comments, c("TahaKhanAbdalli", "Ready to merge: 123456789abc")]]), null, "a go-ahead for an older head freezes nothing");
-  assert.equal(run([[list, open], [comments, c("stranger", "Ready to merge: abcdef123456") + "\n" + c("stranger", "Applied live: x")]]), null, "anyone else's text freezes nothing");
+  assert.match(run([[list, "77\n"]]), /release PR #77 .*is open.*frozen for agents/, "an open release PR freezes staging from the moment it opens, no comment needed");
+  assert.match(run([[list, "77\n78"]]), /#77, #78/, "every open release PR is named");
   assert.match(run([[list, new Error("HTTP 502")]]), /fail closed/);
-  assert.match(run([[list, open], [comments, new Error("HTTP 502")]]), /fail closed/);
-  assert.match(run([[list, "77"]]), /fail closed/);
+  assert.match(run([[list, "77 abc"]]), /fail closed/, "an unreadable answer refuses");
 });
 
 check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)", () => {

@@ -1277,7 +1277,55 @@ export function safeReviewCaptureText(value, label) {
   return `[${label} omitted because it contained secret-shaped text; SHA-256 ${sha256Bytes(Buffer.from(text, "utf8"))}]`;
 }
 
+// Why a review produced no verdict, as one FIXED sentence: it never echoes raw
+// stderr or spawn error text, so it is safe to print even when the capture's
+// stderr is redacted. It reads the RAW result (before redaction would hide the
+// signature) but only Codex's own `ERROR` lines, so diff or transcript text that
+// merely mentions "401" cannot pick the category. Signatures are the observed or
+// explicit markers only; anything else is reported as an unknown cause. A valid
+// CLEAN or BLOCKERS verdict is not a failure (null).
+// Bare `ERROR: …`, or an optional ISO timestamp then `ERROR: …` / `ERROR <target>: …`.
+const CODEX_ERROR_LINE_RE = /^\s*(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\s+)?ERROR(?::|\s+[\w:.-]+:)/;
+const REVIEW_FAILURE_SIGNATURES = [
+  [(line) => /\breason:\s*max_output_tokens\b/.test(line), "Codex reached its response limit."],
+  [
+    (line) => /hit your usage limit|usage_limit_reached|rate_limit_exceeded|rate limit reached|\b429 Too Many Requests\b|\bstatus:? 429\b/i.test(line),
+    "Codex reported an account usage or rate limit.",
+  ],
+  [
+    (line) => /\b401 Unauthorized\b|\b403 Forbidden\b|\bstatus:? 40[13]\b|invalid_api_key|token_expired/i.test(line),
+    "Codex reported an authentication error.",
+  ],
+  [
+    (line) => /stream disconnected before completion|error sending request for url|connection (?:reset|refused)/i.test(line),
+    "The connection to Codex ended before the review finished.",
+  ],
+];
+function codexReviewFailureReason(result = {}) {
+  if (result.error) {
+    if (result.error.code === "ETIMEDOUT") return "The review script reached its timeout.";
+    if (result.error.code === "ENOBUFS") return "Codex produced more output than the review script accepts.";
+    return "The Codex process could not start.";
+  }
+  if (codexReviewProofVerdict(result) || codexReviewIsBlockers(result)) return null;
+  if (typeof result.status !== "number") {
+    return result.signal
+      ? "The Codex process was terminated before a verdict."
+      : "Codex ended without an exit code or a verdict. The cause is unknown.";
+  }
+  if (result.status === 0) return "Codex exited successfully without a valid verdict.";
+  const errorLines = String(result.stderr ?? "").split(/\r?\n/).filter((line) => CODEX_ERROR_LINE_RE.test(line));
+  const match = REVIEW_FAILURE_SIGNATURES.find(([matches]) => errorLines.some(matches));
+  if (match) return match[1];
+  // Startup only (markers may sit on separate ERROR lines): a later command sandbox error has no session-start marker.
+  if (errorLines.some((line) => SESSION_START_FAILURE_RE.test(line)) && errorLines.some((line) => SANDBOX_SETUP_FAILURE_RE.test(line))) {
+    return "Codex reported a Windows sandbox error while starting the review.";
+  }
+  return `Codex exited with code ${result.status} without a verdict. The cause is unknown.`;
+}
+
 export function captureReviewOutput(root, result, runInfo = {}) {
+  const failureReason = codexReviewFailureReason(result);
   const outPath = path.join(root, ".claude", "session-state", "codex-review-latest.txt");
   mkdirSync(path.dirname(outPath), { recursive: true });
   const runLines = [];
@@ -1296,6 +1344,7 @@ export function captureReviewOutput(root, result, runInfo = {}) {
     `Generated: ${new Date().toISOString()}`,
     ...runLines,
     `Exit code: ${result.status ?? "unknown"}`,
+    ...(failureReason ? [`Failure reason: ${failureReason}`] : []),
     "",
     "## STDOUT",
     "",
@@ -1306,7 +1355,7 @@ export function captureReviewOutput(root, result, runInfo = {}) {
     safeReviewCaptureText(result.stderr, "STDERR"),
   ].join("\n");
   writeFileSync(outPath, body, "utf8");
-  return outPath;
+  return { capturePath: outPath, failureReason };
 }
 
 // ── Sol pre-flight: run Sol only on a quiet head (Mason, 2026-10-23) ─────────
@@ -2506,14 +2555,12 @@ function runFocusedSolCheck(root, options, { baseRef, baseSha, headSha, prompt, 
     if (reviewWorkspace?.root) removeSanitizedReviewWorkspace(reviewWorkspace.root);
   }
   const result = codexRun.result;
-  const capturePath = captureReviewOutput(root, result, { ...codexRun, primaryBin: codexBin });
+  const { capturePath, failureReason } = captureReviewOutput(root, result, { ...codexRun, primaryBin: codexBin });
   process.stdout.write(`Sol ${label} captured to ${capturePath} (binary: ${codexRun.codexBin})\n`);
+  if (failureReason) process.stderr.write(`Review failure: ${failureReason}\n`);
   if (result.error) {
-    process.stderr.write(
-      result.error.code === "ETIMEDOUT"
-        ? `${timeoutMessage(options.timeoutSec)}\n`
-        : `Failed to launch Codex (${codexRun.codexBin}): ${result.error.message}\n`,
-    );
+    // The fixed "Review failure:" line above already names any other error.
+    if (result.error.code === "ETIMEDOUT") process.stderr.write(`${timeoutMessage(options.timeoutSec)}\n`);
     return 2;
   }
   if (!codexReviewProofVerdict({ status: result.status, stdout: result.stdout })) {
@@ -3270,15 +3317,13 @@ export function run(argv = process.argv.slice(2)) {
     if (reviewWorkspace?.root) removeSanitizedReviewWorkspace(reviewWorkspace.root);
   }
 
-  const capturePath = captureReviewOutput(root, result, { ...codexRun, primaryBin: codexBin });
+  const { capturePath, failureReason } = captureReviewOutput(root, result, { ...codexRun, primaryBin: codexBin });
   process.stdout.write(`Codex review captured to ${capturePath} (binary: ${codexRun.codexBin})\n`);
+  if (failureReason) process.stderr.write(`Review failure: ${failureReason}\n`);
 
   if (result.error) {
-    if (result.error.code === "ETIMEDOUT") {
-      process.stderr.write(`${timeoutMessage(options.timeoutSec)}\n`);
-    } else {
-      process.stderr.write(`Failed to launch Codex (${codexRun.codexBin}): ${result.error.message}\n`);
-    }
+    // The fixed "Review failure:" line above already names any other error.
+    if (result.error.code === "ETIMEDOUT") process.stderr.write(`${timeoutMessage(options.timeoutSec)}\n`);
     clearCodexPushProof({ root, headSha: headBefore });
     return 2;
   }

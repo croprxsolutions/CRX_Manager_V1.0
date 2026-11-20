@@ -135,6 +135,7 @@ Releases of CRX Manager, newest first.
 * bring staging up to main (replaces #1742) (#1750)
 
 #### 🧩 Other
+* review rules: remove release rule 4; version-only package.json change is not a gate file (#1990) (#2078)
 * review rules: release rule 4, only code changed since the previous Sol round blocks (#1990) (#2074)
 * review rules: release #1990 ships with three named known issues (#2064-#2066) (#2067)
 * review rules: release rule 1 covers unchanged live lines inside a changed function (#1990) (#2059)

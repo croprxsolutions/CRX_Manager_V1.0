@@ -54,6 +54,34 @@ BEGIN
         AND policyname IN ('jobs_insert', 'jobs_update', 'jobs_delete')) <> 3 THEN
     RAISE EXCEPTION 'JOBS_DIRECT_WRITES_PREFLIGHT: the three write policies are not all present (already applied?)';
   END IF;
+  -- The ROLLBACK above restores this exact pre-state, so refuse a drifted one rather than let a later
+  -- rollback grant more than live had.
+  IF (SELECT string_agg(policyname || ':' || cmd || ':' || permissive || ':' || array_to_string(roles, '+') || ':'
+        || coalesce(qual, '') || ':' || coalesce(with_check, ''), ',' ORDER BY policyname)
+        FROM pg_policies WHERE schemaname = 'public' AND tablename = 'jobs' AND cmd <> 'SELECT')
+     IS DISTINCT FROM 'jobs_delete:DELETE:PERMISSIVE:authenticated:is_admin():,'
+       || 'jobs_insert:INSERT:PERMISSIVE:authenticated::(is_admin() OR is_sales_rep()),'
+       || 'jobs_update:UPDATE:PERMISSIVE:public:(is_admin() OR is_sales_rep()):(is_admin() OR is_sales_rep())'
+     OR (SELECT string_agg(v.priv || ':' || a.attname, ',' ORDER BY v.priv, a.attname)
+           FROM pg_attribute a, unnest(ARRAY['INSERT', 'UPDATE']) v(priv)
+          WHERE a.attrelid = 'public.jobs'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+            AND has_column_privilege('authenticated', 'public.jobs', a.attname, v.priv))
+        IS DISTINCT FROM (SELECT string_agg(v.priv || ':' || c, ',' ORDER BY v.priv, c)
+           FROM unnest(ARRAY['INSERT', 'UPDATE']) v(priv), unnest(string_to_array('additional_info,application_service_id,'
+             || 'applicator_id,applied_acres,batch_id,batch_ref,call_date,carrier_rate_gpa,commission_split,consultant_id,'
+             || 'created_at,created_by,customer_id,date_expires,date_proposed,deleted_at,estimated_hours,ground_crew_id,id,'
+             || 'internal_memo,invoice_id,job_date,job_number,last_printed_by,loader_comment,loader_tank_capacity,notes,'
+             || 'printed_at,priority,quote_id,quote_section_id,recipe_id,schedule_date,scheduled_time,season,status,tags,'
+             || 'time_proposed,total_acres,total_price_cents,updated_at,updated_by,vehicle_id', ',')) c)
+     OR has_table_privilege('authenticated', 'public.jobs', 'INSERT') OR has_table_privilege('authenticated', 'public.jobs', 'UPDATE')
+     OR NOT has_table_privilege('authenticated', 'public.jobs', 'DELETE')
+     OR has_table_privilege('authenticated', 'public.jobs', 'TRUNCATE')
+     OR EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'public']) r(role), unnest(ARRAY['INSERT', 'UPDATE']) v(priv)
+                 WHERE has_any_column_privilege(r.role, 'public.jobs', v.priv))
+     OR EXISTS (SELECT 1 FROM unnest(ARRAY['anon', 'public']) r(role), unnest(ARRAY['DELETE', 'TRUNCATE']) v(priv)
+                 WHERE has_table_privilege(r.role, 'public.jobs', v.priv)) THEN
+    RAISE EXCEPTION 'JOBS_DIRECT_WRITES_PREFLIGHT: job write policies or grants differ from the documented pre-state; re-read live and update this file';
+  END IF;
 END
 $preflight$;
 

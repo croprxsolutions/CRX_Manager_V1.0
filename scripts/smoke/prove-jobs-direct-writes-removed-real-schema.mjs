@@ -327,7 +327,8 @@ async function main() {
   const writeAcl = () => scalar(`SELECT coalesce((SELECT string_agg(privilege_type || ':' || column_name, ',' ORDER BY privilege_type, column_name)
       FROM information_schema.column_privileges WHERE table_schema = 'public' AND table_name = 'jobs'
        AND grantee IN ('authenticated', 'anon', 'PUBLIC') AND privilege_type IN ('INSERT', 'UPDATE')), '')
-    || '|' || has_table_privilege('authenticated', 'public.jobs', 'DELETE')::text || '|'
+    || '|' || (SELECT string_agg(r || ':' || p || ':' || has_table_privilege(r, 'public.jobs', p)::text, ',' ORDER BY r, p)
+      FROM unnest(ARRAY['authenticated', 'anon', 'public']) r, unnest(ARRAY['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) p) || '|'
     || coalesce((SELECT string_agg(policyname || ':' || cmd || ':' || permissive || ':' || array_to_string(roles, '+') || ':'
       || coalesce(qual, '') || ':' || coalesce(with_check, ''), ',' ORDER BY policyname) FROM pg_policies
       WHERE schemaname = 'public' AND tablename = 'jobs'), '');`);
@@ -335,6 +336,16 @@ async function main() {
 
   // 2. Apply, then a second apply is refused.
   stageText('candidate.sql', lf(CANDIDATE));
+  // A drifted pre-state (narrower or wider than the header documents) is refused: the rollback could not restore it.
+  for (const drift of ['REVOKE DELETE ON public.jobs FROM authenticated;', 'GRANT TRUNCATE ON public.jobs TO authenticated;',
+    'GRANT UPDATE (completed_at) ON public.jobs TO authenticated;', 'ALTER POLICY jobs_delete ON public.jobs USING (is_admin() AND false);']) {
+    const r = docker([...psqlArgs()], { allowFailure: true, input: `BEGIN;\n${drift}\n\\i /tmp/candidate.sql\nROLLBACK;\n` });
+    assert.notEqual(r.status, 0, `a drifted pre-state must be refused: ${drift}`);
+    assert.match(`${r.stdout}
+${r.stderr}`, /differ from the documented pre-state/, drift);
+  }
+  assert.equal(writeAcl(), preAcl, 'the drift probes must leave the pre-state unchanged');
+  console.log('[case] a drifted pre-state (grant or policy) is refused before anything changes');
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
   ledger(path.basename(CANDIDATE, '.sql'));
@@ -375,6 +386,9 @@ async function main() {
   const rb = apply('rollback.sql');
   assert.equal(rb.status, 0, rb.output);
   assert.equal(writeAcl(), preAcl, 'the header rollback does not restore the pre-state exactly');
+  assert.equal(privs('authenticated'), 'truetruetruefalse', 'after rollback: authenticated should hold INSERT, UPDATE, DELETE only');
+  assert.equal(privs('anon'), 'falsefalsefalsefalse');
+  assert.equal(privs('public'), 'falsefalsefalsefalse');
   console.log('[case] the header ROLLBACK runs as written and restores the exact pre-state grants and policies');
   console.log('JOBS_DIRECT_WRITES_REMOVED_PROOF_PASS');
 }

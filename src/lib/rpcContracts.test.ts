@@ -3102,7 +3102,6 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _sync_job_holds: 'internal convergent hold-sync helper; direct client EXECUTE is revoked',
   _sync_planned_holds: 'internal convergent hold-sync helper called within parent transactions',
   _sync_quote_job_reservations: 'internal convergent reservation-sync helper called by parent RPCs',
-  auto_expire_quotes: 'service-role maintenance sets only currently-expirable quote statuses',
   check_idempotency: 'idempotency infrastructure helper; mutation only purges an expired key',
   check_idempotency_intent:
     'idempotency infrastructure helper (Section 07 gauntlet finding 2); mutation only purges an expired key, and it raises rather than replays when the actor or request fingerprint differs; direct client EXECUTE is revoked',

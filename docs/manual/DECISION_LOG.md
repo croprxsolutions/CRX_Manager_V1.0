@@ -1,5 +1,89 @@
 # Decision Log
 
+## 2026-11-20 — Release #1990: split the gate files out; release rule 4 removed
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, split it", then "Yes, go ahead").** Stop adding Sol release rules. The
+release's tool and guard files (the gate files `owner-accept-sol-finding.mjs` refuses) go to `main` in their own hotfix,
+so #1990 no longer changes any of them and Mason can accept its remaining Sol findings by name, each kept on a tracked
+issue. **What changes:** release rule 4 (`RELEASE_PRIOR_ROUND_HEAD`, entry below) is removed, since Sol round 56 rated it
+a BLOCKER and the accepts replace it. A `package.json` or `package-lock.json` that differs from the release's fork point
+only in its own version number no longer counts as a gate file (`packageVersionOnlyChange` in
+`.claude/hooks/sol-accept-lib.mjs`), because the release bot raises that number on every release; any dependency or
+script change in those files still counts. Every other gate is unchanged.
+
+## 2026-11-20 — Release #1990: only code changed since the previous Sol round blocks
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, adopt it"; proposed by Taha in Slack).** From Sol round 55 on
+release #1990 (head `28e3cf7ed`), a finding blocks the release only when it is in a file the candidate changes since
+the previous round's head. Findings in files that round already reviewed go on tracked issues (round 55: #2069-#2073)
+for next week's fixes. **Why:** each of 55 rounds found new items in the same large billing functions, so the release
+could not finish; live has no real sales yet. **What it does:** release rule 4 in `scripts/write-codex-push-proof.mjs`
+(`RELEASE_PRIOR_ROUND_HEAD`) gives Sol the wrapper-computed list of files changed since that head; a finding whose
+causing lines are all in other files is tagged `[PRIOR-ROUND]` and listed under RELEASE FOLLOW-UPS. A finding in a
+changed file, or one a change makes newly reachable, still blocks. Move the head to each new round's head; clear it
+after the release lands. Every other gate is unchanged.
+
+## 2026-11-20 — Release #1990 ships with three named known issues
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, add the rule"; Taha agreed in Slack).** Release #1990 ships today.
+Three Sol findings on head `ff46f6ca5` are known issues, each on a tracked issue and fixed before next week's release:
+#2064 (`20270120150000` `_enforce_below_cost_line`), #2065 (`20270129150000` `_enforce_booking_live_job_rules`) and
+#2066 (`20270109100200` `_return_customer_line_share`). **Why:** live has no real sales yet, Sol has found new items
+on every round of this release (round 54), and owner-accepts stay refused on release PRs that touch gate files.
+**What it does:** release rule 3 in `scripts/write-codex-push-proof.mjs` (`RELEASE_KNOWN_ISSUES`) tags only those
+findings, in only those functions; any other finding, including a different one in the same function, still blocks.
+Clear the list after the release lands. Every other gate is unchanged.
+
+## 2026-11-20 — Release rule 1 also covers unchanged live lines inside a changed function
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, both" to logging Sol's #1990 findings 1 and 2 as tracked issues, then
+"Yes, loosen it").** Rule 1 below also covers a finding inside a function the release changes when every line causing
+it is copied unchanged from the live (base) definition and live already has the same defect, reachable the same way.
+It goes on a tracked issue and does not hold the release. A defect that any changed line introduces, widens or makes
+newly reachable still blocks. First case: `20270129171000` `_save_field_app_invoice_impl_20260714` (lines 262 and
+298 match live; issue #2058). **What it does:** the release rules in `scripts/write-codex-push-proof.mjs`; every other
+gate is unchanged.
+
+## 2026-11-20 — Release #1990: two release review rules, Sol past the round cap, field-app draft finding accepted
+
+**Decision (Mason, in chat, 2026-11-20: "yes do both rules"), asked for by Taha.** For release PR #1990 and later
+release PRs (`release/next` into `main`):
+
+1. **Live and unchanged code.** A Sol or migration-reviewer finding inside a database function whose body at the
+   reviewed head is byte-identical to the live definition (a read-only comparison against live `pg_proc.prosrc`,
+   recorded with the proof) is code the release does not change. It goes on a tracked GitHub issue for Taha's
+   follow-up and does not hold the release. Findings in new or changed code still block.
+2. **Self-abort under an absent live condition.** A finding whose only effect is that a migration aborts its own
+   apply (full rollback), under a live data condition the migration's record shows absent with read-only live
+   evidence, re-checked read-only right before the apply with the result posted on the PR, does not hold the
+   release. First case: `20270109100400` aborts its backfill if a posted return credit has an unlinked line
+   (live: 0 posted credit memos).
+
+**Also decided:** release #1990 may have its Sol review past the round cap today. Mason accepts the
+`20270129171000` finding that a field-application draft saved before the upgrade is not re-checked (live has 0
+such drafts; first recorded for #2050 on 2026-11-19).
+
+**What it does:** the Sol review instructions in `scripts/write-codex-push-proof.mjs` (release reviews only) and the
+`migration-drift-reviewer` and `rls-security-reviewer` charters carry both rules. Owner-accepts stay refused on
+release PRs that touch gate files; every other gate is unchanged.
+
+## 2026-11-19 — #2050 (release #1990 Sol #2 fix) may have Sol round 5; old drafts are not re-checked
+
+**Decision (Mason, in chat, 2026-11-19: "Yes, accept #1, fix #2" and "Yes, push it").** PR #2050 may have its Sol
+review in round 5. Mason accepts that a field-application draft saved before `20270129171000` is applied is not
+re-checked by it (Sol round 4 finding 1): live has 0 field-application invoices with a product line and 0 products
+without a sold unit. **What it does:** the round-4 test-script finding is fixed on #2050; every other gate is unchanged.
+
+## 2026-11-19 — Every product must have a sold unit (release #1990 Sol #2 fix, branch `claude/release-fix-sol2`)
+
+**Decision (Mason, in chat, 2026-11-19: "Yes, simplify").** Migration `20270129171000` makes a product's sold unit
+(`products.inventory_unit`) required, with at least one letter or digit, instead of scanning old field-application
+drafts and locking tables while it installs. **Why:** Sol rounds 1-3 on the scan found a new timing gap each round;
+live has 0 products without a sold unit and 0 field-application invoices with product lines, so a hard rule closes
+the per-gallon-price-times-ounces gap for good. **Cost:** a product can no longer be created or saved without its sold
+unit. The field-application saves keep refusing such a line and keep `ACTOR_MISMATCH`. A product-row lock during the
+save and a server-side unit check on posting are follow-ups, not this fix.
+
 ## 2026-11-19 — #1997: Mason owner-accepted 7 Sol finding(s) at `994795d9e03e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1997 at `994795d9e03e` (base `ded769b690d0`) found 7 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

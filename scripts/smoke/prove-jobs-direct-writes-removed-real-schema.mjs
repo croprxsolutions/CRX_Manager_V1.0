@@ -338,7 +338,7 @@ async function main() {
   stageText('candidate.sql', lf(CANDIDATE));
   // A drifted pre-state (narrower or wider than the header documents) is refused: the rollback could not restore it.
   for (const drift of ['REVOKE DELETE ON public.jobs FROM authenticated;', 'GRANT TRUNCATE ON public.jobs TO authenticated;',
-    'GRANT UPDATE (completed_at) ON public.jobs TO authenticated;', 'ALTER POLICY jobs_delete ON public.jobs USING (is_admin() AND false);']) {
+    'REVOKE UPDATE (notes) ON public.jobs FROM authenticated;', 'ALTER POLICY jobs_delete ON public.jobs USING (is_admin() AND false);']) {
     const r = docker([...psqlArgs()], { allowFailure: true, input: `BEGIN;\n${drift}\n\\i /tmp/candidate.sql\nROLLBACK;\n` });
     assert.notEqual(r.status, 0, `a drifted pre-state must be refused: ${drift}`);
     assert.match(`${r.stdout}

@@ -32,16 +32,22 @@
 --     status, or another blend ticket's invoice on the same job, blocks double billing; an unnamed product still counts
 --     in the rate and unit checks; the application service is tested by its key (a NULL optional column no longer
 --     drops the fee); an unconvertible quantity is refused; the $0 approval basis names which growers get $0.
+-- Round 6 (Sol r6): a billed blend ticket can't move to another job (new trigger), a live invoice the job points at
+-- through jobs.invoice_id blocks double billing, and a sent entry with no product or line id counts as unreadable.
 -- A typed price still saves. Never a silent fallback to the list price. Grants, owners, security mode, search_path and
 -- volatility are unchanged (CREATE OR REPLACE; the postflight checks them). Stored invoices are never re-priced.
 -- ROLLBACK: re-run the two bodies from 20270129140000 (lines 91-204, 206-1231), then
--- DROP FUNCTION public._quote_item_sent_field_20270129(uuid, uuid).
+-- DROP FUNCTION public._quote_item_sent_field_20270129(uuid, uuid); DROP TRIGGER blend_ticket_billed_keeps_job_20270129
+-- ON public.blend_tickets; DROP FUNCTION public._blend_ticket_billed_keeps_job_20270129().
 
 DO $preflight$
 BEGIN
   IF to_regprocedure('public._quote_item_sent_unit_20270128(uuid,uuid)') IS NULL
      OR to_regprocedure('public._unit_matches_stock_unit(text,text)') IS NULL THEN
     RAISE EXCEPTION 'KI81_FIELD_PREFLIGHT: 20270129140000 or 20270121110000 is missing';
+  END IF;
+  IF to_regprocedure('public._blend_ticket_billed_keeps_job_20270129()') IS NOT NULL THEN
+    RAISE EXCEPTION 'KI81_FIELD_PREFLIGHT: _blend_ticket_billed_keeps_job_20270129 already exists (already applied)';
   END IF;
   IF to_regprocedure('public._quote_item_sent_field_20270129(uuid,uuid)') IS NOT NULL THEN
     RAISE EXCEPTION 'KI81_FIELD_PREFLIGHT: _quote_item_sent_field_20270129 already exists (already applied)';
@@ -86,6 +92,27 @@ AS $fn$
 $fn$;
 ALTER FUNCTION public._quote_item_sent_field_20270129(uuid, uuid) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._quote_item_sent_field_20270129(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
+
+-- KI-81 (Sol r6): a billed blend ticket keeps its job, so the cross-ticket double-billing check always sees the job a
+-- ticket billed. Voiding the ticket's invoice returns it to unbilled, after which it can move.
+CREATE FUNCTION public._blend_ticket_billed_keeps_job_20270129()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $fn$
+BEGIN
+  IF OLD.payment_status = 'billed' AND NEW.job_id IS DISTINCT FROM OLD.job_id THEN
+    RAISE EXCEPTION 'BLEND_TICKET_BILLED_JOB_LOCKED: a billed blend ticket can''t move to another job. Void its invoice first.'
+      USING ERRCODE = 'P0001';
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+ALTER FUNCTION public._blend_ticket_billed_keeps_job_20270129() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._blend_ticket_billed_keeps_job_20270129() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER blend_ticket_billed_keeps_job_20270129
+  BEFORE UPDATE OF job_id ON public.blend_tickets
+  FOR EACH ROW EXECUTE FUNCTION public._blend_ticket_billed_keeps_job_20270129();
 
 CREATE OR REPLACE FUNCTION public._field_app_sent_quote_price_cents(
   p_product_id   uuid,
@@ -247,7 +274,12 @@ BEGIN
                 AND (q8.expires_at IS NULL OR q8.expires_at >= p_on)
                 AND (jsonb_typeof(sv8.snapshot_data->'sections') IS DISTINCT FROM 'array'
                      OR EXISTS (SELECT 1 FROM jsonb_array_elements(sv8.snapshot_data->'sections') s8(value)
-                                 WHERE jsonb_typeof(s8.value->'items') IS DISTINCT FROM 'array'))) THEN
+                                 WHERE jsonb_typeof(s8.value->'items') IS DISTINCT FROM 'array')
+                     OR EXISTS (SELECT 1 FROM jsonb_array_elements(sv8.snapshot_data->'sections') s9(value)
+                                 CROSS JOIN LATERAL jsonb_array_elements(s9.value->'items') i9(value)
+                                 WHERE jsonb_typeof(s9.value->'items') = 'array'
+                                   AND (jsonb_typeof(i9.value) IS DISTINCT FROM 'object'
+                                        OR NOT (i9.value ? 'product_id') OR NOT (i9.value ? 'quote_item_id'))))) THEN
     RAISE EXCEPTION 'QUOTE_RESEND_REQUIRED: a sent quote for this grower can''t be read, so it can''t show the price that was sent for %. Or type the price on this invoice line, then save again.',
       COALESCE((SELECT pr.product_name FROM products pr WHERE pr.id = p_product_id), 'this product')
       USING ERRCODE = 'P0001';
@@ -537,8 +569,16 @@ BEGIN
         AND COALESCE(i.status, '') NOT IN ('voided', 'cancelled')
         AND i.deleted_at IS NULL
     ) OR EXISTS (
+      -- (Sol r6) a live invoice the job itself points at (jobs.invoice_id), even with no backlink, bills it too.
+      SELECT 1 FROM jobs j2
+        JOIN invoices i ON i.id = j2.invoice_id
+      WHERE j2.id = v_ticket.job_id
+        AND COALESCE(i.status, '') NOT IN ('voided', 'cancelled')
+        AND i.deleted_at IS NULL
+    ) OR EXISTS (
       -- (Sol r3/r4) a blend invoice carries blend_ticket_id, not job_id: another ticket on the same job that is
-      -- already invoiced bills the same application.
+      -- already invoiced bills the same application. A billed ticket can't move to another job (trigger in this
+      -- file), so its job here is the job it billed.
       SELECT 1 FROM invoices i
         JOIN blend_tickets bt ON bt.id = i.blend_ticket_id
       WHERE bt.job_id = v_ticket.job_id
@@ -1428,8 +1468,8 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'bf38da992c8a252e7dad78573457d840', false, 'v'),
-        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '58fe2de53ba01e4adf50df5236c81981', true, 'v')
+        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', '95a6f22e8b4738b13fc76c74018382e7', false, 'v'),
+        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'a1ef962eee94cdf259955dc72140da8c', true, 'v')
       ) AS pin(sig, body_md5, secdef, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL
@@ -1446,6 +1486,10 @@ BEGIN
      OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
                  WHERE p.oid = to_regprocedure('public._quote_item_sent_field_20270129(uuid,uuid)') AND a.grantee <> p.proowner) THEN
     RAISE EXCEPTION 'KI81_FIELD_POSTFLIGHT: _quote_item_sent_field_20270129 is not the private, stable, postgres-owned helper this file installs';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.blend_tickets'::regclass
+                  AND tgname = 'blend_ticket_billed_keeps_job_20270129' AND tgenabled = 'O') THEN
+    RAISE EXCEPTION 'KI81_FIELD_POSTFLIGHT: the billed-ticket job trigger is missing or disabled';
   END IF;
   IF current_setting('crx.ki81f_xid', true) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'KI81_FIELD_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';

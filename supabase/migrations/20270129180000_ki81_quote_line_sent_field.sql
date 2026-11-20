@@ -15,12 +15,13 @@
 --     QUOTE_RESEND_REQUIRED, "Or type the price on this invoice line". The blend caller rewrites that ending to "Fix or
 --     resend the quote for <farm>".
 --     Also (Luna/Sol r1 on this fix): (a) a sent quote that listed the product on one of the billed fields, but whose line
---     is no longer on that field (moved or removed with no resend), stops instead of dropping that field to the list
+--     is no longer on that field with that product (moved, removed or swapped with no resend), stops instead of dropping that field to the list
 --     price; (b) one quote price is billed for the whole line, so a product quoted on some of the billed fields but not
 --     others stops instead of spreading one field's price.
 --  2. create_invoice_from_blend_ticket: the job-quote check counts a moved line like a unit mismatch (named "was moved
 --     to another field"), a stored pick clears a ticket line only on an unmoved, matching-unit line, and a ticket that
---     bills the owner per unit on a field other than the job quote section's field stops (Luna/Sol r1).
+--     bills the owner per unit on a field other than the job quote section's field stops (Luna/Sol r1), as does a line the
+--     job's quote listed on that field when sent that is no longer there with that product (Sol r2).
 -- A typed price still saves. Never a silent fallback to the list price. Grants, owners, security mode, search_path and
 -- volatility are unchanged (CREATE OR REPLACE; the postflight checks them). Stored invoices are never re-priced.
 -- ROLLBACK: re-run the two bodies from 20270129140000 (lines 91-204, 206-1231), then
@@ -182,8 +183,9 @@ BEGIN
     RAISE EXCEPTION 'QUOTE_RESEND_REQUIRED: % Or type the price on this invoice line, then save again.', v_msg
       USING ERRCODE = 'P0001';
   END IF;
-  -- KI-81 field (Sol r1 on this fix): a sent quote that listed this product on one of these fields, but whose line is no
-  -- longer on that field (moved or removed with no resend), would otherwise drop that field to the list price.
+  -- KI-81 field (Sol r1/r2 on this fix): a sent quote that listed this product on one of these fields, but whose line is
+  -- no longer on that field with that product (moved, removed or swapped to another product with no resend), would
+  -- otherwise drop that field to the list price.
   SELECT format('%s was quoted for one of these fields, but that quote line was moved or removed after the quote was sent, so its price can''t be billed.',
                 COALESCE((SELECT pr.product_name FROM products pr WHERE pr.id = p_product_id), 'A product'))
     INTO v_msg
@@ -205,7 +207,8 @@ BEGIN
                        JOIN quote_sections qs2 ON qs2.id = qi2.section_id AND qs2.quote_id = qi2.quote_id
                       WHERE qi2.quote_id = q.id
                         AND qi2.id::text = it.value->>'quote_item_id'
-                        AND qs2.field_id::text = s.value->>'field_id')
+                        AND qi2.product_id::text = it.value->>'product_id'
+                        AND qs2.field_id::text = NULLIF(btrim(s.value->>'field_id'), ''))
    LIMIT 1;
   IF v_msg IS NOT NULL THEN
     RAISE EXCEPTION 'QUOTE_RESEND_REQUIRED: % Or type the price on this invoice line, then save again.', v_msg
@@ -749,6 +752,31 @@ BEGIN
                                AND public._quote_item_sent_field_20270129(q2.quote_id, q2.id) IS NOT DISTINCT FROM (SELECT s2.field_id::text FROM quote_sections s2 WHERE s2.id = q2.section_id)))
      ORDER BY btp.sequence_order, btp.id, qi.id
      LIMIT 1;
+    -- KI-81 field (Sol r2 on this fix): a line the job's quote listed on the job section's field in the version the grower
+    -- was sent, for a product on this ticket, that is no longer there with that product (moved, removed or swapped with
+    -- no resend) stops too, so the ticket can't bill the remaining line's price without staff resolving the moved one.
+    IF v_unit_msg IS NULL THEN
+      SELECT format('%s was quoted for this field, but that quote line was moved or removed after the quote was sent, so its price can''t be billed.',
+                    COALESCE(it.value->>'product_name', 'A product'))
+        INTO v_unit_msg
+        FROM (SELECT qs5.quote_id, qs5.field_id FROM quote_sections qs5 WHERE qs5.id = v_quote_section_id) js
+        CROSS JOIN LATERAL (SELECT v.snapshot_data FROM quote_versions v
+                             WHERE v.quote_id = js.quote_id ORDER BY v.version_number DESC LIMIT 1) sv
+        CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(sv.snapshot_data->'sections') = 'array'
+                                                     THEN sv.snapshot_data->'sections' ELSE '[]'::jsonb END) s(value)
+        CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(s.value->'items') = 'array'
+                                                     THEN s.value->'items' ELSE '[]'::jsonb END) it(value)
+       WHERE NULLIF(btrim(s.value->>'field_id'), '') = js.field_id::text
+         AND it.value->>'product_id' IN (SELECT btp.product_id::text FROM blend_ticket_products btp
+                                          WHERE btp.blend_ticket_id = p_blend_ticket_id AND COALESCE(btp.rate_per_acre, 0) > 0)
+         AND NOT EXISTS (SELECT 1 FROM quote_items qi6
+                           JOIN quote_sections qs6 ON qs6.id = qi6.section_id AND qs6.quote_id = qi6.quote_id
+                          WHERE qi6.quote_id = js.quote_id
+                            AND qi6.id::text = it.value->>'quote_item_id'
+                            AND qi6.product_id::text = it.value->>'product_id'
+                            AND qs6.field_id = js.field_id)
+       LIMIT 1;
+    END IF;
     -- KI-81 field (Luna/Sol r1 on this fix): the job's quote section is for one field; it prices the owner's per-unit
     -- share only on that field. A ticket billing the owner per unit on another field stops instead of carrying it over.
     IF v_unit_msg IS NULL AND EXISTS (
@@ -1300,8 +1328,8 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'f31882d022fba56a482d467e3b42dc43', false, 'v'),
-        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '0e3b5121a5d28a9d2ee61382c7c5215d', true, 'v')
+        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'a204c0911f7f3c04a2213de61f1eea32', false, 'v'),
+        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'cdff857346b0b04aa387f934ef500bbc', true, 'v')
       ) AS pin(sig, body_md5, secdef, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL

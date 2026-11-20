@@ -694,6 +694,21 @@
     },
     {
       "predicate": "actor-forgery",
+      "violation_key": "get_sales_summary_report(p_group_by text, p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)",
+      "justification": "Re-reviewed 2026-10-20 against live pg_get_functiondef after migration 20261019010000 (PR #957, cost/margin admin-only, applied 2026-10-19) changed the pinned wrapper digest. Not actor identity: p_group_by is a text grouping selector on a STABLE, read-only report; the predicate matches it only because its name fits p_%by and the wrapper forwards it to its private implementation before any ACTOR_MISMATCH refusal (there is no actor to refuse). Neither the wrapper nor the implementation contains INSERT/UPDATE/DELETE/MERGE or an exception handler, and nothing attributes a row to anyone. Migration 20261019010000 (PR #957, cost/margin admin-only, applied 2026-10-19) renamed the reviewed body unchanged to _get_sales_summary_report_cost_impl_20261019 (EXECUTE: postgres only) and installed a SECURITY DEFINER wrapper that sets v_admin := public.is_admin(), returns the implementation's rows, and blanks total_cost/total_profit/margin_pct (CASE WHEN v_admin) for non-admins. The implementation is the body reviewed 2026-09-12: it checks active admin/sales_rep via profiles.id = auth.uid() before RETURN QUERY and uses p_group_by only in CASE p_group_by. Revenue stays visible to reps by design. This is scanner noise, not an accepted actor-forgery hole. Pins cover the wrapper, the private implementation, auth.uid() and every role helper either body calls; any change to a pinned definition, owner or EXECUTE grant un-matches this exception and the flag returns for a fresh review. Digests were read live 2026-10-20 with the sweep's own contract expression, after the review above. Re-read live 2026-11-09 after 20261229150000_sales_reports_per_payer: the impl now splits Bill Split lines per payer via _sales_line_payers; p_group_by is still a grouping selector, not an actor. Re-read 2026-11-19 for KI-119 (20270201100000): the wrapper gains PERFORM public._require_page_access('sales-reports') as its first statement, which takes no actor and only refuses; p_group_by is still a grouping selector, not an actor. Post-apply wrapper digest computed read-only on live with the sweep's own contract expression, the live definition with only its body swapped (the same query reproduced the current pin c6e0c816...). Equals live once applied; the entry above covers the pre-apply definition. The new helper _require_page_access is pinned too (Sol r2): its digest was computed in the container prover with the candidate applied, where the same query reproduced this wrapper's live-computed pin exactly.",
+      "dated": "2026-11-19",
+      "suspect_param": "p_group_by",
+      "reviewed_contracts": {
+        "auth.uid()": "d0f4a847e4284ab3265335fd66ce2a12",
+        "public._get_sales_summary_report_cost_impl_20261019(p_group_by text, p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)": "8a4e22e795ded148b9bec7bbe132016b",
+        "public._require_page_access(p_page text)": "c35c2891f0f4809f43160bd4b3de59ad",
+        "public.get_sales_summary_report(p_group_by text, p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)": "d684abb34b3d72641c19e5d93c417a53",
+        "public.is_admin()": "8c4f9cb1ee80faa22ed435f970e2fd9f",
+        "public.is_sales_rep()": "b8de9969af7ef55d133e7b20758ff1a0"
+      }
+    },
+    {
+      "predicate": "actor-forgery",
       "violation_key": "price_order(p_order_id uuid, p_items jsonb, p_performed_by uuid, p_idempotency_key text)",
       "justification": "Re-reviewed 2026-11-02 after replay-binding batch 4b (20261103130000, applied live 2026-11-02 Central) renamed this wrapper to the postgres-only _<name>_replay_impl_20261015 and put a new wrapper in front. The new wrapper binds v_actor := auth.uid(), raises IDEMPOTENCY_KEY_REQUIRED without a key, then calls the same pinned _begin_below_cost_money_write guard (AUTH_REQUIRED, ACTOR_MISMATCH, INSUFFICIENT_ROLE) before any replay lookup or write, fingerprints auth.uid() as actor_id (never p_performed_by), and delegates to the renamed body, which is the previously reviewed wrapper unchanged and repeats the guard before its below-cost implementation writes. Pins now cover the new wrapper and the renamed body as well. Earlier review: Live pg_get_functiondef semantic review 2026-09-12, independently traced by RLS/migration reviewers for mutators and inspected by coordinator for the two read-only grouping reports. Wrapper first invokes _begin_below_cost_money_write: auth.uid() bind, non-null mismatch refusal, active admin/sales_rep role gate before forwarding. Owner-only delegated implementation independently repeats actor/role validation; no caller-param authority. This is scanner noise, not an accepted actor-forgery hole. Exception matches only the reviewed suspect parameter and exact function/dependency definition, owner, and effective EXECUTE contracts; missing or changed contracts leave the finding visible. Reason-parser pin declined 2026-09-23 (CodeRabbit on PR #786), measured from the guard's own body: _begin_below_cost_money_write raises AUTH_REQUIRED on a NULL auth.uid(), ACTOR_MISMATCH on a non-null p_performed_by that differs from it, and INSUFFICIENT_ROLE unless the actor is an active admin/sales_rep -- ALL THREE before it ever calls public._below_cost_reason_from_json(p_payload), whose only effect is the text placed in the app.crx_below_cost_reason GUC. That call sits in the pinned guard's own definition, so the pinned digest already covers whether it is reached. The parser is IMMUTABLE SECURITY INVOKER, takes no actor argument, reads no table, and returns caller-supplied payload text the caller already controls, so no change to it can make forged attribution succeed; it is therefore not 'materially relied on in the semantic review' in the README sense. It also calls public._below_cost_reason_from_text, so pinning every transitive callee rather than every materially-relied-on dependency would expand to an unbounded closure. Pins are live database-side digests (definition+owner+ACL); none was invented here, because a wrong digest would un-match this exception permanently and turn the sweep red.",
       "dated": "2026-11-02",
@@ -1342,6 +1357,12 @@
     },
     {
       "predicate": "cost-exposure-review",
+      "violation_key": "get_batch_year_end_summaries(p_customer_ids uuid[], p_season integer)#aa7cc1f38168",
+      "justification": "KI-119 (20270201100000, container-computed key; equals live once applied): page access guard added first; the rest of the chain is unchanged. Previous review: KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; its \"cost\" key is sale revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-19"
+    },
+    {
+      "predicate": "cost-exposure-review",
       "violation_key": "get_bottom_line_pnl(p_start_date date, p_end_date date)#7833af94938d",
       "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin only (checked first); admin gate before any data. The key hashes this function and every helper it reaches; re-read the chain when it changes. Post-apply key computed 2026-11-04 for 20261106150000_fix_delivery_one_screen (PR #1437) before its apply: the cost-exposure-review predicate was run read-only on live with only get_monthly_summary and _get_bottom_line_pnl_cost_impl_20261019 swapped for the migration's bodies (same owner and settings); re-computed 2026-11-04 from the final bodies (PR #1437 head 226cd2bdf, Codex App): every other allowlisted key reproduced unchanged. The only change in the chain is that a cancelled commission is no longer counted when a Fix Delivery copy names it in replaces_commission_id; the admin gate is unchanged.",
       "dated": "2026-11-02"
@@ -1351,6 +1372,12 @@
       "violation_key": "get_chemical_history(p_product_id uuid, p_start_date date, p_end_date date)#95cd66d02f28",
       "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; purchase price hidden from non-admins (see note on free text). The key hashes this function and every helper it reaches; re-read the chain when it changes.",
       "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_chemical_history(p_product_id uuid, p_start_date date, p_end_date date)#36958c8475fc",
+      "justification": "KI-119 (20270201100000, container-computed key; equals live once applied): page access guard added first; the rest of the chain is unchanged. Previous review: KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; purchase price hidden from non-admins (see note on free text). The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-19"
     },
     {
       "predicate": "cost-exposure-review",
@@ -1480,9 +1507,21 @@
     },
     {
       "predicate": "cost-exposure-review",
+      "violation_key": "get_sales_detail_report(p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)#3ba0cda10daa",
+      "justification": "KI-119 (20270201100000): page access guard added as the first statement; the rest of the chain is unchanged. Post-apply key computed read-only on live 2026-11-19 with this predicate's own per-function hash (live hashes for unchanged helpers, the migration's new bodies for the wrapper and public._require_page_access); the same method reproduced the current live keys and the container-computed batch and chemical-history keys. Equals live once applied. Previous review: KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost, profit and margin blanked for non-admins. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-09 after 20261229150000_sales_reports_per_payer: each Bill Split payer gets their share via _sales_line_payers; gates and cost blanking unchanged.",
+      "dated": "2026-11-19"
+    },
+    {
+      "predicate": "cost-exposure-review",
       "violation_key": "get_sales_summary_report(p_group_by text, p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)#43fcfceffb24",
       "justification": "KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost, profit and margin blanked for non-admins. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-09 after 20261229150000_sales_reports_per_payer: each Bill Split payer gets their share via _sales_line_payers; gates and cost blanking unchanged.",
       "dated": "2026-11-02"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_sales_summary_report(p_group_by text, p_start_date date, p_end_date date, p_product_id uuid, p_customer_ids uuid[], p_sales_rep_id uuid, p_category text, p_season integer)#3d84d6241372",
+      "justification": "KI-119 (20270201100000): page access guard added as the first statement; the rest of the chain is unchanged. Post-apply key computed read-only on live 2026-11-19 with this predicate's own per-function hash (live hashes for unchanged helpers, the migration's new bodies for the wrapper and public._require_page_access); the same method reproduced the current live keys and the container-computed batch and chemical-history keys. Equals live once applied. Previous review: KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; cost, profit and margin blanked for non-admins. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-read live 2026-11-09 after 20261229150000_sales_reports_per_payer: each Bill Split payer gets their share via _sales_line_payers; gates and cost blanking unchanged.",
+      "dated": "2026-11-19"
     },
     {
       "predicate": "cost-exposure-review",

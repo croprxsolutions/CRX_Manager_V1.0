@@ -1769,7 +1769,12 @@ export function proofValid(data, headSha, nowMs, expectedBaseSha, maxAgeMs = SOL
 // lowercase SHAs) or, without that list, in the head; and either way not already
 // in main, otherwise a merged PR's proof would cover any branch built on top of
 // it. `isAncestor` answers null when it cannot tell; only a plain false counts here.
-export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, prCommits = null }) {
+//
+// The proof's base must also BE the merge-base of the reviewed head and GitHub's
+// current base (#1913), not just any ancestor of that base, so the reviewed diff is
+// exactly the PR's own changes. `mergeBase(a, b)` returns that one commit, or null
+// when it cannot tell or there is more than one; a missing or null answer refuses.
+export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, mergeBase, prCommits = null }) {
   const SHA = /^[0-9a-f]{40}$/i;
   const proofBase = String(data?.base_sha || "");
   const proofHead = String(data?.head_sha || "").toLowerCase();
@@ -1784,7 +1789,10 @@ export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, 
       if (!onBranch || isAncestor(proofBase, proofHead) !== true) return false;
     }
     if (isAncestor(proofBase, headSha) !== true) return false;
-    return proofBase === baseSha || isAncestor(proofBase, baseSha) === true;
+    // The reviewed head contains its base (checked above), so a base equal to GitHub's is the merge-base: no call.
+    if (proofBase.toLowerCase() === String(baseSha).toLowerCase()) return true;
+    if (typeof mergeBase !== "function") return false;
+    return String(mergeBase(proofHead, baseSha) || "").toLowerCase() === proofBase.toLowerCase();
   } catch {
     return false;
   }
@@ -3673,6 +3681,18 @@ export function headContainsBaseOnGitHub({ baseSha, headSha, repo, gh }) {
   if (!repoPath || !SHA.test(String(baseSha || "")) || !SHA.test(String(headSha || ""))) return false;
   const behindBy = String(gh(["api", `${repoPath}/compare/${baseSha}...${headSha}`, "--jq", ".behind_by"])).trim();
   return behindBy === "0";
+}
+
+// The one merge-base GitHub's compare reports for `headSha` and `baseSha` (#1913),
+// or null for an unusable SHA or answer. Throws on a failed call; callers treat that as null.
+// shortcut: GitHub's compare names one merge-base, so a criss-cross history with two is not
+// refused here as the local check refuses it; still stricter than the old any-ancestor rule.
+export function mergeBaseOnGitHub({ baseSha, headSha, repo, gh }) {
+  const SHA = /^[0-9a-f]{40}$/i;
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath || !SHA.test(String(baseSha || "")) || !SHA.test(String(headSha || ""))) return null;
+  const sha = String(gh(["api", `${repoPath}/compare/${baseSha}...${headSha}`, "--jq", ".merge_base_commit.sha"])).trim();
+  return SHA.test(sha) ? sha.toLowerCase() : null;
 }
 
 export { RISKY_PATH_RES, RISKY_CONTENT_RE };

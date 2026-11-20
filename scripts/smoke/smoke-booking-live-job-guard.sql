@@ -457,8 +457,10 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (J10) a rep planted an invoiced job on a booking: %', v_err;
   END IF;
   v_refusals := v_refusals + 1;
-  -- J11 (Sol MED r6). A soft-deleted booking that is still sent cannot take a live job.
+  -- J11 (Sol MED r6). A soft-deleted booking that is still sent cannot take a live job. Its own live job is
+  -- cancelled first (undone with the block): since 20270129150000 a booking with a live job cannot be deleted.
   BEGIN
+    UPDATE jobs SET status = 'cancelled' WHERE job_number = 'SMK-LJ2-' || v_suffix;
     UPDATE quotes SET deleted_at = now() WHERE id = v_q;
     INSERT INTO jobs (job_number, customer_id, job_date, quote_id)
     VALUES ('SMK-J11-' || v_suffix, v_customer_id, CURRENT_DATE + 7, v_q);

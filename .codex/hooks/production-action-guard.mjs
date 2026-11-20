@@ -36,6 +36,7 @@ import {
   pushIsForced,
   pushUsesBulkMode,
   pullRequestChecksGreen as sharedPullRequestChecksGreen,
+  pushDestinationBranches,
   reviewProofPathMentioned,
   reviewStateDirectoryMentioned,
   riskyFiles,
@@ -69,6 +70,7 @@ import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDest
 import { followUpsDenial, followUpsProblem } from "../../.claude/hooks/followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
+import { claimOrRefuse, claimsFileFor } from "../../.claude/hooks/pr-claim-lib.mjs";
 
 // Sol HIGH finding (2026-08-14, write-scope review): with the Supabase connector
 // write-enabled, ANY mutating Supabase tool Codex can reach is a route to
@@ -123,7 +125,9 @@ const NODE_REPL_TOOL = /(?:^|__)node[_-]?repl(?:__|$)/i;
 // merge needs Sol at all.
 // `session-context-reminder` joined 2026-10-30: not imported, but its output is the
 // rules every later Codex session starts from.
-const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-risk-lib|coderabbit-skip-lib|teammate-comments-lib|followups-lib|read-only-search-lib|app-repo-identity|session-context-reminder)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
+// `pr-claim-lib` and the `registry-freshness-lib` it imports joined 2026-11-19
+// (#1948): imported at startup, and the claim decides whether a push or merge is refused.
+const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-risk-lib|coderabbit-skip-lib|teammate-comments-lib|followups-lib|read-only-search-lib|app-repo-identity|session-context-reminder|pr-claim-lib|registry-freshness-lib)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
 const PROTECTED_HARNESS_PATH_RE = new RegExp(String.raw`(?:^|[\\/])${PROTECTED_HARNESS_SOURCE}$`, "i");
 const PROTECTED_HARNESS_FRAGMENT_RE = new RegExp(`(?<![\\w.-])${PROTECTED_HARNESS_SOURCE}(?![\\w.-])`, "i");
 // The same set, spelled out, for the glob matcher below: a wildcard token has
@@ -146,6 +150,8 @@ export const PROTECTED_HARNESS_FILES = Object.freeze([
   // startup too (Codex App P1 on #1149).
   ".claude/hooks/app-repo-identity.mjs",
   ".claude/hooks/session-context-reminder.mjs",
+  ".claude/hooks/pr-claim-lib.mjs",
+  ".claude/hooks/registry-freshness-lib.mjs",
   ".codex/hooks/production-action-guard.mjs",
   ".codex/hooks/codex-hook-adapter.mjs",
   "scripts/run-claude-review.mjs",
@@ -366,13 +372,13 @@ function defaultRunGh(args, cwd) {
       return execFileSync(executable, args, {
         cwd,
         encoding: "utf8",
-        timeout: 5000,
+        timeout: CODEX_CALL_TIMEOUT_MS,
         stdio: ["ignore", "pipe", "pipe"],
       }).trim();
     } catch (error) {
       // Only a MISSING executable moves on to the next candidate. A timed-out or
       // failed `gh` is thrown as-is: retrying it would let one admitted call run
-      // two 5-second timeouts, which the hard-gate budget counts as one
+      // two per-call timeouts, which the hard-gate budget counts as one
       // (Codex sol, 2026-09-14).
       if (error?.code !== "ENOENT") throw error;
       lastError = error;
@@ -528,6 +534,16 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
       }
     }
   };
+  // The proof's base must equal merge-base(reviewed head, GitHub's base) (#1913).
+  // More than one merge-base, or any git failure, cannot tell: null refuses.
+  const mergeBaseLocally = (a, b) => {
+    try {
+      const bases = String(runGit(["merge-base", "--all", a, b], repoDir)).split(/\s+/).filter(Boolean);
+      return bases.length === 1 ? bases[0] : null;
+    } catch {
+      return null;
+    }
+  };
   const stateDir = path.join(repoDir, ".claude", "session-state");
   let proofPath = path.join(stateDir, `codex-review-${headSha}.json`);
   // Sol runs once before the PR opens (Mason, 2026-10-29): with no proof of this
@@ -541,7 +557,7 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
           try {
             const data = JSON.parse(readFileSync(p, "utf8"));
             // The commits after the reviewed one must be notes only (Sol, 2026-10-29).
-            return proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor: isAncestorLocally })
+            return proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor: isAncestorLocally, mergeBase: mergeBaseLocally })
               && typeof laterChangesLowRisk === "function" && laterChangesLowRisk(String(data.head_sha).toLowerCase(), headSha) === true;
           } catch {
             return false;
@@ -564,14 +580,14 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
   // proofValidForMerge): the proof's own base must be in the head and behind
   // GitHub's base. A direct push to main keeps the exact-base binding.
   const proven = authoritativeBaseSha
-    ? proofValidForMerge({ data: proof, headSha, nowMs, baseSha, isAncestor: isAncestorLocally })
+    ? proofValidForMerge({ data: proof, headSha, nowMs, baseSha, isAncestor: isAncestorLocally, mergeBase: mergeBaseLocally })
     : proofValid(proof, headSha, nowMs, baseSha);
   if (!proven) {
     return proofRequirement(
       headSha,
       riskDescription,
       authoritativeBaseSha
-        ? `Sol proof is stale, future-dated, bound to a different HEAD, bound to a base the head does not contain or that is not an ancestor of ${baseSha}, lacks the required gpt-6.2-sol/high identity, has the wrong verdict/ran key, or is otherwise invalid. A head that does not contain main needs origin/main merged in before Sol can review it.`
+        ? `Sol proof is stale, future-dated, bound to a different HEAD, bound to a base the head does not contain or that is not the merge-base of the reviewed head and ${baseSha}, lacks the required gpt-6.2-sol/high identity, has the wrong verdict/ran key, or is otherwise invalid. A head that does not contain main needs origin/main merged in before Sol can review it.`
         : `Sol proof is stale, future-dated, bound to a different HEAD or to a base other than ${baseSha}, lacks the required gpt-6.2-sol/high identity, has the wrong verdict/ran key, or is otherwise invalid.`,
       baseSha
     );
@@ -680,7 +696,7 @@ export function pullRequestChecksGreen(pullRequest) {
   return sharedPullRequestChecksGreen(pullRequest);
 }
 
-function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
+function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh, claim = null, claimBranches = [] }) {
   let pullRequest;
   try {
     pullRequest = resolvePullRequest({ request, repoDir, runGh });
@@ -689,6 +705,11 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
       `CODEX PRODUCTION GATE: could not determine the pull request's base branch and exact head SHA, so the merge is denied (fail closed). ${error?.message || error}`
     );
   }
+  // Landing claim (pr-claim-lib.mjs, fail open; #1948) — mirror of pr-merge-guard.mjs:
+  // checked here, recorded at the command's allow point, so a denied merge claims nothing.
+  const claimed = claim ? claim(pullRequest.headRefName, "merge", false) : "";
+  if (claimed) return denied(`CODEX PRODUCTION GATE: ${claimed}`);
+  claimBranches.push({ branch: pullRequest.headRefName, action: "merge" });
   const base = normalize(pullRequest.baseRefName).toLowerCase();
   if (base === "master" || base === "production") {
     return denied(`CODEX PRODUCTION GATE: merges to protected branch ${base} remain blocked.`);
@@ -810,19 +831,24 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh }) {
 //
 // Returns a denial verdict, or null when nothing blocks. Fails OPEN on any
 // error: see the header of codex-bot-review-lib.mjs for why this one predicate
-// does not fail closed like its neighbours here. The 7s budget stays under half
-// of the hook's 15s so the notices below can still be written. The hard-gate
-// deadline still caps it.
-const CODEX_ADVISORY_BUDGET_MS = 7_000;
+// does not fail closed like its neighbours here. The 75s budget (four calls at
+// ~15s each, room for a cap to start the last; as pr-merge-guard.mjs) stays under
+// half of the hook's limit so the notices below can still be written. The
+// hard-gate deadline still caps it.
+const CODEX_ADVISORY_BUDGET_MS = 75_000;
 
 // The hard gates' share of this hook (see createHardGateBudget). The timeout
 // mirrors this hook's entry in .codex/hooks.json and the per-call cap mirrors
 // defaultRunGit/defaultRunGh; if either changes, change it here too. The reserve
 // covers the PowerShell launcher, which process.uptime() cannot see, plus
 // writing the verdict.
-const CODEX_HOOK_TIMEOUT_MS = 15_000;
+// Slow GitHub (#1963, as #1962 did for Claude's gate): 5s gh caps refused good
+// merges. Here the advisory shares the hard-gate deadline, so the hook gets
+// Claude's 177s hard-gate room plus its 75s advisory. A GitHub that does not
+// answer still denies, at the first call's 25s cap. Git calls stay at 5s.
+const CODEX_HOOK_TIMEOUT_MS = 255_000;
 const CODEX_HOOK_RESERVE_MS = 2_500;
-const CODEX_CALL_TIMEOUT_MS = 5_000;
+const CODEX_CALL_TIMEOUT_MS = 25_000;
 
 // `deadlineMs` is SHARED across every merge in one command (Codex round 8,
 // SEC-001): the caller computes it once and passes the same value to each
@@ -1052,6 +1078,9 @@ export function evaluateProductionAction({
   // session, or null. main() binds it to the hook's session id; a direct caller
   // gets no waiver.
   findCodeRabbitSkip: findSkip = () => null,
+  // (branch, action, record) => a landing-claim refusal or "" (pr-claim-lib.mjs;
+  // #1948). main() binds it to this session; a direct caller gets no claims.
+  claim = null,
 } = {}) {
   const name = String(toolName);
   const baseRepoDir = path.resolve(repoDir);
@@ -1230,12 +1259,15 @@ export function evaluateProductionAction({
         "CODEX PRODUCTION GATE: could not determine WHICH pull request this merge tool targets from its inputs, so the merge is denied (fail closed) — the guard must never verify one PR while the tool merges another."
       );
     }
+    const connectorClaims = [];
     const result = gatePullRequestMerge({
       request,
       repoDir: actionRepoDir,
       nowMs,
       runGit: gateRunGit,
       runGh: gateRunGh,
+      claim,
+      claimBranches: connectorClaims,
     });
     // Checked before `blocked`: a gate that swallowed the refusal must not allow.
     if (hardGateBudget.exhausted) return denied(hardGateBudgetDenial("CODEX PRODUCTION GATE"));
@@ -1255,6 +1287,10 @@ export function evaluateProductionAction({
         deadlineMs: Math.min(clock() + CODEX_ADVISORY_BUDGET_MS, hardGateDeadlineMs), findSkip });
       if (hardGateBudget.exhausted) return denied(hardGateBudgetDenial("CODEX PRODUCTION GATE"));
       if (advisory) return advisory;
+    }
+    for (const { branch: claimBranch, action } of claim ? connectorClaims : []) {
+      const refusal = claim(claimBranch, action, true);
+      if (refusal) return denied(`CODEX PRODUCTION GATE: ${refusal}`);
     }
     return { blocked: false };
   }
@@ -1304,6 +1340,8 @@ export function evaluateProductionAction({
   // this same function, on the same hard-gate deadline. Its advisory lookups are
   // carried out to THIS call's allow point, after every hard gate has run.
   const nestedAdvisories = [];
+  // Merged PR branches to claim at the allow point (#1948).
+  const claimBranches = [];
   if (nestingDepth === 0) {
     const nested = expandNestedCommands(command);
     if (nested.tooDeep) return denied(nestedTooDeepDenial("CODEX PRODUCTION GATE"));
@@ -1320,11 +1358,13 @@ export function evaluateProductionAction({
         hardGateDeadlineMs,
         clock,
         nestingDepth: 1,
+        claim,
       });
       if (verdict.blocked) {
         return { ...verdict, reason: `${verdict.reason} [Found in a command run by a nested shell: ${inner.slice(0, 160)}]` };
       }
       nestedAdvisories.push(...(verdict.deferredAdvisories || []));
+      claimBranches.push(...(verdict.claimBranches || []));
     }
   }
 
@@ -1453,6 +1493,8 @@ export function evaluateProductionAction({
         nowMs,
         runGit: gateRunGit,
         runGh: gateRunGh,
+        claim,
+        claimBranches,
       });
       // mergeRequestKey drops duplicate readings; this bounds DISTINCT merges.
       if (hardGateBudget.exhausted) return denied(hardGateBudgetDenial("CODEX PRODUCTION GATE"));
@@ -1480,14 +1522,16 @@ export function evaluateProductionAction({
       return denied("CODEX PRODUCTION GATE: force-pushing any branch rewrites shared history and requires Mason's explicit approval.");
     }
     const pushRepoDir = gitPushCwd(segment, actionRepoDir, command);
-    let currentBranch = requestedWorkingDir ? "" : normalize(branch).toLowerCase();
+    let rawBranch = requestedWorkingDir ? "" : normalize(branch);
+    let currentBranch = rawBranch.toLowerCase();
     // The push checks spend the same hard-gate budget as the merge checks: each
     // segment costs a branch lookup plus several git calls in gateMainChange, and
     // a chain of pushes could otherwise walk past the hook's timeout — where a
     // hook that says nothing ALLOWS (CodeRabbit on PR #630, 2026-09-21).
     if (!currentBranch || pushRepoDir !== actionRepoDir) {
       try {
-        currentBranch = normalize(gateRunGit(["rev-parse", "--abbrev-ref", "HEAD"], pushRepoDir)).toLowerCase();
+        rawBranch = normalize(gateRunGit(["rev-parse", "--abbrev-ref", "HEAD"], pushRepoDir));
+        currentBranch = rawBranch.toLowerCase();
       } catch (error) {
         if (hardGateBudget.exhausted) return denied(hardGateBudgetDenial("CODEX PRODUCTION GATE", "push"));
         return denied(`CODEX PRODUCTION GATE: could not determine the push branch, so the push is denied (fail closed). ${error?.message || error}`);
@@ -1497,6 +1541,21 @@ export function evaluateProductionAction({
     if (/\bgit\b[^\r\n;&|]*\bpush\b[^\r\n;&|]*(?:\s|:)(master|production)(?:\s|$)/i.test(segment) ||
         ((currentBranch === "master" || currentBranch === "production") && /\bgit\b[^\r\n;&|]*\bpush\b/i.test(segment))) {
       return denied("CODEX PRODUCTION GATE: pushes to master/production remain blocked.");
+    }
+
+    // Landing claim (pr-claim-lib.mjs, fail open; #1948) — mirror of codex-push-guard.mjs:
+    // the first session to push a PR branch claims it. Checked here, recorded at the
+    // command's allow point, so a refused command claims nothing. A dry run claims nothing.
+    // shortcut: a ref-less push to a differently named upstream claims only the local branch
+    // name (fail open; Codex App P2 on #2041); resolve @{push} only when no refspec was given.
+    if (claim && !/(?:^|\s)(?:--dry-run|-n)(?=\s|$)/.test(segment)) {
+      let destinations = [];
+      try { destinations = pushDestinationBranches(segment, rawBranch); } catch { /* fail open */ }
+      for (const destination of destinations) {
+        const refusal = claim(destination, "push", false);
+        if (refusal) return denied(`CODEX PRODUCTION GATE: ${refusal}`);
+        claimBranches.push({ branch: destination, action: "push" });
+      }
     }
 
     const sourceRef = mainPushSource(segment, currentBranch);
@@ -1528,13 +1587,18 @@ export function evaluateProductionAction({
   // shared by every lookup so N merges cannot multiply the budget.
   // A nested command hands its cleared merges to the outer call, whose allow
   // point is the only one that comes after EVERY hard gate in the command.
-  if (nestingDepth > 0) return { blocked: false, deferredAdvisories };
+  if (nestingDepth > 0) return { blocked: false, deferredAdvisories, claimBranches };
   // On the HARD-gate budget since #973: see the connector route above.
   const advisoryDeadlineMs = Math.min(clock() + CODEX_ADVISORY_BUDGET_MS, hardGateDeadlineMs);
   for (const request of [...nestedAdvisories, ...deferredAdvisories]) {
     const advisory = codexAppAdvisory({ request, repoDir: actionRepoDir, runGh: gateRunGh, clock, deadlineMs: advisoryDeadlineMs, findSkip });
     if (hardGateBudget.exhausted) return denied(hardGateBudgetDenial("CODEX PRODUCTION GATE"));
     if (advisory) return advisory;
+  }
+  // Every push and merge cleared every gate: record the claims; a session that claimed in between still wins.
+  for (const { branch: claimBranch, action } of claim ? claimBranches : []) {
+    const refusal = claim(claimBranch, action, true);
+    if (refusal) return denied(`CODEX PRODUCTION GATE: ${refusal}`);
   }
   return { blocked: false };
 }
@@ -1586,6 +1650,14 @@ async function main() {
       sessionId: payload.session_id ?? payload.sessionId,
       pullRequest,
     }),
+    claim: (branch, action, record) => {
+      try {
+        const cwd = payload.cwd || process.env.CODEX_PROJECT_DIR || process.cwd();
+        return claimOrRefuse({ file: claimsFileFor(cwd), branch, sessionId: payload.session_id ?? payload.sessionId, action, cwd, record });
+      } catch {
+        return "";
+      }
+    },
   });
   // Codex treats allow payloads as noisy/failed hook output. Silence means allow.
   if (!result.blocked) return;

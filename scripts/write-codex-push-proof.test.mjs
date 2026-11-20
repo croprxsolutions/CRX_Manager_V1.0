@@ -80,6 +80,13 @@ import { gitLocalEnvironmentNames } from "../.claude/hooks/git-test-env.mjs";
 import { proofValid, proofValidForMerge } from "../.claude/hooks/codex-push-lib.mjs";
 import { tempDir } from "./lib/test-temp-dir.mjs";
 
+// The merge gates' merge-base answer (#1913), from real Git: the one merge-base, or null.
+const realMergeBase = (repo) => (a, b) => {
+  const out = spawnSync("git", ["merge-base", "--all", a, b], { cwd: repo, encoding: "utf8" });
+  const bases = String(out.stdout || "").split(/\s+/).filter(Boolean);
+  return out.status === 0 && bases.length === 1 ? bases[0] : null;
+};
+
 // Git hooks export repository-local GIT_* variables. A scratch `git init`
 // must never inherit them or it can target/reinitialize the caller's real
 // worktree administrative directory instead of the disposable fixture.
@@ -149,6 +156,20 @@ assert.ok(
   prompt.includes(`${CODEX_VERDICT_TOKEN}: CLEAN`) && prompt.includes(`${CODEX_VERDICT_TOKEN}: BLOCKERS`),
   "prompt demands the machine verdict token in both forms",
 );
+// Release review rules (Mason, 2026-11-20): only a release review carries them.
+const releasePrompt = buildCodexReviewPrompt({ release: true });
+assert.match(releasePrompt, /RELEASE RULES/, "release prompt carries the release rules");
+assert.match(releasePrompt, /\[LIVE-UNCHANGED\]/, "release rule 1: byte-identical unchanged function bodies are tagged");
+assert.match(releasePrompt, /copied unchanged from that function's latest/, "release rule 1: unchanged lines inside a changed function are covered");
+assert.match(releasePrompt, /newly reachable, or with no identical base definition, is not covered/, "release rule 1: defects changed lines create still block");
+assert.match(releasePrompt, /\[SELF-ABORT\]/, "release rule 2: a clean self-abort of a migration's own apply is tagged");
+assert.match(releasePrompt, /\[KNOWN-ISSUE #<issue>\]/, "release rule 3: Mason-named known issues are tagged");
+assert.match(releasePrompt, /#2064 20270120150000 _enforce_below_cost_line/, "release rule 3: each known issue is listed by issue, file and function");
+assert.match(releasePrompt, /same function, is not covered/, "release rule 3: other defects still block");
+assert.doesNotMatch(buildCodexReviewPrompt({}), /KNOWN-ISSUE/, "known issues apply to release reviews only");
+assert.match(releasePrompt, /RELEASE FOLLOW-UPS/, "release rules: tagged findings are listed for tracked issues");
+assert.equal(prompt.includes("RELEASE RULES"), false, "a non-release review has no release rules");
+assert.ok(releasePrompt.indexOf("RELEASE RULES") < releasePrompt.indexOf("Then end your reply"), "release rules come before the verdict instructions");
 
 const permissionConfig = codexReviewPermissionConfig(["C:\\Users\\me\\.codex\\auth.json", "C:\\Repo\\.env.local"], "win32");
 const args = buildCodexExecArgs({ root: "/repo/root", prompt, platform: "win32", permissionConfig });
@@ -977,8 +998,9 @@ assert.equal(
     });
     const verdict = codexReviewProofVerdict({ status: outcome.result.status, stdout: outcome.result.stdout });
     const proof = verdict ? buildCodexPushProof({ headSha: HEAD_SHA, baseSha: BASE_SHA, verdict }) : null;
-    const capture = readFileSync(captureReviewOutput(captureRoot, outcome.result, { ...outcome, primaryBin: PRIMARY }), "utf8");
-    return { calls, notices, outcome, proof, capture };
+    const { capturePath, failureReason } = captureReviewOutput(captureRoot, outcome.result, { ...outcome, primaryBin: PRIMARY });
+    const capture = readFileSync(capturePath, "utf8");
+    return { calls, notices, outcome, proof, capture, failureReason };
   };
 
   try {
@@ -999,12 +1021,73 @@ assert.equal(
     assert.equal(proofValid(a.proof, HEAD_SHA, new Date(), BASE_SHA), true, "(a) and passes the guard's proofValid");
     assert.ok(a.capture.includes(`Codex binary: ${FALLBACK}`), "(a) the capture records the binary that actually ran");
     assert.ok(/Fallback: used/.test(a.capture), "(a) the capture records that the fallback was used");
+    assert.equal(a.failureReason, null, "a clean fallback has no failure reason");
 
     // (b) Real findings from the primary → no retry, nothing mintable.
     const b = runCase({ primary: blockersReview, fallback: cleanReview });
     assert.equal(b.calls.length, 1, "(b) a BLOCKERS verdict is never retried");
     assert.equal(b.proof, null, "(b) nothing mintable");
     assert.ok(b.capture.includes(`Codex binary: ${PRIMARY}`), "(b) the capture records the primary binary");
+    assert.equal(b.failureReason, null, "review findings are a valid verdict");
+
+    const credential = "OPENAI_API_KEY=example-test-credential";
+    const failed = runCase({
+      primary: sandboxFailure,
+      fallback: {
+        status: 1,
+        stdout: "",
+        stderr: `review prompt includes ${credential}\r\nERROR: Incomplete response returned, reason: max_output_tokens\r\n`,
+      },
+    });
+    assert.equal(failed.failureReason, "Codex reached its response limit.");
+    assert.match(failed.capture, /Failure reason: Codex reached its response limit\./);
+    assert.match(failed.capture, /STDERR omitted/);
+    assert.ok(!failed.capture.includes(credential), "capture and new diagnostic must not disclose the credential");
+    assert.equal(failed.calls.length, 2, "only the existing sandbox fallback runs");
+    assert.equal(failed.proof, null, "a failed fallback produces no proof");
+
+    const silentFailure = runCase({ primary: { status: 1, stdout: "", stderr: credential } });
+    assert.equal(silentFailure.failureReason, "Codex exited with code 1 without a verdict. The cause is unknown.");
+    assert.doesNotMatch(silentFailure.capture, /example-test-credential/);
+
+    const diagnostics = [
+      [{ status: 1, stderr: "ERROR: You've hit your usage limit." }, "Codex reported an account usage or rate limit."],
+      [{ status: 1, stderr: "ERROR: unexpected status 401 Unauthorized" }, "Codex reported an authentication error."],
+      [{ status: 1, stderr: "ERROR: stream disconnected before completion" }, "The connection to Codex ended before the review finished."],
+      [{ ...sandboxFailure, stdout: "partial output" }, "Codex reported a Windows sandbox error while starting the review."],
+      [{ status: null, error: { code: "ETIMEDOUT" } }, "The review script reached its timeout."],
+      [{ status: null, error: { code: "ENOENT", message: credential } }, "The Codex process could not start."],
+      [{ status: null, signal: "SIGTERM" }, "The Codex process was terminated before a verdict."],
+      [{ status: 0, stdout: "Almost done." }, "Codex exited successfully without a valid verdict."],
+      [
+        { status: 1, stderr: "2026-11-20T15:04:05.123456Z ERROR codex_core::codex: Incomplete response returned, reason: max_output_tokens" },
+        "Codex reached its response limit.",
+      ],
+      [{ status: 1, stderr: "2026-11-20T15:04:05Z ERROR: unexpected status 429 Too Many Requests" }, "Codex reported an account usage or rate limit."],
+      [{ status: null, error: { code: "ENOBUFS", message: credential } }, "Codex produced more output than the review script accepts."],
+      // A command's sandbox error after the session started is not a startup failure.
+      [
+        { status: 1, stderr: "ERROR codex_core::exec: windows sandbox failed: helper_unknown_error" },
+        "Codex exited with code 1 without a verdict. The cause is unknown.",
+      ],
+      [
+        {
+          status: 1,
+          stdout: "partial",
+          stderr: "2026-11-20T15:04:05Z ERROR codex_core::session: Failed to create session\nERROR: windows sandbox failed: setup refresh had errors",
+        },
+        "Codex reported a Windows sandbox error while starting the review.",
+      ],
+      // Vague mentions outside an ERROR line, or without an explicit marker, stay unknown.
+      [{ status: 1, stderr: "diff mentions 401 Unauthorized and a rate limit\nERROR: something odd" }, "Codex exited with code 1 without a verdict. The cause is unknown."],
+      [{ status: null }, "Codex ended without an exit code or a verdict. The cause is unknown."],
+    ];
+    for (const [primary, reason] of diagnostics) {
+      const result = runCase({ primary });
+      assert.equal(result.failureReason, reason);
+      assert.equal(result.proof, null);
+      assert.equal(result.calls.length, 1, "diagnostics do not trigger a retry");
+    }
     const b2 = runCase({ primary: { ...sandboxFailure, stdout: "[P1] partial" }, fallback: cleanReview });
     assert.equal(b2.calls.length, 1, "(b) any model output makes the run final");
     assert.equal(b2.proof, null, "(b) nothing mintable after partial output");
@@ -1087,7 +1170,7 @@ assert.equal(
     // The kept proof behaves exactly as if main had moved just after the review.
     const proof = buildCodexPushProof({ headSha: head, baseSha: check({ baseAfter: forward }), verdict: "clean" });
     const isAncestor = (a, b) => spawnSync("git", ["merge-base", "--is-ancestor", a, b], { cwd: repo }).status === 0;
-    const mergeAccepts = (data) => proofValidForMerge({ data, headSha: head, nowMs: Date.now(), baseSha: forward, isAncestor });
+    const mergeAccepts = (data) => proofValidForMerge({ data, headSha: head, nowMs: Date.now(), baseSha: forward, isAncestor, mergeBase: realMergeBase(repo) });
     assert.equal(mergeAccepts(proof), true, "review base: the merge gate accepts the kept proof");
     assert.equal(proofValid(proof, head, new Date(), forward), false, "review base: a push on the moved main still refuses it");
     assert.equal(
@@ -1911,8 +1994,8 @@ not json
       assert.equal(base, stagingTip, "staging base: a head containing origin/staging keeps it");
       assert.deepEqual(names(base, featureHead), ["mine.ts"], "staging base: the review diff is only the branch's own file");
       const proof = { codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high", head_sha: featureHead, base_sha: base, timestamp: new Date().toISOString() };
-      assert.ok(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: stagingTip, isAncestor }), "staging base: the merge gate accepts it into staging");
-      assert.equal(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: mainTip, isAncestor }), false, "staging base: the same proof is refused for a merge into main");
+      assert.ok(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: stagingTip, isAncestor, mergeBase: realMergeBase(repo) }), "staging base: the merge gate accepts it into staging");
+      assert.equal(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: mainTip, isAncestor, mergeBase: realMergeBase(repo) }), false, "staging base: the same proof is refused for a merge into main");
       // A branch that undoes unreleased staging work: the main base hides the undo, the staging base shows it.
       git("checkout", "-q", "-b", "claude/undo", stagingTip);
       git("rm", "-q", "someone-elses.sql");
@@ -1927,6 +2010,29 @@ not json
       git("commit", "-qm", "later staging work");
       const movedStaging = git("rev-parse", "HEAD");
       assert.equal(solReviewBase(repo, featureHead, movedStaging), stagingTip, "staging base: a head behind origin/staging is reviewed from its fork point");
+      // #1913, the real shape of a staging PR: the branch is updated from staging with a
+      // merge commit, Sol reviews it, then staging moves on before the merge.
+      {
+        const mergeBase = realMergeBase(repo);
+        const sol = (head, base) => ({ codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high", head_sha: head, base_sha: base, timestamp: new Date().toISOString() });
+        const accepts = (data, headSha, baseSha) => proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor, mergeBase });
+        git("checkout", "-q", "-b", "claude/updated", featureHead);
+        git("merge", "-q", "--no-edit", "--no-ff", movedStaging);
+        const updatedHead = git("rev-parse", "HEAD");
+        const reviewed = solReviewBase(repo, updatedHead, movedStaging);
+        assert.equal(reviewed, movedStaging, "update merge: Sol reviews against the staging tip the branch merged");
+        assert.ok(accepts(sol(updatedHead, reviewed), updatedHead, movedStaging), "update merge: the proof lands on an unmoved staging");
+        git("checkout", "-q", "staging");
+        writeFileSync(path.join(repo, "after-review.sql"), "select 3;\n");
+        git("add", ".");
+        git("commit", "-qm", "staging moves after the review");
+        const stagingAfter = git("rev-parse", "HEAD");
+        assert.ok(accepts(sol(updatedHead, reviewed), updatedHead, stagingAfter), "update merge: staging moving on after the review still accepts it");
+        assert.equal(accepts(sol(updatedHead, stagingTip), updatedHead, stagingAfter), false,
+          "#1913: a proof bound to an older staging commit than the merge-base is refused (any ancestor was accepted before)");
+        // Sol reviewed the pre-update commit; the branch then merged newer staging: that proof still covers it.
+        assert.ok(accepts(sol(featureHead, stagingTip), updatedHead, stagingAfter), "update merge: a proof of the commit before the update merge still counts");
+      }
       // A hotfix cut from main still reviews everything it adds over main.
       git("checkout", "-q", "-b", "hotfix/x", mainTip);
       writeFileSync(path.join(repo, "fix.ts"), "export {};\n");
@@ -1979,7 +2085,7 @@ not json
         // The proof the fork-point review mints passes the merge gate's base check.
         const isAncestor = (a, b) => spawnSync("git", ["merge-base", "--is-ancestor", a, b], { cwd: repo }).status === 0;
         const forkProof = { codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high", head_sha: featureHead, base_sha: branchHead, timestamp: new Date().toISOString() };
-        assert.ok(proofValidForMerge({ data: forkProof, headSha: featureHead, nowMs: Date.now(), baseSha: movedMain, isAncestor }), "review base: the merge gate accepts a proof bound to the fork point");
+        assert.ok(proofValidForMerge({ data: forkProof, headSha: featureHead, nowMs: Date.now(), baseSha: movedMain, isAncestor, mergeBase: realMergeBase(repo) }), "review base: the merge gate accepts a proof bound to the fork point");
         git("checkout", "-q", "main");
       }
       // The clean-merge exception refuses a criss-cross too (Luna MED). Branch commit B0 is

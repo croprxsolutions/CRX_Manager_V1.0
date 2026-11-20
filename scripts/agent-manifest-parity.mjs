@@ -14,7 +14,8 @@
 export const CLAUDE_ONLY_HOOKS = new Set([
   // Codex has its OWN production guard (.codex/hooks/production-action-guard.mjs)
   // that covers pushes AND PR merges, so Codex doesn't wire Claude's push/merge
-  // guards.
+  // guards. That guard runs the same landing claim (pr-claim-lib.mjs) for pushes
+  // and merges (#1948); only Claude's push guard also claims a Sol run.
   "codex-push-guard.mjs",
   "pr-merge-guard.mjs",
   // Runs pr-merge-guard.mjs as a child and denies a possible merge when the guard

@@ -228,6 +228,7 @@ BEGIN
                       WHERE qi2.quote_id = q.id
                         AND qi2.id::text = it.value->>'quote_item_id'
                         AND qi2.product_id::text = it.value->>'product_id'
+                        AND qi2.price_per_unit >= 0
                         AND qs2.field_id::text = NULLIF(btrim(s.value->>'field_id'), ''))
    LIMIT 1;
   IF v_msg IS NOT NULL THEN
@@ -237,14 +238,16 @@ BEGIN
   -- KI-81 field (Sol r4): a candidate quote whose newest sent version can't be read (no sections list) can't show what
   -- the grower was sent for these fields, so stop rather than treat it as empty.
   IF EXISTS (SELECT 1 FROM quotes q8
-              CROSS JOIN LATERAL (SELECT v.snapshot_data FROM quote_versions v
-                                   WHERE v.quote_id = q8.id ORDER BY v.version_number DESC LIMIT 1) sv8
+              LEFT JOIN LATERAL (SELECT v.snapshot_data FROM quote_versions v
+                                  WHERE v.quote_id = q8.id ORDER BY v.version_number DESC LIMIT 1) sv8 ON true
               WHERE q8.customer_id = ANY (p_customer_ids)
                 AND q8.deleted_at IS NULL
                 AND q8.status IN ('sent', 'revised', 'accepted', 'expired', 'closed_by_application', 'closed_short')
                 AND (q8.created_at AT TIME ZONE 'America/Chicago')::date <= p_on
                 AND (q8.expires_at IS NULL OR q8.expires_at >= p_on)
-                AND jsonb_typeof(sv8.snapshot_data->'sections') IS DISTINCT FROM 'array') THEN
+                AND (jsonb_typeof(sv8.snapshot_data->'sections') IS DISTINCT FROM 'array'
+                     OR EXISTS (SELECT 1 FROM jsonb_array_elements(sv8.snapshot_data->'sections') s8(value)
+                                 WHERE jsonb_typeof(s8.value->'items') IS DISTINCT FROM 'array'))) THEN
     RAISE EXCEPTION 'QUOTE_RESEND_REQUIRED: a sent quote for this grower can''t be read, so it can''t show the price that was sent for %. Or type the price on this invoice line, then save again.',
       COALESCE((SELECT pr.product_name FROM products pr WHERE pr.id = p_product_id), 'this product')
       USING ERRCODE = 'P0001';
@@ -508,16 +511,16 @@ BEGIN
     -- KI-81 (Sol r4): every non-deleted quote of the ticket's growers, the job's quote among them, is locked here in
     -- one pass in id order, before the job; the later own-quote lookups then wait for nothing, so two blend invoices
     -- for the same growers can't deadlock on each other's quotes.
+    SELECT j.quote_id INTO v_job_quote_locked FROM jobs j WHERE j.id = v_ticket.job_id;
     PERFORM 1 FROM quotes q
      WHERE q.deleted_at IS NULL
-       AND (q.id = (SELECT j.quote_id FROM jobs j WHERE j.id = v_ticket.job_id)
+       AND (q.id = v_job_quote_locked
             OR q.customer_id = v_ticket.customer_id
             OR q.customer_id IN (SELECT fbd.customer_id FROM blend_ticket_fields btf
                                    JOIN field_billing_defaults fbd ON fbd.field_id = btf.field_id
                                   WHERE btf.blend_ticket_id = p_blend_ticket_id))
      ORDER BY q.id
        FOR UPDATE OF q;
-    SELECT j.quote_id INTO v_job_quote_locked FROM jobs j WHERE j.id = v_ticket.job_id;
     PERFORM 1 FROM jobs WHERE id = v_ticket.job_id FOR UPDATE;
     -- (Sol r4) the job may have been relinked to another quote between reading it and locking the job: stop and retry.
     IF (SELECT j.quote_id FROM jobs j WHERE j.id = v_ticket.job_id) IS DISTINCT FROM v_job_quote_locked THEN
@@ -856,6 +859,7 @@ BEGIN
         CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(s.value->'items') = 'array'
                                                      THEN s.value->'items' ELSE '[]'::jsonb END) it(value)
        WHERE NULLIF(btrim(s.value->>'field_id'), '') = js.field_id::text
+         AND COALESCE(it.value->>'price_per_unit', '') ~ '^[0-9]+([.][0-9]+)?$'
          AND it.value->>'product_id' IN (SELECT btp.product_id::text FROM blend_ticket_products btp
                                           WHERE btp.blend_ticket_id = p_blend_ticket_id AND COALESCE(btp.rate_per_acre, 0) > 0)
          AND NOT EXISTS (SELECT 1 FROM quote_items qi6
@@ -863,6 +867,7 @@ BEGIN
                           WHERE qi6.quote_id = js.quote_id
                             AND qi6.id::text = it.value->>'quote_item_id'
                             AND qi6.product_id::text = it.value->>'product_id'
+                            AND qi6.price_per_unit >= 0
                             AND qs6.field_id = js.field_id)
        LIMIT 1;
     END IF;
@@ -1423,8 +1428,8 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', '86e3366a1b2cd9d19f496c881eba789e', false, 'v'),
-        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'a9361b9554d2e158cdefd1926738690a', true, 'v')
+        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', 'bf38da992c8a252e7dad78573457d840', false, 'v'),
+        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', '58fe2de53ba01e4adf50df5236c81981', true, 'v')
       ) AS pin(sig, body_md5, secdef, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL

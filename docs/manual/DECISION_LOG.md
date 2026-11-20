@@ -1,5 +1,16 @@
 # Decision Log
 
+## 2026-11-20 — Release #1990: split the gate files out; release rule 4 removed
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, split it", then "Yes, go ahead").** Stop adding Sol release rules. The
+release's tool and guard files (the gate files `owner-accept-sol-finding.mjs` refuses) go to `main` in their own hotfix,
+so #1990 no longer changes any of them and Mason can accept its remaining Sol findings by name, each kept on a tracked
+issue. **What changes:** release rule 4 (`RELEASE_PRIOR_ROUND_HEAD`, entry below) is removed, since Sol round 56 rated it
+a BLOCKER and the accepts replace it. A `package.json` or `package-lock.json` that differs from the release's fork point
+only in its own version number no longer counts as a gate file (`packageVersionOnlyChange` in
+`.claude/hooks/sol-accept-lib.mjs`), because the release bot raises that number on every release; any dependency or
+script change in those files still counts. Every other gate is unchanged.
+
 ## 2026-11-20 — Release #1990: only code changed since the previous Sol round blocks
 
 **Decision (Mason, in chat, 2026-11-20: "Yes, adopt it"; proposed by Taha in Slack).** From Sol round 55 on

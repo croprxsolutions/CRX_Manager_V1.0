@@ -437,8 +437,8 @@ describe('return-credit COGS migration', () => {
     expect(returnCreditSmoke).toContain('RETURN_CREDIT_EQUAL_TIMESTAMP_TIEBREAK_PROVEN');
     expect(returnCreditSmoke).toContain("'00000000-0000-4000-8000-00000000f001'");
     expect(returnCreditSmoke).toContain("'00000000-0000-4000-8000-00000000f002'");
-    expect(returnCreditSmoke).toMatch(/00000000-0000-4000-8000-00000000f001[\s\S]*?'gal', now\(\)/);
-    expect(returnCreditSmoke).toMatch(/00000000-0000-4000-8000-00000000f002[\s\S]*?'gal', now\(\)/);
+    expect(returnCreditSmoke).toMatch(/00000000-0000-4000-8000-00000000f001[\s\S]*?'Gal', now\(\)/);
+    expect(returnCreditSmoke).toMatch(/00000000-0000-4000-8000-00000000f002[\s\S]*?'Gal', now\(\)/);
     expect(returnCreditSmoke).toContain('current-season return credit restated the source-season year-end summary');
     expect(returnCreditSmoke).toContain('current-season credit usage quantity=% value=% (expected -15/-15000)');
     expect(returnCreditSmoke).toContain("legacy 15-each return was not converted to 37.5 gallons");

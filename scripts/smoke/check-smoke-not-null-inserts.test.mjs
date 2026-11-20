@@ -53,6 +53,7 @@ r = req(
 );
 assert.deepEqual(cols(r, 't'), ['a', 'b', 'e']);
 assert.equal(r.get('t').get('a'), '3');
+assert.equal(r.get('t').get('b'), '3', 'blames the migration that dropped the default');
 
 // Comments, strings and other schemas are ignored.
 r = req(mig('1', "-- ALTER TABLE t ALTER COLUMN a SET NOT NULL;\nSELECT 'ALTER TABLE t ALTER COLUMN b SET NOT NULL;';\nALTER TABLE auth.users ALTER COLUMN c SET NOT NULL;"));

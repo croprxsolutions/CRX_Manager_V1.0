@@ -88,7 +88,7 @@ export function requiredColumnsFromMigrations(migrations) {
             if (on) c.requiredBy = name; // counts once any default goes away, even in a later migration
           } else {
             c.hasDefault = on && hasDefault(action);
-            if (!c.hasDefault && c.notNull) c.requiredBy ??= name; // dropping the default of a NOT NULL column
+            if (!c.hasDefault && c.notNull) c.requiredBy = name; // dropping the default of a NOT NULL column
           }
         } else if ((m = action.match(/^ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?\s+([\s\S]*)$/i)) && !CONSTRAINT_WORDS.test(m[1])) {
           if (/IF\s+NOT\s+EXISTS/i.test(action) && cols(t).has(ident(m[1]))) continue;

@@ -118,7 +118,33 @@ refuses("select distinct on (o.id) o.id, sum(oi.acres) over (partition by o.id) 
 allows("select 1, x.quantity from orders o, (select 1 as quantity) x", "FROM-list subquery after a select-list comma still binds");
 allows("select (select y.quantity from orders o, (select 1 as quantity) y) from orders", "FROM-list comma inside a select-list subquery");
 allows("select x.quantity from orders o join order_items oi on oi.order_id = o.id, lateral (select 1 as quantity) x", "comma after a JOIN condition");
-allows("select a is distinct from b, f() oi, oi.quantity from order_items oi", "a FROM inside an expression keeps the safe side");
+// #2043: IS DISTINCT FROM, DISTINCT ON, keyword labels and RETURNING lists.
+refuses("select a is distinct from b, f() oi, oi.quantity from order_items oi", ["oi.quantity"], "IS DISTINCT FROM is an operator, not a FROM");
+refuses("select a is not distinct from b, (select 1) oi, oi.quantity from order_items oi", ["oi.quantity"], "IS NOT DISTINCT FROM");
+refuses("select 1 is distinct from abs(1) as oi, oi.quantity from order_items oi", ["oi.quantity"], "function right after IS DISTINCT FROM");
+refuses("select 1, 2 is distinct from (3) as oi, oi.quantity from order_items oi", ["oi.quantity"], "bracket right after IS DISTINCT FROM");
+refuses("select distinct on (o.id) o.id, count(*) oi, oi.quantity from orders o join order_items oi on true", ["oi.quantity"], "DISTINCT ON");
+refuses("select 1 as set, abs(1) as oi, oi.quantity from order_items oi", ["oi.quantity"], "output label spelled like a clause word");
+refuses("select 1 as from_x, 1 as using, abs(1) as oi, oi.quantity from order_items oi", ["oi.quantity"], "labels FROM_X and USING");
+refuses("delete from order_items oi where false returning 1, abs(1) as oi, oi.quantity", ["oi.quantity"], "RETURNING list");
+// Valid SQL the earlier keyword-exception attempt refused (Sol advisory on #2040): must stay allowed.
+allows("select 1 from order_items oi where exists (select distinct (1) from orders o, (select 1 as quantity) oi where oi.quantity = 1)", "DISTINCT (expr) FROM");
+allows("select 1 from order_items oi where exists (select 1 as distinct from orders o, (select 1 as quantity) oi where oi.quantity = 1)", "label DISTINCT before FROM");
+allows("select distinct on (o.id) (1) from orders o, (select 1 as quantity) oi, order_items x where oi.quantity = 1", "DISTINCT ON (...) (expr) FROM");
+allows("select 1 as select from orders o, (select 1 as quantity) oi where oi.quantity = 1", "label SELECT before FROM");
+allows("select 1 as returning from orders o, (select 1 as quantity) oi where oi.quantity = 1", "label RETURNING before FROM");
+allows("delete from order_items oi using orders o, (select 1 as quantity) x where x.quantity = 1", "DELETE USING list");
+allows("update orders o set status = 'x' from order_items oi, (select 1 as quantity) x where x.quantity = 1", "UPDATE FROM list");
+allows("with a as (select 1), b as (select 1) select x.quantity from orders o, (select 1 as quantity) x", "CTE list commas");
+allows("select x.quantity from orders o where o.id is distinct from 1 union select x.quantity from orders o, (select 1 as quantity) x", "UNION branch FROM list");
+allows("create table t as select x.quantity from orders o, (select 1 as quantity) x", "CREATE TABLE AS SELECT");
+// The comma check is one pass: a long generated select list stays fast.
+{
+  const big = `select ${Array.from({ length: 5000 }, (_, i) => `abs(${i}) as c${i}`).join(", ")}, oi.quantity from order_items oi`;
+  const t0 = Date.now();
+  refuses(big, ["oi.quantity"], "5,000-item select list");
+  assert.ok(Date.now() - t0 < 2000, `5,000-item select list took ${Date.now() - t0} ms`); pass++;
+}
 refuses(`select p.price_per_acre from "public"."products" p`, ["p.price_per_acre"], "quoted public schema");
 refuses(`select oi.quantity from orders o, "public".order_items oi`, ["oi.quantity"], "quoted public schema in a comma list");
 refuses(`select "public"."products"."price_per_acre" from "public"."products"`, ["public.products.price_per_acre"], "quoted three-part name");

@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-20 — #2050: Mason owner-accepted 1 Sol finding(s) at `e4960bf1340d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #2050 at `e4960bf1340d` (base `e4e6e11fae1c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270129171000_field_app_refuses_product_without_sold_unit.sql:39`, text sha256 `30caf38e89c4de39` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business) (ref 23d2a64b72fd)
+
 ## 2026-11-19 — #2050 (release #1990 Sol #2 fix) may have Sol round 5; old drafts are not re-checked
 
 **Decision (Mason, in chat, 2026-11-19: "Yes, accept #1, fix #2" and "Yes, push it").** PR #2050 may have its Sol

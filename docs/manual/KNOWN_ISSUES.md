@@ -245,8 +245,8 @@ migration, adding those page keys to it.
 **ACCEPTED (Mason, 2026-11-19, To-Do decision 18: reps keep access; no code) · security/money · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #4, sweep 2 Q1)**
 The 2026-11-01 lock made price tier and credit limit admin-only; payment terms, finance-charge on/off, rate and grace
 days are not covered, so a rep can move a customer to Net 90 or turn off late fees (also parent customer and default
-application service). Fix if Mason agrees (To-Do decision 18): add these fields to `guard_customer_rep_edit_20261013`
-and disable them on the screen for non-admins.
+application service). Mason chose to keep it this way (To-Do decision 18); no fix is planned. Reopen only if he
+changes that decision.
 
 ### KI-121 — The last active admin can remove their own admin role
 **LOW · FIX IN REVIEW (not live) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #7) · Claude**

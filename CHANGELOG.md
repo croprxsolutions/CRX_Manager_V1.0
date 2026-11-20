@@ -36,6 +36,7 @@ Releases of CRX Manager, newest first.
 * environment banner and tab title prefix (STAGING amber, LOCAL blue) (#1714)
 
 #### 🐛 Bug Fixes
+* KI-81 field — a quote price bills only where the grower was sent it; blend invoice fixes (v0.1.0 Sol HIGH) (#2053)
 * every product needs a sold unit (#1990 Sol #2) (#2050)
 * Sol proof base = exact merge-base (#1913); Codex runs the landing claim (#1948) (#2041)
 * Sol + apply-review fixes for v0.1.0 (#1990) (#2044)

@@ -36,7 +36,7 @@ Stale-data issues this is meant to prevent:
 One new hook, `src/hooks/useLoad.ts` (about 60 lines), shaped like `useLastChargedPrices`:
 
 ```ts
-const lock = useLoad(`rate-lock:${id}`, () => loadProductRateLock(id), { action: 'load_rate_lock', refreshOnFocus: true });
+const lock = useLoad('rate-lock', loadProductRateLock, { action: 'load_rate_lock', refreshOnFocus: true });
 // lock.status: 'loading' | 'loaded' | 'failed'
 // lock.data (when loaded, and kept while a reload runs), lock.refreshing
 // await lock.reload() -> true if fresh data arrived, false if the read failed

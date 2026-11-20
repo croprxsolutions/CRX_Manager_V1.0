@@ -16,7 +16,7 @@
 //   * HEAD is the open PR's headRefOid, and the PR targets main;
 //   * CodeRabbit's latest verdict is APPROVED on that exact head, nothing is
 //     CHANGES_REQUESTED, and the newest run of every check is green (CLEAN);
-//   * a fresh gpt-6-sol/high merge proof is bound to that head and to GitHub's
+//   * a fresh gpt-6.2-sol/high merge proof is bound to that head and to GitHub's
 //     real base — the same proof the merge gates require.
 // Anything unreadable fails CLOSED. The same predicates as the merge gates are
 // imported, never re-derived.
@@ -99,7 +99,7 @@ function refuse(why) {
       `MIGRATION LANDING GATE: ${why}\n\n` +
       `Under Mason's autonomous-landing rule (2026-09-26) a live apply happens only after the pull request ` +
       `that carries the migration is ready to merge: every check is green, no review asks for changes, ` +
-      `and a fresh exact-SHA gpt-6-sol proof (node scripts/write-codex-push-proof.mjs) is bound to that ` +
+      `and a fresh exact-SHA gpt-6.2-sol proof (node scripts/write-codex-push-proof.mjs) is bound to that ` +
       `head. Apply from a clean checkout of the PR's branch with the migration committed, then merge right ` +
       `after. A destructive migration never applies through an agent — it is parked for Mason.`,
   };
@@ -445,7 +445,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
     if (proven) break;
   }
   if (!proven) {
-    return refuse(`no fresh gpt-6-sol/high proof is bound to ${number}'s head ${head.slice(0, 12)} and base ${baseSha.slice(0, 12)}.`);
+    return refuse(`no fresh gpt-6.2-sol/high proof is bound to ${number}'s head ${head.slice(0, 12)} and base ${baseSha.slice(0, 12)}.`);
   }
   return { ok: true, pullRequest: pr.number, head, ...(skip ? { coderabbitSkippedBy: skip } : {}) };
 }

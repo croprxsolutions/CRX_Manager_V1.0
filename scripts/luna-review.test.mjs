@@ -82,7 +82,7 @@ const refused = `${banner(LUNA_MODEL)}ERROR: The '${LUNA_MODEL}' model is not su
 const refusal = classifyLunaRun({ ...good, status: 1, stderr: refused });
 assert.equal(refusal.kind, "model-refused");
 assert.match(refusal.reason, /no other model was tried/);
-const swapped = classifyLunaRun({ ...good, stderr: `${banner("gpt-6-sol")}tokens used\n1\n` });
+const swapped = classifyLunaRun({ ...good, stderr: `${banner("gpt-6.2-sol")}tokens used\n1\n` });
 assert.deepEqual([swapped.outcome, swapped.kind], ["void", "wrong-model"]);
 assert.equal(classifyLunaRun({ ...good, stderr: "tokens used\n1\n" }).kind, "wrong-model");
 

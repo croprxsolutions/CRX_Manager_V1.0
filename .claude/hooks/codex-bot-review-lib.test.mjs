@@ -564,10 +564,17 @@ for (const [label, source] of [["Claude", guardSource], ["Codex", codexGuardSour
   const budgetMatch = source.match(/const CODEX_ADVISORY_BUDGET_MS = ([\d_]+);/);
   ok(budgetMatch, `the ${label} guard declares an advisory time budget`);
   const budgetMs = Number(budgetMatch[1].replace(/_/g, ""));
-  // Hook budgets: 15s for the Codex guard (.codex/hooks.json), 30s for the
-  // Claude guard (.claude/settings.json). Half is the ceiling, so the hard gates
-  // and the notices always have room left.
-  const hookBudgetMs = label === "Codex" ? 15_000 : 30_000;
+  // Hook budgets: each guard's own hook limit (CODEX_HOOK_TIMEOUT_MS, which
+  // mirrors .codex/hooks.json; the Claude guard's HOOK_TIMEOUT_MS, its hard-gate
+  // budget). Half is the ceiling, so the hard gates and the notices always have room left.
+  const hookBudgetMs = Number(source.match(label === "Codex" ? /const CODEX_HOOK_TIMEOUT_MS = ([\d_]+);/ : /const HOOK_TIMEOUT_MS = ([\d_]+);/)[1].replace(/_/g, ""));
+  if (label === "Codex") {
+    // The source constant must match the real limit in .codex/hooks.json, or the
+    // hook can be killed (which allows) before its own deadline fires (Luna, #1963).
+    const entry = JSON.parse(readFileSync(path.join(__dirname, "..", "..", ".codex", "hooks.json"), "utf8"))
+      .hooks.PreToolUse.flatMap((group) => group.hooks).find((hook) => /production-action-guard\.mjs/.test(hook.command));
+    ok(entry && entry.timeout * 1000 === hookBudgetMs, `CODEX_HOOK_TIMEOUT_MS (${hookBudgetMs}ms) matches .codex/hooks.json (${entry?.timeout}s)`);
+  }
   ok(
     budgetMs > 0 && budgetMs <= hookBudgetMs / 2,
     `the ${label} guard's advisory budget (${budgetMs}ms) must stay at or under half its ${hookBudgetMs}ms hook timeout`,

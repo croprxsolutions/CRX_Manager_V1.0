@@ -217,8 +217,8 @@ export function releaseFreezeProblem({ repo, gh }) {
   const show = (error) => sanitizeForMessage(String(error?.message || error).split(/\r?\n/)[0]);
   let numbers;
   try {
-    numbers = String(gh(["api", "--paginate", `${repoPath}/pulls?base=main&state=open&per_page=100`, "--jq", '.[] | select(.head.ref == "release/next") | .number']))
-      .split(/\r?\n/).filter(Boolean).map((l) => (/^\d+$/.test(l.trim()) ? Number(l) : NaN));
+    numbers = String(gh(["api", "--paginate", `${repoPath}/pulls?base=main&state=open&per_page=100`, "--jq", '.[] | select(.head.ref == "release/next" and .head.repo.full_name == .base.repo.full_name) | .number']))
+      .split(/\r?\n/).filter(Boolean).map((l) => (/^[1-9]\d*$/.test(l.trim()) ? Number(l) : NaN));
     if (numbers.some((n) => !Number.isInteger(n))) throw new Error("not a PR number");
   } catch (error) {
     return `the open release PR could not be read (${show(error)}), so an open release can't be ruled out (fail closed)`;

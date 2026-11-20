@@ -140,6 +140,10 @@ check("staging is frozen for agents while a release PR is open (#1838 MED 2, wid
   assert.match(run([[list, "77\n78"]]), /#77, #78/, "every open release PR is named");
   assert.match(run([[list, new Error("HTTP 502")]]), /fail closed/);
   assert.match(run([[list, "77 abc"]]), /fail closed/, "an unreadable answer refuses");
+  assert.match(run([[list, "0"]]), /fail closed/, "#0 is not a PR number");
+  let query = "";
+  releaseFreezeProblem({ repo: "o/r", gh: (args) => { query = args.join(" "); return ""; } });
+  assert.match(query, /\.head\.repo\.full_name == \.base\.repo\.full_name/, "a fork's release/next branch freezes nothing");
 });
 
 check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)", () => {

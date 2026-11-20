@@ -1,5 +1,7 @@
 -- Reverse of 20270129171000_field_app_refuses_product_without_sold_unit (prover use): the three bodies as
--- 20270129160000 / 20270125163000 left them. CREATE OR REPLACE keeps owner and grants.
+-- 20270129160000 / 20270125163000 left them. CREATE OR REPLACE keeps owner and grants. The sold-unit rule comes off.
+
+ALTER TABLE public.products DROP CONSTRAINT products_inventory_unit_has_alnum, ALTER COLUMN inventory_unit DROP NOT NULL;
 
 CREATE OR REPLACE FUNCTION public._save_field_app_invoice_impl_20260714(p_invoice_id uuid, p_invoice jsonb, p_locations jsonb, p_chemicals jsonb, p_performed_by uuid, p_application_service_id uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb

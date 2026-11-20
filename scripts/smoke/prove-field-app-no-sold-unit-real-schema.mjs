@@ -4,12 +4,15 @@
  * Container setup and replay copied from prove-release-fixes-1990-real-schema.mjs. A product with no sold unit
  * (inventory_unit NULL, unit_size Gal) and a $32.00/Gal sent quote: 16 oz/ac on 10 acres = 160 oz.
  *   BEFORE: the single-owner save bills 160 x $32 = $5,120.00 (oz priced as gallons); the split save bills
- *           128 oz (A quoted $32, B list $30) = $3,968.00; the preview shows the same. An unposted draft with a
- *           product line stops the apply (preflight) until it is deleted.
- *   AFTER:  both saves refuse FIELD_APP_UNIT_UNCONVERTIBLE (no sold unit, or only a tab); the preview shows the line at $0;
- *           the same product with its sold unit set (Gal) bills 1.25 Gal x $32 = $40.00, as before.
+ *           128 oz (A quoted $32, B list $30) = $3,968.00; the preview shows the same.
+ *   APPLY:  stops, changing nothing, while any product has no sold unit (none, or only a tab); proceeds once set.
+ *   AFTER:  the database refuses saving or creating a product with no sold unit (none, empty, spaces, tab,
+ *           zero-width space) (Mason 2026-11-19). With that rule lifted inside a rolled-back probe, both saves still
+ *           refuse FIELD_APP_UNIT_UNCONVERTIBLE and the preview shows $0. With sold unit Gal: 1.25 Gal x $32 = $40.00
+ *           single, $31.00 split, as before.
  * Also: a forged p_performed_by on the private save helper is refused ACTOR_MISMATCH (was the old free-text message).
- * Then a second apply stops at the preflight, the reverse restores the three bodies, and the candidate re-applies.
+ * Then a second apply stops at the preflight, the reverse restores the three bodies and lifts the rule, and the
+ * candidate re-applies.
  *
  * Run: node scripts/smoke/prove-field-app-no-sold-unit-real-schema.mjs   (needs Docker)
  * Prints FIELD_APP_NO_SOLD_UNIT_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
@@ -263,6 +266,9 @@ const bodies = () => scalar(`SELECT string_agg(proname || ':' || md5(replace(pro
   FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname IN ('${FNS.join("','")}');`);
 const grants = (sig) => scalar(`SELECT COALESCE(string_agg(g, ',' ORDER BY g), '-') FROM (SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END AS g
   FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = '${sig}'::regprocedure AND a.privilege_type = 'EXECUTE') x;`);
+const RULE = () => scalar(`SELECT CASE WHEN a.attnotnull THEN 'required' ELSE 'nullable' END || ':' || COALESCE((SELECT string_agg(conname, ',')
+  FROM pg_constraint WHERE conrelid = 'public.products'::regclass AND conname = 'products_inventory_unit_has_alnum'), 'none')
+  FROM pg_attribute a WHERE a.attrelid = 'public.products'::regclass AND a.attname = 'inventory_unit';`);
 const SPLIT = 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)';
 const SAVE_IMPL = 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)';
 const OLD_BODIES = '_preview_field_app_invoice_split_impl_20260908:15d627b08c6775fb74cd1fa78163a6d2,'
@@ -373,34 +379,26 @@ async function main() {
   console.log(`[before] no sold unit, $32/Gal quote, 160 oz (1.25 Gal) applied: single save ${saveBefore} cents ($5,120.00), preview ${previewBefore};`
     + ` split save of 128 oz (1 Gal; A quoted $32, B list $30) ${splitBefore} cents ($3,968.00). A forged actor is refused "p_performed_by does not match authenticated user"`);
 
-  // The apply stops while any product has no sold unit (an old-body save could misprice it after the scan) ...
+  // The apply stops (changing nothing) while any product has no sold unit: none, or only a tab.
   stageText('candidate.sql', lf(CANDIDATE));
-  assert.equal(psql(`BEGIN;\n${SAVE}\nCOMMIT;`).status, 0);
-  const heldUnit = apply('candidate.sql');
-  assert.notEqual(heldUnit.status, 0);
-  assert.match(heldUnit.output, /FIELD_APP_NO_SOLD_UNIT_PREFLIGHT: 1 product\(s\) have no sold unit/);
+  const heldNull = apply('candidate.sql');
+  assert.notEqual(heldNull.status, 0);
+  assert.match(heldNull.output, /column "inventory_unit" of relation "products" contains null values/);
   assert.equal(bodies(), OLD_BODIES, 'a refused apply must change nothing');
-  // ... and, with every product's unit set, while an unposted field-application invoice carries a product line.
+  raw(`UPDATE public.products SET inventory_unit = E'\t' WHERE id = '${N}';`);
+  const heldTab = apply('candidate.sql');
+  assert.notEqual(heldTab.status, 0);
+  assert.match(heldTab.output, /products_inventory_unit_has_alnum/);
+  assert.equal(bodies(), OLD_BODIES, 'a refused apply must change nothing');
+  assert.equal(RULE(), 'nullable:none', 'a refused apply must leave products as it was');
   raw(`UPDATE public.products SET inventory_unit = 'Gal' WHERE id = '${N}';`);
-  const held = apply('candidate.sql');
-  assert.notEqual(held.status, 0);
-  assert.match(held.output, /FIELD_APP_NO_SOLD_UNIT_PREFLIGHT: 1 unposted field-application invoice\(s\) carry a product line/);
-  assert.equal(bodies(), OLD_BODIES, 'a refused apply must change nothing');
-  raw(`UPDATE public.invoices SET deleted_at = now() WHERE id IN (SELECT invoice_id FROM public.field_app_locations WHERE invoice_id IS NOT NULL) AND deleted_at IS NULL;`);
-  // The same for a split-bill draft (its children are found through their invoice group).
-  assert.equal(psql(`BEGIN;\n${SPLIT_SAVE}\nCOMMIT;`).status, 0);
-  const heldSplit = apply('candidate.sql');
-  assert.notEqual(heldSplit.status, 0);
-  assert.match(heldSplit.output, /FIELD_APP_NO_SOLD_UNIT_PREFLIGHT: 2 unposted field-application invoice\(s\) carry a product line/);
-  assert.equal(bodies(), OLD_BODIES, 'a refused apply must change nothing');
-  raw(`UPDATE public.invoices SET deleted_at = now() WHERE invoice_group_id IS NOT NULL AND deleted_at IS NULL;`);
-  console.log('[case] the apply stops at its preflight and changes nothing while a product has no sold unit, then (unit set) while an unposted'
-    + ' single-owner draft or a split-bill group of 2 carries a product line; once those are deleted it proceeds');
+  console.log('[case] the apply stops and changes nothing while a product has no sold unit (none, or only a tab); with its unit set it proceeds');
 
   // APPLY; a second apply stops at the preflight.
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
   assert.equal(bodies(), NEW_BODIES);
+  assert.equal(RULE(), 'required:products_inventory_unit_has_alnum');
   assert.equal(grants(SPLIT), splitGrants, 'the split helper grants must not change');
   assert.equal(grants(SAVE_IMPL), saveGrants, 'the save helper grants must not change');
   const second = apply('candidate.sql');
@@ -408,36 +406,50 @@ async function main() {
   assert.match(second.output, /FIELD_APP_NO_SOLD_UNIT_PREFLIGHT: not the reviewed body/);
   console.log(`[case] the candidate applies (EXECUTE unchanged: split helper ${splitGrants}, save helper ${saveGrants}); a second apply stops at its preflight`);
 
-  // AFTER (the product's sold unit is blanked again directly; the setup screen and import can leave it blank)
-  raw(`UPDATE public.products SET inventory_unit = NULL WHERE id = '${N}';`);
-  refusedProbe(SAVE, /FIELD_APP_UNIT_UNCONVERTIBLE: cannot price "NSU chem" — the product has no sold unit/);
-  const previewAfter = okProbe(PREVIEW);
-  assert.equal(previewAfter, '0', `after: the preview should show the line at $0 (got ${previewAfter})`);
-  refusedProbe(SPLIT_SAVE, /FIELD_APP_UNIT_UNCONVERTIBLE: chemical line \d+ — the product has no sold unit/);
-  refusedProbe(FORGED, /ACTOR_MISMATCH/);
-  raw(`UPDATE public.products SET inventory_unit = E'\t' WHERE id = '${N}';`);
-  refusedProbe(SAVE, /FIELD_APP_UNIT_UNCONVERTIBLE: cannot price "NSU chem" — the product has no sold unit/);
-  refusedProbe(SPLIT_SAVE, /FIELD_APP_UNIT_UNCONVERTIBLE: chemical line \d+ — the product has no sold unit/);
-  raw(`UPDATE public.products SET inventory_unit = E'\u200B' WHERE id = '${N}';`);
+  // AFTER: a product cannot be saved, or created, without a sold unit.
+  const NO_UNIT = /violates (not-null|check) constraint/;
+  const NO_GUARDS = 'ALTER TABLE public.products DISABLE TRIGGER USER;\n';
+  for (const [label, value] of [['none', 'NULL'], ['empty', "''"], ['spaces', "'   '"], ['tab', "E'\\t'"], ['zero-width space', "E'\\u200B'"]]) {
+    // The table's own guards (PRODUCT_UNIT_STALE, PRODUCT_STOCK_UNIT_UNKNOWN) already refuse some of these; they are off
+    // in these rolled-back probes so the new rule is what refuses.
+    refusedProbe(`${NO_GUARDS}UPDATE public.products SET inventory_unit = ${value} WHERE id = '${N}';`, NO_UNIT);
+    refusedProbe(`${NO_GUARDS}INSERT INTO public.products (product_name, product_form, inventory_unit) VALUES ('[PROVER] NSU new ${label}', 'liquid', ${value});`, NO_UNIT);
+  }
+  refusedProbe(`${NO_GUARDS}INSERT INTO public.products (product_name, product_form) VALUES ('[PROVER] NSU new no unit', 'liquid');`, /violates not-null constraint/);
+  okProbe(`${NO_GUARDS}UPDATE public.products SET inventory_unit = 'fl oz' WHERE id = '${N}'; SELECT 1;`);
+  console.log('[after] a product saved or created with no sold unit, an empty one, spaces, a tab or a zero-width space is refused by the database; "fl oz" saves');
+
+  // The saves still refuse one on their own (rule lifted inside a rolled-back probe).
+  // The table's unit guards are off for the blanking UPDATE only, then back on (all rolled back).
+  const lifted = (unit, sql) => `ALTER TABLE public.products DROP CONSTRAINT products_inventory_unit_has_alnum, ALTER COLUMN inventory_unit DROP NOT NULL;
+    ALTER TABLE public.products DISABLE TRIGGER USER;
+    UPDATE public.products SET inventory_unit = ${unit} WHERE id = '${N}';
+    ALTER TABLE public.products ENABLE TRIGGER USER;\n${sql}`;
+  for (const unit of ['NULL', "E'\\t'"]) {
+    refusedProbe(lifted(unit, SAVE), /FIELD_APP_UNIT_UNCONVERTIBLE: cannot price "NSU chem" — the product has no sold unit/);
+    refusedProbe(lifted(unit, SPLIT_SAVE), /FIELD_APP_UNIT_UNCONVERTIBLE: chemical line \d+ — the product has no sold unit/);
+    assert.equal(okProbe(lifted(unit, PREVIEW)), '0', `after: the preview should show the line at $0 (unit ${unit})`);
+  }
   // The sent-quote unit check may refuse first (its unit differs from Gal); either way nothing is billed.
-  refusedProbe(SAVE, /QUOTE_RESEND_REQUIRED|FIELD_APP_UNIT_UNCONVERTIBLE: cannot price "NSU chem" — the product has no sold unit/);
-  refusedProbe(SPLIT_SAVE, /QUOTE_RESEND_REQUIRED|FIELD_APP_UNIT_UNCONVERTIBLE: chemical line \d+ — the product has no sold unit/);
-  assert.equal(okProbe(PREVIEW), '0');
-  console.log(`[after] no sold unit: the single save and the split save refuse FIELD_APP_UNIT_UNCONVERTIBLE; the preview shows ${previewAfter};`
-    + ' a sold unit of only a tab or a zero-width space is refused the same way; a forged actor is refused ACTOR_MISMATCH');
-  raw(`UPDATE public.products SET inventory_unit = 'Gal' WHERE id = '${N}';`);
+  refusedProbe(lifted("E'\\u200B'", SAVE), /QUOTE_RESEND_REQUIRED|FIELD_APP_UNIT_UNCONVERTIBLE: cannot price "NSU chem" — the product has no sold unit/);
+  refusedProbe(lifted("E'\\u200B'", SPLIT_SAVE), /QUOTE_RESEND_REQUIRED|FIELD_APP_UNIT_UNCONVERTIBLE: chemical line \d+ — the product has no sold unit/);
+  assert.equal(RULE(), 'required:products_inventory_unit_has_alnum', 'the probes must roll the rule back in');
+  refusedProbe(FORGED, /ACTOR_MISMATCH/);
+  console.log('[after] with the rule lifted (rolled back): no sold unit, a tab or a zero-width space is refused by the single and split saves;'
+    + ' the preview shows $0; a forged actor is refused ACTOR_MISMATCH');
   const saveGal = okProbe(SAVE), previewGal = okProbe(PREVIEW), splitGal = okProbe(SPLIT_SAVE);
   assert.equal(saveGal, '4000:quoted', `after: with its sold unit set, 160 oz bills as 1.25 Gal x $32 (got ${saveGal})`);
   assert.equal(previewGal, '4000');
   assert.equal(splitGal, '3100', `after: 128 oz bills as 0.5 Gal x $32 + 0.5 Gal x $30 (got ${splitGal})`);
   console.log(`[after] the same product with sold unit Gal: single save ${saveGal} ($40.00), preview ${previewGal}, split ${splitGal} ($31.00)`);
-  raw(`UPDATE public.products SET inventory_unit = NULL WHERE id = '${N}';`);
 
   // ROLLBACK, then re-apply.
   stageText('reverse.sql', lf(REVERSE));
   const rev = apply('reverse.sql');
   assert.equal(rev.status, 0, rev.output);
   assert.equal(bodies(), OLD_BODIES, 'the reverse must restore every previous body');
+  assert.equal(RULE(), 'nullable:none', 'the reverse must lift the sold-unit rule');
+  raw(`UPDATE public.products SET inventory_unit = NULL WHERE id = '${N}';`);
   assert.equal(grants(SPLIT), splitGrants);
   assert.equal(grants(SAVE_IMPL), saveGrants);
   assert.equal(okProbe(SAVE), saveBefore, 'after the reverse the old behaviour returns');
@@ -445,7 +457,8 @@ async function main() {
   const again = apply('candidate.sql');
   assert.equal(again.status, 0, again.output);
   assert.equal(bodies(), NEW_BODIES);
-  console.log('[case] the reverse restores all three bodies byte-identical (and the old $5,120.00 bill); the candidate re-applies');
+  assert.equal(RULE(), 'required:products_inventory_unit_has_alnum');
+  console.log('[case] the reverse restores all three bodies byte-identical and lifts the rule (the old $5,120.00 bill returns); the candidate re-applies');
   console.log('FIELD_APP_NO_SOLD_UNIT_PROOF_PASS');
 }
 

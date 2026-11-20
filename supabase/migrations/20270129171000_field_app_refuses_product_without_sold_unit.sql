@@ -2,14 +2,15 @@
 -- The sent-quote check (_field_app_sent_quote_price_cents) compares the quote's unit with
 -- COALESCE(inventory_unit, unit_size), but the invoice priced the applied amount in the RATE unit when
 -- inventory_unit was blank. A $32/gal quote on such a product could bill 128 oz at $32 each ($4,096).
--- Now the single-owner save and the split save refuse a product line with no sold unit
--- (FIELD_APP_UNIT_UNCONVERTIBLE, as the grower-share line already did), and the preview shows it at $0.
--- "No sold unit" is a unit with no letter or digit (blank, spaces, tabs, zero-width characters), in all four
--- checks, the grower share's too. The apply stops while any product has no sold unit or an unposted
--- field-application invoice already carries a product line (none of either live today).
+-- Mason's decision 2026-11-19 (DECISION_LOG): a product must have a sold unit. products.inventory_unit is now
+-- NOT NULL and must contain a letter or digit (blank, spaces, tabs or zero-width characters are refused), so no
+-- such product can exist and no save can misprice one. Live 2026-11-19: 0 of 606 products lack one; 0
+-- field-application invoices carry a product line. Creating or editing a product now needs its sold unit.
+-- The single-owner save and the split save still refuse a product line with no sold unit
+-- (FIELD_APP_UNIT_UNCONVERTIBLE, as the grower-share line already did) and the preview shows it at $0, with the
+-- same letter-or-digit test.
 -- Also: the single-owner save's actor check now raises the charter token 'ACTOR_MISMATCH' (it said
 -- 'p_performed_by does not match authenticated user'); the offline sync already reads that token as a session change.
--- Live 2026-11-19: 0 products have a blank inventory_unit, so no invoice that saves today stops saving.
 -- Bodies are the reviewed ones (pinned below) with only that check added; owner, grants, definer mode and
 -- search_path are unchanged by CREATE OR REPLACE.
 -- Order: applies after 20270125163000 and 20270129160000 (the same release); the preflight below pins the
@@ -21,7 +22,6 @@ SET LOCAL lock_timeout = '5s';
 DO $preflight$
 DECLARE
   v_bad text;
-  v_drafts text;
 BEGIN
   SELECT string_agg(s.sig, ', ') INTO v_bad
     FROM (VALUES
@@ -29,30 +29,16 @@ BEGIN
       ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '15d627b08c6775fb74cd1fa78163a6d2'),
       ('public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '962abea61f909003b93cb4a430784fce')) AS s(sig, md5)
    WHERE (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure(s.sig)) IS DISTINCT FROM s.md5;
-  -- An old-body save misprices only a product with no sold unit. Wait for in-flight saves to commit and hold
-  -- new ones (SHARE blocks their inserts until this commits), freeze products, then refuse while any product has
-  -- no sold unit (live 2026-11-19: 0), so no save running under an old body can write a mispriced line after the scan.
-  LOCK TABLE public.invoices, public.invoice_items, public.products IN SHARE MODE;
-  SELECT count(*)::text INTO v_drafts FROM products WHERE COALESCE(inventory_unit, '') !~ '[[:alnum:]]';
-  IF v_drafts <> '0' THEN
-    RAISE EXCEPTION 'FIELD_APP_NO_SOLD_UNIT_PREFLIGHT: % product(s) have no sold unit; set their units first', v_drafts;
-  END IF;
-  -- A draft saved by the old bodies may carry a product line priced in the rate unit; it could still post.
-  -- Live 2026-11-19 has none (2 field-application invoices, no product lines), so stop for review if any appeared.
-  SELECT count(DISTINCT i.id)::text INTO v_drafts
-    FROM invoices i JOIN invoice_items ii ON ii.invoice_id = i.id
-   WHERE i.deleted_at IS NULL AND i.status IN ('draft', 'unposted') AND ii.product_id IS NOT NULL
-     AND (EXISTS (SELECT 1 FROM field_app_locations l WHERE l.invoice_id = i.id)
-          OR EXISTS (SELECT 1 FROM field_app_locations l WHERE l.invoice_group_id = i.invoice_group_id)
-          OR EXISTS (SELECT 1 FROM field_app_billing_sets b WHERE b.invoice_group_id = i.invoice_group_id));
-  IF v_drafts <> '0' THEN
-    RAISE EXCEPTION 'FIELD_APP_NO_SOLD_UNIT_PREFLIGHT: % unposted field-application invoice(s) carry a product line saved before this check; review their quantities, then post or delete them first', v_drafts;
-  END IF;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'FIELD_APP_NO_SOLD_UNIT_PREFLIGHT: not the reviewed body (missing, drifted or already replaced): %', v_bad;
   END IF;
 END;
 $preflight$;
+
+-- Every product has a sold unit. Fails the whole apply (changing nothing) if any row lacks one.
+ALTER TABLE public.products
+  ALTER COLUMN inventory_unit SET NOT NULL,
+  ADD CONSTRAINT products_inventory_unit_has_alnum CHECK (inventory_unit ~ '[[:alnum:]]');
 
 CREATE OR REPLACE FUNCTION public._save_field_app_invoice_impl_20260714(p_invoice_id uuid, p_invoice jsonb, p_locations jsonb, p_chemicals jsonb, p_performed_by uuid, p_application_service_id uuid DEFAULT NULL::uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
@@ -2432,6 +2418,11 @@ BEGIN
               WHERE p.oid = 'public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)'::regprocedure
                 AND a.privilege_type = 'EXECUTE' AND a.grantee <> p.proowner) THEN
     RAISE EXCEPTION 'FIELD_APP_NO_SOLD_UNIT_POSTFLIGHT: a role other than the owner may still run _save_field_app_split_invoice_impl';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.products'::regclass AND attname = 'inventory_unit' AND attnotnull)
+     OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.products'::regclass AND conname = 'products_inventory_unit_has_alnum'
+                     AND contype = 'c' AND convalidated) THEN
+    RAISE EXCEPTION 'FIELD_APP_NO_SOLD_UNIT_POSTFLIGHT: products.inventory_unit is not required with a letter or digit';
   END IF;
 END;
 $postflight$;

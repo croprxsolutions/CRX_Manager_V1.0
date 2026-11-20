@@ -14,7 +14,9 @@ import { fileURLToPath } from 'node:url';
 // Blank out quoted strings and comments in one left-to-right pass, keeping newlines so line numbers stay exact.
 // Dollar-quoted bodies are kept: smoke chains are DO blocks. (Same pass as check-smoke-product-inserts-pricing-free.)
 function stripStringsAndComments(sql) {
-  return sql.replace(/'(?:[^']|'')*'|--[^\n]*|\/\*[\s\S]*?\*\//g, (s) => (s.startsWith("'") ? "''" : s.replace(/[^\n]/g, ' ')));
+  return sql.replace(/'(?:[^']|'')*'|--[^\n]*|\/\*[\s\S]*?\*\//g, (s) =>
+    s.startsWith("'") ? `'${s.slice(1, -1).replace(/[^\n]/g, '')}'` : s.replace(/[^\n]/g, ' '),
+  );
 }
 
 // A table name with an optional schema; only public (or unqualified) tables count.
@@ -41,7 +43,7 @@ function splitTopLevel(text) {
 }
 
 // DEFAULT NULL is no default: an insert that omits the column still writes NULL.
-const hasDefault = (def) => /\b(?:DEFAULT(?!\s+NULL\b)|GENERATED|(?:big|small)?serial\d?)\b/i.test(def);
+const hasDefault = (def) => /\b(?:DEFAULT(?!\s+\(*\s*NULL\b)|GENERATED|(?:big|small)?serial\d?)\b/i.test(def);
 const CONSTRAINT_WORDS = /^(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE|LIKE)\b/i;
 
 /**
@@ -84,7 +86,10 @@ export function requiredColumnsFromMigrations(migrations) {
           if (/^NOT/i.test(m[3])) {
             c.notNull = on;
             if (on) c.requiredBy = name; // counts once any default goes away, even in a later migration
-          } else c.hasDefault = on && hasDefault(action);
+          } else {
+            c.hasDefault = on && hasDefault(action);
+            if (!c.hasDefault && c.notNull) c.requiredBy ??= name; // dropping the default of a NOT NULL column
+          }
         } else if ((m = action.match(/^ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?\s+([\s\S]*)$/i)) && !CONSTRAINT_WORDS.test(m[1])) {
           if (/IF\s+NOT\s+EXISTS/i.test(action) && cols(t).has(ident(m[1]))) continue;
           const def = m[2];
@@ -117,7 +122,7 @@ export function requiredColumnsFromMigrations(migrations) {
 export function insertsIn(sql) {
   const code = stripStringsAndComments(sql);
   const out = [];
-  const re = new RegExp(String.raw`\bINSERT\s+INTO\s+${TABLE}(?:\s+(?:AS\s+)?(?!VALUES\b|SELECT\b|DEFAULT\b|OVERRIDING\b|WITH\b)\w+)?\s*(\(([^)]*)\))?`, 'gi');
+  const re = new RegExp(String.raw`\bINSERT\s+INTO\s+(?:ONLY\s+)?${TABLE}(?:\s+(?:AS\s+)?(?!VALUES\b|SELECT\b|DEFAULT\b|OVERRIDING\b|WITH\b)\w+)?\s*(\(([^)]*)\))?`, 'gi');
   for (const m of code.matchAll(re)) {
     if (!isPublic(m[2])) continue;
     const defaultValues = !m[4] && /^\s*DEFAULT\s+VALUES\b/i.test(code.slice(m.index + m[0].length));

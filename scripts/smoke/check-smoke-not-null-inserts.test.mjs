@@ -44,6 +44,16 @@ assert.deepEqual(cols(r, 't'), []);
 assert.deepEqual(cols(r, 't2'), ['b', 'c', 'd']);
 assert.equal(r.get('t2').get('b'), '2');
 
+// Dropping the default of a NOT NULL column (added by migration or by CREATE TABLE) makes it required;
+// DEFAULT (NULL) is no default.
+r = req(
+  mig('1', "CREATE TABLE t (a text NOT NULL DEFAULT 'x', e text);"),
+  mig('2', "ALTER TABLE t ADD COLUMN b text NOT NULL DEFAULT 'Gal', ADD COLUMN c text NOT NULL DEFAULT 'y';"),
+  mig('3', 'ALTER TABLE t ALTER COLUMN b DROP DEFAULT, ALTER COLUMN a DROP DEFAULT, ALTER COLUMN e SET NOT NULL, ALTER COLUMN e SET DEFAULT (NULL);'),
+);
+assert.deepEqual(cols(r, 't'), ['a', 'b', 'e']);
+assert.equal(r.get('t').get('a'), '3');
+
 // Comments, strings and other schemas are ignored.
 r = req(mig('1', "-- ALTER TABLE t ALTER COLUMN a SET NOT NULL;\nSELECT 'ALTER TABLE t ALTER COLUMN b SET NOT NULL;';\nALTER TABLE auth.users ALTER COLUMN c SET NOT NULL;"));
 assert.equal(r.size, 0);
@@ -58,6 +68,9 @@ const ins = insertsIn(`DO $$ BEGIN
   INSERT INTO products VALUES ('c');
   INSERT INTO auth.users (id) VALUES (gen_random_uuid());
   INSERT INTO products DEFAULT VALUES;
+  RAISE NOTICE 'two
+lines';
+  INSERT INTO ONLY products (product_name) VALUES ('e');
   -- INSERT INTO products (product_name) VALUES ('d');
   PERFORM 'INSERT INTO products (product_name) VALUES (1)';
 END $$;`);
@@ -67,6 +80,7 @@ assert.deepEqual(ins.map((i) => [i.table, i.columns, i.line]), [
   ['products', ['product_name', 'product_form'], 5],
   ['products', null, 7],
   ['products', [], 9],
+  ['products', ['product_name'], 12],
 ]);
 
 // End to end: the inventory_unit case that broke staging (#2050 / #2057).

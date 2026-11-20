@@ -21,14 +21,16 @@ customer whose `customers.is_active` is false. "Becomes open work" means:
 |---|---|---|
 | orders | any INSERT; an UPDATE where (the row is open afterwards and was not open before) or its `customer_id` changed (open or closed) | `status IN ('confirmed','partially_fulfilled')`, `deleted_at IS NULL` |
 | deliveries | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` or `order_id` changed | `status IN ('scheduled','in_progress')`, `deleted_at IS NULL` |
-| inventory_holds (every hold, any type or source; Mason 2026-11-19) | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` changed | `is_active` and not expired (`expires_at` null or ≥ today, Chicago) |
+| inventory_holds (every hold, any type or source; Mason 2026-11-19) | any INSERT; an UPDATE where (open afterwards and not before, counting a dated expiry pushed later or cleared as "not before") or its `customer_id` changed | `is_active` and not expired (`expires_at` null or ≥ today, Chicago) |
 | jobs | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` changed | `status IN ('scheduled','in_progress')`, or `completed` with no `invoice_id`; `deleted_at IS NULL` |
 
 The customer checked is the row's `customer_id`; for a delivery also its order's `customer_id`
 (KI-148 counts a delivery by either). Moving any row, open or closed, onto an inactive customer is
-refused (Astra #12: else a delivery could be added to a closed order while it is moved). A null
+refused (Astra #12: else a delivery could be added to a closed order while it is moved). Moves are
+admin or sales rep only for signed-in users (`WORK_CUSTOMER_MOVE_NOT_ALLOWED`). A null
 `customer_id` is not checked: only `inventory_holds.customer_id` is nullable, and live it is null only
-on 20 switched-off manual holds with no source (2026-11-19).
+on 20 switched-off manual holds with no source (2026-11-19). A hold with a source (built from a job or
+quote) must name its customer: CHECK `inventory_holds_source_needs_customer`.
 
 INSERT is refused whatever its status: a new row for an inactive customer is new work by definition
 (this includes a bulk import of a closed order; reactivate first). Closing, cancelling, voiding,
@@ -215,14 +217,17 @@ change is the sanitizer sentence, which is safe before or after the migration.
   lock_timeout bounds the wait; a deadlock aborts one transaction whole.
 - #7 LOW (New Delivery could show an empty error) → falls back to "Failed to create delivery".
 
-- Luna r6 HIGH (a hold with no customer skips the check) → a hold with a source (built from a job
-  or quote) must name its customer (`HOLD_CUSTOMER_REQUIRED`). Jobs and quotes require a customer
-  and every builder copies it; live 2026-11-19: 0 such rows. A manual hold with no source and no
+- Luna r6 HIGH (a hold with no customer skips the check) and r7 HIGH (an open customer-less hold
+  gains a source without a move) → after the Luna round cap, a fresh simplicity review replaced the
+  trigger branch with one CHECK constraint: `inventory_holds_source_needs_customer` (`source_id IS
+  NULL OR customer_id IS NOT NULL`), on every write path. Jobs and quotes require a customer and
+  every builder copies it; live 2026-11-19: 0 violating rows. A manual hold with no source and no
   customer (20 live, none active) belongs to no customer and stays allowed. No source lookup, so
-  the round-capped exemption mechanism is not revived.
-- Luna r7 HIGH (an open customer-less hold gains a source without a move) → changing a hold's
-  source counts as a move (no app path changes it; grep 2026-11-19), so it runs the role, customer
-  and HOLD_CUSTOMER_REQUIRED checks (proved).
+  the round-capped exemption mechanism is not revived. The same review merged the two customer
+  reads into one locked count.
+- Accepted LOW (simplicity review R1): definer code or a server role could save a hold whose
+  customer differs from its source job's customer; the guard checks the hold's own customer, which
+  is what KI-148 counts. Every live builder copies the job's or quote's customer.
 - Luna r7 MED (service_role can move work) → refuted: the move rule stops signed-in non-staff from
   learning a customer's status (Sol r2 #1). Server roles bypass row-level security already, see
   everything, and are not signed-in users; every move they make still gets the inactive-customer

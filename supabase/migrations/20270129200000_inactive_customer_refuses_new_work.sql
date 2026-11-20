@@ -13,8 +13,9 @@
 --   customer's old spray job that reserves stock, or a quote or booking reservation, needs the
 --   customer reactivated first (live 2026-11-19: no inactive customer has a spray job, quote or
 --   hold; named for Taha in the PR). A hold built from a job or quote (source_id set) must name its
---   customer (HOLD_CUSTOMER_REQUIRED; live 2026-11-19: 0 such rows, and jobs and quotes require a
---   customer); a manual hold with no source and no customer belongs to no customer. Refusal:
+--   customer (CHECK inventory_holds_source_needs_customer; live 2026-11-19: 0 such rows, and jobs
+--   and quotes require a customer); a manual hold with no source and no customer belongs to no
+--   customer. Refusal:
 --   CUSTOMER_INACTIVE_NEW_WORK, a fixed sentence that names no customer (the caller may not be allowed
 --   to read the order's customer). Every role and path (RPCs, direct writes, server roles).
 --   Moving any of these rows to another customer or order is for admins and sales reps only: anyone
@@ -47,6 +48,7 @@
 --   DROP TRIGGER zz_inactive_customer_new_work_20270129 ON public.inventory_holds;
 --   DROP TRIGGER zz_inactive_customer_new_work_20270129 ON public.jobs;
 --   DROP FUNCTION public.guard_inactive_customer_new_work_20270129();
+--   ALTER TABLE public.inventory_holds DROP CONSTRAINT inventory_holds_source_needs_customer;
 --
 -- ORDERING: after 20270128140000 (KI-148). Not re-runnable (preflight refuses). Triggers are added
 --   orders, deliveries, jobs, then inventory_holds: a job cancel writes jobs before holds, so taking
@@ -74,7 +76,9 @@ BEGIN
   IF to_regprocedure('public.guard_inactive_customer_new_work_20270129()') IS NOT NULL
      OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'zz_inactive_customer_new_work_20270129'
                   AND tgrelid IN ('public.orders'::regclass, 'public.deliveries'::regclass,
-                                  'public.jobs'::regclass, 'public.inventory_holds'::regclass)) THEN
+                                  'public.jobs'::regclass, 'public.inventory_holds'::regclass))
+     OR EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.inventory_holds'::regclass
+                  AND conname = 'inventory_holds_source_needs_customer') THEN
     RAISE EXCEPTION 'INACTIVE_NEW_WORK_PREFLIGHT: the guard already exists';
   END IF;
   IF (SELECT count(*) FROM information_schema.columns
@@ -104,7 +108,7 @@ DECLARE
   v_moved boolean := false;
   v_ids uuid[];
   v_order_customer uuid;
-  v_found integer;
+  v_active integer;
 BEGIN
   -- "Open" matches KI-148's deactivation check (20270128140000).
   IF TG_TABLE_NAME = 'orders' THEN
@@ -129,8 +133,7 @@ BEGIN
       -- (old row open at the trigger, expired by the time a deactivation counts) is still checked.
       v_old_open := OLD.is_active IS TRUE AND (OLD.expires_at IS NULL OR OLD.expires_at >= v_today)
         AND NOT (OLD.expires_at IS NOT NULL AND (NEW.expires_at IS NULL OR NEW.expires_at > OLD.expires_at));
-      -- Pointing a hold at another job or quote is a move too (no app path changes a hold's source).
-      v_moved := NEW.customer_id IS DISTINCT FROM OLD.customer_id OR NEW.source_id IS DISTINCT FROM OLD.source_id;
+      v_moved := NEW.customer_id IS DISTINCT FROM OLD.customer_id;
     END IF;
     v_ids := ARRAY[NEW.customer_id];
   ELSIF TG_TABLE_NAME = 'jobs' THEN
@@ -159,14 +162,6 @@ BEGIN
     RAISE EXCEPTION 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order';
   END IF;
 
-  -- A hold built from a job or quote must name its customer (jobs and quotes always have one), so it
-  -- cannot skip the check below with no customer. A manual hold with no source belongs to no customer.
-  IF TG_TABLE_NAME = 'inventory_holds' THEN
-    IF NEW.source_id IS NOT NULL AND NEW.customer_id IS NULL THEN
-      RAISE EXCEPTION 'HOLD_CUSTOMER_REQUIRED: nothing was saved. A stock hold for a spray job or quote must name its customer';
-    END IF;
-  END IF;
-
   -- The delivery's order is locked first, so it cannot move to another customer before this commits.
   -- (Nested IF: PL/pgSQL would read NEW.order_id on every table in a single AND.)
   IF TG_TABLE_NAME = 'deliveries' THEN
@@ -178,13 +173,12 @@ BEGIN
 
   -- FOR SHARE waits for a deactivation in progress, then reads its committed result; it also makes a
   -- deactivation wait for this save, so KI-148's count sees it. Id order: no lock-order deadlock.
-  SELECT count(*) INTO v_found
-    FROM (SELECT 1 FROM public.customers c WHERE c.id = ANY (v_ids) ORDER BY c.id FOR SHARE) locked;
-  -- A customer this transaction cannot see yet is refused, never assumed active.
-  IF v_found < (SELECT count(DISTINCT x) FROM unnest(v_ids) x WHERE x IS NOT NULL) THEN
-    RAISE EXCEPTION 'CUSTOMER_INACTIVE_NEW_WORK: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added';
-  END IF;
-  IF EXISTS (SELECT 1 FROM public.customers c WHERE c.id = ANY (v_ids) AND c.is_active IS NOT TRUE) THEN
+  -- Every named customer must be found, locked and active: one this transaction cannot see yet is
+  -- refused, never assumed active.
+  SELECT count(*) INTO v_active
+    FROM (SELECT c.is_active FROM public.customers c WHERE c.id = ANY (v_ids) ORDER BY c.id FOR SHARE) locked
+   WHERE locked.is_active IS TRUE;
+  IF v_active < (SELECT count(DISTINCT x) FROM unnest(v_ids) x WHERE x IS NOT NULL) THEN
     RAISE EXCEPTION 'CUSTOMER_INACTIVE_NEW_WORK: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added';
   END IF;
   RETURN NULL;
@@ -206,6 +200,12 @@ CREATE TRIGGER zz_inactive_customer_new_work_20270129
   AFTER INSERT OR UPDATE ON public.inventory_holds
   FOR EACH ROW EXECUTE FUNCTION public.guard_inactive_customer_new_work_20270129();
 
+-- A hold built from a job or quote names its customer, so the guard above always has one to check.
+-- A plain constraint, so it holds on every write path. Live 2026-11-19: 0 violating rows.
+ALTER TABLE public.inventory_holds
+  ADD CONSTRAINT inventory_holds_source_needs_customer CHECK (source_id IS NULL OR customer_id IS NOT NULL) NOT VALID;
+ALTER TABLE public.inventory_holds VALIDATE CONSTRAINT inventory_holds_source_needs_customer;
+
 DO $postflight$
 DECLARE
   p pg_proc%ROWTYPE;
@@ -222,8 +222,11 @@ BEGIN
             AND t.tgrelid IN ('public.orders'::regclass, 'public.deliveries'::regclass,
                               'public.inventory_holds'::regclass, 'public.jobs'::regclass)
             AND t.tgenabled = 'O' AND NOT t.tgisinternal AND t.tgqual IS NULL
-            AND t.tgtype = 21 AND t.tgnargs = 0 AND t.tgattr::text = '') <> 4 THEN
-    RAISE EXCEPTION 'INACTIVE_NEW_WORK_POSTFLIGHT: the guard lost its owner, mode, search_path, grants or triggers';
+            AND t.tgtype = 21 AND t.tgnargs = 0 AND t.tgattr::text = '') <> 4
+     OR NOT EXISTS (SELECT 1 FROM pg_constraint
+                     WHERE conrelid = 'public.inventory_holds'::regclass
+                       AND conname = 'inventory_holds_source_needs_customer' AND contype = 'c' AND convalidated) THEN
+    RAISE EXCEPTION 'INACTIVE_NEW_WORK_POSTFLIGHT: the guard lost its owner, mode, search_path, grants, triggers or hold constraint';
   END IF;
 END
 $postflight$;

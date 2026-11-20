@@ -150,7 +150,7 @@ async function main() {
   // customer's job, a quote-built crop program hold.
   for (const sql of [newHold(INACTIVE, R.openJob), newHold(INACTIVE, R.activeJob), newHold(INACTIVE, R.openJob, 'crop_program')]) refused(sql);
   // Luna r6: a hold built from a job or quote may not drop its customer to skip the check.
-  const H = /HOLD_CUSTOMER_REQUIRED: nothing was saved/;
+  const H = /violates check constraint "inventory_holds_source_needs_customer"/;
   refused(newHold(null, R.openJob).replace("'null'", 'NULL'), H);
   refused(`UPDATE public.inventory_holds SET customer_id = NULL, source_id = '${R.openJob}' WHERE id = '${R.activeHold}';`, H);
   // Luna r7: an open hold with no customer and no source may not gain a source either.

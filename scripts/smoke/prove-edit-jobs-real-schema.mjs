@@ -21,10 +21,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-// Iterating: CRX_PROVER_REUSE=<kept container> CRX_PROVER_DB=<a copy of its replayed database> skips the replay.
-const REUSE = process.env.CRX_PROVER_REUSE;
-const NAME = REUSE || `crx-ejob-${process.pid}-${Date.now().toString(36)}`;
-const DB = process.env.CRX_PROVER_DB || 'postgres';
+// Always a fresh, network-less container this run builds (no reuse: seed() rewrites reference data).
+const NAME = `crx-ejob-${process.pid}-${Date.now().toString(36)}`;
+const DB = 'postgres';
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -321,11 +320,7 @@ function race(firstIds, secondIds, firstKey, secondKey, comment) {
 }
 
 async function main() {
-  if (REUSE) {
-    assert.match(REUSE, /^crx-[a-z0-9-]+$/, 'CRX_PROVER_REUSE must name a kept prover container (crx-...)');
-    assert.equal(docker(['inspect', '-f', '{{.HostConfig.NetworkMode}}', REUSE]).stdout.trim(), 'none', 'CRX_PROVER_REUSE must be a network-less prover container');
-    assert.ok(/^[a-z0-9_]+$/.test(DB) && DB !== 'postgres', 'CRX_PROVER_REUSE needs CRX_PROVER_DB naming a copy (a bare database name), not postgres');
-  } else buildContainer();
+  buildContainer();
   seed();
 
   // 1. BEFORE
@@ -375,6 +370,43 @@ async function main() {
   assert.equal(scalar(`SELECT status FROM jobs WHERE id = '${booked}';`), 'cancelled');
   console.log('[case] a rep cancels the job scheduled from their open booking; the booking guard allows it');
 
+  // Case 11b (Sol round 2): 200 jobs from one planned booking, each reserving the same product, cancelled
+  // in one call. Each cancelled job's trigger rebuilds the booking's reservations; changed set-wise, every
+  // rebuild already sees all 200 cancelled, so the call stays fast and leaves no hold behind.
+  psql(`DO $fx$
+  DECLARE v_c uuid; v_q uuid; v_p uuid;
+  BEGIN
+    ALTER TABLE products DISABLE TRIGGER trigger_y_require_governed_product_pricing;
+    INSERT INTO products (product_name, unit_size, product_form, current_cost, tier1_price, is_active)
+      VALUES ('[PROVER] EJ Booked Product', 'GL', 'liquid', 6.00, 10.00, true) RETURNING id INTO v_p;
+    ALTER TABLE products ENABLE TRIGGER trigger_y_require_governed_product_pricing;
+    INSERT INTO customers (farm_name) VALUES ('[PROVER] EJ Big Booking Farm') RETURNING id INTO v_c;
+    INSERT INTO quotes (quote_number, customer_id, status, tier, created_by, is_planned)
+      VALUES ('[PROVER] EJ BIG', v_c, 'draft', 1, '${REP}', true) RETURNING id INTO v_q;
+    INSERT INTO jobs (job_number, customer_id, job_date, quote_id, created_by)
+      SELECT 'J-PRV-EJBIG-' || g, v_c, (now() AT TIME ZONE 'America/Chicago')::date + 7, v_q, '${REP}' FROM generate_series(1, 200) g;
+    INSERT INTO job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit, cost_per_unit_cents, price_per_unit_cents, sort_order)
+      SELECT id, v_p, 1, 'GL', 0.5, 'PT', 600, 1000, 1 FROM jobs WHERE quote_id = v_q;
+    PERFORM _sync_quote_job_reservations(v_q, '${ADMIN}');
+  END $fx$;`);
+  const bigHolds = "SELECT count(*) FROM inventory_holds h JOIN jobs j ON j.id = h.source_id WHERE h.hold_type = 'job' AND j.job_number LIKE 'J-PRV-EJBIG-%';";
+  assert.equal(scalar(bigHolds), '200', 'case 11b setup: every booked job should hold stock');
+  const bigIds = scalar("SELECT string_agg('''' || id || '''', ',') FROM jobs WHERE job_number LIKE 'J-PRV-EJBIG-%';");
+  const bigRes = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `SELECT set_config('request.jwt.claims', '{"sub":"${REP}","role":"authenticated"}', false);
+    SET ROLE authenticated;
+    \\timing on
+    SELECT public.edit_jobs(ARRAY[${bigIds}]::uuid[], NULL, 'cancel', '${REP}', 'ej-big-cancel');` });
+  assert.equal(bigRes.status, 0, `${bigRes.stdout}
+${bigRes.stderr}`);
+  // psql's own timing of the call: the database's time, without docker start-up.
+  const bigMs = Number(/Time: ([\d.]+) ms/.exec(bigRes.stdout)?.[1]);
+  assert.ok(Number.isFinite(bigMs), `case 11b: no timing reported
+${bigRes.stdout}`);
+  assert.equal(scalar("SELECT count(*) FROM jobs WHERE job_number LIKE 'J-PRV-EJBIG-%' AND status = 'cancelled';"), '200');
+  assert.equal(scalar(bigHolds), '0', 'case 11b: cancelled booked jobs still hold stock');
+  assert.ok(bigMs < 4000, `case 11b: 200 booked jobs took ${bigMs} ms, over half the 8 s request limit`);
+  console.log(`[case] 200 jobs from one booking cancelled in one call: ${Math.round(bigMs)} ms, every hold released`);
+
   // Simultaneous calls (committed fixtures; the container is disposable).
   psql(`INSERT INTO customers (farm_name) VALUES ('[PROVER] EJ Race Farm');
     INSERT INTO jobs (job_number, customer_id, job_date) SELECT 'J-PRV-EJ' || g, (SELECT id FROM customers WHERE farm_name = '[PROVER] EJ Race Farm'), CURRENT_DATE + 7 FROM generate_series(1, 2) g;`);
@@ -391,6 +423,9 @@ async function main() {
   const diff = race([A, B], [B, A], 'ej-race-a', 'ej-race-b', 'diff');
   assert.equal(diff.status, 0, `different keys over the same jobs must not deadlock:\n${diff.output}`);
   assert.equal(scalar(`SELECT count(*) FROM jobs WHERE id IN ('${A}', '${B}') AND loader_comment = 'diff-2';`), '2');
+  // The first caller committed too: its receipt lists both jobs as updated.
+  assert.equal(scalar("SELECT jsonb_array_length(result -> 'updated') FROM idempotency_keys WHERE idempotency_key = 'ej-race-a' AND operation = 'edit_jobs';"), '2',
+    'the first call of the opposite-order race did not commit');
   console.log('[case] two simultaneous calls, different keys, same jobs in opposite order: both finish, later writer wins (as today)');
 
   for (const f of REGRESSION) {
@@ -402,4 +437,4 @@ async function main() {
 }
 
 try { await main(); }
-finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }
+finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

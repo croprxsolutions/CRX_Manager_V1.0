@@ -244,7 +244,7 @@ BEGIN
   -- Bad values are refused even when every selected job would be skipped; bad list shapes too.
   SET LOCAL ROLE authenticated;
   FOR v_r IN SELECT * FROM (VALUES
-      ('{"carrier_rate_gpa": -1}'::jsonb, 'BAD_VALUE%'), ('{"loader_tank_capacity": 0}', 'BAD_VALUE%'),
+      ('{"carrier_rate_gpa": -1}'::jsonb, 'BAD_VALUE%'), ('{"loader_tank_capacity": 0}', 'BAD_VALUE%'), ('{"loader_tank_capacity": 1e400}', 'BAD_VALUE%'),
       ('{"job_date": "2027-02-30"}', '%date%'), ('{"applicator_id": "bad-id"}', '%uuid%')
     ) AS t(changes, pattern)
   LOOP

@@ -31,9 +31,8 @@ DECLARE
   v_key         text;
   v_val         jsonb;
   v_kind        text;
-  v_id          uuid;
-  v_status      text;
-  v_deleted_at  timestamptz;
+  v_live        uuid[];
+  v_target      uuid[];
   v_rows        int;
   v_set         text := '';
   v_fingerprint text;
@@ -105,6 +104,9 @@ BEGIN
         RAISE EXCEPTION 'BAD_VALUE: carrier_rate_gpa cannot be negative';
       ELSIF v_key = 'loader_tank_capacity' AND (v_val #>> '{}')::numeric <= 0 THEN
         RAISE EXCEPTION 'BAD_VALUE: loader_tank_capacity must be above zero';
+      ELSIF v_kind = 'numeric' AND (v_val #>> '{}')::numeric > 1000000 THEN
+        -- Far above any real rate or tank, and well inside what the browser reads as a finite number.
+        RAISE EXCEPTION 'BAD_VALUE: % is too large', v_key;
       END IF;
       v_set := v_set || format('%I = ($1 ->> %L)::%s, ', v_key, v_key, v_kind);
     END LOOP;
@@ -121,47 +123,49 @@ BEGIN
     RETURN v_replay -> 'result';
   END IF;
 
-  -- One job at a time in id order: lock it, then act on its current state. A write that changes
-  -- no row (none expected: no BEFORE trigger on jobs returns NULL) aborts rather than being reported.
-  FOREACH v_id IN ARRAY v_ids LOOP
-    SELECT status, deleted_at INTO v_status, v_deleted_at FROM public.jobs WHERE id = v_id FOR UPDATE;
-    IF NOT FOUND THEN
-      v_skipped := v_skipped || jsonb_build_object('id', v_id, 'reason', 'not_found');
-      CONTINUE;
-    END IF;
-    IF v_deleted_at IS NOT NULL THEN
-      v_skipped := v_skipped || jsonb_build_object('id', v_id, 'reason', 'deleted');
-      CONTINUE;
-    END IF;
+  -- Lock every selected job first, in id order, then change them set-wise: one UPDATE per kind of
+  -- change, as the screens' bulk update does today. Each statement's AFTER row triggers (booking
+  -- reservation rebuild, hold release, dispatch close) then run once every row is already changed,
+  -- so a booking's siblings are not rebuilt over and over. No BEFORE trigger on jobs returns NULL, so
+  -- every UPDATE must change exactly the rows it targets; a shortfall aborts rather than being reported.
+  SELECT coalesce(array_agg(id ORDER BY id) FILTER (WHERE deleted_at IS NULL), '{}'),
+         coalesce(jsonb_agg(jsonb_build_object('id', id, 'reason', 'deleted') ORDER BY id)
+                    FILTER (WHERE deleted_at IS NOT NULL), '[]'::jsonb)
+    INTO v_live, v_skipped
+    FROM (SELECT id, deleted_at FROM public.jobs WHERE id = ANY (v_ids) ORDER BY id FOR UPDATE) AS locked;
+  SELECT v_skipped || coalesce(jsonb_agg(jsonb_build_object('id', x, 'reason', 'not_found') ORDER BY x), '[]'::jsonb)
+    INTO v_skipped
+    FROM unnest(v_ids) AS x
+   WHERE NOT EXISTS (SELECT 1 FROM public.jobs j WHERE j.id = x);
 
-    IF v_set <> '' THEN
-      EXECUTE format('UPDATE public.jobs SET %s updated_by = $2 WHERE id = $3 RETURNING status', v_set)
-        INTO v_status USING p_changes, v_actor, v_id;
+  IF v_set <> '' AND cardinality(v_live) > 0 THEN
+    EXECUTE format('UPDATE public.jobs SET %s updated_by = $2 WHERE id = ANY ($3)', v_set)
+      USING p_changes, v_actor, v_live;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    IF v_rows <> cardinality(v_live) THEN RAISE EXCEPTION 'EDIT_NOT_APPLIED: % of % jobs changed', v_rows, cardinality(v_live); END IF;
+    v_updated := v_live;
+  END IF;
+
+  IF p_action IS NOT NULL AND cardinality(v_live) > 0 THEN
+    -- Eligibility reads each job's status after the changes above.
+    SELECT coalesce(array_agg(id ORDER BY id) FILTER (WHERE status = ANY (v_allowed)), '{}'),
+           v_skipped || coalesce(jsonb_agg(jsonb_build_object('id', id, 'reason', 'status', 'status', status) ORDER BY id)
+                                   FILTER (WHERE NOT status = ANY (v_allowed)), '[]'::jsonb)
+      INTO v_target, v_skipped
+      FROM (SELECT id, status, CASE p_action WHEN 'cancel' THEN ARRAY['scheduled', 'in_progress']
+                                             ELSE ARRAY['scheduled', 'in_progress', 'completed'] END AS v_allowed
+              FROM public.jobs WHERE id = ANY (v_live)) AS cur;
+    IF cardinality(v_target) > 0 THEN
+      IF p_action = 'cancel' THEN
+        UPDATE public.jobs SET status = 'cancelled', updated_by = v_actor WHERE id = ANY (v_target);
+      ELSE
+        UPDATE public.jobs SET deleted_at = now(), updated_by = v_actor WHERE id = ANY (v_target);
+      END IF;
       GET DIAGNOSTICS v_rows = ROW_COUNT;
-      IF v_rows <> 1 THEN RAISE EXCEPTION 'EDIT_NOT_APPLIED: job %', v_id; END IF;
-      v_updated := v_updated || v_id;
+      IF v_rows <> cardinality(v_target) THEN RAISE EXCEPTION 'EDIT_NOT_APPLIED: % of % jobs changed', v_rows, cardinality(v_target); END IF;
+      IF p_action = 'cancel' THEN v_cancelled := v_target; ELSE v_deleted := v_target; END IF;
     END IF;
-
-    IF p_action = 'cancel' THEN
-      IF v_status IN ('scheduled', 'in_progress') THEN
-        UPDATE public.jobs SET status = 'cancelled', updated_by = v_actor WHERE id = v_id;
-        GET DIAGNOSTICS v_rows = ROW_COUNT;
-        IF v_rows <> 1 THEN RAISE EXCEPTION 'EDIT_NOT_APPLIED: job %', v_id; END IF;
-        v_cancelled := v_cancelled || v_id;
-      ELSE
-        v_skipped := v_skipped || jsonb_build_object('id', v_id, 'reason', 'status', 'status', v_status);
-      END IF;
-    ELSIF p_action = 'delete' THEN
-      IF v_status IN ('scheduled', 'in_progress', 'completed') THEN
-        UPDATE public.jobs SET deleted_at = now(), updated_by = v_actor WHERE id = v_id;
-        GET DIAGNOSTICS v_rows = ROW_COUNT;
-        IF v_rows <> 1 THEN RAISE EXCEPTION 'EDIT_NOT_APPLIED: job %', v_id; END IF;
-        v_deleted := v_deleted || v_id;
-      ELSE
-        v_skipped := v_skipped || jsonb_build_object('id', v_id, 'reason', 'status', 'status', v_status);
-      END IF;
-    END IF;
-  END LOOP;
+  END IF;
 
   v_result := jsonb_build_object(
     'updated', to_jsonb(v_updated), 'cancelled', to_jsonb(v_cancelled),

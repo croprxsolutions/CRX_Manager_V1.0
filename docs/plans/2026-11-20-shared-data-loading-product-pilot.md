@@ -1,9 +1,13 @@
 # Shared data loading: Product pages pilot (step 2 of the hardening order)
 
-**Status:** PLAN r3, not built. Written 2026-11-20 from `origin/staging` `afd562cb3`.
+**Status:** PLAN r3.1, not built. Written 2026-11-20 from `origin/staging` `afd562cb3`.
 **History:** advisory Sol 6.2 (high) reviews: r1 drew 50 findings (1 BLOCKER: its KI-100 fix targeted rate boxes
 that are already read-only); r2 drew 37, mostly in its second batch (rate-lock switch, timings, units, price
 history). Mason chose on 2026-11-20 to shrink the pilot to the first batch; the rest moves to Product Master Wave 2.
+r3 drew 30 (1 BLOCKER: the proof's cleanup removed a preferred vendor, which the screen and database refuse).
+r3.1 fixes that blocker and the two HIGHs below; the remaining MED/LOW items are implementation detail that
+the build's tests and the code review (Luna, then Sol if the diff is Sol-listed) settle against real code.
+Review record: the shared side-session notes folder.
 **Database changes:** none. **No Sol-listed file changes** (re-check the final diff).
 **Hands off:** `src/components/ui/`; quote, booking, invoice and billing screens (Taha's until 2026-12-15).
 **Merge timing:** staging is frozen until release #1990 is live. A draft PR may open sooner; no merge before then.
@@ -46,8 +50,10 @@ Contract (each line is a test):
 3. **A, then B, then back to A** shows loading until a new A read returns; old A data never comes back.
 4. **`key = null` is idle:** no data, no reads; `reload()` returns `skipped`.
 5. **`reload()` reports its own request:** `applied` with the fresh data, `failed` with the error, or `skipped`
-   (superseded, idle or unmounted). A `reload` captured before a key change reads the current key, never the old
-   one. Callers warn only on `failed`.
+   (superseded, idle or unmounted). A superseded `reload()` resolves `skipped` as soon as a newer request starts,
+   so an awaiting caller is released even if the old read never settles. A `reload` captured before a key change
+   reads the current key, never the old one. Callers warn only on `failed`; on `skipped` they do nothing further
+   (no guessed values, no parent callbacks).
 6. **A failed refresh keeps the old data marked `stale: true`;** the screen says it may be out of date, offers
    Try again, and disables actions that depend on it.
 7. **Success means the loader's promise resolved,** `null` included. A loader that throws before returning a
@@ -73,9 +79,11 @@ Writes are unchanged (`assertRpcResult()` / `checkMutationResult()`).
   rows with "Changed on parent", and its Sentry report keeps `extra.context: 'product_change_history_parent_names'`
   and fires only for a current request. Loading and empty texts unchanged.
 - `src/components/products/ProductVendorsSection.tsx`:
-  - Linked vendors through `useLoad` (key `vendors:${productId}`). Link and unlink await `reload()`.
-  - Preferred-vendor mirroring after link keeps today's rule exactly: use the re-read's preferred vendor when
-    `applied`, else today's fallback (the vendor just made preferred, or the first vendor). See "Known, not fixed".
+  - Linked vendors through `useLoad` (key `vendors:${productId}:${isAdmin}`; the RPC returns costs only to
+    admins, so a role change is a new record). Link and unlink await `reload()`.
+  - Preferred-vendor mirroring after link: `applied` uses the re-read's preferred vendor, falling back as today
+    when the list has none; `failed` keeps today's fallback (the vendor just made preferred, or the first vendor;
+    see "Known, not fixed"); `skipped` mirrors nothing (a newer read already owns the screen).
   - Picker through its own `useLoad` (key `null` unless admin), read with `fetchAllRows` + `pageWithList`,
     `count: 'exact'`, ordered by `name` then `id`.
   - Add is enabled only when the picker is loaded and the picked id is still in the current addable list; the pick
@@ -133,9 +141,13 @@ the app's reads (debugging only, reads only, removed afterwards).
    loaded", Try again recovers.
 3. **Out-of-order answers:** hold the first `get_product_vendors` response for 10 seconds; meanwhile link a vendor
    (this starts a newer read). When the held response is released, the list must still show the new vendor.
-4. **Save then refresh:** on a product with no vendors, add one: it becomes preferred and the product's Vendor
-   field shows it. On a product with a preferred vendor, add a second: the Vendor field stays the same; press Make
-   preferred on the second: the Vendor field changes. Then remove the test links to restore the product.
+4. **Save then refresh** (a test product that already has a preferred vendor; note it first): add a second
+   vendor: the Vendor field stays the same. Press Make preferred on the second: the Vendor field changes. Restore:
+   press Make preferred on the original vendor, then remove the added one (a preferred vendor cannot be removed,
+   by the screen or the database). The first-vendor case (an empty product's first link becomes preferred) is
+   covered by tests only, because that link cannot be removed afterwards.
+   Writes happen only on a database the PR names as a test target (local copy or staging), never live; if the
+   local app points at live, stop and use staging after the freeze lifts.
 5. A sales-rep view if a test rep login exists; otherwise the PR says it was not shown.
 
 After the staging merge (only once #1990 is live): repeat 1, 3 and 4 on `staging.croprxsolutions.app` with the

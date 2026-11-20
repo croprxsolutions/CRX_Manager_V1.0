@@ -1080,6 +1080,13 @@ function currentSolTarget(root) {
 // one CODEX_PROOF_VERDICT line, which codexReviewProofVerdict() parses.
 // Release review rules (Mason, 2026-11-20; docs/manual/DECISION_LOG.md). Release reviews only:
 // a release ships main-plus-staging to live, so code it re-emits unchanged is already live.
+// Known issues Mason accepted for the current release (2026-11-20, #1990); clear this list after the release lands.
+export const RELEASE_KNOWN_ISSUES = [
+  { issue: 2064, file: "20270120150000", fn: "_enforce_below_cost_line", area: "who may approve a below-cost grower-share line" },
+  { issue: 2065, file: "20270129150000", fn: "_enforce_booking_live_job_rules", area: "who may close a sent booking short" },
+  { issue: 2066, file: "20270109100200", fn: "_return_customer_line_share", area: "a return credit after the sales-tax box changes" },
+];
+
 const RELEASE_RULES = [
   "",
   "RELEASE RULES (this is a release review, release/next into main; Mason, 2026-11-20):",
@@ -1095,6 +1102,11 @@ const RELEASE_RULES = [
   "   in full (no partial commit, no effect on live data or on any other migration) is reported at",
   "   its real severity, tagged [SELF-ABORT], naming the live condition that triggers it so it can",
   "   be re-checked read-only before the apply. A defect that can write wrong data is not covered.",
+  "c. Known issues Mason named in chat for this release, each on a tracked GitHub issue: a defect",
+  "   inside one of the functions listed below, matching that entry's area, is reported at its real",
+  "   severity, tagged [KNOWN-ISSUE #<issue>]. Any other defect, including a different defect in the",
+  "   same function, is not covered and keeps its normal handling.",
+  ...RELEASE_KNOWN_ISSUES.map(({ issue, file, fn, area }) => `   - #${issue} ${file} ${fn}: ${area}`),
   "Leave tagged findings out of the numbered finding lines, the count and the verdict below. List",
   "each again under the heading RELEASE FOLLOW-UPS, one line each (tag, file:line, summary), so",
   "each goes on a tracked issue.",

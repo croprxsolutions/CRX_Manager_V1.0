@@ -998,8 +998,9 @@ assert.equal(
     });
     const verdict = codexReviewProofVerdict({ status: outcome.result.status, stdout: outcome.result.stdout });
     const proof = verdict ? buildCodexPushProof({ headSha: HEAD_SHA, baseSha: BASE_SHA, verdict }) : null;
-    const capture = readFileSync(captureReviewOutput(captureRoot, outcome.result, { ...outcome, primaryBin: PRIMARY }), "utf8");
-    return { calls, notices, outcome, proof, capture };
+    const { capturePath, failureReason } = captureReviewOutput(captureRoot, outcome.result, { ...outcome, primaryBin: PRIMARY });
+    const capture = readFileSync(capturePath, "utf8");
+    return { calls, notices, outcome, proof, capture, failureReason };
   };
 
   try {
@@ -1020,12 +1021,65 @@ assert.equal(
     assert.equal(proofValid(a.proof, HEAD_SHA, new Date(), BASE_SHA), true, "(a) and passes the guard's proofValid");
     assert.ok(a.capture.includes(`Codex binary: ${FALLBACK}`), "(a) the capture records the binary that actually ran");
     assert.ok(/Fallback: used/.test(a.capture), "(a) the capture records that the fallback was used");
+    assert.equal(a.failureReason, null, "a clean fallback has no failure reason");
 
     // (b) Real findings from the primary → no retry, nothing mintable.
     const b = runCase({ primary: blockersReview, fallback: cleanReview });
     assert.equal(b.calls.length, 1, "(b) a BLOCKERS verdict is never retried");
     assert.equal(b.proof, null, "(b) nothing mintable");
     assert.ok(b.capture.includes(`Codex binary: ${PRIMARY}`), "(b) the capture records the primary binary");
+    assert.equal(b.failureReason, null, "review findings are a valid verdict");
+
+    const credential = "OPENAI_API_KEY=example-test-credential";
+    const failed = runCase({
+      primary: sandboxFailure,
+      fallback: {
+        status: 1,
+        stdout: "",
+        stderr: `review prompt includes ${credential}\r\nERROR: Incomplete response returned, reason: max_output_tokens\r\n`,
+      },
+    });
+    assert.equal(failed.failureReason, "Codex reached its response limit.");
+    assert.match(failed.capture, /Failure reason: Codex reached its response limit\./);
+    assert.match(failed.capture, /STDERR omitted/);
+    assert.ok(!failed.capture.includes(credential), "capture and new diagnostic must not disclose the credential");
+    assert.equal(failed.calls.length, 2, "only the existing sandbox fallback runs");
+    assert.equal(failed.proof, null, "a failed fallback produces no proof");
+
+    const silentFailure = runCase({ primary: { status: 1, stdout: "", stderr: credential } });
+    assert.equal(silentFailure.failureReason, "Codex exited with code 1 without a verdict. The cause is unknown.");
+    assert.doesNotMatch(silentFailure.capture, /example-test-credential/);
+
+    const diagnostics = [
+      [{ status: 1, stderr: "ERROR: You've hit your usage limit." }, "Codex reported an account usage or rate limit."],
+      [{ status: 1, stderr: "ERROR: unexpected status 401 Unauthorized" }, "Codex reported an authentication error."],
+      [{ status: 1, stderr: "ERROR: stream disconnected before completion" }, "The connection to Codex ended before the review finished."],
+      [{ ...sandboxFailure, stdout: "partial output" }, "Codex reported a Windows sandbox error while starting the review."],
+      [{ status: null, error: { code: "ETIMEDOUT" } }, "The review script reached its timeout."],
+      [{ status: null, error: { code: "ENOENT", message: credential } }, "The Codex process could not start."],
+      [{ status: null, signal: "SIGTERM" }, "The Codex process was terminated before a verdict."],
+      [{ status: 0, stdout: "Almost done." }, "Codex exited successfully without a valid verdict."],
+      [
+        { status: 1, stderr: "2026-11-20T15:04:05.123456Z ERROR codex_core::codex: Incomplete response returned, reason: max_output_tokens" },
+        "Codex reached its response limit.",
+      ],
+      [{ status: 1, stderr: "2026-11-20T15:04:05Z ERROR: unexpected status 429 Too Many Requests" }, "Codex reported an account usage or rate limit."],
+      [{ status: null, error: { code: "ENOBUFS", message: credential } }, "Codex produced more output than the review script accepts."],
+      // A command's sandbox error after the session started is not a startup failure.
+      [
+        { status: 1, stderr: "ERROR codex_core::exec: windows sandbox failed: helper_unknown_error" },
+        "Codex exited with code 1 without a verdict. The cause is unknown.",
+      ],
+      // Vague mentions outside an ERROR line, or without an explicit marker, stay unknown.
+      [{ status: 1, stderr: "diff mentions 401 Unauthorized and a rate limit\nERROR: something odd" }, "Codex exited with code 1 without a verdict. The cause is unknown."],
+      [{ status: null }, "Codex ended without an exit code or a verdict. The cause is unknown."],
+    ];
+    for (const [primary, reason] of diagnostics) {
+      const result = runCase({ primary });
+      assert.equal(result.failureReason, reason);
+      assert.equal(result.proof, null);
+      assert.equal(result.calls.length, 1, "diagnostics do not trigger a retry");
+    }
     const b2 = runCase({ primary: { ...sandboxFailure, stdout: "[P1] partial" }, fallback: cleanReview });
     assert.equal(b2.calls.length, 1, "(b) any model output makes the run final");
     assert.equal(b2.proof, null, "(b) nothing mintable after partial output");

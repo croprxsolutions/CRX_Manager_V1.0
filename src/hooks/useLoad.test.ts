@@ -227,4 +227,11 @@ describe('useLoad', () => {
     await act(async () => { last.read.resolve('kept'); });
     expect(result.current).toMatchObject({ status: 'loaded', data: 'kept' });
   });
+  it('reload after unmount reads nothing and is skipped', async () => {
+    const { result, reads, unmount } = setup({ k: 'A' });
+    const kept = result.current.reload;
+    unmount();
+    await expect(kept()).resolves.toEqual({ status: 'skipped' });
+    expect(reads).toHaveLength(1);
+  });
 });

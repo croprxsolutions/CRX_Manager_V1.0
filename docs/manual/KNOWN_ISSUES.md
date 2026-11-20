@@ -1198,13 +1198,14 @@ order. Two multi-product completions at once can deadlock, and one retries. Fix:
 Since KI-143, vendor bills are checked against what arrived (capped at the ordered total). `set_purchase_order_item_costs`
 still compares billed amounts with the ordered value. Fix: decide whether it should follow the same rule.
 
-### KI-170 — Adding the first vendor at the same moment as another admin can show the wrong preferred vendor
+### KI-170 — Two admins changing a product's vendors at the same moment can show the wrong preferred vendor
 **LOW · OPEN · products/purchasing · found 2026-11-20 (Sol 6.2 plan review, shared data loading pilot) · unassigned (Product Master Wave 2)**
 After an admin links a vendor, the Vendors section re-reads the product's vendors to learn which one is preferred.
 If that re-read fails, it falls back to "the vendor just made preferred, or the first vendor". If two admins link the
-first vendor to the same product at the same moment, that fallback can name the loser's vendor, and the product page
-mirrors that name into its form until a reload. The database keeps the true preferred vendor; the list says it may be
-out of date and offers Try again. Needs a simultaneous first link and a failed read. Fix: on a failed re-read, block
+first vendor to the same product at the same moment, or one makes V2 preferred just before the other makes V1 preferred
+(Luna, 2026-11-20), that fallback can name the loser's vendor, and the product page mirrors that name into its form
+until a reload. The database keeps the true preferred vendor; the list says it may be
+out of date and offers Try again. Needs two admins acting together and a failed read. Fix: on a failed re-read, block
 the product's Save until the vendors are re-read (a `ProductDetail.tsx` change, so Wave 2).
 
 ## Database and release process

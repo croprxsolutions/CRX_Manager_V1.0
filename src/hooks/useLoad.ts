@@ -13,7 +13,7 @@ export type LoadState<T> =
 export type ReloadResult<T> =
   | { status: 'applied'; data: T }
   | { status: 'failed'; error: unknown }
-  // A newer read started, the key went null, or the screen closed: this read's answer is ignored.
+  // A newer read started, the key went null, or the screen closed (reload after unmount reads nothing).
   | { status: 'skipped' };
 
 export interface LoadOptions {
@@ -42,6 +42,7 @@ export function useLoad<T>(
   const [stored, setStored] = useState<Stored<T> | null>(null);
   const generation = useRef(0);
   const pending = useRef<Pending<T> | null>(null);
+  const mounted = useRef(false);
   const keyRef = useLatestRef(key);
   const tokenRef = useLatestRef(refreshToken);
   const loadRef = useLatestRef(load);
@@ -90,6 +91,11 @@ export function useLoad<T>(
     });
   }, [invalidate, loadRef, reportRef, tokenRef]);
 
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
   // A key or token change, and unmount, end the old request's authority at commit, before the next read starts.
   useLayoutEffect(() => invalidate, [key, refreshToken, invalidate]);
 
@@ -100,7 +106,8 @@ export function useLoad<T>(
 
   const reload = useCallback(async (): Promise<ReloadResult<T>> => {
     const current = keyRef.current;
-    return current === null ? { status: 'skipped' } : start(current);
+    // After unmount nobody shows the answer, so read nothing.
+    return current === null || !mounted.current ? { status: 'skipped' } : start(current);
   }, [keyRef, start]);
 
   if (key === null) return { status: 'idle', reload };

@@ -216,4 +216,51 @@ describe('ProductVendorsSection', () => {
     view.rerender(<ProductVendorsSection {...props} isAdmin={false} />);
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   });
+  it('closes an open removal when the screen moves to another product', async () => {
+    const props = { productName: 'Test Product', userId: 'u1', onPreferredChanged: vi.fn(), isAdmin: true };
+    const view = render(<ProductVendorsSection {...props} productId="p1" />);
+    const rows = await screen.findAllByRole('listitem');
+    fireEvent.click(within(rows[1]).getByRole('button', { name: 'Remove' }));
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+    mocks.listProductVendors.mockResolvedValue([link({ link_id: 'other', vendor_id: 'v2', vendor_name: 'Spinner Ag', is_preferred: false })]);
+    view.rerender(<ProductVendorsSection {...props} productId="p2" />);
+    await screen.findByText('Spinner Ag');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('a link that finishes after the screen moved to another product reports nothing', async () => {
+    const onPreferredChanged = vi.fn();
+    const props = { productName: 'Test Product', userId: 'u1', onPreferredChanged, isAdmin: true };
+    const view = render(<ProductVendorsSection {...props} productId="p1" />);
+    const button = await screen.findByRole('button', { name: 'Make preferred' });
+    let finish!: () => void;
+    mocks.linkProductVendor.mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
+    fireEvent.click(button);
+    mocks.listProductVendors.mockRejectedValue(new Error('network'));
+    view.rerender(<ProductVendorsSection {...props} productId="p2" />);
+    await act(async () => { finish(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(onPreferredChanged).not.toHaveBeenCalled();
+  });
+
+  it('a pick does not carry over to another product', async () => {
+    const props = { productName: 'Test Product', userId: 'u1', onPreferredChanged: vi.fn(), isAdmin: true };
+    const view = render(<ProductVendorsSection {...props} productId="p1" />);
+    const picker = await screen.findByLabelText('Add a vendor');
+    await waitFor(() => expect(within(picker).getByRole('option', { name: 'Crop RX Solutions' })).toBeInTheDocument());
+    fireEvent.change(picker, { target: { value: 'v3' } });
+    expect(screen.getByRole('button', { name: 'Add vendor' })).toBeEnabled();
+    view.rerender(<ProductVendorsSection {...props} productId="p2" />);
+    await screen.findByText('Wells Ag Supply');
+    expect(screen.getByRole('button', { name: 'Add vendor' })).toBeDisabled();
+  });
+
+  it('the vendor picker is locked while a change is saving', async () => {
+    renderSection(true);
+    const picker = await screen.findByLabelText('Add a vendor');
+    await waitFor(() => expect(within(picker).getByRole('option', { name: 'Crop RX Solutions' })).toBeInTheDocument());
+    mocks.linkProductVendor.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.click(screen.getByRole('button', { name: 'Make preferred' }));
+    await waitFor(() => expect(screen.getByLabelText('Add a vendor')).toBeDisabled());
+  });
 });

@@ -7,6 +7,7 @@ import ConfirmModal from '../ui/ConfirmModal';
 import Select from '../ui/Select';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
+import { useLatestRef } from '../../hooks/useLatestRef';
 import { useLoad } from '../../hooks/useLoad';
 import { logActivity } from '../../lib/activityLogger';
 import { supabase } from '../../lib/db';
@@ -129,6 +130,7 @@ function AddVendorBar({ picker, addable, pick, onPick, disabled, onAdd }: AddVen
           onChange={(e) => onPick(e.target.value)}
           placeholder="Choose a vendor"
           options={addable.map((v) => ({ value: v.id, label: v.name }))}
+          disabled={disabled}
         />
       </div>
       <Button size="sm" disabled={disabled || !pick} onClick={onAdd}>
@@ -161,9 +163,13 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
   const vendors = linked.status === 'loaded' ? linked.data : null;
   const listUsable = linked.status === 'loaded' && !linked.stale && !linked.refreshing;
   const allVendors = picker.status === 'loaded' ? picker.data : [];
-  const [pickedVendorId, setPickedVendorId] = useState('');
+  // The pick belongs to one product, so it never carries over to the next.
+  const [picked, setPicked] = useState({ productId: '', vendorId: '' });
+  const productRef = useLatestRef(productId);
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<ProductVendor | null>(null);
+  // Remove confirms one link of THIS product: switching product or losing admin closes it.
+  const removable = isAdmin && removing !== null && (vendors ?? []).some((v) => v.link_id === removing.link_id);
   const actor = userId ?? '';
   const linkKeys = useIdempotencyKey('link_product_vendor', actor);
   const unlinkKeys = useIdempotencyKey('unlink_product_vendor', actor);
@@ -183,7 +189,8 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
         entityType: 'product',
         entityId: productId,
       });
-      setPickedVendorId('');
+      setPicked({ productId: '', vendorId: '' });
+      if (productRef.current !== productId) return; // the screen moved to another product; its own read is running
       // A first vendor becomes preferred even when not asked, so report whichever vendor now is.
       // If the re-read fails, a vendor just made preferred (or the first one, preferred by default) is still the one to show.
       const wasFirst = !vendors?.some((v) => v.is_preferred);
@@ -200,7 +207,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
   };
 
   const unlink = async () => {
-    if (!userId || !removing) return;
+    if (!userId || !removing || !removable) return;
     const target = removing;
     setBusy(true);
     try {
@@ -225,7 +232,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
   const linkedIds = new Set((vendors ?? []).map((v) => v.vendor_id));
   const addable = allVendors.filter((v) => !linkedIds.has(v.id));
   // A pick that is no longer offered (list reloaded, failed, or vendor now linked) is no pick.
-  const pick = addable.some((v) => v.id === pickedVendorId) ? pickedVendorId : '';
+  const pick = picked.productId === productId && addable.some((v) => v.id === picked.vendorId) ? picked.vendorId : '';
 
   return (
     <Card>
@@ -242,11 +249,11 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
         </ul>
       )}
       {isAdmin && vendors !== null && (
-        <AddVendorBar picker={picker} addable={addable} pick={pick} onPick={setPickedVendorId}
+        <AddVendorBar picker={picker} addable={addable} pick={pick} onPick={(vendorId) => setPicked({ productId, vendorId })}
           disabled={busy || !listUsable} onAdd={() => void link(pick, false)} />
       )}
       <ConfirmModal
-        open={removing !== null && isAdmin}
+        open={removable}
         onClose={() => setRemoving(null)}
         onConfirm={() => void unlink()}
         title="Remove vendor"

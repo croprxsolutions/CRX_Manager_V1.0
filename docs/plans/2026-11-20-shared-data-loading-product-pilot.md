@@ -1,6 +1,6 @@
 # Shared data loading: Product pages pilot (step 2 of the hardening order)
 
-**Status:** PLAN r3.1, not built. Written 2026-11-20 from `origin/staging` `afd562cb3`.
+**Status:** PLAN r3.1, BUILT 2026-11-20 on branch `claude/data-loading-plan` (draft PR to staging). Written 2026-11-20 from `origin/staging` `afd562cb3`.
 **History:** advisory Sol 6.2 (high) reviews: r1 drew 50 findings (1 BLOCKER: its KI-100 fix targeted rate boxes
 that are already read-only); r2 drew 37, mostly in its second batch (rate-lock switch, timings, units, price
 history). Mason chose on 2026-11-20 to shrink the pilot to the first batch; the rest moves to Product Master Wave 2.

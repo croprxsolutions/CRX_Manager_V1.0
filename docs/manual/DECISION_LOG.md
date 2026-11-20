@@ -3,13 +3,13 @@
 ## 2026-11-19 — #2048: Mason owner-accepted 1 Sol finding(s) at `97c98ae44e88`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2048 at `97c98ae44e88` (base `c0b544a2383e`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
-- Finding 1 (HIGH) at `supabase/migrations/20270129200000_inactive_customer_refuses_new_work.sql:144`, text sha256 `5e2922251fd2fb0f` (the wording stays with the proof, not here)
+- Finding 1 (HIGH) at `supabase/migrations/20270201120000_inactive_customer_refuses_new_work.sql:144`, text sha256 `5e2922251fd2fb0f` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our business (ref d5394f1fb1d6)
 
 ## 2026-11-19 — #2048: Mason owner-accepted 1 Sol finding(s) at `305882be9698`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2048 at `305882be9698` (base `c0b544a2383e`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
-- Finding 1 (HIGH) at `supabase/migrations/20270129200000_inactive_customer_refuses_new_work.sql:138`, text sha256 `a0f64e129e986705` (the wording stays with the proof, not here)
+- Finding 1 (HIGH) at `supabase/migrations/20270201120000_inactive_customer_refuses_new_work.sql:138`, text sha256 `a0f64e129e986705` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our business (ref 21555f0ab195)
 ## 2026-11-20 — Release #1990: split the gate files out; release rule 4 removed
 

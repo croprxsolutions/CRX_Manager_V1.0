@@ -7,7 +7,7 @@
 const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // KI-85: stock may be placed only at Main Warehouse until transfers exist; nothing was received or added.
   [/^UNKNOWN_STORAGE_LOCATION\b/, 'Nothing was saved. Stock can go only into Main Warehouse until transfers between warehouses exist. Choose Main Warehouse and try again'],
-  // #2000 (20270129200000): an inactive customer gets no new orders, deliveries, holds or spray jobs.
+  // #2000 (20270201120000): an inactive customer gets no new orders, deliveries, holds or spray jobs.
   [/^CUSTOMER_INACTIVE_NEW_WORK\b/, 'Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added'],
   [/violates check constraint "inventory_holds_source_needs_customer"/, 'Nothing was saved. A stock hold for a spray job or quote must name its customer'],
   [/^WORK_CUSTOMER_MOVE_NOT_ALLOWED\b/, 'Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery'],

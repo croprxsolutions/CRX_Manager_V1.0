@@ -1176,7 +1176,7 @@ Deactivate and the edit page both hit it. The live inactive customer stays as it
 at once. Accepted limit (Mason, 2026-11-18 and 2026-11-19): work being saved at the same moment as the deactivation,
 or added after it, is not caught. Proof:
 `node scripts/smoke/prove-ki148-customer-deactivation-real-schema.mjs`.
-**Gap closed in review (#2000, migration `20270129200000_inactive_customer_refuses_new_work`, not applied):** Mason, 2026-11-19: an inactive customer gets no new orders, deliveries, holds or spray jobs until reactivated; the check locks the customer row, so a racing deactivation and new work cannot both win (for READ COMMITTED transactions, which every app path uses; a REPEATABLE READ deactivation would count from its older snapshot, and none exists). Quotes, invoices and bookings wait for Taha's billing work.
+**Gap closed in review (#2000, migration `20270201120000_inactive_customer_refuses_new_work`, not applied):** Mason, 2026-11-19: an inactive customer gets no new orders, deliveries, holds or spray jobs until reactivated; the check locks the customer row, so a racing deactivation and new work cannot both win (for READ COMMITTED transactions, which every app path uses; a REPEATABLE READ deactivation would count from its older snapshot, and none exists). Quotes, invoices and bookings wait for Taha's billing work.
 
 ### KI-149 — Crop Programs and job print defaults let reps edit but only admins can save
 **LOW · OPEN · settings · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #9) · unassigned**

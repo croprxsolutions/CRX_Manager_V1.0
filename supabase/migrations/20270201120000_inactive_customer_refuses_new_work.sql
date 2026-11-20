@@ -1,5 +1,5 @@
 -- Written 2026-11-19. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270129200000_inactive_customer_refuses_new_work.md.
+-- docs/reference/migrations.d/20270201120000_inactive_customer_refuses_new_work.md.
 --
 -- WHAT (#2000; Mason, 2026-11-19: an inactive customer must be made active again before any new
 --   work is done for them): a row of orders, deliveries, inventory_holds or jobs may not become open

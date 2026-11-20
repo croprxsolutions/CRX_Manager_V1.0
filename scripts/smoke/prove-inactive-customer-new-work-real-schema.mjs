@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270129200000_inactive_customer_refuses_new_work (#2000; contract
+ * Real-schema proof for 20270201120000_inactive_customer_refuses_new_work (#2000; contract
  * docs/plans/2026-11-19-inactive-customer-no-new-work-CONTRACT.md, proof cases 1 to 8).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
@@ -22,7 +22,7 @@ process.env.UNDO_PATHS_CONTAINER ||= `crx-inactive-work-${process.pid}-${Date.no
 const { buildContainer, removeContainer, seedUsers, scalar, psql, claims, USERS, ROOT, NAME, docker, id } =
   await import('./undo-paths/harness.mjs');
 
-const CANDIDATE = '20270129200000_inactive_customer_refuses_new_work.sql';
+const CANDIDATE = '20270201120000_inactive_customer_refuses_new_work.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const ADMIN = USERS.admin;

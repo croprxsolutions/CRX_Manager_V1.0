@@ -131,6 +131,7 @@ Releases of CRX Manager, newest first.
 * bring staging up to main (replaces #1742) (#1750)
 
 #### 🧩 Other
+* rls reviewer: CHECK 3 temp-table exemption + CHECK 5 final form (#2049)
 * rls reviewer CHECK 5: owner-only internal helpers are exempt (release #1990 fix) (#2036)
 * Reset-order scanner: a regex after a statement block's } is hidden (#686) (#2034)
 * session-staleness: count CREATE OR REPLACE FUNCTION and trigger migrations as pending (#749) (#2031)

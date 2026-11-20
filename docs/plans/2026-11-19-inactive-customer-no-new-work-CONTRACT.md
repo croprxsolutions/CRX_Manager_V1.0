@@ -233,6 +233,29 @@ change is the sanitizer sentence, which is safe before or after the migration.
   everything, and are not signed-in users; every move they make still gets the inactive-customer
   check (proved as service_role for inserts). The changelog now says "for signed-in users".
 
+## Sol round 3 settlement (2026-11-19)
+
+- #1 HIGH (a hold names an active customer but its source is an inactive customer's job or quote)
+  → **accepted by Mason, 2026-11-19** ("this case cannot happen in our business"; DECISION_LOG).
+- #2 MED (REPEATABLE READ) → accepted, as in Sol r1 #4 (no app path uses it).
+- #3 MED (a driver reopens a delivery whose order belongs to a customer they cannot see) → reopening
+  a delivery is admin or sales rep only for signed-in users, with the same fixed refusal as a move.
+  No function reopens a delivery (grep 2026-11-19); proved for undelete. Completed → in progress is
+  already refused by the older delivery state machine for everyone but an admin override (proved).
+- #4 MED (the hold constraint blocks a customer delete that clears a released hold's customer) →
+  the constraint applies to active holds only; switching a customer-less sourced hold back on is
+  still refused (proved). The app never hard-deletes customers.
+- #5 MED (cancelling one of a legacy inactive customer's two jobs on a booking rebuilds the other's
+  hold) → refuted: live 2026-11-19, no inactive customer has any spray job, and KI-148 refuses
+  deactivating a customer with open jobs, so such a pair cannot arise. Reactivate first if it did.
+- #6 MED (raising an open hold's quantity) → counts as opening (proved; lowering stays allowed).
+- #7 MED (applying outside a transaction) → refuted: `scripts/apply-migration-file.mjs` wraps the
+  file in one transaction, and the prover applies it with `-1`.
+- #8 LOW → the preflight also requires KI-148's trigger to have no WHEN clause.
+- #9 LOW → each race waits (up to 10 s) for the first session to be inside `pg_sleep`.
+- #10 LOW → the hold RPC proof commits, so deferred checks run.
+- #11 LOW → the screen matches the constraint error itself, not the name anywhere in a message.
+
 ## Open business decisions
 
 None. The scope (four tables), the legacy customer's consequence and the deferred parts follow

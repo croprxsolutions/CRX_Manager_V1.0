@@ -339,8 +339,11 @@ describe('sanitizeError', () => {
     expect(sanitizeError('CUSTOMER_INACTIVE_NEW_WORK')).toContain('must reactivate the customer');
     expect(sanitizeError({ message: 'new row for relation "inventory_holds" violates check constraint "inventory_holds_source_needs_customer"' }))
       .toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');
-    expect(sanitizeError({ message: 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order' }))
-      .toBe('Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order');
+    expect(sanitizeError({ message: 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery' }))
+      .toBe('Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery');
+    // The hold-rule name inside some other message is not mistaken for the rule.
+    expect(sanitizeError({ message: 'Product inventory_holds_source_needs_customer not found' }))
+      .not.toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');
     expect(sanitizeError('PREPAY_BALANCE_SERVER_ONLY: a prepay balance changes only through prepayments and payments'))
       .toBe('A prepay balance changes only through prepayments and payments');
     expect(sanitizeError('RETURN_CREDIT_UNIT_MISMATCH')).toContain('original sale');

@@ -42,7 +42,7 @@ DECLARE
   v_fails text := '';
 BEGIN
   SELECT id INTO v_admin FROM profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at LIMIT 1;
-  SELECT id INTO v_rep FROM profiles WHERE role = 'sales_rep' AND is_active = true AND NOT (denied_pages && ARRAY['sales-reports']) ORDER BY created_at, id LIMIT 1;
+  SELECT id INTO v_rep FROM profiles WHERE role = 'sales_rep' AND is_active = true AND NOT (COALESCE(denied_pages, '{}') && ARRAY['sales-reports']) ORDER BY created_at, id LIMIT 1;
   SELECT id INTO v_main FROM customers WHERE is_active = true ORDER BY created_at, id LIMIT 1;
   SELECT id INTO v_payer2 FROM customers WHERE is_active = true AND id <> v_main ORDER BY created_at, id LIMIT 1;
   SELECT * INTO v_product FROM products

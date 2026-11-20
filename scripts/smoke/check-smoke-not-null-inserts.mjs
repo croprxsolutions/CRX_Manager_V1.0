@@ -47,7 +47,7 @@ function splitTopLevel(text) {
 }
 
 // DEFAULT NULL is no default: an insert that omits the column still writes NULL.
-const hasDefault = (def) => /\b(?:DEFAULT(?![\s(]*NULL\b)|GENERATED|(?:big|small)?serial\d?)\b/i.test(def);
+const hasDefault = (def) => /\b(?:DEFAULT(?![\s(]*NULL[\s)]*$)|GENERATED|(?:big|small)?serial\d?)\b/i.test(def);
 const CONSTRAINT_WORDS = /^(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE|LIKE)\b/i;
 
 /**
@@ -96,7 +96,7 @@ export function requiredColumnsFromMigrations(migrations) {
           }
         } else if ((m = action.match(/^ADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?PRIMARY\s+KEY\s*\(([^)]*)\)/i))) {
           for (const c of splitTopLevel(m[1]).map(ident)) Object.assign(col(t, c), { notNull: true, requiredBy: name });
-        } else if ((m = action.match(/^ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?\s+([\s\S]*)$/i)) && !CONSTRAINT_WORDS.test(m[1])) {
+        } else if ((m = action.match(/^ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?\s+([\s\S]*)$/i)) && !/^ADD\s+(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE)\b/i.test(action)) {
           if (/IF\s+NOT\s+EXISTS/i.test(action) && cols(t).has(ident(m[1]))) continue;
           const def = m[2];
           const notNull = /\bNOT\s+NULL\b|\bPRIMARY\s+KEY\b/i.test(def);
@@ -132,8 +132,8 @@ export function insertsIn(sql) {
   for (const m of code.matchAll(re)) {
     if (!isPublic(m[2])) continue;
     // DEFAULT VALUES names no column. Positional VALUES may stop short of a newly added column, so it counts as naming
-    // none (name the columns to pass). Only SELECT with no column list (a whole-row copy) is trusted to fill every column.
-    const namesNone = !m[4] && /^\s*(?:OVERRIDING\s+\w+\s+VALUE\s+)?(?:DEFAULT\s+VALUES|VALUES)\b/i.test(code.slice(m.index + m[0].length).replace(/^s*OVERRIDINGs+w+s+VALUEb/i, ''));
+    // none (name the columns to pass). Only a whole-row copy (SELECT * / SELECT x.*) with no column list is trusted to fill every column.
+    const namesNone = !m[4] && /^\s*(?:OVERRIDING\s+\w+\s+VALUE\s+)?(?:DEFAULT\s+VALUES|VALUES|SELECT\b(?!\s+(?:\w+\s*\.\s*)?\*))/i.test(code.slice(m.index + m[0].length));
     out.push({ table: ident(m[3]), columns: m[4] ? splitTopLevel(m[5]).map(ident) : namesNone ? [] : null, line: code.slice(0, m.index).split('\n').length });
   }
   return out;

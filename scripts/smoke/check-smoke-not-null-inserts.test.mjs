@@ -59,6 +59,10 @@ assert.equal(r.get('t').get('b'), '3', 'blames the migration that dropped the de
 r = req(mig('1', 'CREATE TABLE t ("serial" text, x text);'), mig('2', 'ALTER TABLE t ALTER COLUMN "serial" SET NOT NULL, ADD COLUMN y text NOT NULL DEFAULT(NULL);'));
 assert.deepEqual(cols(r, 't'), ['serial', 'y']);
 
+// A quoted column named check is a column; DEFAULT (NULL IS NULL) is a real default.
+r = req(mig('1', 'CREATE TABLE t (a text);'), mig('2', 'ALTER TABLE t ADD COLUMN "check" text NOT NULL, ADD "unique" text NOT NULL, ADD COLUMN z boolean NOT NULL DEFAULT (NULL IS NULL), ADD CHECK (a <> b);'));
+assert.deepEqual(cols(r, 't'), ['check', 'unique']);
+
 // ADD PRIMARY KEY makes its columns NOT NULL.
 r = req(mig('1', 'CREATE TABLE t (a text, b text);'), mig('2', 'ALTER TABLE t ADD CONSTRAINT t_pk PRIMARY KEY (a, b);'));
 assert.deepEqual(cols(r, 't'), ['a', 'b']);
@@ -76,6 +80,7 @@ const ins = insertsIn(`DO $$ BEGIN
   SELECT x, y FROM src;
   INSERT INTO products OVERRIDING SYSTEM VALUE VALUES ('c');
   INSERT INTO products SELECT v_row.*;
+  INSERT INTO products SELECT a, b FROM src;
   INSERT INTO auth.users (id) VALUES (gen_random_uuid());
   INSERT INTO products DEFAULT VALUES;
   RAISE NOTICE 'two
@@ -90,8 +95,9 @@ assert.deepEqual(ins.map((i) => [i.table, i.columns, i.line]), [
   ['products', ['product_name', 'product_form'], 5],
   ['products', [], 7],
   ['products', null, 8],
-  ['products', [], 10],
-  ['products', ['product_name'], 13],
+  ['products', [], 9],
+  ['products', [], 11],
+  ['products', ['product_name'], 14],
 ]);
 
 // End to end: the inventory_unit case that broke staging (#2050 / #2057).

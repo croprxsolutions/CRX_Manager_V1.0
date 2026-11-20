@@ -52,8 +52,8 @@ BEGIN
   -- ── SETUP (owner) ─────────────────────────────────────────────────────────
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] EJ ' || v_sfx) RETURNING id INTO v_cust;
-  INSERT INTO products (product_name, unit_size, epa_registration, product_form)
-    VALUES ('[SMOKE] EJ Prod ' || v_sfx, 'GL', '999999-99998', 'liquid') RETURNING id INTO v_prod;
+  INSERT INTO products (product_name, unit_size, inventory_unit, epa_registration, product_form)
+    VALUES ('[SMOKE] EJ Prod ' || v_sfx, 'Gal', 'Gal', '999999-99998', 'liquid') RETURNING id INTO v_prod;
   INSERT INTO jobs (job_number, customer_id, job_date, created_by) VALUES
     ('[SMOKE] EJ-S-'  || v_sfx, v_cust, CURRENT_DATE + 5, v_admin) RETURNING id INTO v_jS;
   INSERT INTO jobs (job_number, customer_id, job_date, created_by) VALUES

@@ -222,6 +222,7 @@ BEGIN
       ('{"ground_crew_id": "not-a-uuid"}', NULL, '%uuid%'),
       ('{"carrier_rate_gpa": -1}', NULL, '%carrier_rate_gpa%'),
       ('{"loader_tank_capacity": 0}', NULL, '%loader_tank_capacity%'),
+      ('{"loader_tank_capacity": 1e-400}', NULL, 'BAD_VALUE%'),
       ('{"loader_comment": "x"}', 'delete', 'DELETE_WITH_CHANGES%'),
       ('{}', NULL, 'NO_CHANGES%'),
       (NULL, NULL, 'NOTHING_TO_DO%'),
@@ -236,6 +237,14 @@ BEGIN
       IF SQLERRM NOT LIKE v_r.pattern THEN
         RESET ROLE; RAISE EXCEPTION 'SMOKE_FAIL: C4 % / % wrong error: %', v_r.changes, v_r.action, SQLERRM;
       END IF;
+    END;
+  END LOOP;
+  FOR v_r IN SELECT * FROM (VALUES (NULL::text), (''), ('   ')) AS t(k) LOOP
+    BEGIN
+      PERFORM edit_jobs(ARRAY[v_jS2], '{"loader_comment": "no key"}', NULL, v_rep, v_r.k);
+      RESET ROLE; RAISE EXCEPTION 'SMOKE_FAIL: C4 a call without a replay key was not refused';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'IDEMPOTENCY_KEY_REQUIRED%' THEN RESET ROLE; RAISE EXCEPTION 'SMOKE_FAIL: C4 missing key wrong error: %', SQLERRM; END IF;
     END;
   END LOOP;
   RESET ROLE;

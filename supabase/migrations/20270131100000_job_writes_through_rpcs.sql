@@ -104,9 +104,10 @@ BEGIN
         RAISE EXCEPTION 'BAD_VALUE: carrier_rate_gpa cannot be negative';
       ELSIF v_key = 'loader_tank_capacity' AND (v_val #>> '{}')::numeric <= 0 THEN
         RAISE EXCEPTION 'BAD_VALUE: loader_tank_capacity must be above zero';
-      ELSIF v_kind = 'numeric' AND (v_val #>> '{}')::numeric > 1000000 THEN
-        -- Far above any real rate or tank, and well inside what the browser reads as a finite number.
-        RAISE EXCEPTION 'BAD_VALUE: % is too large', v_key;
+      ELSIF v_kind = 'numeric' AND ((v_val #>> '{}')::numeric > 1000000
+            OR ((v_val #>> '{}')::numeric > 0 AND (v_val #>> '{}')::numeric < 0.001)) THEN
+        -- Real rates and tanks sit between these; outside them the browser reads Infinity or 0.
+        RAISE EXCEPTION 'BAD_VALUE: % must be 0.001 to 1000000', v_key;
       END IF;
       v_set := v_set || format('%I = ($1 ->> %L)::%s, ', v_key, v_key, v_kind);
     END LOOP;
@@ -128,15 +129,20 @@ BEGIN
   -- reservation rebuild, hold release, dispatch close) then run once every row is already changed,
   -- so a booking's siblings are not rebuilt over and over. No BEFORE trigger on jobs returns NULL, so
   -- every UPDATE must change exactly the rows it targets; a shortfall aborts rather than being reported.
-  SELECT coalesce(array_agg(id ORDER BY id) FILTER (WHERE deleted_at IS NULL), '{}'),
-         coalesce(jsonb_agg(jsonb_build_object('id', id, 'reason', 'deleted') ORDER BY id)
-                    FILTER (WHERE deleted_at IS NOT NULL), '[]'::jsonb)
+  -- One snapshot: every requested id is either locked and live, or skipped as deleted / not found.
+  WITH locked AS (SELECT id, deleted_at FROM public.jobs WHERE id = ANY (v_ids) ORDER BY id FOR UPDATE)
+  SELECT coalesce(array_agg(x ORDER BY x) FILTER (WHERE l.id IS NOT NULL AND l.deleted_at IS NULL), '{}'),
+         coalesce(jsonb_agg(jsonb_build_object('id', x, 'reason', CASE WHEN l.id IS NULL THEN 'not_found' ELSE 'deleted' END) ORDER BY x)
+                    FILTER (WHERE l.id IS NULL OR l.deleted_at IS NOT NULL), '[]'::jsonb)
     INTO v_live, v_skipped
-    FROM (SELECT id, deleted_at FROM public.jobs WHERE id = ANY (v_ids) ORDER BY id FOR UPDATE) AS locked;
-  SELECT v_skipped || coalesce(jsonb_agg(jsonb_build_object('id', x, 'reason', 'not_found') ORDER BY x), '[]'::jsonb)
-    INTO v_skipped
-    FROM unnest(v_ids) AS x
-   WHERE NOT EXISTS (SELECT 1 FROM public.jobs j WHERE j.id = x);
+    FROM unnest(v_ids) AS x LEFT JOIN locked l ON l.id = x;
+  -- The caller may have been deactivated while this call waited for those locks.
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles
+     WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales_rep')
+  ) THEN
+    RAISE EXCEPTION 'INSUFFICIENT_ROLE: edit_jobs requires an active admin or sales rep';
+  END IF;
 
   IF v_set <> '' AND cardinality(v_live) > 0 THEN
     EXECUTE format('UPDATE public.jobs SET %s updated_by = $2 WHERE id = ANY ($3)', v_set)

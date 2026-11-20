@@ -98,6 +98,7 @@ Releases of CRX Manager, newest first.
 * staging DB job accepts existing odd-stamp and self-wrapping migrations (#1749)
 
 #### 🧹 Refactors & Chore
+* Last verified 2026-11-20 for the live ledger (release #1990 docs freshness) (#2052)
 * apply priority follow-ups in the rate-review prover (#1928) (#2042)
 * live apply evidence in three billing migration records (v0.1.0 apply review) (#2037)
 * release #1990 may have its Sol review (#2003)

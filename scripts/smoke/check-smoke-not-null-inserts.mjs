@@ -90,6 +90,8 @@ export function requiredColumnsFromMigrations(migrations) {
             c.hasDefault = on && hasDefault(action);
             if (!c.hasDefault && c.notNull) c.requiredBy = name; // dropping the default of a NOT NULL column
           }
+        } else if ((m = action.match(/^ADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?PRIMARY\s+KEY\s*\(([^)]*)\)/i))) {
+          for (const c of splitTopLevel(m[1]).map(ident)) Object.assign(col(t, c), { notNull: true, requiredBy: name });
         } else if ((m = action.match(/^ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?\s+([\s\S]*)$/i)) && !CONSTRAINT_WORDS.test(m[1])) {
           if (/IF\s+NOT\s+EXISTS/i.test(action) && cols(t).has(ident(m[1]))) continue;
           const def = m[2];
@@ -125,8 +127,10 @@ export function insertsIn(sql) {
   const re = new RegExp(String.raw`\bINSERT\s+INTO\s+(?:ONLY\s+)?${TABLE}(?:\s+(?:AS\s+)?(?!VALUES\b|SELECT\b|DEFAULT\b|OVERRIDING\b|WITH\b)\w+)?\s*(\(([^)]*)\))?`, 'gi');
   for (const m of code.matchAll(re)) {
     if (!isPublic(m[2])) continue;
-    const defaultValues = !m[4] && /^\s*DEFAULT\s+VALUES\b/i.test(code.slice(m.index + m[0].length));
-    out.push({ table: ident(m[3]), columns: m[4] ? splitTopLevel(m[5]).map(ident) : defaultValues ? [] : null, line: code.slice(0, m.index).split('\n').length });
+    // DEFAULT VALUES names no column. Positional VALUES may stop short of a newly added column, so it counts as naming
+    // none (name the columns to pass). Only SELECT with no column list (a whole-row copy) is trusted to fill every column.
+    const namesNone = !m[4] && /^\s*(?:DEFAULT\s+VALUES|VALUES)\b/i.test(code.slice(m.index + m[0].length));
+    out.push({ table: ident(m[3]), columns: m[4] ? splitTopLevel(m[5]).map(ident) : namesNone ? [] : null, line: code.slice(0, m.index).split('\n').length });
   }
   return out;
 }
@@ -136,7 +140,6 @@ export function findMissing(required, chains) {
   for (const { name, sql } of chains) {
     for (const ins of insertsIn(sql)) {
       const req = required.get(ins.table);
-      // No column list = positional VALUES or SELECT *: every column is filled, so it cannot silently omit one.
       // shortcut: INSERTs inside EXECUTE strings are not read (today only permission probes that expect a refusal); parse them if a chain builds fixtures that way.
       if (!req || !ins.columns) continue;
       for (const [c, migration] of req) {

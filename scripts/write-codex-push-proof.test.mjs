@@ -168,15 +168,6 @@ assert.match(releasePrompt, /#2064 20270120150000 _enforce_below_cost_line/, "re
 assert.match(releasePrompt, /same function, is not covered/, "release rule 3: other defects still block");
 assert.doesNotMatch(buildCodexReviewPrompt({}), /KNOWN-ISSUE/, "known issues apply to release reviews only");
 assert.match(releasePrompt, /RELEASE FOLLOW-UPS/, "release rules: tagged findings are listed for tracked issues");
-// Release rule 4 (Mason, 2026-11-20): code the previous Sol round already reviewed is tracked, not blocking.
-assert.doesNotMatch(releasePrompt, /PRIOR-ROUND/, "rule 4 needs the wrapper's changed-file list");
-const priorPrompt = buildCodexReviewPrompt({ release: true, priorRoundChanged: ["scripts/write-codex-push-proof.mjs"] });
-assert.match(priorPrompt, /\[PRIOR-ROUND\]/, "release rule 4: findings in files unchanged since the previous round are tagged");
-assert.match(priorPrompt, /- scripts\/write-codex-push-proof\.mjs/, "release rule 4: changed files are listed");
-assert.match(priorPrompt, /makes newly reachable, is not covered/, "release rule 4: changed files still block");
-assert.ok(priorPrompt.indexOf("PRIOR-ROUND") < priorPrompt.indexOf("RELEASE FOLLOW-UPS"), "rule 4 sits before the follow-up instructions");
-assert.match(buildCodexReviewPrompt({ release: true, priorRoundChanged: [] }), /\(none\)/, "release rule 4: an empty list says none");
-assert.doesNotMatch(buildCodexReviewPrompt({ priorRoundChanged: [] }), /PRIOR-ROUND/, "rule 4 applies to release reviews only");
 assert.equal(prompt.includes("RELEASE RULES"), false, "a non-release review has no release rules");
 assert.ok(releasePrompt.indexOf("RELEASE RULES") < releasePrompt.indexOf("Then end your reply"), "release rules come before the verdict instructions");
 

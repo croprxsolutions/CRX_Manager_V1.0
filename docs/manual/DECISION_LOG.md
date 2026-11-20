@@ -5,6 +5,17 @@
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #2050 at `e4960bf1340d` (base `e4e6e11fae1c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
 - Finding 1 (HIGH) at `supabase/migrations/20270129171000_field_app_refuses_product_without_sold_unit.sql:39`, text sha256 `30caf38e89c4de39` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our business) (ref 23d2a64b72fd)
+## 2026-11-20 — Release #1990: split the gate files out; release rule 4 removed
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, split it", then "Yes, go ahead").** Stop adding Sol release rules. The
+release's tool and guard files (the gate files `owner-accept-sol-finding.mjs` refuses) go to `main` in their own hotfix,
+so #1990 no longer changes any of them and Mason can accept its remaining Sol findings by name, each kept on a tracked
+issue. **What changes:** release rule 4 (`RELEASE_PRIOR_ROUND_HEAD`, entry below) is removed, since Sol round 56 rated it
+a BLOCKER and the accepts replace it. A `package.json` or `package-lock.json` that differs from the release's fork point
+only in its own version number no longer counts as a gate file (`packageVersionOnlyChange` in
+`.claude/hooks/sol-accept-lib.mjs`), because the release bot raises that number on every release; any dependency or
+script change in those files still counts. Every other gate is unchanged.
+
 ## 2026-11-20 — Release #1990: only code changed since the previous Sol round blocks
 
 **Decision (Mason, in chat, 2026-11-20: "Yes, adopt it"; proposed by Taha in Slack).** From Sol round 55 on

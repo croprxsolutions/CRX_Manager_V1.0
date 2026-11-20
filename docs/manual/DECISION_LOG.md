@@ -5,6 +5,62 @@
 **Decision (Mason, in chat, 2026-11-19: "close it").** Remove direct INSERT, UPDATE, DELETE and TRUNCATE on `jobs` from signed-in users and anon, and drop the three write policies, including admins' unused direct hard delete (option (a) of the #1979 contract's Open decision 1). Built as #1979 PR C, `20270131110000_jobs_direct_writes_removed.sql`.
 **Why:** an admin or rep could mark a job completed, or change any job column, by a direct database call that skips the checks; every screen now writes jobs through checked server functions. Same step as job lines on 2026-11-06. The Supabase dashboard, SQL editor and reviewed migrations run as the owner and are unaffected.
 **What this forbids/implies:** new job writes go through a SECURITY DEFINER function, never a direct table write from the app. Apply only after the screen PR (B) is on production and no old tab is in use. Re-granting is a permission change that needs Mason's approval (exact rollback in the migration header).
+## 2026-11-19 — #2047: Mason owner-accepted 2 Sol finding(s) at `d2525e72220a`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2047 at `d2525e72220a` (base `c79b2a04d9b3`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (BLOCKER) at `docs/plans/2026-11-19-job-writes-through-rpcs-CONTRACT.md:3`, text sha256 `eda3e2570ce59129` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref ca71e5988000)
+- Finding 2 (HIGH) at `supabase/migrations/20270131100000_job_writes_through_rpcs.sql:166`, text sha256 `847c3a966cb5ec80` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 6b963a8267f1)
+## 2026-11-20 — Release rule 1 also covers unchanged live lines inside a changed function
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, both" to logging Sol's #1990 findings 1 and 2 as tracked issues, then
+"Yes, loosen it").** Rule 1 below also covers a finding inside a function the release changes when every line causing
+it is copied unchanged from the live (base) definition and live already has the same defect, reachable the same way.
+It goes on a tracked issue and does not hold the release. A defect that any changed line introduces, widens or makes
+newly reachable still blocks. First case: `20270129171000` `_save_field_app_invoice_impl_20260714` (lines 262 and
+298 match live; issue #2058). **What it does:** the release rules in `scripts/write-codex-push-proof.mjs`; every other
+gate is unchanged.
+
+## 2026-11-20 — Release #1990: two release review rules, Sol past the round cap, field-app draft finding accepted
+
+**Decision (Mason, in chat, 2026-11-20: "yes do both rules"), asked for by Taha.** For release PR #1990 and later
+release PRs (`release/next` into `main`):
+
+1. **Live and unchanged code.** A Sol or migration-reviewer finding inside a database function whose body at the
+   reviewed head is byte-identical to the live definition (a read-only comparison against live `pg_proc.prosrc`,
+   recorded with the proof) is code the release does not change. It goes on a tracked GitHub issue for Taha's
+   follow-up and does not hold the release. Findings in new or changed code still block.
+2. **Self-abort under an absent live condition.** A finding whose only effect is that a migration aborts its own
+   apply (full rollback), under a live data condition the migration's record shows absent with read-only live
+   evidence, re-checked read-only right before the apply with the result posted on the PR, does not hold the
+   release. First case: `20270109100400` aborts its backfill if a posted return credit has an unlinked line
+   (live: 0 posted credit memos).
+
+**Also decided:** release #1990 may have its Sol review past the round cap today. Mason accepts the
+`20270129171000` finding that a field-application draft saved before the upgrade is not re-checked (live has 0
+such drafts; first recorded for #2050 on 2026-11-19).
+
+**What it does:** the Sol review instructions in `scripts/write-codex-push-proof.mjs` (release reviews only) and the
+`migration-drift-reviewer` and `rls-security-reviewer` charters carry both rules. Owner-accepts stay refused on
+release PRs that touch gate files; every other gate is unchanged.
+
+## 2026-11-19 — #2050 (release #1990 Sol #2 fix) may have Sol round 5; old drafts are not re-checked
+
+**Decision (Mason, in chat, 2026-11-19: "Yes, accept #1, fix #2" and "Yes, push it").** PR #2050 may have its Sol
+review in round 5. Mason accepts that a field-application draft saved before `20270129171000` is applied is not
+re-checked by it (Sol round 4 finding 1): live has 0 field-application invoices with a product line and 0 products
+without a sold unit. **What it does:** the round-4 test-script finding is fixed on #2050; every other gate is unchanged.
+
+## 2026-11-19 — Every product must have a sold unit (release #1990 Sol #2 fix, branch `claude/release-fix-sol2`)
+
+**Decision (Mason, in chat, 2026-11-19: "Yes, simplify").** Migration `20270129171000` makes a product's sold unit
+(`products.inventory_unit`) required, with at least one letter or digit, instead of scanning old field-application
+drafts and locking tables while it installs. **Why:** Sol rounds 1-3 on the scan found a new timing gap each round;
+live has 0 products without a sold unit and 0 field-application invoices with product lines, so a hard rule closes
+the per-gallon-price-times-ounces gap for good. **Cost:** a product can no longer be created or saved without its sold
+unit. The field-application saves keep refusing such a line and keep `ACTOR_MISMATCH`. A product-row lock during the
+save and a server-side unit check on posting are follow-ups, not this fix.
 
 ## 2026-11-19 — #1997: Mason owner-accepted 7 Sol finding(s) at `994795d9e03e`
 

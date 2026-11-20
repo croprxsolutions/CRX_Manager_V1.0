@@ -110,6 +110,21 @@ assert.equal(hasSkipMarker("select $$ column-check: skip $$"), false, "marker in
 assert.equal(hasSkipMarker("select 1 -- column-check: skip"), true, "marker in a line comment"); pass++;
 assert.equal(hasSkipMarker("/* column-check: skip */ select 1"), true, "marker in a block comment"); pass++;
 
+// --- #2035: an output name after a select-list comma, and a quoted "public" schema ---
+refuses("select 1, count(*) as oi, oi.quantity from order_items oi", ["oi.quantity"], "output name after a select-list comma");
+refuses("select o.id, (select 1) oi, oi.quantity from orders o, order_items oi", ["oi.quantity"], "scalar subquery after a select-list comma");
+refuses("select distinct on (o.id) o.id, sum(oi.acres) over (partition by o.id) oi, oi.quantity from orders o join order_items oi on true",
+  ["oi.quantity"], "window output name after DISTINCT ON and a comma");
+allows("select 1, x.quantity from orders o, (select 1 as quantity) x", "FROM-list subquery after a select-list comma still binds");
+allows("select (select y.quantity from orders o, (select 1 as quantity) y) from orders", "FROM-list comma inside a select-list subquery");
+allows("select x.quantity from orders o join order_items oi on oi.order_id = o.id, lateral (select 1 as quantity) x", "comma after a JOIN condition");
+allows("select a is distinct from b, f() oi, oi.quantity from order_items oi", "a FROM inside an expression keeps the safe side");
+refuses(`select p.price_per_acre from "public"."products" p`, ["p.price_per_acre"], "quoted public schema");
+refuses(`select oi.quantity from orders o, "public".order_items oi`, ["oi.quantity"], "quoted public schema in a comma list");
+refuses(`select "public"."products"."price_per_acre" from "public"."products"`, ["public.products.price_per_acre"], "quoted three-part name");
+allows(`select p.rate_unit from "public"."products" p`, "correct quoted public schema");
+allows(`select p.price_per_acre from "Public"."products" p`, "mixed-case quoted schema is a different schema");
+
 // --- End to end: the hook process itself, isolated copy beside a crafted registry ---
 const tmp = tempDir("crx-sql-column-");
 const hooksDir = path.join(tmp, ".claude", "hooks");

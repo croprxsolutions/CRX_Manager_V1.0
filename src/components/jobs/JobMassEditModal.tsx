@@ -3,7 +3,9 @@ import { Check, Calendar, CircleDot, User, Layers, AlertTriangle, Pencil, Truck 
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
-import { supabase, checkMutationResult } from '../../lib/db';
+import { editJobs, editJobsScope, describeEditJobsResult, editJobsChangedNothing, EDIT_JOBS_MAX } from '../../lib/editJobs';
+import { getIdempotencyBindingRejection } from '../../lib/idempotency';
+import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { sanitizeError } from '../../lib/errorSanitizer';
 import { Sentry } from '../../lib/sentry';
 import { logActivity } from '../../lib/activityLogger';
@@ -76,6 +78,7 @@ export default function JobMassEditModal({
   const { profile } = useAuth();
   const [draft, setDraft] = useState<MassEditDraft>(emptyMassEditDraft);
   const [applying, setApplying] = useState(false);
+  const editIdem = useIdempotencyKey('edit_jobs', profile?.id || '');
 
   const count = selectedJobs.length;
 
@@ -118,67 +121,45 @@ export default function JobMassEditModal({
       handleClose();
       return;
     }
+    if (!profile) return;
+    if (count > EDIT_JOBS_MAX) {
+      toast('error', `Select at most ${EDIT_JOBS_MAX} jobs at a time (${count} selected).`);
+      return;
+    }
     setApplying(true);
+    // Field changes and the cancel go in ONE server call: both save, or neither does.
+    // Only the bulk-safe status (cancelled) can be chosen here; the server decides which jobs may move.
+    const jobIds = selectedJobs.map((j) => j.id);
+    const fieldPatch = buildFieldPatch(draft);
+    const action = draft.setStatus && draft.status === 'cancelled' ? 'cancel' as const : null;
+    const scope = editJobsScope(jobIds, fieldPatch, action);
     try {
-      const allIds = selectedJobs.map((j) => j.id);
-      const now = new Date().toISOString();
-
-      // 1) Non-status fields (date / planning date / applicator / batch) — a
-      //    single .update() across ALL selected jobs. Only enabled sections ride.
-      const fieldPatch = buildFieldPatch(draft);
-      if (fieldPatch) {
-        const result = await supabase
-          .from('jobs')
-          .update({ ...fieldPatch, updated_at: now, updated_by: profile?.id ?? null })
-          .in('id', allIds)
-          .select('id');
-        checkMutationResult(result, 'Mass edit jobs');
-      }
-
-      // 2) Status — only the bulk-safe target (cancelled), and only on the jobs
-      //    the trigger will accept. Eligible jobs move; blocked jobs are skipped
-      //    and reported (never silently failed).
-      let statusMoved = 0;
-      let statusSkipped = 0;
-      if (draft.setStatus && draft.status && statusPartition) {
-        const eligibleIds = statusPartition.eligible.map((j) => j.id);
-        statusSkipped = statusPartition.blocked.length;
-        if (eligibleIds.length > 0) {
-          const result = await supabase
-            .from('jobs')
-            .update({ status: draft.status, updated_at: now, updated_by: profile?.id ?? null })
-            .in('id', eligibleIds)
-            .select('id');
-          checkMutationResult(result, 'Mass edit job status');
-          statusMoved = eligibleIds.length;
-        }
-      }
-
-      if (profile) {
-        logActivity({
-          event: 'jobs_mass_edited',
-          description: `Mass-edited ${count} job(s): ${changes.join('; ')}`,
-          performedBy: profile.id,
-        });
-      }
-
-      // Result toast — clear about what changed, including any skipped status moves.
-      if (statusSkipped > 0) {
-        toast(
-          'success',
-          `Updated ${count} job(s). Status set on ${statusMoved}; ${statusSkipped} skipped (not a legal status change).`
-        );
-      } else {
-        toast('success', `Updated ${count} job(s)`);
-      }
+      const result = await editJobs({
+        jobIds,
+        changes: fieldPatch,
+        action,
+        performedBy: profile.id,
+        idempotencyKey: editIdem.getKeyFor(scope),
+      });
+      editIdem.resetKeyFor(scope);
+      const summary = describeEditJobsResult(result, action);
+      logActivity({
+        event: 'jobs_mass_edited',
+        description: `Mass edit (${changes.join('; ')}): ${summary}`,
+        performedBy: profile.id,
+      });
+      toast(editJobsChangedNothing(result) || result.skipped.length > 0 ? 'info' : 'success', summary);
       reset();
       onApplied();
       onClose();
     } catch (err) {
+      // A lost reply keeps the key so a retry of the same edit replays the saved result.
+      const binding = getIdempotencyBindingRejection(err);
+      if (binding === 'intent' || binding === 'actor') editIdem.resetKeyFor(scope);
       Sentry.captureException(toSentryError(err), {
         extra: { context: 'JobMassEditModal.apply' },
       });
-      toast('error', sanitizeError(err));
+      toast('error', `Nothing was saved. ${sanitizeError(err)}`);
     }
     setApplying(false);
   };

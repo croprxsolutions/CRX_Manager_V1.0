@@ -14,11 +14,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { logActivity } from '../lib/activityLogger';
 import { notifyApplicatorDispatched, notifyApplicatorRescheduled, notifyApplicatorUndispatched } from '../lib/notificationTriggers';
-import { supabase, checkMutationResult, assertRpcResult, assertTransferDataPresent, assertTransferResultForJob, hasRpcCode, isTransferInvoiceResultInvalid, RpcErrorCodes, sanitizeError, transferInvoiceErrorMessage } from '../lib/db';
+import { supabase, assertRpcResult, assertTransferDataPresent, assertTransferResultForJob, hasRpcCode, isTransferInvoiceResultInvalid, RpcErrorCodes, sanitizeError, transferInvoiceErrorMessage } from '../lib/db';
 import { warnIfOverCreditLimit } from '../lib/creditLimit';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { fingerprintIntentPayload, getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
+import { editJobs, editJobsScope, describeEditJobsResult } from '../lib/editJobs';
 import { getLicenseStatus, licenseStatusLabel } from '../lib/licenseStatus';
 import { generateWpsNoticePdf } from '../lib/wpsNoticePdf';
 import { generateApplicatorSheetPdf } from '../lib/applicatorSheetPdf';
@@ -308,6 +309,7 @@ export default function JobDetail() {
   const completeJobIdem = useIdempotencyKey('complete_job', profile?.id || '');
   const startJobIdem = useIdempotencyKey('start_job', profile?.id || '');
   const transferJobIdem = useIdempotencyKey('transfer_job_to_invoice', profile?.id || '');
+  const editJobsIdem = useIdempotencyKey('edit_jobs', profile?.id || '');
   const isNew = id === 'new';
   const isEditable = role === 'admin' || role === 'sales_rep';
   // Cost is admin-only (Mason, 2026-10-15): the server works it out for everyone else's saves.
@@ -2976,16 +2978,20 @@ export default function JobDetail() {
         // the applicator-reassign-failure pattern below) so any retry edits the
         // existing row rather than inserting again.
         try {
-          const crewResult = await supabase
-            .from('jobs')
-            .update({
-              ground_crew_id: groundCrewId || null,
-              carrier_rate_gpa: carrierVal,
-              loader_tank_capacity: capacityVal,
-            })
-            .eq('id', savedJobId)
-            .select('id');
-          checkMutationResult(crewResult, 'Assign ground crew / loader worksheet');
+          const crewChanges = {
+            ground_crew_id: groundCrewId || null,
+            carrier_rate_gpa: carrierVal,
+            loader_tank_capacity: capacityVal,
+          };
+          const crewScope = editJobsScope([savedJobId], crewChanges, null);
+          const crewResult = await editJobs({
+            jobIds: [savedJobId],
+            changes: crewChanges,
+            performedBy: profile!.id,
+            idempotencyKey: editJobsIdem.getKeyFor(crewScope),
+          });
+          editJobsIdem.resetKeyFor(crewScope);
+          if (crewResult.updated.length !== 1) throw new Error(describeEditJobsResult(crewResult, null));
         } catch (crewErr) {
           Sentry.captureException(toSentryError(crewErr), { extra: { context: 'job_crew_loader_after_save' } });
           toast('error', 'Job created, but the crew/loader settings did not save — adjust them on this page.');
@@ -3300,15 +3306,27 @@ export default function JobDetail() {
       toast('error', `Cannot cancel a job in '${status}' status — only scheduled or in-progress jobs can be cancelled`);
       return;
     }
+    if (!profile) return;
     setCancelling(true);
+    const cancelScope = editJobsScope([id!], null, 'cancel');
     try {
-      const result = await supabase
-        .from('jobs')
-        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-        .eq('id', id!)
-        .select('id');
-      checkMutationResult(result, 'Cancel job');
-      if (profile) logActivity({ event: 'job_cancelled', description: `Job ${jobNumber} cancelled`, performedBy: profile.id });
+      const result = await editJobs({
+        jobIds: [id!],
+        action: 'cancel',
+        performedBy: profile!.id,
+        idempotencyKey: editJobsIdem.getKeyFor(cancelScope),
+      });
+      editJobsIdem.resetKeyFor(cancelScope);
+      if (result.cancelled.length !== 1) {
+        // Someone else moved or removed the job since this page loaded: say what the server found.
+        if (stillOnThisJob()) {
+          toast('info', describeEditJobsResult(result, 'cancel'));
+          await fetchJob();
+        }
+        setCancelling(false);
+        return;
+      }
+      logActivity({ event: 'job_cancelled', description: `Job ${jobNumber} cancelled`, performedBy: profile!.id });
       // The cancel committed and is logged. Gate the on-screen half: a stale success
       // toast would claim the job the operator is NOW looking at was cancelled, and the
       // setIsDirty(false) would silently strip that job's unsaved-changes protection.
@@ -3318,6 +3336,9 @@ export default function JobDetail() {
         await fetchJob();
       }
     } catch (err: unknown) {
+      // A lost reply keeps the key so a second click replays the saved result.
+      const binding = getIdempotencyBindingRejection(err);
+      if (binding === 'intent' || binding === 'actor') editJobsIdem.resetKeyFor(cancelScope);
       Sentry.captureException(toSentryError(err), { extra: { context: 'cancel_job' } });
       toast('error', sanitizeError(err));
     }

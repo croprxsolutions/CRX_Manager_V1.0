@@ -1,6 +1,6 @@
 # Behavior contract: spray job writes go through a server function (#1979)
 
-Read at `c0b544a23` (origin/staging, 2026-11-19). Booking items in #1979 are out of scope (Taha owns bookings until 2026-12-15). Challenged by Astra (`gpt-6.2-astra`, high): cold challenge (52 findings) and one targeted re-check of the redesign (27 findings); both settled at the end. No further challenge rounds.
+Read at `c0b544a23` (origin/staging, 2026-11-19). Booking items in #1979 are out of scope (Taha owns bookings until 2026-12-15). Challenged by Astra (`gpt-6.2-astra`, high): cold challenge (52 findings) and one targeted re-check of the redesign (27 findings); both settled at the end. The plan-contract cold challenge for this contract is finished; reviews of the code continue as usual.
 
 **Principle: parity.** This change moves today's screen writes behind one checked server function and then removes direct writes. It does not change any business rule the screens follow today (who may edit which job, which statuses may be cancelled or deleted, license timing, last-writer-wins edits, no undo). Each of those stays exactly as it is; changing one is a separate decision.
 

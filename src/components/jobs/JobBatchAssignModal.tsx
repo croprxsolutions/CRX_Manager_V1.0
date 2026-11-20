@@ -5,6 +5,9 @@ import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
 import { supabase, checkMutationResult } from '../../lib/db';
 import { sanitizeError } from '../../lib/errorSanitizer';
+import { editJobs, editJobsScope, describeEditJobsResult, editJobsChangedNothing, EDIT_JOBS_MAX } from '../../lib/editJobs';
+import { getIdempotencyBindingRejection } from '../../lib/idempotency';
+import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { Sentry } from '../../lib/sentry';
 import { useAuth } from '../../contexts/AuthContext';
 import type { JobBatch } from '../../types';
@@ -49,6 +52,7 @@ export default function JobBatchAssignModal({
   const { profile } = useAuth();
   const [choice, setChoice] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  const editIdem = useIdempotencyKey('edit_jobs', profile?.id || '');
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
 
@@ -102,21 +106,32 @@ export default function JobBatchAssignModal({
       onClose();
       return;
     }
+    if (!profile) return;
+    if (selectedJobIds.length > EDIT_JOBS_MAX) {
+      toast('error', `Select at most ${EDIT_JOBS_MAX} jobs at a time (${selectedJobIds.length} selected).`);
+      return;
+    }
     setApplying(true);
+    const changes = { batch_ref: choice === REMOVE ? null : choice };
+    const scope = editJobsScope(selectedJobIds, changes, null);
     try {
-      const newRef = choice === REMOVE ? null : choice;
-      const result = await supabase
-        .from('jobs')
-        .update({ batch_ref: newRef })
-        .in('id', selectedJobIds)
-        .select('id');
-      checkMutationResult(result, 'Assign jobs to batch');
+      const result = await editJobs({
+        jobIds: selectedJobIds,
+        changes,
+        performedBy: profile.id,
+        idempotencyKey: editIdem.getKeyFor(scope),
+      });
+      editIdem.resetKeyFor(scope);
       const verb = choice === REMOVE ? 'Removed from batch' : 'Added to batch';
-      toast('success', `${verb}: ${selectedJobIds.length} job(s)`);
+      const summary = describeEditJobsResult(result, null);
+      toast(editJobsChangedNothing(result) || result.skipped.length > 0 ? 'info' : 'success', `${verb}: ${summary}`);
       setChoice(null);
       onApplied();
       onClose();
     } catch (err) {
+      // A lost reply keeps the key so a retry of the same choice replays the saved result.
+      const binding = getIdempotencyBindingRejection(err);
+      if (binding === 'intent' || binding === 'actor') editIdem.resetKeyFor(scope);
       Sentry.captureException(toSentryError(err), { extra: { context: 'JobBatchAssignModal.apply' } });
       toast('error', sanitizeError(err));
     }

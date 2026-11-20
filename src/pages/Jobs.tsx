@@ -13,7 +13,10 @@ import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
 import SplitHeading from '../components/ui/SplitHeading';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, checkMutationResult, assertRpcResult } from '../lib/db';
+import { supabase, assertRpcResult } from '../lib/db';
+import { editJobs, editJobsScope, describeEditJobsResult, editJobsChangedNothing, EDIT_JOBS_MAX } from '../lib/editJobs';
+import { getIdempotencyBindingRejection } from '../lib/idempotency';
+import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { JOB_COLUMNS } from '../lib/costFields';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { chunkIds } from '../lib/dispatchDisplay';
@@ -237,6 +240,7 @@ export default function Jobs() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { role, profile } = useAuth();
+  const deleteIdem = useIdempotencyKey('edit_jobs', profile?.id || '');
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [loading, setLoading] = useState(true);
   // The newest jobs read failed: show "could not be loaded", never "No jobs found" (To-Do 10.5).
@@ -1444,48 +1448,43 @@ export default function Jobs() {
   };
 
   const handleDelete = async () => {
+    if (!profile) return;
+    // REPORTABLE broadened selection to include invoiced jobs (so they can be
+    // summarized/exported). Delete stays gated to DELETABLE: invoiced/cancelled
+    // jobs are never sent. The server re-checks each job's status under lock and
+    // skips any that changed since this list loaded.
+    const deletableRows = selectedRows.filter((j) => DELETABLE.includes(j.status));
+    const ids = deletableRows.map((j) => j.id);
+    const notSent = selectedRows.length - ids.length;
+    if (ids.length === 0) {
+      toast('error', `No deletable jobs selected — invoiced/finished jobs can't be deleted (${notSent} skipped).`);
+      setDeleteModalOpen(false);
+      return;
+    }
+    if (ids.length > EDIT_JOBS_MAX) {
+      toast('error', `Delete at most ${EDIT_JOBS_MAX} jobs at a time (${ids.length} selected).`);
+      return;
+    }
     setDeleting(true);
+    const scope = editJobsScope(ids, null, 'delete');
     try {
-      // REPORTABLE broadened selection to include invoiced jobs (so they can be
-      // summarized/exported). Delete must stay gated to DELETABLE: re-filter the
-      // selection here so an invoiced/finished job is NEVER soft-deleted, even if
-      // it's checkbox-selected for a report. Skipped jobs are surfaced in the toast.
-      const deletableRows = selectedRows.filter((j) => DELETABLE.includes(j.status));
-      const ids = deletableRows.map((j) => j.id);
-      const skipped = selectedRows.length - ids.length;
-      if (ids.length === 0) {
-        toast('error', `No deletable jobs selected — invoiced/finished jobs can't be deleted (${skipped} skipped).`);
-        setDeleting(false);
-        setDeleteModalOpen(false);
-        return;
-      }
-      // Belt-and-suspenders: scope the soft-delete by status IN DELETABLE at the
-      // QUERY level too (not just the in-memory `ids` filter above). If the
-      // in-memory status were ever stale/wrong, the DB query still refuses to
-      // stamp deleted_at on an invoiced/cancelled job. This mirrors the new
-      // server-side _enforce_billed_job_immutability trigger (#12 DB guard).
-      const result = await supabase
-        .from('jobs')
-        .update({ deleted_at: new Date().toISOString() })
-        .in('id', ids)
-        .in('status', DELETABLE)
-        .select('id');
-      checkMutationResult(result, 'Delete jobs');
-      // If the DB matched fewer rows than we asked to delete, a selected job was
-      // not in a deletable status (e.g. it was billed between fetch and delete) and
-      // the query correctly skipped it. Surface that instead of claiming success.
-      const deletedCount = result.data?.length ?? 0;
-      const dbSkipped = ids.length - deletedCount;
-      const totalSkipped = skipped + dbSkipped;
-      toast(
-        totalSkipped > 0 ? 'info' : 'success',
-        totalSkipped > 0
-          ? `Deleted ${deletedCount} job(s); ${totalSkipped} skipped — invoiced/finished jobs can't be deleted.`
-          : `Deleted ${deletedCount} job(s)`,
-      );
+      const result = await editJobs({
+        jobIds: ids,
+        action: 'delete',
+        performedBy: profile.id,
+        idempotencyKey: deleteIdem.getKeyFor(scope),
+      });
+      deleteIdem.resetKeyFor(scope);
+      const summary = describeEditJobsResult(result, 'delete');
+      const notSentText = notSent > 0 ? ` ${notSent} invoiced/finished not deleted.` : '';
+      toast(editJobsChangedNothing(result) || result.skipped.length > 0 || notSent > 0 ? 'info' : 'success', `${summary}${notSentText}`);
       clearSelection();
       fetchJobs();
     } catch (err) {
+      // A lost reply keeps the key so a retry of the same delete replays the saved result.
+      const binding = getIdempotencyBindingRejection(err);
+      if (binding === 'intent' || binding === 'actor') deleteIdem.resetKeyFor(scope);
+      Sentry.captureException(toSentryError(err), { extra: { context: 'jobs_bulk_delete' } });
       toast('error', sanitizeError(err));
     }
     setDeleting(false);

@@ -276,7 +276,7 @@ function seed() {
     UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '${REP}';
     DELETE FROM public.unit_conversions;
     INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};
-    INSERT INTO public.customers (id, farm_name, assigned_tier, is_active, salesman_id) VALUES ('${A}', '[PROVER] GSRC Farm A', 1, true, '${REP}');
+    INSERT INTO public.customers (id, farm_name, assigned_tier, is_active, assigned_sales_rep) VALUES ('${A}', '[PROVER] GSRC Farm A', 1, true, '${REP}');
     INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
         current_cost, tier1_price, tier2_price, tier3_price, is_active) VALUES
       ('${P}', '[PROVER] GSRC chem P', 'GSRC-P', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 5, 30, 30, 30, true),
@@ -349,7 +349,8 @@ async function main() {
   const refused = probe(save(REP, 1, ONE));
   assert.notEqual(refused.status, 0, refused.output);
   assert.match(refused.output, BELOW);
-  assert.doesNotMatch(refused.output, /50000|\b500\b|locked_unit_cost/, 'the refusal must not carry the cost');
+  const errorLine = refused.output.split(/\r?\n/).find((l) => l.includes('FIELD_APP_GROWER_SHARE_BELOW_COST')) ?? '';
+  assert.doesNotMatch(errorLine, /\d|\$|locked_unit_cost/, 'the refusal must not carry the cost');
   refusedProbe(save(REP, 499, ONE), BELOW);
   const covered = parts(okProbe(save(REP, 500, ONE)));
   assert.equal(covered[1], `${REP}:50000`);

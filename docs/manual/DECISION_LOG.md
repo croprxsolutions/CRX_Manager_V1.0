@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-19 — #2038 may have Sol round 6
+
+**Decision (Mason, in chat, 2026-11-19: "Accept + round 6").** PR #2038 (#1976) may have Sol round 6. Mason judges the lookup race (a lookup started between the batch's screen check and its own lookup) a business non-issue: both lookups fetch the same EPA data, and the admin can re-run theirs.
+**Why:** round 5's other HIGH (no release smoke chain for `commit_epa_proposal_batch`) was fixed in a new commit, so the head needs a fresh review.
+
 ## 2026-11-19 — #2038 may have Sol round 5
 
 **Decision (Mason, in chat, 2026-11-19: "Approve round 5").** PR #2038 (#1976, EPA batch save checks in the database) may have Sol round 5.

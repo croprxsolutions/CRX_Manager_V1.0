@@ -7,8 +7,8 @@ interface StampJobPrintedResult {
 }
 
 /**
- * Stamp through the RPC instead of a direct jobs update because applicator-role
- * users can see jobs but jobs_update RLS is admin/sales-only. The SECURITY DEFINER
+ * Stamp through the RPC instead of a direct jobs update because signed-in users
+ * cannot write jobs directly (#1979 PR C). The SECURITY DEFINER
  * RPC preserves the print audit for every user who is allowed to see that job.
  */
 export async function stampJobPrinted(jobId: string): Promise<void> {

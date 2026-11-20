@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-19 — #1979: signed-in users lose direct writes on spray jobs
+
+**Decision (Mason, in chat, 2026-11-19: "close it").** Remove direct INSERT, UPDATE, DELETE and TRUNCATE on `jobs` from signed-in users and anon, and drop the three write policies, including admins' unused direct hard delete (option (a) of the #1979 contract's Open decision 1). Built as #1979 PR C, `20270131110000_jobs_direct_writes_removed.sql`.
+**Why:** an admin or rep could mark a job completed, or change any job column, by a direct database call that skips the checks; every screen now writes jobs through checked server functions. Same step as job lines on 2026-11-06. The Supabase dashboard, SQL editor and reviewed migrations run as the owner and are unaffected.
+**What this forbids/implies:** new job writes go through a SECURITY DEFINER function, never a direct table write from the app. Apply only after the screen PR (B) is on production and no old tab is in use. Re-granting is a permission change that needs Mason's approval (exact rollback in the migration header).
+
 ## 2026-11-19 — #1997: Mason owner-accepted 7 Sol finding(s) at `994795d9e03e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1997 at `994795d9e03e` (base `ded769b690d0`) found 7 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

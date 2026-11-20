@@ -77,7 +77,7 @@ Files: `supabase/migrations/20270131100000_job_writes_through_rpcs.sql` (PR A), 
 
 ## Open business decisions
 
-1. **Remove direct job edits (PR C), including admins' unused direct hard delete.** (a) Remove, as done for job lines on 2026-11-06: every job change goes through a checked function and no one can mark a job completed without the completion step. (b) Keep: the screens still move over, but the back door stays open. **Recommendation: (a).** Asked 2026-11-19; answer: pending.
+1. **Remove direct job edits (PR C), including admins' unused direct hard delete.** (a) Remove, as done for job lines on 2026-11-06: every job change goes through a checked function and no one can mark a job completed without the completion step. (b) Keep: the screens still move over, but the back door stays open. **Recommendation: (a).** Asked 2026-11-19; answer (Mason, 2026-11-19): "close it", (a). Built as PR C (`20270131110000_jobs_direct_writes_removed.sql`).
 
 ## Challenge settlement (Astra, 52 findings)
 

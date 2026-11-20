@@ -30,7 +30,9 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270129150000_booking_guard_rep_and_delete.sql');
 const FOLLOW_UPS = [];
-const LATER_READ_ONLY = new Set([]);
+// #1979 PR C only revokes direct job writes and drops the write policies; this proof replays up to its own candidate,
+// and every function it relies on is SECURITY DEFINER, so the revoke changes nothing it proves.
+const LATER_READ_ONLY = new Set(['20270131110000_jobs_direct_writes_removed.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

@@ -163,11 +163,21 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
   const vendors = linked.status === 'loaded' ? linked.data : null;
   const listUsable = linked.status === 'loaded' && !linked.stale && !linked.refreshing;
   const allVendors = picker.status === 'loaded' ? picker.data : [];
-  // The pick belongs to one product, so it never carries over to the next.
-  const [picked, setPicked] = useState({ productId: '', vendorId: '' });
+  const [pickedVendorId, setPickedVendorId] = useState('');
   const productRef = useLatestRef(productId);
-  const [busy, setBusy] = useState(false);
+  // The product a save is running for, so another product's controls stay usable.
+  const [busyFor, setBusyFor] = useState<string | null>(null);
+  const busy = busyFor === productId;
   const [removing, setRemoving] = useState<ProductVendor | null>(null);
+  // A new product or role starts clean: no pick and no open removal (React's reset-on-prop-change pattern).
+  // The picker list is re-read only after a role change, so this also drops a pick across a picker reload.
+  const owner = `${productId}:${isAdmin}`;
+  const [shownFor, setShownFor] = useState(owner);
+  if (shownFor !== owner) {
+    setShownFor(owner);
+    setPickedVendorId('');
+    setRemoving(null);
+  }
   // Remove confirms one link of THIS product: switching product or losing admin closes it.
   const removable = isAdmin && removing !== null && (vendors ?? []).some((v) => v.link_id === removing.link_id);
   const actor = userId ?? '';
@@ -177,7 +187,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
   const link = async (vendorId: string, makePreferred: boolean) => {
     if (!userId) return;
     const scope = `${productId}:${vendorId}:${makePreferred}`;
-    setBusy(true);
+    setBusyFor(productId);
     try {
       await linkProductVendor(productId, vendorId, makePreferred, userId, linkKeys.getKeyFor(scope));
       linkKeys.resetKeyFor(scope);
@@ -189,7 +199,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
         entityType: 'product',
         entityId: productId,
       });
-      setPicked({ productId: '', vendorId: '' });
+      setPickedVendorId('');
       if (productRef.current !== productId) return; // the screen moved to another product; its own read is running
       // A first vendor becomes preferred even when not asked, so report whichever vendor now is.
       // If the re-read fails, a vendor just made preferred (or the first one, preferred by default) is still the one to show.
@@ -202,14 +212,14 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
     } catch (error) {
       toast('error', productVendorErrorMessage(error));
     } finally {
-      setBusy(false);
+      setBusyFor((current) => (current === productId ? null : current));
     }
   };
 
   const unlink = async () => {
     if (!userId || !removing || !removable) return;
     const target = removing;
-    setBusy(true);
+    setBusyFor(productId);
     try {
       await unlinkProductVendor(target.link_id, userId, unlinkKeys.getKeyFor(target.link_id));
       unlinkKeys.resetKeyFor(target.link_id);
@@ -225,14 +235,14 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
     } catch (error) {
       toast('error', productVendorErrorMessage(error));
     } finally {
-      setBusy(false);
+      setBusyFor((current) => (current === productId ? null : current));
     }
   };
 
   const linkedIds = new Set((vendors ?? []).map((v) => v.vendor_id));
   const addable = allVendors.filter((v) => !linkedIds.has(v.id));
   // A pick that is no longer offered (list reloaded, failed, or vendor now linked) is no pick.
-  const pick = picked.productId === productId && addable.some((v) => v.id === picked.vendorId) ? picked.vendorId : '';
+  const pick = addable.some((v) => v.id === pickedVendorId) ? pickedVendorId : '';
 
   return (
     <Card>
@@ -249,7 +259,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
         </ul>
       )}
       {isAdmin && vendors !== null && (
-        <AddVendorBar picker={picker} addable={addable} pick={pick} onPick={(vendorId) => setPicked({ productId, vendorId })}
+        <AddVendorBar picker={picker} addable={addable} pick={pick} onPick={setPickedVendorId}
           disabled={busy || !listUsable} onAdd={() => void link(pick, false)} />
       )}
       <ConfirmModal

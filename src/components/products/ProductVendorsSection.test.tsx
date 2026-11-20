@@ -263,4 +263,28 @@ describe('ProductVendorsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Make preferred' }));
     await waitFor(() => expect(screen.getByLabelText('Add a vendor')).toBeDisabled());
   });
+  it('a save still running for another product does not lock this one', async () => {
+    const props = { productName: 'Test Product', userId: 'u1', onPreferredChanged: vi.fn(), isAdmin: true };
+    const view = render(<ProductVendorsSection {...props} productId="p1" />);
+    const button = await screen.findByRole('button', { name: 'Make preferred' });
+    mocks.linkProductVendor.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Make preferred' })).toBeDisabled());
+    view.rerender(<ProductVendorsSection {...props} productId="p2" />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Make preferred' })).toBeEnabled());
+  });
+
+  it('a removal closed by a product switch does not reopen on switching back', async () => {
+    const props = { productName: 'Test Product', userId: 'u1', onPreferredChanged: vi.fn(), isAdmin: true };
+    const view = render(<ProductVendorsSection {...props} productId="p1" />);
+    const rows = await screen.findAllByRole('listitem');
+    fireEvent.click(within(rows[1]).getByRole('button', { name: 'Remove' }));
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+    view.rerender(<ProductVendorsSection {...props} productId="p2" />);
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    view.rerender(<ProductVendorsSection {...props} productId="p1" />);
+    await screen.findAllByRole('listitem');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
 });

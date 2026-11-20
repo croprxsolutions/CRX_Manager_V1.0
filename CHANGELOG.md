@@ -36,6 +36,7 @@ Releases of CRX Manager, newest first.
 * environment banner and tab title prefix (STAGING amber, LOCAL blue) (#1714)
 
 #### 🐛 Bug Fixes
+* blend-ticket invoice release fixes: ACTOR_MISMATCH, READ COMMITTED only, live invoice keeps the job (#1990) (#2060)
 * KI-81 field — a quote price bills only where the grower was sent it; blend invoice fixes (v0.1.0 Sol HIGH) (#2053)
 * every product needs a sold unit (#1990 Sol #2) (#2050)
 * Sol proof base = exact merge-base (#1913); Codex runs the landing claim (#1948) (#2041)

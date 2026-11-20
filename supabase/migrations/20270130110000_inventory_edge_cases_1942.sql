@@ -310,11 +310,12 @@ BEGIN
       INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, manufactured_at_delivery)
       VALUES (v_product.product_id, 'Main Warehouse', 0, 0, true)
       ON CONFLICT DO NOTHING;
-      PERFORM 1 FROM public.inventory i
-       WHERE i.product_id = v_product.product_id AND i.location = 'Main Warehouse'
-       ORDER BY i.id
-         FOR UPDATE;
     END IF;
+    -- Locked whether this pass created it or not: another completion may have committed it after the first pass (Sol r4).
+    PERFORM 1 FROM public.inventory i
+     WHERE i.product_id = v_product.product_id AND i.location = 'Main Warehouse'
+     ORDER BY i.id
+       FOR UPDATE;
   END LOOP;
   RETURN public._complete_delivery_authorized_impl_20270122(
     p_delivery_id, p_signed_by, p_performed_by, p_quantities, p_issue_type, p_issue_notes, p_idempotency_key, p_completed_at);
@@ -923,7 +924,7 @@ BEGIN
   FOR v_fn IN
     SELECT x.sig, x.body_md5, p.oid, p.prosrc
       FROM (VALUES
-        ('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', '447d868a0facd8bb2b3a67be8e3891be'),
+        ('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', '7efd361c003d860361992711e3b15e92'),
         ('public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', '70e318a7f05d51d2cf6c3c6ea6226379'),
         ('public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'a0575bba2827e38fd4161ad3924e8978'),
         ('public._guard_order_item_delivery_lineage()', '8e4160c1209a9dde5518edbcef5d281b')

@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-19 — #2045 may have up to two more Sol rounds (5-6)
+
+**Decision (Mason, in chat, 2026-11-19: "Approve up to 2 more").** PR #2045 (#1942 inventory edge cases) may have Sol rounds 5 and 6.
+**Why:** Sol round 4 found a real one-line gap in the new stock-row locking (a row committed between the two lock passes was not locked), now fixed and proven. Earlier rounds also counted a migration-stamp rename forced by staging moving.
+
 ## 2026-11-19 — #1942: Mason drops the open-stock-count guard from the migration
 
 **Decision (Mason, in chat via the coordinating session, 2026-11-19: "Drop the guard"; "none of the stock is real in live app so no need to be worried on that").** Migration `20270130110000_inventory_edge_cases_1942` no longer locks `cycle_count_items` or refuses to apply while an open stock count has saved lines.

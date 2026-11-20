@@ -108,6 +108,9 @@ function session(sql) {
 async function race(first, second, delayMs = 1500) {
   const a = session(first);
   await new Promise((r) => { setTimeout(r, delayMs); });
+  // The first session must already be holding its locks (asleep after its write) before the second starts.
+  assert.equal(scalar(`SELECT count(*) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND state = 'active' AND query LIKE '%pg_sleep(4)%';`), '1',
+    'the first session was not yet holding its locks');
   const start = Date.now();
   const b = await session(second);
   return { a: await a, b, bWaitedMs: b.at - start };
@@ -138,12 +141,10 @@ async function main() {
     refused(sql(INACTIVE));
     refused(sql(INACTIVE), W, { role: 'service_role' }, null);
   }
-  // A hold built from a job (source set) follows its job (starting an existing job rebuilds its holds).
-  allowed(newHold(INACTIVE, R.openJob));
-  // Any other sourced hold is checked: another customer's job, or a quote-built hold.
-  refused(newHold(INACTIVE, R.activeJob));
-  refused(newHold(INACTIVE, R.openJob, 'crop_program'));
-  console.log('[new-work] new order (open or closed), delivery, source-free hold of any type and spray job: refused for the inactive customer as postgres and service_role; saved for the active one; a hold built from the customer\'s own job is left to that job; one naming another customer\'s job or a quote is refused');
+  // Every hold, whatever its source (Mason, 2026-11-19: no exceptions): the customer's own job, another
+  // customer's job, a quote-built crop program hold.
+  for (const sql of [newHold(INACTIVE, R.openJob), newHold(INACTIVE, R.activeJob), newHold(INACTIVE, R.openJob, 'crop_program')]) refused(sql);
+  console.log('[new-work] new order (open or closed), delivery, stock hold of any type or source and spray job: refused for the inactive customer as postgres and service_role; saved for the active one');
   // Signed-in admin and rep (the guard ignores who is asking; row-level security does not hide the flag).
   for (const uid of [ADMIN, REP]) refused(newJob(INACTIVE), W, { role: 'authenticated' }, uid);
   // A driver may not add a spray job: the same permission error for either customer, so it reveals no status.

@@ -8,11 +8,11 @@
 --   expiry pushed out), or that moves any row (open or closed) onto an inactive customer. "Open" is KI-148's meaning
 --   (20270128140000). A delivery is checked against its own customer and its order's customer.
 --   Closing, cancelling, deleting, releasing and editing an already-open row stay allowed, so an
---   inactive customer's existing work can still be finished down or cleaned up. Holds: a job hold
---   whose job belongs to the same customer follows that job (so starting an existing job can still
---   rebuild its holds); every other hold is checked, whatever its type or source. A quote or booking
---   hold for an inactive customer is therefore refused (live 2026-11-19: no inactive customer has a
---   quote or a hold; named for Taha in the PR). Refusal:
+--   inactive customer's existing work can still be finished down or cleaned up. Holds: every hold,
+--   whatever its type or source (Mason, 2026-11-19: no exceptions). So starting an inactive
+--   customer's old spray job that reserves stock, or a quote or booking reservation, needs the
+--   customer reactivated first (live 2026-11-19: no inactive customer has a spray job, quote or
+--   hold; named for Taha in the PR). Refusal:
 --   CUSTOMER_INACTIVE_NEW_WORK, a fixed sentence that names no customer (the caller may not be allowed
 --   to read the order's customer). Every role and path (RPCs, direct writes, server roles).
 --   Guarantee holds for READ COMMITTED transactions (every app path); a REPEATABLE READ deactivation
@@ -69,8 +69,7 @@ BEGIN
            ('orders','id'), ('orders','customer_id'), ('orders','status'), ('orders','deleted_at'),
            ('deliveries','customer_id'), ('deliveries','order_id'), ('deliveries','status'), ('deliveries','deleted_at'),
            ('inventory_holds','customer_id'), ('inventory_holds','is_active'), ('inventory_holds','expires_at'),
-           ('inventory_holds','hold_type'), ('inventory_holds','source_id'),
-           ('jobs','customer_id'), ('jobs','status'), ('jobs','deleted_at'), ('jobs','invoice_id'))) <> 19 THEN
+           ('jobs','customer_id'), ('jobs','status'), ('jobs','deleted_at'), ('jobs','invoice_id'))) <> 17 THEN
     RAISE EXCEPTION 'INACTIVE_NEW_WORK_PREFLIGHT: a column the guard reads is missing';
   END IF;
 END
@@ -107,13 +106,7 @@ BEGIN
     END IF;
     v_ids := ARRAY[NEW.customer_id];  -- plus the order's customer, read under a lock below
   ELSIF TG_TABLE_NAME = 'inventory_holds' THEN
-    -- A job hold whose job belongs to this same customer follows that job (starting an existing job
-    -- rebuilds its holds; a new job or a job moved onto an inactive customer is refused above).
-    -- Every other hold is checked, whatever its type or source.
-    IF NEW.hold_type = 'job' AND NEW.source_id IS NOT NULL
-       AND EXISTS (SELECT 1 FROM public.jobs j WHERE j.id = NEW.source_id AND j.customer_id = NEW.customer_id) THEN
-      RETURN NULL;
-    END IF;
+    -- Every hold, whatever its type or source (Mason, 2026-11-19: no exceptions).
     v_new_open := NEW.is_active IS TRUE AND (NEW.expires_at IS NULL OR NEW.expires_at >= v_today);
     IF TG_OP = 'UPDATE' THEN
       v_old_open := OLD.is_active IS TRUE AND (OLD.expires_at IS NULL OR OLD.expires_at >= v_today);

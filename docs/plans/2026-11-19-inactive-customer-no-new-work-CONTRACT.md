@@ -21,7 +21,7 @@ customer whose `customers.is_active` is false. "Becomes open work" means:
 |---|---|---|
 | orders | any INSERT; an UPDATE where (the row is open afterwards and was not open before) or its `customer_id` changed (open or closed) | `status IN ('confirmed','partially_fulfilled')`, `deleted_at IS NULL` |
 | deliveries | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` or `order_id` changed | `status IN ('scheduled','in_progress')`, `deleted_at IS NULL` |
-| inventory_holds (all, except a `job` hold whose job belongs to the same customer; Sol r1 #5, Luna r2-r3) | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` changed | `is_active` and not expired (`expires_at` null or ≥ today, Chicago) |
+| inventory_holds (every hold, any type or source; Mason 2026-11-19) | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` changed | `is_active` and not expired (`expires_at` null or ≥ today, Chicago) |
 | jobs | any INSERT; an UPDATE where (open afterwards and not before) or its `customer_id` changed | `status IN ('scheduled','in_progress')`, or `completed` with no `invoice_id`; `deleted_at IS NULL` |
 
 The customer checked is the row's `customer_id`; for a delivery also its order's `customer_id`
@@ -135,7 +135,7 @@ change is the sanitizer sentence, which is safe before or after the migration.
   four kinds is open, and this guard refuses creating them, so "growing existing open work" or an
   internal hold rebuild for an inactive customer can only touch that one legacy customer, whose
   orders stay as they are by decision 23. A quote or booking hold for an inactive customer is
-  refused at the reservation step (Sol r1 #5 settlement); named in the PR for Taha. No `INSERT INTO inventory_holds … ON CONFLICT` writer
+  refused at the reservation step (Mason, 2026-11-19, Sol r1 #5); named in the PR for Taha. No `INSERT INTO inventory_holds … ON CONFLICT` writer
   exists live (#36). Voiding or deleting an invoice clears `jobs.invoice_id`
   (`_void_invoice_split_provenance_impl_20260719`, `_delete_invoices_split_provenance_impl_20260719`,
   `_transfer_invoice_to_job_replay_impl_20261015`), reopening a completed job: for an inactive
@@ -171,12 +171,16 @@ change is the sanitizer sentence, which is safe before or after the migration.
   order; follow-up delivery never updates the order.
 - #3 MED (customer row not visible) → refused unless every named customer is found and locked.
 - #4 MED (REPEATABLE READ) → accepted, as before (no app path uses it).
-- #5 MED (job start rebuilds its holds) → a `job` hold whose `source_id` is a job of the same
-  customer is left to that job (a job for an inactive customer can only be one that existed before,
-  since new and moved jobs are refused); every other hold is checked, whatever its type or source
-  (Luna r2 and r3: a type-only or source-only rule let unrelated holds through). Quote and booking
-  holds for an inactive customer are refused: live 2026-11-19 no inactive customer has a quote or
-  a hold; named for Taha in the PR.
+- #5 MED (job start rebuilds its holds) → **business decision, Mason 2026-11-19: "Refuse all
+  holds".** Three tries at an exception for job-built holds each drew a new Luna HIGH (a type-only,
+  a source-only, then a same-customer-job rule), so per the round cap the exception was dropped and
+  Mason chose: every new or reopened hold for an inactive customer is refused, any type or source.
+  Starting an inactive customer's old spray job that reserves stock, and a quote or booking
+  reservation, need the customer reactivated first. Cost today: none (live 2026-11-19: no inactive
+  customer has a spray job, quote or hold; KI-148 stops deactivating a customer with open jobs).
+  Named for Taha in the PR.
+- Luna r4 LOW (race proof used a fixed delay) → each race now checks the first session is asleep
+  holding its locks before the second starts.
 - Luna r3 LOW (prover rolls back "allowed" writes) → refuted: AFTER ROW triggers fire at the end of
   each statement, before the rollback, so a statement that succeeds has passed the guard; the race
   cases commit and count the saved rows. This also

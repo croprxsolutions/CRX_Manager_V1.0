@@ -378,7 +378,7 @@ async function main() {
   BEGIN
     ALTER TABLE products DISABLE TRIGGER trigger_y_require_governed_product_pricing;
     INSERT INTO products (product_name, unit_size, inventory_unit, product_form, current_cost, tier1_price, is_active)
-      VALUES ('[PROVER] EJ Booked Product', 'GL', 'GL', 'liquid', 6.00, 10.00, true) RETURNING id INTO v_p;
+      VALUES ('[PROVER] EJ Booked Product', 'Gal', 'Gal', 'liquid', 6.00, 10.00, true) RETURNING id INTO v_p;
     ALTER TABLE products ENABLE TRIGGER trigger_y_require_governed_product_pricing;
     INSERT INTO customers (farm_name) VALUES ('[PROVER] EJ Big Booking Farm') RETURNING id INTO v_c;
     INSERT INTO quotes (quote_number, customer_id, status, tier, created_by, is_planned)

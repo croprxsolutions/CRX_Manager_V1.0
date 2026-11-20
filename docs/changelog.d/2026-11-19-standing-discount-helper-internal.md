@@ -1,0 +1,3 @@
+## 2026-11-19 - The standing-discount recompute helper is internal only
+
+`_recompute_standing_discount_20261231(uuid)` rewrites a draft invoice's standing-discount line. `20270109100100` revoked it from `PUBLIC`, `anon` and `authenticated` but left `service_role` its EXECUTE, so the v0.1.0 apply review (rls-security-reviewer CHECK 4) refused 100100 and 100200. `20270129100000` revokes it from every API role. Its callers are all SECURITY DEFINER, so the discount, sales-tax and return flows are unchanged. Mason's rule (2026-11-19, #2006): a later revoke from every API role clears an internal helper.

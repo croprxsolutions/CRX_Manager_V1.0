@@ -80,6 +80,13 @@ import { gitLocalEnvironmentNames } from "../.claude/hooks/git-test-env.mjs";
 import { proofValid, proofValidForMerge } from "../.claude/hooks/codex-push-lib.mjs";
 import { tempDir } from "./lib/test-temp-dir.mjs";
 
+// The merge gates' merge-base answer (#1913), from real Git: the one merge-base, or null.
+const realMergeBase = (repo) => (a, b) => {
+  const out = spawnSync("git", ["merge-base", "--all", a, b], { cwd: repo, encoding: "utf8" });
+  const bases = String(out.stdout || "").split(/\s+/).filter(Boolean);
+  return out.status === 0 && bases.length === 1 ? bases[0] : null;
+};
+
 // Git hooks export repository-local GIT_* variables. A scratch `git init`
 // must never inherit them or it can target/reinitialize the caller's real
 // worktree administrative directory instead of the disposable fixture.
@@ -1087,7 +1094,7 @@ assert.equal(
     // The kept proof behaves exactly as if main had moved just after the review.
     const proof = buildCodexPushProof({ headSha: head, baseSha: check({ baseAfter: forward }), verdict: "clean" });
     const isAncestor = (a, b) => spawnSync("git", ["merge-base", "--is-ancestor", a, b], { cwd: repo }).status === 0;
-    const mergeAccepts = (data) => proofValidForMerge({ data, headSha: head, nowMs: Date.now(), baseSha: forward, isAncestor });
+    const mergeAccepts = (data) => proofValidForMerge({ data, headSha: head, nowMs: Date.now(), baseSha: forward, isAncestor, mergeBase: realMergeBase(repo) });
     assert.equal(mergeAccepts(proof), true, "review base: the merge gate accepts the kept proof");
     assert.equal(proofValid(proof, head, new Date(), forward), false, "review base: a push on the moved main still refuses it");
     assert.equal(
@@ -1911,8 +1918,8 @@ not json
       assert.equal(base, stagingTip, "staging base: a head containing origin/staging keeps it");
       assert.deepEqual(names(base, featureHead), ["mine.ts"], "staging base: the review diff is only the branch's own file");
       const proof = { codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high", head_sha: featureHead, base_sha: base, timestamp: new Date().toISOString() };
-      assert.ok(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: stagingTip, isAncestor }), "staging base: the merge gate accepts it into staging");
-      assert.equal(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: mainTip, isAncestor }), false, "staging base: the same proof is refused for a merge into main");
+      assert.ok(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: stagingTip, isAncestor, mergeBase: realMergeBase(repo) }), "staging base: the merge gate accepts it into staging");
+      assert.equal(proofValidForMerge({ data: proof, headSha: featureHead, nowMs: Date.now(), baseSha: mainTip, isAncestor, mergeBase: realMergeBase(repo) }), false, "staging base: the same proof is refused for a merge into main");
       // A branch that undoes unreleased staging work: the main base hides the undo, the staging base shows it.
       git("checkout", "-q", "-b", "claude/undo", stagingTip);
       git("rm", "-q", "someone-elses.sql");
@@ -1927,6 +1934,29 @@ not json
       git("commit", "-qm", "later staging work");
       const movedStaging = git("rev-parse", "HEAD");
       assert.equal(solReviewBase(repo, featureHead, movedStaging), stagingTip, "staging base: a head behind origin/staging is reviewed from its fork point");
+      // #1913, the real shape of a staging PR: the branch is updated from staging with a
+      // merge commit, Sol reviews it, then staging moves on before the merge.
+      {
+        const mergeBase = realMergeBase(repo);
+        const sol = (head, base) => ({ codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high", head_sha: head, base_sha: base, timestamp: new Date().toISOString() });
+        const accepts = (data, headSha, baseSha) => proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor, mergeBase });
+        git("checkout", "-q", "-b", "claude/updated", featureHead);
+        git("merge", "-q", "--no-edit", "--no-ff", movedStaging);
+        const updatedHead = git("rev-parse", "HEAD");
+        const reviewed = solReviewBase(repo, updatedHead, movedStaging);
+        assert.equal(reviewed, movedStaging, "update merge: Sol reviews against the staging tip the branch merged");
+        assert.ok(accepts(sol(updatedHead, reviewed), updatedHead, movedStaging), "update merge: the proof lands on an unmoved staging");
+        git("checkout", "-q", "staging");
+        writeFileSync(path.join(repo, "after-review.sql"), "select 3;\n");
+        git("add", ".");
+        git("commit", "-qm", "staging moves after the review");
+        const stagingAfter = git("rev-parse", "HEAD");
+        assert.ok(accepts(sol(updatedHead, reviewed), updatedHead, stagingAfter), "update merge: staging moving on after the review still accepts it");
+        assert.equal(accepts(sol(updatedHead, stagingTip), updatedHead, stagingAfter), false,
+          "#1913: a proof bound to an older staging commit than the merge-base is refused (any ancestor was accepted before)");
+        // Sol reviewed the pre-update commit; the branch then merged newer staging: that proof still covers it.
+        assert.ok(accepts(sol(featureHead, stagingTip), updatedHead, stagingAfter), "update merge: a proof of the commit before the update merge still counts");
+      }
       // A hotfix cut from main still reviews everything it adds over main.
       git("checkout", "-q", "-b", "hotfix/x", mainTip);
       writeFileSync(path.join(repo, "fix.ts"), "export {};\n");
@@ -1979,7 +2009,7 @@ not json
         // The proof the fork-point review mints passes the merge gate's base check.
         const isAncestor = (a, b) => spawnSync("git", ["merge-base", "--is-ancestor", a, b], { cwd: repo }).status === 0;
         const forkProof = { codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high", head_sha: featureHead, base_sha: branchHead, timestamp: new Date().toISOString() };
-        assert.ok(proofValidForMerge({ data: forkProof, headSha: featureHead, nowMs: Date.now(), baseSha: movedMain, isAncestor }), "review base: the merge gate accepts a proof bound to the fork point");
+        assert.ok(proofValidForMerge({ data: forkProof, headSha: featureHead, nowMs: Date.now(), baseSha: movedMain, isAncestor, mergeBase: realMergeBase(repo) }), "review base: the merge gate accepts a proof bound to the fork point");
         git("checkout", "-q", "main");
       }
       // The clean-merge exception refuses a criss-cross too (Luna MED). Branch commit B0 is

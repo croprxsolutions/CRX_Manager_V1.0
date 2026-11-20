@@ -31,6 +31,7 @@ import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { laterMigrationRedefines } from './later-migration-redefines.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const NAME = `crx-ki134-count-${process.pid}-${Date.now().toString(36)}`;
@@ -65,6 +66,8 @@ const TOUCHED = /(cycle_count|adjust_inventory|receive_po_items)/i;
 // A later file breaks this proof only by redefining what it relies on; calling or naming it (shared retry
 // helpers, comments, CASE lists) does not. Definitions of functions, tables, triggers and policies count.
 const REDEFINED = new RegExp(String.raw`(CREATE(\s+OR\s+REPLACE)?|ALTER|DROP)\s+(FUNCTION|TABLE)\s+(IF\s+(NOT\s+)?EXISTS\s+)?(ONLY\s+)?(public\.)?"?[a-z_0-9]*${TOUCHED.source}|(CREATE|ALTER|DROP)\s+(OR\s+REPLACE\s+)?(TRIGGER|POLICY)\s[^;]*?\bON\s+(public\.)?"?[a-z_0-9]*${TOUCHED.source}`, 'i');
+// A rename onto one of these names (ALTER ... RENAME TO <name>) also redefines it (#1910).
+const RENAMED_ONTO = String.raw`[a-z_0-9]*${TOUCHED.source}`;
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -181,7 +184,7 @@ function plan() {
     last = i;
   }
   for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f) && !LATER_READ_ONLY.has(path.basename(f)))) {
-    assert.ok(!REDEFINED.test(lf(file)), `${path.basename(file)} sorts after the candidate and redefines what it relies on; re-think this proof`);
+    assert.ok(!laterMigrationRedefines(lf(file), REDEFINED, RENAMED_ONTO), `${path.basename(file)} sorts after the candidate and redefines what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);
   for (const name of PARKED) {

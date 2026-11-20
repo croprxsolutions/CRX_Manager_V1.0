@@ -3,7 +3,7 @@
 ## 2026-11-19 — #2038 may have Sol round 5
 
 **Decision (Mason, in chat, 2026-11-19: "Approve round 5").** PR #2038 (#1976, EPA batch save checks in the database) may have Sol round 5.
-**Why:** the pre-push check required a regenerated workflow map (`docs/app-workflow-map.html`, one line naming the new RPC), so the pushed head is one commit past the head Sol round 4 reviewed. The code reviewed in round 4 is unchanged.
+**Why:** the pre-push check required a regenerated workflow map (`docs/app-workflow-map.html`, its RPC count goes from 361 to 362), so the pushed head is one commit past the head Sol round 4 reviewed. The code reviewed in round 4 is unchanged.
 
 ## 2026-11-19 — #1997: Mason owner-accepted 7 Sol finding(s) at `994795d9e03e`
 

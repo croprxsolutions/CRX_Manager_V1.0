@@ -89,7 +89,7 @@ const WRITABLE = new Set(['add', 'add_name_only', 'fill', 'confirm', 'rup_upgrad
 const decisions = (pid) => proposal(pid).items.filter((i) => WRITABLE.has(i.class)).map((i) => ({ item_id: i.item_id, accept: i.kind === 'ingredient' }));
 const ingredientsOnly = (pid) => proposal(pid).items.filter((i) => i.kind === 'ingredient').map((i) => ({ item_id: i.item_id, accept: true }));
 const BATCH = (pid, k = key('c'), d = decisions(pid)) => `SELECT public.commit_epa_proposal_batch('${pid}', ${proposal(pid).proposal_version}, ${J(d)}, '${k}');`;
-const registration = (k) => scalar(`SELECT to_jsonb(r) - 'registration_version' - 'updated_at' FROM public.epa_registrations r WHERE epa_registration = '${NUM[k]}';`);
+const registration = (k) => scalar(`SELECT to_jsonb(r) FROM public.epa_registrations r WHERE epa_registration = '${NUM[k]}';`);
 const lookupOf = (pid) => proposal(pid).lookup_id;
 const PLAIN = (pid) => `SELECT public.commit_epa_proposal('${pid}', ${proposal(pid).proposal_version}, ${J(decisions(pid))}, '${key('p')}');`;
 const ingredients = (k) => Number(scalar(`SELECT count(*) FROM public.product_parent_ingredients WHERE parent_id = '${P[k]}';`));
@@ -287,6 +287,11 @@ async function main() {
   refused(REP, BATCH(b2), /ADMIN_REQUIRED/);
   refused(null, BATCH(b2), /permission denied for function commit_epa_proposal_batch/);
   console.log('[epa-batch] B4: a sales rep and anon are refused');
+
+  // The live smoke chain registered for the release gate passes here, against the candidate.
+  const chain = docker(psqlArgs, { allowFailure: true, input: readFileSync(new URL('./smoke-commit_epa_proposal_batch.sql', import.meta.url), 'utf8') });
+  assert.match(`${chain.stdout}\n${chain.stderr}`, /SMOKE_PASS_ROLLBACK: EPA batch save chain passed/);
+  console.log('[epa-batch] SMOKE: smoke-commit_epa_proposal_batch.sql passes and rolls back');
 
   console.log('EPA_BATCH_COMMIT_PROOF_PASS');
 }

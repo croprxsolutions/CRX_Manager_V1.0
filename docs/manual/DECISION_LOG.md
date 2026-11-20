@@ -1,5 +1,12 @@
 # Decision Log
 
+## 2026-11-19 — #2050 (release #1990 Sol #2 fix) may have Sol round 5; old drafts are not re-checked
+
+**Decision (Mason, in chat, 2026-11-19: "Yes, accept #1, fix #2" and "Yes, push it").** PR #2050 may have its Sol
+review in round 5. Mason accepts that a field-application draft saved before `20270129171000` is applied is not
+re-checked by it (Sol round 4 finding 1): live has 0 field-application invoices with a product line and 0 products
+without a sold unit. **What it does:** the round-4 test-script finding is fixed on #2050; every other gate is unchanged.
+
 ## 2026-11-19 — Every product must have a sold unit (release #1990 Sol #2 fix, branch `claude/release-fix-sol2`)
 
 **Decision (Mason, in chat, 2026-11-19: "Yes, simplify").** Migration `20270129171000` makes a product's sold unit

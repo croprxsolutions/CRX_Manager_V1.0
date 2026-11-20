@@ -8,7 +8,7 @@ Read at `origin/staging` e4e6e11fa, live read-only 2026-11-19 (Central). Challen
 - Scope: **actions + reports**. A hidden page blocks that person's ready-made report data and money actions. They still see invoice, job and field information on the screens they keep (Orders, Deliveries, Customers, including the Customer page's year-end summary).
 - **Reports now, money later.** This change locks only the Reports Library and Sales Reports data. The invoice and payment actions (Invoices, Record Payments) go to Taha after 2026-12-15, because billing is his area until then.
 - KI-120: reps keep access to payment terms, finance-charge settings, parent customer and default application service. Close as accepted; no code.
-- OPEN (asked 2026-11-19): logbook reports refuse every role except admin and sales rep, and refuse signed-out callers.
+- Logbook reports are for admins and sales reps only; drivers, applicators and signed-out callers are refused (Mason, 2026-11-19).
 
 ## Facts (live, 2026-11-19)
 
@@ -30,7 +30,7 @@ Read at `origin/staging` e4e6e11fa, live read-only 2026-11-19 (Central). Challen
 
 ## Outcome and authority
 
-- New internal helper `public._require_page_access(p_page text)`. It runs `SECURITY DEFINER` with `search_path = public, pg_temp` and reads the caller's own profile (`auth.uid()`). It raises `PAGE_ACCESS_DENIED: <page>` when there is no signed-in user, no profile, an inactive profile, a role not allowed for that page (`reports`, `sales-reports`: admin and sales_rep), or the key in `denied_pages`. Admins always pass. It mirrors `hasPageAccess`, including the legacy aliases (none exist for these two keys).
+- New internal helper `public._require_page_access(p_page text)`. It runs `SECURITY DEFINER` with `search_path = public, pg_temp` and reads the caller's own profile (`auth.uid()`). It raises `PAGE_ACCESS_DENIED: <page>` when there is no signed-in user, no profile, an inactive profile, a role not allowed for that page (`reports`, `sales-reports`: admin and sales_rep), or the key in `denied_pages`. Active admins always pass, even with a stale list; an inactive admin is refused like any inactive profile. It mirrors `hasPageAccess`, including the legacy aliases (none exist for these two keys).
 - Grants: the helper is revoked from PUBLIC and `anon` and granted to `authenticated`. The INVOKER logbook functions must be able to call it. It only reveals the caller's own access.
 - The DEFINER report functions call `PERFORM public._require_page_access('<key>')` first. Each is re-emitted from the **live** body (`pg_get_functiondef`, captured in the PR), not copied from an old migration. Only the guard line is added.
 - The logbook SQL functions keep their INVOKER bodies, so RLS still limits rows. Each becomes a `plpgsql` INVOKER wrapper: call the guard, then return the same query. Identical columns and ordering.
@@ -40,7 +40,7 @@ Read at `origin/staging` e4e6e11fa, live read-only 2026-11-19 (Central). Challen
 ## State and failure
 
 - Existing rows: an empty list means no lock. Unknown or legacy keys are ignored. Switching a person to admin clears their list (existing behavior, unchanged); switching them back to rep starts with an empty list, so the admin must re-hide pages.
-- Timing: each call reads the deny list committed when the call starts. A report already on screen stays visible until the next load; the next load is refused, and the screen shows the existing error toast. Acceptable for a read-only report.
+- Timing: each call reads the deny list visible to its statement (normal app requests: the latest committed list; a long REPEATABLE READ transaction keeps its first snapshot). A report already on screen stays visible until the next load; the next load is refused, and the screen shows the existing error toast. Acceptable for a read-only report.
 - Rollout: the deployed app already hides both pages from the denied rep, and admins and other reps keep their results. The change is one database migration in one transaction with a postflight that asserts every guarded function contains the guard call and the helper's grants. Rollback is a follow-up migration that re-emits the captured pre-change bodies.
 
 ## Delivery
@@ -54,9 +54,16 @@ Read at `origin/staging` e4e6e11fa, live read-only 2026-11-19 (Central). Challen
 2. When a rep with only `sales-reports` denied calls both sales functions, then they refuse; that rep's `reports` functions succeed.
 3. When the denied rep calls `get_customer_year_end_summary` for one customer and reads that customer's invoices, then both succeed as before.
 4. When an admin with an empty list, and a rep with nothing denied, call every guarded function, then the results equal the pre-migration results on the same data. Cost columns stay hidden from the rep.
-5. When a driver or applicator calls a logbook function, then it refuses *(depends on the OPEN decision)*.
+5. When a driver or applicator calls a logbook function, then it refuses.
 6. When a signed-out caller calls a logbook function or the helper, then it is refused.
 7. When an inactive rep's session calls a guarded function, then it refuses.
 8. When an admin removes `reports` from the rep's list, then the rep's next call succeeds.
 9. Postflight: every guarded function's live body calls the helper; no PUBLIC or `anon` execute remains on the helper or the logbooks.
 10. Browser: an admin's Reports and Sales Reports load every report. A rep without denials loads both pages. The denied rep is redirected away from both.
+
+## Astra re-check (`gpt-6.2-astra` high, 16 findings, 2026-11-19)
+
+- Fixed: the preflight also pins each function's security mode, volatility, language and settings, and refuses any existing `_require_page_access` overload (#7, #8).
+- Refuted on live: the report implementations (`_get_sales_*_cost_impl_20261019`, `_get_chemical_history_cost_step2_impl`) are executable by `postgres` only (#4); the DEFINER reports have no PUBLIC grant and the logbooks have a direct `authenticated` grant (#2, #3, #11); a non-admin cannot change `denied_pages` (profile role-lock trigger, `20260807215532`) (#5).
+- Proven by the container prover rather than argued: the plpgsql logbooks return the same rows and types as before (#1, #15).
+- Accepted: `is_admin()` runs before the guard in three bodies (a read, no error path) (#6); the apply runs in one transaction (#10); overlapping deploys are covered by the pinned pre-image (#9); rollback bodies are the pinned pre-images, which equal the newest earlier definitions (#14); timing and inactive-admin wording fixed above (#12, #13); delivery items are tracked in the plan list (#16).

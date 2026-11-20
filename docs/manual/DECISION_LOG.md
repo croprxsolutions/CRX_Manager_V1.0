@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-19 — Page Access is a real lock (KI-119); reps keep credit terms (KI-120)
+
+**Decision (Mason, in chat, 2026-11-19).** Settings → Page Access is a real security control, not menu tidiness (To-Do decision 16). Scope: "actions + reports". Reports now: the database refuses Reports Library and Sales Reports data to a person with that page hidden (`20270201100000`). Money later: the invoice and payment actions wait for Taha after 2026-12-15 (KI-169). Logbook reports are for admins and sales reps only. Reps keep payment terms, finance-charge settings, parent customer and default application service (To-Do decision 18; KI-120 accepted, no code).
+**Why:** a hidden page should mean the person cannot get that data, while billing stays in Taha's hands until his plan lands.
+
 ## 2026-11-19 — #1997: Mason owner-accepted 7 Sol finding(s) at `994795d9e03e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1997 at `994795d9e03e` (base `ded769b690d0`) found 7 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

@@ -157,7 +157,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_SETUP: a second active admin is required for actor-binding proof';
   END IF;
   SELECT id INTO v_sales_rep FROM profiles
-  WHERE role = 'sales_rep' AND is_active = true
+  WHERE role = 'sales_rep' AND is_active = true AND NOT (denied_pages && ARRAY['reports'])
   ORDER BY created_at LIMIT 1;
   IF v_sales_rep IS NULL THEN
     RAISE EXCEPTION 'SMOKE_SETUP: an active sales rep is required for customer-scope proof';

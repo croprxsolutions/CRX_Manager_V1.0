@@ -308,10 +308,11 @@ function seed() {
     INSERT INTO public.application_records (record_number, source_type, source_id, customer_id, application_date,
       applicator_id, field_id, vehicle_id)
     VALUES ('PAL-1', 'job', gen_random_uuid(), '${CUSTOMER}', CURRENT_DATE - 1, '${APPL}', '${FIELD}', '${PLANE}');
-    -- One pending commission each for the hidden rep and the undenied rep (the Commissions tab reads the table).
+    -- One pending commission each for the hidden rep, the sales-reports-only rep and the undenied rep (the Commissions tab reads the table).
     INSERT INTO public.orders (id, order_number, customer_id) VALUES ('${ORDER}', 'PAL-O1', '${CUSTOMER}');
     INSERT INTO public.commissions (customer_id, order_id, recipient_user_id, recipient, commission_amount, status)
     VALUES ('${CUSTOMER}', '${ORDER}', '${REP_DENIED}', '[PROVER] denied', 1.00, 'pending'),
+           ('${CUSTOMER}', '${ORDER}', '${REP_SALES_ONLY}', '[PROVER] sales-only', 3.00, 'pending'),
            ('${CUSTOMER}', '${ORDER}', '${REP}', '[PROVER] rep', 2.00, 'pending');
     DELETE FROM public.unit_conversions;
     INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};`);
@@ -353,6 +354,7 @@ async function main() {
   for (const k of ['faa', 'byField', 'byCustomer', 'byApplicator']) assert.notEqual(adminBefore[k], EMPTY, `${k} returned no rows: the seeded application is not exercised`);
   assert.equal(okProbe(OWN_COMMISSIONS, REP_DENIED), '1');
   assert.equal(okProbe(OWN_COMMISSIONS, REP), '1');
+  assert.equal(okProbe(OWN_COMMISSIONS, REP_SALES_ONLY), '1');
   console.log('[case] BEFORE: every logbook returns the seeded aerial application; the hidden rep reads their own commission row');
   const before = Object.fromEntries(REGRESSION.map((f) => [f, chainOutcome(f)]));
   for (const [f, o] of Object.entries(before)) console.log(`[before] ${f}: ${o.slice(0, 160)}`);
@@ -396,9 +398,9 @@ async function main() {
   assert.match(anonHelper.output, /permission denied for function _require_page_access/);
   console.log('[case] AFTER: a signed-out caller is refused the logbooks and the helper');
   assert.equal(okProbe(OWN_COMMISSIONS, REP_DENIED), '0', 'the hidden rep still reads their commission rows');
-  assert.equal(okProbe(OWN_COMMISSIONS, REP_SALES_ONLY), '0');
+  assert.equal(okProbe(OWN_COMMISSIONS, REP_SALES_ONLY), '1', 'hiding only sales-reports must not hide commission rows');
   assert.equal(okProbe(OWN_COMMISSIONS, REP), '1', "the undenied rep lost their commission row");
-  assert.equal(okProbe(OWN_COMMISSIONS, ADMIN_STALE), '2', 'an admin with a stale hidden list should see every commission row');
+  assert.equal(okProbe(OWN_COMMISSIONS, ADMIN_STALE), '3', 'an admin with a stale hidden list should see every commission row');
   console.log('[case] AFTER: the hidden rep reads none of their commission rows; the undenied rep and admins are unchanged');
   // Undo: the admin clears the list; the next call goes through with the undenied rep's results.
   raw(`UPDATE public.profiles SET denied_pages = '{}' WHERE id = '${REP_DENIED}';`);
@@ -410,7 +412,11 @@ async function main() {
     const after = chainOutcome(f);
     assert.equal(after, before[f], `${f} ends differently after the candidate`);
     // A chain that stops at its own setup on this container never reaches a report: it proves nothing here.
-    if (!/^SMOKE_PASS_ROLLBACK/.test(before[f])) uncovered.push(f);
+    if (!/^SMOKE_PASS_ROLLBACK/.test(before[f])) {
+      // Only a stop at setup counts as uncovered; a chain that reached its assertions and failed them fails the proof.
+      assert.doesNotMatch(before[f], /SMOKE_FAIL/, `${f} fails its own assertions on this container`);
+      uncovered.push(f);
+    }
   }
   console.log(`[case] AFTER: ${REGRESSION.length - uncovered.length} existing chains pass before and after`);
   if (uncovered.length) console.log(`[not covered] stop at their own setup on this container both times (live smoke run after apply covers them): ${uncovered.join(', ')}`);

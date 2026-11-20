@@ -82,7 +82,7 @@ BEGIN
 
   -- Each staff role, as a real active profile: the six cost reports.
   FOR v_role IN SELECT unnest(ARRAY['admin', 'sales_rep', 'driver', 'applicator', 'entity_recipient']) LOOP
-    SELECT p.id INTO v_uid FROM public.profiles p WHERE p.role = v_role AND p.is_active AND (v_role <> 'sales_rep' OR NOT (COALESCE(p.denied_pages, '{}') && ARRAY['reports', 'sales-reports'])) ORDER BY p.created_at LIMIT 1;
+    SELECT p.id INTO v_uid FROM public.profiles p WHERE p.role = v_role AND p.is_active AND (v_role <> 'sales_rep' OR NOT (COALESCE(p.denied_pages, '{}') && ARRAY['sales-reports'])) ORDER BY p.created_at LIMIT 1;
     IF v_uid IS NULL THEN
       RAISE EXCEPTION 'SMOKE_FAIL: no active % profile to probe with', v_role;
     END IF;

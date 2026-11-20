@@ -11,6 +11,25 @@
 --   E. an admin with a stale hidden list still passes; clearing the rep's list lets the next call through;
 --   F. signed-out callers and PUBLIC cannot execute the helper or the logbooks.
 -- Fails before the migration (the helper does not exist). Terminal rollback.
+-- Each report is called by a short key through this static dispatcher (the live-smoke guard refuses EXECUTE of
+-- computed SQL; Sol r2). Session-only (pg_temp).
+CREATE OR REPLACE FUNCTION pg_temp.ki119_run(p_key text, p_customer uuid)
+RETURNS bigint LANGUAGE plpgsql AS $fn$
+BEGIN
+  CASE p_key
+    WHEN 'balance_listing' THEN RETURN (SELECT count(*) FROM public.get_customer_balance_listing(CURRENT_DATE));
+    WHEN 'chemical_history' THEN RETURN (SELECT count(*) FROM public.get_chemical_history(NULL, CURRENT_DATE - 30, CURRENT_DATE));
+    WHEN 'batch_year_end' THEN RETURN jsonb_array_length(public.get_batch_year_end_summaries(ARRAY[]::uuid[], extract(year FROM CURRENT_DATE)::int));
+    WHEN 'logbook_faa' THEN RETURN (SELECT count(*) FROM public.get_logbook_faa(CURRENT_DATE - 30, CURRENT_DATE));
+    WHEN 'logbook_by_field' THEN RETURN (SELECT count(*) FROM public.get_logbook_by_field(NULL, CURRENT_DATE - 30, CURRENT_DATE));
+    WHEN 'logbook_by_customer' THEN RETURN (SELECT count(*) FROM public.get_logbook_by_customer(NULL, CURRENT_DATE - 30, CURRENT_DATE));
+    WHEN 'logbook_by_applicator' THEN RETURN (SELECT count(*) FROM public.get_logbook_by_applicator(NULL, CURRENT_DATE - 30, CURRENT_DATE));
+    WHEN 'sales_summary' THEN RETURN (SELECT count(*) FROM public.get_sales_summary_report());
+    WHEN 'sales_detail' THEN RETURN (SELECT count(*) FROM public.get_sales_detail_report());
+    WHEN 'year_end_one' THEN RETURN (SELECT count(*) FROM jsonb_object_keys(public.get_customer_year_end_summary(p_customer, extract(year FROM CURRENT_DATE)::int)));
+  END CASE;
+END
+$fn$;
 DO $smoke$
 DECLARE
   v_admin uuid;
@@ -23,19 +42,9 @@ DECLARE
   v_fn text;
   v_who text;
   v_uid uuid;
-  v_reports text[] := ARRAY[
-    'SELECT count(*) FROM public.get_customer_balance_listing(CURRENT_DATE)',
-    'SELECT count(*) FROM public.get_chemical_history(NULL, CURRENT_DATE - 30, CURRENT_DATE)',
-    'SELECT jsonb_array_length(public.get_batch_year_end_summaries(ARRAY[]::uuid[], extract(year FROM CURRENT_DATE)::int))',
-    'SELECT count(*) FROM public.get_logbook_faa(CURRENT_DATE - 30, CURRENT_DATE)',
-    'SELECT count(*) FROM public.get_logbook_by_field(NULL, CURRENT_DATE - 30, CURRENT_DATE)',
-    'SELECT count(*) FROM public.get_logbook_by_customer(NULL, CURRENT_DATE - 30, CURRENT_DATE)',
-    'SELECT count(*) FROM public.get_logbook_by_applicator(NULL, CURRENT_DATE - 30, CURRENT_DATE)'
-  ];
-  v_sales text[] := ARRAY[
-    'SELECT count(*) FROM public.get_sales_summary_report()',
-    'SELECT count(*) FROM public.get_sales_detail_report()'
-  ];
+  v_reports text[] := ARRAY['balance_listing', 'chemical_history', 'batch_year_end', 'logbook_faa',
+    'logbook_by_field', 'logbook_by_customer', 'logbook_by_applicator'];
+  v_sales text[] := ARRAY['sales_summary', 'sales_detail'];
   v_logbooks text[] := ARRAY[
     'public.get_logbook_faa(date,date)', 'public.get_logbook_by_field(uuid,date,date)',
     'public.get_logbook_by_customer(uuid,date,date)', 'public.get_logbook_by_applicator(uuid,date,date)'
@@ -66,7 +75,7 @@ BEGIN
       PERFORM set_config('request.jwt.claim.sub', v_uid::text, true);
       EXECUTE 'SET LOCAL ROLE authenticated';
       BEGIN
-        EXECUTE v_fn INTO v_n;
+        v_n := pg_temp.ki119_run(v_fn, v_customer);
       EXCEPTION WHEN OTHERS THEN
         v_err := SQLERRM;
         EXECUTE 'RESET ROLE';
@@ -86,7 +95,7 @@ BEGIN
     v_err := NULL;
     EXECUTE 'SET LOCAL ROLE authenticated';
     BEGIN
-      EXECUTE v_fn INTO v_n;
+      v_n := pg_temp.ki119_run(v_fn, v_customer);
     EXCEPTION WHEN OTHERS THEN
       v_err := SQLERRM;
     END;
@@ -95,12 +104,10 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL: (B) % with reports hidden: %', v_fn, coalesce(v_err, 'not refused');
     END IF;
   END LOOP;
-  FOREACH v_fn IN ARRAY v_sales || ARRAY[
-    format('SELECT count(*) FROM jsonb_object_keys(public.get_customer_year_end_summary(%L::uuid, extract(year FROM CURRENT_DATE)::int))', v_customer)
-  ] LOOP
+  FOREACH v_fn IN ARRAY v_sales || ARRAY['year_end_one'] LOOP
     EXECUTE 'SET LOCAL ROLE authenticated';
     BEGIN
-      EXECUTE v_fn INTO v_n;
+      v_n := pg_temp.ki119_run(v_fn, v_customer);
     EXCEPTION WHEN OTHERS THEN
       v_err := SQLERRM;
       EXECUTE 'RESET ROLE';
@@ -119,7 +126,7 @@ BEGIN
     v_err := NULL;
     EXECUTE 'SET LOCAL ROLE authenticated';
     BEGIN
-      EXECUTE v_fn INTO v_n;
+      v_n := pg_temp.ki119_run(v_fn, v_customer);
     EXCEPTION WHEN OTHERS THEN
       v_err := SQLERRM;
     END;
@@ -131,7 +138,7 @@ BEGIN
   FOREACH v_fn IN ARRAY v_reports LOOP
     EXECUTE 'SET LOCAL ROLE authenticated';
     BEGIN
-      EXECUTE v_fn INTO v_n;
+      v_n := pg_temp.ki119_run(v_fn, v_customer);
     EXCEPTION WHEN OTHERS THEN
       v_err := SQLERRM;
       EXECUTE 'RESET ROLE';
@@ -148,7 +155,7 @@ BEGIN
       v_err := NULL;
       EXECUTE 'SET LOCAL ROLE authenticated';
       BEGIN
-        EXECUTE v_fn INTO v_n;
+        v_n := pg_temp.ki119_run(v_fn, v_customer);
       EXCEPTION WHEN OTHERS THEN
         v_err := SQLERRM;
       END;
@@ -167,7 +174,7 @@ BEGIN
     v_err := NULL;
     EXECUTE 'SET LOCAL ROLE authenticated';
     BEGIN
-      EXECUTE v_fn INTO v_n;
+      v_n := pg_temp.ki119_run(v_fn, v_customer);
     EXCEPTION WHEN OTHERS THEN
       v_err := SQLERRM;
     END;
@@ -212,7 +219,7 @@ BEGIN
   v_err := NULL;
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
-    EXECUTE v_reports[1] INTO v_n;
+    v_n := pg_temp.ki119_run(v_reports[1], v_customer);
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLERRM;
   END;
@@ -227,7 +234,7 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
   BEGIN
-    EXECUTE v_reports[1] INTO v_n;
+    v_n := pg_temp.ki119_run(v_reports[1], v_customer);
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLERRM;
     EXECUTE 'RESET ROLE';

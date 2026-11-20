@@ -7,6 +7,10 @@
 // of every chain run-smoke.mjs can send to a real database (container-only chains replay an older fixed migration
 // set, so they are skipped, as in #1802). Columns that were NOT NULL from CREATE TABLE are not tracked: chains were
 // written against those, and some are filled by triggers.
+// Deliberate limits (a static omission check, not a SQL engine; none of these occur in the repo as of 2026-11-20):
+// it checks that a required column is NAMED, not that its value is non-NULL (VALUES (NULL) / (DEFAULT)); a default
+// expression that evaluates to NULL (other than a literal NULL) counts as a default; quoted identifiers are compared
+// case-insensitively (the schema has no mixed-case quoted names); INSERTs inside EXECUTE strings are not read.
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -129,7 +133,7 @@ export function insertsIn(sql) {
     if (!isPublic(m[2])) continue;
     // DEFAULT VALUES names no column. Positional VALUES may stop short of a newly added column, so it counts as naming
     // none (name the columns to pass). Only SELECT with no column list (a whole-row copy) is trusted to fill every column.
-    const namesNone = !m[4] && /^\s*(?:DEFAULT\s+VALUES|VALUES)\b/i.test(code.slice(m.index + m[0].length));
+    const namesNone = !m[4] && /^\s*(?:OVERRIDING\s+\w+\s+VALUE\s+)?(?:DEFAULT\s+VALUES|VALUES)\b/i.test(code.slice(m.index + m[0].length).replace(/^s*OVERRIDINGs+w+s+VALUEb/i, ''));
     out.push({ table: ident(m[3]), columns: m[4] ? splitTopLevel(m[5]).map(ident) : namesNone ? [] : null, line: code.slice(0, m.index).split('\n').length });
   }
   return out;

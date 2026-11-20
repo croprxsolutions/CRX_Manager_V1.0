@@ -74,7 +74,7 @@ const ins = insertsIn(`DO $$ BEGIN
   INSERT INTO products AS "p" (product_name) SELECT 'b';
   INSERT INTO "products"(product_name, product_form)
   SELECT x, y FROM src;
-  INSERT INTO products VALUES ('c');
+  INSERT INTO products OVERRIDING SYSTEM VALUE VALUES ('c');
   INSERT INTO products SELECT v_row.*;
   INSERT INTO auth.users (id) VALUES (gen_random_uuid());
   INSERT INTO products DEFAULT VALUES;

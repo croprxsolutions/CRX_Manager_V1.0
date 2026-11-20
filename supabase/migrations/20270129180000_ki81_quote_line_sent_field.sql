@@ -23,6 +23,15 @@
 --     to another field"), a stored pick clears a ticket line only on an unmoved, matching-unit line, and a ticket that
 --     bills the owner per unit on a field other than the job quote section's field stops (Luna/Sol r1), as does a line the
 --     job's quote listed on that field when sent that is no longer there with that product (Sol r2).
+--  Round 4 (Luna/Sol r4): the helper's first lock covers every non-deleted quote of the growers (drafts too); a priced
+--     line that isn't a finite whole-cent amount stops; the removed-line scan counts only sent entries that carried a
+--     price; a candidate quote whose newest sent version can't be read stops. In the blend invoice: every non-deleted
+--     quote of the ticket's growers is locked FOR UPDATE in one id-ordered pass before the job (no cross-ticket
+--     deadlock); a job relinked to another quote mid-save stops (JOB_QUOTE_CHANGED, retryable); a receipt committed by
+--     a concurrent retry is replayed after the ticket lock; a NULL review status is refused; a live invoice with a NULL
+--     status, or another blend ticket's invoice on the same job, blocks double billing; an unnamed product still counts
+--     in the rate and unit checks; the application service is tested by its key (a NULL optional column no longer
+--     drops the fee); an unconvertible quantity is refused; the $0 approval basis names which growers get $0.
 -- A typed price still saves. Never a silent fallback to the list price. Grants, owners, security mode, search_path and
 -- volatility are unchanged (CREATE OR REPLACE; the postflight checks them). Stored invoices are never re-priced.
 -- ROLLBACK: re-run the two bodies from 20270129140000 (lines 91-204, 206-1231), then
@@ -115,11 +124,11 @@ BEGIN
   v_cached := current_setting(v_key, true);
   -- KI-81 field (Sol r3 on this fix): hold every candidate quote of these growers FOR SHARE first, in id order, so the
   -- eligibility pick below and the moved-line scans after it read one state: a resend or line move (save_quote and the
-  -- send take the quote FOR UPDATE) waits for this invoice instead of landing between them.
+  -- send take the quote FOR UPDATE) waits for this invoice instead of landing between them. Drafts are held too, so a
+  -- draft sent mid-invoice can't price one product at list and the next at the quote (Sol r4).
   PERFORM 1 FROM quotes q
    WHERE q.customer_id = ANY (p_customer_ids)
      AND q.deleted_at IS NULL
-     AND q.status IN ('sent', 'revised', 'accepted', 'expired', 'closed_by_application', 'closed_short')
    ORDER BY q.id
      FOR SHARE OF q;
   FOR v_quote IN
@@ -213,6 +222,7 @@ BEGIN
      AND (q.expires_at IS NULL OR q.expires_at >= p_on)
      AND NULLIF(btrim(s.value->>'field_id'), '') IN (SELECT f::text FROM unnest(p_field_ids) f)
      AND it.value->>'product_id' = p_product_id::text
+     AND COALESCE(it.value->>'price_per_unit', '') ~ '^[0-9]+([.][0-9]+)?$'
      AND NOT EXISTS (SELECT 1 FROM quote_items qi2
                        JOIN quote_sections qs2 ON qs2.id = qi2.section_id AND qs2.quote_id = qi2.quote_id
                       WHERE qi2.quote_id = q.id
@@ -222,6 +232,21 @@ BEGIN
    LIMIT 1;
   IF v_msg IS NOT NULL THEN
     RAISE EXCEPTION 'QUOTE_RESEND_REQUIRED: % Or type the price on this invoice line, then save again.', v_msg
+      USING ERRCODE = 'P0001';
+  END IF;
+  -- KI-81 field (Sol r4): a candidate quote whose newest sent version can't be read (no sections list) can't show what
+  -- the grower was sent for these fields, so stop rather than treat it as empty.
+  IF EXISTS (SELECT 1 FROM quotes q8
+              CROSS JOIN LATERAL (SELECT v.snapshot_data FROM quote_versions v
+                                   WHERE v.quote_id = q8.id ORDER BY v.version_number DESC LIMIT 1) sv8
+              WHERE q8.customer_id = ANY (p_customer_ids)
+                AND q8.deleted_at IS NULL
+                AND q8.status IN ('sent', 'revised', 'accepted', 'expired', 'closed_by_application', 'closed_short')
+                AND (q8.created_at AT TIME ZONE 'America/Chicago')::date <= p_on
+                AND (q8.expires_at IS NULL OR q8.expires_at >= p_on)
+                AND jsonb_typeof(sv8.snapshot_data->'sections') IS DISTINCT FROM 'array') THEN
+    RAISE EXCEPTION 'QUOTE_RESEND_REQUIRED: a sent quote for this grower can''t be read, so it can''t show the price that was sent for %. Or type the price on this invoice line, then save again.',
+      COALESCE((SELECT pr.product_name FROM products pr WHERE pr.id = p_product_id), 'this product')
       USING ERRCODE = 'P0001';
   END IF;
   -- KI-81 field (Sol r1 on this fix): one quote price is billed for the whole line, so every field on it must carry the
@@ -237,6 +262,17 @@ BEGIN
       USING ERRCODE = 'P0001';
   END IF;
 
+  -- KI-81 (Luna/Sol r4): a quote price that isn't a finite whole-cent amount can't be billed as is; stop and ask
+  -- instead of rounding it (the blend job-quote path already refuses such a line).
+  IF EXISTS (SELECT 1 FROM quote_sections qs7
+               JOIN quote_items qi7 ON qi7.section_id = qs7.id AND qi7.quote_id = qs7.quote_id
+              WHERE qs7.quote_id = ANY (v_quotes) AND qs7.field_id = ANY (p_field_ids)
+                AND qi7.product_id = p_product_id AND qi7.price_per_unit >= 0
+                AND NOT (qi7.price_per_unit < 'Infinity'::numeric AND qi7.price_per_unit = ROUND(qi7.price_per_unit, 2))) THEN
+    RAISE EXCEPTION 'QUOTE_RESEND_REQUIRED: % has a quote price that isn''t a whole-cent amount, so it can''t be billed as is. Or type the price on this invoice line, then save again.',
+      COALESCE((SELECT pr.product_name FROM products pr WHERE pr.id = p_product_id), 'A product')
+      USING ERRCODE = 'P0001';
+  END IF;
   SELECT array_agg(DISTINCT ROUND(qi.price_per_unit * 100)::bigint)
     INTO v_prices
     FROM quote_sections qs
@@ -274,6 +310,7 @@ AS $function$
 DECLARE
   v_actor               uuid := auth.uid();
   v_unit_msg            text;
+  v_job_quote_locked    uuid;
   v_existing            jsonb;
   v_ticket              record;
   v_field_ids           uuid[];
@@ -404,11 +441,29 @@ BEGIN
      AND deleted_at IS NULL
    FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Blend ticket not found: %', p_blend_ticket_id; END IF;
+  -- (Sol r4) A retry with this key may have committed while this call waited for the ticket lock: replay its receipt
+  -- (same intent checks as above) instead of refusing the now-billed ticket.
+  v_existing := public.check_idempotency(p_idempotency_key, 'create_invoice_from_blend_ticket');
+  IF v_existing IS NOT NULL THEN
+    IF jsonb_typeof(v_existing->'invoice_ids') IS DISTINCT FROM 'array'
+       OR jsonb_array_length(v_existing->'invoice_ids') = 0
+       OR EXISTS (
+         SELECT 1
+           FROM jsonb_array_elements_text(v_existing->'invoice_ids') AS r(invoice_id)
+           LEFT JOIN public.invoices i ON i.id = r.invoice_id::uuid
+          WHERE i.id IS NULL
+             OR i.blend_ticket_id IS DISTINCT FROM p_blend_ticket_id
+             OR i.created_by IS DISTINCT FROM v_actor
+       ) THEN
+      RAISE EXCEPTION 'IDEMPOTENCY_INTENT_MISMATCH';
+    END IF;
+    RETURN v_existing;
+  END IF;
   -- 20261021070000: hold the ticket's lines too, so a line edited between the $0 approval
   -- check below and the billing loop cannot bill something the approval never covered (the
   -- office policy lets staff update these rows directly).
   PERFORM 1 FROM blend_ticket_products btp WHERE btp.blend_ticket_id = p_blend_ticket_id FOR UPDATE;
-  IF v_ticket.review_status != 'approved' THEN
+  IF v_ticket.review_status IS DISTINCT FROM 'approved' THEN
     RAISE EXCEPTION 'Blend ticket must be approved (status: %)', v_ticket.review_status;
   END IF;
   IF v_ticket.payment_status IS DISTINCT FROM 'unbilled' THEN
@@ -450,10 +505,25 @@ BEGIN
     -- blend_tickets after jobs.
     -- KI-81: the job's quote row before the job row, the order save_quote takes them (quote, then
     -- anything that references the job), so this invoice and a quote save cannot deadlock.
+    -- KI-81 (Sol r4): every non-deleted quote of the ticket's growers, the job's quote among them, is locked here in
+    -- one pass in id order, before the job; the later own-quote lookups then wait for nothing, so two blend invoices
+    -- for the same growers can't deadlock on each other's quotes.
     PERFORM 1 FROM quotes q
-     WHERE q.id = (SELECT j.quote_id FROM jobs j WHERE j.id = v_ticket.job_id)
+     WHERE q.deleted_at IS NULL
+       AND (q.id = (SELECT j.quote_id FROM jobs j WHERE j.id = v_ticket.job_id)
+            OR q.customer_id = v_ticket.customer_id
+            OR q.customer_id IN (SELECT fbd.customer_id FROM blend_ticket_fields btf
+                                   JOIN field_billing_defaults fbd ON fbd.field_id = btf.field_id
+                                  WHERE btf.blend_ticket_id = p_blend_ticket_id))
+     ORDER BY q.id
        FOR UPDATE OF q;
+    SELECT j.quote_id INTO v_job_quote_locked FROM jobs j WHERE j.id = v_ticket.job_id;
     PERFORM 1 FROM jobs WHERE id = v_ticket.job_id FOR UPDATE;
+    -- (Sol r4) the job may have been relinked to another quote between reading it and locking the job: stop and retry.
+    IF (SELECT j.quote_id FROM jobs j WHERE j.id = v_ticket.job_id) IS DISTINCT FROM v_job_quote_locked THEN
+      RAISE EXCEPTION 'JOB_QUOTE_CHANGED: this blend ticket''s job changed quotes while the invoice was saving. Create this invoice again.'
+        USING ERRCODE = '40001';
+    END IF;
     -- Codex R2 P2: test for a LIVE invoice directly (invoices.job_id, non-void/
     -- cancel, not deleted) instead of trusting jobs.status — a job stranded as
     -- 'invoiced' by a PRE-U6 void (dead invoice, status never reverted) must not
@@ -461,7 +531,16 @@ BEGIN
     IF EXISTS (
       SELECT 1 FROM invoices i
       WHERE i.job_id = v_ticket.job_id
-        AND i.status NOT IN ('voided', 'cancelled')
+        AND COALESCE(i.status, '') NOT IN ('voided', 'cancelled')
+        AND i.deleted_at IS NULL
+    ) OR EXISTS (
+      -- (Sol r3/r4) a blend invoice carries blend_ticket_id, not job_id: another ticket on the same job that is
+      -- already invoiced bills the same application.
+      SELECT 1 FROM invoices i
+        JOIN blend_tickets bt ON bt.id = i.blend_ticket_id
+      WHERE bt.job_id = v_ticket.job_id
+        AND bt.id <> p_blend_ticket_id
+        AND COALESCE(i.status, '') NOT IN ('voided', 'cancelled')
         AND i.deleted_at IS NULL
     ) THEN
       RAISE EXCEPTION 'JOB_ALREADY_INVOICED: this blend ticket''s job has already been invoiced; billing the ticket too would double-bill the customer. Void the job invoice first if you meant to re-bill.';
@@ -470,7 +549,7 @@ BEGIN
 
   -- A5 BEGIN: refuse to bill blend lines that can't be priced correctly.
   -- (1) A billable product line with no per-acre rate would silently bill $0.
-  SELECT string_agg(DISTINCT btp.product_name, ', ')
+  SELECT string_agg(DISTINCT COALESCE(btp.product_name, '(unnamed product)'), ', ')
     INTO v_bad_rate
     FROM blend_ticket_products btp
    WHERE btp.blend_ticket_id = p_blend_ticket_id
@@ -481,7 +560,7 @@ BEGIN
   END IF;
   -- (2) A billable line whose rate unit cannot convert to the product's inventory
   --     (pricing) unit would mis-bill by the unit ratio (the oz-vs-gal 128x class).
-  SELECT string_agg(DISTINCT btp.product_name, ', ')
+  SELECT string_agg(DISTINCT COALESCE(btp.product_name, '(unnamed product)'), ', ')
     INTO v_bad_unit
     FROM blend_ticket_products btp
     JOIN products p ON p.id = btp.product_id
@@ -531,7 +610,7 @@ BEGIN
   IF v_ticket.application_service_id IS NOT NULL THEN
     SELECT * INTO v_app_service FROM application_services WHERE id = v_ticket.application_service_id;
     v_has_app_service := FOUND
-                         AND (v_app_service IS NOT NULL)
+                         AND (v_app_service.id IS NOT NULL)
                          AND COALESCE(v_app_service.is_active, false);
   END IF;
 
@@ -865,10 +944,16 @@ BEGIN
            -- What sets this line's billed quantity and the grower-share charge: its rate and rate
            -- unit, the product's units and form (the quantity conversion), and every field's acres
            -- and per-acre price. The approval must send it back unchanged.
-           'basis', md5(format('%L|%L|%L|%L|%L|%L|%L', z.rate_per_acre, z.rate_per_acre_unit,
+           'basis', md5(format('%L|%L|%L|%L|%L|%L|%L|%L', z.rate_per_acre, z.rate_per_acre_unit,
                       z.p_rate_unit, z.p_inventory_unit, z.p_unit_size, z.p_product_form,
                       (SELECT string_agg(r.value::text, ',' ORDER BY r.value::text)
-                         FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)))))
+                         FROM jsonb_array_elements(v_shares -> 'rows') AS r(value)),
+                      -- (Sol r4) which growers get this product at $0, so an approval can't carry over to another grower
+                      (SELECT string_agg(w.x, ',' ORDER BY w.x)
+                         FROM (SELECT v_ticket.customer_id::text AS x WHERE z.price_cents = 0
+                               UNION
+                               SELECT split_part(e.key, '|', 1) FROM jsonb_each_text(v_own_prices) e
+                                WHERE e.value = '0' AND split_part(e.key, '|', 2) = z.product_id::text) w))))
          ORDER BY z.sequence_order, z.id)
     INTO v_zero_lines
     FROM (SELECT y.*,
@@ -977,12 +1062,12 @@ BEGIN
      SELECT normalize_rate_unit(COALESCE(NULLIF(btrim(btp.rate_per_acre_unit), ''), p.rate_unit)) AS rate_unit,
             normalize_rate_unit(COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)) AS inv_unit) u
    WHERE btp.blend_ticket_id = p_blend_ticket_id
-     AND ((q.qty_a > 0 AND ROUND(CASE WHEN btp.product_id IS NOT NULL
+     AND ((q.qty_a > 0 AND COALESCE(ROUND(CASE WHEN btp.product_id IS NOT NULL
                                 THEN field_app_priced_quantity(q.qty_a, u.rate_unit, u.inv_unit, p.product_form)
-                                ELSE q.qty_a END, 4) <= 0)
-       OR (q.qty_b > 0 AND ROUND(CASE WHEN btp.product_id IS NOT NULL
+                                ELSE q.qty_a END, 4), 0) <= 0)
+       OR (q.qty_b > 0 AND COALESCE(ROUND(CASE WHEN btp.product_id IS NOT NULL
                                 THEN field_app_priced_quantity(q.qty_b, u.rate_unit, u.inv_unit, p.product_form)
-                                ELSE q.qty_b END, 4) <= 0))
+                                ELSE q.qty_b END, 4), 0) <= 0))
    ORDER BY btp.sequence_order, btp.id
    LIMIT 1;
   IF FOUND THEN
@@ -1338,8 +1423,8 @@ BEGIN
   IF EXISTS (
     SELECT 1
       FROM (VALUES
-        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', '99f1900dcdbcc089cd0b12d26d5d61b7', false, 'v'),
-        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'cdff857346b0b04aa387f934ef500bbc', true, 'v')
+        ('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)', '86e3366a1b2cd9d19f496c881eba789e', false, 'v'),
+        ('public.create_invoice_from_blend_ticket(uuid,uuid,text,text,jsonb)', 'a9361b9554d2e158cdefd1926738690a', true, 'v')
       ) AS pin(sig, body_md5, secdef, vol)
       LEFT JOIN pg_proc p ON p.oid = to_regprocedure(pin.sig)
      WHERE p.oid IS NULL

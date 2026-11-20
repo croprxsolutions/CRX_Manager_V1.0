@@ -13,4 +13,5 @@
   - After it, both refuse. A typed price still saves, and a line moved back to its sent field still bills quoted.
   - The moved-off line (M5), the partly quoted line (M6), the blend ticket on another field (M7), a swapped product (M8) and a blend job quote that lost its moved line (M9) bill wrong before the fix and refuse after it. All 28 KI-81 unit scenarios are unchanged.
   - The postflight passes, and a second apply stops at the preflight.
+- Round 4 (Luna/Sol): the blend invoice now bills an active application service whose optional column is NULL. Proof: R1, where the fee line was missing before and is billed after. It also locks the ticket's growers' quotes in one id-ordered pass (no deadlock), stops on a job relinked mid-save, replays a concurrent retry's receipt, refuses a NULL review status, blocks double billing through another ticket on the same job, and binds the $0 approval to the growers getting $0. The helper also holds drafts and stops on a non-finite price or an unreadable sent version.
 - Not verified: staging (the staging database job applies it on merge) and concurrency.

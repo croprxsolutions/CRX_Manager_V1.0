@@ -57,7 +57,14 @@ const readJson = (name) => { try { return JSON.parse(readFileSync(path.join(stat
 const record = readJson(blockersRecordName(head));
 const problem = blockersRecordProblem(record, { headSha: head });
 if (problem) die(`${problem}. Run the full Sol review at this head first: node scripts/write-codex-push-proof.mjs`);
-const gates = gateFilesIn(git(["diff", "--name-only", "--no-renames", `${record.base_sha}...${head}`]).split(/\r?\n/).filter(Boolean));
+const forkPoint = git(["merge-base", record.base_sha, head]);
+const showAt = (sha, p) => {
+  try {
+    return String(execFileSync("git", ["show", `${sha}:${p}`], { cwd: checkout, encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 }));
+  } catch { return null; }
+};
+const gates = gateFilesIn(git(["diff", "--name-only", "--no-renames", `${record.base_sha}...${head}`]).split(/\r?\n/).filter(Boolean),
+  (p) => [showAt(forkPoint, p), showAt(head, p)]);
 if (gates.length) die(`this pull request changes gate or approval files (${gates.slice(0, 5).join(", ")}); a Sol review that was not clean cannot vouch for them, so its findings must be fixed, not accepted.`);
 
 const argv = process.argv.slice(2);
@@ -85,7 +92,9 @@ const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
 if (!/^[0-9A-Za-z_-]{8,128}$/.test(String(sessionId || ""))) die("run this inside the Claude Code session Mason will reply in (CLAUDE_CODE_SESSION_ID is not set).");
 if (!promptHookSeen({ dirs: [stateDir], sessionId })) die(hooklessSessionRefusal({ checkout, sessionId }));
 
-// The pull request the acceptance names: this branch, open against main, at this exact head.
+// The pull request the acceptance names: this branch, open against main or (staging-first, #1363) staging,
+// at this exact head.
+const ACCEPT_BASES = new Set(["main", "staging"]);
 let pr;
 try {
   pr = JSON.parse(String(execFileSync("gh", ["pr", "view", git(["rev-parse", "--abbrev-ref", "HEAD"]), "--json", "number,state,headRefOid,baseRefName"], {
@@ -94,8 +103,8 @@ try {
 } catch (err) {
   die(`could not find this branch's open pull request (${err?.message || err}).`);
 }
-if (String(pr?.state).toUpperCase() !== "OPEN" || pr?.baseRefName !== "main" || String(pr?.headRefOid).toLowerCase() !== head.toLowerCase()) {
-  die(`pull request #${pr?.number ?? "?"} must be open against main with head ${head.slice(0, 12)}; push first.`);
+if (String(pr?.state).toUpperCase() !== "OPEN" || !ACCEPT_BASES.has(pr?.baseRefName) || String(pr?.headRefOid).toLowerCase() !== head.toLowerCase()) {
+  die(`pull request #${pr?.number ?? "?"} must be open against main or staging with head ${head.slice(0, 12)}; push first.`);
 }
 // The code running now must be the bytes committed at this head (in this checkout).
 try {

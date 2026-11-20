@@ -73,6 +73,11 @@ for f in "$REPO"/supabase/migrations/*.sql; do   # glob order = stamp order
     # Live stores validate_product_units() with CRLF too (its preflight pins it); the baseline dump is LF.
     psqlq -c "DO \$\$ BEGIN EXECUTE replace(pg_get_functiondef('public.validate_product_units()'::regprocedure), E'\n', E'\r\n'); END \$\$;"
   fi
+  if [ "$b" = "20270106110000_invoice_brands_rup" ]; then
+    # Its preflight wants the REG-1 seed, a one-time admin step (EPA registration setup page), not a migration.
+    # Live and staging ran it; this throwaway database only needs the marker row its check reads.
+    psqlq -c "INSERT INTO public.epa_registration_seed_run (seeded_by, rup_default, fingerprint) VALUES ('00000000-0000-0000-0000-000000000000', 'no', 'rebuild') ON CONFLICT DO NOTHING;"
+  fi
   tx=(--single-transaction)   # a first line "-- crx: no-transaction" runs outside one, as db-apply does
   head -n 1 "$f" | tr -d '\r' | grep -Eiq '^--[[:space:]]*crx:[[:space:]]*no-transaction[[:space:]]*$' && tx=()
   ok=0

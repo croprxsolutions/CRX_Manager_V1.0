@@ -199,7 +199,7 @@ try {
       findings: 'clean', queryHash, ...overrides.reviewer,
     }));
     writeFileSync(paths.codexFile, JSON.stringify({
-      queryHash, verdict: 'clean', model: 'gpt-6-sol', reasoning_effort: 'high', timestamp: reviewedAt, ...overrides.codex,
+      queryHash, verdict: 'clean', model: 'gpt-6.2-sol', reasoning_effort: 'high', timestamp: reviewedAt, ...overrides.codex,
     }));
   };
   const cli = (...args) => spawnSync(process.execPath, [
@@ -208,7 +208,7 @@ try {
   const newProofs = applyProofPaths(stateDir, NEW);
   // Loaded lazily so the CLI checks fail on behaviour, not on a missing export.
   const carry = async (opts = {}) => (await import('./write-apply-proofs-lib.mjs')).carryRestampedApplyProofs({
-    stateDir, migrationsDir, fromName: OLD, toName: NEW, model: 'gpt-6-sol', effort: 'high', ...opts,
+    stateDir, migrationsDir, fromName: OLD, toName: NEW, model: 'gpt-6.2-sol', effort: 'high', ...opts,
   });
   try {
     writeFileSync(path.join(migrationsDir, `${NEW}.sql`), sql.replace(/\r\n/g, '\n'));
@@ -246,7 +246,7 @@ try {
     seedOldProofs({ reviewer: { findings: 'blockers-fixed' } });
     assert.match((await carry()).problem, /both reviewers/, 'restamp: only a clean review carries');
     seedOldProofs({ codex: { model: 'gpt-6-luna' } });
-    assert.match((await carry()).problem, /gpt-6-sol\/high/, 'restamp: a Luna proof is refused');
+    assert.match((await carry()).problem, /gpt-6.2-sol\/high/, 'restamp: a Luna proof is refused');
     seedOldProofs({ reviewer: { migration: '20261101000000_product_rate_lock' } });
     assert.match((await carry()).problem, /both reviewers/, 'restamp: a proof naming another migration is refused');
     rmSync(applyProofPaths(stateDir, OLD).codexFile);

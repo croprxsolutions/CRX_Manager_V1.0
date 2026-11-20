@@ -12,6 +12,7 @@ import { pathToFileURL } from 'node:url';
 
 const LIVE_REF = 'rhyzpcqhnizqbxphqdkr';
 const METAHIVE_REF = 'dyxaxsjrqprvxzxkfooi';
+const STAGING_REF = 'fsnjredpmakbmhwowjjt';
 // <14-digit stamp>_<lower_snake>. Existing files only need this shape: three applied ones carry
 // impossible times (20261022086000 = 08:60). New files must also have a real date and time (below).
 const NAME = /^(\d{14})_[a-z0-9_]+$/;
@@ -168,6 +169,143 @@ export function stampProblems({ added, base, head, changed = [], onMain = [], ma
   return problems;
 }
 
+// Mason's restamp (ship.md, 2026-11-04): when a newer migration went live first, the file gets a new,
+// newer stamp with byte-identical SQL and the same name after the stamp. On staging the old name has
+// already run, so its ledger row is renamed instead of running the SQL a second time. A restamp is a
+// file the ledger lacks whose sha256 matches exactly one row (after the baseline, holding SQL) that has
+// no file left and the same name after the stamp, with an older stamp, AND whose old file git shows was
+// deleted holding those same bytes in the change that added the new file (deleted(from, to) = sha256 of the
+// old file as that change deleted it, or null), so the rename comes from one delete plus add in the repo,
+// not from ledger likeness or an old, unrelated delete (Sol, #1837).
+const slug = (n) => n.slice(15);
+export function planRestamps({ stored, files, highWater, deleted }) {
+  const fileless = [...stored].filter(([n, h]) => h && NAME.test(n) && n.slice(0, 14) > highWater && !files.has(n));
+  const pairs = [];
+  for (const [to, sha] of files) {
+    if (stored.has(to) || !NAME.test(to)) continue;
+    const rows = fileless.filter(([n, h]) => h === sha && slug(n) === slug(to) && n.slice(0, 14) < to.slice(0, 14) && deleted(n, to) === sha);
+    if (rows.length === 1) pairs.push({ from: rows[0][0], to, sha });
+  }
+  // A row two files could claim, or a file two rows could match, is ambiguous: neither is renamed.
+  return pairs.filter((p) => pairs.filter((q) => q.from === p.from).length === 1).sort((a, b) => a.to.localeCompare(b.to));
+}
+
+// Mason (2026-11-12): a restamp that is not clean blocks. A file the ledger lacks that was not planned
+// would otherwise run its SQL a second time when it either looks like a restamp (a row after the baseline
+// with no file left and the same name after the stamp, whatever the stamp order: a backward restamp blocks
+// too) or holds the exact SQL of any row, whatever its name (a copy, or the same bytes under a new slug).
+export function unmatchedRestamps({ stored, files, highWater, restamps }) {
+  const planned = new Set(restamps.map((r) => r.to));
+  const fileless = [...stored.keys()].filter((n) => NAME.test(n) && n.slice(0, 14) > highWater && !files.has(n));
+  const ran = new Set([...stored.values()].filter(Boolean));
+  return [...files].filter(([to, sha]) => NAME.test(to) && !stored.has(to) && !planned.has(to)
+    && (fileless.some((n) => slug(n) === slug(to)) || ran.has(sha))).map(([to]) => to).sort();
+}
+
+// One transaction for all of them: rename only the row holding that exact SQL, then prove the new name holds
+// it and the old one is gone before COMMIT. One failure renames none.
+export function restampSql(restamps) {
+  const hash = "encode(sha256(convert_to(statements[1], 'UTF8')), 'hex')";
+  const lines = ['BEGIN;'];
+  for (const { from, to, sha } of restamps) {
+    for (const n of [from, to]) if (!NAME.test(n)) throw new Error(`bad migration name: ${n}`);
+    if (!/^[0-9a-f]{64}$/.test(sha ?? '')) throw new Error(`bad sha256 for ${to}`);
+    lines.push(
+      `UPDATE supabase_migrations.schema_migrations SET name = '${to}' WHERE name = '${from}' AND ${hash} = '${sha}';`,
+      `DO $crx_check$ BEGIN IF (SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name = '${to}' AND ${hash} = '${sha}') <> 1 OR EXISTS (SELECT 1 FROM supabase_migrations.schema_migrations WHERE name = '${from}') THEN RAISE EXCEPTION 'RESTAMP_RENAME_FAILED: ${from} -> ${to}'; END IF; END $crx_check$;`,
+    );
+  }
+  return [...lines, 'COMMIT;', ''].join('\n');
+}
+
+// PR check: a deleted and an added migration with the same blob and name after the stamp, the new stamp
+// newer, are one restamp (not an edit). blob(file) is the git blob id, or null when unreadable.
+export function restampPairs({ deleted, added, blob }) {
+  const pairs = [];
+  for (const from of deleted) {
+    const b = blob(from);
+    if (!b || !NAME.test(from.replace(/\.sql$/, ''))) continue;
+    const to = added.filter((a) => NAME.test(a.replace(/\.sql$/, '')) && slug(a) === slug(from) && a.slice(0, 14) > from.slice(0, 14) && blob(a) === b);
+    if (to.length === 1) pairs.push({ from, to: to[0] });
+  }
+  // One new file two deleted files could claim is ambiguous (staging couldn't pick a row to rename): no restamp.
+  const clean = pairs.filter((p) => pairs.filter((q) => q.to === p.to).length === 1);
+  // Several restamps keep their order, or none counts (Mason, #1837 LOW 6).
+  const byFrom = [...clean].sort((a, b) => a.from.localeCompare(b.from)).map((p) => p.to).join();
+  const byTo = clean.map((p) => p.to).sort().join();
+  return byFrom === byTo ? clean : [];
+}
+
+// PR check: which deleted or edited migrations count as changes (refused). A restamp is not one, but only
+// into staging and only for a file that never reached main: on main, or for a file already live, the same
+// bytes under a new name would run live's SQL a second time (Mason, #1837 HIGH). A restamped one-shot must
+// stay a one-shot under its new name, or live would run SQL that is only ever recorded (Sol, #1837).
+// Deleted files are read at the merge-base, added ones at HEAD; onMain(f): f exists on main.
+export function migrationChanges({ toStaging, removedOrEdited, deleted, added, baseBlob, headBlob, onMain, oneShotsBase = {}, oneShotsHead = {} }) {
+  const pairs = toStaging
+    ? restampPairs({ deleted: deleted.filter((f) => !onMain(f)), added, blob: (f) => (deleted.includes(f) ? baseBlob(f) : headBlob(f)) })
+    : [];
+  // ...and a restamp can't make an ordinary migration record-only either, or live would never run it (attack run, #1837).
+  const stem = (f) => f.replace(/\.sql$/, '');
+  // What the file was comes from the base branch only: the PR can't vouch for itself (Sol, #1837).
+  const wasShot = (f) => Object.hasOwn(oneShotsBase, stem(f));
+  const problems = pairs.flatMap(({ from, to }) => {
+    const isShot = Object.hasOwn(oneShotsHead, stem(to));
+    if (wasShot(from) && !isShot) return [`${to}: restamps the one-shot ${stem(from)}; add ${stem(to)} to one-shot-migrations.json in this PR, or live would run it`];
+    if (!wasShot(from) && isShot) return [`${to}: restamps the ordinary migration ${stem(from)} into a one-shot; a restamp keeps what the file is, or live would only record it`];
+    return [];
+  });
+  // A new migration in the same PR sorts after the restamps: staging already ran the restamped SQL, but main
+  // would run a lower-stamped newcomer first, before what it may depend on (Sol, #1837).
+  const tops = pairs.map((p) => p.to.slice(0, 14)).sort().at(-1);
+  const targets = new Set(pairs.map((p) => p.to));
+  if (tops) problems.push(...added.filter((f) => !targets.has(f) && f.slice(0, 14) < tops).map((f) => `${f}: sorts below ${tops}, a migration this PR restamps; on main it would run first. Stamp it after the restamps`));
+  const restamped = new Set(pairs.map((p) => p.from));
+  return { changed: removedOrEdited.filter((f) => !restamped.has(f)), problems, pairs };
+}
+
+// PR check: the one-shot list moves only on purpose. A stem may leave it only when this PR restamps that
+// file into a new name the list now holds (migrationChanges already refuses a restamp that drops it; Sol,
+// #1990). A stem may join it only as a new file in this PR.
+export function oneShotListProblems({ base = {}, head = {}, added, pairs = [] }) {
+  const stem = (f) => f.replace(/\.sql$/, '');
+  const movedTo = new Map(pairs.map((p) => [stem(p.from), stem(p.to)]));
+  const problems = [];
+  for (const s of Object.keys(base)) {
+    if (!Object.hasOwn(head, s) && !Object.hasOwn(head, movedTo.get(s) ?? '')) problems.push(`one-shot-migrations.json: ${s} was removed from the one-shot list; a record-only data migration would then run`);
+  }
+  const restampedInto = new Set(movedTo.values());
+  for (const s of Object.keys(head)) {
+    if (!Object.hasOwn(base, s) && (!added.includes(`${s}.sql`) || (restampedInto.has(s) && ![...movedTo].some(([from, to]) => to === s && Object.hasOwn(base, from))))) problems.push(`one-shot-migrations.json: ${s} was added as a one-shot but isn't a new file in this PR (an existing migration can't become record-only)`);
+  }
+  return problems;
+}
+
+// A one-shot is recorded, never run, because a restore brings its rows already corrected. For KI-137 a staging
+// copy restored from live data from before it would keep the old labels, and 20270121110000 would then refuse
+// (Sol, #1990). Before recording it, db-apply runs this check (read only) and stops loudly while any row KI-137
+// relabels exists with a label other than its corrected one, or a Powder Keg family still has the old rate
+// unit (Taha, 2026-11-19: a loud stop, no automatic run). Reviewed code, not data: a test keeps each key a
+// listed one-shot, so a restamp has to move it. Uses only schema older than every pending migration.
+const ids = (...a) => a.map((x) => `'${x}'`).join(', ');
+export const ONE_SHOT_STOPS = {
+  '20270121100000_ki137_powder_keg_each_piksi_mg_labels': [
+    `EXISTS (SELECT 1 FROM public.products WHERE id IN (${ids('0b2e713b-4962-4c49-ae3a-6074ddac1464', '17ccc5ba-7e98-49bf-9510-4d57c0eda962')}) AND inventory_unit IS DISTINCT FROM 'Ea')`,
+    `EXISTS (SELECT 1 FROM public.product_parents WHERE id IN (${ids('8a1f87bf-9732-4046-b464-8bb5e0ee97b9', '7a565acf-19e8-416e-9373-817ca065ae8a')}) AND rate_unit = 'Lb')`,
+    `EXISTS (SELECT 1 FROM public.inventory WHERE (id IN (${ids('a1396a1c-7cbf-48f7-b98d-83e36ad7de25', 'd847d5c1-0676-4e7e-addf-3e1640e216db')}) AND unit_size IS DISTINCT FROM 'Ea') OR (id = '40224943-7238-4504-ae72-1dbc0ad0bdf6' AND unit_size IS DISTINCT FROM 'MG') OR (id = '687b3d54-1f4e-4ae1-9a5f-afa0542e94c2' AND unit_size IS DISTINCT FROM 'Dry oz'))`,
+    `EXISTS (SELECT 1 FROM public.order_items WHERE (id IN (${ids('41ce7cfe-ad47-4fe3-9ace-9b694338ec34', 'b24ffb13-7925-4c03-8ffd-bdcbb00ad0ca')}) AND unit_size IS DISTINCT FROM 'Ea') OR (id IN (${ids('69766da1-a9bf-4fc6-90c0-f9ced47556bc', 'c12acb4c-45ec-424e-bb13-9566ea3c73f9', 'c8fd3a29-e44b-4ba5-9318-b574845d69a4')}) AND unit_size IS DISTINCT FROM 'MG'))`,
+    `EXISTS (SELECT 1 FROM public.delivery_items WHERE id = 'd33b3ba5-8c72-49e5-81a1-6a60a5507c93' AND unit_size IS DISTINCT FROM 'MG')`,
+    `EXISTS (SELECT 1 FROM public.purchase_order_items WHERE (id = '59a5c466-7e4a-46d8-a65c-55cd8397d52c' AND unit_size IS DISTINCT FROM 'MG') OR (id = '46142f54-0e4d-4259-b749-f24e4101b062' AND unit_size IS DISTINCT FROM 'Dry oz'))`,
+  ].join(' OR '),
+};
+
+// holds(sql) runs a check on the target, read only; anything but false (an error, null) counts as "still needs it".
+export function oneShotStops({ steps, stops = ONE_SHOT_STOPS, holds, ref }) {
+  return steps
+    .filter(({ stem, run }) => !run && Object.hasOwn(stops, stem) && holds(stops[stem]) !== false)
+    .map(({ stem }) => `${stem} is a one-shot (recorded here, never run), but this database (${ref}) still holds rows it corrects, so recording it would leave them wrong and a later migration may refuse. Never apply it to live this way (live runs it through the release). If this database is a restore of live data from before ${stem}, apply that file to THIS database by hand first, in one transaction, with its connection in PGHOST/PGUSER/PGDATABASE and the password in ~/.pgpass (never on the command line): psql -v ON_ERROR_STOP=1 -1 -f supabase/migrations/${stem}.sql, then run this again (it is then only recorded). If its preflight refuses, or those rows were changed on purpose after it, ask Mason. Nothing was written.`);
+}
+
 // Drift between the ledger and the repo, for rows after the baseline: a row with no migration file
 // (applied some other way, e.g. the SQL Editor or an unmerged branch), a row whose file changed
 // after it ran (stored text's sha256 differs), and a file never applied. stored/files map name ->
@@ -259,14 +397,18 @@ export function applyUserProblem(dbUrl) {
   return /^postgres(\.[a-z]{20})?$/.test(user) ? null : `migrations apply only as postgres, not ${user.split('.')[0]}`;
 }
 
-function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
-  const refused = refuseTarget(dbUrl, expectedRef) ?? applyUserProblem(dbUrl);
+// Renaming ledger rows is for staging alone (live never renames; Sol, #1837).
+export const renameTargetProblem = (renameRestamps, expectedRef) => (renameRestamps && expectedRef !== STAGING_REF ? 'RENAME_RESTAMPS is for the staging database only' : null);
+
+function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder, renameRestamps = false }) {
+  const refused = refuseTarget(dbUrl, expectedRef) ?? applyUserProblem(dbUrl) ?? renameTargetProblem(renameRestamps, expectedRef);
   if (refused) throw new Error(`REFUSED: ${refused}`);
   const migDir = path.join(repo, 'supabase', 'migrations');
   const manifest = JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/manifest.json'), 'utf8'));
   const highWater = manifest.migrations_high_water;
   if (!/^\d{14}$/.test(highWater ?? '')) throw new Error('STOPPED: supabase/baselines/manifest.json has no valid migrations_high_water');
-  const registry = JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/one-shot-migrations.json'), 'utf8')).one_shot;
+  const oneShotFile = JSON.parse(readFileSync(path.join(repo, 'supabase/baselines/one-shot-migrations.json'), 'utf8'));
+  const registry = oneShotFile.one_shot;
   if (!registry || typeof registry !== 'object') throw new Error('STOPPED: supabase/baselines/one-shot-migrations.json has no one_shot list');
   const oneShots = new Set(Object.keys(registry));
   const allSql = readdirSync(migDir).filter((n) => n.endsWith('.sql'));
@@ -280,8 +422,29 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
   // Every check runs before anything is written.
   const stored = new Map(query(dbUrl, "SELECT name || '|' || coalesce(encode(sha256(convert_to(statements[1], 'UTF8')), 'hex'), '') FROM supabase_migrations.schema_migrations")
     .map((l) => [l.slice(0, l.lastIndexOf('|')), l.slice(l.lastIndexOf('|') + 1)]));
-  const ledgerNames = new Set(stored.keys());
-  // Applied files must still be what was applied.
+  // Staging only: a restamped file's old name already ran here, so its row is renamed, not run again.
+  const postFiles = new Map(files.map((n) => n.slice(0, -4)).filter((n) => n.slice(0, 14) > highWater).map((n) => [n, sha256(fileBytes(n))]));
+  // sha256 of a migration file as this branch held it just before it left (needs full history), or null.
+  // Staging's own first-parent line: the PR's merge commit, diffed against staging, so an edit on the PR
+  // branch before the delete, or a restamp made inside a merge, still reads what staging ran (attack run, #1837).
+  // The same change must add the new file (it is in that commit and not in its first parent).
+  const deleted = (from, to) => {
+    const [p, q] = [from, to].map((n) => `supabase/migrations/${n}.sql`);
+    const git = (...a) => execFileSync('git', a, { cwd: repo, stdio: ['ignore', 'pipe', 'ignore'] });
+    const has = (ref) => { try { git('cat-file', '-e', ref); return true; } catch { return false; } };
+    try {
+      const c = git('log', '-1', '--first-parent', '-m', '--format=%H', '--diff-filter=D', 'HEAD', '--', p).toString().trim().split('\n')[0];
+      if (!c || !has(`${c}:${q}`) || has(`${c}^:${q}`)) return null;
+      return sha256(git('show', `${c}^:${p}`));
+    } catch { return null; }
+  };
+  const restamps = renameRestamps ? planRestamps({ stored, files: postFiles, highWater, deleted }) : [];
+  // Always checked: without RENAME_RESTAMPS nothing is renamed, so anything restamp-like blocks (Luna, #1837).
+  const unmatched = unmatchedRestamps({ stored, files: postFiles, highWater, restamps });
+  if (unmatched.length) throw new Error(`STOPPED before applying anything: ${unmatched.join(', ')} look(s) like a restamp or copy of a migration this database already ran, but no clean restamp matches (the SQL differs from what ran here, the old row holds no SQL, git shows no delete of the old file with these bytes, the new stamp is older, or more than one file or row could match), so it would run a second time. Restamp with the exact same bytes, one file per migration, in one commit. A row holding no SQL: put the old file back for one staging run (BACKFILL fills the row), then restamp again.`);
+  const ledgerNames = new Set([...stored.keys(), ...restamps.map((r) => r.to)]);
+  // Applied files must still be what was applied. postBaseline needs the file, so a restamped row's old
+  // name (its file is gone) is skipped here and renamed below.
   const edited = [...stored].filter(([n, h]) => h && postBaseline(n) && sha256(fileBytes(n)) !== h).map(([n]) => n);
   if (edited.length) throw new Error(`STOPPED: these applied migrations no longer match the ledger (edited after they ran): ${edited.join(', ')}`);
   const { steps, outOfOrder } = planMigrations({ files, highWater, ledgerNames, oneShots, allowOutOfOrder });
@@ -297,6 +460,15 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
     ...bare.flatMap((stem) => fileProblems(stem, fileBytes(stem), { forRun: false })),
   ];
   if (problems.length) throw new Error(`STOPPED before applying anything: ${problems.join('; ')}`);
+  const stops = oneShotStops({ steps, ref: expectedRef, holds: (sql) => query(dbUrl, `BEGIN READ ONLY; SELECT CASE WHEN (${sql}) IS NOT FALSE THEN 1 ELSE 0 END; ROLLBACK;`)[0] !== '0' });
+  if (stops.length) throw new Error(`STOPPED before applying anything: ${stops.join('; ')}`);
+
+  if (restamps.length) {
+    const f = path.join(work, 'restamps.sql');
+    writeFileSync(f, restampSql(restamps));
+    runFile(dbUrl, f);
+    for (const r of restamps) console.log(`restamped ${r.from} -> ${r.to}  (same SQL, sha256 ${r.sha.slice(0, 12)}; ledger row renamed, not run again)`);
+  }
 
   for (const stem of bare) {
     const text = fileBytes(stem).toString('utf8');
@@ -336,7 +508,7 @@ function apply({ dbUrl, expectedRef, repo, backfill, allowOutOfOrder }) {
     execFileSync('sleep', ['1']); // versions are the apply second; keep them unique
   }
   if (steps.length) psql(dbUrl, ['-c', "NOTIFY pgrst, 'reload schema';"]);
-  console.log(`DB_APPLY_DONE ${expectedRef}: ${steps.length} migration(s)`);
+  console.log(`DB_APPLY_DONE ${expectedRef}: ${steps.length} migration(s)${restamps.length ? `, ${restamps.length} restamp(s)` : ''}`);
 }
 
 // Read-only: compares the target's ledger with the repo's files and fails on any drift.
@@ -396,10 +568,10 @@ const commands = {
   drift() {
     return drift({ dbUrl: process.env.DB_URL, expectedRef: process.env.TARGET_REF ?? '', repo: process.cwd(), report: process.env.DRIFT_MODE === 'report' });
   },
-  // env: DB_URL, TARGET_REF; optional BACKFILL=1 and ALLOW_OUT_OF_ORDER=1 (staging only)
+  // env: DB_URL, TARGET_REF; optional BACKFILL=1, ALLOW_OUT_OF_ORDER=1 and RENAME_RESTAMPS=1 (staging only)
   apply() {
     const expectedRef = process.env.TARGET_REF ?? '';
-    apply({ dbUrl: process.env.DB_URL, expectedRef, repo: process.cwd(), backfill: process.env.BACKFILL === '1', allowOutOfOrder: process.env.ALLOW_OUT_OF_ORDER === '1' });
+    apply({ dbUrl: process.env.DB_URL, expectedRef, repo: process.cwd(), backfill: process.env.BACKFILL === '1', allowOutOfOrder: process.env.ALLOW_OUT_OF_ORDER === '1', renameRestamps: process.env.RENAME_RESTAMPS === '1' });
     return 0;
   },
   // usage: db-apply.mjs stamp-check <base ref>
@@ -412,20 +584,34 @@ const commands = {
     const blob = (ref, f) => { try { return execFileSync('git', ['rev-parse', `${ref}:supabase/migrations/${f}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; } };
     const mainRef = baseRef.endsWith('/staging') ? baseRef.replace(/\/staging$/, '/main') : null;
     const onMain = mainRef ? added.filter((f) => { const m = blob(mainRef, f); return m !== null && m === blob('HEAD', f); }) : [];
+    const show = (ref, file) => { try { return JSON.parse(execFileSync('git', ['show', `${ref}:${file}`], { encoding: 'utf8' })); } catch { return null; } };
+    const [oBase, oHead] = [show(baseRef, 'supabase/baselines/one-shot-migrations.json'), show('HEAD', 'supabase/baselines/one-shot-migrations.json')];
+    // Mason's restamp: the same bytes under a newer stamp is not an edit (stampProblems still wants the new stamp newest).
+    const mergeBase = git('merge-base', baseRef, 'HEAD')[0];
+    const moved = migrationChanges({
+      toStaging: mainRef !== null,
+      removedOrEdited: diff('MDT'),
+      deleted: diff('D'),
+      added,
+      baseBlob: (f) => blob(mergeBase, f),
+      headBlob: (f) => blob('HEAD', f),
+      onMain: (f) => blob(mainRef, f) !== null,
+      oneShotsBase: oBase?.one_shot ?? {},
+      oneShotsHead: oHead?.one_shot ?? {},
+    });
     const problems = stampProblems({
       added,
       onMain,
-      changed: diff('MDT'),
+      changed: moved.changed,
       base: names(git('ls-tree', '--name-only', `${baseRef}:supabase/migrations`)),
       head: names(git('ls-tree', '--name-only', 'HEAD:supabase/migrations')),
       mainFiles: mainRef ? names(git('ls-tree', '--name-only', `${mainRef}:supabase/migrations`)) : [],
     });
+    problems.push(...moved.problems);
     // The baseline high-water and the one-shot list decide what runs: they move only on purpose.
-    const show = (ref, file) => { try { return JSON.parse(execFileSync('git', ['show', `${ref}:${file}`], { encoding: 'utf8' })); } catch { return null; } };
     const [mBase, mHead] = [show(baseRef, 'supabase/baselines/manifest.json'), show('HEAD', 'supabase/baselines/manifest.json')];
     if (!/^\d{14}$/.test(mHead?.migrations_high_water ?? '')) problems.push('supabase/baselines/manifest.json: missing or invalid migrations_high_water');
     if (mBase && mHead && mBase.migrations_high_water !== mHead.migrations_high_water) problems.push(`supabase/baselines/manifest.json: migrations_high_water changed (${mBase.migrations_high_water} -> ${mHead.migrations_high_water}); that skips every file below it, so it needs a new baseline, not a PR`);
-    const [oBase, oHead] = [show(baseRef, 'supabase/baselines/one-shot-migrations.json'), show('HEAD', 'supabase/baselines/one-shot-migrations.json')];
     const oneShots = oHead?.one_shot && typeof oHead.one_shot === 'object' && !Array.isArray(oHead.one_shot) ? oHead.one_shot : null;
     if (!oneShots) problems.push('supabase/baselines/one-shot-migrations.json: missing or invalid one_shot list');
     // A one-shot is only recorded, never run, so only its encoding is checked (as apply does).
@@ -433,12 +619,7 @@ const commands = {
       const stem = f.replace(/\.sql$/, '');
       return fileProblems(stem, readFileSync(path.join('supabase/migrations', f)), { forRun: !Object.hasOwn(oneShots ?? {}, stem) });
     }));
-    for (const stem of Object.keys(oBase?.one_shot ?? {})) {
-      if (!(stem in (oHead?.one_shot ?? {}))) problems.push(`one-shot-migrations.json: ${stem} was removed from the one-shot list; a record-only data migration would then run`);
-    }
-    for (const stem of Object.keys(oHead?.one_shot ?? {})) {
-      if (!(stem in (oBase?.one_shot ?? {})) && !added.includes(`${stem}.sql`)) problems.push(`one-shot-migrations.json: ${stem} was added as a one-shot but isn't a new file in this PR (an existing migration can't become record-only)`);
-    }
+    problems.push(...oneShotListProblems({ base: oBase?.one_shot ?? {}, head: oneShots ?? {}, added, pairs: moved.pairs }));
     for (const p of problems) console.log(`::error::${p}`);
     return problems.length ? 1 : 0;
   },

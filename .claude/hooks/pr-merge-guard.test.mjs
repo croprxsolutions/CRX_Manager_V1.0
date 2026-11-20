@@ -482,7 +482,7 @@ ok(r.decision?.permissionDecision === "deny", "--admin later in a chain is still
   // `CODEX=$(ls … | head -1); "$CODEX" exec …` that this refusal used to block.
   for (const command of [
     "a=g; b=h; c=mer; d=ge; $a$b pr $c$d 951 --squash",
-    "CODEX=$(ls -t /c/tools/*/codex.exe | head -1); timeout 2400 \"$CODEX\" exec --ephemeral -m gpt-6-sol -c 'model_reasoning_effort=\"high\"'",
+    "CODEX=$(ls -t /c/tools/*/codex.exe | head -1); timeout 2400 \"$CODEX\" exec --ephemeral -m gpt-6.2-sol -c 'model_reasoning_effort=\"high\"'",
   ]) {
     r = runHook({ tool_name: "Bash", tool_input: { command } });
     ok(!r.decision, `accepted hole / ordinary launch is allowed: ${JSON.stringify(command.slice(0, 60))}`);
@@ -603,8 +603,12 @@ ok(
   "the proof's ancestry checks run through the budgeted hardGateGh",
 );
 ok(
-  /proofValidForMerge\(\{\s*data,\s*headSha,\s*nowMs:\s*Date\.now\(\),\s*baseSha,\s*isAncestor:\s*isAncestorOnGitHub,\s*prCommits\s*\}\)/.test(gateRequestSource),
+  /proofValidForMerge\(\{\s*data,\s*headSha,\s*nowMs:\s*Date\.now\(\),\s*baseSha,\s*isAncestor:\s*isAncestorOnGitHub,\s*mergeBase:\s*mergeBaseOnGitHubOnce,\s*prCommits\s*\}\)/.test(gateRequestSource),
   "the proof scan binds the proof to this head, GitHub's base and GitHub's ancestry answers",
+);
+ok(
+  /mergeBaseOnGitHub\(\{\s*baseSha:\s*b,\s*headSha:\s*a,\s*repo:\s*request\.repo,\s*gh:\s*hardGateGh\s*\}\)/.test(gateRequestSource),
+  "the proof's merge-base check (#1913) runs through the budgeted hardGateGh",
 );
 ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base is no longer refused on that ground alone");
 
@@ -694,12 +698,17 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   const X = "d".repeat(40);   // a base the head does not contain
   const now = Date.now();
   const proof = (over = {}) => ({
-    codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high",
+    codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
     head_sha: H, base_sha: B0, timestamp: new Date(now - 60_000).toISOString(), ...over,
   });
   const edges = new Set([`${B0}>${H}`, `${B0}>${B1}`]);
   const isAncestor = (a, b) => edges.has(`${a}>${b}`);
-  const check = (data, over = {}) => proofValidForMerge({ data, headSha: H, nowMs: now, baseSha: B1, isAncestor, ...over });
+  // Every reviewed head here contains B0, so merge-base(head, base) is B0 when the base contains B0.
+  const check = (data, over = {}) => {
+    const graph = over.isAncestor ?? isAncestor;
+    const mergeBase = (_head, base) => (base === B0 || graph(B0, base) === true ? B0 : null);
+    return proofValidForMerge({ data, headSha: H, nowMs: now, baseSha: B1, isAncestor, mergeBase, ...over });
+  };
 
   ok(check(proof(), { baseSha: B0 }), "a proof bound to the base the merge lands on still counts");
   ok(check(proof()), "main moved forward after the review: the proof of the unchanged head still counts");
@@ -715,6 +724,17 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(!check(proof({ verdict: "blocked" })), "a non-clean verdict never counts");
   ok(!check(proof({ model: "gpt-6-luna" })), "a Luna review never counts");
   ok(!check(proof({ timestamp: new Date(now - 25 * 3600_000).toISOString() })), "a proof older than 24 hours never counts");
+
+  // #1913: the proof's base must BE merge-base(reviewed head, GitHub's base), not any ancestor of it.
+  // The head also contains a newer base commit B1, so the review against B0 saw base commits as the PR's own.
+  const newerInHead = (a, b) => edges.has(`${a}>${b}`) || (a === B1 && b === H);
+  ok(!check(proof(), { isAncestor: newerInHead, mergeBase: () => B1 }), "a base older than the merge-base is refused (#1913)");
+  ok(!check(proof(), { mergeBase: () => null }), "a merge-base GitHub cannot report refuses");
+  ok(!check(proof(), { mergeBase: () => { throw new Error("HTTP 500"); } }), "a failed merge-base lookup refuses");
+  ok(!check(proof(), { mergeBase: undefined }), "no merge-base lookup at all refuses (fail closed)");
+  ok(check(proof(), { mergeBase: () => B0.toUpperCase() }), "the merge-base comparison ignores SHA case");
+  ok(check(proof(), { baseSha: B0, mergeBase: () => { throw new Error("must not be asked"); } }),
+    "a proof bound to GitHub's own base needs no merge-base call");
 
   // Sol once before the PR opens (Mason, 2026-10-29): a proof of an earlier
   // commit on this PR's branch covers fixes pushed after it.
@@ -741,7 +761,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   const B = "b".repeat(40);   // main, which the head and every reviewed commit contain
   const now = Date.now();
   const proof = (head_sha, over = {}) => ({
-    codex_ran: true, verdict: "clean", model: "gpt-6-sol", reasoning_effort: "high",
+    codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
     head_sha, base_sha: B, timestamp: new Date(now - 60_000).toISOString(), ...over,
   });
   const older = ["1", "2", "3", "4", "5", "6"].map((c) => proof(c.repeat(40)));
@@ -754,9 +774,10 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
     const budget = createHardGateBudget({ deadlineMs: 27_000, callTimeoutMs: 0, clock: () => t });
     const call = () => { if (!budget.admit()) throw new Error("budget spent"); calls++; t += 1000; };
     const isAncestor = (a, b) => { call(); return b === H || a === B; };  // older commits are not in main
+    const mergeBase = () => { call(); return B; };
     const solRisky = () => { call(); call(); return laterRisky; };
     const accept = (data, exactHead) =>
-      proofValidForMerge({ data, headSha: H, nowMs: now, baseSha: B, isAncestor, prCommits })
+      proofValidForMerge({ data, headSha: H, nowMs: now, baseSha: B, isAncestor, mergeBase, prCommits })
         && (exactHead || !solRisky());
     try { return { accepted: find(proofs, accept), calls }; } catch { return { spent: true, calls }; }
   };

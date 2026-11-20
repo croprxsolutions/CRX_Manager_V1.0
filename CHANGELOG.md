@@ -2,7 +2,7 @@
 
 Releases of CRX Manager, newest first.
 
-## v0.1.0 (2026-11-20)
+## v0.1.0 (2026-11-21)
 
 #### ✨ New Features
 * a new quote's commission split starts from the customer's split (#1999)
@@ -136,6 +136,8 @@ Releases of CRX Manager, newest first.
 * bring staging up to main (replaces #1742) (#1750)
 
 #### 🧩 Other
+* #2093 out of release v0.1.0 (back next week) (#2095)
+* Explain Codex review failures without exposing credentials (#2093)
 * review rules: remove release rule 4; version-only package.json change is not a gate file (#1990) (#2078)
 * review rules: release rule 4, only code changed since the previous Sol round blocks (#1990) (#2074)
 * review rules: release #1990 ships with three named known issues (#2064-#2066) (#2067)

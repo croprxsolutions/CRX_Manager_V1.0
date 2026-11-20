@@ -7,6 +7,29 @@
   Mason's reason: this case cannot happen in our business (ref ca71e5988000)
 - Finding 2 (HIGH) at `supabase/migrations/20270131100000_job_writes_through_rpcs.sql:166`, text sha256 `847c3a966cb5ec80` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our business (ref 6b963a8267f1)
+## 2026-11-20 — Release #1990: two release review rules, Sol past the round cap, field-app draft finding accepted
+
+**Decision (Mason, in chat, 2026-11-20: "yes do both rules"), asked for by Taha.** For release PR #1990 and later
+release PRs (`release/next` into `main`):
+
+1. **Live and unchanged code.** A Sol or migration-reviewer finding inside a database function whose body at the
+   reviewed head is byte-identical to the live definition (a read-only comparison against live `pg_proc.prosrc`,
+   recorded with the proof) is code the release does not change. It goes on a tracked GitHub issue for Taha's
+   follow-up and does not hold the release. Findings in new or changed code still block.
+2. **Self-abort under an absent live condition.** A finding whose only effect is that a migration aborts its own
+   apply (full rollback), under a live data condition the migration's record shows absent with read-only live
+   evidence, re-checked read-only right before the apply with the result posted on the PR, does not hold the
+   release. First case: `20270109100400` aborts its backfill if a posted return credit has an unlinked line
+   (live: 0 posted credit memos).
+
+**Also decided:** release #1990 may have its Sol review past the round cap today. Mason accepts the
+`20270129171000` finding that a field-application draft saved before the upgrade is not re-checked (live has 0
+such drafts; first recorded for #2050 on 2026-11-19).
+
+**What it does:** the Sol review instructions in `scripts/write-codex-push-proof.mjs` (release reviews only) and the
+`migration-drift-reviewer` and `rls-security-reviewer` charters carry both rules. Owner-accepts stay refused on
+release PRs that touch gate files; every other gate is unchanged.
+
 ## 2026-11-19 — #2050 (release #1990 Sol #2 fix) may have Sol round 5; old drafts are not re-checked
 
 **Decision (Mason, in chat, 2026-11-19: "Yes, accept #1, fix #2" and "Yes, push it").** PR #2050 may have its Sol

@@ -4,8 +4,9 @@
 -- inventory_unit was blank. A $32/gal quote on such a product could bill 128 oz at $32 each ($4,096).
 -- Now the single-owner save and the split save refuse a product line with no sold unit
 -- (FIELD_APP_UNIT_UNCONVERTIBLE, as the grower-share line already did), and the preview shows it at $0.
--- "No sold unit" is blank or only whitespace of any kind (tab, newline), in all four checks, the grower share's too.
--- The apply stops if an unposted field-application invoice already carries a product line (none live today).
+-- "No sold unit" is a unit with no letter or digit (blank, spaces, tabs, zero-width characters), in all four
+-- checks, the grower share's too. The apply stops while any product has no sold unit or an unposted
+-- field-application invoice already carries a product line (none of either live today).
 -- Also: the single-owner save's actor check now raises the charter token 'ACTOR_MISMATCH' (it said
 -- 'p_performed_by does not match authenticated user'); the offline sync already reads that token as a session change.
 -- Live 2026-11-19: 0 products have a blank inventory_unit, so no invoice that saves today stops saving.
@@ -28,12 +29,21 @@ BEGIN
       ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '15d627b08c6775fb74cd1fa78163a6d2'),
       ('public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '962abea61f909003b93cb4a430784fce')) AS s(sig, md5)
    WHERE (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure(s.sig)) IS DISTINCT FROM s.md5;
+  -- An old-body save misprices only a product with no sold unit. Wait for in-flight saves to commit and hold
+  -- new ones (SHARE blocks their inserts until this commits), freeze products, then refuse while any product has
+  -- no sold unit (live 2026-11-19: 0), so no save running under an old body can write a mispriced line after the scan.
+  LOCK TABLE public.invoices, public.invoice_items, public.products IN SHARE MODE;
+  SELECT count(*)::text INTO v_drafts FROM products WHERE COALESCE(inventory_unit, '') !~ '[[:alnum:]]';
+  IF v_drafts <> '0' THEN
+    RAISE EXCEPTION 'FIELD_APP_NO_SOLD_UNIT_PREFLIGHT: % product(s) have no sold unit; set their units first', v_drafts;
+  END IF;
   -- A draft saved by the old bodies may carry a product line priced in the rate unit; it could still post.
   -- Live 2026-11-19 has none (2 field-application invoices, no product lines), so stop for review if any appeared.
   SELECT count(DISTINCT i.id)::text INTO v_drafts
     FROM invoices i JOIN invoice_items ii ON ii.invoice_id = i.id
    WHERE i.deleted_at IS NULL AND i.status IN ('draft', 'unposted') AND ii.product_id IS NOT NULL
      AND (EXISTS (SELECT 1 FROM field_app_locations l WHERE l.invoice_id = i.id)
+          OR EXISTS (SELECT 1 FROM field_app_locations l WHERE l.invoice_group_id = i.invoice_group_id)
           OR EXISTS (SELECT 1 FROM field_app_billing_sets b WHERE b.invoice_group_id = i.invoice_group_id));
   IF v_drafts <> '0' THEN
     RAISE EXCEPTION 'FIELD_APP_NO_SOLD_UNIT_PREFLIGHT: % unposted field-application invoice(s) carry a product line saved before this check; review their quantities, then post or delete them first', v_drafts;
@@ -415,7 +425,7 @@ BEGIN
           -- from the request.
           -- Its cost is per the sold unit, so a product with no sold unit cannot be costed: refuse rather than
           -- cost a rate-unit quantity at a sold-unit price (live 2026-11-16: 0 such products).
-          IF (v_chem->>'product_id') IS NOT NULL AND COALESCE(v_inv_unit, '') !~ '[^[:space:]]' THEN
+          IF (v_chem->>'product_id') IS NOT NULL AND COALESCE(v_inv_unit, '') !~ '[[:alnum:]]' THEN
             RAISE EXCEPTION 'FIELD_APP_UNIT_UNCONVERTIBLE: cannot cost "%" in the grower share — the product has no sold unit. Fix this product''s units before invoicing this field application.',
               COALESCE(NULLIF(v_chem->>'description', ''), (v_chem->>'product_id'));
           END IF;
@@ -517,7 +527,7 @@ BEGIN
           -- "per unit"), refuse rather than silently mis-bill.
           -- #1990 Sol: a product with no sold unit has no unit its price is per (the sent-quote check reads unit_size,
           -- this would price the rate unit), so refuse it here as the grower share already does.
-          IF (v_chem->>'product_id') IS NOT NULL AND COALESCE(v_inv_unit, '') !~ '[^[:space:]]' THEN
+          IF (v_chem->>'product_id') IS NOT NULL AND COALESCE(v_inv_unit, '') !~ '[[:alnum:]]' THEN
             RAISE EXCEPTION 'FIELD_APP_UNIT_UNCONVERTIBLE: cannot price "%" — the product has no sold unit. Fix this product''s units before invoicing this field application.',
               COALESCE(NULLIF(v_chem->>'description', ''), (v_chem->>'product_id'));
           END IF;
@@ -950,7 +960,7 @@ BEGIN
             FROM products p WHERE p.id = (v_chem->>'product_id')::uuid;
         END IF;
         -- #1990 Sol: a product with no sold unit is refused by the save; preview it at $0 like any unconvertible line.
-        v_priced_qty := CASE WHEN (v_chem->>'product_id') IS NOT NULL AND COALESCE(v_inv_unit, '') !~ '[^[:space:]]' THEN NULL
+        v_priced_qty := CASE WHEN (v_chem->>'product_id') IS NOT NULL AND COALESCE(v_inv_unit, '') !~ '[[:alnum:]]' THEN NULL
                              ELSE field_app_priced_quantity(v_chem_qty_b, v_ta_unit, COALESCE(v_inv_unit, v_ta_unit), v_form) END;
         -- Unconvertible units (save blocks with FIELD_APP_UNIT_UNCONVERTIBLE): preview the line at
         -- $0 rather than the old ~128x figure or crashing the preview.
@@ -1762,7 +1772,7 @@ BEGIN
         -- SAME unit (the live 128x guard). No inventory_unit -> identity (price as entered).
         -- #1990 Sol: a product with no sold unit has no unit its price is per (the sent-quote check reads unit_size,
         -- this would price the rate unit), so refuse it like the single-owner save.
-        IF COALESCE(v_inv_unit, '') !~ '[^[:space:]]' THEN
+        IF COALESCE(v_inv_unit, '') !~ '[[:alnum:]]' THEN
           RAISE EXCEPTION 'FIELD_APP_UNIT_UNCONVERTIBLE: chemical line % — the product has no sold unit. Fix this product''s units before invoicing.', v_idx
             USING ERRCODE = 'invalid_parameter_value';
         END IF;
@@ -2408,9 +2418,9 @@ DECLARE
 BEGIN
   SELECT string_agg(s.sig, ', ') INTO v_bad
     FROM (VALUES
-      ('public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'f16d30fea4e18ef668a6a8de9c61fb25'),
-      ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '05870f1336d86c75cb6dbac0a39cd726'),
-      ('public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', '4ff3415a2a848509940d03b9b36b54b5')) AS s(sig, md5)
+      ('public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', '1a4a2655e43392d867b195289df9b9a1'),
+      ('public._preview_field_app_invoice_split_impl_20260908(jsonb,jsonb,uuid,uuid,date)', '2dfe6ce5b2c81bf1dcba73cc156addfe'),
+      ('public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)', 'd72ff5547170c6a4a90bce083b6d7084')) AS s(sig, md5)
     LEFT JOIN pg_proc p ON p.oid = to_regprocedure(s.sig)
    WHERE md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM s.md5
       OR p.proowner <> 'postgres'::regrole OR NOT p.prosecdef

@@ -7,6 +7,18 @@
   Mason's reason: this case cannot happen in our business (ref ca71e5988000)
 - Finding 2 (HIGH) at `supabase/migrations/20270131100000_job_writes_through_rpcs.sql:166`, text sha256 `847c3a966cb5ec80` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our business (ref 6b963a8267f1)
+## 2026-11-20 — Release #1990: only code changed since the previous Sol round blocks
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, adopt it"; proposed by Taha in Slack).** From Sol round 55 on
+release #1990 (head `28e3cf7ed`), a finding blocks the release only when it is in a file the candidate changes since
+the previous round's head. Findings in files that round already reviewed go on tracked issues (round 55: #2069-#2073)
+for next week's fixes. **Why:** each of 55 rounds found new items in the same large billing functions, so the release
+could not finish; live has no real sales yet. **What it does:** release rule 4 in `scripts/write-codex-push-proof.mjs`
+(`RELEASE_PRIOR_ROUND_HEAD`) gives Sol the wrapper-computed list of files changed since that head; a finding whose
+causing lines are all in other files is tagged `[PRIOR-ROUND]` and listed under RELEASE FOLLOW-UPS. A finding in a
+changed file, or one a change makes newly reachable, still blocks. Move the head to each new round's head; clear it
+after the release lands. Every other gate is unchanged.
+
 ## 2026-11-20 — Release #1990 ships with three named known issues
 
 **Decision (Mason, in chat, 2026-11-20: "Yes, add the rule"; Taha agreed in Slack).** Release #1990 ships today.

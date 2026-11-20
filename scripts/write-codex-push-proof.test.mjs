@@ -156,6 +156,14 @@ assert.ok(
   prompt.includes(`${CODEX_VERDICT_TOKEN}: CLEAN`) && prompt.includes(`${CODEX_VERDICT_TOKEN}: BLOCKERS`),
   "prompt demands the machine verdict token in both forms",
 );
+// Release review rules (Mason, 2026-11-20): only a release review carries them.
+const releasePrompt = buildCodexReviewPrompt({ release: true });
+assert.match(releasePrompt, /RELEASE RULES/, "release prompt carries the release rules");
+assert.match(releasePrompt, /\[LIVE-UNCHANGED\]/, "release rule 1: byte-identical unchanged function bodies are tagged");
+assert.match(releasePrompt, /\[SELF-ABORT\]/, "release rule 2: a clean self-abort of a migration's own apply is tagged");
+assert.match(releasePrompt, /RELEASE FOLLOW-UPS/, "release rules: tagged findings are listed for tracked issues");
+assert.equal(prompt.includes("RELEASE RULES"), false, "a non-release review has no release rules");
+assert.ok(releasePrompt.indexOf("RELEASE RULES") < releasePrompt.indexOf("Then end your reply"), "release rules come before the verdict instructions");
 
 const permissionConfig = codexReviewPermissionConfig(["C:\\Users\\me\\.codex\\auth.json", "C:\\Repo\\.env.local"], "win32");
 const args = buildCodexExecArgs({ root: "/repo/root", prompt, platform: "win32", permissionConfig });

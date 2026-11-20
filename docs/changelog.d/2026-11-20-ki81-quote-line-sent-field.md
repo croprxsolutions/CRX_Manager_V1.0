@@ -1,7 +1,7 @@
 ## 2026-11-20 — KI-81 field: a quote price bills only on the field the grower was sent it for
 
 - Fixes the final-round Sol HIGH on release #1990 (`20270129140000:160`). A quote line moved to another field after sending, with no resend, priced the new field at the old field's sent price. The lookups match the line's current section, and the sent-price lock compares line, product and price, not field.
-- New migration `20270129170000_ki81_quote_line_sent_field.sql`. It adds a private helper that reads the line's field from the newest sent version, and re-emits `_field_app_sent_quote_price_cents` and `create_invoice_from_blend_ticket` with these checks, each refusing with `QUOTE_RESEND_REQUIRED`:
+- New migration `20270129180000_ki81_quote_line_sent_field.sql`. It adds a private helper that reads the line's field from the newest sent version, and re-emits `_field_app_sent_quote_price_cents` and `create_invoice_from_blend_ticket` with these checks, each refusing with `QUOTE_RESEND_REQUIRED`:
   - a moved line ("was moved to another field after the quote was sent");
   - a sent line for a billed field that has since moved or been removed, so the field doesn't silently drop to list price;
   - a product quoted on only some of the billed fields;

@@ -1070,6 +1070,14 @@ assert.equal(
         { status: 1, stderr: "ERROR codex_core::exec: windows sandbox failed: helper_unknown_error" },
         "Codex exited with code 1 without a verdict. The cause is unknown.",
       ],
+      [
+        {
+          status: 1,
+          stdout: "partial",
+          stderr: "2026-11-20T15:04:05Z ERROR codex_core::session: Failed to create session\nERROR: windows sandbox failed: setup refresh had errors",
+        },
+        "Codex reported a Windows sandbox error while starting the review.",
+      ],
       // Vague mentions outside an ERROR line, or without an explicit marker, stay unknown.
       [{ status: 1, stderr: "diff mentions 401 Unauthorized and a rate limit\nERROR: something odd" }, "Codex exited with code 1 without a verdict. The cause is unknown."],
       [{ status: null }, "Codex ended without an exit code or a verdict. The cause is unknown."],

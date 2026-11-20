@@ -1300,11 +1300,6 @@ const REVIEW_FAILURE_SIGNATURES = [
     (line) => /stream disconnected before completion|error sending request for url|connection (?:reset|refused)/i.test(line),
     "The connection to Codex ended before the review finished.",
   ],
-  // Startup only: a command's sandbox error after the session started is not this.
-  [
-    (line) => SESSION_START_FAILURE_RE.test(line) && SANDBOX_SETUP_FAILURE_RE.test(line),
-    "Codex reported a Windows sandbox error while starting the review.",
-  ],
 ];
 function codexReviewFailureReason(result = {}) {
   if (result.error) {
@@ -1321,7 +1316,12 @@ function codexReviewFailureReason(result = {}) {
   if (result.status === 0) return "Codex exited successfully without a valid verdict.";
   const errorLines = String(result.stderr ?? "").split(/\r?\n/).filter((line) => CODEX_ERROR_LINE_RE.test(line));
   const match = REVIEW_FAILURE_SIGNATURES.find(([matches]) => errorLines.some(matches));
-  return match ? match[1] : `Codex exited with code ${result.status} without a verdict. The cause is unknown.`;
+  if (match) return match[1];
+  // Startup only (markers may sit on separate ERROR lines): a later command sandbox error has no session-start marker.
+  if (errorLines.some((line) => SESSION_START_FAILURE_RE.test(line)) && errorLines.some((line) => SANDBOX_SETUP_FAILURE_RE.test(line))) {
+    return "Codex reported a Windows sandbox error while starting the review.";
+  }
+  return `Codex exited with code ${result.status} without a verdict. The cause is unknown.`;
 }
 
 export function captureReviewOutput(root, result, runInfo = {}) {

@@ -9,6 +9,9 @@
 -- Live 2026-11-19: 0 products have a blank inventory_unit, so no invoice that saves today stops saving.
 -- Bodies are the reviewed ones (pinned below) with only that check added; owner, grants, definer mode and
 -- search_path are unchanged by CREATE OR REPLACE.
+-- Order: applies after 20270125163000 and 20270129160000 (the same release); the preflight below pins the
+-- bodies those two leave and refuses (FIELD_APP_NO_SOLD_UNIT_PREFLIGHT) if either is missing, so a wrong order
+-- stops before any change. 20270129160000 already revoked the split helper's non-owner EXECUTE.
 
 SET LOCAL lock_timeout = '5s';
 

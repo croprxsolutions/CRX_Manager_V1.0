@@ -7,6 +7,17 @@
   Mason's reason: this case cannot happen in our business (ref ca71e5988000)
 - Finding 2 (HIGH) at `supabase/migrations/20270131100000_job_writes_through_rpcs.sql:166`, text sha256 `847c3a966cb5ec80` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our business (ref 6b963a8267f1)
+## 2026-11-20 — Release #1990 ships with three named known issues
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, add the rule"; Taha agreed in Slack).** Release #1990 ships today.
+Three Sol findings on head `ff46f6ca5` are known issues, each on a tracked issue and fixed before next week's release:
+#2064 (`20270120150000` `_enforce_below_cost_line`), #2065 (`20270129150000` `_enforce_booking_live_job_rules`) and
+#2066 (`20270109100200` `_return_customer_line_share`). **Why:** live has no real sales yet, Sol has found new items
+on every round of this release (round 54), and owner-accepts stay refused on release PRs that touch gate files.
+**What it does:** release rule 3 in `scripts/write-codex-push-proof.mjs` (`RELEASE_KNOWN_ISSUES`) tags only those
+findings, in only those functions; any other finding, including a different one in the same function, still blocks.
+Clear the list after the release lands. Every other gate is unchanged.
+
 ## 2026-11-20 — Release rule 1 also covers unchanged live lines inside a changed function
 
 **Decision (Mason, in chat, 2026-11-20: "Yes, both" to logging Sol's #1990 findings 1 and 2 as tracked issues, then

@@ -256,6 +256,19 @@ change is the sanitizer sentence, which is safe before or after the migration.
 - #10 LOW → the hold RPC proof commits, so deferred checks run.
 - #11 LOW → the screen matches the constraint error itself, not the name anywhere in a message.
 
+## Sol round 4 settlement (2026-11-19)
+
+- #1 HIGH → the same case Mason accepted at r3 (DECISION_LOG 2026-11-19, #2048); unchanged.
+- #2 MED (switching an open hold's product) → counts as opening (proved).
+- #3 MED (REPEATABLE READ) → accepted, as in Sol r1 #4 and r3 #2.
+- #4 MED (an expired but still switched-on sourced hold blocks a hard customer delete) → refuted: the
+  app never hard-deletes customers, and the constraint is validated at apply (0 live violations), so
+  a pre-rollout row would stop the apply, not slip through. Release such a hold first if it happens.
+- #5 LOW → the preflight also requires KI-148's trigger to be `BEFORE UPDATE OF is_active ... FOR EACH ROW`.
+- #6 LOW → the undelete proof checks for the returned row, not an empty output.
+- #7 LOW → the header now names `restore_cancelled_delivery` (admin-only maintenance): restoring an
+  inactive customer's cancelled delivery needs reactivation first, which is the rule.
+
 ## Open business decisions
 
 None. The scope (four tables), the legacy customer's consequence and the deferred parts follow

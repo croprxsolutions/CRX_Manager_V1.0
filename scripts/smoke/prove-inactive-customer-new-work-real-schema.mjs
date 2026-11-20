@@ -30,6 +30,7 @@ const REP = USERS.rep;
 const DRIVER = USERS.driver;
 const APPLICATOR = USERS.applicator;
 const PRODUCT = id('d1');
+const PRODUCT2 = id('d2');
 const ACTIVE = id('c1'); // active customer
 const INACTIVE = id('c2'); // inactive, with open and closed work (like the live customer with 2 confirmed orders)
 const RACE1 = id('c3'); // active, deactivated while an order is being saved
@@ -73,7 +74,8 @@ function seed() {
       ('${RACE1}', '[NEWWORK] race1', true), ('${RACE2}', '[NEWWORK] race2', true),
       ('${RACE3}', '[NEWWORK] race3', true);
     INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, tier1_price, tier2_price, tier3_price, pricing_version, is_active)
-      VALUES ('${PRODUCT}', '[NEWWORK] Product', 'NW-P', 'liquid', 'Gal', 'Gal', 40, 36, 32, 1, true);
+      VALUES ('${PRODUCT}', '[NEWWORK] Product', 'NW-P', 'liquid', 'Gal', 'Gal', 40, 36, 32, 1, true),
+             ('${PRODUCT2}', '[NEWWORK] Product 2', 'NW-P2', 'liquid', 'Gal', 'Gal', 40, 36, 32, 1, true);
     INSERT INTO public.orders (id, order_number, customer_id, status, deleted_at) VALUES
       ('${R.openOrder}', 'NW-OPEN', '${INACTIVE}', 'confirmed', NULL),
       ('${R.cancelledOrder}', 'NW-CANC', '${INACTIVE}', 'cancelled', NULL),
@@ -230,7 +232,7 @@ async function main() {
   refused(`UPDATE public.deliveries SET status = 'in_progress' WHERE id = '${R.driverDone}' RETURNING 1;`, /Invalid delivery status transition: completed → in_progress/, { role: 'authenticated' }, DRIVER);
   const undelete = run(DRIVER, `UPDATE public.deliveries SET deleted_at = NULL WHERE id = '${R.driverDeleted}' RETURNING 1;`);
   assert.doesNotMatch(undelete.err, /CUSTOMER_INACTIVE_NEW_WORK/, undelete.err);
-  if (undelete.status === 0) assert.equal(undelete.out, '', 'the driver undeleted a delivery');
+  if (undelete.status === 0) assert.notEqual(undelete.out, '1', 'the driver undeleted a delivery');
   else assert.match(undelete.err, M, undelete.err);
   console.log(`[new-work] the driver reopening a delivery whose order is the inactive customer's: same fixed refusal, no status (${undelete.status === 0 ? 'undelete: row not visible' : 'undelete: move error'})`);
 
@@ -242,7 +244,9 @@ async function main() {
   // Sol r3 #6: raising an open hold's quantity reserves more stock; lowering it does not.
   refused(`UPDATE public.inventory_holds SET quantity = quantity + 99 WHERE id = '${R.openHold}';`);
   assert.equal(allowed(`UPDATE public.inventory_holds SET quantity = 0.5 WHERE id = '${R.openHold}' RETURNING 1;`), '1');
-  console.log('[new-work] an inactive customer\'s open hold: raising the quantity refused; lowering it allowed');
+  // Sol r4 #2: switching an open hold to another product reserves new stock, so it is opening it.
+  refused(`UPDATE public.inventory_holds SET product_id = '${PRODUCT2}' WHERE id = '${R.openHold}';`);
+  console.log('[new-work] an inactive customer\'s open hold: raising the quantity or switching the product refused; lowering it allowed');
   // Sol r3 #4: a released hold built from a job may lose its customer (customer delete sets it NULL),
   // but switching it back on with no customer is refused by the constraint.
   assert.equal(allowed(`${newHold(ACTIVE, R.activeJob)}

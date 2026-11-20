@@ -21,8 +21,9 @@
 --   Moving any of these rows to another customer or order is for admins and sales reps only: anyone
 --   else signed in gets WORK_CUSTOMER_MOVE_NOT_ALLOWED before a customer is read (no status leak;
 --   no screen lets a non-admin move work); the same applies to reopening a delivery, whose order's
---   customer the caller may not see (no function reopens one). Pushing a hold's dated expiry later or
---   raising its quantity is checked as opening it.
+--   customer the caller may not see (restore_cancelled_delivery is admin-only maintenance, so only the
+--   inactive-customer check applies to it). Pushing a hold's dated expiry later or
+--   raising its quantity or switching its product is checked as opening it.
 --   Correcting closed history that reopens a row (for example voiding a completed delivery, which
 --   reopens its order) needs the customer reactivated first.
 --   Guarantee holds for READ COMMITTED transactions (every app path); a REPEATABLE READ deactivation
@@ -72,7 +73,8 @@ BEGIN
                      WHERE t.tgrelid = 'public.customers'::regclass
                        AND t.tgname = 'customers_open_work_on_deactivate_20270128'
                        AND t.tgfoid = to_regprocedure('public.guard_customer_deactivation_open_work_20270128()')
-                       AND t.tgenabled = 'O' AND t.tgqual IS NULL) THEN
+                       AND t.tgenabled = 'O' AND t.tgqual IS NULL
+                       AND pg_get_triggerdef(t.oid) LIKE '%BEFORE UPDATE OF is_active ON public.customers FOR EACH ROW%') THEN
     RAISE EXCEPTION 'INACTIVE_NEW_WORK_PREFLIGHT: KI-148 (20270128140000) must be applied first';
   END IF;
   IF to_regprocedure('public.guard_inactive_customer_new_work_20270129()') IS NOT NULL
@@ -90,8 +92,8 @@ BEGIN
            ('orders','id'), ('orders','customer_id'), ('orders','status'), ('orders','deleted_at'),
            ('deliveries','customer_id'), ('deliveries','order_id'), ('deliveries','status'), ('deliveries','deleted_at'),
            ('inventory_holds','customer_id'), ('inventory_holds','is_active'), ('inventory_holds','expires_at'),
-           ('inventory_holds','source_id'), ('inventory_holds','quantity'),
-           ('jobs','customer_id'), ('jobs','status'), ('jobs','deleted_at'), ('jobs','invoice_id'))) <> 19 THEN
+           ('inventory_holds','source_id'), ('inventory_holds','quantity'), ('inventory_holds','product_id'),
+           ('jobs','customer_id'), ('jobs','status'), ('jobs','deleted_at'), ('jobs','invoice_id'))) <> 20 THEN
     RAISE EXCEPTION 'INACTIVE_NEW_WORK_PREFLIGHT: a column the guard reads is missing';
   END IF;
 END
@@ -133,10 +135,10 @@ BEGIN
     IF TG_OP = 'UPDATE' THEN
       -- Pushing a dated expiry later counts as opening, so an extension saved across Chicago midnight
       -- (old row open at the trigger, expired by the time a deactivation counts) is still checked.
-      -- Raising the quantity reserves more stock, so it counts as opening too.
+      -- Raising the quantity or switching the product reserves new stock, so it counts as opening too.
       v_old_open := OLD.is_active IS TRUE AND (OLD.expires_at IS NULL OR OLD.expires_at >= v_today)
         AND NOT (OLD.expires_at IS NOT NULL AND (NEW.expires_at IS NULL OR NEW.expires_at > OLD.expires_at))
-        AND NOT (NEW.quantity > OLD.quantity);
+        AND NOT (NEW.quantity > OLD.quantity) AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id;
       v_moved := NEW.customer_id IS DISTINCT FROM OLD.customer_id;
     END IF;
     v_ids := ARRAY[NEW.customer_id];
@@ -162,7 +164,7 @@ BEGIN
   -- Only an admin or sales rep may move work to another customer or order, or reopen a delivery (its
   -- order's customer may be one the caller cannot see). Anyone else signed in (a driver on an assigned
   -- delivery) gets this fixed refusal before any customer is read, so it can never reveal whether such
-  -- a customer is active. No function reopens a delivery. Server roles have no signed-in user.
+  -- a customer is active. Server roles have no signed-in user.
   IF (v_moved OR (TG_OP = 'UPDATE' AND TG_TABLE_NAME = 'deliveries'))
      AND auth.uid() IS NOT NULL AND NOT (public.is_admin() OR public.is_sales_rep()) THEN
     RAISE EXCEPTION 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery';

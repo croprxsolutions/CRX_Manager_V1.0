@@ -40,7 +40,8 @@ function splitTopLevel(text) {
   return parts.map((p) => p.trim()).filter(Boolean);
 }
 
-const hasDefault = (def) => /\b(?:DEFAULT|GENERATED|(?:big|small)?serial\d?)\b/i.test(def);
+// DEFAULT NULL is no default: an insert that omits the column still writes NULL.
+const hasDefault = (def) => /\b(?:DEFAULT(?!\s+NULL\b)|GENERATED|(?:big|small)?serial\d?)\b/i.test(def);
 const CONSTRAINT_WORDS = /^(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE|LIKE)\b/i;
 
 /**
@@ -54,7 +55,7 @@ export function requiredColumnsFromMigrations(migrations) {
 
   for (const { name, sql } of migrations) {
     for (const stmt of stripStringsAndComments(sql).split(';')) {
-      const create = stmt.match(new RegExp(String.raw`^\s*CREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?${TABLE}\s*\(([\s\S]*)\)`, 'i'));
+      const create = stmt.match(new RegExp(String.raw`\bCREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?${TABLE}\s*\(([\s\S]*)\)`, 'i'));
       if (create && isPublic(create[2])) {
         const t = ident(create[3]);
         if (/IF\s+NOT\s+EXISTS/i.test(stmt) && state.has(t)) continue;
@@ -66,12 +67,13 @@ export function requiredColumnsFromMigrations(migrations) {
         }
         continue;
       }
-      const drop = stmt.match(new RegExp(String.raw`^\s*DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?${TABLE}`, 'i'));
+      const drop = stmt.match(new RegExp(String.raw`\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?${TABLE}`, 'i'));
       if (drop && isPublic(drop[2])) {
         state.delete(ident(drop[3]));
         continue;
       }
-      const alter = stmt.match(new RegExp(String.raw`^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?${TABLE}\s+([\s\S]*)$`, 'i'));
+      // Not anchored to the statement start: DDL inside a DO block or IF branch counts too.
+      const alter = stmt.match(new RegExp(String.raw`\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?${TABLE}\s+([\s\S]*)$`, 'i'));
       if (!alter || !isPublic(alter[2])) continue;
       const t = ident(alter[3]);
       for (const action of splitTopLevel(alter[4])) {
@@ -79,16 +81,20 @@ export function requiredColumnsFromMigrations(migrations) {
         if ((m = action.match(/^ALTER\s+(?:COLUMN\s+)?"?(\w+)"?\s+(SET|DROP)\s+(NOT\s+NULL|DEFAULT)\b/i))) {
           const c = col(t, ident(m[1]));
           const on = m[2].toUpperCase() === 'SET';
-          if (/^NOT/i.test(m[3])) c.notNull = on;
-          else c.hasDefault = on;
-          if (on && c.notNull && !c.hasDefault && /^NOT/i.test(m[3])) c.requiredBy = name;
+          if (/^NOT/i.test(m[3])) {
+            c.notNull = on;
+            if (on) c.requiredBy = name; // counts once any default goes away, even in a later migration
+          } else c.hasDefault = on && hasDefault(action);
         } else if ((m = action.match(/^ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?\s+([\s\S]*)$/i)) && !CONSTRAINT_WORDS.test(m[1])) {
           if (/IF\s+NOT\s+EXISTS/i.test(action) && cols(t).has(ident(m[1]))) continue;
           const def = m[2];
           const notNull = /\bNOT\s+NULL\b|\bPRIMARY\s+KEY\b/i.test(def);
-          cols(t).set(ident(m[1]), { notNull, hasDefault: hasDefault(def), requiredBy: notNull && !hasDefault(def) ? name : null });
+          cols(t).set(ident(m[1]), { notNull, hasDefault: hasDefault(def), requiredBy: notNull ? name : null });
         } else if ((m = action.match(/^DROP\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?"?(\w+)"?/i)) && !/^DROP\s+CONSTRAINT\b/i.test(action)) {
           cols(t).delete(ident(m[1]));
+        } else if ((m = action.match(/^RENAME\s+TO\s+"?(\w+)"?/i))) {
+          state.set(ident(m[1]), cols(t));
+          state.delete(t);
         } else if ((m = action.match(/^RENAME\s+(?:COLUMN\s+)?"?(\w+)"?\s+TO\s+"?(\w+)"?/i))) {
           const c = cols(t).get(ident(m[1]));
           cols(t).delete(ident(m[1]));
@@ -114,7 +120,8 @@ export function insertsIn(sql) {
   const re = new RegExp(String.raw`\bINSERT\s+INTO\s+${TABLE}(?:\s+(?:AS\s+)?(?!VALUES\b|SELECT\b|DEFAULT\b|OVERRIDING\b|WITH\b)\w+)?\s*(\(([^)]*)\))?`, 'gi');
   for (const m of code.matchAll(re)) {
     if (!isPublic(m[2])) continue;
-    out.push({ table: ident(m[3]), columns: m[4] ? splitTopLevel(m[5]).map(ident) : null, line: code.slice(0, m.index).split('\n').length });
+    const defaultValues = !m[4] && /^\s*DEFAULT\s+VALUES\b/i.test(code.slice(m.index + m[0].length));
+    out.push({ table: ident(m[3]), columns: m[4] ? splitTopLevel(m[5]).map(ident) : defaultValues ? [] : null, line: code.slice(0, m.index).split('\n').length });
   }
   return out;
 }
@@ -125,6 +132,7 @@ export function findMissing(required, chains) {
     for (const ins of insertsIn(sql)) {
       const req = required.get(ins.table);
       // No column list = positional VALUES or SELECT *: every column is filled, so it cannot silently omit one.
+      // shortcut: INSERTs inside EXECUTE strings are not read (today only permission probes that expect a refusal); parse them if a chain builds fixtures that way.
       if (!req || !ins.columns) continue;
       for (const [c, migration] of req) {
         if (!ins.columns.includes(c)) failures.push({ file: name, line: ins.line, table: ins.table, column: c, migration });

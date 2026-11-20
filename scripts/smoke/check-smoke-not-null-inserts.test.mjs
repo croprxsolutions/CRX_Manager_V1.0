@@ -31,6 +31,19 @@ r = req(mig('1', `ALTER TABLE public.t
   ADD e uuid NOT NULL REFERENCES other(id);`));
 assert.deepEqual(cols(r, 't'), ['a', 'e']);
 
+// DEFAULT NULL is no default; a default dropped after SET NOT NULL makes it required; DDL inside DO blocks counts;
+// a table rename carries its required columns.
+r = req(
+  mig('1', 'CREATE TABLE t (a text, b text DEFAULT \'x\', c text);'),
+  mig('2', 'ALTER TABLE t ADD COLUMN d text NOT NULL DEFAULT NULL; ALTER TABLE t ALTER COLUMN b SET NOT NULL;'),
+  mig('3', 'ALTER TABLE t ALTER COLUMN b DROP DEFAULT;'),
+  mig('4', "DO $$ BEGIN IF true THEN ALTER TABLE public.t ALTER COLUMN c SET NOT NULL; END IF; END $$;"),
+  mig('5', 'ALTER TABLE t RENAME TO t2;'),
+);
+assert.deepEqual(cols(r, 't'), []);
+assert.deepEqual(cols(r, 't2'), ['b', 'c', 'd']);
+assert.equal(r.get('t2').get('b'), '2');
+
 // Comments, strings and other schemas are ignored.
 r = req(mig('1', "-- ALTER TABLE t ALTER COLUMN a SET NOT NULL;\nSELECT 'ALTER TABLE t ALTER COLUMN b SET NOT NULL;';\nALTER TABLE auth.users ALTER COLUMN c SET NOT NULL;"));
 assert.equal(r.size, 0);
@@ -44,6 +57,7 @@ const ins = insertsIn(`DO $$ BEGIN
   SELECT x, y FROM src;
   INSERT INTO products VALUES ('c');
   INSERT INTO auth.users (id) VALUES (gen_random_uuid());
+  INSERT INTO products DEFAULT VALUES;
   -- INSERT INTO products (product_name) VALUES ('d');
   PERFORM 'INSERT INTO products (product_name) VALUES (1)';
 END $$;`);
@@ -52,6 +66,7 @@ assert.deepEqual(ins.map((i) => [i.table, i.columns, i.line]), [
   ['products', ['product_name'], 4],
   ['products', ['product_name', 'product_form'], 5],
   ['products', null, 7],
+  ['products', [], 9],
 ]);
 
 // End to end: the inventory_unit case that broke staging (#2050 / #2057).

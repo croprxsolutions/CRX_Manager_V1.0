@@ -41,6 +41,7 @@ const R = {
   delDelivery: id('e7'), activeDelivery: id('e8'),
   offHold: id('e9'), expiredHold: id('ea'), openHold: id('eb'), activeHold: id('ec'),
   delJob: id('ed'), activeJob: id('ee'), openJob: id('ef'), activeClosed: id('f1'),
+  driverDelivery: id('f2'), datedHold: id('f3'),
 };
 const W = /CUSTOMER_INACTIVE_NEW_WORK: nothing was saved\. This customer is inactive\. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added/;
 
@@ -84,10 +85,13 @@ function seed() {
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, status, deleted_at) VALUES
       ('${R.delDelivery}', 'NW-DDEL', '${R.inactiveDone}', '${INACTIVE}', '${ADMIN}', 'scheduled', now()),
       ('${R.activeDelivery}', 'NW-DACT', '${R.activeDone}', '${ACTIVE}', '${ADMIN}', 'scheduled', NULL);
+    INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, status, assigned_driver) VALUES
+      ('${R.driverDelivery}', 'NW-DDRV', '${R.activeDone}', '${ACTIVE}', '${ADMIN}', 'in_progress', '${DRIVER}');
     INSERT INTO public.inventory_holds (id, product_id, customer_id, quantity, created_by, is_active, expires_at, hold_type) VALUES
       ('${R.offHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', false, NULL, 'manual'),
       ('${R.expiredHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', true, (now() AT TIME ZONE 'America/Chicago')::date - 1, 'manual'),
       ('${R.openHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', true, NULL, 'manual'),
+      ('${R.datedHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', true, (now() AT TIME ZONE 'America/Chicago')::date + 1, 'manual'),
       ('${R.activeHold}', '${PRODUCT}', '${ACTIVE}', 1, '${ADMIN}', true, NULL, 'manual');
     INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, deleted_at) VALUES
       ('${R.delJob}', 'NW-JDEL', '${INACTIVE}', current_date, 'scheduled', now()),
@@ -195,6 +199,26 @@ async function main() {
   };
   for (const sql of Object.values(move)) refused(sql);
   console.log(`[new-work] moving work onto the inactive customer refused: ${Object.keys(move).join(', ')}`);
+
+  // Sol r2 #1: a driver may update their own in-progress delivery, but moving it to another customer
+  // or order is refused before any customer is looked at: the same answer for active and inactive.
+  const M = /WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved\. Only an admin or sales rep can move/;
+  const driverMoves = {
+    'customer to the inactive one': `UPDATE public.deliveries SET customer_id = '${INACTIVE}' WHERE id = '${R.driverDelivery}' RETURNING 1;`,
+    'customer to an active one': `UPDATE public.deliveries SET customer_id = '${RACE1}' WHERE id = '${R.driverDelivery}' RETURNING 1;`,
+    'order to the inactive customer\'s': `UPDATE public.deliveries SET order_id = '${R.inactiveDone}' WHERE id = '${R.driverDelivery}' RETURNING 1;`,
+    'order to an active customer\'s': `UPDATE public.deliveries SET order_id = '${R.activeOrder}' WHERE id = '${R.driverDelivery}' RETURNING 1;`,
+  };
+  assert.equal(allowed(`UPDATE public.deliveries SET delivery_notes = 'driver note' WHERE id = '${R.driverDelivery}' RETURNING 1;`, { role: 'authenticated', uid: DRIVER }), '1',
+    'the driver could not update their own delivery, so this case proves nothing');
+  for (const sql of Object.values(driverMoves)) refused(sql, M, { role: 'authenticated' }, DRIVER);
+  console.log(`[new-work] the driver may edit their own in-progress delivery, but every move is refused with the same move error: ${Object.keys(driverMoves).join(', ')}`);
+
+  // Sol r2 #2: pushing a dated hold's expiry later (or clearing it) is opening it; pulling it earlier is not.
+  refused(`UPDATE public.inventory_holds SET expires_at = expires_at + 5 WHERE id = '${R.datedHold}';`);
+  refused(`UPDATE public.inventory_holds SET expires_at = NULL WHERE id = '${R.datedHold}';`);
+  assert.equal(allowed(`UPDATE public.inventory_holds SET expires_at = (now() AT TIME ZONE 'America/Chicago')::date WHERE id = '${R.datedHold}' RETURNING 1;`), '1');
+  console.log('[new-work] an inactive customer\'s dated hold: pushing the expiry later or clearing it refused; pulling it earlier allowed');
 
   // Case 4: finishing down existing work of the inactive customer stays allowed.
   const finish = {

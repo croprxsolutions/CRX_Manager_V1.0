@@ -474,7 +474,7 @@ export default function NewDelivery() {
     });
 
     if (error) {
-      toast('error', sanitizeError(error));
+      toast('error', sanitizeError(error) || 'Failed to create delivery');
       Sentry.captureException(error, { extra: { context: 'create_delivery_with_items' } });
       setSaving(false);
       return;

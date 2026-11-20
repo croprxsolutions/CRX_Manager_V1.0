@@ -15,6 +15,11 @@
 --   hold; named for Taha in the PR). Refusal:
 --   CUSTOMER_INACTIVE_NEW_WORK, a fixed sentence that names no customer (the caller may not be allowed
 --   to read the order's customer). Every role and path (RPCs, direct writes, server roles).
+--   Moving any of these rows to another customer or order is for admins and sales reps only: anyone
+--   else signed in gets WORK_CUSTOMER_MOVE_NOT_ALLOWED before a customer is read (no status leak;
+--   no screen lets a non-admin move work). Pushing a hold's dated expiry later is checked as opening it.
+--   Correcting closed history that reopens a row (for example voiding a completed delivery, which
+--   reopens its order) needs the customer reactivated first.
 --   Guarantee holds for READ COMMITTED transactions (every app path); a REPEATABLE READ deactivation
 --   would count from its own older snapshot.
 --   NOT HERE (Taha's quote, invoice and booking work, until 2026-12-15): quotes, invoices, bookings.
@@ -43,13 +48,19 @@
 --
 -- ORDERING: after 20270128140000 (KI-148). Not re-runnable (preflight refuses). Triggers are added
 --   orders, deliveries, jobs, then inventory_holds: a job cancel writes jobs before holds, so taking
---   the holds table lock last cannot deadlock with it.
+--   the holds table lock last cannot deadlock with it. Live paths write orders and deliveries in both
+--   orders (quick delivery: order first; completion: delivery first), so no trigger order avoids every
+--   install-time deadlock: apply at a quiet time; lock_timeout 5s bounds the wait, and a deadlock
+--   aborts one transaction whole (retry it).
 
 SET LOCAL lock_timeout = '5s';
 
 DO $preflight$
 BEGIN
   -- The other half of the rule (KI-148's deactivation check) must already be installed.
+  IF to_regprocedure('public.is_admin()') IS NULL OR to_regprocedure('public.is_sales_rep()') IS NULL THEN
+    RAISE EXCEPTION 'INACTIVE_NEW_WORK_PREFLIGHT: the role helpers is_admin() and is_sales_rep() are missing';
+  END IF;
   IF to_regprocedure('public.guard_customer_deactivation_open_work_20270128()') IS NULL
      OR NOT EXISTS (SELECT 1 FROM pg_trigger t
                      WHERE t.tgrelid = 'public.customers'::regclass
@@ -111,7 +122,10 @@ BEGIN
     -- Every hold, whatever its type or source (Mason, 2026-11-19: no exceptions).
     v_new_open := NEW.is_active IS TRUE AND (NEW.expires_at IS NULL OR NEW.expires_at >= v_today);
     IF TG_OP = 'UPDATE' THEN
-      v_old_open := OLD.is_active IS TRUE AND (OLD.expires_at IS NULL OR OLD.expires_at >= v_today);
+      -- Pushing a dated expiry later counts as opening, so an extension saved across Chicago midnight
+      -- (old row open at the trigger, expired by the time a deactivation counts) is still checked.
+      v_old_open := OLD.is_active IS TRUE AND (OLD.expires_at IS NULL OR OLD.expires_at >= v_today)
+        AND NOT (OLD.expires_at IS NOT NULL AND (NEW.expires_at IS NULL OR NEW.expires_at > OLD.expires_at));
       v_moved := NEW.customer_id IS DISTINCT FROM OLD.customer_id;
     END IF;
     v_ids := ARRAY[NEW.customer_id];
@@ -132,6 +146,13 @@ BEGIN
   -- (Moving a closed order counts too: else a delivery could be added to it while it moves.)
   IF TG_OP = 'UPDATE' AND NOT ((v_new_open AND NOT v_old_open) OR v_moved) THEN
     RETURN NULL;
+  END IF;
+
+  -- Only an admin or sales rep may move work to another customer or order. Anyone else signed in (a
+  -- driver on an assigned delivery) gets this fixed refusal before any customer is read, so it can
+  -- never reveal whether a customer they cannot see is active. Server roles have no signed-in user.
+  IF v_moved AND auth.uid() IS NOT NULL AND NOT (public.is_admin() OR public.is_sales_rep()) THEN
+    RAISE EXCEPTION 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order';
   END IF;
 
   -- The delivery's order is locked first, so it cannot move to another customer before this commits.

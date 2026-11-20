@@ -194,6 +194,27 @@ change is the sanitizer sentence, which is safe before or after the migration.
 - #8 LOW → the rollback race checks the first session too.
 - #9 LOW → New Delivery shows the error through `sanitizeError`.
 
+## Sol round 2 settlement (2026-11-19)
+
+- #1 HIGH (a driver changes an assigned delivery's customer to learn whether another customer is
+  active) → moving any order, delivery, hold or job to another customer or order is refused for
+  anyone signed in who is not an admin or sales rep (`WORK_CUSTOMER_MOVE_NOT_ALLOWED`), before the
+  customer is looked at, so the answer is the same for an active and an inactive customer (proved
+  with the driver's own in-progress delivery). No screen lets a non-admin move work today; the only
+  live writer that moves a customer (`_save_job_cost_step2_impl`) is admin/rep only.
+- #2 MED (pushing a dated hold's expiry later, across midnight) → pushing an expiry later or
+  clearing it counts as opening the hold, so it is refused for an inactive customer (proved).
+- #3 MED (KNOWN_ISSUES omitted the REPEATABLE READ limit) → KI-148's note now names it.
+- #4 MED (adding lines to a legacy confirmed order) → accepted: decision 23 keeps existing orders
+  editable, and order lines are outside the four tables.
+- #5 MED (voiding a completed delivery reopens its order, which is then refused) → accepted:
+  correcting closed history that reopens a row needs the customer reactivated first (documented in
+  the migration header and changelog).
+- #6 MED (creating the triggers can deadlock with a delivery being completed) → accepted: live paths
+  write orders and deliveries in both orders, so no trigger order avoids it. Apply at a quiet time;
+  lock_timeout bounds the wait; a deadlock aborts one transaction whole.
+- #7 LOW (New Delivery could show an empty error) → falls back to "Failed to create delivery".
+
 ## Open business decisions
 
 None. The scope (four tables), the legacy customer's consequence and the deferred parts follow

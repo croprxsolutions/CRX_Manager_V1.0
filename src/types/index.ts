@@ -840,6 +840,9 @@ export interface QuoteSection {
   section_header_notes: string | null;
   needed_by_date: string | null;
   field_id: string | null;
+  /** 20270127110000; absent before that migration. */
+  timing?: 'pre_plant' | 'in_season' | 'late_summer' | null;
+  confidence?: 'firm' | 'likely' | 'maybe' | null;
 }
 
 /** The last price charged to a customer for one product (get_last_charged_prices, To-Do 0.3). */

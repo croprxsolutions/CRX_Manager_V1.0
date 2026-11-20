@@ -2244,6 +2244,84 @@ describe('QuoteBuilder', () => {
     expect(mockRpc.mock.calls.some(([name]) => name === 'create_job_from_quote_section')).toBe(false);
   });
 
+  // Bookings Phase A (20270127110000): timing and confidence per section, on every booking, not only Planned ones; never on the PDF.
+  it('sends each section’s timing and confidence, and a timing pick fills an empty needed-by date', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, is_planned: false };
+    const section = { ...fixture.section, timing: 'pre_plant', confidence: 'firm' };
+    // '{}' parses to the default windows; with no row the Timing pick stays off (a failed read).
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'app_settings' ? { setting_value: '{}' } : table === 'quotes' ? quote : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item] : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? [fixture.product] : [], error: null }));
+    let saves = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name !== 'save_quote') return Promise.resolve({ data: null, error: null });
+      saves += 1;
+      return Promise.resolve({ data: { status: 'saved', quote_id: quote.id, row_version: 7 + saves, item_ids: {}, section_ids: {} }, error: null });
+    });
+    const sentSection = (call: number) => (mockRpc.mock.calls.filter(([name]) => name === 'save_quote')[call][1] as {
+      p_sections: Array<{ timing: string | null; confidence: string | null; needed_by_date: string | null }>;
+    }).p_sections[0];
+
+    renderQuoteBuilder(quote.id);
+    const timing = await screen.findByLabelText('Timing') as HTMLSelectElement;
+    await waitFor(() => expect(timing.value).toBe('pre_plant'));
+    expect((screen.getByLabelText('Confidence') as HTMLSelectElement).value).toBe('firm');
+    fireEvent.change(screen.getByLabelText('Confidence'), { target: { value: 'maybe' } });
+    fireEvent.click(screen.getByText('Save draft'));
+    await waitFor(() => expect(saves).toBe(1));
+    expect(sentSection(0)).toMatchObject({ timing: 'pre_plant', confidence: 'maybe', needed_by_date: null });
+    await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+
+    fireEvent.change(screen.getByLabelText('Timing'), { target: { value: 'late_summer' } });
+    fireEvent.click(screen.getByText('Save draft'));
+    await waitFor(() => expect(saves).toBe(2));
+    expect(sentSection(1).timing).toBe('late_summer');
+    expect(sentSection(1).needed_by_date).toMatch(/^\d{4}-07-16$/);
+  });
+
+  it('a timing pick on a section with a live job leaves its needed-by date empty (the job locks it)', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, is_planned: true };
+    const section = { ...fixture.section, field_id: 'field-1', needed_by_date: null };
+    const job = { id: 'job-7', job_number: 'J-7', status: 'scheduled', quote_section_id: section.id };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote
+      : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item]
+        : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+          : table === 'products' ? [fixture.product] : table === 'fields' ? [HOME_QUARTER_OF_CUSTOMER_1]
+            : table === 'jobs' ? [job] : [], error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+      ? { data: { status: 'saved', quote_id: quote.id, row_version: 8, item_ids: {}, section_ids: {} }, error: null }
+      : { data: null, error: null }));
+    renderQuoteBuilder(quote.id);
+    await screen.findByText(/Job J-7 was scheduled from this section/);
+    fireEvent.change(screen.getByLabelText('Timing'), { target: { value: 'in_season' } });
+    fireEvent.click(screen.getByText('Save draft'));
+    await waitFor(() => expect(mockRpc.mock.calls.some(([name]) => name === 'save_quote')).toBe(true));
+    const sent = (mockRpc.mock.calls.find(([name]) => name === 'save_quote')![1] as {
+      p_sections: Array<{ timing: string | null; needed_by_date: string | null }>;
+    }).p_sections[0];
+    expect(sent).toMatchObject({ timing: 'in_season', needed_by_date: null });
+  });
+
+  it('shows another rep’s booking’s timing and confidence read-only', async () => {
+    const fixture = makeQuoteFixture('revised', 7);
+    const quote = { ...fixture.quote, is_planned: true, created_by: 'other-rep' };
+    const section = { ...fixture.section, timing: 'in_season', confidence: 'likely' };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item] : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? [fixture.product] : [], error: null }));
+    mockRpc.mockResolvedValue({ data: null, error: null });
+    authState.role = 'sales_rep';
+    try {
+      renderQuoteBuilder(quote.id);
+      const timing = await screen.findByLabelText('Timing') as HTMLSelectElement;
+      await waitFor(() => expect(timing.value).toBe('in_season'));
+      expect(timing).toBeDisabled();
+      expect(screen.getByLabelText('Confidence')).toBeDisabled();
+      // The price-only path refuses a planning change, so the date is read-only too.
+      for (const seg of screen.getAllByRole('spinbutton', { name: /Needed by/ })) expect(seg).toHaveAttribute('aria-disabled', 'true');
+    } finally {
+      authState.role = 'admin';
+    }
+  });
+
   it('stops naming a line as its saved line once it is switched to another product, even if switched back', async () => {
     const fixture = makeQuoteFixture('draft', 7);
     const alpha = { ...fixture.product, product_name: 'Alpha Chem' };
@@ -5535,8 +5613,10 @@ describe('QuoteBuilder', () => {
       serve('draft');
       await waitFor(() => expect(figure('Total cost')).toBe('$12.00'));
       fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+      expect(screen.getByLabelText('Confidence')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('menuitem', { name: /Customer view/ }));
       expect(figure('Quote total')).toBe('$20.00');
+      expect(screen.queryByLabelText('Confidence')).not.toBeInTheDocument();
       expect(within(summary()).queryByText('Total cost')).not.toBeInTheDocument();
       expect(within(summary()).queryByText('Profit · margin')).not.toBeInTheDocument();
       expect(summary().textContent).not.toMatch(/\$12\.00|\$8\.00|40\.0%/);
@@ -5931,7 +6011,11 @@ describe('QuoteBuilder', () => {
     it.each(['accepted', 'sent'] as const)('a %s quote shows its fields disabled and no add actions; collapse and tabs still work', async (status) => {
       serveLines('Product', {}, status);
       await screen.findAllByRole('spinbutton', { name: 'Price per unit' });
-      for (const input of screen.getAllByRole('spinbutton')) expect(input).toBeDisabled();
+      // The Needed-by date picker's segments are spinbuttons that mark themselves aria-disabled.
+      for (const input of screen.getAllByRole('spinbutton')) {
+        if (input.getAttribute('aria-disabled') !== 'true') expect(input).toBeDisabled();
+      }
+      expect(screen.getAllByRole('spinbutton', { name: /Needed by/ }).length).toBeGreaterThan(0);
       expect(screen.getByRole('textbox', { name: 'Section name' })).toBeDisabled();
       expect(screen.getByRole('textbox', { name: /Note at the top/ })).toBeDisabled();
       expect(screen.getByRole('button', { name: /Pricing tier/ })).toBeDisabled();

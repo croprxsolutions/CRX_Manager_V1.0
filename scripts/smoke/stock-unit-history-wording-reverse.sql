@@ -1,6 +1,6 @@
--- Rollback for supabase/migrations/20270129140000_stock_unit_history_names_movements_holds.sql (proven by
+-- Rollback for supabase/migrations/20270201130000_stock_unit_history_names_movements_holds.sql (proven by
 -- scripts/smoke/prove-units-batch-real-schema.mjs). Run this BEFORE stock-unit-history-guard-reverse.sql.
--- Restores the 20270121120000 body (fallback wording "stock movements or holds"); the refusal itself is unchanged.
+-- Restores the body release #1990 left (20270129160000: fallback wording "stock movements or holds", READ COMMITTED check); the refusal itself is unchanged.
 -- To use it live, copy it into a new migration through the gates (without the BEGIN / COMMIT lines).
 BEGIN;
 
@@ -18,6 +18,13 @@ BEGIN
   -- Clearing is a1's to refuse; a case or outer-space change keeps every comparison (receive_return lowers and trims).
   IF v_new IS NULL OR v_new IS NOT DISTINCT FROM v_old THEN
     RETURN NEW;
+  END IF;
+  -- #1990 Sol: under REPEATABLE READ or SERIALIZABLE the checks below read the transaction's first snapshot, so a
+  -- line committed since (it held this row FOR SHARE, then let go) is invisible and the unit would change under it.
+  -- READ COMMITTED re-reads after the row lock, so only it may change a stock unit.
+  IF current_setting('transaction_isolation') NOT IN ('read committed', 'read uncommitted') THEN
+    RAISE EXCEPTION 'PRODUCT_UNIT_CHANGE_NEEDS_READ_COMMITTED: change a stock unit in a READ COMMITTED transaction (this one is %), so the history check sees every committed line.',
+      current_setting('transaction_isolation') USING ERRCODE = 'serialization_failure';
   END IF;
   IF EXISTS (SELECT 1 FROM public.order_items WHERE product_id = NEW.id)
      OR EXISTS (SELECT 1 FROM public.delivery_items WHERE product_id = NEW.id)

@@ -2,7 +2,8 @@
 -- the sentence. The record list covers only order, delivery, PO, return and receipt rows, so a product whose only
 -- history is a stock movement or an active hold read "...stock movements or holds (stock movements or holds)."
 --
--- WHAT: re-emits public._refuse_stock_unit_change_with_history() (20270121120000) with one change: when no order,
+-- WHAT: re-emits public._refuse_stock_unit_change_with_history() as release #1990 left it (20270129160000, which added
+-- the READ COMMITTED check; kept unchanged here) with one change: when no order,
 -- delivery, PO, return or receipt row exists, the brackets say which of the two it found: "stock movements",
 -- "an active hold", or "stock movements and an active hold". The decision (which history refuses), the trigger,
 -- the lock trigger and the grants are unchanged. Wording only; screens cannot reach it (they cannot change a stock
@@ -12,9 +13,9 @@
 
 DO $preflight$
 BEGIN
-  -- Pins the body 20270121120000 created (CR stripped), so this replaces exactly that body.
+  -- Pins the body release #1990 created (20270129160000, CR stripped), so this replaces exactly that body.
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
-       WHERE oid = to_regprocedure('public._refuse_stock_unit_change_with_history()')) IS DISTINCT FROM 'edb18d7a09c0475bf1c6316c8d2d11e2' THEN
+       WHERE oid = to_regprocedure('public._refuse_stock_unit_change_with_history()')) IS DISTINCT FROM '20f02f8606621be4bc042d7787c34cdb' THEN
     RAISE EXCEPTION 'PREFLIGHT_UNITS_DRIFT: _refuse_stock_unit_change_with_history is missing, changed, or already re-emitted';
   END IF;
 END;
@@ -34,6 +35,13 @@ BEGIN
   -- Clearing is a1's to refuse; a case or outer-space change keeps every comparison (receive_return lowers and trims).
   IF v_new IS NULL OR v_new IS NOT DISTINCT FROM v_old THEN
     RETURN NEW;
+  END IF;
+  -- #1990 Sol: under REPEATABLE READ or SERIALIZABLE the checks below read the transaction's first snapshot, so a
+  -- line committed since (it held this row FOR SHARE, then let go) is invisible and the unit would change under it.
+  -- READ COMMITTED re-reads after the row lock, so only it may change a stock unit.
+  IF current_setting('transaction_isolation') NOT IN ('read committed', 'read uncommitted') THEN
+    RAISE EXCEPTION 'PRODUCT_UNIT_CHANGE_NEEDS_READ_COMMITTED: change a stock unit in a READ COMMITTED transaction (this one is %), so the history check sees every committed line.',
+      current_setting('transaction_isolation') USING ERRCODE = 'serialization_failure';
   END IF;
   IF EXISTS (SELECT 1 FROM public.order_items WHERE product_id = NEW.id)
      OR EXISTS (SELECT 1 FROM public.delivery_items WHERE product_id = NEW.id)

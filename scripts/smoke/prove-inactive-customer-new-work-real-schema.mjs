@@ -153,6 +153,8 @@ async function main() {
   const H = /HOLD_CUSTOMER_REQUIRED: nothing was saved/;
   refused(newHold(null, R.openJob).replace("'null'", 'NULL'), H);
   refused(`UPDATE public.inventory_holds SET customer_id = NULL, source_id = '${R.openJob}' WHERE id = '${R.activeHold}';`, H);
+  // Luna r7: an open hold with no customer and no source may not gain a source either.
+  refused(`UPDATE public.inventory_holds SET customer_id = NULL WHERE id = '${R.activeHold}'; UPDATE public.inventory_holds SET source_id = '${R.openJob}' WHERE id = '${R.activeHold}';`, H);
   console.log('[new-work] a hold built from a job or quote with no customer is refused (new, or by dropping its customer)');
   console.log('[new-work] new order (open or closed), delivery, stock hold of any type or source and spray job: refused for the inactive customer as postgres and service_role; saved for the active one');
   // Signed-in admin and rep (the guard ignores who is asking; row-level security does not hide the flag).

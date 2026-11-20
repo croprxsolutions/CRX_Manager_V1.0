@@ -220,6 +220,13 @@ change is the sanitizer sentence, which is safe before or after the migration.
   and every builder copies it; live 2026-11-19: 0 such rows. A manual hold with no source and no
   customer (20 live, none active) belongs to no customer and stays allowed. No source lookup, so
   the round-capped exemption mechanism is not revived.
+- Luna r7 HIGH (an open customer-less hold gains a source without a move) → changing a hold's
+  source counts as a move (no app path changes it; grep 2026-11-19), so it runs the role, customer
+  and HOLD_CUSTOMER_REQUIRED checks (proved).
+- Luna r7 MED (service_role can move work) → refuted: the move rule stops signed-in non-staff from
+  learning a customer's status (Sol r2 #1). Server roles bypass row-level security already, see
+  everything, and are not signed-in users; every move they make still gets the inactive-customer
+  check (proved as service_role for inserts). The changelog now says "for signed-in users".
 
 ## Open business decisions
 

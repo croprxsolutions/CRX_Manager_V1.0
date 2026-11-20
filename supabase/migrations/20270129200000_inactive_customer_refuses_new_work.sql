@@ -129,7 +129,8 @@ BEGIN
       -- (old row open at the trigger, expired by the time a deactivation counts) is still checked.
       v_old_open := OLD.is_active IS TRUE AND (OLD.expires_at IS NULL OR OLD.expires_at >= v_today)
         AND NOT (OLD.expires_at IS NOT NULL AND (NEW.expires_at IS NULL OR NEW.expires_at > OLD.expires_at));
-      v_moved := NEW.customer_id IS DISTINCT FROM OLD.customer_id;
+      -- Pointing a hold at another job or quote is a move too (no app path changes a hold's source).
+      v_moved := NEW.customer_id IS DISTINCT FROM OLD.customer_id OR NEW.source_id IS DISTINCT FROM OLD.source_id;
     END IF;
     v_ids := ARRAY[NEW.customer_id];
   ELSIF TG_TABLE_NAME = 'jobs' THEN

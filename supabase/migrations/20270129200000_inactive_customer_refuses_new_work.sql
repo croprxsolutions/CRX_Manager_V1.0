@@ -12,7 +12,9 @@
 --   whatever its type or source (Mason, 2026-11-19: no exceptions). So starting an inactive
 --   customer's old spray job that reserves stock, or a quote or booking reservation, needs the
 --   customer reactivated first (live 2026-11-19: no inactive customer has a spray job, quote or
---   hold; named for Taha in the PR). Refusal:
+--   hold; named for Taha in the PR). A hold built from a job or quote (source_id set) must name its
+--   customer (HOLD_CUSTOMER_REQUIRED; live 2026-11-19: 0 such rows, and jobs and quotes require a
+--   customer); a manual hold with no source and no customer belongs to no customer. Refusal:
 --   CUSTOMER_INACTIVE_NEW_WORK, a fixed sentence that names no customer (the caller may not be allowed
 --   to read the order's customer). Every role and path (RPCs, direct writes, server roles).
 --   Moving any of these rows to another customer or order is for admins and sales reps only: anyone
@@ -82,7 +84,8 @@ BEGIN
            ('orders','id'), ('orders','customer_id'), ('orders','status'), ('orders','deleted_at'),
            ('deliveries','customer_id'), ('deliveries','order_id'), ('deliveries','status'), ('deliveries','deleted_at'),
            ('inventory_holds','customer_id'), ('inventory_holds','is_active'), ('inventory_holds','expires_at'),
-           ('jobs','customer_id'), ('jobs','status'), ('jobs','deleted_at'), ('jobs','invoice_id'))) <> 17 THEN
+           ('inventory_holds','source_id'),
+           ('jobs','customer_id'), ('jobs','status'), ('jobs','deleted_at'), ('jobs','invoice_id'))) <> 18 THEN
     RAISE EXCEPTION 'INACTIVE_NEW_WORK_PREFLIGHT: a column the guard reads is missing';
   END IF;
 END
@@ -153,6 +156,14 @@ BEGIN
   -- never reveal whether a customer they cannot see is active. Server roles have no signed-in user.
   IF v_moved AND auth.uid() IS NOT NULL AND NOT (public.is_admin() OR public.is_sales_rep()) THEN
     RAISE EXCEPTION 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order';
+  END IF;
+
+  -- A hold built from a job or quote must name its customer (jobs and quotes always have one), so it
+  -- cannot skip the check below with no customer. A manual hold with no source belongs to no customer.
+  IF TG_TABLE_NAME = 'inventory_holds' THEN
+    IF NEW.source_id IS NOT NULL AND NEW.customer_id IS NULL THEN
+      RAISE EXCEPTION 'HOLD_CUSTOMER_REQUIRED: nothing was saved. A stock hold for a spray job or quote must name its customer';
+    END IF;
   END IF;
 
   -- The delivery's order is locked first, so it cannot move to another customer before this commits.

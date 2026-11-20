@@ -337,6 +337,8 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ message: 'CUSTOMER_INACTIVE_NEW_WORK: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added' }))
       .toBe('Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added');
     expect(sanitizeError('CUSTOMER_INACTIVE_NEW_WORK')).toContain('must reactivate the customer');
+    expect(sanitizeError({ message: 'HOLD_CUSTOMER_REQUIRED: nothing was saved. A stock hold for a spray job or quote must name its customer' }))
+      .toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');
     expect(sanitizeError({ message: 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order' }))
       .toBe('Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order');
     expect(sanitizeError('PREPAY_BALANCE_SERVER_ONLY: a prepay balance changes only through prepayments and payments'))

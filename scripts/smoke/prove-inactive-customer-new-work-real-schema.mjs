@@ -149,6 +149,11 @@ async function main() {
   // Every hold, whatever its source (Mason, 2026-11-19: no exceptions): the customer's own job, another
   // customer's job, a quote-built crop program hold.
   for (const sql of [newHold(INACTIVE, R.openJob), newHold(INACTIVE, R.activeJob), newHold(INACTIVE, R.openJob, 'crop_program')]) refused(sql);
+  // Luna r6: a hold built from a job or quote may not drop its customer to skip the check.
+  const H = /HOLD_CUSTOMER_REQUIRED: nothing was saved/;
+  refused(newHold(null, R.openJob).replace("'null'", 'NULL'), H);
+  refused(`UPDATE public.inventory_holds SET customer_id = NULL, source_id = '${R.openJob}' WHERE id = '${R.activeHold}';`, H);
+  console.log('[new-work] a hold built from a job or quote with no customer is refused (new, or by dropping its customer)');
   console.log('[new-work] new order (open or closed), delivery, stock hold of any type or source and spray job: refused for the inactive customer as postgres and service_role; saved for the active one');
   // Signed-in admin and rep (the guard ignores who is asking; row-level security does not hide the flag).
   for (const uid of [ADMIN, REP]) refused(newJob(INACTIVE), W, { role: 'authenticated' }, uid);

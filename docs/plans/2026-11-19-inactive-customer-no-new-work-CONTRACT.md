@@ -215,6 +215,12 @@ change is the sanitizer sentence, which is safe before or after the migration.
   lock_timeout bounds the wait; a deadlock aborts one transaction whole.
 - #7 LOW (New Delivery could show an empty error) → falls back to "Failed to create delivery".
 
+- Luna r6 HIGH (a hold with no customer skips the check) → a hold with a source (built from a job
+  or quote) must name its customer (`HOLD_CUSTOMER_REQUIRED`). Jobs and quotes require a customer
+  and every builder copies it; live 2026-11-19: 0 such rows. A manual hold with no source and no
+  customer (20 live, none active) belongs to no customer and stays allowed. No source lookup, so
+  the round-capped exemption mechanism is not revived.
+
 ## Open business decisions
 
 None. The scope (four tables), the legacy customer's consequence and the deferred parts follow

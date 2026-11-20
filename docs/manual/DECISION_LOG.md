@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-19 — #2038: Mason owner-accepted 2 Sol finding(s) at `8e5eb30ccb22`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2038 at `8e5eb30ccb22` (base `62ccaeaa2a7b`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270130100000_epa_batch_commit_checks_at_save.sql:88`, text sha256 `ca8573d6db3fd3ce` (the wording stays with the proof, not here)
+  Mason's reason: both lookups fetch the same EPA data (ref e033590e65ec)
+- Finding 2 (HIGH) at `supabase/migrations/20270130100000_epa_batch_commit_checks_at_save.sql:143`, text sha256 `8662efbcd11758a1` (the wording stays with the proof, not here)
+  Mason's reason: re-running the lookup brings it back (ref e11881672f0a)
+
 ## 2026-11-19 — #2038 may have Sol round 6
 
 **Decision (Mason, in chat, 2026-11-19: "Accept + round 6").** PR #2038 (#1976) may have Sol round 6. Mason judges the lookup race (a lookup started between the batch's screen check and its own lookup) a business non-issue: both lookups fetch the same EPA data, and the admin can re-run theirs.

@@ -28,6 +28,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const ADMIN = USERS.admin;
 const REP = USERS.rep;
 const DRIVER = USERS.driver;
+const APPLICATOR = USERS.applicator;
 const PRODUCT = id('d1');
 const ACTIVE = id('c1'); // active customer
 const INACTIVE = id('c2'); // inactive, with open and closed work (like the live customer with 2 confirmed orders)
@@ -147,12 +148,16 @@ async function main() {
   console.log('[new-work] new order (open or closed), delivery, stock hold of any type or source and spray job: refused for the inactive customer as postgres and service_role; saved for the active one');
   // Signed-in admin and rep (the guard ignores who is asking; row-level security does not hide the flag).
   for (const uid of [ADMIN, REP]) refused(newJob(INACTIVE), W, { role: 'authenticated' }, uid);
-  // A driver may not add a spray job: the same permission error for either customer, so it reveals no status.
-  const driverErr = (cid) => { const r = run(DRIVER, newJob(cid)); assert.notEqual(r.status, 0, 'a driver saved a spray job'); return r.err.replace(/NW-J\d+/g, ''); };
-  const [driverActive, driverInactive] = [driverErr(ACTIVE), driverErr(INACTIVE)];
-  assert.doesNotMatch(driverInactive, /CUSTOMER_INACTIVE_NEW_WORK/, driverInactive);
-  assert.equal(driverInactive, driverActive);
-  console.log(`[new-work] a driver adding a spray job gets the same permission error for an active and an inactive customer: ${driverActive.split('\n')[0]}`);
+  // A driver or applicator who may not add a spray job gets the same permission error for either
+  // customer, so it reveals no status. (One who may add it for the active customer is a real writer.)
+  for (const [who, uid] of [['driver', DRIVER], ['applicator', APPLICATOR]]) {
+    const [active, inactive] = [ACTIVE, INACTIVE].map((cid) => { const r = run(uid, newJob(cid)); return { ...r, err: r.err.replace(/NW-J\d+/g, '') }; });
+    if (active.status === 0) { assert.match(inactive.err, W, `${who}: ${inactive.err}`); console.log(`[new-work] the ${who} may add spray jobs: refused only for the inactive customer`); continue; }
+    assert.notEqual(inactive.status, 0, `the ${who} saved a spray job for the inactive customer`);
+    assert.doesNotMatch(inactive.err, /CUSTOMER_INACTIVE_NEW_WORK/, inactive.err);
+    assert.equal(inactive.err, active.err);
+    console.log(`[new-work] the ${who} adding a spray job gets the same permission error for an active and an inactive customer: ${active.err.split('\n')[0]}`);
+  }
   // The real screen path for a hold: create_inventory_hold, signed in.
   const holdRpc = (cid, uid) => `SELECT (public.create_inventory_hold('${PRODUCT}', '${cid}', 1, 'manual', NULL, 'NW', '${uid}', true, 'prover', gen_random_uuid()::text)) IS NOT NULL;`;
   // Admin with force (no stock is seeded; a rep may not force, so the rep is proved on the job insert above).

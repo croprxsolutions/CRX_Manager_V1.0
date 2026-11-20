@@ -179,6 +179,10 @@ change is the sanitizer sentence, which is safe before or after the migration.
   reservation, need the customer reactivated first. Cost today: none (live 2026-11-19: no inactive
   customer has a spray job, quote or hold; KI-148 stops deactivating a customer with open jobs).
   Named for Taha in the PR.
+- Luna r5 MED (multi-customer deadlock with a bulk deactivation in another order) → accepted, as
+  in #17-#19: Postgres aborts one side with nothing half-saved and the user retries. Luna r5 LOWs →
+  the "already installed" check looks only at the four tables; the permission proof covers the
+  applicator as well as the driver.
 - Luna r4 LOW (race proof used a fixed delay) → each race now checks the first session is asleep
   holding its locks before the second starts.
 - Luna r3 LOW (prover rolls back "allowed" writes) → refuted: AFTER ROW triggers fire at the end of

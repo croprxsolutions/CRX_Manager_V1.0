@@ -59,7 +59,9 @@ BEGIN
     RAISE EXCEPTION 'INACTIVE_NEW_WORK_PREFLIGHT: KI-148 (20270128140000) must be applied first';
   END IF;
   IF to_regprocedure('public.guard_inactive_customer_new_work_20270129()') IS NOT NULL
-     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'zz_inactive_customer_new_work_20270129') THEN
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'zz_inactive_customer_new_work_20270129'
+                  AND tgrelid IN ('public.orders'::regclass, 'public.deliveries'::regclass,
+                                  'public.jobs'::regclass, 'public.inventory_holds'::regclass)) THEN
     RAISE EXCEPTION 'INACTIVE_NEW_WORK_PREFLIGHT: the guard already exists';
   END IF;
   IF (SELECT count(*) FROM information_schema.columns

@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-20 — #2051: Mason owner-accepted 1 Sol finding(s) at `4294c88e1cfa`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #2051 at `4294c88e1cfa` (base `e4e6e11fae1c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201100000_page_access_locks_reports.sql:524`, text sha256 `635a35ee3770de64` (the wording stays with the proof, not here)
+  Mason's reason: this doesn't happen in our buisness (ref 8e75ba46f8ee)
+
 ## 2026-11-19 — Page Access is a real lock (KI-119); reps keep credit terms (KI-120)
 
 **Decision (Mason, in chat, 2026-11-19).** Settings → Page Access is a real security control, not menu tidiness (To-Do decision 16). Scope: "actions + reports". Reports now: the database refuses Reports Library and Sales Reports data to a person with that page hidden (`20270201100000`). Money later: the invoice and payment actions wait for Taha after 2026-12-15 (KI-169). Logbook reports are for admins and sales reps only. Reps keep payment terms, finance-charge settings, parent customer and default application service (To-Do decision 18; KI-120 accepted, no code).

@@ -107,7 +107,7 @@ BEGIN
   -- full through the canonical complete_delivery boundary, as the caller in the current JWT;
   -- it draws down stock, so each delivered product's warehouse row is seeded once up front.
   INSERT INTO public.inventory(product_id,location,quantity_available,unit_size)
-  SELECT p,'Main Warehouse',100,'ea' FROM unnest(ARRAY[v_unknown,v_returnable,v_other]) AS p;
+  SELECT p,'Main Warehouse',100,'Gal' FROM unnest(ARRAY[v_unknown,v_returnable,v_other]) AS p;
   EXECUTE $sql$
     CREATE FUNCTION pg_temp.smk_p3_delivered(p_item uuid,p_key text) RETURNS void
     LANGUAGE plpgsql AS $fn$
@@ -136,7 +136,7 @@ BEGIN
 
   INSERT INTO public.orders(order_number,customer_id,salesman_id) VALUES ('SMK-P3-'||v_suffix,v_customer,v_admin) RETURNING id INTO v_order;
   INSERT INTO public.order_items(order_id,product_id,product_name,price_per_unit,total_units_needed,unit_size,total_price,quantity_delivered,quantity_remaining)
-  VALUES(v_order,v_unknown,'[SMOKE] unknown',10,4,'ea',40,0,4) RETURNING id INTO v_item;
+  VALUES(v_order,v_unknown,'[SMOKE] unknown',10,4,'Gal',40,0,4) RETURNING id INTO v_item;
   PERFORM pg_temp.smk_p3_delivered(v_item,v_suffix||'-unknown');
   -- sales_rep positive control proves the public wrapper remains available.
   PERFORM set_config('request.jwt.claim.sub', v_sales::text, true);
@@ -182,7 +182,7 @@ BEGIN
   -- dormant unknown compatibility chain above.
   INSERT INTO public.orders(order_number,customer_id,salesman_id) VALUES ('SMK-P3-RET-'||v_suffix,v_customer,v_sales) RETURNING id INTO v_returnable_order;
   INSERT INTO public.order_items(order_id,product_id,product_name,price_per_unit,total_units_needed,unit_size,total_price,quantity_delivered,quantity_remaining)
-  VALUES(v_returnable_order,v_returnable,'[SMOKE] returnable',10,4,'ea',40,0,4) RETURNING id INTO v_returnable_item;
+  VALUES(v_returnable_order,v_returnable,'[SMOKE] returnable',10,4,'Gal',40,0,4) RETURNING id INTO v_returnable_item;
   PERFORM pg_temp.smk_p3_delivered(v_returnable_item,v_suffix||'-returnable');
   v_result:=public.create_return(jsonb_build_object('customer_id',v_customer,'order_id',v_returnable_order,'reason','overstock'),jsonb_build_array(jsonb_build_object('order_item_id',v_returnable_item,'quantity',2,'condition','unopened','restock',true)),'smk-p3-'||v_suffix||'-returnable-create');
   v_returnable_return:=(v_result->>'return_id')::uuid;
@@ -255,7 +255,7 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_sales::text, true);
   INSERT INTO public.orders(order_number,customer_id,salesman_id) VALUES ('SMK-P3-NR-'||v_suffix,v_customer,v_sales) RETURNING id INTO v_force_order;
   INSERT INTO public.order_items(order_id,product_id,product_name,price_per_unit,total_units_needed,unit_size,total_price,quantity_delivered,quantity_remaining)
-  VALUES(v_force_order,v_blocked,'[SMOKE] no return',10,4,'ea',40,4,0) RETURNING id INTO v_force_item;
+  VALUES(v_force_order,v_blocked,'[SMOKE] no return',10,4,'Gal',40,4,0) RETURNING id INTO v_force_item;
   BEGIN
     PERFORM public.create_return(jsonb_build_object('customer_id',v_customer,'order_id',v_force_order,'reason','overstock'),jsonb_build_array(jsonb_build_object('order_item_id',v_force_item,'quantity',1,'condition','unopened','restock',false)),'smk-p3-'||v_suffix||'-blocked-create');
     RAISE EXCEPTION 'SMOKE_FAIL: no_return create was allowed';
@@ -269,14 +269,14 @@ BEGIN
   -- Policy does not interfere with retire-only reversal wrappers.
   INSERT INTO public.orders(order_number,customer_id,salesman_id) VALUES ('SMK-P3-REJ-'||v_suffix,v_customer,v_sales) RETURNING id INTO v_reject_order;
   INSERT INTO public.order_items(order_id,product_id,product_name,price_per_unit,total_units_needed,unit_size,total_price,quantity_delivered,quantity_remaining)
-  VALUES(v_reject_order,v_other,'[SMOKE] reject',10,4,'ea',40,4,0) RETURNING id INTO v_reject_item;
+  VALUES(v_reject_order,v_other,'[SMOKE] reject',10,4,'Gal',40,4,0) RETURNING id INTO v_reject_item;
   v_result:=public.create_return(jsonb_build_object('customer_id',v_customer,'order_id',v_reject_order,'reason','overstock'),jsonb_build_array(jsonb_build_object('order_item_id',v_reject_item,'quantity',1,'condition','unopened','restock',false)),'smk-p3-'||v_suffix||'-reject-create');
   v_reject_return:=(v_result->>'return_id')::uuid;
   v_result:=public.reject_return(v_reject_return,v_sales,'smk-p3-'||v_suffix||'-reject');
   IF v_result->>'status' IS DISTINCT FROM 'rejected' THEN RAISE EXCEPTION 'SMOKE_FAIL: reject boundary %',v_result; END IF;
   INSERT INTO public.orders(order_number,customer_id,salesman_id) VALUES ('SMK-P3-CAN-'||v_suffix,v_customer,v_sales) RETURNING id INTO v_cancel_order;
   INSERT INTO public.order_items(order_id,product_id,product_name,price_per_unit,total_units_needed,unit_size,total_price,quantity_delivered,quantity_remaining)
-  VALUES(v_cancel_order,v_other,'[SMOKE] cancel',10,4,'ea',40,0,4) RETURNING id INTO v_cancel_item;
+  VALUES(v_cancel_order,v_other,'[SMOKE] cancel',10,4,'Gal',40,0,4) RETURNING id INTO v_cancel_item;
   PERFORM pg_temp.smk_p3_delivered(v_cancel_item,v_suffix||'-cancel');
   v_result:=public.create_return(jsonb_build_object('customer_id',v_customer,'order_id',v_cancel_order,'reason','overstock'),jsonb_build_array(jsonb_build_object('order_item_id',v_cancel_item,'quantity',1,'condition','unopened','restock',true)),'smk-p3-'||v_suffix||'-cancel-create');
   v_cancel_return:=(v_result->>'return_id')::uuid;
@@ -346,7 +346,7 @@ BEGIN
   -- leave its requested return and idempotency ledger untouched.
   INSERT INTO public.orders(order_number,customer_id,salesman_id) VALUES ('SMK-P3-FORCE-REJ-'||v_suffix,v_customer,v_sales) RETURNING id INTO v_force_order;
   INSERT INTO public.order_items(order_id,product_id,product_name,price_per_unit,total_units_needed,unit_size,total_price,quantity_delivered,quantity_remaining)
-  VALUES(v_force_order,v_other,'[SMOKE] forced reject',10,4,'ea',40,4,0) RETURNING id INTO v_force_item;
+  VALUES(v_force_order,v_other,'[SMOKE] forced reject',10,4,'Gal',40,4,0) RETURNING id INTO v_force_item;
   v_result:=public.create_return(jsonb_build_object('customer_id',v_customer,'order_id',v_force_order,'reason','overstock'),jsonb_build_array(jsonb_build_object('order_item_id',v_force_item,'quantity',1,'condition','unopened','restock',false)),'smk-p3-'||v_suffix||'-force-reject-create');
   v_reject_return:=(v_result->>'return_id')::uuid;
   SELECT count(*) INTO v_before_count FROM public.activity_feed WHERE related_entity_id=v_reject_return;
@@ -368,7 +368,7 @@ BEGIN
   -- cancel_return reverses received inventory before its late activity row.
   INSERT INTO public.orders(order_number,customer_id,salesman_id) VALUES ('SMK-P3-FORCE-CAN-'||v_suffix,v_customer,v_sales) RETURNING id INTO v_force_order;
   INSERT INTO public.order_items(order_id,product_id,product_name,price_per_unit,total_units_needed,unit_size,total_price,quantity_delivered,quantity_remaining)
-  VALUES(v_force_order,v_other,'[SMOKE] forced cancel',10,4,'ea',40,0,4) RETURNING id INTO v_force_item;
+  VALUES(v_force_order,v_other,'[SMOKE] forced cancel',10,4,'Gal',40,0,4) RETURNING id INTO v_force_item;
   PERFORM pg_temp.smk_p3_delivered(v_force_item,v_suffix||'-force-cancel');
   v_result:=public.create_return(jsonb_build_object('customer_id',v_customer,'order_id',v_force_order,'reason','overstock'),jsonb_build_array(jsonb_build_object('order_item_id',v_force_item,'quantity',1,'condition','unopened','restock',true)),'smk-p3-'||v_suffix||'-force-cancel-create');
   v_cancel_return:=(v_result->>'return_id')::uuid;
@@ -395,7 +395,7 @@ BEGIN
   -- forced late activity failure must erase all three and the idempotency row.
   INSERT INTO public.orders(order_number,customer_id,salesman_id) VALUES ('SMK-P3-FORCE-C-'||v_suffix,v_customer,v_sales) RETURNING id INTO v_force_order;
   INSERT INTO public.order_items(order_id,product_id,product_name,price_per_unit,total_units_needed,unit_size,total_price,quantity_delivered,quantity_remaining)
-  VALUES(v_force_order,v_other,'[SMOKE] forced create',10,4,'ea',40,0,4) RETURNING id INTO v_force_item;
+  VALUES(v_force_order,v_other,'[SMOKE] forced create',10,4,'Gal',40,0,4) RETURNING id INTO v_force_item;
   PERFORM pg_temp.smk_p3_delivered(v_force_item,v_suffix||'-force-create');
   SELECT count(*) INTO v_before_count FROM public.activity_feed WHERE customer_id=v_customer AND event_type='return_requested';
   PERFORM set_config('app.phase3_smoke_force','return_requested',true);
@@ -512,7 +512,7 @@ BEGIN
   -- Validate-only trigger backstop: privileged direct line paths get the exact code.
   BEGIN
     INSERT INTO public.return_items(return_id,product_id,product_name,quantity,unit,unit_price_cents,extended_cents,condition,restock,sort_order)
-    VALUES(v_return,v_blocked,'[SMOKE] blocked',1,'ea',1,1,'unopened',false,99);
+    VALUES(v_return,v_blocked,'[SMOKE] blocked',1,'Gal',1,1,'unopened',false,99);
     RAISE EXCEPTION 'SMOKE_FAIL: direct blocked return_items INSERT was allowed';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL:%' THEN RAISE; END IF;

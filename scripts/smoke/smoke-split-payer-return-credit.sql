@@ -25,7 +25,7 @@
 --   5. B's whole share of line 2 credits exactly what B was billed for it, not a cent more;
 --   5b. on a second split order whose invoices are still drafts, A cannot return anything
 --      (RETURN_SPLIT_SHARE_NOT_BILLED);
---   5c. on a third split order whose line has no unit, the split invoices bill it as 'ea', and B's
+--   5c. on a third split order whose line has no unit, the split invoices bill it in the product's unit ('Gal'), and B's
 --      return of it is created, received and credited (-10.00) from B's own line;
 --   6. the guard still refuses a credit memo for B on A's order with no claim, and a memo for D
 --      inside a claim for B (INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID).
@@ -561,7 +561,7 @@ BEGIN
     END IF;
   END;
 
-  -- 5c. A split line with no unit: the split invoices bill it as 'ea', the unit its return carries,
+  -- 5c. A split line with no unit: the split invoices bill it in the product's unit ('Gal'; filled since 20270106100000),
   --     so the payer's return is created, received and credited from its own line (before
   --     20261021155000 the invoices copied the empty unit, and the credit refuses a source line
   --     whose unit differs: RETURN_CREDIT_UNIT_MISMATCH).
@@ -625,8 +625,8 @@ BEGIN
                    AND ii.return_credit_source_item_id IS DISTINCT FROM v_b_line4_item) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: B''s no-unit credit is not -10.00 backed by B''s own line';
   END IF;
-  IF (SELECT unit_size FROM public.invoice_items WHERE id = v_b_line4_item) IS DISTINCT FROM 'ea' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: the split invoice did not bill the no-unit line as ea';
+  IF (SELECT unit_size FROM public.invoice_items WHERE id = v_b_line4_item) IS DISTINCT FROM 'Gal' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the split invoice did not bill the no-unit line in the product unit Gal';
   END IF;
 
   -- 6a. The guard: a credit memo for B on A's order, outside any claim.

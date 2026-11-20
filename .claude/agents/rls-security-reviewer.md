@@ -36,6 +36,7 @@ This is the exact class of bug from B9 — 6 SECDEF DML helpers (`check_idempote
 ### CHECK 3 — New table without RLS
 Pattern: any `CREATE TABLE` not followed (within the same migration) by `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` AND at least one `CREATE POLICY`.
 Severity: **BLOCKER**.
+Exempt: a session-local `CREATE TEMP TABLE ... ON COMMIT DROP` (or `CREATE TEMPORARY TABLE`), which lives only in the migration's own transaction and no API role can reach (Mason, 2026-11-19). Name it in your report. A permanent table, or a temp table without `ON COMMIT DROP`, is not exempt.
 
 ### CHECK 4 — Mutating RPC without `p_idempotency_key`
 Pattern: any function that performs INSERT/UPDATE/DELETE and does NOT accept a parameter named `p_idempotency_key text DEFAULT NULL`.

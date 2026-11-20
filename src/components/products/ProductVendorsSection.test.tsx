@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -8,13 +8,24 @@ const mocks = vi.hoisted(() => ({
   unlinkProductVendor: vi.fn(),
   logActivity: vi.fn(),
   allVendors: [] as { id: string; name: string }[],
+  pickerFailures: 0,
 }));
 
 vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
 vi.mock('../../lib/activityLogger', () => ({ logActivity: mocks.logActivity }));
 vi.mock('../../lib/db', async () => {
   const actual = await vi.importActual<typeof import('../../lib/db')>('../../lib/db');
-  const chain = { select: () => chain, is: () => chain, order: () => Promise.resolve({ data: mocks.allVendors, error: null }) };
+  // The picker reads page by page (fetchAllRows), so the mock answers each requested range.
+  const chain = {
+    select: () => chain, is: () => chain, order: () => chain,
+    range: (from: number, to: number) => {
+      if (mocks.pickerFailures > 0) {
+        mocks.pickerFailures -= 1;
+        return Promise.resolve({ data: null, error: { message: 'vendors down' }, count: null });
+      }
+      return Promise.resolve({ data: mocks.allVendors.slice(from, to + 1), error: null, count: mocks.allVendors.length });
+    },
+  };
   return { ...actual, supabase: { from: () => chain } };
 });
 vi.mock('../../lib/productVendors', async () => {
@@ -50,6 +61,7 @@ function renderSection(isAdmin: boolean, onPreferredChanged = vi.fn()) {
 describe('ProductVendorsSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.pickerFailures = 0;
     mocks.allVendors = [{ id: 'v1', name: 'Wells Ag Supply' }, { id: 'v2', name: 'Spinner Ag' }, { id: 'v3', name: 'Crop RX Solutions' }];
     mocks.listProductVendors.mockResolvedValue([preferred, spare]);
     mocks.linkProductVendor.mockResolvedValue(undefined);
@@ -124,7 +136,84 @@ describe('ProductVendorsSection', () => {
   it('shows a load failure instead of an empty list', async () => {
     mocks.listProductVendors.mockRejectedValue(new Error('get_product_vendors returned an unexpected result'));
     renderSection(false);
-    expect(await screen.findByText(/unexpected result|went wrong|try again/i)).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(/unexpected result|went wrong/i);
     expect(screen.queryByText('No vendors linked yet.')).not.toBeInTheDocument();
+    mocks.listProductVendors.mockResolvedValue([preferred]);
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('Wells Ag Supply')).toBeInTheDocument();
+  });
+
+  it('marks the list out of date when the re-read after a change fails', async () => {
+    renderSection(true);
+    const button = await screen.findByRole('button', { name: 'Make preferred' });
+    mocks.listProductVendors.mockRejectedValue(new Error('network'));
+    fireEvent.click(button);
+    expect(await screen.findByText('Could not refresh the vendors. This list may be out of date.')).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Make preferred' })).toBeDisabled();
+    expect(within(screen.getAllByRole('listitem')[1]).getByRole('button', { name: 'Remove' })).toBeDisabled();
+    mocks.listProductVendors.mockResolvedValue([preferred, spare]);
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.queryByText(/may be out of date/)).not.toBeInTheDocument());
+  });
+
+  it('offers every vendor past the first 1,000', async () => {
+    mocks.allVendors = Array.from({ length: 1001 }, (_, i) => ({ id: `x${i}`, name: `Vendor ${String(i).padStart(4, '0')}` }));
+    renderSection(true);
+    const picker = await screen.findByLabelText('Add a vendor');
+    await waitFor(() => expect(within(picker).getByRole('option', { name: 'Vendor 1000' })).toBeInTheDocument());
+  });
+
+  it('a failed vendor list keeps the linked vendors and only blocks adding', async () => {
+    mocks.pickerFailures = 1;
+    renderSection(true);
+    expect(await screen.findByText('Could not load the vendor list.')).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Make preferred' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Add vendor' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    const picker = await screen.findByLabelText('Add a vendor');
+    await waitFor(() => expect(within(picker).getByRole('option', { name: 'Crop RX Solutions' })).toBeInTheDocument());
+    expect(screen.queryByText('Could not load the vendor list.')).not.toBeInTheDocument();
+  });
+
+  it('drops a pick that is no longer offered', async () => {
+    renderSection(true);
+    const picker = await screen.findByLabelText('Add a vendor');
+    await waitFor(() => expect(within(picker).getByRole('option', { name: 'Crop RX Solutions' })).toBeInTheDocument());
+    fireEvent.change(picker, { target: { value: 'v3' } });
+    expect(screen.getByRole('button', { name: 'Add vendor' })).toBeEnabled();
+    // Another admin linked v3 meanwhile; removing a vendor re-reads the list (and, unlike adding, keeps the pick).
+    const v3 = link({ link_id: 'l3', vendor_id: 'v3', vendor_name: 'Crop RX Solutions', is_preferred: false });
+    mocks.listProductVendors.mockResolvedValue([preferred, v3]);
+    fireEvent.click(within(screen.getAllByRole('listitem')[1]).getByRole('button', { name: 'Remove' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(screen.getByText('Crop RX Solutions', { selector: 'span' })).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Add vendor' })).toBeDisabled();
+  });
+
+  it('a change whose re-read is overtaken by a newer read reports nothing', async () => {
+    const onPreferredChanged = vi.fn();
+    const props = { productId: 'p1', productName: 'Test Product', userId: 'u1', onPreferredChanged };
+    const view = render(<ProductVendorsSection {...props} isAdmin />);
+    const button = await screen.findByRole('button', { name: 'Make preferred' });
+    let release!: (rows: unknown) => void;
+    mocks.listProductVendors.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    fireEvent.click(button);
+    await waitFor(() => expect(mocks.listProductVendors).toHaveBeenCalledTimes(2));
+    view.rerender(<ProductVendorsSection {...props} isAdmin={false} />);
+    await screen.findByText('Wells Ag Supply');
+    await act(async () => { release([{ ...spare, is_preferred: true }]); });
+    expect(onPreferredChanged).not.toHaveBeenCalled();
+  });
+
+  it('closes an open removal when the user is no longer an admin', async () => {
+    const props = { productId: 'p1', productName: 'Test Product', userId: 'u1', onPreferredChanged: vi.fn() };
+    const view = render(<ProductVendorsSection {...props} isAdmin />);
+    const rows = await screen.findAllByRole('listitem');
+    fireEvent.click(within(rows[1]).getByRole('button', { name: 'Remove' }));
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+    view.rerender(<ProductVendorsSection {...props} isAdmin={false} />);
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   });
 });

@@ -160,6 +160,8 @@ assert.ok(
 const releasePrompt = buildCodexReviewPrompt({ release: true });
 assert.match(releasePrompt, /RELEASE RULES/, "release prompt carries the release rules");
 assert.match(releasePrompt, /\[LIVE-UNCHANGED\]/, "release rule 1: byte-identical unchanged function bodies are tagged");
+assert.match(releasePrompt, /copied unchanged from that function's latest/, "release rule 1: unchanged lines inside a changed function are covered");
+assert.match(releasePrompt, /newly reachable, or with no identical base definition, is not covered/, "release rule 1: defects changed lines create still block");
 assert.match(releasePrompt, /\[SELF-ABORT\]/, "release rule 2: a clean self-abort of a migration's own apply is tagged");
 assert.match(releasePrompt, /RELEASE FOLLOW-UPS/, "release rules: tagged findings are listed for tracked issues");
 assert.equal(prompt.includes("RELEASE RULES"), false, "a non-release review has no release rules");

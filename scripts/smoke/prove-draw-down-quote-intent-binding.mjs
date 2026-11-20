@@ -324,10 +324,10 @@ ON CONFLICT (id) DO UPDATE
 BEGIN;
 ALTER TABLE public.products
   DISABLE TRIGGER trigger_y_require_governed_product_pricing;
-INSERT INTO public.products (product_name, unit_size, current_cost, tier1_price)
+INSERT INTO public.products (product_name, unit_size, current_cost, tier1_price, product_form, inventory_unit)
 VALUES
-  ('[PROVER] Draw Intent Priced A', 'gal', 3.00, 10.00),
-  ('[PROVER] Draw Intent Priced B', 'gal', 4.00, 8.00);
+  ('[PROVER] Draw Intent Priced A', 'gal', 3.00, 10.00, 'liquid', 'Gal'),
+  ('[PROVER] Draw Intent Priced B', 'gal', 4.00, 8.00, 'liquid', 'Gal');
 ALTER TABLE public.products
   ENABLE TRIGGER trigger_y_require_governed_product_pricing;
 DO $seed_check$

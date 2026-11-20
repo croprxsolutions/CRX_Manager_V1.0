@@ -256,9 +256,9 @@ try {
   // against, or resembles a write to, the live database.
   psql(`
     ALTER TABLE public.products DISABLE TRIGGER trigger_y_require_governed_product_pricing;
-    INSERT INTO public.products (product_name, unit_size, current_cost, tier1_price)
-    VALUES ('[PROVER] Draw Tier A', 'gal', 3.00, 10.00),
-           ('[PROVER] Draw Tier B', 'gal', 4.00, 8.00);
+    INSERT INTO public.products (product_name, unit_size, current_cost, tier1_price, product_form, inventory_unit)
+    VALUES ('[PROVER] Draw Tier A', 'gal', 3.00, 10.00, 'liquid', 'Gal'),
+           ('[PROVER] Draw Tier B', 'gal', 4.00, 8.00, 'liquid', 'Gal');
     ALTER TABLE public.products ENABLE TRIGGER trigger_y_require_governed_product_pricing;
   `);
 

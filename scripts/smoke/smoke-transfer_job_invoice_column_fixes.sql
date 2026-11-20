@@ -106,12 +106,12 @@ BEGIN
   VALUES ('[SMOKE] Transfer Farm ' || v_sfx)
   RETURNING id INTO v_customer;
 
-  INSERT INTO products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Chem Alpha ' || v_sfx, 'GL', '999999-99999', 'liquid')
+  INSERT INTO products (product_name, unit_size, epa_registration, product_form, inventory_unit)
+  VALUES ('[SMOKE] Chem Alpha ' || v_sfx, 'Gal', '999999-99999', 'liquid', 'Gal')
   RETURNING id INTO v_prod_a;
 
-  INSERT INTO products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Chem Beta ' || v_sfx, 'GL', '999999-99999', 'liquid')
+  INSERT INTO products (product_name, unit_size, epa_registration, product_form, inventory_unit)
+  VALUES ('[SMOKE] Chem Beta ' || v_sfx, 'Gal', '999999-99999', 'liquid', 'Gal')
   RETURNING id INTO v_prod_b;
 
   INSERT INTO fields (customer_id, field_name, crop_type)
@@ -133,13 +133,13 @@ BEGIN
   -- rate 0.5 PT/ac x 100 ac = 50 PT -> 6.25 GL (liquid PT/8).
   INSERT INTO job_chemicals (job_id, product_id, quantity, unit, rate_per_acre,
                              rate_unit, cost_per_unit_cents, price_per_unit_cents, sort_order)
-  VALUES (v_job, v_prod_a, 10, 'GL', 0.5, 'PT', 1000, 2500, 1);
+  VALUES (v_job, v_prod_a, 10, 'Gal', 0.5, 'PT', 1000, 2500, 1);
 
   -- Chem Beta: fractional qty rounding — 2.5 x 999c = 2497.5 -> 2498;
   -- 2.5 x 444c = 1110. No rate (total_applied stays NULL).
   INSERT INTO job_chemicals (job_id, product_id, quantity, unit, rate_per_acre,
                              rate_unit, cost_per_unit_cents, price_per_unit_cents, sort_order)
-  VALUES (v_job, v_prod_b, 2.5, 'GL', NULL, NULL, 444, 999, 2);
+  VALUES (v_job, v_prod_b, 2.5, 'Gal', NULL, NULL, 444, 999, 2);
 
   -- Lifecycle: the enforcer-legal path to 'completed'
   UPDATE jobs SET status = 'in_progress' WHERE id = v_job;
@@ -199,7 +199,7 @@ BEGIN
   IF v_item.sort_order <> 1 OR v_item.acres <> 100 OR v_item.rate_per_acre <> 0.5 THEN
     RAISE EXCEPTION 'FAIL: Alpha sort/acres/rate %/%/%', v_item.sort_order, v_item.acres, v_item.rate_per_acre;
   END IF;
-  IF v_item.total_applied <> 50 OR v_item.total_applied_gl_lb <> 6.25 OR v_item.gl_lb_unit IS DISTINCT FROM 'GL' THEN
+  IF v_item.total_applied <> 50 OR v_item.total_applied_gl_lb <> 6.25 OR v_item.gl_lb_unit IS DISTINCT FROM 'Gal' THEN
     RAISE EXCEPTION 'FAIL: Alpha applied math %/%/%', v_item.total_applied, v_item.total_applied_gl_lb, v_item.gl_lb_unit;
   END IF;
 

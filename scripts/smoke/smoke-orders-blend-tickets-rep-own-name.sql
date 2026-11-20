@@ -53,8 +53,8 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
   -- A product priced through the governed preview/apply path (products are born pricing-free).
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] Rep Salesman Product ' || v_suffix, 'GL') RETURNING id INTO v_product;
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[E2E] Rep Salesman Product ' || v_suffix, 'Gal', 'liquid', 'Gal') RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes(
     'product_page', NULL,
     jsonb_build_array(jsonb_build_object(
@@ -69,7 +69,7 @@ BEGIN
     (v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint', v_admin,
     'e2e-rep-salesman-pricing-apply-' || v_suffix);
   INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
-  VALUES (v_product, 'Main Warehouse', 1000, 0, 'GL');
+  VALUES (v_product, 'Main Warehouse', 1000, 0, 'Gal');
 
   INSERT INTO public.customers (farm_name, assigned_sales_rep, assigned_tier)
   VALUES ('[E2E] Rep Salesman Farm ' || v_suffix, v_other_rep, 1) RETURNING id INTO v_customer;
@@ -96,7 +96,7 @@ BEGIN
     VALUES (v_ticket, v_field, v_customer, 10);
     INSERT INTO public.blend_ticket_products (
       blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order
-    ) VALUES (v_ticket, v_product, '[E2E] RSN line ' || v_i, 20, 'GL', 2, 'gal/ac', 1);
+    ) VALUES (v_ticket, v_product, '[E2E] RSN line ' || v_i, 20, 'Gal', 2, 'gal/ac', 1);
     v_tickets := v_tickets || v_ticket;
   END LOOP;
 

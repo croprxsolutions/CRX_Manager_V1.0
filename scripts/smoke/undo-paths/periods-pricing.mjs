@@ -23,8 +23,8 @@ const lineFp = (line) => `(SELECT row(oi.price_per_unit, oi.cost_per_unit, oi.to
 function seedPeriodsPricing() {
   seed('periods-pricing', `SELECT public.close_accounting_period('${PERIOD_END}', '${ADMIN}', 'undo-seed-close-period');
     INSERT INTO public.customers (id, farm_name, account_number) VALUES ('${CUST}', '[UNDO] Pricing Farm', '[UNDO]-PRC-1');
-    INSERT INTO public.products (id, product_name, unit_size, epa_registration, product_form)
-      VALUES ('${PROD}', '[UNDO] Pricing Product', 'GL', '999999-99996', 'liquid');
+    INSERT INTO public.products (id, product_name, unit_size, epa_registration, product_form, inventory_unit)
+      VALUES ('${PROD}', '[UNDO] Pricing Product', 'Gal', '999999-99996', 'liquid', 'Gal');
     DO $price$
     DECLARE v jsonb;
     BEGIN
@@ -41,8 +41,8 @@ function seedPeriodsPricing() {
     UPDATE public.orders SET pricing_status = 'needs_pricing' WHERE id = '${PEND_ORDER}';
     INSERT INTO public.order_items (id, order_id, product_id, product_name, price_per_unit, cost_per_unit,
         total_units_needed, total_price, profit, net_margin, quantity_delivered, quantity_remaining, unit_size, pricing_pending)
-      VALUES ('${LINE}', '${ORDER}', '${PROD}', '[UNDO] priced line', 10, 6, 5, 50, 20, 40, 0, 5, 'GL', false),
-             ('${PEND_LINE}', '${PEND_ORDER}', '${PROD}', '[UNDO] pending line', 0, 6, 5, 0, 0, 0, 0, 5, 'GL', true);`);
+      VALUES ('${LINE}', '${ORDER}', '${PROD}', '[UNDO] priced line', 10, 6, 5, 50, 20, 40, 0, 5, 'Gal', false),
+             ('${PEND_LINE}', '${PEND_ORDER}', '${PROD}', '[UNDO] pending line', 0, 6, 5, 0, 0, 0, 0, 5, 'Gal', true);`);
 }
 
 const show = (label, got) => { console.log(`  ${label}: ${got}`); return got; };
@@ -66,7 +66,7 @@ export function run() {
   // update_order_items below cost: rep refused; admin needs a reason; with one, a single approval row records the
   // $1.00 x 5 shortfall; replay adds nothing; raising the price back adds no approval.
   const upd = (who, price, reason, key) => `r := public.update_order_items('${ORDER}', jsonb_build_array(jsonb_build_object('id', '${LINE}',
-    'product_id', '${PROD}', 'product_name', '[UNDO] priced line', 'unit_size', 'GL', 'price_per_unit', ${price}, 'total_units_needed', 5
+    'product_id', '${PROD}', 'product_name', '[UNDO] priced line', 'unit_size', 'Gal', 'price_per_unit', ${price}, 'total_units_needed', 5
     ${reason ? `, 'below_cost_reason', '${reason}'` : ''})), '${who}', '${key}', n);`;
   // n holds the order's row_version, read as postgres just before each change.
   const version = `n := (SELECT row_version FROM public.orders WHERE id = '${ORDER}');`;

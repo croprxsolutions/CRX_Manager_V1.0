@@ -22,6 +22,9 @@ test('the flow is enforced only when RELEASE_FLOW is exactly "on"', () => {
 test('release/next may differ from staging + main only in the bot\'s files', () => {
   assert.deepEqual(releaseExtraFiles(['package.json', 'package-lock.json', 'CHANGELOG.md', 'src/releaseNotes.ts']), []);
   assert.deepEqual(releaseExtraFiles(['CHANGELOG.md', 'src/lib/money.ts']), ['src/lib/money.ts']);
+  // The owner-accept log (scripts/owner-accept-sol-finding.mjs) is the one non-bot file allowed on top.
+  assert.deepEqual(releaseExtraFiles(['docs/manual/DECISION_LOG.md', 'CHANGELOG.md']), []);
+  assert.deepEqual(releaseExtraFiles(['docs/manual/DECISION_LOG.md', 'docs/manual/OTHER.md']), ['docs/manual/OTHER.md']);
 });
 
 test('proofLink finds the first https "Staging proof:" line in the body or any comment', () => {

@@ -228,8 +228,8 @@ Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_
 **HIGH · REPORTS PART FIX IN REVIEW (Claude, `20270201100000_page_access_locks_reports.sql`, to staging after release #1990) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #2)**
 Page Access (`denied_pages`) is checked only by the screen router. Mason decided 2026-11-19 (To-Do decision 16) that
 it is a real security control: scope "actions + reports", reports now and money later. The fix makes the database
-refuse Reports Library and Sales Reports data to a person with that page hidden, and limits the four logbook reports
-to admins and sales reps (Mason, 2026-11-19). Contract:
+refuse Reports Library and Sales Reports data to a person with that page hidden (including the commission rows the
+Reports Library shows), and limits the four logbook reports to admins and sales reps (Mason, 2026-11-19). Contract:
 [2026-11-19-ki119-page-access-lock-CONTRACT.md](../plans/2026-11-19-ki119-page-access-lock-CONTRACT.md); proof:
 `scripts/smoke/prove-page-access-locks-reports-real-schema.mjs`. The invoice and payment actions are KI-169. Known
 limit (Mason's scope): a person with reports hidden still sees the order and invoice rows on the screens they keep.

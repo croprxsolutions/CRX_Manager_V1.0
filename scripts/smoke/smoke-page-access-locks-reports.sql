@@ -5,7 +5,9 @@
 --   B. the rep with `reports` hidden is refused PAGE_ACCESS_DENIED: reports on the Reports Library
 --      functions, keeps Sales Reports, and keeps the Customer page's one-customer year-end summary;
 --   C. the rep with `sales-reports` hidden is refused on both sales reports and keeps the Reports Library;
---   D. a driver and an applicator are refused the logbooks; an inactive rep is refused;
+--   D. a driver and an applicator are refused the logbooks; a user with no active profile is refused;
+--   G. the rep's own commission rows disappear while `reports` is hidden (not for `sales-reports`), and the admin
+--      still sees them;
 --   E. an admin with a stale hidden list still passes; clearing the rep's list lets the next call through;
 --   F. signed-out callers and PUBLIC cannot execute the helper or the logbooks.
 -- Fails before the migration (the helper does not exist). Terminal rollback.
@@ -156,11 +158,11 @@ BEGIN
       END IF;
     END LOOP;
   END LOOP;
-  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
-  PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
-  UPDATE public.profiles SET denied_pages = '{}', is_active = false WHERE id = v_rep;
-  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
-  PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
+  -- A signed-in user with no active profile (the prover also checks a seeded inactive rep). Deactivating a real
+  -- rep here would delete their sessions inside this transaction (Sol r1).
+  v_uid := gen_random_uuid();
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_uid, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.sub', v_uid::text, true);
   FOREACH v_fn IN ARRAY v_reports || v_sales LOOP
     v_err := NULL;
     EXECUTE 'SET LOCAL ROLE authenticated';
@@ -171,14 +173,40 @@ BEGIN
     END;
     EXECUTE 'RESET ROLE';
     IF v_err IS NULL OR v_err NOT LIKE 'PAGE_ACCESS_DENIED: %' THEN
-      RAISE EXCEPTION 'SMOKE_FAIL: (D) % as an inactive rep: %', v_fn, coalesce(v_err, 'not refused');
+      RAISE EXCEPTION 'SMOKE_FAIL: (D) % as a user with no active profile: %', v_fn, coalesce(v_err, 'not refused');
     END IF;
   END LOOP;
 
-  -- E: undo. Reactivate with `reports` hidden: refused; clear the list: the next call goes through.
+  -- G: the Commissions tab reads public.commissions directly. One pending row for the rep (rolled back).
+  INSERT INTO public.commissions (customer_id, order_id, order_date, recipient_user_id, recipient, commission_amount, status)
+  SELECT o.customer_id, o.id, CURRENT_DATE, v_rep, 'KI-119 smoke', 1.00, 'pending' FROM public.orders o ORDER BY o.created_at, o.id LIMIT 1;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: (G) needs one order to hang a test commission on';
+  END IF;
+  FOREACH v_who IN ARRAY ARRAY['{}', '{reports}', '{sales-reports}'] LOOP
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    UPDATE public.profiles SET denied_pages = v_who::text[] WHERE id = v_rep;
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    SELECT count(*) INTO v_n FROM public.commissions WHERE recipient = 'KI-119 smoke';
+    EXECUTE 'RESET ROLE';
+    IF v_n <> (CASE WHEN v_who = '{reports}' THEN 0 ELSE 1 END) THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (G) rep with hidden pages % sees % of their own commission rows', v_who, v_n;
+    END IF;
+  END LOOP;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
-  UPDATE public.profiles SET denied_pages = ARRAY['reports'], is_active = true WHERE id = v_rep;
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  SELECT count(*) INTO v_n FROM public.commissions WHERE recipient = 'KI-119 smoke';
+  EXECUTE 'RESET ROLE';
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (G) the admin (stale hidden list) sees % of the rep''s commission rows', v_n;
+  END IF;
+
+  -- E: undo. With `reports` hidden: refused; clear the list: the next call goes through.
+  UPDATE public.profiles SET denied_pages = ARRAY['reports'] WHERE id = v_rep;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
   v_err := NULL;

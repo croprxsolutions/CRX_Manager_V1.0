@@ -10,9 +10,17 @@
 --   the same query, so row security still limits their rows.
 -- * Already admin-only and unchanged: profitability, inventory cost, gross sales, P&L and the commission reports.
 --   Unchanged on purpose: get_customer_year_end_summary (one customer; the Customer page uses it).
+-- * The commissions read policy (the Reports Library Commissions tab reads the table directly) also hides a sales
+--   rep's own rows while Reports is hidden for them.
 -- * EXECUTE: PUBLIC and anon lose the logbooks; the helper is for authenticated only. No data change.
+-- caller-analysis: get_logbook_faa :: LogbookReport.tsx calls it signed in (authenticated keeps EXECUTE); only PUBLIC and anon lose it
+-- caller-analysis: get_logbook_by_field :: LogbookReport.tsx calls it signed in (authenticated keeps EXECUTE); only PUBLIC and anon lose it
+-- caller-analysis: get_logbook_by_customer :: LogbookReport.tsx calls it signed in (authenticated keeps EXECUTE); only PUBLIC and anon lose it
+-- caller-analysis: get_logbook_by_applicator :: LogbookReport.tsx calls it signed in (authenticated keeps EXECUTE); only PUBLIC and anon lose it
 -- Rollback: a follow-up migration re-emits the pinned pre-image bodies (newest earlier definitions of each), restores
--- the logbook grants, then drops public._require_page_access(text).
+-- the logbook grants and the comm_select USING expression read live 2026-11-19
+-- (is_admin() OR (is_sales_rep() AND recipient_user_id = (SELECT auth.uid()))), then drops
+-- public._require_page_access(text).
 
 SET LOCAL lock_timeout = '10s';
 
@@ -52,6 +60,14 @@ BEGIN
       OR p.proconfig IS DISTINCT FROM CASE WHEN t.secdef THEN ARRAY['search_path=public, pg_temp'] ELSE ARRAY['search_path=public'] END;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_REPORT_FUNCTION_NOT_LIVE_PRE_IMAGE: %', v_bad;
+  END IF;
+  -- The Reports Library Commissions tab reads public.commissions directly (Sol r1): its one read policy is live's.
+  IF NOT EXISTS (SELECT 1 FROM pg_policy
+                  WHERE polrelid = 'public.commissions'::regclass AND polname = 'comm_select' AND polcmd = 'r'
+                    AND polpermissive AND polroles = ARRAY['authenticated'::regrole::oid]
+                    AND md5(pg_get_expr(polqual, polrelid)) = 'ff30dd8bde662aa7132abbe987601317')
+     OR (SELECT count(*) FROM pg_policy WHERE polrelid = 'public.commissions'::regclass AND polcmd IN ('r', '*')) <> 1 THEN
+    RAISE EXCEPTION 'PREFLIGHT_COMMISSIONS_READ_POLICY_NOT_LIVE';
   END IF;
 END
 $preflight$;
@@ -503,6 +519,13 @@ REVOKE ALL ON FUNCTION public.get_logbook_by_field(uuid, date, date) FROM PUBLIC
 REVOKE ALL ON FUNCTION public.get_logbook_by_customer(uuid, date, date) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.get_logbook_by_applicator(uuid, date, date) FROM PUBLIC, anon;
 
+-- The Commissions tab of the Reports Library: a sales rep with Reports hidden no longer reads their own commission
+-- rows. Admins are unchanged; a NULL hidden list hides nothing.
+ALTER POLICY comm_select ON public.commissions
+  USING (is_admin() OR (is_sales_rep() AND recipient_user_id = (SELECT auth.uid())
+         AND NOT EXISTS (SELECT 1 FROM public.profiles pr
+                          WHERE pr.id = (SELECT auth.uid()) AND 'reports' = ANY (pr.denied_pages))));
+
 DO $postflight$
 DECLARE
   c_helper constant regprocedure := 'public._require_page_access(text)'::regprocedure;
@@ -545,6 +568,14 @@ BEGIN
      OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
                  WHERE p.oid = c_helper AND a.grantee = 0) THEN
     RAISE EXCEPTION 'POSTFLIGHT_PAGE_ACCESS_HELPER_GRANTS';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policy
+                  WHERE polrelid = 'public.commissions'::regclass AND polname = 'comm_select' AND polcmd = 'r'
+                    AND polpermissive AND polroles = ARRAY['authenticated'::regrole::oid]
+                    AND pg_get_expr(polqual, polrelid) LIKE '%''reports''::text = ANY (pr.denied_pages)%')
+     OR (SELECT count(*) FROM pg_policy WHERE polrelid = 'public.commissions'::regclass AND polcmd IN ('r', '*')) <> 1 THEN
+    RAISE EXCEPTION 'POSTFLIGHT_COMMISSIONS_READ_POLICY';
   END IF;
 END
 $postflight$;

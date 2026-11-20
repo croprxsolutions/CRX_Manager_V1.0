@@ -25,6 +25,7 @@ Read at `origin/staging` e4e6e11fa, live read-only 2026-11-19 (Central). Challen
 | `get_customer_year_end_summary` (one customer) | admin or sales_rep | none: the Customer page uses it (Mason's scope) |
 | `get_logbook_faa`, `_by_field`, `_by_customer`, `_by_applicator` | SQL INVOKER; EXECUTE to PUBLIC, `anon`, `authenticated`; rows limited by table RLS | wrap with a check (see Authority); revoke PUBLIC/`anon` |
 | `get_sales_summary_report`, `get_sales_detail_report` | DEFINER; impl allows admin or sales_rep | add page check `sales-reports` |
+| Reports Library Commissions tab: reads `public.commissions` directly (policy `comm_select`: admin, or a sales rep's own rows) | RLS | the policy also hides a rep's own rows while `reports` is hidden (Sol round 1, 2026-11-19; no other rep screen reads the table) |
 
 - **Known limit (part of Mason's scope):** a denied rep can still read the orders and invoice rows RLS gives them on their own screens, and could add them up by hand. The lock removes the ready-made reports, not the rows.
 

@@ -260,6 +260,10 @@ const APPL = 'c1190000-0000-4000-8000-0000000000e7';
 const ADMIN_STALE = 'c1190000-0000-4000-8000-0000000000a8';
 const RECIPIENT = 'c1190000-0000-4000-8000-0000000000aa';
 const CUSTOMER = 'c1190000-0000-4000-8000-0000000000f9';
+const FIELD = 'c1190000-0000-4000-8000-0000000000fa';
+const PLANE = 'c1190000-0000-4000-8000-0000000000fb';
+const ORDER = 'c1190000-0000-4000-8000-0000000000fc';
+const OWN_COMMISSIONS = "SELECT count(*) FROM public.commissions WHERE recipient LIKE '[PROVER]%';";
 const CHAIN = 'smoke-page-access-locks-reports.sql';
 // Existing chains that call a guarded function; each must end the same way before and after the candidate.
 const REGRESSION = ['smoke-cost_margin_admin_only_rpc_leaks.sql', 'smoke-remaining-money-inventory-hardening.sql',
@@ -272,9 +276,9 @@ const REPORTS = {
   chemical: digest('public.get_chemical_history(NULL, CURRENT_DATE - 400, CURRENT_DATE)'),
   batch: `SELECT md5(public.get_batch_year_end_summaries(ARRAY['${CUSTOMER}'::uuid], ${YEAR})::text);`,
   faa: digest('public.get_logbook_faa(CURRENT_DATE - 400, CURRENT_DATE)'),
-  byField: digest('public.get_logbook_by_field(NULL, CURRENT_DATE - 400, CURRENT_DATE)'),
+  byField: digest(`public.get_logbook_by_field('${FIELD}', CURRENT_DATE - 400, CURRENT_DATE)`),
   byCustomer: digest(`public.get_logbook_by_customer('${CUSTOMER}', CURRENT_DATE - 400, CURRENT_DATE)`),
-  byApplicator: digest('public.get_logbook_by_applicator(NULL, CURRENT_DATE - 400, CURRENT_DATE)'),
+  byApplicator: digest(`public.get_logbook_by_applicator('${APPL}', CURRENT_DATE - 400, CURRENT_DATE)`),
 };
 const SALES = {
   summary: digest("public.get_sales_summary_report('customer')"),
@@ -285,7 +289,7 @@ const YEAR_END_ONE = `SELECT md5(public.get_customer_year_end_summary('${CUSTOME
 function seed() {
   const users = [[ADMIN, 'admin'], [REP, 'sales_rep'], [REP_DENIED, 'sales_rep'], [REP_SALES_ONLY, 'sales_rep'],
     [REP_INACTIVE, 'sales_rep'], [DRIVER, 'driver'], [APPL, 'applicator'], [ADMIN_STALE, 'admin'], [RECIPIENT, 'entity_recipient']];
-  // Live has these; deactivating a profile bans the user and ends their sessions (the chain deactivates a rep).
+  // Live has these; deactivating a profile bans the user and ends their sessions (the seed deactivates a rep).
   psql(`ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS banned_until timestamptz;
     CREATE TABLE IF NOT EXISTS auth.sessions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid);
     CREATE TABLE IF NOT EXISTS auth.refresh_tokens (id bigserial PRIMARY KEY, user_id varchar(255));
@@ -298,6 +302,17 @@ function seed() {
     UPDATE public.profiles SET is_active = false WHERE id = '${REP_INACTIVE}';
     UPDATE public.profiles SET denied_pages = ARRAY['reports', 'sales-reports'] WHERE id = '${ADMIN_STALE}';
     INSERT INTO public.customers (id, farm_name, is_active, assigned_sales_rep) VALUES ('${CUSTOMER}', '[PROVER] Page Access Farm', true, '${REP}');
+    -- One aerial application on a field, so every logbook returns a real row before and after (Sol r1).
+    INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${FIELD}', '${CUSTOMER}', '[PROVER] North 40');
+    INSERT INTO public.vehicles (id, vehicle_name, vehicle_type) VALUES ('${PLANE}', '[PROVER] Plane', 'air');
+    INSERT INTO public.application_records (record_number, source_type, source_id, customer_id, application_date,
+      applicator_id, field_id, vehicle_id)
+    VALUES ('PAL-1', 'job', gen_random_uuid(), '${CUSTOMER}', CURRENT_DATE - 1, '${APPL}', '${FIELD}', '${PLANE}');
+    -- One pending commission each for the hidden rep and the undenied rep (the Commissions tab reads the table).
+    INSERT INTO public.orders (id, order_number, customer_id) VALUES ('${ORDER}', 'PAL-O1', '${CUSTOMER}');
+    INSERT INTO public.commissions (customer_id, order_id, recipient_user_id, recipient, commission_amount, status)
+    VALUES ('${CUSTOMER}', '${ORDER}', '${REP_DENIED}', '[PROVER] denied', 1.00, 'pending'),
+           ('${CUSTOMER}', '${ORDER}', '${REP}', '[PROVER] rep', 2.00, 'pending');
     DELETE FROM public.unit_conversions;
     INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};`);
 }
@@ -334,6 +349,11 @@ async function main() {
   const repBefore = results(all, REP);
   const yearEndBefore = okProbe(YEAR_END_ONE, REP_DENIED);
   assert.deepEqual(deniedBefore, repBefore, 'two reps should see the same report results before the candidate');
+  const EMPTY = 'd41d8cd98f00b204e9800998ecf8427e';
+  for (const k of ['faa', 'byField', 'byCustomer', 'byApplicator']) assert.notEqual(adminBefore[k], EMPTY, `${k} returned no rows: the seeded application is not exercised`);
+  assert.equal(okProbe(OWN_COMMISSIONS, REP_DENIED), '1');
+  assert.equal(okProbe(OWN_COMMISSIONS, REP), '1');
+  console.log('[case] BEFORE: every logbook returns the seeded aerial application; the hidden rep reads their own commission row');
   const before = Object.fromEntries(REGRESSION.map((f) => [f, chainOutcome(f)]));
   for (const [f, o] of Object.entries(before)) console.log(`[before] ${f}: ${o.slice(0, 160)}`);
   const chainBefore = chainOutcome(CHAIN);
@@ -375,15 +395,25 @@ async function main() {
   const anonHelper = anonProbe("SELECT public._require_page_access('reports');");
   assert.match(anonHelper.output, /permission denied for function _require_page_access/);
   console.log('[case] AFTER: a signed-out caller is refused the logbooks and the helper');
+  assert.equal(okProbe(OWN_COMMISSIONS, REP_DENIED), '0', 'the hidden rep still reads their commission rows');
+  assert.equal(okProbe(OWN_COMMISSIONS, REP_SALES_ONLY), '0');
+  assert.equal(okProbe(OWN_COMMISSIONS, REP), '1', "the undenied rep lost their commission row");
+  assert.equal(okProbe(OWN_COMMISSIONS, ADMIN_STALE), '2', 'an admin with a stale hidden list should see every commission row');
+  console.log('[case] AFTER: the hidden rep reads none of their commission rows; the undenied rep and admins are unchanged');
   // Undo: the admin clears the list; the next call goes through with the undenied rep's results.
   raw(`UPDATE public.profiles SET denied_pages = '{}' WHERE id = '${REP_DENIED}';`);
   assert.deepEqual(results(all, REP_DENIED), repBefore, 'after clearing the list the rep should see the reports again');
-  console.log('[case] AFTER: clearing the hidden list lets the next call through');
+  assert.equal(okProbe(OWN_COMMISSIONS, REP_DENIED), '1', 'after clearing the list the rep should see their commission row again');
+  console.log('[case] AFTER: clearing the hidden list lets the next call through (reports and commission rows)');
+  const uncovered = [];
   for (const f of REGRESSION) {
     const after = chainOutcome(f);
     assert.equal(after, before[f], `${f} ends differently after the candidate`);
+    // A chain that stops at its own setup on this container never reaches a report: it proves nothing here.
+    if (!/^SMOKE_PASS_ROLLBACK/.test(before[f])) uncovered.push(f);
   }
-  console.log(`[case] AFTER: ${REGRESSION.length} existing chains end exactly as before`);
+  console.log(`[case] AFTER: ${REGRESSION.length - uncovered.length} existing chains pass before and after`);
+  if (uncovered.length) console.log(`[not covered] stop at their own setup on this container both times (live smoke run after apply covers them): ${uncovered.join(', ')}`);
   console.log('PAGE_ACCESS_LOCKS_REPORTS_PROOF_PASS');
 }
 

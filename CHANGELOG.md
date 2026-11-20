@@ -134,6 +134,7 @@ Releases of CRX Manager, newest first.
 * bring staging up to main (replaces #1742) (#1750)
 
 #### 🧩 Other
+* Review rules for release #1990: live-unchanged code and clean self-aborts don't block (#2054)
 * rls reviewer: CHECK 3 temp-table exemption + CHECK 5 final form (#2049)
 * rls reviewer CHECK 5: owner-only internal helpers are exempt (release #1990 fix) (#2036)
 * Reset-order scanner: a regex after a statement block's } is hidden (#686) (#2034)

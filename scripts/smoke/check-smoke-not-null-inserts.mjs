@@ -43,7 +43,7 @@ function splitTopLevel(text) {
 }
 
 // DEFAULT NULL is no default: an insert that omits the column still writes NULL.
-const hasDefault = (def) => /\b(?:DEFAULT(?!\s+\(*\s*NULL\b)|GENERATED|(?:big|small)?serial\d?)\b/i.test(def);
+const hasDefault = (def) => /\b(?:DEFAULT(?![\s(]*NULL\b)|GENERATED|(?:big|small)?serial\d?)\b/i.test(def);
 const CONSTRAINT_WORDS = /^(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE|LIKE)\b/i;
 
 /**
@@ -65,7 +65,7 @@ export function requiredColumnsFromMigrations(migrations) {
         for (const el of splitTopLevel(create[4])) {
           if (CONSTRAINT_WORDS.test(el)) continue;
           const [, c] = el.match(/^"?(\w+)"?/) ?? [];
-          if (c) Object.assign(col(t, ident(c)), { notNull: /\bNOT\s+NULL\b|\bPRIMARY\s+KEY\b/i.test(el), hasDefault: hasDefault(el) });
+          if (c) Object.assign(col(t, ident(c)), { notNull: /\bNOT\s+NULL\b|\bPRIMARY\s+KEY\b/i.test(el), hasDefault: hasDefault(el.replace(/^"?\w+"?/, '')) });
         }
         continue;
       }
@@ -124,7 +124,7 @@ export function requiredColumnsFromMigrations(migrations) {
 export function insertsIn(sql) {
   const code = stripStringsAndComments(sql);
   const out = [];
-  const re = new RegExp(String.raw`\bINSERT\s+INTO\s+(?:ONLY\s+)?${TABLE}(?:\s+(?:AS\s+)?(?!VALUES\b|SELECT\b|DEFAULT\b|OVERRIDING\b|WITH\b)\w+)?\s*(\(([^)]*)\))?`, 'gi');
+  const re = new RegExp(String.raw`\bINSERT\s+INTO\s+(?:ONLY\s+)?${TABLE}(?:\s+(?:AS\s+)?(?!VALUES\b|SELECT\b|DEFAULT\b|OVERRIDING\b|WITH\b)"?\w+"?)?\s*(\(([^)]*)\))?`, 'gi');
   for (const m of code.matchAll(re)) {
     if (!isPublic(m[2])) continue;
     // DEFAULT VALUES names no column. Positional VALUES may stop short of a newly added column, so it counts as naming

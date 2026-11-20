@@ -55,6 +55,10 @@ assert.deepEqual(cols(r, 't'), ['a', 'b', 'e']);
 assert.equal(r.get('t').get('a'), '3');
 assert.equal(r.get('t').get('b'), '3', 'blames the migration that dropped the default');
 
+// A column named serial is not a default; DEFAULT(NULL) is no default.
+r = req(mig('1', 'CREATE TABLE t ("serial" text, x text);'), mig('2', 'ALTER TABLE t ALTER COLUMN "serial" SET NOT NULL, ADD COLUMN y text NOT NULL DEFAULT(NULL);'));
+assert.deepEqual(cols(r, 't'), ['serial', 'y']);
+
 // ADD PRIMARY KEY makes its columns NOT NULL.
 r = req(mig('1', 'CREATE TABLE t (a text, b text);'), mig('2', 'ALTER TABLE t ADD CONSTRAINT t_pk PRIMARY KEY (a, b);'));
 assert.deepEqual(cols(r, 't'), ['a', 'b']);
@@ -67,7 +71,7 @@ assert.equal(r.size, 0);
 const ins = insertsIn(`DO $$ BEGIN
   INSERT INTO public.products (product_name,
     "inventory_unit") VALUES ('a', 'Gal');
-  INSERT INTO products AS p (product_name) SELECT 'b';
+  INSERT INTO products AS "p" (product_name) SELECT 'b';
   INSERT INTO "products"(product_name, product_form)
   SELECT x, y FROM src;
   INSERT INTO products VALUES ('c');

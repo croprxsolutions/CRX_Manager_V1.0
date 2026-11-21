@@ -1,5 +1,5 @@
 -- Written 2026-11-21. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270204100000_field_app_refuses_payer_change.md.
+-- docs/reference/migrations.d/20270205100000_field_app_refuses_payer_change.md.
 --
 -- WHY (#2058, #2070, release #1990 Sol, already live before that release): editing a STANDALONE field-application
 --   invoice (one payer, no group) through save_field_app_invoice

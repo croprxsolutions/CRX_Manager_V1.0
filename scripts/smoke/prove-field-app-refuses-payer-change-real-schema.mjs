@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270204100000_field_app_refuses_payer_change (#2058).
+ * Real-schema proof for 20270205100000_field_app_refuses_payer_change (#2058).
  * Container setup and replay copied from prove-field-app-no-sold-unit-real-schema.mjs. A standalone draft for farm A
  * (field A1) is edited through save_field_app_invoice, each case rolled back:
  *   BEFORE: moved to B's field, A stays the customer and is billed for B's work; split over A's and B's fields, the
@@ -30,7 +30,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270204100000_field_app_refuses_payer_change.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270205100000_field_app_refuses_payer_change.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([

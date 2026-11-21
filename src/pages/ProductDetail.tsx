@@ -252,7 +252,8 @@ const NO_ROWS: never[] = [];
 async function readUnitConversions(): Promise<UnitConversion[]> {
   const { data, error } = await supabase.from('unit_conversions').select('*').order('unit');
   if (error) throw error;
-  if (!Array.isArray(data)) throw new Error('The unit list came back empty.');
+  // Every product form needs units; an empty answer would unlock Product Form with nothing to pick.
+  if (!Array.isArray(data) || data.length === 0) throw new Error('The unit list came back empty.');
   return data as UnitConversion[];
 }
 

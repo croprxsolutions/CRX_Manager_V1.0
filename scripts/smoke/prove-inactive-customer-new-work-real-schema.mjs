@@ -271,8 +271,12 @@ async function main() {
   console.log(`[new-work] still allowed on the inactive customer's existing work: ${Object.keys(finish).join(', ')}`);
 
   // Case 5: reactivating lifts the refusal.
-  assert.equal(allowed(`UPDATE public.customers SET is_active = true WHERE id = '${INACTIVE}' RETURNING 1; ${newOrder(INACTIVE)} SELECT 1;`), '1');
-  console.log('[new-work] after reactivation the same new order is saved');
+  assert.equal(allowed(`UPDATE public.customers SET is_active = true WHERE id = '${INACTIVE}' RETURNING 1;
+    ${newOrder(INACTIVE)} ${newDelivery(INACTIVE, R.inactiveDone)} ${newJob(INACTIVE)} SELECT 1;`), '1');
+  // A hold goes through its RPC (direct inserts are refused by the cutover guard); committed, signed in.
+  assert.equal(allowed(`UPDATE public.customers SET is_active = true WHERE id = '${INACTIVE}'; ${holdRpc(INACTIVE, ADMIN)}`,
+    { role: 'authenticated', uid: ADMIN, commit: true }), 't');
+  console.log('[new-work] after reactivation the same new order, delivery, stock hold and spray job are saved');
 
   // Case 7a: a deactivation is running when an order is saved: the order waits, then is refused.
   const r1 = await race(

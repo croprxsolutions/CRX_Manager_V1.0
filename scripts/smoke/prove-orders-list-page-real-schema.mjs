@@ -35,9 +35,9 @@ import { pathToFileURL } from 'node:url';
 const ORDERS = 5200;
 const seedSql = (from, admin, rep) => `
 SET session_replication_role = replica;
-INSERT INTO public.products (id, product_name)
-SELECT md5('g4o-prod-' || g)::uuid, '[G4O] Product ' || g FROM generate_series(1, 40) g;
-INSERT INTO public.products (id, product_name) VALUES (md5('g4o-prod-zebra')::uuid, '[G4O] Zebra Unique Blend');
+INSERT INTO public.products (id, product_name, product_form, inventory_unit)
+SELECT md5('g4o-prod-' || g)::uuid, '[G4O] Product ' || g, 'liquid', 'Gal' FROM generate_series(1, 40) g;
+INSERT INTO public.products (id, product_name, product_form, inventory_unit) VALUES (md5('g4o-prod-zebra')::uuid, '[G4O] Zebra Unique Blend', 'liquid', 'Gal');
 INSERT INTO public.customers (id, farm_name) VALUES (md5('g4o-group')::uuid, '[G4O] Prairie Group');
 INSERT INTO public.customers (id, farm_name, parent_customer_id)
 SELECT md5('g4o-cust-' || g)::uuid, '[G4O] Farm ' || g, CASE WHEN g % 3 = 0 THEN md5('g4o-group')::uuid END

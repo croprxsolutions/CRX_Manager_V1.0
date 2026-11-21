@@ -99,8 +99,8 @@ function seed() {
   // Invented rows only; triggers are skipped so the seed sets exactly the shapes under test.
   psql(`SET session_replication_role = replica;
     INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUSTOMER}', '[PERM] Farm', true);
-    INSERT INTO public.products (id, product_name, sku, unit_size, current_cost, tier1_price, is_active)
-      VALUES ('${PRODUCT}', '[PERM] product', 'PERM-1', 'GL', 6.00, 10.00, true);
+    INSERT INTO public.products (id, product_name, sku, unit_size, product_form, inventory_unit, current_cost, tier1_price, is_active)
+      VALUES ('${PRODUCT}', '[PERM] product', 'PERM-1', 'GL', 'liquid', 'GL', 6.00, 10.00, true);
     INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
       VALUES ('${PRODUCT}', 'Main Warehouse', 500, 50, 'GL');
     ${Object.keys(O).map((k) => order(k)).join('\n    ')}

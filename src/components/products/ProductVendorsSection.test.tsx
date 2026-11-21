@@ -249,6 +249,27 @@ describe('ProductVendorsSection', () => {
     expect(onPreferredChanged).toHaveBeenCalledWith('Wells Ag Supply');
   });
 
+  it('KI-170: a read begun before the change, answering late with the old vendor, never settles it', async () => {
+    const onPreferredChanged = vi.fn();
+    const props = { productId: 'p1', productName: 'Test Product', userId: 'u1', onPreferredChanged, onPreferredUnknown };
+    const view = render(<ProductVendorsSection {...props} isAdmin />);
+    const button = await screen.findByRole('button', { name: 'Make preferred' });
+    let finishLink!: () => void;
+    mocks.linkProductVendor.mockReturnValueOnce(new Promise<void>((resolve) => { finishLink = resolve; }));
+    let answerOld!: (rows: unknown) => void;
+    mocks.listProductVendors.mockReturnValueOnce(new Promise((resolve) => { answerOld = resolve; }));
+    fireEvent.click(button);
+    // A role change starts a list read while the change is still saving.
+    view.rerender(<ProductVendorsSection {...props} isAdmin={false} />);
+    await waitFor(() => expect(mocks.listProductVendors).toHaveBeenCalledTimes(2));
+    mocks.listProductVendors.mockRejectedValueOnce(new Error('network'));
+    await act(async () => { finishLink(); });
+    await waitFor(() => expect(onPreferredUnknown).toHaveBeenCalledWith(true));
+    await act(async () => { answerOld([preferred, spare]); });
+    expect(onPreferredChanged).not.toHaveBeenCalled();
+    expect(onPreferredUnknown).not.toHaveBeenCalledWith(false);
+  });
+
   it('closes an open removal when the user is no longer an admin', async () => {
     const props = { productId: 'p1', productName: 'Test Product', userId: 'u1', onPreferredChanged: vi.fn(), onPreferredUnknown };
     const view = render(<ProductVendorsSection {...props} isAdmin />);

@@ -239,6 +239,8 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
         // KI-170: failed, or overtaken by a newer read. Another admin may have changed the preferred vendor
         // meanwhile, so guess nothing: the page blocks Save until a fresh read of this product's vendors
         // (the newer one, or Try again above the list) says which vendor is preferred, then mirrors it.
+        // Every read that can settle it began after this change: useLoad applies only the newest read, and
+        // this reload started after the save, so any older read in flight is discarded.
         markPreferredUnknown();
         return;
       }

@@ -434,6 +434,7 @@ export default function ProductDetail() {
   const reloadRequired = pricingReloadRequired || productStale;
   // KI-170: a vendor was linked but the vendors could not be re-read, so the preferred vendor (copied onto
   // the product) is unknown. Save waits for the Vendors section to re-read them.
+  // No reset on a product change is needed: ProductDetailRoute mounts a new page per product (key={id}).
   const [vendorPreferredUnknown, setVendorPreferredUnknown] = useState(false);
   // cost_history is admin-only under RLS (the panel only renders for admins).
   const costHistoryRead = useLoad<CostHistory[]>(isAdmin && !isNew && id ? `cost-history:${id}` : null, async () => {

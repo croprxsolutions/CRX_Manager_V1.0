@@ -91,12 +91,12 @@ BEGIN
 
   -- Three products: fully priced, tier-1 only, and never priced (products are born pricing-free;
   -- the two priced ones go through the governed preview/apply path).
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] BTP Full ' || v_suffix, 'GL') RETURNING id INTO v_p_full;
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] BTP Tier1Only ' || v_suffix, 'GL') RETURNING id INTO v_p_t1only;
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] BTP Unpriced ' || v_suffix, 'GL') RETURNING id INTO v_p_none;
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[E2E] BTP Full ' || v_suffix, 'Gal', 'liquid', 'Gal') RETURNING id INTO v_p_full;
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[E2E] BTP Tier1Only ' || v_suffix, 'Gal', 'liquid', 'Gal') RETURNING id INTO v_p_t1only;
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[E2E] BTP Unpriced ' || v_suffix, 'Gal', 'liquid', 'Gal') RETURNING id INTO v_p_none;
   v_pricing := public.preview_product_pricing_changes(
     'product_page', NULL,
     jsonb_build_array(
@@ -216,24 +216,24 @@ BEGIN
     END CASE;
   END LOOP;
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
-  VALUES (v_t1, v_p_t1only, '[E2E] BTP t1 line', 20, 'GL', 2, 'gal/ac', 1),
-         (v_t2, v_p_full, '[E2E] BTP t2 full', 20, 'GL', 2, 'gal/ac', 1),
-         (v_t2, v_p_none, '[E2E] BTP t2 unpriced', 20, 'GL', 2, 'gal/ac', 2),
-         (v_t3, v_p_t1only, '[E2E] BTP t3 line', 20, 'GL', 2, 'gal/ac', 1),
-         (v_t4, v_p_none, '[E2E] BTP t4 unpriced', 20, 'GL', 2, 'gal/ac', 1),
-         (v_t5, v_p_t1only, '[E2E] BTP t5 same-price', 20, 'GL', 2, 'gal/ac', 2);
+  VALUES (v_t1, v_p_t1only, '[E2E] BTP t1 line', 20, 'Gal', 2, 'gal/ac', 1),
+         (v_t2, v_p_full, '[E2E] BTP t2 full', 20, 'Gal', 2, 'gal/ac', 1),
+         (v_t2, v_p_none, '[E2E] BTP t2 unpriced', 20, 'Gal', 2, 'gal/ac', 2),
+         (v_t3, v_p_t1only, '[E2E] BTP t3 line', 20, 'Gal', 2, 'gal/ac', 1),
+         (v_t4, v_p_none, '[E2E] BTP t4 unpriced', 20, 'Gal', 2, 'gal/ac', 1),
+         (v_t5, v_p_t1only, '[E2E] BTP t5 same-price', 20, 'Gal', 2, 'gal/ac', 2);
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
-  VALUES (v_t5, v_p_full, '[E2E] BTP t5 two-price', 20, 'GL', 2, 'gal/ac', 1) RETURNING id INTO v_line_full;
+  VALUES (v_t5, v_p_full, '[E2E] BTP t5 two-price', 20, 'Gal', 2, 'gal/ac', 1) RETURNING id INTO v_line_full;
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
-  VALUES (v_t6, v_p_full, '[E2E] BTP t6 other rep', 20, 'GL', 2, 'gal/ac', 1) RETURNING id INTO v_line_other;
+  VALUES (v_t6, v_p_full, '[E2E] BTP t6 other rep', 20, 'Gal', 2, 'gal/ac', 1) RETURNING id INTO v_line_other;
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
-  VALUES (v_t7, v_p_full, '[E2E] BTP t7 other quote', 20, 'GL', 2, 'gal/ac', 1) RETURNING id INTO v_line_t7;
+  VALUES (v_t7, v_p_full, '[E2E] BTP t7 other quote', 20, 'Gal', 2, 'gal/ac', 1) RETURNING id INTO v_line_t7;
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
-  VALUES (v_t8, v_p_full, '[E2E] BTP t8 stale pick', 20, 'GL', 2, 'gal/ac', 1) RETURNING id INTO v_line_t8;
+  VALUES (v_t8, v_p_full, '[E2E] BTP t8 stale pick', 20, 'Gal', 2, 'gal/ac', 1) RETURNING id INTO v_line_t8;
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
-  VALUES (v_t9, v_p_full, '[E2E] BTP t9 zero quote', 20, 'GL', 2, 'gal/ac', 1) RETURNING id INTO v_line_t9_full;
+  VALUES (v_t9, v_p_full, '[E2E] BTP t9 zero quote', 20, 'Gal', 2, 'gal/ac', 1) RETURNING id INTO v_line_t9_full;
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
-  VALUES (v_t9, v_p_t1only, '[E2E] BTP t9 zero or six', 20, 'GL', 2, 'gal/ac', 2) RETURNING id INTO v_line_t9_t1;
+  VALUES (v_t9, v_p_t1only, '[E2E] BTP t9 zero or six', 20, 'Gal', 2, 'gal/ac', 2) RETURNING id INTO v_line_t9_t1;
 
   -- 1. Order: a tier-2 customer, a product with no tier-2 price -> priced at tier 1, never $0.
   BEGIN
@@ -604,7 +604,7 @@ BEGIN
   INSERT INTO public.blend_ticket_fields (blend_ticket_id, field_id, customer_id, actual_acres)
   VALUES (v_t10, v_field, v_customer, 10);
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
-  VALUES (v_t10, v_p_full, '[E2E] BTP t10 other quote section', 20, 'GL', 2, 'gal/ac', 1) RETURNING id INTO v_line_t10;
+  VALUES (v_t10, v_p_full, '[E2E] BTP t10 other quote section', 20, 'Gal', 2, 'gal/ac', 1) RETURNING id INTO v_line_t10;
   BEGIN
     v_res := public.set_blend_ticket_product_quote_price(v_line_t10, v_qi_d, v_admin, 'e2e-btp-pick-t10-' || v_suffix);
     RAISE EXCEPTION 'SMOKE_FAIL: a price from a quote other than the job''s own quote was accepted as the pick: %', v_res;

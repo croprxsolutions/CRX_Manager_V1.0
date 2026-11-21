@@ -48,6 +48,7 @@ import { Sentry } from '../lib/sentry';
 import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, PRODUCT_FORM_OPTIONS } from '../lib/units';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
+import { useLoad } from '../hooks/useLoad';
 import { usePhoneSections } from '../hooks/usePhoneSections';
 import type { CostHistory, EpaLookupResult, Product, ProductBrand, ProductRateLock, UnitConversion } from '../types';
 import {
@@ -246,6 +247,26 @@ function ParentOwnedHint({ parentName, identity = false }: { parentName?: string
   );
 }
 
+const NO_ROWS: never[] = [];
+
+async function readUnitConversions(): Promise<UnitConversion[]> {
+  const { data, error } = await supabase.from('unit_conversions').select('*').order('unit');
+  if (error) throw error;
+  // Every product form needs units; an empty answer would unlock Product Form with nothing to pick.
+  if (!Array.isArray(data) || data.length === 0) throw new Error('The unit list came back empty.');
+  return data as UnitConversion[];
+}
+
+// Vendor and manufacturer stay free text; these are only suggestions and near-match warnings.
+async function readVendorManufacturerChoices(): Promise<{ vendors: string[]; manufacturers: string[] }> {
+  // Every product's choices, page by page (Goal 4): one read stops silently at 1000 rows.
+  const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase.from('products').select('id, vendor, manufacturer', { count: 'exact' }).order('id').range(from, to)));
+  if (error) throw error;
+  if (!data) throw new Error('The vendor and manufacturer list came back empty.');
+  const distinct = (values: Array<string | null>) => [...new Set(values.filter(Boolean) as string[])].sort();
+  return { vendors: distinct(data.map((p) => p.vendor)), manufacturers: distinct(data.map((p) => p.manufacturer)) };
+}
+
 export default function ProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -347,19 +368,33 @@ export default function ProductDetail() {
     } : {}),
   }));
   const [costHistory, setCostHistory] = useState<CostHistory[]>([]);
-  const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
-  const [categoryOptions, setCategoryOptions] = useState<ProductCategory[]>([]);
-  const [timingOptions, setTimingOptions] = useState<UseTimingOption[]>([]);
-  const [cropOptions, setCropOptions] = useState<CropOption[]>([]);
+  // The page's pick lists. An action that needs a list stays off until it has loaded; a failed one shows Try again.
+  const unitsRead = useLoad('unit-conversions', readUnitConversions, { report: { tags: { source: 'fetch', action: 'load_unit_conversions' } } });
+  const categoriesRead = useLoad<ProductCategory[]>('product-categories', listProductCategories, { report: {} });
+  const timingsRead = useLoad<UseTimingOption[]>('product-use-timings', listProductUseTimingOptions, { report: false });
+  // Crop names only label the picker's groups; without them each group shows its crop code.
+  const cropsRead = useLoad<CropOption[]>('product-crops', listProductCropOptions, { report: false });
+  const choicesRead = useLoad('product-vendor-manufacturer-choices', readVendorManufacturerChoices, { report: { tags: { source: 'fetch', action: 'load_product_options' } } });
+  const unitsReady = unitsRead.status === 'loaded';
+  const categoriesReady = categoriesRead.status === 'loaded';
+  const timingsReady = timingsRead.status === 'loaded';
+  const cropsReady = cropsRead.status === 'loaded';
+  const unitConversions = unitsReady ? unitsRead.data : NO_ROWS;
+  const categoryOptions = categoriesReady ? categoriesRead.data : NO_ROWS;
+  const timingOptions = timingsReady ? timingsRead.data : NO_ROWS;
+  const cropOptions = cropsReady ? cropsRead.data : NO_ROWS;
+  const vendorOptions = choicesRead.status === 'loaded' ? choicesRead.data.vendors : NO_ROWS;
+  const manufacturerOptions = choicesRead.status === 'loaded' ? choicesRead.data.manufacturers : NO_ROWS;
+  const failedLists = ([
+    [unitsRead, 'units'], [categoriesRead, 'categories'], [timingsRead, 'use timings'],
+    [cropsRead, 'crop names'], [choicesRead, 'vendor and manufacturer suggestions'],
+  ] as const).filter(([read]) => read.status === 'failed');
   const [timingChoicesOpen, setTimingChoicesOpen] = useState(false);
-  const [timingLoadFailed, setTimingLoadFailed] = useState(false);
   const [pendingCategory, setPendingCategory] = useState<string | null | undefined>(undefined);
-  const [categoryLoadFailed, setCategoryLoadFailed] = useState(false);
   const [nameRequired, setNameRequired] = useState(false);
+  const [unitRequired, setUnitRequired] = useState(false);
   const [reiDraft, setReiDraft] = useState('');
   const [phiDraft, setPhiDraft] = useState('');
-  const [vendorOptions, setVendorOptions] = useState<string[]>([]);
-  const [manufacturerOptions, setManufacturerOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
   const [costModal, setCostModal] = useState(false);
@@ -575,34 +610,6 @@ export default function ProductDetail() {
     setCostBasisPricingBehavior('keep_sell_prices');
     pricingPreviewIntentRef.current = null;
   }, [id, resetApplyPricingKey, resetPreviewPricingKey]);
-
-  useEffect(() => {
-    supabase.from('unit_conversions').select('*').order('unit').then(({ data, error }) => {
-      if (error) { Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_unit_conversions' } }); return; }
-      setUnitConversions((data || []) as UnitConversion[]);
-    });
-    listProductCategories().then(setCategoryOptions).catch((error: unknown) => {
-      Sentry.captureException(error);
-      setCategoryLoadFailed(true);
-      toast('error', 'Could not load product categories. Refresh before saving a category.');
-    });
-    listProductUseTimingOptions().then(setTimingOptions).catch(() => {
-      setTimingLoadFailed(true);
-      toast('error', 'Could not load use timings. Refresh before changing them.');
-    });
-    // Crop names only label the picker's groups; without them each group shows its crop code.
-    listProductCropOptions().then(setCropOptions).catch(() => undefined);
-    // Vendor and manufacturer remain free-text choices.
-    // Every product's choices, page by page (Goal 4): one read stops silently at 1000 rows.
-    void fetchAllRows((from, to) => pageWithList(supabase.from('products').select('id, vendor, manufacturer', { count: 'exact' }).order('id').range(from, to))).then(({ data, error }) => {
-      if (error) { Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_product_options' } }); return; }
-      if (!data) return;
-      const vends = [...new Set(data.map((p) => p.vendor).filter(Boolean) as string[])].sort();
-      const mfrs = [...new Set(data.map((p) => p.manufacturer).filter(Boolean) as string[])].sort();
-      setVendorOptions(vends);
-      setManufacturerOptions(mfrs);
-    });
-  }, [toast]);
 
   const saveExistingProductDetails = async () => {
     const validation = productSetupValidationMessage(product, reiDraft, phiDraft, persistedProduct);
@@ -838,8 +845,8 @@ export default function ProductDetail() {
       revealPhoneSection('information');
       return;
     }
-    if (categoryLoadFailed && Boolean(product.category) && product.category !== persistedProduct?.category) {
-      toast('error', 'Could not load product categories. Refresh before saving a category.');
+    if (!categoriesReady && Boolean(product.category) && product.category !== persistedProduct?.category) {
+      toast('error', 'Product categories have not loaded. Use Try again before saving a category.');
       revealPhoneSection('information');
       return;
     }
@@ -854,6 +861,13 @@ export default function ProductDetail() {
     // A new parent needs its form; a new size takes its parent's form.
     if (isNew && !addSizeTo && !product.product_form) {
       toast('error', 'Choose a product form (liquid, dry, seed or each) before saving.');
+      revealPhoneSection('information');
+      return;
+    }
+    // The database refuses a product with no sold unit (products.inventory_unit NOT NULL, #2050).
+    if (isNew && !/[\p{L}\p{N}]/u.test(product.inventory_unit ?? '')) {
+      setUnitRequired(true);
+      toast('error', 'Choose an Inventory Unit (the unit this product is sold and stocked in) before saving.');
       revealPhoneSection('information');
       return;
     }
@@ -1226,6 +1240,12 @@ export default function ProductDetail() {
   };
 
   const changeCategory = (next: string | null) => {
+    // Without the timing list the page cannot tell which saved timings the new category keeps.
+    if (next !== product.category && (product.use_timings?.length ?? 0) > 0 && !timingsReady
+      && (next === 'Herbicide' || next === 'Foliar Fertilizer')) {
+      toast('error', 'Use timings have not loaded. Use Try again before changing the category.');
+      return;
+    }
     if (next !== product.category && (product.use_timings?.length ?? 0) > 0
       && (next !== 'Herbicide' && next !== 'Foliar Fertilizer'
         || (product.use_timings ?? []).some((code) => timingOptions.find((option) => option.code === code)?.category !== next))) {
@@ -1388,6 +1408,12 @@ export default function ProductDetail() {
               </Button>
             </div>
           )}
+          {failedLists.length > 0 && (
+            <div role="alert" className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <span>Could not load {failedLists.map(([, name]) => name).join(', ')}. Changes that need them stay off until they load.</span>
+              <Button size="sm" variant="secondary" onClick={() => failedLists.forEach(([read]) => void read.reload())}>Try again</Button>
+            </div>
+          )}
           {/* PAR-1: the parent this size belongs to, or the parent a new product creates. */}
           {!isNew && parent && profile && (
             <ProductParentPanel
@@ -1400,7 +1426,8 @@ export default function ProductDetail() {
               timingOptions={timingOptions}
               cropOptions={cropOptions}
               rateUnitOptions={rateUnitOptionsForProduct(unitConversions, parent.product_form, product.inventory_unit).map((uc) => uc.unit)}
-              busy={isDirty || pricingReloadRequired || saving}
+              // Its edit windows offer these pick lists, so they wait for them too.
+              busy={isDirty || pricingReloadRequired || saving || !unitsReady || !categoriesReady || !timingsReady || !cropsReady}
               onChanged={() => {
                 setParentReload((current) => current + 1);
                 loadRateLock();
@@ -1491,7 +1518,7 @@ export default function ProductDetail() {
                 <label htmlFor="product-category" className="block text-sm font-medium text-secondary mb-1">Category</label>
                 <select id="product-category" value={product.category || ''}
                   onChange={(e) => changeCategory(e.target.value || null)}
-                  disabled={!isAdmin || categoryLoadFailed || parentOwned}
+                  disabled={!isAdmin || !categoriesReady || parentOwned}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white text-nav-dark focus-visible:ring-2 focus-visible:ring-crx-green disabled:opacity-50">
                   <option value="">-- Select --</option>
                   {visibleProductCategories(categoryOptions, product.category).map((item) => (
@@ -1501,14 +1528,14 @@ export default function ProductDetail() {
                 {parentOwned && <ParentOwnedHint parentName={shownParent?.name} />}
               </div>
               {(product.category === 'Herbicide' || product.category === 'Foliar Fertilizer'
-                || (timingLoadFailed && ((product.use_timings?.length ?? 0) > 0 || Boolean(product.use_timing)))) && (
+                || (timingsRead.status === 'failed' && ((product.use_timings?.length ?? 0) > 0 || Boolean(product.use_timing)))) && (
                 <fieldset>
                   <legend className="mb-1 text-sm font-medium text-secondary">Use Timing</legend>
                   <div className="rounded-lg border border-gray-200 bg-white p-2 space-y-1">
-                    {timingLoadFailed ? (
+                    {timingsRead.status === 'failed' ? (
                       <>
                         <p className="px-2 text-sm text-secondary">Use timings could not be loaded. Refresh before changing them.</p>
-                        <p className="px-2 text-sm text-nav-dark">{product.use_timing || 'No saved use timings'}</p>
+                        <p className="px-2 text-sm text-nav-dark">{product.use_timing || product.use_timings?.join(', ') || 'No saved use timings'}</p>
                       </>
                     ) : (
                       <UseTimingPicker
@@ -1521,9 +1548,9 @@ export default function ProductDetail() {
                         onChange={(next) => update('use_timings', next)}
                       />
                     )}
-                    {!timingLoadFailed && timingOptions.length === 0 && <p className="px-2 text-sm text-secondary">Loading use timings...</p>}
+                    {timingsRead.status === 'loading' && <p className="px-2 text-sm text-secondary">Loading use timings...</p>}
                   </div>
-                  {isAdmin && !timingLoadFailed && (
+                  {isAdmin && timingsReady && cropsReady && (
                     <button type="button" onClick={() => setTimingChoicesOpen(true)}
                       className="mt-1 min-h-8 text-sm font-medium text-crx-green hover:underline focus-visible:ring-2 focus-visible:ring-crx-green">
                       Manage crop and timing choices
@@ -1820,7 +1847,8 @@ export default function ProductDetail() {
                     });
                     setIsDirty(true);
                   }}
-                  disabled={!isAdmin || Boolean(persistedProduct?.product_form)}
+                  // A form change drops units the form does not offer, so it waits for the unit list.
+                  disabled={!isAdmin || Boolean(persistedProduct?.product_form) || !unitsReady}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                 >
                   <option value="">-- Select --</option>
@@ -1903,9 +1931,12 @@ export default function ProductDetail() {
                         ? '' : current.rate_unit,
                     }));
                     setIsDirty(true);
+                    if (inventoryUnit) setUnitRequired(false);
                   }}
                   disabled={!isAdmin || Boolean(persistedProduct?.inventory_unit)}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
+                  aria-invalid={unitRequired || undefined}
+                  aria-describedby={unitRequired ? 'product-inventory-unit-error' : undefined}
+                  className={`w-full px-3 py-2 text-sm border ${unitRequired ? 'border-red-500' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50`}
                 >
                   <option value="">-- Select --</option>
                   {/* WaveB: grandfather a legacy value the form filter would otherwise hide, so a save can't blank it */}
@@ -1916,6 +1947,7 @@ export default function ProductDetail() {
                     <option key={uc.id} value={uc.unit}>{uc.unit}</option>
                   ))}
                 </select>
+                {unitRequired && <p id="product-inventory-unit-error" className="mt-1 text-xs text-red-600">Choose the unit this product is sold and stocked in.</p>}
               </div>
             </div>
 
@@ -1933,7 +1965,7 @@ export default function ProductDetail() {
                 <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-secondary" data-testid="product-rates-locked">
                   <span>Rates are locked. {rateLockSummary(rateLock)}</span>
                   {isAdmin && !isNew && persistedProduct && parent === null && (
-                    <Button size="sm" variant="secondary" onClick={() => setCorrectingRates(true)} disabled={isDirty}
+                    <Button size="sm" variant="secondary" onClick={() => setCorrectingRates(true)} disabled={isDirty || !unitsReady}
                       title={isDirty ? 'Save or discard your other changes first' : undefined}>
                       Correct rates
                     </Button>
@@ -2504,9 +2536,11 @@ export default function ProductDetail() {
           defaultCategory={product.category}
           profileId={profile.id}
           onReload={async () => {
-            const fresh = await listProductUseTimingOptions();
-            setTimingOptions(fresh);
-            return fresh;
+            const result = await timingsRead.reload();
+            if (result.status === 'applied') return result.data;
+            if (result.status === 'failed') throw result.error;
+            // A newer read owns the page's list; the window still needs a fresh answer to check its add against.
+            return listProductUseTimingOptions();
           }}
           onClose={() => setTimingChoicesOpen(false)}
         />

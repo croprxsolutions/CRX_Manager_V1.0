@@ -61,8 +61,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const OWNER_APPROVAL_PURPOSE = "crx-owner-migration-approval-v2";
 export const OWNER_SELFTEST_PURPOSE = "crx-owner-approval-selftest-v2";
 export const OWNER_APPROVAL_VIA = "chat-reply";
-// Once Mason replies, the agent has 30 minutes to apply.
-export const OWNER_APPROVAL_MAX_AGE_MS = 30 * 60 * 1000;
+// Once Mason replies, the approval lasts 24 hours (Mason, 2026-11-20: approve ahead, not "at the perfect time";
+// was 30 minutes), so an overnight release can apply what he approved in the evening.
+export const OWNER_APPROVAL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // He may reply up to a day after the request. Anything that changed meanwhile
 // (the file, the pull request head, what the safety check finds) still refuses it.
 export const OWNER_REQUEST_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -138,8 +139,8 @@ export function ownerApprovalSummary(p) {
     "The safety check stopped it for you because it:",
     ...(p.categories || []).map((c) => `- ${PARKED_LABELS[c.category] || c.category}: ${c.reason}`),
     "",
-    `To approve, reply: I approve (before ${centralTime(p.expiresAt)}).`,
-    "It then works once, for 30 minutes, only for this exact file and version.",
+    `To approve, reply: yes (before ${centralTime(p.expiresAt)}).`,
+    "It then works once, for 24 hours, only for this exact file. Fixes elsewhere in the pull request don't cancel it.",
     "Every other safety check still has to pass before it runs.",
     `(Reference ${p.code}. You don't need to type it.)`,
   ];
@@ -201,9 +202,9 @@ export function approvalCodeFromReply(prompt) {
 
 // The plain reply (Mason, 2026-10-13): "I approve", "approve", "approved",
 // "yes I approve", "I approve it", again only as the WHOLE message, and only those
-// forms (CodeRabbit, PR #900). A bare "yes" or "go" is not one: he says those
-// about everything.
-const PLAIN_REPLY_RE = /^\s*(?:i\s+approve(?:\s+it)?|approve|approved|yes\s*[,.!]?\s+i\s+approve)\s*[.!]*\s*$/i;
+// forms (CodeRabbit, PR #900). A bare "yes" counts too since 2026-11-20 (Mason: "a plain yes, no code"): it
+// still only approves a request the agent's message just before it showed (resolvePlainReply).
+const PLAIN_REPLY_RE = /^\s*(?:i\s+approve(?:\s+it)?|approve|approved|yes|yes\s*[,.!]?\s+i\s+approve)\s*[.!]*\s*$/i;
 
 /** True when the whole message is a plain approval with no code. */
 export const isPlainApprovalReply = (prompt) => PLAIN_REPLY_RE.test(String(prompt ?? ""));
@@ -813,7 +814,7 @@ export function assertOwnerTrustFilesReviewed({
   }
 }
 
-/** The approval must still be inside its 30 minutes at the moment of transmission. */
+/** The approval must still be inside its 24 hours at the moment of transmission. */
 export function assertApprovalStillValid(expiresAt, now = Date.now()) {
   const expires = Date.parse(expiresAt);
   if (!Number.isFinite(expires) || now > expires) throw new Error(`Mason's approval expired at ${expiresAt}`);
@@ -861,9 +862,8 @@ export function verifyOwnerApproval({ approval, expect, appliedNames = null, use
     return no("the pull request or its head is unknown (fail closed)");
   }
   if (Number(p.pullRequest) !== Number(expect.pullRequest)) return no(`it approves pull request #${p.pullRequest}, not #${expect.pullRequest}`);
-  if (String(p.prHead).toLowerCase() !== String(expect.prHead).toLowerCase()) {
-    return no(`it approves version ${String(p.prHead).slice(0, 12)}, not the pull request's current head ${String(expect.prHead).slice(0, 12)}`);
-  }
+  // The head may move after his yes (Mason, 2026-11-20: the agent's fixes shouldn't hold things up); the exact SQL
+  // (queryHash above) and what the safety check finds (below) must not.
   // What Mason was told the check found must be EXACTLY what it finds now — the
   // categories and their reasons, in order. Comparing names alone would let a
   // hand-built request keep the category and soften the reason he reads.
@@ -887,7 +887,7 @@ export function verifyOwnerApproval({ approval, expect, appliedNames = null, use
   if (approved > deadline) return no(`Mason replied after the request expired at ${p.expiresAt}`);
   if (now < approved) return no("the approval is dated in the future");
   const expires = approved + OWNER_APPROVAL_MAX_AGE_MS;
-  if (now > expires) return no(`the approval expired at ${new Date(expires).toISOString()}, 30 minutes after Mason replied; ask him again`);
+  if (now > expires) return no(`the approval expired at ${new Date(expires).toISOString()}, 24 hours after Mason replied; ask him again`);
   if (!/^[0-9A-Za-z_-]{1,128}$/.test(String(p.nonce || ""))) return no("the approval has no usable one-time code");
   if (usedNonces.has(String(p.nonce))) return no("this approval was already used; each one works once");
   if (Array.isArray(appliedNames) && appliedNames.includes(expect.migration)) {

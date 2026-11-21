@@ -64,7 +64,7 @@ function seed() {
 ${claims(USERS.admin)}
 SET session_replication_role = replica;
 INSERT INTO public.customers (id, farm_name) VALUES ('${FARM}', '[TB] Proof Farm');
-INSERT INTO public.products (id, product_name, is_active) VALUES ('${id(0xd001)}', '[TB] Product', true);
+INSERT INTO public.products (id, product_name, is_active, product_form, inventory_unit) VALUES ('${id(0xd001)}', '[TB] Product', true, 'liquid', 'Gal');
 INSERT INTO public.purchase_orders (id, po_number, vendor, created_by) VALUES ('${id(0xe001)}', 'TB-PO-1', '[TB] Vendor', '${USERS.admin}');
 INSERT INTO public.receiving_records (id, purchase_order_id, po_item_id, product_id, quantity_received, received_at, received_by)
 SELECT ${hex(0)}, '${id(0xe001)}', '${id(0xe002)}', '${id(0xd001)}', g, '2026-11-01 12:00:00+00', '${USERS.admin}' FROM ${series};

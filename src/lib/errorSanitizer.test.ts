@@ -74,6 +74,12 @@ describe('sanitizeError', () => {
   ])('explains a delivery-line refusal %s (20270126110000) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
   });
+  it.each([
+    ['DELIVERY_QUANTITIES_STALE', "this delivery's lines changed since the screen loaded them; reload it and enter the quantities again."],
+    ['DELIVERY_QUANTITIES_INVALID', 'every delivered quantity must be a number; reload the delivery and enter the quantities again.'],
+  ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
+    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
+  });
   it('explains a not-a-number count (20270126110000)', () => {
     expect(sanitizeError({ code: '23514', message: 'CYCLE_COUNT_QTY_INVALID: the counted quantity must be a number.' }))
       .toBe('Nothing was saved. the counted quantity must be a number.');
@@ -282,6 +288,11 @@ describe('sanitizeError', () => {
       .toBe('Nothing was saved. Cannot cost "Dry X" in the grower share — 0.00003125 ton is too small to record to 4 decimals without its cost changing by more than $0.50. Record this product in a smaller sold unit before invoicing this field application.');
   });
 
+  it('passes a rep\'s grower-share below-cost refusal through without a cost', () => {
+    expect(sanitizeError('FIELD_APP_GROWER_SHARE_BELOW_COST: the grower\'s per-acre price on this invoice does not cover the cost of the chemicals included in it. Raise the per-acre price, bill the chemicals on their own lines, or ask an admin to save this invoice.'))
+      .toBe('Nothing was saved. The grower\'s per-acre price on this invoice does not cover the cost of the chemicals included in it. Raise the per-acre price, bill the chemicals on their own lines, or ask an admin to save this invoice.');
+  });
+
   it('maps return-credit and customer-scope tokens to operator guidance', () => {
     expect(sanitizeError('CUSTOMER_SCOPE_DENIED')).toBe('You can only work with customers assigned to you');
     expect(sanitizeError('REP_CANNOT_REASSIGN')).toBe('Only an admin can change which sales rep a customer is assigned to');
@@ -334,6 +345,16 @@ describe('sanitizeError', () => {
     expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK')).toContain('spray jobs, returns or prepay money). Finish, bill or settle it before deactivating it.');
     expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. \u202Esmraf\u202C\u061C still has open invoices. Settle them first'))
       .toBe('Nothing was deactivated. smraf still has open invoices. Settle them first.');
+    expect(sanitizeError({ message: 'CUSTOMER_INACTIVE_NEW_WORK: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added' }))
+      .toBe('Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added');
+    expect(sanitizeError('CUSTOMER_INACTIVE_NEW_WORK')).toContain('must reactivate the customer');
+    expect(sanitizeError({ message: 'new row for relation "inventory_holds" violates check constraint "inventory_holds_source_needs_customer"' }))
+      .toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');
+    expect(sanitizeError({ message: 'WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery' }))
+      .toBe('Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery');
+    // The hold-rule name inside some other message is not mistaken for the rule.
+    expect(sanitizeError({ message: 'Product inventory_holds_source_needs_customer not found' }))
+      .not.toBe('Nothing was saved. A stock hold for a spray job or quote must name its customer');
     expect(sanitizeError('PREPAY_BALANCE_SERVER_ONLY: a prepay balance changes only through prepayments and payments'))
       .toBe('A prepay balance changes only through prepayments and payments');
     expect(sanitizeError('RETURN_CREDIT_UNIT_MISMATCH')).toContain('original sale');

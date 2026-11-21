@@ -27,8 +27,8 @@
 --        bucket, not complete, no suggestion
 --   P18  an order line counts only its quantity_remaining; a delivery covering only part of it
 --        does not move its need date (it stays today)
---   P20  job lines in qt and Gal convert; a '2.5 GL' line counts on a product stocked by that
---        jug and goes to Check units on a Gal product
+--   P20  job lines in qt and Gal convert; a '2.5 GL' line goes to Check units on a Gal product (also
+--        when the product is sized 2.5 GL: its stock unit is Gal, a product must have a sold unit)
 --   P21  a job's draw comes off its own (August) section: March still needs 100
 --   P22  a draft booking's crop-program hold (20) counts now; a counted booking's hold on a product it books (10) does not;
 --        its hold on a product it does not book (5 of product 22) does; an expired manual hold (7) does not
@@ -75,12 +75,12 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Purchasing Farm ' || v_suffix) RETURNING id INTO v_customer;
-  -- Products 1..27, all stocked in Gal except 20 (stocked by the 2.5 GL jug); every product is inserted before any is priced
+  -- Products 1..27, all stocked in Gal (product 20 is sized 2.5 GL, but its stock unit is Gal: a product must have a sold unit); every product is inserted before any is priced
   -- (pricing sets a transaction-wide mode).
   FOR v_i IN 1..27 LOOP
     INSERT INTO products (product_name, unit_size, inventory_unit, product_form)
     VALUES ('[SMOKE] Purchasing ' || lpad(v_i::text, 2, '0') || ' ' || v_suffix,
-            (ARRAY['Gal', '2.5 GL'])[(v_i = 20)::int + 1], (ARRAY['Gal', NULL])[(v_i = 20)::int + 1], 'liquid')
+            (ARRAY['Gal', '2.5 GL'])[(v_i = 20)::int + 1], 'Gal', 'liquid')
     RETURNING id INTO v_pid;
     v_p := v_p || v_pid;
   END LOOP;
@@ -334,7 +334,7 @@ BEGIN
   INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order) VALUES (v_job, v_p[16], 12, 'lb', 1);
 
   -- P20: job lines as Schedule Job labels them. Product 18 (Gal): 8 qt + 3 Gal = 5 Gal.
-  -- Product 20 (stocked by the 2.5 GL jug): 5 x '2.5 GL' = 5 jugs. Product 21 (Gal) with a
+  -- Product 20 (sized 2.5 GL, stocked in Gal) and product 21 (Gal), each with a
   -- '2.5 GL' line cannot be converted, so it goes to Check units.
   INSERT INTO jobs (job_number, customer_id, status, job_date, created_by)
   VALUES ('SMK-PP20-' || v_suffix, v_customer, 'scheduled', v_t + 20, v_admin) RETURNING id INTO v_job;
@@ -591,8 +591,8 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (P20 qt and Gal) %', v_x;
   END IF;
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[20];
-  IF v_x IS NULL OR (v_x->'reasons' ? 'check_units') OR (v_x->>'committed')::numeric <> 5 OR v_x->>'stock_unit' <> '2.5 GL' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P20 jug product) %', v_x;
+  IF v_x IS NULL OR NOT (v_x->'reasons' ? 'check_units') OR (v_x->>'committed')::numeric <> 0 OR v_x->>'stock_unit' <> 'Gal' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P20 jug-sized product stocked in Gal) %', v_x;
   END IF;
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[21];
   IF v_x IS NULL OR NOT (v_x->'reasons' ? 'check_units') OR (v_x->>'committed')::numeric <> 0 THEN

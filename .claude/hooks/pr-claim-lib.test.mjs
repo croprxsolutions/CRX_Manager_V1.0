@@ -82,6 +82,33 @@ assert.deepEqual(pushDestinationBranches("git push -o ci.skip origin a b:c", "x"
 assert.deepEqual(pushDestinationBranches("git status", "x"), []);
 assert.deepEqual(pushDestinationBranches("git push origin 'feat/*:feat/*' b", "x"), ["b"]);
 passed += 7;
+// Shell redirections are not branches (2026-11-21: `2>` and `>` were claimed as branch names).
+for (const [cmd, want] of [
+  ["git -C X push -q origin b 2>&1", ["b"]],
+  ["git -C X push origin b > out.txt", ["b"]],
+  ["git push origin b >> out.txt", ["b"]],
+  ["git push origin b >out.txt", ["b"]],
+  ["git push origin b 2>/dev/null", ["b"]],
+  ["git push origin b 2> err.txt c", ["b", "c"]],
+  ["git push origin b &> all.txt", ["b"]],
+  ["git push origin b < in.txt", ["b"]],
+  ["git push > out.txt origin b", ["b"]],
+  ["git push origin b | tee log", ["b"]],
+  ["git push origin b && echo ok", ["b"]],
+  ["git push origin b; echo ok", ["b"]],
+  ["git push origin b&>all.txt c", ["b", "c"]], // `&>` redirects; the push runs on past it
+  ["git push origin b &>> all.txt c", ["b", "c"]],
+  ["git push origin b <> rw.txt", ["b"]],
+  ["git push origin b <<- EOF", ["b"]],
+  ["git push origin b & git status", ["b"]], // a lone `&` does end the command
+  ["git push origin feat/x>out.txt c", ["feat/x", "c"]], // a redirect glued to a branch
+  ["git push origin feat/x2>err.txt", ["feat/x2"]], // digits glued to a word are not a file descriptor
+  ["git push origin '>' b", [">", "b"]], // a quoted `>` is a real argument, not a redirection
+  ["git push origin 'a>b' c", ["a>b", "c"]],
+]) {
+  assert.deepEqual(pushDestinationBranches(cmd, "cur"), want, cmd);
+  passed += 1;
+}
 
 // ── through the real push guard (Claude-only hook) ───────────────────────────
 const repo = tempDir("pr-claim-repo-");
@@ -111,6 +138,14 @@ ok(/LANDING CLAIM/.test(pushGuard(`node "${path.join(ROOT, "scripts", "write-cod
 ok(pushGuard("node scripts/write-codex-push-proof.mjs --dry-run", "B") === "", "a dry run is never refused");
 ok(pushGuard("node scripts/write-codex-push-proof.mjs", "A") === "", "the holder's Sol run is allowed");
 ok(pushGuard("git push origin other-branch", "B") === "", "B may push a different branch");
+pushGuard("git push origin '>'", "Z");
+pushGuard("git push origin '2>'", "Z");
+ok(readClaims(claimsPath)[">"]?.session === "Z", "setup: another session holds claims on the names `>` and `2>`");
+ok(pushGuard("git push origin other-branch > out.txt", "B") === "", "a redirect after the push is not a branch, so no refusal");
+ok(pushGuard("git -C . push -q origin other-branch 2>&1", "B") === "", "`2>&1` is not a branch, so no refusal");
+ok(/LANDING CLAIM/.test(pushGuard("git push origin feat/land 2>&1", "B")), "a real claimed branch is still refused behind a redirect");
+ok(/LANDING CLAIM/.test(pushGuard("git push origin feat/land>out.txt", "B")), "a real claimed branch is still refused with a redirect glued on");
+ok(/LANDING CLAIM/.test(pushGuard("git push origin other-branch &>log feat/land", "B")), "a claimed branch after `&>` is still refused");
 ok(pushGuard("git push --dry-run origin dry-branch", "B") === "" && !("dry-branch" in readClaims(claimsPath)), "a dry-run push claims nothing");
 ok(pushGuard("git status && npm test", "B") === "", "ordinary commands are never refused");
 ok(pushGuard("git push origin feat/land") === "", "a call with no session id is never refused");

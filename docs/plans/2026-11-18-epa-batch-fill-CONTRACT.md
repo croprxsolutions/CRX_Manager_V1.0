@@ -9,7 +9,7 @@ the session notes `moa1-sol-approach-review-2026-11-18.md` (not in repo).
 path a person uses on the product page: `start_epa_lookup` → `epa-lookup` Edge Function (record mode) → `commit_epa_proposal`.
 The tool writes **ingredients only**. Anything that is not a plain new ingredient waits on `/epa-lookups` for a person.
 
-**Smallest change.** A screen-only change. No new table, RPC, migration, Edge Function change, flag, or job.
+**Smallest change.** A screen-only change. No new table, RPC, migration, Edge Function change, flag, or job. (Superseded 2026-11-19 by issue #1976: the save now goes through the new RPC `commit_epa_proposal_batch`, migration `20270130100000`; see the Astra challenge settlement below.)
 - `src/lib/epaBatchFill.ts` (new): the candidate list, the per-parent eligibility rule, the decisions builder, and the run loop. It is built from the existing `startEpaLookup`, `runRecordedEpaLookup` and `commitEpaProposal`.
 - `src/lib/epaBatchFill.test.ts` (new): the eligibility and decisions rules.
 - `src/components/products/EpaBatchFill.tsx` (new): the card on `/epa-lookups`. It lists the candidates with checkboxes and has Start and Stop buttons, plus per-parent results.
@@ -86,7 +86,7 @@ No email, file, or receipt is produced. The tool shows nothing beyond the per-pa
 
 ## 3. Delivery
 
-Screens only; no database change. One PR to `staging`. The touched `src/` files are checked against the Sol list by running the classifier. If any is listed, Sol reviews before the PR opens. Luna reviews regardless.
+Screens only; no database change. One PR to `staging`. (Issue #1976 later added the migration `20270130100000`; the screen needs it applied to save.) The touched `src/` files are checked against the Sol list by running the classifier. If any is listed, Sol reviews before the PR opens. Luna reviews regardless.
 
 ## 4. Proof cases
 
@@ -134,6 +134,8 @@ Rule changes adopted (supersede §2 where they differ):
 - **Exactly-one-number race (F7) and concurrent supersede (F9, F10):** re-read the number count and open proposals in the
   browser immediately before start and before commit; a remaining race needs two admins acting on the same product in
   the same seconds. Accepted residual risk (two admins total), not closed server-side; §2 wording corrected.
+  **Closed server-side 2026-11-19 (issue #1976):** the batch now saves through `commit_epa_proposal_batch`
+  (`20270130100000`), which re-makes the batch's whole decision (the eligibility and decisions rules above, the label unchanged since the lookup, no proposal replaced meanwhile) under the save's own locks.
 - **Held rules (F5, F6):** §2 overstated. Actual: chemistry is version-checked from *recording*, and registration changes
   hold only when a label item is accepted. Batch re-reads both before commit.
 - **Result identity (F23):** the loop requires `proposal_id` on a proposal outcome and re-fetches that proposal, checking
@@ -147,8 +149,8 @@ Rule changes adopted (supersede §2 where they differ):
   as explicit false or blank-fill only; full `epa_registrations` row compared before/after, not three fields.
 - **Evidence items (F14, F15, F17-F20, F26, F31, F33, F34, F36):** answered at build time by reading the named helpers
   and policies; any that contradicts this contract stops the build and returns here.
-- **Not adopted:** a server precondition for exactly-one-number (F7/F38) would need a migration; outside the approved
-  screen-only scope unless Mason asks.
+- **Not adopted (then adopted 2026-11-19, issue #1976):** a server precondition for exactly-one-number (F7/F38) would need
+  a migration; outside the approved screen-only scope unless Mason asks. Now in `commit_epa_proposal_batch`.
 
 ## Mason's decisions (in-session, 2026-11-18)
 

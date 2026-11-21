@@ -21,12 +21,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-// Iterating: CRX_PROVER_REUSE=<kept container> CRX_PROVER_DB=<a copy of its replayed database> skips the replay.
-const REUSE = process.env.CRX_PROVER_REUSE;
-const NAME = REUSE || `crx-rpc-${process.pid}-${Date.now().toString(36)}`;
-const DB = process.env.CRX_PROVER_DB || 'postgres';
-// Shell commands below name the database; only a bare name is accepted (Sol r1).
-if (!/^[a-z0-9_]+$/.test(DB)) throw new Error('CRX_PROVER_DB must be a bare database name (a-z, 0-9, _)');
+const NAME = `crx-rpc-${process.pid}-${Date.now().toString(36)}`;
+const DB = 'postgres';
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -426,9 +422,12 @@ async function main() {
   for (const role of ['anon', 'authenticated', 'service_role']) {
     for (const sig of [APPROVE, RUN]) assert.equal(scalar(`SELECT has_function_privilege('${role}', '${sig}', 'EXECUTE');`), 'f', `${role} ${sig}`);
   }
-  console.log('[case] 7 a sales rep is refused (ADMIN_REQUIRED); anon/authenticated/service_role cannot run either private function');
+  for (const sig of ['public.preview_rate_review(jsonb,jsonb)', 'public.commit_rate_review(jsonb,jsonb,text)']) {
+    assert.equal(scalar(`SELECT has_function_privilege('anon', '${sig}', 'EXECUTE');`), 'f', `anon ${sig}`);
+  }
+  console.log('[case] 7 a sales rep is refused (ADMIN_REQUIRED); anon/authenticated/service_role cannot run either private function; anon cannot run the public pair');
   console.log('RATE_REVIEW_PARENT_CHANGED_PROOF_PASS');
 }
 
 try { await main(); }
-finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }
+finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

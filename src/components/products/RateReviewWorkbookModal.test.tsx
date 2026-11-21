@@ -135,6 +135,8 @@ describe('RateReviewWorkbookModal', () => {
     fireEvent.click(confirm);
     await waitFor(() => expect(H.commit).toHaveBeenCalledOnce());
     expect(await screen.findByText(/Saved 2 rates and 0 outcomes./)).toBeInTheDocument();
+    expect(screen.queryByText(text)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Parent rate changed/)).toHaveLength(1);
     expect(screen.getByText('Draft Rates 2 (Atrazine 4L): Parent rate changed since this draft was made: was "4 oz", now none. Approving still saves it.'))
       .toBeInTheDocument();
   });
@@ -148,7 +150,7 @@ describe('RateReviewWorkbookModal', () => {
     const view = render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
     expect(await screen.findByText('Parent rate changed since this draft was made: was "4 oz/A", now "8 oz/A". Approving still saves it.')).toBeInTheDocument();
     view.unmount();
-    for (const bad of [{ was: 4, now: '8 oz/A' }, { was: '', now: '8 oz/A' }, { was: '4 oz/A', now: ' ' }]) {
+    for (const bad of [{ was: 4, now: '8 oz/A' }, { was: '', now: '8 oz/A' }, { was: '4 oz/A', now: '' }]) {
       sessionStorage.setItem(name, stored(bad));
       const damaged = render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
       expect(await screen.findByText(/unreadable.*rows are unavailable/i)).toBeInTheDocument();

@@ -282,6 +282,11 @@ describe('sanitizeError', () => {
       .toBe('Nothing was saved. Cannot cost "Dry X" in the grower share — 0.00003125 ton is too small to record to 4 decimals without its cost changing by more than $0.50. Record this product in a smaller sold unit before invoicing this field application.');
   });
 
+  it('passes a rep\'s grower-share below-cost refusal through without a cost', () => {
+    expect(sanitizeError('FIELD_APP_GROWER_SHARE_BELOW_COST: the grower\'s per-acre price on this invoice does not cover the cost of the chemicals included in it. Raise the per-acre price, bill the chemicals on their own lines, or ask an admin to save this invoice.'))
+      .toBe('Nothing was saved. The grower\'s per-acre price on this invoice does not cover the cost of the chemicals included in it. Raise the per-acre price, bill the chemicals on their own lines, or ask an admin to save this invoice.');
+  });
+
   it('maps return-credit and customer-scope tokens to operator guidance', () => {
     expect(sanitizeError('CUSTOMER_SCOPE_DENIED')).toBe('You can only work with customers assigned to you');
     expect(sanitizeError('REP_CANNOT_REASSIGN')).toBe('Only an admin can change which sales rep a customer is assigned to');

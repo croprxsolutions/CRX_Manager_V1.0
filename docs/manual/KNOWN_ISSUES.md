@@ -44,8 +44,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 Highest-priority open items, in order: KI-02 (cost and
 margin: the table-level lock is live since 2026-10-25; the server-function audit is done and its fixes went live 2026-11-02 in
-migration `20261102200000`), KI-10 (about 69 functions still replay a saved answer on the retry
-key alone).
+migration `20261102200000`), KI-10 (outside quote, invoice and billing
+functions, every keyed function now checks its request on a retry; the billing remainder waits for Taha's work).
 
 ---
 
@@ -295,8 +295,24 @@ Both are in the live `void_invoice`, so they affect the ordinary Void Invoice bu
   when its invoice is voided, after checking its Chicago month is open. Live had 0 write-offs (2026-11-14).
 - **Credit month read in UTC — FIXED LIVE 2026-11-07.** `20261206110000` (KI-18) checks each credit's Chicago
   month; confirmed in the live body 2026-11-14.
-### KI-10 — About 69 live functions replay a saved result matched on the retry key alone
-**HIGH on money paths · PARTIAL · money/inventory/database · unassigned (batch 3 remainder is next)**
+### KI-10 — Some live functions replayed a saved result matched on the retry key alone
+**MED (billing remainder only) · PARTIAL · money/database · remainder deferred to after Taha's billing work (2026-12-15)**
+**Live re-check 2026-11-21 (read-only, production):** of the 252 public function versions that take a retry key, none
+outside quotes, invoices, payments and billing still replays a changed request. Batches 1–4e bind theirs to the
+caller and request; the rest check the request themselves: the Product Master functions through
+`_product_parent_replay` (caller and request fingerprint), the delivery-receipt email functions, customer, team-note,
+vendor-alias, supplier-link, pricing and EPA functions by a stored fingerprint or every argument, and
+`stamp_job_printed`, `reverse_application_record` and `resolve_offline_action` by their only business arguments
+after their role check. The stock movers the stock-unit work touches (`complete_delivery`,
+`start_and_complete_delivery`, `cancel_order`, `bulk_import_order`) are bound too. **Still open, deferred (Taha
+owns quotes, bookings, invoices and billing until 2026-12-15):** `post_invoice_group` replays on the key alone
+(confirmed); `auto_expire_quotes` takes no request to compare; the other quote, invoice, credit-memo, payment
+and finance-charge functions (`save_quote`, `save_invoice`, `post_invoice`, `create_quote_version`,
+`restore_quote_version`, `convert_quote_to_order`, `create_invoice_from_order`, `create_invoice_from_blend_ticket`,
+`create_invoice_for_unbilled_delivery`, `apply_credit_memo_to_invoice`, `reverse_credit_memo_application`,
+`unapply_credit_memo`, `allocate_payment`, `record_invoice_payment`, `generate_finance_charges`,
+`save_field_app_split_invoice`, `revert_quote_status`) show their own request checks but were not each proven;
+re-check them function by function when that work reopens. History of the batches follows.
 When a user retries an action with a saved "retry key", these functions return the first call's saved answer
 without checking that the retry is for the same person and record. Nothing is double-charged; a reused key with
 a different target gives a false "success" on the wrong record. Fixed on `main`: batch 1 (`20261016060000`,

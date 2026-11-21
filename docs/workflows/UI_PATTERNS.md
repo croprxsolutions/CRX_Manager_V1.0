@@ -51,6 +51,14 @@ lists every route and page, and `src/pages/` is the ground truth.
 
 CRX Manager uses `useState` + `useEffect` for data fetching (not React Query or SWR).
 
+**Pilot: `useLoad` (`src/hooks/useLoad.ts`).** Used by `ProductChangeHistory` and `ProductVendorsSection`; Product
+Master Wave 2 extends it to the rest of the Product pages before it becomes the app-wide pattern
+([plan](../plans/2026-11-20-shared-data-loading-product-pilot.md)). It reads by `key` (null = do not read), uses
+only the newest request's answer, keeps shown data marked `refreshing` or `stale` on a same-record refresh, and
+`reload()` says whether its read was `applied`, `failed` or `skipped`. The loader throws on a returned Supabase
+`error` and gets `isCurrent()` to check before any later request. Keep the screen's existing Sentry names in
+`report`.
+
 ### Reading data
 ```typescript
 const [customers, setCustomers] = useState<Customer[]>([]);

@@ -84,3 +84,7 @@ None. Mason, 2026-11-21: "Yes, show them" (drivers see open deliveries with farm
 - LOW: "already assigned to you" only while the delivery is still scheduled; otherwise "already taken or changed".
 - LOW: the list proof adds a delivery whose number sorts first but date last, and checks dates and ids.
 - LOW: the take-hardening rule above now states the implemented order.
+
+## Luna (gpt-6-luna xhigh, commit 28bc36eb4): 1 MED, fixed
+
+- MED: a driver's same-key retry that waited on the key lock could replay success after an admin denied Deliveries. The replay path now re-checks the driver's access holding their profile row, as the fresh path does. Not separately proven (the window needs three interleaved sessions); the full prover still passes.

@@ -157,6 +157,15 @@ BEGIN
   -- A driver's replay is returned only while the delivery is still theirs, so the screen never says "assigned to
   -- you" for one dispatch has since moved; otherwise the current state wins.
   IF v_replay IS NOT NULL THEN
+    -- The key lock above may have waited: re-check the driver's access, as the fresh path does after its row lock.
+    IF NOT v_is_office THEN
+      PERFORM 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role = 'driver'
+        AND array_position(COALESCE(denied_pages, '{}'::text[]), 'deliveries') IS NULL
+        FOR SHARE;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'Not authorized to reassign deliveries';
+      END IF;
+    END IF;
     IF NOT v_is_office AND NOT EXISTS (
       SELECT 1 FROM public.deliveries WHERE id = p_delivery_id AND deleted_at IS NULL AND assigned_driver = v_actor
     ) THEN

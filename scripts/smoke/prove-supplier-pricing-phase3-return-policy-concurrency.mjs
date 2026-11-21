@@ -489,7 +489,7 @@ ROLLBACK;`).stdout;
   console.log('PHASE3_PRODUCT_FAMILIES_ACTIVE_PROFILE_GATE_PASS');
   const smoke=sql('\\i /tmp/smoke.sql',{fail:true}); const smokeOut=`${smoke.stdout}\n${smoke.stderr}`; assert.match(smokeOut,/SMOKE_PASS_ROLLBACK/,'rollback matrix did not reach its terminal marker'); assert.match(smokeOut,/PHASE3_UNRELATED_CREDIT_MEMO_UNAPPLY_PASS/,'unrelated credit-memo unapply regression did not pass'); console.log('PHASE3_UNRELATED_CREDIT_MEMO_UNAPPLY_PASS');
   const source=readFileSync(files.stageA,'utf8'); for(const x of ['lock_phase3_product_policy_products','RETURN_POLICY_NO_RETURN','trigger_x_validate_phase3_return_item_policy'])assert.match(source,new RegExp(x));
-  sql(`INSERT INTO public.products(product_name, product_form, inventory_unit) VALUES ('[PROOF] Phase3 lock A', 'liquid', 'Gal'),('[PROOF] Phase3 lock B', 'liquid', 'Gal');`);
+  sql(`INSERT INTO public.products(product_name, inventory_unit) VALUES ('[PROOF] Phase3 lock A', 'Gal'),('[PROOF] Phase3 lock B', 'Gal');`);
   const ids=sql(`SELECT id FROM public.products ORDER BY id LIMIT 2;`).stdout.trim().split(/\r?\n/).filter(Boolean); if(ids.length<2)throw new Error('schema dump has fewer than two Products for real lock proof'); const [a,b]=ids;
   // Two independent psql sessions call the actual Stage A helper, opposite UUID
   // order. Both must finish: no replacement tables/functions are installed.
@@ -513,7 +513,7 @@ ROLLBACK;`).stdout;
   }
   function makeFixture(label,state='requested',sharedProductId=null){
     const n=++fixtureNo, tag=`[PROOF P3 ${process.pid}-${n}] ${label}`;
-    const productId=sharedProductId||scalar(`INSERT INTO public.products(product_name, product_form, inventory_unit) VALUES ('${tag} Product', 'liquid', 'Gal') RETURNING id;`);
+    const productId=sharedProductId||scalar(`INSERT INTO public.products(product_name, inventory_unit) VALUES ('${tag} Product', 'Gal') RETURNING id;`);
     const customerId=scalar(`INSERT INTO public.customers(farm_name) VALUES ('${tag} Customer') RETURNING id;`);
     const orderId=scalar(`INSERT INTO public.orders(order_number,customer_id,salesman_id,status) VALUES ('P3-${process.pid}-${n}','${customerId}'::uuid,'${sales}'::uuid,'confirmed') RETURNING id;`);
     const orderItemId=scalar(`INSERT INTO public.order_items(order_id,product_id,product_name,price_per_unit,total_units_needed,unit_size,total_price,quantity_delivered,quantity_remaining) VALUES ('${orderId}'::uuid,'${productId}'::uuid,'${tag} Product',10,4,'ea',40,4,0) RETURNING id;`);
@@ -541,7 +541,7 @@ ROLLBACK;`).stdout;
   function policy(f){return scalar(`SELECT return_policy FROM public.products WHERE id='${f.productId}'::uuid;`)}
   function directItemSql(returnId,productId,label){return `INSERT INTO public.return_items(return_id,product_id,product_name,quantity,unit,unit_price_cents,extended_cents,condition,restock,sort_order) VALUES ('${returnId}'::uuid,'${productId}'::uuid,'[PROOF P3] ${label}',1,'ea',1,1,'unopened',false,99);`;}
   function unapplySql(invoiceId,key){return `SELECT public.unapply_credit_memo('${invoiceId}'::uuid,'Phase 3 concurrency reversal','${admin}'::uuid,'${key}');`;}
-  function createTarget(label){return scalar(`INSERT INTO public.products(product_name, product_form, inventory_unit) VALUES ('[PROOF P3] ${label} target', 'liquid', 'Gal') RETURNING id;`);}
+  function createTarget(label){return scalar(`INSERT INTO public.products(product_name, inventory_unit) VALUES ('[PROOF P3] ${label} target', 'Gal') RETURNING id;`);}
   function autocommitDeferredFkTiming(){
     const f=makeFixture('autocommit deferred FK timing','requested'), target=createTarget(`autocommit ${f.n}`);
     // sql() launches psql without BEGIN, so this is an implicit/autocommit

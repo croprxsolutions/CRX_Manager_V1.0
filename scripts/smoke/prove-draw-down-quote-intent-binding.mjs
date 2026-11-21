@@ -262,6 +262,9 @@ function restoreFullSchemaAndRunSmoke() {
     'candidate must be the final full-schema replay migration',
   );
 
+  // The schema-only baseline has no unit rows; the chains' liquid test products need live's 'Gal'.
+  psql(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) SELECT 'Gal', 128, 'liquid'
+    WHERE NOT EXISTS (SELECT 1 FROM public.unit_conversions WHERE unit = 'Gal');`);
   const smokeSql = readFileSync(SMOKE_PATH, 'utf8');
   const smoke = psql(smokeSql, { allowFailure: true });
   const smokeOutput = `${smoke.stdout}\n${smoke.stderr}`;
@@ -324,10 +327,10 @@ ON CONFLICT (id) DO UPDATE
 BEGIN;
 ALTER TABLE public.products
   DISABLE TRIGGER trigger_y_require_governed_product_pricing;
-INSERT INTO public.products (product_name, unit_size, current_cost, tier1_price, product_form, inventory_unit)
+INSERT INTO public.products (product_name, unit_size, current_cost, tier1_price, inventory_unit)
 VALUES
-  ('[PROVER] Draw Intent Priced A', 'gal', 3.00, 10.00, 'liquid', 'Gal'),
-  ('[PROVER] Draw Intent Priced B', 'gal', 4.00, 8.00, 'liquid', 'Gal');
+  ('[PROVER] Draw Intent Priced A', 'gal', 3.00, 10.00, 'Gal'),
+  ('[PROVER] Draw Intent Priced B', 'gal', 4.00, 8.00, 'Gal');
 ALTER TABLE public.products
   ENABLE TRIGGER trigger_y_require_governed_product_pricing;
 DO $seed_check$

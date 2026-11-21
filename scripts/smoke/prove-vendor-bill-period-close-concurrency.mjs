@@ -508,7 +508,7 @@ SELECT public._section9_record_vendor_payment_intent_impl_20260826(
   sql(`DROP TRIGGER proof_pause_period ON public.accounting_periods; DROP FUNCTION public._proof_pause_period(); DELETE FROM public.accounting_periods WHERE period_start='2025-01-01';`);
   console.log('CANDIDATE_CLOSE_SAME_KEY_SERIALIZATION_PASS');
   sql(`${claims()} INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES ('00000000-0000-0000-0000-0000000000a2','period-proof-applicator@example.invalid','{"full_name":"Period Proof Applicator","role":"applicator"}'::jsonb) ON CONFLICT DO NOTHING; INSERT INTO public.profiles(id,email,role,is_active) VALUES ('00000000-0000-0000-0000-0000000000a2','period-proof-applicator@example.invalid','applicator',true) ON CONFLICT (id) DO UPDATE SET role=EXCLUDED.role,is_active=true;`);
-  sql(`INSERT INTO public.products(product_name, product_form, inventory_unit) VALUES ('[PROOF] sibling smoke product ${process.pid}', 'liquid', 'Gal');`);
+  sql(`INSERT INTO public.products(product_name, inventory_unit) VALUES ('[PROOF] sibling smoke product ${process.pid}', 'Gal');`);
   for (const sibling of SIBLING_SMOKES) {
     run(['cp', path.join(ROOT, 'scripts', 'smoke', sibling), `${NAME}:/tmp/${sibling}`]);
     const siblingResult = sql(`${claims()}\n\\i /tmp/${sibling}`, { fail: true });

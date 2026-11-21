@@ -146,7 +146,11 @@ BEGIN
   -- means status invoiced, an invoice_id, or any live invoice on the job or on one of its blend tickets
   -- (a ticket can be invoiced while the job is still 'completed'); such a job is reported as 'invoiced'.
   -- FOR NO KEY UPDATE is the lock the UPDATEs below take anyway, so this adds no new lock conflict.
-  WITH locked0 AS (SELECT id, deleted_at, status, invoice_id FROM public.jobs WHERE id = ANY (v_ids) ORDER BY id FOR NO KEY UPDATE),
+  -- The lock is its own statement so the billed check below takes a fresh snapshot after any wait: a
+  -- blend-ticket invoice that held a job's lock and committed meanwhile is then seen (it does not
+  -- change the job row itself).
+  PERFORM 1 FROM public.jobs WHERE id = ANY (v_ids) ORDER BY id FOR NO KEY UPDATE;
+  WITH locked0 AS (SELECT id, deleted_at, status, invoice_id FROM public.jobs WHERE id = ANY (v_ids)),
   locked AS (
     SELECT id, deleted_at,
            CASE WHEN status = 'invoiced' OR invoice_id IS NOT NULL OR EXISTS (

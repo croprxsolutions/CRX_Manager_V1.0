@@ -587,6 +587,8 @@ export default function QuoteBuilder() {
   // Booking timing windows: picking a timing fills an empty needed-by date (A-R1).
   // null until the saved windows arrive; the Timing pick waits so it never fills a date from the defaults.
   const [timingWindows, setTimingWindows] = useState<TimingWindows | null>(null);
+  // Section key -> the needed-by date a Timing pick filled this session, so it still counts as auto-filled on a later day.
+  const autoFilledNeededBy = useRef<Map<string, string>>(new Map());
   useEffect(() => {
     let cancelled = false;
     void loadTimingWindows().then((w) => { if (!cancelled) setTimingWindows(w); });
@@ -2162,13 +2164,13 @@ export default function QuoteBuilder() {
       const jobLocked = Boolean(s.id && sectionJobs[s.id] && sectionJobs[s.id].status !== 'cancelled');
       if (jobLocked || !timing || !timingWindows) return { ...s, timing };
       const today = todayInBusinessTz();
-      // A date still equal to the old timing's window start was auto-filled, so it follows the new timing; a typed date stays.
-      const autoFilled = Boolean(s.timing && s.needed_by_date === timingWindowStart(timingWindows, s.timing, today));
-      return {
-        ...s,
-        timing,
-        needed_by_date: s.needed_by_date && !autoFilled ? s.needed_by_date : timingWindowStart(timingWindows, timing, today),
-      };
+      // A date the pick filled (this session, or still the old timing's window start) follows the new timing; a chosen date stays.
+      const autoFilled = Boolean(s.needed_by_date && (autoFilledNeededBy.current.get(key) === s.needed_by_date
+        || (s.timing && s.needed_by_date === timingWindowStart(timingWindows, s.timing, today))));
+      if (s.needed_by_date && !autoFilled) return { ...s, timing };
+      const filled = timingWindowStart(timingWindows, timing, today);
+      autoFilledNeededBy.current.set(key, filled);
+      return { ...s, timing, needed_by_date: filled };
     }));
   };
 

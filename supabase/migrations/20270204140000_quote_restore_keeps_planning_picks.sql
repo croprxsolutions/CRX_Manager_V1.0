@@ -9,8 +9,10 @@
 --   then counted committed ("firm") demand as "could add", silently dropping it from the buy plan.
 -- WHAT: CREATE OR REPLACE of public._restore_quote_version_owner_impl only. Its body is the
 --   20261027040000 body, byte for byte, plus PLANNING_PICKS_KEPT: before the section delete it
---   reads the current sections' timing and confidence keyed by sort_order, and each restored
---   section takes the picks of the current section with the same sort_order (none: unset).
+--   reads the current sections' timing and confidence keyed by sort_order and section_name, and
+--   each restored section takes the picks of the current section with the same sort_order AND
+--   section_name (none: unset; a tie: the highest id). Position alone is not enough: removing a
+--   section renumbers the rest, which would move picks onto another section.
 --   Planning picks are deliberately not version content (decided 2026-11-21): a rewind keeps the
 --   current picks. The snapshot function (_create_quote_version_owner_impl) is unchanged.
 -- NOT CHANGED: signature, owner, SECURITY DEFINER, search_path, EXECUTE grants (postgres and
@@ -211,9 +213,10 @@ BEGIN
 
   -- PLANNING_PICKS_KEPT (20270204140000): timing and confidence are planning picks, not version
   -- content (a version never records them). Keep each current section's picks for the restored
-  -- section at the same sort_order; a sort_order with no current section restores unset.
-  -- sort_order is not unique: on a tie the section with the highest id wins (deterministic).
-  SELECT COALESCE(jsonb_object_agg(qs.sort_order::text,
+  -- section with the same sort_order AND section_name (a removal renumbers sections, so position
+  -- alone could move picks onto another section); no such current section: restored unset.
+  -- Neither is unique: on a tie the section with the highest id wins (deterministic).
+  SELECT COALESCE(jsonb_object_agg(qs.sort_order::text || chr(31) || COALESCE(qs.section_name, chr(30)),
            jsonb_build_object('timing', qs.timing, 'confidence', qs.confidence) ORDER BY qs.id), '{}'::jsonb)
     INTO v_planning_picks
     FROM quote_sections qs
@@ -269,9 +272,11 @@ BEGIN
       (SELECT f.id FROM fields f
         WHERE f.id = NULLIF(v_section->>'field_id', '')::uuid
           AND f.customer_id = (SELECT q.customer_id FROM quotes q WHERE q.id = p_quote_id)),
-      -- PLANNING_PICKS_KEPT (20270204140000): the current picks for this sort_order, else unset.
-      v_planning_picks->((v_section->>'sort_order')::integer::text)->>'timing',
-      v_planning_picks->((v_section->>'sort_order')::integer::text)->>'confidence'
+      -- PLANNING_PICKS_KEPT (20270204140000): the current picks at this position and name, else unset.
+      v_planning_picks->((v_section->>'sort_order')::integer::text || chr(31)
+        || COALESCE(v_section->>'section_name', chr(30)))->>'timing',
+      v_planning_picks->((v_section->>'sort_order')::integer::text || chr(31)
+        || COALESCE(v_section->>'section_name', chr(30)))->>'confidence'
     )
     RETURNING id INTO v_section_id;
 
@@ -425,7 +430,7 @@ BEGIN
   IF position('PLANNING_PICKS_KEPT' IN v_fn.prosrc) = 0
      OR position('v_item->>''quote_item_id''' IN v_fn.prosrc) = 0
      OR position('QUOTE_RESTORE_BLOCKED_BY_DRAW' IN v_fn.prosrc) = 0
-     OR md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM '3038daf757d09b8b9e83092384bb5a3b' THEN
+     OR md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM 'aaa8e3297d94899f2bc4d6279a57c644' THEN
     RAISE EXCEPTION 'POSTFLIGHT_RESTORE_BODY: _restore_quote_version_owner_impl is not the reviewed body of this file';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK rewind keeps planning picks';

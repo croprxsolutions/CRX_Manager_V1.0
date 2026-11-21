@@ -2,6 +2,7 @@
  * QuoteBuilder.test.tsx — Tests for the quote builder page
  */
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
+import { todayInBusinessTz } from '../lib/dateUtils';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Suspense } from 'react';
 import { Link, MemoryRouter, Route, RouterProvider, Routes, createMemoryRouter, useParams } from 'react-router-dom';
@@ -2283,6 +2284,32 @@ describe('QuoteBuilder', () => {
     fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => expect(saves).toBe(3));
     expect(sentSection(2).needed_by_date).toBe('2026-03-16');
+  });
+
+  it('a date a timing pick filled still follows a later timing change on another day (Luna MED)', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, is_planned: false };
+    const section = { ...fixture.section, timing: null, confidence: null, needed_by_date: null };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'app_settings' ? { setting_value: '{}' } : table === 'quotes' ? quote : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item] : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? [fixture.product] : [], error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+      ? { data: { status: 'saved', quote_id: quote.id, row_version: 8, item_ids: {}, section_ids: {} }, error: null }
+      : { data: null, error: null }));
+    try {
+      renderQuoteBuilder(quote.id);
+      const timing = await screen.findByLabelText('Timing') as HTMLSelectElement;
+      await waitFor(() => expect(timing).not.toBeDisabled());
+      fireEvent.change(timing, { target: { value: 'pre_plant' } }); // fills today, 2026-03-16
+      vi.mocked(todayInBusinessTz).mockReturnValue('2026-03-20');
+      fireEvent.change(screen.getByLabelText('Timing'), { target: { value: 'late_summer' } });
+      fireEvent.click(screen.getByText('Save draft'));
+      await waitFor(() => expect(mockRpc.mock.calls.some(([name]) => name === 'save_quote')).toBe(true));
+      const sent = (mockRpc.mock.calls.find(([name]) => name === 'save_quote')![1] as {
+        p_sections: Array<{ timing: string | null; needed_by_date: string | null }>;
+      }).p_sections[0];
+      expect(sent).toMatchObject({ timing: 'late_summer', needed_by_date: '2026-07-16' });
+    } finally {
+      vi.mocked(todayInBusinessTz).mockReturnValue('2026-03-16');
+    }
   });
 
   it('a timing change keeps a needed-by date the rep chose', async () => {

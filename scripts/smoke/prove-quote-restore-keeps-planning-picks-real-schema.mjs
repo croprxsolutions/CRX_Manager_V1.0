@@ -12,8 +12,9 @@
  *   1. BEFORE: a booking with picks on three sections is versioned, edited (picks changed, one section
  *      removed) and rewound: every section comes back with timing and confidence blank (the bug).
  *   2. The candidate applies; a second apply is refused by its preflight.
- *   3. AFTER: the same chain keeps each current section's picks; the section only the version has
- *      comes back unset; a drawn booking is still refused QUOTE_RESTORE_BLOCKED_BY_DRAW with nothing
+ *   3. AFTER: the same chain keeps each current section's picks (matched on position AND name); the
+ *      section only the version has comes back unset; after a removal that renumbers sections, or a
+ *      rename, the moved or renamed sections come back unset (no picks land on another section); a drawn booking is still refused QUOTE_RESTORE_BLOCKED_BY_DRAW with nothing
  *      changed; owner, SECURITY DEFINER, search_path, EXECUTE grants and the single overload are
  *      unchanged; the existing restore chain smoke-quote-version-restore-trust.sql ends as before.
  *
@@ -270,11 +271,21 @@ function seed() {
     INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};`);
 }
 
+// The default edit after the send: North and South picks change, West is removed.
+const EDIT_DEFAULT = [
+  { from: 'North', name: 'North', sort: 0, timing: 'in_season', confidence: 'likely', items: true },
+  { from: 'South', name: 'South', sort: 1, timing: 'late_summer', confidence: 'firm' },
+];
 // One rolled-back chain through the real RPCs. Sends a booking with picks on North (sort 0),
-// South (1) and West (2), versions it, then edits it (North and South picks changed, West removed)
-// and rewinds to that version. With drawn = true a stamped order line is added before the rewind.
+// South (1) and West (2), versions it, then saves the edit (each entry: the sent section it keeps,
+// by name, with its new name, position and picks; sections not listed are removed) and rewinds to
+// that version. With drawn = true a stamped order line is added before the rewind.
 // Returns {section: "timing/confidence"} of the rewound booking, or {refused, unchanged}.
-function chain({ drawn = false } = {}) {
+function chain({ drawn = false, edit = EDIT_DEFAULT } = {}) {
+  const editSections = edit.map((s) => `jsonb_build_object('id', (SELECT id FROM quote_sections WHERE quote_id = v_q AND section_name = '${s.from}'),
+        'client_key', '_${s.from}', 'section_name', '${s.name}', 'sort_order', ${s.sort},
+        'timing', '${s.timing}', 'confidence', '${s.confidence}', 'items', ${s.items ? 'jsonb_build_array(v_line)' : "'[]'::jsonb"})`).join(',\n      ');
+  const editCheck = edit.map((s) => `'${s.name}', '${s.timing}/${s.confidence}'`).join(', ');
   const sql = `DO $chain$
 DECLARE
   v_admin uuid := '${ADMIN}';
@@ -318,21 +329,15 @@ BEGIN
   v_ver := (v_res->>'version_id')::uuid;
   IF v_ver IS NULL THEN RAISE EXCEPTION 'PROVER_SETUP: no version: %', v_res; END IF;
 
-  -- Edit after the send: picks change, West is removed.
+  -- Edit after the send.
   v_rv := (SELECT row_version FROM quotes WHERE id = v_q);
   v_res := save_quote(v_q, v_payload || jsonb_build_object('row_version_expected', v_rv,
       'status', (SELECT status FROM quotes WHERE id = v_q)),
     jsonb_build_array(
-      jsonb_build_object('id', (SELECT id FROM quote_sections WHERE quote_id = v_q AND section_name = 'North'),
-        'client_key', '_n', 'section_name', 'North', 'sort_order', 0,
-        'timing', 'in_season', 'confidence', 'likely', 'items', jsonb_build_array(v_line)),
-      jsonb_build_object('id', (SELECT id FROM quote_sections WHERE quote_id = v_q AND section_name = 'South'),
-        'client_key', '_s', 'section_name', 'South', 'sort_order', 1,
-        'timing', 'late_summer', 'confidence', 'firm', 'items', '[]'::jsonb)),
+      ${editSections}),
     v_admin, 'qrpp-save-2');
-  IF (SELECT count(*) FROM quote_sections WHERE quote_id = v_q) <> 2
-     OR (SELECT timing || '/' || confidence FROM quote_sections WHERE quote_id = v_q AND section_name = 'North')
-        IS DISTINCT FROM 'in_season/likely' THEN
+  IF (SELECT jsonb_object_agg(section_name, timing || '/' || confidence) FROM quote_sections WHERE quote_id = v_q)
+     IS DISTINCT FROM jsonb_build_object(${editCheck}) THEN
     RAISE EXCEPTION 'PROVER_SETUP: the edit did not land: %', v_res;
   END IF;
 
@@ -422,8 +427,32 @@ async function main() {
   const after = chain();
   console.log(`[after] rewind: ${JSON.stringify(after)}`);
   assert.deepEqual(after, { North: 'in_season/likely', South: 'late_summer/firm', West: '-/-' },
-    'AFTER: current picks kept per sort_order; the version-only section restores unset');
+    'AFTER: current picks kept per position and name; the version-only section restores unset');
   console.log('[case] AFTER: each section keeps its current picks; the section only the version has comes back unset');
+  // Removing North renumbers South and West (QuoteBuilder removeSection): no restored section
+  // matches a current one on both position and name, so none takes picks.
+  const removedFirst = chain({ edit: [
+    { from: 'South', name: 'South', sort: 0, timing: 'in_season', confidence: 'firm', items: true },
+    { from: 'West', name: 'West', sort: 1, timing: 'late_summer', confidence: 'maybe' },
+  ] });
+  console.log(`[after] rewind after removing North: ${JSON.stringify(removedFirst)}`);
+  assert.deepEqual(removedFirst, { North: '-/-', South: '-/-', West: '-/-' },
+    'AFTER: picks must not move onto another section when a removal renumbers sections');
+  // Removing South: North keeps position and name (kept); West moved from 2 to 1 (unset).
+  const removedMiddle = chain({ edit: [
+    { from: 'North', name: 'North', sort: 0, timing: 'in_season', confidence: 'likely', items: true },
+    { from: 'West', name: 'West', sort: 1, timing: 'pre_plant', confidence: 'firm' },
+  ] });
+  console.log(`[after] rewind after removing South: ${JSON.stringify(removedMiddle)}`);
+  assert.deepEqual(removedMiddle, { North: 'in_season/likely', South: '-/-', West: '-/-' });
+  // Renaming North at the same position: no longer the same section, so it restores unset.
+  const renamed = chain({ edit: [
+    { from: 'North', name: 'North Field', sort: 0, timing: 'in_season', confidence: 'likely', items: true },
+    { from: 'South', name: 'South', sort: 1, timing: 'late_summer', confidence: 'firm' },
+  ] });
+  console.log(`[after] rewind after renaming North: ${JSON.stringify(renamed)}`);
+  assert.deepEqual(renamed, { North: '-/-', South: 'late_summer/firm', West: '-/-' });
+  console.log('[case] AFTER: picks follow position AND name: a removal that renumbers, or a rename, restores unset');
   const drawnAfter = chain({ drawn: true });
   assert.match(drawnAfter.refused ?? '', /QUOTE_RESTORE_BLOCKED_BY_DRAW/, JSON.stringify(drawnAfter));
   assert.equal(drawnAfter.unchanged, true, 'a refused rewind must change nothing');

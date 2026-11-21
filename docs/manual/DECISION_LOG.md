@@ -13,6 +13,10 @@
 **Why:** keep the levels simple and buy only on a grower's yes.
 **What this implies:** `docs/plans/2026-11-20-booking-confidence-rules.md` and `docs/plans/2026-11-20-inventory-purchasing-and-bookings-PLAN.md` are the build plan. A one-time switch-on (Planned bookings → Firm) must land before Plan A PR 3. It sits in Taha's area through Dec 15, so the switch-on and any booking or hold writer change is Taha's.
 
+## 2026-11-18 — CMP-2 (Brand vs Generic rebuild) waits for real ingredient data
+
+**Decision (Mason, in chat, 2026-11-18: "Fill chemistry first").** Live check that day: 0 `active_ingredients`, 0 parents with ingredient rows, 0 mode-of-action rows, 0 `ingredient_map` rows. The comparison is built entirely from ingredient strengths, so a page built now would show every row as incomplete. He was offered "build now on test data" and "a price-per-acre slice only", and chose to fill the chemistry first.
+**What this forbids/implies:** no CMP-2 code starts until the "Start when" list in `docs/plans/2026-11-18-product-CMP2-BUILD-SHEET.md` is met: chemistry filled (DM-4 EPA lookup, DM-1b workbook or reviewed manual entry), MOA-1 landed with its group load, and RT-4 live. The next Product Master step is filling the chemistry, not CMP-2.
 ## 2026-11-20 — #2050: Mason owner-accepted 1 Sol finding(s) at `e4960bf1340d`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #2050 at `e4960bf1340d` (base `e4e6e11fae1c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

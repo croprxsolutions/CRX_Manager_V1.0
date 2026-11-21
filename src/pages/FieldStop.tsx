@@ -63,6 +63,12 @@ interface StopPhoto {
   uploaded_at?: string | null;
 }
 
+// A driver's stop never asks the customers table for the farm: withStopFarm fills it from the driver lookup (#2018).
+function stopColumns(isDriver: boolean): string {
+  const base = 'id, delivery_number, status, updated_at, customer_id, order_id, created_by, delivery_address_id, delivery_notes, assigned_driver';
+  return isDriver ? base : `${base}, customer:customers(farm_name, email, contact_name)`;
+}
+
 // The stop with a driver's view of its farm (#2018); throws when the lookup fails. Others keep the joined farm.
 async function withStopFarm(del: StopDelivery, isDriver: boolean): Promise<{ del: StopDelivery; address: string }> {
   if (!isDriver) return { del, address: '' };
@@ -172,7 +178,7 @@ export default function FieldStop() {
     setLoading(true);
     const { data, error } = await supabase
       .from('deliveries')
-      .select('id, delivery_number, status, updated_at, customer_id, order_id, created_by, delivery_address_id, delivery_notes, assigned_driver, customer:customers(farm_name, email, contact_name)')
+      .select(stopColumns(isDriver))
       .eq('id', id)
       .maybeSingle();
 

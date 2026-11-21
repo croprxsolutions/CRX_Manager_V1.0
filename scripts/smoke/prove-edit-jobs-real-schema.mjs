@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270131100000_job_writes_through_rpcs (#1979 PR A: edit_jobs).
+ * Real-schema proof for 20270201170000_job_writes_through_rpcs (#1979 PR A: edit_jobs).
  * Container setup and replay copied from prove-booking-guard-rep-and-delete-real-schema.mjs. Then:
  *   1. BEFORE: edit_jobs does not exist and smoke-edit-jobs.sql fails.
  *   2. The candidate applies; a second apply is refused.
@@ -28,7 +28,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270131100000_job_writes_through_rpcs.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270201170000_job_writes_through_rpcs.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([

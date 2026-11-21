@@ -45,7 +45,7 @@ Read at `c0b544a23` (origin/staging, 2026-11-19). Booking items in #1979 are out
 - **Result:** `{"updated": [ids], "cancelled": [ids], "deleted": [ids], "skipped": [{"id", "reason", "status"?}]}`, ids sorted. A job can appear in both `updated` and `skipped` (edited, but not cancellable). Screens and activity entries word each count by operation ("2 jobs edited. 1 cancelled. 1 already completed and could not be cancelled."), never the selection size or a sum.
 - **Errors by caller:** `anon` cannot run the function at all (permission denied); a signed-in non-admin/rep → `INSUFFICIENT_ROLE`; a role with execute but no user (service role) → `AUTH_REQUIRED`.
 
-Files: `supabase/migrations/20270131100000_job_writes_through_rpcs.sql` (PR A), `src/types/supabase.ts`, the four screen files in F6 and their tests (PR B), a later revoke migration (PR C), `docs/changelog.d/` records, DECISION_LOG entry for C.
+Files: `supabase/migrations/20270201170000_job_writes_through_rpcs.sql` (PR A), `src/types/supabase.ts`, the four screen files in F6 and their tests (PR B), a later revoke migration (PR C), `docs/changelog.d/` records, DECISION_LOG entry for C.
 
 ## 2. State and failure
 
@@ -101,7 +101,7 @@ Files: `supabase/migrations/20270131100000_job_writes_through_rpcs.sql` (PR A), 
 
 ## Reviewer settlement (rls-security-reviewer, migration-drift-reviewer, 2026-11-19)
 
-- Both: no BLOCKER, HIGH or MED. Fixed: owner set to `postgres` explicitly; migration record `docs/reference/migrations.d/20270131100000_job_writes_through_rpcs.md` added. At apply: re-read the live ledger for ordering.
+- Both: no BLOCKER, HIGH or MED. Fixed: owner set to `postgres` explicitly; migration record `docs/reference/migrations.d/20270201170000_job_writes_through_rpcs.md` added. At apply: re-read the live ledger for ordering.
 - Invoiced jobs are skipped by every action, admins included (Mason, 2026-11-21, Sol round 6). Admins' field changes still reach cancelled jobs, as today.
 - Receipt-binding trigger list not extended for `edit_jobs`, matching every 2027 function that uses the same helpers; an unbound receipt fails closed (refused retry).
 - Time limit: live `authenticated` has `statement_timeout = 8s`. Case 10b's timing decides the cap: if 500 jobs is not well under 8 s locally, the cap is lowered and screens refuse a larger selection.

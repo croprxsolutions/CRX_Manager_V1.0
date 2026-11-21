@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2047 (edit_jobs): admins and reps stay assignable as applicators
+
+**Decision (Mason, in chat, 2026-11-21, answering Sol round 8: "Admin and sales rep sometimes are applicators").** The
+job screens keep offering admins and sales reps as applicators. The old applicator's dispatch staying open after such a
+reassignment is today's dispatch behaviour, logged as KI-175; Mason owner-accepts that Sol finding.
+
 ## 2026-11-21 — #2047 (edit_jobs): applicator changes on completed jobs stay as today
 
 **Decision (Mason, in chat, 2026-11-21, answering Sol round 7: "Keep today's rule").** Anyone who may edit jobs may

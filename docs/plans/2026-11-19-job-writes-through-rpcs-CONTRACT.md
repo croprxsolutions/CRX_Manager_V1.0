@@ -155,3 +155,11 @@ Files: `supabase/migrations/20270201170000_job_writes_through_rpcs.sql` (PR A), 
 - **HIGH fixed:** a new applicator must be an active applicator, admin or sales rep (the list the screens offer); the profile row is share-locked so a deactivation cannot slip in before commit (C6).
 - **HIGH kept as today (Mason, 2026-11-21):** changing the applicator on a recently completed job moves the 7-day record access to the new applicator; Mason kept today's rule and owner-accepts it.
 - **HIGH accepted (Mason, 2026-11-21):** completed-job date and invoice pricing (KI-172); partial-cancel cost (KI-171).
+
+## Sol round 8 settlement (6 HIGH)
+
+- **HIGH fixed:** the caller's profile is share-locked at the second role check, so a demotion, deactivation or page block waits until the call commits.
+- **HIGH fixed:** "billed" now also covers an `invoice_id` or any live invoice (not voided or cancelled) on the job or on one of its blend tickets; such jobs are skipped as `invoiced` by every action (C11).
+- **HIGH kept as today (Mason, 2026-11-21: admins and reps sometimes apply):** reassigning a job from an applicator to an admin or rep leaves the old applicator's dispatch open, because the dispatch-sync trigger only acts for the applicator role. KI-175; Mason owner-accepts.
+- **HIGH accepted, as before:** completed-job applicator access (round 7), completed-job date (KI-172), partial-cancel cost (KI-171).
+- **MED/LOW deferred (parity or named before):** locks on rows that will be skipped; same-booking cancel clash (KI-174); cancelled jobs reach the planning update (as today); `season` across October 1; retired crew; key claimed by an all-skipped call; C9 does not force a cancel-stage failure; the replay marks the job-access migrations ledger-only; dispatch rows on soft delete (KI-173); no key length limit; opposite-order race overlap.

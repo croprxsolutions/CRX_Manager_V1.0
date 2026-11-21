@@ -37,7 +37,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | Status | Count |
 |---|---|
 | Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md); KI-170 added 2026-11-20 from the shared data loading pilot; KI-120 accepted and KI-169 split from KI-119 2026-11-19; KI-173 added 2026-11-21 from #2047) | 110 |
-| Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106, KI-120, KI-171, KI-172, KI-174) | 21 |
+| Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106, KI-120, KI-171, KI-172, KI-174, KI-175) | 22 |
 | Closed as FIXED, with proof (bottom of file and archive) | 25 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
@@ -1248,6 +1248,13 @@ The booking hold trigger upgrades a cancelled job's row lock while it rebuilds t
 cancel different jobs on the same booking at the same instant, PostgreSQL stops one: it saves nothing and shows an
 error, and a retry works. Today's screens behave the same way. Mason accepted it (2026-11-21). Fix: lock the booking
 before the job rows in the hold trigger's callers, or rebuild once per statement (booking/inventory core).
+
+### KI-175 — Reassigning a job to an admin or rep leaves the old applicator dispatched
+**MED · ACCEPTED · jobs/dispatch · found 2026-11-21 (Sol round 8, #2047) · unassigned (dispatch)**
+Admins and sales reps can be a job's applicator (they sometimes apply, Mason 2026-11-21). The dispatch-sync trigger
+only replaces dispatch rows when the new person has the applicator role, so moving an open job from applicator A to an
+admin or rep leaves A's dispatch open, and A can still see and finish the job. Today's screens do the same. Fix: close
+the previous applicator's open dispatch rows on any applicator change (dispatch-sync trigger).
 
 ## Database and release process
 

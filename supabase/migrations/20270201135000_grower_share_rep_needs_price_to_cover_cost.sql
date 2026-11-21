@@ -11,8 +11,9 @@
 --
 -- WHAT: _enforce_below_cost_line is re-created from its 20270120150000 body (md5 1069cd1451454030627b250db7b729d1) with
 -- one added check, in the grower-share branch only: when the signed-in user is not an admin, the line saves only if
--- (cost of this invoice's $0 grower-share lines already written in this save + this line's cost) <= (sum of this
--- invoice's per-acre grower-share lines). Otherwise FIELD_APP_GROWER_SHARE_BELOW_COST and the whole save rolls back.
+-- (booked cost of this invoice's $0 grower-share lines already written in this save + this line's booked cost + 51
+-- cents per such line) <= (sum of this invoice's per-acre grower-share lines). The 51-cent cushion per line (Mason,
+-- 2026-11-21, "Add a cushion") covers the up-to-50-cent rounding the save allows on each line. Otherwise FIELD_APP_GROWER_SHARE_BELOW_COST and the whole save rolls back.
 -- _save_field_app_invoice_impl_20260714 (the only writer of this context; the split save refuses grower-share fields)
 -- deletes an invoice's lines first and writes every per-acre line before any $0 line, so the last $0 line's check is
 -- the whole-invoice check. Browser roles cannot write invoice_items or below_cost_approvals. Nothing else changes.
@@ -289,17 +290,19 @@ BEGIN
       -- fee) before any $0 line, so these sums are the whole invoice's by its last $0 line. Earlier $0 lines are
       -- counted from their approval rows whose line still exists (a re-save deletes the old lines). An admin may
       -- save it uncovered, as before. The message never states a cost (cost is admin-only, 2026-10-15).
-      -- Costs are added unrounded and rounded once, so splitting a chemical into many small lines cannot shave
-      -- a rounding remainder off each line (#2068 Sol round 2).
+      -- Mason, 2026-11-21 (#2068 Sol round 3, chose "Add a cushion"): each $0 line's cost is counted as it is
+      -- booked (rounded per line, as the invoice records it) plus 51 cents. The save already refuses a line whose
+      -- booked cost differs from its exact cost by more than 50 cents (20270129171000), so the per-acre total then
+      -- covers the chemicals' exact cost however the lines are split or rounded.
       IF NOT public.is_admin()
-         AND round((SELECT COALESCE(sum((a.locked_unit_cost_cents - a.unit_price_cents) * a.quantity), 0)
-                      FROM public.below_cost_approvals a
-                     WHERE a.operation = 'field_app_grower_share'
-                       AND a.entity_type = 'invoice'
-                       AND a.entity_id = NEW.invoice_id
-                       AND EXISTS (SELECT 1 FROM public.invoice_items ii
-                                    WHERE ii.id = a.line_id AND ii.invoice_id = NEW.invoice_id))
-                   + (v_cost_cents - v_price_cents) * v_quantity)::bigint
+         AND (SELECT COALESCE(sum(a.total_shortfall_cents + 51), 0)
+                FROM public.below_cost_approvals a
+               WHERE a.operation = 'field_app_grower_share'
+                 AND a.entity_type = 'invoice'
+                 AND a.entity_id = NEW.invoice_id
+                 AND EXISTS (SELECT 1 FROM public.invoice_items ii
+                              WHERE ii.id = a.line_id AND ii.invoice_id = NEW.invoice_id))
+             + round((v_cost_cents - v_price_cents) * v_quantity)::bigint + 51
            > (SELECT COALESCE(sum(ii.extended_cents), 0)
                 FROM public.invoice_items ii
                WHERE ii.invoice_id = NEW.invoice_id
@@ -309,7 +312,7 @@ BEGIN
                  AND ii.order_item_id IS NULL) THEN
         RAISE EXCEPTION USING
           ERRCODE = 'P0001',
-          MESSAGE = 'FIELD_APP_GROWER_SHARE_BELOW_COST: the grower''s per-acre price on this invoice does not cover the cost of the chemicals included in it. Raise the per-acre price, bill the chemicals on their own lines, or ask an admin to save this invoice.';
+          MESSAGE = 'FIELD_APP_GROWER_SHARE_BELOW_COST: the grower''s per-acre price on this invoice does not cover the cost of the chemicals included in it, with a small allowance for rounding. Raise the per-acre price, bill the chemicals on their own lines, or ask an admin to save this invoice.';
       END IF;
       -- Mason, 2026-11-16 ("Yes, record it"): log who approved this $0 line, in this transaction.
       INSERT INTO public.below_cost_approvals (
@@ -392,7 +395,7 @@ BEGIN
      WHERE p.oid = to_regprocedure('public._enforce_below_cost_line()')
        AND ((SELECT count(*) FROM pg_proc o
               WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_enforce_below_cost_line') <> 1
-        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '0173da0b7f61a15353d4295edd4e9b13'
+        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '5fa0a5f975dc2a84b3c6599a84b8cc55'
         OR p.proowner <> 'postgres'::regrole
         OR NOT p.prosecdef
         OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270129200000_grower_share_rep_needs_price_to_cover_cost (#1990 Sol HIGH, 20270120150000:1000).
+ * Real-schema proof for 20270201135000_grower_share_rep_needs_price_to_cover_cost (#1990 Sol HIGH, 20270120150000:1000).
  * Container setup and replay copied from prove-field-app-no-sold-unit-real-schema.mjs. Grower A owns field G (100 ac, 100%)
  * with a grower-share per-acre price; chemicals P and Q cost $5.00/Gal. 1 Gal/ac of P on 100 ac costs $500.00.
  *   BEFORE: a sales rep at $0.01/ac ($1.00 billed) saves $500.00 of P as a $0 grower-share line, approval under the rep.
@@ -34,7 +34,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270129200000_grower_share_rep_needs_price_to_cover_cost.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270201135000_grower_share_rep_needs_price_to_cover_cost.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([
@@ -266,7 +266,7 @@ const body = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
 const grants = () => scalar(`SELECT COALESCE(string_agg(g, ',' ORDER BY g), '-') FROM (SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END AS g
   FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = '${GUARD}'::regprocedure AND a.privilege_type = 'EXECUTE') x;`);
 const OLD_BODY = '1069cd1451454030627b250db7b729d1';
-const NEW_BODY = '0173da0b7f61a15353d4295edd4e9b13';
+const NEW_BODY = '5fa0a5f975dc2a84b3c6599a84b8cc55';
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -316,7 +316,7 @@ const save = (uid, cents, chems) => `${rate(cents)}${as(uid)}SELECT gsrc.save('$
 const BELOW = /FIELD_APP_GROWER_SHARE_BELOW_COST: the grower's per-acre price on this invoice does not cover the cost/;
 const parts = (out) => out.split('|');
 // The rep's covered invoice is saved, then re-saved by the rep at <cents>/ac with the same chemical.
-const resave = (cents) => `${rate(500)}${as(REP)}SELECT split_part(gsrc.save('${REP}', ${ONE}), '|', 1) AS inv \\gset
+const resave = (cents) => `${rate(501)}${as(REP)}SELECT split_part(gsrc.save('${REP}', ${ONE}), '|', 1) AS inv \\gset
 ${rate(cents)}SELECT gsrc.save('${REP}', ${ONE}, :'inv'::uuid);
 SELECT count(*) FROM below_cost_approvals WHERE operation = 'field_app_grower_share';`;
 
@@ -354,11 +354,13 @@ async function main() {
   const errorLine = refused.output.split(/\r?\n/).find((l) => l.includes('FIELD_APP_GROWER_SHARE_BELOW_COST')) ?? '';
   assert.doesNotMatch(errorLine, /\d|\$|locked_unit_cost/, 'the refusal must not carry the cost');
   refusedProbe(save(REP, 499, ONE), BELOW);
-  const covered = parts(okProbe(save(REP, 500, ONE)));
+  // Mason, 2026-11-21 ("Add a cushion"): a rep needs cost + $0.51 per included chemical line.
+  refusedProbe(save(REP, 500, ONE), BELOW);
+  const covered = parts(okProbe(save(REP, 501, ONE)));
   assert.equal(covered[1], `${REP}:50000`);
-  assert.equal(covered[2], '50000');
+  assert.equal(covered[2], '50100');
   console.log('[after] the rep at $0.01/ac and at $4.99/ac is refused FIELD_APP_GROWER_SHARE_BELOW_COST (no cost in the message);'
-    + ` at $5.00/ac ($500.00 = the cost) it saves, approval under the rep (${covered[1]})`);
+    + ` at $5.00/ac ($500.00 = the cost, no cushion) too; at $5.01/ac ($501.00 >= $500.00 + $0.51) it saves, approval under the rep (${covered[1]})`);
 
   refusedProbe(save(REP, 500, TWO), BELOW);
   const twoAdmin = parts(okProbe(save(ADMIN, 500, TWO)));
@@ -366,10 +368,11 @@ async function main() {
   console.log('[after] P and Q at $300.00 each under $5.00/ac ($500.00): the rep is refused ($600.00 together); an admin saves both');
 
   refusedProbe(save(REP, 1, SPLIT), BELOW);
-  assert.equal(parts(okProbe(save(REP, 2, SPLIT)))[1].split(',').length, 100);
-  console.log('[after] one chemical split into 100 lines of $0.0145 ($1.45, each rounding to $0.01): the rep at $0.01/ac ($1.00) is refused; at $0.02/ac ($2.00) it saves');
+  refusedProbe(save(REP, 51, SPLIT), BELOW);
+  assert.equal(parts(okProbe(save(REP, 52, SPLIT)))[1].split(',').length, 100);
+  console.log('[after] one chemical split into 100 lines of $0.0145 ($1.45, each rounding to $0.01): the rep at $0.01/ac and at $0.51/ac ($51.00) is refused; at $0.52/ac ($52.00 = $1.00 booked + 100 x $0.51) it saves');
 
-  assert.equal(okProbe(resave(500)), '2', 'the first save and the re-save each log one row');
+  assert.equal(okProbe(resave(501)), '2', 'the first save and the re-save each log one row');
   refusedProbe(resave(1), BELOW);
   console.log('[after] the rep re-saves a covered invoice (old approvals point at deleted lines): saves; re-saving it at $0.01/ac: refused');
 

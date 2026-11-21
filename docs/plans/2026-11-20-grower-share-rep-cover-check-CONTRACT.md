@@ -25,6 +25,7 @@ Read on `origin/staging` at the branch point of `claude/release-fix-rep-below-co
 - After the save: lines change only through this save (re-checked) or `save_invoice`, which re-judges every $0 line under the admin-with-reason wall (a rep is refused). Posting does not change lines. Changing a field default later does not change a saved invoice.
 
 - Sol round 2 (2026-11-21, HIGH): costs are added from the approval rows' unrounded `(locked_unit_cost_cents - unit_price_cents) * quantity` plus this line's, rounded once; summing each line's rounded shortfall let a chemical split into many tiny lines pass (100 lines of $0.0145 counted as $1.00).
+- Sol round 3 (2026-11-21, 2 HIGH, same rounding mechanism): the round-2 sum used already-rounded quantities and ignored per-line booking. **Mason, 2026-11-21 (chose "Add a cushion"):** a rep's per-acre total must reach the chemicals' booked cost plus $0.51 per included chemical line; the save already caps each line's rounding at $0.50, so this always covers exact cost. Replaces the round-2 arithmetic.
 
 ## State, timing, rollout
 - No existing rows change; live has none of these invoices (re-count at apply time with the reviewers' read-only check).

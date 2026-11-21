@@ -94,7 +94,7 @@ vi.mock('../lib/db', async () => {
 
   const from = vi.fn((table: string) => table === 'products'
     ? chainable({ data: H.product ? [H.product] : [], error: null })
-    : chainable({ data: [], error: null }));
+    : chainable({ data: table === 'unit_conversions' ? [{ id: 'gal', unit: 'Gal', unit_type: 'liquid' }] : [], error: null }));
 
   const updateProduct = vi.fn((payload: Record<string, unknown>) => {
     H.savedPayload = payload;
@@ -397,6 +397,9 @@ describe('ProductDetail brands section', () => {
     render(<ProductDetail />);
     fireEvent.change(screen.getByRole('textbox', { name: /Product Name/ }), { target: { value: 'New Herbicide' } });
     fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
+    const unit = screen.getByLabelText('Inventory Unit');
+    await within(unit).findByRole('option', { name: 'Gal' });
+    fireEvent.change(unit, { target: { value: 'Gal' } });
     fireEvent.change(await screen.findByRole('combobox', { name: 'Vendor' }), { target: { value: 'New Vendor' } });
     await screen.findByRole('option', { name: 'Herbicide' });
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Herbicide' } });
@@ -410,6 +413,9 @@ describe('ProductDetail brands section', () => {
     const created = render(<ProductDetail />);
     fireEvent.change(screen.getByRole('textbox', { name: /Product Name/ }), { target: { value: 'New Herbicide' } });
     fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
+    const unit = screen.getByLabelText('Inventory Unit');
+    await within(unit).findByRole('option', { name: 'Gal' });
+    fireEvent.change(unit, { target: { value: 'Gal' } });
     await screen.findByRole('option', { name: 'Herbicide' });
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Herbicide' } });
     const group = await screen.findByRole('group', { name: 'Use Timing' });

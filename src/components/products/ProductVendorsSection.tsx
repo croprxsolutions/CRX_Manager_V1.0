@@ -34,6 +34,8 @@ interface ProductVendorsSectionProps {
    * product) is unknown; false once a re-read succeeds. The page blocks its Save while unknown.
    */
   onPreferredUnknown: (unknown: boolean) => void;
+  /** The page still waits on a re-read (KI-170), e.g. from before this section was last shown. */
+  preferredUnknown?: boolean;
 }
 
 /** Every vendor an admin can add, page by page: one read stops silently at 1,000 rows. */
@@ -161,16 +163,18 @@ function usePreferredSettle(
   linked: Loaded<ProductVendor[]>,
   onPreferredChanged: (vendorName: string) => void,
   onPreferredUnknown: (unknown: boolean) => void,
+  pageUnknown: boolean,
 ) {
   const [unknownFor, setUnknownFor] = useState<string | null>(null);
   const freshList = linked.status === 'loaded' && !linked.stale && !linked.refreshing ? linked.data : null;
   useEffect(() => {
-    if (unknownFor !== productId || !freshList) return;
+    // pageUnknown: this section remounted (role change) while Save waited; its own first read is fresh.
+    if ((unknownFor !== productId && !pageUnknown) || !freshList) return;
     const preferred = freshList.find((v) => v.is_preferred)?.vendor_name;
     if (preferred) onPreferredChanged(preferred);
     setUnknownFor(null);
     onPreferredUnknown(false);
-  }, [unknownFor, productId, freshList, onPreferredChanged, onPreferredUnknown]);
+  }, [unknownFor, pageUnknown, productId, freshList, onPreferredChanged, onPreferredUnknown]);
   return () => {
     setUnknownFor(productId);
     onPreferredUnknown(true);
@@ -181,7 +185,7 @@ function usePreferredSettle(
  * The vendors a product can be bought from (WP-PM-15b). Exactly one is preferred, and the product's
  * vendor name is a copy of it: the database keeps that copy and refuses to drop the preferred vendor.
  */
-export default function ProductVendorsSection({ productId, productName, isAdmin, userId, onPreferredChanged, onPreferredUnknown }: ProductVendorsSectionProps) {
+export default function ProductVendorsSection({ productId, productName, isAdmin, userId, onPreferredChanged, onPreferredUnknown, preferredUnknown }: ProductVendorsSectionProps) {
   const { toast } = useToast();
   // Costs come back only for admins, so a role change is a different read.
   const linked = useLoad(`vendors:${productId}:${isAdmin}`, () => listProductVendors(productId), {
@@ -199,7 +203,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
   const [busyFor, setBusyFor] = useState<string | null>(null);
   const busy = busyFor === productId;
   const [removing, setRemoving] = useState<ProductVendor | null>(null);
-  const markPreferredUnknown = usePreferredSettle(productId, linked, onPreferredChanged, onPreferredUnknown);
+  const markPreferredUnknown = usePreferredSettle(productId, linked, onPreferredChanged, onPreferredUnknown, preferredUnknown === true);
   // A new product or role starts clean: no pick and no open removal (React's reset-on-prop-change pattern).
   // The picker list is re-read only after a role change, so this also drops a pick across a picker reload.
   const owner = `${productId}:${isAdmin}`;

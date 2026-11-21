@@ -2074,6 +2074,7 @@ export default function ProductDetail() {
                   setPersistedProduct((p) => (p ? { ...p, vendor: vendorName } : p));
                 }}
                 onPreferredUnknown={setVendorPreferredUnknown}
+                preferredUnknown={vendorPreferredUnknown}
               />
             </PhoneSection>
           )}

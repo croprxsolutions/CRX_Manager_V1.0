@@ -270,6 +270,14 @@ describe('ProductVendorsSection', () => {
     expect(onPreferredUnknown).not.toHaveBeenCalledWith(false);
   });
 
+  it('KI-170: a section shown again while the page still waits settles it from its own fresh read', async () => {
+    const onPreferredChanged = vi.fn();
+    render(<ProductVendorsSection productId="p1" productName="Test Product" isAdmin userId="u1"
+      onPreferredChanged={onPreferredChanged} onPreferredUnknown={onPreferredUnknown} preferredUnknown />);
+    await waitFor(() => expect(onPreferredUnknown).toHaveBeenLastCalledWith(false));
+    expect(onPreferredChanged).toHaveBeenCalledWith('Wells Ag Supply');
+  });
+
   it('closes an open removal when the user is no longer an admin', async () => {
     const props = { productId: 'p1', productName: 'Test Product', userId: 'u1', onPreferredChanged: vi.fn(), onPreferredUnknown };
     const view = render(<ProductVendorsSection {...props} isAdmin />);

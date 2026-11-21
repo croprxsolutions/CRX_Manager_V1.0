@@ -1,5 +1,17 @@
 # Decision Log
 
+## 2026-11-21 — #1985: Mason owner-accepted 4 Sol finding(s) at `d549921a5aaf`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #1985 at `d549921a5aaf` (base `6a6462d4c469`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270205150000_ingredient_modes_of_action_load.sql:49`, text sha256 `eb47212d17b069a5` (the wording stays with the proof, not here)
+  Mason's reason: cnat happen (ref ba3bbf98566a)
+- Finding 2 (HIGH) at `supabase/migrations/20270205150000_ingredient_modes_of_action_load.sql:247`, text sha256 `25af93926cbb1dbc` (the wording stays with the proof, not here)
+  Mason's reason: cant happen (ref c5d81d8a7658)
+- Finding 3 (HIGH) at `supabase/migrations/20270205150000_ingredient_modes_of_action_load.sql:241`, text sha256 `a2e074c5182807ca` (the wording stays with the proof, not here)
+  Mason's reason: cnat happen (ref 9ae6f1d73ffe)
+- Finding 4 (HIGH) at `supabase/migrations/20270205150000_ingredient_modes_of_action_load.sql:39`, text sha256 `6dcc56be7c42e0c7` (the wording stays with the proof, not here)
+  Mason's reason: cant happen (ref 74f3d6cd886c)
+
 ## 2026-11-21 — #1985: Mason owner-accepted 4 Sol finding(s) at `5890f0710c43`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #1985 at `5890f0710c43` (base `81cb83cfbb6f`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

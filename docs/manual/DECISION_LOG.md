@@ -199,6 +199,8 @@ on every round of this release (round 54), and owner-accepts stay refused on rel
 **What it does:** release rule 3 in `scripts/write-codex-push-proof.mjs` (`RELEASE_KNOWN_ISSUES`) tags only those
 findings, in only those functions; any other finding, including a different one in the same function, still blocks.
 Clear the list after the release lands. Every other gate is unchanged.
+**Cleared (Mason, 2026-11-21, "Yes, remove it"):** #1990 landed, so the list is empty and release rule 3 drops out of the
+release prompt until Mason names new known issues for a future release. #2064-#2066 stay open as normal issues.
 
 ## 2026-11-20 — Release rule 1 also covers unchanged live lines inside a changed function
 

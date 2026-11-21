@@ -18,6 +18,11 @@ review of the build (20 findings: loose command wording, widening renews the 24 
 freeze under a pass, a partial apply not ending other passes, a `yes` surviving edits to another migration in the PR)
 was put to him with a tightening plan; he declined it ("this is too strict i want less rules and guards"). Those are
 accepted residuals; do not re-raise them as blockers on this PR.
+## 2026-11-21 — #2045 may have one more Sol round (round 7)
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, one more round").** PR #2045 (#1942 inventory edge cases) may have one more Sol round (round 7).
+**Why:** #2038 merged into staging first and added RPC contract test entries beside #2045's, so staging had to be merged in again to clear a conflict in `src/lib/rpcContracts.test.ts`. The PR's own change is unchanged since its last owner-accepted round.
+
 ## 2026-11-20 — Booking levels: Firm / Maybe / "Just quoting"; Likely removed; inventory plan v5
 
 **Decision (Mason, in chat, 2026-11-20).** A booking section is Firm, Maybe or blank ("Just quoting"). Likely is removed. Among booking levels only Firm buys and sets stock aside. Maybe is shown as a total and never buys or holds. Blank counts nowhere, even after the booking is sent. Also decided:

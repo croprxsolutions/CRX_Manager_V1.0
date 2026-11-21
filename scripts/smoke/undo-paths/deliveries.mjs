@@ -27,17 +27,17 @@ const FP = `(SELECT string_agg(x, ' ' ORDER BY x) FROM (
 function seedDeliveries() {
   const line = (k, units) => `INSERT INTO public.order_items (id, order_id, product_id, product_name, price_per_unit, cost_per_unit,
       total_units_needed, total_price, profit, net_margin, quantity_delivered, quantity_remaining, unit_size)
-    VALUES ('${LINE[k]}', '${ORDER}', '${PROD}', '[UNDO] line ${k}', 10, 6, ${units}, ${units * 10}, ${units * 4}, 40, 0, ${units}, 'GL');`;
+    VALUES ('${LINE[k]}', '${ORDER}', '${PROD}', '[UNDO] line ${k}', 10, 6, ${units}, ${units * 10}, ${units * 4}, 40, 0, ${units}, 'Gal');`;
   const delivery = (k, lineKey, qty) => `INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, scheduled_date, status, created_by)
       VALUES ('${DEL[k]}', '[UNDO] DEL-${k}', '${ORDER}', '${CUST}', CURRENT_DATE, 'scheduled', '${ADMIN}');
     INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
-      VALUES ('${DEL[k]}', '${LINE[lineKey]}', '${PROD}', ${qty}, 0, 'GL');`;
+      VALUES ('${DEL[k]}', '${LINE[lineKey]}', '${PROD}', ${qty}, 0, 'Gal');`;
   const complete = (k) => `UPDATE public.deliveries SET status = 'in_progress' WHERE id = '${DEL[k]}';
     SELECT public.complete_delivery(p_delivery_id => '${DEL[k]}', p_signed_by => '${NO_PROOF_SIGNER}', p_performed_by => '${ADMIN}',
       p_idempotency_key => 'undo-seed-complete-${k}', p_evidence => 'no_proof', p_evidence_ref => '[UNDO] fixture');`;
   seed('deliveries', `INSERT INTO public.customers (id, farm_name, account_number) VALUES ('${CUST}', '[UNDO] Delivery Farm', '[UNDO]-DEL-1');
-    INSERT INTO public.products (id, product_name, unit_size, epa_registration, product_form)
-      VALUES ('${PROD}', '[UNDO] Delivery Product', 'GL', '999999-99999', 'liquid');
+    INSERT INTO public.products (id, product_name, unit_size, epa_registration, product_form, inventory_unit)
+      VALUES ('${PROD}', '[UNDO] Delivery Product', 'Gal', '999999-99999', 'liquid', 'Gal');
     DO $price$
     DECLARE v jsonb;
     BEGIN
@@ -48,7 +48,7 @@ function seedDeliveries() {
       PERFORM public.apply_product_pricing_change_set((v->>'change_set_id')::uuid, v->>'request_fingerprint', '${ADMIN}', 'undo-seed-del-pricing-apply');
     END
     $price$;
-    INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size) VALUES ('${PROD}', 'Main Warehouse', 100, 20, 'GL');
+    INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size) VALUES ('${PROD}', 'Main Warehouse', 100, 20, 'Gal');
     INSERT INTO public.orders (id, order_number, customer_id, status, booking_draw) VALUES ('${ORDER}', '[UNDO] DEL-ORDER', '${CUST}', 'confirmed', false);
     ${line('a', 8)} ${line('b', 6)} ${line('c', 6)}
     ${delivery('sched', 'a', 3)} ${delivery('done', 'b', 4)} ${delivery('bill', 'c', 5)}
@@ -62,12 +62,12 @@ const START = 'del1=scheduled:3 del2=completed:4 del3=completed:5 inv=1:4000 lin
 const show = (label, got) => { console.log(`  ${label}: ${got}`); return got; };
 
 const create = (key, qty = 2) => `public.create_delivery_with_items('${ORDER}', '${CUST}', CURRENT_DATE,
-  jsonb_build_array(jsonb_build_object('order_item_id', '${LINE.a}', 'product_id', '${PROD}', 'quantity', ${qty}, 'unit_size', 'GL')),
+  jsonb_build_array(jsonb_build_object('order_item_id', '${LINE.a}', 'product_id', '${PROD}', 'quantity', ${qty}, 'unit_size', 'Gal')),
   NULL, NULL, NULL, '[UNDO] new delivery', '${key}')`;
 const cancel = (del, uid, key) => `public.cancel_delivery('${del}', '[UNDO] customer called', '${uid}', '${key}')`;
 const voidDel = (del, uid, key) => `public.void_delivery('${del}', '[UNDO] delivered in error', '${uid}', '${key}')`;
 const edit = (qty, uid, key) => `public.edit_delivery('${DEL.sched}', p_items => jsonb_build_array(jsonb_build_object('order_item_id', '${LINE.a}',
-  'product_id', '${PROD}', 'quantity', ${qty}, 'unit_size', 'GL')), p_performed_by => '${uid}', p_idempotency_key => '${key}')`;
+  'product_id', '${PROD}', 'quantity', ${qty}, 'unit_size', 'Gal')), p_performed_by => '${uid}', p_idempotency_key => '${key}')`;
 const bill = (uid, key) => `public.create_invoice_for_unbilled_delivery('${DEL.bill}', '${uid}', '${key}')`;
 
 export function run() {

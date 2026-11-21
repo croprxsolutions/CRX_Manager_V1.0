@@ -335,8 +335,10 @@ async function main() {
     assert.match(REUSE, /^crx-[a-z0-9-]+$/, 'CRX_PROVER_REUSE must name a kept prover container (crx-...)');
     assert.equal(docker(['inspect', '-f', '{{.HostConfig.NetworkMode}}', REUSE]).stdout.trim(), 'none', 'CRX_PROVER_REUSE must be a network-less prover container');
     assert.ok(/^[a-z0-9_]+$/.test(DB) && DB !== 'postgres', 'CRX_PROVER_REUSE needs CRX_PROVER_DB naming a copy (a bare database name), not postgres');
-    // The copy must be the bare replay: no customer rows yet, so it cannot be a database holding real data (#2122).
-    assert.equal(scalar('SELECT count(*) FROM public.customers;'), '0', 'CRX_PROVER_DB must be a fresh copy of the replayed database (it already has customer rows)');
+    // The copy must be the bare replay: no sign-ins and no customers yet, so it is neither a used proof copy nor a
+    // database holding real data (#2122).
+    assert.equal(scalar('SELECT (SELECT count(*) FROM auth.users) + (SELECT count(*) FROM public.profiles) + (SELECT count(*) FROM public.customers);'),
+      '0', 'CRX_PROVER_DB must be a fresh copy of the replayed database (it already has users or customers)');
   } else buildContainer();
   seed();
 

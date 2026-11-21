@@ -586,8 +586,8 @@ const gateRequestSource = guardSource.slice(
 ok(gateRequestSource.length > 0, "gateRequest() is present to inspect");
 eq(
   (gateRequestSource.match(/\bhardGateGh\(/g) || []).length,
-  1,
-  "gateRequest()'s one gh call — the PR resolve, which now also carries reviews — spends the shared budget " +
+  2,
+  "gateRequest()'s two direct gh calls — the PR resolve (which carries reviews) and a pass-backed main merge's file list (Codex P1, #2098) — spend the shared budget " +
   "(the two diff reads went away with the risky/non-risky split: every main merge needs the proof)",
 );
 eq(

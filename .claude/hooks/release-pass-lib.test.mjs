@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import {
-  RELEASE_PASS_MAX_AGE_MS, findReleasePass, recordReleasePass, releasePassCommand, releasePassCovers, releasePassFileName, withdrawReleasePass,
+  RELEASE_PASS_MAX_AGE_MS, findReleasePass, recordReleasePass, releasePassCommand, releasePassCovers, releasePassFileName, unappliedMigrationsProblem, withdrawReleasePass,
 } from "./release-pass-lib.mjs";
 
 const SID = "sess-mason-chat-0001";
@@ -64,4 +64,13 @@ test("record, find, widen, cover and withdraw a pass", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a pass-backed merge into main needs its migrations live first (Codex P1, PR #2098)", () => {
+  const files = [["added", "supabase/migrations/20261120120000_a.sql"], ["modified", "src/x.ts"], ["removed", "supabase/migrations/20200101000000_old.sql"]];
+  assert.equal(unappliedMigrationsProblem({ files: [["modified", "src/x.ts"]], snapshot: null }), null, "no migrations: nothing to check");
+  assert.match(unappliedMigrationsProblem({ files, snapshot: null }), /no applied-migration snapshot/);
+  assert.match(unappliedMigrationsProblem({ files, snapshot: { applied: [{ version: "20261101000000", name: "b" }] } }), /20261120120000_a are not live/);
+  assert.equal(unappliedMigrationsProblem({ files, snapshot: { applied: [{ version: "20261120120000", name: "a" }] } }), null);
+  assert.equal(unappliedMigrationsProblem({ files, snapshot: [{ name: "20261120120000_a" }] }), null, "a bare-array snapshot works too");
 });

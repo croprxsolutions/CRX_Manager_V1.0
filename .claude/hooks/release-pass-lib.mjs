@@ -105,6 +105,23 @@ export function withdrawReleasePass({
 }
 
 /**
+ * Before a pass-backed merge into main, every migration the PR adds must already be live (Codex P1, PR #2098):
+ * main has no apply job, so merging first would ship code against an old schema. `files` are GitHub's
+ * [status, path] rows; `snapshot` is this checkout's applied-migrations.json (scripts/apply-migration-file.mjs
+ * refreshes it after each apply). Returns null when all are live, else why not.
+ */
+export function unappliedMigrationsProblem({ files, snapshot }) {
+  const added = (files || []).filter(([status, f]) => status !== "removed" && /^supabase\/migrations\/[^/]+\.sql$/.test(String(f || "")))
+    .map(([, f]) => f.split("/").pop().replace(/\.sql$/i, ""));
+  if (!added.length) return null;
+  const rows = Array.isArray(snapshot) ? snapshot : snapshot?.applied;
+  if (!Array.isArray(rows) || !rows.length) return "no applied-migration snapshot in this checkout, so its migrations can't be shown to be live: apply them (scripts/apply-migration-file.mjs) or refresh the snapshot first";
+  const stamps = new Set(rows.map((r) => String(typeof r === "string" ? r : (r?.version || r?.name || "")).match(/^\d{14}/)?.[0]).filter(Boolean));
+  const missing = added.filter((m) => !stamps.has(m.slice(0, 14)));
+  return missing.length ? `its migrations ${missing.join(", ")} are not live yet: apply them before merging (main has no apply job)` : null;
+}
+
+/**
  * Does this session's pass cover merging this PR? `base`/`headRef` are GitHub's; `number` the PR number.
  * Covered: the release PR (release/next into main) under `ship the release`, a PR named by `go live #n`,
  * and the back-merge (main into staging) that follows either, so staging isn't left behind.

@@ -96,16 +96,20 @@ describe('CorrectBrandsModal', () => {
     await waitFor(() => expect(toast).toHaveBeenCalledWith('error', expect.stringContaining('do not add up to the 5 delivered')));
     expect(correctDeliveryBrands).not.toHaveBeenCalled();
   });
-  it('confirming as they are never re-sends a typed brand that was already reviewed', async () => {
-    const typed = { ...brands.lines[0].picks[0], id: 'k9', source: 'typed' as const, legacy_brand_id: null, brand_name: 'Credit', review_state: 'added' as const };
-    getDeliveryBrands.mockImplementation(async () => ({ ...brands, lines: [{ ...brands.lines[0], picks: [typed] }] }));
+  it('confirming as they are re-sends a reviewed typed brand unchanged, so the database keeps its review (#1846)', async () => {
+    const typed = { ...brands.lines[0].picks[0], id: 'k9', source: 'typed' as const, legacy_brand_id: null, parent_brand_id: null,
+      brand_name: 'Credit', epa_registration: '524-1', manufacturer: 'Maker', review_state: 'added' as const };
     correctDeliveryBrands.mockReset();
+    correctDeliveryBrands.mockResolvedValue({ event_seq: 9, picks: [], invoice_ids: [] });
+    getDeliveryBrands.mockImplementation(async () => ({ ...brands, lines: [{ ...brands.lines[0], picks: [typed] }] }));
     toast.mockReset();
     render(<CorrectBrandsModal open deliveryId="D1" onClose={() => undefined} />);
     await screen.findByLabelText('Brand for Glyphosate');
     fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Checked' } });
     fireEvent.click(screen.getByText('Save correction'));
-    await waitFor(() => expect(toast).toHaveBeenCalledWith('info', expect.stringContaining('already reviewed')));
-    expect(correctDeliveryBrands).not.toHaveBeenCalled();
+    await waitFor(() => expect(correctDeliveryBrands).toHaveBeenCalledTimes(1));
+    const [, lines] = correctDeliveryBrands.mock.calls[0];
+    expect(lines).toEqual([{ delivery_item_id: brands.lines[0].delivery_item_id,
+      picks: [{ typed_name: 'Credit', typed_epa: '524-1', typed_manufacturer: 'Maker', quantity: typed.quantity }] }]);
   });
 });

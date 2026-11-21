@@ -83,7 +83,8 @@ import {
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { isDefinitiveRpcRejection } from '../lib/idempotency';
 import { matchesProductSearch } from '../lib/productSearch';
-import { useProductParents } from '../lib/productParents';
+import { getProductParents, type ParentSearchIndex, type ProductParent } from '../lib/productParents';
+import { useLoad, type LoadState } from '../hooks/useLoad';
 
 const INLINE_PRICING_FIELDS = new Set([
   'pricing_mode',
@@ -144,6 +145,40 @@ function storedMarginPercent(value: number | null | undefined): string | null {
   return value == null ? null : formatPricingMarginPercent(value);
 }
 
+const NO_ROWS: never[] = [];
+
+/** A read that failed, or whose last refresh failed (its data may be out of date). */
+function readFailed(read: LoadState<unknown>): boolean {
+  return read.status === 'failed' || (read.status === 'loaded' && read.stale);
+}
+
+// Every product, page by page: PostgREST caps one response (default 1000), so one read would silently truncate.
+async function readProductList(isAdmin: boolean, isCurrent: () => boolean): Promise<Product[]> {
+  const PAGE_SIZE = 1000;
+  const all: Product[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('products')
+      .select(PRODUCT_COLUMNS)
+      .order('product_name')
+      .order('id')
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    if (!Array.isArray(data)) throw new Error('The product list came back without rows.');
+    if (!isCurrent()) throw new Error('A newer product list read started.');
+    all.push(...(data as Product[]));
+    if (data.length < PAGE_SIZE) break;
+  }
+  // Cost is admin-only (Mason, 2026-10-15).
+  return withAdminCosts('products', all, isAdmin);
+}
+
+async function readProductParents(): Promise<ProductParent[]> {
+  const parents = await getProductParents(null);
+  if (!Array.isArray(parents)) throw new Error('The product groups came back without a list.');
+  return parents;
+}
+
 /** A tier's net margin under its price; red with "under floor" when below the product's floor. */
 function NetMarginNote({ margin, floor }: { margin: number; floor: number | undefined }) {
   const under = isUnderMarginFloor(margin, floor);
@@ -158,26 +193,78 @@ export default function Products() {
   const { role, profile } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [products, setProducts] = useState<ProductListRow[]>([]);
+  const canBulkAction = role === 'admin' || role === 'sales_rep';
+  const isAdmin = role === 'admin';
+
+  // The page's reads. A failed one says so with Try again; an action that needs it stays off until it loads.
+  // The key names the role, so a role change never keeps rows read without (or with) cost.
+  const productsRead = useLoad(`products:${isAdmin ? 'admin' : 'staff'}`,
+    (isCurrent) => readProductList(isAdmin, isCurrent), { report: {} });
+  // Floors (admin-only) only add warnings: without them the floor column shows "?" and stays read-only.
+  const floorsRead = useLoad(isAdmin ? 'product-margin-floors' : null, fetchMarginFloors,
+    { report: { extra: { context: 'load_product_margin_floors' } } });
+  const categoriesRead = useLoad<ProductCategory[]>('product-categories', listProductCategories, { report: {} });
   // Grouped sizes take category from their parent (PAR-1); a parent's name or nickname finds its sizes.
   const [parentsReload, setParentsReload] = useState(0);
-  const { byProduct: parentByProduct, index: parentIndex } = useProductParents(parentsReload);
+  const parentsRead = useLoad('product-parents', readProductParents,
+    { refreshToken: parentsReload, report: { extra: { context: 'get_product_parents' } } });
+
+  const loadError = productsRead.status === 'failed';
+  // A failed refresh keeps the old rows on screen; actions on them wait for a fresh list.
+  const listStale = productsRead.status === 'loaded' && productsRead.stale;
+  const listBlocked = loadError || listStale;
+  const categoriesReady = !readFailed(categoriesRead) && categoriesRead.status === 'loaded';
+  // Without the groups the page cannot tell which sizes take their category from a parent.
+  const parentsReady = !readFailed(parentsRead) && parentsRead.status === 'loaded';
+  const floorsFailed = isAdmin && readFailed(floorsRead);
+  const loadedProducts = productsRead.status === 'loaded' ? productsRead.data : NO_ROWS;
+  const loadedFloors = floorsRead.status === 'loaded' && !floorsRead.stale ? floorsRead.data : null;
+  const categoryChoices = categoriesRead.status === 'loaded' ? categoriesRead.data : NO_ROWS;
+  const parents = parentsRead.status === 'loaded' ? parentsRead.data : NO_ROWS;
+
+  const { parentByProduct, parentIndex } = useMemo(() => {
+    const byProduct = new Map<string, ProductParent>();
+    const index = new Map<string, { name: string; nickname: string | null }>();
+    for (const parent of parents) {
+      for (const size of parent.sizes) {
+        byProduct.set(size.product_id, parent);
+        index.set(size.product_id, { name: parent.name, nickname: parent.nickname });
+      }
+    }
+    return { parentByProduct: byProduct as ReadonlyMap<string, ProductParent>, parentIndex: index as ParentSearchIndex };
+  }, [parents]);
   // Product id → parent name, for the pricing workbook's grouped rows.
   const groupedParentNames = useMemo(
     () => new Map([...parentByProduct].map(([productId, parent]) => [productId, parent.name])),
     [parentByProduct],
   );
   const searchProducts = useCallback((row: ProductListRow, search: string) => matchesProductSearch(row, search, parentIndex), [parentIndex]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+
+  // Floors this page just saved, kept until the floors are read again, so they stay known if that read fails.
+  const [savedFloors, setSavedFloors] = useState<ReadonlyMap<string, number | null>>(new Map());
+  const marginFloors = useMemo(() => {
+    const floors = new Map(loadedFloors ?? []);
+    for (const [productId, floor] of savedFloors) {
+      if (floor === null) floors.delete(productId);
+      else floors.set(productId, floor);
+    }
+    return floors;
+  }, [loadedFloors, savedFloors]);
+  const marginFloorsLoadFailed = isAdmin && loadedFloors === null;
+  // The floor rides on each row as typed text, so the inline editor can tell a real edit from
+  // the stored value (clearing a floor included).
+  const products = useMemo<ProductListRow[]>(
+    () => loadedProducts.map((p) => ({ ...p, [MARGIN_FLOOR_FIELD]: formatMarginFloorPercent(marginFloors.get(p.id)) })),
+    [loadedProducts, marginFloors],
+  );
+  const categories = useMemo(() => [...new Set(loadedProducts.map((p) => p.category).filter(Boolean))].sort() as string[], [loadedProducts]);
+  const vendors = useMemo(() => [...new Set(loadedProducts.map((p) => p.vendor).filter(Boolean))].sort() as string[], [loadedProducts]);
+
   const [rateLock, setRateLock] = useState<ProductRateLock | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [vendorFilter, setVendorFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
   const [setupFilter, setSetupFilter] = useState<SetupFilter>('');
-  const [categories, setCategories] = useState<string[]>([]);
-  const [categoryChoices, setCategoryChoices] = useState<ProductCategory[]>([]);
-  const [vendors, setVendors] = useState<string[]>([]);
   const [bulkProductImportOpen, setBulkProductImportOpen] = useState(false);
   const [setupWorkbookOpen, setSetupWorkbookOpen] = useState(false);
   const [rateReviewOpen, setRateReviewOpen] = useState(false);
@@ -210,102 +297,6 @@ export default function Products() {
   const exportPricingIdem = useIdempotencyKey('create_pricing_workbook_export', profile?.id || '');
   const marginFloorIdem = useIdempotencyKey('set_product_margin_floors', profile?.id || '');
   const productActiveIdem = useIdempotencyKey('set_product_active', profile?.id || '');
-  const [marginFloors, setMarginFloorsByProduct] = useState<Map<string, number>>(new Map());
-  const [marginFloorsLoadFailed, setMarginFloorsLoadFailed] = useState(false);
-  // Products whose floor this page just saved, so it is known even while the floors failed to load.
-  const [marginFloorsKnownFromSave, setMarginFloorsKnownFromSave] = useState<Set<string>>(new Set());
-
-  const canBulkAction = role === 'admin' || role === 'sales_rep';
-  const isAdmin = role === 'admin';
-
-  // Only the newest load may install rows: a role change re-runs the loader while an older
-  // (possibly cost-less) load is still in flight (Luna round 2).
-  const loadSeqRef = useRef(0);
-  const fetchProducts = useCallback(async (reportError = true): Promise<boolean> => {
-    const seq = ++loadSeqRef.current;
-    // A failed load hides the rows, so an open Deactivate dialog for a hidden selection closes too.
-    const failLoad = () => {
-      setLoadError(true);
-      activeReviewSeq.current += 1;
-      setActiveReview(null);
-    };
-    // Paginate so the master catalog never silently truncates as the catalog grows.
-    // PostgREST caps a single response (default 1000), so we page through with .range().
-    const PAGE_SIZE = 1000;
-    const all: Product[] = [];
-    for (let from = 0; ; from += PAGE_SIZE) {
-      const { data, error } = await supabase
-        .from('products')
-        .select(PRODUCT_COLUMNS)
-        .order('product_name')
-        .order('id')
-        .range(from, from + PAGE_SIZE - 1);
-      if (seq !== loadSeqRef.current) return false;
-      if (error) {
-        Sentry.captureException(error);
-        // A silent reload's caller keeps the rows on screen and explains the failure itself.
-        if (reportError) toast('error', 'Failed to load products. Please try again.');
-        if (reportError) failLoad();
-        setLoading(false);
-        return false;
-      }
-      const batch = (data || []) as Product[];
-      all.push(...batch);
-      if (batch.length < PAGE_SIZE) break;
-    }
-    // Cost is admin-only (Mason, 2026-10-15).
-    let prods: Product[];
-    try {
-      prods = await withAdminCosts('products', all, isAdmin);
-    } catch (costError) {
-      Sentry.captureException(costError);
-      if (seq !== loadSeqRef.current) return false;
-      if (reportError) toast('error', 'Failed to load products. Please try again.');
-      if (reportError) failLoad();
-      setLoading(false);
-      return false;
-    }
-    // Margin floors (admin-only) only add warnings: a failed read keeps the catalog and says so.
-    let floors = new Map<string, number>();
-    let floorsFailed = false;
-    if (isAdmin) {
-      try {
-        floors = await fetchMarginFloors();
-      } catch (floorError) {
-        Sentry.captureException(floorError, { extra: { context: 'load_product_margin_floors' } });
-        floorsFailed = true;
-      }
-    }
-    if (seq !== loadSeqRef.current) return false;
-    // The floor rides on each row as typed text, so the inline editor can tell a real edit from
-    // the stored value (clearing a floor included).
-    setProducts(prods.map((p) => ({ ...p, [MARGIN_FLOOR_FIELD]: formatMarginFloorPercent(floors.get(p.id)) })));
-    setMarginFloorsByProduct(floors);
-    setMarginFloorsKnownFromSave(new Set());
-    setMarginFloorsLoadFailed(floorsFailed);
-    if (floorsFailed && reportError) toast('warning', 'Margin floors could not be loaded. Floor warnings are hidden until you refresh.');
-    setLoadError(false);
-
-    const cats = [...new Set(prods.map((p) => p.category).filter(Boolean))] as string[];
-    const vends = [...new Set(prods.map((p) => p.vendor).filter(Boolean))] as string[];
-    setCategories(cats.sort());
-    setVendors(vends.sort());
-    setLoading(false);
-    // The rows are installed either way, but a silent reload's caller must still say the floors
-    // are missing (its own warning), so a failed floor read is not reported as a clean reload.
-    return !floorsFailed;
-  }, [isAdmin, toast]);
-
-  useEffect(() => {
-    void fetchProducts();
-  }, [fetchProducts]);
-
-  useEffect(() => {
-    listProductCategories().then(setCategoryChoices).catch((error: unknown) => {
-      Sentry.captureException(error);
-      toast('error', 'Could not load product categories. Refresh before editing a category.');
-    });
-  }, [toast]);
 
   const [rateLockFailed, setRateLockFailed] = useState(false);
   const loadRateLock = useCallback(() => {
@@ -318,11 +309,6 @@ export default function Products() {
     });
   }, []);
   useEffect(loadRateLock, [loadRateLock]);
-
-  const retryProducts = () => {
-    setLoading(true);
-    void fetchProducts();
-  };
 
   const listFiltered = products.filter((p) => {
     if (categoryFilter && p.category !== categoryFilter) return false;
@@ -515,7 +501,7 @@ export default function Products() {
   };
 
   const startActiveReview = async (ids: string[], active: boolean) => {
-    if (!isAdmin || loadError || isEditingProducts || ids.length === 0) return;
+    if (!isAdmin || listBlocked || isEditingProducts || ids.length === 0) return;
     if (ids.length > MAX_ACTIVE_CHANGE_PRODUCTS) {
       toast('error', `Turn on or off at most ${MAX_ACTIVE_CHANGE_PRODUCTS} Products at a time. Narrow the filters or select a smaller batch.`);
       return;
@@ -545,8 +531,29 @@ export default function Products() {
     setActiveReview(null);
   };
 
+  /** Read the list (and an admin's floors) again; true only when both came back. */
+  const reloadList = async (): Promise<boolean> => {
+    const [list, floors] = await Promise.all([productsRead.reload(), isAdmin ? floorsRead.reload() : Promise.resolve(null)]);
+    if (floors?.status === 'applied') setSavedFloors(new Map());
+    // The rows a Deactivate review was opened for are no longer known to be current.
+    if (list.status === 'failed') closeActiveReview();
+    return list.status === 'applied' && (floors === null || floors.status === 'applied');
+  };
+  const retryProducts = () => { void reloadList(); };
+  const failedReadNames = [
+    listStale && 'the latest product list',
+    floorsFailed && 'margin floors',
+    readFailed(categoriesRead) && 'product categories',
+    readFailed(parentsRead) && 'product groups',
+  ].filter(Boolean);
+  const retryFailedReads = () => {
+    if (listStale || floorsFailed) void reloadList();
+    if (readFailed(categoriesRead)) void categoriesRead.reload();
+    if (readFailed(parentsRead)) void parentsRead.reload();
+  };
+
   const applyActiveReview = async () => {
-    if (!activeReview || activeReview.result.blockers.length > 0 || loadError || deactivating) return;
+    if (!activeReview || activeReview.result.blockers.length > 0 || listBlocked || deactivating) return;
     const { ids, active, scope, result } = activeReview;
     await runCriticalAction({
       action: async () => {
@@ -592,7 +599,7 @@ export default function Products() {
       onSuccess: () => {
         productActiveIdem.resetKeyFor(scope);
         clearSelection();
-        fetchProducts();
+        void reloadList();
         closeActiveReview();
       },
     });
@@ -691,29 +698,12 @@ export default function Products() {
       throw new Error(marginFloorErrorMessage(err));
     }
     marginFloorIdem.resetKeyFor(scope);
-    const reloaded = await fetchProducts(false);
+    // Show what was saved rather than the old floors until the floors are read again, so nobody
+    // re-enters them if that read fails (the other products' floors then show "?" and stay read-only).
+    setSavedFloors((current) => new Map([...current, ...floorChanges.map((change) =>
+      [change.productId, change.marginFloorPercent == null ? null : change.marginFloorPercent / 100] as const)]));
+    const reloaded = await reloadList();
     if (!reloaded) {
-      // Show what was saved rather than the old floors, so nobody re-enters them. Only the saved
-      // products change: the rest keep whatever the failed reload left (the earlier floors if the
-      // products failed, none if the floors failed, where they show "?" and stay read-only).
-      const changedIds = new Set(floorChanges.map((change) => change.productId));
-      const savedPercent = new Map(floorChanges.map((change) => [change.productId, change.marginFloorPercent]));
-      const savedFloor = (productId: string) => {
-        const percent = savedPercent.get(productId);
-        return percent == null ? undefined : percent / 100;
-      };
-      setMarginFloorsByProduct((current) => {
-        const next = new Map([...current].filter(([productId]) => !changedIds.has(productId)));
-        for (const productId of changedIds) {
-          const floor = savedFloor(productId);
-          if (floor !== undefined) next.set(productId, floor);
-        }
-        return next;
-      });
-      setMarginFloorsKnownFromSave(changedIds);
-      setProducts((rows) => rows.map((p) => (changedIds.has(p.id)
-        ? { ...p, [MARGIN_FLOOR_FIELD]: formatMarginFloorPercent(savedFloor(p.id)) }
-        : p)));
       toast('warning', 'Margin floors were saved, but the list could not be reloaded. Refresh this page.');
     } else if (result.changed_count === 0) {
       toast('info', 'The margin floors are unchanged.');
@@ -725,6 +715,7 @@ export default function Products() {
 
   const handleBulkSave = async (changes: Map<string, Record<string, unknown>>): Promise<void | boolean> => {
     try {
+      if (listStale) throw new Error('The product list could not be refreshed. Use Try again before saving.');
       let hasPricing = false;
       let hasNonpricing = false;
       let hasFloor = false;
@@ -735,6 +726,9 @@ export default function Products() {
       }
       for (const [productId, fields] of changes) {
         const original = products.find((item) => item.id === productId);
+        if ('category' in fields && original && (fields.category || null) !== original.category && (!categoriesReady || !parentsReady)) {
+          throw new Error('Product categories or groups have not loaded. Use Try again before changing a category.');
+        }
         const parent = parentByProduct.get(productId);
         if ('category' in fields && original && parent && (fields.category || null) !== original.category) {
           throw new Error(`${original.product_name}'s category is set on parent "${parent.name}". Change it on the product page's Parent panel.`);
@@ -834,7 +828,7 @@ export default function Products() {
       if (profile) {
         logActivity({ event: 'products_bulk_updated', description: `${changes.size} product(s) updated via inline edit`, performedBy: profile.id, entityType: 'product' });
       }
-      fetchProducts();
+      void reloadList();
       setParentsReload((n) => n + 1);
       return true;
     } catch (err: unknown) {
@@ -877,7 +871,8 @@ export default function Products() {
 
   // fullSheet: every active product, whatever the filters or selection (To-Do 0.1).
   const handleExportPricingWorkbook = async (fullSheet: boolean) => {
-    if (!profile) return;
+    // The workbook marks grouped sizes, so it waits for the groups as well as a current list.
+    if (!profile || listBlocked || !parentsReady) return;
     const productIds = (fullSheet ? products : selectedRows.length > 0 ? selectedRows : filtered)
       .filter((product) => product.is_active)
       .map((product) => product.id);
@@ -924,7 +919,8 @@ export default function Products() {
   };
 
   const handlePricingWorkbookUpload = async (file: File) => {
-    if (!profile) return;
+    // The review refuses a grouped size's use timing, so it waits for the groups.
+    if (!profile || !parentsReady) return;
     if (file.size > MAX_PRICING_WORKBOOK_FILE_BYTES) {
       toast(
         'error',
@@ -992,7 +988,7 @@ export default function Products() {
       setPricingPreview(null);
       setPricingSourceFile(null);
       setTableRevision((revision) => revision + 1);
-      const reloaded = await fetchProducts(false);
+      const reloaded = await reloadList();
       if (reloaded) {
         toast('success', `Applied pricing to ${result.applied_count} Product(s).`);
       } else {
@@ -1033,7 +1029,9 @@ export default function Products() {
       ) : (
         <select aria-label="Category" value={String(getCellValue('category') ?? '')}
           onChange={(event) => setCellValue('category', event.target.value || null)}
-          disabled={categoryChoices.length === 0}
+          // A grouped size's category is its parent's, so without the groups no row's category is offered.
+          disabled={!categoriesReady || !parentsReady || categoryChoices.length === 0}
+          title={!categoriesReady || !parentsReady ? 'Product categories or groups have not loaded. Use Try again.' : undefined}
           className="w-full rounded border border-gray-200 bg-white px-2 py-1 text-sm text-nav-dark focus-visible:ring-2 focus-visible:ring-crx-green disabled:opacity-50">
           <option value="">—</option>
           {categoryChoices.filter((choice) => choice.is_active || choice.name === row.category).map((choice) => (
@@ -1110,8 +1108,9 @@ export default function Products() {
               );
             },
             render: (row: Product) => {
-              if (marginFloorsLoadFailed && !marginFloorsKnownFromSave.has(row.id)) {
-                return <span className="text-xs text-amber-700" title="Margin floors could not be loaded">?</span>;
+              if (marginFloorsLoadFailed && !savedFloors.has(row.id)) {
+                const why = floorsFailed ? 'Margin floors could not be loaded' : 'Loading margin floors';
+                return <span className="text-xs text-amber-700" title={why}>?</span>;
               }
               const floor = marginFloors.get(row.id);
               return (
@@ -1238,7 +1237,7 @@ export default function Products() {
     ? [checkboxCol as unknown as EditableColumn<Product>, ...dataColumns]
     : dataColumns;
 
-  if (loading) {
+  if (productsRead.status === 'loading' || productsRead.status === 'idle') {
     return (
       <div className="p-6">
         <SkeletonTable rows={8} />
@@ -1256,7 +1255,7 @@ export default function Products() {
         actions={(
           <>
           {/* Bulk actions act on the selection, so they wait while the rows are hidden by a failed load. */}
-          {canBulkAction && !loadError && (
+          {canBulkAction && !listBlocked && (
             <div className="hidden md:block">
               <BulkActionBar
                 selectedCount={selectedCount}
@@ -1274,7 +1273,7 @@ export default function Products() {
               variant="secondary"
               icon={<Download className="w-4 h-4" />}
               onClick={() => setExportMenuOpen((v) => !v)}
-              disabled={exporting || loadError || filtered.length === 0}
+              disabled={exporting || listBlocked || filtered.length === 0}
             >
               {exporting ? 'Exporting...' : 'Download'} <ChevronDown className="w-3 h-3 ml-1 inline" />
             </Button>
@@ -1312,7 +1311,7 @@ export default function Products() {
                 icon={<FileSpreadsheet className="w-4 h-4" />}
                 onClick={() => void handleExportPricingWorkbook(true)}
                 loading={workbookBusy}
-                disabled={loadError || products.length === 0}
+                disabled={listBlocked || !parentsReady || products.length === 0}
                 title="Every active product, ignoring filters and selection"
               >
                 Full price sheet
@@ -1322,7 +1321,7 @@ export default function Products() {
                 icon={<FileSpreadsheet className="w-4 h-4" />}
                 onClick={() => void handleExportPricingWorkbook(false)}
                 loading={workbookBusy}
-                disabled={loadError || filtered.length === 0}
+                disabled={listBlocked || !parentsReady || filtered.length === 0}
                 title="The selected products, or every active product the filters show"
               >
                 Pricing .xlsx
@@ -1331,7 +1330,7 @@ export default function Products() {
                 variant="secondary"
                 icon={<Upload className="w-4 h-4" />}
                 onClick={() => pricingWorkbookInputRef.current?.click()}
-                disabled={workbookBusy}
+                disabled={workbookBusy || !parentsReady}
               >
                 Review Pricing File
               </Button>
@@ -1380,6 +1379,13 @@ export default function Products() {
         )}
       />
 
+      {failedReadNames.length > 0 && (
+        <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <span>Could not load {failedReadNames.join(', ')}. Changes that need them stay off until they load.</span>
+          <Button size="sm" variant="secondary" onClick={retryFailedReads}>Try again</Button>
+        </div>
+      )}
+
       <Card padding={false}>
         <div
           data-testid="products-mobile-layout"
@@ -1398,7 +1404,7 @@ export default function Products() {
             setupFilter={setupFilter}
             onSetupFilterChange={setSetupFilter}
             onOpenProduct={(product) => navigate(`/products/${product.id}`)}
-            onChangePrice={isAdmin ? (product) => setQuickPriceProductId(product.id) : undefined}
+            onChangePrice={isAdmin && !listStale ? (product) => setQuickPriceProductId(product.id) : undefined}
             loadError={loadError}
             onRetry={retryProducts}
             parentIndex={parentIndex}
@@ -1426,10 +1432,9 @@ export default function Products() {
                 </Button>
               ) : undefined
             }
-            loading={loading}
             loadError={loadError}
             onRetry={retryProducts}
-            canEdit={isAdmin}
+            canEdit={isAdmin && !listStale}
             onEditModeChange={setIsEditingProducts}
             onSave={handleBulkSave}
             headerActions={(
@@ -1497,7 +1502,7 @@ export default function Products() {
                   <option value="">Any setup</option>
                   <option value="incomplete">Incomplete setup ({incompleteCount})</option>
                 </select>
-                {canBulkAction && !loadError && filtered.some((p) => isAdmin || p.is_active) && (
+                {canBulkAction && !listBlocked && filtered.some((p) => isAdmin || p.is_active) && (
                   <button
                     onClick={toggleAll}
                     className="px-3 py-2 text-xs font-medium text-secondary hover:text-nav-dark transition-colors"
@@ -1518,7 +1523,7 @@ export default function Products() {
           open={setupWorkbookOpen}
           profileId={profile?.id ?? ''}
           onClose={() => setSetupWorkbookOpen(false)}
-          onSaved={() => { void fetchProducts(); }}
+          onSaved={() => { void reloadList(); }}
         />
       )}
       {isAdmin && (
@@ -1529,7 +1534,7 @@ export default function Products() {
         open={bulkProductImportOpen}
         onClose={() => setBulkProductImportOpen(false)}
         onSuccess={() => {
-          fetchProducts();
+          void reloadList();
           setBulkProductImportOpen(false);
         }}
       />

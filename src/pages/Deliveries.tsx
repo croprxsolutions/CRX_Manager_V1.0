@@ -901,13 +901,15 @@ export default function Deliveries() {
     const seq = ++availableSeqRef.current;
     const { data, error: availableErr } = await supabase.rpc('get_available_deliveries_for_driver');
     if (seq !== availableSeqRef.current) return;
-    if (availableErr) {
+    try {
+      if (availableErr) throw availableErr;
+      setUnassigned(assertRpcResult<{ rows: AvailableDelivery[] }>(data, 'get_available_deliveries_for_driver').rows ?? []);
+    } catch (loadErr) {
+      // A failed or malformed answer clears the card, so an old list never stays clickable.
       setUnassigned([]);
-      toast('error', `Could not load available deliveries: ${sanitizeError(availableErr)}`);
-      Sentry.captureException(availableErr, { tags: { source: 'fetch', page: 'deliveries' } });
-      return;
+      toast('error', `Could not load available deliveries: ${sanitizeError(loadErr)}`);
+      Sentry.captureException(loadErr, { tags: { source: 'fetch', page: 'deliveries' } });
     }
-    setUnassigned(assertRpcResult<{ rows: AvailableDelivery[] }>(data, 'get_available_deliveries_for_driver').rows ?? []);
   }, [toast]);
   useEffect(() => {
     if (isDriver) void loadAvailable();

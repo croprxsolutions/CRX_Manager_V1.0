@@ -201,6 +201,14 @@ When one session (the captain) lands PRs that child sessions get green (Mason, 2
 - Don't push to a branch whose author pushed in the last 30 minutes (Mason, 2026-11-04); leave a PR comment instead. Never push to Taha's branches at all (Taha's PRs, below).
 - A child that goes idle right after `/compact` gets a one-line "carry on" message.
 
+### Handing a staging PR to the CI watcher (Mason, 2026-11-21)
+
+A session that opens a staging PR hands it to the **main CI watcher** instead of watching it itself, then may be archived (main-branch hotfix and release PRs stay with the merge captain):
+- Read `C:\Claude\crx-ci-watch\watch-list.md` for the current main watcher's and backup's session ids (watchers get replaced; never hard-code an id). Send the main watcher one line: `#N HANDOFF branch=<branch> folder=<worktree, where any Sol proof lives> open=<what is still open, or none>`. Release your landing claim first (`node scripts/pr-claim.mjs release <branch>`).
+- The main watcher owns the PR from then on: it fixes failed checks, conflicts and review comments, runs Sol when the PR is on the Sol list, keeps its row in the list file current, and reports `#N READY` or `#N BLOCKED` to the captain as above. Sol round caps and owner-accepts still go to Mason.
+- The backup watcher reads the list about every 30 minutes and takes over any PR whose main watcher has stopped, or whose row has not moved in over an hour without a question waiting on Mason or Taha; it tells Mason and the captain in one line. The landing claim keeps the two from working one PR at once.
+- Keep the PR's worktree until it merges when it holds a Sol proof; tell the watcher if you must remove it.
+
 ```
 ═══════════════════════════════════════════════════
   SHIP — <job>   (<YYYY-MM-DD HH:MM>)

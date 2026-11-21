@@ -102,13 +102,6 @@ BEGIN
         PERFORM (v_val #>> '{}')::date;
       ELSIF v_kind = 'uuid' THEN
         PERFORM (v_val #>> '{}')::uuid;
-        -- The same people the screens offer; FOR SHARE holds off a deactivation until this call commits,
-        -- so a job is never handed to an inactive profile (whose dispatch trigger would leave the old one open).
-        IF v_key = 'applicator_id' THEN
-          PERFORM 1 FROM public.profiles WHERE id = (v_val #>> '{}')::uuid AND is_active = true
-             AND role IN ('applicator', 'admin', 'sales_rep') FOR SHARE;
-          IF NOT FOUND THEN RAISE EXCEPTION 'BAD_VALUE: applicator_id must be an active applicator, admin or sales rep'; END IF;
-        END IF;
       ELSIF v_key = 'carrier_rate_gpa' AND (v_val #>> '{}')::numeric < 0 THEN
         RAISE EXCEPTION 'BAD_VALUE: carrier_rate_gpa cannot be negative';
       ELSIF v_key = 'loader_tank_capacity' AND (v_val #>> '{}')::numeric <= 0 THEN
@@ -131,6 +124,15 @@ BEGIN
       RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
     END IF;
     RETURN v_replay -> 'result';
+  END IF;
+
+  -- A new applicator must be one the screens offer. Checked after the replay lookup, so a retry of a
+  -- saved call still gets its saved result; FOR SHARE holds off a deactivation until this call commits,
+  -- so a job is never handed to an inactive profile (whose dispatch trigger would leave the old one open).
+  IF jsonb_typeof(p_changes -> 'applicator_id') = 'string' THEN
+    PERFORM 1 FROM public.profiles WHERE id = (p_changes ->> 'applicator_id')::uuid AND is_active = true
+       AND role IN ('applicator', 'admin', 'sales_rep') FOR SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'BAD_VALUE: applicator_id must be an active applicator, admin or sales rep'; END IF;
   END IF;
 
   -- Lock every selected job first, in id order, then change them set-wise: one UPDATE per kind of

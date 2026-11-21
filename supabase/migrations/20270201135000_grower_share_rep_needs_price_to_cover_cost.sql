@@ -5,8 +5,7 @@
 -- The public wrapper save_field_app_invoice raises ACTOR_MISMATCH and keeps p_idempotency_key text DEFAULT NULL; unchanged.
 --
 -- WHY: 20270120150000 let an active admin OR sales rep save the $0 "included in grower share" chemical line, logging the
--- approval under that user. The per-acre rate comes from field_billing_defaults, which reps can edit, so a rep could set
--- $0.01/acre and save $500 of chemicals for $1 with no admin review. Live 2026-11-20: 0 grower-share fields, 0 such
+-- approval under that user, without comparing the per-acre price with the included chemicals' cost. Live 2026-11-20: 0 grower-share fields, 0 such
 -- invoice lines, so nothing in use changes.
 --
 -- WHAT: _enforce_below_cost_line is re-created from its 20270120150000 body (md5 1069cd1451454030627b250db7b729d1) with

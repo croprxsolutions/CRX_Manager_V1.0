@@ -3,7 +3,7 @@
  * Real-schema proof for 20270201135000_grower_share_rep_needs_price_to_cover_cost (#1990 Sol HIGH, 20270120150000:1000).
  * Container setup and replay copied from prove-field-app-no-sold-unit-real-schema.mjs. Grower A owns field G (100 ac, 100%)
  * with a grower-share per-acre price; chemicals P and Q cost $5.00/Gal. 1 Gal/ac of P on 100 ac costs $500.00.
- *   BEFORE: a sales rep at $0.01/ac ($1.00 billed) saves $500.00 of P as a $0 grower-share line, approval under the rep.
+ *   BEFORE: the base saves a rep's grower-share invoice without comparing price and cost.
  *   AFTER (Mason, 2026-11-20, "Reps if price covers cost"):
  *     - the rep at $0.01/ac is refused FIELD_APP_GROWER_SHARE_BELOW_COST, nothing saved, and the message carries no cost;
  *     - the rep at $5.00/ac ($500.00, exactly the cost) saves, one approval row under the rep; at $4.99/ac is refused;

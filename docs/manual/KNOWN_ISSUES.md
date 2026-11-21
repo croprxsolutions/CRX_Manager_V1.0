@@ -1490,8 +1490,8 @@ spelling on receipt.
 ### KI-171 — Grower-share rep coverage check (#2068): accepted limits and test gaps
 **MED · OPEN · field-app invoices · found 2026-11-20/21 (Sol rounds 1-2, Astra, #2068) · unassigned**
 #2068 lets a sales rep save a grower-share invoice only when its per-acre price covers the included chemicals' cost.
-Left open: (1) by trying per-acre prices a rep can find the price where the chemicals are covered, which reveals their
-total cost (accepted with Mason's 2026-11-20 decision); (2) hand-typed chemicals (no catalog product) count as $0 cost
+Left open: (1) a rep's save passing or not depends on the chemicals' cost, so the outcome is not cost-blind (accepted
+with Mason's 2026-11-20 decision); (2) chemicals without a catalog product are outside the check
 for a rep (Mason, 2026-11-20: leave as is); (3) after a lost response, "Nothing was saved" can be wrong when the first
 save committed; (4) the reverse script leaves the migration ledger saying the candidate is applied; (5) the coverage
 check re-reads the invoice's approval rows on every $0 line, so a very large, often re-saved draft gets slower;

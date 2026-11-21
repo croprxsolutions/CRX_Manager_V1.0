@@ -6,7 +6,7 @@ Read on `origin/staging` at the branch point of `claude/release-fix-rep-below-co
 - `_enforce_below_cost_line` (final body: `20270120150000`, md5 `1069cd1451454030627b250db7b729d1`; no later file redefines it) lets the $0 "included in grower share" invoice line through for an active admin OR sales rep, and writes a `below_cost_approvals` row under that user (`operation = 'field_app_grower_share'`).
 - Only `_save_field_app_invoice_impl_20260714` (final body `20270129171000`) sets that context, around that one INSERT. The split save refuses grower-share fields (`MODE_A_UNSUPPORTED`); the preview inserts nothing.
 - In that save, an invoice's lines are deleted first, then its grower-share per-acre lines are inserted (product NULL, `acres` set, not a fee), then each chemical's $0 grower-share line, then billed lines, then fees. Billed and $0 lines never set `acres`; fees are `is_application_fee`.
-- The per-acre rate comes from `field_billing_defaults.price_override_cents`, which reps can edit. So a rep can set $0.01/acre and save $500 of chemicals for $1.
+- The per-acre rate comes from `field_billing_defaults.price_override_cents`, which reps can edit, and nothing compared it with the included chemicals' cost.
 - Browser roles have no INSERT/UPDATE/DELETE on `invoice_items` and only SELECT on `below_cost_approvals` (live read 2026-11-20). `save_invoice` rebuilding such a draft re-judges the $0 line under the normal wall (admin with reason only).
 - Live 2026-11-20: 0 fields with a grower-share rate, 0 grower-share invoice lines, 3 active reps, 5 active admins.
 
@@ -24,14 +24,14 @@ Read on `origin/staging` at the branch point of `claude/release-fix-rep-below-co
 - Revenue lines are picked as: this invoice, no product, `acres` set, not a fee, not from an order. Billed and $0 chemical lines never set `acres`, so the billed lines interleaved between $0 lines are never counted. Both sums are booked whole cents (`total_shortfall_cents` is a line total for both product lines and costed hand-typed admin lines).
 - After the save: lines change only through this save (re-checked) or `save_invoice`, which re-judges every $0 line under the admin-with-reason wall (a rep is refused). Posting does not change lines. Changing a field default later does not change a saved invoice.
 
-- Sol round 2 (2026-11-21, HIGH): costs are added from the approval rows' unrounded `(locked_unit_cost_cents - unit_price_cents) * quantity` plus this line's, rounded once; summing each line's rounded shortfall let a chemical split into many tiny lines pass (100 lines of $0.0145 counted as $1.00).
-- Sol round 3 (2026-11-21, 2 HIGH, same rounding mechanism): the round-2 sum used already-rounded quantities and ignored per-line booking. **Mason, 2026-11-21 (chose "Add a cushion"):** a rep's per-acre total must reach the chemicals' booked cost plus $0.51 per included chemical line; the save already caps each line's rounding at $0.50, so this always covers exact cost. Replaces the round-2 arithmetic.
+- Sol round 2 (2026-11-21, HIGH): adding each line's rounded cost under-counted the total; replaced in round 3.
+- Sol round 3 (2026-11-21, 2 HIGH, same rounding mechanism). **Mason, 2026-11-21 (chose "Add a cushion"):** a rep's per-acre total must reach the chemicals' booked cost plus $0.51 per included chemical line; the save already caps each line's rounding at $0.50, so this always covers exact cost.
 
 ## State, timing, rollout
 - No existing rows change; live has none of these invoices (re-count at apply time with the reviewers' read-only check).
 - One save is one transaction with no exception handler around the insert, so a refusal rolls the whole save back.
 - An idempotent replay returns the earlier result without re-running the save (unchanged behavior).
-- Accepted consequence of Mason's decision: by trying rates, a rep can find the per-acre price at which an invoice's chemicals are covered, which reveals their total cost (exactly, on a simple one-chemical invoice). The message itself never states a cost.
+- Accepted consequence of Mason's decision: whether a rep's save passes depends on cost, so the outcome is not cost-blind (KI-171). The message itself never states a cost.
 
 ## Astra challenge (2026-11-20, 29 findings) — settled
 - DECISIONs 4 (pooling) and 3 (hand-typed cost): Mason, above. 16 (admin handoff) and 19 (preview vs save): the save's values are authoritative; a refused rep re-enters or asks an admin, as on every other admin-only refusal.

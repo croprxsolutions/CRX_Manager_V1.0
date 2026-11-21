@@ -27,6 +27,7 @@ import PhoneHeader from '../components/ui/PhoneHeader';
 import SectionCard from '../components/ui/SectionCard';
 import CustomerDrawer from '../components/customers/CustomerDrawer';
 import { hasPageAccess } from '../lib/pagePermissions';
+import { topFarmGroupName, type FarmParentRow } from '../lib/farmGroupTop';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import Button from '../components/ui/Button';
@@ -901,11 +902,14 @@ export default function Deliveries() {
       const pIds = [...new Set(
         (data || []).map((d: Record<string, unknown>) => (d.customer as { parent_customer_id?: string })?.parent_customer_id).filter(Boolean) as string[]
       )];
-      const pMap: Record<string, string> = {};
-      if (pIds.length > 0) {
-        const { data: parents, error: pErr } = await supabase.from('customers').select('id, farm_name').in('id', pIds);
-        if (pErr) Sentry.captureException(pErr, { tags: { source: 'fetch', page: 'deliveries' } });
-        (parents || []).forEach((p) => { pMap[p.id] = p.farm_name; });
+      // #1995: farm groups can be several levels deep; show the TOP parent, like the main list.
+      const pMap: Record<string, FarmParentRow> = {};
+      let toRead = pIds;
+      for (let depth = 0; toRead.length > 0 && depth < 20; depth++) {
+        const { data: parents, error: pErr } = await supabase.from('customers').select('id, farm_name, parent_customer_id').in('id', toRead);
+        if (pErr) { Sentry.captureException(pErr, { tags: { source: 'fetch', page: 'deliveries' } }); break; }
+        (parents || []).forEach((p) => { pMap[p.id] = { farm_name: p.farm_name, parent_customer_id: p.parent_customer_id }; });
+        toRead = [...new Set((parents || []).map((p) => p.parent_customer_id).filter((id): id is string => !!id && !(id in pMap)))];
       }
       const rows = (data || []).map((d) => {
         const cust = d.customer as { farm_name?: string; parent_customer_id?: string } | null;
@@ -914,7 +918,7 @@ export default function Deliveries() {
           customer_name: cust?.farm_name || 'Unknown',
           driver_name: 'Unassigned',
           item_count: 0,
-          farm_group_name: cust?.parent_customer_id ? pMap[cust.parent_customer_id] || null : null,
+          farm_group_name: cust?.parent_customer_id ? topFarmGroupName(cust.parent_customer_id, pMap) : null,
         };
       });
       setUnassigned(rows as DeliveryRow[]);

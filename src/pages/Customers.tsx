@@ -17,6 +17,7 @@ import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { exportToCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
 import { sanitizeError } from '../lib/errorSanitizer';
+import { namesCutFarm } from '../lib/customerDeactivation';
 import { Sentry } from '../lib/sentry';
 import { fetchAllRows, pageWithList } from '../lib/pagedRead';
 import { SkeletonTable } from '../components/ui/Skeleton';
@@ -338,7 +339,7 @@ export default function Customers() {
       clearSelection();
       fetchCustomers();
     } catch (err) {
-      toast('error', sanitizeError(err));
+      toast('error', namesCutFarm(sanitizeError(err), selectedRows));
     }
     setDeactivating(false);
     setDeactivateModalOpen(false);

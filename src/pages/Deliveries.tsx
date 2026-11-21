@@ -1263,7 +1263,8 @@ export default function Deliveries() {
   if (isDriver) {
     // Completed, cancelled and voided deliveries are finished; only these two are still to do.
     const isOpen = (d: DeliveryRow) => d.status === 'scheduled' || d.status === 'in_progress';
-    const myToday = deliveries.filter((d) => d.scheduled_date === todayStr && isOpen(d));
+    // Overdue open deliveries stay under Today, so a late one a driver just took is never hidden.
+    const myToday = deliveries.filter((d) => d.scheduled_date <= todayStr && isOpen(d));
     const myUpcoming = deliveries.filter((d) => d.scheduled_date > todayStr && isOpen(d));
     const myCompleted = deliveries.filter((d) => d.status === 'completed').slice(0, 10);
 
@@ -1291,9 +1292,9 @@ export default function Deliveries() {
         toast,
         successMessage: 'Delivery assigned to you',
         sentryTag: 'take_delivery',
-        onSuccess: () => fetchDeliveries(),
       });
-      // Taken (by this driver or another) or changed: either way the card must reflect the database now.
+      // Taken (by this driver or another), changed, or a lost reply: both lists must reflect the database now.
+      void fetchDeliveries();
       void loadAvailable();
     };
 

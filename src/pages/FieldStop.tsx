@@ -63,6 +63,17 @@ interface StopPhoto {
   uploaded_at?: string | null;
 }
 
+// The stop's own delivery address as one line ('' when missing or unreadable).
+async function readStopAddress(addressId: string): Promise<{ line: string; error: unknown }> {
+  const { data, error } = await supabase
+    .from('customer_addresses')
+    .select('address_line, city, state, zip')
+    .eq('id', addressId)
+    .maybeSingle();
+  const a = (data ?? {}) as { address_line?: string | null; city?: string | null; state?: string | null; zip?: string | null };
+  return { line: [a.address_line, a.city, a.state, a.zip].filter(Boolean).join(', '), error };
+}
+
 // A driver's stop never asks the customers table for the farm: withStopFarm fills it from the driver lookup (#2018).
 function stopColumns(isDriver: boolean): string {
   const base = 'id, delivery_number, status, updated_at, customer_id, order_id, created_by, delivery_address_id, delivery_notes, assigned_driver';
@@ -74,7 +85,8 @@ async function withStopFarm(del: StopDelivery, isDriver: boolean): Promise<{ del
   if (!isDriver) return { del, address: '' };
   const farm = (await fetchDriverFarms([del.customer_id])).get(del.customer_id);
   const customer = farm ? { farm_name: farm.farm_name, email: farm.email, contact_name: null } : null;
-  return { del: { ...del, customer }, address: farm?.address ?? '' };
+  // A stop with its own delivery address shows only that one, read later.
+  return { del: { ...del, customer }, address: del.delivery_address_id ? '' : farm?.address ?? '' };
 }
 
 interface StopDelivery {
@@ -203,7 +215,7 @@ export default function FieldStop() {
     }
     const { del, address: farmAddress } = stop;
     setDelivery(del);
-    // The farm's shipping (else billing) address until a delivery address below replaces it.
+    // A stop with its own delivery address shows only that one (read below); otherwise the farm's address.
     setAddressLine(farmAddress);
     setReceiptRecipient(null);
     // Only an open stop sends a receipt on completion.
@@ -236,16 +248,13 @@ export default function FieldStop() {
     setDeliveryQtys(initQtys);
 
     if (del.delivery_address_id) {
-      const { data: addr } = await supabase
-        .from('customer_addresses')
-        .select('address_line, city, state, zip')
-        .eq('id', del.delivery_address_id)
-        .maybeSingle();
+      const { line, error: addrErr } = await readStopAddress(del.delivery_address_id);
       if (isStale()) return;
-      if (addr) {
-        const a = addr as { address_line?: string | null; city?: string | null; state?: string | null; zip?: string | null };
-        setAddressLine([a.address_line, a.city, a.state, a.zip].filter(Boolean).join(', '));
+      if (addrErr) {
+        Sentry.captureException(addrErr, { tags: { source: 'fetch', page: 'field-stop-address' } });
+        toast('error', 'Could not load the stop address. Check the delivery before driving.');
       }
+      setAddressLine(line);
     }
     await fetchPhotos();
     setLoading(false);

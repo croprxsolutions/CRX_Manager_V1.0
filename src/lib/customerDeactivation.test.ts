@@ -24,3 +24,13 @@ describe('namesCutFarm', () => {
     expect(namesCutFarm(cut, [{ farm_name: a }, { farm_name: 'Other Farm' }])).toBe(cut);
   });
 });
+
+describe('namesCutFarm counts characters as the database does', () => {
+  it('matches a cut name holding an emoji (one character, two UTF-16 units)', () => {
+    const emojiStart = `🌽${start.slice(1)}`;
+    const a = `${emojiStart}ley North`, b = `${emojiStart}ley South`;
+    const message = refusal(`${[...a].slice(0, 59).join('')}…`);
+    expect(namesCutFarm(message, [{ farm_name: a }, { farm_name: b }]))
+      .toBe(`${message} Selected farms starting with that name: ${a}; ${b}.`);
+  });
+});

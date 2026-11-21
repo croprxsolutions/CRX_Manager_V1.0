@@ -41,7 +41,7 @@ Read at `origin/staging` dab22364c (2026-11-21).
 ## Proof cases (local Docker real-schema prover, never live)
 
 All in `scripts/smoke/prove-driver-available-deliveries-real-schema.mjs`:
-1. When an active driver calls the read, then they get exactly every open delivery in order (29 seeded: 4 named + 25), only the five fields, and none assigned, started or deleted.
+1. When an active driver calls the read, then they get exactly every open delivery in order (32 open of 37 seeded: 7 named + 25), only the five fields, and none assigned, started or deleted.
 2. When an admin, sales rep, applicator, inactive driver or a driver denied the Deliveries page calls it, then it is refused; anon has no execute.
 3. When the customer is C in A > B > C, then `farm_group_name` is A; with no parent it is null; with a forced loop the read still returns (direct parent).
 4. When a driver takes an open delivery for themself, then it becomes theirs and leaves the list; assigning someone else, an inactive driver, a driver denied the Deliveries page, an applicator are refused; a fresh key on a delivery already theirs gets "already assigned to you"; taken, started, deleted deliveries get "already taken or changed"; a same-key retry replays.

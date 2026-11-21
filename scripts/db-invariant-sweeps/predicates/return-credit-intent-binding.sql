@@ -3,7 +3,7 @@
 -- wrappers from 20260812130145. Their renamed business implementations and
 -- the existing check_idempotency_intent helper must remain browser-inaccessible.
 -- The shared credit reversal helper must be the exact due-date-aware wrapper.
--- Re-pinned 2026-11-19 for 20270129120000 (#1912): the six wrapper bodies differ only in the idempotency-key
+-- Re-pinned 2026-11-19 for 20270201150000 (#1912): the six wrapper bodies differ only in the idempotency-key
 -- check, which now refuses any character outside printable ASCII. Until that migration is applied live, this
 -- predicate flags the six wrappers there.
 -- Contract: EXPECT ZERO rows.

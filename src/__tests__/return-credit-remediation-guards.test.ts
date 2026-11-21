@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 const root = process.cwd();
 const migration = readFileSync(path.join(root, 'supabase/migrations/20260812130145_bind_return_receipts_to_intent_and_restore_overdue.sql'), 'utf8');
 // #1912 re-emitted the six return wrappers (key check only); the predicate pins those bodies.
-const returnKeyMigration = readFileSync(path.join(root, 'supabase/migrations/20270129120000_idempotency_keys_printable_only.sql'), 'utf8');
+const returnKeyMigration = readFileSync(path.join(root, 'supabase/migrations/20270201150000_idempotency_keys_printable_only.sql'), 'utf8');
 // KI-18 batch 1 replaced _reverse_credit_memo_application (one due-date line); the predicate pins that live body.
 const ki18Batch1Migration = readFileSync(path.join(root, 'supabase/migrations/20261204100000_ki18_batch1_chicago_today.sql'), 'utf8');
 const helperGuardMigration = readFileSync(path.join(root, 'supabase/migrations/20260813070000_pin_return_idempotency_helper_contract.sql'), 'utf8');

@@ -5,7 +5,7 @@ Read at `origin/staging` b81667ddd, 2026-11-19.
 ## Outcome and authority
 
 - **Result:** `adjust_inventory` refuses an idempotency key that contains any character outside printable ASCII (`!` to `~`), not only keys with no printable character at all. Fact: the current check (`20270113100000`, `p_idempotency_key COLLATE "C" !~ '[!-~]'`) needs just one printable character, so `'abc' || E'\n'` passes.
-- **Smallest change:** one new migration re-emitting the `20270113100000` body with that one condition changed to `p_idempotency_key COLLATE "C" ~ '[^!-~]'` (and its comment). Files: `supabase/migrations/20270129110000_adjust_inventory_key_printable_only.sql`, its ledger records, this contract, `scripts/smoke/prove-adjust-inventory-key-real-schema.mjs`.
+- **Smallest change:** one new migration re-emitting the `20270113100000` body with that one condition changed to `p_idempotency_key COLLATE "C" ~ '[^!-~]'` (and its comment). Files: `supabase/migrations/20270201140000_adjust_inventory_key_printable_only.sql`, its ledger records, this contract, `scripts/smoke/prove-adjust-inventory-key-real-schema.mjs`.
 - **Who may act:** unchanged (active admin, actor bound to `auth.uid()`, `SECURITY DEFINER`, `search_path = public, pg_temp`, same grants). The new check still runs after the auth checks and before any receipt lookup.
 
 ## State and failure
@@ -29,7 +29,7 @@ No open business decisions. Cold challenge skipped: one-condition tightening wit
 
 ## Follow-up (Mason, 2026-11-19: "fix the other 15 functions with the same check")
 
-- **Scope:** a database replayed from `origin/staging` plus `20270129110000` shows 19 more public functions whose current body holds the weak check (the "15" was a count of migration files). Migration `20270129120000_idempotency_keys_printable_only.sql` makes the same one-condition swap in each, generated from `pg_get_functiondef`. Each held the check exactly once, as `IF p_idempotency_key IS NULL OR ... OR p_idempotency_key COLLATE "C" !~ '[!-~]' THEN RAISE 'IDEMPOTENCY_KEY_REQUIRED ...'`.
+- **Scope:** a database replayed from `origin/staging` plus `20270201140000` shows 19 more public functions whose current body holds the weak check (the "15" was a count of migration files). Migration `20270201150000_idempotency_keys_printable_only.sql` makes the same one-condition swap in each, generated from `pg_get_functiondef`. Each held the check exactly once, as `IF p_idempotency_key IS NULL OR ... OR p_idempotency_key COLLATE "C" !~ '[!-~]' THEN RAISE 'IDEMPOTENCY_KEY_REQUIRED ...'`.
 - **Callers:** every app key comes from `generateIdempotencyKey` (`<operation>:<user>:<uuid>`), the intent hooks (`<tab uuid>:<uuid>`) or those keys plus record ids; all printable ASCII without spaces. No app call changes.
 - **Money paths touched** (validation only, no amount, status or row logic): vendor bills/payments, commission payments, return credits. Taha has no open PRs (checked 2026-11-19); his billing/invoice ownership through 2026-12-15 should see this before the PR.
 - **Sweep allowlist:** `cost-exposure-review` keys hash each function and the helpers it reaches, so entries whose chain reaches a changed body are re-keyed from the replayed database (they show until the migration is applied).

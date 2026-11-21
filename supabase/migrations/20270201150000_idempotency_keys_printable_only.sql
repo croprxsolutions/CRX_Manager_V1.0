@@ -1,4 +1,4 @@
--- #1912 follow-up: the same weak idempotency-key check fixed in adjust_inventory (20270129110000) is in 19 more
+-- #1912 follow-up: the same weak idempotency-key check fixed in adjust_inventory (20270201140000) is in 19 more
 -- functions: `p_idempotency_key COLLATE "C" !~ '[!-~]'` needs only ONE printable character, so a key such as 'abc' followed by
 -- a newline (or by a tab, a control character or a space) was accepted and stored. Each now refuses a
 -- key with ANY character outside printable ASCII ('!' to '~'). App keys are '<operation>:<user uuid>:<uuid>'

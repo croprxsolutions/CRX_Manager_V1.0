@@ -873,7 +873,7 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
   });
 
   it('#2058: a save refused because the fields now bill another farm explains why on the page, then clears on the next Save', async () => {
-    const why = 'Nothing was saved. These fields bill Beta Farms, but this invoice bills a different farm, and an invoice cannot change which farm it bills. Put back the original fields, or have an admin delete this invoice (void it if it was posted) first, then make a new field application invoice for these fields.';
+    const why = 'Nothing was saved. These fields bill Beta Farms, which does not match the one farm this invoice bills, and an invoice cannot change which farm it bills. Put back the original fields, or have an admin delete this invoice (void it if it was posted) first, then make a new field application invoice for these fields.';
     const routeRpc = mockRpc.getMockImplementation();
     mockRpc.mockImplementation((name: string, args: unknown) => name === 'save_field_app_invoice'
       ? Promise.resolve({ data: null, error: { message: `FIELD_APP_PAYER_CHANGED: ${why}` } })

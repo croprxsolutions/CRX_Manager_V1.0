@@ -369,7 +369,7 @@ async function main() {
   const STANDALONE_END = 'Put back the original fields, or have an admin delete this invoice (void it if it was posted) first, then make a new field application invoice for these fields.';
   const JOB_END = 'Put back the original fields, or, if the job itself is wrong, have an admin delete this invoice (void it if it was posted), correct the job, and invoice it again from Scheduling.';
   // Names only the farm(s) of the fields sent; never this invoice's own number or farm (Sol r3).
-  const sentence = (now, end = STANDALONE_END) => new RegExp(lit(`FIELD_APP_PAYER_CHANGED: Nothing was saved. These fields bill ${now}, but this invoice bills a different farm, and an invoice cannot change which farm it bills. ${end}`));
+  const sentence = (now, end = STANDALONE_END) => new RegExp(lit(`FIELD_APP_PAYER_CHANGED: Nothing was saved. These fields bill ${now}, which does not match the one farm this invoice bills, and an invoice cannot change which farm it bills. ${end}`));
   const B_ONLY = '[PROVER] SDF Farm B', BOTH = '[PROVER] SDF Farm A and [PROVER] SDF Farm B';
   refusedProbe(TO_B, sentence(B_ONLY));
   refusedProbe(SPLIT, sentence(BOTH));

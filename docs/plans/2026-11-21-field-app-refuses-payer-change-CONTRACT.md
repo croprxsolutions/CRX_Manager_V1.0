@@ -19,7 +19,7 @@ An earlier version moved the draft automatically (cancel the old one, make a new
 
 Saving a standalone invoice whose fields now bill a different farm, or several farms, is refused with `FIELD_APP_PAYER_CHANGED` and this sentence (farm names and invoice number filled in):
 
-> Nothing was saved. These fields bill <farm(s)>, but this invoice bills a different farm, and an invoice cannot change which farm it bills. Put back the original fields, or have an admin delete this invoice (void it if it was posted) first, then make a new field application invoice for these fields.
+> Nothing was saved. These fields bill <farm(s)>, which does not match the one farm this invoice bills, and an invoice cannot change which farm it bills. Put back the original fields, or have an admin delete this invoice (void it if it was posted) first, then make a new field application invoice for these fields.
 
 An invoice made from a job ends instead:
 
@@ -33,7 +33,7 @@ Unchanged: a new invoice (no id), an edit whose fields still bill the same singl
 
 ## Proof cases (real migrated database, prover)
 
-1. A standalone draft for farm A re-saved with only farm B's field: before, it stays A with B's lines; after, refused with the sentence naming B, the invoice number and A; the database is unchanged.
+1. A standalone draft for farm A re-saved with only farm B's field: before, it stays A with B's lines; after, refused with the sentence naming B (not the invoice number or A); the database is unchanged.
 2. Re-saved with A's and B's fields: before, the original stays live with no lines; after, refused naming both farms; unchanged.
 3. Re-saved with A's fields only: same id, number and customer (regression).
 4. A grouped edit ends exactly as before.

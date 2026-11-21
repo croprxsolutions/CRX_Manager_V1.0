@@ -22,7 +22,7 @@
 -- ROLLBACK (its own reviewed migration): re-emit the body from
 --   20270129171000_field_app_refuses_product_without_sold_unit.sql (md5 1a4a2655e43392d867b195289df9b9a1).
 --
--- ORDERING: after 20270129171000. Not re-runnable (preflight refuses). Postflight pins the new body md5 54c5e75581aff769ed2b856882d98ec0.
+-- ORDERING: after 20270129171000. Not re-runnable (preflight refuses). Postflight pins the new body md5 515feb5274cc66e65b5d577d0108e421.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -224,7 +224,7 @@ BEGIN
        SELECT 1 FROM jsonb_array_elements(v_customers) c WHERE (c->>'customer_id')::uuid = v_existing_customer_id)) THEN
     -- Names only the farm(s) of the fields the caller sent, never this invoice's own number or farm (Sol r3), and
     -- puts the admin step first so a rep never leaves two live drafts; a job-made invoice is re-billed from its job.
-    RAISE EXCEPTION 'FIELD_APP_PAYER_CHANGED: Nothing was saved. These fields bill %, but this invoice bills a different farm, and an invoice cannot change which farm it bills. %',
+    RAISE EXCEPTION 'FIELD_APP_PAYER_CHANGED: Nothing was saved. These fields bill %, which does not match the one farm this invoice bills, and an invoice cannot change which farm it bills. %',
       (SELECT string_agg(COALESCE(NULLIF(btrim(c->>'customer_name'), ''), 'another farm'), ' and ' ORDER BY c->>'customer_name')
          FROM jsonb_array_elements(v_customers) c),
       CASE WHEN (SELECT job_id FROM invoices WHERE id = p_invoice_id) IS NOT NULL
@@ -751,7 +751,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)'))
-     IS DISTINCT FROM '54c5e75581aff769ed2b856882d98ec0' THEN
+     IS DISTINCT FROM '515feb5274cc66e65b5d577d0108e421' THEN
     RAISE EXCEPTION 'FIELD_APP_STANDALONE_DRAFT_POSTFLIGHT: _save_field_app_invoice_impl_20260714 is not the reviewed new body';
   END IF;
 END;

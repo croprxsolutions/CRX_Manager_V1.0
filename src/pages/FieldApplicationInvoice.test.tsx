@@ -1041,14 +1041,13 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
     expect(mockFrom.mock.calls.some((call) => call[0] === 'activity_feed')).toBe(false);
   });
 
-  it('#1983: a line saved with no units reloads its rate unit from the recorded application and its sold unit from the product, never oz or the catalog rate unit', async () => {
+  it('#1983: a product line saved with no sold unit reloads in the product sold unit; a blank rate unit keeps oz (never the recorded or catalog unit)', async () => {
     const existingFrom = mockFrom.getMockImplementation()!;
     const unitFrom = makeFromMock({
       invoice_items: { data: [
-        // Recorded application unit Pt; the catalog's rate unit (Qt) must NOT be used: same rate, other unit = rebill.
+        // Neither the recorded unit (Pt) nor the catalog's rate unit (Qt) may replace oz: same rate, other unit = rebill.
         { id: 'chem-recorded', product_id: 'product-gal', description: 'Recorded product', rate_per_acre: 1,
           rate_unit: null, total_applied_unit: 'Pt', quantity: 10, unit_size: null, unit_price_cents: 100, extended_cents: 1000, cost_cents: 50, sort_order: 0 },
-        // Nothing recorded: keeps the old 'oz' reading, so a resave bills exactly as before.
         { id: 'chem-bare', product_id: 'product-gal', description: 'Bare product', rate_per_acre: 1,
           rate_unit: null, total_applied_unit: null, quantity: 10, unit_size: null, unit_price_cents: 100, extended_cents: 1000, cost_cents: 50, sort_order: 1 },
         { id: 'chem-manual', product_id: null, description: 'Hand-typed line', rate_per_acre: 1,
@@ -1084,7 +1083,7 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
     };
     walk(save[1]);
     const byName = (d: string) => sent.find((l) => l.description === d);
-    expect(byName('Recorded product')).toMatchObject({ rate_unit: 'Pt', unit_size: 'Gal' });
+    expect(byName('Recorded product')).toMatchObject({ rate_unit: 'oz', unit_size: 'Gal' });
     expect(byName('Bare product')).toMatchObject({ rate_unit: 'oz', unit_size: 'Gal' });
     expect(byName('Hand-typed line')).toMatchObject({ rate_unit: 'oz', unit_size: 'oz' });
   });

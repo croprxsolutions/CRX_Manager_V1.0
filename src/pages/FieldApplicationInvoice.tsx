@@ -1390,17 +1390,17 @@ export default function FieldApplicationInvoice() {
       (items as Array<Record<string, unknown>>).map((it, idx) => {
         const pid = it.product_id as string | null;
         const label = pid ? (labelByProduct.get(pid) ?? null) : null;
-        // #1983: a product line saved with no sold unit reloads in the product's sold unit, not 'oz'.
-        // A blank rate unit takes the unit the server recorded for the application (total_applied_unit),
-        // never the catalog's: re-reading the same rate in another unit would rebill the line on save.
+        // #1983: a product line saved with no sold unit shows the product's sold unit (the unit its
+        // quantity and price are in), not 'oz'. The server prices product lines in that unit and ignores
+        // the one sent. The rate unit keeps its 'oz' fallback: reading a saved rate in any other unit
+        // would rebill the line on save and change the label check (Sol, two rounds).
         const soldUnit = label ? (label.inventory_unit || '') : 'oz';
-        const rateUnit = (it.total_applied_unit as string) || 'oz';
         return {
           id: (it.id as string) || `chem_${idx}`,
           product_id: it.product_id as string | null,
           product_name: (it.description as string) || '',
           rate_per_acre: it.rate_per_acre as number | null,
-          rate_unit: (it.rate_unit as string) || rateUnit,
+          rate_unit: (it.rate_unit as string) || 'oz',
           quantity: (it.quantity as number) || 0,
           unit: (it.unit_size as string) || soldUnit,
           unit_price_cents: (it.unit_price_cents as number) || 0,

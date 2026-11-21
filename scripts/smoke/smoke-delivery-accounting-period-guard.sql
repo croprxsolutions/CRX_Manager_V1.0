@@ -101,15 +101,15 @@ BEGIN
   RETURNING id INTO v_customer;
 
   INSERT INTO public.products (
-    product_name, unit_size, epa_registration, product_form
+    product_name, unit_size, epa_registration, product_form, inventory_unit
   ) VALUES (
     '[SMOKE] Delivery Period Product ' || v_suffix,
-    'GL', '999999-99999', 'liquid'
+    'Gal', '999999-99999', 'liquid', 'Gal'
   ) RETURNING id INTO v_product;
 
   INSERT INTO public.inventory (
     product_id, location, quantity_available, quantity_prebooked, unit_size
-  ) VALUES (v_product, 'Main Warehouse', 100, 2, 'GL');
+  ) VALUES (v_product, 'Main Warehouse', 100, 2, 'Gal');
 
   INSERT INTO public.orders (
     order_number, customer_id, status, booking_draw
@@ -137,7 +137,7 @@ BEGIN
   INSERT INTO public.delivery_items (
     delivery_id, order_item_id, product_id, quantity,
     quantity_delivered, unit_size
-  ) VALUES (v_delivery, v_order_item, v_product, 2, 0, 'GL')
+  ) VALUES (v_delivery, v_order_item, v_product, 2, 0, 'Gal')
   RETURNING id INTO v_delivery_item;
 
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_delivery;

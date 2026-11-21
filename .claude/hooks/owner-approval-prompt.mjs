@@ -2,11 +2,11 @@
 // UserPromptSubmit half of Mason's owner approval (owner-approval-lib.mjs;
 // Mason 2026-10-09: replaces Windows Hello so he can approve from his phone;
 // 2026-10-13: a plain "I approve" is enough).
-//   - His WHOLE message is `I approve` (or `approve`, `approved`, `yes I approve`)
+//   - His WHOLE message is `yes` or `I approve` (or `approve`, `approved`, `yes I approve`)
 //     right after the agent showed a pending request's reference number, or
 //     `approve <6-digit code>`, in the session that built that request
 //     (scripts/owner-approve-migration.mjs) → the request becomes an approval
-//     good for 30 minutes, and the agent is told so.
+//     good for 24 hours (2026-11-20), and the agent is told so.
 //   - A plain `I approve` with no request waiting in this session is ordinary
 //     chat: the hook says nothing.
 //   - Any other message, or the reply in another session → nothing is approved.
@@ -143,7 +143,7 @@ if (result.kind === "selftest") {
 const p = result.payload;
 emit([
   `OWNER APPROVAL RECORDED — the reply "${said}" in this session approved ${p.migration} (pull request ` +
-    `#${p.pullRequest}, head ${String(p.prHead).slice(0, 12)}). It works once, for the next 30 minutes, for that exact file and head.`,
+    `#${p.pullRequest}). It works once, for the next 24 hours, for that exact file (the PR head may move; the SQL may not).`,
   `Apply it now: node scripts/apply-migration-file.mjs supabase/migrations/${p.migration}.sql (dry run), then again with --confirm.`,
   ...(result.requestLeft ? ["(The used request file could not be removed; it is harmless and needs no action.)"] : []),
 ].join("\n"));

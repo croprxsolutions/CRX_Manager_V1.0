@@ -78,8 +78,8 @@ BEGIN
 
   -- Order lines need a positive cost basis, COST_BASIS_REQUIRED, and a product is born
   -- pricing-free, so price a fresh shell through the governed preview/apply path.
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] Own Name Product ' || v_suffix, 'GL') RETURNING id INTO v_product;
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[E2E] Own Name Product ' || v_suffix, 'Gal', 'liquid', 'Gal') RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes(
     'product_page',
     NULL,
@@ -104,7 +104,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_SETUP: governed product pricing apply did not price the product';
   END IF;
   INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
-  VALUES (v_product, 'Main Warehouse', 100, 0, 'GL');
+  VALUES (v_product, 'Main Warehouse', 100, 0, 'Gal');
 
   INSERT INTO public.customers (farm_name, assigned_sales_rep)
   VALUES ('[E2E] Own Name Farm ' || v_suffix, v_other_rep) RETURNING id INTO v_customer;
@@ -321,7 +321,7 @@ BEGIN
     'E2E-OWN-NAME-DEL-' || v_suffix, v_orders[6], v_customer, NULL, v_today, 'scheduled', v_admin
   ) RETURNING id INTO v_delivery;
   INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
-  VALUES (v_delivery, v_items[6], v_product, 2, 0, 'GL')
+  VALUES (v_delivery, v_items[6], v_product, 2, 0, 'Gal')
   RETURNING id INTO v_delivery_item;
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_delivery;
 

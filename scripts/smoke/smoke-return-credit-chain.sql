@@ -157,7 +157,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_SETUP: a second active admin is required for actor-binding proof';
   END IF;
   SELECT id INTO v_sales_rep FROM profiles
-  WHERE role = 'sales_rep' AND is_active = true
+  WHERE role = 'sales_rep' AND is_active = true AND NOT (COALESCE(denied_pages, '{}') && ARRAY['reports'])
   ORDER BY created_at LIMIT 1;
   IF v_sales_rep IS NULL THEN
     RAISE EXCEPTION 'SMOKE_SETUP: an active sales rep is required for customer-scope proof';
@@ -199,8 +199,8 @@ BEGIN
   -- same governed preview/apply RPC path used by the app. This keeps the smoke
   -- independent of live catalog contents without disabling product triggers or
   -- touching an existing business row. Everything remains rollback-scoped.
-  INSERT INTO products (product_name, unit_size, inventory_unit)
-  VALUES ('[SMOKE] RCC Governed Product ' || v_suffix, 'gal', 'gal')
+  INSERT INTO products (product_name, unit_size, inventory_unit, product_form)
+  VALUES ('[SMOKE] RCC Governed Product ' || v_suffix, 'Gal', 'Gal', 'liquid')
   RETURNING id INTO v_product_id;
 
   v_res := public.preview_product_pricing_changes(
@@ -238,7 +238,7 @@ BEGIN
   -- after completion below so receive_return must recreate usable stock rather
   -- than silently marking the return received with restocked=false.
   INSERT INTO inventory (product_id, location, quantity_available, unit_size)
-  VALUES (v_product_id, 'Main Warehouse', 100, 'gal')
+  VALUES (v_product_id, 'Main Warehouse', 100, 'Gal')
   RETURNING id INTO v_inventory_id;
 
   -- Minimal order so issue_return_credit exercises its salesman_id lookup
@@ -253,28 +253,28 @@ BEGIN
     unit_size, total_price, quantity_delivered, quantity_remaining
   ) VALUES (
     v_order_id, v_product_id, '[SMOKE] RCC Herbicide ' || v_suffix,
-    10, 10, 'gal', 100, 10, 0
+    10, 10, 'Gal', 100, 10, 0
   ) RETURNING id INTO v_order_item_1;
   INSERT INTO order_items (
     order_id, product_id, product_name, price_per_unit, total_units_needed,
     unit_size, total_price, quantity_delivered, quantity_remaining
   ) VALUES (
     v_order_id, v_product_id, '[SMOKE] RCC Herbicide ' || v_suffix,
-    10, 6, 'gal', 60, 6, 0
+    10, 6, 'Gal', 60, 6, 0
   ) RETURNING id INTO v_order_item_2;
   INSERT INTO order_items (
     order_id, product_id, product_name, price_per_unit, cost_per_unit,
     total_units_needed, unit_size, total_price, quantity_delivered, quantity_remaining
   ) VALUES (
     v_order_id, v_product_id, '[SMOKE] RCC Follow-up Herbicide ' || v_suffix,
-    25, 5, 1, 'gal', 25, 0, 1
+    25, 5, 1, 'Gal', 25, 0, 1
   ) RETURNING id INTO v_order_item_3;
   INSERT INTO order_items (
     order_id, product_id, product_name, price_per_unit, cost_per_unit,
     total_units_needed, unit_size, total_price, quantity_delivered, quantity_remaining
   ) VALUES (
     v_order_id, v_product_id, '[SMOKE] RCC Backfill Herbicide ' || v_suffix,
-    25, 5, 1, 'gal', 25, 1, 0
+    25, 5, 1, 'Gal', 25, 1, 0
   ) RETURNING id INTO v_order_item_4;
 
   -- Keep the order's delivered totals backed by exact completed-delivery
@@ -289,8 +289,8 @@ BEGIN
     delivery_id, order_item_id, product_id, quantity,
     quantity_delivered, unit_size
   ) VALUES
-    (v_delivery_id, v_order_item_1, v_product_id, 10, 10, 'gal'),
-    (v_delivery_id, v_order_item_2, v_product_id, 6, 6, 'gal');
+    (v_delivery_id, v_order_item_1, v_product_id, 10, 10, 'Gal'),
+    (v_delivery_id, v_order_item_2, v_product_id, 6, 6, 'Gal');
   UPDATE deliveries SET status = 'in_progress' WHERE id = v_delivery_id;
   -- Use the canonical completion boundary. The later completed-delivery posting
   -- guard makes this mandatory and deliberately rejects a direct status write;
@@ -343,11 +343,11 @@ BEGIN
   ) VALUES
   (
     v_source_paid_id, v_order_item_1, v_product_id, '[SMOKE] paid source',
-    8, 1000, 8000, 500, 'gal', now() - interval '4 seconds'
+    8, 1000, 8000, 500, 'Gal', now() - interval '4 seconds'
   ),
   (
     v_source_paid_id, v_order_item_2, v_product_id, '[SMOKE] first repeated-cost source',
-    1, 1000, 1000, 500, 'gal', now() - interval '4 seconds'
+    1, 1000, 1000, 500, 'Gal', now() - interval '4 seconds'
   );
   UPDATE invoices
      SET status = 'posted', posted_at = now(), posted_by = v_admin
@@ -368,7 +368,7 @@ BEGIN
     unit_price_cents, extended_cents, cost_cents, unit_size, created_at
   ) VALUES (
     v_source_overdue_id, v_order_item_2, v_product_id, '[SMOKE] overdue source',
-    2, 1000, 2000, 600, 'gal', now() - interval '3 seconds'
+    2, 1000, 2000, 600, 'Gal', now() - interval '3 seconds'
   );
 
   -- Exercise the real generic editor before recognition. The legacy writer
@@ -401,7 +401,7 @@ BEGIN
       'extended_cents', 2000,
       'cost_cents', 500,
       'sort_order', 0,
-      'unit_size', 'gal',
+      'unit_size', 'Gal',
       'is_application_fee', false
     )),
     'smk-rcc-' || v_suffix || '-edit-source'
@@ -415,7 +415,7 @@ BEGIN
       AND invoice_id = v_source_overdue_id
       AND order_item_id = v_order_item_2
       AND product_id = v_product_id
-      AND unit_size = 'gal'
+      AND unit_size = 'Gal'
       AND cost_cents = 600
       AND quantity = 2
   ) THEN
@@ -440,11 +440,11 @@ BEGIN
   ) VALUES
   (
     v_source_posted_id, v_order_item_2, v_product_id, '[SMOKE] posted source',
-    2, 1000, 2000, 500, 'gal', now() - interval '2 seconds'
+    2, 1000, 2000, 500, 'Gal', now() - interval '2 seconds'
   ),
   (
     v_source_posted_id, v_order_item_2, v_product_id, '[SMOKE] fractional source',
-    1, 1000, 1000, 501, 'gal', now() - interval '1 second'
+    1, 1000, 1000, 501, 'Gal', now() - interval '1 second'
   );
   UPDATE invoices
      SET status = 'posted', posted_at = now(), posted_by = v_admin
@@ -821,7 +821,7 @@ BEGIN
   END IF;
   SET LOCAL session_replication_role = replica;
   UPDATE return_items
-     SET unit = 'gal'
+     SET unit = 'Gal'
    WHERE return_id = v_return_id
      AND order_item_id = v_order_item_1;
   SET LOCAL session_replication_role = origin;
@@ -1023,7 +1023,7 @@ BEGIN
     VALUES ('SMK-RCC-BELOW-' || v_suffix, v_customer_id, v_order_id, v_delivery_id, 'chemical_sale', 'draft', current_date, current_date, 1000, v_admin)
     RETURNING id INTO v_target_invoice_id;
     INSERT INTO invoice_items (invoice_id, order_item_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, unit_size)
-    VALUES (v_target_invoice_id, v_order_item_1, v_product_id, '[SMOKE] ordinary below cost', 1, 1000, 1000, 500, 'gal');
+    VALUES (v_target_invoice_id, v_order_item_1, v_product_id, '[SMOKE] ordinary below cost', 1, 1000, 1000, 500, 'Gal');
     RAISE EXCEPTION 'SMOKE_FAIL: ordinary below-cost invoice line was accepted';
   EXCEPTION WHEN OTHERS THEN
     v_reason := SQLERRM;
@@ -1053,7 +1053,7 @@ BEGIN
       unit_price_cents, extended_cents, cost_cents, unit_size
     ) VALUES (
       v_unlinked_credit_id, NULL, v_product_id, '[SMOKE] ambiguous unlinked cost credit',
-      -1, 1000, -1000, 500, 'gal'
+      -1, 1000, -1000, 500, 'Gal'
     );
     SET LOCAL session_replication_role = origin;
     BEGIN
@@ -1129,7 +1129,7 @@ BEGIN
     delivery_id, order_item_id, product_id, quantity,
     quantity_delivered, unit_size
   ) VALUES (
-    v_followup_delivery_id, v_order_item_3, v_product_id, 1, 0, 'gal'
+    v_followup_delivery_id, v_order_item_3, v_product_id, 1, 0, 'Gal'
   );
   UPDATE deliveries SET status = 'in_progress' WHERE id = v_followup_delivery_id;
   -- 20261022075000: a completion names its saved proof; a rollback-scoped ticket photo.
@@ -1179,7 +1179,7 @@ BEGIN
     delivery_id, order_item_id, product_id, quantity,
     quantity_delivered, unit_size
   ) VALUES (
-    v_backfill_delivery_id, v_order_item_4, v_product_id, 1, 1, 'gal'
+    v_backfill_delivery_id, v_order_item_4, v_product_id, 1, 1, 'Gal'
   );
   SET LOCAL session_replication_role = origin;
   v_res2 := public.get_dashboard_action_items(50);
@@ -1275,7 +1275,7 @@ BEGIN
     VALUES ('SMK-RCC-AFTER-' || v_suffix, v_customer_id, v_order_id, v_delivery_id, 'chemical_sale', 'draft', current_date, current_date, 0, v_admin)
     RETURNING id INTO v_target_invoice_id;
     INSERT INTO invoice_items (invoice_id, order_item_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, unit_size)
-    VALUES (v_target_invoice_id, v_order_item_1, v_product_id, '[SMOKE] post-credit below cost', -1, 1000, -1000, 500, 'gal');
+    VALUES (v_target_invoice_id, v_order_item_1, v_product_id, '[SMOKE] post-credit below cost', -1, 1000, -1000, 500, 'Gal');
     RAISE EXCEPTION 'SMOKE_FAIL: return-credit lineage flag remained active after its insert';
   EXCEPTION WHEN OTHERS THEN
     v_reason := SQLERRM;
@@ -2030,12 +2030,12 @@ BEGIN
   VALUES (
     v_same_product_product_id,
     '[SMOKE] same-product cancel aggregate ' || v_suffix,
-    'gal', 'gal'
+    'Gal', 'Gal'
   );
   INSERT INTO inventory (
     product_id, location, quantity_available, quantity_prebooked, unit_size
   ) VALUES (
-    v_same_product_product_id, 'Main Warehouse', 10, 0, 'gal'
+    v_same_product_product_id, 'Main Warehouse', 10, 0, 'Gal'
   );
   INSERT INTO orders (id, order_number, customer_id, salesman_id, status)
   VALUES (
@@ -2050,12 +2050,12 @@ BEGIN
   (
     v_same_product_order_item_1, v_same_product_order_id,
     v_same_product_product_id, '[SMOKE] same-product cancel aggregate ' || v_suffix,
-    10, 5, 6, 60, 30, 50, 6, 0, 'gal'
+    10, 5, 6, 60, 30, 50, 6, 0, 'Gal'
   ),
   (
     v_same_product_order_item_2, v_same_product_order_id,
     v_same_product_product_id, '[SMOKE] same-product cancel aggregate ' || v_suffix,
-    10, 5, 6, 60, 30, 50, 6, 0, 'gal'
+    10, 5, 6, 60, 30, 50, 6, 0, 'Gal'
   );
   INSERT INTO returns (
     id, return_number, customer_id, order_id, reason, requested_by, status,
@@ -2073,12 +2073,12 @@ BEGIN
   (
     v_same_product_return_id, v_same_product_order_item_1,
     v_same_product_product_id, '[SMOKE] same-product cancel aggregate ' || v_suffix,
-    6, 'gal', 1000, 6000, 'unopened', true, true, 6, 0
+    6, 'Gal', 1000, 6000, 'unopened', true, true, 6, 0
   ),
   (
     v_same_product_return_id, v_same_product_order_item_2,
     v_same_product_product_id, '[SMOKE] same-product cancel aggregate ' || v_suffix,
-    6, 'gal', 1000, 6000, 'unopened', true, true, 6, 1
+    6, 'Gal', 1000, 6000, 'unopened', true, true, 6, 1
   );
   SET LOCAL session_replication_role = origin;
 
@@ -2158,7 +2158,7 @@ BEGIN
     unit_price_cents, extended_cents, condition, restock
   ) VALUES (
     v_future_unlinked_return_id, NULL, v_product_id, '[SMOKE] forbidden source-free line',
-    1, 'gal', 7597, 7597, 'unopened', true
+    1, 'Gal', 7597, 7597, 'unopened', true
   );
   BEGIN
     PERFORM receive_return(
@@ -2186,7 +2186,7 @@ BEGIN
     total_units_needed, unit_size, total_price, quantity_delivered, quantity_remaining
   ) VALUES (
     v_rounding_order_id, v_product_id, '[SMOKE] RCC rounding product ' || v_suffix,
-    30, 5.01, 1.25, 'gal', 37.50, 1.25, 0
+    30, 5.01, 1.25, 'Gal', 37.50, 1.25, 0
   ) RETURNING id INTO v_rounding_order_item_id;
 
   INSERT INTO deliveries (
@@ -2200,7 +2200,7 @@ BEGIN
     quantity_delivered, unit_size
   ) VALUES (
     v_rounding_delivery_id, v_rounding_order_item_id, v_product_id,
-    1.25, 1.25, 'gal'
+    1.25, 1.25, 'Gal'
   );
   PERFORM set_config('app.admin_override', 'true', true);
   PERFORM set_config('crx.delivery_completion_authorized', v_rounding_delivery_id::text, true);
@@ -2230,7 +2230,7 @@ BEGIN
     '00000000-0000-4000-8000-00000000f001',
     v_rounding_source_id, v_rounding_order_item_id, v_product_id,
     '[SMOKE] original fractional same-cost source', 1, 3000, 3000, 501,
-    'gal', now()
+    'Gal', now()
   );
   UPDATE invoices SET status = 'posted', posted_at = now(), posted_by = v_admin
   WHERE id = v_rounding_source_id;
@@ -2266,7 +2266,7 @@ BEGIN
     '00000000-0000-4000-8000-00000000f002',
     v_backdated_source_id, v_rounding_order_item_id, v_product_id,
     '[SMOKE] later-created backdated same-cost source', 0.25, 3000, 750, 501,
-    'gal', now()
+    'Gal', now()
   );
   UPDATE invoices SET status = 'posted', posted_at = now(), posted_by = v_admin
   WHERE id = v_backdated_source_id;

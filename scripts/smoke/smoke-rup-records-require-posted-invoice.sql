@@ -82,8 +82,8 @@ BEGIN
   VALUES ('[SMOKE] RUP Posted Farm ' || v_suffix)
   RETURNING id INTO v_customer;
 
-  INSERT INTO products (product_name, unit_size, is_rup, epa_registration, signal_word, product_form)
-  VALUES ('[SMOKE] RUP Product ' || v_suffix, 'GL', true, '999999-99999', 'Warning', 'liquid')
+  INSERT INTO products (product_name, unit_size, is_rup, epa_registration, signal_word, product_form, inventory_unit)
+  VALUES ('[SMOKE] RUP Product ' || v_suffix, 'Gal', true, '999999-99999', 'Warning', 'liquid', 'Gal')
   RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes('product_page', NULL,
     jsonb_build_array(jsonb_build_object('product_id', v_product, 'row_version', 1, 'pricing_mode', 'price_driven',
@@ -92,7 +92,7 @@ BEGIN
   PERFORM public.apply_product_pricing_change_set((v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint',
     v_admin, 'smoke-rupp-pricing-apply-' || v_suffix);
   INSERT INTO inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
-  VALUES (v_product, 'Main Warehouse', 100, 0, 'GL');
+  VALUES (v_product, 'Main Warehouse', 100, 0, 'Gal');
 
   v_lic_num := 'SMK-LIC-' || v_suffix;
   -- issued_date is required for 'compliant': a license with no issue date on file is a warning (KI-18 batch 1).
@@ -110,7 +110,7 @@ BEGIN
   VALUES ('[SMOKE] RUPP-DEL-' || v_suffix, v_order, v_customer, CURRENT_DATE, 'scheduled', v_admin)
   RETURNING id INTO v_delivery;
   INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
-  VALUES (v_delivery, v_line, v_product, 10, 0, 'GL')
+  VALUES (v_delivery, v_line, v_product, 10, 0, 'Gal')
   RETURNING id INTO v_ditem;
   UPDATE deliveries SET status = 'in_progress' WHERE id = v_delivery;
 

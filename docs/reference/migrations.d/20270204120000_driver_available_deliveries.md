@@ -1,0 +1,7 @@
+**LOCAL CANDIDATE — NOT APPLIED.** #2018: `20270204120000_driver_available_deliveries.sql` (SQL sha256: `fae53fd842d3c483dcc148cc4d202cb53f0baa8cb66a7bdb4d49e88f8d458149`). Adds `get_available_deliveries_for_driver()` (active drivers only: every open delivery with number, date, customer and top farm group) and re-emits the `reassign_delivery` wrapper so a driver locks the row, may take only an open scheduled delivery for themself, gets "already taken or changed" on a stale row, and a bound same-key retry returns its stored result. No table, row, policy or other function changes.
+
+**Safety.** The preflight refuses autocommit, requires the live `reassign_delivery` wrapper to be exactly the `20261110160000` body (md5 `350f587913b20f2908a7a2a44445b0f6`) and the new function to be absent, so a second apply is refused (`DRIVER_AVAILABLE_BASELINE_DRIFT`); the postflight checks both functions' security mode, search path and grants (never `anon`). Plan: `docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md`.
+
+**Proof (local real-schema container, network off, test data):** `node scripts/smoke/prove-driver-available-deliveries-real-schema.mjs` → `DRIVER_AVAILABLE_DELIVERIES_PROOF_PASS`.
+
+**Rollback:** ship the screen rollback first, then a new reviewed migration dropping `get_available_deliveries_for_driver()`. The `reassign_delivery` hardening is corrected forward, not reverted.

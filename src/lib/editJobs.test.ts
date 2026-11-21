@@ -39,6 +39,12 @@ describe('editJobs', () => {
     expect(rpc.mock.calls[0][1]).toMatchObject({ p_changes: undefined, p_action: 'delete' });
   });
 
+  it('sends no action for a field-only edit', async () => {
+    rpc.mockResolvedValue({ data: empty, error: null });
+    await editJobs({ jobIds: ['a'], changes: { batch_ref: 'B1' }, performedBy: 'u' });
+    expect(rpc.mock.calls[0][1]).toMatchObject({ p_changes: { batch_ref: 'B1' }, p_action: undefined });
+  });
+
   it('refuses more than 500 jobs before calling the server', async () => {
     await expect(editJobs({ jobIds: Array.from({ length: 501 }, (_, i) => String(i)), action: 'delete', performedBy: 'u' }))
       .rejects.toThrow(/at most 500/);

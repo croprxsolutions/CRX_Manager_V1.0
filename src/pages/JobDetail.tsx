@@ -2978,6 +2978,8 @@ export default function JobDetail() {
         // risk). Instead, on failure we move the user onto the SAVED job (exactly
         // the applicator-reassign-failure pattern below) so any retry edits the
         // existing row rather than inserting again.
+        // Why edit_jobs skipped the job (e.g. invoiced meanwhile), so the toast can say it instead of "adjust them here".
+        let crewSkipReason: string | null = null;
         try {
           // #1979: through edit_jobs; a skipped job (e.g. invoiced) counts as not saved.
           // Only the values the user changed are sent, so an untouched older value is left as it is.
@@ -2990,12 +2992,17 @@ export default function JobDetail() {
             const crewResult = await editJobs({
               jobIds: [savedJobId], changes: crewChanges, performedBy: profile!.id,
             });
-            if (crewResult.skipped.length > 0) throw new Error(summarizeEditJobs(crewResult));
+            if (crewResult.skipped.length > 0) {
+              crewSkipReason = summarizeEditJobs(crewResult);
+              throw new Error(crewSkipReason);
+            }
           }
         } catch (crewErr) {
           Sentry.captureException(toSentryError(crewErr), { extra: { context: 'job_crew_loader_after_save' } });
           toast('error', stillOnThisJob()
-            ? `${isNew ? 'Job created' : 'Job saved'}, but the crew/loader settings did not save — adjust them on this page.`
+            ? (crewSkipReason
+              ? `${isNew ? 'Job created' : 'Job saved'}, but the crew/loader settings did not save: ${crewSkipReason}`
+              : `${isNew ? 'Job created' : 'Job saved'}, but the crew/loader settings did not save — adjust them on this page.`)
             : 'A job was saved, but its crew/loader settings did not save — open it from the Job Schedule and adjust them.');
           // §5: the job + over-label mix DID commit (only the crew/loader sub-write failed),
           // so still record the override audit linked to the saved job before bailing.
@@ -3316,10 +3323,8 @@ export default function JobDetail() {
       });
       if (result.cancelled.length === 0) {
         if (stillOnThisJob()) {
-          // Reload only when there is no unsaved edit to lose; the toast already says why it was not cancelled.
-          const dirtyNow = isDirtyRef.current;
-          toast('info', `Job not cancelled: ${summarizeEditJobs(result)}${dirtyNow ? ' Your unsaved changes are kept; refresh to see the job as saved.' : ''}`);
-          if (!dirtyNow) await fetchJob();
+          // No reload: the form stays editable, so a reload could overwrite what the user types meanwhile.
+          toast('info', `Job not cancelled: ${summarizeEditJobs(result)} Refresh to see the job as saved.`);
         }
         setCancelling(false);
         return;

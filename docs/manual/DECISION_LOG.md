@@ -3,11 +3,15 @@
 ## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B): every job edit saves fresh
 
 **Decision (Mason, in chat, 2026-11-21: "Save fresh every click").**
-On PR #2151, every Save, Apply or Delete click on the job screens sends `edit_jobs` a new request key. A
-second click never replays the answer to an earlier attempt; it re-sends the edit as it stands now.
+On PR #2151, every job-screen click that calls `edit_jobs` (Mass Edit, batch assign, bulk Cancel/Delete,
+Cancel on a job, and the crew/loader part of a job Save) sends a new request key. A second click never
+replays the answer to an earlier attempt; it re-sends the edit as it stands now. A notes-only job Save uses
+`save_job` alone and is not affected.
 **What it does:** `editJobs()` mints a new idempotency key per call instead of keeping one across retries.
-Re-sending an edit is safe because it sets the same values again, and the server skips jobs already
-cancelled or deleted. Every other gate is unchanged.
+Re-sending sets the same values again. A cancel or delete already done is skipped and shown as "already
+cancelled"/"already deleted". One accepted edge: if the reply to a combined field edit + cancel is lost
+and the user clicks again, the field values are written again on the now-cancelled job (same values, so
+no change in meaning). Every other gate is unchanged.
 
 ## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B) may have Sol rounds 11 to 16
 

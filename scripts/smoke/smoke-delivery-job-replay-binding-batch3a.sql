@@ -43,6 +43,7 @@ DECLARE
   v_order uuid;
   v_oi uuid;
   v_del uuid[] := ARRAY[]::uuid[];
+  v_pic uuid[] := ARRAY[]::uuid[];
   v_item uuid[] := ARRAY[]::uuid[];
   v_id uuid;
   v_field uuid[] := ARRAY[]::uuid[];
@@ -133,6 +134,15 @@ BEGIN
     v_item := v_item || v_id;
     UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_del[v_i];
   END LOOP;
+  -- A completion names its proof: a saved signed-ticket photo of the delivery itself (deliveries 1 and 2).
+  FOR v_i IN 1..2 LOOP
+    INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-photos',
+      'delivery-photos/' || v_del[v_i] || '/ticket.jpg', v_admin::text, '{"size": 1024, "mimetype": "image/png"}'::jsonb);
+    INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
+    VALUES (v_del[v_i], 'delivery-photos/' || v_del[v_i] || '/ticket.jpg', 'x', v_admin, 'Signed paper delivery ticket', 0)
+    RETURNING id INTO v_id;
+    v_pic := v_pic || v_id;
+  END LOOP;
 
   -- Three in_progress jobs (A, B, offline), each on its own field, one chemical line.
   FOR v_i IN 1..3 LOOP
@@ -162,7 +172,7 @@ BEGIN
   -- --------------------------------------------------------------------------------------------
   v_key := v_prefix || 'complete-delivery';
   v_res := public.complete_delivery(v_del[1], '[SMOKE] Receiver', v_admin, NULL, NULL, '[SMOKE] notes',
-                                    v_key, v_completed_at);
+                                    v_key, v_completed_at, 'paper_ticket', v_pic[1]::text);
   IF v_res->>'delivery_id' IS DISTINCT FROM v_del[1]::text
      OR v_res->>'status' IS DISTINCT FROM 'completed' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: complete_delivery on delivery A did not complete it: %', v_res;
@@ -174,7 +184,7 @@ BEGIN
   END IF;
   BEGIN
     v_res2 := public.complete_delivery(v_del[2], '[SMOKE] Receiver', v_admin, NULL, NULL, '[SMOKE] notes',
-                                       v_key, v_completed_at);
+                                       v_key, v_completed_at, 'paper_ticket', v_pic[2]::text);
     RAISE EXCEPTION 'SMOKE_FAIL: complete_delivery replayed delivery A''s receipt as success for delivery B: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -191,7 +201,7 @@ BEGIN
   -- b. The exact retry of A returns the identical result and moves no extra stock.
   -- --------------------------------------------------------------------------------------------
   v_res2 := public.complete_delivery(v_del[1], '[SMOKE] Receiver', v_admin, NULL, NULL, '[SMOKE] notes',
-                                     v_key, v_completed_at);
+                                     v_key, v_completed_at, 'paper_ticket', v_pic[1]::text);
   IF v_res2 IS DISTINCT FROM v_res THEN
     RAISE EXCEPTION 'SMOKE_FAIL: the exact complete_delivery retry did not replay: % vs %', v_res2, v_res;
   END IF;
@@ -209,7 +219,7 @@ BEGIN
   BEGIN
     v_res2 := public.complete_delivery(v_del[1], '[SMOKE] Receiver', v_admin,
                                        jsonb_build_object(v_item[1]::text, 1), NULL, '[SMOKE] notes',
-                                       v_key, v_completed_at);
+                                       v_key, v_completed_at, 'paper_ticket', v_pic[1]::text);
     RAISE EXCEPTION 'SMOKE_FAIL: complete_delivery replayed a receipt for edited quantities: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -219,7 +229,7 @@ BEGIN
   END;
   BEGIN
     v_res2 := public.complete_delivery(v_del[1], '[SMOKE] Someone Else', v_admin, NULL, NULL, '[SMOKE] notes',
-                                       v_key, v_completed_at);
+                                       v_key, v_completed_at, 'paper_ticket', v_pic[1]::text);
     RAISE EXCEPTION 'SMOKE_FAIL: complete_delivery replayed a receipt for an edited signer: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -229,7 +239,7 @@ BEGIN
   END;
   BEGIN
     v_res2 := public.complete_delivery(v_del[1], '[SMOKE] Receiver', v_admin, NULL, NULL, '[SMOKE] other notes',
-                                       v_key, v_completed_at);
+                                       v_key, v_completed_at, 'paper_ticket', v_pic[1]::text);
     RAISE EXCEPTION 'SMOKE_FAIL: complete_delivery replayed a receipt for edited issue notes: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -239,7 +249,7 @@ BEGIN
   END;
   BEGIN
     v_res2 := public.complete_delivery(v_del[1], '[SMOKE] Receiver', v_admin, NULL, NULL, '[SMOKE] notes',
-                                       v_key, v_completed_at - interval '1 minute');
+                                       v_key, v_completed_at - interval '1 minute', 'paper_ticket', v_pic[1]::text);
     RAISE EXCEPTION 'SMOKE_FAIL: complete_delivery replayed a receipt for a different completion time: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -255,7 +265,7 @@ BEGIN
   SET LOCAL TIME ZONE 'Asia/Tokyo';
   BEGIN
     v_res2 := public.complete_delivery(v_del[1], '[SMOKE] Receiver', v_admin, NULL, NULL, '[SMOKE] notes',
-                                       v_key, v_completed_at);
+                                       v_key, v_completed_at, 'paper_ticket', v_pic[1]::text);
   EXCEPTION WHEN OTHERS THEN
     RAISE EXCEPTION 'SMOKE_FAIL: complete_delivery refused the same completed_at instant under another session TimeZone: %', SQLERRM;
   END;
@@ -268,7 +278,7 @@ BEGIN
   -- e. No key: refused (22023) before anything is written; delivery B stays in_progress.
   -- --------------------------------------------------------------------------------------------
   BEGIN
-    v_res2 := public.complete_delivery(v_del[2], '[SMOKE] Receiver', v_admin, NULL, NULL, NULL, NULL, NULL);
+    v_res2 := public.complete_delivery(v_del[2], '[SMOKE] Receiver', v_admin, NULL, NULL, NULL, NULL, NULL, 'paper_ticket', v_pic[2]::text);
     RAISE EXCEPTION 'SMOKE_FAIL: complete_delivery ran without an idempotency key: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
@@ -291,7 +301,7 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin_b::text, true);
   BEGIN
     v_res2 := public.complete_delivery(v_del[1], '[SMOKE] Receiver', v_admin_b, NULL, NULL, '[SMOKE] notes',
-                                       v_key, v_completed_at);
+                                       v_key, v_completed_at, 'paper_ticket', v_pic[1]::text);
     RAISE EXCEPTION 'SMOKE_FAIL: a second admin replayed the first admin''s complete_delivery key: %', v_res2;
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;

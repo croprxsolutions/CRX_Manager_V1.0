@@ -70,7 +70,7 @@ assert.deepEqual(cols(r, 't'), ['a', 'b']);
 // ADD PRIMARY KEY USING INDEX makes the unique index's columns NOT NULL.
 r = req(
   mig('1', 'CREATE TABLE t (a text, b text, c text);'),
-  mig('2', 'CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS t_ab ON public.t USING btree (a, b DESC); ALTER TABLE t ADD CONSTRAINT t_pk PRIMARY KEY USING INDEX t_ab;'),
+  mig('2', 'CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS t_ab ON public.t USING btree (a, b DESC); CREATE UNIQUE INDEX t_ab ON other.t (c); ALTER TABLE t ADD CONSTRAINT t_pk PRIMARY KEY USING INDEX t_ab;'),
 );
 assert.deepEqual(cols(r, 't'), ['a', 'b']);
 

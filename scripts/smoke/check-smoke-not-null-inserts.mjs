@@ -67,7 +67,7 @@ const CONSTRAINT_WORDS = /^(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE|LI
 export function requiredColumnsFromMigrations(migrations) {
   const state = new Map(); // table -> Map(column -> { notNull, hasDefault, requiredBy })
   const dropped = new Map(); // table -> its columns when last dropped, so a recreate can be compared
-  const uniqueIndexes = new Map(); // index -> columns, for ADD PRIMARY KEY USING INDEX
+  const uniqueIndexes = new Map(); // public index -> columns, for ADD PRIMARY KEY USING INDEX
   const cols = (t) => state.get(t) ?? state.set(t, new Map()).get(t);
   const col = (t, c) => cols(t).get(c) ?? cols(t).set(c, { notNull: false, hasDefault: false, requiredBy: null }).get(c);
 
@@ -98,6 +98,7 @@ export function requiredColumnsFromMigrations(migrations) {
       // The index name is not captured: TABLE's back-reference \1 must stay group 1.
       const index = stmt.match(new RegExp(String.raw`\bCREATE\s+UNIQUE\s+INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?\w+"?\s+ON\s+(?:ONLY\s+)?${TABLE}\s*(?:USING\s+\w+\s*)?\(([^)]*)\)`, 'i'));
       if (index) {
+        if (!isPublic(index[2])) continue;
         const [, indexName] = index[0].match(/INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?/i);
         uniqueIndexes.set(ident(indexName), splitTopLevel(index[4]).map((c) => ident(c.split(/\s/)[0])));
         continue;

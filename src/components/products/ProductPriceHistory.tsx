@@ -90,6 +90,10 @@ export default function ProductPriceHistory({
     && history?.suppliers.some((supplier) => supplier.id === filter.supplierId)
     ? filter.supplierId
     : '';
+  // A dropped filter is forgotten, so it never comes back on its own if the supplier or product returns.
+  if (filter.supplierId && supplierId !== filter.supplierId && (filter.productId !== productId || history)) {
+    setFilter({ productId, supplierId: '' });
+  }
 
   const points = useMemo(() => {
     const all = history?.points ?? [];

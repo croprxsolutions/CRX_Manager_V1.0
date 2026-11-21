@@ -219,7 +219,8 @@ describe('ProductPriceHistory', () => {
       mockGetHistory
         .mockResolvedValueOnce(history([['vendor-1', 'The Andersons'], ['vendor-2', 'Van Diest']]))
         .mockResolvedValueOnce(history([['vendor-1', 'The Andersons'], ['vendor-2', 'Van Diest']]))
-        .mockResolvedValueOnce(history([['vendor-1', 'The Andersons'], ['vendor-3', 'Helena']]));
+        .mockResolvedValueOnce(history([['vendor-1', 'The Andersons'], ['vendor-3', 'Helena']]))
+        .mockResolvedValueOnce(history([['vendor-1', 'The Andersons'], ['vendor-2', 'Van Diest']]));
       const { rerender } = render(card(0));
       await screen.findAllByText('Van Diest');
       fireEvent.change(screen.getByLabelText('Filter supplier'), { target: { value: 'vendor-2' } });
@@ -233,6 +234,12 @@ describe('ProductPriceHistory', () => {
 
       rerender(card(2));
       await vi.waitFor(() => expect(screen.getAllByText('Helena')).toHaveLength(2));
+      expect(screen.getByLabelText('Filter supplier')).toHaveValue('');
+      expect(screen.getAllByText('The Andersons')).toHaveLength(2);
+
+      // The dropped filter stays dropped when that supplier comes back.
+      rerender(card(3));
+      await vi.waitFor(() => expect(screen.getAllByText('Van Diest')).toHaveLength(2));
       expect(screen.getByLabelText('Filter supplier')).toHaveValue('');
       expect(screen.getAllByText('The Andersons')).toHaveLength(2);
     });

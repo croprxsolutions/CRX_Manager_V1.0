@@ -64,6 +64,11 @@ vi.mock('../lib/db', () => ({
     ACTOR_MISMATCH: 'ACTOR_MISMATCH',
     INVOICE_SEASON_DATE_CHANGE_NOT_ALLOWED: 'INVOICE_SEASON_DATE_CHANGE_NOT_ALLOWED',
     INVOICE_FILED_SEASON_CHANGE_NOT_ALLOWED: 'INVOICE_FILED_SEASON_CHANGE_NOT_ALLOWED',
+    FIELD_APP_PAYER_CHANGED: 'FIELD_APP_PAYER_CHANGED',
+  },
+  rpcCodeDetail: (err: unknown, code: string) => {
+    const m = err instanceof Error ? err.message : String((err as { message?: string } | null)?.message ?? err ?? '');
+    return m === code ? '' : m.startsWith(`${code}:`) ? m.slice(code.length + 1).trim() : null;
   },
   hasRpcCode: (err: unknown, code: string) => {
     const m = err instanceof Error ? err.message : String(err ?? '');
@@ -865,6 +870,27 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
       p_invoice: expect.objectContaining({ header_notes: null }),
     }));
     expect(mockRpc.mock.calls.some(([name]) => name === 'post_invoice' || name === 'delete_invoices')).toBe(false);
+  });
+
+  it('#2058: a save refused because the fields now bill another farm explains why on the page, then clears on the next Save', async () => {
+    const why = 'Nothing was saved. These fields bill Beta Farms, which does not match the one farm this invoice bills, and an invoice cannot change which farm it bills. Put back the original fields, or have an admin delete this invoice (void it if it was posted) first, then make a new field application invoice for these fields.';
+    const routeRpc = mockRpc.getMockImplementation();
+    mockRpc.mockImplementation((name: string, args: unknown) => name === 'save_field_app_invoice'
+      ? Promise.resolve({ data: null, error: { message: `FIELD_APP_PAYER_CHANGED: ${why}` } })
+      : (routeRpc ? routeRpc(name, args) : Promise.resolve({ data: null, error: null })));
+    await renderPage();
+    await screen.findByText(/Field Application INV-1001/);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
+    expect(await screen.findByRole('alert')).toHaveTextContent(why);
+    expect(screen.getByRole('alert')).not.toHaveTextContent('FIELD_APP_PAYER_CHANGED');
+    expect(mockToast).toHaveBeenCalledWith('error', "Not saved: these fields no longer bill this invoice's farm. See the note at the top of the invoice.");
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    mockRpc.mockImplementation((name: string, args: unknown) => name === 'save_field_app_invoice'
+      ? new Promise(() => {})
+      : (routeRpc ? routeRpc(name, args) : Promise.resolve({ data: null, error: null })));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
+    expect(screen.queryByText(why)).toBeNull();
   });
 
   it('pins both production invoice routes to the identity-keyed wrapper without changing access roles', () => {

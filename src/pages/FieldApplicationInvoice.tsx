@@ -10,7 +10,7 @@ import Button from '../components/ui/Button';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, sanitizeError, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
+import { supabase, sanitizeError, assertRpcResult, hasRpcCode, rpcCodeDetail, RpcErrorCodes } from '../lib/db';
 import { asProductForm } from '../lib/units';
 import { assertInvoiceLifecycleSendable, assertInvoiceSendable } from '../lib/invoiceSendDisposition';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -301,6 +301,11 @@ export default function FieldApplicationInvoice() {
   const [saving, setSaving] = useState(false);
   const [posting, setPosting] = useState(false);
   const [dirty, setDirty] = useState(false);
+  // #2058: the server's explanation of why a save that would change the billed farm was refused. Kept on the page
+  // (a toast is gone in 4 seconds) until the next Save.
+  const [payerChangeRefusal, setPayerChangeRefusal] = useState<string | null>(null);
+  // A refusal belongs to the invoice it was raised on; drop it when the route opens another one.
+  useEffect(() => { setPayerChangeRefusal(null); }, [id]);
   const [showLocationsModal, setShowLocationsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   // #28: Post confirm + Unpost confirm/in-flight state.
@@ -1785,6 +1790,8 @@ export default function FieldApplicationInvoice() {
   // silent data corruption). 'cannot_compare' / 'no_label_max' never gate a save.
   const handleSave = async () => {
     if (!profile) return;
+    // A new Save attempt supersedes the last refusal, even if this one stops at local validation.
+    setPayerChangeRefusal(null);
     // Opened at /new?created=<id>: nothing is saved here until the check has settled and the
     // page is a plain new invoice again (see the created-invoice check).
     if (isNew && createdCheck.state !== 'none') {
@@ -2271,6 +2278,13 @@ export default function FieldApplicationInvoice() {
         await fetchInvoice();
       }
     } catch (err) {
+      const payerChange = rpcCodeDetail(err, RpcErrorCodes.FIELD_APP_PAYER_CHANGED);
+      if (payerChange) {
+        // An expected business refusal, explained in full at the top of the page.
+        setPayerChangeRefusal(payerChange);
+        toast('error', "Not saved: these fields no longer bill this invoice's farm. See the note at the top of the invoice.");
+        return;
+      }
       Sentry.captureException(err, { tags: { rpc: 'save_field_app_invoice' } });
       toast('error', `Save failed: ${fieldAppError(err)}`);
     } finally {
@@ -3164,6 +3178,14 @@ export default function FieldApplicationInvoice() {
           records warning from #23). Editing inputs are also disabled via canEdit.
           #29: a voided/cancelled invoice is TERMINAL — it can't be unposted, so show a
           distinct red banner instead of the amber "unpost to edit" copy. */}
+      {payerChangeRefusal && (
+        <Card>
+          <div role="alert" className="flex items-start gap-2 px-4 py-3 bg-amber-50 border-l-4 border-amber-400 rounded text-sm text-amber-800">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span>{payerChangeRefusal}</span>
+          </div>
+        </Card>
+      )}
       {isLocked && (status === 'voided' || status === 'cancelled') && (
         <Card>
           <div className="flex items-start gap-2 px-4 py-3 bg-red-50 border-l-4 border-red-400 rounded text-sm text-red-800">

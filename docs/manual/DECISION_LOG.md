@@ -1,5 +1,16 @@
 # Decision Log
 
+## 2026-11-21 — #2142: Mason owner-accepted 1 Sol finding(s) at `2d2d74cbf2bb`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2142 at `2d2d74cbf2bb` (base `81cb83cfbb6f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270205100000_field_app_refuses_payer_change.sql:223`, text sha256 `e5366b8e2723b1c1` (the wording stays with the proof, not here)
+  Mason's reason: this can't happen (ref 7b827def922e)
+
+## 2026-11-21 — #2058/#2142: a field-application invoice refuses a save that changes which farm it bills
+
+**Decision (Mason, in chat via the issue-triage session, 2026-11-21: "refuse the save and warn explain probvlem"; and directly: "refuse save but explain issue so they know and it just doestn say error cant save").** When a standalone field-application invoice is edited so its fields now belong to another farm, or to several farms, Save is refused and nothing changes. The screen shows a plain sentence: which farm(s) the fields now bill, which farm the invoice bills, and what to do (put the original fields back, or have an admin delete or void this one first and then make a new invoice; a job-made invoice is re-invoiced from its job). A refusal may reveal to a rep whether another rep's draft bills that farm or came from a job; Mason accepted that (2026-11-21, #2163) because any rep may already edit any draft field-application invoice.
+**Why:** the first design moved the draft automatically (cancel it, make a new one for the new farm). Sol found new HIGH findings from that move in two rounds (copied PO, notes and negotiated prices; another rep's draft cancelled; stale Void on a new group; the screen losing the new draft), so the stop rule applied and Mason chose the simpler refusal.
+**What this changes:** `_save_field_app_invoice_impl_20260714` via `20270205100000_field_app_refuses_payer_change.sql`; `src/pages/FieldApplicationInvoice.tsx` shows the sentence. Grouped invoices, new invoices and same-farm edits are unchanged.
 ## 2026-11-21 — #2161: Mason owner-accepted 1 Sol finding(s) at `203179d85e5e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2161 at `203179d85e5e` (base `0ac30a2fc832`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

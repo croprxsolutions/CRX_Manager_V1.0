@@ -10,7 +10,7 @@ import Button from '../components/ui/Button';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, sanitizeError, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
+import { supabase, sanitizeError, assertRpcResult, hasRpcCode, rpcCodeDetail, RpcErrorCodes } from '../lib/db';
 import { asProductForm } from '../lib/units';
 import { assertInvoiceLifecycleSendable, assertInvoiceSendable } from '../lib/invoiceSendDisposition';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -301,6 +301,9 @@ export default function FieldApplicationInvoice() {
   const [saving, setSaving] = useState(false);
   const [posting, setPosting] = useState(false);
   const [dirty, setDirty] = useState(false);
+  // #2058: the server's explanation of why a save that would change the billed farm was refused. Kept on the page
+  // (a toast is gone in 4 seconds) until the next Save.
+  const [payerChangeRefusal, setPayerChangeRefusal] = useState<string | null>(null);
   const [showLocationsModal, setShowLocationsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   // #28: Post confirm + Unpost confirm/in-flight state.
@@ -538,12 +541,6 @@ export default function FieldApplicationInvoice() {
   // save failure), a repeat Save must update THIS invoice — sending p_invoice_id = null
   // again would create a duplicate invoice for the same application.
   const createdInvoiceIdRef = useRef<string | null>(null);
-  // The new draft an earlier Save on this page moved the edited one to (its fields bill another farm, #2058).
-  // The edited draft is cancelled, so after a partial failure every repeat Save writes to the new one.
-  const replacementInvoiceIdRef = useRef<string | null>(null);
-  // Shown while this page still holds a draft the save cancelled (#2058): its own actions would act on stale data.
-  const [replacedBy, setReplacedBy] = useState<string | null>(null);
-  useEffect(() => { replacementInvoiceIdRef.current = null; setReplacedBy(null); }, [id]);
   const [searchParams] = useSearchParams();
   const createdIdInAddress = createdInvoiceIdFromAddress(searchParams);
   // Opened at /new?created=<id>: Save waits for the created-invoice check below.
@@ -1923,11 +1920,12 @@ export default function FieldApplicationInvoice() {
     if (discountInputRefused()) return;
     // The invoice this save writes to: the routed one, or the one an earlier Save on this
     // still-/new page already created. Only when neither exists does the save CREATE.
-    const targetInvoiceId = replacementInvoiceIdRef.current || id || createdInvoiceIdRef.current;
+    const targetInvoiceId = id || createdInvoiceIdRef.current;
     const creating = !targetInvoiceId;
     if (saveInFlightRef.current) return;
     saveInFlightRef.current = true;
     setSaving(true);
+    setPayerChangeRefusal(null);
     try {
       const saveArgs = {
         p_invoice: {
@@ -2029,14 +2027,7 @@ export default function FieldApplicationInvoice() {
           navigate({ search: createdInvoiceAddressSearch(ids[0]) }, { replace: true });
         }
       }
-      // #2058: the save cancelled the edited draft and saved a new one (its fields bill another farm). Record it before
-      // any later step can fail, so every repeat Save from this page goes to the new draft, not the cancelled one.
-      if (!creating && targetInvoiceId && ids.length > 0 && !ids.includes(targetInvoiceId)) {
-        replacementInvoiceIdRef.current = ids[0];
-        setReplacedBy(ids[0]);
-      }
-      // #2058: when the earlier save cancelled the edited draft (its fields bill another farm), repeat onto the new one.
-      const replayedInvoiceId = targetInvoiceId && (ids.length === 0 || ids.includes(targetInvoiceId)) ? targetInvoiceId : ids[0];
+      const replayedInvoiceId = targetInvoiceId || ids[0];
       if (retryMayReplayOldValues && replayedInvoiceId) {
         const followUpKey = saveIdem.getKey();
         unansweredSaveRef.current = { key: followUpKey, fingerprints: [fingerprint] };
@@ -2264,16 +2255,7 @@ export default function FieldApplicationInvoice() {
 
       // Still on /invoices/field-app/new: move to the saved invoice's own page.
       const savedInvoiceId = ids[0] ?? createdInvoiceIdRef.current;
-      // An edit whose fields now bill another farm cancels this draft and saves a new one (#2058): open the new one.
-      const replaced = !isNew && !!id && ids.length > 0 && !ids.includes(id);
-      if (replaced && !(appliedInfoOk && billingOk)) {
-        // Keep the typed values on the page (the error toast says what did not persist); Save again writes them to
-        // the new draft, then opens it. Reloading here would show the cancelled draft.
-        replacementInvoiceIdRef.current = savedInvoiceId;
-        setReplacedBy(savedInvoiceId);
-        return;
-      }
-      if ((isNew || replaced) && savedInvoiceId) {
+      if (isNew && savedInvoiceId) {
         // Everything saved, so nothing is unsaved: let this navigation past the
         // leave-page guard. After a PARTIAL failure the form stays dirty and the guard
         // still asks; "Stay" keeps the typed values, and Save again updates the same
@@ -2287,6 +2269,13 @@ export default function FieldApplicationInvoice() {
         await fetchInvoice();
       }
     } catch (err) {
+      const payerChange = rpcCodeDetail(err, RpcErrorCodes.FIELD_APP_PAYER_CHANGED);
+      if (payerChange) {
+        // An expected business refusal, explained in full at the top of the page.
+        setPayerChangeRefusal(payerChange);
+        toast('error', 'Not saved: these fields now bill a different farm. See the note at the top of the invoice.');
+        return;
+      }
       Sentry.captureException(err, { tags: { rpc: 'save_field_app_invoice' } });
       toast('error', `Save failed: ${fieldAppError(err)}`);
     } finally {
@@ -3053,8 +3042,6 @@ export default function FieldApplicationInvoice() {
           {!isNew && <Badge variant={statusToBadgeVariant[status] || 'default'}>{status}</Badge>}
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
-          {/* #2058: after a save that replaced this draft, only Save (finishing onto the new draft) and Cancel remain. */}
-          {!replacedBy && (<>
           {!isNew && canEdit && (
             <Button variant="danger" size="sm" icon={<Trash2 className="w-4 h-4" />} onClick={() => setShowDeleteConfirm(true)}>
               Delete
@@ -3151,7 +3138,6 @@ export default function FieldApplicationInvoice() {
               Preview
             </Button>
           )}
-          </>)}
           {/* #24: explicit Cancel Without Saving (the unsaved-changes guard still prompts). */}
           <Button variant="secondary" size="sm" icon={<X className="w-4 h-4" />} onClick={handleCancel}>
             Cancel
@@ -3183,14 +3169,11 @@ export default function FieldApplicationInvoice() {
           records warning from #23). Editing inputs are also disabled via canEdit.
           #29: a voided/cancelled invoice is TERMINAL — it can't be unposted, so show a
           distinct red banner instead of the amber "unpost to edit" copy. */}
-      {replacedBy && (
+      {payerChangeRefusal && (
         <Card>
           <div role="alert" className="flex items-start gap-2 px-4 py-3 bg-amber-50 border-l-4 border-amber-400 rounded text-sm text-amber-800">
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-            <span>
-              These fields now bill a different farm, so this draft was cancelled and a new draft was saved. Some details did not
-              save yet: press <strong>Save</strong> to finish them on the new draft, which then opens.
-            </span>
+            <span>{payerChangeRefusal}</span>
           </div>
         </Card>
       )}

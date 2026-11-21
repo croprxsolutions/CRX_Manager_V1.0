@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270202100000_field_app_standalone_draft_follows_fields (#2058).
+ * Real-schema proof for 20270202100000_field_app_refuses_payer_change (#2058).
  * Container setup and replay copied from prove-field-app-no-sold-unit-real-schema.mjs. A standalone draft for farm A
  * (field A1) is edited through save_field_app_invoice, each case rolled back:
  *   BEFORE: moved to B's field, A stays the customer and is billed for B's work; split over A's and B's fields, the
  *           original stays a live draft with no lines; a second A field is a normal edit.
- *   AFTER:  moved to B's field, the original is cancelled like a grouped orphan (totals 0, one
- *           invoice_orphan_cancelled row) and B gets its own draft; split, the original is reused for A and joins the
- *           group; the normal edit ends exactly as before. A second apply stops at the preflight.
+ *   AFTER:  moved or split, the save is refused FIELD_APP_PAYER_CHANGED with a sentence naming the farm(s) the fields
+ *           now bill, the invoice number and its farm, and nothing changes (Mason, 2026-11-21: refuse and explain);
+ *           the normal edit and a grouped edit end exactly as before. A second apply stops at the preflight.
  *
- * Run: node scripts/smoke/prove-field-app-standalone-draft-real-schema.mjs   (needs Docker)
- * Prints FIELD_APP_STANDALONE_DRAFT_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
+ * Run: node scripts/smoke/prove-field-app-refuses-payer-change-real-schema.mjs   (needs Docker)
+ * Prints FIELD_APP_PAYER_CHANGE_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -30,7 +30,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270202100000_field_app_standalone_draft_follows_fields.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270202100000_field_app_refuses_payer_change.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([
@@ -310,12 +310,11 @@ const TO_B = scenario(`'${GB}'`), SPLIT = scenario(`'${GA}','${GB}'`), SAME = sc
 // A grouped A+B draft (opened from its first member) edited down to A's field: the existing grouped rule, unchanged.
 const GROUPED = scenario(`'${GA}'`, `'${GA}','${GB}'`);
 // Test-only shortcuts (rolled back with the case; triggers and foreign keys skipped): an invoice that was posted once,
-// and (a real job row) one made from a job. Moving either to B's field is refused after the candidate instead of cancelled.
+// and (a real job row) one made from a job. Moving or splitting either is refused after the candidate, like a plain draft.
 const viaReplica = (set) => `SET LOCAL session_replication_role = replica; UPDATE invoices SET ${set} FROM t WHERE invoices.id = t.inv; SET LOCAL session_replication_role = origin;`;
 const UNPOSTED = scenario(`'${GB}'`, `'${GA}'`, viaReplica(`status = 'unposted'`));
 const FROM_JOB = scenario(`'${GB}'`, `'${GA}'`, `WITH j AS (INSERT INTO jobs (job_number, customer_id, job_date) VALUES ('SDF-J1', '${A}', CURRENT_DATE) RETURNING id)
     UPDATE invoices SET job_id = j.id FROM j, t WHERE invoices.id = t.inv;`);
-// Splitting either over A's and B's fields is refused too: in a group, a later edit's orphan cancel would strand it (Sol r1).
 const UNPOSTED_SPLIT = scenario(`'${GA}','${GB}'`, `'${GA}'`, viaReplica(`status = 'unposted'`));
 const FROM_JOB_SPLIT = scenario(`'${GA}','${GB}'`, `'${GA}'`, `WITH j AS (INSERT INTO jobs (job_number, customer_id, job_date) VALUES ('SDF-J2', '${A}', CURRENT_DATE) RETURNING id)
     UPDATE invoices SET job_id = j.id FROM j, t WHERE invoices.id = t.inv;`);
@@ -365,24 +364,27 @@ async function main() {
   assert.match(second.output, /FIELD_APP_STANDALONE_DRAFT_PREFLIGHT/);
   console.log(`[case] the candidate applies (EXECUTE unchanged: ${saveGrants}); a second apply stops at its preflight`);
 
-  const toB = okProbe(TO_B), split = okProbe(SPLIT), same = okProbe(SAME);
-  console.log(`[after] A's draft moved to B's field: ${toB}`);
-  console.log(`[after] A's draft split over A's and B's fields: ${split}`);
+  // Refused, with the sentence the office reads (the farm names come from the derived payers and the invoice's farm).
+  const lit = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const sentence = (now) => new RegExp(lit(`FIELD_APP_PAYER_CHANGED: Nothing was saved. The fields on this invoice now bill ${now}, but invoice `)
+    + '\\S+' + lit(' bills [PROVER] SDF Farm A, and an invoice cannot change which farm it bills. Make a new field application invoice'
+    + ' for these fields, then delete this one (void it if it was posted), or put back the fields for [PROVER] SDF Farm A.'));
+  const B_ONLY = '[PROVER] SDF Farm B', BOTH = '[PROVER] SDF Farm A and [PROVER] SDF Farm B';
+  refusedProbe(TO_B, sentence(B_ONLY));
+  refusedProbe(SPLIT, sentence(BOTH));
+  console.log("[after] A's draft moved to B's field, or split over A's and B's: refused FIELD_APP_PAYER_CHANGED naming the farms (whole save rolled back)");
+  refusedProbe(UNPOSTED, sentence(B_ONLY));
+  refusedProbe(FROM_JOB, sentence(B_ONLY));
+  refusedProbe(UNPOSTED_SPLIT, sentence(BOTH));
+  refusedProbe(FROM_JOB_SPLIT, sentence(BOTH));
+  console.log('[after] an unposted invoice or a job-made draft, moved or split: refused the same way');
+  const same = okProbe(SAME);
   console.log(`[after] A's draft given a second A field: ${same}`);
-  assert.equal(toB, 'A:cancelled:0:0:solo B:draft:30000:1:solo | replaced | orphan-rows=1 | original=A:cancelled',
-    'after: the original is cancelled like a grouped orphan and B gets its own draft');
-  assert.equal(split, 'A:draft:30000:1:group B:draft:30000:1:group | kept | orphan-rows=0 | original=A:draft',
-    'after: the original is reused for A and joins the group; no empty live draft');
   assert.equal(same, sameBefore, 'a normal edit is unchanged');
   assert.equal(okProbe(GROUPED), groupedBefore, 'a grouped edit is unchanged');
   refusedProbe(DELETED, /Invoice not found/);
-  refusedProbe(UNPOSTED, /FIELD_APP_PAYER_CHANGED: .*is no longer a draft/);
-  refusedProbe(FROM_JOB, /FIELD_APP_PAYER_CHANGED: .*came from a job or blend ticket/);
-  refusedProbe(UNPOSTED_SPLIT, /FIELD_APP_PAYER_CHANGED: .*is no longer a draft/);
-  refusedProbe(FROM_JOB_SPLIT, /FIELD_APP_PAYER_CHANGED: .*came from a job or blend ticket/);
-  console.log("[after] moving or splitting a once-posted invoice or a job-made draft over another farm's fields is refused FIELD_APP_PAYER_CHANGED (nothing cancelled, no group)");
   console.log(`[after] the grouped edit ends as before (${groupedBefore}); a deleted standalone draft is refused 'Invoice not found'`);
-  console.log('FIELD_APP_STANDALONE_DRAFT_PROOF_PASS');
+  console.log('FIELD_APP_PAYER_CHANGE_PROOF_PASS');
 }
 
 try { await main(); }

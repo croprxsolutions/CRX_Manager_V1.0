@@ -1,22 +1,19 @@
 -- Written 2026-11-21. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270202100000_field_app_standalone_draft_follows_fields.md.
+-- docs/reference/migrations.d/20270202100000_field_app_refuses_payer_change.md.
 --
--- WHY (#2058, release #1990 Sol, already live before that release): editing a STANDALONE field-application draft
---   (one payer, no group) through save_field_app_invoice
---   1. so every field belongs to another farm reused the draft for the new payer but never set its customer_id,
---      so the old farm would be billed for the new farm's work;
---   2. so the fields split across several payers left the original draft live with its old total and no lines
+-- WHY (#2058, #2070, release #1990 Sol, already live before that release): editing a STANDALONE field-application
+--   invoice (one payer, no group) through save_field_app_invoice
+--   1. so every field belongs to another farm reused the invoice for the new payer but never changed its customer_id,
+--      so the old farm would be billed for the new farm's work (#2070: header and pricing then disagree);
+--   2. so the fields split across several payers left the original invoice live with its old total and no lines
 --      (its lines were deleted; every payer got a new draft).
 --   Live 2026-11-21 (read-only): 3 field-application invoices; neither shape exists.
 --
--- WHAT: _save_field_app_invoice_impl_20260714 treats a standalone draft as it already treats a grouped draft's
---   member: it is reused only for the payer it bills (joining the new group when the fields split), and when its
---   payer is no longer among the fields' payers it is cancelled the same way a grouped orphan is (status
---   'cancelled', totals 0, an 'invoice_orphan_cancelled' activity row). Only a plain draft is cancelled: an
---   unposted invoice, or one made from a job or blend ticket, is refused FIELD_APP_PAYER_CHANGED instead (a cancel
---   would skip the void or strand the job link). The impl also reads the edited row FOR UPDATE and refuses a
---   deleted one, as its lock wrapper (20260714224000) already does for every public save. Contract:
---   docs/plans/2026-11-21-field-app-standalone-draft-follows-fields-CONTRACT.md.
+-- WHAT (Mason, 2026-11-21: "refuse the save ... explain the problem"): _save_field_app_invoice_impl_20260714 refuses
+--   that save with FIELD_APP_PAYER_CHANGED and a plain sentence naming the farm(s) the fields now bill, the farm the
+--   invoice bills, and what to do (make a new invoice for those fields; delete or void this one). Nothing is written.
+--   An invoice never changes which farm it bills; grouped invoices keep their existing rules. Contract:
+--   docs/plans/2026-11-21-field-app-refuses-payer-change-CONTRACT.md.
 --
 -- NOT CHANGED: everything else in the body (pinned below), its owner, grants, SECURITY DEFINER and search_path
 --   (CREATE OR REPLACE keeps them), every other function, table, row and policy.
@@ -24,7 +21,7 @@
 -- ROLLBACK (its own reviewed migration): re-emit the body from
 --   20270129171000_field_app_refuses_product_without_sold_unit.sql (md5 1a4a2655e43392d867b195289df9b9a1).
 --
--- ORDERING: after 20270129171000. Not re-runnable (preflight refuses). Postflight pins the new body md5 28ce5328aff2e0ea24ab669596aa34f5.
+-- ORDERING: after 20270129171000. Not re-runnable (preflight refuses). Postflight pins the new body md5 b594d6f12001cccf5fbe41d5dbf6ec2c.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -129,10 +126,8 @@ BEGIN
   END IF;
 
   IF p_invoice_id IS NOT NULL THEN
-    -- #2058: the public save's lock wrapper (20260714224000) already locks this row and refuses a deleted invoice;
-    -- the impl repeats both so a direct call reads the same row the checks below rely on.
     SELECT status, invoice_group_id, customer_id INTO v_existing_status, v_existing_group_id, v_existing_customer_id
-      FROM invoices WHERE id = p_invoice_id AND deleted_at IS NULL FOR UPDATE;
+      FROM invoices WHERE id = p_invoice_id;
     IF NOT FOUND THEN RAISE EXCEPTION 'Invoice not found: %', p_invoice_id; END IF;
     -- KI-156 follow-up: only field-application invoices are rebuilt here (the invoice and every live member of its
     -- group, whose lines are deleted below); any other draft keeps its own lines.
@@ -222,38 +217,16 @@ BEGIN
     END LOOP;
   END IF;
 
-  -- #2058: a standalone invoice whose fields now bill another payer, or several, changes payers: it is cancelled
-  -- (moved) or joins a group (split). Only a plain draft may: an unposted invoice is past draft (void it instead), and
-  -- one made from a job or blend ticket keeps that link, which a cancel strands (job left 'invoiced' on a cancelled
-  -- invoice). Refusing the split too keeps such an invoice out of a group, whose orphan cancel above has no such check.
+  -- #2058/#2070: a standalone invoice bills one farm for good. When its fields now bill another farm, or several,
+  -- refuse with a sentence the office can act on (Mason, 2026-11-21) rather than move or orphan the invoice.
   IF p_invoice_id IS NOT NULL AND v_existing_group_id IS NULL AND (v_customer_count > 1 OR NOT EXISTS (
-       SELECT 1 FROM jsonb_array_elements(v_customers) c WHERE (c->>'customer_id')::uuid = v_existing_customer_id))
-     AND (v_existing_status <> 'draft' OR EXISTS (SELECT 1 FROM invoices WHERE id = p_invoice_id
-                                                    AND (job_id IS NOT NULL OR blend_ticket_id IS NOT NULL))) THEN
-    RAISE EXCEPTION 'FIELD_APP_PAYER_CHANGED: these fields now bill another customer or several, and invoice % cannot change payers because it %. Void it, or change the job, then make a new invoice for these fields.',
+       SELECT 1 FROM jsonb_array_elements(v_customers) c WHERE (c->>'customer_id')::uuid = v_existing_customer_id)) THEN
+    RAISE EXCEPTION 'FIELD_APP_PAYER_CHANGED: Nothing was saved. The fields on this invoice now bill %, but invoice % bills %, and an invoice cannot change which farm it bills. Make a new field application invoice for these fields, then delete this one (void it if it was posted), or put back the fields for %.',
+      (SELECT string_agg(COALESCE(NULLIF(btrim(c->>'customer_name'), ''), 'another farm'), ' and ' ORDER BY c->>'customer_name')
+         FROM jsonb_array_elements(v_customers) c),
       (SELECT invoice_number FROM invoices WHERE id = p_invoice_id),
-      CASE WHEN v_existing_status <> 'draft' THEN 'is no longer a draft' ELSE 'came from a job or blend ticket' END;
-  END IF;
-  -- The payer left: the draft is cancelled exactly as a grouped orphan above; the fields' payers get their own drafts below.
-  IF p_invoice_id IS NOT NULL AND v_existing_group_id IS NULL AND NOT EXISTS (
-       SELECT 1 FROM jsonb_array_elements(v_customers) c WHERE (c->>'customer_id')::uuid = v_existing_customer_id) THEN
-    UPDATE invoices SET
-      status              = 'cancelled',
-      total_amount_cents  = 0,
-      total_cost_cents    = 0,
-      updated_at          = now()
-    WHERE id = p_invoice_id
-    RETURNING invoice_number INTO v_invoice_number;
-
-    INSERT INTO activity_feed (
-      event_type, description, performed_by,
-      related_entity_type, related_entity_id, customer_id
-    ) VALUES (
-      'invoice_orphan_cancelled',
-      'Field app invoice ' || v_invoice_number ||
-        ' cancelled — its fields now bill another customer',
-      p_performed_by, 'invoice', p_invoice_id, v_existing_customer_id
-    );
+      (SELECT farm_name FROM customers WHERE id = v_existing_customer_id),
+      (SELECT farm_name FROM customers WHERE id = v_existing_customer_id);
   END IF;
 
   IF p_application_service_id IS NOT NULL THEN
@@ -294,8 +267,7 @@ BEGIN
     IF v_existing_group_id IS NOT NULL THEN
       SELECT id INTO v_invoice_id FROM invoices
        WHERE invoice_group_id = v_existing_group_id AND customer_id = v_customer_id AND deleted_at IS NULL LIMIT 1;
-    ELSIF p_invoice_id IS NOT NULL AND v_customer_id = v_existing_customer_id THEN
-      -- #2058: a standalone draft is reused only for the payer it bills (it joins the group when the fields split).
+    ELSIF p_invoice_id IS NOT NULL AND v_customer_count = 1 THEN
       v_invoice_id := p_invoice_id;
     END IF;
 
@@ -776,7 +748,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)'))
-     IS DISTINCT FROM '28ce5328aff2e0ea24ab669596aa34f5' THEN
+     IS DISTINCT FROM 'b594d6f12001cccf5fbe41d5dbf6ec2c' THEN
     RAISE EXCEPTION 'FIELD_APP_STANDALONE_DRAFT_POSTFLIGHT: _save_field_app_invoice_impl_20260714 is not the reviewed new body';
   END IF;
 END;

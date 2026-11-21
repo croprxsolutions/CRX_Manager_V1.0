@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2058/#2142: a field-application invoice refuses a save that changes which farm it bills
+
+**Decision (Mason, in chat via the issue-triage session, 2026-11-21: "refuse the save and warn explain probvlem"; and directly: "refuse save but explain issue so they know and it just doestn say error cant save").** When a standalone field-application invoice is edited so its fields now belong to another farm, or to several farms, Save is refused and nothing changes. The screen shows a plain sentence: which farm(s) the fields now bill, which farm the invoice bills, and what to do (make a new invoice for these fields, then delete or void this one, or put the old farm's fields back).
+**Why:** the first design moved the draft automatically (cancel it, make a new one for the new farm). Sol found new HIGH findings from that move in two rounds (copied PO, notes and negotiated prices; another rep's draft cancelled; stale Void on a new group; the screen losing the new draft), so the stop rule applied and Mason chose the simpler refusal.
+**What this changes:** `_save_field_app_invoice_impl_20260714` via `20270202100000_field_app_refuses_payer_change.sql`; `src/pages/FieldApplicationInvoice.tsx` shows the sentence. Grouped invoices, new invoices and same-farm edits are unchanged.
+
 ## 2026-11-21 — #2068: Mason owner-accepted 4 Sol finding(s) at `1d9202dcb57d`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `1d9202dcb57d` (base `dab22364c6bc`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

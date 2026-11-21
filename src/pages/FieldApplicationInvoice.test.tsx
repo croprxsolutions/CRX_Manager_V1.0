@@ -64,6 +64,11 @@ vi.mock('../lib/db', () => ({
     ACTOR_MISMATCH: 'ACTOR_MISMATCH',
     INVOICE_SEASON_DATE_CHANGE_NOT_ALLOWED: 'INVOICE_SEASON_DATE_CHANGE_NOT_ALLOWED',
     INVOICE_FILED_SEASON_CHANGE_NOT_ALLOWED: 'INVOICE_FILED_SEASON_CHANGE_NOT_ALLOWED',
+    FIELD_APP_PAYER_CHANGED: 'FIELD_APP_PAYER_CHANGED',
+  },
+  rpcCodeDetail: (err: unknown, code: string) => {
+    const m = err instanceof Error ? err.message : String((err as { message?: string } | null)?.message ?? err ?? '');
+    return m === code ? '' : m.startsWith(`${code}:`) ? m.slice(code.length + 1).trim() : null;
   },
   hasRpcCode: (err: unknown, code: string) => {
     const m = err instanceof Error ? err.message : String(err ?? '');
@@ -867,106 +872,25 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
     expect(mockRpc.mock.calls.some(([name]) => name === 'post_invoice' || name === 'delete_invoices')).toBe(false);
   });
 
-  // #2058: both drafts resolve to their farm, so the billing step can finish.
-  const withBilledFarms = () => mockFrom.mockImplementation(makeFromMock({
-    invoices: { data: [
-      { id: 'inv-solo', invoice_number: 'INV-1001', invoice_type: 'field_application', invoice_date: '2026-04-29', season: 2026,
-        header_notes: '', status: 'draft', application_service_id: null, invoice_group_id: null, total_amount_cents: 100000,
-        invoice_post_version: 'v1:inv-solo', customer_id: 'cust-a' },
-      { id: 'inv-other-farm', customer_id: 'cust-b' },
-    ] },
-    field_app_locations: { data: [] },
-    invoice_items: { data: [] },
-    invoice_shares: { data: [] },
-  }));
-
-  it('#2058: opens the new draft when the save cancelled the edited one (its fields now bill another farm)', async () => {
-    const saveReturns = (ids: string[]) => mockRpc.mockImplementation((name: string) =>
-      Promise.resolve(name === 'save_field_app_invoice'
-        ? { data: { invoice_ids: ids, invoice_group_id: null }, error: null }
-        : { data: null, error: null }));
-    saveReturns(['inv-other-farm']);
-    withBilledFarms();
+  it('#2058: a save refused because the fields now bill another farm explains why on the page, then clears on the next Save', async () => {
+    const why = 'Nothing was saved. The fields on this invoice now bill Beta Farms, but invoice INV-1001 bills Alpha Farms, and an invoice cannot change which farm it bills. Make a new field application invoice for these fields, then delete this one (void it if it was posted), or put back the fields for Alpha Farms.';
+    const routeRpc = mockRpc.getMockImplementation();
+    mockRpc.mockImplementation((name: string, args: unknown) => name === 'save_field_app_invoice'
+      ? Promise.resolve({ data: null, error: { message: `FIELD_APP_PAYER_CHANGED: ${why}` } })
+      : (routeRpc ? routeRpc(name, args) : Promise.resolve({ data: null, error: null })));
     await renderPage();
     await screen.findByText(/Field Application INV-1001/);
     await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/invoices/field-app/inv-other-farm', { replace: true }));
-
-    // A normal edit returns the same invoice: the page stays and reloads it.
-    mockNavigate.mockClear();
-    saveReturns(['inv-solo']);
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
-    await waitFor(() => expect(mockRpc.mock.calls.filter(([n]) => n === 'save_field_app_invoice')).toHaveLength(2));
+    expect(await screen.findByRole('alert')).toHaveTextContent(why);
+    expect(screen.getByRole('alert')).not.toHaveTextContent('FIELD_APP_PAYER_CHANGED');
+    expect(mockToast).toHaveBeenCalledWith('error', 'Not saved: these fields now bill a different farm. See the note at the top of the invoice.');
     expect(mockNavigate).not.toHaveBeenCalled();
-  });
 
-  it('#2058: a retry whose earlier save cancelled the draft repeats onto the new draft, not the cancelled one', async () => {
-    let saves = 0;
-    mockRpc.mockImplementation((name: string) => {
-      if (name !== 'save_field_app_invoice') return Promise.resolve({ data: null, error: null });
-      saves += 1;
-      return Promise.resolve(saves === 1
-        ? { data: null, error: { message: 'IDEMPOTENCY_INTENT_MISMATCH', details: JSON.stringify({
-          operation: 'save_field_app_invoice', result: { invoice_ids: ['inv-other-farm'], invoice_group_id: null } }) } }
-        : { data: { invoice_ids: ['inv-other-farm'], invoice_group_id: null }, error: null });
-    });
-    withBilledFarms();
-    await renderPage();
-    await screen.findByText(/Field Application INV-1001/);
+    mockRpc.mockImplementation((name: string, args: unknown) => name === 'save_field_app_invoice'
+      ? new Promise(() => {})
+      : (routeRpc ? routeRpc(name, args) : Promise.resolve({ data: null, error: null })));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/invoices/field-app/inv-other-farm', { replace: true }));
-    const saveCalls = mockRpc.mock.calls.filter(([n]) => n === 'save_field_app_invoice');
-    expect(saveCalls.map(([, args]) => (args as { p_invoice_id: string }).p_invoice_id)).toEqual(['inv-solo', 'inv-other-farm']);
-  });
-
-  it('#2058: once a lost reply names the new draft, a refused follow-up still leaves the next Save aimed at it', async () => {
-    let saves = 0;
-    mockRpc.mockImplementation((name: string) => {
-      if (name !== 'save_field_app_invoice') return Promise.resolve({ data: { ok: true }, error: null });
-      saves += 1;
-      if (saves === 1) return Promise.resolve({ data: null, error: { message: 'IDEMPOTENCY_INTENT_MISMATCH', details: JSON.stringify({
-        operation: 'save_field_app_invoice', result: { invoice_ids: ['inv-other-farm'], invoice_group_id: null } }) } });
-      if (saves === 2) return Promise.resolve({ data: null, error: { message: 'FIELD_APP_UNIT_MISMATCH: pick a matching unit', code: 'P0001' } });
-      return Promise.resolve({ data: { invoice_ids: ['inv-other-farm'], invoice_group_id: null }, error: null });
-    });
-    withBilledFarms();
-    await renderPage();
-    await screen.findByText(/Field Application INV-1001/);
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Save failed')));
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/invoices/field-app/inv-other-farm', { replace: true }));
-    const saveCalls = mockRpc.mock.calls.filter(([n]) => n === 'save_field_app_invoice');
-    expect(saveCalls.map(([, args]) => (args as { p_invoice_id: string }).p_invoice_id)).toEqual(['inv-solo', 'inv-other-farm', 'inv-other-farm']);
-  });
-
-  it('#2058: after a partial failure on a replaced draft the page keeps the form, and Save again writes to the new draft', async () => {
-    let appliedCalls = 0;
-    mockRpc.mockImplementation((name: string) => {
-      if (name === 'save_field_app_invoice') return Promise.resolve({ data: { invoice_ids: ['inv-other-farm'], invoice_group_id: null }, error: null });
-      if (name === 'update_field_app_applied_info') {
-        appliedCalls += 1;
-        return Promise.resolve(appliedCalls === 1 ? { data: null, error: { message: 'network down' } } : { data: null, error: null });
-      }
-      return Promise.resolve({ data: null, error: null });
-    });
-    withBilledFarms();
-    await renderPage();
-    await screen.findByText(/Field Application INV-1001/);
-    expect(screen.getByRole('button', { name: /^Delete$/i })).toBeInTheDocument();
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Applied Info')));
-    expect(mockNavigate).not.toHaveBeenCalled();
-    // The page still shows the cancelled draft: its own actions (Delete, Void, Print, Post...) would act on stale data.
-    expect(screen.getByRole('alert')).toHaveTextContent(/this draft was cancelled and a new draft was saved/);
-    for (const name of [/^Delete$/i, /Void/i, /Print/i, /^Post/i, /Email/i]) expect(screen.queryByRole('button', { name })).toBeNull();
-
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/invoices/field-app/inv-other-farm', { replace: true }));
-    const saveCalls = mockRpc.mock.calls.filter(([n]) => n === 'save_field_app_invoice');
-    expect(saveCalls.map(([, args]) => (args as { p_invoice_id: string }).p_invoice_id)).toEqual(['inv-solo', 'inv-other-farm']);
-    const applied = mockRpc.mock.calls.filter(([n]) => n === 'update_field_app_applied_info');
-    expect((applied[1][1] as { p_invoice_ids: string[] }).p_invoice_ids).toEqual(['inv-other-farm']);
+    expect(screen.queryByText(why)).toBeNull();
   });
 
   it('pins both production invoice routes to the identity-keyed wrapper without changing access roles', () => {

@@ -194,6 +194,10 @@ describe('Products list reads', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save (1)' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the latest product list.');
     expect(screen.queryByText('Sales sheet open')).not.toBeInTheDocument();
+    mocks.productsError = null;
+    fireEvent.click(tryAgain());
+    await waitFor(() => expect(banner()).not.toBeInTheDocument());
+    expect(screen.queryByText('Sales sheet open')).not.toBeInTheDocument();
   });
 
   it("refuses a phone price change whose form opened before the product's pricing version changed", async () => {

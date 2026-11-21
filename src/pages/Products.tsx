@@ -540,8 +540,13 @@ export default function Products() {
   };
   const reloadProducts = async () => {
     const list = await productsRead.reload();
-    // The rows a Deactivate review was opened for are no longer known to be current.
-    if (list.status === 'failed') closeActiveReview();
+    // The rows a Deactivate review, the Download menu or a sales sheet was opened for are no longer known
+    // to be current; they close rather than reopen by themselves after Try again.
+    if (list.status === 'failed') {
+      closeActiveReview();
+      setExportMenuOpen(false);
+      setSalesSheetFormat(null);
+    }
     return list;
   };
   /** Read the list (and an admin's floors) again; false when either read failed. A superseded read is not a

@@ -2,7 +2,7 @@
 // Pre-push skips the app type check and build only when no app file changed, and builds on any doubt.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { allDeletes, edgeSourceTests, needsAppBuild, needsFreshnessCheck, needsMapCheck, needsPinCheck, needsRegistryCheck } from './prepush-needs-build.mjs';
 import { tempDir } from './lib/test-temp-dir.mjs';
@@ -72,6 +72,31 @@ assert.equal(deletesVerdict(`${del('refs/heads/x')}\n`), 'deletes');
 assert.equal(deletesVerdict(`${push}\n`), 'push');
 assert.equal(deletesVerdict(''), 'push');
 
+// A new branch (no remote sha) is compared with the base it forked from last: staging for a staging
+// branch, main for a hotfix. A main-only base made a docs-only staging branch rebuild (2026-11-21 retro).
+const forks = tempDir('crx-prepush-base-');
+try {
+  const inRepo = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: forks, encoding: 'utf8' }).trim();
+  const add = (file, msg) => { mkdirSync(path.dirname(path.join(forks, file)), { recursive: true }); writeFileSync(path.join(forks, file), `${msg}\n`); inRepo('add', '.'); inRepo('commit', '-qm', msg); return inRepo('rev-parse', 'HEAD'); };
+  const run = (tip, flag) => spawnSync(process.execPath, [path.resolve('scripts/prepush-needs-build.mjs'), ...(flag ? [flag] : [])],
+    { cwd: forks, input: `refs/heads/n ${tip} refs/heads/n ${zero}\n`, encoding: 'utf8' }).stdout.trim();
+  inRepo('init', '-q', '-b', 'main');
+  const mainTip = add('README.md', 'base');
+  inRepo('update-ref', 'refs/remotes/origin/main', mainTip);
+  add('src/app.ts', 'staging app'); const stagingTip = add('.claude/schema-registry.json', 'staging registry');
+  inRepo('update-ref', 'refs/remotes/origin/staging', stagingTip);
+  const docsOnStaging = add('docs/plan.md', 'docs on staging');
+  assert.equal(run(docsOnStaging), 'skip', 'a docs-only staging branch must not rebuild the app');
+  assert.equal(run(docsOnStaging, '--registry'), 'skip', 'nor re-run the contract tests');
+  const appOnStaging = add('src/more.ts', 'app on staging');
+  assert.equal(run(appOnStaging), 'build', 'an app change on a staging branch still builds');
+  inRepo('checkout', '-q', '-b', 'hotfix', mainTip);
+  assert.equal(run(add('docs/hotfix.md', 'hotfix docs')), 'skip', 'a docs-only hotfix from main skips');
+  assert.equal(run(add('src/fix.ts', 'hotfix app')), 'build', 'an app hotfix from main builds');
+} finally {
+  rmSync(forks, { recursive: true, force: true });
+}
+
 // A move out of src/ must still build: rename detection would report only the new path.
 const repo = tempDir('crx-prepush-move-');
 try {
@@ -88,5 +113,11 @@ try {
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }
+
+// The containment test drives .husky/pre-push with node and npm stubbed, and its Windows CI job has no
+// node_modules: a plain folder test there failed CI on PR #2112. Hook checks must ask through node.
+const prePushHook = readFileSync('.husky/pre-push', 'utf8');
+assert.doesNotMatch(prePushHook, /\[\s*!?\s*-[defs]\s+["']?node_modules/,
+  'pre-push must check packages through node, not a [ -d node_modules/... ] test');
 
 console.log('PASS - pre-push skips the build and the map check only when none of their inputs changed.');

@@ -92,8 +92,8 @@ BEGIN
   INSERT INTO public.customers (farm_name, account_number, email)
   VALUES ('[SMOKE] Evidence Farm ' || v_suffix, '[SMOKE]-DCE-' || v_suffix, 'smk-dce-' || v_suffix || '@example.invalid')
   RETURNING id INTO v_customer;
-  INSERT INTO public.products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Evidence Product ' || v_suffix, 'GL', '999999-99999', 'liquid')
+  INSERT INTO public.products (product_name, unit_size, epa_registration, product_form, inventory_unit)
+  VALUES ('[SMOKE] Evidence Product ' || v_suffix, 'Gal', '999999-99999', 'liquid', 'Gal')
   RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes('product_page', NULL,
     jsonb_build_array(jsonb_build_object('product_id', v_product, 'row_version', 1, 'pricing_mode', 'price_driven',
@@ -101,7 +101,7 @@ BEGIN
     v_admin, v_prefix || 'pricing-preview');
   PERFORM public.apply_product_pricing_change_set((v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint', v_admin, v_prefix || 'pricing-apply');
   INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
-  VALUES (v_product, 'Main Warehouse', 100, 0, 'GL');
+  VALUES (v_product, 'Main Warehouse', 100, 0, 'Gal');
 
   -- Deliveries 1-4, 6 and 7 in_progress (driver A; 6 scheduled 10 days ago); 5 and 8 scheduled (the list).
   INSERT INTO public.orders (order_number, customer_id, status, booking_draw)
@@ -116,7 +116,7 @@ BEGIN
     RETURNING id INTO v_id;
     v_del := v_del || v_id;
     INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
-    VALUES (v_id, v_oi, v_product, 2, 0, 'GL');
+    VALUES (v_id, v_oi, v_product, 2, 0, 'Gal');
     IF v_i NOT IN (5, 8) THEN UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_id; END IF;
   END LOOP;
 

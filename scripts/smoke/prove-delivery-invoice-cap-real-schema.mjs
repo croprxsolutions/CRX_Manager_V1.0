@@ -210,9 +210,9 @@ function seed() {
     ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role, is_active = true;
     INSERT INTO public.customers (id, farm_name, assigned_sales_rep, assigned_tier, is_active) VALUES ('${CUSTOMER}', '[PROVER] Farm', '${REP}', 1, true);
     ALTER TABLE public.products DISABLE TRIGGER trigger_y_require_governed_product_pricing;
-    INSERT INTO public.products (id, product_name, unit_size, current_cost, tier1_price, tier2_price, tier3_price, is_active) VALUES
-      ('${PRODUCT_A}', '[PROVER] Product A', 'Gal', 6.00, 10.00, 10.00, 10.00, true),
-      ('${PRODUCT_B}', '[PROVER] Product B', 'Gal', 6.00, 10.00, 10.00, 10.00, true);
+    INSERT INTO public.products (id, product_name, unit_size, current_cost, tier1_price, tier2_price, tier3_price, is_active, inventory_unit) VALUES
+      ('${PRODUCT_A}', '[PROVER] Product A', 'Gal', 6.00, 10.00, 10.00, 10.00, true, 'Gal'),
+      ('${PRODUCT_B}', '[PROVER] Product B', 'Gal', 6.00, 10.00, 10.00, 10.00, true, 'Gal');
     ALTER TABLE public.products ENABLE TRIGGER trigger_y_require_governed_product_pricing;
     INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size) VALUES
       ('${PRODUCT_A}', 'Main Warehouse', 1000, 0, 'Gal'), ('${PRODUCT_B}', 'Main Warehouse', 1000, 0, 'Gal');

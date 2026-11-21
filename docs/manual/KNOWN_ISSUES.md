@@ -36,8 +36,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md)) | 108 |
-| Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md); KI-170 added 2026-11-20 from the shared data loading pilot; KI-120 accepted and KI-169 split from KI-119 2026-11-19) | 109 |
+| Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106, KI-120) | 18 |
 | Closed as FIXED, with proof (bottom of file and archive) | 25 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
@@ -225,18 +225,31 @@ Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_
 ---
 
 ### KI-119 — Settings → Page Access hides screens but the database does not enforce it
-**MED (HIGH if meant as security) · OPEN · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #2) · unassigned**
-Page Access (`denied_pages`) is checked only by the screen router. A user with money pages hidden (one live rep today)
-keeps the abilities behind those pages. No decision says whether Page Access is a security control or menu tidiness
-(To-Do decision 16). Fix once decided: either rename it "Hide from menu" and record that, or enforce it in the
-database for the money and report functions. Exploit-level detail is held privately until a fix is live.
+**HIGH · REPORTS PART FIX IN REVIEW (Claude, `20270201100000_page_access_locks_reports.sql`, to staging after release #1990) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #2)**
+Page Access (`denied_pages`) is checked only by the screen router. Mason decided 2026-11-19 (To-Do decision 16) that
+it is a real security control: scope "actions + reports", reports now and money later. The fix makes the database
+refuse Reports Library and Sales Reports data to a person with that page hidden (including the commission rows the
+Reports Library shows, and the one-customer year-end summary when Customers is hidden too: Mason,
+2026-11-21), and limits the four logbook reports to admins and sales reps (Mason, 2026-11-19). Contract:
+[2026-11-19-ki119-page-access-lock-CONTRACT.md](../plans/2026-11-19-ki119-page-access-lock-CONTRACT.md); proof:
+`scripts/smoke/prove-page-access-locks-reports-real-schema.mjs`. The invoice and payment actions are KI-169. Known
+limit (Mason's scope): a person with reports hidden still sees the order and invoice rows on the screens they keep.
+Also accepted (Mason, 2026-11-21, Sol round 5): the Posted Applications and Price List tabs read the same records as
+the Record Book and Products pages, so they are not locked when those pages are hidden too; revisit when those pages
+get their own lock. Exploit-level detail is held privately until the fix is live.
+
+### KI-169 — Page Access does not yet lock the invoice and payment actions
+**HIGH · OPEN · security/money · split from KI-119 2026-11-19 · Taha, after 2026-12-15**
+Mason decided 2026-11-19 that Page Access also locks money actions, but the Invoices and Record Payments actions wait
+for Taha after 2026-12-15 (billing is his area until then). Reuse `public._require_page_access` from KI-119's
+migration, adding those page keys to it.
 
 ### KI-120 — Any rep can change a customer's payment terms and finance-charge settings
-**MED · OPEN · security/money · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #4, sweep 2 Q1) · unassigned**
+**ACCEPTED (Mason, 2026-11-19, To-Do decision 18: reps keep access; no code) · security/money · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #4, sweep 2 Q1)**
 The 2026-11-01 lock made price tier and credit limit admin-only; payment terms, finance-charge on/off, rate and grace
 days are not covered, so a rep can move a customer to Net 90 or turn off late fees (also parent customer and default
-application service). Fix if Mason agrees (To-Do decision 18): add these fields to `guard_customer_rep_edit_20261013`
-and disable them on the screen for non-admins.
+application service). Mason chose to keep it this way (To-Do decision 18); no fix is planned. Reopen only if he
+changes that decision.
 
 ### KI-121 — The last active admin can remove their own admin role
 **LOW · FIX IN REVIEW (not live) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #7) · Claude**
@@ -1177,6 +1190,7 @@ at once. Accepted limit (Mason, 2026-11-18 and 2026-11-19): work being saved at 
 or added after it, is not caught. Proof:
 `node scripts/smoke/prove-ki148-customer-deactivation-real-schema.mjs`. Follow-ups (unbilled blend tickets, jobs billed
 through their blend ticket, split-billing payers, billing runs that skip inactive customers): #2000.
+**Gap closed in review (#2000, migration `20270201120000_inactive_customer_refuses_new_work`, not applied):** Mason, 2026-11-19: an inactive customer gets no new orders, deliveries, holds or spray jobs until reactivated; the check locks the customer row, so a racing deactivation and new work cannot both win (for READ COMMITTED transactions, which every app path uses; a REPEATABLE READ deactivation would count from its older snapshot, and none exists). Quotes, invoices and bookings wait for Taha's billing work.
 
 ### KI-149 — Crop Programs and job print defaults let reps edit but only admins can save
 **LOW · OPEN · settings · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #9) · unassigned**
@@ -1198,6 +1212,16 @@ order. Two multi-product completions at once can deadlock, and one retries. Fix:
 **LOW · OPEN · purchasing/payables · found 2026-11-11 (PR #1769 review) · unassigned**
 Since KI-143, vendor bills are checked against what arrived (capped at the ordered total). `set_purchase_order_item_costs`
 still compares billed amounts with the ordered value. Fix: decide whether it should follow the same rule.
+
+### KI-170 — Two admins changing a product's vendors at the same moment can show the wrong preferred vendor
+**LOW · OPEN · products/purchasing · found 2026-11-20 (Sol 6.2 plan review, shared data loading pilot) · unassigned (Product Master Wave 2)**
+After an admin links a vendor, the Vendors section re-reads the product's vendors to learn which one is preferred.
+If that re-read fails, it falls back to "the vendor just made preferred, or the first vendor". If two admins link the
+first vendor to the same product at the same moment, or one makes V2 preferred just before the other makes V1 preferred
+(Luna, 2026-11-20), that fallback can name the loser's vendor, and the product page mirrors that name into its form
+until a reload. The database keeps the true preferred vendor; the list says it may be
+out of date and offers Try again. Needs two admins acting together and a failed read. Fix: on a failed re-read, block
+the product's Save until the vendors are re-read (a `ProductDetail.tsx` change, so Wave 2).
 
 ## Database and release process
 
@@ -1498,6 +1522,7 @@ spelling on receipt.
 | KI-61 | A `LOCK TABLE` in a migration does not stop an already-running call of the OLD function body | Mason 2026-09-03; both instances applied with zero activity; future migrations of that shape need a quiet rollout and a concurrency proof |
 | KI-62 | Live migration ledger has older entries with no file on `main` | Pre-existing drift, not new |
 | KI-63 | Quote-version trust chain has live pins in two files (`quote-versions-rpc-owned.sql`, `quoteVersionWriteBoundary.test.ts`); migration `20260826220000` keeps its apply-time pin copy | Intentional friction; a live-pin change must update both live files, while the applied migration stays unchanged |
+| KI-120 | Any rep can change a customer's payment terms, finance-charge settings, parent customer and default application service | Mason, 2026-11-19 (To-Do decision 18): reps keep access |
 | KI-64 | All agents share Mason's admin GitHub identity; the manual merge override is fenced only by command matching | Mason declined a separate non-admin credential twice (2026-09-01) |
 | KI-65 | The write-time actor-binding guard is bypassable by design limits | Capped by decision 2026-09-01; real controls are Codex review and post-apply sweeps |
 | KI-66 | `review-proof-guard` denies destructive commands that spell out a worktree path | Mason "document, don't fix" 2026-08-20; narrowed 2026-11-03 (P3): only the worktree root, its `.claude`, an unreadable or `..` path, or a path-less wiper aimed at one still deny |

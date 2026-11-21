@@ -2193,10 +2193,23 @@
       "covers": ["_epa_proposal_items", "start_epa_lookup", "record_epa_lookup", "_epa_lookup_input"],
       "area": ["regression"]
     },
+    "commit_epa_proposal_batch": {
+      "chain": "smoke-commit_epa_proposal_batch.sql",
+      "container_prover": "prove-epa-batch-commit-real-schema.mjs",
+      "description": "REQUIRES 20270130100000 (#1976). On two invented products an admin starts an EPA lookup and the epa-lookup role records a one-ingredient answer; the batch save accepting only the ingredient commits and writes exactly one ingredient row, a same-key retry returns the same receipt, and a save declining the ingredient is refused EPA_BATCH_DECISION_INVALID with nothing written and the proposal still open. Terminal rollback.",
+      "covers": ["commit_epa_proposal_batch", "commit_epa_proposal", "start_epa_lookup", "record_epa_lookup"],
+      "area": ["regression", "idempotency"]
+    },
     "farm_group_no_loops": {
       "chain": "smoke-farm_group_no_loops.sql",
       "description": "REQUIRES 20270127200000 (KI-146). An admin builds invented customers A > B > C through save_customer; putting A under its grandchild C is refused and A keeps no parent; get_customer_farm_group from C returns A, B and C with only A marked parent. Fails before the migration. Terminal rollback.",
       "covers": ["get_customer_farm_group", "guard_customer_parent_no_loop_20270127", "save_customer"],
+      "area": ["regression"]
+    },
+    "page_access_locks_reports": {
+      "chain": "smoke-page-access-locks-reports.sql",
+      "description": "REQUIRES 20270201100000 (KI-119). As real active profiles under RLS: an admin (even with a stale hidden list) and a rep with nothing hidden run every Reports Library and Sales Reports function; a rep with reports hidden is refused PAGE_ACCESS_DENIED: reports on the balance listing, chemical history, batch year-end and the four logbooks but keeps Sales Reports and the one-customer year-end summary, which is refused (PAGE_ACCESS_DENIED: reports, customers) only when Customers is hidden too; sales-reports hidden refuses both sales reports only; drivers, applicators and a signed-in user with no profile are refused (the container prover checks a seeded inactive rep); a rep's own commission rows disappear while reports is hidden (not for sales-reports) and the admin still sees them; clearing the list lets the next call through; anon and PUBLIC cannot execute the helper or the logbooks. Fails before the migration. Terminal rollback.",
+      "covers": ["_require_page_access", "get_customer_balance_listing", "get_chemical_history", "get_batch_year_end_summaries", "get_customer_year_end_summary", "get_logbook_faa", "get_logbook_by_field", "get_logbook_by_customer", "get_logbook_by_applicator", "get_sales_summary_report", "get_sales_detail_report"],
       "area": ["regression"]
     }
   }

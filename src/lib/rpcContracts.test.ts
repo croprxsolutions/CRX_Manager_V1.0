@@ -2934,6 +2934,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // 20270119160000 (USE-2, local candidate): admin and sales-rep adjuvant list writer; replays through
   // _product_parent_replay and saves its receipt. Prune once the generated types carry it.
   'set_registration_adjuvants',
+  // 20270130100000 (#1976, local candidate): the EPA batch fill's save; replays through _product_parent_replay and
+  // commit_epa_proposal saves the receipt. Prune once the generated types carry it.
+  'commit_epa_proposal_batch',
 ]);
 
 /**

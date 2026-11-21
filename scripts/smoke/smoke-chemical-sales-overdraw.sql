@@ -41,8 +41,8 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub',v_admin::text,true);
   INSERT INTO public.customers(farm_name, assigned_sales_rep)
   VALUES ('[SMOKE] Overdraw Farm '||v_suffix, v_rep_a) RETURNING id INTO v_customer;
-  INSERT INTO public.products(product_name, unit_size, product_form)
-  VALUES ('[SMOKE] Overdraw Product '||v_suffix, 'gal', 'liquid') RETURNING id INTO v_product;
+  INSERT INTO public.products(product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[SMOKE] Overdraw Product '||v_suffix, 'gal', 'liquid', 'Gal') RETURNING id INTO v_product;
   v_split := jsonb_build_object('splits',jsonb_build_array(jsonb_build_object(
     'recipient',(SELECT full_name FROM public.profiles WHERE id=v_rep_a),
     'recipient_user_id',v_rep_a,'percentage',100)));

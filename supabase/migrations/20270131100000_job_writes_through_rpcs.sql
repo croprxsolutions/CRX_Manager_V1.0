@@ -42,16 +42,18 @@ DECLARE
   v_deleted     uuid[] := '{}';
   v_skipped     jsonb := '[]'::jsonb;
   v_result      jsonb;
+  v_is_admin    boolean;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
   IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH';
   END IF;
-  IF NOT EXISTS (
-    SELECT 1 FROM public.profiles
-     WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales_rep')
-  ) THEN
-    RAISE EXCEPTION 'INSUFFICIENT_ROLE: edit_jobs requires an active admin or sales rep';
+  -- An admin, or a sales rep whose Job Schedule page is not blocked (as the screens' hasPageAccess).
+  SELECT role = 'admin' INTO v_is_admin FROM public.profiles
+   WHERE id = v_actor AND is_active = true
+     AND (role = 'admin' OR (role = 'sales_rep' AND NOT 'jobs' = ANY (denied_pages)));
+  IF v_is_admin IS NULL THEN
+    RAISE EXCEPTION 'INSUFFICIENT_ROLE: edit_jobs requires an active admin, or a sales rep with the Job Schedule page';
   END IF;
   IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: edit_jobs requires p_idempotency_key';
@@ -130,18 +132,20 @@ BEGIN
   -- so a booking's siblings are not rebuilt over and over. No BEFORE trigger on jobs returns NULL, so
   -- every UPDATE must change exactly the rows it targets; a shortfall aborts rather than being reported.
   -- One snapshot: every requested id is either locked and live, or skipped as deleted / not found.
-  WITH locked AS (SELECT id, deleted_at FROM public.jobs WHERE id = ANY (v_ids) ORDER BY id FOR UPDATE)
+  -- FOR NO KEY UPDATE (the lock the UPDATEs below take anyway) does not block the FOR KEY SHARE that
+  -- foreign-key checks on job lines take, so two cancels on one booking cannot deadlock over it.
+  WITH locked AS (SELECT id, deleted_at FROM public.jobs WHERE id = ANY (v_ids) ORDER BY id FOR NO KEY UPDATE)
   SELECT coalesce(array_agg(x ORDER BY x) FILTER (WHERE l.id IS NOT NULL AND l.deleted_at IS NULL), '{}'),
          coalesce(jsonb_agg(jsonb_build_object('id', x, 'reason', CASE WHEN l.id IS NULL THEN 'not_found' ELSE 'deleted' END) ORDER BY x)
                     FILTER (WHERE l.id IS NULL OR l.deleted_at IS NOT NULL), '[]'::jsonb)
     INTO v_live, v_skipped
     FROM unnest(v_ids) AS x LEFT JOIN locked l ON l.id = x;
   -- The caller may have been deactivated while this call waited for those locks.
-  IF NOT EXISTS (
-    SELECT 1 FROM public.profiles
-     WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales_rep')
-  ) THEN
-    RAISE EXCEPTION 'INSUFFICIENT_ROLE: edit_jobs requires an active admin or sales rep';
+  SELECT role = 'admin' INTO v_is_admin FROM public.profiles
+   WHERE id = v_actor AND is_active = true
+     AND (role = 'admin' OR (role = 'sales_rep' AND NOT 'jobs' = ANY (denied_pages)));
+  IF v_is_admin IS NULL THEN
+    RAISE EXCEPTION 'INSUFFICIENT_ROLE: edit_jobs requires an active admin, or a sales rep with the Job Schedule page';
   END IF;
 
   IF v_set <> '' AND cardinality(v_live) > 0 THEN
@@ -153,13 +157,15 @@ BEGIN
   END IF;
 
   IF p_action IS NOT NULL AND cardinality(v_live) > 0 THEN
-    -- Eligibility reads each job's status after the changes above.
+    -- Eligibility reads each job's status after the changes above. Only an admin may delete a
+    -- completed job (Mason, 2026-11-21), so billable work cannot quietly leave Unbilled Jobs.
     SELECT coalesce(array_agg(id ORDER BY id) FILTER (WHERE status = ANY (v_allowed)), '{}'),
            v_skipped || coalesce(jsonb_agg(jsonb_build_object('id', id, 'reason', 'status', 'status', status) ORDER BY id)
                                    FILTER (WHERE NOT status = ANY (v_allowed)), '[]'::jsonb)
       INTO v_target, v_skipped
       FROM (SELECT id, status, CASE p_action WHEN 'cancel' THEN ARRAY['scheduled', 'in_progress']
-                                             ELSE ARRAY['scheduled', 'in_progress', 'completed'] END AS v_allowed
+                                             WHEN 'delete' THEN CASE WHEN v_is_admin THEN ARRAY['scheduled', 'in_progress', 'completed']
+                                                                     ELSE ARRAY['scheduled', 'in_progress'] END END AS v_allowed
               FROM public.jobs WHERE id = ANY (v_live)) AS cur;
     IF cardinality(v_target) > 0 THEN
       IF p_action = 'cancel' THEN

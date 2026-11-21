@@ -1,8 +1,12 @@
 # Behavior contract: spray job writes go through a server function (#1979)
 
-Read at `c0b544a23` (origin/staging, 2026-11-19). Booking items in #1979 are out of scope (Taha owns bookings until 2026-12-15). Challenged by Astra (`gpt-6.2-astra`, high): cold challenge (52 findings) and one targeted re-check of the redesign (27 findings); both settled at the end. No further challenge rounds.
+Read at `c0b544a23` (origin/staging, 2026-11-19). Booking items in #1979 are out of scope (Taha owns bookings until 2026-12-15). Challenged by Astra (`gpt-6.2-astra`, high): cold challenge (52 findings) and one targeted re-check of the redesign (27 findings); both settled at the end. Later Sol review rounds continue as normal.
 
 **Principle: parity.** This change moves today's screen writes behind one checked server function and then removes direct writes. It does not change any business rule the screens follow today (who may edit which job, which statuses may be cancelled or deleted, license timing, last-writer-wins edits, no undo). Each of those stays exactly as it is; changing one is a separate decision.
+
+**Exceptions to parity (Mason, 2026-11-21, Sol round 5):** (a) a sales rep whose Job Schedule page is blocked for them (`profiles.denied_pages` contains `jobs`) is refused, matching what the screens already show them; (b) only an admin may delete a completed job: a rep's delete skips completed jobs (reason `status`). Admins are never page-blocked, as in the screens.
+
+**Value limits:** numeric patch fields must be 0.001 to 1,000,000 (carrier rate may also be 0); the RPC refuses anything else with `BAD_VALUE`. The caller (PR B) checks the same range before saving.
 
 **One intended change:** Mass Edit's field changes and its cancel now save together or not at all. Today they are two separate saves, so a refused cancel could leave the date change saved; now a refusal anywhere saves nothing, and the screen says so.
 
@@ -126,3 +130,14 @@ Files: `supabase/migrations/20270131100000_job_writes_through_rpcs.sql` (PR A), 
 - **MED refuted:** C9's refusal comes from the planning UPDATE, but the whole call is one transaction, so a later cancel failure rolls back the planning edit by the same rule (Postgres semantics; no savepoint in the function).
 - **MED deferred (parity, already named):** admins edit billed/cancelled jobs; a rep can soft-delete completed unbilled work; soft delete leaves dispatch rows open; booking lock order.
 - **LOW fixed:** positive values below 0.001 refused (`1e-400` case); C4 now proves a missing, empty or blank key is refused; contract wording. **LOW deferred:** the replay marks `20261217100000` ledger-only (named in round 1).
+
+## Sol round 5 settlement (1 BLOCKER, 5 HIGH, 5 MED, 3 LOW)
+
+- **BLOCKER fixed:** the "no further challenge rounds" wording at the top is gone.
+- **HIGH fixed (Mason, 2026-11-21):** a rep blocked from the Job Schedule page is refused (P6); only an admin deletes a completed job (C3).
+- **HIGH fixed:** job rows are locked `FOR NO KEY UPDATE`, which does not block the `FOR KEY SHARE` lock foreign-key checks take, so two cancels on one booking cannot deadlock.
+- **HIGH accepted for Taha (Mason, 2026-11-21):** partial cancel of a large booking rebuilds its holds per cancelled job (same as today's screens; KNOWN_ISSUES KI-151). Mason owner-accepts it after round 6.
+- **HIGH kept as today (Mason, 2026-11-21):** changing a completed job's date can change which quote prices its invoice (KNOWN_ISSUES KI-172, for Taha's billing work).
+- **MED fixed:** C9 comment states the refusal happens before any write.
+- **MED deferred:** an all-skipped call can claim another operation's key (keys are random per click, so only a caller who already knows a key can do this, and the victim gets a clear refusal, never a wrong replay); a rep deactivated while the call waits on a booking lock can finish (both checks pass before the wait; the window is the length of one lock wait); soft delete leaves dispatch rows open and no dispatch row in the smoke cancel case (KI-173, parity); the opposite-order race test does not force lock overlap (ids are locked in one sorted statement, so caller order cannot reach the lock order).
+- **LOW fixed:** numeric limits written into this contract. **LOW deferred:** prover cleanup by container name (the name carries a random suffix created in the same run).

@@ -6,17 +6,19 @@
 -- CONTAINER ONLY (smoke-specs container_only): probe P5 deactivates a sales rep inside the transaction,
 -- which locks that user's auth session rows until rollback; never run it against a live database.
 -- Every call runs as a signed-in user (SET LOCAL ROLE authenticated + jwt sub); checks read as owner.
---   P1-P5  auth probes: no user, anon, applicator, forged actor, inactive admin -> refused, nothing written
+--   P1-P6  auth probes: no user, anon, applicator, forged actor, inactive rep, rep blocked from the
+--          Job Schedule page -> refused, nothing written
 --   C1  rep cancels {scheduled, in_progress, completed, deleted, missing}: 2 cancelled, 3 skipped with reasons;
 --       the cancelled scheduled job's stock holds are gone
 --   C2  same key + same payload replays; same key + other ids refused
---   C3  delete {scheduled, completed, invoiced}: 2 deleted, invoiced skipped and still live
+--   C3  rep deletes {scheduled, completed, invoiced}: scheduled deleted, completed and invoiced skipped;
+--       admin deletes {completed, invoiced}: completed deleted, invoiced skipped and still live
 --   C4  refused shapes and values (other columns, null job_date, wrong types, bad numbers, delete+changes)
 --   C5  {loader_comment} only changes that column; null clears; batch_ref set then cleared; absent keys untouched
 --   C6  expired license refused; no license rows allowed (today's rule)
 --   C7  rep schedule_date on {scheduled, invoiced} -> whole call refused, nothing changed; admin -> both updated
 --   C8  changes + cancel on {scheduled, completed}: both dated, only scheduled cancelled
---   C9  rep changes + cancel on {scheduled (sorts first), invoiced}: billed lock aborts all, scheduled not cancelled
+--   C9  rep changes + cancel on {scheduled (sorts first), invoiced}: billed refusal saves nothing, scheduled not cancelled
 --   C10 500 scheduled jobs holding stock, changes + cancel in one call: all updated, cancelled, holds released, under 4 s
 -- Ends in RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'. Any other error = FAIL.
 -- ============================================================================
@@ -136,7 +138,20 @@ BEGIN
   END;
   RESET ROLE;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
-  UPDATE profiles SET is_active = true WHERE id = v_rep2;
+  UPDATE profiles SET is_active = true, denied_pages = array_append(denied_pages, 'jobs') WHERE id = v_rep2;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep2, 'role', 'authenticated')::text, true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    PERFORM edit_jobs(ARRAY[v_jS], NULL, 'cancel', v_rep2, 'ej-p6-' || v_sfx);
+    RESET ROLE; RAISE EXCEPTION 'SMOKE_FAIL: P6 rep blocked from the Job Schedule was not refused';
+  EXCEPTION WHEN OTHERS THEN
+    RESET ROLE;
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'INSUFFICIENT_ROLE%' THEN RAISE EXCEPTION 'SMOKE_FAIL: P6 wrong error: %', SQLERRM; END IF;
+  END;
+  RESET ROLE;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  UPDATE profiles SET denied_pages = array_remove(denied_pages, 'jobs') WHERE id = v_rep2;
   SELECT count(*) INTO v_n FROM jobs WHERE id = v_jS AND status = 'scheduled';
   IF v_n <> 1 THEN RAISE EXCEPTION 'SMOKE_FAIL: a refused probe changed the job'; END IF;
 
@@ -190,14 +205,28 @@ BEGIN
   SELECT count(*) INTO v_n FROM jobs WHERE id = v_jS2 AND status = 'scheduled';
   IF v_n <> 1 THEN RAISE EXCEPTION 'SMOKE_FAIL: C2 refused replay changed a job'; END IF;
 
-  -- ── C3 delete ─────────────────────────────────────────────────────────────
+  -- ── C3 delete: a rep cannot delete completed work; an admin can ───────────
   SET LOCAL ROLE authenticated;
   v_res := edit_jobs(ARRAY[v_jS2, v_jC, v_jI], NULL, 'delete', v_rep, 'ej-c3-' || v_sfx);
   RESET ROLE;
-  IF NOT (v_res -> 'deleted') @> to_jsonb(ARRAY[v_jS2, v_jC]) OR jsonb_array_length(v_res -> 'deleted') <> 2
-     OR v_res -> 'skipped' <> jsonb_build_array(jsonb_build_object('id', v_jI, 'reason', 'status', 'status', 'invoiced')) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: C3 result %', v_res;
+  IF v_res -> 'deleted' <> to_jsonb(ARRAY[v_jS2])
+     OR NOT (v_res -> 'skipped') @> jsonb_build_array(
+          jsonb_build_object('id', v_jC, 'reason', 'status', 'status', 'completed'),
+          jsonb_build_object('id', v_jI, 'reason', 'status', 'status', 'invoiced'))
+     OR jsonb_array_length(v_res -> 'skipped') <> 2 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: C3 rep result %', v_res;
   END IF;
+  SELECT count(*) INTO v_n FROM jobs WHERE id IN (v_jC, v_jI) AND deleted_at IS NULL;
+  IF v_n <> 2 THEN RAISE EXCEPTION 'SMOKE_FAIL: C3 rep deleted completed or invoiced work'; END IF;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  SET LOCAL ROLE authenticated;
+  v_res := edit_jobs(ARRAY[v_jC, v_jI], NULL, 'delete', v_admin, 'ej-c3a-' || v_sfx);
+  RESET ROLE;
+  IF v_res -> 'deleted' <> to_jsonb(ARRAY[v_jC])
+     OR v_res -> 'skipped' <> jsonb_build_array(jsonb_build_object('id', v_jI, 'reason', 'status', 'status', 'invoiced')) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: C3 admin result %', v_res;
+  END IF;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
   SELECT count(*) INTO v_n FROM jobs WHERE id IN (v_jS2, v_jC) AND deleted_at IS NOT NULL;
   IF v_n <> 2 THEN RAISE EXCEPTION 'SMOKE_FAIL: C3 jobs not deleted'; END IF;
   SELECT count(*) INTO v_n FROM jobs WHERE id = v_jI AND deleted_at IS NULL;
@@ -370,8 +399,8 @@ BEGIN
   IF v_n <> 1 THEN RAISE EXCEPTION 'SMOKE_FAIL: C8 scheduled job not cancelled'; END IF;
 
   -- ── C9 combined call: a refused patch on the invoiced job aborts the scheduled cancel too ──
-  -- The scheduled job's id sorts before the invoiced one, so it is edited and cancelled first and the
-  -- refusal must undo both.
+  -- The scheduled job's id sorts before the invoiced one. The patch check refuses the invoiced job before
+  -- any row is written, so the scheduled job must be left unchanged (not edited, not cancelled).
   INSERT INTO jobs (id, job_number, customer_id, job_date, schedule_date, created_by)
     VALUES (('00000000-0000-4000-8000-' || substr(md5(v_sfx), 1, 12))::uuid, '[SMOKE] EJ-S3-' || v_sfx, v_cust,
             CURRENT_DATE + 5, v_date, v_admin) RETURNING id INTO v_jS2;

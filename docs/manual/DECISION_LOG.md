@@ -1,5 +1,14 @@
 # Decision Log
 
+## 2026-11-21 — #2047 (edit_jobs): who may edit and delete jobs, and two job issues left for Taha
+
+**Decision (Mason, in chat, 2026-11-21, answering Sol round 5).** (1) A sales rep whose Job Schedule page is blocked
+for them is refused by `edit_jobs`, as the screens already block them. (2) Only an admin may delete a completed job; a
+rep's delete skips it. (3) Changing a completed job's date stays allowed as today; logged as KI-172 for Taha's billing
+work. (4) Partial cancel of a large booking stays as today; logged as KI-171 for Taha, and Mason will owner-accept that
+Sol finding after the next round.
+**What it does:** two deliberate exceptions to the #1979 "parity" rule (contract updated); no other job rule changes.
+
 ## 2026-11-21 — #2047 (job edits through edit_jobs, #1979 PR A) may have Sol rounds 5 to 10
 
 **Decision (Mason, in chat, 2026-11-21: "Yes, allow 5–10").** PR #2047 may have its Sol review in rounds 5

@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md); KI-170 added 2026-11-20 from the shared data loading pilot) | 109 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md); KI-170 added 2026-11-20 from the shared data loading pilot; KI-171 to KI-173 added 2026-11-21 from #2047) | 112 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
 | Closed as FIXED, with proof (bottom of file and archive) | 25 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
@@ -1208,6 +1208,25 @@ first vendor to the same product at the same moment, or one makes V2 preferred j
 until a reload. The database keeps the true preferred vendor; the list says it may be
 out of date and offers Try again. Needs two admins acting together and a failed read. Fix: on a failed re-read, block
 the product's Save until the vendors are re-read (a `ProductDetail.tsx` change, so Wave 2).
+
+### KI-171 — Cancelling part of a large booking's jobs rebuilds its stock holds once per job
+**LOW · ACCEPTED · jobs/bookings · found 2026-11-21 (Sol round 5, #2047) · Taha (bookings, after 2026-12-15)**
+The booking hold trigger runs once per cancelled job, so cancelling part of a booking rebuilds the remaining jobs' holds
+every time. Today's screens do the same. It only matters with roughly 150+ open stocked jobs on one booking (measured
+200 rebuilds = 11.3 s); live has 4 jobs and none on a booking (2026-11-19). Mason accepted it for #2047 (2026-11-21).
+Fix: make the trigger rebuild once per statement (booking/inventory core).
+
+### KI-172 — Changing a completed job's date can change which quote prices its invoice
+**MED · ACCEPTED · jobs/billing · found 2026-11-21 (Sol round 5, #2047) · Taha (billing)**
+Admins and reps can change a completed, not-yet-invoiced job's `job_date`. Split-invoice pricing picks the quote by that
+date, so moving a June 10 job to June 13 can let a June 12 quote price it. Today's Mass Edit allows the same. Mason kept
+today's rule (2026-11-21). Fix belongs with the field-application invoice rules: lock the date once a job is completed,
+or price by the application record's date.
+
+### KI-173 — Soft-deleting a dispatched job leaves its dispatch rows open
+**LOW · OPEN · jobs · found 2026-11-11 (Sol, #2047) · unassigned**
+Deleting a job hides it but leaves its location dispatch rows marked `dispatched`; restoring the job shows the old
+dispatch again. Same as today's direct delete. Fix: close dispatch rows on delete, as cancel already does.
 
 ## Database and release process
 

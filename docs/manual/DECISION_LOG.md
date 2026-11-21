@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2045: Mason owner-accepted 1 Sol finding(s) at `790859458268`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2045 at `790859458268` (base `a90d3b34fc7a`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201195000_inventory_edge_cases_1942.sql:315`, text sha256 `83a9f256b4f30c5e` (the wording stays with the proof, not here)
+  Mason's reason: cant hapen (ref 5ed2ac568296)
+
 ## 2026-11-21 — #2051: Mason owner-accepted 1 Sol finding(s) at `d3b16f425dc9`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2051 at `d3b16f425dc9` (base `ccefd47221c0`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

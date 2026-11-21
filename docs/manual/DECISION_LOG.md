@@ -1,5 +1,26 @@
 # Decision Log
 
+## 2026-11-21 — #2068: Mason owner-accepted 4 Sol finding(s) at `1d9202dcb57d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `1d9202dcb57d` (base `dab22364c6bc`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:296`, text sha256 `8c9208ce2bfc73a0` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 541bb0106bf2)
+- Finding 2 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:174`, text sha256 `1eccf829c6361a8d` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 535732ca2aa9)
+- Finding 3 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:312`, text sha256 `43b3d94fb469bf0a` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 5d333eacec4e)
+- Finding 4 (HIGH) at `scripts/smoke/grower-share-rep-cover-reverse.sql:31`, text sha256 `3a19afa1d0a31d5f` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref d424445cef65)
+
+## 2026-11-21 — #2068: Mason owner-accepted 3 Sol finding(s) at `2f04db346c0b`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `2f04db346c0b` (base `912dd819a01f`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201135000_grower_share_rep_needs_price_to_cover_cost.sql:296`, text sha256 `478b5ca87698ebe6` (the wording stays with the proof, not here)
+  Mason's reason: reps knowing cost is acceptable , decided 11-20 (ref e09c1e3b226e)
+- Finding 2 (HIGH) at `supabase/migrations/20270201135000_grower_share_rep_needs_price_to_cover_cost.sql:174`, text sha256 `102a19fdd69df789` (the wording stays with the proof, not here)
+  Mason's reason: this can't happen in our buisness (ref 90055eb3a0d6)
+- Finding 3 (HIGH) at `supabase/migrations/20270201135000_grower_share_rep_needs_price_to_cover_cost.sql:312`, text sha256 `2295df5619029f50` (the wording stays with the proof, not here)
+  Mason's reason: nowhere near 9999 invoices a year (ref 0b77a9cf87d8)
 ## 2026-11-21 — Any rep may edit any draft field-application invoice (rep-scope fix dropped)
 
 **Decision (Mason, in chat, 2026-11-21: "Drop the fix").** A sales rep may save, change billing on, and change applied details (applicator, weather, carrier water) of ANY draft or unposted field-application invoice, not only their own, as the app works today. The planned fix (`docs/plans/2026-11-21-field-invoice-rep-scope-CONTRACT.md`) is dropped and nothing was built. The KI-01 related low and the field-invoice part of KI-03 are accepted.

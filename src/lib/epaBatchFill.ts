@@ -85,14 +85,19 @@ export async function fetchBatchCandidates(now = Date.now()): Promise<BatchCandi
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-const words = (s: string) => s.toLowerCase().split(/[\s\-/]+/).map((w) => w.replace(/[^a-z0-9]/g, '')).filter(Boolean);
+// A typed "(R)" or "(TM)" is a trademark mark, not part of the name ("CruiserMaxx(R) APX").
+const words = (s: string) => s.toLowerCase().replace(/\((r|tm)\)/g, ' ').split(/[\s\-/]+/)
+  .map((w) => w.replace(/[^a-z0-9]/g, '')).filter(Boolean);
 
-/** A word of EPA's product name equals the first word of at least one app name (catches wrong numbers). */
+/**
+ * A word of EPA's product name equals the first word of at least one app name, or its first two words joined
+ * ("Grazon Next" = EPA's "GrazonNext"). Catches wrong numbers.
+ */
 export function epaNameMatches(epaProductName: string | null | undefined, appNames: string[]): boolean {
   const epa = new Set(words(epaProductName ?? ''));
   return appNames.some((name) => {
-    const first = words(name)[0];
-    return first !== undefined && epa.has(first);
+    const [first, second] = words(name);
+    return first !== undefined && (epa.has(first) || (second !== undefined && epa.has(first + second)));
   });
 }
 

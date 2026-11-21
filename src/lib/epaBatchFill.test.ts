@@ -25,6 +25,16 @@ describe('epaNameMatches', () => {
     expect(epaNameMatches('SURFACE HERBICIDE', ['Ace'])).toBe(false); // whole words only, never a substring
     expect(epaNameMatches('Lumax® EZ Herbicide', ['Lumax EZ'])).toBe(true);
   });
+
+  it('ignores a typed (R) or (TM) mark and accepts a two-word app name written as one word', () => {
+    expect(epaNameMatches('CruiserMaxx(R) APX', ['CruiserMaxx APX'])).toBe(true);
+    expect(epaNameMatches('Widget(TM) 2L', ['Widget'])).toBe(true);
+    expect(epaNameMatches('GrazonNext HL', ['Grazon Next HL'])).toBe(true);
+    expect(epaNameMatches('FIRSTRATE HERBICIDE', ['First Rate'])).toBe(true);
+    // Still whole words: a joined pair must equal an EPA word, never sit inside one.
+    expect(epaNameMatches('SUPERFIRSTRATE', ['First Rate'])).toBe(false);
+    expect(epaNameMatches('Relam® Q', ['Realm Q'])).toBe(false); // EPA misspelling stays with a person
+  });
 });
 
 describe('batchDecision', () => {

@@ -259,15 +259,31 @@ function splitShellWordsRaw(value) {
 // destination paths) use this, because the raw form is the correct one there.
 // Shell redirections (`>`, `2>`, `>>out`, `< in`) and their target file are not
 // git arguments: read as words they became fake refspecs/branches (2026-11-21).
-// Matched on the RAW word, so a quoted `'>'` stays a real argument.
-const SHELL_REDIRECT_RE = /^\d*(?:>>|>\||>&|>|<<<|<<|<&|<)/;
+// Read on the RAW word, so a quoted `'>'` stays a real argument; a redirect glued
+// to a word (`feat/x>out.txt`) leaves the shell's argument `feat/x`.
+const SHELL_REDIRECT_OP_RE = /^(?:>>|>\||>&|>|<<<|<<|<&|<)/;
+function unquotedRedirectAt(word) {
+  let quote = "";
+  for (let i = 0; i < word.length; i += 1) {
+    const char = word[i];
+    if (quote) { if (char === quote) quote = ""; else if (char === "\\" && quote === '"') i += 1; continue; }
+    if (char === "\\") { i += 1; continue; }
+    if (char === "'" || char === '"') { quote = char; continue; }
+    if (char === ">" || char === "<") return i;
+  }
+  return -1;
+}
 function splitShellArgs(value) {
   const raw = splitShellWordsRaw(value);
   const words = [];
   for (let i = 0; i < raw.length; i += 1) {
-    const op = raw[i].match(SHELL_REDIRECT_RE);
-    if (!op) { words.push(unquoteShellArg(raw[i])); continue; }
-    if (op[0] === raw[i]) i += 1; // bare operator: its target is the next word
+    const at = unquotedRedirectAt(raw[i]);
+    if (at === -1) { words.push(unquoteShellArg(raw[i])); continue; }
+    const prefix = raw[i].slice(0, at);
+    // `2>` / `&>` name a file descriptor; any other prefix is a real argument.
+    if (prefix && !/^(?:\d+|&)$/.test(prefix)) words.push(unquoteShellArg(prefix));
+    const rest = raw[i].slice(at);
+    if (rest.match(SHELL_REDIRECT_OP_RE)[0] === rest) i += 1; // bare operator: its target is the next word
   }
   return words;
 }

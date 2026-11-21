@@ -96,7 +96,11 @@ for (const [cmd, want] of [
   ["git push origin b | tee log", ["b"]],
   ["git push origin b && echo ok", ["b"]],
   ["git push origin b; echo ok", ["b"]],
+  ["git push origin b&>all.txt c", ["b"]], // the push command ends at `&`
+  ["git push origin feat/x>out.txt c", ["feat/x", "c"]], // a redirect glued to a branch
+  ["git push origin feat/x2>err.txt", ["feat/x2"]], // digits glued to a word are not a file descriptor
   ["git push origin '>' b", [">", "b"]], // a quoted `>` is a real argument, not a redirection
+  ["git push origin 'a>b' c", ["a>b", "c"]],
 ]) {
   assert.deepEqual(pushDestinationBranches(cmd, "cur"), want, cmd);
   passed += 1;
@@ -136,6 +140,7 @@ ok(readClaims(claimsPath)[">"]?.session === "Z", "setup: another session holds c
 ok(pushGuard("git push origin other-branch > out.txt", "B") === "", "a redirect after the push is not a branch, so no refusal");
 ok(pushGuard("git -C . push -q origin other-branch 2>&1", "B") === "", "`2>&1` is not a branch, so no refusal");
 ok(/LANDING CLAIM/.test(pushGuard("git push origin feat/land 2>&1", "B")), "a real claimed branch is still refused behind a redirect");
+ok(/LANDING CLAIM/.test(pushGuard("git push origin feat/land>out.txt", "B")), "a real claimed branch is still refused with a redirect glued on");
 ok(pushGuard("git push --dry-run origin dry-branch", "B") === "" && !("dry-branch" in readClaims(claimsPath)), "a dry-run push claims nothing");
 ok(pushGuard("git status && npm test", "B") === "", "ordinary commands are never refused");
 ok(pushGuard("git push origin feat/land") === "", "a call with no session id is never refused");

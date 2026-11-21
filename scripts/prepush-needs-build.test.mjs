@@ -2,7 +2,7 @@
 // Pre-push skips the app type check and build only when no app file changed, and builds on any doubt.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { allDeletes, edgeSourceTests, needsAppBuild, needsFreshnessCheck, needsMapCheck, needsPinCheck, needsRegistryCheck } from './prepush-needs-build.mjs';
 import { tempDir } from './lib/test-temp-dir.mjs';
@@ -113,5 +113,11 @@ try {
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }
+
+// The containment test drives .husky/pre-push with node and npm stubbed, and its Windows CI job has no
+// node_modules: a plain folder test there failed CI on PR #2112. Hook checks must ask through node.
+const prePushHook = readFileSync('.husky/pre-push', 'utf8');
+assert.doesNotMatch(prePushHook, /\[\s*!?\s*-[defs]\s+["']?node_modules/,
+  'pre-push must check packages through node, not a [ -d node_modules/... ] test');
 
 console.log('PASS - pre-push skips the build and the map check only when none of their inputs changed.');

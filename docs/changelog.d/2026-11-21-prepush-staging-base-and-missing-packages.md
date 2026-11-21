@@ -10,3 +10,5 @@ Proof:
 - I ran `.husky/pre-push` in a worktree without packages and saw the new message and exit 1.
 
 Not verified: a real push of a staging branch through the hook; CI still checks every PR.
+
+Follow-up (same day): the first version tested `[ ! -d node_modules/vitest ]`, which failed the Windows containment job (that test stubs `node`/`npm` and runs with no packages). The check now asks Node, and `scripts/prepush-needs-build.test.mjs` refuses any `[ -d node_modules/... ]` test in the hook. Its rule matches the old hook text (33e409374) and passes on the new one.

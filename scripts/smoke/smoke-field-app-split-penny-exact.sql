@@ -77,7 +77,7 @@ BEGIN
   -- supplies its manual unit_price_cents on the invoice line. Establish its cost
   -- through the public governed pricing route; never disable the cost guard.
   INSERT INTO products (product_name, unit_size, inventory_unit, product_form)
-    VALUES ('[SMOKE] Split Prod '||v_sfx, 'gal', 'gal', 'liquid') RETURNING id INTO v_prod;
+    VALUES ('[SMOKE] Split Prod '||v_sfx, 'Gal', 'Gal', 'liquid') RETURNING id INTO v_prod;
   v_pricing_preview := public.preview_product_cost_basis_changes(
     'product_page', NULL,
     jsonb_build_array(jsonb_build_object(
@@ -119,7 +119,7 @@ BEGIN
   -- its own; the engine never divides 1501, so the sum is exact by construction.
   v_chemicals := jsonb_build_array(jsonb_build_object(
     'product_id', v_prod, 'description', 'Split Chem',
-    'quantity', 0, 'unit_size', 'gal',
+    'quantity', 0, 'unit_size', 'Gal',
     'unit_price_cents', 1501, 'cost_cents', 100, 'sort_order', 0,
     'rate_per_acre', 0.01, 'rate_unit', 'gal',
     'manual_override', true

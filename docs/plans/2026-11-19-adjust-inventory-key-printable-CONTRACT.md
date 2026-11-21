@@ -5,7 +5,7 @@ Read at `origin/staging` b81667ddd, 2026-11-19.
 ## Outcome and authority
 
 - **Result:** `adjust_inventory` refuses an idempotency key that contains any character outside printable ASCII (`!` to `~`), not only keys with no printable character at all. Fact: the current check (`20270113100000`, `p_idempotency_key COLLATE "C" !~ '[!-~]'`) needs just one printable character, so `'abc' || E'\n'` passes.
-- **Smallest change:** one new migration re-emitting the `20270113100000` body with that one condition changed to `p_idempotency_key COLLATE "C" ~ '[^!-~]'` (and its comment). Files: `supabase/migrations/20270129110000_adjust_inventory_key_printable_only.sql`, its ledger records, this contract, `scripts/smoke/prove-adjust-inventory-key-real-schema.mjs`.
+- **Smallest change:** one new migration re-emitting the `20270113100000` body with that one condition changed to `p_idempotency_key COLLATE "C" ~ '[^!-~]'` (and its comment). Files: `supabase/migrations/20270201140000_adjust_inventory_key_printable_only.sql`, its ledger records, this contract, `scripts/smoke/prove-adjust-inventory-key-real-schema.mjs`.
 - **Who may act:** unchanged (active admin, actor bound to `auth.uid()`, `SECURITY DEFINER`, `search_path = public, pg_temp`, same grants). The new check still runs after the auth checks and before any receipt lookup.
 
 ## State and failure

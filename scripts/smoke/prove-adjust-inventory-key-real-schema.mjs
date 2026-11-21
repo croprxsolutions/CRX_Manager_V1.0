@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270129110000_adjust_inventory_key_printable_only.sql (#1912). Builds the checked-in
+ * Real-schema proof for 20270201140000_adjust_inventory_key_printable_only.sql (#1912). Builds the checked-in
  * baseline plus every post-baseline migration on this checkout (the candidate included, so its preflight and
  * postflight ran) in a network-disabled PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), seeds one
  * stock row, and calls adjust_inventory as the signed-in admin:
@@ -19,7 +19,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, scalar, attempt, asUser, refuse, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270129110000_adjust_inventory_key_printable_only.sql';
+const CANDIDATE = '20270201140000_adjust_inventory_key_printable_only.sql';
 const reuse = process.env.ADJUST_KEY_PROOF_REUSE === '1';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PROD = '7c7a0000-0000-4000-8000-000019120001';

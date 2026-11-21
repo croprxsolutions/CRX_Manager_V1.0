@@ -2,9 +2,9 @@
 
 ## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B) may have Sol rounds 11 to 16
 
-**Decision (Mason, in chat, 2026-11-21: "Yes, allow 5–10").** PR #2151 may have its Sol review. Its branch
-carries #2047's ten rounds, so its own first review counts as round 11; the same six-review allowance #2047
-had runs from round 11 through 16.
+**Decision (Mason, in chat, 2026-11-21: "Yes", answering "Allow Sol review rounds 11 to 16 on PR B (#2151)?").**
+PR #2151 may have its Sol review in rounds 11 through 16. Its branch also carries #2047's commits, whose ten
+rounds count toward its total.
 **What it does:** lifts the round cap for #2151 only, up to round 16; the stop rule (the same BLOCKER/HIGH
 surviving two fix rounds goes back to Mason) and every other gate are unchanged.
 

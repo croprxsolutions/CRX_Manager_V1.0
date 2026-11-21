@@ -867,6 +867,43 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
     expect(mockRpc.mock.calls.some(([name]) => name === 'post_invoice' || name === 'delete_invoices')).toBe(false);
   });
 
+  it('#2058: opens the new draft when the save cancelled the edited one (its fields now bill another farm)', async () => {
+    const saveReturns = (ids: string[]) => mockRpc.mockImplementation((name: string) =>
+      Promise.resolve(name === 'save_field_app_invoice'
+        ? { data: { invoice_ids: ids, invoice_group_id: null }, error: null }
+        : { data: null, error: null }));
+    saveReturns(['inv-other-farm']);
+    await renderPage();
+    await screen.findByText(/Field Application INV-1001/);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/invoices/field-app/inv-other-farm', { replace: true }));
+
+    // A normal edit returns the same invoice: the page stays and reloads it.
+    mockNavigate.mockClear();
+    saveReturns(['inv-solo']);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
+    await waitFor(() => expect(mockRpc.mock.calls.filter(([n]) => n === 'save_field_app_invoice')).toHaveLength(2));
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('#2058: a retry whose earlier save cancelled the draft repeats onto the new draft, not the cancelled one', async () => {
+    let saves = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name !== 'save_field_app_invoice') return Promise.resolve({ data: null, error: null });
+      saves += 1;
+      return Promise.resolve(saves === 1
+        ? { data: null, error: { message: 'IDEMPOTENCY_INTENT_MISMATCH', details: JSON.stringify({
+          operation: 'save_field_app_invoice', result: { invoice_ids: ['inv-other-farm'], invoice_group_id: null } }) } }
+        : { data: { invoice_ids: ['inv-other-farm'], invoice_group_id: null }, error: null });
+    });
+    await renderPage();
+    await screen.findByText(/Field Application INV-1001/);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/invoices/field-app/inv-other-farm', { replace: true }));
+    const saveCalls = mockRpc.mock.calls.filter(([n]) => n === 'save_field_app_invoice');
+    expect(saveCalls.map(([, args]) => (args as { p_invoice_id: string }).p_invoice_id)).toEqual(['inv-solo', 'inv-other-farm']);
+  });
+
   it('pins both production invoice routes to the identity-keyed wrapper without changing access roles', () => {
     const app = readFileSync(join(process.cwd(), 'src', 'App.tsx'), 'utf8');
     for (const path of ['invoices/field-app/new', 'invoices/field-app/:id']) {

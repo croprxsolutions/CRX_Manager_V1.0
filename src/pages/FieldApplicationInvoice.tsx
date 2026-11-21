@@ -2023,7 +2023,8 @@ export default function FieldApplicationInvoice() {
           navigate({ search: createdInvoiceAddressSearch(ids[0]) }, { replace: true });
         }
       }
-      const replayedInvoiceId = targetInvoiceId || ids[0];
+      // #2058: when the earlier save cancelled the edited draft (its fields bill another farm), repeat onto the new one.
+      const replayedInvoiceId = targetInvoiceId && (ids.length === 0 || ids.includes(targetInvoiceId)) ? targetInvoiceId : ids[0];
       if (retryMayReplayOldValues && replayedInvoiceId) {
         const followUpKey = saveIdem.getKey();
         unansweredSaveRef.current = { key: followUpKey, fingerprints: [fingerprint] };
@@ -2251,12 +2252,16 @@ export default function FieldApplicationInvoice() {
 
       // Still on /invoices/field-app/new: move to the saved invoice's own page.
       const savedInvoiceId = ids[0] ?? createdInvoiceIdRef.current;
-      if (isNew && savedInvoiceId) {
+      // An edit whose fields now bill another farm cancels this draft and saves a new one (#2058): open the new one.
+      const replaced = !isNew && !!id && ids.length > 0 && !ids.includes(id);
+      if ((isNew || replaced) && savedInvoiceId) {
         // Everything saved, so nothing is unsaved: let this navigation past the
         // leave-page guard. After a PARTIAL failure the form stays dirty and the guard
         // still asks; "Stay" keeps the typed values, and Save again updates the same
         // invoice (createdInvoiceIdRef), never a new one.
-        if (appliedInfoOk && billingOk) skipUnsavedPromptRef.current = true;
+        // A replaced draft is cancelled, so "Stay" could only save into it and be refused: always open the new one
+        // (the error toast above already says what to re-enter).
+        if ((appliedInfoOk && billingOk) || replaced) skipUnsavedPromptRef.current = true;
         navigate(`/invoices/field-app/${savedInvoiceId}`, { replace: true });
       } else {
         // Keep the form frozen until the server copy has finished hydrating.

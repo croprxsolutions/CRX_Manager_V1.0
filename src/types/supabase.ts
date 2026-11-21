@@ -19403,6 +19403,7 @@ export type Database = {
         )[]
       }
       get_ar_reminder_candidates: { Args: never; Returns: Json }
+      get_available_deliveries_for_driver: { Args: never; Returns: Json }
       get_batch_year_end_summaries: {
         Args: { p_customer_ids: string[]; p_season: number }
         Returns: Json

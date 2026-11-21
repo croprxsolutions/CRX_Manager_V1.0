@@ -19,6 +19,7 @@
 --   C7  schedule_date on {scheduled, invoiced}: invoiced skipped for a rep and an admin (Mason, 2026-11-21); admin applicator change on it skipped
 --   C8  changes + cancel on {scheduled, completed}: both dated, only scheduled cancelled
 --   C9  rep changes + cancel on {scheduled, invoiced}: scheduled changed and cancelled, invoiced skipped untouched
+--   C11 completed job billed through its blend ticket: skipped as invoiced, even for an admin delete
 --   C10 500 scheduled jobs holding stock, changes + cancel in one call: all updated, cancelled, holds released, under 4 s
 -- Ends in RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'. Any other error = FAIL.
 -- ============================================================================
@@ -31,7 +32,7 @@ DECLARE
   v_rep2   uuid;
   v_cust   uuid;
   v_prod   uuid;
-  v_jS     uuid; v_jP uuid; v_jC uuid; v_jD uuid; v_jI uuid; v_jS2 uuid; v_jC2 uuid;
+  v_jS     uuid; v_jP uuid; v_jC uuid; v_jD uuid; v_jI uuid; v_jS2 uuid; v_jC2 uuid; v_bt uuid; v_inv uuid;
   v_missing uuid := gen_random_uuid();
   v_res    jsonb;
   v_n      int;
@@ -429,6 +430,25 @@ BEGIN
   END IF;
   SELECT count(*) INTO v_n FROM jobs WHERE id = v_jI AND status = 'invoiced' AND schedule_date IS DISTINCT FROM v_date + 1;
   IF v_n <> 1 THEN RAISE EXCEPTION 'SMOKE_FAIL: C9 invoiced job was changed'; END IF;
+
+  -- ── C11 a completed job billed through its blend ticket is skipped, even for an admin ──
+  INSERT INTO public.blend_tickets (ticket_number, uploaded_by, customer_id, status, review_status,
+      payment_status, order_link_status, season, total_acres, source, job_id)
+    VALUES ('[SMOKE] EJ-BT-' || v_sfx, v_admin, v_cust, 'completed', 'approved', 'unbilled', 'unlinked',
+            public.current_season(), 10, 'manual', v_jC2) RETURNING id INTO v_bt;
+  INSERT INTO public.invoices (invoice_number, customer_id, invoice_type, status, total_amount_cents, created_by, blend_ticket_id)
+    VALUES ('[SMOKE] EJ-INV-' || v_sfx, v_cust, 'chemical_sale', 'draft', 100, v_admin, v_bt) RETURNING id INTO v_inv;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  SET LOCAL ROLE authenticated;
+  v_res := edit_jobs(ARRAY[v_jC2], NULL, 'delete', v_admin, 'ej-c11-' || v_sfx);
+  RESET ROLE;
+  IF v_res -> 'deleted' <> '[]'::jsonb
+     OR v_res -> 'skipped' <> jsonb_build_array(jsonb_build_object('id', v_jC2, 'reason', 'status', 'status', 'invoiced')) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: C11 result %', v_res;
+  END IF;
+  SELECT count(*) INTO v_n FROM jobs WHERE id = v_jC2 AND deleted_at IS NULL AND status = 'completed';
+  IF v_n <> 1 THEN RAISE EXCEPTION 'SMOKE_FAIL: C11 ticket-billed job was changed'; END IF;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
 
   -- ── C10 the 500-job maximum, changes + cancel ─────────────────────────────
   WITH ins AS (

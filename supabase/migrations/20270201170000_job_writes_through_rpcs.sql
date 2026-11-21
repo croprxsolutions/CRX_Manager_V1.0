@@ -141,10 +141,21 @@ BEGIN
   -- so a booking's siblings are not rebuilt over and over. No BEFORE trigger on jobs returns NULL, so
   -- every UPDATE must change exactly the rows it targets; a shortfall aborts rather than being reported.
   -- One snapshot: every requested id is either locked and live, or skipped as deleted / not found /
-  -- invoiced. Invoiced jobs are never changed here, even by an admin (Mason, 2026-11-21): Mass Edit
-  -- already hides them, and a stale screen must not move billed work or its applicator access.
+  -- billed. Billed jobs are never changed here, even by an admin (Mason, 2026-11-21): Mass Edit
+  -- already hides them, and a stale screen must not move billed work or its applicator access. Billed
+  -- means status invoiced, an invoice_id, or any live invoice on the job or on one of its blend tickets
+  -- (a ticket can be invoiced while the job is still 'completed'); such a job is reported as 'invoiced'.
   -- FOR NO KEY UPDATE is the lock the UPDATEs below take anyway, so this adds no new lock conflict.
-  WITH locked AS (SELECT id, deleted_at, status FROM public.jobs WHERE id = ANY (v_ids) ORDER BY id FOR NO KEY UPDATE)
+  WITH locked0 AS (SELECT id, deleted_at, status, invoice_id FROM public.jobs WHERE id = ANY (v_ids) ORDER BY id FOR NO KEY UPDATE),
+  locked AS (
+    SELECT id, deleted_at,
+           CASE WHEN status = 'invoiced' OR invoice_id IS NOT NULL OR EXISTS (
+                  SELECT 1 FROM public.invoices i
+                   WHERE i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled')
+                     AND (i.job_id = l0.id OR i.blend_ticket_id IN (
+                           SELECT bt.id FROM public.blend_tickets bt WHERE bt.job_id = l0.id AND bt.deleted_at IS NULL)))
+                THEN 'invoiced' ELSE status END AS status
+      FROM locked0 l0)
   SELECT coalesce(array_agg(x ORDER BY x) FILTER (WHERE l.id IS NOT NULL AND l.deleted_at IS NULL AND l.status <> 'invoiced'), '{}'),
          coalesce(jsonb_agg(CASE WHEN l.id IS NULL THEN jsonb_build_object('id', x, 'reason', 'not_found')
                                  WHEN l.deleted_at IS NOT NULL THEN jsonb_build_object('id', x, 'reason', 'deleted')
@@ -152,10 +163,12 @@ BEGIN
                     FILTER (WHERE l.id IS NULL OR l.deleted_at IS NOT NULL OR l.status = 'invoiced'), '[]'::jsonb)
     INTO v_live, v_skipped
     FROM unnest(v_ids) AS x LEFT JOIN locked l ON l.id = x;
-  -- The caller may have been deactivated while this call waited for those locks.
+  -- The caller may have been deactivated while this call waited for those locks. FOR SHARE then holds
+  -- off a deactivation, demotion or page block until this call commits.
   SELECT role = 'admin' INTO v_is_admin FROM public.profiles
    WHERE id = v_actor AND is_active = true
-     AND (role = 'admin' OR (role = 'sales_rep' AND NOT coalesce('jobs' = ANY (denied_pages), false)));
+     AND (role = 'admin' OR (role = 'sales_rep' AND NOT coalesce('jobs' = ANY (denied_pages), false)))
+     FOR SHARE;
   IF v_is_admin IS NULL THEN
     RAISE EXCEPTION 'INSUFFICIENT_ROLE: edit_jobs requires an active admin, or a sales rep with the Job Schedule page';
   END IF;

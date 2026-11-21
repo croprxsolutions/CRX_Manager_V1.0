@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { PaintBucket, Undo2 } from 'lucide-react';
 import Button from '../ui/Button';
 import Card, { CardHeader } from '../ui/Card';
@@ -7,9 +7,9 @@ import ReasonModal from '../ui/ReasonModal';
 import { useToast } from '../ui/Toast';
 import ToteFillModal from './ToteFillModal';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
+import { useLoad } from '../../hooks/useLoad';
 import { sanitizeError } from '../../lib/db';
 import { isDefinitiveRpcRejection } from '../../lib/idempotency';
-import { Sentry } from '../../lib/sentry';
 import { listToteFills, reverseToteFill, type ToteFillRow } from '../../lib/toteFill';
 
 const qty = (n: number) => Number(n).toLocaleString('en-US', { maximumFractionDigits: 4 });
@@ -26,33 +26,21 @@ export default function ToteFillCard({ toteProductId, toteName, profileId, onSto
   onStockChanged: () => void;
 }) {
   const { toast } = useToast();
-  const [fills, setFills] = useState<ToteFillRow[]>([]);
-  const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'failed'>('loading');
   const [filling, setFilling] = useState(false);
   const [undoFill, setUndoFill] = useState<ToteFillRow | null>(null);
   const [undoing, setUndoing] = useState(false);
   const { getKeyFor, resetKeyFor } = useIdempotencyKey('reverse_tote_fill', profileId);
 
-  const latestLoad = useRef(0);
-  const load = useCallback(async () => {
-    const mine = ++latestLoad.current; // only the newest load may set the list
-    setLoadState('loading');
-    try {
-      const rows = await listToteFills(toteProductId);
-      if (mine !== latestLoad.current) return;
-      setFills(rows);
-      setLoadState('loaded');
-    } catch (error) {
-      if (mine !== latestLoad.current) return;
-      Sentry.captureException(error, { tags: { source: 'fetch', page: 'tote-fill-card' } });
-      setLoadState('failed');
-    }
-  }, [toteProductId]);
-  useEffect(() => { void load(); }, [load]);
+  const fillsRead = useLoad(toteProductId, () => listToteFills(toteProductId), {
+    report: { tags: { source: 'fetch', page: 'tote-fill-card' } },
+  });
+  // After a fill or undo the old list is out of date: a failed refresh shows the failure, not the old rows.
+  const failed = fillsRead.status === 'failed' || (fillsRead.status === 'loaded' && fillsRead.stale);
+  const fills = fillsRead.status === 'loaded' && !fillsRead.stale && !fillsRead.refreshing ? fillsRead.data : null;
 
-  const changed = () => { void load(); onStockChanged(); };
-  const reversed = new Set(fills.map((f) => f.reverses_fill_id).filter(Boolean));
-  const newest = fills[0];
+  const changed = () => { void fillsRead.reload(); onStockChanged(); };
+  const reversed = new Set((fills ?? []).map((f) => f.reverses_fill_id).filter(Boolean));
+  const newest = fills?.[0];
   const undoable = newest && !newest.reverses_fill_id && !reversed.has(newest.id) ? newest : null;
 
   const undo = async (reason: string) => {
@@ -85,10 +73,10 @@ export default function ToteFillCard({ toteProductId, toteName, profileId, onSto
           </Button>
         )}
       />
-      {loadState === 'loading' ? (
+      {failed ? (
+        <LoadFailedState title="Fills could not be loaded" onRetry={() => { void fillsRead.reload(); }} />
+      ) : !fills ? (
         <p className="text-sm text-secondary" role="status">Loading fills…</p>
-      ) : loadState === 'failed' ? (
-        <LoadFailedState title="Fills could not be loaded" onRetry={() => { void load(); }} />
       ) : fills.length === 0 ? (
         <p className="text-sm text-secondary">No fills recorded for this tote.</p>
       ) : (

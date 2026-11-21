@@ -206,43 +206,26 @@ export function prApprovalProblem(text) {
     : null;
 }
 
-// #1838 MED 2 (Mason's agents): once a release migration is applied live ("Applied live:" on the open release PR),
-// a staging merge moves release/next under the remaining applies, so staging merges wait until the release merges.
-// null when no release is being applied; otherwise why the merge waits. Never throws; an unreadable answer refuses.
+// Release freeze (#1838 MED 2; widened 2026-11-20 after #2024–#2042 and #2093): while a release PR (release/next
+// into main) is open, the "Refresh release PR" job re-cuts release/next on every staging merge, which moves the
+// release head and voids its Sol proof and Taha's "Ready to merge". So an agent merges nothing into staging while
+// one is open. Taha's and Mason's own GitHub clicks are not hooked. null when none is open; never throws; an
+// unreadable answer refuses (fail closed).
 export function releaseFreezeProblem({ repo, gh }) {
   const repoPath = ghApiRepoPath(repo);
   if (!repoPath) return "the pull request's repository could not be read";
   const show = (error) => sanitizeForMessage(String(error?.message || error).split(/\r?\n/)[0]);
   let numbers;
   try {
-    numbers = String(gh(["api", "--paginate", `${repoPath}/pulls?base=main&state=open&per_page=100`, "--jq", '.[] | select(.head.ref == "release/next") | "\\(.number) \\(.head.sha)"']))
-      .split(/\r?\n/).filter(Boolean).map((l) => { const [n, sha] = l.split(" "); return { n: Number(n), sha }; });
-    if (numbers.some((x) => !Number.isInteger(x.n) || !/^[0-9a-f]{40}$/i.test(String(x.sha)))) throw new Error("not a PR number and head");
+    numbers = String(gh(["api", "--paginate", `${repoPath}/pulls?base=main&state=open&per_page=100`, "--jq", '.[] | select(.head.ref == "release/next" and .head.repo.full_name == .base.repo.full_name) | .number']))
+      .split(/\r?\n/).filter(Boolean).map((l) => (/^[1-9]\d*$/.test(l.trim()) ? Number(l) : NaN));
+    if (numbers.some((n) => !Number.isInteger(n))) throw new Error("not a PR number");
   } catch (error) {
-    return `the open release PR could not be read (${show(error)}), so a release being applied can't be ruled out (fail closed)`;
+    return `the open release PR could not be read (${show(error)}), so an open release can't be ruled out (fail closed)`;
   }
-  if (!Array.isArray(numbers)) return "GitHub's list of open PRs into main was unexpected (fail closed)";
-  for (const { n, sha } of numbers) {
-    let comments;
-    try {
-      comments = String(gh(["api", "--paginate", `${repoPath}/issues/${n}/comments?per_page=100`, "--jq", ".[] | {login: .user.login, at: .created_at, body: .body} | tojson"]))
-        .split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l));
-    } catch (error) {
-      return `the release PR #${n}'s comments could not be read (${show(error)}) (fail closed)`;
-    }
-    // Taha's "Ready to merge: <sha>" for the release's current head comes before the first apply and holds until the
-    // release merges, closes or moves (no expiry: a failed "Applied live:" post must not end it; Sol). "Applied live:"
-    // (agents' account or Taha) follows each apply. Anyone else's text freezes nothing (Luna, Sol).
-    const by = (c, ...logins) => logins.includes(String(c?.login ?? "").toLowerCase());
-    const go = (c) => /^\s*Ready to merge:\s*([0-9a-f]{12,40})\s*$/i.exec(String(c?.body ?? ""));
-    const applying = comments.some((c) =>
-      (by(c, "masonwells1", "tahakhanabdalli") && /^\s*Applied live:/im.test(String(c?.body ?? ""))) ||
-      (by(c, "tahakhanabdalli") && go(c) && String(sha).toLowerCase().startsWith(go(c)[1].toLowerCase())));
-    if (applying) {
-      return `the release (#${n}) is being applied live, so merges into staging wait until it merges: a staging merge moves release/next under the remaining applies (ship.md › Staging)`;
-    }
-  }
-  return null;
+  if (!numbers.length) return null;
+  const list = numbers.map((n) => `#${n}`).join(", ");
+  return `release PR ${list} (release/next into main) is open, and a staging merge now would re-cut release/next, moving the release head and voiding its Sol proof and Taha's "Ready to merge". Staging is frozen for agents until the release merges or closes; retry then (Taha or Mason may merge by hand; ship.md › Staging)`;
 }
 
 // #1838 MED 3 (Mason's agents): a destructive migration (DELETE/TRUNCATE/DROP of data) is Mason's on live. Into

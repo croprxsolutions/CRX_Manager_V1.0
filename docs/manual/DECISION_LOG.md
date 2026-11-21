@@ -15,6 +15,15 @@
   Mason's reason: this case cannot happen in our business (ref f7878916e856)
 - Finding 2 (HIGH) at `supabase/migrations/20270127140000_ingredient_modes_of_action_load.sql:269`, text sha256 `d62604642a3ee0ed` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our busines (ref 804bd04476c3)
+## 2026-11-18 — CMP-2 (Brand vs Generic rebuild) waits for real ingredient data
+
+**Decision (Mason, in chat, 2026-11-18: "Fill chemistry first").** Live check that day: 0 `active_ingredients`, 0 parents with ingredient rows, 0 mode-of-action rows, 0 `ingredient_map` rows. The comparison is built entirely from ingredient strengths, so a page built now would show every row as incomplete. He was offered "build now on test data" and "a price-per-acre slice only", and chose to fill the chemistry first.
+**What this forbids/implies:** no CMP-2 code starts until the "Start when" list in `docs/plans/2026-11-18-product-CMP2-BUILD-SHEET.md` is met: chemistry filled (DM-4 EPA lookup, DM-1b workbook or reviewed manual entry), MOA-1 landed with its group load, and RT-4 live. The next Product Master step is filling the chemistry, not CMP-2.
+## 2026-11-20 — #2050: Mason owner-accepted 1 Sol finding(s) at `e4960bf1340d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #2050 at `e4960bf1340d` (base `e4e6e11fae1c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270129171000_field_app_refuses_product_without_sold_unit.sql:39`, text sha256 `30caf38e89c4de39` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business) (ref 23d2a64b72fd)
 ## 2026-11-20 — #1990: Mason owner-accepted 5 Sol finding(s) at `b145a1514838`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #1990 at `b145a1514838` (base `5740b6c076ea`) found 5 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

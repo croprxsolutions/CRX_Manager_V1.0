@@ -36,6 +36,7 @@ const OFF_DRIVER = id('a7');
 const DENIED_DRIVER = id('a8');
 const NULL_ENTRY_DRIVER = id('a9');
 const REVOKED_DRIVER = id('aa');
+const DEMOTED_REP = id('ab');
 const DEL = Object.fromEntries(['open1', 'open2', 'mine', 'started', 'deleted', 'race', 'other', 'double', 'replay', 'late', 'closed', 'revoke'].map((k, i) => [k, id(`d${i + 1}`)]));
 const key = () => `'${crypto.randomUUID()}'`;
 const take = (delivery, driver, k = key()) => `public.reassign_delivery('${delivery}', '${driver}', NULL, ${k})`;
@@ -58,7 +59,7 @@ const raw = (sql, delay) => new Promise((resolve) => {
 });
 
 /**
- * One psql session taking `delivery` as `uid` after `delay` s, holding its transaction open 2 s after the call.
+ * One psql session taking `delivery` as `uid` after `delay` s, holding its transaction open 4 s after the call.
  * It reports the call's result and the database's own time spent inside the call (any lock wait included).
  */
 const session = (uid, delay, k, delivery) => new Promise((resolve) => {
@@ -74,7 +75,7 @@ const session = (uid, delay, k, delivery) => new Promise((resolve) => {
     DO $s$ DECLARE t0 timestamptz := clock_timestamp(); v text; BEGIN
       BEGIN v := (${take(delivery, uid, k)})->>'status'; EXCEPTION WHEN OTHERS THEN v := SQLERRM; END;
       RAISE NOTICE 'WAITED % %', extract(epoch FROM clock_timestamp() - t0), v; END $s$;
-    SELECT pg_sleep(2); COMMIT;`);
+    SELECT pg_sleep(4); COMMIT;`);
 });
 
 try {
@@ -85,11 +86,13 @@ try {
       ('${OFF_DRIVER}', 'avail-off@example.invalid', '{"full_name":"[AVAIL] Off Driver","role":"driver"}'::jsonb),
       ('${DENIED_DRIVER}', 'avail-denied@example.invalid', '{"full_name":"[AVAIL] Denied Driver","role":"driver"}'::jsonb),
       ('${NULL_ENTRY_DRIVER}', 'avail-null@example.invalid', '{"full_name":"[AVAIL] Null Entry Driver","role":"driver"}'::jsonb),
-      ('${REVOKED_DRIVER}', 'avail-revoked@example.invalid', '{"full_name":"[AVAIL] Revoked Driver","role":"driver"}'::jsonb);
+      ('${REVOKED_DRIVER}', 'avail-revoked@example.invalid', '{"full_name":"[AVAIL] Revoked Driver","role":"driver"}'::jsonb),
+      ('${DEMOTED_REP}', 'avail-demoted@example.invalid', '{"full_name":"[AVAIL] Demoted Rep","role":"sales_rep"}'::jsonb);
     SET session_replication_role = replica;
     UPDATE public.profiles SET is_active = false WHERE id = '${OFF_DRIVER}';
     UPDATE public.profiles SET denied_pages = '{deliveries}' WHERE id = '${DENIED_DRIVER}';
     UPDATE public.profiles SET denied_pages = ARRAY['reports', NULL] WHERE id = '${NULL_ENTRY_DRIVER}';
+    UPDATE public.profiles SET role = 'sales_rep' WHERE id = '${DEMOTED_REP}';
     INSERT INTO public.customers (id, farm_name, parent_customer_id) VALUES
       ('${A}', 'Alpha Top Farms', NULL), ('${B}', 'Bravo Farms', '${A}'), ('${C}', 'Charlie Farms', '${B}'), ('${D}', 'Delta Farms', NULL);
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, scheduled_date, status, assigned_driver, deleted_at) VALUES
@@ -182,7 +185,7 @@ try {
   const winners = racers.filter((r) => r.result === 'reassigned');
   const losers = racers.filter((r) => /already taken or changed/.test(r.result));
   assert.ok(winners.length === 1 && losers.length === 1, `exactly one driver wins:\n${racers.map((r) => r.out).join('\n---\n')}`);
-  // The winner holds its lock 2 s after its call and the two calls start about 0.5 s apart, so the loser waits inside.
+  // The winner holds its lock 4 s after its call and the two calls start about 0.5 s apart, so the loser waits inside.
   assert.ok(losers[0].waited >= 0.5, `the refused driver's call must have waited on the winner's lock (${losers[0].waited} s)`);
   assert.equal(owner(DEL.race), racers[0] === winners[0] ? USERS.driver : DRIVER2, 'the winner keeps it');
   // One driver's double tap with the same key, at once: both calls report success, one assignment, one notification.
@@ -195,7 +198,7 @@ try {
   assert.equal(scalar(`SELECT count(*) FROM public.notifications WHERE related_entity_id = '${DEL.double}';`), '1', 'a double tap notifies once');
   // A take waiting on dispatch's row lock is refused if the driver is denied Deliveries before the lock frees.
   const [dispatch, revoked] = await Promise.all([
-    raw(`BEGIN; SELECT 1 FROM public.deliveries WHERE id = '${DEL.revoke}' FOR UPDATE; SELECT pg_sleep(2);
+    raw(`BEGIN; SELECT 1 FROM public.deliveries WHERE id = '${DEL.revoke}' FOR UPDATE; SELECT pg_sleep(4);
       ${claims(USERS.admin)} UPDATE public.profiles SET denied_pages = '{deliveries}' WHERE id = '${REVOKED_DRIVER}'; COMMIT;`, 0),
     session(REVOKED_DRIVER, 0.5, key(), DEL.revoke)]);
   assert.equal(dispatch.code, 0, dispatch.out);
@@ -203,6 +206,17 @@ try {
   assert.equal(revoked.result, 'Not authorized to reassign deliveries', revoked.out);
   assert.equal(owner(DEL.revoke), '-', 'the revoked driver did not get it');
   console.log('[race] access revoked while a take waits: refused');
+  // A sales rep demoted to driver while their call waits on its key is refused (no office power after the wait).
+  const k5 = key();
+  const [demote, demoted] = await Promise.all([
+    raw(`BEGIN; SELECT pg_advisory_xact_lock(hashtextextended('crx:idempotency:' || ${k5}, 0)); SELECT pg_sleep(4);
+      ${claims(USERS.admin)} UPDATE public.profiles SET role = 'driver' WHERE id = '${DEMOTED_REP}'; COMMIT;`, 0),
+    session(DEMOTED_REP, 0.5, k5, DEL.open2)]);
+  assert.equal(demote.code, 0, demote.out);
+  assert.ok(demoted.waited >= 0.5, `the call must have waited on its key (${demoted.waited} s)`);
+  assert.equal(demoted.result, 'Not authorized to reassign deliveries', demoted.out);
+  assert.equal(owner(DEL.open2), '-', 'the demoted rep assigned nothing');
+  console.log('[race] office role removed while a call waits: refused');
   console.log('[race] two drivers at once: one wins and keeps it, the other waits and is refused; a double tap notifies once');
 
   // 5. Admin and sales rep reassign as before (scheduled and in-progress, to anyone).

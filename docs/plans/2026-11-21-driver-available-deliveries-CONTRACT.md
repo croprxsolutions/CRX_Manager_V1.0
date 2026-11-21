@@ -88,3 +88,11 @@ None. Mason, 2026-11-21: "Yes, show them" (drivers see open deliveries with farm
 ## Luna (gpt-6-luna xhigh, commit 28bc36eb4): 1 MED, fixed
 
 - MED: a driver's same-key retry that waited on the key lock could replay success after an admin denied Deliveries. The replay path now re-checks the driver's access holding their profile row, as the fresh path does. Not separately proven (the window needs three interleaved sessions); the full prover still passes.
+
+## Sol round 3 (gpt-6.2-sol high, head 69153cae2): 1 HIGH, 2 MED, 2 LOW, all fixed
+
+- HIGH: the office/driver decision was made before the key wait, so a sales rep demoted to driver mid-wait kept office power. After the key lock an office caller is re-checked (active admin or sales rep) holding their profile row; proven with a rep demoted while their call waits. Same mechanism as round 2 (permission change during a lock wait): every caller's authority is now re-checked after its last wait, so no stale decision is left.
+- MED: a driver's replay reads ownership `FOR SHARE`, so it waits for an open dispatch change and re-reads.
+- MED: race proofs hold their locks 4 s, so a slow container start still overlaps.
+- LOW: the denied-page test is `NOT COALESCE('deliveries' = ANY (denied_pages), false)`: null-safe and safe on a nested array.
+- LOW: the changelog and record name all five returned fields, id included.

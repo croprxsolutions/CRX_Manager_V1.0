@@ -65,7 +65,7 @@ AS $function$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true AND role = 'driver'
-      AND array_position(COALESCE(denied_pages, '{}'::text[]), 'deliveries') IS NULL
+      AND NOT COALESCE('deliveries' = ANY (denied_pages), false)
   ) THEN
     RAISE EXCEPTION 'Not authorized to view available deliveries' USING ERRCODE = '42501';
   END IF;
@@ -142,7 +142,7 @@ BEGIN
   -- #2018: a driver (active, not denied the Deliveries page) may assign a delivery only to themself.
   IF NOT v_is_office AND (NOT EXISTS (
        SELECT 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role = 'driver'
-         AND array_position(COALESCE(denied_pages, '{}'::text[]), 'deliveries') IS NULL
+         AND NOT COALESCE('deliveries' = ANY (denied_pages), false)
      ) OR p_new_driver IS DISTINCT FROM v_actor) THEN
     RAISE EXCEPTION 'Not authorized to reassign deliveries';
   END IF;
@@ -152,6 +152,15 @@ BEGIN
   IF v_replay IS NOT NULL AND jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
   END IF;
+  -- #2018: the key lock above may have waited. An office caller must still be an active admin or sales rep now, and
+  -- their profile row is held until commit, so a role change or deactivation made meanwhile is honored.
+  IF v_is_office THEN
+    PERFORM 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role IN ('admin', 'sales_rep')
+      FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Not authorized to reassign deliveries';
+    END IF;
+  END IF;
   -- #2018: a bound retry (same key, caller and request) returns its stored result here. The body re-checks
   -- "unassigned" for a driver, so a driver's retry after a lost reply would otherwise be refused, not replayed.
   -- A driver's replay is returned only while the delivery is still theirs, so the screen never says "assigned to
@@ -160,16 +169,19 @@ BEGIN
     -- The key lock above may have waited: re-check the driver's access, as the fresh path does after its row lock.
     IF NOT v_is_office THEN
       PERFORM 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role = 'driver'
-        AND array_position(COALESCE(denied_pages, '{}'::text[]), 'deliveries') IS NULL
+        AND NOT COALESCE('deliveries' = ANY (denied_pages), false)
         FOR SHARE;
       IF NOT FOUND THEN
         RAISE EXCEPTION 'Not authorized to reassign deliveries';
       END IF;
     END IF;
-    IF NOT v_is_office AND NOT EXISTS (
-      SELECT 1 FROM public.deliveries WHERE id = p_delivery_id AND deleted_at IS NULL AND assigned_driver = v_actor
-    ) THEN
-      RAISE EXCEPTION 'This delivery was already taken or changed. Refresh the list.';
+    IF NOT v_is_office THEN
+      -- FOR SHARE waits for an open dispatch change to this delivery, then re-reads it.
+      PERFORM 1 FROM public.deliveries WHERE id = p_delivery_id AND deleted_at IS NULL AND assigned_driver = v_actor
+        FOR SHARE;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'This delivery was already taken or changed. Refresh the list.';
+      END IF;
     END IF;
     RETURN v_replay -> 'result';
   END IF;
@@ -186,7 +198,7 @@ BEGIN
     -- The lock above may have waited: re-check the driver's access now, and hold their profile row until commit so
     -- an admin's deactivation or Deliveries denial cannot slip in before this take commits.
     PERFORM 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role = 'driver'
-      AND array_position(COALESCE(denied_pages, '{}'::text[]), 'deliveries') IS NULL
+      AND NOT COALESCE('deliveries' = ANY (denied_pages), false)
       FOR SHARE;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'Not authorized to reassign deliveries';

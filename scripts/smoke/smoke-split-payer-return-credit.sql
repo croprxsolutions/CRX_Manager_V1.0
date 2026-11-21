@@ -25,7 +25,7 @@
 --   5. B's whole share of line 2 credits exactly what B was billed for it, not a cent more;
 --   5b. on a second split order whose invoices are still drafts, A cannot return anything
 --      (RETURN_SPLIT_SHARE_NOT_BILLED);
---   5c. on a third split order whose line has no unit, the split invoices bill it as 'ea', and B's
+--   5c. on a third split order whose line has no unit, the split invoices bill it in the product's unit ('Gal'), and B's
 --      return of it is created, received and credited (-10.00) from B's own line;
 --   6. the guard still refuses a credit memo for B on A's order with no claim, and a memo for D
 --      inside a claim for B (INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID).
@@ -85,8 +85,8 @@ BEGIN
 
   -- 0. Setup. Order lines need a positive cost basis, so price a fresh product shell through the
   --    governed preview/apply path.
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] Split Payer Return Product ' || v_suffix, 'GL') RETURNING id INTO v_product;
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[E2E] Split Payer Return Product ' || v_suffix, 'Gal', 'liquid', 'Gal') RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes(
     'product_page',
     NULL,
@@ -108,7 +108,7 @@ BEGIN
     'e2e-split-return-pricing-apply-' || v_suffix
   );
   INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
-  VALUES (v_product, 'Main Warehouse', 100, 0, 'GL');
+  VALUES (v_product, 'Main Warehouse', 100, 0, 'Gal');
 
   INSERT INTO public.customers (farm_name) VALUES ('[E2E] Split Return A ' || v_suffix) RETURNING id INTO v_a;
   INSERT INTO public.customers (farm_name) VALUES ('[E2E] Split Return B ' || v_suffix) RETURNING id INTO v_b;
@@ -126,14 +126,14 @@ BEGIN
     total_units_needed, total_price, profit, net_margin,
     quantity_delivered, quantity_remaining, sort_order
   ) VALUES (
-    v_order, v_product, '[E2E] split return line 1', 10, 5, 'GL', 4, 40, 20, 50, 0, 4, 1
+    v_order, v_product, '[E2E] split return line 1', 10, 5, 'Gal', 4, 40, 20, 50, 0, 4, 1
   ) RETURNING id INTO v_line1;
   INSERT INTO public.order_items (
     order_id, product_id, product_name, price_per_unit, cost_per_unit, unit_size,
     total_units_needed, total_price, profit, net_margin,
     quantity_delivered, quantity_remaining, sort_order
   ) VALUES (
-    v_order, v_product, '[E2E] split return line 2', 10.01, 5, 'GL', 1, 10.01, 5.01, 50, 0, 1, 2
+    v_order, v_product, '[E2E] split return line 2', 10.01, 5, 'Gal', 1, 10.01, 5.01, 50, 0, 1, 2
   ) RETURNING id INTO v_line2;
   INSERT INTO public.order_item_field_allocations (order_item_id, field_id, acres)
   VALUES (v_line1, v_field, 100), (v_line2, v_field, 100);
@@ -144,7 +144,7 @@ BEGIN
   VALUES ('E2E-SPLIT-RETURN-D-' || v_suffix, v_order, v_a, v_today, 'scheduled', v_admin)
   RETURNING id INTO v_delivery;
   INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
-  VALUES (v_delivery, v_line1, v_product, 4, 4, 'GL'), (v_delivery, v_line2, v_product, 1, 1, 'GL');
+  VALUES (v_delivery, v_line1, v_product, 4, 4, 'Gal'), (v_delivery, v_line2, v_product, 1, 1, 'Gal');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_delivery;
   v_res := public.complete_delivery(
     v_delivery, 'No proof — recorded by office', v_admin,
@@ -529,7 +529,7 @@ BEGIN
     total_units_needed, total_price, profit, net_margin,
     quantity_delivered, quantity_remaining, sort_order
   ) VALUES (
-    v_order2, v_product, '[E2E] split return draft line', 10, 5, 'GL', 2, 20, 10, 50, 0, 2, 1
+    v_order2, v_product, '[E2E] split return draft line', 10, 5, 'Gal', 2, 20, 10, 50, 0, 2, 1
   ) RETURNING id INTO v_line3;
   INSERT INTO public.order_item_field_allocations (order_item_id, field_id, acres)
   VALUES (v_line3, v_field, 100);
@@ -537,7 +537,7 @@ BEGIN
   VALUES ('E2E-SPLIT-RETURN-D2-' || v_suffix, v_order2, v_a, v_today, 'scheduled', v_admin)
   RETURNING id INTO v_delivery2;
   INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
-  VALUES (v_delivery2, v_line3, v_product, 2, 2, 'GL');
+  VALUES (v_delivery2, v_line3, v_product, 2, 2, 'Gal');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_delivery2;
   PERFORM public.complete_delivery(
     v_delivery2, 'No proof — recorded by office', v_admin,
@@ -561,7 +561,7 @@ BEGIN
     END IF;
   END;
 
-  -- 5c. A split line with no unit: the split invoices bill it as 'ea', the unit its return carries,
+  -- 5c. A split line with no unit: the split invoices bill it in the product's unit ('Gal'; filled since 20270106100000),
   --     so the payer's return is created, received and credited from its own line (before
   --     20261021155000 the invoices copied the empty unit, and the credit refuses a source line
   --     whose unit differs: RETURN_CREDIT_UNIT_MISMATCH).
@@ -581,7 +581,7 @@ BEGIN
   VALUES ('E2E-SPLIT-RETURN-D3-' || v_suffix, v_order3, v_a, v_today, 'scheduled', v_admin)
   RETURNING id INTO v_delivery3;
   INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
-  VALUES (v_delivery3, v_line4, v_product, 2, 2, 'GL');
+  VALUES (v_delivery3, v_line4, v_product, 2, 2, 'Gal');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_delivery3;
   PERFORM public.complete_delivery(
     v_delivery3, 'No proof — recorded by office', v_admin,
@@ -625,8 +625,8 @@ BEGIN
                    AND ii.return_credit_source_item_id IS DISTINCT FROM v_b_line4_item) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: B''s no-unit credit is not -10.00 backed by B''s own line';
   END IF;
-  IF (SELECT unit_size FROM public.invoice_items WHERE id = v_b_line4_item) IS DISTINCT FROM 'ea' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: the split invoice did not bill the no-unit line as ea';
+  IF (SELECT unit_size FROM public.invoice_items WHERE id = v_b_line4_item) IS DISTINCT FROM 'Gal' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the split invoice did not bill the no-unit line in the product unit Gal';
   END IF;
 
   -- 6a. The guard: a credit memo for B on A's order, outside any claim.

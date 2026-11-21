@@ -17,7 +17,7 @@ VALUES (
 
 INSERT INTO public.products(
   id, product_name, sku, current_cost,
-  tier1_margin, tier2_margin, tier3_margin
+  tier1_margin, tier2_margin, tier3_margin, product_form, inventory_unit
 )
 VALUES (
   '99999999-9999-4999-8999-999999999991'::uuid,
@@ -26,7 +26,7 @@ VALUES (
   10.00,
   0.20,
   0.25,
-  0.30
+  0.30, 'liquid', 'Gal'
 );
 
 SELECT set_config(

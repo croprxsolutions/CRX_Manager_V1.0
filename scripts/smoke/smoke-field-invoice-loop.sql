@@ -70,12 +70,12 @@ BEGIN
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Field-Loop Farm ' || v_sfx)
   RETURNING id INTO v_customer;
 
-  INSERT INTO products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Loop Chem A ' || v_sfx, 'GL', '999999-99999', 'liquid')
+  INSERT INTO products (product_name, unit_size, epa_registration, product_form, inventory_unit)
+  VALUES ('[SMOKE] Loop Chem A ' || v_sfx, 'Gal', '999999-99999', 'liquid', 'Gal')
   RETURNING id INTO v_prod_a;
 
-  INSERT INTO products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Loop Chem B ' || v_sfx, 'GL', '999999-99999', 'liquid')
+  INSERT INTO products (product_name, unit_size, epa_registration, product_form, inventory_unit)
+  VALUES ('[SMOKE] Loop Chem B ' || v_sfx, 'Gal', '999999-99999', 'liquid', 'Gal')
   RETURNING id INTO v_prod_b;
 
   -- Since 20260812115237 a sale needs a positive catalog cost (COST_BASIS_REQUIRED), and a product
@@ -122,8 +122,8 @@ BEGIN
 
   INSERT INTO job_chemicals (job_id, product_id, quantity, unit, rate_per_acre,
                              rate_unit, cost_per_unit_cents, price_per_unit_cents, sort_order)
-  VALUES (v_job, v_prod_a, 10, 'GL', 1.0, 'PT', 1000, 2500, 1),
-         (v_job, v_prod_b,  5, 'GL', NULL, NULL,  800, 2000, 2);
+  VALUES (v_job, v_prod_a, 10, 'Gal', 1.0, 'PT', 1000, 2500, 1),
+         (v_job, v_prod_b,  5, 'Gal', NULL, NULL,  800, 2000, 2);
 
   -- =================================================== 1) start_job
   v_res := start_job(v_job, v_admin, '[SMOKE] sj-' || v_sfx);

@@ -105,8 +105,8 @@ BEGIN
   INSERT INTO public.customers (farm_name, account_number, assigned_tier)
   VALUES ('[SMOKE] Replay 4c Farm ' || v_suffix, '[SMOKE]-RB4C-' || v_suffix, 1)
   RETURNING id INTO v_customer;
-  INSERT INTO public.products (product_name, unit_size, product_form)
-  VALUES ('[SMOKE] RB4C product ' || v_suffix, 'GL', 'liquid')
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[SMOKE] RB4C product ' || v_suffix, 'Gal', 'liquid', 'Gal')
   RETURNING id INTO v_product;
   -- Order lines need the product's governed cost basis (the below-cost line trigger).
   v_pricing := public.preview_product_cost_basis_changes('product_page', NULL,
@@ -134,7 +134,7 @@ BEGIN
   FOR v_i IN 1..2 LOOP
     INSERT INTO public.order_items (order_id, product_id, product_name, unit_size, total_units_needed,
                                     quantity_remaining, price_per_unit, cost_per_unit, sort_order)
-    VALUES (v_order, v_product, '[SMOKE] RB4C line ' || v_i, 'GL', 10, 10, 10, 1, v_i)
+    VALUES (v_order, v_product, '[SMOKE] RB4C line ' || v_i, 'Gal', 10, 10, 10, 1, v_i)
     RETURNING id INTO v_id;
     v_oi := v_oi || v_id;
   END LOOP;
@@ -169,7 +169,7 @@ BEGIN
   FOR v_i IN 9..10 LOOP
     INSERT INTO public.delivery_remainders (original_delivery_id, order_id, order_item_id, customer_id, product_id,
                                             quantity_remaining, unit_size, status)
-    VALUES (v_del[v_i], v_order, v_oi[v_i - 8], v_customer, v_product, 1, 'GL', 'pending');
+    VALUES (v_del[v_i], v_order, v_oi[v_i - 8], v_customer, v_product, 1, 'Gal', 'pending');
   END LOOP;
   FOR v_i IN 1..2 LOOP
     INSERT INTO public.cycle_counts (count_number, status, initiated_by)
@@ -390,13 +390,13 @@ BEGIN
   v_key := v_prefix || 'create-delivery'; v_keys := v_keys || v_key;
   v_sql := 'SELECT public.create_delivery_with_items(%L, %L, %L::date, %L::jsonb, p_idempotency_key => %L)';
   v_res := public.create_delivery_with_items(v_order, v_customer, v_date,
-    jsonb_build_array(jsonb_build_object('order_item_id', v_oi[1], 'product_id', v_product, 'quantity', 1, 'unit_size', 'GL')),
+    jsonb_build_array(jsonb_build_object('order_item_id', v_oi[1], 'product_id', v_product, 'quantity', 1, 'unit_size', 'Gal')),
     p_idempotency_key => v_key);
   IF v_res->>'delivery_id' IS NULL THEN RAISE EXCEPTION 'SMOKE_FAIL: create_delivery_with_items did not create: %', v_res; END IF;
   v_n := (SELECT count(*) FROM public.deliveries WHERE order_id = v_order);
   PERFORM pg_temp.b4c_refused('create_delivery_with_items replayed line 1''s receipt as success for line 2',
     format(v_sql, v_order, v_customer, v_date,
-      jsonb_build_array(jsonb_build_object('order_item_id', v_oi[2], 'product_id', v_product, 'quantity', 1, 'unit_size', 'GL')), v_key),
+      jsonb_build_array(jsonb_build_object('order_item_id', v_oi[2], 'product_id', v_product, 'quantity', 1, 'unit_size', 'Gal')), v_key),
     'IDEMPOTENCY_INTENT_MISMATCH%');
   IF (SELECT count(*) FROM public.deliveries WHERE order_id = v_order) <> v_n THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a refused create_delivery_with_items created a delivery';
@@ -404,19 +404,19 @@ BEGIN
   PERFORM pg_temp.b4c_as(v_admin_b);
   PERFORM pg_temp.b4c_refused('create_delivery_with_items replayed admin A''s receipt to admin B',
     format(v_sql, v_order, v_customer, v_date,
-      jsonb_build_array(jsonb_build_object('order_item_id', v_oi[1], 'product_id', v_product, 'quantity', 1, 'unit_size', 'GL')), v_key),
+      jsonb_build_array(jsonb_build_object('order_item_id', v_oi[1], 'product_id', v_product, 'quantity', 1, 'unit_size', 'Gal')), v_key),
     'IDEMPOTENCY_ACTOR_MISMATCH');
   PERFORM pg_temp.b4c_as(v_low);
   PERFORM pg_temp.b4c_refused('create_delivery_with_items answered an applicator',
     format(v_sql, v_order, v_customer, v_date,
-      jsonb_build_array(jsonb_build_object('order_item_id', v_oi[1], 'product_id', v_product, 'quantity', 1, 'unit_size', 'GL')), v_key),
+      jsonb_build_array(jsonb_build_object('order_item_id', v_oi[1], 'product_id', v_product, 'quantity', 1, 'unit_size', 'Gal')), v_key),
     'FORBIDDEN');
   PERFORM pg_temp.b4c_as(v_admin);
   PERFORM pg_temp.b4c_replays('create_delivery_with_items', format(v_sql, v_order, v_customer, v_date,
-      jsonb_build_array(jsonb_build_object('order_item_id', v_oi[1], 'product_id', v_product, 'quantity', 1, 'unit_size', 'GL')), v_key), v_res);
+      jsonb_build_array(jsonb_build_object('order_item_id', v_oi[1], 'product_id', v_product, 'quantity', 1, 'unit_size', 'Gal')), v_key), v_res);
   PERFORM pg_temp.b4c_refused('create_delivery_with_items ran without an idempotency key',
     format('SELECT public.create_delivery_with_items(%L, %L, %L::date, %L::jsonb)', v_order, v_customer, v_date,
-      jsonb_build_array(jsonb_build_object('order_item_id', v_oi[2], 'product_id', v_product, 'quantity', 1, 'unit_size', 'GL'))),
+      jsonb_build_array(jsonb_build_object('order_item_id', v_oi[2], 'product_id', v_product, 'quantity', 1, 'unit_size', 'Gal'))),
     'IDEMPOTENCY_KEY_REQUIRED%', '22023');
 
   -- --------------------------------------------------------------------------------------------

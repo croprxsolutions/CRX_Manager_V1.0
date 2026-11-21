@@ -1122,8 +1122,8 @@ try {
     SET LOCAL session_replication_role = replica;
     INSERT INTO public.customers (id, farm_name)
     VALUES ('f3614000-0000-4000-8000-0000000000${suffix}', '[SMOKE] order credit gate ${suffix}');
-    INSERT INTO public.products (id, product_name, current_cost)
-    VALUES ('f3614000-0000-4000-8001-0000000000${suffix}', '[SMOKE] order credit product ${suffix}', 5);
+    INSERT INTO public.products (id, product_name, current_cost, product_form, inventory_unit)
+    VALUES ('f3614000-0000-4000-8001-0000000000${suffix}', '[SMOKE] order credit product ${suffix}', 5, 'liquid', 'Gal');
     INSERT INTO public.orders (id, order_number, customer_id, salesman_id, status)
     VALUES (
       'f3614000-0000-4000-8002-0000000000${suffix}', 'SMK-RCC-ORDER-GATE-${suffix}',
@@ -1256,10 +1256,10 @@ try {
         'f3611000-0000-4000-8000-000000000001',
         '00000000-0000-4000-8000-000000000081', 'cancelled'
       );
-    INSERT INTO public.products (id, product_name, current_cost)
+    INSERT INTO public.products (id, product_name, current_cost, product_form, inventory_unit)
     VALUES (
       'f3611000-0000-4000-8000-000000000008',
-      '[SMOKE] PR361 tote provenance product', 5.00
+      '[SMOKE] PR361 tote provenance product', 5.00, 'liquid', 'Gal'
     );
     INSERT INTO public.inventory (
       product_id, location, quantity_available, quantity_prebooked, unit_size

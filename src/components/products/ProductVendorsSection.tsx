@@ -168,13 +168,20 @@ function usePreferredSettle(
   const [unknownFor, setUnknownFor] = useState<string | null>(null);
   const freshList = linked.status === 'loaded' && !linked.stale && !linked.refreshing ? linked.data : null;
   useEffect(() => {
-    // pageUnknown: this section remounted (role change) while Save waited; its own first read is fresh.
-    if ((unknownFor !== productId && !pageUnknown) || !freshList) return;
+    if (unknownFor !== productId || !freshList) return;
     const preferred = freshList.find((v) => v.is_preferred)?.vendor_name;
     if (preferred) onPreferredChanged(preferred);
     setUnknownFor(null);
     onPreferredUnknown(false);
-  }, [unknownFor, pageUnknown, productId, freshList, onPreferredChanged, onPreferredUnknown]);
+  }, [unknownFor, productId, freshList, onPreferredChanged, onPreferredUnknown]);
+  // Shown again (role change) while Save waits: this section's first read may predate the vendor change, so
+  // only a read started now may settle it.
+  const { reload } = linked;
+  useEffect(() => {
+    if (!pageUnknown || unknownFor === productId) return;
+    setUnknownFor(productId);
+    void reload();
+  }, [pageUnknown, unknownFor, productId, reload]);
   return () => {
     setUnknownFor(productId);
     onPreferredUnknown(true);

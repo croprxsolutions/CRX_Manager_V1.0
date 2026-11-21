@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -270,12 +271,21 @@ describe('ProductVendorsSection', () => {
     expect(onPreferredUnknown).not.toHaveBeenCalledWith(false);
   });
 
-  it('KI-170: a section shown again while the page still waits settles it from its own fresh read', async () => {
+  it('KI-170: a section shown again while the page still waits settles it only from a read started then', async () => {
     const onPreferredChanged = vi.fn();
-    render(<ProductVendorsSection productId="p1" productName="Test Product" isAdmin userId="u1"
-      onPreferredChanged={onPreferredChanged} onPreferredUnknown={onPreferredUnknown} preferredUnknown />);
+    // Its first read may predate the change (old vendor); the read it starts on being shown has the new one.
+    mocks.listProductVendors.mockResolvedValueOnce([preferred, spare]);
+    mocks.listProductVendors.mockResolvedValueOnce([{ ...spare, is_preferred: true }, { ...preferred, is_preferred: false }]);
+    // Like the page: the section clears the flag it was shown with.
+    function Page() {
+      const [unknown, setUnknown] = useState(true);
+      return (<ProductVendorsSection productId="p1" productName="Test Product" isAdmin userId="u1" onPreferredChanged={onPreferredChanged}
+        onPreferredUnknown={(value) => { onPreferredUnknown(value); setUnknown(value); }} preferredUnknown={unknown} />);
+    }
+    render(<Page />);
     await waitFor(() => expect(onPreferredUnknown).toHaveBeenLastCalledWith(false));
-    expect(onPreferredChanged).toHaveBeenCalledWith('Wells Ag Supply');
+    expect(onPreferredChanged).toHaveBeenCalledTimes(1);
+    expect(onPreferredChanged).toHaveBeenCalledWith('Spinner Ag');
   });
 
   it('closes an open removal when the user is no longer an admin', async () => {

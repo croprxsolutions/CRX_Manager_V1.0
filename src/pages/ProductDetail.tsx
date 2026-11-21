@@ -1327,7 +1327,7 @@ export default function ProductDetail() {
               size="sm"
               icon={<Plus className="w-4 h-4" />}
               showChevron={false}
-              disabled={reloadRequired || !parent || !parent.is_active}
+              disabled={reloadRequired || vendorPreferredUnknown || !parent || !parent.is_active}
               title={parent === null ? 'This product has no parent yet, so it has no sizes to add to. Use New product.' : undefined}
               onClick={() => parent && navigate('/products/new', { state: { duplicateFrom: duplicateProductSource(persistedProduct!), addSizeTo: parent } })}
             >
@@ -1338,7 +1338,7 @@ export default function ProductDetail() {
               size="sm"
               icon={<Copy className="w-4 h-4" />}
               showChevron={false}
-              disabled={reloadRequired}
+              disabled={reloadRequired || vendorPreferredUnknown}
               onClick={() => navigate('/products/new', { state: { duplicateFrom: duplicateProductSource(persistedProduct!) } })}
             >
               New product
@@ -2072,6 +2072,8 @@ export default function ProductDetail() {
                 onPreferredChanged={(vendorName) => {
                   setProduct((p) => ({ ...p, vendor: vendorName }));
                   setPersistedProduct((p) => (p ? { ...p, vendor: vendorName } : p));
+                  // A product read already running may predate this vendor; read again so it cannot install over it.
+                  if (productRead.status === 'loaded' && productRead.refreshing) void reloadProduct();
                 }}
                 onPreferredUnknown={setVendorPreferredUnknown}
                 preferredUnknown={vendorPreferredUnknown}
@@ -2230,7 +2232,9 @@ export default function ProductDetail() {
             >
               {vendorPreferredUnknown && (
                 <p role="alert" className="mr-3 self-center text-sm text-amber-800">
-                  Save is off until the vendors are re-read: press Try again in Vendors.
+                  {reloadRequired
+                    ? 'Save is off until the product and its vendors are re-read: press Reload Product, then Try again in Vendors.'
+                    : 'Save is off until the vendors are re-read: press Try again in Vendors.'}
                 </p>
               )}
               <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving} disabled={vendorPreferredUnknown} className="max-md:w-full">
@@ -2379,7 +2383,7 @@ export default function ProductDetail() {
               <ProductPriceHistory
                 productId={id}
                 costBasisWorkspace={costBasisWorkspace}
-                costBasisBusy={costBasisBusy || costBasisUnsure}
+                costBasisBusy={costBasisBusy || costBasisUnsure || reloadRequired}
                 reloadToken={priceHistoryReloadToken}
                 onSelectSupplierBasis={(candidate) => void handleSupplierBasisSelection(candidate)}
                 onSelectPurchaseBasis={(candidate) => void handlePurchaseBasisSelection(candidate)}

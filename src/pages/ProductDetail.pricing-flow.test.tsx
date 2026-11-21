@@ -106,9 +106,10 @@ function chainable(resolveWith: unknown) {
 }
 
 // The Vendors section has its own tests; these page tests only keep its callbacks (KI-170).
-const vendorSection = vi.hoisted(() => ({ props: null as null | { onPreferredUnknown: (unknown: boolean) => void } }));
+type VendorSectionProps = { onPreferredUnknown: (unknown: boolean) => void; onPreferredChanged: (vendorName: string) => void };
+const vendorSection = vi.hoisted(() => ({ props: null as null | VendorSectionProps }));
 vi.mock('../components/products/ProductVendorsSection', () => ({
-  default: (props: { onPreferredUnknown: (unknown: boolean) => void }) => { vendorSection.props = props; return null; },
+  default: (props: VendorSectionProps) => { vendorSection.props = props; return null; },
 }));
 vi.mock('../lib/db', async () => {
   // Use the REAL sanitizeError. Stubbing it as `e instanceof Error ? e.message : …`
@@ -1160,9 +1161,31 @@ describe('ProductDetail governed pricing flow', () => {
     await waitFor(() => expect(vendorSection.props).not.toBeNull());
     act(() => vendorSection.props!.onPreferredUnknown(true));
     expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    // A copy would carry the unconfirmed vendor onto a new product (Sol r1).
+    expect(screen.getByRole('button', { name: 'New product' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add a size' })).toBeDisabled();
     expect(screen.getByText(/Save is off until the vendors are re-read/)).toBeInTheDocument();
     act(() => vendorSection.props!.onPreferredUnknown(false));
     expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'New product' })).toBeEnabled();
     expect(screen.queryByText(/Save is off until the vendors are re-read/)).not.toBeInTheDocument();
+  });
+
+  it('a product read already running when a vendor change is confirmed never installs the older vendor', async () => {
+    render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    await waitFor(() => expect(vendorSection.props).not.toBeNull());
+    let answerOld!: (value: { data: typeof product; error: null }) => void;
+    productLoadResults.push(new Promise((resolve) => { answerOld = resolve; }) as unknown as { data: typeof product; error: null });
+    productLoadResults.push({ data: { ...product, vendor: 'New Vendor' }, error: null });
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(productLoadResults).toHaveLength(1)); // the refresh after the save is running
+    act(() => vendorSection.props!.onPreferredChanged('New Vendor'));
+    await waitFor(() => expect(productLoadResults).toHaveLength(0)); // read again
+    await act(async () => { answerOld({ data: { ...product, vendor: 'Old Vendor' }, error: null }); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled());
+    expect(screen.getByDisplayValue('New Vendor')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('Old Vendor')).not.toBeInTheDocument();
   });
 });

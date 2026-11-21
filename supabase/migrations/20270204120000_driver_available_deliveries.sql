@@ -188,15 +188,8 @@ BEGIN
   -- A driver's replay is returned only while the delivery is still theirs, so the screen never says "assigned to
   -- you" for one dispatch has since moved; otherwise the current state wins.
   IF v_replay IS NOT NULL THEN
-    -- The key lock above may have waited: re-check the driver's access, as the fresh path does after its row lock.
-    IF NOT v_is_office THEN
-      PERFORM 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role = 'driver'
-        AND NOT COALESCE('deliveries' = ANY (denied_pages), false)
-        FOR SHARE;
-      IF NOT FOUND THEN
-        RAISE EXCEPTION 'Not authorized to reassign deliveries';
-      END IF;
-    END IF;
+    -- Delivery row first, then the driver's profile: the same order as the fresh take, so a dispatch change that
+    -- holds this delivery and then edits the driver cannot deadlock with a retry.
     IF NOT v_is_office THEN
       -- FOR SHARE waits for an open dispatch change to this delivery, then re-reads it.
       PERFORM 1 FROM public.deliveries WHERE id = p_delivery_id AND deleted_at IS NULL AND assigned_driver = v_actor
@@ -204,6 +197,13 @@ BEGIN
         FOR SHARE;
       IF NOT FOUND THEN
         RAISE EXCEPTION 'This delivery was already taken or changed. Refresh the list.';
+      END IF;
+      -- The waits above may have let an access change in: re-check the driver's access and hold it until commit.
+      PERFORM 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role = 'driver'
+        AND NOT COALESCE('deliveries' = ANY (denied_pages), false)
+        FOR SHARE;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'Not authorized to reassign deliveries';
       END IF;
     END IF;
     RETURN v_replay -> 'result';

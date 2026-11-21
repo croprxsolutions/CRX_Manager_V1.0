@@ -1,5 +1,5 @@
 -- Written 2026-11-21. STATUS: NOT APPLIED (staging candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270205110000_pnl_commission_share_billed.md.
+-- docs/reference/migrations.d/20270206110000_pnl_commission_share_billed.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY: the two profit reports (Reports > Bottom Line P&L, Month-End Close) and the month-close receipt (2026-11-10 sweeps):

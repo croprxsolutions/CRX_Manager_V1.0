@@ -738,7 +738,7 @@ fix needs an Edge deploy with Mason's approval. Repair step 3 (To-Do 0.17).
   window. `label_url` accepts any text. The Step 1 assign/preview stubs keep their "not set up" message.
 
 ### KI-125 — Bottom Line P&L and Monthly Summary subtract commissions on every booked order but count only CRX-invoiced revenue
-**HIGH · FIX IN REVIEW (Claude, `20270205110000_pnl_commission_share_billed.sql`, to staging; [contract](../plans/2026-11-21-pnl-month-end-report-fixes-CONTRACT.md)) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #1)**
+**HIGH · FIX IN REVIEW (Claude, `20270206110000_pnl_commission_share_billed.sql`, to staging; [contract](../plans/2026-11-21-pnl-month-end-report-fixes-CONTRACT.md)) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #1)**
 Revenue counts posted/overdue/paid invoices by invoice date; commissions count every non-replaced commission by order
 date, invoiced or not. Most 2026 sales were billed in Chem Man, so net profit shows a six-figure loss that is not real
 (only 1 of 35 commissioned orders has a posted CRX invoice). Where: `_get_bottom_line_pnl_cost_impl_20261019` and
@@ -761,7 +761,7 @@ discounted the same way), against what was billed rather than the capped total. 
 invoice records: plan it with Taha (billing until 2026-12-15). Commission rows themselves are KI-13.
 
 ### KI-126 — P&L and Monthly Summary would multiply application-fee cost by acres twice
-**MED (latent) · FIX IN REVIEW (Claude, `20270205110000_pnl_commission_share_billed.sql`, with KI-125) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #2)**
+**MED (latent) · FIX IN REVIEW (Claude, `20270206110000_pnl_commission_share_billed.sql`, with KI-125) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #2)**
 Fee lines store cost already extended by acres, with quantity = acres; both reports compute `cost_cents x quantity`.
 100 acres at $2/acre cost would show $20,000 COGS instead of $200. Latent: every live application service costs $0
 today. Fix: use the `is_application_fee` case `save_invoice` already uses, plus a prover with a costed fee line.

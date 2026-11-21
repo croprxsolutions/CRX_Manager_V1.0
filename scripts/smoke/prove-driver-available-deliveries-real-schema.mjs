@@ -179,7 +179,7 @@ try {
   assert.equal(attempt(USERS.driver, `${refuse(`r := ${take(DEL.replay, USERS.driver, k4)};`)} v := t;`), GONE, 'a replay for a delivery dispatch moved is refused');
   console.log('[take] self only, open only; inactive, denied and applicator refused; retry replays; own fresh key named; taken delivery leaves the list');
 
-  // 4. Two drivers take one delivery at once: whoever locks first holds it 2 s; the other waits, then is refused.
+  // 4. Two drivers take one delivery at once: whoever locks first holds it 4 s; the other waits, then is refused.
   // Order-independent: a slow container start may let either driver win.
   const racers = await Promise.all([session(USERS.driver, 0, key(), DEL.race), session(DRIVER2, 0.5, key(), DEL.race)]);
   const winners = racers.filter((r) => r.result === 'reassigned');

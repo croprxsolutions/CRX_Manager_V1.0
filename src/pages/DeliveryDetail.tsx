@@ -46,6 +46,7 @@ import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { formatCentsMinus } from '../lib/money';
 import { invoiceStatusBadge } from '../lib/statusLabel';
 import { Sentry } from '../lib/sentry';
+import { fetchDriverFarms } from '../lib/driverFarms';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
 import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
@@ -384,7 +385,21 @@ export default function DeliveryDetail() {
       const photoSeq = ++photoSeqRef.current;
       try {
         const [custRes, itemsRes, addrRes, driverRes, photosRes] = await Promise.all([
-          supabase.from('customers').select('*').eq('id', del.customer_id).maybeSingle(),
+          // A driver reads the farm through get_driver_customers (#2018): name, phone, email and the delivery
+          // address (shipping, else billing, shown where the office sees the billing address); nothing financial.
+          isDriver
+            ? fetchDriverFarms([del.customer_id]).then(
+                (farms) => {
+                  const farm = farms.get(del.customer_id);
+                  const data = farm
+                    ? ({ id: farm.id, farm_name: farm.farm_name, phone: farm.phone, email: farm.email,
+                        billing_address: farm.address, shipping_address: farm.address } as unknown as Customer)
+                    : null;
+                  return { data, error: null };
+                },
+                (error: unknown) => ({ data: null, error }),
+              )
+            : supabase.from('customers').select('*').eq('id', del.customer_id).maybeSingle(),
           supabase.from('delivery_items').select('*, product:products(id, product_name, sku, unit_size, packaging_variant, container_size, container_unit, inventory_unit, return_policy, is_full_tote_only, product_family:product_families(name))').eq('delivery_id', id!),
           del.delivery_address_id
             ? supabase.from('customer_addresses').select('*').eq('id', del.delivery_address_id).maybeSingle()
@@ -587,7 +602,7 @@ export default function DeliveryDetail() {
     }
     setLoadFailedId(null);
     setLoading(false);
-  }, [id, toast]);
+  }, [id, toast, isDriver]);
 
   useEffect(() => {
     if (id) fetchDelivery();

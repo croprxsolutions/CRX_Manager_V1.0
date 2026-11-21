@@ -19654,6 +19654,10 @@ export type Database = {
         Args: { p_applicator_id?: string; p_crew_id?: string }
         Returns: Json[]
       }
+      get_driver_customers: {
+        Args: { p_customer_ids: string[] }
+        Returns: Json
+      }
       get_duplicate_product_parents: { Args: never; Returns: Json }
       get_epa_registrations: { Args: { p_numbers?: string[] }; Returns: Json }
       get_epa_sales_to_check: { Args: never; Returns: Json }

@@ -38,6 +38,7 @@ import { logActivity } from '../lib/activityLogger';
 import { notifyDeliveryCompleted, notifyDeliveryRemainder } from '../lib/notificationTriggers';
 import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
 import { Sentry } from '../lib/sentry';
+import { fetchDriverFarms } from '../lib/driverFarms';
 import PrivatePhoto from '../components/ui/PrivatePhoto';
 import { deliveryPhotoPath } from '../lib/privatePhotos';
 import { toSentryError } from '../lib/sentryError';
@@ -83,6 +84,7 @@ export default function FieldStop() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const isDriver = profile?.role === 'driver';
   const { toast } = useToast();
   const isOnline = useOnlineStatus();
   const confirmIdem = useIdempotencyKey('confirm_delivery', profile?.id || '');
@@ -174,8 +176,26 @@ export default function FieldStop() {
       return;
     }
 
-    const del = data as unknown as StopDelivery;
+    let del = data as unknown as StopDelivery;
+    // A driver reads the farm through get_driver_customers (#2018), not the customers table.
+    let farmAddress: string | null = null;
+    if (isDriver) {
+      try {
+        const farm = (await fetchDriverFarms([del.customer_id])).get(del.customer_id);
+        if (isStale()) return;
+        del = { ...del, customer: farm ? { farm_name: farm.farm_name, email: farm.email, contact_name: null } : null };
+        farmAddress = farm?.address ?? null;
+      } catch (farmErr) {
+        if (isStale()) return;
+        Sentry.captureException(farmErr, { tags: { source: 'fetch', page: 'field-stop' } });
+        toast('error', 'Could not load this stop');
+        navigate('/my-route');
+        return;
+      }
+    }
     setDelivery(del);
+    // The farm's shipping (else billing) address until a delivery address below replaces it.
+    setAddressLine(farmAddress ?? '');
     setReceiptRecipient(null);
     // Only an open stop sends a receipt on completion.
     if (!del.customer?.email && (del.status === 'scheduled' || del.status === 'in_progress')) {
@@ -220,7 +240,7 @@ export default function FieldStop() {
     }
     await fetchPhotos();
     setLoading(false);
-  }, [id, navigate, toast, fetchPhotos]);
+  }, [id, navigate, toast, fetchPhotos, isDriver]);
 
   useEffect(() => { activeStopIdRef.current = id; fetchStop(); }, [id, fetchStop]);
 

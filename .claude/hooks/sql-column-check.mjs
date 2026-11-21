@@ -91,28 +91,37 @@ function openParens(stmt) {
   return open;
 }
 
+// A same-length copy of a statement for reading its clauses: an `AS label` and the
+// IS [NOT] DISTINCT FROM operator are blanked, so neither reads as a clause keyword.
+const blank = (m) => " ".repeat(m.length);
+function clauseText(stmt) {
+  return stmt.replace(/\bas\s+(?!select\b)[a-z_]\w*/g, blank).replace(/\bis\s+(?:not\s+)?distinct\s+from\b/g, blank);
+}
+
+// Indexes of the commas in a select or RETURNING list: one left-to-right pass noting, per
+// parenthesis depth, whether SELECT/RETURNING or FROM/JOIN/USING came last (#2035, #2043).
+function listCommas(text) {
+  const commas = new Set(), kinds = [null];
+  for (const m of text.matchAll(/[(),]|\b(?:select|returning|from|join|using)\b/g)) {
+    const t = m[0];
+    if (t === "(") kinds.push(null);
+    else if (t === ")") { if (kinds.length > 1) kinds.pop(); }
+    else if (t === ",") { if (kinds.at(-1) === "list") commas.add(m.index); }
+    else kinds[kinds.length - 1] = t === "select" || t === "returning" ? "list" : "from";
+  }
+  return commas;
+}
+
 // True when the parenthesis opening at `at` starts a FROM item: a subquery, or a
-// function call, right after FROM, JOIN, LATERAL, ONLY or a comma. A comma whose
-// clause (same parenthesis depth) is the select list is not one (#2035); any other
-// comma still counts (unresolvable, the safe side).
-function startsFromItem(stmt, at, open) {
+// function call, right after FROM, JOIN, LATERAL, ONLY or a comma that is not in a
+// select or RETURNING list. Unsure counts as a FROM item (unresolvable, the safe side).
+function startsFromItem(text, at, commas) {
   if (at === undefined) return true;
-  let before = stmt.slice(0, at).trimEnd();
+  let before = text.slice(0, at).trimEnd();
   const fn = before.match(/(?:[a-z_]\w*\s*\.\s*)?([a-z_]\w*)$/);
   if (fn && !/^(?:from|join|lateral|only)$/.test(fn[1])) before = before.slice(0, fn.index).trimEnd();
   if (/\b(?:from|join|lateral|only)$/.test(before)) return true;
-  return before.endsWith(",") && clauseBefore(stmt, before.length - 1, open) !== "select";
-}
-
-// The last clause keyword before `at` at the same parenthesis depth, or null.
-const CLAUSE_RE = /\b(select|from|join|on|using|where|group|having|window|order|limit|offset|returning|values|set|union|intersect|except)\b/g;
-function clauseBefore(stmt, at, open) {
-  const parts = [];
-  for (let i = at - 1, end = at; ; i--) {
-    if (i < 0 || stmt[i] === "(") { parts.push(stmt.slice(i + 1, end)); break; }
-    if (stmt[i] === ")" && open.has(i)) { parts.push(stmt.slice(i + 1, end)); i = open.get(i); end = i; parts.push(" "); }
-  }
-  return [...parts.reverse().join("").matchAll(CLAUSE_RE)].pop()?.[1] ?? null;
+  return before.endsWith(",") && !commas.has(before.length - 1);
 }
 
 // Returns [{ ref, table, column }] for every reference that is certainly wrong.
@@ -130,8 +139,9 @@ export function findBadColumns(sql, columnsByTable) {
     // Subquery / function aliases in FROM: ") alias" — never resolvable. An output
     // name in the select list (count(*) as oi) is not a source and binds nothing.
     const open = openParens(stmt);
+    const text = clauseText(stmt), commas = listCommas(text);
     for (const m of stmt.matchAll(/\)\s+(?:as\s+)?([a-z_]\w*)/g)) {
-      if (!NOT_ALIAS.has(m[1]) && startsFromItem(stmt, open.get(m.index), open)) bind(m[1], null);
+      if (!NOT_ALIAS.has(m[1]) && startsFromItem(text, open.get(m.index), commas)) bind(m[1], null);
     }
 
     // Binds one FROM/JOIN item; returns whether a ", next_item" may follow it.

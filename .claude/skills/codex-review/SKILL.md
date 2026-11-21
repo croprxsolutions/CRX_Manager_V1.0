@@ -83,13 +83,13 @@ Set `SCOPE` to exactly one of these — Step 3A passes it to `scripts/luna-revie
 
 | Situation | `SCOPE` |
 |---|---|
-| Feature branch, pre-push (most common) | `--base origin/main` |
+| Feature branch, pre-push (most common) | empty (the default: the base Sol uses, see Step 3A) |
 | Uncommitted working-tree changes (staged + unstaged + untracked) | `--uncommitted` |
 | A single commit | `--commit <sha>` |
 
 ```bash
 git fetch origin        # reviewing against a stale local main distorts the diff
-SCOPE="--base origin/main"   # or: SCOPE="--uncommitted"  /  SCOPE="--commit 12cb424"
+SCOPE=""   # or: SCOPE="--uncommitted"  /  SCOPE="--commit 12cb424"
 ```
 
 Replace `<sha>` with a real commit hash before assigning `SCOPE` — `<`/`>` are shell
@@ -97,8 +97,8 @@ redirection operators, so an unsubstituted `SCOPE="--commit <sha>"` redirects st
 file named `sha` instead of reviewing a commit.
 
 Confirm the scope with the user in one line if it's ambiguous (e.g. branch has both
-committed and uncommitted work — usually you want `--base origin/main` for the push gate).
-Do NOT leave `SCOPE` hard-coded to `--base origin/main` when the user asked for `--uncommitted`
+committed and uncommitted work — usually you want the empty default scope for the push gate).
+Do NOT leave `SCOPE` empty when the user asked for `--uncommitted`
 or a single commit — that silently reviews the wrong diff.
 
 ## Step 2: Run the live evidence gates FIRST (for DB-touching changes)
@@ -135,7 +135,11 @@ background:
 node scripts/luna-review.mjs $SCOPE
 ```
 
-With no scope it reviews the branch against `origin/main`. `scripts/luna-review.mjs` pins
+With no scope it reviews the branch against the base Sol uses (`solTargetRef` in
+`scripts/write-codex-push-proof.mjs`, #1914): `origin/staging` for a feature branch bound for
+staging, so it reads only that branch's own changes; `origin/main` for `hotfix/` and `release/`
+branches, `main`, `staging`, a detached HEAD, or when `origin/staging` is missing. An explicit
+`--base <ref>` round never clears the change. `scripts/luna-review.mjs` pins
 `gpt-6-luna` at `xhigh` in one constant (`LUNA_MODEL`), freezes the diff with git's external
 programs switched off, runs Codex read-only from a neutral temp directory with no user config, puts
 the diff and its canaries on stdin, and validates the reply. Its header comments say why each piece
@@ -198,7 +202,7 @@ gate. List each deferral explicitly when you report SHIP-WITH-FOLLOWUPS, then pr
 
 **The last round reads the whole branch (Mason, 2026-11-06).** Rounds on a single fix may use
 `--commit <sha>`, but the round that clears the change for the PR (and for Sol) must be the default
-branch scope against `origin/main`, run on the committed head that will be pushed. Its `Reviewed:`
+branch scope (the base Sol uses, above), run on the committed head that will be pushed. Its `Reviewed:`
 line names that head; quote it when you report the result. If a later commit changes anything
 but plain notes, run the whole-branch round again; if it changes only plain notes (status
 records, changelog entries, plans), say so and name both heads. Rules are not plain notes:

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Advisory Luna code review: /codex-review Step 3A as one committed command.
 //
-//   node scripts/luna-review.mjs                      branch diff against origin/main
+//   node scripts/luna-review.mjs                      branch diff against Sol's base (origin/staging
+//                                                     for a feature branch, else origin/main)
 //   node scripts/luna-review.mjs --base <ref>         branch diff against another base
 //   node scripts/luna-review.mjs --commit <sha>       one commit
 //   node scripts/luna-review.mjs --uncommitted        working tree, including untracked files
@@ -39,11 +40,12 @@ import { pathToFileURL } from "node:url";
 import {
   CODEX_REVIEW_EFFORT,
   CODEX_REVIEW_MODEL,
-  GUARDED_BASE,
+  STAGING_BASE,
   codexExecutable,
   codexReviewerEnvironment,
   fixedGitExecutable,
   runCodexWithSandboxFallback,
+  solTargetRef,
 } from "./write-codex-push-proof.mjs";
 
 // The newest Luna this account can use (`gpt-6.1-luna` is refused as of 2026-11-06). A new Luna is
@@ -341,15 +343,25 @@ function freezeDiff(git, opts) {
       diff: gitOutput(git, ["show", "--no-ext-diff", "--no-textconv", "--format=", "--no-notes", sha]),
     };
   }
-  const base = opts.base ?? GUARDED_BASE;
+  // The default base is the one Sol reviews against (#1914): a feature branch bound for staging
+  // reads only its own changes, not the whole unreleased staging week.
+  const base = opts.base ?? defaultBase(git);
   const baseSha = resolveCommit(git, base);
   // Freeze the head too, so the printed result names exactly what was read.
   const headSha = resolveCommit(git, "HEAD");
   return {
     label: `branch against ${base} (${baseSha.slice(0, 9)}) at head ${headSha}`,
     baseSha,
+    defaultBase: !opts.base,
     diff: gitOutput(git, ["diff", "--no-ext-diff", "--no-textconv", `${baseSha}...${headSha}`]),
   };
+}
+
+function defaultBase(git) {
+  const branch = git(["branch", "--show-current"]);
+  const staging = git(["rev-parse", "--verify", "--quiet", `${STAGING_BASE}^{commit}`]);
+  const ok = (r) => !r.error && r.status === 0;
+  return solTargetRef(ok(branch) ? branch.stdout.trim() : "", ok(staging) && /^[0-9a-f]{40}$/i.test(staging.stdout.trim()));
 }
 
 // ── round caps ───────────────────────────────────────────────────────────────
@@ -460,8 +472,8 @@ export function nextStepHint(text) {
 }
 
 // A round on one commit or on uncommitted work never clears the change (Mason, 2026-11-06).
-export function scopeHint(label, dirty = false) {
-  if (String(label).startsWith("branch against origin/main ")) {
+export function scopeHint(label, dirty = false, defaultBase = false) {
+  if (defaultBase) {
     if (!dirty) return null;
     return "Scope: the checkout has edits that are not committed, and this round did not read them. Commit "
       + "them and run the whole-branch round again before you push (codex-review Step 3A).";
@@ -477,7 +489,7 @@ function reportDidNotRun(reason, advice) {
   return EXIT_DID_NOT_RUN;
 }
 
-function report(run, { label, diffLines, files, model, effort, dirty, healthNote, settledNote }) {
+function report(run, { label, defaultBase, diffLines, files, model, effort, dirty, healthNote, settledNote }) {
   const exitCode = exitCodeFor(run);
   if (run.outcome === "void") {
     console.error(run.stderr.split(/\r?\n/).slice(-20).join("\n"));
@@ -493,7 +505,7 @@ function report(run, { label, diffLines, files, model, effort, dirty, healthNote
   if (settledNote) console.log(settledNote);
   const hint = run.outcome === "clean" ? null : nextStepHint(run.text);
   if (hint) console.log(hint);
-  const scope = scopeHint(label, dirty);
+  const scope = scopeHint(label, dirty, defaultBase);
   if (scope) console.log(scope);
   if (healthNote) console.log(healthNote);
   return exitCode;
@@ -579,7 +591,7 @@ export function main(argv = process.argv.slice(2), codexDeps = {}, { codeHealth 
     const settledNote = settled
       ? `Settled list: ${opts.settled} (${settled.split("\n").filter((line) => line.trim()).length} line(s)) was given to Luna; it never goes to Sol.`
       : null;
-    return report(run, { label: frozen.label, diffLines, files, model, effort, dirty, healthNote, settledNote });
+    return report(run, { label: frozen.label, defaultBase: frozen.defaultBase, diffLines, files, model, effort, dirty, healthNote, settledNote });
   } catch (error) {
     return reportDidNotRun(error.message);
   }

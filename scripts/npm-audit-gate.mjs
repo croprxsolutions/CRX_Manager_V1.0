@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 // CI dependency gate: `npm audit --audit-level=high`, plus dated exceptions
 // for advisories that have NO patched version anywhere. Each exception expires;
-// after its date the advisory fails the gate again. Mason approved the picomatch
-// entry on 2026-11-17 (no fixed release exists; build/test tooling only, the
-// production-only audit has no high). Never add an advisory that has a fix:
-// bump the dependency instead.
+// after its date the advisory fails the gate again. Never add an advisory that
+// has a fix: bump the dependency instead. (The 2026-11-17 picomatch entry was
+// removed after GitHub withdrew GHSA-fc5q-39xc-vjpf on 2026-11-18, #1943.)
 
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -14,10 +13,7 @@ import { fileURLToPath } from 'node:url';
 // `latestSeen`, npm offers no direct fix, and the advisory is absent from the
 // production-only audit: a new release, or the package reaching what customers run,
 // ends it early, so CI makes someone act instead of hiding it until the date.
-export const EXCEPTIONS = {
-  // picomatch ReDoS, all versions <= 4.0.7 (latest); used by vite/vitest/knip only.
-  'GHSA-fc5q-39xc-vjpf': { until: '2026-12-31', package: 'picomatch', latestSeen: '4.0.7' },
-};
+export const EXCEPTIONS = {};
 
 const BLOCKING = new Set(['high', 'critical']);
 

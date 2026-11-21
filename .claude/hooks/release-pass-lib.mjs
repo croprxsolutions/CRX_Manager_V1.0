@@ -31,7 +31,7 @@ export function releasePassCommand(reply) {
   if (SHIP_RE.test(text)) return { kind: "pass", release: true, pullRequests: [], said: text.trim().split(/\r?\n/)[0] };
   const m = GO_LIVE_RE.exec(text);
   if (!m) return null;
-  const pullRequests = [...new Set([...m[1].matchAll(/#?(\d{1,7})(?!\d)/g)].map((x) => Number(x[1])))].filter((n) => n > 0);
+  const pullRequests = [...new Set([...m[1].matchAll(/#(\d{1,7})(?!\d)/g)].map((x) => Number(x[1])))].filter((n) => n > 0);
   if (!pullRequests.length) return { kind: "unnamed" };
   return { kind: "pass", release: false, pullRequests: pullRequests.slice(0, MAX_PRS), said: text.trim().split(/\r?\n/)[0] };
 }

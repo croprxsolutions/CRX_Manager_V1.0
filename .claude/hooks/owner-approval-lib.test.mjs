@@ -169,7 +169,7 @@ refuses(check(approve({ categories: [...CATS, { category: "deletes-data", reason
 
 // ── Time and single use.
 refuses(check(approve(), { now: APPROVED + OWNER_APPROVAL_MAX_AGE_MS + 1 }), "expired", "an approval older than 24 hours is refused");
-ok(check(approve(), { now: APPROVED + OWNER_APPROVAL_MAX_AGE_MS - 1 }).ok, "an approval 29 minutes old still verifies");
+ok(check(approve(), { now: APPROVED + OWNER_APPROVAL_MAX_AGE_MS - 1 }).ok, "an approval just under 24 hours old still verifies");
 refuses(check(approve(), { now: APPROVED - 1 }), "future", "an approval dated after now is refused");
 refuses(check(approve({}, { approvedAt: new Date(ISSUED - 1).toISOString() })), "before the request",
   "an approval dated before its request is refused");

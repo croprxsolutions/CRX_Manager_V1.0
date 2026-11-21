@@ -15,6 +15,7 @@ test("only the start of his message counts", () => {
   assert.equal(releasePassCommand("Ship release tonight").release, true);
   assert.deepEqual(releasePassCommand("go live #2105 and #2106").pullRequests, [2105, 2106]);
   assert.equal(releasePassCommand("go live").kind, "unnamed");
+  assert.equal(releasePassCommand("go live after checking item 42").kind, "unnamed", "a number needs its #");
   assert.equal(releasePassCommand("stop the release").kind, "cancel");
   assert.equal(releasePassCommand("hold the release").kind, "cancel");
   for (const no of ["should we ship the release?", "I approve", "yes", "merge 2101", "don't go live #5", ""]) assert.equal(releasePassCommand(no), null, no);

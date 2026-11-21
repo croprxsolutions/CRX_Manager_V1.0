@@ -234,10 +234,11 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
       if (productRef.current !== productId) return; // the screen moved to another product; its own read is running
       // A first vendor becomes preferred even when not asked, so report whichever vendor now is.
       const fresh = await linked.reload();
-      if (fresh.status === 'skipped') return; // a newer read owns the list; guess nothing
-      if (fresh.status === 'failed') {
-        // KI-170: another admin may have changed the preferred vendor meanwhile, so guess nothing; the
-        // page blocks Save until a re-read (Try again above the list) says which vendor is preferred.
+      if (productRef.current !== productId) return;
+      if (fresh.status !== 'applied') {
+        // KI-170: failed, or overtaken by a newer read. Another admin may have changed the preferred vendor
+        // meanwhile, so guess nothing: the page blocks Save until a fresh read of this product's vendors
+        // (the newer one, or Try again above the list) says which vendor is preferred, then mirrors it.
         markPreferredUnknown();
         return;
       }

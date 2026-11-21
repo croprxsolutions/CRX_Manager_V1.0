@@ -230,7 +230,7 @@ describe('ProductVendorsSection', () => {
     expect(screen.getByRole('button', { name: 'Add vendor' })).toBeDisabled();
   });
 
-  it('a change whose re-read is overtaken by a newer read reports nothing', async () => {
+  it('a change whose re-read is overtaken mirrors only the newer read, never the overtaken answer', async () => {
     const onPreferredChanged = vi.fn();
     const props = { productId: 'p1', productName: 'Test Product', userId: 'u1', onPreferredChanged, onPreferredUnknown };
     const view = render(<ProductVendorsSection {...props} isAdmin />);
@@ -242,7 +242,11 @@ describe('ProductVendorsSection', () => {
     view.rerender(<ProductVendorsSection {...props} isAdmin={false} />);
     await screen.findByText('Wells Ag Supply');
     await act(async () => { release([{ ...spare, is_preferred: true }]); });
-    expect(onPreferredChanged).not.toHaveBeenCalled();
+    expect(onPreferredChanged).not.toHaveBeenCalledWith('Spinner Ag');
+    // Save waited (unknown) until the newer read settled who is preferred.
+    expect(onPreferredUnknown).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(onPreferredUnknown).toHaveBeenLastCalledWith(false));
+    expect(onPreferredChanged).toHaveBeenCalledWith('Wells Ag Supply');
   });
 
   it('closes an open removal when the user is no longer an admin', async () => {

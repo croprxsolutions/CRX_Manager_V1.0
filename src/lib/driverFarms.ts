@@ -17,11 +17,14 @@ export interface DriverFarm {
 /** Farms by id. Throws on a failed read so a caller never mistakes a failure for "no farm". */
 export async function fetchDriverFarms(ids: (string | null | undefined)[]): Promise<Map<string, DriverFarm>> {
   const unique = [...new Set(ids.filter((v): v is string => !!v))];
-  if (unique.length === 0) return new Map();
-  const { data, error } = await supabase.rpc('get_driver_customers', { p_customer_ids: unique });
-  if (error) throw error;
-  const rows = assertRpcResult<{ rows: DriverFarm[] }>(data, 'get_driver_customers').rows ?? [];
-  return new Map(rows.map((farm) => [farm.id, farm]));
+  const farms = new Map<string, DriverFarm>();
+  // The database takes at most 500 ids per call.
+  for (let i = 0; i < unique.length; i += 500) {
+    const { data, error } = await supabase.rpc('get_driver_customers', { p_customer_ids: unique.slice(i, i + 500) });
+    if (error) throw error;
+    for (const farm of assertRpcResult<{ rows: DriverFarm[] }>(data, 'get_driver_customers').rows ?? []) farms.set(farm.id, farm);
+  }
+  return farms;
 }
 
 /**

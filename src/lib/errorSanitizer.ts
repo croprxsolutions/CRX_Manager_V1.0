@@ -276,6 +276,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'A required field is missing'],
   [/value too long for type character varying\(\d+\)/i,
    'The provided value is too long'],
+  // #2156: a blank quantity or amount reaches Postgres as '' and fails the numeric cast (22P02).
+  [/invalid input syntax for type numeric: ""/i,
+   'Nothing was saved. A quantity or amount was left blank; enter a number and try again'],
   [/invalid input syntax for type [^:]+:/i,
    'Invalid input format'],
   [/relation "[^"]+" does not exist/i,

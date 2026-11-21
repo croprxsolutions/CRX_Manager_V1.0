@@ -12,7 +12,7 @@ PUSH_REFS="$(cat)"
 
 # A fresh worktree has no packages; the tests then failed with a misleading migration hint (2026-11-21 retro).
 require_packages() {
-  if [ ! -d node_modules/vitest ] || [ ! -d node_modules/vite ]; then
+  if ! node -e "require.resolve('vitest/package.json'); require.resolve('vite/package.json')" 2>/dev/null; then
     echo ""
     echo "❌ PACKAGES NOT INSTALLED in this folder — push blocked."
     echo "Run npm ci here, then push again."

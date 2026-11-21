@@ -41,7 +41,7 @@ Read at `origin/staging` dab22364c (2026-11-21).
 ## Proof cases (local Docker real-schema prover, never live)
 
 All in `scripts/smoke/prove-driver-available-deliveries-real-schema.mjs`:
-1. When an active driver calls the read, then they get exactly every open delivery in order (32 open of 37 seeded: 7 named + 25), only the five fields, and none assigned, started or deleted.
+1. When an active driver calls the read, then they get exactly every open delivery in order (33 open of 40 seeded: 8 named + 25), only the five fields, and none assigned, started or deleted.
 2. When an admin, sales rep, applicator, inactive driver or a driver denied the Deliveries page calls it, then it is refused; anon has no execute.
 3. When the customer is C in A > B > C, then `farm_group_name` is A; with no parent it is null; with a forced loop the read still returns (direct parent).
 4. When a driver takes an open delivery for themself, then it becomes theirs and leaves the list; assigning someone else, an inactive driver, a driver denied the Deliveries page, an applicator are refused; a fresh key on a delivery already theirs gets "already assigned to you"; taken, started, deleted deliveries get "already taken or changed"; a same-key retry replays.
@@ -96,3 +96,10 @@ None. Mason, 2026-11-21: "Yes, show them" (drivers see open deliveries with farm
 - MED: race proofs hold their locks 4 s, so a slow container start still overlaps.
 - LOW: the denied-page test is `NOT COALESCE('deliveries' = ANY (denied_pages), false)`: null-safe and safe on a nested array.
 - LOW: the changelog and record name all five returned fields, id included.
+
+## Sol round 4 (gpt-6.2-sol high, head 7b350ead4): 2 HIGH waiting on Mason; 1 MED, 2 LOW fixed
+
+- HIGH 1 (Mason's decision): once a driver takes a delivery, the existing customer read rule lets every assigned driver read that farm's credit limit, prepayment balance, payment terms and internal notes. That is today's rule for any assigned driver; this change lets a driver pick which farm.
+- HIGH 2 (Mason's decision): the existing driver update rule lets an assigned driver edit fields of their own delivery through the table API (e.g. the quick-delivery flag, which changes stock release on a later cancel). Also today's rule for any assigned driver; this change lets a driver pick which delivery.
+- MED, fixed: a driver's replay is refused once the delivery is no longer scheduled or in progress (e.g. dispatch cancelled it); proven.
+- LOW, fixed: the list proof seeds an unassigned cancelled delivery; the double-tap proof requires both sessions to commit.

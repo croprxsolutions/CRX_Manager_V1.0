@@ -178,6 +178,7 @@ BEGIN
     IF NOT v_is_office THEN
       -- FOR SHARE waits for an open dispatch change to this delivery, then re-reads it.
       PERFORM 1 FROM public.deliveries WHERE id = p_delivery_id AND deleted_at IS NULL AND assigned_driver = v_actor
+        AND status IN ('scheduled', 'in_progress')
         FOR SHARE;
       IF NOT FOUND THEN
         RAISE EXCEPTION 'This delivery was already taken or changed. Refresh the list.';

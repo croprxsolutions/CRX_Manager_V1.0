@@ -37,7 +37,7 @@ const DENIED_DRIVER = id('a8');
 const NULL_ENTRY_DRIVER = id('a9');
 const REVOKED_DRIVER = id('aa');
 const DEMOTED_REP = id('ab');
-const DEL = Object.fromEntries(['open1', 'open2', 'mine', 'started', 'deleted', 'race', 'other', 'double', 'replay', 'late', 'closed', 'revoke'].map((k, i) => [k, id(`d${i + 1}`)]));
+const DEL = Object.fromEntries(['open1', 'open2', 'mine', 'started', 'deleted', 'race', 'other', 'double', 'replay', 'late', 'closed', 'revoke', 'voidopen', 'cancelme'].map((k, i) => [k, id(`d${i + 1}`)]));
 const key = () => `'${crypto.randomUUID()}'`;
 const take = (delivery, driver, k = key()) => `public.reassign_delivery('${delivery}', '${driver}', NULL, ${k})`;
 const LIST = `r := public.get_available_deliveries_for_driver();
@@ -107,7 +107,9 @@ try {
       ('${DEL.replay}', 'AV-09', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-14', 'scheduled', NULL, NULL),
       ('${DEL.late}', 'AV-00', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-08-01', 'scheduled', NULL, NULL),
       ('${DEL.closed}', 'AV-10', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-01', 'cancelled', '${USERS.driver}', NULL),
-      ('${DEL.revoke}', 'AV-11', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-15', 'scheduled', NULL, NULL);
+      ('${DEL.revoke}', 'AV-11', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-15', 'scheduled', NULL, NULL),
+      ('${DEL.voidopen}', 'AV-12', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-01', 'cancelled', NULL, NULL),
+      ('${DEL.cancelme}', 'AV-13', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-16', 'scheduled', NULL, NULL);
     INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, scheduled_date, status)
       SELECT 'AV-X' || lpad(g::text, 2, '0'), gen_random_uuid(), '${D}', '${USERS.admin}', date '2026-07-01' + g, 'scheduled'
       FROM generate_series(1, 25) g;
@@ -131,7 +133,7 @@ try {
   const extra = Array.from({ length: 25 }, (_, i) => `AV-X${String(i + 1).padStart(2, '0')}=Delta Farms/-`);
   // AV-00 has the lowest number but the latest date: it must come last (date order, not number order).
   const expected = ['AV-01=Charlie Farms/Alpha Top Farms', 'AV-02=Delta Farms/-', 'AV-06=Bravo Farms/Alpha Top Farms', 'AV-08=Delta Farms/-',
-    'AV-09=Delta Farms/-', 'AV-11=Delta Farms/-', ...extra, 'AV-00=Delta Farms/-'];
+    'AV-09=Delta Farms/-', 'AV-11=Delta Farms/-', 'AV-13=Delta Farms/-', ...extra, 'AV-00=Delta Farms/-'];
   assert.equal(attempt(USERS.driver, asUser(LIST)), `ok|${expected.join(',')}`, 'every open delivery, in order, nothing else');
   assert.equal(attempt(USERS.driver, `${asUser('r := public.get_available_deliveries_for_driver();')}
     v := (r->'rows'->0->>'id') || '/' || (r->'rows'->0->>'scheduled_date') || '/' || (r->'rows'->-1->>'id') || '/' || (r->'rows'->-1->>'scheduled_date');`),
@@ -177,6 +179,11 @@ try {
   assert.equal(attempt(USERS.driver, `${asUser(`r := ${take(DEL.replay, USERS.driver, k4)};`)} v := r->>'status';`, { commit: true }), 'ok|reassigned');
   assert.equal(attempt(USERS.admin, `${asUser(`r := ${take(DEL.replay, DRIVER2)};`)} v := r->>'status';`, { commit: true }), 'ok|reassigned');
   assert.equal(attempt(USERS.driver, `${refuse(`r := ${take(DEL.replay, USERS.driver, k4)};`)} v := t;`), GONE, 'a replay for a delivery dispatch moved is refused');
+  // A same-key replay after dispatch cancelled it (still assigned): the current state wins.
+  const k6 = key();
+  assert.equal(attempt(USERS.driver, `${asUser(`r := ${take(DEL.cancelme, USERS.driver, k6)};`)} v := r->>'status';`, { commit: true }), 'ok|reassigned');
+  docker(PSQL, { input: `SET session_replication_role = replica; UPDATE public.deliveries SET status = 'cancelled' WHERE id = '${DEL.cancelme}';` });
+  assert.equal(attempt(USERS.driver, `${refuse(`r := ${take(DEL.cancelme, USERS.driver, k6)};`)} v := t;`), GONE, 'a replay for a cancelled delivery is refused');
   console.log('[take] self only, open only; inactive, denied and applicator refused; retry replays; own fresh key named; taken delivery leaves the list');
 
   // 4. Two drivers take one delivery at once: whoever locks first holds it 4 s; the other waits, then is refused.
@@ -194,6 +201,7 @@ try {
   assert.ok(Math.max(tap1.waited, tap2.waited) >= 0.5, `one tap must have waited on the other (${tap1.waited} s, ${tap2.waited} s)`);
   assert.equal(tap1.result, 'reassigned', tap1.out);
   assert.equal(tap2.result, 'reassigned', tap2.out);
+  assert.ok(tap1.code === 0 && tap2.code === 0, `both taps must commit:\n${tap1.out}\n---\n${tap2.out}`);
   assert.equal(owner(DEL.double), DRIVER2);
   assert.equal(scalar(`SELECT count(*) FROM public.notifications WHERE related_entity_id = '${DEL.double}';`), '1', 'a double tap notifies once');
   // A take waiting on dispatch's row lock is refused if the driver is denied Deliveries before the lock frees.

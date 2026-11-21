@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-21 — #2045 may have two more Sol rounds (rounds 7 and 8)
+
+**Decision (Mason, in chat, 2026-11-21: "Yes 2 more").** PR #2045 (#1942 inventory edge cases) may have two more Sol rounds (rounds 7 and 8).
+**Why:** after Mason owner-accepted round 6's one HIGH finding, staging moved again and GitHub reported a conflict, so staging had to be merged in and the merge gate needs a fresh Sol review of the new head. The PR's own change is unchanged since round 6.
+
 ## 2026-11-21 — #2051: Mason owner-accepted 1 Sol finding(s) at `d3b16f425dc9`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2051 at `d3b16f425dc9` (base `ccefd47221c0`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

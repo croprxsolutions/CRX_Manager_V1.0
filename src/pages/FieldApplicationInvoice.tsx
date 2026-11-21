@@ -1364,11 +1364,11 @@ export default function FieldApplicationInvoice() {
     const productIds = Array.from(
       new Set((items as Array<Record<string, unknown>>).map((it) => it.product_id as string | null).filter((x): x is string => !!x)),
     );
-    const labelByProduct = new Map<string, { max_label_rate: number | null; max_label_rate_unit: string | null; rei_hours: number | null; phi_days: number | null; product_form: string | null; rate_unit: string | null; inventory_unit: string | null }>();
+    const labelByProduct = new Map<string, { max_label_rate: number | null; max_label_rate_unit: string | null; rei_hours: number | null; phi_days: number | null; inventory_unit: string | null }>();
     if (productIds.length > 0) {
       const { data: prodRows, error: prodError } = await supabase
         .from('products')
-        .select('id, max_label_rate, max_label_rate_unit, rei_hours, phi_days, product_form, rate_unit, inventory_unit')
+        .select('id, max_label_rate, max_label_rate_unit, rei_hours, phi_days, inventory_unit')
         .in('id', productIds);
       if (!isCurrentLoad()) return;
       if (prodError) throw prodError;
@@ -1376,14 +1376,12 @@ export default function FieldApplicationInvoice() {
       // Every staff member reads every product, so a missing one is a bad read: its line would
       // look like it has no label maximum.
       if (prodRows.length < productIds.length) throw new Error('The product label read left out a product');
-      for (const p of prodRows as Array<{ id: string } & { max_label_rate: number | null; max_label_rate_unit: string | null; rei_hours: number | null; phi_days: number | null; product_form: string | null; rate_unit: string | null; inventory_unit: string | null }>) {
+      for (const p of prodRows as Array<{ id: string; max_label_rate: number | null; max_label_rate_unit: string | null; rei_hours: number | null; phi_days: number | null; inventory_unit: string | null }>) {
         labelByProduct.set(p.id, {
           max_label_rate: p.max_label_rate,
           max_label_rate_unit: p.max_label_rate_unit,
           rei_hours: p.rei_hours,
           phi_days: p.phi_days,
-          product_form: p.product_form,
-          rate_unit: p.rate_unit,
           inventory_unit: p.inventory_unit,
         });
       }
@@ -1392,11 +1390,11 @@ export default function FieldApplicationInvoice() {
       (items as Array<Record<string, unknown>>).map((it, idx) => {
         const pid = it.product_id as string | null;
         const label = pid ? (labelByProduct.get(pid) ?? null) : null;
-        // #1983: a product line saved with no unit reloads in the product's units (as picking the product
-        // sets them), not 'oz'; only a product-less line keeps the new-line default 'oz'.
+        // #1983: a product line saved with no sold unit reloads in the product's sold unit, not 'oz'.
+        // A blank rate unit takes the unit the server recorded for the application (total_applied_unit),
+        // never the catalog's: re-reading the same rate in another unit would rebill the line on save.
         const soldUnit = label ? (label.inventory_unit || '') : 'oz';
-        const rateUnit = !label ? 'oz'
-          : label.product_form === 'seed' || label.product_form === 'each' ? soldUnit : (label.rate_unit || soldUnit);
+        const rateUnit = (it.total_applied_unit as string) || 'oz';
         return {
           id: (it.id as string) || `chem_${idx}`,
           product_id: it.product_id as string | null,

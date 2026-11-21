@@ -104,7 +104,7 @@ export default function JobBatchAssignModal({
       onClose();
       return;
     }
-    if (!profile) return;
+    if (!profile) { toast('error', 'Sign in again to save these changes.'); return; }
     const newRef = choice === REMOVE ? null : choice;
     const jobIds = [...selectedJobIds].sort();
     const scope = JSON.stringify([jobIds, newRef]);

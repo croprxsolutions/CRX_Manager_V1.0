@@ -119,7 +119,7 @@ export default function JobMassEditModal({
       handleClose();
       return;
     }
-    if (!profile) return;
+    if (!profile) { toast('error', 'Sign in again to save these changes.'); return; }
     // #1979: field changes and the cancel go to edit_jobs in ONE call, so they save together or not
     // at all. The server decides which jobs it can cancel (status after the changes) and reports skips.
     const jobIds = selectedJobs.map((j) => j.id).sort();

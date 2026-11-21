@@ -348,7 +348,7 @@ async function main() {
   assert.match(after.outcome, /^SMOKE_PASS_ROLLBACK/, after.output);
   const timing = /C10 500 jobs edited \+ cancelled in (\d+) ms/.exec(after.output);
   assert.ok(timing, 'the 500-job case did not report its time');
-  console.log(`[case] AFTER: smoke-edit-jobs.sql passes (P1-P5, C1-C10); 500 jobs edited + cancelled in ${timing[1]} ms`);
+  console.log(`[case] AFTER: smoke-edit-jobs.sql passes (P1-P6, C1-C10); 500 jobs edited + cancelled in ${timing[1]} ms`);
 
   // Case 11: a rep cancels the scheduled job made from their own open booking (committed; disposable container).
   psql(`DO $fx$

@@ -14,7 +14,14 @@
  *      replays; a fresh key on one already theirs says "already assigned to you";
  *   4. two drivers taking one delivery at once: the second waits, then is refused and the first keeps it; one
  *      driver's double tap (same key) at once: both get the result, one notification;
- *   5. an admin and a sales rep still reassign scheduled and in-progress deliveries to anyone.
+ *   5. an admin and a sales rep still reassign scheduled and in-progress deliveries to anyone;
+ *   6. get_driver_customers gives an active driver, for any farm, only id, farm name, phone, email and the delivery
+ *      address (shipping, else billing); never the seeded credit limit, prepay balance, payment terms or notes;
+ *      everyone else is refused;
+ *   7. a driver's direct table update of their in-progress or completed delivery changes nothing (it did before);
+ *      admin and sales rep direct updates still work;
+ *   8. no SECURITY DEFINER function a signed-in user can run returns the seeded credit limit, prepay balance,
+ *      payment terms or notes to a driver (the same sweep as an admin finds them, so the sweep can see a leak).
  *
  * Run: node scripts/smoke/prove-driver-available-deliveries-real-schema.mjs   (needs Docker; never touches live)
  * Prints DRIVER_AVAILABLE_DELIVERIES_PROOF_PASS on success.
@@ -37,12 +44,41 @@ const DENIED_DRIVER = id('a8');
 const NULL_ENTRY_DRIVER = id('a9');
 const REVOKED_DRIVER = id('aa');
 const DEMOTED_REP = id('ab');
-const DEL = Object.fromEntries(['open1', 'open2', 'mine', 'started', 'deleted', 'race', 'other', 'double', 'replay', 'late', 'closed', 'revoke', 'voidopen', 'cancelme'].map((k, i) => [k, id(`d${i + 1}`)]));
+const DEL = Object.fromEntries(['open1', 'open2', 'mine', 'started', 'deleted', 'race', 'other', 'double', 'replay', 'late', 'closed', 'revoke', 'voidopen', 'cancelme', 'inprog', 'done'].map((k, i) => [k, id(`d${i + 1}`)]));
 const key = () => `'${crypto.randomUUID()}'`;
 const take = (delivery, driver, k = key()) => `public.reassign_delivery('${delivery}', '${driver}', NULL, ${k})`;
 const LIST = `r := public.get_available_deliveries_for_driver();
   v := (SELECT string_agg((x->>'delivery_number') || '=' || (x->>'customer_name') || '/' || COALESCE(x->>'farm_group_name', '-'), ',' ORDER BY ord)
           FROM jsonb_array_elements(r->'rows') WITH ORDINALITY AS e(x, ord));`;
+// A driver's direct table edit of their in-progress and completed deliveries; v = rows changed.
+const directEdit = (set) => asUser(`UPDATE public.deliveries SET ${set} WHERE id IN ('${DEL.inprog}', '${DEL.done}'); GET DIAGNOSTICS n = ROW_COUNT; v := n::text;`);
+const SECRETS = ['987654321', '9876543.21', '123456789', '1234567.89', 'ZZTERMS2018', 'ZZNOTE2018'];
+// Calls every SECURITY DEFINER function authenticated may run (uuid arguments = farm D, uuid[] = {D}, the rest
+// NULL), each as the signed-in user in its own rolled-back step, and lists the ones whose result shows a secret.
+const SWEEP = `SET LOCAL statement_timeout = '5s';
+  n := 0; v := '';
+  FOR f0, f1 IN
+    SELECT format('public.%I', p.proname),
+           COALESCE((SELECT string_agg(CASE t.oid WHEN 'uuid'::regtype THEN quote_literal('${D}') || '::uuid'
+                                                WHEN 'uuid[]'::regtype THEN 'ARRAY[' || quote_literal('${D}') || ']::uuid[]'
+                                                ELSE 'NULL::' || format_type(t.oid, NULL) END, ', ' ORDER BY a.ord)
+                     FROM unnest(p.proargtypes::oid[]) WITH ORDINALITY a(typ, ord) JOIN pg_type t ON t.oid = a.typ), '')
+    FROM pg_proc p
+    WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef AND p.prokind = 'f'
+      AND p.prorettype NOT IN ('trigger'::regtype, 'event_trigger'::regtype)
+      AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
+    ORDER BY 1, 2
+  LOOP
+    BEGIN
+      SET LOCAL ROLE authenticated;
+      EXECUTE format('SELECT string_agg(x::text, %L) FROM %s(%s) AS x', '|', f0, f1) INTO t;
+      RESET ROLE;
+      n := n + 1;
+      IF t ~ '${SECRETS.map((x) => x.replaceAll('.', '\\.')).join('|')}' THEN v := v || f0 || ' '; END IF;
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+  END LOOP;
+  v := n::text || ':' || btrim(v);`;
 const owner = (delivery) => scalar(`SELECT COALESCE(assigned_driver::text, '-') FROM public.deliveries WHERE id = '${delivery}';`);
 const REFUSED = 'ok|Not authorized to reassign deliveries';
 const GONE = 'ok|This delivery was already taken or changed. Refresh the list.';
@@ -95,6 +131,11 @@ try {
     UPDATE public.profiles SET role = 'sales_rep' WHERE id = '${DEMOTED_REP}';
     INSERT INTO public.customers (id, farm_name, parent_customer_id) VALUES
       ('${A}', 'Alpha Top Farms', NULL), ('${B}', 'Bravo Farms', '${A}'), ('${C}', 'Charlie Farms', '${B}'), ('${D}', 'Delta Farms', NULL);
+    -- Distinctive values a driver must never receive (part 6 and 8), plus the addresses a driver may.
+    UPDATE public.customers SET credit_limit_cents = 987654321, prepay_balance_cents = 123456789,
+      payment_terms = 'ZZTERMS2018', notes = 'ZZNOTE2018', phone = '555-0104', email = 'delta@example.invalid',
+      billing_address = 'BILL 1 Rd', shipping_address = 'SHIP 9 Ln' WHERE id = '${D}';
+    UPDATE public.customers SET billing_address = 'A Billing St', shipping_address = '  ' WHERE id = '${A}';
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, scheduled_date, status, assigned_driver, deleted_at) VALUES
       ('${DEL.open1}', 'AV-01', gen_random_uuid(), '${C}', '${USERS.admin}', '2026-06-10', 'scheduled', NULL, NULL),
       ('${DEL.open2}', 'AV-02', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-11', 'scheduled', NULL, NULL),
@@ -109,7 +150,9 @@ try {
       ('${DEL.closed}', 'AV-10', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-01', 'cancelled', '${USERS.driver}', NULL),
       ('${DEL.revoke}', 'AV-11', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-15', 'scheduled', NULL, NULL),
       ('${DEL.voidopen}', 'AV-12', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-01', 'cancelled', NULL, NULL),
-      ('${DEL.cancelme}', 'AV-13', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-16', 'scheduled', NULL, NULL);
+      ('${DEL.cancelme}', 'AV-13', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-16', 'scheduled', NULL, NULL),
+      ('${DEL.inprog}', 'AV-14', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-01', 'in_progress', '${USERS.driver}', NULL),
+      ('${DEL.done}', 'AV-15', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-01', 'completed', '${USERS.driver}', NULL);
     INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, scheduled_date, status)
       SELECT 'AV-X' || lpad(g::text, 2, '0'), gen_random_uuid(), '${D}', '${USERS.admin}', date '2026-07-01' + g, 'scheduled'
       FROM generate_series(1, 25) g;
@@ -117,6 +160,8 @@ try {
 
   // Before the candidate: the driver's direct read finds no open delivery (the bug).
   assert.equal(attempt(USERS.driver, asUser("v := (SELECT count(*) FROM public.deliveries WHERE assigned_driver IS NULL AND status = 'scheduled')::text;")), 'ok|0');
+  // Before the candidate: a driver CAN change their in-progress and completed deliveries straight through the table.
+  assert.equal(attempt(USERS.driver, `${directEdit('is_quick_delivery = NOT is_quick_delivery')}`), 'ok|2', 'before: the driver direct edit works');
 
   const auto = apply();
   assert.notEqual(auto.status, 0, 'autocommit apply must be refused');
@@ -235,6 +280,42 @@ try {
   assert.equal(scalar(`SELECT count(*) FROM public.notifications WHERE related_entity_id = '${DEL.mine}' AND title = 'New Delivery Assigned';`), '1', 'the admin retry notifies once');
   assert.equal(attempt(USERS.rep, `${asUser(`r := ${take(DEL.started, USERS.driver)};`)} v := r->>'status';`), 'ok|reassigned');
   console.log('[take] admin and sales rep reassign as before');
+
+  // 6. A driver's farm contact lookup: any farm, five fields, delivery address = shipping, else billing.
+  const CONTACTS = `r := public.get_driver_customers(ARRAY['${D}', '${A}', '${B}', '${D}', '${id('ff')}']::uuid[]);`;
+  assert.equal(attempt(USERS.driver, `${asUser(CONTACTS)} v := (SELECT string_agg((e->>'farm_name') || '=' || COALESCE(e->>'address', '-'), ',' ORDER BY e->>'id') FROM jsonb_array_elements(r->'rows') e);`),
+    'ok|Alpha Top Farms=A Billing St,Bravo Farms=-,Delta Farms=SHIP 9 Ln', 'one row per known farm, shipping else billing');
+  assert.equal(attempt(USERS.driver, `${asUser(CONTACTS)} v := (SELECT string_agg(k, ',' ORDER BY k) FROM jsonb_object_keys(r->'rows'->2) k) || ' ' || (r->'rows'->2->>'phone') || ' ' || (r->'rows'->2->>'email');`),
+    'ok|address,email,farm_name,id,phone 555-0104 delta@example.invalid', 'only five fields');
+  const contactsText = attempt(USERS.driver, `${asUser(CONTACTS)} v := r::text;`);
+  for (const secret of SECRETS) assert.ok(!contactsText.includes(secret), `the contact lookup must not return ${secret}`);
+  assert.equal(attempt(DENIED_DRIVER, `${asUser("r := public.get_driver_customers('{}'::uuid[]);")} v := r::text;`), 'ok|{"rows": []}', 'an empty request returns no rows');
+  assert.equal(attempt(USERS.driver, `${refuse('r := public.get_driver_customers(NULL);')} v := t;`), 'ok|Pass up to 500 farm ids');
+  assert.equal(attempt(USERS.driver, `${refuse(`r := public.get_driver_customers(ARRAY(SELECT '${D}'::uuid FROM generate_series(1, 501)));`)} v := t;`), 'ok|Pass up to 500 farm ids');
+  for (const [uid, who] of [[USERS.admin, 'admin'], [USERS.rep, 'sales rep'], [USERS.applicator, 'applicator'], [OFF_DRIVER, 'inactive driver']]) {
+    assert.equal(attempt(uid, `${refuse(`r := public.get_driver_customers(ARRAY['${D}']::uuid[]);`)} v := t;`), 'ok|Not authorized to view farm contacts', `${who} must be refused`);
+  }
+  assert.match(attempt(USERS.driver, `SET LOCAL ROLE anon; BEGIN r := public.get_driver_customers(ARRAY['${D}']::uuid[]); v := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN v := SQLERRM; END; RESET ROLE;`),
+    /permission denied/, 'anon cannot run the contact lookup');
+  console.log('[contacts] a driver gets five safe fields for any farm; everyone else refused');
+
+  // 7. A driver's direct table edits change nothing now; admin and sales rep direct edits still work.
+  for (const set of ['is_quick_delivery = NOT is_quick_delivery', "delivery_notes = 'driver edit'", "status = 'completed'"]) {
+    assert.equal(attempt(USERS.driver, directEdit(set)), 'ok|0', `a driver direct edit (${set}) changes nothing`);
+  }
+  assert.equal(scalar(`SELECT string_agg(is_quick_delivery::text || '/' || COALESCE(delivery_notes, '-') || '/' || status, ',' ORDER BY delivery_number) FROM public.deliveries WHERE id IN ('${DEL.inprog}', '${DEL.done}');`),
+    'false/-/in_progress,false/-/completed', 'both deliveries are untouched');
+  for (const uid of [USERS.admin, USERS.rep]) {
+    assert.equal(attempt(uid, asUser(`UPDATE public.deliveries SET delivery_notes = 'office edit' WHERE id = '${DEL.inprog}'; GET DIAGNOSTICS n = ROW_COUNT; v := n::text;`)), 'ok|1', 'office direct edit still works');
+  }
+  console.log('[edits] a driver direct table edit changes nothing; admin and sales rep still edit');
+
+  // 8. No server function hands a driver the secret farm fields; the same sweep as an admin does find them.
+  const driverSweep = attempt(USERS.driver, SWEEP);
+  assert.match(driverSweep, /^ok\|\d+:$/, `functions showing a driver secret farm fields: ${driverSweep}`);
+  const adminSweep = attempt(USERS.admin, SWEEP);
+  assert.match(adminSweep, /^ok\|\d+:\S/, `the sweep must see the secrets as an admin: ${adminSweep}`);
+  console.log(`[sweep] driver: ${driverSweep.split('|')[1].split(':')[0]} functions answered, none showed a secret; admin sees them in: ${adminSweep.split(':')[1]}`);
 
   console.log('\nDRIVER_AVAILABLE_DELIVERIES_PROOF_PASS');
 } finally {

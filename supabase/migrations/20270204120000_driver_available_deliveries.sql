@@ -23,10 +23,23 @@
 --    "unassigned" for a driver, which refused a driver's retry after a lost reply). For admin and sales rep the
 --    stored result is the same one the body's own replay returned. Admin and sales rep authority, the replay
 --    binding, the body it calls, the signature and grants are unchanged.
+-- 3. Drivers change deliveries only through the app's server functions (Mason, 2026-11-21: "fix both"). The
+--    del_update row rule loses its assigned-driver branch, which let a driver change ANY column of their in-progress
+--    or completed delivery straight through the table (e.g. the quick-delivery flag that decides stock release on
+--    cancel, the customer, order or date). Only admin and sales rep may update the table directly. The app never
+--    updates deliveries directly; every driver action (start, complete, confirm, edit, take, offline sync) is a
+--    SECURITY DEFINER function that keeps its own checks and is unchanged.
+-- 4. New get_driver_customers(uuid[]): an active driver gets, for the requested farms, only the farm name, phone,
+--    email and delivery address (shipping address, else billing). Mason decided drivers may see these for every
+--    farm. Never credit limit, prepay balance, payment terms, notes or any other column. Step 1 of 2: the driver
+--    screens switch to it in the screens PR; a later reviewed migration then removes drivers' whole-row customer
+--    read (customers_select driver branch) once those screens are live, so a driver on an old app copy is never
+--    left without the farm's phone or address.
 --
--- No table, row, policy or other function changes. Rollback: ship the screen rollback first, then a new reviewed
--- migration dropping get_available_deliveries_for_driver(). The reassign_delivery hardening is corrected forward,
--- never reverted (reverting would reopen the double-take race).
+-- No table or other policy changes. Rollback: ship the screen rollback first, then a new reviewed migration
+-- dropping get_available_deliveries_for_driver() and get_driver_customers(uuid[]). The reassign_delivery hardening
+-- and the del_update narrowing are corrected forward, never reverted (reverting reopens the double-take race and
+-- drivers' direct edits).
 
 CREATE TEMP TABLE driver_available_2018_tx ON COMMIT DROP AS SELECT pg_current_xact_id()::text AS transaction_id;
 
@@ -49,8 +62,17 @@ BEGIN
   IF (SELECT count(*) FROM pg_proc WHERE proname = 'reassign_delivery' AND pronamespace = 'public'::regnamespace) <> 1 THEN
     RAISE EXCEPTION 'DRIVER_AVAILABLE_BASELINE_DRIFT: reassign_delivery has more than one overload';
   END IF;
-  IF to_regprocedure('public.get_available_deliveries_for_driver()') IS NOT NULL THEN
-    RAISE EXCEPTION 'DRIVER_AVAILABLE_BASELINE_DRIFT: get_available_deliveries_for_driver already exists';
+  IF to_regprocedure('public.get_available_deliveries_for_driver()') IS NOT NULL
+     OR to_regprocedure('public.get_driver_customers(uuid[])') IS NOT NULL THEN
+    RAISE EXCEPTION 'DRIVER_AVAILABLE_BASELINE_DRIFT: a function this file creates already exists';
+  END IF;
+  -- del_update must still be the 20260511060000 rule (admin, sales rep, or the assigned driver while in progress or
+  -- completed); this file replaces it with the same rule minus the driver branch.
+  IF (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'deliveries' AND cmd = 'UPDATE') <> 1
+     OR NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'deliveries'
+                      AND policyname = 'del_update' AND cmd = 'UPDATE' AND permissive = 'PERMISSIVE'
+                      AND qual LIKE '%assigned_driver%' AND with_check LIKE '%assigned_driver%') THEN
+    RAISE EXCEPTION 'DRIVER_AVAILABLE_BASELINE_DRIFT: deliveries UPDATE rules are not the 20260511060000 del_update';
   END IF;
 END;
 $preflight$;
@@ -214,8 +236,62 @@ BEGIN
 END;
 $function$;
 
+-- 3. Direct table updates: admin and sales rep only.
+DROP POLICY "del_update" ON public.deliveries;
+CREATE POLICY "del_update" ON public.deliveries
+  AS PERMISSIVE FOR UPDATE TO authenticated
+  USING (is_admin() OR is_sales_rep())
+  WITH CHECK (is_admin() OR is_sales_rep());
+
+-- 4. A driver's farm contact lookup: four safe fields, nothing financial.
+CREATE FUNCTION public.get_driver_customers(p_customer_ids uuid[])
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true AND role = 'driver'
+  ) THEN
+    RAISE EXCEPTION 'Not authorized to view farm contacts' USING ERRCODE = '42501';
+  END IF;
+  IF p_customer_ids IS NULL OR cardinality(p_customer_ids) > 500 THEN
+    RAISE EXCEPTION 'Pass up to 500 farm ids' USING ERRCODE = '22023';
+  END IF;
+
+  -- One row per distinct existing farm; unknown ids are simply absent.
+  RETURN jsonb_build_object('rows', COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+             'id', c.id,
+             'farm_name', c.farm_name,
+             'phone', c.phone,
+             'email', c.email,
+             'address', COALESCE(NULLIF(btrim(c.shipping_address), ''), NULLIF(btrim(c.billing_address), '')))
+           ORDER BY c.id)
+    FROM public.customers c
+    WHERE c.id = ANY (p_customer_ids)
+  ), '[]'::jsonb));
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.get_driver_customers(uuid[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_driver_customers(uuid[]) TO authenticated, service_role;
+
 DO $postflight$
 BEGIN
+  IF (SELECT prosecdef AND provolatile = 's' AND proconfig = ARRAY['search_path=public, pg_temp']
+        FROM pg_proc WHERE oid = to_regprocedure('public.get_driver_customers(uuid[])')) IS NOT TRUE
+     OR has_function_privilege('anon', 'public.get_driver_customers(uuid[])', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.get_driver_customers(uuid[])', 'EXECUTE') THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: get_driver_customers must be definer, stable, fixed search_path, authenticated only';
+  END IF;
+  IF (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'deliveries' AND cmd = 'UPDATE') <> 1
+     OR EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'deliveries'
+                  AND cmd = 'UPDATE' AND (qual LIKE '%assigned_driver%' OR with_check LIKE '%assigned_driver%')) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: del_update must be admin and sales rep only';
+  END IF;
   IF (SELECT prosecdef AND provolatile = 's' AND proconfig = ARRAY['search_path=public, pg_temp']
         FROM pg_proc WHERE oid = to_regprocedure('public.get_available_deliveries_for_driver()')) IS NOT TRUE
      OR has_function_privilege('anon', 'public.get_available_deliveries_for_driver()', 'EXECUTE')

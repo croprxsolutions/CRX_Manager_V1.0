@@ -103,3 +103,64 @@ None. Mason, 2026-11-21: "Yes, show them" (drivers see open deliveries with farm
 - HIGH 2 (Mason's decision): the existing driver update rule lets an assigned driver edit fields of their own delivery through the table API (e.g. the quick-delivery flag, which changes stock release on a later cancel). Also today's rule for any assigned driver; this change lets a driver pick which delivery.
 - MED, fixed: a driver's replay is refused once the delivery is no longer scheduled or in progress (e.g. dispatch cancelled it); proven.
 - LOW, fixed: the list proof seeds an unassigned cancelled delivery; the double-tap proof requires both sessions to commit.
+
+## Part 2: driver data and edit protections (Mason, 2026-11-21: "fix both")
+
+Mason rejected accepting Sol round 4's two HIGHs: a driver must not read a farm's credit limit, prepay balance, payment terms or internal notes, and must change only what delivering needs, enforced by the database.
+
+### Facts (real-schema container at `origin/staging` 3e5954f86 + every migration; frontend inventory)
+
+- `customers_select` driver branch: a driver reads WHOLE customer rows (every column) for any customer with a delivery assigned to them dated today-1 or later. `authenticated` has table-wide SELECT on `customers`, so row rules cannot hide columns.
+- `del_update` driver branch: an assigned driver may UPDATE any column of their delivery while it is `in_progress` or `completed` (e.g. `is_quick_delivery`, `customer_id`, `order_id`, `scheduled_date`). No trigger limits which columns a driver changes.
+- The app never updates `deliveries` directly (`src/` has no `.from('deliveries').update/insert/upsert/delete`). Every driver delivery action is an RPC (`complete_delivery`, `confirm_delivery`, `edit_delivery`, `reassign_delivery`, `process_offline_action`, ...). No SECURITY INVOKER function executable by `authenticated` updates `deliveries`. So a SECURITY DEFINER RPC is the only write path the app uses, and dropping the driver branch of `del_update` breaks no app flow. `delivery_items` UPDATE is already admin-only.
+- Driver customer reads in the app (all go through `customers_select`): `FieldRoute.tsx:78` embed `farm_name`; `FieldStop.tsx:165` embed `farm_name, email` (contact_name unused); `DeliveryDetail.tsx:387` `select('*')`, the driver layout uses `id, farm_name, phone, email, billing_address`; `Deliveries.tsx:451` office customer filter (also runs for drivers, unused there); `Deliveries.tsx:892/906` the #2018 card (replaced by the new list). `DeliveryDetail.tsx:3167` invoice embed returns no rows to drivers (`invoices_select`).
+- `get_deliveries_keyset_page` (SECURITY INVOKER, `20270201110000`) joins `customers` three times for `customer_name` and the top farm group; for a driver it relies on `customers_select`.
+- No other table's row rule reads `customers`.
+
+### Outcome and authority
+
+1. `customers_select` loses its driver branch: a driver reads no customer row directly. Admin, sales rep, applicator and the dispatchee rule are unchanged.
+2. New `get_driver_customers(p_customer_ids uuid[])`, SECURITY DEFINER, STABLE, `search_path = public, pg_temp`, `authenticated` + `service_role` only. An active driver not denied the Deliveries page gets, for each requested customer that is on a non-deleted delivery assigned to them dated today-1 or later (today's window), only: `id, farm_name, contact_name, phone, email, billing_address, shipping_address, city, state, zip`. Never credit limit, prepay, payment terms, notes, finance or commission fields, tier, discount or account number. Anyone else: refused. Ids outside the rule are silently omitted.
+3. New `_delivery_list_customer_labels()`, SECURITY DEFINER, STABLE, returning `id, farm_name, parent_customer_id` only: every customer for an active admin or sales rep; for anyone else only customers on a delivery assigned to them plus those customers' ancestors (so the top farm group still resolves). `get_deliveries_keyset_page` reads names and the farm-group walk from it instead of `customers`; its output, order, search and paging are unchanged.
+4. `del_update` loses its driver branch: only admin and sales rep may UPDATE `deliveries` directly. Drivers change deliveries only through the existing server functions, which already decide what a driver may change.
+5. Screens (second PR, "Closes #2018"): FieldRoute, FieldStop and the DeliveryDetail driver layout read customer details through `get_driver_customers`; the Available card uses `get_available_deliveries_for_driver`; the office customer-filter read is skipped for drivers.
+
+### Delivery
+
+- DB PR (this branch) carries parts 1-4 with the #2018 functions; the screens PR carries part 5. The screens cannot land first (their RPCs must be live on staging). Between the two merges, staging drivers see "Unknown customer" and no phone or address on the delivery screen. Both PRs must ship in the same release; the merge captain is told so.
+
+### Proof cases (added to the real-schema prover)
+
+8. A driver reading `customers` directly gets no row, even for a delivery assigned to them; admin and sales rep still read every column.
+9. `get_driver_customers` returns exactly the ten safe fields for a customer on the driver's delivery; omits a customer not on their deliveries and one only on an old (before today-1) delivery; refuses admin, sales rep, applicator, inactive and denied drivers; anon has no execute.
+10. `get_deliveries_keyset_page` for a driver still returns the customer name and top farm group of their deliveries; for an admin, unchanged.
+11. A driver's direct UPDATE of their in-progress delivery (`is_quick_delivery`, `status`) changes nothing; admin direct UPDATE still works; a driver still completes a delivery through its RPC.
+
+### Mason's decisions on Part 2 (2026-11-21, in this session, answering Astra's DECISION findings 6, 7, 23, 33)
+
+- Address (Astra 6): drivers see the farm's **shipping** address; when it is blank, the billing address.
+- Contact access (Astra 7, 8, 9, 29): drivers may see the farm name, phone, email and delivery address of **every** farm, any time (not only farms on their deliveries). Credit limit, prepay balance, payment terms and notes stay hidden. This removes the date window, the per-delivery entitlement and its time-zone boundary.
+- Driver actions (Astra 17, 19, 23): drivers keep every action the app's buttons offer today; only the direct table edit (`del_update` driver branch) is removed.
+- Go-live (Astra 33, 34): two steps. Release 1: edit lock, `get_driver_customers`, the list's label helper, the screens. Release 2 (a later small PR): drop the `customers_select` driver branch once release-1 screens are live. No gap for drivers on an old app copy.
+
+### Part 2 as built (release 1) and Astra's 36 findings
+
+Built in `20270204120000` (release 1): the `del_update` driver branch is removed; `get_driver_customers(uuid[])` returns `id, farm_name, phone, email, address` (shipping, else billing) for any farm to an active driver, refuses everyone else, caps a request at 500 ids, and never returns another column. Screens PR: FieldRoute, FieldStop and the DeliveryDetail driver layout read farms through it (`src/lib/driverFarms.ts`). Release 2 (a later small PR, after release-1 screens are live): drop the `customers_select` driver branch and give `get_deliveries_keyset_page` a definer label source for drivers. Items 2 and 3 of "Outcome and authority" above move to release 2; the label helper is designed there, not here.
+
+Proof (prover parts 6-8): five safe fields only, address rule, unknown and duplicate ids, empty and over-cap requests, admin/rep/applicator/inactive/anon refused; a driver's direct edit of their in-progress and completed delivery worked before the candidate and changes nothing after (quick flag, notes, status), with admin and rep direct edits unchanged; and a sweep calls every SECURITY DEFINER function `authenticated` may run as a driver with a seeded farm (41 answered) and finds none returning the seeded credit limit, prepay balance, payment terms or notes, while the same sweep as an admin finds them in 7 functions (so the sweep can see a leak).
+
+| Astra # | Settlement |
+|---|---|
+| 1, 2, 27 | Release 2 (the whole-row read stays in release 1 by Mason's two-step decision). `_is_dispatched_to_me` and the role predicates re-read the active profile on every call (definitions checked); release 2 will prove a driver with a dispatch, an applicator and a dispatchee. |
+| 3 | Fixed by evidence: the definer-function sweep above. Invoker functions return only what the table read returns, which release 2 removes. |
+| 4 | Refuted: `deliveries` has no money or credit column (column list checked); drivers already see their delivery's notes on screen. |
+| 5, 6, 7, 8, 9, 28, 29 | Settled by Mason's decisions: any farm, any time, five fields, shipping else billing. No date window or per-delivery rule remains; one row per distinct known id is proven. |
+| 10-16, 31, 32 | Release 2 (label helper and keyset change); not in this PR. 32 for `get_driver_customers`: definer, fixed search path, authenticated + service_role only, checked by postflight and the anon proof. |
+| 17, 19, 23 | Settled by Mason: drivers keep every app action as is; only the direct table edit is removed. |
+| 18, 20, 21, 22 | Unchanged functions; this PR adds no driver write path and removes one. The existing RPCs keep their own checks (not re-audited here). |
+| 24, 25 | Accepted: the app has no direct `deliveries` update anywhere in `src/`; any assigned non-office user loses only that unused path. |
+| 26 | Fixed: flag-only, notes-only and status-only driver edits on both states, the "before" case proves the edit worked pre-candidate, and an independent read confirms the rows unchanged. |
+| 30 | Screens: each driver read throws on failure and the page shows its existing load error; FieldStop clears the old address before the new stop's address loads. Browser proof in the screens PR. |
+| 33, 34 | Settled by Mason's two-step go-live; rollback stated in the migration header. |
+| 35 | Release 2: old devices hold only what the driver already saw; the whole-row read ends there. |
+| 36 | Screens PR: browser proof of take, open the stop, see the farm contact. |

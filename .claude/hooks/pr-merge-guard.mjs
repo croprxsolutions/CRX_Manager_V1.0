@@ -71,6 +71,7 @@ import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDest
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "./pr-claim-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
+import { findReleasePass, releasePassCovers } from "./release-pass-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
 
@@ -530,11 +531,24 @@ function gateRequest(request) {
   }
   // Ordinary feature-branch merges are not production landings; staging is (sol-risk-lib.mjs).
   if (!GATED_MERGE_BASES.includes(base)) return;
-  // Staging-first: main takes only the release and hotfixes, merged by Taha or Mason (sol-risk-lib.mjs).
-  const notAgents = agentMergeProblem(base, String(pr.headRefName || ""));
+  // Staging-first: main takes only the release and hotfixes, merged by Taha or Mason, or by an agent
+  // under Mason's release pass for this PR in this session (sol-risk-lib.mjs, release-pass-lib.mjs).
+  const headRef = String(pr.headRefName || "");
+  let releasePass = false;
+  try {
+    const pass = findReleasePass({ dirs: skipStateDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]), sessionId: payload?.session_id ?? payload?.sessionId });
+    releasePass = releasePassCovers(pass, { base, headRef, number: pr.number });
+  } catch { releasePass = false; }
+  const notAgents = agentMergeProblem(base, headRef, { releasePass });
   if (notAgents) deny(`PR MERGE GATE: this merge is refused: ${notAgents}.`);
+  // A release pass never covers a .github/ change: Taha merges those (AGENTS.md; Codex P1, PR #2098).
+  if (base === "main") {
+    const github = stagingDestructiveProblem({ repo: request.repo, gh: hardGateGh, number: pr.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pr.headRefOid, baseSha: pr.baseRefOid });
+    if (github) deny(`PR MERGE GATE: this merge into main is refused: ${github}.`);
+  }
   if (base === "staging") {
-    const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });
+    // The back-merge itself (head main) is the one PR meant to bring main in; only a release pass reaches here with it.
+    const backMerge = headRef === "main" ? null : mainCommitsInPrOnGitHub({ stagingSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });
     if (backMerge) deny(`PR MERGE GATE: this merge into staging is refused: ${backMerge}.`);
     const frozen = releaseFreezeProblem({ repo: request.repo, gh: hardGateGh });
     if (frozen) deny(`PR MERGE GATE: this merge into staging is refused: ${frozen}.`);

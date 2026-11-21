@@ -177,7 +177,7 @@ type CreatedInvoiceCheck =
 // KI-14: each owner of a split keeps its own payment terms. choice is a preset, a legacy text, '' (the
 // customer's terms, filled in by the database on save) or CUSTOM_DUE (a typed due date).
 // #2164: the refusal says this save stored nothing; an earlier Save from the page did make the draft.
-const EARLIER_SAVE_CREATED_NOTE = 'An earlier Save from this page already created this invoice, and that draft still exists.';
+const EARLIER_SAVE_CREATED_NOTE = 'An earlier Save from this page already created this invoice, and it still exists.';
 const CUSTOM_DUE = 'Custom date…';
 const TERMS_PRESETS = ['Net 30', 'Net 15', 'Due on receipt'];
 type OwnerTerms = { choice: string; customText: string; dueDate: string };

@@ -388,7 +388,7 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(PAYER_WHY);
-    const note = 'An earlier Save from this page already created this invoice, and that draft still exists.';
+    const note = 'An earlier Save from this page already created this invoice, and it still exists.';
     expect(alert).toHaveTextContent(note);
     expect(savedInvoiceId(2)).toBe(CREATED_ID);
     expect(addressParam(router, 'created')).toBe(CREATED_ID);

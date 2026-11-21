@@ -29,6 +29,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import {
   headContainsBaseOnGitHub,
+  mergeBaseOnGitHub,
   createHardGateBudget,
   expandNestedCommands,
   ghApiMergeRequest,
@@ -648,6 +649,17 @@ function gateRequest(request) {
     }
     return ancestry.get(key);
   };
+  // The proof's base must equal merge-base(reviewed head, GitHub's base) (#1913); null when GitHub cannot say.
+  const mergeBases = new Map();
+  const mergeBaseOnGitHubOnce = (a, b) => {
+    const key = `${a}...${b}`;
+    if (!mergeBases.has(key)) {
+      let sha = null;
+      try { sha = mergeBaseOnGitHub({ baseSha: b, headSha: a, repo: request.repo, gh: hardGateGh }); } catch { sha = null; }
+      mergeBases.set(key, sha);
+    }
+    return mergeBases.get(key);
+  };
 
   // The PR's own commits: a Sol proof of an earlier one counts, with no GitHub call per proof file.
   const prCommits = new Set((Array.isArray(pr.commits) ? pr.commits : []).map((c) => String(c?.oid || "").toLowerCase()));
@@ -664,7 +676,7 @@ function gateRequest(request) {
   // A proof of an earlier commit covers the commits after it unless those
   // touch the Sol list; same module, same budgeted gh. Exact-head proofs are tried first.
   const proof = firstAcceptedProof(proofs, headSha, (data, exactHead) =>
-    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, prCommits })
+    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits })
       && (exactHead || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky));
   const valid = proof !== null;
   const carried = proof?.carried_forward === true ? proof.carry : null;

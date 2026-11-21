@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-21 — #1985: Sol round 6 for the MOA-1 group load
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, allow round 6").** PR #1985 may have Sol round 6 (the round ledger's next round; Mason first answered "Allow round 5 now", then confirmed round 6 once the count was corrected). This restates the 2026-11-19 entry below for today's round. It still merges into staging only after the live EPA batch fill has run.
+
 ## 2026-11-19 — #1985: two more Sol rounds for the MOA-1 group load
 
 **Decision (Mason, 2026-11-19, in chat).** PR #1985 may have up to two more Sol rounds (rounds 5 and 6). Since round 4 the load's SQL is unchanged: the branch only merged staging and re-dated the migration file. The load stays as built: the CAS number decides the match, the name counts only when the list row or the ingredient has no CAS and exactly one active ingredient has that name, and there is no in-migration readiness check (Mason, 2026-11-18). It merges into staging only after release PR #1990 is in main and the live EPA batch fill has run.

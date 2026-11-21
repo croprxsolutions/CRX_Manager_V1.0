@@ -4118,6 +4118,7 @@ describe('QuoteBuilder', () => {
       renderQuoteBuilder(quote.id);
       fireEvent.click(await screen.findByRole('button', { name: 'Rewind to version 1' }));
       const dialog = await screen.findByRole('alertdialog', { name: 'Rewind to version 1?' });
+      expect(within(dialog).getByText(/every section's Timing and Confidence are cleared/)).toBeInTheDocument();
       fireEvent.click(within(dialog).getByRole('button', { name: 'Rewind to version 1' }));
 
       await waitFor(() => expect(mockRpc).toHaveBeenCalledWith(

@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-21 — #1980: Mason chose to drop "restore keeps Timing/Confidence"
+
+**Decision (Mason, in chat, 2026-11-21: "Yes and log for future work").** Sol round 3 on #1980 found that keeping each section's Timing and Confidence across a version restore or rewind (matched by section name) could give an old product a new section's Firm pick, or pair a current Firm pick with an older needed-by date. Mason chose to drop that change: a restore or rewind keeps its existing behavior and clears Timing and Confidence (blank never counts as Firm), and both restore prompts say so. A safe design (picks stored in each version snapshot) is logged in #1977 as future work. This entry names #1980 so Sol may run round 5 on it.
+
 ## 2026-11-19 — #1980: Mason owner-accepted 1 Sol finding(s) at `e2225f84faab`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1980 at `e2225f84faab` (base `5f87729d2685`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

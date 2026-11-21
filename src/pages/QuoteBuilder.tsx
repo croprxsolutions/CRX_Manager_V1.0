@@ -2158,16 +2158,17 @@ export default function QuoteBuilder() {
   };
 
   const setSectionTiming = (key: string, timing: BookingTiming | null) => {
+    // Read before the updater so a replayed updater sees the same values (it must stay pure).
+    const priorAutoFilled = autoFilledNeededBy.current.get(key);
+    const filled = timing && timingWindows ? timingWindowStart(timingWindows, timing, todayInBusinessTz()) : null;
     setSections((prev) => prev.map((s) => {
       if (s._key !== key) return s;
       // A live job's section keeps its needed-by date (save_quote refuses SECTION_HAS_JOB_LOCKED).
       const jobLocked = Boolean(s.id && sectionJobs[s.id] && sectionJobs[s.id].status !== 'cancelled');
-      if (jobLocked || !timing || !timingWindows) return { ...s, timing };
-      const today = todayInBusinessTz();
+      if (jobLocked || !filled) return { ...s, timing };
       // Only a date this screen's Timing pick filled follows the new timing; any other date (typed, or saved earlier) stays.
-      const autoFilled = Boolean(s.needed_by_date && autoFilledNeededBy.current.get(key) === s.needed_by_date);
+      const autoFilled = Boolean(s.needed_by_date && priorAutoFilled === s.needed_by_date);
       if (s.needed_by_date && !autoFilled) return { ...s, timing };
-      const filled = timingWindowStart(timingWindows, timing, today);
       autoFilledNeededBy.current.set(key, filled);
       return { ...s, timing, needed_by_date: filled };
     }));
@@ -6416,7 +6417,7 @@ export default function QuoteBuilder() {
             await handleRestoreVersion(lastSentVersion.id, lastSentVersion.version_number);
           }}
           title={`Rewind to version ${lastSentVersion.version_number}?`}
-          message={`Put this quote back to version ${lastSentVersion.version_number}, the version last sent to the customer? Changes made since then, saved or not, are discarded.`}
+          message={`Put this quote back to version ${lastSentVersion.version_number}, the version last sent to the customer? Changes made since then, saved or not, are discarded, and every section's Timing and Confidence are cleared.`}
           confirmLabel={`Rewind to version ${lastSentVersion.version_number}`}
           variant="info"
           icon={RotateCcw}

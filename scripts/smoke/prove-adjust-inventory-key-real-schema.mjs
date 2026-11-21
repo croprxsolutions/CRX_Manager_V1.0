@@ -10,7 +10,9 @@
  *      with IDEMPOTENCY_KEY_REQUIRED, and nothing changes (no stock, ledger or receipt row);
  *   3. follow-up 20270201150000: no public function keeps the weak check, and each of the 20 functions with the
  *      strict check refuses a newline key, while a normal key gets past the key check (rolled back);
- *   4. a second apply of either migration is refused by its preflight.
+ *   4. a second apply of either migration is refused by its preflight;
+ *   5. the registered full adjust_inventory chain passes on the new body, and a sales rep removes a customer document
+ *      with a normal key (replay returns the same answer) while a newline key is refused.
  *
  * Run: node scripts/smoke/prove-adjust-inventory-key-real-schema.mjs   (needs Docker; never touches live)
  * Reuse a built database: UNDO_PATHS_CONTAINER=<name> ADJUST_KEY_PROOF_REUSE=1 (left running).
@@ -43,9 +45,19 @@ try {
     'the candidate must have replayed (its preflight and postflight passed)');
   if (scalar(`SELECT count(*) FROM public.inventory WHERE id = '${INV}';`) === '0') {
     const r = docker(['exec', '-i', NAME, 'psql', '-U', 'supabase_admin', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'], { allowFailure: true, input: `
-INSERT INTO public.products (id, product_name, is_active, product_form) VALUES ('${PROD}', '[1912] product', true, 'liquid');
+INSERT INTO public.products (id, product_name, is_active, product_form, inventory_unit) VALUES ('${PROD}', '[1912] product', true, 'liquid', 'Gal');
 INSERT INTO public.inventory (id, product_id, location, quantity_available, quantity_prebooked, quantity_on_order) VALUES ('${INV}', '${PROD}', 'Main Warehouse', 10, 0, 0);` });
     assert.equal(r.status, 0, `seed failed:\n${r.stderr}`);
+  }
+  // The customer-document chain discovers two active reps, each with an active customer of their own.
+  const REP2 = '7c7a0000-0000-4000-8000-000019120003';
+  if (scalar(`SELECT count(*) FROM public.customers WHERE assigned_sales_rep = '${REP2}';`) === '0') {
+    const r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'], { allowFailure: true, input: `
+INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ('${REP2}', 'adjust-key-rep2@example.invalid', '{"full_name":"[1912] Rep Two","role":"sales_rep"}'::jsonb);
+INSERT INTO public.customers (id, farm_name, assigned_sales_rep, is_active) VALUES
+  ('7c7a0000-0000-4000-8000-000019120004', '[1912] Rep Farm', '${USERS.rep}', true),
+  ('7c7a0000-0000-4000-8000-000019120005', '[1912] Rep Two Farm', '${REP2}', true);` });
+    assert.equal(r.status, 0, `rep/customer seed failed:\n${r.stderr}`);
   }
 
   // 1. Real app key shapes work; a same-key retry replays the first answer and writes nothing more.
@@ -129,6 +141,39 @@ ROLLBACK;` });
     assert.match(again.stderr, marker);
     console.log(`[adjust-key] second apply of ${file} refused by the preflight`);
   }
+  // 5a. The full adjust_inventory business chain (its own prover replays only up to 20260911120000) runs unchanged
+  //     on the candidate body and must end in SMOKE_PASS_ROLLBACK, so nothing it plants persists.
+  for (const chain of ['smoke-adjust-inventory-intent-binding.sql']) {
+    const sql = readFileSync(path.join(ROOT, 'scripts', 'smoke', chain), 'utf8').replaceAll('\r\n', '\n');
+    const r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'], { input: sql, allowFailure: true });
+    const out = `${r.stdout}\n${r.stderr}`;
+    assert.notEqual(r.status, 0, `${chain} must end by rolling back:\n${out}`);
+    assert.match(out, /ERROR:\s+SMOKE_PASS_ROLLBACK\b/, `${chain} failed on the candidate bodies:\n${out}`);
+    assert.doesNotMatch(out, /SMOKE_FAIL|SMOKE_SETUP/, `${chain} reported a failure:\n${out}`);
+    console.log(`[adjust-key] full chain ${chain}: SMOKE_PASS_ROLLBACK on the candidate bodies`);
+  }
+
+  // 5b. soft_delete_customer_document's business path on the candidate body, as a signed-in sales rep (any rep may
+  //     work any customer since 20261013220000, so the older registered chain's cross-rep refusal no longer holds):
+  //     a normal key removes the document stamped with the rep, the same key replays the same answer, and a newline
+  //     key is refused with the other document left in place. Rolled back.
+  const REP = USERS.rep;
+  const CUST = '7c7a0000-0000-4000-8000-000019120004';
+  const DOC1 = '7c7a0000-0000-4000-8000-000019120006';
+  const DOC2 = '7c7a0000-0000-4000-8000-000019120007';
+  const softDelete = (doc, keySql) => `public.soft_delete_customer_document('${doc}', '${CUST}', ${keySql})`;
+  const doc = show('soft_delete_customer_document chain', attempt(REP, `
+    PERFORM set_config('request.jwt.claim.sub', '${REP}', true);
+    INSERT INTO public.customer_documents (id, customer_id, document_type, storage_path, filename, mime_type, size_bytes, uploaded_by, source) VALUES
+      ('${DOC1}', '${CUST}', 'other', '${CUST}/${DOC1}-proof-one.pdf', '[1912]-one.pdf', 'application/pdf', 100, '${REP}', 'rep'),
+      ('${DOC2}', '${CUST}', 'other', '${CUST}/${DOC2}-proof-two.pdf', '[1912]-two.pdf', 'application/pdf', 100, '${REP}', 'rep');
+    ${asUser(`r := ${softDelete(DOC1, `'soft_delete_customer_document:${REP}:6a0f1b2c-3d4e-4f5a-8b6c-7d8e9fa0b1c2'`)};`)}
+    ${asUser(`r2 := ${softDelete(DOC1, `'soft_delete_customer_document:${REP}:6a0f1b2c-3d4e-4f5a-8b6c-7d8e9fa0b1c2'`)};`)}
+    ${refuse(`r3 := ${softDelete(DOC2, `'abc' || E'\\n'`)};`)}
+    v := 'doc=' || (r->>'document_id' = '${DOC1}') || '|replay_same=' || (r = r2)
+      || '|deleted_by_rep=' || (SELECT deleted_at IS NOT NULL AND deleted_by = '${REP}' FROM public.customer_documents WHERE id = '${DOC1}')
+      || '|bad=' || t || '|doc2_kept=' || (SELECT deleted_at IS NULL FROM public.customer_documents WHERE id = '${DOC2}');`));
+  assert.match(doc, /^ok\|doc=true\|replay_same=true\|deleted_by_rep=true\|bad=IDEMPOTENCY_KEY_REQUIRED[^|]*\|doc2_kept=true$/);
   console.log('\nADJUST_INVENTORY_KEY_PROOF_PASS');
 } finally {
   if (!reuse) removeContainer();

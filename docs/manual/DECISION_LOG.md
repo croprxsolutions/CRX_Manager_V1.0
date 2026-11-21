@@ -9,6 +9,11 @@
   Mason's reason: this can't happen in our buisness (ref 90055eb3a0d6)
 - Finding 3 (HIGH) at `supabase/migrations/20270201135000_grower_share_rep_needs_price_to_cover_cost.sql:312`, text sha256 `2295df5619029f50` (the wording stays with the proof, not here)
   Mason's reason: nowhere near 9999 invoices a year (ref 0b77a9cf87d8)
+## 2026-11-21 — Any rep may edit any draft field-application invoice (rep-scope fix dropped)
+
+**Decision (Mason, in chat, 2026-11-21: "Drop the fix").** A sales rep may save, change billing on, and change applied details (applicator, weather, carrier water) of ANY draft or unposted field-application invoice, not only their own, as the app works today. The planned fix (`docs/plans/2026-11-21-field-invoice-rep-scope-CONTRACT.md`) is dropped and nothing was built. The KI-01 related low and the field-invoice part of KI-03 are accepted.
+**What this changes:** for field-application invoice edits only, it narrows the 2026-10-13 `INVOICE_SCOPE_DENIED` rule below ("a rep changes or posts only an existing invoice under their own name"). Checks already built stay: posting (`post_invoice`, `post_invoice_group`) and the split-invoice save (`SPLIT_SET_NOT_OWNED`) still require the rep's own invoice, delete stays admin-only, and posted invoices stay locked. The rest of KI-03 (unpost, transfer, consolidate, wider rep reads) is unchanged and waits for Taha after 2026-12-15.
+**Why:** Mason's call; field invoices are shared work across reps today.
 
 ## 2026-11-21 — #2051: Mason owner-accepted 1 Sol finding(s) at `d3b16f425dc9`
 

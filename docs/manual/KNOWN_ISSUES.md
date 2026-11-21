@@ -42,8 +42,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
-Highest-priority open items, in order: KI-01 (its related lows; all three parts are live: A and B 2026-10-26 and
-2026-10-27 UTC, part C, access ending with the job, 2026-11-09 UTC), KI-02 (cost and
+Highest-priority open items, in order: KI-02 (cost and
 margin: the table-level lock is live since 2026-10-25; the server-function audit is done and its fixes went live 2026-11-02 in
 migration `20261102200000`), KI-10 (about 69 functions still replay a saved answer on the retry
 key alone).
@@ -53,15 +52,15 @@ key alone).
 ## Security and access
 
 ### KI-01 — Drivers and applicators can read every customer's fields and some money totals
-**HIGH · PARTIAL · security · parts A, B and C applied live; the related lows below stay open**
+**HIGH · FIXED LIVE / ACCEPTED · security · parts A, B and C applied live; all three related lows settled 2026-11-21 (see below)**
 Until 2026-10-26 02:10 UTC (9:10 PM Central, 2026-10-25), any signed-in account, including drivers and applicators, could call database functions that
 returned every customer's field boundaries, owners, billing splits, balances and the company-wide overdue list,
 because the functions never checked who was asking. Until 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26),
 applicators could also read every field-table row, not only the fields of the jobs they were sent to. Proven by
 read-only impersonation on 2026-10-22. Planned as three parts: A (functions, PR #1065), B (tables, PR #1103),
 C (the job route); A, B and C are applied live and merged (part C: PR #1650, ledger `20261109052957`, see KI-73). Related lows: dispatched
-applicators can read chemical cost; any sales rep can edit another rep's draft field-invoice billing; invoice
-emails put the invoice number and date into HTML unescaped (`src/lib/emailService.ts:123-139`).
+applicators can read chemical cost (CLOSED by KI-02: checked live read-only 2026-11-21, signed-in users have no SELECT on any cost, margin or profit column of `job_chemicals`, `products`, `jobs`, `blend_ticket_products` or `invoice_items`, and KI-02's function audit made cost admin-only; the functions were not re-tested as an applicator); any sales rep can edit another rep's draft field-invoice billing (ACCEPTED, Mason 2026-11-21: any rep may edit any draft field invoice; see KI-03); invoice
+emails put the invoice number and date into HTML unescaped (`src/lib/emailService.ts:123-139`) (CLOSED, checked in the downloaded live `send-email` source 2026-11-21: the server rebuilds the invoice email and escapes both (`supabase/functions/_shared/invoiceEmailGate.ts:194,202`), sending `built.html`, never the screen's HTML; the screen-side builder still does not escape, but its HTML is not what gets sent).
 Status 2026-10-23: part A was written and not yet applied (`20261023090000_field_functions_require_field_access`,
 history row 980). It adds `_can_see_field`, filters the two field-map lookups by it, makes the other field and money
 functions office-only (plus three uncalled ones the review found), and was proven in a disposable copy of the
@@ -109,6 +108,7 @@ are; no new note gets a cost.
 
 ### KI-03 — Reps do not yet have the decided invoice and commission-split scoping
 **MED · OPEN · security/money · Mason decided, build unassigned**
+**Field-invoice part ACCEPTED (Mason, 2026-11-21, "Drop the fix"):** any rep may edit any draft or unposted field-application invoice (`update_field_app_applied_info`, `update_field_app_invoice_billing`, `save_field_app_invoice` on an existing invoice, and direct `invoice_shares` / field-location writes); no fix is planned (`DECISION_LOG.md` 2026-11-21). Posting and the split-invoice save keep their own-name checks. The rest of this entry stays open.
 Mason decided reps may see all invoices read-only but only act on their own, and that only admins may change
 commission splits on jobs, quotes and orders. Neither is built: no migration widens rep invoice reads or adds
 own-name checks (`INVOICE_SCOPE_DENIED`) to the full set of invoice actions any active rep can call today on any
@@ -252,10 +252,10 @@ application service). Mason chose to keep it this way (To-Do decision 18); no fi
 changes that decision.
 
 ### KI-121 — The last active admin can remove their own admin role
-**LOW · FIX IN REVIEW (not live) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #7) · Claude**
+**LOW · FIXED LIVE (`20270127130000`, PR #1981, released in #1990; checked live 2026-11-21: `trg_guard_last_active_admin` is BEFORE UPDATE OF is_active, role) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #7) · Claude**
 `_guard_last_active_admin` fires only on deactivation, not a role change, so the last admin can demote themselves and
 nobody can reach Settings without database access. 5 active admins today; the screen warns. Fix: extend the guard to
-role changes. Fix in review: `20270127130000_security_batch_ki121_ki123` (the guard also refuses a role change, and two
+role changes. Fixed live: `20270127130000_security_batch_ki121_ki123` (the guard also refuses a role change, and two
 admins removing each other at once cannot both succeed).
 
 ### KI-122 — An admin password reset leaves the user's existing sign-ins open and is not audited

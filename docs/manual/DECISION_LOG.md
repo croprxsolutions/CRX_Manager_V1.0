@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2048: Mason owner-accepted 1 Sol finding(s) at `44d70d8bf839`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2048 at `44d70d8bf839` (base `ca1ed13c47fd`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201120000_inactive_customer_refuses_new_work.sql:144`, text sha256 `5ea6254975308c7b` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen (ref 6738a97a5e50)
+
 ## 2026-11-21 — #2048 may have one more Sol round (round 6)
 
 **Decision (Mason, in chat, 2026-11-21: "Yes, one more each").** PR #2048 (#2000 inactive customer refuses new work) may have one more Sol round (round 6).

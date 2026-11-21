@@ -538,6 +538,9 @@ export default function FieldApplicationInvoice() {
   // save failure), a repeat Save must update THIS invoice — sending p_invoice_id = null
   // again would create a duplicate invoice for the same application.
   const createdInvoiceIdRef = useRef<string | null>(null);
+  // The new draft an earlier Save on this page moved the edited one to (its fields bill another farm, #2058).
+  // The edited draft is cancelled, so after a partial failure every repeat Save writes to the new one.
+  const replacementInvoiceIdRef = useRef<string | null>(null);
   const [searchParams] = useSearchParams();
   const createdIdInAddress = createdInvoiceIdFromAddress(searchParams);
   // Opened at /new?created=<id>: Save waits for the created-invoice check below.
@@ -1917,7 +1920,7 @@ export default function FieldApplicationInvoice() {
     if (discountInputRefused()) return;
     // The invoice this save writes to: the routed one, or the one an earlier Save on this
     // still-/new page already created. Only when neither exists does the save CREATE.
-    const targetInvoiceId = id || createdInvoiceIdRef.current;
+    const targetInvoiceId = replacementInvoiceIdRef.current || id || createdInvoiceIdRef.current;
     const creating = !targetInvoiceId;
     if (saveInFlightRef.current) return;
     saveInFlightRef.current = true;
@@ -2254,14 +2257,18 @@ export default function FieldApplicationInvoice() {
       const savedInvoiceId = ids[0] ?? createdInvoiceIdRef.current;
       // An edit whose fields now bill another farm cancels this draft and saves a new one (#2058): open the new one.
       const replaced = !isNew && !!id && ids.length > 0 && !ids.includes(id);
+      if (replaced && !(appliedInfoOk && billingOk)) {
+        // Keep the typed values on the page (the error toast says what did not persist); Save again writes them to
+        // the new draft, then opens it. Reloading here would show the cancelled draft.
+        replacementInvoiceIdRef.current = savedInvoiceId;
+        return;
+      }
       if ((isNew || replaced) && savedInvoiceId) {
         // Everything saved, so nothing is unsaved: let this navigation past the
         // leave-page guard. After a PARTIAL failure the form stays dirty and the guard
         // still asks; "Stay" keeps the typed values, and Save again updates the same
         // invoice (createdInvoiceIdRef), never a new one.
-        // A replaced draft is cancelled, so "Stay" could only save into it and be refused: always open the new one
-        // (the error toast above already says what to re-enter).
-        if ((appliedInfoOk && billingOk) || replaced) skipUnsavedPromptRef.current = true;
+        if (appliedInfoOk && billingOk) skipUnsavedPromptRef.current = true;
         navigate(`/invoices/field-app/${savedInvoiceId}`, { replace: true });
       } else {
         // Keep the form frozen until the server copy has finished hydrating.

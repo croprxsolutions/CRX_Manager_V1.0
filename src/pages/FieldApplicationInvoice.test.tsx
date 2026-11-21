@@ -867,12 +867,26 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
     expect(mockRpc.mock.calls.some(([name]) => name === 'post_invoice' || name === 'delete_invoices')).toBe(false);
   });
 
+  // #2058: both drafts resolve to their farm, so the billing step can finish.
+  const withBilledFarms = () => mockFrom.mockImplementation(makeFromMock({
+    invoices: { data: [
+      { id: 'inv-solo', invoice_number: 'INV-1001', invoice_type: 'field_application', invoice_date: '2026-04-29', season: 2026,
+        header_notes: '', status: 'draft', application_service_id: null, invoice_group_id: null, total_amount_cents: 100000,
+        invoice_post_version: 'v1:inv-solo', customer_id: 'cust-a' },
+      { id: 'inv-other-farm', customer_id: 'cust-b' },
+    ] },
+    field_app_locations: { data: [] },
+    invoice_items: { data: [] },
+    invoice_shares: { data: [] },
+  }));
+
   it('#2058: opens the new draft when the save cancelled the edited one (its fields now bill another farm)', async () => {
     const saveReturns = (ids: string[]) => mockRpc.mockImplementation((name: string) =>
       Promise.resolve(name === 'save_field_app_invoice'
         ? { data: { invoice_ids: ids, invoice_group_id: null }, error: null }
         : { data: null, error: null }));
     saveReturns(['inv-other-farm']);
+    withBilledFarms();
     await renderPage();
     await screen.findByText(/Field Application INV-1001/);
     await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
@@ -896,12 +910,38 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
           operation: 'save_field_app_invoice', result: { invoice_ids: ['inv-other-farm'], invoice_group_id: null } }) } }
         : { data: { invoice_ids: ['inv-other-farm'], invoice_group_id: null }, error: null });
     });
+    withBilledFarms();
     await renderPage();
     await screen.findByText(/Field Application INV-1001/);
     await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/invoices/field-app/inv-other-farm', { replace: true }));
     const saveCalls = mockRpc.mock.calls.filter(([n]) => n === 'save_field_app_invoice');
     expect(saveCalls.map(([, args]) => (args as { p_invoice_id: string }).p_invoice_id)).toEqual(['inv-solo', 'inv-other-farm']);
+  });
+
+  it('#2058: after a partial failure on a replaced draft the page keeps the form, and Save again writes to the new draft', async () => {
+    let appliedCalls = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'save_field_app_invoice') return Promise.resolve({ data: { invoice_ids: ['inv-other-farm'], invoice_group_id: null }, error: null });
+      if (name === 'update_field_app_applied_info') {
+        appliedCalls += 1;
+        return Promise.resolve(appliedCalls === 1 ? { data: null, error: { message: 'network down' } } : { data: null, error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+    withBilledFarms();
+    await renderPage();
+    await screen.findByText(/Field Application INV-1001/);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Applied Info')));
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/invoices/field-app/inv-other-farm', { replace: true }));
+    const saveCalls = mockRpc.mock.calls.filter(([n]) => n === 'save_field_app_invoice');
+    expect(saveCalls.map(([, args]) => (args as { p_invoice_id: string }).p_invoice_id)).toEqual(['inv-solo', 'inv-other-farm']);
+    const applied = mockRpc.mock.calls.filter(([n]) => n === 'update_field_app_applied_info');
+    expect((applied[1][1] as { p_invoice_ids: string[] }).p_invoice_ids).toEqual(['inv-other-farm']);
   });
 
   it('pins both production invoice routes to the identity-keyed wrapper without changing access roles', () => {

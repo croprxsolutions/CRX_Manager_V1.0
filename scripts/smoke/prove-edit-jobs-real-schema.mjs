@@ -258,18 +258,17 @@ const APPL = 'e1100000-0000-4000-8000-0000000000d4';
 const CHAIN = 'smoke-edit-jobs.sql';
 const SIG = 'public.edit_jobs(uuid[],jsonb,text,uuid,text)';
 // Existing chains that write jobs; each must pass before and after the candidate.
-// Left out because they fail on the current schema for reasons seeding cannot fix (checked 2026-11-21 in the
-// replayed container; the other six of issue #2146's nine now pass and are listed below):
+// Left out because their assertions describe old behaviour (checked 2026-11-21 in the replayed container; the
+// other seven of issue #2146's nine now pass and are listed below). Rewrite tracked in #2168:
 // - transfer-invoice-to-job: a two-owner job now bills one invoice per owner (U7 group path), so its "2 customer
 //   shares" check no longer holds; its cost setup is fixed, the assertion is stale.
-// - delivery-job-replay-binding-batch3a: sends a proof photo now, but its offline step stages complete_delivery
-//   with no evidence and the offline processor cannot send any (COMPLETION_EVIDENCE_REQUIRED -> PAYLOAD_INVALID).
 // - field-functions-require-field-access: expects an applicator dispatched to one field to see only that field;
 //   since row 11.4 part B (Mason, 2026-10-25) a dispatched applicator sees every field of the job.
 const REGRESSION = ('smoke-booking-live-job-guard smoke-booking-guard-rep-and-delete smoke-field-invoice-loop '
   + 'smoke-ops-replay-binding-batch4e smoke-get-jobs-billed-customers smoke-offline-action-receipts '
   + 'smoke-billed-job-immutability smoke-transfer_job_invoice_column_fixes smoke-transfer_job_invoice_machine_fee '
-  + 'smoke-dispatch-job-locations smoke-undispatch-job-locations smoke-job_from_quote_activity_feed_fix')
+  + 'smoke-dispatch-job-locations smoke-undispatch-job-locations smoke-job_from_quote_activity_feed_fix '
+  + 'smoke-delivery-job-replay-binding-batch3a')
   .split(' ').map((s) => `${s}.sql`);
 
 function seed() {

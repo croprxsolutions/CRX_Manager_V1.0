@@ -15,8 +15,8 @@
 -- the key is refused (IDEMPOTENCY_ACTOR_MISMATCH) and is shown nothing; an exact retry still returns
 -- the original answer and moves no extra stock; the same completion instant sent under another
 -- session TimeZone is the same request; a call with no key is refused (IDEMPOTENCY_KEY_REQUIRED,
--- 22023). The offline path (stage_offline_action + process_offline_action) still completes once and
--- replays. Every fresh receipt is bound to the actor with a 64-hex fingerprint.
+-- 22023). The offline job path (stage_offline_action + process_offline_action) still completes once
+-- and replays. Every fresh receipt is bound to the actor with a 64-hex fingerprint.
 --
 -- Fail-first: before the migration step a fails (complete_delivery hands delivery A's receipt back
 -- as success for delivery B).
@@ -389,32 +389,12 @@ BEGIN
   END IF;
 
   -- --------------------------------------------------------------------------------------------
-  -- h. Offline path: stage + process completes delivery 3 and job 3 once; processing again
-  --    returns 'succeeded' with the same result and does no second piece of work.
+  -- h. Offline path: stage + process completes job 3 once; processing again returns 'succeeded'
+  --    with the same result and does no second piece of work. (#2146: the offline DELIVERY half was
+  --    removed. Phones stopped queuing complete_delivery on 2026-10-19 (src/lib/offlineSync.ts), and a
+  --    leftover queued delivery carries no completion evidence, so it is refused and goes to office
+  --    review by design.)
   -- --------------------------------------------------------------------------------------------
-  v_payload := jsonb_build_object(
-    'signed_by', '[SMOKE] Offline Receiver',
-    'quantities', jsonb_build_object(v_item[3]::text, '2'),
-    'issue_type', 'none',
-    'completed_at', to_jsonb(clock_timestamp() - interval '1 minute'));
-  v_res := public.stage_offline_action(v_del_action, 'complete_delivery', v_del[3], 1, v_client_time,
-                                       v_payload, v_off_del_key,
-                                       (SELECT d.updated_at FROM public.deliveries d WHERE d.id = v_del[3]));
-  IF v_res->>'status' IS DISTINCT FROM 'received' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: offline delivery stage did not return received: %', v_res;
-  END IF;
-  v_res := public.process_offline_action(v_del_action, v_off_del_key);
-  IF v_res->>'status' IS DISTINCT FROM 'succeeded'
-     OR v_res->'result'->>'delivery_id' IS DISTINCT FROM v_del[3]::text THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: offline delivery process failed: %', v_res;
-  END IF;
-  v_res2 := public.process_offline_action(v_del_action, v_off_del_key);
-  SELECT count(*) INTO v_n FROM public.inventory_transactions
-   WHERE delivery_id = v_del[3] AND transaction_type = 'delivered';
-  IF v_res2 IS DISTINCT FROM v_res OR v_n <> 1 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: offline delivery replay changed or repeated the work (% ledger rows): % vs %', v_n, v_res2, v_res;
-  END IF;
-
   v_payload := jsonb_build_object(
     'actual_start_time', to_jsonb(clock_timestamp() - interval '2 hours'),
     'actual_end_time', to_jsonb(clock_timestamp() - interval '5 minutes'),
@@ -446,11 +426,11 @@ BEGIN
   -- i. Every fresh receipt above is bound to the admin and carries a SHA-256 fingerprint.
   -- --------------------------------------------------------------------------------------------
   SELECT count(*) INTO v_n FROM public.idempotency_keys
-   WHERE idempotency_key IN (v_key, v_job_key, v_off_del_key, v_off_job_key)
+   WHERE idempotency_key IN (v_key, v_job_key, v_off_job_key)
      AND operation IN ('complete_delivery', 'complete_job')
      AND request_actor_id = v_admin AND request_fingerprint ~ '^[0-9a-f]{64}$';
-  IF v_n <> 4 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: % of the 4 complete_delivery/complete_job receipts are bound to the admin with a fingerprint', v_n;
+  IF v_n <> 3 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: % of the 3 complete_delivery/complete_job receipts are bound to the admin with a fingerprint', v_n;
   END IF;
 
   RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';

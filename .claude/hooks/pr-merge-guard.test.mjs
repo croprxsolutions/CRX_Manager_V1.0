@@ -650,6 +650,8 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
     "a merge into main, or of the back-merge, is refused unless Mason's release pass covers it");
   ok(/releasePass = releasePassCovers\(pass, \{ base, headRef, number: pr\.number \}\);\s*\} catch \{ releasePass = false; \}/.test(gateRequestSource),
     "the pass is checked for this exact PR, and an unreadable pass means none");
+  ok(/if \(base === "main"\) \{\s*const github = stagingDestructiveProblem\([\s\S]{0,300}\);\s*if \(github\) deny\(/.test(gateRequestSource),
+    "a release pass never lets an agent merge a .github/ change into main (Codex P1, PR #2098)");
   ok(/headRefName,headRefOid/.test(gateRequestSource), "the guard reads the PR's head branch name to spot the back-merge");
   ok(gateRequestSource.indexOf("agentMergeProblem(") < gateRequestSource.indexOf("pullRequestReviewBlocked(pr)"),
     "the main and back-merge refusal runs before any allow point");

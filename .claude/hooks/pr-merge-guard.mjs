@@ -541,6 +541,11 @@ function gateRequest(request) {
   } catch { releasePass = false; }
   const notAgents = agentMergeProblem(base, headRef, { releasePass });
   if (notAgents) deny(`PR MERGE GATE: this merge is refused: ${notAgents}.`);
+  // A release pass never covers a .github/ change: Taha merges those (AGENTS.md; Codex P1, PR #2098).
+  if (base === "main") {
+    const github = stagingDestructiveProblem({ repo: request.repo, gh: hardGateGh, number: pr.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pr.headRefOid, baseSha: pr.baseRefOid });
+    if (github) deny(`PR MERGE GATE: this merge into main is refused: ${github}.`);
+  }
   if (base === "staging") {
     // The back-merge itself (head main) is the one PR meant to bring main in; only a release pass reaches here with it.
     const backMerge = headRef === "main" ? null : mainCommitsInPrOnGitHub({ stagingSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });

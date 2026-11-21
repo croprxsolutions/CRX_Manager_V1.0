@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-21 — #2038 may have one more Sol round (round 7)
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, one more each").** PR #2038 (#1976 EPA batch save check) may have one more Sol round (round 7).
+**Why:** after release #1990 and its back-merge, staging had to be merged in to clear a conflict, so the merge gate needs a fresh Sol review of the new head. The PR's own change is unchanged since its last clean or owner-accepted round.
+
 ## 2026-11-19 — #2038: Mason owner-accepted 2 Sol finding(s) at `8e5eb30ccb22`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2038 at `8e5eb30ccb22` (base `62ccaeaa2a7b`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

@@ -7,6 +7,11 @@
   Mason's reason: a rep never has record book or product hidden on top of repirts (ref 604ba71bdaf6)
 
 
+## 2026-11-21 — #2045 may have one more Sol round (round 9)
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, round 9").** PR #2045 (#1942 inventory edge cases) may have Sol round 9.
+**Why:** #2068 merged migration `20270201180000`, so #2045's migration needed a newer stamp (`20270201141000` → `20270201195000`). The restamp carry refused because the reviewed proof sits two commits back (a DECISION_LOG reorder came after it), and rewriting history isn't allowed. The PR's own SQL is unchanged since round 8. Mason also chose to track the Codex App P2 (doubled repeated-line short-stock warning) as follow-up #2135 instead of fixing it here.
+
 ## 2026-11-21 — #2045: Mason owner-accepted 2 Sol finding(s) at `2020eb077d1e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2045 at `2020eb077d1e` (base `a90d3b34fc7a`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

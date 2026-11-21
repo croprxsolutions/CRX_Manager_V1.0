@@ -1,5 +1,20 @@
 # Decision Log
 
+## 2026-11-20 — Mason's release pass: go live without codes or waiting for Taha
+
+**Decision (Mason, in chat, 2026-11-20: "i want to prior authorize a session to take multiple pr live overnight while
+i sleep ... i give prior authorization and the agent do what is best"; "deletions should never be automatic"; "if agent
+changes things that is for good shouldnt hold us up").** Mason starts a message with `ship the release` or
+`go live #<n>`; that Claude session may then take that release or hotfix live for 24 hours, including its
+non-destructive migrations, the merge into `main` and the back-merge, with no wait for Taha's merge or his
+`Ready to merge:` comment. `stop the release` withdraws it. The pass binds to the PR, not its head. A migration that
+deletes data still needs Mason's own reply, now a plain `yes`, good for 24 hours and surviving head moves (the SQL may
+not change). The agent stops only for genuine business decisions (AGENTS.md). Taha's 4-hour hold and `hold` comments,
+every check, Sol and the apply proofs are unchanged; Codex still hands live work to Claude. A destructive migration may
+now merge into `staging` (test data); live still needs his `yes`. **Accepted residual:** like every chat-reply record
+here, an agent could forge the pass file; Sol's plan review (48 findings) also asked for a server-side approval store,
+a rehearsed restore and a production window shared with Taha, which Mason chose not to build now.
+
 ## 2026-11-20 — Release #1990: split the gate files out; release rule 4 removed
 
 **Decision (Mason, in chat, 2026-11-20: "Yes, split it", then "Yes, go ahead").** Stop adding Sol release rules. The

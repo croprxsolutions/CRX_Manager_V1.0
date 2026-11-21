@@ -71,7 +71,8 @@ async function readStopAddress(addressId: string): Promise<{ line: string; error
     .eq('id', addressId)
     .maybeSingle();
   const a = (data ?? {}) as { address_line?: string | null; city?: string | null; state?: string | null; zip?: string | null };
-  return { line: [a.address_line, a.city, a.state, a.zip].filter(Boolean).join(', '), error };
+  // A missing site row is a failure too: the driver must not start a stop with no verified destination.
+  return { line: [a.address_line, a.city, a.state, a.zip].filter(Boolean).join(', '), error: error ?? (data ? null : new Error('stop address not found')) };
 }
 
 // A driver's stop never asks the customers table for the farm: withStopFarm fills it from the driver lookup (#2018).

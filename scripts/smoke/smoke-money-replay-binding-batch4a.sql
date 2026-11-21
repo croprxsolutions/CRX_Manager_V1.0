@@ -96,8 +96,8 @@ BEGIN
   VALUES ('[SMOKE] Money Replay Farm B ' || v_suffix, '[SMOKE]-MRB4A-B-' || v_suffix)
   RETURNING id INTO v_customer_b;
   -- A pricing-free shell (pricing goes only through the governed path); every line sets its price.
-  INSERT INTO public.products (product_name, unit_size, product_form)
-  VALUES ('[SMOKE] Money Replay Product ' || v_suffix, 'GL', 'liquid')
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[SMOKE] Money Replay Product ' || v_suffix, 'Gal', 'liquid', 'Gal')
   RETURNING id INTO v_product;
   -- Its cost and tier prices go through the governed preview -> approve -> apply path.
   v_pricing := public.preview_product_cost_basis_changes('product_page', NULL,
@@ -146,9 +146,9 @@ BEGIN
         'field_id', v_split_field, 'map_number', 1, 'total_acres', 40, 'planted_acres', NULL,
         'applied_acres', 40, 'crop_type', NULL, 'wind_direction', NULL, 'sort_order', 0)),
       jsonb_build_array(jsonb_build_object(
-        'product_id', v_product, 'description', '[SMOKE] MRB4A Group Chem', 'quantity', 0, 'unit_size', 'GL',
+        'product_id', v_product, 'description', '[SMOKE] MRB4A Group Chem', 'quantity', 0, 'unit_size', 'Gal',
         'unit_price_cents', 1000 * v_i, 'cost_cents', 100, 'sort_order', 0, 'rate_per_acre', 0.1,
-        'rate_unit', 'GL', 'manual_override', true)),
+        'rate_unit', 'Gal', 'manual_override', true)),
       v_admin, NULL, v_prefix || 'grp-save-' || v_i);
     v_id := (v_res->>'invoice_group_id')::uuid;
     IF v_id IS NULL THEN
@@ -376,7 +376,7 @@ BEGIN
     RETURNING id INTO v_id;
     INSERT INTO public.job_fields (job_id, field_id, acres_to_treat, sort_order) VALUES (v_id, v_field, 40, 1);
     INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit, cost_per_unit_cents, price_per_unit_cents, sort_order)
-    VALUES (v_id, v_product, 4, 'GL', 0.1, 'GL', 2000, 5000, 1);
+    VALUES (v_id, v_product, 4, 'Gal', 0.1, 'Gal', 2000, 5000, 1);
     UPDATE public.jobs SET status = 'in_progress' WHERE id = v_id;
     UPDATE public.jobs SET status = 'completed' WHERE id = v_id;
     v_res := public.transfer_job_to_invoice(v_id, v_admin, v_prefix || 'job-fwd-' || v_i);
@@ -410,8 +410,8 @@ BEGIN
     'field_id', v_field, 'map_number', 1, 'total_acres', 40, 'planted_acres', NULL,
     'applied_acres', 40, 'crop_type', NULL, 'wind_direction', NULL, 'sort_order', 0));
   v_chemicals := jsonb_build_array(jsonb_build_object(
-    'product_id', v_product, 'description', '[SMOKE] MRB4A Chem', 'quantity', 0, 'unit_size', 'GL',
-    'unit_price_cents', NULL, 'cost_cents', 0, 'sort_order', 0, 'rate_per_acre', 0.1, 'rate_unit', 'GL',
+    'product_id', v_product, 'description', '[SMOKE] MRB4A Chem', 'quantity', 0, 'unit_size', 'Gal',
+    'unit_price_cents', NULL, 'cost_cents', 0, 'sort_order', 0, 'rate_per_acre', 0.1, 'rate_unit', 'Gal',
     'manual_override', false));
   v_key := v_prefix || 'fa-save';
   v_res := public.save_field_app_invoice(NULL,

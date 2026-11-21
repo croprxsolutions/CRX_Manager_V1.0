@@ -310,9 +310,9 @@ try {
   // any smoke runs. This never touches a live database.
   psql(`
     ALTER TABLE public.products DISABLE TRIGGER trigger_y_require_governed_product_pricing;
-    INSERT INTO public.products (product_name, unit_size, current_cost, tier1_price)
-    VALUES ('[PROVER] Row Version Priced A', 'gal', 3.00, 10.00),
-           ('[PROVER] Row Version Priced B', 'gal', 4.00, 8.00);
+    INSERT INTO public.products (product_name, unit_size, current_cost, tier1_price, inventory_unit)
+    VALUES ('[PROVER] Row Version Priced A', 'gal', 3.00, 10.00, 'Gal'),
+           ('[PROVER] Row Version Priced B', 'gal', 4.00, 8.00, 'Gal');
     ALTER TABLE public.products ENABLE TRIGGER trigger_y_require_governed_product_pricing;
   `);
   for (const file of legacyLifecycleSmokeFiles) {

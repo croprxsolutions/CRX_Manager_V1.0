@@ -81,13 +81,18 @@ check("GitHub failures and mismatched comparisons need Sol", () => {
 check("main and staging are the merge bases every gate covers", () => {
   assert.deepEqual([...GATED_MERGE_BASES], ["main", "staging"]);
 });
-check("an agent never merges into main, whatever the branch", () => {
+check("an agent never merges into main without Mason's release pass, whatever the branch", () => {
   for (const head of ["release/next", "hotfix/cents", "claude/x", "taha/x", "main", "", undefined]) {
-    assert.match(agentMergeProblem("main", head), /never merges into main.*Taha or Mason/, String(head));
+    assert.match(agentMergeProblem("main", head), /never merges into main.*Taha or Mason.*ship the release/, String(head));
   }
 });
-check("an agent never merges the back-merge (main into staging)", () => {
+check("an agent never merges the back-merge (main into staging) without the pass", () => {
   assert.match(agentMergeProblem("staging", "main"), /back-merge.*Taha's or Mason's/);
+});
+check("Mason's release pass lets the agent merge into main and the back-merge, nothing else", () => {
+  assert.equal(agentMergeProblem("main", "release/next", { releasePass: true }), null);
+  assert.equal(agentMergeProblem("staging", "main", { releasePass: true }), null);
+  assert.match(agentMergeProblem("staging", "release/next", { releasePass: true }), /go into main, not staging/);
 });
 check("feature work into staging is the agent's, migrations included", () => {
   for (const head of ["claude/x", "codex/y", "ship/z", "taha/x", "release/nextish", "hotfixes"]) assert.equal(agentMergeProblem("staging", head), null, head);
@@ -146,7 +151,7 @@ check("staging is frozen for agents while a release PR is open (#1838 MED 2, wid
   assert.match(query, /\.head\.repo\.full_name == \.base\.repo\.full_name/, "a fork's release/next branch freezes nothing");
 });
 
-check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)", () => {
+check("a destructive migration no longer stops a staging merge (Mason, 2026-11-20; live still needs his yes)", () => {
   const H = "a".repeat(40);
   const b64 = (t) => Buffer.from(t).toString("base64");
   const gh = (files, sql) => (args) => {
@@ -162,13 +167,11 @@ check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)
   assert.equal(run("modified\tsrc/a.ts\t\n", ""), null, "no migration");
   assert.equal(run(MIG, "ALTER TABLE t ADD COLUMN c int;"), null, "an additive migration");
   assert.equal(run("removed\tsupabase/migrations/x.sql\t\n", ""), null, "a removed migration is not read");
-  assert.match(run(MIG, "DELETE FROM invoices WHERE true;"), /destructive migration.*x\.sql/);
-  assert.match(run(MIG, "DROP TABLE t;"), /DROP TABLE/);
+  assert.equal(run(MIG, "DELETE FROM invoices WHERE true;"), null, "a deletion merges into staging");
+  assert.equal(run(MIG, "DROP TABLE t;"), null, "a drop merges into staging");
   assert.match(run(new Error("HTTP 502"), ""), /fail closed/);
-  assert.match(run(MIG, new Error("HTTP 502")), /fail closed/);
   assert.match(stagingDestructiveProblem({ repo: "o/r", gh: gh("", ""), number: undefined, headSha: H, baseSha: "b".repeat(40) }), /fail closed/);
   assert.match(stagingDestructiveProblem({ repo: "o/r", gh: gh("", ""), number: 5, headSha: H, baseSha: undefined }), /fail closed/, "no base sha");
-  assert.match(run(MIG, "   "), /came back empty/);
   assert.match(run("src/a.ts\n", ""), /unreadable file list.*fail closed/, "a list without status and tabs fails closed");
 });
 

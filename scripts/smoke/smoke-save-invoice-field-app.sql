@@ -36,8 +36,8 @@ BEGIN
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] SIb '||v_sfx) RETURNING id INTO v_cust_b;
   -- Current supplier-pricing governance requires a pricing-free shell followed
   -- by the public preview/apply path. Never disable the pricing trigger.
-  INSERT INTO products (product_name, unit_size, product_form)
-    VALUES ('[SMOKE] SIP '||v_sfx, 'gal', 'liquid') RETURNING id INTO v_prod;
+  INSERT INTO products (product_name, unit_size, product_form, inventory_unit)
+    VALUES ('[SMOKE] SIP '||v_sfx, 'gal', 'liquid', 'Gal') RETURNING id INTO v_prod;
 
   -- A missing/nonpositive cost basis is forbidden. Establish a governed 1-cent
   -- basis for historical fixture creation, then price it at $10 before edits.

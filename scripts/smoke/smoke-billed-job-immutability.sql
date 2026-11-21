@@ -61,8 +61,8 @@ BEGIN
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role','authenticated')::text, true);
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] IMMUT '||v_sfx) RETURNING id INTO v_cust;
-  INSERT INTO products (product_name, unit_size, epa_registration, product_form)
-    VALUES ('[SMOKE] IMMUT Prod '||v_sfx,'GL','999999-99999','liquid') RETURNING id INTO v_prodA;
+  INSERT INTO products (product_name, unit_size, epa_registration, product_form, inventory_unit)
+    VALUES ('[SMOKE] IMMUT Prod '||v_sfx,'Gal','999999-99999','liquid', 'Gal') RETURNING id INTO v_prodA;
   INSERT INTO fields (customer_id, field_name, crop_type)
     VALUES (v_cust,'[SMOKE] IMMUT F1 '||v_sfx,'corn') RETURNING id INTO v_field;
 
@@ -73,7 +73,7 @@ BEGIN
     RETURNING id INTO v_job;
   INSERT INTO job_fields (job_id, field_id, acres_to_treat, sort_order) VALUES (v_job, v_field, 100, 1);
   INSERT INTO job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit, cost_per_unit_cents, price_per_unit_cents, sort_order)
-    VALUES (v_job, v_prodA, 10, 'GL', 0.5, 'PT', 2000, 5000, 1);
+    VALUES (v_job, v_prodA, 10, 'Gal', 0.5, 'PT', 2000, 5000, 1);
   UPDATE jobs SET status='in_progress' WHERE id=v_job;
   UPDATE jobs SET status='completed'   WHERE id=v_job;
 
@@ -90,7 +90,7 @@ BEGIN
     RETURNING id INTO v_job2;
   INSERT INTO job_fields (job_id, field_id, acres_to_treat, sort_order) VALUES (v_job2, v_field, 50, 1);
   INSERT INTO job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit, cost_per_unit_cents, price_per_unit_cents, sort_order)
-    VALUES (v_job2, v_prodA, 5, 'GL', 0.5, 'PT', 2000, 5000, 1);
+    VALUES (v_job2, v_prodA, 5, 'Gal', 0.5, 'PT', 2000, 5000, 1);
   UPDATE jobs SET status='in_progress' WHERE id=v_job2;
   UPDATE jobs SET status='completed'   WHERE id=v_job2;
   v_res := transfer_job_to_invoice(v_job2, v_admin, 'SMOKE-im-fwd2-'||v_sfx);
@@ -224,7 +224,7 @@ BEGIN
       RETURNING id INTO v_job3;
     INSERT INTO job_fields (job_id, field_id, acres_to_treat, sort_order) VALUES (v_job3, v_field, 25, 1);
     INSERT INTO job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit, cost_per_unit_cents, price_per_unit_cents, sort_order)
-      VALUES (v_job3, v_prodA, 3, 'GL', 0.5, 'PT', 2000, 5000, 1);
+      VALUES (v_job3, v_prodA, 3, 'Gal', 0.5, 'PT', 2000, 5000, 1);
     UPDATE jobs SET status='in_progress' WHERE id=v_job3;
     UPDATE jobs SET status='completed'   WHERE id=v_job3;
     v_res := transfer_job_to_invoice(v_job3, v_admin, 'SMOKE-im-L1-'||v_sfx);

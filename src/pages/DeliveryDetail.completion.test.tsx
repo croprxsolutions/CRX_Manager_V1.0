@@ -72,13 +72,20 @@ vi.mock('../lib/db', () => ({
 }));
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => auth }));
 // Drivers read farms through get_driver_customers (#2018); serve it from the fake customers rows.
-vi.mock('../lib/driverFarms', () => ({
-  fetchDriverFarms: (ids: string[]) => Promise.resolve(new Map(
-    ((tables.data.customers ?? []) as { id: string; farm_name: string; email?: string | null }[])
-      .filter((c) => ids.includes(c.id))
-      .map((c) => [c.id, { id: c.id, farm_name: c.farm_name, phone: null, email: c.email ?? null, address: null }]),
-  )),
-}));
+vi.mock('../lib/driverFarms', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/driverFarms')>();
+  return {
+    ...actual,
+    // Office users read the fake customers table as before; a driver gets only the lookup's fields.
+    fetchDeliveryFarm: (id: string, isDriver: boolean) => {
+      if (!isDriver) return actual.fetchDeliveryFarm(id, false);
+      const c = ((tables.data.customers ?? []) as { id: string; farm_name: string; email?: string | null }[])
+        .find((row) => row.id === id);
+      const data = c ? { id: c.id, farm_name: c.farm_name, phone: null, email: c.email ?? null, billing_address: null, shipping_address: null } : null;
+      return Promise.resolve({ data, error: null });
+    },
+  };
+});
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));

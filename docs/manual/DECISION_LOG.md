@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-21 — Job completion waits to create a first stock row, the way deliveries do
+
+**Decision (Mason, this task, 2026-11-21).** Two field jobs that finish together and both need a Main Warehouse stock row that does not exist yet must both finish. Stock ends at the sum of what they used. One job must not fail and need a retry. This is the delivery rule from #2045, applied to job completion. It narrows the 2026-11-18 acceptance of that deadlock as a non-issue, which stopped further patches on #1940; deliveries were fixed after that, and jobs were the piece still open (#2121). Rush-order stock rows stay on #2121.
+
 ## 2026-11-21 — #2161: Mason owner-accepted 1 Sol finding(s) at `203179d85e5e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2161 at `203179d85e5e` (base `0ac30a2fc832`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

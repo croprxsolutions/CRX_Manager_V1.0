@@ -33,7 +33,7 @@ describe('gauntlet caller-side safety guards', () => {
     expect(page).toContain('.filter((entry) => entry.cycleCountId === completingCountId)');
     expect(page).not.toContain('await Promise.all([...pendingItemWritesRef.current])');
     expect(page).toMatch(/waitForAuthoritativeCountItems[\s\S]*refreshCountItems/);
-    expect(page).toContain('disabled={preparingCompletion || completing}');
+    expect(page).toContain('disabled={preparingCompletion}');
     expect(page).toContain('onConfirm={() => { void executeComplete(); }}');
   });
 

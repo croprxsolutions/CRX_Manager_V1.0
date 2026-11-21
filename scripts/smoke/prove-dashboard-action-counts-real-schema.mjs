@@ -70,8 +70,8 @@ INSERT INTO public.quotes (id, quote_number, customer_id, created_by, status, is
 SELECT gen_random_uuid(), 'H36-Q-' || g, '7c7a0000-0000-4000-8000-0000000c0001', '${USERS.admin}', 'sent', false,
        (now() AT TIME ZONE 'America/Chicago')::date + 1 + (g % 6) + (g * interval '1 minute')
   FROM generate_series(1, ${N.expiringQuotes}) g;
-INSERT INTO public.products (id, product_name, is_active)
-SELECT ('7c7a0000-0000-4000-8000-0000001' || lpad(g::text, 5, '0'))::uuid, 'H36 Product ' || g, true
+INSERT INTO public.products (id, product_name, is_active, product_form, inventory_unit)
+SELECT ('7c7a0000-0000-4000-8000-0000001' || lpad(g::text, 5, '0'))::uuid, 'H36 Product ' || g, true, 'liquid', 'Gal'
   FROM generate_series(1, ${N.lowStock}) g;
 INSERT INTO public.inventory (product_id, quantity_available, reorder_point)
 SELECT ('7c7a0000-0000-4000-8000-0000001' || lpad(g::text, 5, '0'))::uuid, g, 100 + g

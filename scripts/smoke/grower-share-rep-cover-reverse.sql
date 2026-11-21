@@ -1,4 +1,4 @@
--- ROLLBACK for 20270201135000_grower_share_rep_needs_price_to_cover_cost.sql. Restores _enforce_below_cost_line to its
+-- ROLLBACK for 20270201180000_grower_share_rep_needs_price_to_cover_cost.sql. Restores _enforce_below_cost_line to its
 -- 20270120150000 body (md5 1069cd1451454030627b250db7b729d1): a sales rep may again save a grower-share invoice whose
 -- per-acre price does not cover its chemicals. No rows change. Apply as ONE transaction (psql -1).
 -- Proven by scripts/smoke/prove-grower-share-rep-cover-real-schema.mjs.
@@ -21,7 +21,7 @@ BEGIN
                    FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
            IS DISTINCT FROM ARRAY['postgres', 'service_role'])
   ) OR to_regprocedure('public._enforce_below_cost_line()') IS NULL THEN
-    RAISE EXCEPTION 'GROWER_SHARE_REP_COVER_REVERSE: _enforce_below_cost_line is not the 20270201135000 body, or its header or grants changed';
+    RAISE EXCEPTION 'GROWER_SHARE_REP_COVER_REVERSE: _enforce_below_cost_line is not the 20270201180000 body, or its header or grants changed';
   END IF;
   PERFORM set_config('crx.gsrc_xid', pg_current_xact_id()::text, true);
   PERFORM set_config('crx.gsrc_acl', (SELECT coalesce(proacl::text, '') FROM pg_proc WHERE oid = 'public._enforce_below_cost_line()'::regprocedure), true);

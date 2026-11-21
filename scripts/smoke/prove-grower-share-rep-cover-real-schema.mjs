@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270201135000_grower_share_rep_needs_price_to_cover_cost (#1990 Sol HIGH, 20270120150000:1000).
+ * Real-schema proof for 20270201180000_grower_share_rep_needs_price_to_cover_cost (#1990 Sol HIGH, 20270120150000:1000).
  * Container setup and replay copied from prove-field-app-no-sold-unit-real-schema.mjs. Grower A owns field G (100 ac, 100%)
  * with a grower-share per-acre price; chemicals P and Q cost $5.00/Gal. 1 Gal/ac of P on 100 ac costs $500.00.
  *   BEFORE: the base saves a rep's grower-share invoice without comparing price and cost.
@@ -34,7 +34,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270201135000_grower_share_rep_needs_price_to_cover_cost.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270201180000_grower_share_rep_needs_price_to_cover_cost.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([

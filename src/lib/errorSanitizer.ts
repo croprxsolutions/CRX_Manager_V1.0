@@ -378,7 +378,7 @@ export function sanitizeError(error: unknown): string {
     return `Nothing was saved. ${setupRefusal.charAt(0).toUpperCase()}${setupRefusal.slice(1)}`;
   }
   // Grower-share line too small to record (20270120150000, Mason 2026-11-17): the server text names the product.
-  // A rep's per-acre price below the chemicals' cost (20270201135000, Mason 2026-11-20): the server text says what to do.
+  // A rep's per-acre price below the chemicals' cost (20270201180000, Mason 2026-11-20): the server text says what to do.
   const growerShareRounding = message.match(/^FIELD_APP_GROWER_SHARE_(?:ROUNDING|BELOW_COST):\s*(.+)$/s)?.[1];
   if (growerShareRounding) {
     return `Nothing was saved. ${growerShareRounding.charAt(0).toUpperCase()}${growerShareRounding.slice(1)}`;

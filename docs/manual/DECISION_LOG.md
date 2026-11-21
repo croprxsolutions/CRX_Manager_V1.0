@@ -1,5 +1,12 @@
 # Decision Log
 
+## 2026-11-21 — #2051: Mason owner-accepted 1 Sol finding(s) at `d3b16f425dc9`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2051 at `d3b16f425dc9` (base `ccefd47221c0`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201100000_page_access_locks_reports.sql:670`, text sha256 `5936f6b886f393ac` (the wording stays with the proof, not here)
+  Mason's reason: a rep never has record book or product hidden on top of repirts (ref 604ba71bdaf6)
+
+
 ## 2026-11-21 — #2045: Mason owner-accepted 2 Sol finding(s) at `2020eb077d1e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2045 at `2020eb077d1e` (base `a90d3b34fc7a`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
@@ -12,13 +19,6 @@
 
 **Decision (Mason, in chat, 2026-11-21: "Yes 2 more").** PR #2045 (#1942 inventory edge cases) may have two more Sol rounds (rounds 7 and 8).
 **Why:** after Mason owner-accepted round 6's one HIGH finding, staging moved again and GitHub reported a conflict, so staging had to be merged in and the merge gate needs a fresh Sol review of the new head. The PR's own change is unchanged since round 6.
-
-## 2026-11-21 — #2051: Mason owner-accepted 1 Sol finding(s) at `d3b16f425dc9`
-
-**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2051 at `d3b16f425dc9` (base `ccefd47221c0`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
-- Finding 1 (HIGH) at `supabase/migrations/20270201100000_page_access_locks_reports.sql:670`, text sha256 `5936f6b886f393ac` (the wording stays with the proof, not here)
-  Mason's reason: a rep never has record book or product hidden on top of repirts (ref 604ba71bdaf6)
-
 ## 2026-11-21 — #2051 (KI-119): Mason chose to fix Sol round 4's year-end summary finding
 
 **Decision (Mason, 2026-11-21, "Fix it").** Sol round 4 on PR #2051 found that the one-customer year-end summary stays open to a sales rep with both Reports and Customers hidden. Mason chose a fix over an owner-accept: that summary is now refused only when BOTH pages are hidden (either page alone keeps it; admins always pass). This entry names #2051 so Sol may run round 5 on it.

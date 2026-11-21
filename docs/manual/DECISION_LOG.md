@@ -5,6 +5,32 @@
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2045 at `790859458268` (base `a90d3b34fc7a`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
 - Finding 1 (HIGH) at `supabase/migrations/20270201195000_inventory_edge_cases_1942.sql:315`, text sha256 `83a9f256b4f30c5e` (the wording stays with the proof, not here)
   Mason's reason: cant hapen (ref 5ed2ac568296)
+## 2026-11-21 — #2068: Mason owner-accepted 4 Sol finding(s) at `1d9202dcb57d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `1d9202dcb57d` (base `dab22364c6bc`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:296`, text sha256 `8c9208ce2bfc73a0` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 541bb0106bf2)
+- Finding 2 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:174`, text sha256 `1eccf829c6361a8d` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 535732ca2aa9)
+- Finding 3 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:312`, text sha256 `43b3d94fb469bf0a` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 5d333eacec4e)
+- Finding 4 (HIGH) at `scripts/smoke/grower-share-rep-cover-reverse.sql:31`, text sha256 `3a19afa1d0a31d5f` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref d424445cef65)
+
+## 2026-11-21 — #2068: Mason owner-accepted 3 Sol finding(s) at `2f04db346c0b`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `2f04db346c0b` (base `912dd819a01f`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201135000_grower_share_rep_needs_price_to_cover_cost.sql:296`, text sha256 `478b5ca87698ebe6` (the wording stays with the proof, not here)
+  Mason's reason: reps knowing cost is acceptable , decided 11-20 (ref e09c1e3b226e)
+- Finding 2 (HIGH) at `supabase/migrations/20270201135000_grower_share_rep_needs_price_to_cover_cost.sql:174`, text sha256 `102a19fdd69df789` (the wording stays with the proof, not here)
+  Mason's reason: this can't happen in our buisness (ref 90055eb3a0d6)
+- Finding 3 (HIGH) at `supabase/migrations/20270201135000_grower_share_rep_needs_price_to_cover_cost.sql:312`, text sha256 `2295df5619029f50` (the wording stays with the proof, not here)
+  Mason's reason: nowhere near 9999 invoices a year (ref 0b77a9cf87d8)
+## 2026-11-21 — Any rep may edit any draft field-application invoice (rep-scope fix dropped)
+
+**Decision (Mason, in chat, 2026-11-21: "Drop the fix").** A sales rep may save, change billing on, and change applied details (applicator, weather, carrier water) of ANY draft or unposted field-application invoice, not only their own, as the app works today. The planned fix (`docs/plans/2026-11-21-field-invoice-rep-scope-CONTRACT.md`) is dropped and nothing was built. The KI-01 related low and the field-invoice part of KI-03 are accepted.
+**What this changes:** for field-application invoice edits only, it narrows the 2026-10-13 `INVOICE_SCOPE_DENIED` rule below ("a rep changes or posts only an existing invoice under their own name"). Checks already built stay: posting (`post_invoice`, `post_invoice_group`) and the split-invoice save (`SPLIT_SET_NOT_OWNED`) still require the rep's own invoice, delete stays admin-only, and posted invoices stay locked. The rest of KI-03 (unpost, transfer, consolidate, wider rep reads) is unchanged and waits for Taha after 2026-12-15.
+**Why:** Mason's call; field invoices are shared work across reps today.
 
 ## 2026-11-21 — #2051: Mason owner-accepted 1 Sol finding(s) at `d3b16f425dc9`
 
@@ -148,6 +174,28 @@ accepted residuals; do not re-raise them as blockers on this PR.
 **Decision (Mason, in chat, 2026-11-19: "Approve round 5").** PR #2038 (#1976, EPA batch save checks in the database) may have Sol round 5.
 **Why:** the pre-push check required a regenerated workflow map (`docs/app-workflow-map.html`, its RPC count goes from 361 to 362), so the pushed head is one commit past the head Sol round 4 reviewed. The code reviewed in round 4 is unchanged.
 ## 2026-11-20 — #1990: Mason owner-accepted 5 Sol finding(s) at `b145a1514838`
+## 2026-11-21 — #2048: Mason owner-accepted 1 Sol finding(s) at `44d70d8bf839`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2048 at `44d70d8bf839` (base `ca1ed13c47fd`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201120000_inactive_customer_refuses_new_work.sql:144`, text sha256 `5ea6254975308c7b` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen (ref 6738a97a5e50)
+
+## 2026-11-21 — #2048 may have one more Sol round (round 6)
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, one more each").** PR #2048 (#2000 inactive customer refuses new work) may have one more Sol round (round 6).
+**Why:** after release #1990 and its back-merge, staging had to be merged in to clear a conflict, so the merge gate needs a fresh Sol review of the new head. The PR's own change is unchanged since its last clean or owner-accepted round.
+
+## 2026-11-19 — #2048: Mason owner-accepted 1 Sol finding(s) at `97c98ae44e88`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2048 at `97c98ae44e88` (base `c0b544a2383e`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201120000_inactive_customer_refuses_new_work.sql:144`, text sha256 `5e2922251fd2fb0f` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref d5394f1fb1d6)
+
+## 2026-11-19 — #2048: Mason owner-accepted 1 Sol finding(s) at `305882be9698`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2048 at `305882be9698` (base `c0b544a2383e`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201120000_inactive_customer_refuses_new_work.sql:138`, text sha256 `a0f64e129e986705` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 21555f0ab195)
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #1990 at `b145a1514838` (base `5740b6c076ea`) found 5 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
 - Finding 1 (HIGH) at `supabase/migrations/20270109100200_sales_tax_checkbox.sql:433`, text sha256 `7af8d6a6d1bd6424` (the wording stays with the proof, not here)

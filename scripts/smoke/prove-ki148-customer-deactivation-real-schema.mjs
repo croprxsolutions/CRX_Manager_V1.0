@@ -64,10 +64,13 @@ function seed2(order) {
     INSERT INTO public.inventory_holds (product_id, customer_id, quantity, created_by, is_active) VALUES ('${PRODUCT}', '${C.closed2}', 0, '${ADMIN}', true);`;
 }
 
-// Sol r4 (issue #2000): a hold "expiring today" turns expired at Chicago midnight. Never seed within 10 minutes of it.
+// Sol r4 (issue #2000): a hold "expiring today" turns expired at Chicago midnight. A full run takes about 7 minutes,
+// so never start within 30 minutes of it (#2115); main() also names a crossing if one still happens.
+const chicagoDate = () => scalar(`SELECT (now() AT TIME ZONE 'America/Chicago')::date;`);
+let seededOn = null;
 async function awayFromChicagoMidnight() {
   const left = Number(scalar(`SELECT extract(epoch FROM (date_trunc('day', now() AT TIME ZONE 'America/Chicago') + interval '1 day') - (now() AT TIME ZONE 'America/Chicago'))::int;`));
-  if (left < 600) {
+  if (left < 1800) {
     console.log(`[ki148] ${left}s before Chicago midnight: waiting so the "expires today" hold keeps its day`);
     await new Promise((r) => setTimeout(r, (left + 5) * 1000));
   }
@@ -76,6 +79,7 @@ async function awayFromChicagoMidnight() {
 async function seed() {
   buildContainer({ stopBefore: CANDIDATE }); seedUsers();
   await awayFromChicagoMidnight();
+  seededOn = chicagoDate();
   // Fixtures go in past every other trigger (replica), as the other provers seed them; the checks run normally.
   const customers = Object.keys(C).map((k) => `('${C[k]}', '${N[k]}', ${k === 'inactive' ? 'false' : 'true'})`).join(',');
   let n = 0;
@@ -240,4 +244,11 @@ async function main() {
   console.log('KI148_FOLLOWUP_PROOF_PASS');
 }
 
-try { await main(); } finally { if (!KEEP) removeContainer(); else console.log(`Kept ${NAME}`); }
+try {
+  try { await main(); } catch (e) {
+    let now = seededOn;
+    try { now = chicagoDate(); } catch { /* keep the original failure */ }
+    if (seededOn && now !== seededOn) throw new Error(`the run crossed Chicago midnight (seeded ${seededOn}), so the "expires today" hold expired mid-run; rerun it`, { cause: e });
+    throw e;
+  }
+} finally { if (!KEEP) removeContainer(); else console.log(`Kept ${NAME}`); }

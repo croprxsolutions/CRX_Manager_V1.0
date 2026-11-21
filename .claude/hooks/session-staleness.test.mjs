@@ -397,6 +397,39 @@ try {
     ok(!additionalContextOf(r).includes("guards are NOT"), "HOOKSPATH: a folder outside git gives no warning");
   }
 
+  // ── MAIN-BEHIND (2026-11-21): the main checkout, where hooks and merge gates
+  // run, lagged origin/main by 509 commits and refused valid Sol proofs. ──────
+  {
+    const mainRepo = path.join(tmpRoot, "behind-main");
+    const linked = path.join(tmpRoot, "behind-linked");
+    const git = (...args) => execFileSync("git", ["-C", mainRepo, ...args], { env: isolatedGitEnv, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    execFileSync("git", ["init", "-b", "main", mainRepo], { env: isolatedGitEnv, stdio: "ignore" });
+    git("config", "user.email", "session-staleness@example.com");
+    git("config", "user.name", "Session Staleness Test");
+    git("commit", "--allow-empty", "-m", "base");
+    // 51 commits on a fake origin/main, without moving the checkout's HEAD.
+    let tip = git("rev-parse", "HEAD");
+    for (let i = 0; i < 51; i++) tip = git("commit-tree", "HEAD^{tree}", "-p", tip, "-m", `upstream ${i}`);
+    git("update-ref", "refs/remotes/origin/main", tip);
+    git("worktree", "add", "--detach", linked);
+
+    r = runHook(linked);
+    eq(r.status, 0, "MAIN-BEHIND: exits 0");
+    const ctxBehind = additionalContextOf(r);
+    ok(ctxBehind.includes("51 commits behind origin/main"), "MAIN-BEHIND: a linked worktree warns that the main checkout is 51 behind");
+    ok(ctxBehind.includes("merge --ff-only origin/main"), "MAIN-BEHIND: warning names the fix");
+    ok(ctxBehind.includes("gpt-6.2-sol"), "MAIN-BEHIND: warning names the symptom");
+
+    git("merge", "--ff-only", "origin/main");
+    r = runHook(linked);
+    ok(!additionalContextOf(r).includes("behind origin/main"), "MAIN-BEHIND: an up-to-date main checkout gives no warning");
+
+    git("update-ref", "-d", "refs/remotes/origin/main");
+    r = runHook(linked);
+    eq(r.status, 0, "MAIN-BEHIND: no origin/main still exits 0");
+    ok(!additionalContextOf(r).includes("behind origin/main"), "MAIN-BEHIND: no origin/main stays silent");
+  }
+
   console.log(`session-staleness: ${pass} assertions passed`);
 } finally {
   rmSync(tmpRoot, { recursive: true, force: true });

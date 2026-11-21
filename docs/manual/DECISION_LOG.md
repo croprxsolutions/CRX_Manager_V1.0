@@ -1,5 +1,17 @@
 # Decision Log
 
+## 2026-11-21 — #2068: Mason owner-accepted 4 Sol finding(s) at `1d9202dcb57d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `1d9202dcb57d` (base `dab22364c6bc`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:296`, text sha256 `8c9208ce2bfc73a0` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 541bb0106bf2)
+- Finding 2 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:174`, text sha256 `1eccf829c6361a8d` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 535732ca2aa9)
+- Finding 3 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:312`, text sha256 `43b3d94fb469bf0a` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 5d333eacec4e)
+- Finding 4 (HIGH) at `scripts/smoke/grower-share-rep-cover-reverse.sql:31`, text sha256 `3a19afa1d0a31d5f` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref d424445cef65)
+
 ## 2026-11-21 — #2045: Mason owner-accepted 2 Sol finding(s) at `e6a349b6f20d`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2045 at `e6a349b6f20d` (base `18be091ef88f`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
@@ -18,18 +30,6 @@
 
 **Decision (Mason, in chat, 2026-11-21: "Yes, round 10").** PR #2045 (#1942 inventory edge cases) may have Sol round 10.
 **Why:** after round 9, staging gained #2068, #2137, #2138 and #2143, and GitHub reported #2045 as conflicting. Merging staging in was clean, but staging had changed files this PR also edits, and a staging-bound branch has no carry-forward, so the merged head needs a full Sol review. The PR's own change is unchanged since round 9.
-
-## 2026-11-21 — #2068: Mason owner-accepted 4 Sol finding(s) at `1d9202dcb57d`
-
-**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `1d9202dcb57d` (base `dab22364c6bc`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
-- Finding 1 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:296`, text sha256 `8c9208ce2bfc73a0` (the wording stays with the proof, not here)
-  Mason's reason: this cant happen (ref 541bb0106bf2)
-- Finding 2 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:174`, text sha256 `1eccf829c6361a8d` (the wording stays with the proof, not here)
-  Mason's reason: this cant happen (ref 535732ca2aa9)
-- Finding 3 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:312`, text sha256 `43b3d94fb469bf0a` (the wording stays with the proof, not here)
-  Mason's reason: this cant happen (ref 5d333eacec4e)
-- Finding 4 (HIGH) at `scripts/smoke/grower-share-rep-cover-reverse.sql:31`, text sha256 `3a19afa1d0a31d5f` (the wording stays with the proof, not here)
-  Mason's reason: this cant happen (ref d424445cef65)
 
 ## 2026-11-21 — #2068: Mason owner-accepted 3 Sol finding(s) at `2f04db346c0b`
 

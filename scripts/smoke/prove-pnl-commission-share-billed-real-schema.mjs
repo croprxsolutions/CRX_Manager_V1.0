@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270204130000_pnl_commission_share_billed (KI-125, KI-126, KI-129 invoice count).
+ * Real-schema proof for 20270205110000_pnl_commission_share_billed (KI-125, KI-126, KI-129 invoice count).
  * Container setup and replay copied from prove-page-access-locks-reports-real-schema.mjs. Then, on synthetic rows:
  *   1. BEFORE: the P&L and Month-End Close subtract every booked commission by order date, multiply a fee line's
  *      cost by acres again, and show $0 payments; the close receipt counts only invoices still 'posted'.
@@ -26,7 +26,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270204130000_pnl_commission_share_billed.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270205110000_pnl_commission_share_billed.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([

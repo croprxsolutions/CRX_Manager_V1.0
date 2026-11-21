@@ -273,7 +273,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // reservation completion took; changing the literal would orphan every existing receipt.
   _void_delivery_replay_impl_20261015: ['void_delivery'],
   // Direct EXECUTE is revoked (postgres-only). Batch 3b renamed the live close_accounting_period body to this
-  // name, so it kept the public literal the wrapper binds. 20270204130000 (KI-125/129) re-emits it only to change
+  // name, so it kept the public literal the wrapper binds. 20270205110000 (KI-125/129) re-emits it only to change
   // the summary figures; changing the literal would orphan every existing receipt.
   _close_accounting_period_replay_impl_20261015: ['close_accounting_period'],
   // Direct EXECUTE is revoked (postgres-only after batch 3b). Migration 20260714222000 renamed the

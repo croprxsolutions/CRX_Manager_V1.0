@@ -1,6 +1,6 @@
 ## 2026-11-21 — KI-125, KI-126, KI-129 (part), KI-130: P&L and Month-End Close count commissions on billed sales only
 
-- New migration `20270204130000_pnl_commission_share_billed.sql` (not applied live; record in `docs/reference/migrations.d/`). [Contract](../plans/2026-11-21-pnl-month-end-report-fixes-CONTRACT.md).
+- New migration `20270205110000_pnl_commission_share_billed.sql` (not applied live; record in `docs/reference/migrations.d/`). [Contract](../plans/2026-11-21-pnl-month-end-report-fixes-CONTRACT.md).
 - Bottom Line P&L and Month-End Close now subtract a commission only for the share of its order billed on CRX chemical-sale or misc-charge invoices in that period (Mason, 2026-11-10 and 2026-11-13). An order billed 25% in November and 75% in December counts a quarter of its commission in November and the rest in December. A field application's commission counts when its field invoice is billed. Orders billed in Chem Man no longer show their commission as a CRX cost.
 - Live effect: checked read-only on 2026-11-21 against admin-only figures, which are not recorded in this public repo.
 - KI-126: an application-fee line's cost is no longer multiplied by acres a second time (no live effect today; every fee costs $0).

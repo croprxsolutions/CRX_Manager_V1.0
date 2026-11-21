@@ -1,7 +1,7 @@
 # Behavior contract: inventory clean-up edge cases (#1942, follow-ups of #1940)
 
 Read at `origin/staging` 62ccaeaa2, 2026-11-19. One PR to `staging`, one new migration
-(`20270201141000_inventory_edge_cases_1942.sql`), DB only plus screen error wording. No live data is changed.
+(`20270201195000_inventory_edge_cases_1942.sql`), DB only plus screen error wording. No live data is changed.
 
 ## 1. Outcome and authority
 

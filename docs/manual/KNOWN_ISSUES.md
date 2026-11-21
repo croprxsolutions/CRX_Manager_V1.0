@@ -738,17 +738,19 @@ fix needs an Edge deploy with Mason's approval. Repair step 3 (To-Do 0.17).
   window. `label_url` accepts any text. The Step 1 assign/preview stubs keep their "not set up" message.
 
 ### KI-125 — Bottom Line P&L and Monthly Summary subtract commissions on every booked order but count only CRX-invoiced revenue
-**HIGH · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #1) · unassigned**
+**HIGH · FIX IN REVIEW (Claude, `20270203100000_pnl_commission_share_billed.sql`, to staging; [contract](../plans/2026-11-21-pnl-month-end-report-fixes-CONTRACT.md)) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #1)**
 Revenue counts posted/overdue/paid invoices by invoice date; commissions count every non-replaced commission by order
 date, invoiced or not. Most 2026 sales were billed in Chem Man, so net profit shows a six-figure loss that is not real
 (only 1 of 35 commissioned orders has a posted CRX invoice). Where: `_get_bottom_line_pnl_cost_impl_20261019` and
 `get_monthly_summary` (`20261106150000_fix_delivery_one_screen.sql`). Mason decided 2026-11-10 (To-Do decision 15,
 DECISION_LOG): count a commission only when its order has a CRX invoice in the period's revenue set. Refined 2026-11-13 (DECISION_LOG,
 "Split by share billed"): a partly billed order counts only the share of its commission matching the share billed in
-that period, so checking that an invoice exists is not enough. Not built yet. First in the sweep's fix order.
+that period, so checking that an invoice exists is not enough. Fix in review: an order's commission counts in each
+period by the share of its product sales billed on CRX chemical invoices (cumulative, capped at 100%); a field
+application's commission counts when its field invoice is billed. On live 2026 data the reported net moves from a large loss to roughly break-even.
 
 ### KI-126 — P&L and Monthly Summary would multiply application-fee cost by acres twice
-**MED (latent) · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #2) · unassigned**
+**MED (latent) · FIX IN REVIEW (Claude, `20270203100000_pnl_commission_share_billed.sql`, with KI-125) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #2)**
 Fee lines store cost already extended by acres, with quantity = acres; both reports compute `cost_cents x quantity`.
 100 acres at $2/acre cost would show $20,000 COGS instead of $200. Latent: every live application service costs $0
 today. Fix: use the `is_application_fee` case `save_invoice` already uses, plus a prover with a costed fee line.
@@ -767,14 +769,14 @@ orders live. Fix: add `unposted` to void's cancel branch and flag overdue/paid f
 Related: KI-102 (same function, stock side).
 
 ### KI-129 — Monthly Summary and the month-close summary show $0 payments and undercount invoices
-**MED · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #6) · unassigned**
+**MED · PARTLY IN REVIEW (Claude: the close receipt's invoice count is fixed with KI-125; payments received is OPEN, a follow-up: it needs a rule for prepayment checks, which can be edited or deleted later, and a re-check at close that the figures still match what the admin reviewed) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #6)**
 Both read the legacy `payments` table (0 rows; payments now live in `allocation_sets`), so the one July 2026 customer
 payment shows as $0. The close summary also counts only invoices still `posted`, missing ones since paid or overdue.
 Where: `get_monthly_summary` and `_close_accounting_period_replay_impl_20261015`. Fix: sum active payment
 `allocation_sets` (UNION the legacy table, as the statement does) and use posted/overdue/paid.
 
 ### KI-130 — Monthly Summary's "AR balance" is always today's AR
-**LOW · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #7) · unassigned**
+**LOW · FIX IN REVIEW (Claude, screen label only, with KI-125: "Current AR (today)") · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #7)**
 `get_monthly_summary.ar_balance_cents` has no date filter, so a past month shows today's receivables. The AR Aging tab
 has the real as-of figure. Fix: relabel "Current AR (today)" or reuse `get_ar_aging(p_period_end)`.
 

@@ -1,5 +1,10 @@
 # Decision Log
 
+## 2026-11-21 — #2048 may have one more Sol round (round 6)
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, one more each").** PR #2048 (#2000 inactive customer refuses new work) may have one more Sol round (round 6).
+**Why:** after release #1990 and its back-merge, staging had to be merged in to clear a conflict, so the merge gate needs a fresh Sol review of the new head. The PR's own change is unchanged since its last clean or owner-accepted round.
+
 ## 2026-11-19 — #2048: Mason owner-accepted 1 Sol finding(s) at `97c98ae44e88`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2048 at `97c98ae44e88` (base `c0b544a2383e`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

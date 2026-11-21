@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // Fully chainable Supabase query-builder mock
 function chainable(resolveWith: unknown = { data: [], error: null }) {
@@ -40,11 +40,15 @@ vi.mock('../../lib/documentOCR', () => ({
 const authValue = vi.hoisted(() => ({ profile: { id: 'admin-1', role: 'admin' } as { id: string; role: string } }));
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => authValue }));
 
+const toast = vi.hoisted(() => vi.fn());
 vi.mock('../ui/Toast', () => ({
-  useToast: () => ({ toast: vi.fn() }),
+  useToast: () => ({ toast }),
 }));
 
+vi.mock('../../lib/appSettingDefaults', () => ({ loadDefaultTier: vi.fn(async () => 1) }));
+
 import BulkCustomerImport from './BulkCustomerImport';
+import { loadDefaultTier } from '../../lib/appSettingDefaults';
 
 describe('BulkCustomerImport', () => {
   const defaultProps = { open: true, onClose: vi.fn(), onSuccess: vi.fn() };
@@ -145,6 +149,34 @@ describe('BulkCustomerImport', () => {
     expect(screen.getByText(/Row 2 \(Lost Farm\): No answer from the server: this customer may have saved/)).toBeInTheDocument();
   });
 
+  // The modal's corner X is also named Close; this is the footer button.
+  const footerClose = () => screen.getAllByRole('button', { name: 'Close' }).find((b) => b.textContent?.trim() === 'Close') as HTMLElement;
+
+  it('asks before closing while a row has no server answer, since re-importing could save it twice', async () => {
+    rpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const onClose = vi.fn();
+    const { container } = render(<BulkCustomerImport {...defaultProps} onClose={onClose} />);
+    pick(container, 'farm_name\nLost Farm\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Import 1 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    fireEvent.click(footerClose());
+    expect(await screen.findByText(/1 row\(s\) got no answer from the server and may have saved/)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
+    expect(screen.getByRole('button', { name: 'Retry 1 Unanswered Row(s)' })).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    // Escape with the confirm open closes only the confirm, not the import (both modals listen for it).
+    fireEvent.click(footerClose());
+    await screen.findByRole('button', { name: 'Close anyway' });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Retry 1 Unanswered Row(s)' })).toBeInTheDocument();
+    fireEvent.click(footerClose());
+    fireEvent.click(await screen.findByRole('button', { name: 'Close anyway' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('refuses unquoted thousands and bad acreage instead of saving the wrong number', async () => {
     const { container } = render(<BulkCustomerImport {...defaultProps} />);
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
@@ -166,6 +198,134 @@ describe('BulkCustomerImport', () => {
     expect(await screen.findByText('Row 2: Invalid tier: Tier 2')).toBeInTheDocument();
     expect(screen.getByText('Row 3: Invalid tier: 2.5')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import 2 Customer(s)' })).toBeInTheDocument();
+  });
+
+  // #1998: the edge cases left after KI-145.
+  function pick(container: HTMLElement, csv: string) {
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File([csv], 'c.csv', { type: 'text/csv' })] } });
+  }
+
+  it('refuses an unquoted "1,200" that still fits the columns, but keeps real adjacent numbers', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,total_acres,notes,corn_acres,soybean_acres\nBig Farm,1,200,,\nNote Farm,5,200 bu,,\nQuoted Farm,"1,200",,,\nSplit Farm,,,500,300\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText('Row 2: Unclear total acres: 1,200 has a comma but no quotes. Put quotes around numbers with commas, like "1,200"')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import 3 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    expect(payloads().map((a) => a.p_customer_payload)).toEqual([
+      expect.objectContaining({ farm_name: 'Note Farm', total_acres: 5, notes: '200 bu' }),
+      expect.objectContaining({ farm_name: 'Quoted Farm', total_acres: 1200 }),
+      expect.objectContaining({ farm_name: 'Split Farm', corn_acres: 500, soybean_acres: 300 }),
+    ]);
+  });
+
+  it('refuses a total of 1-999 followed by a larger 3-digit crop (an unquoted "1,200"), but warns on other crops above the total', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,total_acres,corn_acres,soybean_acres\nSplit Farm,1,200,\nZero Farm,0,500,\nRented Farm,100,1500,\nReal Farm,500,300,200\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText('Row 2: Unclear total acres: 1,200 has a comma but no quotes. Put quotes around numbers with commas, like "1,200"')).toBeInTheDocument();
+    expect(screen.getByText('Will import, but check these rows:')).toBeInTheDocument();
+    expect(screen.getByText('Row 3: Unclear acres: corn acres (500) is more than total acres (0). Check the acres, or put quotes around numbers with commas, like "1,200"')).toBeInTheDocument();
+    expect(screen.getByText('Row 4: Unclear acres: corn acres (1500) is more than total acres (100). Check the acres, or put quotes around numbers with commas, like "1,200"')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import 3 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    expect(payloads().map((a) => a.p_customer_payload)).toEqual([
+      expect.objectContaining({ farm_name: 'Zero Farm', total_acres: 0, corn_acres: 500 }),
+      expect.objectContaining({ farm_name: 'Rented Farm', total_acres: 100, corn_acres: 1500 }),
+      expect.objectContaining({ farm_name: 'Real Farm', total_acres: 500, corn_acres: 300, soybean_acres: 200 }),
+    ]);
+  });
+
+  it('warns but still imports a crop of 1-999 followed by a larger 3-digit crop (maybe an unquoted "1,200")', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,corn_acres,soybean_acres\nSplit Farm,1,200\nReal Farm,300,200\nBig Farm,40,1500\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText('Row 2: Check acres: corn acres 1 and soybean acres 200 might be one number, 1,200. Put quotes around numbers with commas, like "1,200"')).toBeInTheDocument();
+    expect(screen.queryByText(/Row 3:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Row 4:/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import 3 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    expect(payloads().map((a) => a.p_customer_payload)).toEqual([
+      expect.objectContaining({ farm_name: 'Split Farm', corn_acres: 1, soybean_acres: 200 }),
+      expect.objectContaining({ farm_name: 'Real Farm', corn_acres: 300, soybean_acres: 200 }),
+      expect.objectContaining({ farm_name: 'Big Farm', corn_acres: 40, soybean_acres: 1500 }),
+    ]);
+  });
+
+  it('refuses an unquoted "5,000" that splits into total acres 5 and corn acres 000', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,total_acres,corn_acres\nSmith Farm,5,000\nReal Farm,500,300\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText('Row 2: Unclear total acres: 5,000 has a comma but no quotes. Put quotes around numbers with commas, like "1,200"')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import 1 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    expect(payloads().map((a) => a.p_customer_payload)).toEqual([
+      expect.objectContaining({ farm_name: 'Real Farm', total_acres: 500, corn_acres: 300 }),
+    ]);
+  });
+
+  it('keeps an inch mark inside a cell as text instead of opening a quote', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,notes\nA Farm,12" tile\nB Farm,6" tile\nC Farm,ok\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Import 3 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    expect(payloads().map((a) => a.p_customer_payload)).toEqual([
+      expect.objectContaining({ farm_name: 'A Farm', notes: '12" tile' }),
+      expect.objectContaining({ farm_name: 'B Farm', notes: '6" tile' }),
+      expect.objectContaining({ farm_name: 'C Farm', notes: 'ok' }),
+    ]);
+  });
+
+  it('keeps a quoted value that spans lines in one record, with later rows on their file line', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,billing_address,notes\r\nLine Farm,"12 Main St\r\nSpringfield, IL","said ""hi"""\r\n,no name\r\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText('Row 4: Missing farm name')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import 1 Customer(s)' }));
+    await screen.findByText('Import Complete');
+    expect(payloads()[0].p_customer_payload).toMatchObject({ farm_name: 'Line Farm', billing_address: '12 Main St\nSpringfield, IL', notes: 'said "hi"' });
+  });
+
+  it('refuses a file with an unclosed quote instead of swallowing later rows', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name,notes\nA Farm,"oops\nB Farm,fine\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('error', 'Line 2 opens a quote that is never closed. Fix the quotes in that row and try again.'));
+    expect(screen.queryByText('Valid Customers')).not.toBeInTheDocument();
+  });
+
+  it('retries an unanswered row with its original key', async () => {
+    rpc
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({ data: { status: 'saved', customer_id: 'c-2' }, error: null })
+      .mockResolvedValueOnce({ data: { status: 'saved', customer_id: 'c-1' }, error: null });
+    await importFile('farm_name\nLost Farm\nOk Farm\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry 1 Unanswered Row(s)' }));
+    expect(await screen.findByText(/Successfully imported 2 customer/)).toBeInTheDocument();
+    const [first, , retry] = payloads();
+    expect(retry.p_idempotency_key).toBe(first.p_idempotency_key);
+    expect(retry.p_customer_payload).toEqual(first.p_customer_payload);
+    expect(screen.queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
+  });
+
+  it('offers no retry for a row the server refused', async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { code: 'P0001', message: 'REP_MUST_SELF_ASSIGN' } });
+    await importFile('farm_name\nBad Farm\n');
+    expect(screen.queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
+  });
+
+  it('drops the "No valid data" toast of a parse superseded by a newer file', async () => {
+    let releaseTier!: (tier: 1 | 2 | 3) => void;
+    vi.mocked(loadDefaultTier).mockReturnValueOnce(new Promise((r) => { releaseTier = r; }));
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    pick(container, 'farm_name\n');
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    pick(container, 'farm_name\nNew Farm\n');
+    releaseTier(1);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it('shows file upload area', () => {

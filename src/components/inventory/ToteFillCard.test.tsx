@@ -61,4 +61,32 @@ describe('tote fill history', () => {
     expect(onStockChanged).toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
   });
+
+  it('a failed first read shows Try again, which recovers', async () => {
+    mockList.mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce([row('f1')]);
+    render(<ToteFillCard toteProductId="tote" toteName="UAN 265 Tote" profileId="u1" onStockChanged={vi.fn()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Fills could not be loaded');
+    expect(screen.queryByText('No fills recorded for this tote.')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByRole('button', { name: 'Undo' })).toBeInTheDocument();
+  });
+
+  it('when the refresh after an undo fails, shows the failure instead of the old fills', async () => {
+    mockList.mockResolvedValueOnce([row('f1')])
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce([row('u1', { reverses_fill_id: 'f1', reason: 'wrong count' }), row('f1')]);
+    mockReverse.mockResolvedValue(undefined);
+    const onStockChanged = vi.fn();
+    render(<ToteFillCard toteProductId="tote" toteName="UAN 265 Tote" profileId="u1" onStockChanged={onStockChanged} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'wrong count' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Undo Fill' }));
+    expect(await screen.findByText('Fills could not be loaded')).toBeInTheDocument();
+    expect(onStockChanged).toHaveBeenCalled();
+    expect(screen.queryByText(/Filled 1 tote/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText(/\(undone\)/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+  });
 });

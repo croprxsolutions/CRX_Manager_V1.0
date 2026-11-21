@@ -1066,6 +1066,53 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
     expect(mockRpc.mock.calls.some((call) => call[0] === 'save_field_app_invoice')).toBe(false);
     expect(mockFrom.mock.calls.some((call) => call[0] === 'activity_feed')).toBe(false);
   });
+
+  it('#1983: a product line saved with no sold unit reloads in the product sold unit; a blank rate unit keeps oz (never the recorded or catalog unit)', async () => {
+    const existingFrom = mockFrom.getMockImplementation()!;
+    const unitFrom = makeFromMock({
+      invoice_items: { data: [
+        // Neither the recorded unit (Pt) nor the catalog's rate unit (Qt) may replace oz: same rate, other unit = rebill.
+        { id: 'chem-recorded', product_id: 'product-gal', description: 'Recorded product', rate_per_acre: 1,
+          rate_unit: null, total_applied_unit: 'Pt', quantity: 10, unit_size: null, unit_price_cents: 100, extended_cents: 1000, cost_cents: 50, sort_order: 0 },
+        { id: 'chem-bare', product_id: 'product-gal', description: 'Bare product', rate_per_acre: 1,
+          rate_unit: null, total_applied_unit: null, quantity: 10, unit_size: null, unit_price_cents: 100, extended_cents: 1000, cost_cents: 50, sort_order: 1 },
+        { id: 'chem-manual', product_id: null, description: 'Hand-typed line', rate_per_acre: 1,
+          rate_unit: null, quantity: 10, unit_size: null, unit_price_cents: 100, extended_cents: 1000, cost_cents: 50, sort_order: 2 },
+      ] },
+      products: { data: [{
+        id: 'product-gal', max_label_rate: null, max_label_rate_unit: null, rei_hours: null, phi_days: null,
+        product_form: 'liquid', rate_unit: 'Qt', inventory_unit: 'Gal',
+      }] },
+    });
+    mockFrom.mockImplementation((table: string) =>
+      ['invoice_items', 'products'].includes(table) ? unitFrom(table) : existingFrom(table),
+    );
+    await renderPage();
+    await waitFor(() => expect(screen.getByText(/Field Application INV-1001/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Select Locations/i }));
+    fireEvent.click(await screen.findByTestId('mock-select-one-field'));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    const save = await waitFor(() => {
+      const call = mockRpc.mock.calls.find((c) => c[0] === 'save_field_app_invoice');
+      expect(call).toBeDefined();
+      return call!;
+    });
+    // Collect every sent chemical line (objects carrying a rate_unit), in order, and check each one.
+    const sent: Array<Record<string, unknown>> = [];
+    const walk = (v: unknown) => {
+      if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === 'object') {
+        if ('rate_unit' in v && 'description' in v) sent.push(v as Record<string, unknown>);
+        else Object.values(v).forEach(walk);
+      }
+    };
+    walk(save[1]);
+    const byName = (d: string) => sent.find((l) => l.description === d);
+    expect(byName('Recorded product')).toMatchObject({ rate_unit: 'oz', unit_size: 'Gal' });
+    expect(byName('Bare product')).toMatchObject({ rate_unit: 'oz', unit_size: 'Gal' });
+    expect(byName('Hand-typed line')).toMatchObject({ rate_unit: 'oz', unit_size: 'oz' });
+  });
 });
 
 describe('FieldApplicationInvoice — invoice load ownership', () => {

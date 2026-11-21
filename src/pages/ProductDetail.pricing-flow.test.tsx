@@ -123,6 +123,8 @@ vi.mock('../lib/db', async () => {
         ? { data: [product], error: null }
         : table === 'cost_history'
           ? costHistoryLoadResult
+        : table === 'unit_conversions'
+          ? { data: [{ id: 'u-gal', unit: 'gal', factor_oz: 128, unit_type: 'volume', notes: null }], error: null }
         : { data: [], error: null },
     )),
     rpc: vi.fn(() => chainable({ data: {}, error: null })),

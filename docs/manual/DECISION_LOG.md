@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-21 — #2038: Mason owner-accepted 2 Sol finding(s) at `9b5598f5d0d1`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2038 at `9b5598f5d0d1` (base `ca1ed13c47fd`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270130100000_epa_batch_commit_checks_at_save.sql:88`, text sha256 `1ac62581b10666ca` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen (ref cf87dc0055f9)
+- Finding 2 (HIGH) at `supabase/migrations/20270130100000_epa_batch_commit_checks_at_save.sql:143`, text sha256 `0e4369772881fb34` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen (ref a691a7b87a16)
+
 ## 2026-11-21 — #2038 may have one more Sol round (round 7)
 
 **Decision (Mason, in chat, 2026-11-21: "Yes, one more each").** PR #2038 (#1976 EPA batch save check) may have one more Sol round (round 7).

@@ -2952,8 +2952,8 @@ export default function JobDetail() {
         const savedJobId = isNew ? result.job_id : id!;
         // handleSave already BLOCKS an out-of-range value before we get here (same range edit_jobs
         // enforces), so these only ever see a blank or a valid number.
-        const carrierVal = carrierRateGpa.trim() !== '' ? parseFloat(carrierRateGpa) : null;
-        const capacityVal = tankCapacity.trim() !== '' ? parseFloat(tankCapacity) : null;
+        const carrierVal = carrierRateGpa.trim() !== '' ? Number(carrierRateGpa.trim()) : null;
+        const capacityVal = tankCapacity.trim() !== '' ? Number(tankCapacity.trim()) : null;
         // FIX 2 (Wave 2b): wrap this crew/loader sub-write in its OWN try/catch.
         // save_job has already INSERTED the row and the idempotency key was reset
         // above. If this separate write then fails (e.g. ground_crew_id FK
@@ -2976,7 +2976,9 @@ export default function JobDetail() {
           if (crewResult.skipped.length > 0) throw new Error(summarizeEditJobs(crewResult));
         } catch (crewErr) {
           Sentry.captureException(toSentryError(crewErr), { extra: { context: 'job_crew_loader_after_save' } });
-          toast('error', 'Job created, but the crew/loader settings did not save — adjust them on this page.');
+          toast('error', stillOnThisJob()
+            ? 'Job created, but the crew/loader settings did not save — adjust them on this page.'
+            : 'A job was saved, but its crew/loader settings did not save — open it from the Job Schedule and adjust them.');
           // §5: the job + over-label mix DID commit (only the crew/loader sub-write failed),
           // so still record the override audit linked to the saved job before bailing.
           if (overrideReasonForAudit) {

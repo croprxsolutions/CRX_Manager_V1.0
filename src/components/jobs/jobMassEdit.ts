@@ -155,9 +155,9 @@ export function buildFieldPatch(draft: MassEditDraft): Record<string, string | n
     // Blank clears (NULL); an out-of-range number is dropped to NULL here, but the modal blocks
     // Apply first (loaderInputsValid), so it never reaches edit_jobs, which would refuse it.
     patch.carrier_rate_gpa = draft.carrierRateGpa.trim() !== '' && !loaderNumberError(draft.carrierRateGpa, 'carrier')
-      ? parseFloat(draft.carrierRateGpa) : null;
+      ? Number(draft.carrierRateGpa.trim()) : null;
     patch.loader_tank_capacity = draft.loaderTankCapacity.trim() !== '' && !loaderNumberError(draft.loaderTankCapacity, 'capacity')
-      ? parseFloat(draft.loaderTankCapacity) : null;
+      ? Number(draft.loaderTankCapacity.trim()) : null;
     // Comment: blank => NULL (clear).
     patch.loader_comment = draft.loaderComment.trim() !== '' ? draft.loaderComment.trim() : null;
   }
@@ -171,7 +171,7 @@ const LOADER_NUMBER_MAX = 1_000_000;
 /** Message for a value the server would refuse, or null when the input is blank or in range. */
 export function loaderNumberError(raw: string, kind: 'carrier' | 'capacity'): string | null {
   if (raw.trim() === '') return null;
-  const n = parseFloat(raw);
+  const n = Number(raw.trim()); // Number, not parseFloat: "12abc" is refused, not read as 12
   const label = kind === 'carrier' ? 'Carrier rate' : 'Tank capacity';
   if (Number.isNaN(n)) return `${label} must be a number.`;
   if (kind === 'carrier' && n === 0) return null;

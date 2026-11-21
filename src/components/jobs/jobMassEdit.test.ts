@@ -230,6 +230,9 @@ describe('jobMassEdit — Loader Worksheet bulk fields (#10)', () => {
     expect(loaderNumberError('0.001', 'carrier')).toBeNull();
     expect(loaderNumberError('1000000', 'carrier')).toBeNull();
     expect(loaderNumberError('0.0001', 'carrier')).not.toBeNull();
+    // Luna: a numeric prefix is refused, not saved as its leading number.
+    expect(loaderNumberError('12abc', 'carrier')).toBe('Carrier rate must be a number.');
+    expect(loaderNumberError('0oops', 'capacity')).toBe('Tank capacity must be a number.');
     expect(loaderNumberError('1000001', 'carrier')).not.toBeNull();
     expect(loaderNumberError('Infinity', 'carrier')).not.toBeNull();
     expect(loaderNumberError('abc', 'carrier')).not.toBeNull();

@@ -302,17 +302,26 @@ function seed() {
           WHERE c.farm_name LIKE '[PROVER] SDF%'), '')
         || COALESCE((SELECT string_agg(to_jsonb(x)::text, '|' ORDER BY x.id) FROM invoice_items x JOIN invoices i ON i.id = x.invoice_id
           JOIN customers c ON c.id = i.customer_id WHERE c.farm_name LIKE '[PROVER] SDF%'), '')
-        || (SELECT count(*) FROM activity_feed)::text);
-    $f$;`);
+        || COALESCE((SELECT string_agg(to_jsonb(x)::text, '|' ORDER BY x.id) FROM invoice_shares x JOIN invoices i ON i.id = x.invoice_id
+          JOIN customers c ON c.id = i.customer_id WHERE c.farm_name LIKE '[PROVER] SDF%'), '')
+        || COALESCE((SELECT string_agg(to_jsonb(l)::text, '|' ORDER BY l.id) FROM field_app_locations l WHERE l.field_id IN ('${GA}', '${GA2}', '${GB}')), '')
+        || COALESCE((SELECT string_agg(to_jsonb(x)::text, '|' ORDER BY x.id) FROM field_app_location_shares x JOIN field_app_locations l ON l.id = x.location_id
+          WHERE l.field_id IN ('${GA}', '${GA2}', '${GB}')), '')
+        || (SELECT count(*) FROM activity_feed)::text || '/' || (SELECT count(*) FROM financial_audit_log)::text);
+    $f$;
+    -- The rep case calls sdf.save as the signed-in authenticated role, through the app's own grants.
+    GRANT USAGE ON SCHEMA sdf TO authenticated;
+    GRANT EXECUTE ON FUNCTION sdf.save(uuid, uuid[], text) TO authenticated;`);
   console.log('[prover] committed test rows: farms A and B; fields A1, A2 (A) and B (B); a liquid chemical sold by the Gal at $30');
 }
 const asAdmin = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);\n`;
-const asRep = `SELECT set_config('request.jwt.claims', '{"sub":"${REP}","role":"authenticated"}', true);\n`;
+const asRep = `SELECT set_config('request.jwt.claims', '{"sub":"${REP}","role":"authenticated"}', true);\nSET LOCAL ROLE authenticated;\n`;
 // Create a draft for A on field A1 (or the given fields), run the optional setup, then edit it with the given fields
 // in a later statement; returns the state and whether the original id is among the returned ids.
 const scenario = (fields, start = `'${GA}'`, setup = '', who = asAdmin) => `${who}CREATE TEMP TABLE t AS SELECT (sdf.save(NULL, ARRAY[${start}]::uuid[], 'sdf-new-' || gen_random_uuid())->'invoice_ids'->>0)::uuid AS inv;
   ${setup}
   CREATE TEMP TABLE r AS SELECT sdf.save(t.inv, ARRAY[${fields}]::uuid[], 'sdf-edit-' || gen_random_uuid()) AS r FROM t;
+  RESET ROLE;
   SELECT sdf.state() || ' | ' || (SELECT CASE WHEN r.r->'invoice_ids' @> to_jsonb(ARRAY[t.inv]) THEN 'kept' ELSE 'replaced' END
     || ' | orphan-rows=' || (SELECT count(*) FROM activity_feed a WHERE a.related_entity_id = t.inv AND a.event_type = 'invoice_orphan_cancelled')
     || ' | original=' || (SELECT right(c.farm_name, 1) || ':' || i.status FROM invoices i JOIN customers c ON c.id = i.customer_id WHERE i.id = t.inv)

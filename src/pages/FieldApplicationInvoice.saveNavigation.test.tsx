@@ -369,7 +369,9 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
       if (name === 'save_field_app_invoice') {
         createCalls += 1;
         if (createCalls === 1) return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
-        if (createCalls === 2) return Promise.resolve({ data: { invoice_ids: [args.p_invoice_id ?? CREATED_ID], invoice_group_id: null }, error: null });
+        // The retry changed fields under the unanswered key: the database refuses it and hands back the first receipt.
+        if (createCalls === 2) return Promise.resolve({ data: null, error: { message: 'IDEMPOTENCY_INTENT_MISMATCH',
+          details: JSON.stringify({ operation: 'save_field_app_invoice', result: { invoice_ids: [args.p_invoice_id ?? CREATED_ID], invoice_group_id: null } }) } });
         return followUp();
       }
       return Promise.resolve({ data: { success: true }, error: null });
@@ -386,9 +388,16 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(PAYER_WHY);
-    expect(alert).toHaveTextContent('An earlier Save from this page did create this invoice, with the fields it had then. That draft still exists.');
+    const note = 'An earlier Save from this page already created this invoice, and that draft still exists.';
+    expect(alert).toHaveTextContent(note);
     expect(savedInvoiceId(2)).toBe(CREATED_ID);
     expect(addressParam(router, 'created')).toBe(CREATED_ID);
+
+    // Save again with the same fields: refused again, and the note stays (the draft still holds the first values).
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(4));
+    expect(savedInvoiceId(3)).toBe(CREATED_ID);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(note));
   });
 
   it('#2164: a farm-change refusal that answers after the user left shows nothing', async () => {

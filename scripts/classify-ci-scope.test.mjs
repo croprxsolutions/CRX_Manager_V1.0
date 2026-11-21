@@ -521,7 +521,7 @@ equal(
   for (const run of ['npm run lint', 'npm run typecheck', 'npm run build', 'node scripts/npm-audit-gate.test.mjs && node scripts/npm-audit-gate.mjs', 'npm run test:ci-scope', 'npm run check:docs']) {
     equal(jobSlice('lint-typecheck-build').includes(`run: ${run}`), true, `lint/build part runs ${run}`);
   }
-  for (const run of ['npm run test:supplier-pricing-phase3c-packet', 'npm run check:pricing-phase2-live-smoke', 'npm run check:smoke-product-inserts', 'node scripts/run-correction-guards.mjs test:agent-workflows', 'npm run test:contracts']) {
+  for (const run of ['npm run test:supplier-pricing-phase3c-packet', 'npm run check:pricing-phase2-live-smoke', 'npm run check:smoke-product-inserts', 'npm run check:smoke-not-null-inserts', 'node scripts/run-correction-guards.mjs test:agent-workflows', 'npm run test:contracts']) {
     equal(jobSlice('regression-tests').includes(`run: ${run}`), true, `regression part runs ${run}`);
   }
 }

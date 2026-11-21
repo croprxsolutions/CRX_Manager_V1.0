@@ -378,7 +378,8 @@ export function sanitizeError(error: unknown): string {
     return `Nothing was saved. ${setupRefusal.charAt(0).toUpperCase()}${setupRefusal.slice(1)}`;
   }
   // Grower-share line too small to record (20270120150000, Mason 2026-11-17): the server text names the product.
-  const growerShareRounding = message.match(/^FIELD_APP_GROWER_SHARE_ROUNDING:\s*(.+)$/s)?.[1];
+  // A rep's per-acre price below the chemicals' cost (20270201180000, Mason 2026-11-20): the server text says what to do.
+  const growerShareRounding = message.match(/^FIELD_APP_GROWER_SHARE_(?:ROUNDING|BELOW_COST):\s*(.+)$/s)?.[1];
   if (growerShareRounding) {
     return `Nothing was saved. ${growerShareRounding.charAt(0).toUpperCase()}${growerShareRounding.slice(1)}`;
   }
@@ -476,6 +477,9 @@ export function sanitizeError(error: unknown): string {
   // Delivery lines match their order lines (20270126110000, KI-161): the server sentence says what is wrong.
   const deliveryLineRule = message.match(/^(?:DELIVERY_LINE_NOT_ON_ORDER|DELIVERY_LINE_PRODUCT_MISMATCH|DELIVERY_LINE_UNIT_MISMATCH|DELIVERY_LINE_DUPLICATE|DELIVERY_ORDER_LOCKED):\s*(.+)$/s);
   if (deliveryLineRule) return `Nothing was saved. ${deliveryLineRule[1].trim()}`;
+  // Partial completion figures (20270203120000, #1942): stale or malformed figures; the server sentence says to reload.
+  const deliveryQuantities = message.match(/^DELIVERY_QUANTITIES_(?:STALE|INVALID):\s*(.+)$/s);
+  if (deliveryQuantities) return `The delivery was not completed. ${deliveryQuantities[1].trim()}`;
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.
   const countRule = message.match(/^(?:CYCLE_COUNT_ROW_ALREADY_OPEN|CYCLE_COUNT_ROW_WRONG_PLACE|CYCLE_COUNT_REOPEN_FORBIDDEN|CYCLE_COUNT_REVERSE_BLOCKED|CYCLE_COUNT_QTY_INVALID):\s*(.+)$/s);
   if (countRule) return `Nothing was saved. ${countRule[1].trim()}`;

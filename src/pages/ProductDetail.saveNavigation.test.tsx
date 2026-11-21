@@ -10,7 +10,7 @@
  * file uses the REAL data router, the REAL hook and the REAL modal.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Link, Outlet, RouterProvider, createMemoryRouter } from 'react-router';
 
 // Same module copy for the page's useNavigate and the hook's useBlocker
@@ -72,6 +72,12 @@ function chain(data: unknown) {
   return self;
 }
 
+async function chooseUnit(value = 'Gal') {
+  const unit = screen.getByLabelText('Inventory Unit');
+  await within(unit).findByRole('option', { name: value });
+  fireEvent.change(unit, { target: { value } });
+}
+
 function renderNewProduct(state?: unknown) {
   const router = createMemoryRouter(
     [{
@@ -92,7 +98,8 @@ function renderNewProduct(state?: unknown) {
 describe('ProductDetail — leaving a new product', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFrom.mockImplementation(() => chain([{ id: 'product-1' }]));
+    mockFrom.mockImplementation((table: string) => chain(table === 'unit_conversions'
+      ? [{ id: 'gal', unit: 'Gal', unit_type: 'liquid' }] : [{ id: 'product-1' }]));
     mockCreate.mockResolvedValue({ parent_id: 'parent-1', parent_version: 1, product_id: 'product-1', event_id: 1 });
   });
 
@@ -100,6 +107,7 @@ describe('ProductDetail — leaving a new product', () => {
     const router = renderNewProduct();
     fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'New Chem' } });
     fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
+    await chooseUnit();
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
 
     await screen.findByText('New product page');
@@ -114,6 +122,7 @@ describe('ProductDetail — leaving a new product', () => {
     const router = renderNewProduct();
     fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'New Chem' } });
     fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
+    await chooseUnit();
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
 
     await screen.findByText('Products list page');
@@ -159,6 +168,7 @@ describe('ProductDetail — leaving a new product', () => {
     const name = await screen.findByLabelText(/Product Name/);
     fireEvent.change(name, { target: { value: 'New Chem' } });
     fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
+    await chooseUnit();
     expect(name).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
 
@@ -173,6 +183,18 @@ describe('ProductDetail — leaving a new product', () => {
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
     expect(mockToast).toHaveBeenCalledWith('error', 'Choose a product form (liquid, dry, seed or each) before saving.');
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('names the missing Inventory Unit before requesting a save (#2106)', async () => {
+    renderNewProduct();
+    fireEvent.change(await screen.findByLabelText(/Product Name/), { target: { value: 'New Chem' } });
+    fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
+    expect(mockToast).toHaveBeenCalledWith('error', 'Choose an Inventory Unit (the unit this product is sold and stocked in) before saving.');
+    expect(screen.getByLabelText('Inventory Unit')).toHaveAccessibleDescription('Choose the unit this product is sold and stocked in.');
+    expect(mockCreate).not.toHaveBeenCalled();
+    await chooseUnit();
+    expect(screen.queryByText('Choose the unit this product is sold and stocked in.')).not.toBeInTheDocument();
   });
 
   it('leaving with an unsaved name still prompts', async () => {
@@ -208,7 +230,7 @@ describe('ProductDetail — leaving a new product', () => {
       ? [{ name: 'Herbicide', is_active: true, sort_order: 10 },
         { name: 'Seed', is_active: true, sort_order: 20 },
         { name: 'Old', is_active: false, sort_order: 30 }]
-      : [{ id: 'product-1' }]));
+      : table === 'unit_conversions' ? [{ id: 'lb', unit: 'Lb', unit_type: 'dry' }] : [{ id: 'product-1' }]));
     renderNewProduct();
     const category = await screen.findByLabelText('Category');
     await waitFor(() => expect(category.querySelectorAll('option').length).toBe(3));
@@ -220,6 +242,7 @@ describe('ProductDetail — leaving a new product', () => {
     fireEvent.change(screen.getByLabelText('EPA Registration'), { target: { value: '' } });
     const form = screen.getByText('Product Form').parentElement!.querySelector('select')!;
     fireEvent.change(form, { target: { value: 'dry' } });
+    await chooseUnit('Lb');
     fireEvent.click(screen.getByRole('button', { name: /Create Product/ }));
     await screen.findByText('New product page');
     const [parentFields, size] = mockCreate.mock.calls[0] as [Record<string, unknown>, Record<string, unknown>];

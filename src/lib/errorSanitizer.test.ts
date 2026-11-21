@@ -74,6 +74,12 @@ describe('sanitizeError', () => {
   ])('explains a delivery-line refusal %s (20270126110000) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
   });
+  it.each([
+    ['DELIVERY_QUANTITIES_STALE', "this delivery's lines changed since the screen loaded them; reload it and enter the quantities again."],
+    ['DELIVERY_QUANTITIES_INVALID', 'every delivered quantity must be a number; reload the delivery and enter the quantities again.'],
+  ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
+    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
+  });
   it('explains a not-a-number count (20270126110000)', () => {
     expect(sanitizeError({ code: '23514', message: 'CYCLE_COUNT_QTY_INVALID: the counted quantity must be a number.' }))
       .toBe('Nothing was saved. the counted quantity must be a number.');
@@ -280,6 +286,11 @@ describe('sanitizeError', () => {
   it('passes the grower-share rounding refusal through with its product name', () => {
     expect(sanitizeError('FIELD_APP_GROWER_SHARE_ROUNDING: cannot cost "Dry X" in the grower share — 0.00003125 ton is too small to record to 4 decimals without its cost changing by more than $0.50. Record this product in a smaller sold unit before invoicing this field application.'))
       .toBe('Nothing was saved. Cannot cost "Dry X" in the grower share — 0.00003125 ton is too small to record to 4 decimals without its cost changing by more than $0.50. Record this product in a smaller sold unit before invoicing this field application.');
+  });
+
+  it('passes a rep\'s grower-share below-cost refusal through without a cost', () => {
+    expect(sanitizeError('FIELD_APP_GROWER_SHARE_BELOW_COST: the grower\'s per-acre price on this invoice does not cover the cost of the chemicals included in it. Raise the per-acre price, bill the chemicals on their own lines, or ask an admin to save this invoice.'))
+      .toBe('Nothing was saved. The grower\'s per-acre price on this invoice does not cover the cost of the chemicals included in it. Raise the per-acre price, bill the chemicals on their own lines, or ask an admin to save this invoice.');
   });
 
   it('maps return-credit and customer-scope tokens to operator guidance', () => {

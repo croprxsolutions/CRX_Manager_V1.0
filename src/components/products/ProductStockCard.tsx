@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Card, { CardHeader } from '../ui/Card';
 import { LoadFailedState } from '../ui/EmptyState';
 import { useAuth } from '../../contexts/AuthContext';
 import { assertRpcResult, supabase } from '../../lib/db';
 import { exactDecimalSum, type ExactDecimal } from '../../lib/chemCalculator';
-import { Sentry } from '../../lib/sentry';
+import { useLoad } from '../../hooks/useLoad';
 import { validateInventoryPositionShape } from '../../lib/inventoryPositionValidator';
 import type { InventoryPositionRow } from '../../types';
 
@@ -37,50 +36,29 @@ export default function ProductStockCard({ productId, isActive }: ProductStockCa
   return <ProductStockCardContent productId={productId} isActive={isActive} />;
 }
 
+async function readProductStock(productId: string) {
+  const { data, error } = await supabase.rpc('get_inventory_position');
+  const asOf = new Date();
+  if (error) throw error;
+  const positions = assertRpcResult<InventoryPositionRow[]>(data, 'get_inventory_position');
+  validateInventoryPositionShape(positions);
+  const rows = positions
+    .filter((row) => row.product_id === productId)
+    .sort((left, right) =>
+      (left.location?.trim() || '').localeCompare(right.location?.trim() || ''),
+    );
+  return { rows, asOf };
+}
+
 function ProductStockCardContent({ productId }: ProductStockCardProps) {
-  const [rows, setRows] = useState<InventoryPositionRow[]>([]);
-  const [asOf, setAsOf] = useState<Date | null>(null);
-  const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'failed'>('loading');
-  const requestIdRef = useRef(0);
-
-  const loadStock = useCallback(async () => {
-    const requestId = ++requestIdRef.current;
-    setRows([]);
-    setAsOf(null);
-    setLoadState('loading');
-
-    try {
-      const { data, error } = await supabase.rpc('get_inventory_position');
-      const readAt = new Date();
-      if (requestId !== requestIdRef.current) return;
-      if (error) throw error;
-
-      const positions = assertRpcResult<InventoryPositionRow[]>(data, 'get_inventory_position');
-      validateInventoryPositionShape(positions);
-      const productRows = positions
-        .filter((row) => row.product_id === productId)
-        .sort((left, right) =>
-          (left.location?.trim() || '').localeCompare(right.location?.trim() || ''),
-        );
-
-      setRows(productRows);
-      setAsOf(readAt);
-      setLoadState('loaded');
-    } catch (error: unknown) {
-      if (requestId !== requestIdRef.current) return;
-      Sentry.captureException(error, { tags: { source: 'fetch', page: 'product-stock-card' } });
-      setRows([]);
-      setAsOf(null);
-      setLoadState('failed');
-    }
-  }, [productId]);
-
-  useEffect(() => {
-    void loadStock();
-    return () => {
-      requestIdRef.current += 1;
-    };
-  }, [loadStock]);
+  const stock = useLoad(productId, () => readProductStock(productId), {
+    report: { tags: { source: 'fetch', page: 'product-stock-card' } },
+  });
+  // A failed or running refresh never shows the old counts as current.
+  const failed = stock.status === 'failed' || (stock.status === 'loaded' && stock.stale && !stock.refreshing);
+  const shown = stock.status === 'loaded' && !stock.stale && !stock.refreshing ? stock.data : null;
+  const rows = shown?.rows ?? [];
+  const asOf = shown?.asOf ?? null;
 
   const inventoryLink = `/inventory?product=${productId}`;
   const canShowTotal = rows.length >= 2 && rows.every((row) =>
@@ -94,10 +72,10 @@ function ProductStockCardContent({ productId }: ProductStockCardProps) {
   return (
     <Card>
       <CardHeader title="Stock" accent="& Reorder" />
-      {loadState === 'loading' ? (
+      {failed ? (
+        <LoadFailedState title="Stock could not be loaded" onRetry={() => { void stock.reload(); }} />
+      ) : !shown ? (
         <p className="text-sm text-secondary" role="status">Loading stock…</p>
-      ) : loadState === 'failed' ? (
-        <LoadFailedState title="Stock could not be loaded" onRetry={() => { void loadStock(); }} />
       ) : (
         <div className="space-y-4">
           {rows.length === 0 ? (

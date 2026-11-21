@@ -230,9 +230,12 @@ export function buildProductImportRow(
   // Every parser runs, so a valid field is kept even on a refused row; the first refusal is reported.
   const numberError = parseImportNumbers(raw, insert);
   const rupError = parseImportRup(raw.is_rup, insert);
+  // The database refuses a product with no sold unit (products.inventory_unit NOT NULL, #2050).
+  const unitError = /[\p{L}\p{N}]/u.test(insert.inventory_unit ?? '')
+    ? undefined : 'Missing Inventory Unit (the unit this product is sold and stocked in, e.g. Gal or Lb).';
   const error = (insert.product_name ? undefined : 'Missing product name.') ?? numberError ?? rupError;
   const { rates, error: rateError } = importRates(raw, insert.product_form, insert.inventory_unit);
-  const firstError = problem ?? error ?? rateError;
+  const firstError = problem ?? error ?? rateError ?? unitError;
   return { row, insert, ...(rates ? { rates } : {}), fixes, ...(firstError ? { error: firstError } : {}) };
 }
 

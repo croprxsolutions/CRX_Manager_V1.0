@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ fetchSellPriceHistory: vi.fn(), captureException: vi.fn() }));
@@ -90,5 +90,49 @@ describe('ProductSellPriceHistory', () => {
     expect(mocks.captureException).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: /try again/i }));
     expect(await screen.findByText('No price changes recorded since this product was created.')).toBeInTheDocument();
+  });
+
+  it('keeps the last answer, marked out of date, when a refresh fails, and never stretches it to today', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-10-25T18:00:00Z'));
+      let failRefresh: (error: Error) => void = () => {};
+      const rows = [
+        { ...base, id: 'r', changed_at: '2026-10-20T15:00:00Z', change_source: 'pricing_worksheet', change_reason: 'Wells letter', old_tier1_price: 10, new_tier1_price: 11 },
+      ];
+      mocks.fetchSellPriceHistory
+        .mockResolvedValueOnce(rows)
+        .mockImplementationOnce(() => new Promise((_, reject) => { failRefresh = reject; }))
+        .mockResolvedValueOnce(rows);
+      const { rerender } = render(<ProductSellPriceHistory productId="p1" reloadToken={0} />);
+      expect(await screen.findByRole('img', { name: /to Oct 25, 2026$/ })).toBeInTheDocument();
+
+      vi.setSystemTime(new Date('2026-11-20T18:00:00Z'));
+      rerender(<ProductSellPriceHistory productId="p1" reloadToken={1} />);
+      expect(screen.getByRole('status')).toHaveTextContent('Refreshing sell price history');
+      expect(screen.getByText('Wells letter').closest('[aria-busy="true"]')).not.toBeNull();
+
+      await act(async () => { failRefresh(new Error('network')); });
+      expect(screen.getByRole('alert')).toHaveTextContent('Could not refresh. This history may be out of date.');
+      expect(screen.getByText('Wells letter')).toBeInTheDocument();
+      // The axis still ends on the day the shown answer was read, not today.
+      expect(screen.getByRole('img', { name: /to Oct 25, 2026$/ })).toBeInTheDocument();
+      expect(mocks.captureException).toHaveBeenCalledWith(expect.any(Error), expect.objectContaining({ extra: { context: 'sell_price_history' } }));
+
+      fireEvent.click(screen.getByRole('button', { name: /try again/i }));
+      expect(await screen.findByRole('img', { name: /to Nov 20, 2026$/ })).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says a price it cannot show exactly is a failed read, not an empty history', async () => {
+    mocks.fetchSellPriceHistory.mockResolvedValueOnce([
+      { ...base, id: 'x', changed_at: '2026-10-20T15:00:00Z', change_source: 'product_page', old_tier1_price: 10, new_tier1_price: 10.555 },
+    ]);
+    render(<ProductSellPriceHistory productId="p1" />);
+    expect(await screen.findByText('Sell price history could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByText('No price changes recorded since this product was created.')).not.toBeInTheDocument();
   });
 });

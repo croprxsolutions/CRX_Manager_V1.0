@@ -35,7 +35,7 @@ export default function ToteFillCard({ toteProductId, toteName, profileId, onSto
     report: { tags: { source: 'fetch', page: 'tote-fill-card' } },
   });
   // After a fill or undo the old list is out of date: a failed refresh shows the failure, not the old rows.
-  const failed = fillsRead.status === 'failed' || (fillsRead.status === 'loaded' && fillsRead.stale);
+  const failed = fillsRead.status === 'failed' || (fillsRead.status === 'loaded' && fillsRead.stale && !fillsRead.refreshing);
   const fills = fillsRead.status === 'loaded' && !fillsRead.stale && !fillsRead.refreshing ? fillsRead.data : null;
 
   const changed = () => { void fillsRead.reload(); onStockChanged(); };

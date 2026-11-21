@@ -85,7 +85,7 @@ function useTotePreview(toteProductId: string, requested: number | null) {
     // A failed or running re-preview never leaves the old counts confirmable.
     preview: loaded && !loaded.stale && !loaded.refreshing ? loaded.data : null,
     // true = a refresh failed after a preview had loaded (useLoad keeps no error for that case).
-    previewFailed: read.status === 'failed' ? read.error : loaded?.stale ? true : null,
+    previewFailed: read.status === 'failed' ? read.error : loaded?.stale && !loaded.refreshing ? true : null,
     previewing: read.status === 'loading' || Boolean(loaded?.refreshing),
   };
 }

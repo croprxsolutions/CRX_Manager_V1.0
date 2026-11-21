@@ -55,7 +55,7 @@ function ProductStockCardContent({ productId }: ProductStockCardProps) {
     report: { tags: { source: 'fetch', page: 'product-stock-card' } },
   });
   // A failed or running refresh never shows the old counts as current.
-  const failed = stock.status === 'failed' || (stock.status === 'loaded' && stock.stale);
+  const failed = stock.status === 'failed' || (stock.status === 'loaded' && stock.stale && !stock.refreshing);
   const shown = stock.status === 'loaded' && !stock.stale && !stock.refreshing ? stock.data : null;
   const rows = shown?.rows ?? [];
   const asOf = shown?.asOf ?? null;

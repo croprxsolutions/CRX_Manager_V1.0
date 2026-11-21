@@ -98,8 +98,14 @@ export function epaNameMatches(epaProductName: string | null | undefined, appNam
 
 const CAS_PATTERN = /^\d{2,7}-\d{2}-\d$/;
 
-// Percent in hundred-thousandths, so a sum is exact (EPA gives at most four decimals).
-const pctUnits = (value: number) => Math.round(value * 100_000);
+// Percent as an exact whole number of 1e-20ths, read from its decimal text, so the sum matches the database's exact
+// numeric sum (rounding each percent first refused some exact 100% splits, #2120).
+const PCT_SCALE = 20;
+function pctUnits(value: number): bigint {
+  const text = String(value).includes('e') ? value.toFixed(PCT_SCALE) : String(value);
+  const [whole, fraction = ''] = text.split('.');
+  return BigInt(whole + fraction.padEnd(PCT_SCALE, '0').slice(0, PCT_SCALE));
+}
 
 function labelBlocks(item: EpaProposalItem): string | null {
   // Status is never written (D-T) and is 'unknown' on every registration, so "EPA says active" is always a difference;
@@ -132,7 +138,7 @@ function recordBlocks(summary: Record<string, unknown>, appNames: string[]): str
 /** Every ingredient is a plain new one with a CAS number and a positive percent, and they sum to 100 or less. */
 function ingredientsBlock(ingredients: EpaProposalItem[]): string | null {
   if (ingredients.length === 0) return 'EPA lists no ingredients';
-  let total = 0;
+  let total = 0n;
   for (const item of ingredients) {
     const change = item.change ?? {};
     const pct = change.strength_value;

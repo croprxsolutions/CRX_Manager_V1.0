@@ -6,7 +6,7 @@
 - KI-126: an application-fee line's cost is no longer multiplied by acres a second time (no live effect today; every fee costs $0).
 - KI-129 (part): the close receipt counts invoices since paid or overdue, not only those still "posted". Payments received is NOT changed (follow-up: see KNOWN_ISSUES KI-129).
 - KI-130: Month-End Close labels the AR figure "Current AR (today)" and the commission figure "Commissions on Sales Billed".
-- Not changed: invoice and billing code, revenue, AR, past close receipts (already-closed periods keep their stored figures). A return credit does not take commission back yet (KI-184, Mason 2026-11-21).
+- Not changed: invoice and billing code, revenue, AR, past close receipts (an already-closed period keeps its status and stored totals; its receipt detail lives only in the 24-hour retry record). A return credit does not take commission back yet (KI-184, Mason 2026-11-21).
 - Proof: container prover `scripts/smoke/prove-pnl-commission-share-billed-real-schema.mjs` (PNL_COMMISSION_SHARE_BILLED_PROOF_PASS). Not verified: on staging or in the browser.
 - Sweep allowlist: `get_bottom_line_pnl` and `get_monthly_summary` cost-exposure keys replaced with their post-apply keys (both already flagged on live since the 2027-01-09 sales-tax body; still admin-gated, same returned fields). Computed from per-function hashes: live read-only for unchanged helpers (equal to the replayed container's), container after apply for the changed and new ones. Both stay flagged until the apply.
 - Luna round 1: the prover's missing refusal helper added; legacy payment dollars rounded to cents; Month-End's "N paid" count now follows the same billed share (fixed in the Sol round).
@@ -16,3 +16,4 @@
 - Sol round 4: return credits now take commission back in proportion, as Mason decided (the earlier build had it backwards); profitability wording removed from tracked docs.
 - Sol round 5: the return clawback drew two new HIGHs (tax and discounts on credits; billing above the booked total), the fourth round in a row in this calculation, so Mason chose to ship without it (KI-184, DECISION_LOG 2026-11-21). The prover's reuse check and receipt cases tightened.
 - Sol round 6: a deleted middle copy in a Fix Delivery chain (A -> B -> C) no longer brings the original back; the old report's rule (any replacement retires the original) is restored and proven.
+- Sol round 7: clean. Its notes were doc wording only (contract's replacement rule, closed-period wording), fixed here.

@@ -52,7 +52,7 @@ whole-cent `round(commission_cents × share)`:
   cumulative(start−1), so per-period rounding can never add up to more or less than the commission. When `B ≤ 0` the
   share is 1 once anything is billed (live: 3 such commissions, all $0). Clamping at B means billing over the booked
   total never counts more than 100%, and a later period's billing never changes an earlier period's figure.
-- Deleted commissions are skipped; a cancelled commission is skipped only when a live (not deleted) replacement exists.
+- Deleted commissions are skipped; a cancelled commission is skipped when any replacement exists, deleted or not (the old report's rule, restored after Sol round 6).
 - A return credit takes back the matching share of commission in its month (decided 2026-08-09, reaffirmed 2026-11-13) — DEFERRED to KI-184 by Mason 2026-11-21 after Sol round 5; this PR takes nothing back.
 - Commission dates no longer matter; only the invoice dates do.
 R2 (KI-126) COGS per line: `CASE WHEN is_application_fee THEN cost_cents ELSE round(cost_cents*quantity) END` in both reports.

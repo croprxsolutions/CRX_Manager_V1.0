@@ -175,7 +175,8 @@ export function loaderNumberError(raw: string, kind: 'carrier' | 'capacity'): st
   // Plain decimals only: "12abc" and "1e-400" (which Number reads as 0) are refused.
   if (!/^-?(\d+(\.\d*)?|\.\d+)$/.test(raw.trim())) return `${label} must be a number.`;
   const n = Number(raw.trim());
-  if (kind === 'carrier' && n === 0) return null;
+  // Only text that IS zero counts as 0: "0.000…001" with hundreds of zeros reads as 0 in Number and is refused below.
+  if (kind === 'carrier' && /^-?(0+(\.0*)?|\.0+)$/.test(raw.trim())) return null;
   if (n < LOADER_NUMBER_MIN || n > LOADER_NUMBER_MAX) {
     return kind === 'carrier'
       ? 'Carrier rate must be 0, or 0.001 to 1,000,000.'

@@ -227,6 +227,8 @@ describe('jobMassEdit — Loader Worksheet bulk fields (#10)', () => {
 
   it('mirrors the edit_jobs range: carrier 0 or 0.001-1,000,000; capacity 0.001-1,000,000', () => {
     expect(loaderNumberError('0', 'carrier')).toBeNull();
+    expect(loaderNumberError('0.00', 'carrier')).toBeNull();
+    expect(loaderNumberError(`0.${'0'.repeat(400)}1`, 'carrier')).toMatch(/0, or 0.001/);
     expect(loaderNumberError('0.001', 'carrier')).toBeNull();
     expect(loaderNumberError('1000000', 'carrier')).toBeNull();
     expect(loaderNumberError('0.0001', 'carrier')).not.toBeNull();

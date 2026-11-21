@@ -238,8 +238,8 @@ export default function Jobs() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { role, profile } = useAuth();
-  // edit_jobs lets only an admin delete a completed job; a rep is never offered one.
-  const deletableStatuses: JobStatus[] = role === 'admin' ? DELETABLE : ['scheduled', 'in_progress'];
+  // edit_jobs lets only an admin delete a completed job; a rep is never offered one, and no other role may delete.
+  const deletableStatuses: JobStatus[] = role === 'admin' ? DELETABLE : role === 'sales_rep' ? ['scheduled', 'in_progress'] : [];
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [loading, setLoading] = useState(true);
   // The newest jobs read failed: show "could not be loaded", never "No jobs found" (To-Do 10.5).

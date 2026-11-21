@@ -55,6 +55,8 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 function skipLabel(s: EditJobsSkip): string {
   if (s.reason === 'not_found') return 'no longer exists';
   if (s.reason === 'deleted') return 'already deleted';
+  // A second click after a lost reply finds the job cancelled by the first: say so plainly.
+  if (s.status === 'cancelled') return 'already cancelled';
   return (s.status ?? 'other status').replace(/_/g, ' ');
 }
 

@@ -60,6 +60,8 @@ describe('summarizeEditJobs', () => {
       skipped: [{ id: 'b', reason: 'status', status: 'completed' }, { id: 'c', reason: 'status', status: 'invoiced' }, { id: 'd', reason: 'not_found' }],
     })).toBe('2 jobs edited. 1 job cancelled. 1 job not cancelled (completed). 1 job skipped (invoiced). 1 job skipped (no longer exists).');
     expect(summarizeEditJobs(empty)).toBe('Nothing changed.');
+    expect(summarizeEditJobs({ ...empty, skipped: [{ id: 'a', reason: 'status', status: 'cancelled' }] }))
+      .toBe('1 job skipped (already cancelled).');
   });
 });
 

@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import Button from '../ui/Button';
 import Card, { CardHeader } from '../ui/Card';
 import { LoadFailedState } from '../ui/EmptyState';
+import { useLoad } from '../../hooks/useLoad';
 import { formatCents } from '../../lib/money';
-import { Sentry } from '../../lib/sentry';
-import { sanitizeError } from '../../lib/errorSanitizer';
 import {
   sourceLabel,
   TIERS,
   fetchSellPriceHistory,
   sellPricePoints,
   timeFraction,
-  type SellPricePoint,
   type TierKey,
 } from '../../lib/sellPriceHistory';
 
@@ -28,13 +27,6 @@ function formatDay(at: string): string {
   return new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Chicago' });
 }
 
-// Each settled state names the product it belongs to, so another product's history never shows.
-type LoadState =
-  | { status: 'loading' }
-  | { status: 'failed'; productId: string }
-  // loadedAt ends the time axis: the last price is drawn as still in effect on that day.
-  | { status: 'loaded'; productId: string; points: SellPricePoint[]; loadedAt: string };
-
 // Width of the "before" band, in chart units: the prices before the first change, which have no date.
 const BEFORE_BAND = 8;
 
@@ -44,34 +36,22 @@ const BEFORE_BAND = 8;
  * only and cost_history is admin-only in the database.
  */
 export default function ProductSellPriceHistory({ productId, reloadToken = 0 }: { productId: string; reloadToken?: number }) {
-  const [loaded, setState] = useState<LoadState>({ status: 'loading' });
-  const state = useMemo<LoadState>(
-    () => (loaded.status !== 'loading' && loaded.productId !== productId ? { status: 'loading' } : loaded),
-    [loaded, productId],
-  );
-  const [attempt, setAttempt] = useState(0);
-  const retry = useCallback(() => setAttempt((n) => n + 1), []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setState({ status: 'loading' });
-    fetchSellPriceHistory(productId)
-      .then((rows) => {
-        if (!cancelled) setState({ status: 'loaded', productId, points: sellPricePoints(rows), loadedAt: new Date().toISOString() });
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        Sentry.captureException(error instanceof Error ? error : new Error(sanitizeError(error)), {
-          extra: { context: 'sell_price_history' },
-        });
-        setState({ status: 'failed', productId });
-      });
-    return () => { cancelled = true; };
-  }, [productId, reloadToken, attempt]);
+  const history = useLoad(`sell-price-history:${productId}`, async () => ({
+    points: sellPricePoints(await fetchSellPriceHistory(productId)),
+    // When this read answered: it ends the time axis (the last price is drawn as still in effect on
+    // that day). It belongs to the read, so a failed refresh never stretches an old answer to today.
+    loadedAt: new Date().toISOString(),
+  }), {
+    refreshToken: reloadToken,
+    report: { extra: { context: 'sell_price_history' } },
+  });
+  const retry = () => { void history.reload(); };
+  const data = history.status === 'loaded' ? history.data : null;
+  const outdated = history.status === 'loaded' && (history.refreshing || history.stale);
 
   const chart = useMemo(() => {
-    if (state.status !== 'loaded' || state.points.length === 0) return null;
-    const { points } = state;
+    if (!data || data.points.length === 0) return null;
+    const { points } = data;
     // A product with older history starts at its first change, whose old prices were in effect
     // before it on no recorded date: they get a "before" band at the left edge.
     const before = points[0].isStartingPoint ? null : points[0].previousCents;
@@ -85,7 +65,7 @@ export default function ProductSellPriceHistory({ productId, reloadToken = 0 }: 
     const start = points[0].at;
     // The axis runs to the day it loaded, so the last price is drawn as still in effect.
     const last = points[points.length - 1].at;
-    const end = Date.parse(state.loadedAt) > Date.parse(last) ? state.loadedAt : last;
+    const end = Date.parse(data.loadedAt) > Date.parse(last) ? data.loadedAt : last;
     const min = Math.min(...values);
     const max = Math.max(...values);
     const x = (at: string) => plotLeft + timeFraction(at, start, end) * (RIGHT - plotLeft);
@@ -112,17 +92,27 @@ export default function ProductSellPriceHistory({ productId, reloadToken = 0 }: 
       return { tier, d: segments.join(' ') };
     });
     return { paths, start, end, min, max, x, y, hasBefore };
-  }, [state]);
+  }, [data]);
 
   return (
     <Card>
       <CardHeader title="Sell Price" accent="History" />
-      {state.status === 'loading' && <p className="text-sm text-secondary" role="status">Loading sell price history…</p>}
-      {state.status === 'failed' && <LoadFailedState title="Sell price history could not be loaded" onRetry={retry} />}
-      {state.status === 'loaded' && state.points.length === 0 && (
+      {history.status === 'loading' && <p className="text-sm text-secondary" role="status">Loading sell price history…</p>}
+      {history.status === 'failed' && <LoadFailedState title="Sell price history could not be loaded" onRetry={retry} />}
+      {history.status === 'loaded' && history.stale && (
+        <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-amber-800">
+          <span>Could not refresh. This history may be out of date.</span>
+          <Button size="sm" variant="secondary" onClick={retry} disabled={history.refreshing}>Try again</Button>
+        </div>
+      )}
+      {history.status === 'loaded' && history.refreshing && (
+        <p className="mb-3 text-sm text-secondary" role="status">Refreshing sell price history…</p>
+      )}
+      <div aria-busy={outdated} className={outdated ? 'opacity-60' : undefined}>
+      {data && data.points.length === 0 && (
         <p className="text-sm text-secondary">No price changes recorded since this product was created.</p>
       )}
-      {state.status === 'loaded' && chart && (
+      {data && chart && (
         <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
           <svg
             role="img"
@@ -136,7 +126,7 @@ export default function ProductSellPriceHistory({ productId, reloadToken = 0 }: 
             {chart.paths.map(({ tier, d }) => (
               d ? <path key={tier} d={d} fill="none" stroke={TIER_COLORS[tier]} strokeWidth="2" vectorEffect="non-scaling-stroke" /> : null
             ))}
-            {state.points.map((point) => TIERS.map((tier) => {
+            {data.points.map((point) => TIERS.map((tier) => {
               const cents = point.cents[tier];
               if (cents === null) return null;
               return (
@@ -161,10 +151,10 @@ export default function ProductSellPriceHistory({ productId, reloadToken = 0 }: 
           </div>
         </div>
       )}
-      {state.status === 'loaded' && state.points.length > 0 && (
+      {data && data.points.length > 0 && (
         // Scrollable, so it takes keyboard focus (and says what it is) for keyboard scrolling.
         <ul className="mt-4 max-h-96 space-y-3 overflow-y-auto" tabIndex={0} aria-label="Sell price changes, newest first">
-          {[...state.points].reverse().map((point) => (
+          {[...data.points].reverse().map((point) => (
             <li key={point.id} className="border-b border-gray-100 pb-3 last:border-0">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <span className="text-sm font-medium text-nav-dark">{formatDay(point.at)}</span>
@@ -197,6 +187,7 @@ export default function ProductSellPriceHistory({ productId, reloadToken = 0 }: 
           ))}
         </ul>
       )}
+      </div>
     </Card>
   );
 }

@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import Card, { CardHeader } from '../ui/Card';
+import { LoadFailedState } from '../ui/EmptyState';
 import Select from '../ui/Select';
-import { sanitizeError } from '../../lib/errorSanitizer';
+import { useLoad } from '../../hooks/useLoad';
 import { timeFraction } from '../../lib/sellPriceHistory';
 import {
   formatSupplierCents,
   getProductPriceHistory,
-  type SupplierPriceHistory,
   type SupplierPriceHistoryPoint,
 } from '../../lib/supplierPricing';
 import type {
@@ -72,28 +72,24 @@ export default function ProductPriceHistory({
   onSelectSupplierBasis,
   onSelectPurchaseBasis,
 }: ProductPriceHistoryProps) {
-  const [history, setHistory] = useState<SupplierPriceHistory | null>(null);
-  const [supplierId, setSupplierId] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError(null);
-    setSupplierId('');
-    getProductPriceHistory(productId)
-      .then((result) => {
-        if (active) setHistory(result);
-      })
-      .catch((reason) => {
-        if (active) setError(sanitizeError(reason));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => { active = false; };
-  }, [productId, reloadToken]);
+  const read = useLoad(`supplier-price-history:${productId}`, async () => {
+    const result = await getProductPriceHistory(productId);
+    if (result.product_id !== productId) throw new Error('Price history returned the wrong Product.');
+    return result;
+  }, {
+    refreshToken: reloadToken,
+    report: { extra: { context: 'product_price_history' } },
+  });
+  const history = read.status === 'loaded' ? read.data : null;
+  // Shown evidence that is being re-read, or whose last re-read failed, is not acted on.
+  const outdated = read.status === 'loaded' && (read.refreshing || read.stale);
+  const retry = () => { void read.reload(); };
+  // The filter is kept across a refresh of the same product, but only while that supplier is still listed.
+  const [filter, setFilter] = useState({ productId, supplierId: '' });
+  const supplierId = filter.productId === productId
+    && history?.suppliers.some((supplier) => supplier.id === filter.supplierId)
+    ? filter.supplierId
+    : '';
 
   const points = useMemo(() => {
     const all = history?.points ?? [];
@@ -130,7 +126,7 @@ export default function ProductPriceHistory({
       <Select
         label="Filter supplier"
         value={supplierId}
-        onChange={(event) => setSupplierId(event.target.value)}
+        onChange={(event) => setFilter({ productId, supplierId: event.target.value })}
         placeholder="All suppliers"
         options={(history?.suppliers ?? []).map((supplier) => ({
           value: supplier.id,
@@ -138,6 +134,17 @@ export default function ProductPriceHistory({
         }))}
       />
 
+      {read.status === 'loaded' && read.stale && (
+        <div role="alert" className="mt-4 flex flex-wrap items-center gap-2 text-sm text-amber-800">
+          <span>Could not refresh. This evidence may be out of date, so Select as cost basis is off.</span>
+          <Button size="sm" variant="secondary" onClick={retry} disabled={read.refreshing}>Try again</Button>
+        </div>
+      )}
+      {read.status === 'loaded' && read.refreshing && (
+        <p className="mt-4 text-sm text-secondary" role="status">Refreshing supplier and purchase evidence…</p>
+      )}
+
+      <div aria-busy={outdated} className={outdated ? 'opacity-60' : undefined}>
       {history && (
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
@@ -182,17 +189,13 @@ export default function ProductPriceHistory({
         </div>
       )}
 
-      {loading && <p className="mt-4 text-sm text-secondary">Loading supplier and purchase evidence…</p>}
-      {error && (
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          Supplier history is unavailable: {error}
-        </div>
-      )}
-      {!loading && !error && points.length === 0 && (
+      {read.status === 'loading' && <p className="mt-4 text-sm text-secondary" role="status">Loading supplier and purchase evidence…</p>}
+      {read.status === 'failed' && <LoadFailedState title="Supplier price history could not be loaded" onRetry={retry} />}
+      {history && points.length === 0 && (
         <p className="mt-4 text-sm text-secondary">No supplier observations, selected cost basis, or purchase facts yet.</p>
       )}
 
-      {!loading && !error && plotted.length > 0 && minimum !== null && maximum !== null && (
+      {history && plotted.length > 0 && minimum !== null && maximum !== null && (
         <>
           <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
             <svg
@@ -267,7 +270,7 @@ export default function ProductPriceHistory({
                       className="mt-2"
                       size="sm"
                       type="button"
-                      disabled={!costBasisWorkspace?.enabled || costBasisBusy}
+                      disabled={!costBasisWorkspace?.enabled || costBasisBusy || outdated}
                       onClick={() => onSelectSupplierBasis(candidate)}
                     >
                       Select as cost basis
@@ -284,7 +287,7 @@ export default function ProductPriceHistory({
                       size="sm"
                       type="button"
                       variant="secondary"
-                      disabled={!costBasisWorkspace?.enabled || costBasisBusy}
+                      disabled={!costBasisWorkspace?.enabled || costBasisBusy || outdated}
                       onClick={() => onSelectPurchaseBasis(candidate)}
                     >
                       Select as cost basis
@@ -296,6 +299,7 @@ export default function ProductPriceHistory({
           </div>
         </>
       )}
+      </div>
     </Card>
   );
 }

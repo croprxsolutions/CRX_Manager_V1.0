@@ -246,7 +246,9 @@ async function main() {
 
 try {
   try { await main(); } catch (e) {
-    if (seededOn && chicagoDate() !== seededOn) throw new Error(`the run crossed Chicago midnight (seeded ${seededOn}), so the "expires today" hold expired mid-run; rerun it`, { cause: e });
+    let now = seededOn;
+    try { now = chicagoDate(); } catch { /* keep the original failure */ }
+    if (seededOn && now !== seededOn) throw new Error(`the run crossed Chicago midnight (seeded ${seededOn}), so the "expires today" hold expired mid-run; rerun it`, { cause: e });
     throw e;
   }
 } finally { if (!KEEP) removeContainer(); else console.log(`Kept ${NAME}`); }

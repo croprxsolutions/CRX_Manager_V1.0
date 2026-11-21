@@ -334,6 +334,15 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // changing the literal would orphan existing receipts.
   _section9_cancel_purchase_order_serialized: ['cancel_purchase_order'],
   _section9_create_vendor_bill_intent_impl_20260826: ['create_vendor_bill'],
+  // Section 9 (20260826221000 onward) moved the public AP bodies into these impls behind their public wrappers, so
+  // each kept the public literal its wrapper binds. 20270129120000 (#1912)
+  // re-emits them only to refuse idempotency keys with a non-printable character; changing the literal would orphan
+  // existing receipts.
+  _section9_create_vendor_bill_cumulative_impl: ['create_vendor_bill'],
+  _section9_update_vendor_bill_intent_impl_20260831: ['update_vendor_bill'],
+  _section9_record_vendor_payment_intent_impl_20260831: ['record_vendor_payment'],
+  _section9_void_vendor_bill_intent_impl_20260831: ['void_vendor_bill'],
+  _section9_receive_po_items_intent_impl_20260831: ['receive_po_items'],
   // Direct EXECUTE is revoked (postgres-only). Batch 4a (20261102180000) renamed the live
   // update_field_app_invoice_billing body to this name, so it kept the public literal the wrapper binds.
   // 20261120100000 (KI-14) re-creates it with one more trailing argument (per-invoice terms); changing

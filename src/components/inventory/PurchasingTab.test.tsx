@@ -14,7 +14,7 @@ import PurchasingTab, { suggestionText, type PurchasingPlan } from './Purchasing
 // Shaped like get_purchasing_plan's answer (20270127110000); numerics arrive as JSON numbers.
 const PLAN: PurchasingPlan = {
   today: '2027-02-01', lead_days: 14, months_ahead: 6, horizon_end: '2027-07-31',
-  firm_needs_date: [{ quote_number: 'Q-1', customer_name: 'North Farm', section_name: 'Field A', product_name: 'Herbicide X', quantity: 40 }],
+  firm_needs_date: [{ quote_number: 'Q-1', customer_name: 'North Farm', section_name: 'Field A', product_id: 'p1', product_name: 'Herbicide X', quantity: 40 }],
   drawn_section_unknown: [{ quote_number: 'Q-2', customer_name: 'South Farm', product_name: 'Herbicide X', quantity: 60 }],
   review: [{ quote_id: 'q3', section_id: 's3', quote_number: 'Q-3', customer_name: 'East Farm', section_name: 'Field C',
     timing: 'pre_plant', confidence: 'likely', needed_by_date: '2027-03-01', window_end: '2027-05-15' }],
@@ -40,7 +40,7 @@ describe('PurchasingTab', () => {
     mockRpc.mockResolvedValue({ data: PLAN, error: null });
     render(<PurchasingTab />);
     expect(await screen.findByText(/Firm, needs a date: 1 booking line./)).toBeInTheDocument();
-    expect(screen.getByText(/North Farm · Booking Q-1 · Field A · Herbicide X: 40/)).toBeInTheDocument();
+    expect(screen.getByText(/North Farm · Booking Q-1 · Field A · Herbicide X: 40 Gal/)).toBeInTheDocument();
     expect(screen.getByText('Drawn, section unknown')).toBeInTheDocument();
     expect(screen.getByText(/South Farm · Booking Q-2 · Herbicide X: 60/)).toBeInTheDocument();
     expect(screen.getByText('East Farm')).toBeInTheDocument();

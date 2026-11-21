@@ -186,7 +186,7 @@ Sol (gpt-6-sol, high) returned 83 findings: `docs/research/2026-11-17-bookings-f
 The rules below **replace** the matching v1 text; where they conflict, v2 wins.
 
 ### Phase A changes (amend contract v4)
-- **A-R1 (Sol 1):** picking a timing fills an empty needed-by date with the **current** window's start if today falls inside the window, otherwise the next one. The rep sees the filled year and can change it. *Amended (Sol on PR #1980):* never a past date. Inside a window that already began it fills today, because a past needed-by date would end a Planned booking's stock hold at once.
+- **A-R1 (Sol 1):** picking a timing fills an empty needed-by date with the **current** window's start if today falls inside the window, otherwise the next one. The rep sees the filled year and can change it. *Amended (Sol on PR #1980):* never a past date. Inside a window that already began it fills today, because a past needed-by date would cut short a Planned booking's stock hold, which runs to 14 days after the needed-by date.
 - **A-R2 (Sol 2):** a section qualifies for the review list if it has a needed-by date, whether or not it has a timing. Proof: a section with a date and no timing.
 - **A-R3 (Sol 3):** undated Firm demand is shown at the top of Purchasing as "Firm, needs a date: N units". The buy plan reads "incomplete" until it is cleared.
 - **A-R4 (Sol 4):** an open order line's need date is its delivery date when set, otherwise today. B8 keeps the same rule.

@@ -5900,7 +5900,7 @@ describe('QuoteBuilder', () => {
       expect(screen.getByText('Comparing V2 vs Current')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /Exit compare/ }));
       fireEvent.click(screen.getByRole('button', { name: /^Restore$/ }));
-      expect(screen.getByText('Restore V2?')).toBeInTheDocument();
+      expect(screen.getByText('Restore V2? Timing and Confidence will be cleared.')).toBeInTheDocument();
     });
 
     it('a quote with no saved versions has no History tab', async () => {

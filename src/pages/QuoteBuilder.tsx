@@ -5407,7 +5407,7 @@ export default function QuoteBuilder() {
                   <DatePicker
                     aria-label="Needed by"
                     value={sec.needed_by_date || null}
-                    onChange={(value) => updateSectionField(sec._key, 'needed_by_date', value || null)}
+                    onChange={(value) => { autoFilledNeededBy.current.delete(sec._key); updateSectionField(sec._key, 'needed_by_date', value || null); }}
                     disabled={planningLocked || Boolean(sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled')}
                   />
                 </div>
@@ -5784,7 +5784,7 @@ export default function QuoteBuilder() {
                     <>
                       {confirmRestore === selectedVersion.id ? (
                         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1">
-                          <span className="text-sm text-amber-800">Restore V{selectedVersion.version_number}?</span>
+                          <span className="text-sm text-amber-800">Restore V{selectedVersion.version_number}? Timing and Confidence will be cleared.</span>
                           <Button
                             size="sm"
                             icon={<CheckCircle className="w-3.5 h-3.5" />}

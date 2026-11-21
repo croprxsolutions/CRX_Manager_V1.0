@@ -20,7 +20,7 @@ interface PlanProduct { product_id: string; product_name: string; stock_unit: st
   incoming: Qty; drafted: Qty; committed: Qty; suggested: Qty; could_add: Qty; over_drawn: Qty;
   not_complete: boolean; reasons: string[] | null; suggestions: Suggestion[]; rows: DemandRow[];
   purchase_orders: PlanPo[] }
-interface BookingRef { quote_number: string; customer_name: string | null; product_name: string; quantity: Qty; section_name?: string | null }
+interface BookingRef { quote_number: string; customer_name: string | null; product_id?: string; product_name: string; quantity: Qty; section_name?: string | null }
 interface ReviewRow { quote_id: string; section_id: string; quote_number: string; customer_name: string;
   section_name: string; timing: string | null; confidence: string | null; needed_by_date: string | null; window_end: string }
 export interface PurchasingPlan { today: string; lead_days: number; months_ahead: number; horizon_end: string;
@@ -171,7 +171,7 @@ export default function PurchasingTab() {
           </p>
           <ul className="mt-2 space-y-1">
             {plan.firm_needs_date.map((r, i) => (
-              <li key={i}>{[r.customer_name, `Booking ${r.quote_number}`, r.section_name, r.product_name].filter(Boolean).join(' · ')}: {qty(r.quantity)}</li>
+              <li key={i}>{[r.customer_name, `Booking ${r.quote_number}`, r.section_name, r.product_name].filter(Boolean).join(' · ')}: {[qty(r.quantity), plan.products.find((p) => p.product_id === r.product_id)?.stock_unit].filter(Boolean).join(' ')}</li>
             ))}
           </ul>
         </div>

@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-21 — #2047 (edit_jobs): invoiced jobs are never changed by bulk job edits; cancel clash accepted
+
+**Decision (Mason, in chat, 2026-11-21, answering Sol round 6).** (1) `edit_jobs` skips invoiced jobs for every
+action, admins included; Mass Edit already hides them, and a stale screen must not move billed work or its applicator
+access. (2) Two cancels on one booking at the same moment can make one fail safely, as today; logged as KI-174 for
+Taha, and Mason owner-accepts that Sol finding.
+**What it does:** a third deliberate exception to the #1979 parity rule; admins fix billed jobs through the invoice flow.
+
 ## 2026-11-21 — #2047 (edit_jobs): who may edit and delete jobs, and two job issues left for Taha
 
 **Decision (Mason, in chat, 2026-11-21, answering Sol round 5).** (1) A sales rep whose Job Schedule page is blocked

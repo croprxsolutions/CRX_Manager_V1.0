@@ -16,9 +16,9 @@
 --   C4  refused shapes and values (other columns, null job_date, wrong types, bad numbers, delete+changes)
 --   C5  {loader_comment} only changes that column; null clears; batch_ref set then cleared; absent keys untouched
 --   C6  expired license refused; no license rows allowed (today's rule)
---   C7  rep schedule_date on {scheduled, invoiced} -> whole call refused, nothing changed; admin -> both updated
+--   C7  schedule_date on {scheduled, invoiced}: invoiced skipped for a rep and an admin (Mason, 2026-11-21); admin applicator change on it skipped
 --   C8  changes + cancel on {scheduled, completed}: both dated, only scheduled cancelled
---   C9  rep changes + cancel on {scheduled (sorts first), invoiced}: billed refusal saves nothing, scheduled not cancelled
+--   C9  rep changes + cancel on {scheduled, invoiced}: scheduled changed and cancelled, invoiced skipped untouched
 --   C10 500 scheduled jobs holding stock, changes + cancel in one call: all updated, cancelled, holds released, under 4 s
 -- Ends in RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'. Any other error = FAIL.
 -- ============================================================================
@@ -268,7 +268,7 @@ BEGIN
       END IF;
     END;
   END LOOP;
-  FOR v_r IN SELECT * FROM (VALUES (NULL::text), (''), ('   ')) AS t(k) LOOP
+  FOR v_r IN SELECT * FROM (VALUES (NULL::text), (''), ('   '), (E'\t\n')) AS t(k) LOOP
     BEGIN
       PERFORM edit_jobs(ARRAY[v_jS2], '{"loader_comment": "no key"}', NULL, v_rep, v_r.k);
       RESET ROLE; RAISE EXCEPTION 'SMOKE_FAIL: C4 a call without a replay key was not refused';
@@ -364,25 +364,24 @@ BEGIN
   RESET ROLE;
   DELETE FROM applicator_licenses WHERE license_number = 'SMOKE-' || v_sfx;
 
-  -- ── C7 billed-job lock aborts the whole call for a rep; admin passes ──────
+  -- ── C7 invoiced jobs are skipped by planning edits, for a rep and an admin ─
   SET LOCAL ROLE authenticated;
-  BEGIN
-    PERFORM edit_jobs(ARRAY[v_jS2, v_jI], jsonb_build_object('schedule_date', v_date), NULL, v_rep, 'ej-c7a-' || v_sfx);
-    RESET ROLE; RAISE EXCEPTION 'SMOKE_FAIL: C7 rep edit of an invoiced job was not refused';
-  EXCEPTION WHEN OTHERS THEN
-    RESET ROLE;
-    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
-    IF SQLERRM NOT LIKE '%billed-relevant fields%' THEN RAISE EXCEPTION 'SMOKE_FAIL: C7 wrong error: %', SQLERRM; END IF;
-  END;
+  v_res := edit_jobs(ARRAY[v_jS2, v_jI], jsonb_build_object('schedule_date', v_date), NULL, v_rep, 'ej-c7a-' || v_sfx);
   RESET ROLE;
-  SELECT count(*) INTO v_n FROM jobs WHERE id IN (v_jS2, v_jI) AND schedule_date = v_date;
-  IF v_n <> 0 THEN RAISE EXCEPTION 'SMOKE_FAIL: C7 refused call saved % job(s)', v_n; END IF;
+  IF v_res -> 'updated' <> to_jsonb(ARRAY[v_jS2])
+     OR v_res -> 'skipped' <> jsonb_build_array(jsonb_build_object('id', v_jI, 'reason', 'status', 'status', 'invoiced')) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: C7 rep result %', v_res;
+  END IF;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   SET LOCAL ROLE authenticated;
-  v_res := edit_jobs(ARRAY[v_jS2, v_jI], jsonb_build_object('schedule_date', v_date), NULL, v_admin, 'ej-c7b-' || v_sfx);
+  v_res := edit_jobs(ARRAY[v_jI], jsonb_build_object('applicator_id', v_appl, 'schedule_date', v_date), NULL, v_admin, 'ej-c7b-' || v_sfx);
   RESET ROLE;
-  SELECT count(*) INTO v_n FROM jobs WHERE id IN (v_jS2, v_jI) AND schedule_date = v_date;
-  IF v_n <> 2 THEN RAISE EXCEPTION 'SMOKE_FAIL: C7 admin edit saved % of 2 jobs', v_n; END IF;
+  IF v_res -> 'updated' <> '[]'::jsonb
+     OR v_res -> 'skipped' <> jsonb_build_array(jsonb_build_object('id', v_jI, 'reason', 'status', 'status', 'invoiced')) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: C7 admin result %', v_res;
+  END IF;
+  SELECT count(*) INTO v_n FROM jobs WHERE id = v_jI AND (schedule_date IS NOT DISTINCT FROM v_date OR applicator_id IS NOT DISTINCT FROM v_appl);
+  IF v_n <> 0 THEN RAISE EXCEPTION 'SMOKE_FAIL: C7 invoiced job was changed'; END IF;
 
   -- ── C8 changes + cancel in one call ───────────────────────────────────────
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
@@ -398,25 +397,19 @@ BEGIN
   SELECT count(*) INTO v_n FROM jobs WHERE id = v_jS2 AND status = 'cancelled';
   IF v_n <> 1 THEN RAISE EXCEPTION 'SMOKE_FAIL: C8 scheduled job not cancelled'; END IF;
 
-  -- ── C9 combined call: a refused patch on the invoiced job aborts the scheduled cancel too ──
-  -- The scheduled job's id sorts before the invoiced one. The patch check refuses the invoiced job before
-  -- any row is written, so the scheduled job must be left unchanged (not edited, not cancelled).
+  -- ── C9 changes + cancel on {scheduled, invoiced}: scheduled changed and cancelled, invoiced untouched ──
   INSERT INTO jobs (id, job_number, customer_id, job_date, schedule_date, created_by)
     VALUES (('00000000-0000-4000-8000-' || substr(md5(v_sfx), 1, 12))::uuid, '[SMOKE] EJ-S3-' || v_sfx, v_cust,
             CURRENT_DATE + 5, v_date, v_admin) RETURNING id INTO v_jS2;
-  IF v_jS2 > v_jI THEN RAISE EXCEPTION 'SMOKE_SETUP: C9 job does not sort first'; END IF;
   SET LOCAL ROLE authenticated;
-  BEGIN
-    PERFORM edit_jobs(ARRAY[v_jS2, v_jI], jsonb_build_object('schedule_date', v_date + 1), 'cancel', v_rep, 'ej-c9-' || v_sfx);
-    RESET ROLE; RAISE EXCEPTION 'SMOKE_FAIL: C9 rep patch of an invoiced job was not refused';
-  EXCEPTION WHEN OTHERS THEN
-    RESET ROLE;
-    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
-    IF SQLERRM NOT LIKE '%billed-relevant fields%' THEN RAISE EXCEPTION 'SMOKE_FAIL: C9 wrong error: %', SQLERRM; END IF;
-  END;
+  v_res := edit_jobs(ARRAY[v_jS2, v_jI], jsonb_build_object('schedule_date', v_date + 1), 'cancel', v_rep, 'ej-c9-' || v_sfx);
   RESET ROLE;
-  SELECT count(*) INTO v_n FROM jobs WHERE id = v_jS2 AND status = 'scheduled' AND schedule_date = v_date;
-  IF v_n <> 1 THEN RAISE EXCEPTION 'SMOKE_FAIL: C9 refused call changed the scheduled job'; END IF;
+  IF v_res -> 'updated' <> to_jsonb(ARRAY[v_jS2]) OR v_res -> 'cancelled' <> to_jsonb(ARRAY[v_jS2])
+     OR v_res -> 'skipped' <> jsonb_build_array(jsonb_build_object('id', v_jI, 'reason', 'status', 'status', 'invoiced')) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: C9 result %', v_res;
+  END IF;
+  SELECT count(*) INTO v_n FROM jobs WHERE id = v_jI AND status = 'invoiced' AND schedule_date IS DISTINCT FROM v_date + 1;
+  IF v_n <> 1 THEN RAISE EXCEPTION 'SMOKE_FAIL: C9 invoiced job was changed'; END IF;
 
   -- ── C10 the 500-job maximum, changes + cancel ─────────────────────────────
   WITH ins AS (

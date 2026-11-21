@@ -78,7 +78,8 @@ export default function FieldRoute() {
     // (admins/reps see all). Ordering: in_progress first, then date.
     const { data, error } = await supabase
       .from('deliveries')
-      .select('id, delivery_number, status, scheduled_date, scheduled_time, priority, assigned_driver, delivery_notes, customer_id, customer:customers(farm_name)')
+      // A driver's farm names come from the driver lookup below, never the customers table (#2018).
+      .select(`id, delivery_number, status, scheduled_date, scheduled_time, priority, assigned_driver, delivery_notes, customer_id${isDriver ? '' : ', customer:customers(farm_name)'}`)
       .is('deleted_at', null)
       .in('status', OPEN_STATUSES)
       .order('scheduled_date', { ascending: true })

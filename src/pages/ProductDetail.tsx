@@ -392,6 +392,7 @@ export default function ProductDetail() {
   const [timingChoicesOpen, setTimingChoicesOpen] = useState(false);
   const [pendingCategory, setPendingCategory] = useState<string | null | undefined>(undefined);
   const [nameRequired, setNameRequired] = useState(false);
+  const [unitRequired, setUnitRequired] = useState(false);
   const [reiDraft, setReiDraft] = useState('');
   const [phiDraft, setPhiDraft] = useState('');
   const [loading, setLoading] = useState(!isNew);
@@ -860,6 +861,13 @@ export default function ProductDetail() {
     // A new parent needs its form; a new size takes its parent's form.
     if (isNew && !addSizeTo && !product.product_form) {
       toast('error', 'Choose a product form (liquid, dry, seed or each) before saving.');
+      revealPhoneSection('information');
+      return;
+    }
+    // The database refuses a product with no sold unit (products.inventory_unit NOT NULL, #2050).
+    if (isNew && !/[\p{L}\p{N}]/u.test(product.inventory_unit ?? '')) {
+      setUnitRequired(true);
+      toast('error', 'Choose an Inventory Unit (the unit this product is sold and stocked in) before saving.');
       revealPhoneSection('information');
       return;
     }
@@ -1923,9 +1931,12 @@ export default function ProductDetail() {
                         ? '' : current.rate_unit,
                     }));
                     setIsDirty(true);
+                    if (inventoryUnit) setUnitRequired(false);
                   }}
                   disabled={!isAdmin || Boolean(persistedProduct?.inventory_unit)}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
+                  aria-invalid={unitRequired || undefined}
+                  aria-describedby={unitRequired ? 'product-inventory-unit-error' : undefined}
+                  className={`w-full px-3 py-2 text-sm border ${unitRequired ? 'border-red-500' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50`}
                 >
                   <option value="">-- Select --</option>
                   {/* WaveB: grandfather a legacy value the form filter would otherwise hide, so a save can't blank it */}
@@ -1936,6 +1947,7 @@ export default function ProductDetail() {
                     <option key={uc.id} value={uc.unit}>{uc.unit}</option>
                   ))}
                 </select>
+                {unitRequired && <p id="product-inventory-unit-error" className="mt-1 text-xs text-red-600">Choose the unit this product is sold and stocked in.</p>}
               </div>
             </div>
 

@@ -97,7 +97,7 @@ vi.mock('../lib/db', async () => {
     if (table === 'products') return chainable({ data: H.product ? [H.product] : [], error: null });
     if (table === 'unit_conversions') {
       return chainable(H.unitsFailed ? { data: null, error: { message: 'units unavailable' } }
-        : { data: [{ id: 'u-gal', unit: 'gal', factor_oz: 128, unit_type: 'volume', notes: null }], error: null });
+        : { data: [{ id: 'u-gal', unit: 'gal', factor_oz: 128, unit_type: 'volume', notes: null }, { id: 'gal', unit: 'Gal', factor_oz: 128, unit_type: 'liquid', notes: null }], error: null });
     }
     return chainable({ data: [], error: null });
   });
@@ -405,6 +405,9 @@ describe('ProductDetail brands section', () => {
     render(<ProductDetail />);
     fireEvent.change(screen.getByRole('textbox', { name: /Product Name/ }), { target: { value: 'New Herbicide' } });
     fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
+    const unit = screen.getByLabelText('Inventory Unit');
+    await within(unit).findByRole('option', { name: 'Gal' });
+    fireEvent.change(unit, { target: { value: 'Gal' } });
     fireEvent.change(await screen.findByRole('combobox', { name: 'Vendor' }), { target: { value: 'New Vendor' } });
     await screen.findByRole('option', { name: 'Herbicide' });
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Herbicide' } });
@@ -418,6 +421,9 @@ describe('ProductDetail brands section', () => {
     const created = render(<ProductDetail />);
     fireEvent.change(screen.getByRole('textbox', { name: /Product Name/ }), { target: { value: 'New Herbicide' } });
     fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
+    const unit = screen.getByLabelText('Inventory Unit');
+    await within(unit).findByRole('option', { name: 'Gal' });
+    fireEvent.change(unit, { target: { value: 'Gal' } });
     await screen.findByRole('option', { name: 'Herbicide' });
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Herbicide' } });
     const group = await screen.findByRole('group', { name: 'Use Timing' });

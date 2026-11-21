@@ -1,6 +1,5 @@
-import { useRef } from 'react';
 import { supabase, assertRpcResult } from './db';
-import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { generateIdempotencyKey } from './idempotency';
 import { sanitizeError } from './errorSanitizer';
 import type { Json } from '../types/supabase';
 import type { JobStatus } from '../types';
@@ -13,30 +12,6 @@ const EDIT_JOBS_MAX = 500;
 /** Too many jobs for one save, as a message to show BEFORE asking the user to confirm; null when fine. */
 export function editJobsLimitMessage(count: number): string | null {
   return count > EDIT_JOBS_MAX ? `Choose at most ${EDIT_JOBS_MAX} jobs at a time (${count} selected).` : null;
-}
-
-/**
- * Retry keys for edit_jobs. Only the latest attempt keeps its key: an exact retry after a lost reply reuses it,
- * but going back to an earlier edit (A, then B, then A) sends A again instead of replaying A's old result,
- * which would report success while B's values stay saved.
- */
-export function useEditJobsKey(userId: string) {
-  const idem = useIdempotencyKey('edit_jobs', userId);
-  const lastScope = useRef<string | null>(null);
-  return {
-    keyFor(scope: string): string {
-      if (lastScope.current !== null && lastScope.current !== scope) idem.resetKeyFor(lastScope.current);
-      lastScope.current = scope;
-      return idem.getKeyFor(scope);
-    },
-    /** Call after a confirmed reply. */
-    done(scope: string): void { idem.resetKeyFor(scope); },
-    /** Call when the screen is closed: reopening it is a new edit, never a replay of an old one. */
-    forget(): void {
-      if (lastScope.current !== null) idem.resetKeyFor(lastScope.current);
-      lastScope.current = null;
-    },
-  };
 }
 
 export type EditJobsAction = 'cancel' | 'delete';
@@ -53,7 +28,6 @@ export async function editJobs(args: {
   changes?: EditJobsChanges | null;
   action?: EditJobsAction | null;
   performedBy: string;
-  idempotencyKey: string;
 }): Promise<EditJobsResult> {
   if (args.jobIds.length > EDIT_JOBS_MAX) {
     throw new Error(`Nothing was saved. Choose at most ${EDIT_JOBS_MAX} jobs at a time.`);
@@ -63,7 +37,10 @@ export async function editJobs(args: {
     p_changes: (args.changes ?? undefined) as Json | undefined,
     p_action: args.action ?? undefined,
     p_performed_by: args.performedBy,
-    p_idempotency_key: args.idempotencyKey,
+    // Every click is a fresh save, never a replay of an earlier attempt (Mason, 2026-11-21, #2151): each edit
+    // sets values or skips jobs already cancelled/deleted, so sending it again is safe.
+    // eslint-disable-next-line local-rules/idempotency-key-from-hook -- fresh per click is Mason's decision (DECISION_LOG 2026-11-21, #2151)
+    p_idempotency_key: generateIdempotencyKey('edit_jobs', args.performedBy),
   });
   if (error) throw error;
   const r = assertRpcResult<EditJobsResult>(data, 'edit_jobs');

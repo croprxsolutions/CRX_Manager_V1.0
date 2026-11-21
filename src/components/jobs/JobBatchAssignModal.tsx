@@ -7,7 +7,7 @@ import { supabase, checkMutationResult } from '../../lib/db';
 import { sanitizeError } from '../../lib/errorSanitizer';
 import { Sentry } from '../../lib/sentry';
 import { useAuth } from '../../contexts/AuthContext';
-import { editJobs, editJobsErrorMessage, summarizeEditJobs, useEditJobsKey } from '../../lib/editJobs';
+import { editJobs, editJobsErrorMessage, summarizeEditJobs } from '../../lib/editJobs';
 import type { JobBatch } from '../../types';
 import { toSentryError } from '../../lib/sentryError';
 
@@ -48,7 +48,6 @@ export default function JobBatchAssignModal({
 }: JobBatchAssignModalProps) {
   const { toast } = useToast();
   const { profile } = useAuth();
-  const editKey = useEditJobsKey(profile?.id ?? '');
   const [choice, setChoice] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [newName, setNewName] = useState('');
@@ -107,13 +106,11 @@ export default function JobBatchAssignModal({
     if (!profile) { toast('error', 'Sign in again to save these changes.'); return; }
     const newRef = choice === REMOVE ? null : choice;
     const jobIds = [...selectedJobIds].sort();
-    const scope = JSON.stringify([jobIds, newRef]);
     setApplying(true);
     try {
       const result = await editJobs({
-        jobIds, changes: { batch_ref: newRef }, performedBy: profile.id, idempotencyKey: editKey.keyFor(scope),
+        jobIds, changes: { batch_ref: newRef }, performedBy: profile.id,
       });
-      editKey.done(scope);
       const verb = choice === REMOVE ? 'Removed from batch' : 'Added to batch';
       // All skipped: say nothing changed rather than announce the action.
       const lead = result.updated.length > 0 ? verb : 'Batch not changed';
@@ -129,7 +126,6 @@ export default function JobBatchAssignModal({
   };
 
   const handleClose = () => {
-    editKey.forget();
     setChoice(null);
     setNewName('');
     onClose();

@@ -1,5 +1,14 @@
 # Decision Log
 
+## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B): every job edit saves fresh
+
+**Decision (Mason, in chat, 2026-11-21: "Save fresh every click").**
+On PR #2151, every Save, Apply or Delete click on the job screens sends `edit_jobs` a new request key. A
+second click never replays the answer to an earlier attempt; it re-sends the edit as it stands now.
+**What it does:** `editJobs()` mints a new idempotency key per call instead of keeping one across retries.
+Re-sending an edit is safe because it sets the same values again, and the server skips jobs already
+cancelled or deleted. Every other gate is unchanged.
+
 ## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B) may have Sol rounds 11 to 16
 
 **Decision (Mason, in chat, 2026-11-21: "Yes", answering "Allow Sol review rounds 11 to 16 on PR B (#2151)?").**

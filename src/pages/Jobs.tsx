@@ -18,7 +18,7 @@ import { JOB_COLUMNS } from '../lib/costFields';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { chunkIds } from '../lib/dispatchDisplay';
 import { logActivity } from '../lib/activityLogger';
-import { editJobs, editJobsErrorMessage, editJobsLimitMessage, summarizeEditJobs, useEditJobsKey } from '../lib/editJobs';
+import { editJobs, editJobsErrorMessage, editJobsLimitMessage, summarizeEditJobs } from '../lib/editJobs';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
@@ -238,7 +238,6 @@ export default function Jobs() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { role, profile } = useAuth();
-  const deleteKey = useEditJobsKey(profile?.id ?? '');
   // edit_jobs lets only an admin delete a completed job; a rep is never offered one.
   const deletableStatuses: JobStatus[] = role === 'admin' ? DELETABLE : ['scheduled', 'in_progress'];
   const [jobs, setJobs] = useState<JobRow[]>([]);
@@ -1467,11 +1466,9 @@ export default function Jobs() {
       // #1979: edit_jobs soft-deletes in one transaction and skips any job no longer deletable
       // (billed since loading; a rep's completed job). Selection skips are reported with the server's.
       const jobIds = [...ids].sort();
-      const scope = JSON.stringify([jobIds, 'delete']);
       const result = await editJobs({
-        jobIds, action: 'delete', performedBy: profile.id, idempotencyKey: deleteKey.keyFor(scope),
+        jobIds, action: 'delete', performedBy: profile.id,
       });
-      deleteKey.done(scope);
       const localSkips = selectedRows
         .filter((j) => !deletableStatuses.includes(j.status))
         .map((j) => ({ id: j.id, reason: 'status' as const, status: j.status }));

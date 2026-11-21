@@ -9,8 +9,7 @@ vi.mock('./db', () => ({
   },
 }));
 
-import { renderHook } from '@testing-library/react';
-import { editJobs, summarizeEditJobs, editJobsErrorMessage, editJobsLimitMessage, useEditJobsKey } from './editJobs';
+import { editJobs, summarizeEditJobs, editJobsErrorMessage, editJobsLimitMessage } from './editJobs';
 
 const empty = { updated: [], cancelled: [], deleted: [], skipped: [] };
 
@@ -19,31 +18,38 @@ describe('editJobs', () => {
 
   it('sends one call with ids, changes, action, actor and key', async () => {
     rpc.mockResolvedValue({ data: { ...empty, updated: ['a'], cancelled: ['a'] }, error: null });
-    const r = await editJobs({ jobIds: ['a'], changes: { job_date: '2027-03-01' }, action: 'cancel', performedBy: 'u', idempotencyKey: 'k' });
+    const r = await editJobs({ jobIds: ['a'], changes: { job_date: '2027-03-01' }, action: 'cancel', performedBy: 'u' });
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc).toHaveBeenCalledWith('edit_jobs', {
-      p_job_ids: ['a'], p_changes: { job_date: '2027-03-01' }, p_action: 'cancel', p_performed_by: 'u', p_idempotency_key: 'k',
+      p_job_ids: ['a'], p_changes: { job_date: '2027-03-01' }, p_action: 'cancel', p_performed_by: 'u', p_idempotency_key: expect.any(String),
     });
     expect(r.cancelled).toEqual(['a']);
   });
 
+  it('sends a fresh key on every call, so a second click never replays the first', async () => {
+    rpc.mockResolvedValue({ data: empty, error: null });
+    await editJobs({ jobIds: ['a'], action: 'cancel', performedBy: 'u' });
+    await editJobs({ jobIds: ['a'], action: 'cancel', performedBy: 'u' });
+    expect(rpc.mock.calls[0][1].p_idempotency_key).not.toBe(rpc.mock.calls[1][1].p_idempotency_key);
+  });
+
   it('omits changes and action when not given', async () => {
     rpc.mockResolvedValue({ data: empty, error: null });
-    await editJobs({ jobIds: ['a'], action: 'delete', performedBy: 'u', idempotencyKey: 'k' });
+    await editJobs({ jobIds: ['a'], action: 'delete', performedBy: 'u' });
     expect(rpc.mock.calls[0][1]).toMatchObject({ p_changes: undefined, p_action: 'delete' });
   });
 
   it('refuses more than 500 jobs before calling the server', async () => {
-    await expect(editJobs({ jobIds: Array.from({ length: 501 }, (_, i) => String(i)), action: 'delete', performedBy: 'u', idempotencyKey: 'k' }))
+    await expect(editJobs({ jobIds: Array.from({ length: 501 }, (_, i) => String(i)), action: 'delete', performedBy: 'u' }))
       .rejects.toThrow(/at most 500/);
     expect(rpc).not.toHaveBeenCalled();
   });
 
   it('throws the server error and a malformed result', async () => {
     rpc.mockResolvedValue({ data: null, error: { message: 'INSUFFICIENT_ROLE: x' } });
-    await expect(editJobs({ jobIds: ['a'], action: 'cancel', performedBy: 'u', idempotencyKey: 'k' })).rejects.toMatchObject({ message: 'INSUFFICIENT_ROLE: x' });
+    await expect(editJobs({ jobIds: ['a'], action: 'cancel', performedBy: 'u' })).rejects.toMatchObject({ message: 'INSUFFICIENT_ROLE: x' });
     rpc.mockResolvedValue({ data: { updated: [] }, error: null });
-    await expect(editJobs({ jobIds: ['a'], action: 'cancel', performedBy: 'u', idempotencyKey: 'k' })).rejects.toThrow(/unexpected/);
+    await expect(editJobs({ jobIds: ['a'], action: 'cancel', performedBy: 'u' })).rejects.toThrow(/unexpected/);
   });
 });
 
@@ -65,24 +71,6 @@ describe('editJobsErrorMessage', () => {
   });
 });
 
-describe('useEditJobsKey', () => {
-  it('reuses the key only for a retry of the latest edit (A, B, then A gets a fresh key)', () => {
-    const { result } = renderHook(() => useEditJobsKey('user-1'));
-    const a1 = result.current.keyFor('A');
-    expect(result.current.keyFor('A')).toBe(a1); // exact retry after a lost reply
-    const b = result.current.keyFor('B');
-    expect(b).not.toBe(a1);
-    expect(result.current.keyFor('A')).not.toBe(a1); // back to A: sent again, not replayed
-  });
-
-  it('mints a new key after a confirmed reply', () => {
-    const { result } = renderHook(() => useEditJobsKey('user-1'));
-    const k = result.current.keyFor('A');
-    result.current.done('A');
-    expect(result.current.keyFor('A')).not.toBe(k);
-  });
-});
-
 describe('editJobsLimitMessage', () => {
   it('flags more than 500 jobs before anything is confirmed', () => {
     expect(editJobsLimitMessage(500)).toBeNull();
@@ -96,14 +84,5 @@ describe('summarizeEditJobs with field changes and a refused cancel', () => {
       updated: ['a', 'b'], cancelled: ['a'], deleted: [],
       skipped: [{ id: 'b', reason: 'status', status: 'completed' }, { id: 'c', reason: 'status', status: 'invoiced' }],
     })).toBe('2 jobs edited. 1 job cancelled. 1 job not cancelled (completed). 1 job skipped (invoiced).');
-  });
-});
-
-describe('useEditJobsKey.forget', () => {
-  it('gives a reopened screen a fresh key for the same edit', () => {
-    const { result } = renderHook(() => useEditJobsKey('user-1'));
-    const k = result.current.keyFor('A');
-    result.current.forget();
-    expect(result.current.keyFor('A')).not.toBe(k);
   });
 });

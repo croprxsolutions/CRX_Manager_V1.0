@@ -3,7 +3,7 @@ import { Check, Calendar, CircleDot, User, Layers, AlertTriangle, Pencil, Truck 
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
-import { editJobs, editJobsErrorMessage, summarizeEditJobs, useEditJobsKey } from '../../lib/editJobs';
+import { editJobs, editJobsErrorMessage, summarizeEditJobs } from '../../lib/editJobs';
 import { Sentry } from '../../lib/sentry';
 import { logActivity } from '../../lib/activityLogger';
 import { useAuth } from '../../contexts/AuthContext';
@@ -74,7 +74,6 @@ export default function JobMassEditModal({
 }: JobMassEditModalProps) {
   const { toast } = useToast();
   const { profile } = useAuth();
-  const editKey = useEditJobsKey(profile?.id ?? '');
   const [draft, setDraft] = useState<MassEditDraft>(emptyMassEditDraft);
   const [applying, setApplying] = useState(false);
 
@@ -110,7 +109,6 @@ export default function JobMassEditModal({
   const reset = () => setDraft(emptyMassEditDraft);
 
   const handleClose = () => {
-    editKey.forget();
     reset();
     onClose();
   };
@@ -126,13 +124,11 @@ export default function JobMassEditModal({
     const jobIds = selectedJobs.map((j) => j.id).sort();
     const fieldChanges = buildFieldPatch(draft);
     const action = draft.setStatus && draft.status === 'cancelled' ? 'cancel' as const : null;
-    const scope = JSON.stringify([jobIds, fieldChanges, action]);
     setApplying(true);
     try {
       const result = await editJobs({
-        jobIds, changes: fieldChanges, action, performedBy: profile.id, idempotencyKey: editKey.keyFor(scope),
+        jobIds, changes: fieldChanges, action, performedBy: profile.id,
       });
-      editKey.done(scope);
       const summary = summarizeEditJobs(result);
       if (result.updated.length + result.cancelled.length > 0) {
         logActivity({

@@ -81,7 +81,7 @@ const JobFieldMap = lazy(() => import('../components/jobs/JobFieldMap'));
 // The picker contains Mapbox GL, so keep it out of the normal job-editor load.
 const JobFieldPickerModal = lazy(() => import('../components/jobs/JobFieldPickerModal'));
 import { loaderNumberError } from '../components/jobs/jobMassEdit';
-import { editJobs, editJobsErrorMessage, summarizeEditJobs, useEditJobsKey, type EditJobsChanges } from '../lib/editJobs';
+import { editJobs, editJobsErrorMessage, summarizeEditJobs, type EditJobsChanges } from '../lib/editJobs';
 import JobAttachments from '../components/jobs/JobAttachments';
 import { LegacyLoaderWorksheet } from '../components/jobs/LegacyLoaderWorksheet';
 import { LoaderWorksheetsPanel } from '../components/jobs/LoaderWorksheetsPanel';
@@ -310,7 +310,6 @@ export default function JobDetail() {
   const completeJobIdem = useIdempotencyKey('complete_job', profile?.id || '');
   const startJobIdem = useIdempotencyKey('start_job', profile?.id || '');
   const transferJobIdem = useIdempotencyKey('transfer_job_to_invoice', profile?.id || '');
-  const editJobsKey = useEditJobsKey(profile?.id || '');
   // Crew/loader values as last loaded, so a save sends (and checks) only the ones the user changed.
   const savedLoaderRef = useRef({ groundCrewId: '', carrier: '', capacity: '' });
   const isNew = id === 'new';
@@ -2988,12 +2987,9 @@ export default function JobDetail() {
           if (carrierRateGpa !== base.carrier) crewChanges.carrier_rate_gpa = carrierVal;
           if (tankCapacity !== base.capacity) crewChanges.loader_tank_capacity = capacityVal;
           if (Object.keys(crewChanges).length > 0) {
-            const crewScope = JSON.stringify([savedJobId, crewChanges]);
             const crewResult = await editJobs({
               jobIds: [savedJobId], changes: crewChanges, performedBy: profile!.id,
-              idempotencyKey: editJobsKey.keyFor(crewScope),
             });
-            editJobsKey.done(crewScope);
             if (crewResult.skipped.length > 0) throw new Error(summarizeEditJobs(crewResult));
           }
         } catch (crewErr) {
@@ -3315,11 +3311,9 @@ export default function JobDetail() {
     setCancelling(true);
     try {
       // #1979: through edit_jobs. A job that moved on since loading is skipped, not cancelled.
-      const cancelScope = JSON.stringify([id, 'cancel']);
       const result = await editJobs({
-        jobIds: [id!], action: 'cancel', performedBy: profile!.id, idempotencyKey: editJobsKey.keyFor(cancelScope),
+        jobIds: [id!], action: 'cancel', performedBy: profile!.id,
       });
-      editJobsKey.done(cancelScope);
       if (result.cancelled.length === 0) {
         if (stillOnThisJob()) {
           // Reload only when there is no unsaved edit to lose; the toast already says why it was not cancelled.

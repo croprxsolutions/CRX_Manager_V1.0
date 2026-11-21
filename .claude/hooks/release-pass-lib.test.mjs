@@ -50,6 +50,14 @@ test("record, find, widen, cover and withdraw a pass", () => {
     writeFileSync(file, JSON.stringify({ ...pass, expiresAt: new Date(Date.parse(pass.recordedAt) + RELEASE_PASS_MAX_AGE_MS + 1).toISOString() }));
     assert.equal(findReleasePass({ dirs, sessionId: SID, now: now + 2000 }), null);
 
+    // a file that can't be deleted is overwritten so the gates see no pass
+    recordReleasePass({ dirs, sessionId: SID, release: true, pullRequests: [], now });
+    assert.deepEqual(withdrawReleasePass({ dirs, sessionId: SID, remove: () => { throw new Error("EBUSY"); } }), { stillLive: false });
+    assert.equal(findReleasePass({ dirs, sessionId: SID, now: now + 2000 }), null, "a stuck file is neutralised");
+    rmSync(file, { force: true });
+    recordReleasePass({ dirs, sessionId: SID, release: true, pullRequests: [], now });
+    assert.deepEqual(withdrawReleasePass({ dirs, sessionId: SID, remove: () => {}, write: () => { throw new Error("EACCES"); } }), { stillLive: true }, "neither delete nor overwrite: can't confirm");
+
     assert.deepEqual(withdrawReleasePass({ dirs, sessionId: SID }), { stillLive: false });
     assert.equal(findReleasePass({ dirs, sessionId: SID, now: now + 2000 }), null);
     assert.deepEqual(withdrawReleasePass({ dirs: [], sessionId: SID }), { stillLive: true }, "no folder can't confirm");

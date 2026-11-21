@@ -85,13 +85,21 @@ export function recordReleasePass({ dirs, sessionId, release, pullRequests, said
 }
 
 /** `stop the release`: remove this session's pass everywhere; stillLive when any copy may remain. */
-export function withdrawReleasePass({ dirs, sessionId, remove = (f) => rmSync(f, { force: true }), exists = (f) => mayExist(f) }) {
+export function withdrawReleasePass({
+  dirs, sessionId, remove = (f) => rmSync(f, { force: true }), exists = (f) => mayExist(f),
+  read = (f) => readFileSync(f, "utf8"), write = (f, s) => writeFileSync(f, s),
+}) {
   if (!usableSkipSessionId(sessionId) || !Array.isArray(dirs) || !dirs.length) return { stillLive: true };
   let stillLive = false;
   for (const dir of dirs) {
     const file = path.join(dir, releasePassFileName(sessionId));
     try { remove(file); } catch { /* re-checked below */ }
-    if (exists(file)) stillLive = true;
+    if (!exists(file)) continue;
+    // Couldn't delete it: overwrite it with something findReleasePass refuses, so the gates see no pass.
+    try { write(file, "withdrawn"); } catch { /* re-checked below */ }
+    let content = null;
+    try { content = read(file); } catch { /* unreadable: can't confirm */ }
+    if (content !== "withdrawn") stillLive = true;
   }
   return { stillLive };
 }

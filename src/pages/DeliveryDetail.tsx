@@ -401,11 +401,16 @@ export default function DeliveryDetail() {
         if (isStale()) return;
 
         // No list, or no customer row read, is a failed load too: with no lines on screen
-        // Edit would offer every order line as new and save over the real ones. A failed delivery-site read
-        // fails too, or Navigate would fall back to the farm's default address (Sol #2165 round 2).
-        if (itemsRes.error || !itemsRes.data || custRes.error || addrRes.error) {
-          Sentry.captureException(itemsRes.error ?? custRes.error ?? addrRes.error ?? new Error('delivery_items read returned no list'), { extra: { context: 'load_delivery_items', deliveryId: del.id } });
+        // Edit would offer every order line as new and save over the real ones.
+        if (itemsRes.error || !itemsRes.data || custRes.error) {
+          Sentry.captureException(itemsRes.error ?? custRes.error ?? new Error('delivery_items read returned no list'), { extra: { context: 'load_delivery_items', deliveryId: del.id } });
           failLoad('Failed to load delivery items');
+          return;
+        }
+        // An unread delivery site fails the load, or Navigate would fall back to the farm's default address.
+        if (del.delivery_address_id && (addrRes.error || !addrRes.data)) {
+          Sentry.captureException(addrRes.error ?? new Error('delivery site not found'), { extra: { context: 'load_delivery_address', deliveryId: del.id } });
+          failLoad("Could not load this delivery's site address");
           return;
         }
 

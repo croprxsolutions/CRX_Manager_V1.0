@@ -14,7 +14,9 @@
 --    lets a driver assign a delivery only to themself, checks the idempotency key first (the same lock order as
 --    admin and sales rep: key, then row), then locks the delivery row before checking it and refuses a taken,
 --    deleted or no-longer-scheduled delivery with "already taken or changed" (one already the caller's with a
---    fresh key gets "already assigned to you"), not a permission error. Before, the open check ran
+--    fresh key gets "already assigned to you"), not a permission error. After the lock it re-checks the driver's
+--    access and holds their profile row, so an access change made while the take waited is honored. A driver's
+--    same-key replay is returned only while the delivery is still theirs. Before, the open check ran
 --    unlocked, so two drivers taking one delivery at once could both pass and the second silently took it; and a
 --    driver could assign an open delivery to someone else. A bound retry (same key, same caller, same request) now
 --    returns its stored result before the body runs (the body re-checks
@@ -43,6 +45,10 @@ BEGIN
      IS DISTINCT FROM '350f587913b20f2908a7a2a44445b0f6' THEN
     RAISE EXCEPTION 'DRIVER_AVAILABLE_BASELINE_DRIFT: reassign_delivery is not the 20261110160000 body (already applied?)';
   END IF;
+  -- Only the one signature this file hardens may exist; an older overload would bypass it.
+  IF (SELECT count(*) FROM pg_proc WHERE proname = 'reassign_delivery' AND pronamespace = 'public'::regnamespace) <> 1 THEN
+    RAISE EXCEPTION 'DRIVER_AVAILABLE_BASELINE_DRIFT: reassign_delivery has more than one overload';
+  END IF;
   IF to_regprocedure('public.get_available_deliveries_for_driver()') IS NOT NULL THEN
     RAISE EXCEPTION 'DRIVER_AVAILABLE_BASELINE_DRIFT: get_available_deliveries_for_driver already exists';
   END IF;
@@ -59,7 +65,7 @@ AS $function$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true AND role = 'driver'
-      AND NOT ('deliveries' = ANY (COALESCE(denied_pages, '{}'::text[])))
+      AND array_position(COALESCE(denied_pages, '{}'::text[]), 'deliveries') IS NULL
   ) THEN
     RAISE EXCEPTION 'Not authorized to view available deliveries' USING ERRCODE = '42501';
   END IF;
@@ -136,7 +142,7 @@ BEGIN
   -- #2018: a driver (active, not denied the Deliveries page) may assign a delivery only to themself.
   IF NOT v_is_office AND (NOT EXISTS (
        SELECT 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role = 'driver'
-         AND NOT ('deliveries' = ANY (COALESCE(denied_pages, '{}'::text[])))
+         AND array_position(COALESCE(denied_pages, '{}'::text[]), 'deliveries') IS NULL
      ) OR p_new_driver IS DISTINCT FROM v_actor) THEN
     RAISE EXCEPTION 'Not authorized to reassign deliveries';
   END IF;
@@ -148,18 +154,33 @@ BEGIN
   END IF;
   -- #2018: a bound retry (same key, caller and request) returns its stored result here. The body re-checks
   -- "unassigned" for a driver, so a driver's retry after a lost reply would otherwise be refused, not replayed.
+  -- A driver's replay is returned only while the delivery is still theirs, so the screen never says "assigned to
+  -- you" for one dispatch has since moved; otherwise the current state wins.
   IF v_replay IS NOT NULL THEN
+    IF NOT v_is_office AND NOT EXISTS (
+      SELECT 1 FROM public.deliveries WHERE id = p_delivery_id AND deleted_at IS NULL AND assigned_driver = v_actor
+    ) THEN
+      RAISE EXCEPTION 'This delivery was already taken or changed. Refresh the list.';
+    END IF;
     RETURN v_replay -> 'result';
   END IF;
   IF NOT v_is_office THEN
     -- #2018: lock the row before checking it (after the key lock, as the body does for admin and sales rep), so of
     -- two drivers taking one delivery at once the second waits, re-reads it as taken, and is refused.
     SELECT assigned_driver INTO v_owner FROM public.deliveries
-     WHERE id = p_delivery_id AND deleted_at IS NULL
-       AND ((assigned_driver IS NULL AND status = 'scheduled') OR assigned_driver = v_actor)
+     WHERE id = p_delivery_id AND deleted_at IS NULL AND status = 'scheduled'
+       AND (assigned_driver IS NULL OR assigned_driver = v_actor)
      FOR UPDATE;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'This delivery was already taken or changed. Refresh the list.';
+    END IF;
+    -- The lock above may have waited: re-check the driver's access now, and hold their profile row until commit so
+    -- an admin's deactivation or Deliveries denial cannot slip in before this take commits.
+    PERFORM 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role = 'driver'
+      AND array_position(COALESCE(denied_pages, '{}'::text[]), 'deliveries') IS NULL
+      FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Not authorized to reassign deliveries';
     END IF;
     IF v_owner = v_actor THEN
       RAISE EXCEPTION 'This delivery is already assigned to you. Refresh the list.';
@@ -184,6 +205,9 @@ BEGIN
      OR has_function_privilege('anon', 'public.reassign_delivery(uuid,uuid,uuid,text)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.reassign_delivery(uuid,uuid,uuid,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: reassign_delivery must keep its security and grants';
+  END IF;
+  IF (SELECT count(*) FROM pg_proc WHERE proname = 'reassign_delivery' AND pronamespace = 'public'::regnamespace) <> 1 THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: reassign_delivery must have exactly one overload';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK';
 END;

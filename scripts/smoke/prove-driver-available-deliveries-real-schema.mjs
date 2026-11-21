@@ -34,7 +34,9 @@ const [A, B, C, D] = ['c1', 'c2', 'c3', 'c4'].map(id);
 const DRIVER2 = id('a6');
 const OFF_DRIVER = id('a7');
 const DENIED_DRIVER = id('a8');
-const DEL = Object.fromEntries(['open1', 'open2', 'mine', 'started', 'deleted', 'race', 'other', 'double'].map((k, i) => [k, id(`d${i + 1}`)]));
+const NULL_ENTRY_DRIVER = id('a9');
+const REVOKED_DRIVER = id('aa');
+const DEL = Object.fromEntries(['open1', 'open2', 'mine', 'started', 'deleted', 'race', 'other', 'double', 'replay', 'late', 'closed', 'revoke'].map((k, i) => [k, id(`d${i + 1}`)]));
 const key = () => `'${crypto.randomUUID()}'`;
 const take = (delivery, driver, k = key()) => `public.reassign_delivery('${delivery}', '${driver}', NULL, ${k})`;
 const LIST = `r := public.get_available_deliveries_for_driver();
@@ -44,6 +46,16 @@ const owner = (delivery) => scalar(`SELECT COALESCE(assigned_driver::text, '-') 
 const REFUSED = 'ok|Not authorized to reassign deliveries';
 const GONE = 'ok|This delivery was already taken or changed. Refresh the list.';
 const MINE = 'ok|This delivery is already assigned to you. Refresh the list.';
+
+/** One superuser psql session running `sql` after `delay` s; resolves with its exit code and output. */
+const raw = (sql, delay) => new Promise((resolve) => {
+  const p = spawn('docker', [...PSQL, '-A', '-t'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  let out = '';
+  p.stdout.on('data', (b) => { out += b; });
+  p.stderr.on('data', (b) => { out += b; });
+  p.on('close', (code) => resolve({ code, out }));
+  p.stdin.end(`SELECT pg_sleep(${delay}); ${sql}`);
+});
 
 /**
  * One psql session taking `delivery` as `uid` after `delay` s, holding its transaction open 2 s after the call.
@@ -71,10 +83,13 @@ try {
   docker(PSQL, { input: `INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
       ('${DRIVER2}', 'avail-driver2@example.invalid', '{"full_name":"[AVAIL] Driver Two","role":"driver"}'::jsonb),
       ('${OFF_DRIVER}', 'avail-off@example.invalid', '{"full_name":"[AVAIL] Off Driver","role":"driver"}'::jsonb),
-      ('${DENIED_DRIVER}', 'avail-denied@example.invalid', '{"full_name":"[AVAIL] Denied Driver","role":"driver"}'::jsonb);
+      ('${DENIED_DRIVER}', 'avail-denied@example.invalid', '{"full_name":"[AVAIL] Denied Driver","role":"driver"}'::jsonb),
+      ('${NULL_ENTRY_DRIVER}', 'avail-null@example.invalid', '{"full_name":"[AVAIL] Null Entry Driver","role":"driver"}'::jsonb),
+      ('${REVOKED_DRIVER}', 'avail-revoked@example.invalid', '{"full_name":"[AVAIL] Revoked Driver","role":"driver"}'::jsonb);
     SET session_replication_role = replica;
     UPDATE public.profiles SET is_active = false WHERE id = '${OFF_DRIVER}';
     UPDATE public.profiles SET denied_pages = '{deliveries}' WHERE id = '${DENIED_DRIVER}';
+    UPDATE public.profiles SET denied_pages = ARRAY['reports', NULL] WHERE id = '${NULL_ENTRY_DRIVER}';
     INSERT INTO public.customers (id, farm_name, parent_customer_id) VALUES
       ('${A}', 'Alpha Top Farms', NULL), ('${B}', 'Bravo Farms', '${A}'), ('${C}', 'Charlie Farms', '${B}'), ('${D}', 'Delta Farms', NULL);
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, scheduled_date, status, assigned_driver, deleted_at) VALUES
@@ -85,7 +100,11 @@ try {
       ('${DEL.deleted}', 'AV-05', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-01', 'scheduled', NULL, now()),
       ('${DEL.race}', 'AV-06', gen_random_uuid(), '${B}', '${USERS.admin}', '2026-06-12', 'scheduled', NULL, NULL),
       ('${DEL.other}', 'AV-07', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-02', 'scheduled', '${DRIVER2}', NULL),
-      ('${DEL.double}', 'AV-08', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-13', 'scheduled', NULL, NULL);
+      ('${DEL.double}', 'AV-08', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-13', 'scheduled', NULL, NULL),
+      ('${DEL.replay}', 'AV-09', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-14', 'scheduled', NULL, NULL),
+      ('${DEL.late}', 'AV-00', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-08-01', 'scheduled', NULL, NULL),
+      ('${DEL.closed}', 'AV-10', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-01', 'cancelled', '${USERS.driver}', NULL),
+      ('${DEL.revoke}', 'AV-11', gen_random_uuid(), '${D}', '${USERS.admin}', '2026-06-15', 'scheduled', NULL, NULL);
     INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, scheduled_date, status)
       SELECT 'AV-X' || lpad(g::text, 2, '0'), gen_random_uuid(), '${D}', '${USERS.admin}', date '2026-07-01' + g, 'scheduled'
       FROM generate_series(1, 25) g;
@@ -107,8 +126,15 @@ try {
 
   // 1. An active driver sees every open delivery, soonest first, with the TOP farm group, and only five fields.
   const extra = Array.from({ length: 25 }, (_, i) => `AV-X${String(i + 1).padStart(2, '0')}=Delta Farms/-`);
-  const expected = ['AV-01=Charlie Farms/Alpha Top Farms', 'AV-02=Delta Farms/-', 'AV-06=Bravo Farms/Alpha Top Farms', 'AV-08=Delta Farms/-', ...extra];
+  // AV-00 has the lowest number but the latest date: it must come last (date order, not number order).
+  const expected = ['AV-01=Charlie Farms/Alpha Top Farms', 'AV-02=Delta Farms/-', 'AV-06=Bravo Farms/Alpha Top Farms', 'AV-08=Delta Farms/-',
+    'AV-09=Delta Farms/-', 'AV-11=Delta Farms/-', ...extra, 'AV-00=Delta Farms/-'];
   assert.equal(attempt(USERS.driver, asUser(LIST)), `ok|${expected.join(',')}`, 'every open delivery, in order, nothing else');
+  assert.equal(attempt(USERS.driver, `${asUser('r := public.get_available_deliveries_for_driver();')}
+    v := (r->'rows'->0->>'id') || '/' || (r->'rows'->0->>'scheduled_date') || '/' || (r->'rows'->-1->>'id') || '/' || (r->'rows'->-1->>'scheduled_date');`),
+    `ok|${DEL.open1}/2026-06-10/${DEL.late}/2026-08-01`, 'ids and dates are the rows own');
+  // A stray null entry in denied_pages does not lock out a driver allowed the Deliveries page.
+  assert.equal(attempt(NULL_ENTRY_DRIVER, asUser(LIST)), `ok|${expected.join(',')}`, 'a null denied_pages entry does not refuse');
   assert.equal(attempt(USERS.driver, `${asUser('r := public.get_available_deliveries_for_driver();')} v := (SELECT string_agg(k, ',' ORDER BY k) FROM jsonb_object_keys(r->'rows'->0) k);`),
     'ok|customer_name,delivery_number,farm_group_name,id,scheduled_date', 'only the five card fields leave the database');
   // A farm-group loop forced past the KI-146 trigger (B <-> C, detached from A) still returns: direct parent shown.
@@ -133,6 +159,7 @@ try {
   assert.equal(attempt(USERS.driver, `${refuse(`r := ${take(DEL.other, USERS.driver)};`)} v := t;`), GONE, 'a driver cannot take a delivery already taken');
   assert.equal(attempt(USERS.driver, `${refuse(`r := ${take(DEL.started, USERS.driver)};`)} v := t;`), GONE, 'a driver cannot take a started delivery');
   assert.equal(attempt(USERS.driver, `${refuse(`r := ${take(DEL.deleted, USERS.driver)};`)} v := t;`), GONE, 'a driver cannot take a deleted delivery');
+  assert.equal(attempt(USERS.driver, `${refuse(`r := ${take(DEL.closed, USERS.driver)};`)} v := t;`), GONE, 'a cancelled one of theirs is taken-or-changed, not already-yours');
   const k1 = key();
   assert.equal(attempt(USERS.driver, `${asUser(`r := ${take(DEL.open1, USERS.driver, k1)};`)} v := r->>'status';`, { commit: true }), 'ok|reassigned');
   assert.equal(owner(DEL.open1), USERS.driver);
@@ -142,6 +169,11 @@ try {
   const after = attempt(USERS.driver, asUser(LIST));
   assert.ok(after.startsWith('ok|AV-02='), `the list still loads after the take: ${after}`);
   assert.ok(!after.includes('AV-01='), 'a taken delivery leaves the list');
+  // A same-key replay after dispatch moved the delivery: the current state wins.
+  const k4 = key();
+  assert.equal(attempt(USERS.driver, `${asUser(`r := ${take(DEL.replay, USERS.driver, k4)};`)} v := r->>'status';`, { commit: true }), 'ok|reassigned');
+  assert.equal(attempt(USERS.admin, `${asUser(`r := ${take(DEL.replay, DRIVER2)};`)} v := r->>'status';`, { commit: true }), 'ok|reassigned');
+  assert.equal(attempt(USERS.driver, `${refuse(`r := ${take(DEL.replay, USERS.driver, k4)};`)} v := t;`), GONE, 'a replay for a delivery dispatch moved is refused');
   console.log('[take] self only, open only; inactive, denied and applicator refused; retry replays; own fresh key named; taken delivery leaves the list');
 
   // 4. Two drivers take one delivery at once: whoever locks first holds it 2 s; the other waits, then is refused.
@@ -156,10 +188,21 @@ try {
   // One driver's double tap with the same key, at once: both calls report success, one assignment, one notification.
   const k2 = key();
   const [tap1, tap2] = await Promise.all([session(DRIVER2, 0, k2, DEL.double), session(DRIVER2, 0.5, k2, DEL.double)]);
+  assert.ok(Math.max(tap1.waited, tap2.waited) >= 0.5, `one tap must have waited on the other (${tap1.waited} s, ${tap2.waited} s)`);
   assert.equal(tap1.result, 'reassigned', tap1.out);
   assert.equal(tap2.result, 'reassigned', tap2.out);
   assert.equal(owner(DEL.double), DRIVER2);
   assert.equal(scalar(`SELECT count(*) FROM public.notifications WHERE related_entity_id = '${DEL.double}';`), '1', 'a double tap notifies once');
+  // A take waiting on dispatch's row lock is refused if the driver is denied Deliveries before the lock frees.
+  const [dispatch, revoked] = await Promise.all([
+    raw(`BEGIN; SELECT 1 FROM public.deliveries WHERE id = '${DEL.revoke}' FOR UPDATE; SELECT pg_sleep(2);
+      ${claims(USERS.admin)} UPDATE public.profiles SET denied_pages = '{deliveries}' WHERE id = '${REVOKED_DRIVER}'; COMMIT;`, 0),
+    session(REVOKED_DRIVER, 0.5, key(), DEL.revoke)]);
+  assert.equal(dispatch.code, 0, dispatch.out);
+  assert.ok(revoked.waited >= 0.5, `the take must have waited on dispatch (${revoked.waited} s)`);
+  assert.equal(revoked.result, 'Not authorized to reassign deliveries', revoked.out);
+  assert.equal(owner(DEL.revoke), '-', 'the revoked driver did not get it');
+  console.log('[race] access revoked while a take waits: refused');
   console.log('[race] two drivers at once: one wins and keeps it, the other waits and is refused; a double tap notifies once');
 
   // 5. Admin and sales rep reassign as before (scheduled and in-progress, to anyone).

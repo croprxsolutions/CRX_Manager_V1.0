@@ -98,13 +98,21 @@ export function epaNameMatches(epaProductName: string | null | undefined, appNam
 
 const CAS_PATTERN = /^\d{2,7}-\d{2}-\d$/;
 
-// Percent as an exact whole number of 1e-20ths, read from its decimal text, so the sum matches the database's exact
-// numeric sum (rounding each percent first refused some exact 100% splits, #2120).
-const PCT_SCALE = 20;
-function pctUnits(value: number): bigint {
-  const text = String(value).includes('e') ? value.toFixed(PCT_SCALE) : String(value);
-  const [whole, fraction = ''] = text.split('.');
-  return BigInt(whole + fraction.padEnd(PCT_SCALE, '0').slice(0, PCT_SCALE));
+// A positive percent read exactly from its decimal text (exponent form too): digits / 10^scale. Summing these matches
+// the database's exact numeric sum; rounding each percent first refused some exact 100% splits (#2120).
+function exactDecimal(value: number): { digits: bigint; scale: number } {
+  const [, whole, fraction = '', exponent = '0'] = /^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/.exec(String(value))!;
+  const scale = fraction.length - Number(exponent);
+  const digits = BigInt(whole + fraction);
+  return scale >= 0 ? { digits, scale } : { digits: digits * 10n ** BigInt(-scale), scale: 0 };
+}
+
+/** True when the percents add up to more than 100, compared exactly. */
+function pctOver100(values: number[]): boolean {
+  const parts = values.map(exactDecimal);
+  const scale = Math.max(0, ...parts.map((p) => p.scale));
+  const total = parts.reduce((sum, p) => sum + p.digits * 10n ** BigInt(scale - p.scale), 0n);
+  return total > 100n * 10n ** BigInt(scale);
 }
 
 function labelBlocks(item: EpaProposalItem): string | null {
@@ -138,15 +146,15 @@ function recordBlocks(summary: Record<string, unknown>, appNames: string[]): str
 /** Every ingredient is a plain new one with a CAS number and a positive percent, and they sum to 100 or less. */
 function ingredientsBlock(ingredients: EpaProposalItem[]): string | null {
   if (ingredients.length === 0) return 'EPA lists no ingredients';
-  let total = 0n;
+  const percents: number[] = [];
   for (const item of ingredients) {
     const change = item.change ?? {};
     const pct = change.strength_value;
     if (item.class !== 'add' || typeof change.cas !== 'string' || !CAS_PATTERN.test(change.cas)) return `Ingredient needs a person (${item.class})`;
     if (typeof pct !== 'number' || !Number.isFinite(pct) || pct <= 0) return 'Ingredient has no percent';
-    total += pctUnits(pct);
+    percents.push(pct);
   }
-  return total > pctUnits(100) ? 'Ingredient percents add up to more than 100' : null;
+  return pctOver100(percents) ? 'Ingredient percents add up to more than 100' : null;
 }
 
 /** Whether the batch may commit this proposal, and the explicit decisions it sends: ingredients yes, every label no. */

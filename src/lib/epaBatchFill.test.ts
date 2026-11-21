@@ -72,6 +72,7 @@ describe('batchDecision', () => {
     const over = batchDecision(proposal([ing('a', 33.333334), ing('b', 33.333333, '51218-45-2'), ing('c', 33.333334, '94-75-7')]), names);
     expect(over).toEqual({ commit: false, reason: 'Ingredient percents add up to more than 100' });
     expect(batchDecision(proposal([ing('a', 1e-7), ing('b', 99.9999999, '51218-45-2')]), names).commit).toBe(true);
+    expect(batchDecision(proposal([ing('a', 100), ing('b', 1e-21, '51218-45-2')]), names)).toEqual({ commit: false, reason: 'Ingredient percents add up to more than 100' });
   });
 
   it('refuses a proposal that is not open', () => {

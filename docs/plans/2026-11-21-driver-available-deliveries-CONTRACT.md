@@ -41,10 +41,10 @@ Read at `origin/staging` dab22364c (2026-11-21).
 ## Proof cases (local Docker real-schema prover, never live)
 
 All in `scripts/smoke/prove-driver-available-deliveries-real-schema.mjs`:
-1. When an active driver calls the read, then they get exactly every open delivery in order (28 seeded), only the five fields, and none assigned, started or deleted.
-2. When an admin, sales rep, applicator or inactive driver calls it, then it is refused; anon has no execute.
+1. When an active driver calls the read, then they get exactly every open delivery in order (29 seeded: 4 named + 25), only the five fields, and none assigned, started or deleted.
+2. When an admin, sales rep, applicator, inactive driver or a driver denied the Deliveries page calls it, then it is refused; anon has no execute.
 3. When the customer is C in A > B > C, then `farm_group_name` is A; with no parent it is null; with a forced loop the read still returns (direct parent).
-4. When a driver takes an open delivery for themself, then it becomes theirs and leaves the list; assigning someone else, an inactive driver, an applicator are refused; taken, started, deleted deliveries get "already taken or changed"; a same-key retry replays.
+4. When a driver takes an open delivery for themself, then it becomes theirs and leaves the list; assigning someone else, an inactive driver, a driver denied the Deliveries page, an applicator are refused; a fresh key on a delivery already theirs gets "already assigned to you"; taken, started, deleted deliveries get "already taken or changed"; a same-key retry replays.
 5. When two drivers take the same delivery at once, then the second waits for the first, is refused, and the first owns it. A same-driver double tap notifies once.
 6. When an admin or sales rep reassigns a scheduled or in-progress delivery, then it still works.
 7. Browser (screen PR): a driver on a local run sees the card with deliveries, takes one, and it moves to their list.
@@ -63,3 +63,13 @@ None. Mason, 2026-11-21: "Yes, show them" (drivers see open deliveries with farm
 
 - MED, refuted: a driver's same-key retry after the office reassigned or deleted the delivery gets "already taken or changed", not the stored success. Intended: the stored success no longer says who owns the delivery (Astra #22), so the current state wins and the screen reloads the list.
 - LOW, fixed here: the contract now names the `service_role` grant, which matches every app function.
+
+## Sol round 1 (gpt-6.2-sol high, head f302c5b): 1 HIGH, 2 MED, 5 LOW, all fixed
+
+- HIGH: a driver an admin denied the Deliveries page could still list and take open deliveries. Both the read and the driver take now refuse a driver whose `denied_pages` holds `deliveries` (the app's page key, `src/appPages.tsx`); proven.
+- MED: lock order. A driver took the row lock before the idempotency key lock, the reverse of admin and sales rep. The driver path now checks the key (and returns a bound replay) first, then locks the row. So a driver's same-key retry after the office moved the delivery now replays its stored success, like every other replayed call (this supersedes the Luna MED note above); the screen reloads the list either way.
+- MED: the SQL header's rollback now matches the ledger (screen first, then drop the read; the take hardening is corrected forward).
+- LOW: a fresh key on a delivery already the caller's now says "already assigned to you", not a permission error.
+- LOW: the race proof measures the second driver's time inside the database call (at least 1 s of lock wait), not from process launch.
+- LOW: the post-take list check now requires the list call to succeed.
+- LOW: the changelog names the replay condition (same key, caller and request). LOW: the seeded count is 29.

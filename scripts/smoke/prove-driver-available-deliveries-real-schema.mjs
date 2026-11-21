@@ -8,9 +8,10 @@
  *   1. an active driver sees every open delivery (unassigned, scheduled, not deleted), soonest first, with only
  *      five fields and the TOP farm group (a farm-group loop still returns), and nothing assigned, in another
  *      status, or deleted;
- *   2. an admin, sales rep, applicator, inactive driver and anon are refused;
+ *   2. an admin, sales rep, applicator, inactive driver, driver denied the Deliveries page and anon are refused;
  *   3. a driver takes an open delivery for themself; assigning it to someone else, or taking one already taken,
- *      started or deleted, is refused; inactive drivers and applicators are refused; a same-key retry replays;
+ *      started or deleted, is refused; inactive, denied drivers and applicators are refused; a same-key retry
+ *      replays; a fresh key on one already theirs says "already assigned to you";
  *   4. two drivers taking one delivery at once: the second waits, then is refused and the first keeps it; one
  *      driver's double tap (same key) at once: both get the result, one notification;
  *   5. an admin and a sales rep still reassign scheduled and in-progress deliveries to anyone.
@@ -32,6 +33,7 @@ const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, al
 const [A, B, C, D] = ['c1', 'c2', 'c3', 'c4'].map(id);
 const DRIVER2 = id('a6');
 const OFF_DRIVER = id('a7');
+const DENIED_DRIVER = id('a8');
 const DEL = Object.fromEntries(['open1', 'open2', 'mine', 'started', 'deleted', 'race', 'other', 'double'].map((k, i) => [k, id(`d${i + 1}`)]));
 const key = () => `'${crypto.randomUUID()}'`;
 const take = (delivery, driver, k = key()) => `public.reassign_delivery('${delivery}', '${driver}', NULL, ${k})`;
@@ -41,17 +43,26 @@ const LIST = `r := public.get_available_deliveries_for_driver();
 const owner = (delivery) => scalar(`SELECT COALESCE(assigned_driver::text, '-') FROM public.deliveries WHERE id = '${delivery}';`);
 const REFUSED = 'ok|Not authorized to reassign deliveries';
 const GONE = 'ok|This delivery was already taken or changed. Refresh the list.';
+const MINE = 'ok|This delivery is already assigned to you. Refresh the list.';
 
-/** One psql session taking `delivery` as `uid` after `delay` s, holding its transaction open 2 s after the call. */
+/**
+ * One psql session taking `delivery` as `uid` after `delay` s, holding its transaction open 2 s after the call.
+ * It reports the call's result and the database's own time spent inside the call (any lock wait included).
+ */
 const session = (uid, delay, k, delivery) => new Promise((resolve) => {
-  const started = Date.now();
   const p = spawn('docker', [...PSQL, '-A', '-t'], { stdio: ['pipe', 'pipe', 'pipe'] });
   let out = '';
   p.stdout.on('data', (b) => { out += b; });
   p.stderr.on('data', (b) => { out += b; });
-  p.on('close', (code) => resolve({ code, out, ms: Date.now() - started }));
+  p.on('close', (code) => {
+    const m = out.match(/WAITED ([0-9.]+) (.*)/);
+    resolve({ code, out, waited: m ? Number(m[1]) : -1, result: m ? m[2].trim() : '' });
+  });
   p.stdin.end(`SELECT pg_sleep(${delay}); BEGIN; ${claims(uid)} SET LOCAL ROLE authenticated;
-    SELECT (${take(delivery, uid, k)})->>'status'; SELECT pg_sleep(2); COMMIT;`);
+    DO $s$ DECLARE t0 timestamptz := clock_timestamp(); v text; BEGIN
+      BEGIN v := (${take(delivery, uid, k)})->>'status'; EXCEPTION WHEN OTHERS THEN v := SQLERRM; END;
+      RAISE NOTICE 'WAITED % %', extract(epoch FROM clock_timestamp() - t0), v; END $s$;
+    SELECT pg_sleep(2); COMMIT;`);
 });
 
 try {
@@ -59,9 +70,11 @@ try {
   seedUsers();
   docker(PSQL, { input: `INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
       ('${DRIVER2}', 'avail-driver2@example.invalid', '{"full_name":"[AVAIL] Driver Two","role":"driver"}'::jsonb),
-      ('${OFF_DRIVER}', 'avail-off@example.invalid', '{"full_name":"[AVAIL] Off Driver","role":"driver"}'::jsonb);
+      ('${OFF_DRIVER}', 'avail-off@example.invalid', '{"full_name":"[AVAIL] Off Driver","role":"driver"}'::jsonb),
+      ('${DENIED_DRIVER}', 'avail-denied@example.invalid', '{"full_name":"[AVAIL] Denied Driver","role":"driver"}'::jsonb);
     SET session_replication_role = replica;
     UPDATE public.profiles SET is_active = false WHERE id = '${OFF_DRIVER}';
+    UPDATE public.profiles SET denied_pages = '{deliveries}' WHERE id = '${DENIED_DRIVER}';
     INSERT INTO public.customers (id, farm_name, parent_customer_id) VALUES
       ('${A}', 'Alpha Top Farms', NULL), ('${B}', 'Bravo Farms', '${A}'), ('${C}', 'Charlie Farms', '${B}'), ('${D}', 'Delta Farms', NULL);
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, scheduled_date, status, assigned_driver, deleted_at) VALUES
@@ -105,16 +118,17 @@ try {
   console.log('[read] driver sees every open delivery in order, five fields, top farm group; a loop still returns');
 
   // 2. Everyone else is refused.
-  for (const [who, uid] of Object.entries({ admin: USERS.admin, rep: USERS.rep, applicator: USERS.applicator, off_driver: OFF_DRIVER })) {
+  for (const [who, uid] of Object.entries({ admin: USERS.admin, rep: USERS.rep, applicator: USERS.applicator, off_driver: OFF_DRIVER, denied_driver: DENIED_DRIVER })) {
     assert.equal(attempt(uid, `${refuse('r := public.get_available_deliveries_for_driver();')} v := t;`), 'ok|Not authorized to view available deliveries', `${who} must be refused`);
   }
   assert.match(attempt(USERS.driver, `SET LOCAL ROLE anon; BEGIN r := public.get_available_deliveries_for_driver(); v := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN v := SQLERRM; END; RESET ROLE;`),
     /^ok\|permission denied/, 'anon has no execute');
-  console.log('[read] admin, sales rep, applicator, inactive driver refused; anon has no execute');
+  console.log('[read] admin, sales rep, applicator, inactive driver, driver denied Deliveries refused; anon has no execute');
 
   // 3. A driver takes an open delivery for themself only.
   assert.equal(attempt(USERS.driver, `${refuse(`r := ${take(DEL.open1, DRIVER2)};`)} v := t;`), REFUSED, 'a driver cannot assign to someone else');
   assert.equal(attempt(OFF_DRIVER, `${refuse(`r := ${take(DEL.open1, OFF_DRIVER)};`)} v := t;`), REFUSED, 'an inactive driver cannot take');
+  assert.equal(attempt(DENIED_DRIVER, `${refuse(`r := ${take(DEL.open1, DENIED_DRIVER)};`)} v := t;`), REFUSED, 'a driver denied Deliveries cannot take');
   assert.equal(attempt(USERS.applicator, `${refuse(`r := ${take(DEL.open1, USERS.applicator)};`)} v := t;`), REFUSED, 'an applicator cannot take');
   assert.equal(attempt(USERS.driver, `${refuse(`r := ${take(DEL.other, USERS.driver)};`)} v := t;`), GONE, 'a driver cannot take a delivery already taken');
   assert.equal(attempt(USERS.driver, `${refuse(`r := ${take(DEL.started, USERS.driver)};`)} v := t;`), GONE, 'a driver cannot take a started delivery');
@@ -123,25 +137,25 @@ try {
   assert.equal(attempt(USERS.driver, `${asUser(`r := ${take(DEL.open1, USERS.driver, k1)};`)} v := r->>'status';`, { commit: true }), 'ok|reassigned');
   assert.equal(owner(DEL.open1), USERS.driver);
   assert.equal(attempt(USERS.driver, `${asUser(`r := ${take(DEL.open1, USERS.driver, k1)};`)} v := r->>'status';`), 'ok|reassigned', 'a retry with the same key replays');
+  assert.equal(attempt(USERS.driver, `${refuse(`r := ${take(DEL.open1, USERS.driver)};`)} v := t;`), MINE, 'a fresh key on a delivery already yours says so');
   assert.equal(attempt(DRIVER2, `${refuse(`r := ${take(DEL.open1, DRIVER2)};`)} v := t;`), GONE, 'another driver cannot take it afterwards');
-  assert.ok(!attempt(USERS.driver, asUser(LIST)).includes('AV-01='), 'a taken delivery leaves the list');
-  console.log('[take] self only, open only; inactive driver and applicator refused; retry replays; taken delivery leaves the list');
+  const after = attempt(USERS.driver, asUser(LIST));
+  assert.ok(after.startsWith('ok|AV-02='), `the list still loads after the take: ${after}`);
+  assert.ok(!after.includes('AV-01='), 'a taken delivery leaves the list');
+  console.log('[take] self only, open only; inactive, denied and applicator refused; retry replays; own fresh key named; taken delivery leaves the list');
 
   // 4. Two drivers take one delivery at once: the first holds its lock 2 s; the second waits, then is refused.
   const [one, two] = await Promise.all([session(USERS.driver, 0, key(), DEL.race), session(DRIVER2, 0.5, key(), DEL.race)]);
-  assert.equal(one.code, 0, `first driver failed:\n${one.out}`);
-  assert.match(one.out, /reassigned/);
-  assert.notEqual(two.code, 0, `second driver must be refused:\n${two.out}`);
-  assert.match(two.out, /already taken or changed/);
-  assert.ok(two.ms >= 2000, `the second driver must have waited for the first (${two.ms} ms)`);
+  assert.equal(one.result, 'reassigned', `first driver failed:\n${one.out}`);
+  assert.match(two.result, /already taken or changed/, `second driver must be refused:\n${two.out}`);
+  // The first holds its lock 2 s after its call and the second calls 0.5 s later, so it waits about 1.5 s inside.
+  assert.ok(two.waited >= 1, `the second driver's call must have waited on the first's lock (${two.waited} s)`);
   assert.equal(owner(DEL.race), USERS.driver, 'the first driver keeps it');
   // One driver's double tap with the same key, at once: both calls report success, one assignment, one notification.
   const k2 = key();
   const [tap1, tap2] = await Promise.all([session(DRIVER2, 0, k2, DEL.double), session(DRIVER2, 0.5, k2, DEL.double)]);
-  assert.equal(tap1.code, 0, tap1.out);
-  assert.match(tap1.out, /reassigned/);
-  assert.equal(tap2.code, 0, tap2.out);
-  assert.match(tap2.out, /reassigned/);
+  assert.equal(tap1.result, 'reassigned', tap1.out);
+  assert.equal(tap2.result, 'reassigned', tap2.out);
   assert.equal(owner(DEL.double), DRIVER2);
   assert.equal(scalar(`SELECT count(*) FROM public.notifications WHERE related_entity_id = '${DEL.double}';`), '1', 'a double tap notifies once');
   console.log('[race] two drivers at once: second waits and is refused, first keeps it; a double tap notifies once');

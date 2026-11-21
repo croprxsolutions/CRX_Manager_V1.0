@@ -5,23 +5,26 @@
 -- deliveries table directly, and the del_select read rule shows a driver only deliveries assigned to them, so
 -- the card was always empty. Contract: docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md.
 --
--- 1. New get_available_deliveries_for_driver(): an active driver only. Returns {rows: [...]} with every open
+-- 1. New get_available_deliveries_for_driver(): an active driver only, and not one an admin has denied the
+--    Deliveries page (profiles.denied_pages contains 'deliveries'). Returns {rows: [...]} with every open
 --    delivery (assigned_driver null, status scheduled, not deleted), soonest first, and for each only its id,
 --    number, date, customer name and farm group (TOP parent, as the lists show since #1995). No address, notes,
 --    items or prices. SECURITY DEFINER because the read rule hides these rows; the read rule itself is unchanged.
--- 2. reassign_delivery: the driver branch (not admin or sales rep) now locks the delivery row before checking it,
---    refuses a deleted or no-longer-scheduled delivery with "already taken or changed" (not a permission error),
---    and lets a driver assign a delivery only to themself. Before, the open check ran
+-- 2. reassign_delivery: the driver branch (not admin or sales rep) refuses a driver denied the Deliveries page,
+--    lets a driver assign a delivery only to themself, checks the idempotency key first (the same lock order as
+--    admin and sales rep: key, then row), then locks the delivery row before checking it and refuses a taken,
+--    deleted or no-longer-scheduled delivery with "already taken or changed" (one already the caller's with a
+--    fresh key gets "already assigned to you"), not a permission error. Before, the open check ran
 --    unlocked, so two drivers taking one delivery at once could both pass and the second silently took it; and a
---    driver could assign an open delivery to someone else. A delivery already assigned to the calling driver
---    still passes, and a bound retry now returns its stored result before the body runs (the body re-checks
+--    driver could assign an open delivery to someone else. A bound retry (same key, same caller, same request) now
+--    returns its stored result before the body runs (the body re-checks
 --    "unassigned" for a driver, which refused a driver's retry after a lost reply). For admin and sales rep the
 --    stored result is the same one the body's own replay returned. Admin and sales rep authority, the replay
 --    binding, the body it calls, the signature and grants are unchanged.
 --
--- No table, row, policy or other function changes. Rollback: DROP FUNCTION
--- public.get_available_deliveries_for_driver(); then re-run the reassign_delivery CREATE FUNCTION body from
--- 20261110160000 as CREATE OR REPLACE.
+-- No table, row, policy or other function changes. Rollback: ship the screen rollback first, then a new reviewed
+-- migration dropping get_available_deliveries_for_driver(). The reassign_delivery hardening is corrected forward,
+-- never reverted (reverting would reopen the double-take race).
 
 CREATE TEMP TABLE driver_available_2018_tx ON COMMIT DROP AS SELECT pg_current_xact_id()::text AS transaction_id;
 
@@ -56,6 +59,7 @@ AS $function$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true AND role = 'driver'
+      AND NOT ('deliveries' = ANY (COALESCE(denied_pages, '{}'::text[])))
   ) THEN
     RAISE EXCEPTION 'Not authorized to view available deliveries' USING ERRCODE = '42501';
   END IF;
@@ -109,6 +113,8 @@ SET search_path = public, pg_temp
 AS $function$
 DECLARE
   v_actor uuid := auth.uid();
+  v_is_office boolean;
+  v_owner uuid;
   v_fingerprint text;
   v_replay jsonb;
   v_result jsonb;
@@ -123,25 +129,16 @@ BEGIN
   IF p_performed_by IS NOT NULL AND p_performed_by IS DISTINCT FROM v_actor THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH';
   END IF;
-  IF NOT EXISTS (
+  v_is_office := EXISTS (
     SELECT 1 FROM public.profiles WHERE id = v_actor AND is_active = true
       AND role IN ('admin', 'sales_rep')
-  ) THEN
-    IF NOT EXISTS (
-      SELECT 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role = 'driver'
-    ) OR p_new_driver IS DISTINCT FROM v_actor THEN
-      RAISE EXCEPTION 'Not authorized to reassign deliveries';
-    END IF;
-    -- #2018: a driver takes an open delivery for themself. The row is locked before the check, so of two drivers
-    -- taking one delivery at once the second waits, re-reads it as taken, and is refused. A delivery already the
-    -- caller's passes, so a retry after a lost reply reaches the stored replay below.
-    PERFORM 1 FROM public.deliveries
-     WHERE id = p_delivery_id AND deleted_at IS NULL
-       AND ((assigned_driver IS NULL AND status = 'scheduled') OR assigned_driver = v_actor)
-     FOR UPDATE;
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'This delivery was already taken or changed. Refresh the list.';
-    END IF;
+  );
+  -- #2018: a driver (active, not denied the Deliveries page) may assign a delivery only to themself.
+  IF NOT v_is_office AND (NOT EXISTS (
+       SELECT 1 FROM public.profiles WHERE id = v_actor AND is_active = true AND role = 'driver'
+         AND NOT ('deliveries' = ANY (COALESCE(denied_pages, '{}'::text[])))
+     ) OR p_new_driver IS DISTINCT FROM v_actor) THEN
+    RAISE EXCEPTION 'Not authorized to reassign deliveries';
   END IF;
   v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
     'actor_id', v_actor, 'delivery_id', p_delivery_id, 'new_driver', p_new_driver));
@@ -149,10 +146,24 @@ BEGIN
   IF v_replay IS NOT NULL AND jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
   END IF;
-  -- #2018: a bound retry returns its stored result here. The body below re-checks "unassigned" for a driver, so a
-  -- driver's retry after a lost reply (the delivery is now theirs) would otherwise be refused instead of replayed.
+  -- #2018: a bound retry (same key, caller and request) returns its stored result here. The body re-checks
+  -- "unassigned" for a driver, so a driver's retry after a lost reply would otherwise be refused, not replayed.
   IF v_replay IS NOT NULL THEN
     RETURN v_replay -> 'result';
+  END IF;
+  IF NOT v_is_office THEN
+    -- #2018: lock the row before checking it (after the key lock, as the body does for admin and sales rep), so of
+    -- two drivers taking one delivery at once the second waits, re-reads it as taken, and is refused.
+    SELECT assigned_driver INTO v_owner FROM public.deliveries
+     WHERE id = p_delivery_id AND deleted_at IS NULL
+       AND ((assigned_driver IS NULL AND status = 'scheduled') OR assigned_driver = v_actor)
+     FOR UPDATE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'This delivery was already taken or changed. Refresh the list.';
+    END IF;
+    IF v_owner = v_actor THEN
+      RAISE EXCEPTION 'This delivery is already assigned to you. Refresh the list.';
+    END IF;
   END IF;
   v_result := public._reassign_delivery_replay_impl_20261015(p_delivery_id, p_new_driver, p_performed_by, p_idempotency_key);
   PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'reassign_delivery', v_fingerprint);

@@ -8,7 +8,7 @@ import type { JobStatus } from '../types';
 // #1979: every screen change to a spray job goes through the edit_jobs server function
 // (20270203110000_job_writes_through_rpcs.sql). This file is the one caller.
 
-export const EDIT_JOBS_MAX = 500;
+const EDIT_JOBS_MAX = 500;
 
 /** Too many jobs for one save, as a message to show BEFORE asking the user to confirm; null when fine. */
 export function editJobsLimitMessage(count: number): string | null {

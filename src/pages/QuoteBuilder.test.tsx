@@ -3324,6 +3324,30 @@ describe('QuoteBuilder', () => {
     expect(screen.queryByText('Reload Quote')).not.toBeInTheDocument();
   });
 
+  it('locks the form while Mark as presented is still recording the version (Sol #1980 r5)', async () => {
+    const quote = { id: 'quote-present-lock', quote_number: 'Q-lock', customer_id: 'customer-1', customer: QUOTE_FIXTURE_CUSTOMER, tier: 1, valid_days: 30, header_notes: '', footer_notes: '', status: 'draft', is_planned: false, commission_split: { splits: [] }, row_version: 7, created_at: RECENT_QUOTE_CREATED_AT };
+    const product = { id: 'product-1', product_name: 'Product', is_active: true, current_cost: 6, tier1_price: 10, unit_size: 'gal', inventory_unit: 'gal' };
+    const section = { id: 'section-1', quote_id: quote.id, section_name: 'Products', sort_order: 0, section_notes: null, section_header_notes: null, needed_by_date: null, field_id: null };
+    const item = { id: 'item-1', quote_id: quote.id, section_id: section.id, product_id: product.id, sort_order: 0, product, calc_mode: 'units_direct', total_units_needed: 2, price_per_unit: 10, price_override: null, current_cost: 6, suggested_rate: null, actual_rate: null, rate_unit: null, oz_per_acre: null, price_per_acre: null, acres: null, unit_size: 'gal', profit: 8, total_price: 20, net_margin: 40, notes: null, price_unit: null };
+    let finishVersion: (value: unknown) => void = () => {};
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote : table === 'quote_sections' ? [section] : table === 'quote_items' ? [item] : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? [product] : [], error: null }));
+    mockRpc.mockImplementation((name: string) => name === 'save_quote'
+      ? Promise.resolve({ data: { quote_id: quote.id, row_version: 8 }, error: null })
+      : name === 'create_quote_version'
+        ? new Promise((resolve) => { finishVersion = resolve; })
+        : Promise.resolve({ data: null, error: null }));
+    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:quote'), revokeObjectURL: vi.fn() });
+    renderQuoteBuilder(quote.id);
+    expect(await screen.findByDisplayValue('Products')).toBeEnabled();
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview & send' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark as presented' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('create_quote_version', expect.anything()));
+    // Version still recording: an edit made now would not be in the sent booking.
+    expect(screen.getByDisplayValue('Products')).toBeDisabled();
+    finishVersion({ data: { version_number: 1, row_version: 9 }, error: null });
+    await waitFor(() => expect(screen.getByText('Sent')).toBeInTheDocument());
+  });
+
   it('requires a numeric reload and a new confirmed freeze before retrying an aborted email', async () => {
     const { quote, product, section, item } = makeQuoteFixture('draft', 7);
     let quoteReads = 0;

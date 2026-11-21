@@ -4397,9 +4397,9 @@ export default function QuoteBuilder() {
     );
   }
 
-  // The quote cannot be edited while a save or order creation runs: an edit made then
+  // The quote cannot be edited while a save, mark-presented or order creation runs: an edit made then
   // would not be in what was written, and the page usually moves on afterwards.
-  const formLocked = saving || converting || drawing;
+  const formLocked = saving || converting || drawing || markingPresented || bookingAsOrder;
   // A saved quote whose status can't be edited (sent, accepted, closed...) shows its values but takes no
   // edits: none could be saved, and each one only raised "Unsaved changes". Tabs, History, collapse,
   // the job link and Schedule job still work.

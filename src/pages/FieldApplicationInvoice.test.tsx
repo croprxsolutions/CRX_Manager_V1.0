@@ -1040,6 +1040,40 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
     expect(mockRpc.mock.calls.some((call) => call[0] === 'save_field_app_invoice')).toBe(false);
     expect(mockFrom.mock.calls.some((call) => call[0] === 'activity_feed')).toBe(false);
   });
+
+  it('#1983: a product line saved with no unit reloads in the product units, not oz; a product-less line keeps oz', async () => {
+    const existingFrom = mockFrom.getMockImplementation()!;
+    const unitFrom = makeFromMock({
+      invoice_items: { data: [
+        { id: 'chem-no-unit', product_id: 'product-gal', description: 'Gallon product', rate_per_acre: 1,
+          rate_unit: null, quantity: 10, unit_size: null, unit_price_cents: 100, extended_cents: 1000, cost_cents: 50, sort_order: 0 },
+        { id: 'chem-manual', product_id: null, description: 'Hand-typed line', rate_per_acre: 1,
+          rate_unit: null, quantity: 10, unit_size: null, unit_price_cents: 100, extended_cents: 1000, cost_cents: 50, sort_order: 1 },
+      ] },
+      products: { data: [{
+        id: 'product-gal', max_label_rate: null, max_label_rate_unit: null, rei_hours: null, phi_days: null,
+        product_form: 'liquid', rate_unit: 'Pt', inventory_unit: 'Gal',
+      }] },
+    });
+    mockFrom.mockImplementation((table: string) =>
+      ['invoice_items', 'products'].includes(table) ? unitFrom(table) : existingFrom(table),
+    );
+    await renderPage();
+    await waitFor(() => expect(screen.getByText(/Field Application INV-1001/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Select Locations/i }));
+    fireEvent.click(await screen.findByTestId('mock-select-one-field'));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    const save = await waitFor(() => {
+      const call = mockRpc.mock.calls.find((c) => c[0] === 'save_field_app_invoice');
+      expect(call).toBeDefined();
+      return call!;
+    });
+    const lines = JSON.stringify(save[1]);
+    expect(lines).toMatch(/"rate_unit":"Pt"/);
+    expect(lines).toMatch(/"unit_size":"Gal"/);
+    expect(lines).toMatch(/"rate_unit":"oz"/);
+  });
 });
 
 describe('FieldApplicationInvoice — invoice load ownership', () => {

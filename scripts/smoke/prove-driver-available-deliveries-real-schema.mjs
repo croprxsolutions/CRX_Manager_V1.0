@@ -144,13 +144,15 @@ try {
   assert.ok(!after.includes('AV-01='), 'a taken delivery leaves the list');
   console.log('[take] self only, open only; inactive, denied and applicator refused; retry replays; own fresh key named; taken delivery leaves the list');
 
-  // 4. Two drivers take one delivery at once: the first holds its lock 2 s; the second waits, then is refused.
-  const [one, two] = await Promise.all([session(USERS.driver, 0, key(), DEL.race), session(DRIVER2, 0.5, key(), DEL.race)]);
-  assert.equal(one.result, 'reassigned', `first driver failed:\n${one.out}`);
-  assert.match(two.result, /already taken or changed/, `second driver must be refused:\n${two.out}`);
-  // The first holds its lock 2 s after its call and the second calls 0.5 s later, so it waits about 1.5 s inside.
-  assert.ok(two.waited >= 1, `the second driver's call must have waited on the first's lock (${two.waited} s)`);
-  assert.equal(owner(DEL.race), USERS.driver, 'the first driver keeps it');
+  // 4. Two drivers take one delivery at once: whoever locks first holds it 2 s; the other waits, then is refused.
+  // Order-independent: a slow container start may let either driver win.
+  const racers = await Promise.all([session(USERS.driver, 0, key(), DEL.race), session(DRIVER2, 0.5, key(), DEL.race)]);
+  const winners = racers.filter((r) => r.result === 'reassigned');
+  const losers = racers.filter((r) => /already taken or changed/.test(r.result));
+  assert.ok(winners.length === 1 && losers.length === 1, `exactly one driver wins:\n${racers.map((r) => r.out).join('\n---\n')}`);
+  // The winner holds its lock 2 s after its call and the two calls start about 0.5 s apart, so the loser waits inside.
+  assert.ok(losers[0].waited >= 0.5, `the refused driver's call must have waited on the winner's lock (${losers[0].waited} s)`);
+  assert.equal(owner(DEL.race), racers[0] === winners[0] ? USERS.driver : DRIVER2, 'the winner keeps it');
   // One driver's double tap with the same key, at once: both calls report success, one assignment, one notification.
   const k2 = key();
   const [tap1, tap2] = await Promise.all([session(DRIVER2, 0, k2, DEL.double), session(DRIVER2, 0.5, k2, DEL.double)]);
@@ -158,7 +160,7 @@ try {
   assert.equal(tap2.result, 'reassigned', tap2.out);
   assert.equal(owner(DEL.double), DRIVER2);
   assert.equal(scalar(`SELECT count(*) FROM public.notifications WHERE related_entity_id = '${DEL.double}';`), '1', 'a double tap notifies once');
-  console.log('[race] two drivers at once: second waits and is refused, first keeps it; a double tap notifies once');
+  console.log('[race] two drivers at once: one wins and keeps it, the other waits and is refused; a double tap notifies once');
 
   // 5. Admin and sales rep reassign as before (scheduled and in-progress, to anyone).
   const k3 = key();

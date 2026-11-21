@@ -1,7 +1,8 @@
 ## 2026-11-21 - #2018: drivers can list open deliveries and take one for themself (database part)
 
-- Migration `20270204120000_driver_available_deliveries.sql` adds `get_available_deliveries_for_driver()`: an active driver only (everyone else refused) gets up to 20 open deliveries (unassigned, scheduled, not deleted), soonest first, with only number, date, customer and top farm group. Mason decided 2026-11-21 that every driver may see these. The deliveries read rule is unchanged.
-- `reassign_delivery` (driver branch only) now locks the delivery before checking it, refuses deleted deliveries, and lets a driver assign a delivery only to themself. Two drivers taking one delivery at once: the first gets it, the second is refused. Admin and sales rep reassigning is unchanged.
-- No data changes. The current app never calls the new function, so it is safe before the screen change. The screen switch ships in a follow-up PR after this is on the staging database.
-- Contract: `docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md`.
-- Proof: `node scripts/smoke/prove-driver-available-deliveries-real-schema.mjs` (`DRIVER_AVAILABLE_DELIVERIES_PROOF_PASS`).
+- Migration `20270204120000_driver_available_deliveries.sql` adds `get_available_deliveries_for_driver()`: an active driver only (everyone else refused) gets every open delivery (unassigned, scheduled, not deleted), soonest first, with only number, date, customer and top farm group. Mason decided 2026-11-21 that every driver may see these. The deliveries read rule is unchanged.
+- `reassign_delivery`: for a driver it now locks the delivery before checking it, lets a driver assign a delivery only to themself, and refuses a delivery already taken, started or deleted with "This delivery was already taken or changed. Refresh the list." Two drivers taking one delivery at once: the first gets it, the second is refused. A same-key retry (any role) now returns its stored result before the body runs, so a driver's retry after a lost reply replays instead of being refused. Admin and sales rep authority is unchanged.
+- No data changes. The current app never calls the new function, and its driver take calls already assign the caller. The screen switch ships in a follow-up PR after this is on the staging database. Rollback: screen first, then drop the new function; the `reassign_delivery` hardening is corrected forward, not rolled back.
+- Contract: `docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md` (Astra challenge settled there).
+- Proof: `node scripts/smoke/prove-driver-available-deliveries-real-schema.mjs` (`DRIVER_AVAILABLE_DELIVERIES_PROOF_PASS`, local Docker, 2026-11-21).
+- Not verified: the staging database (applied by the staging DB job after merge).

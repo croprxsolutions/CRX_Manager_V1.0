@@ -1,6 +1,6 @@
 import { supabaseUntyped } from './db';
 import { fetchAllRows, pageWithList } from './pagedRead';
-import { commitEpaProposal, fetchParentEpaState, normalizeEpaNumber, startEpaLookup, WRITABLE_CLASSES, type EpaDecision } from './epaProposals';
+import { commitEpaProposalBatch, fetchParentEpaState, normalizeEpaNumber, startEpaLookup, WRITABLE_CLASSES, type EpaDecision } from './epaProposals';
 import { runRecordedEpaLookup } from './epaLookupClient';
 import type { EpaChemistryProposal, EpaProposalItem } from '../types';
 
@@ -189,6 +189,7 @@ async function once<T>(call: () => Promise<T>): Promise<T> {
     return await withDeadline(call());
   } catch (error: unknown) {
     if (error instanceof BatchDeadlineError) throw error; // the first call may still be running
+    if (errorText(error).startsWith('EPA_BATCH_')) throw error; // the database's decision, not a lost reply
     return withDeadline(call());
   }
 }
@@ -263,7 +264,15 @@ export async function runBatchParent(runId: string, candidate: BatchCandidate & 
   if (changed) return { ...base, outcome: 'needs_person', detail: `${changed}; the proposal waits for a person` };
   const decision = batchDecision(proposal, appNames);
   if (!decision.commit) return { ...base, outcome: 'needs_person', detail: decision.reason };
-  const result = await once(() => commitEpaProposal(proposal.id, proposal.proposal_version, decision.decisions, `${key}:commit`));
+  let result;
+  try {
+    result = await once(() => commitEpaProposalBatch(proposal.id, proposal.proposal_version, decision.decisions, `${key}:commit`));
+  } catch (error: unknown) {
+    // The database's own check at save time (#1976): nothing was written and the proposal waits for a person.
+    const refusal = /^EPA_BATCH_NOT_ELIGIBLE: (.*)$/s.exec(errorText(error));
+    if (refusal) return { ...base, outcome: 'needs_person', detail: `Refused at save: ${refusal[1]}; the proposal waits for a person` };
+    throw error;
+  }
   if (result.status === 'held') return { ...base, outcome: 'needs_person', detail: `On hold (${result.hold_reason})` };
   const written = Object.entries(result.commit_result).filter(([id, r]) => r === 'written' && id.startsWith('ing:')).length;
   return { ...base, outcome: 'saved', detail: `${written} ingredient${written === 1 ? '' : 's'} saved` };

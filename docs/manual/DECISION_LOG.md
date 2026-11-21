@@ -40,6 +40,37 @@ accepted residuals; do not re-raise them as blockers on this PR.
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #2050 at `e4960bf1340d` (base `e4e6e11fae1c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
 - Finding 1 (HIGH) at `supabase/migrations/20270129171000_field_app_refuses_product_without_sold_unit.sql:39`, text sha256 `30caf38e89c4de39` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our business) (ref 23d2a64b72fd)
+
+## 2026-11-21 — #2038: Mason owner-accepted 2 Sol finding(s) at `9b5598f5d0d1`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2038 at `9b5598f5d0d1` (base `ca1ed13c47fd`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270130100000_epa_batch_commit_checks_at_save.sql:88`, text sha256 `1ac62581b10666ca` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen (ref cf87dc0055f9)
+- Finding 2 (HIGH) at `supabase/migrations/20270130100000_epa_batch_commit_checks_at_save.sql:143`, text sha256 `0e4369772881fb34` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen (ref a691a7b87a16)
+
+## 2026-11-21 — #2038 may have one more Sol round (round 7)
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, one more each").** PR #2038 (#1976 EPA batch save check) may have one more Sol round (round 7).
+**Why:** after release #1990 and its back-merge, staging had to be merged in to clear a conflict, so the merge gate needs a fresh Sol review of the new head. The PR's own change is unchanged since its last clean or owner-accepted round.
+
+## 2026-11-19 — #2038: Mason owner-accepted 2 Sol finding(s) at `8e5eb30ccb22`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2038 at `8e5eb30ccb22` (base `62ccaeaa2a7b`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270130100000_epa_batch_commit_checks_at_save.sql:88`, text sha256 `ca8573d6db3fd3ce` (the wording stays with the proof, not here)
+  Mason's reason: both lookups fetch the same EPA data (ref e033590e65ec)
+- Finding 2 (HIGH) at `supabase/migrations/20270130100000_epa_batch_commit_checks_at_save.sql:143`, text sha256 `8662efbcd11758a1` (the wording stays with the proof, not here)
+  Mason's reason: re-running the lookup brings it back (ref e11881672f0a)
+
+## 2026-11-19 — #2038 may have Sol round 6
+
+**Decision (Mason, in chat, 2026-11-19: "Accept + round 6").** PR #2038 (#1976) may have Sol round 6. Mason judges the lookup race (a lookup started between the batch's screen check and its own lookup) a business non-issue: both lookups fetch the same EPA data, and the admin can re-run theirs.
+**Why:** round 5's other HIGH (no release smoke chain for `commit_epa_proposal_batch`) was fixed in a new commit, so the head needs a fresh review.
+
+## 2026-11-19 — #2038 may have Sol round 5
+
+**Decision (Mason, in chat, 2026-11-19: "Approve round 5").** PR #2038 (#1976, EPA batch save checks in the database) may have Sol round 5.
+**Why:** the pre-push check required a regenerated workflow map (`docs/app-workflow-map.html`, its RPC count goes from 361 to 362), so the pushed head is one commit past the head Sol round 4 reviewed. The code reviewed in round 4 is unchanged.
 ## 2026-11-20 — #1990: Mason owner-accepted 5 Sol finding(s) at `b145a1514838`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #1990 at `b145a1514838` (base `5740b6c076ea`) found 5 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

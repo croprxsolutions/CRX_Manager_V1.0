@@ -15,7 +15,7 @@
 --       admin deletes {completed, invoiced}: completed deleted, invoiced skipped and still live
 --   C4  refused shapes and values (other columns, null job_date, wrong types, bad numbers, delete+changes)
 --   C5  {loader_comment} only changes that column; null clears; batch_ref set then cleared; absent keys untouched
---   C6  expired license refused; no license rows allowed (today's rule)
+--   C6  expired license refused; no license rows allowed (today's rule); inactive applicator refused
 --   C7  schedule_date on {scheduled, invoiced}: invoiced skipped for a rep and an admin (Mason, 2026-11-21); admin applicator change on it skipped
 --   C8  changes + cancel on {scheduled, completed}: both dated, only scheduled cancelled
 --   C9  rep changes + cancel on {scheduled, invoiced}: scheduled changed and cancelled, invoiced skipped untouched
@@ -342,7 +342,7 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: C5 batch not cleared or another field changed';
   END IF;
 
-  -- ── C6 license rule (unchanged) ───────────────────────────────────────────
+  -- ── C6 license rule (unchanged); inactive applicator refused ───────────────────────────────────────────
   UPDATE jobs SET applicator_id = NULL WHERE id = v_jS2;
   SET LOCAL ROLE authenticated;
   PERFORM edit_jobs(ARRAY[v_jS2], jsonb_build_object('applicator_id', v_appl), NULL, v_rep, 'ej-c6a-' || v_sfx);
@@ -363,6 +363,25 @@ BEGIN
   END;
   RESET ROLE;
   DELETE FROM applicator_licenses WHERE license_number = 'SMOKE-' || v_sfx;
+  -- An inactive profile cannot be made the applicator (the dispatch trigger would leave the old one open).
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  UPDATE profiles SET is_active = false WHERE id = v_rep2;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
+  SET LOCAL ROLE authenticated;
+  BEGIN
+    PERFORM edit_jobs(ARRAY[v_jS2], jsonb_build_object('applicator_id', v_rep2), NULL, v_rep, 'ej-c6c-' || v_sfx);
+    RESET ROLE; RAISE EXCEPTION 'SMOKE_FAIL: C6 inactive applicator was assigned';
+  EXCEPTION WHEN OTHERS THEN
+    RESET ROLE;
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'BAD_VALUE: applicator_id%' THEN RAISE EXCEPTION 'SMOKE_FAIL: C6 inactive wrong error: %', SQLERRM; END IF;
+  END;
+  RESET ROLE;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+  UPDATE profiles SET is_active = true WHERE id = v_rep2;
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
+  SELECT count(*) INTO v_n FROM jobs WHERE id = v_jS2 AND applicator_id IS NOT DISTINCT FROM v_rep2;
+  IF v_n <> 0 THEN RAISE EXCEPTION 'SMOKE_FAIL: C6 inactive applicator saved'; END IF;
 
   -- ── C7 invoiced jobs are skipped by planning edits, for a rep and an admin ─
   SET LOCAL ROLE authenticated;

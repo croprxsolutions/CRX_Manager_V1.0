@@ -1,5 +1,12 @@
 # Decision Log
 
+## 2026-11-21 — #2047 (edit_jobs): applicator changes on completed jobs stay as today
+
+**Decision (Mason, in chat, 2026-11-21, answering Sol round 7: "Keep today's rule").** Anyone who may edit jobs may
+still change the applicator on a completed job; the new applicator then gets the usual 7-day record access. Mason
+owner-accepts that Sol finding. Separately, `edit_jobs` now refuses an inactive or wrong-role applicator (a check, not
+a rule change: the screens already offer only active applicators, admins and reps).
+
 ## 2026-11-21 — #2047 (edit_jobs): invoiced jobs are never changed by bulk job edits; cancel clash accepted
 
 **Decision (Mason, in chat, 2026-11-21, answering Sol round 6).** (1) `edit_jobs` skips invoiced jobs for every

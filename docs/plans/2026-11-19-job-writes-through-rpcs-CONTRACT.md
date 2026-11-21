@@ -149,3 +149,9 @@ Files: `supabase/migrations/20270201170000_job_writes_through_rpcs.sql` (PR A), 
 - **MED fixed:** C9 rewritten around the skip rule.
 - **MED deferred (parity with today's direct writes):** a deactivation landing while the call waits on a booking lock; an all-skipped call claiming another operation's key; moving `job_date` across October 1 leaves `season` unchanged; assigning an inactive applicator leaves the old dispatch open; soft delete leaves dispatch rows open (KI-173); the replay marks `20261217100000` ledger-only.
 - **LOW fixed:** whitespace-only keys (tabs, newlines) refused; a NULL entry in `denied_pages` no longer blocks a rep; this contract's lock mode and KI reference. **LOW deferred:** a cancel waits on locks of jobs it will skip; prover cleanup by its random container name.
+
+## Sol round 7 settlement (4 HIGH)
+
+- **HIGH fixed:** a new applicator must be an active applicator, admin or sales rep (the list the screens offer); the profile row is share-locked so a deactivation cannot slip in before commit (C6).
+- **HIGH kept as today (Mason, 2026-11-21):** changing the applicator on a recently completed job moves the 7-day record access to the new applicator; Mason kept today's rule and owner-accepts it.
+- **HIGH accepted (Mason, 2026-11-21):** completed-job date and invoice pricing (KI-172); partial-cancel cost (KI-171).

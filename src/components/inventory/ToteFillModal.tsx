@@ -71,6 +71,36 @@ function PreviewDetails({ shown }: { shown: ToteFillPreview }) {
   );
 }
 
+/** The preview the admin asked for (null = none), through useLoad. */
+function useTotePreview(toteProductId: string, requested: number | null) {
+  // A refusal (e.g. wrong stock unit) is shown in the window, so not reported to Sentry.
+  const read = useLoad(
+    requested === null ? null : `${toteProductId}:${requested}`,
+    () => previewToteFill(toteProductId, requested as number),
+    { report: false },
+  );
+  const loaded = read.status === 'loaded' ? read : null;
+  return {
+    reload: read.reload,
+    // A failed or running re-preview never leaves the old counts confirmable.
+    preview: loaded && !loaded.stale && !loaded.refreshing ? loaded.data : null,
+    // true = a refresh failed after a preview had loaded (useLoad keeps no error for that case).
+    previewFailed: read.status === 'failed' ? read.error : loaded?.stale ? true : null,
+    previewing: read.status === 'loading' || Boolean(loaded?.refreshing),
+  };
+}
+
+function PreviewFailed({ error, onRetry, disabled }: { error: unknown; onRetry: () => void; disabled: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded border-l-4 border-red-500 bg-red-50 p-3 text-sm text-red-800" role="alert">
+      <span>
+        {error === true ? 'The preview could not be refreshed. Nothing was filled; try again before filling.' : `Preview could not be loaded: ${sanitizeError(error)}`}
+      </span>
+      <Button size="sm" variant="secondary" showChevron={false} onClick={onRetry} disabled={disabled}>Try again</Button>
+    </div>
+  );
+}
+
 /**
  * Fill whole totes from the tote's Bulk (admins only). The admin previews first; the fill sends that
  * preview back and the database refuses it if stock, units, source or catalog cost changed since.
@@ -90,17 +120,8 @@ export default function ToteFillModal({ toteProductId, toteName, profileId, onCl
   // A fill whose answer was lost: it may have saved. Only the same preview and key may be resent,
   // so the database returns the first result instead of filling twice.
   const [unsure, setUnsure] = useState(false);
-  // A refusal (e.g. wrong stock unit) is shown in the window, so not reported to Sentry.
-  const previewRead = useLoad(
-    requested === null ? null : `${toteProductId}:${requested}`,
-    () => previewToteFill(toteProductId, requested as number),
-    { report: false },
-  );
-  // A failed or running re-preview never leaves the old counts confirmable.
-  const preview = previewRead.status === 'loaded' && !previewRead.stale && !previewRead.refreshing ? previewRead.data : null;
-  const previewFailed = previewRead.status === 'failed' ? previewRead.error
-    : previewRead.status === 'loaded' && previewRead.stale ? true : null;
-  const previewing = previewRead.status === 'loading' || (previewRead.status === 'loaded' && previewRead.refreshing);
+  const previewRead = useTotePreview(toteProductId, requested);
+  const { preview, previewFailed, previewing } = previewRead;
   const { getKey, resetKey } = useIdempotencyKey('fill_tote_from_bulk', profileId, JSON.stringify(preview));
 
   const toteCount = /^\d{1,4}$/.test(totes.trim()) ? Number(totes.trim()) : NaN;
@@ -165,12 +186,7 @@ export default function ToteFillModal({ toteProductId, toteName, profileId, onCl
         </div>
 
         {previewFailed !== null && (
-          <div className="flex flex-wrap items-center gap-2 rounded border-l-4 border-red-500 bg-red-50 p-3 text-sm text-red-800" role="alert">
-            <span>
-              {previewFailed === true ? 'The preview could not be refreshed. Nothing was filled; try again before filling.' : `Preview could not be loaded: ${sanitizeError(previewFailed)}`}
-            </span>
-            <Button size="sm" variant="secondary" showChevron={false} onClick={() => { void previewRead.reload(); }} disabled={busy || unsure}>Try again</Button>
-          </div>
+          <PreviewFailed error={previewFailed} onRetry={() => { void previewRead.reload(); }} disabled={busy || unsure} />
         )}
         {shown && <PreviewDetails shown={shown} />}
 

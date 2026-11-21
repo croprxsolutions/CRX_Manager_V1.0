@@ -104,7 +104,8 @@ async function upload(
 
 describe('ProductSetupWorkbookModal parent rates', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // Reset, not clear: an unused mockReturnValueOnce from a failed test must not leak into the next one.
+    vi.resetAllMocks();
     H.loadExport.mockResolvedValue({ rates_locked: false, rows: [] });
     H.getProductParents.mockResolvedValue([parent]);
     H.previewParentRates.mockResolvedValue(preview);
@@ -162,9 +163,9 @@ describe('ProductSetupWorkbookModal parent rates', () => {
       source: 'label', source_note: 'Label page 1' }], issues: [], openProposalParentIds: [] };
     await upload(membershipHash, [], chemistry);
     expect(await screen.findByText('No open proposals.')).toBeInTheDocument();
-    const confirm = await screen.findByRole('button', { name: 'Confirm Ingredients tab' });
-    expect(confirm).toBeEnabled();
-    fireEvent.click(confirm);
+    // Confirm renders disabled until its preview loads; a click before then is silently ignored (#1984).
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm Ingredients tab' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Ingredients tab' }));
     await waitFor(() => expect(H.startChemistrySave).toHaveBeenCalledOnce());
     await waitFor(() => {
       screen.getAllByRole('button', { name: 'Close' }).forEach((button) => expect(button).toBeDisabled());

@@ -43,8 +43,10 @@ vi.mock('../lib/db', () => ({
     ACTOR_MISMATCH: 'ACTOR_MISMATCH',
     INVOICE_SEASON_DATE_CHANGE_NOT_ALLOWED: 'INVOICE_SEASON_DATE_CHANGE_NOT_ALLOWED',
     INVOICE_FILED_SEASON_CHANGE_NOT_ALLOWED: 'INVOICE_FILED_SEASON_CHANGE_NOT_ALLOWED',
+    FIELD_APP_PAYER_CHANGED: 'FIELD_APP_PAYER_CHANGED',
   },
   hasRpcCode: () => false,
+  rpcCodeDetail: () => null,
 }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn().mockResolvedValue(undefined) }));

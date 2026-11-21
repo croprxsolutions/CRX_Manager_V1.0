@@ -2026,6 +2026,9 @@ export default function FieldApplicationInvoice() {
           navigate({ search: createdInvoiceAddressSearch(ids[0]) }, { replace: true });
         }
       }
+      // #2058: the save cancelled the edited draft and saved a new one (its fields bill another farm). Record it before
+      // any later step can fail, so every repeat Save from this page goes to the new draft, not the cancelled one.
+      if (!creating && targetInvoiceId && ids.length > 0 && !ids.includes(targetInvoiceId)) replacementInvoiceIdRef.current = ids[0];
       // #2058: when the earlier save cancelled the edited draft (its fields bill another farm), repeat onto the new one.
       const replayedInvoiceId = targetInvoiceId && (ids.length === 0 || ids.includes(targetInvoiceId)) ? targetInvoiceId : ids[0];
       if (retryMayReplayOldValues && replayedInvoiceId) {

@@ -919,6 +919,27 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
     expect(saveCalls.map(([, args]) => (args as { p_invoice_id: string }).p_invoice_id)).toEqual(['inv-solo', 'inv-other-farm']);
   });
 
+  it('#2058: once a lost reply names the new draft, a refused follow-up still leaves the next Save aimed at it', async () => {
+    let saves = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name !== 'save_field_app_invoice') return Promise.resolve({ data: { ok: true }, error: null });
+      saves += 1;
+      if (saves === 1) return Promise.resolve({ data: null, error: { message: 'IDEMPOTENCY_INTENT_MISMATCH', details: JSON.stringify({
+        operation: 'save_field_app_invoice', result: { invoice_ids: ['inv-other-farm'], invoice_group_id: null } }) } });
+      if (saves === 2) return Promise.resolve({ data: null, error: { message: 'FIELD_APP_UNIT_MISMATCH: pick a matching unit', code: 'P0001' } });
+      return Promise.resolve({ data: { invoice_ids: ['inv-other-farm'], invoice_group_id: null }, error: null });
+    });
+    withBilledFarms();
+    await renderPage();
+    await screen.findByText(/Field Application INV-1001/);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Save failed')));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/invoices/field-app/inv-other-farm', { replace: true }));
+    const saveCalls = mockRpc.mock.calls.filter(([n]) => n === 'save_field_app_invoice');
+    expect(saveCalls.map(([, args]) => (args as { p_invoice_id: string }).p_invoice_id)).toEqual(['inv-solo', 'inv-other-farm', 'inv-other-farm']);
+  });
+
   it('#2058: after a partial failure on a replaced draft the page keeps the form, and Save again writes to the new draft', async () => {
     let appliedCalls = 0;
     mockRpc.mockImplementation((name: string) => {

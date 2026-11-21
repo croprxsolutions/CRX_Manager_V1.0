@@ -66,6 +66,15 @@ describe('batchDecision', () => {
     expect(batchDecision(proposal([ing('a', 33.3333), ing('b', 33.3333, '51218-45-2'), ing('c', 33.3334, '94-75-7')]), names).commit).toBe(true);
   });
 
+  it('adds percents exactly, as the database does (#2120)', () => {
+    // Rounding each to five decimals made this exact 100 split read 100.00001.
+    expect(batchDecision(proposal([ing('a', 33.333335), ing('b', 33.333335, '51218-45-2'), ing('c', 33.33333, '94-75-7')]), names).commit).toBe(true);
+    const over = batchDecision(proposal([ing('a', 33.333334), ing('b', 33.333333, '51218-45-2'), ing('c', 33.333334, '94-75-7')]), names);
+    expect(over).toEqual({ commit: false, reason: 'Ingredient percents add up to more than 100' });
+    expect(batchDecision(proposal([ing('a', 1e-7), ing('b', 99.9999999, '51218-45-2')]), names).commit).toBe(true);
+    expect(batchDecision(proposal([ing('a', 100), ing('b', 1e-21, '51218-45-2')]), names)).toEqual({ commit: false, reason: 'Ingredient percents add up to more than 100' });
+  });
+
   it('refuses a proposal that is not open', () => {
     expect(batchDecision({ ...proposal([ing('a', 10)]), status: 'held' }, names)).toEqual({ commit: false, reason: 'Proposal is held' });
   });

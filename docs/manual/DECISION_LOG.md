@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-21 — #2045: Mason owner-accepted 2 Sol finding(s) at `e6a349b6f20d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2045 at `e6a349b6f20d` (base `18be091ef88f`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201195000_inventory_edge_cases_1942.sql:315`, text sha256 `90719fc7dc6123a9` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen in our business (ref 9a9e909b0dbd)
+- Finding 2 (HIGH) at `supabase/migrations/20270201195000_inventory_edge_cases_1942.sql:307`, text sha256 `90d66f788657eace` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen in our bususines (ref aa35ddfaf298)
+
 ## 2026-11-21 — #2045: Mason owner-accepted 1 Sol finding(s) at `790859458268`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2045 at `790859458268` (base `a90d3b34fc7a`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

@@ -24,6 +24,8 @@ Read on `origin/staging` at the branch point of `claude/release-fix-rep-below-co
 - Revenue lines are picked as: this invoice, no product, `acres` set, not a fee, not from an order. Billed and $0 chemical lines never set `acres`, so the billed lines interleaved between $0 lines are never counted. Both sums are booked whole cents (`total_shortfall_cents` is a line total for both product lines and costed hand-typed admin lines).
 - After the save: lines change only through this save (re-checked) or `save_invoice`, which re-judges every $0 line under the admin-with-reason wall (a rep is refused). Posting does not change lines. Changing a field default later does not change a saved invoice.
 
+- Sol round 2 (2026-11-21, HIGH): costs are added from the approval rows' unrounded `(locked_unit_cost_cents - unit_price_cents) * quantity` plus this line's, rounded once; summing each line's rounded shortfall let a chemical split into many tiny lines pass (100 lines of $0.0145 counted as $1.00).
+
 ## State, timing, rollout
 - No existing rows change; live has none of these invoices (re-count at apply time with the reviewers' read-only check).
 - One save is one transaction with no exception handler around the insert, so a refusal rolls the whole save back.

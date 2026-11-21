@@ -266,7 +266,7 @@ const body = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
 const grants = () => scalar(`SELECT COALESCE(string_agg(g, ',' ORDER BY g), '-') FROM (SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END AS g
   FROM pg_proc p, aclexplode(p.proacl) a WHERE p.oid = '${GUARD}'::regprocedure AND a.privilege_type = 'EXECUTE') x;`);
 const OLD_BODY = '1069cd1451454030627b250db7b729d1';
-const NEW_BODY = 'fa9182a1292ed29e9620400c5c9d553a';
+const NEW_BODY = '0173da0b7f61a15353d4295edd4e9b13';
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -310,6 +310,8 @@ const as = (uid) => `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","r
 const rate = (cents) => `UPDATE public.field_billing_defaults SET price_override_cents = ${cents} WHERE field_id = '${G}';\n`;
 const ONE = `'[{"k":"P","rate":1,"n":0,"pid":"${P}"}]'::jsonb`;
 const TWO = `'[{"k":"P","rate":0.6,"n":0,"pid":"${P}"},{"k":"Q","rate":0.6,"n":1,"pid":"${Q}"}]'::jsonb`;
+// #2068 Sol round 2: 100 lines of 0.0029 Gal at $5.00 cost $0.0145 each ($1.45 together) but round to $0.01 each.
+const SPLIT = `'${JSON.stringify(Array.from({ length: 100 }, (_, n) => ({ k: `S${n}`, rate: 0.000029, n, pid: P })))}'::jsonb`;
 const save = (uid, cents, chems) => `${rate(cents)}${as(uid)}SELECT gsrc.save('${uid}', ${chems});`;
 const BELOW = /FIELD_APP_GROWER_SHARE_BELOW_COST: the grower's per-acre price on this invoice does not cover the cost/;
 const parts = (out) => out.split('|');
@@ -362,6 +364,10 @@ async function main() {
   const twoAdmin = parts(okProbe(save(ADMIN, 500, TWO)));
   assert.equal(twoAdmin[1], `${ADMIN}:30000,${ADMIN}:30000`);
   console.log('[after] P and Q at $300.00 each under $5.00/ac ($500.00): the rep is refused ($600.00 together); an admin saves both');
+
+  refusedProbe(save(REP, 1, SPLIT), BELOW);
+  assert.equal(parts(okProbe(save(REP, 2, SPLIT)))[1].split(',').length, 100);
+  console.log('[after] one chemical split into 100 lines of $0.0145 ($1.45, each rounding to $0.01): the rep at $0.01/ac ($1.00) is refused; at $0.02/ac ($2.00) it saves');
 
   assert.equal(okProbe(resave(500)), '2', 'the first save and the re-save each log one row');
   refusedProbe(resave(1), BELOW);

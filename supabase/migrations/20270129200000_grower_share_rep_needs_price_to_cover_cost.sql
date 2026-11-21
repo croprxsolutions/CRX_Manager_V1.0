@@ -289,15 +289,17 @@ BEGIN
       -- fee) before any $0 line, so these sums are the whole invoice's by its last $0 line. Earlier $0 lines are
       -- counted from their approval rows whose line still exists (a re-save deletes the old lines). An admin may
       -- save it uncovered, as before. The message never states a cost (cost is admin-only, 2026-10-15).
+      -- Costs are added unrounded and rounded once, so splitting a chemical into many small lines cannot shave
+      -- a rounding remainder off each line (#2068 Sol round 2).
       IF NOT public.is_admin()
-         AND (SELECT COALESCE(sum(a.total_shortfall_cents), 0)
-                FROM public.below_cost_approvals a
-               WHERE a.operation = 'field_app_grower_share'
-                 AND a.entity_type = 'invoice'
-                 AND a.entity_id = NEW.invoice_id
-                 AND EXISTS (SELECT 1 FROM public.invoice_items ii
-                              WHERE ii.id = a.line_id AND ii.invoice_id = NEW.invoice_id))
-             + round((v_cost_cents - v_price_cents) * v_quantity)::bigint
+         AND round((SELECT COALESCE(sum((a.locked_unit_cost_cents - a.unit_price_cents) * a.quantity), 0)
+                      FROM public.below_cost_approvals a
+                     WHERE a.operation = 'field_app_grower_share'
+                       AND a.entity_type = 'invoice'
+                       AND a.entity_id = NEW.invoice_id
+                       AND EXISTS (SELECT 1 FROM public.invoice_items ii
+                                    WHERE ii.id = a.line_id AND ii.invoice_id = NEW.invoice_id))
+                   + (v_cost_cents - v_price_cents) * v_quantity)::bigint
            > (SELECT COALESCE(sum(ii.extended_cents), 0)
                 FROM public.invoice_items ii
                WHERE ii.invoice_id = NEW.invoice_id
@@ -390,7 +392,7 @@ BEGIN
      WHERE p.oid = to_regprocedure('public._enforce_below_cost_line()')
        AND ((SELECT count(*) FROM pg_proc o
               WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_enforce_below_cost_line') <> 1
-        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM 'fa9182a1292ed29e9620400c5c9d553a'
+        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '0173da0b7f61a15353d4295edd4e9b13'
         OR p.proowner <> 'postgres'::regrole
         OR NOT p.prosecdef
         OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]

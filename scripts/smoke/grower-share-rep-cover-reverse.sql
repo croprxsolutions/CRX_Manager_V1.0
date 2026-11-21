@@ -12,7 +12,7 @@ BEGIN
      WHERE p.oid = to_regprocedure('public._enforce_below_cost_line()')
        AND ((SELECT count(*) FROM pg_proc o
               WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_enforce_below_cost_line') <> 1
-        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM 'fa9182a1292ed29e9620400c5c9d553a'
+        OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '0173da0b7f61a15353d4295edd4e9b13'
         OR p.proowner <> 'postgres'::regrole
         OR NOT p.prosecdef
         OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]

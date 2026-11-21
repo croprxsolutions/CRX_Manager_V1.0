@@ -87,7 +87,17 @@ vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
 vi.mock('../hooks/useUnsavedChanges', () => ({
   useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }),
 }));
-vi.mock('../components/products/ProductsMobileList', () => ({ default: () => null }));
+vi.mock('../components/products/ProductsMobileList', () => ({
+  default: ({ products, onChangePrice }: { products: Array<{ id: string }>; onChangePrice?: (row: { id: string }) => void }) => (
+    onChangePrice && products[0] ? <button onClick={() => onChangePrice(products[0])}>Phone change price</button> : null
+  ),
+}));
+vi.mock('../components/products/QuickPriceChangeModal', () => ({
+  default: ({ onSubmit }: { onSubmit: (fields: Record<string, string>) => void }) => (
+    <button onClick={() => onSubmit({ current_cost: '50', tier1_price: '70', tier2_price: '55.56', tier3_price: '66.67' })}>Submit phone price</button>
+  ),
+}));
+vi.mock('../components/products/CustomerSalesSheetModal', () => ({ default: () => <p>Sales sheet open</p> }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 
 import Products from './Products';
@@ -170,5 +180,33 @@ describe('Products list reads', () => {
     await waitFor(() => expect(banner()).not.toBeInTheDocument());
     expect(screen.getByRole('button', { name: /^edit$/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /download/i })).toBeEnabled();
+  });
+
+  it('closes an open Customer Sales Sheet when a refresh fails, so it never prints old prices', async () => {
+    render(<Products />);
+    await screen.findByText('Loose Product');
+    fireEvent.click(screen.getByRole('button', { name: /download/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /customer sales sheet/i })[0]);
+    expect(screen.getByText('Sales sheet open')).toBeInTheDocument();
+    mocks.productsError = new Error('offline');
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Category' }), { target: { value: 'Seed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save (1)' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the latest product list.');
+    expect(screen.queryByText('Sales sheet open')).not.toBeInTheDocument();
+  });
+
+  it("refuses a phone price change whose form opened before the product's pricing version changed", async () => {
+    render(<Products />);
+    await screen.findByText('Loose Product');
+    fireEvent.click(screen.getByRole('button', { name: 'Phone change price' }));
+    // A coworker's price change lands; a category save's refresh brings version 8.
+    mocks.products.splice(0, 1, { ...product, pricing_version: 8, tier2_price: 120 });
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Category' }), { target: { value: 'Seed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save (1)' }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('success', 'Updated 1 product(s)'));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit phone price' }));
+    expect(mocks.toast).toHaveBeenCalledWith('error', "This product's prices changed while the form was open. Close it and open Change price again.");
   });
 });

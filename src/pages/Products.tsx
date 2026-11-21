@@ -284,7 +284,8 @@ export default function Products() {
   // Inline price edits waiting for their source and reason before the preview.
   const [pendingInlineRows, setPendingInlineRows] = useState<PricingPreviewInputRow[] | null>(null);
   const [previewingInline, setPreviewingInline] = useState(false);
-  const [quickPriceProductId, setQuickPriceProductId] = useState<string | null>(null);
+  // The pricing version the phone's Change price form opened on: a newer one refuses the form's old amounts.
+  const [quickPrice, setQuickPrice] = useState<{ id: string; version: number | null } | null>(null);
   const [applyingPricing, setApplyingPricing] = useState(false);
   const [workbookBusy, setWorkbookBusy] = useState(false);
   const [tableRevision, setTableRevision] = useState(0);
@@ -531,13 +532,23 @@ export default function Products() {
     setActiveReview(null);
   };
 
-  /** Read the list (and an admin's floors) again; true only when both came back. */
-  const reloadList = async (): Promise<boolean> => {
-    const [list, floors] = await Promise.all([productsRead.reload(), isAdmin ? floorsRead.reload() : Promise.resolve(null)]);
-    if (floors?.status === 'applied') setSavedFloors(new Map());
+  // Only the newest read applies, so a floor read that applied replaces whatever this page saved before it started.
+  const reloadFloors = async () => {
+    const floors = await floorsRead.reload();
+    if (floors.status === 'applied') setSavedFloors(new Map());
+    return floors;
+  };
+  const reloadProducts = async () => {
+    const list = await productsRead.reload();
     // The rows a Deactivate review was opened for are no longer known to be current.
     if (list.status === 'failed') closeActiveReview();
-    return list.status === 'applied' && (floors === null || floors.status === 'applied');
+    return list;
+  };
+  /** Read the list (and an admin's floors) again; false when either read failed. A superseded read is not a
+   * failure: the newer read that replaced it shows its own result. */
+  const reloadList = async (): Promise<boolean> => {
+    const [list, floors] = await Promise.all([reloadProducts(), isAdmin ? reloadFloors() : Promise.resolve(null)]);
+    return list.status !== 'failed' && floors?.status !== 'failed';
   };
   const retryProducts = () => { void reloadList(); };
   const failedReadNames = [
@@ -547,7 +558,8 @@ export default function Products() {
     readFailed(parentsRead) && 'product groups',
   ].filter(Boolean);
   const retryFailedReads = () => {
-    if (listStale || floorsFailed) void reloadList();
+    if (listStale) void reloadProducts();
+    if (floorsFailed) void reloadFloors();
     if (readFailed(categoriesRead)) void categoriesRead.reload();
     if (readFailed(parentsRead)) void parentsRead.reload();
   };
@@ -701,7 +713,8 @@ export default function Products() {
     // Show what was saved rather than the old floors until the floors are read again, so nobody
     // re-enters them if that read fails (the other products' floors then show "?" and stay read-only).
     setSavedFloors((current) => new Map([...current, ...floorChanges.map((change) =>
-      [change.productId, change.marginFloorPercent == null ? null : change.marginFloorPercent / 100] as const)]));
+      // A decimal shift, not "/ 100", so 0.07 becomes exactly 0.0007 as the database stores it.
+      [change.productId, change.marginFloorPercent == null ? null : Number(`${change.marginFloorPercent}e-2`)] as const)]));
     const reloaded = await reloadList();
     if (!reloaded) {
       toast('warning', 'Margin floors were saved, but the list could not be reloaded. Refresh this page.');
@@ -840,8 +853,13 @@ export default function Products() {
   // A phone's one-product change is an Edit table save of one row, so it gets the same row checks and review.
   // handleBulkSave shows its own refusal, and the modal stays open to fix it.
   const submitQuickPrice = (productId: string, fields: QuickPriceFields) => {
+    const current = products.find((product) => product.id === productId);
+    if (!current || current.pricing_version !== quickPrice?.version) {
+      toast('error', "This product's prices changed while the form was open. Close it and open Change price again.");
+      return;
+    }
     handleBulkSave(new Map([[productId, { ...fields, pricing_mode: 'price_driven' }]]))
-      .then(() => setQuickPriceProductId(null), () => undefined);
+      .then(() => setQuickPrice(null), () => undefined);
   };
 
   const previewInlinePricing = async ({ source, reason }: PricingSourceReason) => {
@@ -1222,7 +1240,7 @@ export default function Products() {
       render: (row) => (
         <div className="flex items-center gap-2">
           <Badge variant={row.is_active ? 'success' : 'default'}>{row.is_active ? 'Active' : 'Inactive'}</Badge>
-          {isAdmin && <button type="button" disabled={isEditingProducts}
+          {isAdmin && <button type="button" disabled={isEditingProducts || listBlocked}
             className="min-h-8 rounded px-2 text-xs font-medium text-crx-green focus-visible:outline focus-visible:outline-2 focus-visible:outline-crx-green"
             onClick={(event) => { event.stopPropagation(); void startActiveReview([row.id], !row.is_active); }}
             onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation(); }}>
@@ -1245,7 +1263,7 @@ export default function Products() {
     );
   }
 
-  const quickPriceProduct = products.find((product) => product.id === quickPriceProductId);
+  const quickPriceProduct = products.find((product) => product.id === quickPrice?.id);
 
   return (
     <div className="phone-touch space-y-4">
@@ -1277,7 +1295,8 @@ export default function Products() {
             >
               {exporting ? 'Exporting...' : 'Download'} <ChevronDown className="w-3 h-3 ml-1 inline" />
             </Button>
-            {exportMenuOpen && (
+            {/* Exports wait for a current list, so a failed refresh closes the menu too. */}
+            {exportMenuOpen && !listBlocked && (
               <>
                 <div className="fixed inset-0 z-40" role="presentation" onClick={() => setExportMenuOpen(false)} onKeyDown={() => setExportMenuOpen(false)} />
                 <div className="absolute right-0 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
@@ -1404,7 +1423,7 @@ export default function Products() {
             setupFilter={setupFilter}
             onSetupFilterChange={setSetupFilter}
             onOpenProduct={(product) => navigate(`/products/${product.id}`)}
-            onChangePrice={isAdmin && !listStale ? (product) => setQuickPriceProductId(product.id) : undefined}
+            onChangePrice={isAdmin && !listStale ? (product) => setQuickPrice({ id: product.id, version: products.find((row) => row.id === product.id)?.pricing_version ?? null }) : undefined}
             loadError={loadError}
             onRetry={retryProducts}
             parentIndex={parentIndex}
@@ -1543,7 +1562,7 @@ export default function Products() {
         <QuickPriceChangeModal
           key={quickPriceProduct.id}
           product={quickPriceProduct}
-          onClose={() => setQuickPriceProductId(null)}
+          onClose={() => setQuickPrice(null)}
           onSubmit={(fields) => submitQuickPrice(quickPriceProduct.id, fields)}
         />
       )}
@@ -1570,7 +1589,8 @@ export default function Products() {
         onSubmit={(value) => void previewInlinePricing(value)}
       />
 
-      {salesSheetFormat && (
+      {/* The sheet prints the list's prices, so it closes when a refresh fails. */}
+      {salesSheetFormat && !listBlocked && (
         <CustomerSalesSheetModal
           format={salesSheetFormat}
           products={filtered.filter((p) => p.is_active)}

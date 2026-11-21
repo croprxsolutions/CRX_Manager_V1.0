@@ -137,7 +137,7 @@ BEGIN
   -- A completion names its proof: a saved signed-ticket photo of the delivery itself (deliveries 1 and 2).
   FOR v_i IN 1..2 LOOP
     INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('delivery-photos',
-      'delivery-photos/' || v_del[v_i] || '/ticket.jpg', v_admin::text, '{"size": 1024, "mimetype": "image/png"}'::jsonb);
+      'delivery-photos/' || v_del[v_i] || '/ticket.jpg', v_admin::text, '{"size": 1024, "mimetype": "image/jpeg"}'::jsonb);
     INSERT INTO public.delivery_photos (delivery_id, storage_path, image_url, uploaded_by, caption, sort_order)
     VALUES (v_del[v_i], 'delivery-photos/' || v_del[v_i] || '/ticket.jpg', 'x', v_admin, 'Signed paper delivery ticket', 0)
     RETURNING id INTO v_id;

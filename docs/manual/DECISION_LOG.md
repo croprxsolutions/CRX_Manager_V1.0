@@ -1,5 +1,15 @@
 # Decision Log
 
+## 2026-11-21 — #2068: Mason owner-accepted 3 Sol finding(s) at `2f04db346c0b`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `2f04db346c0b` (base `912dd819a01f`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201135000_grower_share_rep_needs_price_to_cover_cost.sql:296`, text sha256 `478b5ca87698ebe6` (the wording stays with the proof, not here)
+  Mason's reason: reps knowing cost is acceptable , decided 11-20 (ref e09c1e3b226e)
+- Finding 2 (HIGH) at `supabase/migrations/20270201135000_grower_share_rep_needs_price_to_cover_cost.sql:174`, text sha256 `102a19fdd69df789` (the wording stays with the proof, not here)
+  Mason's reason: this can't happen in our buisness (ref 90055eb3a0d6)
+- Finding 3 (HIGH) at `supabase/migrations/20270201135000_grower_share_rep_needs_price_to_cover_cost.sql:312`, text sha256 `2295df5619029f50` (the wording stays with the proof, not here)
+  Mason's reason: nowhere near 9999 invoices a year (ref 0b77a9cf87d8)
+
 ## 2026-11-20 — #2050: Mason owner-accepted 1 Sol finding(s) at `e4960bf1340d`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #2050 at `e4960bf1340d` (base `e4e6e11fae1c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

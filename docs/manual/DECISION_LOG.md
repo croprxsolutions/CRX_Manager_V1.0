@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2149 (KI-125): month close keeps saving the figures current at the click; payments received split out
+
+**Decision (Mason, in session, 2026-11-21: "Accept, follow-up later").** After Sol round 4 on #2149, Mason accepted that Month-End Close saves the figures the reports show when Close is clicked and does not re-check the figures the admin reviewed (true of every close figure before #2149). A follow-up adds a "figures changed since you reviewed" check to the whole close. Sol reviews of #2149 may continue past round 4 for the remaining fixes.
+**Why:** the gap predates #2149 and closing it changes the close call itself; it is not part of the commission fix.
+**What this forbids/implies:** #2149 does not change the close call. KI-129's payments-received part stays open (it needs a rule for prepayment checks, which can be edited or deleted later); its follow-up must include the close re-check.
+
 ## 2026-11-21 — #2068: Mason owner-accepted 4 Sol finding(s) at `1d9202dcb57d`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `1d9202dcb57d` (base `dab22364c6bc`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

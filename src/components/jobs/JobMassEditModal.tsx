@@ -110,6 +110,7 @@ export default function JobMassEditModal({
   const reset = () => setDraft(emptyMassEditDraft);
 
   const handleClose = () => {
+    editKey.forget();
     reset();
     onClose();
   };

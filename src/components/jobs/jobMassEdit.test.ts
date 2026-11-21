@@ -260,3 +260,13 @@ describe('jobMassEdit — Loader Worksheet bulk fields (#10)', () => {
     expect(lines.some((l) => l.includes('Loader Comment'))).toBe(true);
   });
 });
+
+describe('loaderNumberError exponent input', () => {
+  it('refuses exponent forms that would round into the accepted range', () => {
+    expect(loaderNumberError('1e-400', 'carrier')).toBe('Carrier rate must be a number.');
+    expect(loaderNumberError('1e3', 'capacity')).toBe('Tank capacity must be a number.');
+    expect(loaderNumberError('15', 'carrier')).toBeNull();
+    expect(loaderNumberError('.5', 'capacity')).toBeNull();
+    expect(loaderNumberError('0', 'carrier')).toBeNull();
+  });
+});

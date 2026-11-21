@@ -2792,6 +2792,8 @@ export default function JobDetail() {
   };
 
   const performSave = async (licenseOverride: boolean, overrideReasonForAudit?: string) => {
+    // Crew/loader values as loaded when Save was clicked: a reload during the save must not make an untouched value look edited.
+    const loaderBaseAtSave = isNew ? { groundCrewId: '', carrier: '', capacity: '' } : { ...savedLoaderRef.current };
     // Bound to the route this save STARTED on — see captureRouteEpoch. Captured here
     // rather than in handleSave because the expired-license override path calls
     // performSave directly, and this is where the save actually begins. The job row is
@@ -2980,7 +2982,7 @@ export default function JobDetail() {
         try {
           // #1979: through edit_jobs; a skipped job (e.g. invoiced) counts as not saved.
           // Only the values the user changed are sent, so an untouched older value is left as it is.
-          const base = isNew ? { groundCrewId: '', carrier: '', capacity: '' } : savedLoaderRef.current;
+          const base = loaderBaseAtSave;
           const crewChanges: EditJobsChanges = {};
           if (groundCrewId !== base.groundCrewId) crewChanges.ground_crew_id = groundCrewId || null;
           if (carrierRateGpa !== base.carrier) crewChanges.carrier_rate_gpa = carrierVal;

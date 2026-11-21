@@ -31,6 +31,11 @@ export function useEditJobsKey(userId: string) {
     },
     /** Call after a confirmed reply. */
     done(scope: string): void { idem.resetKeyFor(scope); },
+    /** Call when the screen is closed: reopening it is a new edit, never a replay of an old one. */
+    forget(): void {
+      if (lastScope.current !== null) idem.resetKeyFor(lastScope.current);
+      lastScope.current = null;
+    },
   };
 }
 

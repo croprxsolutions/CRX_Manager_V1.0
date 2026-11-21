@@ -171,9 +171,10 @@ const LOADER_NUMBER_MAX = 1_000_000;
 /** Message for a value the server would refuse, or null when the input is blank or in range. */
 export function loaderNumberError(raw: string, kind: 'carrier' | 'capacity'): string | null {
   if (raw.trim() === '') return null;
-  const n = Number(raw.trim()); // Number, not parseFloat: "12abc" is refused, not read as 12
   const label = kind === 'carrier' ? 'Carrier rate' : 'Tank capacity';
-  if (Number.isNaN(n)) return `${label} must be a number.`;
+  // Plain decimals only: "12abc" and "1e-400" (which Number reads as 0) are refused.
+  if (!/^-?(\d+(\.\d*)?|\.\d+)$/.test(raw.trim())) return `${label} must be a number.`;
+  const n = Number(raw.trim());
   if (kind === 'carrier' && n === 0) return null;
   if (n < LOADER_NUMBER_MIN || n > LOADER_NUMBER_MAX) {
     return kind === 'carrier'

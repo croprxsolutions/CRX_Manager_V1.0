@@ -98,3 +98,12 @@ describe('summarizeEditJobs with field changes and a refused cancel', () => {
     })).toBe('2 jobs edited. 1 job cancelled. 1 job not cancelled (completed). 1 job skipped (invoiced).');
   });
 });
+
+describe('useEditJobsKey.forget', () => {
+  it('gives a reopened screen a fresh key for the same edit', () => {
+    const { result } = renderHook(() => useEditJobsKey('user-1'));
+    const k = result.current.keyFor('A');
+    result.current.forget();
+    expect(result.current.keyFor('A')).not.toBe(k);
+  });
+});

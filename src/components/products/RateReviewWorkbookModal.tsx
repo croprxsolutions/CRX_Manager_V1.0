@@ -45,19 +45,18 @@ const isStoredOutcome = (value: unknown) => {
     && versionNumber(value.expected_outcome_version) && nullableText(value.note)
     && (value.outcome === null || value.outcome === 'approved_default' || value.outcome === 'no_per_acre_default' || value.outcome === 'needs_label_data');
 };
+const isLabelCheck = (value: unknown) => isRecord(value) && typeof value.status === 'string'
+  && (value.status !== 'above' || (Array.isArray(value.above) && value.above.every(isRecord)))
+  && (value.why == null || typeof value.why === 'string');
+const isParentChanged = (value: unknown) => isRecord(value) && typeof value.was === 'string' && nullableText(value.now);
 const isStoredPreviewRow = (value: unknown, count: number) => {
   if (!isRecord(value)) return false;
   if (typeof value.index !== 'number' || !Number.isInteger(value.index) || value.index < 0 || value.index >= count
       || typeof value.status !== 'string') return false;
   if (['rate_id', 'parent_id', 'name', 'outcome', 'note', 'problem'].some((field) => value[field] !== undefined && !nullableText(value[field]))) return false;
   if (value.actions != null && (!Array.isArray(value.actions) || !value.actions.every((action: unknown) => typeof action === 'string'))) return false;
-  if (value.label_check != null) {
-    if (!isRecord(value.label_check) || typeof value.label_check.status !== 'string') return false;
-    if (value.label_check.status === 'above' && (!Array.isArray(value.label_check.above) || !value.label_check.above.every(isRecord))) return false;
-    if (value.label_check.why != null && typeof value.label_check.why !== 'string') return false;
-  }
-  if (value.parent_changed !== undefined
-      && (!isRecord(value.parent_changed) || typeof value.parent_changed.was !== 'string' || !nullableText(value.parent_changed.now))) return false;
+  if (value.label_check != null && !isLabelCheck(value.label_check)) return false;
+  if (value.parent_changed !== undefined && !isParentChanged(value.parent_changed)) return false;
   return true;
 };
 const isPendingRateReview = (value: unknown): value is PendingRateReview => {

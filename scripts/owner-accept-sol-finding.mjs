@@ -57,7 +57,14 @@ const readJson = (name) => { try { return JSON.parse(readFileSync(path.join(stat
 const record = readJson(blockersRecordName(head));
 const problem = blockersRecordProblem(record, { headSha: head });
 if (problem) die(`${problem}. Run the full Sol review at this head first: node scripts/write-codex-push-proof.mjs`);
-const gates = gateFilesIn(git(["diff", "--name-only", "--no-renames", `${record.base_sha}...${head}`]).split(/\r?\n/).filter(Boolean));
+const forkPoint = git(["merge-base", record.base_sha, head]);
+const showAt = (sha, p) => {
+  try {
+    return String(execFileSync("git", ["show", `${sha}:${p}`], { cwd: checkout, encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 }));
+  } catch { return null; }
+};
+const gates = gateFilesIn(git(["diff", "--name-only", "--no-renames", `${record.base_sha}...${head}`]).split(/\r?\n/).filter(Boolean),
+  (p) => [showAt(forkPoint, p), showAt(head, p)]);
 if (gates.length) die(`this pull request changes gate or approval files (${gates.slice(0, 5).join(", ")}); a Sol review that was not clean cannot vouch for them, so its findings must be fixed, not accepted.`);
 
 const argv = process.argv.slice(2);

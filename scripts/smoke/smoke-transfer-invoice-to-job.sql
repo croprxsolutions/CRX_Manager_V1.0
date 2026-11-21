@@ -30,7 +30,7 @@ BEGIN
   IF v_admin IS NULL THEN RAISE EXCEPTION 'SMOKE_SETUP: no admin'; END IF;
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] RT A '||v_sfx) RETURNING id INTO v_cust;
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] RT B '||v_sfx) RETURNING id INTO v_cust2;
-  INSERT INTO products (product_name, unit_size, epa_registration, product_form) VALUES ('[SMOKE] RT Prod '||v_sfx,'GL','999999-99999','liquid') RETURNING id INTO v_prodA;
+  INSERT INTO products (product_name, unit_size, epa_registration, product_form, inventory_unit) VALUES ('[SMOKE] RT Prod '||v_sfx,'Gal','999999-99999','liquid', 'Gal') RETURNING id INTO v_prodA;
   INSERT INTO fields (customer_id, field_name, crop_type) VALUES (v_cust,'[SMOKE] RT F1 '||v_sfx,'corn') RETURNING id INTO v_field;
   INSERT INTO fields (customer_id, field_name, crop_type) VALUES (v_cust,'[SMOKE] RT F2 '||v_sfx,'corn') RETURNING id INTO v_field2;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role','authenticated')::text, true);
@@ -42,7 +42,7 @@ BEGIN
     VALUES ('[SMOKE] RT JOB-'||v_sfx, v_cust, 'scheduled', CURRENT_DATE-3, 2026, 50000, 20000, v_admin) RETURNING id INTO v_job;
   INSERT INTO job_fields (job_id, field_id, acres_to_treat, sort_order) VALUES (v_job, v_field, 100, 1);
   INSERT INTO job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit, cost_per_unit_cents, price_per_unit_cents, sort_order)
-    VALUES (v_job, v_prodA, 10, 'GL', 0.5, 'PT', 2000, 5000, 1);
+    VALUES (v_job, v_prodA, 10, 'Gal', 0.5, 'PT', 2000, 5000, 1);
   -- An as-applied legal record on the job (so the reverse must detach it).
   INSERT INTO application_records (record_number, source_type, source_id, customer_id, application_date, created_by)
     VALUES ('[SMOKE] REC-'||v_sfx, 'job', v_job, v_cust, CURRENT_DATE-1, v_admin) RETURNING id INTO v_apprec;

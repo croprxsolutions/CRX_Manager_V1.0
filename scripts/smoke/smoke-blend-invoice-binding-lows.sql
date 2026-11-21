@@ -63,10 +63,10 @@ BEGIN
 
   -- Two products through the governed pricing path: an expensive one (so a 4th-place quantity
   -- difference is worth cents) and an ordinary one.
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] BIL Big ' || v_suffix, 'GL') RETURNING id INTO v_p_big;
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] BIL Q ' || v_suffix, 'GL') RETURNING id INTO v_p_q;
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[E2E] BIL Big ' || v_suffix, 'Gal', 'liquid', 'Gal') RETURNING id INTO v_p_big;
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[E2E] BIL Q ' || v_suffix, 'Gal', 'liquid', 'Gal') RETURNING id INTO v_p_q;
   v_pricing := public.preview_product_pricing_changes(
     'product_page', NULL,
     jsonb_build_array(
@@ -137,15 +137,15 @@ BEGIN
     END CASE;
   END LOOP;
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order)
-  VALUES (v_t_unit, v_p_big, '[E2E] BIL per-unit', 1.23456, 'GL', 0.123456, 'gal/ac', 1),
-         (v_t_share, v_p_big, '[E2E] BIL in grower share', 1.23456, 'GL', 0.123456, 'gal/ac', 1),
+  VALUES (v_t_unit, v_p_big, '[E2E] BIL per-unit', 1.23456, 'Gal', 0.123456, 'gal/ac', 1),
+         (v_t_share, v_p_big, '[E2E] BIL in grower share', 1.23456, 'Gal', 0.123456, 'gal/ac', 1),
          -- 0.000004 gal/ac on 10 acres is 0.00004 gal, which stores as 0.0000.
-         (v_t_tiny, v_p_big, '[E2E] BIL tiny per-unit', 0.00004, 'GL', 0.000004, 'gal/ac', 1),
-         (v_t_tiny_share, v_p_big, '[E2E] BIL tiny in grower share', 0.00004, 'GL', 0.000004, 'gal/ac', 1);
+         (v_t_tiny, v_p_big, '[E2E] BIL tiny per-unit', 0.00004, 'Gal', 0.000004, 'gal/ac', 1),
+         (v_t_tiny_share, v_p_big, '[E2E] BIL tiny in grower share', 0.00004, 'Gal', 0.000004, 'gal/ac', 1);
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order, unit_cost_cents)
-  VALUES (v_t_zero, v_p_big, '[E2E] BIL zero quoted', 20, 'GL', 2, 'gal/ac', 1, 100) RETURNING id INTO v_line_zero;
+  VALUES (v_t_zero, v_p_big, '[E2E] BIL zero quoted', 20, 'Gal', 2, 'gal/ac', 1, 100) RETURNING id INTO v_line_zero;
   INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, rate_per_acre, rate_per_acre_unit, sequence_order, unit_cost_cents)
-  VALUES (v_t_zero, v_p_q, '[E2E] BIL quoted six', 20, 'GL', 2, 'gal/ac', 2, 100);
+  VALUES (v_t_zero, v_p_q, '[E2E] BIL quoted six', 20, 'Gal', 2, 'gal/ac', 2, 100);
 
   -- 1. Per-unit line (Mode B): billed and costed from the stored quantity.
   v_res := public.create_invoice_from_blend_ticket(v_t_unit, v_admin, 'e2e-bil-invoice-1-' || v_suffix);

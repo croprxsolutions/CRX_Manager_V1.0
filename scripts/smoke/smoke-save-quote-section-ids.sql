@@ -80,8 +80,8 @@ BEGIN
   RETURNING id INTO v_customer_id;
   -- One product per section, so no save repeats a product (QUOTE_ITEM_AMBIGUOUS_COST is not under test).
   FOR v_i IN 1..3 LOOP
-    INSERT INTO products (product_name, unit_size, product_form)
-    VALUES ('[SMOKE] Section Ids Product ' || v_i || ' ' || v_suffix, 'gal', 'liquid')
+    INSERT INTO products (product_name, unit_size, product_form, inventory_unit)
+    VALUES ('[SMOKE] Section Ids Product ' || v_i || ' ' || v_suffix, 'gal', 'liquid', 'Gal')
     RETURNING id INTO v_product_id;
     v_products := v_products || v_product_id;
   END LOOP;

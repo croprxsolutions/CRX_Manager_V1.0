@@ -60,8 +60,8 @@ BEGIN
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Live Job Farm ' || v_suffix) RETURNING id INTO v_customer_id;
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Live Job Farm B ' || v_suffix) RETURNING id INTO v_customer2_id;
-  INSERT INTO products (product_name, unit_size, product_form)
-  VALUES ('[SMOKE] Live Job Product ' || v_suffix, 'gal', 'liquid') RETURNING id INTO v_product_id;
+  INSERT INTO products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[SMOKE] Live Job Product ' || v_suffix, 'gal', 'liquid', 'Gal') RETURNING id INTO v_product_id;
   v_price_res := preview_product_pricing_changes('product_page', NULL, jsonb_build_array(jsonb_build_object(
     'product_id', v_product_id, 'row_version', (SELECT pricing_version FROM products WHERE id = v_product_id),
     'pricing_mode', 'margin_driven', 'new_cost', '6.00', 'tier1_margin_percent', '20',

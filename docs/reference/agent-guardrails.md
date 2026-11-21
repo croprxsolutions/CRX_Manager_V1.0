@@ -353,6 +353,8 @@ These run when Mason submits a prompt, BEFORE Claude reads it. They inject extra
 |------|------------------|-----|
 | `ship-intent-reminder.mjs` | **Removed 2026-10-29 (Mason)** — unwired and deleted | Formerly reminded Claude to drive build/fix/ship messages through `/ship`; `AGENTS.md` routes that work instead |
 
+`release-pass-prompt.mjs` (Claude only, since 2026-11-20) records Mason's `ship the release` / `go live #<n>` as a 24-hour pass for that session (`release-pass-lib.mjs`); `pr-merge-guard.mjs` then lets that session merge the release or hotfix into `main` and the back-merge into `staging`, and `migration-landing-gate-lib.mjs` accepts it in place of Taha's `Ready to merge:` comment. `stop the release` withdraws it. Every other merge and apply gate still runs. The same day, `owner-approval-prompt.mjs` started accepting a plain `yes` (still only right after the request it names), approvals last 24 hours, and they survive the PR head moving (the SQL hash still binds); a destructive migration no longer blocks a `staging` merge.
+
 `hold-latch-prompt.mjs` is also a UserPromptSubmit hook — see the Correction-mined guards table below for what it does.
 
 ### SessionStart Hooks (`.claude/hooks/`)

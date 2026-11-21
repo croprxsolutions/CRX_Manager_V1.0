@@ -234,7 +234,9 @@ Reports Library shows, and the one-customer year-end summary when Customers is h
 [2026-11-19-ki119-page-access-lock-CONTRACT.md](../plans/2026-11-19-ki119-page-access-lock-CONTRACT.md); proof:
 `scripts/smoke/prove-page-access-locks-reports-real-schema.mjs`. The invoice and payment actions are KI-169. Known
 limit (Mason's scope): a person with reports hidden still sees the order and invoice rows on the screens they keep.
-Exploit-level detail is held privately until the fix is live.
+Also accepted (Mason, 2026-11-21, Sol round 5): the Posted Applications and Price List tabs read the same records as
+the Record Book and Products pages, so they are not locked when those pages are hidden too; revisit when those pages
+get their own lock. Exploit-level detail is held privately until the fix is live.
 
 ### KI-169 — Page Access does not yet lock the invoice and payment actions
 **HIGH · OPEN · security/money · split from KI-119 2026-11-19 · Taha, after 2026-12-15**

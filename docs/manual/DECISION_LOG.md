@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2045: Mason owner-accepted 1 Sol finding(s) at `b75d3a0306ca`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2045 at `b75d3a0306ca` (base `ca1ed13c47fd`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270130110000_inventory_edge_cases_1942.sql:315`, text sha256 `d98bb40a0d45e8e1` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen (ref 622226788197)
+
 ## 2026-11-21 — #2045 may have one more Sol round (round 6)
 
 **Decision (Mason, in chat, 2026-11-21: "Yes, one more each").** PR #2045 (#1942 inventory edge cases) may have one more Sol round (round 6).

@@ -257,8 +257,19 @@ function splitShellWordsRaw(value) {
 // The long-standing token view: words split correctly, wrapping quotes stripped,
 // everything else as typed. Callers that read VALUES (remote URLs, Windows
 // destination paths) use this, because the raw form is the correct one there.
+// Shell redirections (`>`, `2>`, `>>out`, `< in`) and their target file are not
+// git arguments: read as words they became fake refspecs/branches (2026-11-21).
+// Matched on the RAW word, so a quoted `'>'` stays a real argument.
+const SHELL_REDIRECT_RE = /^\d*(?:>>|>\||>&|>|<<<|<<|<&|<)/;
 function splitShellArgs(value) {
-  return splitShellWordsRaw(value).map(unquoteShellArg);
+  const raw = splitShellWordsRaw(value);
+  const words = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const op = raw[i].match(SHELL_REDIRECT_RE);
+    if (!op) { words.push(unquoteShellArg(raw[i])); continue; }
+    if (op[0] === raw[i]) i += 1; // bare operator: its target is the next word
+  }
+  return words;
 }
 
 // Every argv a push's arguments can mean, because the guard reads text without

@@ -349,6 +349,11 @@ async function main() {
   const adminBefore = results(all, ADMIN);
   const repBefore = results(all, REP);
   const yearEndBefore = okProbe(YEAR_END_ONE, REP_DENIED);
+  // Sol r4: before the candidate, a rep with Reports AND Customers hidden still reads the one-customer summary.
+  raw(`UPDATE public.profiles SET denied_pages = denied_pages || ARRAY['customers'] WHERE id = '${REP_DENIED}';`);
+  assert.equal(okProbe(YEAR_END_ONE, REP_DENIED), yearEndBefore);
+  raw(`UPDATE public.profiles SET denied_pages = ARRAY['reports', 'sales-reports', 'invoices'] WHERE id = '${REP_DENIED}';`);
+  console.log("[case] BEFORE: a rep with Reports and Customers hidden reads one customer's year-end summary");
   assert.deepEqual(deniedBefore, repBefore, 'two reps should see the same report results before the candidate');
   const EMPTY = 'd41d8cd98f00b204e9800998ecf8427e';
   for (const k of ['faa', 'byField', 'byCustomer', 'byApplicator']) assert.notEqual(adminBefore[k], EMPTY, `${k} returned no rows: the seeded application is not exercised`);
@@ -380,6 +385,16 @@ async function main() {
   console.log('[case] AFTER: the hidden rep is refused every report function, with the page named');
   assert.equal(okProbe(YEAR_END_ONE, REP_DENIED), yearEndBefore, "the hidden rep's one-customer year-end summary is unchanged");
   console.log("[case] AFTER: the hidden rep still reads one customer's year-end summary (Customer page)");
+  // Sol r4 (Mason, 2026-11-21): Reports AND Customers hidden refuses it; Customers alone, or an admin, does not.
+  raw(`UPDATE public.profiles SET denied_pages = denied_pages || ARRAY['customers'] WHERE id IN ('${REP_DENIED}', '${ADMIN_STALE}');
+    UPDATE public.profiles SET denied_pages = ARRAY['customers'] WHERE id = '${REP}';`);
+  refusedProbe(YEAR_END_ONE, /PAGE_ACCESS_DENIED: reports, customers/, REP_DENIED);
+  assert.equal(okProbe(YEAR_END_ONE, ADMIN_STALE), yearEndBefore, 'an admin with both pages hidden keeps the summary');
+  assert.equal(okProbe(YEAR_END_ONE, REP), yearEndBefore, 'a rep with only Customers hidden keeps the summary');
+  raw(`UPDATE public.profiles SET denied_pages = ARRAY['reports', 'sales-reports', 'invoices'] WHERE id = '${REP_DENIED}';
+    UPDATE public.profiles SET denied_pages = ARRAY['reports', 'sales-reports'] WHERE id = '${ADMIN_STALE}';
+    UPDATE public.profiles SET denied_pages = '{}' WHERE id = '${REP}';`);
+  console.log('[case] AFTER: Reports and Customers both hidden refuses the one-customer summary; Customers alone or an admin keeps it');
   for (const sql of Object.values(SALES)) refusedProbe(sql, /PAGE_ACCESS_DENIED: sales-reports/, REP_SALES_ONLY);
   assert.deepEqual(results(REPORTS, REP_SALES_ONLY), Object.fromEntries(Object.keys(REPORTS).map((k) => [k, repBefore[k]])));
   console.log('[case] AFTER: a rep with only sales-reports hidden is refused the sales reports and keeps the Reports Library');

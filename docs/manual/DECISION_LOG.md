@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-21 — #2051 (KI-119): Mason chose to fix Sol round 4's year-end summary finding
+
+**Decision (Mason, 2026-11-21, "Fix it").** Sol round 4 on PR #2051 found that the one-customer year-end summary stays open to a sales rep with both Reports and Customers hidden. Mason chose a fix over an owner-accept: that summary is now refused only when BOTH pages are hidden (either page alone keeps it; admins always pass). This entry names #2051 so Sol may run round 5 on it.
+
 ## 2026-11-20 — #2051: Mason owner-accepted 1 Sol finding(s) at `4294c88e1cfa`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #2051 at `4294c88e1cfa` (base `e4e6e11fae1c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

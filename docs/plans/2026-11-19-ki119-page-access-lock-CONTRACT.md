@@ -22,7 +22,7 @@ Read at `origin/staging` e4e6e11fa, live read-only 2026-11-19 (Central). Challen
 | `get_commission_history_report` → `get_commission_balance_report` / `get_commission_payment_detail_report`; `create_commission_payment` | `require_admin()` / admin check | none (already admin-only) |
 | `get_customer_balance_listing`, `get_chemical_history` | DEFINER, admin or sales_rep | add page check `reports` |
 | `get_batch_year_end_summaries` | DEFINER, no own check; inner `get_customer_year_end_summary` allows reps, so a rep can pull every customer's summary at once | add page check `reports` (the only other caller, Month-End Close, is admin; admins always pass) |
-| `get_customer_year_end_summary` (one customer) | admin or sales_rep | none: the Customer page uses it (Mason's scope) |
+| `get_customer_year_end_summary` (one customer) | admin or sales_rep | refuse a sales rep with BOTH `reports` and `customers` hidden (Mason, 2026-11-21, Sol r4); either page alone keeps it (the Customer page uses it) |
 | `get_logbook_faa`, `_by_field`, `_by_customer`, `_by_applicator` | SQL INVOKER; EXECUTE to PUBLIC, `anon`, `authenticated`; rows limited by table RLS | wrap with a check (see Authority); revoke PUBLIC/`anon` |
 | `get_sales_summary_report`, `get_sales_detail_report` | DEFINER; impl allows admin or sales_rep | add page check `sales-reports` |
 | Reports Library Commissions tab: reads `public.commissions` directly (policy `comm_select`: admin, or a sales rep's own rows) | RLS | the policy also hides a rep's own rows while `reports` is hidden (Sol round 1, 2026-11-19; no other rep screen reads the table) |

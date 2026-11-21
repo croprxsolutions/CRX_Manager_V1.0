@@ -4,6 +4,8 @@
 --   A. an admin and a sales rep with nothing hidden run every guarded report;
 --   B. the rep with `reports` hidden is refused PAGE_ACCESS_DENIED: reports on the Reports Library
 --      functions, keeps Sales Reports, and keeps the Customer page's one-customer year-end summary;
+--   H. the rep with `reports` AND `customers` hidden is refused the one-customer year-end summary; `customers`
+--      alone keeps it (Sol r4);
 --   C. the rep with `sales-reports` hidden is refused on both sales reports and keeps the Reports Library;
 --   D. a driver and an applicator are refused the logbooks; a user with no active profile is refused;
 --   G. the rep's own commission rows disappear while `reports` is hidden (not for `sales-reports`), and the admin
@@ -114,6 +116,29 @@ BEGIN
       RAISE EXCEPTION 'SMOKE_FAIL: (B) % refused with only reports hidden: %', v_fn, v_err;
     END;
     EXECUTE 'RESET ROLE';
+  END LOOP;
+
+  -- H (Sol r4, Mason 2026-11-21): Reports AND Customers hidden refuses the one-customer year-end summary;
+  -- Customers alone keeps it.
+  FOREACH v_who IN ARRAY ARRAY['{reports,customers}', '{customers}'] LOOP
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    UPDATE public.profiles SET denied_pages = v_who::text[] WHERE id = v_rep;
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_rep, 'role', 'authenticated')::text, true);
+    PERFORM set_config('request.jwt.claim.sub', v_rep::text, true);
+    v_err := NULL;
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    BEGIN
+      v_n := pg_temp.ki119_run('year_end_one', v_customer);
+    EXCEPTION WHEN OTHERS THEN
+      v_err := SQLERRM;
+    END;
+    EXECUTE 'RESET ROLE';
+    IF v_who = '{reports,customers}' AND v_err IS DISTINCT FROM 'PAGE_ACCESS_DENIED: reports, customers' THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (H) year-end summary with Reports and Customers hidden: %', coalesce(v_err, 'not refused');
+    ELSIF v_who = '{customers}' AND v_err IS NOT NULL THEN
+      RAISE EXCEPTION 'SMOKE_FAIL: (H) year-end summary refused with only Customers hidden: %', v_err;
+    END IF;
   END LOOP;
 
   -- C: `sales-reports` hidden.

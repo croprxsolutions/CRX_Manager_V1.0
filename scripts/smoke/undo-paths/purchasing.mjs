@@ -22,12 +22,12 @@ function seedPurchasing() {
   const po = (k, n) => `INSERT INTO undo_paths.ids SELECT 'po-${k}', (public.save_purchase_order(NULL,
       jsonb_build_object('po_number', '[UNDO] PO-${k}', 'vendor', '[UNDO] Vendor', 'status', 'draft'),
       jsonb_build_array(jsonb_build_object('product_id', '${PROD}', 'product_name', '[UNDO] Purchased Product', 'quantity_ordered', ${n},
-        'unit_cost_cents', 600, 'unit_size', 'GL')), '${ADMIN}', 'undo-seed-po-${k}')->>'po_id')::uuid;
+        'unit_cost_cents', 600, 'unit_size', 'Gal')), '${ADMIN}', 'undo-seed-po-${k}')->>'po_id')::uuid;
     SELECT public.submit_purchase_order(${PO[k]}, '${ADMIN}', 'undo-seed-po-submit-${k}');`;
   seed('purchasing', `INSERT INTO public.vendors (id, name) VALUES ('${VENDOR}', '[UNDO] Vendor');
-    INSERT INTO public.products (id, product_name, unit_size, epa_registration, product_form)
-      VALUES ('${PROD}', '[UNDO] Purchased Product', 'GL', '999999-99998', 'liquid');
-    INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size) VALUES ('${PROD}', 'Main Warehouse', 50, 0, 'GL');
+    INSERT INTO public.products (id, product_name, unit_size, epa_registration, product_form, inventory_unit)
+      VALUES ('${PROD}', '[UNDO] Purchased Product', 'Gal', '999999-99998', 'liquid', 'Gal');
+    INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size) VALUES ('${PROD}', 'Main Warehouse', 50, 0, 'Gal');
     ${po('received', 10)} ${po('open', 7)}
     SELECT public.receive_po_items(jsonb_build_array(jsonb_build_object('po_item_id',
       ${ITEM('received')}, 'quantity', 4,

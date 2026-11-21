@@ -50,13 +50,13 @@ BEGIN
 
   -- ---- synthetic fixtures ----
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] CDO Cust ' || v_sfx) RETURNING id INTO v_cust;
-  INSERT INTO products  (product_name) VALUES ('[SMOKE] CDO Prod ' || v_sfx) RETURNING id INTO v_prod;
+  INSERT INTO products  (product_name, product_form, inventory_unit) VALUES ('[SMOKE] CDO Prod ' || v_sfx, 'liquid', 'Gal') RETURNING id INTO v_prod;
   INSERT INTO inventory (product_id, location, quantity_available, quantity_prebooked, quantity_on_order, unit_size)
-    VALUES (v_prod, 'Main Warehouse', 1000, 0, 0, '2.5 gal');
+    VALUES (v_prod, 'Main Warehouse', 1000, 0, 0, 'Gal');
 
   v_items := jsonb_build_array(jsonb_build_object(
     'product_id', v_prod, 'product_name', '[SMOKE] CDO Prod ' || v_sfx,
-    'quantity', 10, 'price_per_unit', 20, 'unit_cost', 10, 'unit_size', '2.5 gal'));
+    'quantity', 10, 'price_per_unit', 20, 'unit_cost', 10, 'unit_size', 'Gal'));
   v_want_po := '[SMOKE] PO-' || v_sfx;
 
   -- ===== PROBE 1: sales_rep creates a direct order WITH a PO (THE fix) =====

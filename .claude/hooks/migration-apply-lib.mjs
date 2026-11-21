@@ -920,9 +920,9 @@ export function evaluateMigrationApply({
       `this exact file is fresh, run \`node scripts/owner-approve-migration.mjs supabase/migrations/${migName || "<file>"}.sql\` ` +
       `from the PR's checkout, show Mason the plain-English summary it prints, word for word and alone, as the last ` +
       `message of your turn (explain the change BEFORE running the script: text in the same reply joins the summary and his ` +
-      `plain reply is refused), and ask him to reply \`I approve\` (he can do it from his ` +
-      `phone; \`approve <code>\` also works), then ` +
-      `apply within 30 minutes of his reply through ` +
+      `plain reply is refused), and ask him to reply \`yes\` (he can do it from his ` +
+      `phone, hours ahead; \`approve <code>\` also works), then ` +
+      `apply within 24 hours of his reply through ` +
       `\`node scripts/apply-migration-file.mjs\` (the MCP apply tool never accepts it). Do NOT write, copy or ` +
       `edit an approval or request file yourself, and never send the reply on his behalf; only his own message counts.`;
     const refusals = {

@@ -12,7 +12,6 @@
 
 import { isMoneyPath } from "./codex-bot-review-lib.mjs";
 import { ghApiRepoPath, sanitizeForMessage } from "./codex-push-lib.mjs";
-import { destructiveMigrationCheck } from "./live-testdata-lib.mjs";
 
 const show = (value) => sanitizeForMessage(value, 160);
 
@@ -228,10 +227,8 @@ export function releaseFreezeProblem({ repo, gh }) {
   return `release PR ${list} (release/next into main) is open, and a staging merge now would re-cut release/next, moving the release head and voiding its Sol proof and Taha's "Ready to merge". Staging is frozen for agents until the release merges or closes; retry then (Taha or Mason may merge by hand; ship.md › Staging)`;
 }
 
-// #1838 MED 3 (Mason's agents): a destructive migration (DELETE/TRUNCATE/DROP of data) is Mason's on live. Into
-// staging it would merge unflagged and first meet his approval on release day, holding the whole release; so an
-// agent never merges one into staging: Taha or Mason does, having looked. null when the PR has none. Fails closed.
-// Also (Taha, 13 Nov; on top of GitHub's code-owner review of .github/, which stays on as the guard agents can't
+// A destructive migration no longer stops a staging merge (Mason, 2026-11-20): staging holds test data, and
+// live still needs his own `yes` for it. What stays (Taha, 13 Nov; on top of GitHub's code-owner review of .github/, which stays on as the guard agents can't
 // edit): a PR that adds, changes, deletes or renames anything under .github/ is Taha's to merge, never an agent's.
 export function stagingDestructiveProblem({ repo, gh, number, headSha, baseSha }) {
   const repoPath = ghApiRepoPath(repo);
@@ -264,31 +261,18 @@ export function stagingDestructiveProblem({ repo, gh, number, headSha, baseSha }
   if (github.length || treesDiffer) {
     return `it changes ${github.length ? [...new Set(github)].join(", ") : ".github/"}: the release guard and workflows live in .github/, so Taha merges it, never an agent (ship.md › Staging)`;
   }
-  const files = rows.filter(([status, f]) => status !== "removed" && /^supabase\/migrations\/[^/]+\.sql$/.test(f)).map(([, f]) => f);
-  const found = [];
-  for (const f of files) {
-    let sql;
-    try {
-      // The raw media type serves files of any size; the JSON form has no content over 1 MB (Luna, #1838 fixes).
-      sql = String(gh(["api", "-H", "Accept: application/vnd.github.raw", `${repoPath}/contents/${f}?ref=${headSha}`]));
-    } catch (error) {
-      return `${f} could not be read (${show(error)}) (fail closed)`;
-    }
-    if (!sql.trim()) return `${f} came back empty from GitHub (fail closed)`;
-    let verdict;
-    try { verdict = destructiveMigrationCheck(sql); } catch { verdict = { destructive: true, reason: "it could not be checked" }; }
-    if (verdict?.destructive) found.push(`${f.split("/").pop()} (${verdict.reason})`);
-  }
-  return found.length
-    ? `it carries a destructive migration (${found.join(", ")}), which is Mason's on live, so an agent doesn't merge it into staging: Taha or Mason merges it, and Mason approves that exact file before release day`
-    : null;
+  // Mason, 2026-11-20: a destructive migration may merge into staging (test data only); it still needs
+  // his own `yes` before it touches live (migration-apply-lib.mjs, owner-approval-lib.mjs).
+  return null;
 }
 
 // null when an agent may merge this PR (its other gates still apply).
-export function agentMergeProblem(base, headRef) {
+// `releasePass`: Mason's `ship the release` / `go live #n` in this session covers this PR (release-pass-lib.mjs).
+export function agentMergeProblem(base, headRef, { releasePass = false } = {}) {
+  if (releasePass && (base === "main" || (base === "staging" && headRef === "main"))) return null;
   if (base === "main") {
     return "an agent never merges into main: only the weekly release PR (release/next) and hotfix/<name> PRs go there, " +
-      "and Taha or Mason merges them. Feature PRs, migrations included, target staging (ship.md › Staging)";
+      "and Taha or Mason merges them, or an agent whose session Mason told `ship the release` / `go live #<n>`. Feature PRs, migrations included, target staging (ship.md › Staging)";
   }
   if (base === "staging" && headRef === "main") {
     return "the back-merge (main into staging) is Taha's or Mason's to merge, with \"Create a merge commit\"";

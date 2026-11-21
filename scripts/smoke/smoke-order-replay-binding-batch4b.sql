@@ -72,12 +72,12 @@ BEGIN
   VALUES ('[SMOKE] Order Replay Farm ' || v_suffix, '[SMOKE]-ORB4B-' || v_suffix, 1)
   RETURNING id INTO v_customer;
   -- A cost-free shell for inventory row 1.
-  INSERT INTO public.products (product_name, unit_size, is_active)
-  VALUES ('[SMOKE] ORB4B shell ' || v_suffix, 'gal', true)
+  INSERT INTO public.products (product_name, unit_size, is_active, product_form, inventory_unit)
+  VALUES ('[SMOKE] ORB4B shell ' || v_suffix, 'gal', true, 'liquid', 'Gal')
   RETURNING id INTO v_shell;
   -- An order line for a catalog product needs a governed positive cost: preview -> approve -> apply.
-  INSERT INTO public.products (product_name, unit_size, product_form)
-  VALUES ('[SMOKE] ORB4B Product ' || v_suffix, 'GL', 'liquid')
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[SMOKE] ORB4B Product ' || v_suffix, 'Gal', 'liquid', 'Gal')
   RETURNING id INTO v_product;
   v_pricing := public.preview_product_cost_basis_changes('product_page', NULL,
     jsonb_build_array(jsonb_build_object(
@@ -215,7 +215,7 @@ BEGIN
   -- --------------------------------------------------------------------------------------------
   v_key := v_prefix || 'edit';
   v_items := jsonb_build_array(jsonb_build_object('product_id', v_product, 'product_name', '[SMOKE] ORB4B line',
-    'unit_size', 'GL', 'cost_per_unit', 1, 'price_per_unit', 10, 'total_units_needed', 2));
+    'unit_size', 'Gal', 'cost_per_unit', 1, 'price_per_unit', 10, 'total_units_needed', 2));
   v_ver := (SELECT row_version FROM public.orders WHERE id = v_order[1]);
   v_res := public.update_order_items(v_order[1], v_items, v_admin, v_key, v_ver);
   v_ver_after := (SELECT row_version FROM public.orders WHERE id = v_order[1]);

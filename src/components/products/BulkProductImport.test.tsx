@@ -133,9 +133,9 @@ describe('row building', () => {
     buildProductImportRow(cells, mapProductImportHeaders(headers), 2, ['Herbicide', 'Seed']);
 
   it('fixes spelling only, and says so', () => {
-    const r = build(['product_name', 'category', 'product_form', 'container_type', 'signal_word', 'is_rup'],
-      ['Chem', 'herbicide', 'Liquid', 'jug', 'CAUTION', 'Yes']);
-    expect(r.insert).toEqual({ product_name: 'Chem', category: 'Herbicide', product_form: 'liquid', container_type: 'Jug', signal_word: 'Caution', is_rup: true });
+    const r = build(['product_name', 'inventory_unit', 'category', 'product_form', 'container_type', 'signal_word', 'is_rup'],
+      ['Chem', 'Gal', 'herbicide', 'Liquid', 'jug', 'CAUTION', 'Yes']);
+    expect(r.insert).toEqual({ product_name: 'Chem', inventory_unit: 'Gal', category: 'Herbicide', product_form: 'liquid', container_type: 'Jug', signal_word: 'Caution', is_rup: true });
     expect(r.fixes).toEqual(['category: "herbicide" → "Herbicide"', 'product_form: "Liquid" → "liquid"', 'container_type: "jug" → "Jug"', 'signal_word: "CAUTION" → "Caution"']);
     expect(r.error).toBeUndefined();
   });
@@ -160,6 +160,8 @@ describe('row building', () => {
     [['product_name', 'rate_per_acre', 'rate_unit'], ['Chem', '1e21', 'oz'], /Rate per acre must be/],
     [['product_name', 'rei'], ['Chem', '12.5'], /REI hours must be a whole number/],
     [['product_name', 'rup'], ['Chem', 'maybe'], /RUP must be yes or no/],
+    [['product_name'], ['Chem'], /Missing Inventory Unit/],
+    [['product_name', 'inventory_unit'], ['Chem', '\u200b'], /Missing Inventory Unit/],
   ])('refuses a bad value before the database sees it: %j', (headers, cells, why) => {
     expect(build(headers, cells).error).toMatch(why);
   });
@@ -196,7 +198,7 @@ describe('BulkProductImport screen', () => {
   it('refuses a new import too large for browser storage before anything is saved or locked', async () => {
     rpc.mockImplementation(async () => ({ data: { rates_locked: false, rows: [okRow()] }, error: null }));
     render(<BulkProductImport {...props} />);
-    await upload(`product_name,notes\nBig,${'x'.repeat(1_000_001)}\n`);
+    await upload(`inventory_unit,product_name,notes\nGal,Big,${'x'.repeat(1_000_001)}\n`);
     fireEvent.click(await screen.findByRole('button', { name: /Import 1 Product/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/too large to import safely/)));
     expect(rpc).not.toHaveBeenCalledWith('apply_product_setup', expect.anything());
@@ -206,9 +208,9 @@ describe('BulkProductImport screen', () => {
   it('skips a row with more values than columns before anything is sent', async () => {
     rpc.mockImplementation(async () => ({ data: { rates_locked: false, rows: [okRow()] }, error: null }));
     render(<BulkProductImport {...props} />);
-    await upload('product_name,notes\nChem,Handle,with care\nOk,fine\n');
+    await upload('inventory_unit,product_name,notes\nGal,Chem,Handle,with care\nGal,Ok,fine\n');
     expect(await screen.findByText(/1 more value\(s\) than the header has columns/)).toBeInTheDocument();
-    expect(rpc).toHaveBeenCalledWith('preview_product_import', { p_rows: [{ insert: { product_name: 'Ok', notes: 'fine' } }] });
+    expect(rpc).toHaveBeenCalledWith('preview_product_import', { p_rows: [{ insert: { inventory_unit: 'Gal', product_name: 'Ok', notes: 'fine' } }] });
   });
 
   it('offers the template and blocks a pricing column before anything is sent', async () => {
@@ -223,10 +225,10 @@ describe('BulkProductImport screen', () => {
   it('skips both rows that share a SKU, even when one of them has another mistake', async () => {
     rpc.mockImplementation(async () => ({ data: { rates_locked: false, rows: [okRow()] }, error: null }));
     render(<BulkProductImport {...props} />);
-    await upload('product_name,sku,rup\nCorrect Product,SKU-1,maybe\nWrong Product,sku-1 ,no\nOther,SKU-2,no\n');
+    await upload('inventory_unit,product_name,sku,rup\nGal,Correct Product,SKU-1,maybe\nGal,Wrong Product,sku-1 ,no\nGal,Other,SKU-2,no\n');
     expect(await screen.findByText('This name or SKU appears more than once in the file: skipped.')).toBeInTheDocument();
     expect(screen.getByText('RUP must be yes or no.')).toBeInTheDocument();
-    expect(rpc).toHaveBeenCalledWith('preview_product_import', { p_rows: [{ insert: { product_name: 'Other', sku: 'SKU-2', is_rup: false } }] });
+    expect(rpc).toHaveBeenCalledWith('preview_product_import', { p_rows: [{ insert: { inventory_unit: 'Gal', product_name: 'Other', sku: 'SKU-2', is_rup: false } }] });
   });
 
   it('refuses a header row with text after a closing quote before anything is sent (Sol LOW)', async () => {
@@ -253,14 +255,14 @@ describe('BulkProductImport screen', () => {
       ] }, error: null }
       : { data: null, error: { message: 'network' } }));
     render(<BulkProductImport {...props} />);
-    await upload('product_name,sku,epa_registration,rate_per_acre,rate_unit,notes\nGood,G1,,4,oz,"two\nlines"\nBad,B1,abc,,,\nAgain,OLD,,,,\n');
+    await upload('inventory_unit,product_name,sku,epa_registration,rate_per_acre,rate_unit,notes\nGal,Good,G1,,4,oz,"two\nlines"\nGal,Bad,B1,abc,,,\nGal,Again,OLD,,,,\n');
     expect(await screen.findByText('EPA number must look like 524-475')).toBeInTheDocument();
     expect(screen.getByText('Duplicate of Old Chem: skipped.')).toBeInTheDocument();
     expect(screen.getByText('$1.25 / $1.13 / $1.00')).toBeInTheDocument();
     expect(rpc).toHaveBeenCalledWith('preview_product_import', { p_rows: [
-      { insert: { product_name: 'Good', sku: 'G1', notes: 'two\nlines' }, rates: { rate_per_acre: '4', rate_unit: 'oz', suggested_rate: null } },
-      { insert: { product_name: 'Bad', sku: 'B1', epa_registration: 'abc' } },
-      { insert: { product_name: 'Again', sku: 'OLD' } },
+      { insert: { inventory_unit: 'Gal', product_name: 'Good', sku: 'G1', notes: 'two\nlines' }, rates: { rate_per_acre: '4', rate_unit: 'oz', suggested_rate: null } },
+      { insert: { inventory_unit: 'Gal', product_name: 'Bad', sku: 'B1', epa_registration: 'abc' } },
+      { insert: { inventory_unit: 'Gal', product_name: 'Again', sku: 'OLD' } },
     ] });
     fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/^The import was not confirmed \(network\)/)));
@@ -268,7 +270,7 @@ describe('BulkProductImport screen', () => {
     await waitFor(() => expect(rpc).toHaveBeenCalledTimes(3));
     const saves = rpc.mock.calls.filter(([n]) => n === 'apply_product_setup');
     expect(saves[0][1]).toMatchObject({ p_performed_by: 'u1', p_rows: [
-      { insert: { product_name: 'Good', sku: 'G1', notes: 'two\nlines' }, rates: { rate_per_acre: '4', rate_unit: 'oz', suggested_rate: null }, expected_prices: prices },
+      { insert: { inventory_unit: 'Gal', product_name: 'Good', sku: 'G1', notes: 'two\nlines' }, rates: { rate_per_acre: '4', rate_unit: 'oz', suggested_rate: null }, expected_prices: prices },
     ] });
     expect(saves[1][1].p_idempotency_key).toBe(saves[0][1].p_idempotency_key);
     expect(props.onSuccess).not.toHaveBeenCalled();
@@ -279,7 +281,7 @@ describe('BulkProductImport screen', () => {
       ? { data: { rates_locked: false, rows: [okRow()] }, error: null }
       : { data: null, error: { message: 'network' } }));
     const first = render(<BulkProductImport {...props} />);
-    await upload('product_name\nLost Reply\n');
+    await upload('inventory_unit,product_name\nGal,Lost Reply\n');
     fireEvent.click(await screen.findByRole('button', { name: /Import 1 Product/ }));
     await screen.findByRole('button', { name: 'Finish Earlier Import (1)' });
     expect(screen.queryByRole('button', { name: /clear this/ })).not.toBeInTheDocument();
@@ -304,7 +306,7 @@ describe('BulkProductImport screen', () => {
       })) }, error: null };
     });
     render(<BulkProductImport {...props} />);
-    const csv = ['product_name', ...Array.from({ length: 250 }, (_, i) => `P ${i + 1}`)].join('\n');
+    const csv = ['inventory_unit,product_name', ...Array.from({ length: 250 }, (_, i) => `Gal,P ${i + 1}`)].join('\n');
     await upload(csv);
     expect(await screen.findByRole('button', { name: /Import 249 Product/ })).toBeInTheDocument();
     const sizes = rpc.mock.calls.filter(([n]) => n === 'preview_product_import').map(([, a]) => a.p_rows.length);
@@ -326,7 +328,7 @@ describe('BulkProductImport screen', () => {
       return { data: { rates_locked: previews > 1, rows: args.p_rows.map(() => okRow()) }, error: null };
     });
     render(<BulkProductImport {...props} />);
-    await upload(['product_name', ...Array.from({ length: 150 }, (_, i) => `P ${i + 1}`)].join('\n'));
+    await upload(['inventory_unit,product_name', ...Array.from({ length: 150 }, (_, i) => `Gal,P ${i + 1}`)].join('\n'));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error',
       'Could not check the file: Rates were locked or unlocked while the file was being checked. Check the file again.'));
     expect(screen.queryByRole('button', { name: /Import \d+ Product/ })).not.toBeInTheDocument();
@@ -335,7 +337,7 @@ describe('BulkProductImport screen', () => {
   it('refuses a check reply with the wrong number of rows instead of pinning results to the wrong products', async () => {
     rpc.mockImplementation(async () => ({ data: { rates_locked: false, rows: [okRow()] }, error: null }));
     render(<BulkProductImport {...props} />);
-    await upload('product_name\nA\nB\n');
+    await upload('inventory_unit,product_name\nGal,A\nGal,B\n');
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/^Could not check the file/)));
     expect(screen.queryByRole('button', { name: /Import \d+ Product/ })).not.toBeInTheDocument();
   });
@@ -348,12 +350,12 @@ describe('BulkProductImport screen', () => {
       ] }, error: null }
       : { data: { inserted_count: 1, rows: [] }, error: null }));
     const { rerender } = render(<BulkProductImport {...props} />);
-    await upload('product_name,rate_per_acre,rate_unit\nRated,1,oz\nPlain,,\n');
+    await upload('inventory_unit,product_name,rate_per_acre,rate_unit\nGal,Rated,1,oz\nGal,Plain,,\n');
     expect(await screen.findByText(/Rates are locked\. Rows that set a rate are skipped/)).toBeInTheDocument();
     expect(screen.getByText(/^Rates are locked; an admin can correct/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Import 1 Product/ }));
     expect(await screen.findByText('Import Complete')).toBeInTheDocument();
-    expect(rpc.mock.calls.find(([n]) => n === 'apply_product_setup')?.[1].p_rows).toEqual([{ insert: { product_name: 'Plain' } }]);
+    expect(rpc.mock.calls.find(([n]) => n === 'apply_product_setup')?.[1].p_rows).toEqual([{ insert: { inventory_unit: 'Gal', product_name: 'Plain' } }]);
     expect(props.onSuccess).toHaveBeenCalled();
     // The page closes the window on success; reopening starts a new import.
     rerender(<BulkProductImport {...props} open={false} />);
@@ -366,7 +368,7 @@ describe('BulkProductImport screen', () => {
     let answer!: (v: unknown) => void;
     rpc.mockImplementation(() => new Promise((r) => { answer = r; }));
     render(<BulkProductImport {...props} />);
-    await upload('product_name\nFromA\n');
+    await upload('inventory_unit,product_name\nGal,FromA\n');
     await waitFor(() => expect(rpc).toHaveBeenCalled());
     expect(screen.getByLabelText('Select File')).toBeDisabled();
     expect(screen.getByRole('button', { name: /Checking/ })).toBeDisabled();
@@ -387,7 +389,7 @@ describe('BulkProductImport screen', () => {
       return saves === 1 ? { data: null, error: { message: 'network' } } : { data: { inserted_count: 1, rows: [] }, error: null };
     });
     const first = render(<BulkProductImport {...props} />);
-    await upload('product_name\nOne\n');
+    await upload('inventory_unit,product_name\nGal,One\n');
     fireEvent.click(await screen.findByRole('button', { name: /Import 1 Product/ }));
     expect(await screen.findByText(/An earlier import of 1 product\(s\) was not confirmed/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Choose Different File' })).toBeDisabled();
@@ -402,7 +404,7 @@ describe('BulkProductImport screen', () => {
     const saved = rpc.mock.calls.filter(([n]) => n === 'apply_product_setup').map(([, a]) => a);
     expect(saved).toHaveLength(2);
     expect(saved[1].p_idempotency_key).toBe(saved[0].p_idempotency_key);
-    expect(saved[1].p_rows).toEqual([{ insert: { product_name: 'One' } }]);
+    expect(saved[1].p_rows).toEqual([{ insert: { inventory_unit: 'Gal', product_name: 'One' } }]);
     expect(screen.queryByText(/was not confirmed/)).not.toBeInTheDocument();
   });
 
@@ -412,7 +414,7 @@ describe('BulkProductImport screen', () => {
       ? Promise.resolve({ data: { rates_locked: false, rows: [okRow()] }, error: null })
       : new Promise((r) => { answer = r; })));
     const { rerender } = render(<BulkProductImport {...props} />);
-    await upload('product_name\nOne\n');
+    await upload('inventory_unit,product_name\nGal,One\n');
     fireEvent.click(await screen.findByRole('button', { name: /Import 1 Product/ }));
     expect(screen.getByRole('button', { name: 'Choose Different File' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
@@ -434,7 +436,7 @@ describe('BulkProductImport screen', () => {
     let fail!: (e: unknown) => void;
     rpc.mockImplementation(() => new Promise((_, reject) => { fail = reject; }));
     render(<BulkProductImport {...props} />);
-    await upload('product_name\nFromA\n');
+    await upload('inventory_unit,product_name\nGal,FromA\n');
     await waitFor(() => expect(rpc).toHaveBeenCalled());
     fireEvent.change(screen.getByLabelText('Select File'), { target: { files: [new File(['x'], 'b.csv')] } });
     fail(new Error('boom'));

@@ -284,7 +284,25 @@ export function collectAcceptances({ record, readAcceptance, checkReply }) {
 const GATE_PATH_RES = [/^\.claude\/hooks\//, /^\.codex\//, /^\.husky\//, /^\.github\//, /^scripts\/lib\//,
   /^scripts\/write-codex-push-proof/, /^scripts\/owner-accept-sol-finding/, /^scripts\/owner-approve-migration/,
   /^scripts\/write-apply-proofs/, /^scripts\/apply-migration-file/, /^package(?:-lock)?\.json$/];
-export const gateFilesIn = (paths) => paths.filter((p) => GATE_PATH_RES.some((re) => re.test(p)));
+// A release always raises package.json's version (release-flow.mjs release-files), so a package.json or
+// package-lock.json that differs ONLY in its own version field is not a gate change (Mason, 2026-11-20).
+// `readPair(p)` returns [before, after] file texts (null if unreadable); omit it and every gate file counts.
+export const PACKAGE_FILES = new Set(["package.json", "package-lock.json"]);
+export function packageVersionOnlyChange(before, after) {
+  const strip = (text) => {
+    try {
+      const j = JSON.parse(text);
+      if (!j || typeof j !== "object") return null;
+      delete j.version;
+      if (j.packages?.[""] && typeof j.packages[""] === "object") delete j.packages[""].version;
+      return JSON.stringify(j);
+    } catch { return null; }
+  };
+  const [a, b] = [strip(before), strip(after)];
+  return a !== null && a === b;
+}
+export const gateFilesIn = (paths, readPair) => paths.filter((p) => GATE_PATH_RES.some((re) => re.test(p))
+  && !(readPair && PACKAGE_FILES.has(p) && packageVersionOnlyChange(...readPair(p))));
 
 /** The session-state folder of a checkout. */
 export const stateDirOf = (root) => path.join(root, ".claude", "session-state");

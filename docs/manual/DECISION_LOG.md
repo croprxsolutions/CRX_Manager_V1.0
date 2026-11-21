@@ -11,6 +11,178 @@
   Mason's reason: this case cannot happen in our business (ref f7878916e856)
 - Finding 2 (HIGH) at `supabase/migrations/20270127140000_ingredient_modes_of_action_load.sql:269`, text sha256 `d62604642a3ee0ed` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our busines (ref 804bd04476c3)
+## 2026-11-20 — #1990: Mason owner-accepted 5 Sol finding(s) at `b145a1514838`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #1990 at `b145a1514838` (base `5740b6c076ea`) found 5 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270109100200_sales_tax_checkbox.sql:433`, text sha256 `7af8d6a6d1bd6424` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 18b700d7c2f5)
+- Finding 2 (HIGH) at `supabase/migrations/20270125163000_ki81_invoices_bill_sent_quote_price.sql:106`, text sha256 `d7d2b6fb22f9f6d9` (the wording stays with the proof, not here)
+  Mason's reason: cant  happen in buisness (ref 25b4764b7e43)
+- Finding 3 (HIGH) at `supabase/migrations/20270129180000_ki81_quote_line_sent_field.sql:156`, text sha256 `ad3386c2899cd899` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen in our business (ref 5af6a1d395fa)
+- Finding 4 (HIGH) at `supabase/migrations/20270125100000_product_rate_cutover.sql:249`, text sha256 `5ec6a9d9c7841899` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen buisness (ref bc310644bea1)
+- Finding 5 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:90`, text sha256 `5b2f04ce0e54b88d` (the wording stays with the proof, not here)
+  Mason's reason: this canot happen (ref fd14bce41f72)
+
+## 2026-11-20 — #1990: Mason owner-accepted 4 Sol finding(s) at `a16895a707cf`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #1990 at `a16895a707cf` (base `eea1937e1a1a`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270109100200_sales_tax_checkbox.sql:433`, text sha256 `7ae2339e964c8d01` (the wording stays with the proof, not here)
+  Mason's reason: rollout gap closes when release lands (ref d1831a775c1a)
+- Finding 2 (HIGH) at `supabase/migrations/20270117120000_billing_sol_fixes_staging.sql:132`, text sha256 `2ff8d6f0eb3d6aee` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our buisness (ref e7a52bc9e5a2)
+- Finding 3 (HIGH) at `supabase/migrations/20270129180000_ki81_quote_line_sent_field.sql:156`, text sha256 `948c098efe541485` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref e494f6a5a5a0)
+- Finding 4 (HIGH) at `supabase/migrations/20270125100000_product_rate_cutover.sql:249`, text sha256 `56e7fe9a98e092e3` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our buinsess (ref 85fd875bb797)
+
+## 2026-11-20 — Release #1990: split the gate files out; release rule 4 removed
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, split it", then "Yes, go ahead").** Stop adding Sol release rules. The
+release's tool and guard files (the gate files `owner-accept-sol-finding.mjs` refuses) go to `main` in their own hotfix,
+so #1990 no longer changes any of them and Mason can accept its remaining Sol findings by name, each kept on a tracked
+issue. **What changes:** release rule 4 (`RELEASE_PRIOR_ROUND_HEAD`, entry below) is removed, since Sol round 56 rated it
+a BLOCKER and the accepts replace it. A `package.json` or `package-lock.json` that differs from the release's fork point
+only in its own version number no longer counts as a gate file (`packageVersionOnlyChange` in
+`.claude/hooks/sol-accept-lib.mjs`), because the release bot raises that number on every release; any dependency or
+script change in those files still counts. Every other gate is unchanged.
+
+## 2026-11-20 — Release #1990: only code changed since the previous Sol round blocks
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, adopt it"; proposed by Taha in Slack).** From Sol round 55 on
+release #1990 (head `28e3cf7ed`), a finding blocks the release only when it is in a file the candidate changes since
+the previous round's head. Findings in files that round already reviewed go on tracked issues (round 55: #2069-#2073)
+for next week's fixes. **Why:** each of 55 rounds found new items in the same large billing functions, so the release
+could not finish; live has no real sales yet. **What it does:** release rule 4 in `scripts/write-codex-push-proof.mjs`
+(`RELEASE_PRIOR_ROUND_HEAD`) gives Sol the wrapper-computed list of files changed since that head; a finding whose
+causing lines are all in other files is tagged `[PRIOR-ROUND]` and listed under RELEASE FOLLOW-UPS. A finding in a
+changed file, or one a change makes newly reachable, still blocks. Move the head to each new round's head; clear it
+after the release lands. Every other gate is unchanged.
+
+## 2026-11-20 — Release #1990 ships with three named known issues
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, add the rule"; Taha agreed in Slack).** Release #1990 ships today.
+Three Sol findings on head `ff46f6ca5` are known issues, each on a tracked issue and fixed before next week's release:
+#2064 (`20270120150000` `_enforce_below_cost_line`), #2065 (`20270129150000` `_enforce_booking_live_job_rules`) and
+#2066 (`20270109100200` `_return_customer_line_share`). **Why:** live has no real sales yet, Sol has found new items
+on every round of this release (round 54), and owner-accepts stay refused on release PRs that touch gate files.
+**What it does:** release rule 3 in `scripts/write-codex-push-proof.mjs` (`RELEASE_KNOWN_ISSUES`) tags only those
+findings, in only those functions; any other finding, including a different one in the same function, still blocks.
+Clear the list after the release lands. Every other gate is unchanged.
+
+## 2026-11-20 — Release rule 1 also covers unchanged live lines inside a changed function
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, both" to logging Sol's #1990 findings 1 and 2 as tracked issues, then
+"Yes, loosen it").** Rule 1 below also covers a finding inside a function the release changes when every line causing
+it is copied unchanged from the live (base) definition and live already has the same defect, reachable the same way.
+It goes on a tracked issue and does not hold the release. A defect that any changed line introduces, widens or makes
+newly reachable still blocks. First case: `20270129171000` `_save_field_app_invoice_impl_20260714` (lines 262 and
+298 match live; issue #2058). **What it does:** the release rules in `scripts/write-codex-push-proof.mjs`; every other
+gate is unchanged.
+
+## 2026-11-20 — Release #1990: two release review rules, Sol past the round cap, field-app draft finding accepted
+
+**Decision (Mason, in chat, 2026-11-20: "yes do both rules"), asked for by Taha.** For release PR #1990 and later
+release PRs (`release/next` into `main`):
+
+1. **Live and unchanged code.** A Sol or migration-reviewer finding inside a database function whose body at the
+   reviewed head is byte-identical to the live definition (a read-only comparison against live `pg_proc.prosrc`,
+   recorded with the proof) is code the release does not change. It goes on a tracked GitHub issue for Taha's
+   follow-up and does not hold the release. Findings in new or changed code still block.
+2. **Self-abort under an absent live condition.** A finding whose only effect is that a migration aborts its own
+   apply (full rollback), under a live data condition the migration's record shows absent with read-only live
+   evidence, re-checked read-only right before the apply with the result posted on the PR, does not hold the
+   release. First case: `20270109100400` aborts its backfill if a posted return credit has an unlinked line
+   (live: 0 posted credit memos).
+
+**Also decided:** release #1990 may have its Sol review past the round cap today. Mason accepts the
+`20270129171000` finding that a field-application draft saved before the upgrade is not re-checked (live has 0
+such drafts; first recorded for #2050 on 2026-11-19).
+
+**What it does:** the Sol review instructions in `scripts/write-codex-push-proof.mjs` (release reviews only) and the
+`migration-drift-reviewer` and `rls-security-reviewer` charters carry both rules. Owner-accepts stay refused on
+release PRs that touch gate files; every other gate is unchanged.
+
+## 2026-11-19 — #2050 (release #1990 Sol #2 fix) may have Sol round 5; old drafts are not re-checked
+
+**Decision (Mason, in chat, 2026-11-19: "Yes, accept #1, fix #2" and "Yes, push it").** PR #2050 may have its Sol
+review in round 5. Mason accepts that a field-application draft saved before `20270129171000` is applied is not
+re-checked by it (Sol round 4 finding 1): live has 0 field-application invoices with a product line and 0 products
+without a sold unit. **What it does:** the round-4 test-script finding is fixed on #2050; every other gate is unchanged.
+
+## 2026-11-19 — Every product must have a sold unit (release #1990 Sol #2 fix, branch `claude/release-fix-sol2`)
+
+**Decision (Mason, in chat, 2026-11-19: "Yes, simplify").** Migration `20270129171000` makes a product's sold unit
+(`products.inventory_unit`) required, with at least one letter or digit, instead of scanning old field-application
+drafts and locking tables while it installs. **Why:** Sol rounds 1-3 on the scan found a new timing gap each round;
+live has 0 products without a sold unit and 0 field-application invoices with product lines, so a hard rule closes
+the per-gallon-price-times-ounces gap for good. **Cost:** a product can no longer be created or saved without its sold
+unit. The field-application saves keep refusing such a line and keep `ACTOR_MISMATCH`. A product-row lock during the
+save and a server-side unit check on posting are follow-ups, not this fix.
+
+## 2026-11-19 — #1997: Mason owner-accepted 7 Sol finding(s) at `994795d9e03e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1997 at `994795d9e03e` (base `ded769b690d0`) found 7 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:129`, text sha256 `de58d9c249796ea0` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 790e8f66a328)
+- Finding 2 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:112`, text sha256 `2eab717a1e5f38e1` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref a4294f160ded)
+- Finding 3 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:96`, text sha256 `8c37547165bb427d` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref d574a68b7024)
+- Finding 4 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:92`, text sha256 `09b0e88a75b60ff8` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref b5b91eeb8e56)
+- Finding 5 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:116`, text sha256 `3a0bd176d900fbcc` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref dbf01fddb2a5)
+- Finding 6 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:115`, text sha256 `762db17704647daf` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 32f20e28e41c)
+- Finding 7 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:90`, text sha256 `a40417b90ac4c30a` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 7d89581b0add)
+
+## 2026-11-19 — #1997 may have up to three more Sol rounds (6-8)
+
+**Decision (Mason, in chat, 2026-11-19: "Approve up to 3 more").** PR #1997 (KI-148 customer deactivation) may have Sol rounds 6 to 8.
+**Why:** the branch had to merge `staging` to clear a decision-log conflict. That brought other people's database changes into its diff, so the merge gate needs a fresh Sol review. The KI-148 code is unchanged since round 5.
+
+## 2026-11-19 — #1997: Mason owner-accepted 3 Sol finding(s) at `9db7ae3c3924`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1997 at `9db7ae3c3924` (base `872252698adb`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:129`, text sha256 `293dc845726365fc` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 51f9d23991cf)
+- Finding 2 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:92`, text sha256 `ccdc0f56b1a9e785` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref dde574efc71c)
+- Finding 3 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:115`, text sha256 `24b7481390411b3e` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref d9410fa1767f)
+
+## 2026-11-19 — KI-148 (#1997): unbilled work and prepay block deactivation; Sol round 5
+
+**Decision (Mason, in chat, 2026-11-19, on Taha's review of PR #1997).**
+- Deactivation is also refused while the customer has a draft or unposted invoice, a spray job not yet billed
+  (scheduled, in progress, or completed with no invoice), or prepay money on account (balance not zero).
+  **Why:** statements, finance charges and the prepay apply and reconcile runs read only active customers, so that
+  money would drop out of them.
+- An approved or received return still waiting for its credit also blocks. A farm-group parent with active children
+  does not.
+- PR #1997 may have a fifth Sol round (round 5) to review this change.
+
+## 2026-11-19 — KI-148: no lock; Mason removes the wait-for-work lock from the deactivation guard
+
+The `FOR UPDATE` wait added after Sol round 1 drew HIGHs five rounds running (deadlocks with payments and billing,
+deliveries filed under another customer). Mason chose to remove it: the guard counts all five kinds in one statement
+with no row locks, and work saved at the same moment as the deactivation is not caught (extends the 2026-11-18 entry).
+
+## 2026-11-18 — KI-148: Mason accepts the split-second limit on customer deactivation
+
+The deactivation guard (`20270128140000`) waits for new orders, deliveries, holds, quotes and invoices still being saved,
+then checks all five at once. Existing work switched back to open by a status change in the same moment, or work added
+after the deactivation, is not caught. The stop rule fired (Sol r1, Luna r2, Luna r3 HIGHs on this timing mechanism);
+Mason chose to accept the limit rather than build "an inactive customer can never have open work" (follow-up).
+## 2026-11-19 — Release #1990 may have its Sol review past the round cap
+
+**Decision (Mason, in chat, 2026-11-19: "yes, Sol may review release #1990").** The weekly release PR #1990 (`release/next` into `main`) may have its Sol review although the round counter reads 49.
+**Why:** the counter counts every Sol-reviewed commit the release contains, so the 48 earlier rounds are the week's feature PRs' own reviews, not repeated findings on the release.
+**What it does:** lets Sol review the release head before its migrations go live. Every other gate is unchanged: a clean Sol review of the exact release head, green checks, Taha's `Ready to merge`, and Mason's own approval for each migration the apply guard parks.
+
 ## 2026-11-19 — #1991: Mason owner-accepted 1 Sol finding(s) at `25a163b7ad7b`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1991 at `25a163b7ad7b` (base `0c63a967772d`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
@@ -87,6 +259,7 @@
 - **Mason, 2026-11-18 (typed in chat: "close it"):** that includes a section deleted and re-created under the same id: it can only come back on the booking its job came from (Sol round 3).
 - **Mason, 2026-11-18 ("Require both (Recommended)", relayed):** every spray job made from a booking section must also name that booking; the database refuses one that does not. The scheduler already does this; live had no section-linked job breaking it.
 - The rules (no accept, decline, expire or cancel, and no customer change, while a live job exists) now hold in the database for every write path, not only the booking save. Contract: `docs/plans/2026-11-18-booking-live-job-guard-CONTRACT.md`.
+
 ## 2026-11-18 — #1982 may have a fifth Sol round; the cycle-count page locks behind its confirmations
 
 **Decision (Mason, in chat, 2026-11-18: "Yes, round 5").** PR #1982 (cycle-count confirmations open on top of the count window) may have one more Sol round (round 5).

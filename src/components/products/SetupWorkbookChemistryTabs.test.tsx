@@ -48,9 +48,16 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+// Confirm buttons render disabled until their preview loads; a click before then is silently ignored (#1984).
+async function clickWhenEnabled(name: string) {
+  await waitFor(() => expect(screen.getByRole('button', { name })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name }));
+}
+
 describe('SetupWorkbookChemistryTabs', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // Reset, not clear: an unused mockReturnValueOnce from a failed test must not leak into the next one.
+    vi.resetAllMocks();
     H.pendingSaves.mockReturnValue([]);
     H.loadOpenChemistryProposals.mockResolvedValue([]);
     H.previewSetupIngredients.mockResolvedValue({ parents: [] });
@@ -108,11 +115,11 @@ describe('SetupWorkbookChemistryTabs', () => {
     H.startChemistrySave.mockResolvedValue({});
     const onSaved = vi.fn();
     render(<SetupWorkbookChemistryTabs open profileId="admin" fileGeneration={4} parsed={parsedWithIngredient} onSaved={onSaved} />);
-    await screen.findByRole('button', { name: 'Confirm Weights tab' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm Weights tab' })).toBeEnabled());
     expect(screen.getByLabelText('Weights tab preview').textContent).toContain('8 lb/gal · label → 8.5 lb/gal · label: Label page 1');
     expect(screen.getByText(/New reason: not provided · Evidence: not provided/)).toBeInTheDocument();
     expect(screen.getByText(/Parent A · Add: Active B \(CAS 1071-83-6\) · 25 pct_ww active_ingredient · label: Label section 4/)).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Weights tab' }));
+    await clickWhenEnabled('Confirm Weights tab');
     expect(await screen.findByText('Weight drafts saved. The approved weights did not change.')).toBeInTheDocument();
     expect(H.startChemistrySave.mock.calls[0][3]).toEqual({ p_rows: [{
       kind: 'density', subject_id: 'parent-a', expected_version: 1, value: 8.5, unit: 'lb_per_gal',
@@ -171,7 +178,7 @@ describe('SetupWorkbookChemistryTabs', () => {
     });
     H.finishChemistrySave.mockImplementationOnce(async () => { H.pendingSaves.mockReturnValue([]); });
     const view = render(<SetupWorkbookChemistryTabs open profileId="admin" fileGeneration={8} parsed={parsedWithIngredient} onSaved={vi.fn()} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Ingredients tab' }));
+    await clickWhenEnabled('Confirm Ingredients tab');
     expect(await screen.findByRole('button', { name: 'Finish save' })).toBeInTheDocument();
     if (!sameWorkbook) {
       view.rerender(<SetupWorkbookChemistryTabs open profileId="admin" fileGeneration={9} parsed={{
@@ -198,7 +205,7 @@ describe('SetupWorkbookChemistryTabs', () => {
     H.startChemistrySave.mockRejectedValueOnce({ code: 'P0001', message: `${code}: nothing was saved. Synthetic refusal` });
     render(<SetupWorkbookChemistryTabs open profileId="admin" fileGeneration={8} parsed={workbook} onSaved={vi.fn()} />);
     const confirmName = kind === 'weights' ? 'Confirm Weights tab' : 'Confirm Ingredients tab';
-    fireEvent.click(await screen.findByRole('button', { name: confirmName }));
+    await clickWhenEnabled(confirmName);
     const retryName = kind === 'weights' ? 'Retry Weights preview' : 'Retry Ingredients preview';
     expect(await screen.findByRole('button', { name: retryName })).toBeInTheDocument();
     expect(screen.getByText(/preview needs attention: Nothing was saved\. Synthetic refusal/)).toBeInTheDocument();
@@ -237,7 +244,7 @@ describe('SetupWorkbookChemistryTabs', () => {
     const oldSaved = vi.fn();
     const newSaved = vi.fn();
     const view = render(<SetupWorkbookChemistryTabs key="admin:5" open profileId="admin" fileGeneration={5} parsed={parsed} onSaved={oldSaved} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Weights tab' }));
+    await clickWhenEnabled('Confirm Weights tab');
     await waitFor(() => expect(H.startChemistrySave).toHaveBeenCalledTimes(1));
     view.rerender(<SetupWorkbookChemistryTabs key="admin:6" open profileId="admin" fileGeneration={6} parsed={{
       ...parsed, weightRows: [{ ...parsed.weightRows[0], subject_id: 'parent-b', name: 'Parent B' }],
@@ -261,9 +268,7 @@ describe('SetupWorkbookChemistryTabs', () => {
     const view = render(<SetupWorkbookChemistryTabs key="admin1:7" open profileId="admin1" fileGeneration={7} parsed={parsed} onSaved={vi.fn()} />);
     expect(await screen.findByText(/Finish the Save Weights tab/)).toBeInTheDocument();
     view.rerender(<SetupWorkbookChemistryTabs key="admin2:7" open profileId="admin2" fileGeneration={7} parsed={parsed} onSaved={vi.fn()} />);
-    const confirm = await screen.findByRole('button', { name: 'Confirm Weights tab' });
-    expect(confirm).toBeEnabled();
-    fireEvent.click(confirm);
+    await clickWhenEnabled('Confirm Weights tab');
     await waitFor(() => expect(H.startChemistrySave).toHaveBeenCalledWith('admin2', 'setup-workbook-chemistry', 'commit_weights_tab', expect.any(Object), 'Save Weights tab'));
   });
 
@@ -277,11 +282,11 @@ describe('SetupWorkbookChemistryTabs', () => {
     const oldSaved = vi.fn();
     const newSaved = vi.fn();
     const view = render(<SetupWorkbookChemistryTabs key="admin1:9" open profileId="admin1" fileGeneration={9} parsed={parsed} onSaved={oldSaved} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Weights tab' }));
+    await clickWhenEnabled('Confirm Weights tab');
     await waitFor(() => expect(H.startChemistrySave).toHaveBeenCalledTimes(1));
     view.rerender(<SetupWorkbookChemistryTabs key="admin2:9" open profileId="admin2" fileGeneration={9} parsed={parsed} onSaved={newSaved} />);
-    const newConfirm = await screen.findByRole('button', { name: 'Confirm Weights tab' });
-    expect(newConfirm).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Confirm Weights tab' })).toBeEnabled());
+    const newConfirm = screen.getByRole('button', { name: 'Confirm Weights tab' });
     await act(async () => { oldAttempt.reject(new Error('network outcome uncertain')); });
     expect(oldSaved).not.toHaveBeenCalled();
     expect(newConfirm).toBeEnabled();
@@ -299,7 +304,7 @@ describe('SetupWorkbookChemistryTabs', () => {
     H.loadOpenChemistryProposals.mockReturnValueOnce(initial.promise).mockResolvedValueOnce([proposal]);
     H.startChemistrySave.mockResolvedValue({});
     render(<SetupWorkbookChemistryTabs open profileId="admin" fileGeneration={8} parsed={parsed} onSaved={vi.fn()} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Weights tab' }));
+    await clickWhenEnabled('Confirm Weights tab');
     expect(await screen.findByText('Open ingredient proposals (1)')).toBeInTheDocument();
     await act(async () => { initial.resolve([]); });
     expect(screen.getByText('Open ingredient proposals (1)')).toBeInTheDocument();
@@ -316,7 +321,7 @@ describe('SetupWorkbookChemistryTabs', () => {
     const view = render(<SetupWorkbookChemistryTabs open profileId="admin1" fileGeneration={13}
       parsed={action === 'save' ? parsed : null} onSaved={vi.fn()} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: action === 'save' ? 'Confirm Weights tab' : 'Finish save' }));
+    await clickWhenEnabled(action === 'save' ? 'Confirm Weights tab' : 'Finish save');
     await waitFor(() => expect(H.loadOpenChemistryProposals).toHaveBeenCalledTimes(2));
     view.rerender(<SetupWorkbookChemistryTabs open profileId="admin2" fileGeneration={13}
       parsed={action === 'save' ? parsed : null} onSaved={vi.fn()} />);
@@ -439,7 +444,7 @@ describe('SetupWorkbookChemistryTabs', () => {
       status: 'proposal', items: [] }] });
     H.startChemistrySave.mockRejectedValueOnce({ code: 'P0001', message: 'WORKBOOK_INGREDIENTS_REFUSED: nothing was saved. Parent A: WORKBOOK_ROW_INVALID: Active A cannot be renamed here; mark the row __delete and add the new ingredient as a new row; Parent B: WORKBOOK_ROW_INVALID: Active B cannot be renamed here; mark the row __delete and add the new ingredient as a new row; Parent C: WORKBOOK_SOURCE_REQUIRED: X needs its source document' });
     render(<SetupWorkbookChemistryTabs open profileId="admin" fileGeneration={8} parsed={parsedWithIngredient} onSaved={vi.fn()} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Ingredients tab' }));
+    await clickWhenEnabled('Confirm Ingredients tab');
     expect((await screen.findAllByText(/Active A does not match the current shared ingredient identity\. Download a fresh workbook and review it/)).length).toBeGreaterThan(0);
     expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('Download a fresh workbook and review it'));
     expect(screen.queryByText(/mark the row __delete and add the new ingredient/)).not.toBeInTheDocument();
@@ -477,6 +482,8 @@ describe('SetupWorkbookChemistryTabs', () => {
     });
     const previewCall = kind === 'weights' ? H.previewSetupWeights : H.previewSetupIngredients;
     render(<SetupWorkbookChemistryTabs open profileId="admin" fileGeneration={8} parsed={workbook} onSaved={vi.fn()} />);
+    // Finish matches the refusal to a tab only once that tab's preview has loaded.
+    await screen.findByText(kind === 'weights' ? 'Weights tab: 1 changes' : 'Ingredients tab: 1 parent proposals');
     fireEvent.click(await screen.findByRole('button', { name: 'Finish save' }));
     const retryName = kind === 'weights' ? 'Retry Weights preview' : 'Retry Ingredients preview';
     expect(await screen.findByRole('button', { name: retryName })).toBeInTheDocument();
@@ -513,7 +520,7 @@ describe('SetupWorkbookChemistryTabs', () => {
       status: 'proposal', items: [] }] });
     H.startChemistrySave.mockRejectedValueOnce({ code: 'PGRST303', message: 'JWT claims validation failed' });
     render(<SetupWorkbookChemistryTabs open profileId="admin" fileGeneration={11} parsed={parsedWithIngredient} onSaved={vi.fn()} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Ingredients tab' }));
+    await clickWhenEnabled('Confirm Ingredients tab');
     await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', expect.stringMatching(/Sign in again or check administrator access/)));
     expect(screen.queryByRole('button', { name: 'Finish save' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Confirm Ingredients tab' })).toBeEnabled();

@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-18 for the live ledger only (latest live row `20261113011216`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
+**Last verified:** 2026-11-21 for the live ledger only (latest live row `20261121061349`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -1149,12 +1149,13 @@ insert as a rep fails RLS, the new path saves with the rep and one activity row,
 Not fixed here: duplicate check on re-import (KI-77), quoted values spanning lines, in-place retry of unanswered rows.
 
 ### KI-146 — Farm groups (parent customer) can form a loop, and grandchildren are left out
-**LOW-MED · OPEN · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #5) · Claude (fix on staging, not live)**
+**LOW-MED · FIXED ON STAGING (PR #1991, merged 2026-11-19; live with the next release) · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #5) · Claude**
 `get_customer_farm_group` recurses with no loop guard and returns only the top parent's direct children; the picker and
 `save_customer` accept any parent. A loop makes the Sales Reports farm-group view time out. Live data is clean. Fix:
 `20270127200000_ki146_farm_group_no_loops.sql`: a trigger on `customers` refuses a parent that is the customer itself or
 below it (every write path); the read walks distinct ids with `UNION` and returns every descendant. Contract:
-`docs/plans/2026-11-18-ki146-farm-group-loops-CONTRACT.md`.
+`docs/plans/2026-11-18-ki146-farm-group-loops-CONTRACT.md`. Farm groups may be any depth (Mason, 2026-11-18). Follow-ups:
+#1995 (Orders/Deliveries lists show the top parent), #1996 (Sales Reports stale farm-group responses).
 
 ### KI-147 — Customer payment terms are free text and anything unrecognized becomes Net 30
 **LOW · OPEN · customers/AR · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #6) · unassigned**
@@ -1163,11 +1164,19 @@ text while invoices use presets. Every live value parses correctly today. Fix: t
 days)", and have `save_customer` refuse terms the parser would default.
 
 ### KI-148 — Deactivating a customer doesn't check open orders, deliveries, holds or quotes
-**LOW · OPEN · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #8) · unassigned**
+**LOW · FIXED ON STAGING (PR #1997, merged 2026-11-19; live with the next release) · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #8) · Claude**
 `guard_customer_rep_edit_20261013` checks only posted/overdue invoices, and only for reps (admins skip it: To-Do
 decision 20); the Customers bulk Deactivate checks invoices only. Live: 1 inactive customer (deactivated 2026-02-06)
-still has 2 confirmed orders (To-Do decision 23). Fix: add open orders, undelivered deliveries, holds and quotes to
-the guard for every role.
+still has 2 confirmed orders (To-Do decision 23). Fix: a new trigger refuses switching a customer from active to
+inactive while it has open orders, undelivered deliveries, active holds, open quotes, unsettled invoices (draft and
+unposted too), unbilled spray jobs, returns awaiting credit or prepay money on account (the last four added by Mason,
+2026-11-19, on Taha's review), for every role
+including admins (decision 20 answered 2026-11-18), and names what is open (`CUSTOMER_HAS_OPEN_WORK`); the bulk
+Deactivate and the edit page both hit it. The live inactive customer stays as it is (decision 23) and stays editable. It checks everything
+at once. Accepted limit (Mason, 2026-11-18 and 2026-11-19): work being saved at the same moment as the deactivation,
+or added after it, is not caught. Proof:
+`node scripts/smoke/prove-ki148-customer-deactivation-real-schema.mjs`. Follow-ups (unbilled blend tickets, jobs billed
+through their blend ticket, split-billing payers, billing runs that skip inactive customers): #2000.
 
 ### KI-149 — Crop Programs and job print defaults let reps edit but only admins can save
 **LOW · OPEN · settings · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #9) · unassigned**

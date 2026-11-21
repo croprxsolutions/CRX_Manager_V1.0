@@ -17,7 +17,7 @@ Read at `origin/staging` dab22364c (2026-11-21).
 ## Outcome and authority
 
 - Result: the card lists open deliveries for a driver, and "Take This Delivery" assigns one to that driver.
-- Smallest change: one new read function, `get_available_deliveries_for_driver()`, `SECURITY DEFINER`, `STABLE`, `search_path = public, pg_temp`, executable by `authenticated` only. It returns every open delivery (no cap: Mason said all), soonest scheduled date first, then delivery number, then id: `id, delivery_number, scheduled_date, customer_name, farm_group_name (top parent)`. Nothing else (no address, notes, items, prices). Reason it cannot reuse the list: the list function is `SECURITY INVOKER`, so the read rule hides these rows; widening `del_select` would also expose items, notes and addresses.
+- Smallest change: one new read function, `get_available_deliveries_for_driver()`, `SECURITY DEFINER`, `STABLE`, `search_path = public, pg_temp`, executable by `authenticated` (and `service_role`, as every app function is granted; never `anon`). It returns every open delivery (no cap: Mason said all), soonest scheduled date first, then delivery number, then id: `id, delivery_number, scheduled_date, customer_name, farm_group_name (top parent)`. Nothing else (no address, notes, items, prices). Reason it cannot reuse the list: the list function is `SECURITY INVOKER`, so the read rule hides these rows; widening `del_select` would also expose items, notes and addresses.
 - Who may call it: an active profile with role `driver` (checked inside the function from `auth.uid()`; anyone else gets an error). It takes no arguments, so the screen sends nothing the server must trust.
 - Rows: `assigned_driver IS NULL AND status = 'scheduled' AND deleted_at IS NULL`.
 - Take hardening (same migration, `reassign_delivery` wrapper only): when the caller is a driver (not admin or sales rep), the server locks the delivery row first, then requires `p_new_driver = caller` and either (`assigned_driver IS NULL`, `status = scheduled`, not deleted) or already the caller's (so a lost-reply retry reaches the stored replay). A stale row gets "This delivery was already taken or changed. Refresh the list.", not a permission error. A driver can therefore only take an open delivery for themself, and two drivers cannot both take it. Admin and sales rep behavior is unchanged.
@@ -58,3 +58,8 @@ All in `scripts/smoke/prove-driver-available-deliveries-real-schema.mjs`:
 ## Open business decisions
 
 None. Mason, 2026-11-21: "Yes, show them" (drivers see open deliveries with farm name, top farm group and date).
+
+## Luna (gpt-6-luna xhigh, head 7c54df20a): 2 findings
+
+- MED, refuted: a driver's same-key retry after the office reassigned or deleted the delivery gets "already taken or changed", not the stored success. Intended: the stored success no longer says who owns the delivery (Astra #22), so the current state wins and the screen reloads the list.
+- LOW, fixed here: the contract now names the `service_role` grant, which matches every app function.

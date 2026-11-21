@@ -6,8 +6,14 @@
  */
 // jsPDF and autoTable are dynamically imported inside each function
 // to keep them out of the main bundle (~500KB each)
-import { CRX_GREEN, CHARCOAL, GRAY, LIGHT_BG, type JsPDFWithAutoTable } from './pdfTheme';
-import { COMPANY_WEBSITE, companyTaglineHeader, fitCompanyNameFont } from './companyInfo';
+import { CRX_GREEN, GRAY, type JsPDFWithAutoTable } from './pdfTheme';
+import {
+  QUOTE_CONTENT_BOTTOM, QUOTE_CONTINUED_TOP, QUOTE_LOGO_RATIO, QUOTE_LOGO_WIDTH, QUOTE_MARGIN_TOP, QUOTE_MARGIN_X,
+  QUOTE_MUTED, QUOTE_NOTE_BG, QUOTE_NUMBER_COLUMNS, QUOTE_ROW_RULE, QUOTE_TABLE_HEAD_BG, QUOTE_TEXT,
+  QUOTE_TOTALS_RULE, QUOTE_TOTALS_WIDTH,
+} from './quotePdfLayout';
+import { COMPANY_WEBSITE } from './companyInfo';
+import { drawCompanyBlock, drawPageFooters, loadLogoDrawer } from './pdfBrand';
 import { loadCompanyInfoForPdf } from './companyInfoForPdf';
 import { formatUSD as fmt } from './money';
 
@@ -83,6 +89,16 @@ const PDF_COLUMN_DEFS: Record<string, { label: string; getValue: (item: PdfQuote
 // Default columns when none specified (matches legacy behavior)
 const DEFAULT_PDF_COLUMNS = ['product', 'actual_rate', 'acres', 'qty', 'price_unit', 'total_price'];
 
+// The label/value pairs in the header's details table.
+function quoteDetails(data: PdfQuoteData): [string, string][] {
+  return [
+    ['Quote #', data.quote_number],
+    ['Quote date', new Date(data.created_at).toLocaleDateString()],
+    ['Valid until', new Date(data.expires_at).toLocaleDateString()],
+    ['Prepared by', data.sales_rep_name],
+  ];
+}
+
 export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
@@ -90,106 +106,139 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
   const pageW = doc.internal.pageSize.getWidth();
-  const margin = 40;
-  let y = 40;
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = QUOTE_MARGIN_X;
+  const contentW = pageW - margin * 2;
+  const pageBottom = pageH - QUOTE_CONTENT_BOTTOM;
+  let y = QUOTE_MARGIN_TOP;
 
-  // ─── Header bar ───────────────────────────────────────────
-  doc.setFillColor(...CRX_GREEN);
-  doc.rect(0, 0, pageW, 70, 'F');
+  const newPage = () => {
+    doc.addPage();
+    y = QUOTE_CONTINUED_TOP;
+  };
+  const drawLogo = await loadLogoDrawer(doc);
+
+  // ─── Header row: company block, logo + "Quote", details table ──
+  const colW = (contentW - 32) / 3;
+  const companyY = drawCompanyBlock(doc, company, y, colW);
+
+  drawLogo(pageW / 2 - QUOTE_LOGO_WIDTH / 2, y, QUOTE_LOGO_WIDTH);
+  const quoteWordY = y + QUOTE_LOGO_WIDTH * QUOTE_LOGO_RATIO + 15;
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(255, 255, 255);
-  fitCompanyNameFont(doc, company.name.toUpperCase(), pageW - margin * 2 - 150, 22);
-  doc.text(company.name.toUpperCase(), margin, 35);
-  doc.setFontSize(10);
+  doc.setFontSize(13.5);
+  doc.text('Quote', pageW / 2, quoteWordY, { align: 'center' });
+
+  const details = quoteDetails(data);
+  doc.setFontSize(8.25);
+  const labelW = Math.max(...details.map(([label]) => doc.getTextWidth(label))) + 9;
   doc.setFont('helvetica', 'normal');
-  doc.text(doc.splitTextToSize(companyTaglineHeader(company), pageW - margin * 2), margin, 53);
+  // Values wrap inside the right-hand column, so a long rep name or quote number never reaches the logo.
+  const detailLines = details.map(([, value]) => doc.splitTextToSize(value, colW - labelW) as string[]);
+  const valueW = Math.max(...detailLines.flat().map((line) => doc.getTextWidth(line)));
+  const detailsX = pageW - margin - labelW - valueW;
+  let detailsY = y + 9;
+  details.forEach(([label], i) => {
+    doc.setFont('helvetica', 'bold');
+    doc.text(label, detailsX, detailsY);
+    doc.setFont('helvetica', 'normal');
+    for (const line of detailLines[i]) {
+      doc.text(line, detailsX + labelW, detailsY);
+      detailsY += 12;
+    }
+  });
+  y = Math.max(companyY, quoteWordY, detailsY - 12);
 
-  // Quote number badge on right
-  doc.setFontSize(14);
+  // ─── Prepared for (where a window envelope shows it) ──────
+  const forX = margin + 27;
+  y += 30;
   doc.setFont('helvetica', 'bold');
-  doc.text(data.quote_number, pageW - margin, 38, { align: 'right' });
-
-  y = 90;
-
-  // ─── Customer + Date info ─────────────────────────────────
-  doc.setFillColor(...LIGHT_BG);
-  doc.roundedRect(margin, y, pageW - margin * 2, 70, 4, 4, 'F');
-
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...CHARCOAL);
-  doc.text('PREPARED FOR', margin + 12, y + 18);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(12);
-  doc.text(data.customer_name, margin + 12, y + 35);
-  if (data.customer_phone) {
-    doc.setFontSize(9);
-    doc.setTextColor(...GRAY);
-    doc.text(data.customer_phone, margin + 12, y + 50);
-  }
-  if (data.customer_email) {
-    doc.setFontSize(9);
-    doc.setTextColor(...GRAY);
-    doc.text(data.customer_email, margin + 12, y + 62);
-  }
-
-  // Right side — dates
-  const rightX = pageW - margin - 12;
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...CHARCOAL);
-  doc.text('QUOTE DATE', rightX, y + 18, { align: 'right' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.text(new Date(data.created_at).toLocaleDateString(), rightX, y + 32, { align: 'right' });
-
-  doc.setFont('helvetica', 'bold');
-  doc.text('VALID UNTIL', rightX, y + 48, { align: 'right' });
-  doc.setFont('helvetica', 'normal');
-  doc.text(new Date(data.expires_at).toLocaleDateString(), rightX, y + 62, { align: 'right' });
-
-  y += 85;
-
-  // ─── Sales rep ────────────────────────────────────────────
+  doc.setFontSize(7.5);
+  doc.setTextColor(...QUOTE_MUTED);
+  doc.text('PREPARED FOR', forX, y);
+  doc.setTextColor(...QUOTE_TEXT);
   doc.setFontSize(9);
-  doc.setTextColor(...GRAY);
-  doc.text(`Prepared by: ${data.sales_rep_name}`, margin, y);
-  y += 18;
-
-  // ─── Header notes ─────────────────────────────────────────
-  if (data.header_notes) {
-    doc.setFontSize(9);
-    doc.setTextColor(...GRAY);
-    const lines = doc.splitTextToSize(data.header_notes, pageW - margin * 2);
-    doc.text(lines, margin, y);
-    y += lines.length * 12 + 8;
+  y += 13;
+  doc.text(data.customer_name, forX, y);
+  doc.setFont('helvetica', 'normal');
+  const contactLine = [data.customer_phone, data.customer_email].filter(Boolean).join('  ·  ');
+  const forLines = [
+    ...(data.customer_address ? (doc.splitTextToSize(data.customer_address, colW * 1.5) as string[]) : []),
+    ...(contactLine ? [contactLine] : []),
+  ];
+  for (const line of forLines) {
+    y += 13;
+    doc.text(line, forX, y);
   }
+  y += 8;
 
-  // ─── Sections with tables ─────────────────────────────────
   // Wrapped note, one line at a time so a long note continues on a new page
   // instead of printing over the footer area.
-  const pageBottom = doc.internal.pageSize.getHeight() - 50;
   const drawNote = (text: string, lineHeight: number, indent = 4) => {
-    for (const line of doc.splitTextToSize(text, pageW - margin * 2 - indent * 2) as string[]) {
-      if (y + lineHeight > pageBottom) {
-        doc.addPage();
-        y = 40;
-      }
+    for (const line of doc.splitTextToSize(text, contentW - indent * 2) as string[]) {
+      if (y + lineHeight > pageBottom) newPage();
       doc.text(line, margin + indent, y + lineHeight - 6);
       y += lineHeight;
     }
     y += 4;
   };
+  // Header and bottom notes: the same wrapped note in a light grey box, split across pages if long.
+  const drawBoxedNote = (text: string) => {
+    const padX = 7.5;
+    const padY = 6;
+    const lineHeight = 12;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.25);
+    doc.setTextColor(...QUOTE_TEXT);
+    const lines = doc.splitTextToSize(text, contentW - padX * 2) as string[];
+    while (lines.length) {
+      const fits = Math.floor((pageBottom - y - padY * 2) / lineHeight);
+      if (fits < 1) { newPage(); continue; }
+      const chunk = lines.splice(0, fits);
+      doc.setFillColor(...QUOTE_NOTE_BG);
+      doc.rect(margin, y, contentW, chunk.length * lineHeight + padY * 2, 'F');
+      chunk.forEach((line, i) => doc.text(line, margin + padX, y + padY + (i + 1) * lineHeight - 3));
+      y += chunk.length * lineHeight + padY * 2;
+      if (lines.length) newPage();
+    }
+  };
+
+  // ─── Header notes ─────────────────────────────────────────
+  if (data.header_notes) {
+    y += 10;
+    drawBoxedNote(data.header_notes);
+  }
+
+  // ─── Sections: bold title over a green rule, plain grey table head ──
+  const activeCols = (columns || DEFAULT_PDF_COLUMNS).filter((c) => PDF_COLUMN_DEFS[c]);
+  // Build column styles: right-align numbers and money, last col bold
+  const colStyles: Record<number, AutoTableColumnStyle> = { 0: { cellWidth: 'auto' } };
+  activeCols.forEach((c, i) => {
+    if (PDF_COLUMN_DEFS[c].align === 'right' || QUOTE_NUMBER_COLUMNS.has(c)) {
+      colStyles[i] = { ...(colStyles[i] || {}), halign: 'right' };
+    }
+    // Bold the last column (usually total)
+    if (i === activeCols.length - 1 && PDF_COLUMN_DEFS[c].align === 'right') {
+      colStyles[i] = { ...(colStyles[i] || {}), fontStyle: 'bold' };
+    }
+  });
+  const headerRow = activeCols.map((c, i) => ({
+    content: PDF_COLUMN_DEFS[c].label,
+    styles: { halign: colStyles[i]?.halign ?? ('left' as const) },
+  }));
+  const sectionTotal = (section: PdfQuoteSection) => section.items.reduce((sum, item) => sum + item.total_price, 0);
 
   for (const section of data.sections) {
-    // Section header
-    doc.setFillColor(...CRX_GREEN);
-    doc.rect(margin, y, pageW - margin * 2, 22, 'F');
+    // The section needs room for its title, table heading and a row
+    y += 16;
+    if (y + 70 > pageBottom) newPage();
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(255, 255, 255);
-    doc.text(section.section_name.toUpperCase(), margin + 8, y + 15);
-    y += 26;
+    doc.setFontSize(9);
+    doc.setTextColor(...QUOTE_TEXT);
+    doc.text(section.section_name.toUpperCase(), margin, y + 9);
+    doc.setDrawColor(...CRX_GREEN);
+    doc.setLineWidth(1.125);
+    doc.line(margin, y + 13, pageW - margin, y + 13);
+    y += 17;
 
     // Section header notes (above items table)
     if (section.section_header_notes) {
@@ -199,42 +248,30 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
       drawNote(section.section_header_notes, 11);
     }
 
-    const activeCols = (columns || DEFAULT_PDF_COLUMNS).filter((c) => PDF_COLUMN_DEFS[c]);
-    const headerRow = activeCols.map((c) => PDF_COLUMN_DEFS[c].label);
     const rows = section.items.map((item) =>
       activeCols.map((c) => PDF_COLUMN_DEFS[c].getValue(item))
     );
 
-    // Build column styles: right-align columns that need it, last col bold
-    const colStyles: Record<number, AutoTableColumnStyle> = { 0: { cellWidth: 'auto' } };
-    activeCols.forEach((c, i) => {
-      if (PDF_COLUMN_DEFS[c].align === 'right') {
-        colStyles[i] = { ...(colStyles[i] || {}), halign: 'right' };
-      }
-      // Bold the last column (usually total)
-      if (i === activeCols.length - 1 && PDF_COLUMN_DEFS[c].align === 'right') {
-        colStyles[i] = { ...(colStyles[i] || {}), fontStyle: 'bold' };
-      }
-    });
-
     autoTable(doc, {
       startY: y,
-      margin: { left: margin, right: margin },
+      margin: { left: margin, right: margin, top: QUOTE_CONTINUED_TOP, bottom: QUOTE_CONTENT_BOTTOM },
       head: [headerRow],
       body: rows,
+      showHead: 'everyPage',
       theme: 'plain',
-      styles: { fontSize: 9, cellPadding: 5, textColor: CHARCOAL },
-      headStyles: {
-        fillColor: [240, 240, 240],
-        textColor: CHARCOAL,
-        fontStyle: 'bold',
-        fontSize: 8,
-      },
+      styles: { font: 'helvetica', fontSize: 8, cellPadding: { top: 3.75, bottom: 3.75, left: 4.5, right: 4.5 }, textColor: QUOTE_TEXT },
+      headStyles: { fillColor: QUOTE_TABLE_HEAD_BG, textColor: QUOTE_TEXT, fontStyle: 'bold' },
+      bodyStyles: { lineColor: QUOTE_ROW_RULE, lineWidth: { bottom: 0.75, top: 0, left: 0, right: 0 } },
       columnStyles: colStyles,
-      alternateRowStyles: { fillColor: [252, 252, 252] },
     });
 
-    y = (doc as JsPDFWithAutoTable).lastAutoTable.finalY + 6;
+    y = (doc as JsPDFWithAutoTable).lastAutoTable.finalY;
+    if (y + 14 > pageBottom) newPage();
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.25);
+    doc.setTextColor(...QUOTE_TEXT);
+    doc.text(`Section total: ${fmt(sectionTotal(section))}`, pageW - margin - 4.5, y + 11, { align: 'right' });
+    y += 16;
 
     if (section.section_notes) {
       doc.setFontSize(8);
@@ -242,59 +279,56 @@ export async function generateQuotePdf(data: PdfQuoteData, columns?: string[]) {
       doc.setFont('helvetica', 'italic');
       drawNote(section.section_notes, 10);
     }
-
-    y += 10;
-
-    // Check for page break: the next section needs room for its header, table heading and a row
-    if (y > pageBottom - 80) {
-      doc.addPage();
-      y = 40;
-    }
   }
 
-  // ─── Totals box ───────────────────────────────────────────
-  y += 10;
-  if (y > 660) {
-    doc.addPage();
-    y = 40;
+  // ─── Totals box: each section, then the quote total ───────
+  const totalsX = pageW - margin - QUOTE_TOTALS_WIDTH;
+  doc.setFontSize(8.25);
+  doc.setFont('helvetica', 'normal');
+  const totalsRows = data.sections.map((section) => {
+    const amount = fmt(sectionTotal(section));
+    const labelLines = doc.splitTextToSize(section.section_name, QUOTE_TOTALS_WIDTH - doc.getTextWidth(amount) - 9) as string[];
+    return { labelLines, amount };
+  });
+  const totalsH = totalsRows.reduce((h, r) => h + r.labelLines.length * 12, 0) + 40;
+  y += 15;
+  if (y + totalsH > pageBottom) newPage();
+  doc.setDrawColor(...QUOTE_TEXT);
+  doc.setLineWidth(1.5);
+  doc.line(totalsX, y, pageW - margin, y);
+  y += 4;
+  doc.setTextColor(...QUOTE_TEXT);
+  for (const { labelLines, amount } of totalsRows) {
+    // Totals taller than a page carry on over the next one.
+    if (y + labelLines.length * 12 > pageBottom) newPage();
+    doc.text(labelLines, totalsX, y + 10);
+    doc.text(amount, pageW - margin, y + 10, { align: 'right' });
+    y += labelLines.length * 12;
   }
-
-  const totalsX = pageW - margin - 200;
-  doc.setFillColor(...LIGHT_BG);
-  doc.roundedRect(totalsX, y, 200, 50, 4, 4, 'F');
-
+  y += 5;
+  if (y + 26 > pageBottom) newPage();
+  doc.setDrawColor(...QUOTE_TOTALS_RULE);
+  doc.setLineWidth(0.75);
+  doc.line(totalsX, y, pageW - margin, y);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(...CHARCOAL);
-  doc.text('QUOTE TOTAL', totalsX + 12, y + 20);
-  doc.setFontSize(18);
+  doc.setFontSize(9.75);
+  doc.text('Quote total', totalsX, y + 18);
+  doc.setFontSize(13.5);
   doc.setTextColor(...CRX_GREEN);
-  doc.text(fmt(data.totals.totalPrice), totalsX + 188, y + 20, { align: 'right' });
+  doc.text(fmt(data.totals.totalPrice), pageW - margin, y + 18, { align: 'right' });
+  y += 26;
 
-  y += 50;
-
-  // ─── Footer notes ─────────────────────────────────────────
+  // ─── Bottom note, after the totals ────────────────────────
   if (data.footer_notes) {
-    doc.setFontSize(9);
-    doc.setTextColor(...GRAY);
-    doc.setFont('helvetica', 'normal');
-    drawNote(data.footer_notes, 12, 0);
+    y += 10;
+    drawBoxedNote(data.footer_notes);
   }
 
-  // ─── Footer bar ───────────────────────────────────────────
-  const footerY = doc.internal.pageSize.getHeight() - 30;
-  doc.setDrawColor(200, 200, 200);
-  doc.line(margin, footerY - 10, pageW - margin, footerY - 10);
-  doc.setFontSize(7);
-  doc.setTextColor(160, 160, 160);
-  doc.text(
-    [company.name, COMPANY_WEBSITE, company.email, 'Prices valid for the period shown above. Subject to product availability.']
-      .filter(Boolean)
-      .join('  •  '),
-    pageW / 2,
-    footerY,
-    { align: 'center' }
-  );
+  // ─── Every page: small logo from page 2, footer with page number ──
+  const footerText = [company.name, COMPANY_WEBSITE, company.email, 'Prices valid for the period shown above. Subject to product availability.']
+    .filter(Boolean)
+    .join('  •  ');
+  drawPageFooters(doc, footerText, drawLogo);
 
   return doc;
 }

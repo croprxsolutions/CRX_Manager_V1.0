@@ -90,7 +90,7 @@ async function printSelected() {
   render(<MemoryRouter><Invoices /></MemoryRouter>);
   expect(await screen.findByText('CS-1001')).toBeInTheDocument();
   fireEvent.click(screen.getAllByRole('checkbox')[0]);
-  fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Print 1…' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Print with defaults' }));
 }
 
@@ -128,7 +128,7 @@ describe('Invoices — Print Selected', () => {
     render(<MemoryRouter><Invoices /></MemoryRouter>);
     expect(await screen.findByText('CS-1001-1')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('checkbox')[1]);
-    fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Print 1…' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Print with defaults' }));
     await waitFor(() => expect(H.printed).toHaveBeenCalledTimes(1));
     // Mason, 9 Nov (A): every payer's invoice shows every payer, so batch print ticks the table by default.
@@ -141,6 +141,17 @@ describe('Invoices — Print Selected', () => {
     ]);
   });
 
+  it('passes the stored Bill Split identity through the invoices-list print builder', async () => {
+    const split = { ...posted, invoice_group_id: 'stored-group', delivery_id: 'stored-delivery' };
+    H.tables.invoices = [split];
+    H.tables.invoice_items = [{ ...line, brand_lines: [{ brand_key: 'a', brand_name: 'Alpha', epa_registration: '1-1', quantity: 5, line_delivered: 5, delivery_item_id: 'trip-1' }] }];
+    await printSelected();
+    await waitFor(() => expect(H.printed).toHaveBeenCalledTimes(1));
+    const printed = H.printed.mock.calls[0][0][0];
+    expect(printed.bill_split_on_load).toBe(true);
+    expect(printed.items[0].brand_lines[0]).toMatchObject({ brand_name: 'Alpha', quantity: 5 });
+  });
+
   it("a payer's misc charge invoice in a Bill Split is printed with the payer table on too", async () => {
     const split = { ...posted, invoice_type: 'misc_charge', invoice_group_id: 'g1', delivery_id: 'd1', customer: { farm_name: 'Farmer' } };
     H.tables.invoices = [
@@ -150,7 +161,7 @@ describe('Invoices — Print Selected', () => {
     render(<MemoryRouter><Invoices /></MemoryRouter>);
     expect(await screen.findByText('CS-1001-1')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('checkbox')[1]);
-    fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Print 1…' }));
     await screen.findByRole('button', { name: 'Print with defaults' });
     expect(H.dialogProps).toMatchObject({ hasShares: true, sharesOnByDefault: true });
   });
@@ -166,7 +177,7 @@ describe('Invoices — Print Selected', () => {
       expect(await screen.findByText('CS-1001')).toBeInTheDocument();
       H.failing.set(table, mode);
       fireEvent.click(screen.getAllByRole('checkbox')[0]);
-      fireEvent.click(await screen.findByRole('button', { name: /^Print 1 Selected/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Print 1…' }));
       fireEvent.click(await screen.findByRole('button', { name: 'Print with defaults' }));
       await waitFor(() => expect(H.toast).toHaveBeenCalledWith('error', expect.stringContaining('Could not load the invoice details')));
       expect(H.printed).not.toHaveBeenCalled();

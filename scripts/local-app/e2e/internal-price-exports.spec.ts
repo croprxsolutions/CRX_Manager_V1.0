@@ -18,7 +18,7 @@ async function addUnpricedProduct(page: Page) {
   await page.evaluate(async (name) => {
     const path = '/src/lib/db.ts';
     const { supabase } = await import(/* @vite-ignore */ path);
-    const { error } = await supabase.from('products').insert({ product_name: name, product_form: 'liquid', is_active: true });
+    const { error } = await supabase.from('products').insert({ product_name: name, product_form: 'liquid', inventory_unit: 'Gal', is_active: true });
     if (error) throw new Error(error.message);
   }, productName);
 }

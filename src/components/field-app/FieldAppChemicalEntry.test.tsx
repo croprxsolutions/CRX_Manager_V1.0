@@ -250,10 +250,42 @@ describe('FieldAppChemicalEntry', () => {
     expect(next[0].manual_override).toBe(false);
   });
 
+  it('RT-4b: a product with no rate unit (switched to no per-acre default) and no stock unit stays blank, never an invented oz', async () => {
+    const onChange = vi.fn();
+    mockLimit.mockResolvedValueOnce({
+      data: [{
+        id: 'prod-b', product_name: 'Blank Rate WDG', is_active: true,
+        tier1_price: 5, tier2_price: 5, tier3_price: 5,
+        rate_per_acre: null, rate_unit: null, inventory_unit: null,
+        current_cost: 3, vendor: null, product_form: 'dry',
+      }],
+      error: null,
+    });
+    await renderEntry({
+      chemicals: [makeLine({ id: 'cl', product_id: null, product_name: '', vendor: null })],
+      onChemicalsChange: onChange,
+    });
+    const searchInput = screen.getByPlaceholderText(/search product/i);
+    await act(async () => {
+      fireEvent.focus(searchInput);
+      fireEvent.change(searchInput, { target: { value: 'Blank' } });
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    await act(async () => { fireEvent.click(await screen.findByText('Blank Rate WDG')); });
+    const next = onChange.mock.calls[onChange.mock.calls.length - 1][0] as ChemicalLine[];
+    expect(next[0].rate_per_acre).toBeNull();
+    expect([next[0].rate_unit, next[0].unit, next[0].price_unit]).toEqual(['', '', '']);
+  });
+
   it('shows the gallon/lb-equivalent under Total Applied for a DRY product (oz -> lb, server parity)', async () => {
     // dry: 80 oz -> 5 lb (80/16). Branches on product_form, matching convert_to_gl_lb.
     await renderEntry({ chemicals: [makeLine({ quantity: 80, rate_unit: 'oz', product_form: 'dry' })] });
     expect(screen.getByText(/= 5 lb/i)).toBeInTheDocument();
+  });
+
+  it('shows a supplied dry-ounce decimal tie rounded to four decimals', async () => {
+    await renderEntry({ chemicals: [makeLine({ quantity: 0.0024, rate_unit: 'Dry oz', unit: 'Dry oz', product_form: 'dry', rate_per_acre: null })], readOnly: true });
+    expect(screen.getByText('= 0.0002 lb')).toBeInTheDocument();
   });
 
   it('#25 fix: a LIQUID product dosed in bare oz previews as GALLONS (0.625 GL), matching the saved/printed value (not 5 lb)', async () => {

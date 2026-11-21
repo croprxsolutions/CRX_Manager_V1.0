@@ -4,6 +4,7 @@ import Card from '../components/ui/Card';
 import SplitHeading from '../components/ui/SplitHeading';
 import EmptyState, { LoadFailedState } from '../components/ui/EmptyState';
 import { Sentry } from '../lib/sentry';
+import EpaBatchFill from '../components/products/EpaBatchFill';
 import { FAILURE_LABEL, HOLD_LABEL, fetchEpaLookupOverview, type EpaLookupOverview } from '../lib/epaProposals';
 import type { EpaLookupFailure } from '../types';
 
@@ -89,6 +90,7 @@ export default function EpaLookups() {
           </Card>
         </>
       )}
+      <EpaBatchFill onRunEnd={load} />
     </div>
   );
 }

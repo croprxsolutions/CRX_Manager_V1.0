@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, type ReactNode } from 'react';
+import { useState, useMemo, useCallback, useEffect, type ReactNode } from 'react';
 import type { Column } from '../components/ui/DataTable';
 
 interface UseRowSelectionOptions<T> {
@@ -8,6 +8,8 @@ interface UseRowSelectionOptions<T> {
   getId: (row: T) => string;
   /** Optional: only rows passing this predicate are selectable */
   isSelectable?: (row: T) => boolean;
+  /** Opt-in: whenever this changes, selected IDs not in it are dropped for good (default off). */
+  pruneTo?: T[];
 }
 
 interface UseRowSelectionReturn<T> {
@@ -33,8 +35,18 @@ export function useRowSelection<T>({
   data,
   getId,
   isSelectable,
+  pruneTo,
 }: UseRowSelectionOptions<T>): UseRowSelectionReturn<T> {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!pruneTo) return;
+    const keep = new Set(pruneTo.map(getId));
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((id) => keep.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [pruneTo, getId]);
 
   const selectableRows = useMemo(
     () => (isSelectable ? data.filter(isSelectable) : data),
@@ -99,6 +111,15 @@ export function createCheckboxColumn<T>(
   toggleSelect: (id: string) => void,
   getId: (row: T) => string,
   isSelectable?: (row: T) => boolean,
+  {
+    getLabel,
+    checkboxClassName = '',
+  }: {
+    /** Accessible name for each row's checkbox, e.g. "Select Q-0001". */
+    getLabel?: (row: T) => string;
+    /** Extra classes for each row's checkbox (opt-in, e.g. the brand accent colour). */
+    checkboxClassName?: string;
+  } = {},
 ): Column<T> {
   return {
     key: '_select',
@@ -111,13 +132,14 @@ export function createCheckboxColumn<T>(
       return (
         <input
           type="checkbox"
+          aria-label={getLabel?.(row)}
           checked={selected.has(id)}
           onChange={(e) => {
             e.stopPropagation();
             toggleSelect(id);
           }}
           onClick={(e) => e.stopPropagation()}
-          className="w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green"
+          className={`w-4 h-4 rounded border-gray-300 text-crx-green focus:ring-crx-green ${checkboxClassName}`.trimEnd()}
         />
       ) as ReactNode;
     },

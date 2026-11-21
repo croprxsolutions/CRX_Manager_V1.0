@@ -520,8 +520,8 @@ function stripCommentsOnly(code: string): string {
  * closing `/`. A `)` counts only when it closes an `if`, `for` (including `for await`), `while`, `switch` or `catch`
  * head — never a method named like one, such as `helpers.if(a)` — so a regex written as a control
  * statement's BODY is masked while division after an ordinary `)` is not (CodeRabbit, PR #638). This is still a scanner, not a TypeScript lexer:
- * a regex written after `]`, `}` or `<` is read as division and its text stays visible, as it
- * always was, and a `//` inside JSX text still masks the rest of its line.
+ * a `}` counts only when it closes a statement block (#686); a regex written after `]`, `<` or any
+ * other `}` is read as division and its text stays visible, as it always was, and a `//` inside JSX text still masks the rest of its line.
  */
 function maskNonCode(code: string): string {
   let out = '';
@@ -540,6 +540,12 @@ function maskNonCode(code: string): string {
   // `(` opened such a head and where its matching `)` landed in `out`.
   const controlHead: boolean[] = [];
   let controlCloseAt = -1;
+  // Same for `{`: a statement block's `}` ends a statement, so a regex may follow it (#686);
+  // any other `}` (object literal, method or arrow body) ends an operand and keeps division.
+  const blockBrace: boolean[] = [];
+  let blockCloseAt = -1;
+  const functionDeclHead: boolean[] = [];
+  let functionDeclCloseAt = -1;
   // Where the closing `/` of the most recent masked regex literal landed in `out`.
   let regexCloseAt = -1;
 
@@ -571,12 +577,56 @@ function maskNonCode(code: string): string {
     return /^(if|for|while|switch|catch)$/.test(word);
   }
 
+  // True when a statement can start just after index `end`: at the beginning, or after `;`,
+  // `}` or a `{` that is not a template's `${`.
+  function statementStartsAfter(end: number): boolean {
+    let j = end;
+    while (j >= 0 && /\s/.test(out[j])) j -= 1;
+    return j < 0 || out[j] === ';' || out[j] === '}' || (out[j] === '{' && out[j - 1] !== '$');
+  }
+
+  // A `(` opens a function DECLARATION's parameters (`function f(`, `async function* f(`,
+  // `export default function f(`) when `function` starts a statement; its body is a block.
+  // A function expression (`x = function f() {} / 2`) is an operand, so it is not one.
+  function opensFunctionDeclHead(): boolean {
+    const [name, beforeName] = wordBefore(out.length - 1);
+    if (!name) return false;
+    // `export default function (` is the one anonymous declaration.
+    const anonymous = name === 'function';
+    let m = beforeName;
+    while (m >= 0 && /[\s*]/.test(out[m])) m -= 1;
+    let [word, before] = anonymous ? [name, beforeName] : wordBefore(m);
+    if (word !== 'function') return false;
+    let sawDefault = false;
+    for (;;) {
+      [word, m] = wordBefore(before);
+      if (!/^(async|export|default)$/.test(word)) break;
+      sawDefault ||= word === 'default';
+      before = m;
+    }
+    return (!anonymous || sawDefault) && statementStartsAfter(before);
+  }
+
+  // A `{` opens a statement block only at a statement start, after a control head's or a
+  // function declaration's `)`, or after else/do/try/finally or a binding-less `catch`.
+  // shortcut: class bodies, labelled blocks and a statement after a line with no `;` (ASI)
+  // are not tracked, so a regex after their `}` still reads as division; a real lexer is the upgrade.
+  function opensBlock(): boolean {
+    let j = out.length - 1;
+    while (j >= 0 && /\s/.test(out[j])) j -= 1;
+    if (statementStartsAfter(j)) return true;
+    if (out[j] === ')') return controlCloseAt === j || functionDeclCloseAt === j;
+    const [word, before] = wordBefore(j);
+    return /^(else|do|try|finally|catch)$/.test(word) && !isPropertyName(before);
+  }
+
   function regexCanStart(): boolean {
     let j = out.length - 1;
     while (j >= 0 && /\s/.test(out[j])) j -= 1;
     if (j < 0) return true;
     if (out[j] === '>') return out[j - 1] === '=';
     if (out[j] === ')') return controlCloseAt === j;
+    if (out[j] === '}') return blockCloseAt === j;
     // A `/` in `out` is a division operator (comments are blanked), so a regex may follow it
     // (`value / /re/.test(v)`, CodeRabbit, PR #697) — unless it is the closing `/` of a masked
     // regex literal with no flags, which ends an operand (`/x/ / 2`).
@@ -701,8 +751,14 @@ function maskNonCode(code: string): string {
       }
       if (c === '(') {
         controlHead.push(opensControlHead());
-      } else if (c === ')' && controlHead.pop()) {
-        controlCloseAt = out.length;
+        functionDeclHead.push(opensFunctionDeclHead());
+      } else if (c === ')') {
+        if (controlHead.pop()) controlCloseAt = out.length;
+        if (functionDeclHead.pop()) functionDeclCloseAt = out.length;
+      } else if (c === '{') {
+        blockBrace.push(opensBlock());
+      } else if (c === '}' && blockBrace.pop()) {
+        blockCloseAt = out.length;
       }
       keep();
     }
@@ -976,6 +1032,30 @@ describe('F1 guard — resets are verified outside the pinned files, and the pin
     expect(classify(['  if (ready) handleRecovery(getIdempotencyBindingRejection(error));', reset], 2)).toBe('recovery');
   });
 
+  // #686: every `/` after `}` was read as division, so a regex right after a statement
+  // block's `}` stayed visible and its text could supply an excuse.
+  it('a regex right after a statement block cannot excuse a reset', () => {
+    const reset = '  idem.resetKey();';
+    expect(classify(['  if (ready) {} /getIdempotencyBindingRejection/.test(value);', reset], 2)).toBeNull();
+    expect(classify(['  try { go(); } finally {} /query.throwOnError()/.test(value);', reset], 2)).toBeNull();
+    expect(classify(['  else {} /onClick=/.test(v);', reset], 2)).toBeNull();
+    expect(classify(['  {', '  }', '  /getIdempotencyBindingRejection/.test(value);', reset], 4)).toBeNull();
+    // A function declaration's body is a statement block too (Luna, #686 round 1).
+    expect(classify(['  function f() {} /getIdempotencyBindingRejection/.test(value);', reset], 2)).toBeNull();
+    expect(classify(['  export async function* f(a) {} /query.throwOnError()/.test(value);', reset], 2)).toBeNull();
+    expect(classify(['  export default function () {} /getIdempotencyBindingRejection/.test(value);', reset], 2)).toBeNull();
+    expect(classify(['  try { go(); } catch {} /getIdempotencyBindingRejection/.test(value);', reset], 2)).toBeNull();
+
+    // Positive controls: an object literal or a template interpolation's braces end an
+    // operand, so the `/` after them is still division and the code after it stays visible.
+    expect(classify(['  const r = ({a: 1}) / 2 + getIdempotencyBindingRejection(error) / 3;', reset], 2)).toBe('recovery');
+    expect(classify(['  const r = x = {a: 1} / 2 + getIdempotencyBindingRejection(error) / 3;', reset], 2)).toBe('recovery');
+    expect(classify(['  const r = `${ {a: 1} / 2 + getIdempotencyBindingRejection(error) / 3 }`;', reset], 2)).toBe('recovery');
+    // A function EXPRESSION is an operand, so the `/` after its body is division.
+    expect(classify(['  const r = function f() {} / 2 + getIdempotencyBindingRejection(error) / 3;', reset], 2)).toBe('recovery');
+    expect(classify(['  const r = function () {} / 2 + getIdempotencyBindingRejection(error) / 3;', reset], 2)).toBe('recovery');
+  });
+
   // CodeRabbit (PR #668, round 5): keyword detection read a property NAME as a keyword, so the
   // `/` after `obj.return` or after `helpers.if(a)` opened a false regex that masked the rest of
   // the line, including a mutating call that must block an intent-rotation excuse.
@@ -1200,7 +1280,6 @@ describe('F1 guard — resets are verified outside the pinned files, and the pin
   const FIXED_PAYLOAD_KEYS: Array<[string, string]> = [
     ['cancelOrderIdem', 'cancel_order'],
     ['splitInvoiceIdem', 'create_split_invoices_from_order'],
-    ['consolidateIdem', 'consolidate_draft_invoices'],
   ];
 
   // CLAIM LIMITED to what this actually proves (Codex round-3 MEDIUM): it checks that
@@ -1309,42 +1388,13 @@ describe('F1 guard — resets are verified outside the pinned files, and the pin
     }
   });
 
-  /**
-   * A route-id SCOPE is only sound while the request it covers targets that same route id.
-   *
-   * CodeRabbit round 2 (F1): OrderDetail's id effect refetches but never clears `order`, and
-   * `loading` is only ever set false (line 98 initialises it true; nothing sets it true again),
-   * so on A -> B navigation the page keeps rendering A's data — button live — while the route
-   * id is already B. `consolidate_draft_invoices` is the one order action whose request sends
-   * the LOADED `order.id` rather than the route `id` (its siblings at update/cancel/create/
-   * split all send `id`), so in that window it would send A under a key scoped to B, and B's
-   * own later retry would replay A's cached receipt.
-   *
-   * CLAIM LIMITED: this is a LEXICAL check that the equality guard appears between the handler
-   * and its RPC call, in EXECUTABLE code — comments and string literals are blanked first
-   * (CodeRabbit round 3), so prose quoting the guard no longer satisfies it. It still does not
-   * execute the handler, does not prove React state timing, and cannot see a guard that is
-   * present but unreachable. What it buys is that deleting or loosening the guard, replacing it
-   * with a comment, or moving the RPC call above it, fails immediately.
-   *
-   * The two offsets are located in the RAW source so the RPC name inside its string literal is
-   * still findable; a comment forging an earlier call site only SHRINKS the searched region and
-   * therefore fails closed.
-   */
-  it('consolidate refuses to act while the loaded order is not the route order', () => {
-    const src = readFileSync('src/pages/OrderDetail.tsx', 'utf8').replace(/\r\n/g, '\n');
-    const start = src.indexOf('const handleConsolidateDrafts');
-    expect(start, 'handleConsolidateDrafts not found — renamed or removed?').toBeGreaterThan(-1);
-    const rpcAt = src.indexOf("supabase.rpc('consolidate_draft_invoices'", start);
-    expect(rpcAt, 'consolidate_draft_invoices call not found inside the handler').toBeGreaterThan(start);
-
-    const preamble = stripCommentsAndStrings(src.slice(start, rpcAt));
-    expect(
-      /if\s*\(\s*order\.id\s*!==\s*id\s*\)\s*return\s*;/.test(preamble),
-      'handleConsolidateDrafts must refuse when the loaded order is not the route order — ' +
-        'its key is scoped by the route id while its request sends order.id, so a stale ' +
-        "order during navigation would send A's id under B's key and let B replay A's receipt.",
-    ).toBe(true);
+  // Consolidate drafts was retired 2026-11-11 (each delivery bills on its own invoice; lines can't move
+  // between invoices), together with the stale-order guard this block used to pin. Nothing on the page may
+  // call it again without bringing that guard back.
+  it('the order page no longer calls consolidate_draft_invoices', () => {
+    const src = stripCommentsAndStrings(readFileSync('src/pages/OrderDetail.tsx', 'utf8').replace(/\r\n/g, '\n'));
+    expect(src).not.toMatch(/handleConsolidateDrafts|consolidateIdem/);
+    expect(readFileSync('src/pages/OrderDetail.tsx', 'utf8')).not.toContain("'consolidate_draft_invoices'");
   });
 });
 

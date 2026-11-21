@@ -24,8 +24,11 @@ function chainable(resolveWith: unknown = { data: [], error: null }) {
   return builder;
 }
 
+const rpc = vi.hoisted(() => vi.fn());
 vi.mock('../../lib/db', () => ({
-  supabase: { from: vi.fn(() => chainable()), rpc: vi.fn(() => chainable()) },
+  supabase: { from: vi.fn(() => chainable()), rpc },
+  assertRpcResult: (data: unknown) => { if (data == null) throw new Error('empty'); return data; },
+  sanitizeError: (e: { message?: string }) => e?.message ?? String(e),
 }));
 
 vi.mock('../../lib/documentOCR', () => ({
@@ -45,7 +48,10 @@ import BulkCustomerImport from './BulkCustomerImport';
 
 describe('BulkCustomerImport', () => {
   const defaultProps = { open: true, onClose: vi.fn(), onSuccess: vi.fn() };
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    rpc.mockResolvedValue({ data: { status: 'saved', customer_id: 'c-1' }, error: null });
+  });
 
   it('renders when open', () => {
     render(<BulkCustomerImport {...defaultProps} />);
@@ -82,6 +88,84 @@ describe('BulkCustomerImport', () => {
     } finally {
       authValue.profile = { id: 'admin-1', role: 'admin' };
     }
+  });
+
+  // KI-145: rows go through save_customer (activity row, server checks), never a direct insert.
+  async function importFile(csv: string) {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File([csv], 'c.csv', { type: 'text/csv' })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Import \d+ Customer/ }));
+    await screen.findByText('Import Complete');
+  }
+  const payloads = () => rpc.mock.calls.filter(([fn]) => fn === 'save_customer').map(([, args]) => args);
+
+  it('saves a sales rep\'s rows through save_customer assigned to that rep', async () => {
+    authValue.profile = { id: 'rep-1', role: 'sales_rep' };
+    try {
+      await importFile('farm_name\nRep Farm\n');
+      expect(payloads()).toHaveLength(1);
+      const args = payloads()[0];
+      expect(args.p_customer_id).toBeNull();
+      expect(args.p_performed_by).toBe('rep-1');
+      expect(args.p_idempotency_key).toEqual(expect.any(String));
+      expect(args.p_customer_payload).toMatchObject({ farm_name: 'Rep Farm', assigned_sales_rep: 'rep-1', assigned_tier: 1 });
+      expect(screen.getByText(/Successfully imported 1 customer/)).toBeInTheDocument();
+    } finally {
+      authValue.profile = { id: 'admin-1', role: 'admin' };
+    }
+  });
+
+  it('reads "1,200" acres as 1200', async () => {
+    await importFile('farm_name,total_acres\nBig Farm,"1,200"\n');
+    expect(payloads()[0].p_customer_payload).toMatchObject({ total_acres: 1200 });
+  });
+
+  it('counts a row with a blank first cell as invalid, with its file row number', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['farm_name,phone\nGood Farm,1\n,555\n'], 'c.csv', { type: 'text/csv' })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText('Row 3: Missing farm name')).toBeInTheDocument();
+  });
+
+  it('shows each refused row\'s error and still imports the others', async () => {
+    rpc
+      .mockResolvedValueOnce({ data: null, error: { code: 'P0001', message: 'REP_MUST_SELF_ASSIGN' } })
+      .mockResolvedValueOnce({ data: { status: 'saved', customer_id: 'c-2' }, error: null });
+    await importFile('farm_name\nBad Farm\nGood Farm\n');
+    expect(screen.getByText(/Successfully imported 1 customer/)).toBeInTheDocument();
+    expect(screen.getByText('Row 2 (Bad Farm): REP_MUST_SELF_ASSIGN')).toBeInTheDocument();
+  });
+
+  it('says a row with no server answer may have saved', async () => {
+    rpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await importFile('farm_name\nLost Farm\n');
+    expect(screen.getByText(/Row 2 \(Lost Farm\): No answer from the server: this customer may have saved/)).toBeInTheDocument();
+  });
+
+  it('refuses unquoted thousands and bad acreage instead of saving the wrong number', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File([`farm_name,total_acres,notes\nA Farm,1,200,x\nB Farm,12abc\nC Farm,"1,2"\nD Farm,0\nE Farm,0x10\nF Farm,.5\nG Farm,${'9'.repeat(400)}\n`], 'c.csv', { type: 'text/csv' })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText(/Row 2: More values than column headers/)).toBeInTheDocument();
+    expect(screen.getByText('Row 3: Invalid total acres: 12abc')).toBeInTheDocument();
+    expect(screen.getByText('Row 4: Invalid total acres: 1,2')).toBeInTheDocument();
+    expect(screen.getByText('Row 6: Invalid total acres: 0x10')).toBeInTheDocument();
+    expect(screen.getByText(/^Row 8: Invalid total acres: 9{400}$/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import 2 Customer(s)' })).toBeInTheDocument(); // D (0) and F (.5)
+  });
+
+  it('makes an admin row with an unclear tier invalid instead of using the default', async () => {
+    const { container } = render(<BulkCustomerImport {...defaultProps} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['farm_name,tier\nA Farm,Tier 2\nB Farm,2.5\nC Farm,2\nD Farm,\n'], 'c.csv', { type: 'text/csv' })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Parse File' }));
+    expect(await screen.findByText('Row 2: Invalid tier: Tier 2')).toBeInTheDocument();
+    expect(screen.getByText('Row 3: Invalid tier: 2.5')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import 2 Customer(s)' })).toBeInTheDocument();
   });
 
   it('shows file upload area', () => {

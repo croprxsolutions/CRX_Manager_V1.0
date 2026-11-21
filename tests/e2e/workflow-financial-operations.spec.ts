@@ -1,5 +1,11 @@
 import { test, expect, Page } from '@playwright/test';
 import { login } from './utils/auth';
+import { moreAction } from './utils/more-actions';
+
+// Read in Node and passed into the page: the browser has no process.env.
+const SUPA = { url: process.env.VITE_SUPABASE_URL!, key: process.env.VITE_SUPABASE_ANON_KEY! };
+// The app's stored sign-in, named after the project in the URL the tests run against.
+const AUTH_KEY = `sb-${new URL(SUPA.url).hostname.split('.')[0]}-auth-token`;
 
 /**
  * Financial Operations E2E Gate Test
@@ -50,15 +56,15 @@ async function waitForPage(page: Page, ms = 2000) {
 
 // ── Helper: get Supabase session info from localStorage ──────────────
 async function getSupabaseSession(page: Page): Promise<{ token: string; userId: string }> {
-  return page.evaluate(() => {
-    const raw = localStorage.getItem('sb-rhyzpcqhnizqbxphqdkr-auth-token');
+  return page.evaluate((authKey) => {
+    const raw = localStorage.getItem(authKey);
     if (!raw) return { token: '', userId: '' };
     const session = JSON.parse(raw);
     return {
       token: session.access_token || '',
       userId: session.user?.id || '',
     };
-  });
+  }, AUTH_KEY);
 }
 
 // ── Helper: Supabase REST API call (runs in browser context) ─────────
@@ -70,14 +76,14 @@ async function supabaseRest(
 ): Promise<unknown> {
   const { token } = await getSupabaseSession(page);
   return page.evaluate(
-    async ({ method, path, body, token }) => {
+    async ({ method, path, body, token, supa }) => {
       const resp = await fetch(
-        `https://rhyzpcqhnizqbxphqdkr.supabase.co/rest/v1/${path}`,
+        `${supa.url}/rest/v1/${path}`,
         {
           method,
           headers: {
             apikey:
-              'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoeXpwY3Fobml6cWJ4cGhxZGtyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTM2NDAsImV4cCI6MjA4NTk2OTY0MH0.WR0vAi_KeGF0OoJ8_dFH7uW6ael9M5xnm6OUo2IZy7U',
+              supa.key,
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
             Prefer: 'return=representation',
@@ -92,7 +98,7 @@ async function supabaseRest(
         return text;
       }
     },
-    { method, path, body, token }
+    { method, path, body, token, supa: SUPA }
   );
 }
 
@@ -136,7 +142,7 @@ async function createNewPO(page: Page): Promise<string> {
 
   // Handle UnsavedChangesModal race condition
   try {
-    const leaveBtn = page.locator('button:has-text("Leave")');
+    const leaveBtn = page.locator('button:has-text("Discard changes")');
     await leaveBtn.click({ timeout: 3000 });
   } catch {
     // No modal appeared — navigation succeeded directly
@@ -600,8 +606,8 @@ test.describe.serial('Financial Ops — Invoice Payment Lifecycle', () => {
       await waitForPage(page, 3000);
     }
 
-    // Now void it — button should be enabled on a posted invoice
-    const voidBtn = page.locator('button:has-text("Void")');
+    // Now void it — Void invoice… sits under More actions on a posted invoice
+    const voidBtn = await moreAction(page, /^Void invoice/);
     await expect(voidBtn).toBeVisible({ timeout: 10000 });
     await voidBtn.click();
     await waitForPage(page, 1000);
@@ -615,8 +621,8 @@ test.describe.serial('Financial Ops — Invoice Payment Lifecycle', () => {
     await expect(reasonInput).toBeVisible({ timeout: 3000 });
     await reasonInput.fill('E2E test — void verification');
 
-    // Click "Void Invoice" in modal
-    const confirmVoidBtn = voidModal.locator('button:has-text("Void Invoice")');
+    // Click "Void invoice" in modal
+    const confirmVoidBtn = voidModal.locator('button:has-text("Void invoice")');
     await expect(confirmVoidBtn).toBeVisible({ timeout: 5000 });
     await confirmVoidBtn.click();
     await waitForPage(page, 3000);

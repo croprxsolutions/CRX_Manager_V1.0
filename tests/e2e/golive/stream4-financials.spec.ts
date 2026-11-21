@@ -15,7 +15,7 @@
 
 import { test, expect, Page } from '@playwright/test';
 import { login } from '../utils/auth';
-import { supabaseRest, supabaseRpc, asArray } from './utils/supabase-helpers';
+import { getToken, supabaseRest, supabaseRpc, asArray } from './utils/supabase-helpers';
 import {
   navAndStabilize,
   assertNoCriticalErrors,
@@ -26,6 +26,7 @@ import {
   assertCentsEqual as _assertCentsEqual,
   collectConsoleErrors,
 } from './utils/golive-helpers';
+import { amountDueCents, invoiceLineAmounts } from '../utils/invoice-lines';
 
 test.describe.serial('Stream 4 — Financials', () => {
   let page: Page;
@@ -47,16 +48,7 @@ test.describe.serial('Stream 4 — Financials', () => {
     await page.waitForTimeout(2000);
 
     // Verify auth token is available for subsequent DB queries
-    const token = await page.evaluate(() => {
-      const raw = localStorage.getItem('sb-rhyzpcqhnizqbxphqdkr-auth-token');
-      if (!raw) return '';
-      try {
-        const session = JSON.parse(raw);
-        return session.access_token || '';
-      } catch {
-        return '';
-      }
-    });
+    const token = await getToken(page);
     expect(token).toBeTruthy();
   });
 
@@ -91,9 +83,10 @@ test.describe.serial('Stream 4 — Financials', () => {
     await page.waitForLoadState('networkidle').catch(() => {});
     await assertNoCriticalErrors(page);
 
-    // Extract financial values from the Summary card
-    // The invoice detail page shows: Subtotal, Paid, Prepay Applied, Balance Due
-    const subtotalText = await extractLabeledValue(page, 'Subtotal');
+    // Extract financial values from the Amount due card
+    // The invoice detail page shows: Invoice total (the old Subtotal, every line), Paid, Prepay applied (only when
+    // above 0), Balance due (Billing UI, Nov 13)
+    const subtotalText = await extractLabeledValue(page, 'Invoice total');
     const totalText = await extractLabeledValue(page, 'Total');
     const paidText = await extractLabeledValue(page, 'Paid');
     const prepayText = await extractLabeledValue(page, 'Prepay Applied');
@@ -131,8 +124,21 @@ test.describe.serial('Stream 4 — Financials', () => {
     // We should still be on an invoice detail page from FIN3
     await assertNoCriticalErrors(page);
 
-    // Find the line items table (the table under "Line Items" heading)
-    const lineItemsTable = page.locator('table').first();
+    // Every line the invoice shows (product rows, Charges, and the "Worked out for you" discount and tax) must
+    // add up to Amount due's "Invoice total", as the old all-lines table did to "Subtotal" (Billing UI, Nov 13).
+    const allLines = await invoiceLineAmounts(page);
+    const invoiceTotal = await amountDueCents(page, 'Invoice total');
+    if (invoiceTotal !== null && allLines.products.length + allLines.charges.length + allLines.worked.length > 0) {
+      const totalDiff = Math.abs(allLines.totalCents - invoiceTotal);
+      expect(totalDiff,
+        `Products + charges + worked-out lines ${allLines.totalCents} ($${(allLines.totalCents / 100).toFixed(2)}) ` +
+        `does not match Invoice total ${invoiceTotal} ($${(invoiceTotal / 100).toFixed(2)}), diff=${totalDiff} cents`,
+      ).toBeLessThanOrEqual(2);
+    }
+
+    // Find the line items table: the product table in "What this invoice bills". The Who pays table in the
+    // rail comes first in the DOM, so scope to the lines card.
+    const lineItemsTable = page.locator('section[aria-labelledby="invoice-lines-title"] table').first();
     const isVisible = await lineItemsTable.isVisible({ timeout: 5000 }).catch(() => false);
 
     if (!isVisible) {
@@ -192,10 +198,9 @@ test.describe.serial('Stream 4 — Financials', () => {
       return;
     }
 
-    // Compare with the subtotal from the summary card
-    const subtotalText = await extractLabeledValue(page, 'Subtotal');
-    const totalText = await extractLabeledValue(page, 'Total');
-    const subtotalCents = parseDollars(subtotalText || totalText);
+    // Extra check: the table holds the product lines, so it adds up to "Products" in Amount due
+    // (charges, discount and tax are listed below the table and checked above)
+    const subtotalCents = (await amountDueCents(page, 'Products')) ?? 0;
 
     if (subtotalCents > 0) {
       const diff = Math.abs(sumCents - subtotalCents);

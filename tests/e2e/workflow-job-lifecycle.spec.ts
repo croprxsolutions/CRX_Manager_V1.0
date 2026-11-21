@@ -1,6 +1,9 @@
 import { test, expect, Page } from '@playwright/test';
 import { login } from './utils/auth';
 
+// Read in Node and passed into the page: the browser has no process.env.
+const SUPA = { url: process.env.VITE_SUPABASE_URL!, key: process.env.VITE_SUPABASE_ANON_KEY! };
+
 /**
  * Job Lifecycle E2E Test
  *
@@ -100,7 +103,7 @@ test.describe.serial('Job Lifecycle — Create to Invoice', () => {
 
     // Handle UnsavedChangesModal race condition — React state batching may
     // not flush isDirty=false before the route blocker fires
-    const leaveBtn = page.locator('button:has-text("Leave")');
+    const leaveBtn = page.locator('button:has-text("Discard changes")');
     try { await leaveBtn.click({ timeout: 3000 }); } catch { /* no modal */ }
 
     // Wait for navigation to the saved job detail page (/jobs/{uuid})
@@ -272,17 +275,17 @@ test.describe.serial('Job Lifecycle — Create to Invoice', () => {
       // Get Supabase session token from the app's localStorage
       await page.goto('/');
       await waitForPage(page, 2000);
-      await page.evaluate(async (jid: string) => {
-        const raw = localStorage.getItem('sb-rhyzpcqhnizqbxphqdkr-auth-token');
+      await page.evaluate(async ({ jid, supa }) => {
+        const raw = localStorage.getItem(`sb-${new URL(supa.url).hostname.split('.')[0]}-auth-token`);
         if (!raw) return;
         const session = JSON.parse(raw);
         const token = session.access_token || '';
         await fetch(
-          `https://rhyzpcqhnizqbxphqdkr.supabase.co/rest/v1/jobs?id=eq.${jid}`,
+          `${supa.url}/rest/v1/jobs?id=eq.${jid}`,
           {
             method: 'PATCH',
             headers: {
-              apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoeXpwY3Fobml6cWJ4cGhxZGtyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTM2NDAsImV4cCI6MjA4NTk2OTY0MH0.WR0vAi_KeGF0OoJ8_dFH7uW6ael9M5xnm6OUo2IZy7U',
+              apikey: supa.key,
               Authorization: `Bearer ${token}`,
               'Content-Type': 'application/json',
               Prefer: 'return=minimal',
@@ -290,7 +293,7 @@ test.describe.serial('Job Lifecycle — Create to Invoice', () => {
             body: JSON.stringify({ status: 'in_progress' }),
           }
         );
-      }, jobId);
+      }, { jid: jobId, supa: SUPA });
     }
 
     await page.goto(jobPath);
@@ -395,7 +398,7 @@ test.describe.serial('Job Lifecycle — Create to Invoice', () => {
     await waitForPage(page, 8000);
 
     // Handle UnsavedChangesModal race condition if it appears
-    const leaveBtn = page.locator('button:has-text("Leave")');
+    const leaveBtn = page.locator('button:has-text("Discard changes")');
     try { await leaveBtn.click({ timeout: 3000 }); } catch { /* no modal */ }
 
     // Check if we navigated to an invoice page

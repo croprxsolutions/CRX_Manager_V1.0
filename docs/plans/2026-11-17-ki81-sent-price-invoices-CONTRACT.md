@@ -1,0 +1,214 @@
+# KI-81 behavior contract: invoices bill the price the customer was sent
+
+Read at `origin/staging` 10070370e (2026-11-17). Decision: Mason, 2026-11-17 (DECISION_LOG, PR #1936): fix now, Claude builds it.
+
+## Facts (source)
+
+- The sent-price lock `_assert_quote_prices_as_sent(quote_id)` (newest body `20261101100000`) passes a never-sent quote,
+  and otherwise refuses (`QUOTE_RESEND_REQUIRED`) unless every current line price equals the last sent version's price
+  or is the latest change `save_quote` recorded since that send (`20261029120000`). Convert, Partial Order and Schedule
+  Job call it under the quote row lock.
+- Blend invoice `create_invoice_from_blend_ticket` (newest `20261022020000`) prices lines from the job's own quote
+  section (same customer, not deleted, the job's quote), reading `quote_items.price_per_unit` live. It never calls the lock.
+- Single field-app invoice `_save_field_app_invoice_impl_20260714` (newest `20270120150000`) prices a billed chemical
+  from `quote_items` joined to any section on one of the invoice's fields: no customer, status, deleted, season or
+  expiry filter, `ORDER BY qi.id LIMIT 1` (random over UUIDs). Same lookup in `resolve_field_app_chemical_price`
+  (`20260720233000`), used by the split-bill save `_save_field_app_split_invoice_impl` (newest `20261204100000`).
+- Live, read-only 2026-11-17: 0 field-app lines ever priced `quoted`; 0 blend-ticket invoices; 0 field/product pairs
+  on more than one quote; 0 split billing sets; every quote has `season` NULL (so a season filter must come from
+  dates, not that column). Existing invoices are stored lines and are never re-priced by this change.
+- Quote statuses (registry): draft, sent, revised, accepted, declined, expired, cancelled, closed_by_application,
+  closed_short. Quotes expire at season end (`20261029100000`).
+
+## Outcome and authority
+
+- Business result: an invoice that takes a price from a quote takes only a price the customer was sent (or an
+  approved change recorded since the send). Otherwise it refuses with "send the quote again", like Convert.
+- Smallest change: one migration, no new table or column, no screen change.
+  1. New private helper `_field_app_sent_quote_price_cents(product, field_ids, customer_ids, on_date)`: finds the
+     eligible quote lines (below), locks those quotes (FOR SHARE, id order), runs the lock on each, and returns the
+     one price in cents; NULL when none; refuses when eligible quotes disagree.
+  2. `resolve_field_app_chemical_price` takes the billing customers and the application date and uses (1).
+  3. The single and split field-app saves use (1)/(2) once per billed grower; nothing else in their bodies changes.
+  5. The invoice screen's preview (`_preview_field_app_invoice_split_impl_20260908`) picks the same quotes per grower
+     through the shared `_field_app_quote_eligible` (Sol round 2). It does not run the sent-price check: a quote changed
+     since its send previews its current price and the save refuses `QUOTE_RESEND_REQUIRED`, so a preview price is
+     not approval to bill it.
+  4. The blend invoice locks the job's quote row and runs the lock before any price is read or invoice number drawn.
+- Eligible quote (field-app): its customer is the grower being billed (Mason, 2026-11-17, "Own quote only": on a
+  shared field each grower pays their own quoted price, else the price list; a co-owner's quote never prices
+  another grower's share), on a field that grower has a share of (Sol round 3); not deleted; it was actually sent (has a sent version);
+  status sent, revised, accepted, expired, closed_by_application or closed_short (not draft, declined, cancelled);
+  written on or before the application date and not expired by it (Chicago dates; Mason, 2026-11-17, "Valid +
+  written before", replacing the earlier season bound). The date is the job's date, else the invoice date the line
+  will carry, else Chicago today.
+- Who may act: unchanged (admins and reps through the existing wrappers). Every price stays server-derived; the screen
+  sends only ids and a manual override, which still wins as today.
+- Files: `supabase/migrations/20270125163000_ki81_invoices_bill_sent_quote_price.sql`, its ledger and
+  migrations.d record, a real-schema prover + reverse script under `scripts/smoke/`, KNOWN_ISSUES, this contract.
+
+## State and failure
+
+- Rules that always hold: a quote-sourced invoice price equals a price the lock accepts, read in the same transaction
+  that holds the quote lock, so a concurrent `save_quote`/send cannot change it between check and insert.
+- Existing rows: none change. Writes from the deployed app keep working: the public RPCs keep their names and
+  arguments (only the private `resolve_field_app_chemical_price`, callable by no API role, gains two inputs and
+  becomes VOLATILE because it now takes row locks); only new refusals (QUOTE_RESEND_REQUIRED,
+  FIELD_APP_QUOTE_PRICE_CONFLICT) can appear, with plain-English messages.
+- Editing an existing draft field-app invoice re-prices its lines today (the save rebuilds them); after this change
+  that rebuild uses the new rule, so an edit can now refuse or move a line from "quoted" to the price list. Live has
+  0 quoted field-app lines (3 field-app invoices), so no current invoice changes; this is the intended rule going forward.
+- Blend invoices (Mason, 2026-11-18, answering Taha's review: "Yes, same rules"): the job's quote prices a blend
+  line only for the grower who owns that quote, and only if it was sent, written on or before the application date
+  (the ticket date, else the job date) and not expired by it. Every other grower on the ticket, and the owner when the
+  job quote fails those checks, bills their list price. This replaces the earlier blend rule (a never-sent job quote
+  priced the blend for every grower). Every other grower is priced from their own quote exactly as on a field-app
+  invoice (Mason, 2026-11-18, answering Taha's re-review: "Yes, use B's quote"): a sent, valid quote to that grower
+  for a ticket field where they have a per-unit share, else their list price. A resend or two-price problem on it
+  refuses and asks for the quote to be fixed or resent (a blend ticket has no per-grower typed price); a $0 on it takes
+  the below-cost approval. When the owner has no per-unit share, or the job quote has no usable price for any product
+  on the ticket, it prices nobody and skips the sent-price lock (its row lock stays). The owner too is priced from their own quote for a product the job quote gives no
+  usable price for (Mason, 2026-11-18, "Yes, price the owner from their own quote"); a usable job-quote price still wins. The refusal names
+  the grower whose quote to fix.
+- Timing: a retry or double click runs the existing idempotency of each save unchanged; a quote re-sent in between
+  is simply the newer sent price. Locks: field-app saves take FOR SHARE on eligible quotes (shared locks never block
+  each other, so two invoice saves cannot deadlock on quotes); the blend invoice takes FOR UPDATE on its one job quote,
+  then FOR SHARE on the other growers' own quotes. Two blend invoices whose job quotes are each the other's co-owner
+  quote can deadlock; PostgreSQL then cancels one with nothing written, and it is created again. The same holds for
+  two blend invoices for the same grower on the same field where each job quote leaves out a product the other prices
+  (each locks its own job quote FOR UPDATE, then the other's FOR SHARE through the owner's own-quote lookup): one is
+  cancelled (40P01), nothing is written, and creating it again works (Taha's re-review at 6328b47c5; accepted).
+  `save_quote` and the send path lock one quote and never wait on invoices, blend tickets or fields, so no cycle with
+  either invoice path. Proof case 9 runs a save_quote against a held field-app save.
+- Undo: nothing new; a refused save writes nothing.
+
+## Delivery
+
+Database only, one PR to `staging`; the screens already show server errors. No screen depends on it.
+
+## Proof cases (real-schema prover, local Docker, test data)
+
+1. When a field-app chemical is on the customer's sent quote at the sent price, then the line bills that price, source quoted.
+2. When the quote's price was changed after sending and not re-sent (no recorded change), then the save refuses QUOTE_RESEND_REQUIRED and writes nothing.
+3. When the price change was recorded by save_quote since the send, then it bills the new price.
+4. When the only quote on the field is a draft, declined, cancelled or deleted quote, or another customer's, or expired before the application date, then it bills the tier price.
+5. When two eligible quotes list the product on the field at different prices, then it refuses FIELD_APP_QUOTE_PRICE_CONFLICT; a manual price saves.
+6. Split-bill save: cases 1, 2 and 4 through `_save_field_app_split_invoice_impl`.
+7. Blend invoice: the job's quote re-priced and not re-sent refuses QUOTE_RESEND_REQUIRED; sent price bills; a never-sent,
+   declined, expired or later-written job quote bills the list price; on a shared field only the quote's grower bills it
+   (B1-B7). A co-owner's own sent quote prices their share; an unsent change to it refuses; $0 on it asks for the
+   below-cost approval; a job quote that prices nobody is not checked (B8-B11). With no usable job-quote price the
+   owner bills their own sent quote; a usable job quote still wins (B12-B13). A job quote listing no ticket product
+   prices nothing, so its unsent change does not refuse (B14). With no job quote each grower on a shared
+   field bills their own sent quote (B15); the owner's own $0 quote asks for the below-cost approval (B16).
+9. When a field-app save holds a quote and save_quote edits that quote's price at once, then save_quote waits and the invoice bills the sent price.
+8. Rollback script restores all five bodies byte-identical (md5).
+10. Own quote only: on a shared field only grower B has a sent quote; B bills it, A bills A's tier (single and split saves).
+11. The preview shows each grower the price the save bills, and never a draft quote's price.
+
+## Cold challenge (Astra, gpt-6-astra high, 2026-11-17: 37 findings) — settled
+
+Changed because of it:
+- Season bound (7): an eligible quote also expires in the application date's season (quotes expire at season end),
+  so a next season's quote never prices a backdated application. Expiry (a calendar date) is inclusive; a NULL
+  expiry counts (live: 0 quotes have none) (8).
+- One answer per transaction (21, 37): the helper records its first answer for the same inputs; every later call
+  in that transaction recomputes and refuses `FIELD_APP_QUOTE_PRICE_CHANGED` ("save again") if the answer moved, so
+  the split save, which asks once per grower, cannot price one grower from a quote sent mid-save. The record can
+  only refuse, never supply a price (Luna round 2: a planted record refuses; proof case F6).
+- A quote sent by another user while a save runs, after the save chose its quotes (Luna round 2), is not part of that
+  save: the result equals the save committing just before that send, a price the customer was sent.
+- Negative quote prices are ignored, as the blend path already does (4); cent scale and finiteness are a table
+  constraint (`quote_items_price_per_unit_cent_scale_chk`); live has 0 bad prices.
+- Wording: the lock's rules are as in Facts (a raise also needs the grower tick) (1); the draft job quote is the
+  stated exception (2); conflict covers two lines of one quote too (3); the split save's existing rules stay — it
+  refuses an unresolved or $0 price and a $0 manual price, so "tier price" means each path's existing fallback (5, 6).
+
+Settled by evidence or an existing decision (no change):
+- Whole-quote lock (12, 13): the blend invoice bills from the job's own quote, exactly the quote Convert and Schedule
+  Job check whole (Mason, 2026-10-14: the lock covers every price on the quote); it refuses before any number is drawn.
+- Billing customers (10, 11): superseded by Mason's answer 3 (own quote only, after Sol round 2); the lock compares
+  line, product and price, not the field (Mason's 2026-11-17 answer 1 is about which quotes, not which field).
+- Dates (9): single save reads `invoice_date`; split reads the job date, then `invoice_date`, then Chicago today.
+- Locks (20, 22, 23): FOR SHARE re-checks the quote row's conditions after any wait (PostgreSQL re-evaluation), and
+  the prices are read by a later statement; the blend path locks the job (existing) and the quote before its section,
+  the order save_quote uses. Proof case 9.
+- Live, read-only 2026-11-17: 0 quote lines whose section belongs to another quote (14); `products.product_name` is
+  NOT NULL (15); 4 eligible-status sent quotes, 1 with an untrusted last version, which refuses "send again", the safe
+  outcome (16, 31); 0 draft field-app invoices; 0 unbilled blend tickets on quote jobs (31).
+- Outside this change, owned by the existing send workflow and lock (17, 18, 19), the wrappers' role checks (27), the
+  screens (29, 30: the server already chose the quote price; messages say what to do, and a typed price saves),
+  idempotency (24) and transaction atomicity (25; invoice-number gaps already happen on any refused save).
+- Grants and rollback (26, 28, 34): the prover checks the helpers are executable by no API role and the new resolver by neither `anon` nor
+  `authenticated` (the existing `service_role` grant is preserved), only
+  one resolver signature exists, and the reverse restores all five bodies byte-identical, the old resolver closed,
+  and the helper dropped. Undo of a successful draft re-price (35) is a normal draft edit. Rollout (36): staging-first
+  release flow. Audit references on invoice lines (33): not needed for this fix.
+
+## Open business decisions
+
+Mason, 2026-11-17 (in session):
+1. Which quotes price a field-application chemical: "Sent + not expired" (the eligible-quote rule above).
+2. Two eligible quotes disagree on the price: "Stop, type the price" (FIELD_APP_QUOTE_PRICE_CONFLICT; the manual price saves).
+3. Shared field, one grower's quote (Sol round 2): "Own quote only": each grower pays a quoted price only from a quote
+   sent to them; otherwise the price list.
+4. A quote whose expiry crosses October 1 (Sol round 3): "Valid + written before": a quote counts when it was written
+   on or before the application date and had not expired by it; a quote written later (such as next season's) never
+   prices an earlier application.
+
+## PR review (Codex GitHub, 2026-11-17)
+
+- Split save kept one price source for every grower: when one grower bills their own quote and another the price
+  list, each grower's invoice line and share now record their OWN source ('quoted' or 'tier'). Proof: X1.
+
+## Sol round 3 (2026-11-17)
+
+- The season bound ignored a still-valid quote whose expiry fell after October 1: replaced by Mason's answer 4.
+- A grower's quote on a field they had no share of could price their invoice: each grower's quote now counts only on
+  their own fields (single save and preview from the field shares; split save field by field with the same split rule).
+- Preview without the sent-price lock (MED): settled in round 2, below.
+
+## Sol round 2 (2026-11-17)
+
+- The preview read the old lookup, so it could show a price the save would not bill: it now uses the same eligibility.
+- One grower's quote priced another grower's share (and, in the single save, a skipped deleted recipient's quote could
+  price the others): pricing is now per grower, so both go away.
+- The preview runs no sent-price lock (it is read-only); a quote changed and not re-sent previews its current price and
+  the save refuses "send the quote again", which is the message the grower-facing step needs.
+
+## PR review (Taha, 2026-11-18)
+
+- Blend invoices follow decisions 1, 3 and 4 (Mason, 2026-11-18): see the blend rule above; smoke B1-B7.
+- Split save: a grower whose per-person price was typed is not looked up on their quote, so a quote needing a resend
+  does not block the typed price, and the other growers keep their own price and source.
+- Field-app paths: the resend refusal adds "Or type the price on this invoice line, then save again." The quote and
+  blend paths keep the shared message (they have no typed price).
+- Re-review (Taha, 2026-11-18): Mason answered "Yes, use B's quote", so a blend co-owner bills their own quote
+  (B8, B9, B11); and the job quote skips the sent-price lock when its owner has no per-unit share (B10).
+- Second re-review (Taha, 2026-11-18): Mason answered "Yes, price the owner from their own quote": the owner falls back to their own quote
+  when the job quote gives no usable price (B12, B13); the refusal names the grower.
+- Luna r12 (MED, fixed): a job quote listing none of the ticket's products still ran the sent-price lock, so an
+  unsent change to an unrelated product refused the invoice. It now prices nobody and skips the lock (B14).
+  Luna r12's BLOCKER (resolver loses its service_role grant) was refuted: the baseline's explicit grant and the
+  default grant the recreated resolver receives are the same ACL entry, and the prover's ACL postflight passes.
+- Left as they are, to raise with Mason separately: a lower price recorded through save_quote after the send bills
+  without a resend (27 Oct override rule); a quote revised after the application bills the later sent version (the
+  date rule reads the quote's creation date).
+
+## CodeRabbit full review (2026-11-18, review 5960636802 on 92042080f)
+
+- Fixed (billing logic, back to Taha): the blend precheck applied a valid pick to every grower, though a pick prices only
+  the job quote's grower, so another grower with no price passed the precheck and refused later, after an invoice
+  number was drawn; the pick now exempts only the ticket's own grower. The split preview priced a new group member on
+  the edited invoice's date; that date is now used only for the edited invoice's own grower (the save dates a new
+  member's invoice today).
+- Fixed (rollback and tests): the reverse documents `psql -X -v ON_ERROR_STOP=1 -1 -f`, pins the headers of the three
+  functions it drops, checks all three API roles on both helpers, recreates the old resolver with `CREATE FUNCTION`,
+  and grants and verifies its `service_role` EXECUTE; F8/P3 assert each grower's row; C9's quote stays eligible across
+  midnight and its readiness poll ignores itself; the pinned `field_app_priced_quantity` body is LF on any checkout.
+- Refuted: (a) $0 approval bound to its growers: the approval window shows line, product, cost and kind, never a
+  grower, so what the admin approved is unchanged, and each grower's $0 is the price that grower was sent.
+  (b) split prices from one snapshot: each grower is priced only from their own quote (no cross-grower invariant), so
+  the outcome equals each grower's line priced at a moment their own quote was in that state (settled, Luna r2).
+  (c) a forward rollback migration: the reverse is the reviewed rollback artifact; if it is ever needed it ships as a
+  new migration then. (d) "STATUS UNKNOWN" header: the record uses the repo's `LOCAL CANDIDATE — NOT APPLIED` form.

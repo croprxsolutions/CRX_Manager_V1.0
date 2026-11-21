@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
@@ -75,6 +76,9 @@ function customerQuery(nextCustomer: () => typeof original | typeof newer): Reco
   return chain;
 }
 
+// Live hides the sales tax and standing discount controls until commission ships (billingM4Enabled).
+const billingM4 = vi.hoisted(() => ({ on: true }));
+vi.mock('../lib/billingFeatures', () => ({ billingM4Enabled: () => billingM4.on }));
 vi.mock('../lib/db', async () => ({
   supabase: { from: mockFrom, rpc: mockRpc },
   // The REAL assertRpcResult, not a passthrough stub. `vi.fn((value) => value)` never
@@ -116,8 +120,10 @@ vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 // empty recipient, and saving is blocked until it is filled. A `<div />` mock
 // hides that, so the create-route tests below need a way to fill it in.
 vi.mock('../components/ui/CommissionSplitEditor', () => ({
-  default: ({ value, onChange }: { value?: { splits?: { recipient: string; percentage: number }[] }; onChange: (v: { splits: { recipient: string; percentage: number }[] }) => void }) => (
+  default: ({ value, onChange, disabled }: { value?: { splits?: { recipient: string; percentage: number }[] }; onChange: (v: { splits: { recipient: string; percentage: number }[] }) => void; disabled?: boolean }) => (
     <input
+      // The real editor's recipient Dropdown ignores the disabled fieldset, so the page must pass `disabled`.
+      data-locked={disabled ? 'true' : 'false'}
       aria-label="commission recipient"
       value={value?.splits?.[0]?.recipient ?? ''}
       onChange={(e) => onChange({ splits: [{ recipient: e.target.value, percentage: 100 }] })}
@@ -939,18 +945,37 @@ describe('CustomerDetail stale whole-record save', () => {
     try {
       const { unmount } = renderDetail();
       await screen.findByDisplayValue('Original Farm');
-      expect(screen.getByLabelText('Pricing Tier')).toBeDisabled();
-      expect(screen.getByLabelText('Credit Limit ($)')).toBeDisabled();
-      expect(screen.getByText(/only an admin can change a customer.s price tier and credit limit/i)).toBeInTheDocument();
+      expect(screen.getByLabelText('Price tier')).toBeDisabled();
+      expect(screen.getByLabelText('Credit limit')).toBeDisabled();
+      expect(screen.getByText(/only an admin can change the price tier, credit limit and standing discount/i)).toBeInTheDocument();
       unmount();
     } finally {
       mockProfile.current = { id: 'admin-1', role: 'admin', full_name: 'Admin' };
     }
     renderDetail();
     await screen.findByDisplayValue('Original Farm');
-    expect(screen.getByLabelText('Pricing Tier')).toBeEnabled();
-    expect(screen.getByLabelText('Credit Limit ($)')).toBeEnabled();
-    expect(screen.queryByText(/only an admin can change a customer.s price tier and credit limit/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Price tier')).toBeEnabled();
+    expect(screen.getByLabelText('Credit limit')).toBeEnabled();
+    expect(screen.queryByText(/only an admin can change the price tier, credit limit and standing discount/i)).not.toBeInTheDocument();
+  });
+
+  it('locks the commission split editor while a save runs', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') return customerQuery(() => original);
+      return query({ data: [], error: null });
+    });
+    let releaseSave!: (value: { data: unknown; error: unknown }) => void;
+    mockRpc.mockImplementation(() => new Promise((resolve) => { releaseSave = resolve; }));
+    renderDetail();
+    fireEvent.change(await screen.findByDisplayValue('Original Farm'), { target: { value: 'Edited Farm' } });
+    expect(screen.getByLabelText('commission recipient')).toHaveAttribute('data-locked', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_customer', expect.anything()));
+    expect(screen.getByLabelText('commission recipient')).toHaveAttribute('data-locked', 'true');
+
+    await act(async () => { releaseSave({ data: { customer_id: 'customer-1', row_version: 5 }, error: null }); });
+    await waitFor(() => expect(screen.getByLabelText('commission recipient')).toHaveAttribute('data-locked', 'false'));
   });
 
   it('restores the create-form defaults on that jump, not an empty form', async () => {
@@ -1352,5 +1377,215 @@ describe('CustomerDetail save paused on the duplicate check (KI-77)', () => {
     await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 50); }); });
     expect(mockRpc.mock.calls.filter(([name]) => name === 'save_customer'), 'the abandoned edit must never be written').toEqual([]);
     expect(screen.getByRole('button', { name: 'Save Changes' })).not.toBeDisabled();
+  });
+});
+
+describe('CustomerDetail standing discount (billing plan M4b)', () => {
+  const updates: unknown[] = [];
+  beforeEach(() => {
+    vi.clearAllMocks();
+    customerIdempotencyState.reset();
+    updates.length = 0;
+    let saved = { ...original, standing_discount_pct: 3 };
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') {
+        const q = customerQuery(() => saved as unknown as typeof original);
+        const update = q.update as (...args: unknown[]) => unknown;
+        q.update = (...args: unknown[]) => {
+          updates.push(args[0]);
+          saved = { ...saved, ...(args[0] as object), row_version: saved.row_version + 1 };
+          return update(...args);
+        };
+        return q;
+      }
+      return query({ data: [], error: null });
+    });
+    mockRpc.mockResolvedValue({ data: null, error: null });
+  });
+  afterEach(() => { mockProfile.current = { id: 'admin-1', role: 'admin', full_name: 'Admin' }; });
+
+  it('on live (billing M4 off) the customer has no standing discount box', async () => {
+    billingM4.on = false;
+    try {
+      renderDetail();
+      expect(await screen.findByLabelText('Finance charge rate')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Standing discount')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Save discount' })).not.toBeInTheDocument();
+    } finally {
+      billingM4.on = true;
+    }
+  });
+
+  it('an admin changes the customer\'s rate with its own Save', async () => {
+    renderDetail();
+    const input = await screen.findByLabelText('Standing discount');
+    expect(input).toHaveValue(3);
+    expect(input).toHaveAccessibleDescription('%');
+    expect(screen.getByRole('button', { name: 'Save discount' })).toBeDisabled();
+    fireEvent.change(input, { target: { value: '2.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));
+    await waitFor(() => expect(updates).toEqual([{ standing_discount_pct: 2.5 }]));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('2.5%')));
+    expect(mockRpc).not.toHaveBeenCalledWith('save_customer', expect.anything());
+    // The rate is saved: leaving the page must not warn about unsaved changes (staging walkthrough, 11 Nov).
+    expect(dirtyStates[dirtyStates.length - 1]).toBe(false);
+  });
+
+  it('stays clean after the save under React StrictMode too', async () => {
+    render(<StrictMode><MemoryRouter initialEntries={['/customers/customer-1']}><Routes><Route path="/customers/:id" element={<CustomerDetail />} /></Routes></MemoryRouter></StrictMode>);
+    fireEvent.change(await screen.findByLabelText('Standing discount'), { target: { value: '2.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('2.5%')));
+    expect(dirtyStates[dirtyStates.length - 1]).toBe(false);
+  });
+
+  it('refuses more than two decimals or over 100 before writing', async () => {
+    renderDetail();
+    const input = await screen.findByLabelText('Standing discount');
+    fireEvent.change(input, { target: { value: '101' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('0 to 100')));
+    expect(updates).toEqual([]);
+  });
+
+  it('a save that finishes after the page moved to another customer leaves that customer alone', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'customers') return query({ data: [], error: null });
+      let current: unknown = null;
+      const q = customerQuery(() => (current ?? { ...original, standing_discount_pct: 3 }) as unknown as typeof original);
+      const update = q.update as (...args: unknown[]) => unknown;
+      q.update = (...args: unknown[]) => {
+        updates.push(args[0]);
+        current = { ...original, standing_discount_pct: 2.5, row_version: 5 };
+        update(...args);
+        const then = q.then as (...a: unknown[]) => unknown;
+        q.then = (...a: unknown[]) => gate.then(() => then(...a));
+        return q;
+      };
+      return q;
+    });
+    renderDetailWithCustomerSwitch();
+    fireEvent.change(await screen.findByLabelText('Standing discount'), { target: { value: '2.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save discount' }));
+    await waitFor(() => expect(updates).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to customer 2' }));
+    await act(async () => { release(); await gate; });
+    expect(mockToast).not.toHaveBeenCalledWith('success', expect.stringContaining('Standing discount set'));
+  });
+
+  it('a non-admin sees the rate but cannot change it', async () => {
+    mockProfile.current = { id: 'rep-1', role: 'sales_rep', full_name: 'Rep' };
+    renderDetail();
+    expect(await screen.findByLabelText('Standing discount')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Save discount' })).not.toBeInTheDocument();
+  });
+});
+
+describe('CustomerDetail Billing card (billing UI redesign)', () => {
+  const billingCustomer = {
+    ...original, payment_terms: 'Net 30', credit_limit_cents: 2500000, standing_discount_pct: 3,
+    finance_charge_rate: 18, finance_charge_enabled: true, finance_charge_grace_days: 10,
+  };
+  const REP_NOTE = 'Only an admin can change the price tier, credit limit and standing discount.';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    customerIdempotencyState.reset();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') return customerQuery(() => billingCustomer as unknown as typeof original);
+      return query({ data: [], error: null });
+    });
+    mockRpc.mockResolvedValue({ data: { customer_id: 'customer-1', row_version: 5 }, error: null });
+  });
+  afterEach(() => { mockProfile.current = { id: 'admin-1', role: 'admin', full_name: 'Admin' }; });
+
+  async function billingCard() {
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    const card = document.getElementById('customer-billing');
+    if (!card) throw new Error('no Billing card');
+    return card;
+  }
+
+  const savedPayload = () => (mockRpc.mock.calls.find(([name]) => name === 'save_customer')?.[1] as { p_customer_payload: Record<string, unknown> }).p_customer_payload;
+
+  it('sits right after Contact, is in the jump bar, and holds every billing field', async () => {
+    const card = await billingCard();
+    expect(document.getElementById('customer-contact')?.nextElementSibling).toBe(card);
+    expect(within(card).getByRole('heading', { name: 'Billing' })).toBeInTheDocument();
+    const jump = screen.getByRole('navigation', { name: 'Jump to section' });
+    expect(within(jump).getAllByRole('link').map((a) => a.textContent).slice(0, 2)).toEqual(['Contact', 'Billing']);
+
+    for (const label of ['Price tier', 'Credit limit', 'Payment terms', 'Parent customer', 'Standing discount', 'Finance charge rate', 'Grace period']) {
+      expect(within(card).getByLabelText(label)).toBeInTheDocument();
+    }
+    expect(within(card).getByRole('switch', { name: /charge finance charges/i })).toBeChecked();
+    // Moved out of Contact, not copied.
+    const contact = document.getElementById('customer-contact') as HTMLElement;
+    expect(within(contact).queryByLabelText(/tier|credit|discount|finance|grace|terms|parent/i)).not.toBeInTheDocument();
+
+    const discount = within(card).getByLabelText('Standing discount');
+    expect(discount).toHaveValue(3);
+    expect(discount.parentElement).toHaveTextContent('%');
+    expect(within(card).getByText('Saves on its own, right away. Save changes below does not include it.')).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Save discount' })).toBeDisabled();
+    expect(within(card).queryByText(REP_NOTE)).not.toBeInTheDocument();
+  });
+
+  it('an admin edits every billing field; Save Changes carries all but the discount', async () => {
+    const card = await billingCard();
+    for (const label of ['Price tier', 'Credit limit', 'Payment terms', 'Standing discount', 'Finance charge rate', 'Grace period']) {
+      expect(within(card).getByLabelText(label)).toBeEnabled();
+    }
+    fireEvent.change(within(card).getByLabelText('Price tier'), { target: { value: '2' } });
+    fireEvent.change(within(card).getByLabelText('Credit limit'), { target: { value: '500' } });
+    fireEvent.change(within(card).getByLabelText('Payment terms'), { target: { value: 'Net 15' } });
+    fireEvent.change(within(card).getByLabelText('Standing discount'), { target: { value: '4' } });
+    fireEvent.change(within(card).getByLabelText('Finance charge rate'), { target: { value: '12' } });
+    fireEvent.change(within(card).getByLabelText('Grace period'), { target: { value: '5' } });
+    fireEvent.click(within(card).getByRole('switch', { name: /charge finance charges/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_customer', expect.anything()));
+    expect(savedPayload()).toMatchObject({
+      assigned_tier: 2, credit_limit_cents: 50000, payment_terms: 'Net 15',
+      finance_charge_rate: 12, finance_charge_grace_days: 5, finance_charge_enabled: false,
+    });
+    expect(savedPayload()).not.toHaveProperty('standing_discount_pct');
+  });
+
+  it('a sales rep sees the admin note first and the same locked fields as before', async () => {
+    mockProfile.current = { id: 'rep-1', role: 'sales_rep', full_name: 'Rep One' };
+    const card = await billingCard();
+    const note = within(card).getByText(REP_NOTE);
+    const firstField = within(card).getByLabelText('Price tier');
+    expect(note.compareDocumentPosition(firstField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    for (const label of ['Price tier', 'Credit limit', 'Standing discount']) {
+      expect(within(card).getByLabelText(label)).toBeDisabled();
+    }
+    for (const label of ['Payment terms', 'Parent customer', 'Finance charge rate', 'Grace period']) {
+      expect(within(card).getByLabelText(label)).toBeEnabled();
+    }
+    expect(within(card).getByRole('switch', { name: /charge finance charges/i })).toBeEnabled();
+    expect(within(card).queryByRole('button', { name: 'Save discount' })).not.toBeInTheDocument();
+    expect(within(card).queryByText(/saves on its own/i)).not.toBeInTheDocument();
+
+    // Finance charge fields stay editable by anyone who can edit the form, as today.
+    fireEvent.change(within(card).getByLabelText('Finance charge rate'), { target: { value: '12' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_customer', expect.anything()));
+    expect(savedPayload()).toMatchObject({ finance_charge_rate: 12, assigned_tier: 1, credit_limit_cents: 2500000 });
+  });
+
+  it('keeps the standing discount off the New Customer form', async () => {
+    render(<MemoryRouter initialEntries={['/customers/new']}><Routes><Route path="/customers/:id" element={<CustomerDetail />} /></Routes></MemoryRouter>);
+    await screen.findByRole('button', { name: 'Create Customer' });
+    const card = document.getElementById('customer-billing') as HTMLElement;
+    expect(within(card).getByLabelText('Price tier')).toBeEnabled();
+    expect(within(card).queryByLabelText('Standing discount')).not.toBeInTheDocument();
+    expect(within(card).queryByRole('button', { name: 'Save discount' })).not.toBeInTheDocument();
   });
 });

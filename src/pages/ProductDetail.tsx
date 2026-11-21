@@ -17,9 +17,12 @@ import ProductSellPriceHistory from '../components/products/ProductSellPriceHist
 import ProductChangeHistory from '../components/products/ProductChangeHistory';
 import ProductBrandsSection from '../components/products/ProductBrandsSection';
 import CancelledRegistrationBanner from '../components/products/CancelledRegistrationBanner';
-import { CHECK_TIMEOUT_MS, registrationCheck, useCancelledRegistrations, useStickyCancellations } from '../lib/epaRegistrationStatus';
+import {
+  CHECK_TIMEOUT_MS, normalizeEpaRegistration, registrationCheck, useCancelledRegistrations, useStickyCancellations,
+} from '../lib/epaRegistrationStatus';
 import ProductVendorsSection from '../components/products/ProductVendorsSection';
 import EpaLabelLink from '../components/products/EpaLabelLink';
+import LabelAdjuvants from '../components/products/LabelAdjuvants';
 import ProductMarginFloorCard from '../components/products/ProductMarginFloorCard';
 import ProductStockCard from '../components/products/ProductStockCard';
 import ProductRateCorrectionModal from '../components/products/ProductRateCorrectionModal';
@@ -116,11 +119,12 @@ function nonpricingProductPayload(product: Partial<Product>, persisted?: Product
     ['updated_at', new Date().toISOString()],
   ]);
   if (parentOwned) for (const field of PARENT_OWNED_FIELDS) delete payload[field];
+  // RT-4b: the app may not write rate columns directly; rates change only through the rate functions.
+  for (const field of PRODUCT_RATE_KEYS) delete payload[field];
   // Send these only when edited here, so a page left open never re-saves an old value over one
   // changed elsewhere: the vendor by WP-PM-15 (preferred vendor's copy), the rest by Label Review's commit.
-  // Rates too: a stale rate resent while rates are locked would refuse a details-only save.
   if (persisted) {
-    for (const field of [...PRODUCT_FIELDS_WRITTEN_ELSEWHERE, ...PRODUCT_RATE_KEYS]) {
+    for (const field of PRODUCT_FIELDS_WRITTEN_ELSEWHERE) {
       if (payload[field] === (persisted[field] ?? null)) delete payload[field];
     }
   }
@@ -249,6 +253,10 @@ export default function ProductDetail() {
   const { role, profile } = useAuth();
   const isNew = id === 'new';
   const isAdmin = role === 'admin';
+  const canEditAdjuvants = role === 'admin' || role === 'sales_rep';
+  // Bumped after a label-adjuvant save, so the registrations are read again.
+  const [registrationRefresh, setRegistrationRefresh] = useState(0);
+  const refreshRegistrations = useCallback(() => setRegistrationRefresh((n) => n + 1), []);
   const [rateLock, setRateLock] = useState<ProductRateLock | null>(null);
   const [correctingRates, setCorrectingRates] = useState(false);
   const [rateLockFailed, setRateLockFailed] = useState(false);
@@ -447,7 +455,8 @@ export default function ProductDetail() {
       ? [{ label: 'This product', epaRegistration: persistedProduct.epa_registration }, ...brandRegistrations]
       : []
   ), [persistedProduct, id, brandRegistrations]);
-  const registrationStatus = useCancelledRegistrations(registrationSources.map((s) => s.epaRegistration));
+  const registrationStatus = useCancelledRegistrations(
+    registrationSources.map((s) => s.epaRegistration), registrationRefresh ? String(registrationRefresh) : '');
   const shownCancellations = useStickyCancellations(id ?? '', registrationSources, registrationStatus.cancelled);
   const registrationCheckState = registrationCheck(
     productLoaded,
@@ -1553,7 +1562,21 @@ export default function ProductDetail() {
                   </Button>
                 </div>
                 <div className="mt-1">
-                  <EpaLabelLink epaRegistration={product.epa_registration} showHint />
+                  {(() => {
+                    // Registrations are read for the SAVED number; while a different number is typed, show only its search.
+                    const saved = productLoaded ? normalizeEpaRegistration(persistedProduct?.epa_registration) : null;
+                    const matches = saved !== null && normalizeEpaRegistration(product.epa_registration) === saved;
+                    const registration = matches ? registrationStatus.rows.get(saved) : undefined;
+                    return (
+                      <>
+                        <EpaLabelLink epaRegistration={product.epa_registration} showHint labelUrl={registration?.label_url} />
+                        {matches && (
+                          <LabelAdjuvants epaRegistration={saved} row={registration} lookup={registrationStatus.lookup}
+                            canEdit={canEditAdjuvants} profileId={profile?.id ?? ''} onSaved={refreshRegistrations} />
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
                 {parentOwned && <ParentOwnedHint parentName={shownParent?.name} identity />}
                 {isNew && (
@@ -1917,6 +1940,11 @@ export default function ProductDetail() {
                   )}
                 </div>
               )}
+              {!ratesLocked && rateLock && isAdmin && !parentOwned && !isNew && (
+                <p className="mb-3 text-sm text-secondary" data-testid="product-rates-open">
+                  Rates are open. Change this product&apos;s rates in the Setup Workbook&apos;s Rates tab on the Products page.
+                </p>
+              )}
               {(parentOwned || isNew) && (
                 <p className="mb-3 text-sm text-secondary" data-testid="product-rates-parent">
                   {shownParent
@@ -1926,11 +1954,11 @@ export default function ProductDetail() {
               )}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <Input label="Suggested Rate" value={product.suggested_rate || ''} onChange={(e) => update('suggested_rate', e.target.value)} disabled={!isAdmin || ratesLocked || parentOwned || isNew} />
+                  <Input label="Suggested Rate" value={product.suggested_rate || ''} onChange={(e) => update('suggested_rate', e.target.value)} disabled />
                   <p className="mt-1 text-xs text-secondary">Free text shown on quote lines and the quote PDF, such as a rate range. Not used in any calculation.</p>
                 </div>
                 <div>
-                  <Input label="Rate Per Acre" type="number" value={product.rate_per_acre ?? ''} onChange={(e) => update('rate_per_acre', e.target.value ? parseFloat(e.target.value) : null)} disabled={!isAdmin || ratesLocked || parentOwned || isNew} />
+                  <Input label="Rate Per Acre" type="number" value={product.rate_per_acre ?? ''} onChange={(e) => update('rate_per_acre', e.target.value ? parseFloat(e.target.value) : null)} disabled />
                   <p className="mt-1 text-xs text-secondary">The product's default rate, in the Rate Unit. Zero or more.</p>
                 </div>
                 <div>
@@ -1939,7 +1967,7 @@ export default function ProductDetail() {
                     id="product-rate-unit"
                     value={product.rate_unit || ''}
                     onChange={(e) => update('rate_unit', e.target.value)}
-                    disabled={!isAdmin || ratesLocked || parentOwned || isNew}
+                    disabled
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                   >
                     <option value="">-- Select --</option>
@@ -2045,6 +2073,10 @@ export default function ProductDetail() {
                 isAdmin={isAdmin}
                 userId={profile?.id ?? null}
                 cancelled={shownCancellations.cancelled}
+                registrations={registrationStatus.rows}
+                registrationLookup={registrationStatus.lookup}
+                canEditAdjuvants={canEditAdjuvants}
+                onAdjuvantsSaved={refreshRegistrations}
                 onBrandsChange={handleBrandsChange}
               />
             </PhoneSection>

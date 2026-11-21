@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import Tabs, { type TabItem } from './Tabs';
 
@@ -100,17 +100,82 @@ describe('Tabs', () => {
     );
   });
 
-  it('scrolls the newly active tab into view', () => {
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
-    render(<ControlledTabs />);
+  describe('keeping the active tab in view', () => {
+    const geometry = { offsetLeft: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetLeft'), offsetWidth: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth'), clientWidth: Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth') };
+    const originalScrollTo = Element.prototype.scrollTo;
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    afterEach(() => {
+      Element.prototype.scrollTo = originalScrollTo;
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+      vi.unstubAllGlobals();
+      for (const [name, proto] of [['offsetLeft', HTMLElement.prototype], ['offsetWidth', HTMLElement.prototype], ['clientWidth', Element.prototype]] as const) {
+        const original = geometry[name];
+        if (original) Object.defineProperty(proto, name, original); else delete (proto as unknown as Record<string, unknown>)[name];
+      }
+    });
 
-    fireEvent.click(screen.getByRole('tab', { name: /Forecast/ }));
+    it('scrolls only the tab bar, sideways, and not again on a re-render with the same active tab', () => {
+      // Three 200 px tabs in a 300 px bar.
+      Object.defineProperty(HTMLElement.prototype, 'offsetLeft', { configurable: true, get() { return Array.from((this as HTMLElement).parentElement?.children ?? []).indexOf(this as HTMLElement) * 200; } });
+      Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get() { return 200; } });
+      Object.defineProperty(Element.prototype, 'clientWidth', { configurable: true, get() { return 300; } });
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView;
+      const windowScroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+      const barScroll = vi.fn();
+      Element.prototype.scrollTo = barScroll;
 
-    expect(scrollIntoView).toHaveBeenLastCalledWith({
-      behavior: 'smooth',
-      block: 'nearest',
-      inline: 'nearest',
+      const { rerender } = render(<Tabs tabs={tabs} activeKey="inventory" onChange={() => {}} />);
+      expect(barScroll).not.toHaveBeenCalled(); // already in view
+
+      rerender(<Tabs tabs={tabs} activeKey="orders" onChange={() => {}} />);
+      expect(barScroll).toHaveBeenCalledTimes(1);
+      expect(barScroll).toHaveBeenLastCalledWith({ left: 316, behavior: 'smooth' });
+
+      // A caller that builds a fresh tabs array on every render must not re-scroll.
+      rerender(<Tabs tabs={[...tabs]} activeKey="orders" onChange={() => {}} />);
+      rerender(<Tabs tabs={tabs.map((t) => ({ ...t }))} activeKey="orders" onChange={() => {}} />);
+      expect(barScroll).toHaveBeenCalledTimes(1);
+
+      // Never the page.
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(windowScroll).not.toHaveBeenCalled();
+      windowScroll.mockRestore();
+    });
+
+    it('brings the active tab back into view when the bar shrinks without the tab changing', () => {
+      let width = 700;
+      Object.defineProperty(HTMLElement.prototype, 'offsetLeft', { configurable: true, get() { return Array.from((this as HTMLElement).parentElement?.children ?? []).indexOf(this as HTMLElement) * 200; } });
+      Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get() { return 200; } });
+      Object.defineProperty(Element.prototype, 'clientWidth', { configurable: true, get() { return width; } });
+      const barScroll = vi.fn();
+      Element.prototype.scrollTo = barScroll;
+
+      render(<Tabs tabs={tabs} activeKey="orders" onChange={() => {}} />);
+      expect(barScroll).not.toHaveBeenCalled();
+      width = 300;
+      fireEvent(window, new Event('resize'));
+      expect(barScroll).toHaveBeenCalledWith({ left: 316, behavior: 'smooth' });
+    });
+
+    it('brings the active tab back into view when only the bar shrinks (no window resize)', () => {
+      let width = 700;
+      Object.defineProperty(HTMLElement.prototype, 'offsetLeft', { configurable: true, get() { return Array.from((this as HTMLElement).parentElement?.children ?? []).indexOf(this as HTMLElement) * 200; } });
+      Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get() { return 200; } });
+      Object.defineProperty(Element.prototype, 'clientWidth', { configurable: true, get() { return width; } });
+      const barScroll = vi.fn();
+      Element.prototype.scrollTo = barScroll;
+      let onResize: (() => void) | undefined;
+      const disconnect = vi.fn();
+      vi.stubGlobal('ResizeObserver', class { constructor(cb: () => void) { onResize = cb; } observe() {} disconnect() { disconnect(); } });
+
+      const { unmount } = render(<Tabs tabs={tabs} activeKey="orders" onChange={() => {}} />);
+      expect(barScroll).not.toHaveBeenCalled();
+      width = 300; // e.g. a sidebar opened; the window did not resize
+      onResize?.();
+      expect(barScroll).toHaveBeenCalledWith({ left: 316, behavior: 'smooth' });
+      unmount();
+      expect(disconnect).toHaveBeenCalled();
     });
   });
 });

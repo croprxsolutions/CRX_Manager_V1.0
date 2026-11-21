@@ -13,6 +13,7 @@ import {
   CHECK_TIMEOUT_MS,
   cancelledOnText,
   getCancelledRegistrations,
+  getRegistrations,
   normalizeEpaRegistration,
   registrationCheck,
   useCancelledRegistrations,
@@ -69,6 +70,30 @@ describe('getCancelledRegistrations', () => {
     expect([...result]).toEqual([['524-475', '2025-03-01'], ['264-849', null]]);
   });
 
+  it('reads the REG-1 one-type entry as a one-type statement and keeps new entries as they are', async () => {
+    const statement = { kind: 'required', adjuvant_types: ['HS-MSO', 'MSO'], preferred: 'HS-MSO', when: 'hard water' };
+    mockRpc.mockResolvedValue(reply([
+      { epa_registration: '100-1', registration_status: 'active', cancelled_on: null, label_adjuvants: [
+        { kind: 'recommended', adjuvant_type: ' COC ', note: '1%' }, { kind: 'required', adjuvant_type: 'oil,\nmethylated' }, statement] },
+      { epa_registration: '100-2', registration_status: 'active', cancelled_on: null, label_adjuvants: null },
+    ]));
+    const rows = await getRegistrations(['100-1', '100-2']);
+    expect(rows.get('100-1')?.label_adjuvants).toEqual([
+      { kind: 'recommended', adjuvant_types: ['COC'], note: '1%' },
+      { kind: 'required', adjuvant_types: ['oil, methylated'], note: null },
+      statement,
+    ]);
+    expect(rows.get('100-2')?.label_adjuvants).toBeNull();
+  });
+
+  it('reads a stored type holding a line break as one type, preferred included', async () => {
+    mockRpc.mockResolvedValue(reply([{ epa_registration: '100-1', registration_status: 'active', cancelled_on: null, label_adjuvants: [
+      { kind: 'required', adjuvant_types: ['oil,\nmethylated', 'COC'], preferred: 'oil,\nmethylated', note: '1%' }] }]));
+    const rows = await getRegistrations(['100-1']);
+    expect(rows.get('100-1')?.label_adjuvants).toEqual([
+      { kind: 'required', adjuvant_types: ['oil, methylated', 'COC'], preferred: 'oil, methylated', note: '1%' }]);
+  });
+
   it('a failed read throws instead of returning "none cancelled"', async () => {
     mockRpc.mockResolvedValue({ data: null, error: new Error('boom') });
     await expect(getCancelledRegistrations(['524-475'])).rejects.toThrow('boom');
@@ -117,7 +142,7 @@ describe('useCancelledRegistrations', () => {
     const { result } = renderHook(() => useCancelledRegistrations(['524-475']));
     expect(result.current.lookup).toBe('checking');
     await act(async () => { answer(reply([cancelledRow('524-475')])); });
-    expect(result.current).toEqual({ key: '524-475', lookup: 'done', cancelled: new Map([['524-475', null]]) });
+    expect(result.current).toEqual({ key: '524-475', lookup: 'done', cancelled: new Map([['524-475', null]]), rows: new Map([['524-475', cancelledRow('524-475')]]) });
   });
 
   it('failed read: failed', async () => {

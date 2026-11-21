@@ -17,8 +17,10 @@ import { supabaseRest, supabaseRpc, asArray } from './golive/utils/supabase-help
 import { parseDollarsToCents } from '../../src/lib/parseCents';
 
 // ── Node-level Supabase REST (bypasses browser context) ─────────
-const SUPA_URL = 'https://rhyzpcqhnizqbxphqdkr.supabase.co';
-const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJoeXpwY3Fobml6cWJ4cGhxZGtyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTM2NDAsImV4cCI6MjA4NTk2OTY0MH0.WR0vAi_KeGF0OoJ8_dFH7uW6ael9M5xnm6OUo2IZy7U';
+const SUPA_URL = process.env.VITE_SUPABASE_URL!;
+const SUPA_KEY = process.env.VITE_SUPABASE_ANON_KEY!;
+// The app's stored sign-in, named after the project in the URL the tests run against.
+const AUTH_KEY = `sb-${new URL(SUPA_URL).hostname.split('.')[0]}-auth-token`;
 
 let _nodeToken = '';
 async function getNodeToken(): Promise<string> {
@@ -131,16 +133,16 @@ async function btnIfVisible(page: Page, name: string | RegExp, timeout = 5000): 
 }
 
 async function getUserId(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const raw = localStorage.getItem('sb-rhyzpcqhnizqbxphqdkr-auth-token');
+  return page.evaluate((authKey) => {
+    const raw = localStorage.getItem(authKey);
     if (!raw) return '00000000-0000-0000-0000-000000000000';
     try { return JSON.parse(raw)?.user?.id || '00000000-0000-0000-0000-000000000000'; }
     catch { return '00000000-0000-0000-0000-000000000000'; }
-  });
+  }, AUTH_KEY);
 }
 
 async function dismissLeaveDialog(page: Page) {
-  const leaveBtn = page.getByRole('button', { name: 'Leave' });
+  const leaveBtn = page.getByRole('button', { name: 'Discard changes' });
   if (await leaveBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
     await leaveBtn.click();
     await waitForPageStable(page, 1000);
@@ -407,8 +409,8 @@ test.describe.serial('Comprehensive UI Workflow (12 Acts)', () => {
       const prod = prods[i];
       const expectedQty = quantities[i];
 
-      // Click "Add Item"
-      const addBtn = page.getByRole('button', { name: /Add Item/i }).first();
+      // Click "Add one" (empty section) or "Add product"
+      const addBtn = page.getByRole('button', { name: /^(Add one|Add product)$/ }).first();
       if (await addBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
         await addBtn.scrollIntoViewIfNeeded();
         await addBtn.click();
@@ -443,7 +445,7 @@ test.describe.serial('Comprehensive UI Workflow (12 Acts)', () => {
 
       // Set units needed
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-      const unitsInputs = page.locator('input[aria-label="Units needed"]');
+      const unitsInputs = page.locator('input[aria-label="Quantity"]');
       const unitsInput = unitsInputs.nth(i);
       if (await unitsInput.isVisible({ timeout: 2000 }).catch(() => false)) {
         await unitsInput.fill(String(expectedQty));
@@ -544,27 +546,15 @@ test.describe.serial('Comprehensive UI Workflow (12 Acts)', () => {
     if (!S.quoteId) test.skip();
     await nav(page, `/quotes/${S.quoteId}`);
 
-    // Look for planned/is_planned toggle checkbox
-    const plannedCheckbox = page.locator('input[type="checkbox"]').filter({ hasText: /planned/i }).first();
-    const plannedLabel = page.getByText(/Planned Program/i).first();
-    if (await plannedLabel.isVisible({ timeout: 3000 }).catch(() => false)) {
-      // Check if checkbox near the label is unchecked
-      const checkbox = plannedLabel.locator('..').locator('input[type="checkbox"]').first();
-      if (await checkbox.isVisible({ timeout: 2000 }).catch(() => false)) {
-        const isChecked = await checkbox.isChecked();
-        if (!isChecked) {
-          await checkbox.click();
-          await waitForPageStable(page, 1000);
-          // Save
-          await btnIfVisible(page, /Save Draft/i);
-          await waitForPageStable(page, 2000);
-        }
-      }
-    } else if (await plannedCheckbox.isVisible({ timeout: 2000 }).catch(() => false)) {
-      const isChecked = await plannedCheckbox.isChecked();
-      if (!isChecked) {
-        await plannedCheckbox.click();
+    // Look for the Planned program switch (Details card)
+    const plannedSwitch = page.getByRole('switch', { name: /Planned program/ });
+    if (await plannedSwitch.isVisible({ timeout: 3000 }).catch(() => false)) {
+      if (!(await plannedSwitch.isChecked())) {
+        // The switch input is visually hidden; its label toggles it, as a user would click it.
+        await page.getByText('Planned program', { exact: true }).click();
         await waitForPageStable(page, 1000);
+        expect(await plannedSwitch.isChecked()).toBe(true);
+        // Save
         await btnIfVisible(page, /Save Draft/i);
         await waitForPageStable(page, 2000);
       }

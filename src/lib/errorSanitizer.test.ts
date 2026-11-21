@@ -65,6 +65,53 @@ describe('sanitizeError', () => {
       .toBe(`Nothing was saved. ${sentence}`);
   });
 
+  it.each([
+    ['DELIVERY_LINE_NOT_ON_ORDER', "this delivery line is not a line of the delivery's order."],
+    ['DELIVERY_LINE_PRODUCT_MISMATCH', 'this delivery line is for a different product than its order line.'],
+    ['DELIVERY_LINE_UNIT_MISMATCH', 'this delivery line is in "Gal" but its order line is in "Qt".'],
+    ['DELIVERY_LINE_DUPLICATE', 'this order line is already on the delivery.'],
+    ['DELIVERY_ORDER_LOCKED', 'a delivery with lines cannot be moved to another order.'],
+  ])('explains a delivery-line refusal %s (20270126110000) without the raw token', (token, sentence) => {
+    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
+  });
+  it('explains a not-a-number count (20270126110000)', () => {
+    expect(sanitizeError({ code: '23514', message: 'CYCLE_COUNT_QTY_INVALID: the counted quantity must be a number.' }))
+      .toBe('Nothing was saved. the counted quantity must be a number.');
+  });
+  it('keeps a delivery-line sentence that starts with "s" whole', () => {
+    expect(sanitizeError({ code: '23514', message: 'DELIVERY_LINE_DUPLICATE:same order line twice.' })).toBe('Nothing was saved. same order line twice.');
+  });
+  it('explains the delivery-line unique index (20270126110000) as a duplicate line', () => {
+    expect(sanitizeError({ code: '23505', message: 'duplicate key value violates unique constraint "delivery_items_one_line_per_order_line"' }))
+      .toMatch(/^Nothing was saved. This order line is already on the delivery/);
+  });
+  it('explains a unit-rule refusal (20270121110000) without the raw token', () => {
+    const sentence = 'this purchase order line is in "Gallon" but the product is stocked in "Gal". Enter the quantity in Gal.';
+    expect(sanitizeError({ code: '23514', message: `LINE_UNIT_NOT_STOCK_UNIT: ${sentence}` }))
+      .toBe(`Nothing was saved. ${sentence}`);
+  });
+  it.each([
+    ['PRODUCT_STOCK_UNIT_UNKNOWN', '"Tote" is not a known unit; pick a stock unit from the list.'],
+    ['PRODUCT_UNIT_HAS_STOCK', 'this product\'s stock unit cannot change to "Qt" while it has stock counted in "Gal". Bring its stock to zero (or convert it) first.'],
+    ['STOCK_ROW_UNIT_NOT_STOCK_UNIT', 'this stock row is in "Qt" but the product is stocked in "Gal".'],
+    ['PRODUCT_UNIT_HAS_HISTORY', 'this product\'s stock unit cannot change to "Qt" because it already has orders, purchases, deliveries, returns, stock movements or holds (order ORD-0001, return RMA-0001). Set up a new product for the new unit.'],
+  ])('explains a %s refusal without the raw token', (token, sentence) => {
+    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
+  });
+  // The RAISE texts and index of 20270119130000_one_open_count_per_stock_row.sql (KI-160).
+  it.each([
+    ['CYCLE_COUNT_ROW_ALREADY_OPEN', 'This stock row is already on open count CC-0018; finish or cancel that count first.'],
+    ['CYCLE_COUNT_ROW_WRONG_PLACE', "This stock row is not this product at this count's warehouse."],
+    ['CYCLE_COUNT_REOPEN_FORBIDDEN', 'Count CC-0017 is cancelled and cannot become in_progress; a count only moves forward. Start a new count instead.'],
+    ['CYCLE_COUNT_REVERSE_BLOCKED', 'Count CC-0017 shares stock with open count CC-0018; finish or cancel that count before reversing this one.'],
+  ])('explains a %s refusal without the raw token', (token, sentence) => {
+    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
+  });
+  it('explains a second open count at one warehouse', () => {
+    expect(sanitizeError({ code: '23505', message: 'duplicate key value violates unique constraint "cycle_counts_one_open_per_warehouse"' }))
+      .toBe('Nothing was saved. This warehouse already has an open count; finish or cancel it first');
+  });
+
   // The RAISE texts of 20261105190000_sale_lines_refuse_missing_price.sql with the product filled in.
   it.each([
     ['QUOTE_PRICE_MISSING', "Atrazine 4L has no price for this quote's tier, so its line would show $0. Type a price on the line, or set the product's prices first (give it a $0 price if you give it away)."],
@@ -225,6 +272,16 @@ describe('sanitizeError', () => {
       .toBe('Create this field invoice from its job, blend ticket, or the Field Application screen');
   });
 
+  it('explains that only a field application invoice is edited on the field application screen', () => {
+    expect(sanitizeError('FIELD_APP_INVOICE_REQUIRED: invoice 00000000-0000-4000-8000-000000000001 is not a field application invoice'))
+      .toBe('Nothing was saved. This invoice is not a field application invoice, so it cannot be edited here. Open it from Invoices instead');
+  });
+
+  it('passes the grower-share rounding refusal through with its product name', () => {
+    expect(sanitizeError('FIELD_APP_GROWER_SHARE_ROUNDING: cannot cost "Dry X" in the grower share — 0.00003125 ton is too small to record to 4 decimals without its cost changing by more than $0.50. Record this product in a smaller sold unit before invoicing this field application.'))
+      .toBe('Nothing was saved. Cannot cost "Dry X" in the grower share — 0.00003125 ton is too small to record to 4 decimals without its cost changing by more than $0.50. Record this product in a smaller sold unit before invoicing this field application.');
+  });
+
   it('maps return-credit and customer-scope tokens to operator guidance', () => {
     expect(sanitizeError('CUSTOMER_SCOPE_DENIED')).toBe('You can only work with customers assigned to you');
     expect(sanitizeError('REP_CANNOT_REASSIGN')).toBe('Only an admin can change which sales rep a customer is assigned to');
@@ -272,6 +329,11 @@ describe('sanitizeError', () => {
     }
     expect(sanitizeError('CUSTOMER_HAS_OPEN_INVOICES: this customer has posted or overdue invoices; resolve them before deactivating it'))
       .toBe('This customer has posted or overdue invoices. Resolve them before deactivating the customer');
+    expect(sanitizeError({ message: 'CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. Smith Farms still has 2 open order(s), 1 open quote(s). Finish or cancel that work, bill it, credit its returns and use up or refund its prepay first' }))
+      .toBe('Nothing was deactivated. Smith Farms still has 2 open order(s), 1 open quote(s). Finish or cancel that work, bill it, credit its returns and use up or refund its prepay first.');
+    expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK')).toContain('spray jobs, returns or prepay money). Finish, bill or settle it before deactivating it.');
+    expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. \u202Esmraf\u202C\u061C still has open invoices. Settle them first'))
+      .toBe('Nothing was deactivated. smraf still has open invoices. Settle them first.');
     expect(sanitizeError('PREPAY_BALANCE_SERVER_ONLY: a prepay balance changes only through prepayments and payments'))
       .toBe('A prepay balance changes only through prepayments and payments');
     expect(sanitizeError('RETURN_CREDIT_UNIT_MISMATCH')).toContain('original sale');
@@ -302,6 +364,12 @@ describe('sanitizeError', () => {
     );
     expect(sanitizeError('ORDER_ITEM_SHARES_LINE_MOVE: this line has its own bill split')).toBe(
       'Nothing was changed. This line has its own bill split. Remove its shares before moving it to another order',
+    );
+    expect(sanitizeError('STANDING_DISCOUNT_SPLIT_LOCKED: this invoice is part of a field split, which can\'t be edited')).toBe(
+      "Nothing was changed. This draft can't be edited (it's part of a field split, or a Bill Split payer's draft with a product line that has no quantity), so its discount can't change. Void the group and redraft it",
+    );
+    expect(sanitizeError("BILLING_M4_OFF: sales tax isn't switched on yet; it turns on with commission")).toBe(
+      "Nothing was changed. Sales tax and standing discounts aren't switched on yet; they turn on with commission",
     );
     expect(sanitizeError("BILL_SPLIT_SLIVER_LOCKED: this payer's draft has a product line with no quantity")).toBe(
       "Nothing was saved. This payer's draft has a product line with no quantity, so it can't be edited. Post it as drafted, or void the group",
@@ -546,5 +614,18 @@ describe('product setup and import refusals (20261107090000)', () => {
   it('keeps the server text, which names the products', () => {
     expect(sanitizeError({ message: 'PRODUCT_SETUP_DUPLICATE: the SKU or name is already used by a product or twice in this file: Chem' }))
       .toBe('Nothing was saved. The SKU or name is already used by a product or twice in this file: Chem');
+  });
+
+  it('explains the sales tax box refusals (billing plan M4a)', () => {
+    expect(sanitizeError('SALES_TAX_NOT_ALLOWED: only an admin or the sale\'s own rep can change its sales tax'))
+      .toBe("Only an admin or the sale's own rep can turn sales tax on or off for this sale. No changes were saved");
+    expect(sanitizeError('SALES_TAX_RATE_MISSING: set the sales tax rate in Settings first'))
+      .toBe('Set the sales tax rate in Settings first. No changes were saved');
+    expect(sanitizeError('SALES_TAX_STALE: this draft\'s sales tax is out of date; save it again, then post'))
+      .toBe("This draft's sales tax is out of date. Save it again, then post");
+    expect(sanitizeError("SALES_TAX_BOX_MISMATCH: this draft is untaxed but its sale's sales tax box is on; switch the box over and back, ending at the setting you want, to re-apply it to the sale's drafts (a split draft that can't be edited: set the box back to match it, or void the group and redraft it), then post"))
+      .toBe("This draft's sales tax doesn't match its sale's Sales tax box. Switch the box over and back, ending at the setting you want, to re-apply it to the sale's drafts (a split draft that can't be edited: set the box back to match it, or void and redraft its group), then post");
+    expect(sanitizeError('SALES_TAX_ORDER_CLOSED: a cancelled or voided sale can\'t change'))
+      .toBe("This sale is cancelled or voided, so its sales tax can't change");
   });
 });

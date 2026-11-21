@@ -284,7 +284,7 @@ APPLY-WINDOW and COMMISSION-FIRST rules in that file. Owner rollout decision (Ma
 
 ## Recent production deployments
 
-- **Live Edge Function versions, read 2026-11-13 Central:** `create-user` v28, `setup-blend-tickets-storage` v22,
+- **Live Edge Function versions, read 2026-11-13 Central (unchanged 2026-11-14):** `create-user` v28, `setup-blend-tickets-storage` v22,
   `process-blend-ticket` v31, `process-document` v24, `send-email` v31, `reset-user-password` v19, `epa-lookup` v10,
   `customer-document-files` v6, `send-delivery-receipts` v4, all ACTIVE. Since the 2026-11-10 read, three moved:
   `epa-lookup` v9 → v10 (last updated 2026-11-12 11:21 AM Central, the day DM-4 part 2, PR #1836, merged), and

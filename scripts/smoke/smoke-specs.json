@@ -1016,6 +1016,40 @@
         "lifecycle"
       ]
     },
+    "save_quote_section_ids": {
+      "chain": "smoke-save-quote-section-ids.sql",
+      "container_prover": "prove-save-quote-section-ids-real-schema.mjs",
+      "description": "REQUIRES 20270125110000. Bookings Phase A PR 1a: a marked save (section_ids_v1) that names its sections keeps their ids, so a job scheduled from a section stays linked (deferred FK checked immediately); dropping a section a job references (active, cancelled or soft-deleted job, marked or old unmarked save) is refused SECTION_HAS_JOB and the booking is unchanged; another quote's id, a repeated id, a non-uuid and any id on a new quote are refused SECTION_ID_INVALID; an unmarked save without jobs still works and gets new ids; a replay returns the same section_ids. Terminal rollback.",
+      "covers": [
+        "save_quote"
+      ],
+      "area": [
+        "lifecycle",
+        "regression"
+      ]
+    },
+    "booking_planning_fields": {
+      "chain": "smoke-booking-planning-fields.sql",
+      "container_prover": "prove-booking-timing-purchasing-plan-real-schema.mjs",
+      "description": "REQUIRES 20270127110000. Bookings Phase A PR 1b: a marked save writes section timing and confidence; an omitted key keeps the saved value, an explicit null clears it, a new section starts unset; an unmarked (old page) save of a booking with planning data is refused PLANNING_RELOAD_REQUIRED and changes nothing, while an unplanned booking still saves the old way; a value outside the lists is a check_violation. Terminal rollback.",
+      "covers": [
+        "save_quote"
+      ],
+      "area": [
+        "lifecycle"
+      ]
+    },
+    "purchasing_plan": {
+      "chain": "smoke-purchasing-plan.sql",
+      "container_prover": "prove-booking-timing-purchasing-plan-real-schema.mjs",
+      "description": "REQUIRES 20270127110000. get_purchasing_plan nets bookings (by timing and confidence), open orders, active jobs, holds, stock and open POs per product: delivery dating, later POs, cancelled orders and completed jobs, latest-first draw allocation with the drawn part listed as section unknown, over-drawn bookings, timing windows, firm needs without a date, mixed-unit lines (qt and Gal convert; a mismatched pack unit goes to Check units), lead days; an applicator or no signed-in user is refused 42501. Read-only; terminal rollback.",
+      "covers": [
+        "get_purchasing_plan"
+      ],
+      "area": [
+        "inventory"
+      ]
+    },
     "save_quote_repeated_product_line_ids": {
       "chain": "smoke-save-quote-repeated-product-line-ids.sql",
       "description": "QUOTE_ITEM_AMBIGUOUS_COST fix (QuoteBuilder sends each saved line's id and a client_key, and installs the returned item_ids). A quote with one product on two field sections: an id-less re-save is refused QUOTE_ITEM_AMBIGUOUS_COST; re-saves that name every line succeed after a reprice, keep each saved line's quote-time cost, give a new line today's cost and keep ids stable; Mark Presented and Convert succeed and each order line carries its own quote line's cost; a quote without a repeated product re-saves with or without ids as before. Terminal rollback.",
@@ -2111,10 +2145,42 @@
       "covers": ["get_sales_detail_report", "get_sales_summary_report", "financial_dashboard_summary", "_sales_line_payers"],
       "area": ["billing", "regression"]
     },
+    "standing_grower_discount": {
+      "chain": "smoke-standing-grower-discount.sql",
+      "description": "Migration 20270109100100 (billing plan M4b): a 3% customer's delivery invoice drafts at products less 3% (half up, to the cent) with one 'Standing discount 3%' line; freight is not discounted; a re-save never discounts twice; a hand edit or delete of the line is put right at commit; a rep can't set a rate; each invoice keeps the rate it was drafted at (a customer's later change leaves it, posted and unposted amounts never move); Bill Split payers each get their own rate and the group posts, and unposts after a payer's rate changes; a misc-charge draft can't carry the line and a draft switched to misc charge loses it; the office's rate on one sale (set_invoice_standing_discount) sets, clears and restores, relabels at 3.01%, keeps every field of the draft's lines, is replay-safe, and is refused for a rep, a posted invoice and a direct write; the discount's change to a total has its own audit entry; a new empty draft records its customer's rate; a field application draft's total is never changed; a chemical sale drafted and posted in one transaction records its rate, so unposting after a customer change keeps its amount; the office's rate is refused on an unposted invoice; a draft switched to misc charge and posted before any commit is refused; a sale created already posted can't take lines; the anonymous role can't set a rate; the office's rate change has its own audit entry; the change's audit entries add up to it once; returns of a 3% sale (two lines, one in two parts) and of a 3% Bill Split payer's whole share credit the posted totals to the cent. Deferred triggers fired with SET CONSTRAINTS at each commit point. Terminal rollback.",
+      "covers": ["_recompute_standing_discount_20261231", "_standing_discount_expected_20261231", "_standing_discount_after_line_change_20261231", "_standing_discount_after_invoice_change_20261231", "_standing_discount_before_fingerprint_20261231", "guard_customer_standing_discount_20261231", "guard_standing_discount_line_scope_20261231", "guard_standing_discount_current_on_post_20261231", "set_invoice_standing_discount", "_standing_discount_record_rate_20261231", "_standing_discount_net_cents_20261231", "_return_customer_line_share", "create_return", "issue_return_credit", "unpost_invoice_group", "save_invoice", "post_invoice", "post_invoice_group", "complete_delivery"],
+      "area": ["billing", "regression"]
+    },
+    "sales_tax_checkbox": {
+      "chain": "smoke-sales-tax.sql",
+      "description": "Migration 20270109100200 (billing plan M4a, B10): a taxed sale for a 3% customer with $45.00 freight drafts one 'Sales tax 6.25%' line = round((products - discount + freight) x 6.25%), half up; untaxed by default; a re-save never taxes twice; a hand edit or delete of the line is put right at commit; a taxed Bill Split is exact per payer and its group posts; set_order_sales_tax moves the sale's drafts on and off, leaves posted invoices alone, admin or the sale's own rep only (a sale with no salesman is no rep's), replay-safe; a draft keeps its rate when Settings changes, a new draft takes the new one; a bad Settings rate is refused; the line is refused off a chemical sale; a stale tax line can't post; unposting keeps the posted tax; a draft switched to misc charge loses its tax and regains it when switched back; returns credit the posted total, tax included.",
+      "covers": ["_recompute_standing_discount_20261231", "_sales_tax_expected_20261231", "_sales_tax_setting_rate_20261231", "_sales_tax_record_rate_20261231", "guard_sales_tax_line_scope_20261231", "guard_sales_tax_current_on_post_20261231", "set_order_sales_tax", "_standing_discount_net_cents_20261231", "_return_customer_line_share", "create_return", "issue_return_credit", "unpost_invoice_group", "save_invoice", "post_invoice", "post_invoice_group", "complete_delivery"],
+      "area": ["billing", "regression"]
+    },
+    "draft_tax_follows_box": {
+      "chain": "smoke-draft-tax-follows-box.sql",
+      "container_only": true,
+      "container_prover": "prove-draft-tax-follows-box-real-schema.mjs",
+      "description": "CONTAINER ONLY. Migration 20270124140000: a Bill Split payer draft the tax box had to keep (it can't be re-saved) can't post with tax that contradicts its sale's box, ticked or unticked (SALES_TAX_BOX_MISMATCH), and posts once the box matches; with the M4 switch off a ticked sale's untaxed draft posts; once on it is refused until the box is unticked and ticked. Terminal rollback.",
+      "covers": ["guard_sales_tax_box_on_post_20270124", "set_order_sales_tax", "post_invoice", "post_invoice_group"],
+      "area": ["billing", "regression"]
+    },
+    "billing_m4_switch": {
+      "chain": "smoke-billing-m4-switch.sql",
+      "description": "Migration 20270117140000: with the M4 switch off (live until commission), ticking a sale's sales tax, a customer standing discount above 0 and a sale's own discount above 0 are refused (BILLING_M4_OFF), while unticking, 0 and \"the customer's rate\" work; a signed-in admin can read the switch but not change it, the anonymous role can't read it; switched on, all three work. Terminal rollback.",
+      "covers": ["_billing_m4_guard_20270117", "_billing_m4_enabled_20270117", "set_order_sales_tax", "set_invoice_standing_discount"],
+      "area": ["billing", "security", "regression"]
+    },
     "epa_long_name_cas_match": {
       "chain": "smoke-epa_long_name_cas_match.sql",
       "description": "REQUIRES 20270107100000 (#1810 follow-up). On an invented product with one Glyphosate row, an admin starts an EPA lookup and the epa-lookup role records an answer listing Glyphosate by CAS under a 250-character name: the proposal shows that entry as an unticked conflict with no change, shows the product's row beside it, and does not list the row as missing from EPA. Fails before the migration. Terminal rollback.",
       "covers": ["_epa_proposal_items", "start_epa_lookup", "record_epa_lookup", "_epa_lookup_input"],
+      "area": ["regression"]
+    },
+    "farm_group_no_loops": {
+      "chain": "smoke-farm_group_no_loops.sql",
+      "description": "REQUIRES 20270127200000 (KI-146). An admin builds invented customers A > B > C through save_customer; putting A under its grandchild C is refused and A keeps no parent; get_customer_farm_group from C returns A, B and C with only A marked parent. Fails before the migration. Terminal rollback.",
+      "covers": ["get_customer_farm_group", "guard_customer_parent_no_loop_20270127", "save_customer"],
       "area": ["regression"]
     }
   }

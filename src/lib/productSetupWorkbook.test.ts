@@ -12,6 +12,8 @@ import {
   type SetupWorkbookExport,
   type SetupWorkbookProduct,
 } from './productSetupWorkbook';
+import type { SetupWorkbookChemistryExport } from './productSetupChemistryWorkbook';
+import { normalizeSetupWorkbookChemistry } from './productSetupChemistry';
 import { loadExcelJs } from './productPricingWorkbook';
 import type { ProductParent } from './productParents';
 import type { UseTimingOption } from '../types';
@@ -41,8 +43,11 @@ function product(overrides: Partial<SetupWorkbookProduct> = {}): SetupWorkbookPr
 }
 const exported = (rows: SetupWorkbookProduct[], rates_locked = false): SetupWorkbookExport => ({ rates_locked, rows });
 
-async function roundTrip(exp: SetupWorkbookExport, edit?: (wb: import('exceljs').Workbook) => void, parents: ProductParent[] = []) {
-  const blob = await generateSetupWorkbook(exp, OPTIONS, parents);
+async function roundTrip(
+  exp: SetupWorkbookExport, edit?: (wb: import('exceljs').Workbook) => void, parents: ProductParent[] = [],
+  chemistry?: SetupWorkbookChemistryExport,
+) {
+  const blob = await generateSetupWorkbook(exp, OPTIONS, parents, chemistry);
   const ExcelJS = await loadExcelJs();
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(await new Promise<ArrayBuffer>((resolve, reject) => {
@@ -60,6 +65,23 @@ const setCell = (wb: import('exceljs').Workbook, sheet: string, header: string, 
   const headers = (ws.getRow(1).values as string[]).slice(1);
   ws.getCell(2, headers.indexOf(header) + 1).value = value;
 };
+
+const chemistryData = (overrides: Partial<SetupWorkbookChemistryExport> = {}): SetupWorkbookChemistryExport => ({
+  ...normalizeSetupWorkbookChemistry({
+  densities: [
+    { parent_id: 'parent-a', parent_name: 'Parent A', version: 3, approved: { lb_per_gal: '8.25', source: 'label', source_note: 'Approved label' },
+      draft: { lb_per_gal: '8.5', source: 'measured', source_note: 'Scale reading 10/20' } },
+    { parent_id: 'parent-b', parent_name: 'Parent B', version: 9, approved: { lb_per_gal: '9', source: 'label', source_note: 'B label' }, draft: null },
+  ],
+  net_weights: [{ product_id: 'bag-a', product_name: 'Dry bag', inventory_unit: 'Ea', version: 2,
+    approved: { net_lb: '40', source: 'label', source_note: 'Bag label' }, draft: null }],
+  parents: [{ parent_id: 'parent-a', parent_name: 'Parent A', chemistry_version: 4, epa_refusal: null, ingredients: [{
+    row_id: 'ingredient-row-a', name: 'Active A', cas: '1071-83-6', strength_value: '29.4', strength_unit: 'pct_ww',
+    strength_basis: 'active_ingredient', source: 'label', source_note: 'Label page 2',
+  }] }],
+  }),
+  ...overrides,
+});
 
 describe('setup workbook', () => {
   it('reads back an untouched download as no changes on either tab', async () => {
@@ -282,5 +304,286 @@ describe('setup workbook', () => {
       expect(await setupMembershipHash(ids, [])).not.toBe(parsed.membershipHash);
       expect(await setupMembershipHash(ids, [parent({ id: '88888888-8888-4888-8888-888888888888' })])).not.toBe(parsed.membershipHash);
     });
+  });
+
+  it('writes v3 chemistry tabs, starts weights at the draft, and sends only edited rows', async () => {
+    const parsed = await roundTrip(exported([product()]), (wb) => {
+      expect(wb.getWorksheet('Weights')!.getCell(2, 11).value).toBe('8.5');
+      expect(wb.getWorksheet('Weights')!.getCell(2, 8).value).toBe('8.5');
+      const ingredientSheet = wb.getWorksheet('Ingredients')!;
+      for (const column of [6, 7]) {
+        expect(ingredientSheet.getCell(2, column).fill).toMatchObject({ fgColor: { argb: 'FFF2F4F3' } });
+        expect(ingredientSheet.getCell(3, column).fill).toMatchObject({ fgColor: { argb: 'FFEAF7EF' } });
+      }
+      setCell(wb, 'Weights', 'value', '8.75');
+      setCell(wb, 'Weights', 'source', 'measured');
+      const weightHeaders = (wb.getWorksheet('Weights')!.getRow(1).values as string[]).slice(1);
+      wb.getWorksheet('Weights')!.getCell(4, weightHeaders.indexOf('reason') + 1).value = 'record only';
+      const manifest = wb.getWorksheet('_crx_manifest')!;
+      expect(manifest.getCell(1, 2).value).toBe('crx-product-setup-v3');
+    }, [], chemistryData());
+    expect(parsed.chemistry.weightRows).toEqual([{
+      kind: 'density', subject_id: 'parent-a', name: 'Parent A', expected_version: 3, value: 8.75,
+      unit: 'lb_per_gal', source: 'measured', source_note: 'Scale reading 10/20', reason: null, evidence: null,
+    }]);
+    expect(parsed.chemistry.ingredientRows).toEqual([]);
+  });
+
+  it('round-trips blank physical rows and still reads later weight edits and the last ingredient change', async () => {
+    const chemistry = chemistryData({
+      densities: [
+        { parent_id: 'parent-a', parent_name: 'Parent A', version: 3, approved: { value: '8.25', source: 'label', source_note: 'A' }, draft: null },
+        { parent_id: 'parent-b', parent_name: 'Parent B', version: 9, approved: { value: '9', source: 'label', source_note: 'B' }, draft: null },
+      ],
+      parents: [{ parent_id: 'parent-a', parent_name: 'Parent A', chemistry_version: 4, epa_refusal: null, ingredients: [
+        { row_id: 'ingredient-row-a', name: 'Active A', cas: '1071-83-6', strength_value: '29.4', strength_unit: 'pct_ww', strength_basis: 'active_ingredient', source: 'label', source_note: 'Label page 2' },
+        { row_id: 'ingredient-row-b', name: 'Active B', cas: '7664-41-7', strength_value: '10', strength_unit: 'pct_ww', strength_basis: 'active_ingredient', source: 'label', source_note: 'Label page 4' },
+      ] }],
+    });
+    const parsed = await roundTrip(exported([product()]), (wb) => {
+      const weights = wb.getWorksheet('Weights')!;
+      weights.spliceRows(3, 0, []);
+      const weightHeaders = (weights.getRow(1).values as string[]).slice(1);
+      weights.getCell(4, weightHeaders.indexOf('value') + 1).value = '9.25';
+      weights.getCell(4, weightHeaders.indexOf('source_note') + 1).value = 'Updated B';
+      const ingredients = wb.getWorksheet('Ingredients')!;
+      ingredients.spliceRows(3, 0, []);
+      const headers = (ingredients.getRow(1).values as string[]).slice(1);
+      ingredients.getCell(4, headers.indexOf('action') + 1).value = '__delete';
+      ingredients.getCell(4, headers.indexOf('source_note') + 1).value = 'Label revision 5';
+      const starterRow = ingredients.rowCount;
+      for (const [field, value] of Object.entries({ ingredient_name: 'Last Active', cas: '123-45-6', strength_value: '15', strength_unit: 'pct_ww', strength_basis: 'active_ingredient', source: 'label', source_note: 'Label page 8' })) {
+        ingredients.getCell(starterRow, headers.indexOf(field) + 1).value = value;
+      }
+    }, [], chemistry);
+    expect(parsed.chemistry.weightRows).toEqual([expect.objectContaining({ subject_id: 'parent-b', value: 9.25, source_note: 'Updated B' })]);
+    expect(parsed.chemistry.ingredientRows).toEqual([
+      expect.objectContaining({ row_id: 'ingredient-row-b', delete: true }),
+      expect.objectContaining({ row_id: null, name: 'Last Active' }),
+    ]);
+  });
+
+  it('allows an unknown-strength row to be cited or removed while preserving server-required unit and basis', async () => {
+    const unknownChemistry = chemistryData({ parents: [{ parent_id: 'parent-a', parent_name: 'Parent A', chemistry_version: 4, epa_refusal: null, ingredients: [{
+      row_id: 'unknown-row', name: 'Unknown Active', cas: '1071-83-6', strength_value: null, strength_unit: 'pct_ww',
+      strength_basis: 'active_ingredient', source: 'label', source_note: 'Old label',
+    }] }] });
+    const edited = await roundTrip(exported([product()]), (wb) => {
+      setCell(wb, 'Ingredients', 'source_note', 'Synthetic revised unknown label');
+    }, [], unknownChemistry);
+    expect(edited.chemistry.ingredientRows).toEqual([{
+      parent_id: 'parent-a', expected_chemistry_version: 4, row_id: 'unknown-row', name: 'Unknown Active', cas: '1071-83-6',
+      strength_value: null, strength_unit: 'pct_ww', strength_basis: 'active_ingredient', source: 'label', source_note: 'Synthetic revised unknown label',
+    }]);
+    const removed = await roundTrip(exported([product()]), (wb) => {
+      setCell(wb, 'Ingredients', 'action', '__delete');
+      setCell(wb, 'Ingredients', 'source_note', 'Synthetic removal citation');
+    }, [], unknownChemistry);
+    expect(removed.chemistry.ingredientRows[0]).toMatchObject({ row_id: 'unknown-row', delete: true,
+      strength_value: null, strength_unit: 'pct_ww', strength_basis: 'active_ingredient' });
+  });
+
+  it('parses changed ingredients and CAS-bearing adds while blank starter rows remain no-ops', async () => {
+    const parsed = await roundTrip(exported([product()]), (wb) => {
+      setCell(wb, 'Ingredients', 'strength_value', '30');
+      setCell(wb, 'Ingredients', 'source_note', 'Updated label page 3');
+      const ws = wb.getWorksheet('Ingredients')!;
+      const headers = (ws.getRow(1).values as string[]).slice(1);
+      const row = new Map(headers.map((header, index) => [header, ws.getCell(3, index + 1).value]));
+      ws.getCell(3, headers.indexOf('ingredient_name') + 1).value = 'New Active';
+      ws.getCell(3, headers.indexOf('cas') + 1).value = '1071-83-6';
+      ws.getCell(3, headers.indexOf('strength_value') + 1).value = '12.5';
+      ws.getCell(3, headers.indexOf('strength_unit') + 1).value = 'pct_ww';
+      ws.getCell(3, headers.indexOf('strength_basis') + 1).value = 'active_ingredient';
+      ws.getCell(3, headers.indexOf('source') + 1).value = 'label';
+      ws.getCell(3, headers.indexOf('source_note') + 1).value = 'New label page 1';
+      expect(row.get('row_id')).toBe('');
+    }, [], chemistryData());
+    expect(parsed.chemistry.ingredientRows).toEqual([
+      { parent_id: 'parent-a', expected_chemistry_version: 4, row_id: 'ingredient-row-a', name: 'Active A', cas: '1071-83-6',
+        strength_value: 30, strength_unit: 'pct_ww', strength_basis: 'active_ingredient', source: 'label', source_note: 'Updated label page 3' },
+      { parent_id: 'parent-a', expected_chemistry_version: 4, row_id: null, name: 'New Active', cas: '1071-83-6', strength_value: 12.5,
+        strength_unit: 'pct_ww', strength_basis: 'active_ingredient', source: 'label', source_note: 'New label page 1' },
+    ]);
+    expect(parsed.chemistry.issues).toEqual([]);
+  });
+
+  it('directs an existing ingredient CAS correction to the shared ingredient review screen', async () => {
+    const result = await roundTrip(exported([product()]), (wb) => {
+      setCell(wb, 'Ingredients', 'cas', '7664-41-7');
+    }, [], chemistryData()).then(() => null, (error: unknown) => error);
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toMatch(/Download a fresh workbook and correct the CAS in the shared ingredient review screen/i);
+    expect((result as Error).message).not.toMatch(/__delete and add/i);
+  });
+
+  it('refuses an unbound inserted row that contains only parent reference fields', async () => {
+    await expect(roundTrip(exported([product()]), (wb) => {
+      wb.getWorksheet('Ingredients')!.addRow(['parent-a', 'Parent A', '4']);
+    }, [], chemistryData())).rejects.toThrow(/has data but no parent\/version record/);
+  });
+
+  it('accepts a new no-CAS ingredient with unknown strength as a warned proposal row', async () => {
+    const parsed = await roundTrip(exported([product()]), (wb) => {
+      const ws = wb.getWorksheet('Ingredients')!;
+      const headers = (ws.getRow(1).values as string[]).slice(1);
+      for (const [field, value] of Object.entries({ ingredient_name: '[PROOF #1796] New unknown active', strength_unit: 'pct_ww',
+        strength_basis: 'active_ingredient', source: 'label', source_note: 'Synthetic unknown strength label' })) {
+        ws.getCell(3, headers.indexOf(field) + 1).value = value;
+      }
+    }, [], chemistryData());
+    expect(parsed.chemistry.ingredientRows).toEqual([expect.objectContaining({
+      row_id: null, name: '[PROOF #1796] New unknown active', cas: null, strength_value: null, strength_unit: 'pct_ww',
+      strength_basis: 'active_ingredient', source: 'label', source_note: 'Synthetic unknown strength label',
+    })]);
+    expect(parsed.chemistry.issues).toEqual([expect.stringContaining('without a CAS')]);
+  });
+
+  it('compares trimmed downloaded parent names while keeping hidden subject identity', async () => {
+    const chemistry = chemistryData({ densities: [], net_weights: [{ product_id: 'bag-a', product_name: 'Dry bag ', inventory_unit: 'Ea', version: 2,
+      approved: { value: '40', source: 'label', source_note: 'Bag label' }, draft: null }] });
+    const parsed = await roundTrip(exported([product()]), undefined, [], chemistry);
+    expect(parsed.chemistry.weightRows).toEqual([]);
+  });
+
+  it('asks for a weight before accepting a source-only edit on an unrecorded row', async () => {
+    const chemistry = chemistryData({ densities: [{ parent_id: 'parent-a', parent_name: 'Parent A', version: 3, approved: null, draft: null }] });
+    await expect(roundTrip(exported([product()]), (wb) => {
+      setCell(wb, 'Weights', 'source', 'label');
+      setCell(wb, 'Weights', 'source_note', 'New label');
+    }, [], chemistry)).rejects.toThrow(/needs a value before adding its source or note/i);
+  });
+
+  it('omits an untouched stale parent when another parent has an ingredient edit', async () => {
+    const chemistry = chemistryData({ parents: [
+      { parent_id: 'parent-a', parent_name: 'Parent A', chemistry_version: 4, epa_refusal: null, ingredients: [{
+        row_id: 'ingredient-row-a', name: 'Active A', cas: '1071-83-6', strength_value: '29.4', strength_unit: 'pct_ww',
+        strength_basis: 'active_ingredient', source: 'label', source_note: 'Label page 2',
+      }] },
+      { parent_id: 'parent-b', parent_name: 'Parent B', chemistry_version: 9, epa_refusal: null, ingredients: [{
+        row_id: 'ingredient-row-b', name: 'Active B', cas: '7664-41-7', strength_value: '10', strength_unit: 'pct_ww',
+        strength_basis: 'active_ingredient', source: 'label', source_note: 'Label page 4',
+      }] },
+    ] });
+    const parsed = await roundTrip(exported([product()]), (wb) => {
+      setCell(wb, 'Ingredients', 'source_note', 'Updated A label');
+    }, [], chemistry);
+    expect(parsed.chemistry.ingredientRows).toEqual([expect.objectContaining({ parent_id: 'parent-a', row_id: 'ingredient-row-a' })]);
+  });
+
+  it('parses an explicit removal marker without replacing the ingredient identity', async () => {
+    const parsed = await roundTrip(exported([product()]), (wb) => {
+      setCell(wb, 'Ingredients', 'action', '__delete');
+      setCell(wb, 'Ingredients', 'source_note', 'Label revision 4, page 2');
+    }, [], chemistryData());
+    expect(parsed.chemistry.ingredientRows).toEqual([{
+      parent_id: 'parent-a', expected_chemistry_version: 4, row_id: 'ingredient-row-a', delete: true,
+      name: 'Active A', cas: '1071-83-6', strength_value: 29.4, strength_unit: 'pct_ww',
+      strength_basis: 'active_ingredient', source: 'label', source_note: 'Label revision 4, page 2',
+    }]);
+  });
+
+  it('keeps unchanged EPA rows as no-ops and names the refusal if one is edited or removed', async () => {
+    const chemistry = chemistryData({ parents: [{ parent_id: 'parent-a', parent_name: 'Parent A', chemistry_version: 4, epa_refusal: null, ingredients: [{
+      row_id: 'epa-row', name: 'EPA Active', cas: '123-45-6', strength_value: '20', strength_unit: 'pct_ww', strength_basis: 'active_ingredient', source: 'epa_lookup', source_note: 'EPA lookup',
+    }] }] });
+    const untouched = await roundTrip(exported([product()]), (wb) => {
+      const sheet = wb.getWorksheet('Ingredients')!;
+      expect(sheet.getCell(2, 8).fill).toMatchObject({ fgColor: { argb: 'FFF2F4F3' } });
+      for (const column of [6, 7]) expect(sheet.getCell(2, column).fill).toMatchObject({ fgColor: { argb: 'FFF2F4F3' } });
+    }, [], chemistry);
+    expect(untouched.chemistry.ingredientRows).toEqual([]);
+    await expect(roundTrip(exported([product()]), (wb) => { wb.getWorksheet('Ingredients')!.getCell(2, 8).value = '21'; }, [], chemistry))
+      .rejects.toThrow(/EPA-filled reference data and cannot be edited or removed/);
+    await expect(roundTrip(exported([product()]), (wb) => { wb.getWorksheet('Ingredients')!.getCell(2, 4).value = '__delete'; }, [], chemistry))
+      .rejects.toThrow(/EPA-filled reference data and cannot be edited or removed/);
+  });
+
+  it('keeps legacy v2 files and v3 workbooks without chemistry sheets compatible', async () => {
+    const parsed = await roundTrip(exported([product()]), (wb) => {
+      const manifest = wb.getWorksheet('_crx_manifest')!;
+      manifest.getCell(1, 2).value = 'crx-product-setup-v2';
+      for (const name of ['Weights', 'Ingredients']) {
+        const sheet = wb.getWorksheet(name);
+        if (sheet) wb.removeWorksheet(sheet.id);
+      }
+    });
+    expect(parsed.chemistry).toEqual({ weightRows: [], ingredientRows: [], issues: [], openProposalParentIds: [] });
+  });
+
+  it('ignores incidental chemistry-named sheets in a legacy v2 workbook', async () => {
+    const parsed = await roundTrip(exported([product()]), (wb) => {
+      wb.getWorksheet('_crx_manifest')!.getCell(1, 2).value = 'crx-product-setup-v2';
+      wb.addWorksheet('Weights').addRows([['Old reference notes'], ['No chemistry upload format']]);
+      wb.addWorksheet('Ingredients').addRows([['Personal reference notes']]);
+    });
+    expect(parsed.chemistry).toEqual({ weightRows: [], ingredientRows: [], issues: [], openProposalParentIds: [] });
+  });
+
+  it('refuses unbound inserted rows, renamed ingredients, and unsupported weight precision', async () => {
+    await expect(roundTrip(exported([product()]), (wb) => {
+      wb.getWorksheet('Ingredients')!.addRow(['', '', '', '', '', 'Forged new row', '', '', '', '', '', 'Label page 1', '']);
+    }, [], chemistryData())).rejects.toThrow(/copy a blank starter row/i);
+    await expect(roundTrip(exported([product()]), (wb) => { setCell(wb, 'Ingredients', 'ingredient_name', 'Renamed'); }, [], chemistryData()))
+      .rejects.toThrow(/cannot edit|changes the ingredient name/i);
+    await expect(roundTrip(exported([product()]), (wb) => { setCell(wb, 'Weights', 'value', '8.12345'); }, [], chemistryData()))
+      .rejects.toThrow(/4 decimal places/i);
+  });
+
+  it('refuses formula cells in both chemistry sheets, duplicate existing ingredient rows, and unsupported server bases', async () => {
+    await expect(roundTrip(exported([product()]), (wb) => {
+      const ws = wb.getWorksheet('Weights')!;
+      const headers = (ws.getRow(1).values as string[]).slice(1);
+      ws.getCell(2, headers.indexOf('value') + 1).value = { formula: '8+1', result: 9 };
+    }, [], chemistryData())).rejects.toThrow(/Weights row 2, value has a formula/i);
+    await expect(roundTrip(exported([product()]), (wb) => {
+      const ws = wb.getWorksheet('Ingredients')!;
+      const headers = (ws.getRow(1).values as string[]).slice(1);
+      ws.getCell(2, headers.indexOf('strength_value') + 1).value = { formula: '10+1', result: 11 };
+    }, [], chemistryData())).rejects.toThrow(/Ingredients row 2, strength_value has a formula/i);
+    await expect(roundTrip(exported([product()]), (wb) => {
+      const ws = wb.getWorksheet('Ingredients')!;
+      for (let column = 1; column <= ws.columnCount; column += 1) ws.getCell(3, column).value = ws.getCell(2, column).value;
+    }, [], chemistryData())).rejects.toThrow(/no longer matches its downloaded parent and ingredient/i);
+  });
+
+  it('refuses null and wrong-shape hidden chemistry records with a fresh-download message', async () => {
+    for (const hiddenValue of ['null', '[]', '{}']) {
+      await expect(roundTrip(exported([product()]), (wb) => {
+        const ws = wb.getWorksheet('Weights')!;
+        ws.getCell(2, ws.columnCount).value = hiddenValue;
+      }, [], chemistryData())).rejects.toThrow(/Weights row 2 has a damaged hidden download record/);
+      await expect(roundTrip(exported([product()]), (wb) => {
+        const ws = wb.getWorksheet('Ingredients')!;
+        ws.getCell(2, ws.columnCount).value = hiddenValue;
+      }, [], chemistryData())).rejects.toThrow(/Ingredients row 2 .*damaged hidden download record/);
+    }
+  });
+
+  it('names only lowercase source codes in parser errors and workbook notes', async () => {
+    await expect(roundTrip(exported([product()]), (wb) => {
+      setCell(wb, 'Weights', 'value', '8.75');
+      setCell(wb, 'Weights', 'source', 'Label');
+    }, [], chemistryData())).rejects.toThrow(/source code: measured, sds, label or supplier/i);
+    await expect(roundTrip(exported([product()]), (wb) => {
+      setCell(wb, 'Ingredients', 'strength_value', '30');
+      setCell(wb, 'Ingredients', 'source', 'Label');
+    }, [], chemistryData())).rejects.toThrow(/source code: label, sds, supplier or other/i);
+    await roundTrip(exported([product()]), (wb) => {
+      expect(wb.getWorksheet('Weights')!.getCell(1, 12).note).toContain('measured, sds, label or supplier');
+      expect(wb.getWorksheet('Ingredients')!.getCell(1, 11).note).toContain('label, sds, supplier or other');
+    }, [], chemistryData());
+  });
+
+  it.each(['elemental', 'oxide'])('refuses the unsupported strength basis %s before preview', async (basis) => {
+    await expect(roundTrip(exported([product()]), (wb) => {
+      setCell(wb, 'Ingredients', 'strength_basis', basis);
+      setCell(wb, 'Ingredients', 'source_note', 'Updated citation');
+    }, [], chemistryData())).rejects.toThrow(/valid strength unit and basis/i);
+  });
+
+  it('refuses a visible weight name changed independently of its hidden subject binding', async () => {
+    await expect(roundTrip(exported([product()]), (wb) => { setCell(wb, 'Weights', 'name', 'Parent B'); }, [], chemistryData()))
+      .rejects.toThrow(/no longer matches its downloaded subject and name/i);
   });
 });

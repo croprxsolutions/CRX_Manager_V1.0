@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, isFromScratchInvoice } from './invoiceChargeLines';
+import { CHARGE_TYPE_OPTIONS, chargeTypeLabel, fromScratchLinesProblem, invoiceBreakdown, invoiceMarginCents, isChargeLine, isFromScratchInvoice } from './invoiceChargeLines';
 
 describe('isFromScratchInvoice', () => {
   it('is a misc_charge or chemical_sale with no order and no delivery', () => {
@@ -32,10 +32,115 @@ describe('fromScratchLinesProblem', () => {
   });
 });
 
+describe('the standing discount line (billing plan M4b)', () => {
+  const discount = { product_id: null, charge_type: 'standing_discount' as const, description: 'Standing discount 3%', quantity: 1, unit_price_cents: -300 };
+  const freight = { product_id: null, charge_type: 'freight' as const, description: 'Freight', quantity: 1, unit_price_cents: 4500 };
+
+  it('lets a discounted chemical sale be saved: the database writes that line, so the screen does not check it', () => {
+    expect(fromScratchLinesProblem([freight, discount])).toBeNull();
+    expect(fromScratchLinesProblem([discount])).toBeNull();
+  });
+
+  it('still checks every other charge line beside it', () => {
+    expect(fromScratchLinesProblem([{ ...freight, unit_price_cents: 0 }, discount])).toBe('Every charge needs an amount above $0.00.');
+  });
+
+  it('is labelled but never offered as a type to pick', () => {
+    expect(chargeTypeLabel('standing_discount')).toBe('Standing discount');
+    expect(CHARGE_TYPE_OPTIONS.map((option) => option.value)).not.toContain('standing_discount');
+  });
+});
+
+describe('the sales tax line (billing plan M4a)', () => {
+  const tax = { product_id: null, charge_type: 'sales_tax' as const, description: 'Sales tax 6.25%', quantity: 1, unit_price_cents: 281 };
+  const freight = { product_id: null, charge_type: 'freight' as const, description: 'Freight', quantity: 1, unit_price_cents: 4500 };
+
+  it('is the database\'s own line, so the screen does not check it, and still checks the lines beside it', () => {
+    expect(fromScratchLinesProblem([freight, tax])).toBeNull();
+    expect(fromScratchLinesProblem([{ ...freight, description: ' ' }, tax])).toBe('Add a description to every charge.');
+  });
+
+  it('is labelled but never offered as a type to pick', () => {
+    expect(chargeTypeLabel('sales_tax')).toBe('Sales tax');
+    expect(CHARGE_TYPE_OPTIONS.map((option) => option.value)).not.toContain('sales_tax');
+  });
+});
+
 describe('charge types', () => {
-  it('are exactly the four the database accepts (invoice_items_charge_type_check)', () => {
+  it('offer staff the four types they can pick (the database also writes its own standing_discount and sales_tax lines)', () => {
     expect(CHARGE_TYPE_OPTIONS.map((o) => o.value)).toEqual(['freight', 'application_fee', 'service', 'other']);
     expect(chargeTypeLabel('application_fee')).toBe('Application fee');
     expect(chargeTypeLabel(null)).toBe('');
+  });
+});
+
+describe('invoiceMarginCents (billing plan M4a)', () => {
+  it('leaves the sales tax out: tax is collected for the state, not earned', () => {
+    const lines = [
+      { extended_cents: 100000, charge_type: null },
+      { extended_cents: 4500, charge_type: 'freight' as const },
+      { extended_cents: -3000, charge_type: 'standing_discount' as const },
+      { extended_cents: 6408, charge_type: 'sales_tax' as const },
+    ];
+    expect(invoiceMarginCents(lines, 90000)).toBe(100000 + 4500 - 3000 - 90000);
+  });
+});
+
+describe('invoiceBreakdown', () => {
+  const products = [
+    { extended_cents: 24740 },
+    { extended_cents: 26850, charge_type: null },
+    { extended_cents: 15070, product_id: 'p1' },
+  ];
+
+  it('splits products, charges, standing discount and tax', () => {
+    expect(
+      invoiceBreakdown([
+        ...products,
+        { extended_cents: 4500, charge_type: 'freight' },
+        { extended_cents: -2000, charge_type: 'standing_discount', description: 'Standing discount 3%' },
+        { extended_cents: 4323, charge_type: 'sales_tax', description: 'Sales tax 6.25%' },
+      ]),
+    ).toEqual({
+      productsCents: 66660,
+      charges: [{ label: 'Freight', cents: 4500 }],
+      discount: { label: 'Standing discount 3%', cents: -2000 },
+      tax: { label: 'Sales tax 6.25%', cents: 4323 },
+      totalCents: 73483,
+    });
+  });
+
+  it('products only: no charges, discount or tax', () => {
+    expect(invoiceBreakdown(products)).toEqual({ productsCents: 66660, charges: [], discount: null, tax: null, totalCents: 66660 });
+  });
+
+  it('groups charges by label and falls back to the type label', () => {
+    const b = invoiceBreakdown([
+      { extended_cents: 100, charge_type: 'freight' },
+      { extended_cents: 250, charge_type: 'freight' },
+      { extended_cents: 900, charge_type: 'service' },
+      { extended_cents: -50, charge_type: 'standing_discount' },
+      { extended_cents: 7, charge_type: 'sales_tax', description: '' },
+    ]);
+    expect(b.charges).toEqual([{ label: 'Freight', cents: 350 }, { label: 'Service', cents: 900 }]);
+    expect(b.discount).toEqual({ label: 'Standing discount', cents: -50 });
+    expect(b.tax).toEqual({ label: 'Sales tax', cents: 7 });
+    expect(b.totalCents).toBe(1207);
+  });
+
+  // Sol MED-3: the page lists an untyped line with no product under Charges where the invoice takes charges, so
+  // Amount due must not count it as a product there (the database's discount base leaves it out too).
+  it('counts an untyped line with no product as a charge where the invoice takes charges, as the page lists it', () => {
+    const legacy = { extended_cents: 7500, product_id: null, charge_type: null, description: 'Old freight' };
+    const product = { extended_cents: 2000, product_id: 'p1', charge_type: null };
+    expect(invoiceBreakdown([product, legacy], true)).toEqual({
+      productsCents: 2000, charges: [{ label: 'Charge', cents: 7500 }], discount: null, tax: null, totalCents: 9500,
+    });
+    // Elsewhere (a field invoice's machine fee, an older invoice) it stays in the first row, as the page lists it.
+    expect(invoiceBreakdown([product, legacy]).productsCents).toBe(9500);
+    expect(isChargeLine(legacy, true)).toBe(true);
+    expect(isChargeLine(legacy, false)).toBe(false);
+    expect(isChargeLine(product, true)).toBe(false);
+    expect(isChargeLine({ product_id: null, charge_type: 'freight' }, false)).toBe(true);
   });
 });

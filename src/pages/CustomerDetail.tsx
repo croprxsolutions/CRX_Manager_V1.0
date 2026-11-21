@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, lazy, Suspense } from 'react';
+import { billingM4Enabled } from '../lib/billingFeatures';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall, User, Ruler, Sprout, Percent, StickyNote, ChevronDown, Users, Lightbulb, FolderOpen, History, Map, Package, Wallet, ShoppingBasket } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall, User, Ruler, Sprout, Percent, StickyNote, ChevronDown, Users, Lightbulb, FolderOpen, History, Map, Package, Wallet, ShoppingBasket, Receipt, Lock } from 'lucide-react';
+import type { InputHTMLAttributes, ReactNode } from 'react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
+import Switch from '../components/ui/Switch';
 import CommissionSplitEditor from '../components/ui/CommissionSplitEditor';
 import ApplicationServicePicker from '../components/field-app/ApplicationServicePicker';
 import UnsavedChangesModal from '../components/ui/UnsavedChangesModal';
@@ -142,6 +144,25 @@ function scrollToSection(section: CustomerSection | 'info') {
 }
 
 /** Style D band that opens or folds one section of the customer page. */
+/** A labelled number field with a unit before or after it ("$", "%", "days"), as on the Billing card. */
+function AffixField({ label, id, before, after, ...props }: InputHTMLAttributes<HTMLInputElement> & { label: string; id: string; before?: string; after?: string }) {
+  return (
+    <div className="w-full">
+      <label htmlFor={id} className="mb-1 block text-sm font-medium text-secondary">{label}</label>
+      <div className="flex rounded-lg border border-gray-300 bg-white transition-colors focus-within:border-crx-green focus-within:ring-2 focus-within:ring-crx-green/20 has-[:disabled]:bg-gray-50 has-[:disabled]:opacity-50">
+        {before && <span id={`${id}-before`} className="flex items-center pl-3 text-sm text-secondary">{before}</span>}
+        <input
+          id={id}
+          aria-describedby={[before && `${id}-before`, after && `${id}-after`].filter(Boolean).join(' ') || undefined}
+          className="min-h-11 min-w-0 flex-1 rounded-lg bg-transparent px-3 py-2.5 text-right text-sm text-nav-dark focus:outline-none md:min-h-0"
+          {...props}
+        />
+        {after && <span id={`${id}-after`} className="flex items-center whitespace-nowrap rounded-r-lg border-l border-gray-200 bg-cream px-3 text-sm text-secondary">{after}</span>}
+      </div>
+    </div>
+  );
+}
+
 function FoldBand({ section, open, onToggle }: { section: (typeof FOLD_SECTIONS)[number]; open: boolean; onToggle: () => void }) {
   return (
     <h2 id={sectionAnchor(section.id)} className="scroll-mt-32">
@@ -250,6 +271,11 @@ export default function CustomerDetail() {
   // of the form.
   const [crops, setCrops] = useState<CropValue[]>([]);
   const [cropSaving, setCropSaving] = useState<CropValue | null>(null);
+  // The standing discount (billing plan M4b) saves on its own, as crops do: save_customer doesn't carry it.
+  // null = not being edited (the field shows the saved rate).
+  const [discountDraft, setDiscountDraft] = useState<string | null>(null);
+  const [discountSaving, setDiscountSaving] = useState(false);
+  useEffect(() => { setDiscountDraft(null); }, [id]);
 
   // Financials tab state
   interface TxnRow { transaction_date: string; transaction_type: string; reference_number: string; amount_cents: number; running_balance: number }
@@ -276,6 +302,8 @@ export default function CustomerDetail() {
   const applyingDefaultTierRef = useRef(false);
   // initialLoadDone's timer can fire before the effect below sees a read, and a read is not an edit.
   const loadedCustomerRef = useRef<typeof customer | null>(null);
+  // Set by a standing discount save on a clean form: the next customer change is that save, not an edit.
+  const keepCleanAfterDiscountRef = useRef(false);
   const loadedAddressesRef = useRef<typeof addresses | null>(null);
   const suppressDirtyUntilReloadSettlesRef = useRef(false);
   // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
@@ -427,6 +455,10 @@ export default function CustomerDetail() {
     }
     if (!initialLoadDone.current) return;
     if (suppressDirtyUntilReloadSettlesRef.current) return;
+    if (keepCleanAfterDiscountRef.current) {
+      keepCleanAfterDiscountRef.current = false;
+      loadedCustomerRef.current = customer;
+    }
     if (customer === loadedCustomerRef.current && addresses === loadedAddressesRef.current) return;
     setIsDirty(true);
   }, [customer, addresses]);
@@ -1248,6 +1280,60 @@ export default function CustomerDetail() {
     }
   };
 
+  const saveStandingDiscount = async () => {
+    if (!id || isNew || discountDraft === null || discountSaving) return;
+    const text = discountDraft.trim();
+    const pct = Number(text);
+    // The database rule: 0 to 100, at most two decimals (customers_standing_discount_pct_range, numeric(5,2)).
+    if (!/^[0-9]{1,3}(\.[0-9]{1,2})?$/.test(text) || pct > 100) {
+      toast('error', 'Enter a standing discount from 0 to 100%, with at most two decimals.');
+      return;
+    }
+    setDiscountSaving(true);
+    try {
+      const previousRowVersion = customerRowVersionRef.current;
+      const result = await supabase
+        .from('customers')
+        .update({ standing_discount_pct: pct })
+        .eq('id', id)
+        .select('*');
+      checkMutationResult(result, 'update customer standing discount');
+      // The page moved to another customer meanwhile: nothing here may land on that one.
+      if (currentIdRef.current !== id) return;
+      const nextRowVersion = (result.data as Array<{ row_version?: unknown }>)[0]?.row_version;
+      const rowVersionResult = resolveDirectMutationRowVersion(previousRowVersion, nextRowVersion);
+      customerRowVersionRef.current = rowVersionResult.rowVersion;
+      // Saved: an otherwise untouched form stays clean (no unsaved-changes prompt on leaving). The dirty
+      // check below adopts the committed customer as the loaded copy, after the update (StrictMode-safe).
+      keepCleanAfterDiscountRef.current = !isDirty;
+      setCustomer((c) => ({ ...c, standing_discount_pct: pct }));
+      setDiscountDraft(null);
+      if (rowVersionResult.kind === 'recovery') {
+        // Same as a crop change: committed, but another edit may have landed at the same time.
+        staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
+        setStaleSaveOpen(true);
+        toast('warning', 'The standing discount was saved, but another customer edit may have completed at the same time. Your current edits were kept; reload before saving other customer changes.');
+      } else {
+        toast('success', `Standing discount set to ${pct}%. New sales use it; existing invoices keep their rate.`);
+      }
+      // The rate is saved: a failed activity entry must not read as a failed save.
+      if (profile?.id) {
+        void Promise.resolve(logActivity({
+          event: 'customer_updated',
+          description: `Standing discount set to ${pct}%`,
+          performedBy: profile.id,
+          entityType: 'customer',
+          customerId: id,
+        })).catch(() => {});
+      }
+    } catch (error: unknown) {
+      Sentry.captureException(error instanceof Error ? error : new Error(String(error)), { extra: { context: 'CustomerDetail.saveStandingDiscount' } });
+      toast('error', sanitizeError(error));
+    } finally {
+      setDiscountSaving(false);
+    }
+  };
+
   if (loading) {
     return <div className="animate-pulse"><div className="h-64 bg-gray-200 rounded" /></div>;
   }
@@ -1383,6 +1469,7 @@ export default function CustomerDetail() {
           <SectionJumpBar
             sections={[
               { id: 'customer-contact', label: 'Contact' },
+              { id: 'customer-billing', label: 'Billing' },
               { id: 'customer-acreage', label: 'Acreage' },
               ...(!isNew && id ? [{ id: 'customer-crops', label: 'Crops' }] : []),
               { id: 'customer-addresses', label: 'Addresses', count: addresses.length },
@@ -1400,98 +1487,137 @@ export default function CustomerDetail() {
               <Input label="Phone" value={customer.phone || ''} onChange={(e) => { update('phone', e.target.value); setPhoneError(''); }} error={phoneError} />
               <Input label="Email" type="email" value={customer.email || ''} onChange={(e) => { update('email', e.target.value); setEmailError(''); }} error={emailError} />
               <Input label="Billing Address" value={customer.billing_address || ''} onChange={(e) => update('billing_address', e.target.value)} />
-              <div>
-                <label htmlFor="customer-pricing-tier" className="block text-sm font-medium text-secondary mb-1">Pricing Tier</label>
-                {/* Price tiers and credit limits are admin-only (Mason 2026-11-01; enforced by the customer guard). */}
-                <select
-                  id="customer-pricing-tier"
-                  disabled={!isAdmin}
-                  value={customer.assigned_tier}
-                  onChange={(e) => { tierChosenRef.current = true; update('assigned_tier', parseInt(e.target.value)); }}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
-                >
-                  <option value={1}>Tier 1</option>
-                  <option value={2}>Tier 2</option>
-                  <option value={3}>Tier 3</option>
-                </select>
-              </div>
-              <Input label="Payment Terms" value={customer.payment_terms || ''} onChange={(e) => update('payment_terms', e.target.value)} />
-              <Input
-                label="Credit Limit ($)"
-                type="number"
-                min={0}
-                step={100}
-                disabled={!isAdmin}
-                value={customer.credit_limit_cents != null ? (customer.credit_limit_cents as number) / 100 : ''}
-                onChange={(e) => {
-                  const cents = e.target.value ? parseDollarsToCents(e.target.value) : 0;
-                  // null = more than two decimals typed. Refuse the keystroke rather than
-                  // store 0: a $0 credit limit disables the credit check on quick deliveries.
-                  if (cents === null) { toast('error', MONEY_PRECISION_MESSAGE); return; }
-                  update('credit_limit_cents', cents);
-                }}
-              />
-              {!isAdmin && (
-                <p className="text-xs text-secondary sm:col-span-2">
-                  Only an admin can change a customer&apos;s price tier and credit limit.
-                </p>
-              )}
-              <Input
-                label="Finance Charge Rate (%)"
-                type="number"
-                min={0}
-                step={0.5}
-                value={customer.finance_charge_rate ?? ''}
-                onChange={(e) => update('finance_charge_rate', e.target.value ? parseFloat(e.target.value) : 0)}
-              />
-              <div>
-                <label className="block text-sm font-medium text-secondary mb-1">Finance Charges</label>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => update('finance_charge_enabled', !(customer.finance_charge_enabled ?? true))}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      (customer.finance_charge_enabled ?? true) ? 'bg-crx-green' : 'bg-gray-300'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        (customer.finance_charge_enabled ?? true) ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                  <span className="text-sm text-secondary">
-                    {(customer.finance_charge_enabled ?? true) ? 'Enabled' : 'Disabled'}
-                  </span>
-                </div>
-              </div>
-              <Input
-                label="Grace Period (days)"
-                type="number"
-                min={0}
-                step={1}
-                value={customer.finance_charge_grace_days ?? 0}
-                onChange={(e) => update('finance_charge_grace_days', e.target.value ? parseInt(e.target.value) : 0)}
-              />
-
-              {/* Parent Customer (Farm Group) selector */}
-              <div className="relative">
-                <label className="block text-sm font-medium text-secondary mb-1">Parent Customer</label>
-                <CustomerSearchPicker
-                  value={customer.parent_customer_id || ''}
-                  selectedLabel={parentName}
-                  onSelect={(parent) => {
-                    update('parent_customer_id', parent?.id ?? null);
-                    setParentName(parent?.farm_name ?? '');
-                  }}
-                  excludeIds={id && !isNew ? [id] : undefined}
-                  placeholder="Search parent customer..."
-                  ariaLabel="Parent customer"
-                />
-                <p className="text-xs text-secondary mt-1">Link this customer to a parent farm group</p>
-              </div>
             </div>
           </div>
+          </SectionCard>
+
+          {/* Billing terms, moved out of Contact. Who can edit each field is unchanged: tier, credit limit and
+              discount are admin-only (Mason 2026-11-01); the rest save with Save Changes like any other field. */}
+          <SectionCard id="customer-billing" icon={<Receipt className="w-5 h-5" />} title="Billing">
+            <div className="space-y-4 p-4 sm:p-5">
+              {!isAdmin && (
+                <p className="flex items-start gap-2 rounded-lg border border-gray-200 bg-cream px-3 py-2.5 text-sm text-secondary">
+                  <Lock aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+                  Only an admin can change the price tier, credit limit and standing discount.
+                </p>
+              )}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="customer-pricing-tier" className="block text-sm font-medium text-secondary mb-1">Price tier</label>
+                  <select
+                    id="customer-pricing-tier"
+                    disabled={!isAdmin}
+                    value={customer.assigned_tier}
+                    onChange={(e) => { tierChosenRef.current = true; update('assigned_tier', parseInt(e.target.value)); }}
+                    className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-nav-dark focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50 md:min-h-0"
+                  >
+                    <option value={1}>Tier 1</option>
+                    <option value={2}>Tier 2</option>
+                    <option value={3}>Tier 3</option>
+                  </select>
+                </div>
+                <AffixField
+                  label="Credit limit"
+                  id="customer-credit-limit"
+                  before="$"
+                  type="number"
+                  min={0}
+                  step={100}
+                  disabled={!isAdmin}
+                  value={customer.credit_limit_cents != null ? (customer.credit_limit_cents as number) / 100 : ''}
+                  onChange={(e) => {
+                    const cents = e.target.value ? parseDollarsToCents(e.target.value) : 0;
+                    // null = more than two decimals typed. Refuse the keystroke rather than
+                    // store 0: a $0 credit limit disables the credit check on quick deliveries.
+                    if (cents === null) { toast('error', MONEY_PRECISION_MESSAGE); return; }
+                    update('credit_limit_cents', cents);
+                  }}
+                />
+                <Input id="customer-payment-terms" label="Payment terms" className="min-h-11 md:min-h-0" value={customer.payment_terms || ''} onChange={(e) => update('payment_terms', e.target.value)} />
+                {/* Parent Customer (Farm Group) selector */}
+                <div className="relative">
+                  <label className="block text-sm font-medium text-secondary mb-1">Parent customer</label>
+                  <CustomerSearchPicker
+                    value={customer.parent_customer_id || ''}
+                    selectedLabel={parentName}
+                    onSelect={(parent) => {
+                      update('parent_customer_id', parent?.id ?? null);
+                      setParentName(parent?.farm_name ?? '');
+                    }}
+                    excludeIds={id && !isNew ? [id] : undefined}
+                    placeholder="Search parent customer..."
+                    ariaLabel="Parent customer"
+                  />
+                  <p className="text-xs text-secondary mt-1">Link this customer to a parent farm group</p>
+                </div>
+                {!isNew && billingM4Enabled() && (
+                  // Saves on its own (saveStandingDiscount); the whole-record Save Changes never carries it.
+                  // Off on live until commission ships (billingM4Enabled).
+                  <div className="rounded-lg border border-gray-200 bg-cream/60 p-3 sm:col-span-2 sm:p-4">
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div className="w-40">
+                        <AffixField
+                          label="Standing discount"
+                          id="customer-standing-discount"
+                          after="%"
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={0.01}
+                          disabled={!isAdmin || discountSaving}
+                          value={discountDraft ?? String(customer.standing_discount_pct ?? 0)}
+                          onChange={(e) => setDiscountDraft(e.target.value)}
+                        />
+                      </div>
+                      {isAdmin && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          showChevron={false}
+                          className="min-h-11 md:min-h-0"
+                          loading={discountSaving}
+                          disabled={discountDraft === null || Number(discountDraft) === Number(customer.standing_discount_pct ?? 0)}
+                          onClick={saveStandingDiscount}
+                        >
+                          Save discount
+                        </Button>
+                      )}
+                    </div>
+                    <p className="mt-2 text-xs text-secondary">Off products on new chemical sales, before tax. Drafts and posted invoices keep their rate.</p>
+                    {isAdmin && <p className="mt-1 text-xs text-secondary">Saves on its own, right away. Save changes below does not include it.</p>}
+                  </div>
+                )}
+                {/* The rate is yearly: generate_finance_charges bills rate / 12 each month. */}
+                <AffixField
+                  label="Finance charge rate"
+                  id="customer-finance-charge-rate"
+                  after="% a year"
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={customer.finance_charge_rate ?? ''}
+                  onChange={(e) => update('finance_charge_rate', e.target.value ? parseFloat(e.target.value) : 0)}
+                />
+                <AffixField
+                  label="Grace period"
+                  id="customer-grace-period"
+                  after="days"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={customer.finance_charge_grace_days ?? 0}
+                  onChange={(e) => update('finance_charge_grace_days', e.target.value ? parseInt(e.target.value) : 0)}
+                />
+                <div className="sm:col-span-2">
+                  <Switch
+                    label="Charge finance charges"
+                    description="On overdue posted invoices"
+                    isSelected={customer.finance_charge_enabled ?? true}
+                    onChange={(on) => update('finance_charge_enabled', on)}
+                  />
+                </div>
+              </div>
+            </div>
           </SectionCard>
 
           <SectionCard id="customer-acreage" icon={<Ruler className="w-5 h-5" />} title="Acreage">
@@ -1590,6 +1716,7 @@ export default function CustomerDetail() {
                   update('default_commission_split', val);
                 }}
                 label=""
+                disabled={saving}
               />
             ) : (
               <div className="space-y-1 text-sm">

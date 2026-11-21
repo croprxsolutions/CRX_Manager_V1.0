@@ -1,4 +1,5 @@
 import { toSentryError } from '../lib/sentryError';
+import { billingM4Enabled } from '../lib/billingFeatures';
 import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Save, UserPlus, Pencil, Shield, Users, KeyRound, Receipt, Sprout, Building2 } from 'lucide-react';
@@ -59,6 +60,7 @@ import {
   serializeGuardrailMode,
   type GuardrailMode,
 } from '../lib/labelGuardrailSetting';
+import { centsTimesQuantity, formatCents } from '../lib/money';
 import type { Profile, AppSetting, UserRole } from '../types';
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -67,6 +69,9 @@ const ROLE_LABELS: Record<UserRole, string> = {
   driver: 'Driver',
   applicator: 'Applicator',
 };
+
+// The database accepts only a plain percentage (app_settings_sales_tax_rate_chk, migration 20270109100200).
+const SALES_TAX_RATE_PATTERN = /^[0-9]{1,2}(\.[0-9]{1,3})?$/;
 
 const FIELD_CLASS =
   'h-9 rounded-lg border border-gray-300 bg-white px-3 text-sm text-nav-dark placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:bg-gray-50 disabled:text-gray-500';
@@ -188,6 +193,7 @@ interface SettingsForm {
   defaultValidDays: string;
   arReminderDays: string;
   defaultTier: string;
+  salesTaxRate: string;
   fuelSurcharge: FuelSurchargeConfig;
   autoDraftEnabled: boolean;
   guardrailMode: GuardrailMode;
@@ -206,6 +212,7 @@ function toSettingValues(f: SettingsForm): Record<string, string> {
     default_quote_valid_days: f.defaultValidDays,
     ar_reminder_days: f.arReminderDays,
     default_tier: f.defaultTier,
+    sales_tax_rate: f.salesTaxRate,
     fuel_surcharge: serializeFuelSurchargeConfig(f.fuelSurcharge),
     [AUTO_DRAFT_SETTING_KEY]: serializeAutoDraftEnabled(f.autoDraftEnabled),
     [LABEL_RATE_GUARDRAIL_MODE_KEY]: serializeGuardrailMode(f.guardrailMode),
@@ -220,6 +227,7 @@ const GROUP_KEYS = {
   fuel: ['fuel_surcharge'],
   autoDraft: [AUTO_DRAFT_SETTING_KEY],
   defaults: ['default_quote_valid_days', 'ar_reminder_days', 'default_tier'],
+  salesTax: ['sales_tax_rate'],
   guardrail: [LABEL_RATE_GUARDRAIL_MODE_KEY],
   sheet: ['applicator_sheet_custom'],
   notices: ['pre_application_notice_template', 'post_application_notice_template'],
@@ -336,6 +344,8 @@ export default function SettingsPage() {
   const [defaultValidDays, setDefaultValidDays] = useState('30');
   const [arReminderDays, setArReminderDays] = useState('30');
   const [defaultTier, setDefaultTier] = useState('1');
+  const [salesTaxRate, setSalesTaxRate] = useState('6.25');
+  const [savingSalesTax, setSavingSalesTax] = useState(false);
   // #32: Fuel Surcharge — OFF by default, rate blank. The owner sets the rule.
   const [fuelSurcharge, setFuelSurcharge] = useState<FuelSurchargeConfig>(DEFAULT_FUEL_SURCHARGE);
   const [savingFuel, setSavingFuel] = useState(false);
@@ -393,7 +403,7 @@ export default function SettingsPage() {
   const [savedValues, setSavedValues] = useState<Record<string, string> | null>(null);
 
   const values = toSettingValues({
-    companyName, companyPhone, companyEmail, companyAddress, defaultValidDays, arReminderDays, defaultTier,
+    companyName, companyPhone, companyEmail, companyAddress, defaultValidDays, arReminderDays, defaultTier, salesTaxRate,
     fuelSurcharge, autoDraftEnabled, guardrailMode, sheetConfig, preNoticeTemplate, postNoticeTemplate,
   });
   const changedKeys = (group: SettingsGroup) =>
@@ -425,6 +435,7 @@ export default function SettingsPage() {
       defaultValidDays: map['default_quote_valid_days'] || '30',
       arReminderDays: map['ar_reminder_days'] || '30',
       defaultTier: map['default_tier'] || '1',
+      salesTaxRate: map['sales_tax_rate'] || '6.25',
       // #32: blank/absent => the inert OFF default (never invents a rate).
       fuelSurcharge: parseFuelSurchargeConfig(map['fuel_surcharge']),
       // §4: blank/absent/anything-but-'true' => OFF (the safe default).
@@ -444,6 +455,7 @@ export default function SettingsPage() {
     setDefaultValidDays(loaded.defaultValidDays);
     setArReminderDays(loaded.arReminderDays);
     setDefaultTier(loaded.defaultTier);
+    setSalesTaxRate(loaded.salesTaxRate);
     setFuelSurcharge(loaded.fuelSurcharge);
     setAutoDraftEnabled(loaded.autoDraftEnabled);
     setGuardrailMode(loaded.guardrailMode);
@@ -536,6 +548,25 @@ export default function SettingsPage() {
       toast('error', sanitizeError(err));
     }
     setSavingDefaults(false);
+  };
+
+  const saveSalesTax = async () => {
+    const rate = salesTaxRate.trim();
+    if (!SALES_TAX_RATE_PATTERN.test(rate)) {
+      toast('error', 'Enter the sales tax rate as a percentage from 0 to 99.999, for example 6.25.');
+      return;
+    }
+    setSavingSalesTax(true);
+    try {
+      await saveSetting('sales_tax_rate', rate);
+      setSalesTaxRate(rate);
+      markSaved(GROUP_KEYS.salesTax, { ...values, sales_tax_rate: rate });
+      toast('success', 'Sales tax rate saved');
+      if (profile) logActivity({ event: 'settings_updated', description: `Sales tax rate set to ${rate}%`, performedBy: profile.id });
+    } catch (err: unknown) {
+      toast('error', sanitizeError(err));
+    }
+    setSavingSalesTax(false);
   };
 
   const saveFuelSurcharge = async () => {
@@ -854,7 +885,7 @@ export default function SettingsPage() {
         // trg_guard_last_active_admin refuses to deactivate the last active admin,
         // which would otherwise lock the account out of its own app.
         toast('error', /LAST_ACTIVE_ADMIN/.test(String((error as { message?: string })?.message ?? ''))
-          ? 'You cannot deactivate the only active admin. Make someone else an active admin first.'
+          ? 'You cannot remove or deactivate the only active admin. Make someone else an active admin first.'
           : sanitizeError(error));
       } else {
         const updateResult = assertRpcResult<{ error?: string }>(data, 'admin_update_profile');
@@ -1070,6 +1101,58 @@ export default function SettingsPage() {
       ) : !settingsLoaded ? null : (
       <>
       <SettingsSection id="settings-billing" icon={<Receipt className="w-5 h-5" />} title="Billing">
+        {/* Off on live until commission ships (billingM4Enabled). */}
+        {billingM4Enabled() && (
+          <SubPart
+            title="Sales tax"
+            help="A chemical sale with its sales tax box ticked is taxed at this rate, on its products and charges after any standing discount. A draft keeps the rate it was taxed at; a new rate applies to new drafts."
+            dirty={isDirty('salesTax')}
+            saveButton={<SaveButton label="Save sales tax" dirty={isDirty('salesTax')} saving={savingSalesTax} onClick={saveSalesTax} />}
+          >
+            <Row label="Sales tax rate" htmlFor="sales-tax-rate">
+              <span className="inline-flex rounded-lg border border-gray-300 bg-white focus-within:border-crx-green focus-within:ring-2 focus-within:ring-crx-green/20">
+                <input
+                  id="sales-tax-rate"
+                  type="text"
+                  inputMode="decimal"
+                  value={salesTaxRate}
+                  disabled={savingSalesTax}
+                  onChange={(e) => setSalesTaxRate(e.target.value)}
+                  className="h-9 min-h-11 w-24 rounded-l-lg bg-transparent px-3 text-right text-sm text-nav-dark focus:outline-none disabled:bg-gray-50 disabled:text-gray-500 md:min-h-0"
+                />
+                <span className="flex items-center rounded-r-lg border-l border-gray-200 bg-cream px-3 text-sm text-secondary">%</span>
+              </span>
+              {/* What the typed rate means before it is saved: tax on $100.00, rounded to the cent as the server rounds it. */}
+              {SALES_TAX_RATE_PATTERN.test(salesTaxRate.trim()) && (
+                <p className="rounded-lg bg-cream px-3 py-1.5 text-[13px] text-secondary">
+                  Example: a $100.00 taxed sale adds <strong className="font-semibold text-nav-dark">{formatCents(centsTimesQuantity(100, salesTaxRate.trim()))}</strong>
+                </p>
+              )}
+            </Row>
+          </SubPart>
+        )}
+
+        {/* §4: Auto-invoice on job completion (DRAFTS ONLY — never auto-posts). */}
+        <SubPart
+          title="Automatic invoice drafts"
+          help="Drafts only, never posted on their own. A draft waits in Ready to Post on the Office Cockpit for someone to check and post. If pricing can't be worked out, the job still completes and the office is told to bill it by hand."
+          dirty={isDirty('autoDraft')}
+          saveButton={<SaveButton label="Save invoice drafts" dirty={isDirty('autoDraft')} saving={savingAutoDraft} onClick={saveAutoDraft} />}
+        >
+          <Row label="When a job is completed" htmlFor="auto-draft-enabled">
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                id="auto-draft-enabled"
+                type="checkbox"
+                checked={autoDraftEnabled}
+                onChange={(e) => setAutoDraftEnabled(e.target.checked)}
+                className={CHECK_CLASS}
+              />
+              Create a draft invoice
+            </label>
+          </Row>
+        </SubPart>
+
         <SubPart
           title="Fuel surcharge"
           help="Off by default. Added to field-application invoices only when it is on and you enter your own rate; CropRX never sets one for you."
@@ -1127,27 +1210,6 @@ export default function SettingsPage() {
             ) : (
               <span className="text-secondary">Inert: no surcharge will be applied (off, or no rate entered).</span>
             )}
-          </Row>
-        </SubPart>
-
-        {/* §4: Auto-invoice on job completion (DRAFTS ONLY — never auto-posts). */}
-        <SubPart
-          title="Automatic invoice drafts"
-          help="Drafts only, never posted on their own. A draft waits in Ready to Post on the Office Cockpit for someone to check and post. If pricing can't be worked out, the job still completes and the office is told to bill it by hand."
-          dirty={isDirty('autoDraft')}
-          saveButton={<SaveButton label="Save invoice drafts" dirty={isDirty('autoDraft')} saving={savingAutoDraft} onClick={saveAutoDraft} />}
-        >
-          <Row label="When a job is completed" htmlFor="auto-draft-enabled">
-            <label className="inline-flex items-center gap-2 cursor-pointer">
-              <input
-                id="auto-draft-enabled"
-                type="checkbox"
-                checked={autoDraftEnabled}
-                onChange={(e) => setAutoDraftEnabled(e.target.checked)}
-                className={CHECK_CLASS}
-              />
-              Create a draft invoice
-            </label>
           </Row>
         </SubPart>
 

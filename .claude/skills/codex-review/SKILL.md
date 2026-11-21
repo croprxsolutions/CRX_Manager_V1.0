@@ -1,6 +1,6 @@
 ---
 name: codex-review
-description: Run an independent Codex code review DIRECTLY via the headless `codex` CLI — no copy-paste. Iterating rounds run on `gpt-6-luna` at xhigh (the default since 2026-09-20); `gpt-6-sol` at high is reserved for the once-at-the-end ship gate. Use to cross-validate a branch, working-tree changes, or a commit before pushing, getting findings back into this session automatically. This SUPERSEDES the manual paste-doc workflow in codex-cross-review whenever the Codex CLI is available. Use when the user says "have Codex review this", "codex review before I push", "second opinion on this change", "cross-review", or before any prod push of a Codex-worthy change (migration / RLS-RPC security / money / edge fn).
+description: Run an independent Codex code review DIRECTLY via the headless `codex` CLI — no copy-paste. Iterating rounds run on `gpt-6-luna` at xhigh (the default since 2026-09-20); `gpt-6.2-sol` at high is reserved for the once-at-the-end ship gate. Use to cross-validate a branch, working-tree changes, or a commit before pushing, getting findings back into this session automatically. This SUPERSEDES the manual paste-doc workflow in codex-cross-review whenever the Codex CLI is available. Use when the user says "have Codex review this", "codex review before I push", "second opinion on this change", "cross-review", or before any prod push of a Codex-worthy change (migration / RLS-RPC security / money / edge fn).
 ---
 
 # Codex Review (direct CLI — no paste loop)
@@ -13,7 +13,7 @@ always pinned explicitly and isolated from the builder session.
 ### Which tier reviews (Mason's standing decision, 2026-09-20; re-pinned to GPT-6 on 2026-09-23)
 
 **Luna** (`gpt-6-luna`) at `xhigh` is the DEFAULT reviewer for every iterating round, on every
-kind of work. **Sol** (`gpt-6-sol`) at `high` is NOT the everyday reviewer any more — it is the
+kind of work. **Sol** (`gpt-6.2-sol`) at `high` is NOT the everyday reviewer any more — it is the
 once-at-the-end ship gate, and it runs after Luna comes back clean, not alongside it. **Luna is
 also the builder** (`scripts/codex-build.mjs`): Terra and Spark are not usable on GPT-6 here, so
 the old three-tier split collapsed and Terra was retired (Mason, 2026-09-23). Every Codex role, pin,
@@ -26,8 +26,8 @@ independent, and it is the one that guards money.
 | Round | Tier | Path | Mints a gate proof? |
 |---|---|---|---|
 | Every iterating review round | `gpt-6-luna` / `xhigh` | Step 3A (advisory) | **No** |
-| Final gate — a change on `docs/reference/sol-required-paths.md` (Mason, 2026-10-30), once Luna is clean, before the PR opens | `gpt-6-sol` / `high` | Step 3B (`write-codex-push-proof.mjs`) | Yes |
-| Genuinely complex work where Luna is plainly out of its depth | `gpt-6-sol` / `high` early | Step 3A form with the Sol pin | No |
+| Final gate — a change on `docs/reference/sol-required-paths.md` (Mason, 2026-10-30), once Luna is clean, before the PR opens | `gpt-6.2-sol` / `high` | Step 3B (`write-codex-push-proof.mjs`) | Yes |
+| Genuinely complex work where Luna is plainly out of its depth | `gpt-6.2-sol` / `high` early | Step 3A form with the Sol pin | No |
 
 The escape hatch in row 3 is a judgment call the agent may make on its own, but it must state the
 one-line reason to Mason when it does, in chat and in any run ledger. Do not reach for it by
@@ -53,7 +53,7 @@ reflex — Luna-first is the point.
 > (`migration-apply-lib.mjs` `REQUIRED_CODEX_MODEL`, `codex-push-lib.mjs` `proofValid`). **Never
 > route an iterating Luna round through Step 3B.** Luna reviews advisory-only, via Step 3A.
 >
-> The guards still hard-require `gpt-6-sol` at `high`. That is deliberate and was left
+> The guards still hard-require `gpt-6.2-sol` at `high`. That is deliberate and was left
 > untouched on purpose: it is what enforces "Luna until clean, then exactly one Sol" in code
 > rather than in an agent's memory. Do not "fix" the guards to accept Luna.
 
@@ -288,7 +288,7 @@ decision only) immediately before the merge. It mints a carried proof for the ne
 - the new head is a merge whose parents are the Sol-reviewed head and today's origin/main, and its
   content is exactly the conflict-free `git merge-tree` of those two (a resolved conflict or any hand
   edit refuses);
-- the reviewed head's proof is a clean `gpt-6-sol`/`high` proof (full or itself carried) under 24 hours
+- the reviewed head's proof is a clean `gpt-6.2-sol`/`high` proof (full or itself carried) under 24 hours
   old, and for a carried one the original full review is under 24 hours old too (a chain expires);
 - and EITHER the PR's files and main's new files do not overlap and one side is plain documentation
   (notes-folder `.md` files only, which excludes every rule file, and only regular non-executable files: a symlink, submodule or executable named `*.md` is not documentation) — no model
@@ -396,12 +396,12 @@ review is independent. Change the failure classes in both prompts together.
 
 Notes:
 - Every review pins its model and effort explicitly — `gpt-6-luna`/`xhigh` for an advisory
-  Step 3A round, `gpt-6-sol`/`high` for a Step 3B gate proof. Never inherit the model or
+  Step 3A round, `gpt-6.2-sol`/`high` for a Step 3B gate proof. Never inherit the model or
   effort from user configuration: an unpinned call silently inherits whatever `~/.codex/config.toml`
   happens to say, so the tier that reviewed becomes a property of the workstation rather than of
   this contract — and the proof records the pinned constant, so an inherited model would not even
   be visible in it. Pin it, always, on every path. The Step 3B
-  gate proof is `gpt-6-sol`/`high` only — Luna and Claude cannot substitute for it, and the
+  gate proof is `gpt-6.2-sol`/`high` only — Luna and Claude cannot substitute for it, and the
   guards enforce that. Record the model and effort on every security/money proof.
 - A trailing `rmcp … DELETE returned HTTP 404` line is harmless MCP-session cleanup — ignore it.
 - This fires the synced `.codex/hooks.json` hooks (SessionStart/Stop) — expected, they're trusted.
@@ -472,7 +472,7 @@ files make it start its own review and recurse:
 EOF
 ```
 
-Pin the model every time (`gpt-6-sol`/`high` for money or database reasoning). Give Codex the
+Pin the model every time (`gpt-6.2-sol`/`high` for money or database reasoning). Give Codex the
 question, not your suspected answer, so its view stays independent. Escalate to `workspace-write`
 only if Codex must edit files, and tell Mason first.
 

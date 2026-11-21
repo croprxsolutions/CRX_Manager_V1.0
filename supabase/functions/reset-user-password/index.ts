@@ -3,6 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 import { captureEdgeException, warnIfSentryMisconfigured } from "../_shared/sentry.ts";
 import { requireActiveProfile } from "../_shared/auth.ts";
 import { corsHeaders, preflightResponse } from "../_shared/cors.ts";
+import { adminResetPassword, type PasswordResetClient } from "../_shared/passwordReset.ts";
 
 warnIfSentryMisconfigured("reset-user-password");
 
@@ -50,65 +51,13 @@ Deno.serve(async (req: Request) => {
 
     const { user_id, password } = await req.json();
 
-    if (!user_id || !password) {
-      return new Response(
-        JSON.stringify({ error: "user_id and password are required" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    if (password.length < 8) {
-      return new Response(
-        JSON.stringify({ error: "Password must be at least 8 characters" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    // Codex P2 (PR #59, 2026-05-16): block password resets for
-    // entity_recipient service profiles (CMCTW LLC, Crop Rx Solutions —
-    // migration 20260516090000). These profiles exist only to receive
-    // commission payouts; they must never gain a usable login. Defense
-    // in depth — the Settings UI also filters them out, but block here
-    // in case a future caller misses the frontend filter.
-    const { data: targetProfile } = await adminClient
-      .from("profiles")
-      .select("role")
-      .eq("id", user_id)
-      .maybeSingle();
-    if (targetProfile?.role === "entity_recipient") {
-      return new Response(
-        JSON.stringify({ error: "Cannot reset password for service profiles" }),
-        {
-          status: 403,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    // Use admin API to set the user's password
-    const { error: updateError } =
-      await adminClient.auth.admin.updateUserById(user_id, { password });
-
-    if (updateError) {
-      return new Response(JSON.stringify({ error: updateError.message }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    return new Response(
-      JSON.stringify({ success: true }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+    // KI-122: checks the target, writes the server audit row, then changes the
+    // password (see _shared/passwordReset.ts).
+    const outcome = await adminResetPassword(adminClient as unknown as PasswordResetClient, caller.id, user_id, password);
+    return new Response(JSON.stringify(outcome.body), {
+      status: outcome.status,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   } catch (err) {
     // Audit #28: surface unhandled errors — admin password resets are
     // security-relevant and need oncall visibility.

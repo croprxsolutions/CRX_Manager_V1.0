@@ -22,7 +22,7 @@ hooks themselves. If this page and those disagree, they win; please fix this pag
 - **Can a human merge without Claude Code or Codex? Technically yes, and that is the problem.**
   GitHub enforces only: a pull request is required, three status checks must pass, and nobody can
   force-push or delete `main`. The rule that every non-documentation merge needs a clean final
-  **Sol** review (OpenAI's `gpt-6-sol` model, run through the Codex CLI) is enforced only by local
+  **Sol** review (OpenAI's `gpt-6.2-sol` model, run through the Codex CLI) is enforced only by local
   agent hooks. A human clicking **Merge** on GitHub skips it, and so do the other merge-time rules
   below. The section "Can a human merge?" traces this, and the proposal at the end describes the
   smallest change that would make GitHub enforce it for everyone.
@@ -35,7 +35,7 @@ hooks themselves. If this page and those disagree, they win; please fix this pag
 | Gate | Any check that can refuse an action: a hook, a CI job, or a GitHub branch rule. |
 | Proof | A small JSON file in `.claude/session-state/` (git-ignored, so it exists only on the machine that made it) saying a reviewer ran on an exact commit and came back clean. Agents cannot write these by hand; a hook refuses any command that names one. Only the wrapper scripts mint them. |
 | Luna | `gpt-6-luna`, the Codex model used for repeated review rounds while the change is being fixed. |
-| Sol | `gpt-6-sol` at high effort, the single final review that must run last, on the exact commit that will merge. |
+| Sol | `gpt-6.2-sol` at high effort, the single final review that must run last, on the exact commit that will merge. |
 | CodeRabbit | A GitHub review bot. Advisory since 2026-10-19 and silent unless asked since 2026-10-21; required (as a clean review) only on PRs that touch money, invoices, payments, inventory or costs, or that Mason names. |
 | Codex GitHub App | A second GitHub review bot (`chatgpt-codex-connector`). It reviews when a draft PR is marked ready. |
 | Sol list | The files that need a Sol review: money, inventory, database and logins. A PR off the list merges on green checks. Defined in `docs/reference/sol-required-paths.md` and `.claude/hooks/sol-risk-lib.mjs`. |
@@ -131,7 +131,7 @@ in CI (`Guard, Packet, and Contract Regression Tests`, Linux and Windows).
 
 | Script | What it does | Needs |
 |---|---|---|
-| `scripts/write-codex-push-proof.mjs` | Runs one read-only Sol review of `origin/main...HEAD` from a clean, committed checkout and writes `.claude/session-state/codex-review-<head>.json` only if Codex ends with `CODEX_PROOF_VERDICT: CLEAN`. `--carry-forward` reuses a clean review after a plain merge of a newer `main` (rules in `.claude/skills/codex-review/SKILL.md`, Step 3B). A clean proof lasts 24 hours on an unchanged head and base. | The Codex CLI at its standard install location, signed in to an OpenAI account that can use `gpt-6-sol` |
+| `scripts/write-codex-push-proof.mjs` | Runs one read-only Sol review of `origin/main...HEAD` from a clean, committed checkout and writes `.claude/session-state/codex-review-<head>.json` only if Codex ends with `CODEX_PROOF_VERDICT: CLEAN`. `--carry-forward` reuses a clean review after a plain merge of a newer `main` (rules in `.claude/skills/codex-review/SKILL.md`, Step 3B). A clean proof lasts 24 hours on an unchanged head and base. | The Codex CLI at its standard install location, signed in to an OpenAI account that can use `gpt-6.2-sol` |
 | `scripts/write-apply-proofs.mjs` | Runs the reviewer charters and Sol on one migration file and writes the content-bound apply proofs (valid 30 minutes). | Codex CLI |
 | `scripts/apply-migration-file.mjs` | Applies one migration file to live through the same rule book as the hook. Dry run without `--confirm`. | The proofs above and a Supabase access token (`SUPABASE_ACCESS_TOKEN`, or read from Mason's Windows Credential Manager) |
 | `scripts/owner-approve-migration.mjs` | Builds Mason's approval request for a destructive, overwriting or access-changing migration. | A Claude session where Mason replies |
@@ -227,7 +227,7 @@ Traced from the code on 2026-10-23 (`main` at `f52fbea6b`).
 1. **What produces the Sol proof.** Only `scripts/write-codex-push-proof.mjs`. It runs the real
    Codex CLI from its fixed install path (on Windows `%LOCALAPPDATA%/OpenAI/Codex/bin`, with an
    npm-installed fallback; on Linux or macOS `~/.local/share/OpenAI/Codex/bin`; never from `PATH`), pins the model to
-   `gpt-6-sol`, and writes `.claude/session-state/codex-review-<head>.json` only on a clean verdict.
+   `gpt-6.2-sol`, and writes `.claude/session-state/codex-review-<head>.json` only on a clean verdict.
    That folder is git-ignored. The proof never leaves the machine and is never sent to GitHub.
 2. **What reads it.** Only `.claude/hooks/pr-merge-guard.mjs` (Claude Code) and
    `.codex/hooks/production-action-guard.mjs` (Codex), and they search only that machine's

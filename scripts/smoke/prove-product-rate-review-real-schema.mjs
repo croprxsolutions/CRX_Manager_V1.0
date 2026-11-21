@@ -16,6 +16,8 @@ import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
+import { proveInactiveRateReview } from './prove-inactive-rate-review-real-schema.mjs';
+import { TOUCHED, rateReviewTouch } from './rate-review-later-migrations.mjs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -26,9 +28,23 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270104110000_product_rate_review.sql');
-const FOLLOW_UPS = [];
-// Later files that only READ what this proof covers and redefine none of it.
-const LATER_READ_ONLY = new Set();
+// 20270120100000 (#1880) also replaces delivery-brand and receiving functions from later migrations, so after the
+// rate cases the prover replays the chain up to it, applies it and re-checks the rate writers (#1928).
+const PRIORITY = path.join(MIGRATIONS, '20270120100000_priority_integrity_followups.sql');
+const FOLLOW_UPS = [
+  path.join(MIGRATIONS, '20270110110000_inactive_rate_review_cleanup.sql'),
+  PRIORITY,
+  // KI-137 (ordering only, NOT applied): a one-time product relabel that only reads product_rate_lock (it refuses
+  // while rates are locked); it changes no RT-3 table, function or grant.
+  path.join(MIGRATIONS, '20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql'),
+  // RT-4a (listed for ordering only, NOT applied): it adds triggers on product_rates and the outcomes that refuse
+  // writes for a parent switched to its approved rate; no parent here is switched. Its own proof is
+  // scripts/smoke/prove-rate-cutover-real-schema.mjs, which replays this whole chain first.
+  path.join(MIGRATIONS, '20270125100000_product_rate_cutover.sql'),
+  // RT-4b (ordering only, NOT applied): revokes direct writes to products' rate columns; it names the rate
+  // helpers only in postflight EXECUTE checks. Its own proof is scripts/smoke/prove-rate-writers-real-schema.mjs.
+  path.join(MIGRATIONS, '20270126100000_product_rate_direct_writes_revoked.sql'),
+];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -47,8 +63,7 @@ const LEDGER_ONLY = new Set([
   '20261220100000_applicator_keeps_own_record_fields.sql',
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
-// A later or parked file that (re)defines anything the candidate creates or relies on.
-const TOUCHED = /(product_rate|_product_parent_require_admin|_product_parent_replay|product_parent_rate_outcomes|rate_review)/i;
+// TOUCHED (rate-review-later-migrations.mjs): names the candidate creates or relies on.
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
@@ -164,8 +179,10 @@ function plan() {
     assert.ok(i > last, `${path.basename(file)} must sort after the candidate and earlier follow-ups`);
     last = i;
   }
-  for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f) && !LATER_READ_ONLY.has(path.basename(f)))) {
-    assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
+  // A later file that only calls or md5-pins the covered helpers is fine; anything else refuses (fail closed).
+  for (const file of all.slice(at + 1).filter((f) => !FOLLOW_UPS.includes(f))) {
+    const why = rateReviewTouch(lf(file));
+    assert.ok(!why, `${path.basename(file)} sorts after the candidate and touches what it relies on (${why}); re-think this proof`);
   }
   const before = all.slice(0, at);
   for (const name of PARKED) {
@@ -173,8 +190,10 @@ function plan() {
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);
     assert.ok(!TOUCHED.test(lf(file)), `${name} now touches what this proof covers; replay it or re-think the skip`);
   }
-  return before;
+  // The others' migrations between the candidate and PRIORITY, replayed (after the rate cases) before PRIORITY applies.
+  return { before, chain: all.slice(at + 1, all.indexOf(PRIORITY)).filter((f) => !FOLLOW_UPS.includes(f)) };
 }
+const CHAIN = [];
 function installLiveAuthUid() {
   psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
@@ -198,7 +217,8 @@ function buildContainer() {
     GRANT ALL ON storage.objects, storage.buckets TO postgres;`, { user: 'supabase_admin' });
   psql('CREATE SCHEMA IF NOT EXISTS supabase_migrations; CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text PRIMARY KEY, name text NOT NULL, statements text[]);');
   for (const name of ['20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) psql(`\\i /tmp/${name}`, { user: name.includes('overlay') ? 'supabase_admin' : 'postgres' });
-  const files = plan();
+  const { before: files, chain } = plan();
+  CHAIN.push(...chain);
   let replayed = 0;
   for (const [i, file] of files.entries()) {
     const base = path.basename(file);
@@ -552,15 +572,22 @@ function batchCases() {
     { parent_id: L[7], basis: 'per_acre', source: 'label', low: '0.5', high: '1.5', unit: 'pt', decision: 'approve' }], [outRow(L[7], 'approved_default', null, p8)]));
   assert.equal(rec.rates_changed, 2); assert.equal(rec.outcomes_changed, 1);
   assert.equal(outcomeOf(L[7]), 'approved_default');
-  // A reopen + edit on a decided parent, with its outcome row downloaded before the upload: not stale.
+  // A fresh approved row can reconfirm the exact recorded outcome and note in the same upload.
   const p3 = par(L[2]);
-  js(ADMIN, commit([up(L[2], p3.rates.find((r) => r.rate_id === R.b3), { high: '2.5', decision: 'reopen', reason: 'label 2026' })],
-    [outRow(L[2], 'needs_label_data', 'waiting on the 2026 label', p3)]));
+  const sameOutcome = js(ADMIN, commit([{ parent_id: L[2], basis: 'per_100_gal', source: 'label', recommended: '1', unit: 'pt', decision: 'approve' }],
+    [outRow(L[2], p3.outcome, p3.outcome_note, p3)]));
+  assert.equal(sameOutcome.outcomes_changed, 1);
+  assert.equal(outcomeOf(L[2]), 'approved_default');
+  assert.equal(par(L[2]).outcome_note, p3.outcome_note);
+  // A reopen + edit on a decided parent, with its outcome row downloaded before the upload: not stale.
+  const p3After = par(L[2]);
+  js(ADMIN, commit([up(L[2], p3After.rates.find((r) => r.rate_id === R.b3), { high: '2.5', decision: 'reopen', reason: 'label 2026' })],
+    [outRow(L[2], 'needs_label_data', 'waiting on the 2026 label', p3After)]));
   assert.equal(outcomeOf(L[2]), 'needs_label_data');
   assert.equal(statusOf(R.b3), 'draft');
   // But an outcome row whose parent's outcome moved since the download is stale.
-  refused(ADMIN, commit([], [outRow(L[2], 'needs_label_data', 'other', p3)]), /PRODUCT_RATE_OUTCOME_STALE/);
-  console.log('[case] 10 one upload adds and approves a default, then sets approved_default; a reopen + edit with the outcome in the same upload is not stale');
+  refused(ADMIN, commit([], [outRow(L[2], 'needs_label_data', 'other', p3After)]), /PRODUCT_RATE_OUTCOME_STALE/);
+  console.log('[case] 10 one upload sets the same recorded outcome and note after a rate change, then a reopen + edit with a new outcome is not stale');
 
   // 11a. The upload's parent_id must be the rate's parent; unknown parents; duplicates.
   const wrong = js(ADMIN, preview([upId(L[8], R.a9, { parent_id: L[0], decision: 'reopen', reason: 'x' })])).rates[0];
@@ -638,6 +665,66 @@ function accessCases() {
   console.log('[case] 11 a sales rep and anon are refused by every new function; reps read no outcomes; nobody writes the tables directly; the helpers are private');
 }
 
+// #1928: replay the others' migrations up to PRIORITY, apply it, and re-check the rate writers it replaces.
+function priorityCases() {
+  for (const [i, file] of CHAIN.entries()) {
+    const name = `c-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
+    if (r.status !== 0) throw new Error(`later-chain replay failed at ${path.basename(file)}:\n${r.output}`);
+    ledger(path.basename(file, '.sql'));
+  }
+  stageText('priority.sql', lf(PRIORITY));
+  const applied = apply('priority.sql');
+  assert.equal(applied.status, 0, applied.output);
+  console.log(`[case] P0 replayed ${CHAIN.length} later migrations, then ${path.basename(PRIORITY)} applies`);
+
+  // Boundary invisible characters (em space, zero-width space, no-break space) the old btrim kept.
+  const pad = (s) => `  ${s}​ `;
+  const blank = '​  ';
+  const P = id('e1');
+  raw(`INSERT INTO public.product_parents (id, name, product_form, generic_epa_registration, is_active, created_by, updated_by)
+    VALUES ('${P}', '[PROVER] Priority', 'liquid', '${EPA}', true, '${ADMIN}', '${ADMIN}');`);
+  // Save: 2 pt/acre is above EPA 100-1's 24 oz/acre; a reason of only invisible characters is no reason.
+  refused(ADMIN, `SELECT public.save_draft_product_rate('${P}', NULL, NULL, 'per_acre', 'house_standard', NULL, 2, NULL, 'pt', true, ${q(blank)}, 'rt3-p-1');`,
+    /PRODUCT_RATE_ABOVE_LABEL_REASON_REQUIRED/);
+  const a = save(P, { rec: 2, def: true, reason: pad('heavy ground') });
+  assert.equal(scalar(`SELECT over_label_reason FROM public.product_rates WHERE id = '${a}';`), 'heavy ground', 'save trims the reason');
+  const d = pg(`UPDATE public.product_rates SET over_label_reason = ${q(pad('x'))} WHERE id = '${a}';`);
+  assert.notEqual(d.status, 0, 'a padded reason written directly is refused'); assert.match(d.output, /check constraint/);
+  console.log('[case] P1 save: a reason of only invisible characters is refused; boundary invisibles are trimmed and refused on a direct write');
+
+  // Delete: same trimming.
+  const b = save(P, { source: 'label', rec: 1 });
+  const ver = () => scalar(`SELECT row_version FROM public.product_rates WHERE id = '${b}';`);
+  refused(ADMIN, `SELECT public.delete_draft_product_rate('${b}', ${ver()}, ${q(blank)}, 'rt3-p-2');`, /PRODUCT_RATE_REASON_REQUIRED/);
+  js(ADMIN, `SELECT public.delete_draft_product_rate('${b}', ${ver()}, ${q(pad('wrong product'))}, 'rt3-p-3');`);
+  assert.equal(scalar(`SELECT reason FROM public.product_rate_draft_events WHERE rate_id = '${b}' AND event_type = 'deleted';`), 'wrong product');
+  console.log('[case] P2 delete: a reason of only invisible characters is refused; the logged reason is trimmed');
+
+  // Reopen: same trimming, through the review upload.
+  js(ADMIN, commit([upId(P, a, { decision: 'approve' })]));
+  refused(ADMIN, commit([upId(P, a, { decision: 'reopen', reason: blank })]), /PRODUCT_RATE_REASON_REQUIRED/);
+  assert.equal(statusOf(a), 'approved');
+  js(ADMIN, commit([upId(P, a, { decision: 'reopen', reason: pad('recheck') })]));
+  assert.equal(statusOf(a), 'draft');
+  assert.equal(scalar(`SELECT reason FROM public.product_rate_draft_events WHERE rate_id = '${a}' AND event_type = 'reopened';`), 'recheck');
+  console.log('[case] P3 reopen: a reason of only invisible characters is refused; the logged reason is trimmed');
+
+  // Clear-outcome: a signed-in change records that admin; a direct write records System (NULL), not the row's editor.
+  const clearedBy = () => scalar(`SELECT COALESCE(changed_by::text, '<system>') FROM public.product_rate_draft_events
+    WHERE parent_id = '${P}' AND event_type = 'outcome_cleared' AND ${CLEARED_BY_CHANGE} ORDER BY id DESC LIMIT 1;`);
+  js(ADMIN, commit([], [outRow(P, 'needs_label_data')]));
+  js(ADMIN, commit([upId(P, a, { recommended: '2.5' })]));
+  assert.equal(outcomeOf(P), '<undecided>'); assert.equal(clearedBy(), ADMIN);
+  js(ADMIN, commit([], [outRow(P, 'needs_label_data')]));
+  const w = pg(`UPDATE public.product_rates SET recommended = 3, row_version = row_version + 1 WHERE id = '${a}';`);
+  assert.equal(w.status, 0, w.output);
+  assert.equal(outcomeOf(P), '<undecided>'); assert.equal(clearedBy(), '<system>');
+  // Only that automatic event may have no actor.
+  const e = pg(`INSERT INTO public.product_rate_draft_events (parent_id, event_type, reason) VALUES ('${P}', 'saved', 'x');`);
+  assert.notEqual(e.status, 0); assert.match(e.output, /product_rate_draft_events_actor_required/);
+  console.log('[case] P4 clear-outcome: an admin change records the admin, a direct write records System; any other event needs an actor');
+}
+
 async function main() {
   buildContainer();
   seed();
@@ -657,6 +744,9 @@ async function main() {
   downloadCases();
   accessCases();
   console.log('PRODUCT_RATE_REVIEW_PROOF_PASS');
+  await proveInactiveRateReview(NAME);
+  priorityCases();
+  console.log('PRODUCT_RATE_REVIEW_PRIORITY_FOLLOWUPS_PASS');
 }
 
 try { await main(); }

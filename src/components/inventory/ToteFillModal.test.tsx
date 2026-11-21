@@ -116,13 +116,38 @@ describe('fill a tote from bulk', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('shows a refusal by name and keeps the dialog open', async () => {
-    mockPreview.mockRejectedValue({ message: 'TOTE_FILL_TOTE_UNIT: "UAN 265 Tote" is stocked in Gal; a tote must be stocked as Ea or Unit (correct its stock unit first)' });
+  it('shows a refusal by name in the window, keeps it open, and Try again recovers', async () => {
+    mockPreview.mockRejectedValueOnce({ message: 'TOTE_FILL_TOTE_UNIT: "UAN 265 Tote" is stocked in Gal; a tote must be stocked as Ea or Unit (correct its stock unit first)' })
+      .mockResolvedValueOnce(preview());
     const onClose = vi.fn();
     open(vi.fn(), onClose);
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('is stocked in Gal')));
+    expect(await screen.findByRole('alert')).toHaveTextContent('is stocked in Gal');
     expect(screen.queryByTestId('tote-fill-preview')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Fill Tote' })).toBeDisabled();
     expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await screen.findByTestId('tote-fill-preview');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Fill Tote' })).toBeEnabled();
+  });
+
+  it('when the re-preview after a changed-stock refusal fails, shows the failure and nothing to confirm', async () => {
+    mockPreview.mockResolvedValueOnce(preview({ bulk_before: 300, bulk_after: 35 }))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(preview({ bulk_before: 35, bulk_after: -230, shortfall: 230 }));
+    mockFill.mockRejectedValueOnce({ code: 'P0001', message: 'TOTE_FILL_PREVIEW_CHANGED: stock, units, source or catalog cost changed since the preview; preview again' });
+    const onFilled = vi.fn();
+    open(onFilled);
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Fill Tote' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not be refreshed');
+    expect(screen.queryByTestId('tote-fill-preview')).toBeNull();
+    expect(screen.queryByText('35')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Fill Tote' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText(/Bulk is short 230 Gal/)).toBeInTheDocument();
+    expect(mockFill).toHaveBeenCalledTimes(1);
+    expect(onFilled).not.toHaveBeenCalled();
   });
 });

@@ -163,9 +163,7 @@ assert.match(releasePrompt, /\[LIVE-UNCHANGED\]/, "release rule 1: byte-identica
 assert.match(releasePrompt, /copied unchanged from that function's latest/, "release rule 1: unchanged lines inside a changed function are covered");
 assert.match(releasePrompt, /newly reachable, or with no identical base definition, is not covered/, "release rule 1: defects changed lines create still block");
 assert.match(releasePrompt, /\[SELF-ABORT\]/, "release rule 2: a clean self-abort of a migration's own apply is tagged");
-assert.match(releasePrompt, /\[KNOWN-ISSUE #<issue>\]/, "release rule 3: Mason-named known issues are tagged");
-assert.match(releasePrompt, /#2064 20270120150000 _enforce_below_cost_line/, "release rule 3: each known issue is listed by issue, file and function");
-assert.match(releasePrompt, /same function, is not covered/, "release rule 3: other defects still block");
+assert.doesNotMatch(releasePrompt, /KNOWN-ISSUE|#2064|#2065|#2066/, "release rule 3: #1990's known issues were cleared after it landed, and an empty list adds no exemption (Mason, 2026-11-21)");
 assert.doesNotMatch(buildCodexReviewPrompt({}), /KNOWN-ISSUE/, "known issues apply to release reviews only");
 assert.match(releasePrompt, /RELEASE FOLLOW-UPS/, "release rules: tagged findings are listed for tracked issues");
 assert.equal(prompt.includes("RELEASE RULES"), false, "a non-release review has no release rules");

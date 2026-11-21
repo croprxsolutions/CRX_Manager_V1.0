@@ -81,7 +81,7 @@ const JobFieldMap = lazy(() => import('../components/jobs/JobFieldMap'));
 // The picker contains Mapbox GL, so keep it out of the normal job-editor load.
 const JobFieldPickerModal = lazy(() => import('../components/jobs/JobFieldPickerModal'));
 import { loaderNumberError } from '../components/jobs/jobMassEdit';
-import { editJobs, editJobsErrorMessage, summarizeEditJobs } from '../lib/editJobs';
+import { editJobs, editJobsErrorMessage, summarizeEditJobs, useEditJobsKey, type EditJobsChanges } from '../lib/editJobs';
 import JobAttachments from '../components/jobs/JobAttachments';
 import { LegacyLoaderWorksheet } from '../components/jobs/LegacyLoaderWorksheet';
 import { LoaderWorksheetsPanel } from '../components/jobs/LoaderWorksheetsPanel';
@@ -310,7 +310,9 @@ export default function JobDetail() {
   const completeJobIdem = useIdempotencyKey('complete_job', profile?.id || '');
   const startJobIdem = useIdempotencyKey('start_job', profile?.id || '');
   const transferJobIdem = useIdempotencyKey('transfer_job_to_invoice', profile?.id || '');
-  const editJobsIdem = useIdempotencyKey('edit_jobs', profile?.id || '');
+  const editJobsKey = useEditJobsKey(profile?.id || '');
+  // Crew/loader values as last loaded, so a save sends (and checks) only the ones the user changed.
+  const savedLoaderRef = useRef({ groundCrewId: '', carrier: '', capacity: '' });
   const isNew = id === 'new';
   const isEditable = role === 'admin' || role === 'sales_rep';
   // Cost is admin-only (Mason, 2026-10-15): the server works it out for everyone else's saves.
@@ -2044,6 +2046,11 @@ export default function JobDetail() {
     // #10 loader-worksheet inputs (numbers stored as strings in the form).
     setCarrierRateGpa(j.carrier_rate_gpa != null ? String(j.carrier_rate_gpa) : '');
     setTankCapacity(j.loader_tank_capacity != null ? String(j.loader_tank_capacity) : '');
+    savedLoaderRef.current = {
+      groundCrewId: j.ground_crew_id || '',
+      carrier: j.carrier_rate_gpa != null ? String(j.carrier_rate_gpa) : '',
+      capacity: j.loader_tank_capacity != null ? String(j.loader_tank_capacity) : '',
+    };
     setLoaderVesselId(ASSIGNED_VEHICLE_VESSEL_VALUE);
     // Quote traceability (typed via JobDbRow)
     if (j.quote_id) {
@@ -2643,7 +2650,10 @@ export default function JobDetail() {
     // clear message — otherwise the post-save direct .update() would clear the
     // previously-saved value (or be rejected by the CHECK). Blank stays allowed
     // (it clears intentionally). Mirrors the mass-edit loaderInputsValid guard.
-    const loaderError = loaderNumberError(carrierRateGpa, 'carrier') ?? loaderNumberError(tankCapacity, 'capacity');
+    // Only a changed value is checked: an older stored value the server would now refuse must not block a notes-only save.
+    const loaderBase = isNew ? { carrier: '', capacity: '' } : savedLoaderRef.current;
+    const loaderError = (carrierRateGpa !== loaderBase.carrier ? loaderNumberError(carrierRateGpa, 'carrier') : null)
+      ?? (tankCapacity !== loaderBase.capacity ? loaderNumberError(tankCapacity, 'capacity') : null);
     if (loaderError) {
       toast('error', `${loaderError} Fix it on the Loader Worksheet tab (or clear it).`);
       return;
@@ -2966,18 +2976,25 @@ export default function JobDetail() {
         // existing row rather than inserting again.
         try {
           // #1979: through edit_jobs; a skipped job (e.g. invoiced) counts as not saved.
-          const crewChanges = { ground_crew_id: groundCrewId || null, carrier_rate_gpa: carrierVal, loader_tank_capacity: capacityVal };
-          const crewScope = JSON.stringify([savedJobId, crewChanges]);
-          const crewResult = await editJobs({
-            jobIds: [savedJobId], changes: crewChanges, performedBy: profile!.id,
-            idempotencyKey: editJobsIdem.getKeyFor(crewScope),
-          });
-          editJobsIdem.resetKeyFor(crewScope);
-          if (crewResult.skipped.length > 0) throw new Error(summarizeEditJobs(crewResult));
+          // Only the values the user changed are sent, so an untouched older value is left as it is.
+          const base = isNew ? { groundCrewId: '', carrier: '', capacity: '' } : savedLoaderRef.current;
+          const crewChanges: EditJobsChanges = {};
+          if (groundCrewId !== base.groundCrewId) crewChanges.ground_crew_id = groundCrewId || null;
+          if (carrierRateGpa !== base.carrier) crewChanges.carrier_rate_gpa = carrierVal;
+          if (tankCapacity !== base.capacity) crewChanges.loader_tank_capacity = capacityVal;
+          if (Object.keys(crewChanges).length > 0) {
+            const crewScope = JSON.stringify([savedJobId, crewChanges]);
+            const crewResult = await editJobs({
+              jobIds: [savedJobId], changes: crewChanges, performedBy: profile!.id,
+              idempotencyKey: editJobsKey.keyFor(crewScope),
+            });
+            editJobsKey.done(crewScope);
+            if (crewResult.skipped.length > 0) throw new Error(summarizeEditJobs(crewResult));
+          }
         } catch (crewErr) {
           Sentry.captureException(toSentryError(crewErr), { extra: { context: 'job_crew_loader_after_save' } });
           toast('error', stillOnThisJob()
-            ? 'Job created, but the crew/loader settings did not save — adjust them on this page.'
+            ? `${isNew ? 'Job created' : 'Job saved'}, but the crew/loader settings did not save — adjust them on this page.`
             : 'A job was saved, but its crew/loader settings did not save — open it from the Job Schedule and adjust them.');
           // §5: the job + over-label mix DID commit (only the crew/loader sub-write failed),
           // so still record the override audit linked to the saved job before bailing.
@@ -3295,13 +3312,14 @@ export default function JobDetail() {
       // #1979: through edit_jobs. A job that moved on since loading is skipped, not cancelled.
       const cancelScope = JSON.stringify([id, 'cancel']);
       const result = await editJobs({
-        jobIds: [id!], action: 'cancel', performedBy: profile!.id, idempotencyKey: editJobsIdem.getKeyFor(cancelScope),
+        jobIds: [id!], action: 'cancel', performedBy: profile!.id, idempotencyKey: editJobsKey.keyFor(cancelScope),
       });
-      editJobsIdem.resetKeyFor(cancelScope);
+      editJobsKey.done(cancelScope);
       if (result.cancelled.length === 0) {
         if (stillOnThisJob()) {
-          toast('info', `Job not cancelled: ${summarizeEditJobs(result)}`);
-          await fetchJob();
+          // Reload only when there is no unsaved edit to lose; the toast already says why it was not cancelled.
+          toast('info', `Job not cancelled: ${summarizeEditJobs(result)}${isDirty ? ' Your unsaved changes are kept; refresh to see the job as saved.' : ''}`);
+          if (!isDirty) await fetchJob();
         }
         setCancelling(false);
         return;

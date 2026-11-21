@@ -9,7 +9,8 @@ vi.mock('./db', () => ({
   },
 }));
 
-import { editJobs, summarizeEditJobs, editJobsErrorMessage } from './editJobs';
+import { renderHook } from '@testing-library/react';
+import { editJobs, summarizeEditJobs, editJobsErrorMessage, editJobsLimitMessage, useEditJobsKey } from './editJobs';
 
 const empty = { updated: [], cancelled: [], deleted: [], skipped: [] };
 
@@ -61,5 +62,30 @@ describe('editJobsErrorMessage', () => {
     expect(editJobsErrorMessage({ message: 'INSUFFICIENT_ROLE: edit_jobs requires an active admin' })).toMatch(/^Nothing was saved\. Only an admin/);
     expect(editJobsErrorMessage({ message: 'BAD_VALUE: carrier_rate_gpa cannot be negative' })).toBe('Nothing was saved. Carrier rate cannot be negative.');
     expect(editJobsErrorMessage(new Error('Nothing was saved. Choose at most 500 jobs at a time.'))).toBe('Nothing was saved. Choose at most 500 jobs at a time.');
+  });
+});
+
+describe('useEditJobsKey', () => {
+  it('reuses the key only for a retry of the latest edit (A, B, then A gets a fresh key)', () => {
+    const { result } = renderHook(() => useEditJobsKey('user-1'));
+    const a1 = result.current.keyFor('A');
+    expect(result.current.keyFor('A')).toBe(a1); // exact retry after a lost reply
+    const b = result.current.keyFor('B');
+    expect(b).not.toBe(a1);
+    expect(result.current.keyFor('A')).not.toBe(a1); // back to A: sent again, not replayed
+  });
+
+  it('mints a new key after a confirmed reply', () => {
+    const { result } = renderHook(() => useEditJobsKey('user-1'));
+    const k = result.current.keyFor('A');
+    result.current.done('A');
+    expect(result.current.keyFor('A')).not.toBe(k);
+  });
+});
+
+describe('editJobsLimitMessage', () => {
+  it('flags more than 500 jobs before anything is confirmed', () => {
+    expect(editJobsLimitMessage(500)).toBeNull();
+    expect(editJobsLimitMessage(501)).toBe('Choose at most 500 jobs at a time (501 selected).');
   });
 });

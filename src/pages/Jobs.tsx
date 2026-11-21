@@ -18,8 +18,7 @@ import { JOB_COLUMNS } from '../lib/costFields';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { chunkIds } from '../lib/dispatchDisplay';
 import { logActivity } from '../lib/activityLogger';
-import { editJobs, editJobsErrorMessage, summarizeEditJobs } from '../lib/editJobs';
-import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
+import { editJobs, editJobsErrorMessage, editJobsLimitMessage, summarizeEditJobs, useEditJobsKey } from '../lib/editJobs';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
@@ -239,7 +238,9 @@ export default function Jobs() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { role, profile } = useAuth();
-  const deleteIdem = useIdempotencyKey('edit_jobs', profile?.id ?? '');
+  const deleteKey = useEditJobsKey(profile?.id ?? '');
+  // edit_jobs lets only an admin delete a completed job; a rep is never offered one.
+  const deletableStatuses: JobStatus[] = role === 'admin' ? DELETABLE : ['scheduled', 'in_progress'];
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [loading, setLoading] = useState(true);
   // The newest jobs read failed: show "could not be loaded", never "No jobs found" (To-Do 10.5).
@@ -1453,7 +1454,7 @@ export default function Jobs() {
       // summarized/exported). Delete must stay gated to DELETABLE: re-filter the
       // selection here so an invoiced/finished job is NEVER soft-deleted, even if
       // it's checkbox-selected for a report. Skipped jobs are surfaced in the toast.
-      const deletableRows = selectedRows.filter((j) => DELETABLE.includes(j.status));
+      const deletableRows = selectedRows.filter((j) => deletableStatuses.includes(j.status));
       const ids = deletableRows.map((j) => j.id);
       const skipped = selectedRows.length - ids.length;
       if (ids.length === 0) {
@@ -1468,11 +1469,11 @@ export default function Jobs() {
       const jobIds = [...ids].sort();
       const scope = JSON.stringify([jobIds, 'delete']);
       const result = await editJobs({
-        jobIds, action: 'delete', performedBy: profile.id, idempotencyKey: deleteIdem.getKeyFor(scope),
+        jobIds, action: 'delete', performedBy: profile.id, idempotencyKey: deleteKey.keyFor(scope),
       });
-      deleteIdem.resetKeyFor(scope);
+      deleteKey.done(scope);
       const localSkips = selectedRows
-        .filter((j) => !DELETABLE.includes(j.status))
+        .filter((j) => !deletableStatuses.includes(j.status))
         .map((j) => ({ id: j.id, reason: 'status' as const, status: j.status }));
       const all = { ...result, skipped: [...localSkips, ...result.skipped] };
       toast(all.skipped.length > 0 ? 'info' : 'success', summarizeEditJobs(all));
@@ -1486,9 +1487,28 @@ export default function Jobs() {
     setDeleteModalOpen(false);
   };
 
+  // edit_jobs takes at most 500 jobs per save: say so before the user confirms anything.
+  const openEditJobsAction = (open: () => void) => {
+    const limit = editJobsLimitMessage(editableSelectedRows.length);
+    if (limit) { toast('error', limit); return; }
+    openMutatingAction(open);
+  };
+  const openDeleteConfirm = () => {
+    const count = selectedRows.filter((j) => deletableStatuses.includes(j.status)).length;
+    if (count === 0) {
+      toast('error', role === 'admin'
+        ? "No deletable jobs selected — invoiced or cancelled jobs can't be deleted."
+        : 'No deletable jobs selected — only scheduled or in-progress jobs can be deleted.');
+      return;
+    }
+    const limit = editJobsLimitMessage(count);
+    if (limit) { toast('error', limit); return; }
+    setDeleteModalOpen(true);
+  };
+
   const bulkActions = [
-    { key: 'mass-edit', label: 'Mass Edit', icon: <Pencil className="w-4 h-4" />, onClick: () => openMutatingAction(() => setMassEditOpen(true)) },
-    { key: 'batch', label: 'Add to Batch', icon: <Layers className="w-4 h-4" />, onClick: () => openMutatingAction(() => setAssignBatchOpen(true)) },
+    { key: 'mass-edit', label: 'Mass Edit', icon: <Pencil className="w-4 h-4" />, onClick: () => openEditJobsAction(() => setMassEditOpen(true)) },
+    { key: 'batch', label: 'Add to Batch', icon: <Layers className="w-4 h-4" />, onClick: () => openEditJobsAction(() => setAssignBatchOpen(true)) },
     { key: 'tags', label: 'Edit Job Tags', icon: <Tag className="w-4 h-4" />, onClick: () => openMutatingAction(() => setBulkTagsOpen(true)) },
     { key: 'csv', label: 'Export CSV', icon: <Download className="w-4 h-4" />, onClick: handleExportCSV },
     { key: 'pdf', label: 'Download PDF', icon: <FileText className="w-4 h-4" />, onClick: handleExportPDF, loading: exporting },
@@ -1497,7 +1517,7 @@ export default function Jobs() {
     { key: 'chem-summary', label: 'Chemical Summary Report', icon: <ClipboardList className="w-4 h-4" />, onClick: handleChemicalSummaryReport, loading: summaryExporting },
     { key: 'projected-use', label: 'Projected Use Report', icon: <PackageOpen className="w-4 h-4" />, onClick: handleProjectedUseReport, loading: projectedExporting },
     { key: 'master-mix', label: 'Master Mix Summary', icon: <Beaker className="w-4 h-4" />, onClick: handleMasterMixSummary, loading: masterMixExporting },
-    { key: 'delete', label: 'Delete Jobs', icon: <Trash2 className="w-4 h-4" />, onClick: () => setDeleteModalOpen(true), variant: 'danger' as const },
+    { key: 'delete', label: 'Delete Jobs', icon: <Trash2 className="w-4 h-4" />, onClick: openDeleteConfirm, variant: 'danger' as const },
   ];
 
   const dataColumns: Column<JobRow>[] = [

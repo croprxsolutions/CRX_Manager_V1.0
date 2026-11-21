@@ -3,8 +3,7 @@ import { Check, Calendar, CircleDot, User, Layers, AlertTriangle, Pencil, Truck 
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
-import { editJobs, editJobsErrorMessage, summarizeEditJobs } from '../../lib/editJobs';
-import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
+import { editJobs, editJobsErrorMessage, summarizeEditJobs, useEditJobsKey } from '../../lib/editJobs';
 import { Sentry } from '../../lib/sentry';
 import { logActivity } from '../../lib/activityLogger';
 import { useAuth } from '../../contexts/AuthContext';
@@ -19,6 +18,7 @@ import {
   hasAnyChange,
   describeChanges,
   loaderInputsValid,
+  loaderNumberError,
 } from './jobMassEdit';
 import { toSentryError } from '../../lib/sentryError';
 
@@ -74,7 +74,7 @@ export default function JobMassEditModal({
 }: JobMassEditModalProps) {
   const { toast } = useToast();
   const { profile } = useAuth();
-  const editIdem = useIdempotencyKey('edit_jobs', profile?.id ?? '');
+  const editKey = useEditJobsKey(profile?.id ?? '');
   const [draft, setDraft] = useState<MassEditDraft>(emptyMassEditDraft);
   const [applying, setApplying] = useState(false);
 
@@ -129,9 +129,9 @@ export default function JobMassEditModal({
     setApplying(true);
     try {
       const result = await editJobs({
-        jobIds, changes: fieldChanges, action, performedBy: profile.id, idempotencyKey: editIdem.getKeyFor(scope),
+        jobIds, changes: fieldChanges, action, performedBy: profile.id, idempotencyKey: editKey.keyFor(scope),
       });
-      editIdem.resetKeyFor(scope);
+      editKey.done(scope);
       const summary = summarizeEditJobs(result);
       logActivity({
         event: 'jobs_mass_edited',
@@ -341,7 +341,7 @@ export default function JobMassEditModal({
           {draft.setLoader && !loaderValid && (
             <p className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-600">
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              Carrier rate can&apos;t be negative and tank capacity must be greater than zero.
+              {loaderNumberError(draft.carrierRateGpa, 'carrier') ?? loaderNumberError(draft.loaderTankCapacity, 'capacity')}
             </p>
           )}
           <p className="mt-1.5 text-xs text-secondary">

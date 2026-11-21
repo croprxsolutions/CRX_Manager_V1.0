@@ -744,6 +744,8 @@ describe('JobDetail cross-record stale-load guard', () => {
     const option = await screen.findByRole('option', { name: 'Farm Alpha' });
     const customerSelect = option.closest('select') as HTMLSelectElement;
     await act(async () => { fireEvent.change(customerSelect, { target: { value: 'cust-1' } }); });
+    // A loader value to save: the crew/loader write runs only when one was entered.
+    await act(async () => { fireEvent.change(screen.getByPlaceholderText('e.g. 15'), { target: { value: '15' } }); });
 
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Save Job/ })); });
 

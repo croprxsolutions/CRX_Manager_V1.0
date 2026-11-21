@@ -1,12 +1,38 @@
+import { useRef } from 'react';
 import { supabase, assertRpcResult } from './db';
+import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { sanitizeError } from './errorSanitizer';
 import type { Json } from '../types/supabase';
 import type { JobStatus } from '../types';
 
 // #1979: every screen change to a spray job goes through the edit_jobs server function
-// (20270201170000_job_writes_through_rpcs.sql). This file is the one caller.
+// (20270203110000_job_writes_through_rpcs.sql). This file is the one caller.
 
-const EDIT_JOBS_MAX = 500;
+export const EDIT_JOBS_MAX = 500;
+
+/** Too many jobs for one save, as a message to show BEFORE asking the user to confirm; null when fine. */
+export function editJobsLimitMessage(count: number): string | null {
+  return count > EDIT_JOBS_MAX ? `Choose at most ${EDIT_JOBS_MAX} jobs at a time (${count} selected).` : null;
+}
+
+/**
+ * Retry keys for edit_jobs. Only the latest attempt keeps its key: an exact retry after a lost reply reuses it,
+ * but going back to an earlier edit (A, then B, then A) sends A again instead of replaying A's old result,
+ * which would report success while B's values stay saved.
+ */
+export function useEditJobsKey(userId: string) {
+  const idem = useIdempotencyKey('edit_jobs', userId);
+  const lastScope = useRef<string | null>(null);
+  return {
+    keyFor(scope: string): string {
+      if (lastScope.current !== null && lastScope.current !== scope) idem.resetKeyFor(lastScope.current);
+      lastScope.current = scope;
+      return idem.getKeyFor(scope);
+    },
+    /** Call after a confirmed reply. */
+    done(scope: string): void { idem.resetKeyFor(scope); },
+  };
+}
 
 export type EditJobsAction = 'cancel' | 'delete';
 export type EditJobsChanges = Partial<Record<

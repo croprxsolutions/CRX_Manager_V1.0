@@ -53,7 +53,7 @@ whole-cent `round(commission_cents × share)`:
   share is 1 once anything is billed (live: 3 such commissions, all $0). Clamping at B means billing over the booked
   total never counts more than 100%, and a later period's billing never changes an earlier period's figure.
 - Deleted commissions are skipped; a cancelled commission is skipped only when a live (not deleted) replacement exists.
-- Return credits do not take back commission (Open decision Q1, recommended answer built).
+- A return credit takes back the matching share of commission in its month (already decided: DECISION_LOG 2026-08-09, reaffirmed 2026-11-13; Q1 withdrawn).
 - Commission dates no longer matter; only the invoice dates do.
 R2 (KI-126) COGS per line: `CASE WHEN is_application_fee THEN cost_cents ELSE round(cost_cents*quantity) END` in both reports.
 R3 (KI-129; WITHDRAWN from this change after Sol round 3, kept as the starting point for the follow-up) Payments received in [start,end] = legacy `payments` (not deleted, `payment_date`) UNION ALL active payment
@@ -81,7 +81,7 @@ P4 Freight/discount/tax lines do not change the share; standing discount does no
 P5 Bill split 50/50 two payer invoices same month → $100.
 P6 Voided or draft invoice → no commission; a posted then paid/overdue invoice still counts.
 P7 Application commission with its invoice posted in Mar → full in Mar only; invoice unposted → 0.
-P8 Return credit on a billed order → commission unchanged (Q1).
+P8 Half the order returned (credit memo) → half the commission taken back in the credit's month.
 P9 Fee line 100 ac × $2 cost → COGS $200 in both reports (was $20,000).
 P10 Close receipt counts a since-paid or overdue invoice. (Payments received: moved to a follow-up after Sol round 3.)
 P11 Rep calling either report or the close → refused (unchanged).
@@ -89,7 +89,7 @@ P12 Live read-only before/after: run the new helper's query read-only against li
 
 ## Open business decisions
 
-Q1 A customer returns product and gets a credit: should the P&L take back that share of the rep's commission?
+Q1 (WITHDRAWN: already decided 2026-08-09, returns claw back proportionally; Sol round 4) A customer returns product and gets a credit: should the P&L take back that share of the rep's commission?
 - No (recommended): commission rows are not changed by returns and the rep is still paid, so the P&L keeps the expense. Revenue drops by the credit.
 - Yes: the P&L shows the commission as if reduced, but the Commissions page still owes the full amount; the two disagree.
 
@@ -111,9 +111,7 @@ Month-End has no net-profit line; voided-payment handling follows `is_active`.
 
 ## Live before/after (read-only, inlined helper logic, 2026-11-21)
 
-Exact figures removed (admin-only; this repo is public). 2026 full year: revenue and COGS unchanged; the commission
-figure drops to a small fraction (most of it was March orders billed outside CRX); net moves from a large loss to
-roughly break-even. Fee COGS change: none live (latent).
+Checked read-only 2026-11-21; figures are admin-only and not recorded in this public repo. Fee COGS change: none live (latent).
 
 ## Luna round 1 (gpt-6-luna xhigh, head 5beb7a77e) settlement
 
@@ -171,3 +169,13 @@ prepayment buckets). It is removed from this change; Month-End and the close rec
 (HIGH 1 and HIGH 2 no longer apply). KI-129 payments stays open as a follow-up needing Mason's rule for prepayment
 checks and a close-time re-check. MED: exact live figures removed from tracked docs. Other MEDs (non-finite legacy
 values, paid-count wording) as settled in earlier rounds.
+
+## Sol round 4 (gpt-6.2-sol high, head c59ec573f) settlement
+
+Fixed: (HIGH 1) a return credit takes commission back in proportion (DECISION_LOG 2026-08-09 and 2026-11-13; the build
+had Q1 backwards); (HIGH 3) even approximate live profitability removed from tracked docs. Open for Mason (HIGH 2, the
+third round for one mechanism): Month-End Close records whatever the reports show at the click; nothing re-checks the
+figures the admin reviewed (true of every close figure before this change). Recommendation: accept now, follow-up
+adds a reviewed-figures check to the close. MEDs: non-finite booked total (refuted, 0 live); same-day versus next-day
+negative sale line (legacy shape only; the invoice writer refuses negative prices); paid count reflects current status
+(display count); prover reuse guard and synthetic bill split (proof-scope notes, not product behavior).

@@ -384,23 +384,23 @@ async function main() {
   const a = read();
   console.log('[after]', JSON.stringify({ oct: a.oct.pnl, nov: a.nov.pnl, dec: a.dec.pnl, all: a.all.pnl }));
   // Nov: O2 25% ($25) + O3 60% ($60) + O4 split 2 x $50 + O6 in full ($100) + job $30 = $315.
-  // Dec: O2 75% ($75) + O3 the remaining 40% ($40); O6's return credit takes nothing back = $115.
+  // Dec: O2 75% ($75) + O3 the remaining 40% ($40); O6's half return takes back half its commission (-$50) = $65.
   // O7 one cent: Nov recognizes round(0.5c) = 1c, Dec round(1c) - 1c = 0. O8: Nov share clamps at 0, Dec $10.
   assert.equal(Number(a.oct.pnl.Commissions), 0, 'P1: booked but unbilled commissions count nowhere');
   // O9: Nov $50, Dec $0 (the adjustment lowers billing, never the commission). O10: Nov 51 cents.
   assert.equal(Number(a.nov.pnl.Commissions), 365.52, 'P2-P5, P7: November share billed');
-  assert.equal(Number(a.dec.pnl.Commissions), 165, 'P2, P3, P8: December share billed (O11 on a Misc charge invoice); a return takes nothing back');
-  assert.equal(Number(a.all.pnl.Commissions), 530.52, 'P6: the voided/draft order and the draft job invoice count nothing; full range = sum of months');
+  assert.equal(Number(a.dec.pnl.Commissions), 115, 'P2, P3, P8: December share billed (O11 on a Misc charge invoice); a half return takes back half its commission');
+  assert.equal(Number(a.all.pnl.Commissions), 480.52, 'P6: the voided/draft order and the draft job invoice count nothing; full range = sum of months');
   assert.equal(a.nov.month.commissions.earned_cents, 36552, 'Month-End uses the same commission');
   assert.equal(a.nov.month.commissions.basis, 'billed_share', 'the screen labels it as billed-share commission only now');
   assert.equal(a.oct.month.commissions.paid_count, 0, 'paid count follows the billed share');
   assert.equal(a.nov.month.commissions.paid_count, 1);
   assert.equal(a.dec.month.commissions.paid_count, 0);
-  assert.equal(a.dec.month.commissions.earned_cents, 16500);
+  assert.equal(a.dec.month.commissions.earned_cents, 11500);
   assert.equal(okProbe("SELECT earned_cents FROM public._report_commission_cents_20270203(NULL, DATE '2025-12-31');"), '0', 'no start date is no range');
   assert.equal(okProbe('SELECT public._report_billed_part_cents_20270203(707, 10000, 140000);'), '51', 'an exact half cent rounds up');
   assert.equal(okProbe('SELECT public._report_billed_part_cents_20270203(150000001, 300000000, 300000001);'), '150000000', 'just under a half cent rounds down');
-  console.log('[case] AFTER: commission $0 Oct / $365.52 Nov / $165 Dec / $530.52 all; a Misc charge invoice counts; one cent is counted once; a half cent rounds up and just under rounds down; no start date is $0; a negative line or a downward adjustment never makes a negative commission; the paid count follows the billed share');
+  console.log('[case] AFTER: commission $0 Oct / $365.52 Nov / $115 Dec / $480.52 all; a Misc charge invoice counts; a half return takes back half; one cent is counted once; a half cent rounds up and just under rounds down; no start date is $0; a negative sale line or a downward sale adjustment never makes a negative commission; the paid count follows the billed share');
   assert.equal(Number(a.nov.pnl['Cost of Goods Sold']), 200, 'P9: fee cost $2/acre x 100 acres = $200');
   assert.equal(a.nov.month.invoices.total_cost_cents, 20000, 'P9: Month-End fee cost $200');
   console.log('[case] AFTER: the fee line costs $200 in both reports (was $20,000)');

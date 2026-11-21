@@ -746,8 +746,8 @@ date, invoiced or not. Most 2026 sales were billed in Chem Man, so net profit sh
 DECISION_LOG): count a commission only when its order has a CRX invoice in the period's revenue set. Refined 2026-11-13 (DECISION_LOG,
 "Split by share billed"): a partly billed order counts only the share of its commission matching the share billed in
 that period, so checking that an invoice exists is not enough. Fix in review: an order's commission counts in each
-period by the share of its product sales billed on CRX chemical invoices (cumulative, capped at 100%); a field
-application's commission counts when its field invoice is billed. On live 2026 data the reported net moves from a large loss to roughly break-even.
+period by the share of its product sales billed on CRX sale invoices (cumulative, capped at 100%), and a return
+credit takes the matching share back in its month; a field application's commission counts when its field invoice is billed.
 
 ### KI-126 — P&L and Monthly Summary would multiply application-fee cost by acres twice
 **MED (latent) · FIX IN REVIEW (Claude, `20270203100000_pnl_commission_share_billed.sql`, with KI-125) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #2)**

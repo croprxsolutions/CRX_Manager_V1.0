@@ -9,10 +9,11 @@
 --   then counted committed ("firm") demand as "could add", silently dropping it from the buy plan.
 -- WHAT: CREATE OR REPLACE of public._restore_quote_version_owner_impl only. Its body is the
 --   20261027040000 body, byte for byte, plus PLANNING_PICKS_KEPT: before the section delete it
---   reads the current sections' timing and confidence keyed by sort_order and section_name, and
---   each restored section takes the picks of the current section with the same sort_order AND
---   section_name (none: unset; a tie: the highest id). Position alone is not enough: removing a
---   section renumbers the rest, which would move picks onto another section.
+--   reads the current sections' timing and confidence by section_name, and a restored section
+--   takes the picks of the current section with the same name only when that name occurs exactly
+--   once among the current sections and exactly once among the version's sections (a blank name
+--   never matches); otherwise it is restored unset. Position is ignored: removing a section
+--   renumbers the rest, and a repeated name cannot say which section is which.
 --   Planning picks are deliberately not version content (decided 2026-11-21): a rewind keeps the
 --   current picks. The snapshot function (_create_quote_version_owner_impl) is unchanged.
 -- NOT CHANGED: signature, owner, SECURITY DEFINER, search_path, EXECUTE grants (postgres and
@@ -63,8 +64,8 @@ BEGIN
   END IF;
   IF (SELECT count(*) FROM information_schema.columns
        WHERE table_schema = 'public' AND table_name = 'quote_sections'
-         AND column_name IN ('timing', 'confidence', 'sort_order')) <> 3 THEN
-    RAISE EXCEPTION 'PREFLIGHT_COLUMNS_MISSING: quote_sections.timing, confidence or sort_order is missing (20270127110000 first)';
+         AND column_name IN ('timing', 'confidence', 'section_name')) <> 3 THEN
+    RAISE EXCEPTION 'PREFLIGHT_COLUMNS_MISSING: quote_sections.timing, confidence or section_name is missing (20270127110000 first)';
   END IF;
 END;
 $preflight$;
@@ -212,15 +213,23 @@ BEGIN
   END IF;
 
   -- PLANNING_PICKS_KEPT (20270204140000): timing and confidence are planning picks, not version
-  -- content (a version never records them). Keep each current section's picks for the restored
-  -- section with the same sort_order AND section_name (a removal renumbers sections, so position
-  -- alone could move picks onto another section); no such current section: restored unset.
-  -- Neither is unique: on a tie the section with the highest id wins (deterministic).
-  SELECT COALESCE(jsonb_object_agg(qs.sort_order::text || chr(31) || COALESCE(qs.section_name, chr(30)),
-           jsonb_build_object('timing', qs.timing, 'confidence', qs.confidence) ORDER BY qs.id), '{}'::jsonb)
+  -- content (a version never records them, nor any section id). A restored section keeps the
+  -- picks of the current section with the same section_name, only when that name occurs exactly
+  -- once among the current sections AND exactly once among the version's sections; a blank name
+  -- never matches. Otherwise it is restored unset. Position is ignored: a removal renumbers the
+  -- sections after it, and a repeated name cannot say which section is which.
+  SELECT COALESCE(jsonb_object_agg(qs.section_name,
+           jsonb_build_object('timing', qs.timing, 'confidence', qs.confidence)), '{}'::jsonb)
     INTO v_planning_picks
     FROM quote_sections qs
-   WHERE qs.quote_id = p_quote_id;
+   WHERE qs.quote_id = p_quote_id
+     AND btrim(COALESCE(qs.section_name, '')) <> ''
+     AND (SELECT count(*) FROM quote_sections o
+           WHERE o.quote_id = p_quote_id AND o.section_name = qs.section_name) = 1;
+  v_planning_picks := v_planning_picks - ARRAY(
+    SELECT s->>'section_name' FROM jsonb_array_elements(v_snapshot->'sections') s
+     WHERE s->>'section_name' IS NOT NULL
+     GROUP BY 1 HAVING count(*) > 1);
 
   -- Delete existing sections (cascades to items via ON DELETE CASCADE)
   DELETE FROM quote_sections WHERE quote_id = p_quote_id;
@@ -272,11 +281,9 @@ BEGIN
       (SELECT f.id FROM fields f
         WHERE f.id = NULLIF(v_section->>'field_id', '')::uuid
           AND f.customer_id = (SELECT q.customer_id FROM quotes q WHERE q.id = p_quote_id)),
-      -- PLANNING_PICKS_KEPT (20270204140000): the current picks at this position and name, else unset.
-      v_planning_picks->((v_section->>'sort_order')::integer::text || chr(31)
-        || COALESCE(v_section->>'section_name', chr(30)))->>'timing',
-      v_planning_picks->((v_section->>'sort_order')::integer::text || chr(31)
-        || COALESCE(v_section->>'section_name', chr(30)))->>'confidence'
+      -- PLANNING_PICKS_KEPT (20270204140000): the current picks of the uniquely named section, else unset.
+      v_planning_picks->(v_section->>'section_name')->>'timing',
+      v_planning_picks->(v_section->>'section_name')->>'confidence'
     )
     RETURNING id INTO v_section_id;
 
@@ -430,7 +437,7 @@ BEGIN
   IF position('PLANNING_PICKS_KEPT' IN v_fn.prosrc) = 0
      OR position('v_item->>''quote_item_id''' IN v_fn.prosrc) = 0
      OR position('QUOTE_RESTORE_BLOCKED_BY_DRAW' IN v_fn.prosrc) = 0
-     OR md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM 'aaa8e3297d94899f2bc4d6279a57c644' THEN
+     OR md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM '7ce4ee3b756359cd626da660800ecc92' THEN
     RAISE EXCEPTION 'POSTFLIGHT_RESTORE_BODY: _restore_quote_version_owner_impl is not the reviewed body of this file';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK rewind keeps planning picks';

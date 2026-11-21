@@ -44,7 +44,8 @@ const day = (d: string | null) => (d ? new Date(`${d}T00:00:00`).toLocaleDateStr
 
 // eslint-disable-next-line react-refresh/only-export-components -- exported for its unit test
 export function suggestionText(s: Suggestion, unit: string | null): string {
-  const n = `${qty(s.quantity)}${unit ? ` ${unit}` : ''}`;
+  // A buy suggestion rounds UP to the shown precision, so it never understates the order (Luna LOW).
+  const n = `${qty(Math.ceil(num(s.quantity) * 1000 - 1e-9) / 1000)}${unit ? ` ${unit}` : ''}`;
   const order = s.order_now ? `Order ${n} now` : `Order ${n} by ${day(s.order_by)}`;
   return `${order} (needed ${day(s.need_date)})`;
 }

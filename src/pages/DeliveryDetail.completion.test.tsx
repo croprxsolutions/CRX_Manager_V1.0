@@ -71,6 +71,14 @@ vi.mock('../lib/db', () => ({
   },
 }));
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => auth }));
+// Drivers read farms through get_driver_customers (#2018); serve it from the fake customers rows.
+vi.mock('../lib/driverFarms', () => ({
+  fetchDriverFarms: (ids: string[]) => Promise.resolve(new Map(
+    ((tables.data.customers ?? []) as { id: string; farm_name: string; email?: string | null }[])
+      .filter((c) => ids.includes(c.id))
+      .map((c) => [c.id, { id: c.id, farm_name: c.farm_name, phone: null, email: c.email ?? null, address: null }]),
+  )),
+}));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));

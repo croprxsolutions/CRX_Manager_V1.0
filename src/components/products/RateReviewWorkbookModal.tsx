@@ -254,7 +254,7 @@ function PreviewDetail({ shown, upload, saved }: { shown: Shown; upload: ParsedR
                   <td>{(r.actions ?? []).map((a) => (r.isNew && a === 'save' ? 'add' : ACTION_WORDS[a] ?? a)).join(', ')}</td>
                   <td>{rateValueText(upload.rates[r.index])}</td>
                   <td className={r.label_check?.status === 'above' || r.label_check?.status === 'not_checked' ? 'text-amber-800' : ''}>{labelCheckText(r.label_check)}
-                    {r.parent_changed && !saved && <span className="block text-amber-800">{parentChangedText(r.parent_changed)}</span>}</td>
+                    {r.parent_changed && !saved && <span className="block whitespace-pre-wrap text-amber-800">{parentChangedText(r.parent_changed)}</span>}</td>
                 </tr>
               ))}
               {shown.outcomes.filter((o) => o.status === 'change').map((o) => (
@@ -309,7 +309,7 @@ function ReviewPreview({ upload, preview, saved, pending, busy, commitInFlight, 
       {saved
         ? <><p className="text-green-700">Saved {count(saved.rates_changed, 'rate', 'rates')} and {count(saved.outcomes_changed, 'outcome', 'outcomes')}. Download a fresh workbook to continue.</p>
           {saved.rates.filter((r) => r.parent_changed).map((r) => (
-            <p key={`changed-${r.index}`} className="text-amber-800">Draft Rates {upload.rates[r.index]?.sheetRow ?? '?'} ({r.name ?? upload.rates[r.index]?.parent_name ?? 'unknown parent'}): {parentChangedText(r.parent_changed)}</p>
+            <p key={`changed-${r.index}`} className="whitespace-pre-wrap text-amber-800">Draft Rates {upload.rates[r.index]?.sheetRow ?? '?'} ({r.name ?? upload.rates[r.index]?.parent_name ?? 'unknown parent'}): {parentChangedText(r.parent_changed, true)}</p>
           ))}</>
         : shown && <Button onClick={onConfirm} loading={busy} disabled={busy || shown.blocked || !!pending?.expired || !profileId}>
           Confirm rate review ({count(shown.changes.length, 'change', 'changes')})

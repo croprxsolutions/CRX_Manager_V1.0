@@ -137,7 +137,7 @@ describe('RateReviewWorkbookModal', () => {
     expect(await screen.findByText(/Saved 2 rates and 0 outcomes./)).toBeInTheDocument();
     expect(screen.queryByText(text)).not.toBeInTheDocument();
     expect(screen.getAllByText(/Parent rate changed/)).toHaveLength(1);
-    expect(screen.getByText('Draft Rates 2 (Atrazine 4L): Parent rate changed since this draft was made: was "4 oz", now none. Approving still saves it.'))
+    expect(screen.getByText('Draft Rates 2 (Atrazine 4L): Parent rate changed since this draft was made: was "4 oz", now none. Approved anyway.'))
       .toBeInTheDocument();
   });
 

@@ -105,9 +105,9 @@ export function labelCheckText(check: ProductRateLabelCheck | undefined): string
   }
 }
 
-export function parentChangedText(change: RateReviewParentChanged | undefined): string {
+export function parentChangedText(change: RateReviewParentChanged | undefined, saved = false): string {
   if (!change) return '';
-  return `Parent rate changed since this draft was made: was "${change.was}", now ${change.now === null ? 'none' : `"${change.now}"`}. Approving still saves it.`;
+  return `Parent rate changed since this draft was made: was "${change.was}", now ${change.now === null ? 'none' : `"${change.now}"`}. ${saved ? 'Approved anyway.' : 'Approving still saves it.'}`;
 }
 
 const yesNo = (value: boolean) => (value ? 'yes' : 'no');

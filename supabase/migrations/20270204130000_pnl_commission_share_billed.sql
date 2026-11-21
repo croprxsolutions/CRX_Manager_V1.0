@@ -23,11 +23,11 @@
 --        billed(d) = product-line cents (a product on the line; charge_type IS NULL and not an application fee: no
 --        freight, fee, service, other, discount, tax or legacy untyped charge) on the order's recognized sale
 --        invoices (chemical sale or misc charge) dated on or before d, taking the highest cumulative sale amount so
---        far (a later sale adjustment never takes commission back), plus the order's recognized return credits
---        (credit memos) dated on or before d. Part(d) = cents x billed(d) / B, billed kept between 0 and B, exact
---        half-up cents (_report_billed_part_cents_20270203); an order booked at $0 or less counts in full once billed.
---      - a return credit takes commission back in proportion (Mason 2026-08-09, reaffirmed 2026-11-13): the month of
---        the credit shows a negative commission. Commission rows are not changed (paying it back is KI-13).
+--        far (a later adjustment never takes commission back). Part(d) = cents x billed(d) / B, billed kept between 0
+--        and B, exact half-up cents (_report_billed_part_cents_20270203); an order booked at $0 or less counts in full
+--        once billed.
+--      - a return credit (credit memo) does NOT take commission back in this report yet: Mason 2026-11-21 "ship
+--        without, log as a follow-up" (KI-184). Commission rows are not changed (paying it back is KI-13).
 --      - the report reads today's commission and order rows, as the old one did: closing an order's undelivered
 --        remainder recomputes its commission and its booked total, so earlier periods' figures follow (the old report
 --        restated the order-date month the same way). Close receipts keep the figures they saved.
@@ -117,35 +117,31 @@ CREATE FUNCTION public._report_commission_cents_20270203(p_start date, p_end dat
  SET search_path TO 'public', 'pg_temp'
 AS $function$
   -- Per commission: recognized(d) = its billed part through day d, in whole cents; the period gets
-  -- recognized(end) - recognized(start - 1), so consecutive periods add up exactly to the whole range. A period is
-  -- negative only when a return credit takes commission back.
+  -- recognized(end) - recognized(start - 1), so consecutive periods add up exactly to the whole range, and a period
+  -- is never negative.
   WITH daily AS (
-    -- product-line cents on each order's recognized invoices, per invoice day: sales (chemical sale, or misc charge,
-    -- which a draft may switch to and keep its order lines) and return credits (credit memos) kept apart.
-    SELECT i.order_id, i.invoice_date,
-           COALESCE(sum(ii.extended_cents) FILTER (WHERE i.invoice_type <> 'credit_memo'), 0)::numeric AS sale_cents,
-           COALESCE(sum(ii.extended_cents) FILTER (WHERE i.invoice_type = 'credit_memo'), 0)::numeric AS credit_cents
+    -- product-line cents on each order's recognized sale invoices (chemical sale, or misc charge, which a draft may
+    -- switch to and keep its order lines), per invoice day. Return credits are not counted here (follow-up: KI-184).
+    SELECT i.order_id, i.invoice_date, sum(ii.extended_cents)::numeric AS sale_cents
       FROM public.invoices i
       JOIN public.invoice_items ii ON ii.invoice_id = i.id AND ii.charge_type IS NULL AND ii.is_application_fee IS NOT TRUE
                                   AND ii.product_id IS NOT NULL  -- a legacy untyped charge has no product
      WHERE i.order_id IS NOT NULL
-       AND i.invoice_type IN ('chemical_sale', 'misc_charge', 'credit_memo')
+       AND i.invoice_type IN ('chemical_sale', 'misc_charge')
        AND i.status IN ('posted', 'overdue', 'paid')
        AND i.deleted_at IS NULL
        AND i.invoice_date <= p_end
      GROUP BY i.order_id, i.invoice_date
   ), cumulative AS (
-    SELECT d.order_id, d.invoice_date, d.credit_cents,
+    SELECT d.order_id, d.invoice_date,
            sum(d.sale_cents) OVER (PARTITION BY d.order_id ORDER BY d.invoice_date) AS cum_sale_cents
       FROM daily d
   ), billed AS (
-    -- billed through a day = the highest cumulative sale billing so far (a later sale adjustment never takes
-    -- commission back) plus every return credit so far (a return does: Mason 2026-08-09, reaffirmed 2026-11-13,
-    -- "a return claws back commission proportionally"). The helper keeps it between 0 and the booked total.
+    -- billed through a day = the highest cumulative billed amount so far, so a later downward adjustment never makes
+    -- a period negative and never lets the total pass 100%. The helper keeps it between 0 and the booked total.
     SELECT c.order_id,
-           max(c.cum_sale_cents) FILTER (WHERE c.invoice_date < p_start)
-             + COALESCE(sum(c.credit_cents) FILTER (WHERE c.invoice_date < p_start), 0) AS before_cents,
-           max(c.cum_sale_cents) + sum(c.credit_cents) AS through_cents
+           max(c.cum_sale_cents) FILTER (WHERE c.invoice_date < p_start) AS before_cents,
+           max(c.cum_sale_cents) AS through_cents
       FROM cumulative c
      GROUP BY c.order_id
   ), parts AS (

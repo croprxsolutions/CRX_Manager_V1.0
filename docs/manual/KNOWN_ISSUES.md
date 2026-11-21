@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md); KI-170 added 2026-11-20 from the shared data loading pilot; KI-120 accepted and KI-169 split from KI-119 2026-11-19; KI-171 added 2026-11-21 from #2068; KI-178 and KI-182 added 2026-11-21 from #2047) | 112 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md); KI-170 added 2026-11-20 from the shared data loading pilot; KI-120 accepted and KI-169 split from KI-119 2026-11-19; KI-171 added 2026-11-21 from #2068; KI-178 and KI-182 added 2026-11-21 from #2047; KI-184 added 2026-11-21 from #2149) | 113 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106, KI-120, KI-176, KI-177, KI-179, KI-180, KI-181) | 23 |
 | Closed as FIXED, with proof (bottom of file and archive) | 25 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
@@ -746,8 +746,19 @@ date, invoiced or not. Most 2026 sales were billed in Chem Man, so net profit sh
 DECISION_LOG): count a commission only when its order has a CRX invoice in the period's revenue set. Refined 2026-11-13 (DECISION_LOG,
 "Split by share billed"): a partly billed order counts only the share of its commission matching the share billed in
 that period, so checking that an invoice exists is not enough. Fix in review: an order's commission counts in each
-period by the share of its product sales billed on CRX sale invoices (cumulative, capped at 100%), and a return
-credit takes the matching share back in its month; a field application's commission counts when its field invoice is billed.
+period by the share of its product sales billed on CRX sale invoices (cumulative, capped at 100%); a field application's
+commission counts when its field invoice is billed. A return credit does not take commission back yet (KI-184).
+
+### KI-184 — Profit reports do not take commission back when product is returned
+**MED · OPEN (follow-up to KI-125; Mason 2026-11-21 "ship without, log as a follow-up") · money/reports · found 2026-11-21 (#2149 Sol round 5)**
+After KI-125's fix, Bottom Line P&L and Month-End Close count an order's commission by the share of it billed, but a
+return credit memo does not take any of it back, so a returned sale keeps its commission cost in the reports. Mason's
+rule (2026-08-09, reaffirmed 2026-11-13) is that a return takes commission back in proportion. #2149 tried it and Sol
+found two problems: return credits include sales tax and reflect discounts that the sales share does not, and billing
+above the booked total can absorb a return entirely. Older credit memos can also have no lines. No live credit memo
+existed when this was logged. Fix: measure the returned share on the same basis as the sale (product lines before tax,
+discounted the same way), against what was billed rather than the capped total. It reads credit memos, which are
+invoice records: plan it with Taha (billing until 2026-12-15). Commission rows themselves are KI-13.
 
 ### KI-126 — P&L and Monthly Summary would multiply application-fee cost by acres twice
 **MED (latent) · FIX IN REVIEW (Claude, `20270204130000_pnl_commission_share_billed.sql`, with KI-125) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #2)**

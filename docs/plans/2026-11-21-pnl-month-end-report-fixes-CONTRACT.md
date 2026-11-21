@@ -53,7 +53,7 @@ whole-cent `round(commission_cents × share)`:
   share is 1 once anything is billed (live: 3 such commissions, all $0). Clamping at B means billing over the booked
   total never counts more than 100%, and a later period's billing never changes an earlier period's figure.
 - Deleted commissions are skipped; a cancelled commission is skipped only when a live (not deleted) replacement exists.
-- A return credit takes back the matching share of commission in its month (already decided: DECISION_LOG 2026-08-09, reaffirmed 2026-11-13; Q1 withdrawn).
+- A return credit takes back the matching share of commission in its month (decided 2026-08-09, reaffirmed 2026-11-13) — DEFERRED to KI-184 by Mason 2026-11-21 after Sol round 5; this PR takes nothing back.
 - Commission dates no longer matter; only the invoice dates do.
 R2 (KI-126) COGS per line: `CASE WHEN is_application_fee THEN cost_cents ELSE round(cost_cents*quantity) END` in both reports.
 R3 (KI-129; WITHDRAWN from this change after Sol round 3, kept as the starting point for the follow-up) Payments received in [start,end] = legacy `payments` (not deleted, `payment_date`) UNION ALL active payment
@@ -81,7 +81,7 @@ P4 Freight/discount/tax lines do not change the share; standing discount does no
 P5 Bill split 50/50 two payer invoices same month → $100.
 P6 Voided or draft invoice → no commission; a posted then paid/overdue invoice still counts.
 P7 Application commission with its invoice posted in Mar → full in Mar only; invoice unposted → 0.
-P8 Half the order returned (credit memo) → half the commission taken back in the credit's month.
+P8 Half the order returned (credit memo) → no commission taken back yet (KI-184; Mason 2026-11-21, Sol round 5).
 P9 Fee line 100 ac × $2 cost → COGS $200 in both reports (was $20,000).
 P10 Close receipt counts a since-paid or overdue invoice. (Payments received: moved to a follow-up after Sol round 3.)
 P11 Rep calling either report or the close → refused (unchanged).
@@ -179,3 +179,15 @@ figures the admin reviewed (true of every close figure before this change). Reco
 adds a reviewed-figures check to the close. MEDs: non-finite booked total (refuted, 0 live); same-day versus next-day
 negative sale line (legacy shape only; the invoice writer refuses negative prices); paid count reflects current status
 (display count); prover reuse guard and synthetic bill split (proof-scope notes, not product behavior).
+
+## Sol round 5 (gpt-6.2-sol high, head 99d6d5535) settlement
+
+Two new HIGHs, both in the return clawback: return credits include sales tax and reflect discounts that the sales share
+does not; billing above the booked total absorbs a later return before the cap. The fourth round in a row with a new HIGH
+in this calculation, so the stop rule applied and Mason chose (2026-11-21, "Yes ship without, log as a follow up task"):
+no return clawback in this PR; KI-184 carries it (DECISION_LOG). P8 now expects nothing taken back. MEDs: header-only
+older credit memos and the net-zero Month-End checklist no longer apply (no clawback, so a period is never negative and
+a net $0 means no commission); non-finite booked total refuted as before (deliberately counts in full, 0 live rows);
+the prover's reuse path removed (it now always builds its own throwaway container). LOWs: a paid November invoice added
+to the receipt case; the rounding helper's refusal probed; the round-4 decision wording says what the receipt holds; the
+migration reference again says a period is never negative, which is now true.

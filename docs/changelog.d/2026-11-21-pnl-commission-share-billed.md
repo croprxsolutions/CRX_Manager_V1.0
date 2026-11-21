@@ -6,7 +6,7 @@
 - KI-126: an application-fee line's cost is no longer multiplied by acres a second time (no live effect today; every fee costs $0).
 - KI-129 (part): the close receipt counts invoices since paid or overdue, not only those still "posted". Payments received is NOT changed (follow-up: see KNOWN_ISSUES KI-129).
 - KI-130: Month-End Close labels the AR figure "Current AR (today)" and the commission figure "Commissions on Sales Billed".
-- Not changed: invoice and billing code, revenue, AR, past close receipts (already-closed periods keep their stored figures). A return credit takes commission back in proportion, in the month of the credit (Mason 2026-08-09, reaffirmed 2026-11-13).
+- Not changed: invoice and billing code, revenue, AR, past close receipts (already-closed periods keep their stored figures). A return credit does not take commission back yet (KI-184, Mason 2026-11-21).
 - Proof: container prover `scripts/smoke/prove-pnl-commission-share-billed-real-schema.mjs` (PNL_COMMISSION_SHARE_BILLED_PROOF_PASS). Not verified: on staging or in the browser.
 - Sweep allowlist: `get_bottom_line_pnl` and `get_monthly_summary` cost-exposure keys replaced with their post-apply keys (both already flagged on live since the 2027-01-09 sales-tax body; still admin-gated, same returned fields). Computed from per-function hashes: live read-only for unchanged helpers (equal to the replayed container's), container after apply for the changed and new ones. Both stay flagged until the apply.
 - Luna round 1: the prover's missing refusal helper added; legacy payment dollars rounded to cents; Month-End's "N paid" count now follows the same billed share (fixed in the Sol round).
@@ -14,3 +14,4 @@
 - Sol round 2: order lines on a Misc charge invoice now earn their commission share; exact half-up rounding; no start date gives $0 commission.
 - Sol round 3: only lines with a product count as billed product (a legacy untyped charge does not). The payments-received change was taken out of this PR: it raised a new HIGH in three Sol rounds (editable prepayment buckets, re-checking figures at close), so it becomes its own follow-up with a business rule from Mason.
 - Sol round 4: return credits now take commission back in proportion, as Mason decided (the earlier build had it backwards); profitability wording removed from tracked docs.
+- Sol round 5: the return clawback drew two new HIGHs (tax and discounts on credits; billing above the booked total), the fourth round in a row in this calculation, so Mason chose to ship without it (KI-184, DECISION_LOG 2026-11-21). The prover's reuse check and receipt cases tightened.

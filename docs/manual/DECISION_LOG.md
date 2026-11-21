@@ -1,8 +1,19 @@
 # Decision Log
 
+## 2026-11-21 — #2149 (KI-125): returns do not take commission back in the profit reports yet
+
+**Decision (Mason, in session, 2026-11-21: "Yes ship without, log as a follow up task").** Sol round 5 on #2149 found two
+new HIGHs in the return clawback (tax and discounts on return credits; billing above the booked total absorbing a
+return), the fourth round in a row with a new HIGH in the same calculation. #2149 ships with commission matched to the
+share billed and no return clawback; the clawback is KI-184.
+**Why:** no live credit memo exists, so no figure changes today; doing it right means reading credit memos (invoice
+records, Taha's area until 2026-12-15).
+**What this forbids/implies:** the 2026-08-09 / 2026-11-13 rule that a return takes commission back still stands; KI-184
+carries it.
+
 ## 2026-11-21 — #2149 (KI-125): month close keeps saving the figures current at the click; payments received split out
 
-**Decision (Mason, in session, 2026-11-21: "Accept, follow-up later").** After Sol round 4 on #2149, Mason accepted that Month-End Close saves the figures the reports show when Close is clicked and does not re-check the figures the admin reviewed (true of every close figure before #2149). A follow-up adds a "figures changed since you reviewed" check to the whole close. Sol reviews of #2149 may continue past round 4 for the remaining fixes.
+**Decision (Mason, in session, 2026-11-21: "Accept, follow-up later").** After Sol round 4 on #2149, Mason accepted that Month-End Close saves its receipt figures (invoice, order, delivery and payment counts and totals; the receipt holds no commission figure) as they stand when Close is clicked, and does not re-check what the admin reviewed on screen (true of every close figure before #2149). A follow-up adds a "figures changed since you reviewed" check to the whole close. Sol reviews of #2149 may continue past round 4 for the remaining fixes.
 **Why:** the gap predates #2149 and closing it changes the close call itself; it is not part of the commission fix.
 **What this forbids/implies:** #2149 does not change the close call. KI-129's payments-received part stays open (it needs a rule for prepayment checks, which can be edited or deleted later); its follow-up must include the close re-check.
 

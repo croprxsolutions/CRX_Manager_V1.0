@@ -20,10 +20,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-// Iterating: CRX_PROVER_REUSE=<kept container> CRX_PROVER_DB=<a copy of its replayed database> skips the replay.
-const REUSE = process.env.CRX_PROVER_REUSE;
-const NAME = REUSE || `crx-pnl-${process.pid}-${Date.now().toString(36)}`;
-const DB = process.env.CRX_PROVER_DB || 'postgres';
+const NAME = `crx-pnl-${process.pid}-${Date.now().toString(36)}`;
+const DB = 'postgres';
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -269,13 +267,13 @@ const INVOICES = [
   // O3: billed $1,200 over two months (price raised at invoicing).
   [id(301), 3, 'chemical_sale', 'overdue', '2025-11-12', [P(60000)]],
   [id(302), 3, 'chemical_sale', 'posted', '2025-12-12', [P(60000)]],
-  // O4: a 50/50 bill split, two payer invoices.
+  // O4: a 50/50 bill split, two payer invoices (one already paid).
   [id(401), 4, 'chemical_sale', 'posted', '2025-11-20', [P(50000)]],
-  [id(402), 4, 'chemical_sale', 'posted', '2025-11-20', [P(50000)]],
+  [id(402), 4, 'chemical_sale', 'paid', '2025-11-20', [P(50000)]],
   // O5: only a voided invoice and a draft.
   [id(501), 5, 'chemical_sale', 'voided', '2025-11-08', [P(100000)]],
   [id(502), 5, 'chemical_sale', 'draft', '2025-09-08', [P(100000)]],
-  // O6: billed in full in November, half returned in December (credit memo on the order).
+  // O6: billed in full in November, half returned in December (credit memo on the order): no commission taken back yet (KI-184).
   [id(601), 6, 'chemical_sale', 'posted', '2025-11-05', [P(100000)]],
   [id(602), 6, 'credit_memo', 'posted', '2025-12-05', [P(-50000)]],
   // O7: a one-cent commission billed half in November, half in December (rounding must not make two cents).
@@ -348,11 +346,7 @@ const read = () => Object.fromEntries(Object.entries(RANGES).map(([k, [a, b]]) =
   pnl: JSON.parse(okProbe(pnl(a, b), ADMIN)), month: JSON.parse(okProbe(month(a, b), ADMIN)) }]));
 
 async function main() {
-  if (REUSE) {
-    assert.match(REUSE, /^crx-[a-z0-9-]+$/, 'CRX_PROVER_REUSE must name a kept prover container (crx-...)');
-    assert.equal(docker(['inspect', '-f', '{{.HostConfig.NetworkMode}}', REUSE]).stdout.trim(), 'none', 'CRX_PROVER_REUSE must be a network-less prover container');
-    assert.ok(/^pnl_[a-z0-9_]+$/.test(DB), 'CRX_PROVER_REUSE needs CRX_PROVER_DB naming a throwaway copy whose name starts with pnl_');
-  } else buildContainer();
+  buildContainer();
   seed();
 
   // 1. BEFORE
@@ -366,10 +360,10 @@ async function main() {
   assert.equal(Number(b.nov.pnl['Cost of Goods Sold']), 20000, 'BEFORE: the fee cost is multiplied by acres again');
   assert.deepEqual(b.nov.month.payments, { count: 0, total_cents: 0 });
   assert.equal(closeBefore.payments_received_cents, 0);
-  assert.equal(closeBefore.invoices_posted, 9, 'BEFORE: the overdue November invoice is missed');
+  assert.equal(closeBefore.invoices_posted, 8, 'BEFORE: the overdue and paid November invoices are missed');
   assert.equal(b.oct.month.commissions.paid_count, 1, 'BEFORE: a paid commission counts in its order-date month');
   assert.equal(b.oct.month.commissions.basis, undefined);
-  console.log('[case] BEFORE: $757.08 of commission in October with no revenue; fee COGS $20,000; payments $0; the close receipt misses the overdue invoice');
+  console.log('[case] BEFORE: $757.08 of commission in October with no revenue; fee COGS $20,000; payments $0; the close receipt misses the overdue and paid invoices');
 
   // 2. Apply, then a second apply is refused.
   stageText('candidate.sql', lf(CANDIDATE));
@@ -384,23 +378,23 @@ async function main() {
   const a = read();
   console.log('[after]', JSON.stringify({ oct: a.oct.pnl, nov: a.nov.pnl, dec: a.dec.pnl, all: a.all.pnl }));
   // Nov: O2 25% ($25) + O3 60% ($60) + O4 split 2 x $50 + O6 in full ($100) + job $30 = $315.
-  // Dec: O2 75% ($75) + O3 the remaining 40% ($40); O6's half return takes back half its commission (-$50) = $65.
+  // Dec: O2 75% ($75) + O3 the remaining 40% ($40); O6's half return takes nothing back yet (KI-184) = $115.
   // O7 one cent: Nov recognizes round(0.5c) = 1c, Dec round(1c) - 1c = 0. O8: Nov share clamps at 0, Dec $10.
   assert.equal(Number(a.oct.pnl.Commissions), 0, 'P1: booked but unbilled commissions count nowhere');
   // O9: Nov $50, Dec $0 (the adjustment lowers billing, never the commission). O10: Nov 51 cents.
   assert.equal(Number(a.nov.pnl.Commissions), 365.52, 'P2-P5, P7: November share billed');
-  assert.equal(Number(a.dec.pnl.Commissions), 115, 'P2, P3, P8: December share billed (O11 on a Misc charge invoice); a half return takes back half its commission');
-  assert.equal(Number(a.all.pnl.Commissions), 480.52, 'P6: the voided/draft order and the draft job invoice count nothing; full range = sum of months');
+  assert.equal(Number(a.dec.pnl.Commissions), 165, 'P2, P3, P8: December share billed (O11 on a Misc charge invoice); a return takes nothing back yet (KI-184)');
+  assert.equal(Number(a.all.pnl.Commissions), 530.52, 'P6: the voided/draft order and the draft job invoice count nothing; full range = sum of months');
   assert.equal(a.nov.month.commissions.earned_cents, 36552, 'Month-End uses the same commission');
   assert.equal(a.nov.month.commissions.basis, 'billed_share', 'the screen labels it as billed-share commission only now');
   assert.equal(a.oct.month.commissions.paid_count, 0, 'paid count follows the billed share');
   assert.equal(a.nov.month.commissions.paid_count, 1);
   assert.equal(a.dec.month.commissions.paid_count, 0);
-  assert.equal(a.dec.month.commissions.earned_cents, 11500);
+  assert.equal(a.dec.month.commissions.earned_cents, 16500);
   assert.equal(okProbe("SELECT earned_cents FROM public._report_commission_cents_20270203(NULL, DATE '2025-12-31');"), '0', 'no start date is no range');
   assert.equal(okProbe('SELECT public._report_billed_part_cents_20270203(707, 10000, 140000);'), '51', 'an exact half cent rounds up');
   assert.equal(okProbe('SELECT public._report_billed_part_cents_20270203(150000001, 300000000, 300000001);'), '150000000', 'just under a half cent rounds down');
-  console.log('[case] AFTER: commission $0 Oct / $365.52 Nov / $115 Dec / $480.52 all; a Misc charge invoice counts; a half return takes back half; one cent is counted once; a half cent rounds up and just under rounds down; no start date is $0; a negative sale line or a downward sale adjustment never makes a negative commission; the paid count follows the billed share');
+  console.log('[case] AFTER: commission $0 Oct / $365.52 Nov / $165 Dec / $530.52 all; a Misc charge invoice counts; a return takes nothing back yet; one cent is counted once; a half cent rounds up and just under rounds down; no start date is $0; a negative sale line or a downward sale adjustment never makes a negative commission; the paid count follows the billed share');
   assert.equal(Number(a.nov.pnl['Cost of Goods Sold']), 200, 'P9: fee cost $2/acre x 100 acres = $200');
   assert.equal(a.nov.month.invoices.total_cost_cents, 20000, 'P9: Month-End fee cost $200');
   console.log('[case] AFTER: the fee line costs $200 in both reports (was $20,000)');
@@ -422,7 +416,7 @@ async function main() {
   refusedProbe(pnl(...RANGES.nov), /requires admin/, REP);
   refusedProbe(month(...RANGES.nov), /requires admin/, REP);
   refusedProbe(close('2025-11-30', 'pnl-proof-close-3', REP), /Only admin users/, REP);
-  for (const fn of ["_report_commission_cents_20270203(DATE '2025-11-01', DATE '2025-11-30')"]) {
+  for (const fn of ["_report_commission_cents_20270203(DATE '2025-11-01', DATE '2025-11-30')", '_report_billed_part_cents_20270203(1, 1, 1)']) {
     refusedProbe(`SELECT public.${fn};`, /permission denied for function/, REP);
     const anon = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `BEGIN;\nSET LOCAL ROLE anon;\nSELECT public.${fn};\nROLLBACK;\n` });
     assert.match(`${anon.stdout}\n${anon.stderr}`, /permission denied for function/);
@@ -432,4 +426,4 @@ async function main() {
 }
 
 try { await main(); }
-finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }
+finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

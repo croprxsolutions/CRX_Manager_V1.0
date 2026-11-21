@@ -19,7 +19,7 @@
 --   C7  schedule_date on {scheduled, invoiced}: invoiced skipped for a rep and an admin (Mason, 2026-11-21); admin applicator change on it skipped
 --   C8  changes + cancel on {scheduled, completed}: both dated, only scheduled cancelled
 --   C9  rep changes + cancel on {scheduled, invoiced}: scheduled changed and cancelled, invoiced skipped untouched
---   C11 completed job billed through its blend ticket: skipped as invoiced, even for an admin delete
+--   C11 completed job billed through its (soft-deleted) blend ticket: skipped as invoiced, even for an admin delete
 --   C10 500 scheduled jobs holding stock, changes + cancel in one call: all updated, cancelled, holds released, under 4 s
 -- Ends in RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'. Any other error = FAIL.
 -- ============================================================================
@@ -433,9 +433,9 @@ BEGIN
 
   -- ── C11 a completed job billed through its blend ticket is skipped, even for an admin ──
   INSERT INTO public.blend_tickets (ticket_number, uploaded_by, customer_id, status, review_status,
-      payment_status, order_link_status, season, total_acres, source, job_id)
+      payment_status, order_link_status, season, total_acres, source, job_id, deleted_at)
     VALUES ('[SMOKE] EJ-BT-' || v_sfx, v_admin, v_cust, 'completed', 'approved', 'unbilled', 'unlinked',
-            public.current_season(), 10, 'manual', v_jC2) RETURNING id INTO v_bt;
+            public.current_season(), 10, 'manual', v_jC2, now()) RETURNING id INTO v_bt;
   INSERT INTO public.invoices (invoice_number, customer_id, invoice_type, status, total_amount_cents, created_by, blend_ticket_id)
     VALUES ('[SMOKE] EJ-INV-' || v_sfx, v_cust, 'chemical_sale', 'draft', 100, v_admin, v_bt) RETURNING id INTO v_inv;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);

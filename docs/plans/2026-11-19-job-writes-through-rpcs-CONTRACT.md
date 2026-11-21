@@ -163,3 +163,11 @@ Files: `supabase/migrations/20270203110000_job_writes_through_rpcs.sql` (PR A), 
 - **HIGH kept as today (Mason, 2026-11-21: admins and reps sometimes apply):** reassigning a job from an applicator to an admin or rep leaves the old applicator's dispatch open, because the dispatch-sync trigger only acts for the applicator role. KI-180; Mason owner-accepts.
 - **HIGH accepted, as before:** completed-job applicator access (round 7), completed-job date (KI-177), partial-cancel cost (KI-176).
 - **MED/LOW deferred (parity or named before):** locks on rows that will be skipped; same-booking cancel clash (KI-179); cancelled jobs reach the planning update (as today); `season` across October 1; retired crew; key claimed by an all-skipped call; C9 does not force a cancel-stage failure; the replay marks the job-access migrations ledger-only; dispatch rows on soft delete (KI-178); no key length limit; opposite-order race overlap.
+
+## Sol round 9 settlement (3 HIGH) and the Codex app review
+
+- **P2 fixed (Codex app):** the job locks are taken in their own statement, so the billed check reads a fresh snapshot after any lock wait.
+- **HIGH fixed (Mason, 2026-11-21: "Fix it"):** a live invoice on a deleted blend ticket still counts as billed (C11 uses a deleted ticket).
+- **HIGH accepted (Mason, 2026-11-21):** an invoice saved through the generic invoice save in the same second as the edit (KI-181, Taha); a guessable PO-screen retry code taken first by another action (KI-182, shared-table behaviour).
+- **Mechanism stop:** the billed-job check drew HIGHs in rounds 6, 8 and 9; per the Operating Contract it is not patched further in this PR.
+- **MED/LOW deferred:** a job inserted during the lock wait; RLS-hidden invoice reported as invoiced; profile-lock vs role-change deadlock; skipped-row locks vs blend invoice; billed-check plan cost on very large invoice history; key length; numeric fingerprint; retired crew; opposite-order race overlap; C9 cancel-stage failure. Spec text fixed.

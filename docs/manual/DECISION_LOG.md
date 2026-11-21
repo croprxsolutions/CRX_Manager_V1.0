@@ -1,5 +1,12 @@
 # Decision Log
 
+## 2026-11-21 — #2047 (edit_jobs): Sol round 9 decisions
+
+**Decision (Mason, in chat, 2026-11-21, answering Sol round 9).** (1) The shared retry-code table lets a known PO-screen
+code be used first by another action: "Accept, log PO fix" (KI-182). (2) A live invoice on a deleted blend ticket now
+counts as billed: "Fix it". (3) An invoice saved in the same second as a bulk job edit: "Accept, log for Taha" (KI-181).
+The billed-job check had drawn HIGHs in three rounds, so it stops here; Mason owner-accepts findings (1) and (3).
+
 ## 2026-11-21 — #2047 (edit_jobs): admins and reps stay assignable as applicators
 
 **Decision (Mason, in chat, 2026-11-21, answering Sol round 8: "Admin and sales rep sometimes are applicators").** The

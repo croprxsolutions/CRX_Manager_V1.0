@@ -144,7 +144,8 @@ BEGIN
   -- billed. Billed jobs are never changed here, even by an admin (Mason, 2026-11-21): Mass Edit
   -- already hides them, and a stale screen must not move billed work or its applicator access. Billed
   -- means status invoiced, an invoice_id, or any live invoice on the job or on one of its blend tickets
-  -- (a ticket can be invoiced while the job is still 'completed'); such a job is reported as 'invoiced'.
+  -- (a ticket can be invoiced while the job is still 'completed'; a deleted ticket's live invoice still
+  -- counts); such a job is reported as 'invoiced'.
   -- FOR NO KEY UPDATE is the lock the UPDATEs below take anyway, so this adds no new lock conflict.
   -- The lock is its own statement so the billed check below takes a fresh snapshot after any wait: a
   -- blend-ticket invoice that held a job's lock and committed meanwhile is then seen (it does not
@@ -157,7 +158,7 @@ BEGIN
                   SELECT 1 FROM public.invoices i
                    WHERE i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled')
                      AND (i.job_id = l0.id OR i.blend_ticket_id IN (
-                           SELECT bt.id FROM public.blend_tickets bt WHERE bt.job_id = l0.id AND bt.deleted_at IS NULL)))
+                           SELECT bt.id FROM public.blend_tickets bt WHERE bt.job_id = l0.id)))
                 THEN 'invoiced' ELSE status END AS status
       FROM locked0 l0)
   SELECT coalesce(array_agg(x ORDER BY x) FILTER (WHERE l.id IS NOT NULL AND l.deleted_at IS NULL AND l.status <> 'invoiced'), '{}'),

@@ -1,5 +1,40 @@
 # Decision Log
 
+## 2026-11-20 — Mason's release pass: go live without codes or waiting for Taha
+
+**Decision (Mason, in chat, 2026-11-20: "i want to prior authorize a session to take multiple pr live overnight while
+i sleep ... i give prior authorization and the agent do what is best"; "deletions should never be automatic"; "if agent
+changes things that is for good shouldnt hold us up").** Mason starts a message with `ship the release` or
+`go live #<n>`; that Claude session may then take that release or hotfix live for 24 hours, including its
+non-destructive migrations, the merge into `main` and the back-merge, with no wait for Taha's merge or his
+`Ready to merge:` comment. `stop the release` withdraws it. The pass binds to the PR, not its head. A migration that
+deletes data still needs Mason's own reply, now a plain `yes`, good for 24 hours and surviving head moves (the SQL may
+not change). The agent stops only for genuine business decisions (AGENTS.md). Taha's 4-hour hold and `hold` comments,
+every check, Sol and the apply proofs are unchanged; Codex still hands live work to Claude. A destructive migration may
+now merge into `staging` (test data); live still needs his `yes`. **Accepted residual:** like every chat-reply record
+here, an agent could forge the pass file; Sol's plan review (48 findings) also asked for a server-side approval store,
+a rehearsed restore and a production window shared with Taha, which Mason chose not to build now. Sol's whole-branch
+review of the build (20 findings: loose command wording, widening renews the 24 hours, no forced `Ready to merge`
+freeze under a pass, a partial apply not ending other passes, a `yes` surviving edits to another migration in the PR)
+was put to him with a tightening plan; he declined it ("this is too strict i want less rules and guards"). Those are
+accepted residuals; do not re-raise them as blockers on this PR.
+## 2026-11-20 — Booking levels: Firm / Maybe / "Just quoting"; Likely removed; inventory plan v5
+
+**Decision (Mason, in chat, 2026-11-20).** A booking section is Firm, Maybe or blank ("Just quoting"). Likely is removed. Among booking levels only Firm buys and sets stock aside. Maybe is shown as a total and never buys or holds. Blank counts nowhere, even after the booking is sent. Also decided:
+- Purchasing shows the exact shortfall, with no pack rounding (the PO is rounded by hand).
+- The Forecast tab stays.
+- Order-by dates have no weekend or holiday adjustment.
+- A late PO turns red after 14 days.
+- A heads-up from Sep 15 warns of the Oct 1 hold release.
+- T1 is skipped.
+
+**Why:** keep the levels simple and buy only on a grower's yes.
+**What this implies:** `docs/plans/2026-11-20-booking-confidence-rules.md` and `docs/plans/2026-11-20-inventory-purchasing-and-bookings-PLAN.md` are the build plan. A one-time switch-on (Planned bookings → Firm) must land before Plan A PR 3. It sits in Taha's area through Dec 15, so the switch-on and any booking or hold writer change is Taha's.
+
+## 2026-11-18 — CMP-2 (Brand vs Generic rebuild) waits for real ingredient data
+
+**Decision (Mason, in chat, 2026-11-18: "Fill chemistry first").** Live check that day: 0 `active_ingredients`, 0 parents with ingredient rows, 0 mode-of-action rows, 0 `ingredient_map` rows. The comparison is built entirely from ingredient strengths, so a page built now would show every row as incomplete. He was offered "build now on test data" and "a price-per-acre slice only", and chose to fill the chemistry first.
+**What this forbids/implies:** no CMP-2 code starts until the "Start when" list in `docs/plans/2026-11-18-product-CMP2-BUILD-SHEET.md` is met: chemistry filled (DM-4 EPA lookup, DM-1b workbook or reviewed manual entry), MOA-1 landed with its group load, and RT-4 live. The next Product Master step is filling the chemistry, not CMP-2.
 ## 2026-11-20 — #2050: Mason owner-accepted 1 Sol finding(s) at `e4960bf1340d`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #2050 at `e4960bf1340d` (base `e4e6e11fae1c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
@@ -33,6 +68,36 @@
 **Decision (Mason, in chat via the coordinating session, 2026-11-19: "Drop the guard"; "none of the stock is real in live app so no need to be worried on that").** Migration `20270130110000_inventory_edge_cases_1942` no longer locks `cycle_count_items` or refuses to apply while an open stock count has saved lines.
 **Why:** that guard drew a new HIGH in three rounds (Luna r1, Luna r4, Sol r2), so the stop rule fired. Without it, the worst case is today's behaviour: a count saved before the apply and completed after it can land up to 0.00005 of a unit off, and only on stock with more than 4 decimals. Live stock is not real yet.
 **What it does:** the apply no longer waits on open counts. A read-only check for open counts before the apply is optional. Every other #1942 check and gate is unchanged.
+## 2026-11-21 — #2038: Mason owner-accepted 2 Sol finding(s) at `9b5598f5d0d1`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2038 at `9b5598f5d0d1` (base `ca1ed13c47fd`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270130100000_epa_batch_commit_checks_at_save.sql:88`, text sha256 `1ac62581b10666ca` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen (ref cf87dc0055f9)
+- Finding 2 (HIGH) at `supabase/migrations/20270130100000_epa_batch_commit_checks_at_save.sql:143`, text sha256 `0e4369772881fb34` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen (ref a691a7b87a16)
+
+## 2026-11-21 — #2038 may have one more Sol round (round 7)
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, one more each").** PR #2038 (#1976 EPA batch save check) may have one more Sol round (round 7).
+**Why:** after release #1990 and its back-merge, staging had to be merged in to clear a conflict, so the merge gate needs a fresh Sol review of the new head. The PR's own change is unchanged since its last clean or owner-accepted round.
+
+## 2026-11-19 — #2038: Mason owner-accepted 2 Sol finding(s) at `8e5eb30ccb22`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2038 at `8e5eb30ccb22` (base `62ccaeaa2a7b`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270130100000_epa_batch_commit_checks_at_save.sql:88`, text sha256 `ca8573d6db3fd3ce` (the wording stays with the proof, not here)
+  Mason's reason: both lookups fetch the same EPA data (ref e033590e65ec)
+- Finding 2 (HIGH) at `supabase/migrations/20270130100000_epa_batch_commit_checks_at_save.sql:143`, text sha256 `8662efbcd11758a1` (the wording stays with the proof, not here)
+  Mason's reason: re-running the lookup brings it back (ref e11881672f0a)
+
+## 2026-11-19 — #2038 may have Sol round 6
+
+**Decision (Mason, in chat, 2026-11-19: "Accept + round 6").** PR #2038 (#1976) may have Sol round 6. Mason judges the lookup race (a lookup started between the batch's screen check and its own lookup) a business non-issue: both lookups fetch the same EPA data, and the admin can re-run theirs.
+**Why:** round 5's other HIGH (no release smoke chain for `commit_epa_proposal_batch`) was fixed in a new commit, so the head needs a fresh review.
+
+## 2026-11-19 — #2038 may have Sol round 5
+
+**Decision (Mason, in chat, 2026-11-19: "Approve round 5").** PR #2038 (#1976, EPA batch save checks in the database) may have Sol round 5.
+**Why:** the pre-push check required a regenerated workflow map (`docs/app-workflow-map.html`, its RPC count goes from 361 to 362), so the pushed head is one commit past the head Sol round 4 reviewed. The code reviewed in round 4 is unchanged.
 ## 2026-11-20 — #1990: Mason owner-accepted 5 Sol finding(s) at `b145a1514838`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #1990 at `b145a1514838` (base `5740b6c076ea`) found 5 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

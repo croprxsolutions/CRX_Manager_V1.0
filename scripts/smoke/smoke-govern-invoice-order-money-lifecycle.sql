@@ -117,11 +117,11 @@ BEGIN
   VALUES ('[E2E] Other Lifecycle Farm ' || v_suffix)
   RETURNING id INTO v_other_customer;
 
-  INSERT INTO public.products (product_name, unit_size, product_form)
-  VALUES ('[E2E] Lifecycle Product ' || v_suffix, 'GL', 'liquid')
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[E2E] Lifecycle Product ' || v_suffix, 'Gal', 'liquid', 'Gal')
   RETURNING id INTO v_product;
-  INSERT INTO public.products (product_name, unit_size, product_form)
-  VALUES ('[E2E] Lifecycle Other Product ' || v_suffix, 'GL', 'liquid')
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[E2E] Lifecycle Other Product ' || v_suffix, 'Gal', 'liquid', 'Gal')
   RETURNING id INTO v_other_product;
   -- Order lines need a positive cost basis (COST_BASIS_REQUIRED), and a product
   -- is born pricing-free, so price both shells through the governed
@@ -158,10 +158,10 @@ BEGIN
 
   INSERT INTO public.inventory (
     product_id, location, quantity_available, quantity_prebooked, unit_size
-  ) VALUES (v_product, 'Main Warehouse', 50, 10, 'GL');
+  ) VALUES (v_product, 'Main Warehouse', 50, 10, 'Gal');
   INSERT INTO public.inventory (
     product_id, location, quantity_available, quantity_prebooked, unit_size
-  ) VALUES (v_other_product, 'Main Warehouse', 50, 0, 'GL');
+  ) VALUES (v_other_product, 'Main Warehouse', 50, 0, 'Gal');
 
   -- The normal order-edit RPC may not swap a product after that item is linked
   -- to a scheduled delivery. The failed RPC must roll back its earlier inventory
@@ -187,7 +187,7 @@ BEGIN
   ) RETURNING id INTO v_swap_delivery;
   INSERT INTO public.delivery_items (
     delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size
-  ) VALUES (v_swap_delivery, v_swap_item, v_product, 2, 0, 'GL');
+  ) VALUES (v_swap_delivery, v_swap_item, v_product, 2, 0, 'Gal');
   SELECT quantity_prebooked INTO v_numeric
     FROM public.inventory
    WHERE product_id = v_product AND location = 'Main Warehouse';
@@ -210,7 +210,7 @@ BEGIN
           'id', v_swap_item,
           'product_id', v_other_product,
           'product_name', '[E2E] forbidden swap target',
-          'unit_size', 'GL',
+          'unit_size', 'Gal',
           'cost_per_unit', 5,
           'price_per_unit', 9,
           'total_units_needed', 2
@@ -226,7 +226,7 @@ BEGIN
           'id', v_swap_item,
           'product_id', v_other_product,
           'product_name', '[E2E] forbidden swap target',
-          'unit_size', 'GL',
+          'unit_size', 'Gal',
           'cost_per_unit', 5,
           'price_per_unit', 9,
           'total_units_needed', 2
@@ -284,7 +284,7 @@ BEGIN
   ) RETURNING id INTO v_invoiced_delivery;
   INSERT INTO public.delivery_items (
     delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size
-  ) VALUES (v_invoiced_delivery, v_invoiced_item, v_product, 1, 1, 'GL');
+  ) VALUES (v_invoiced_delivery, v_invoiced_item, v_product, 1, 1, 'Gal');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_invoiced_delivery;
   -- Historical completed-delivery fixture: the completion marker records it the way
   -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
@@ -370,7 +370,7 @@ BEGIN
   INSERT INTO public.delivery_items (
     delivery_id, order_item_id, product_id, quantity,
     quantity_delivered, unit_size
-  ) VALUES (v_delivery, v_order_item, v_product, 4, 4, 'GL');
+  ) VALUES (v_delivery, v_order_item, v_product, 4, 4, 'Gal');
 
   UPDATE public.deliveries
   SET status = 'in_progress'
@@ -483,7 +483,7 @@ BEGIN
   INSERT INTO public.delivery_items (
     delivery_id, order_item_id, product_id, quantity,
     quantity_delivered, unit_size
-  ) VALUES (v_tiny_delivery, v_tiny_item, v_product, 1, 1, 'GL');
+  ) VALUES (v_tiny_delivery, v_tiny_item, v_product, 1, 1, 'Gal');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_tiny_delivery;
   -- Historical completed-delivery fixture: the completion marker records it the way
   -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
@@ -643,7 +643,7 @@ BEGIN
     INSERT INTO public.delivery_items (
       delivery_id, order_item_id, product_id, quantity,
       quantity_delivered, unit_size
-    ) VALUES (v_corrupt_delivery, v_corrupt_item, v_product, 1, 2, 'GL');
+    ) VALUES (v_corrupt_delivery, v_corrupt_item, v_product, 1, 2, 'Gal');
     UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_corrupt_delivery;
     -- Historical completed-delivery fixture: the completion marker records it the way
     -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
@@ -698,11 +698,11 @@ BEGIN
     ) RETURNING id INTO v_corrupt_delivery;
     INSERT INTO public.delivery_items (
       delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size
-    ) VALUES (v_corrupt_delivery, v_corrupt_item, v_product, 1, 1, 'GL');
+    ) VALUES (v_corrupt_delivery, v_corrupt_item, v_product, 1, 1, 'Gal');
     BEGIN
       INSERT INTO public.delivery_items (
         delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size
-      ) VALUES (v_corrupt_delivery, v_foreign_item, v_product, 1, 0, 'GL');
+      ) VALUES (v_corrupt_delivery, v_foreign_item, v_product, 1, 0, 'Gal');
       RAISE EXCEPTION 'SMOKE_FAIL: scheduled delivery accepted another order''s item';
     EXCEPTION WHEN OTHERS THEN
       v_err := SQLERRM;
@@ -714,7 +714,7 @@ BEGIN
     BEGIN
       INSERT INTO public.delivery_items (
         delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size
-      ) VALUES (v_corrupt_delivery, v_corrupt_item, v_other_product, 1, 0, 'GL');
+      ) VALUES (v_corrupt_delivery, v_corrupt_item, v_other_product, 1, 0, 'Gal');
       RAISE EXCEPTION 'SMOKE_FAIL: scheduled delivery accepted a mismatched product';
     EXCEPTION WHEN OTHERS THEN
       v_err := SQLERRM;
@@ -728,7 +728,7 @@ BEGIN
     PERFORM set_config('app.admin_override', 'true', true);
     INSERT INTO public.delivery_items (
       delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size
-    ) VALUES (v_corrupt_delivery, v_foreign_item, v_product, 1, 0, 'GL');
+    ) VALUES (v_corrupt_delivery, v_foreign_item, v_product, 1, 0, 'Gal');
     PERFORM set_config('app.admin_override', 'false', true);
     UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_corrupt_delivery;
     -- Historical completed-delivery fixture: the completion marker records it the way
@@ -774,7 +774,7 @@ BEGIN
     ) RETURNING id INTO v_corrupt_delivery;
     INSERT INTO public.delivery_items (
       delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size
-    ) VALUES (v_corrupt_delivery, v_corrupt_item, v_product, 1, 1, 'GL');
+    ) VALUES (v_corrupt_delivery, v_corrupt_item, v_product, 1, 1, 'Gal');
     UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_corrupt_delivery;
     -- Historical completed-delivery fixture: the completion marker records it the way
     -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
@@ -821,7 +821,7 @@ BEGIN
     ) RETURNING id INTO v_corrupt_delivery;
     INSERT INTO public.delivery_items (
       delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size
-    ) VALUES (v_corrupt_delivery, v_corrupt_item, v_product, 1, 1, 'GL');
+    ) VALUES (v_corrupt_delivery, v_corrupt_item, v_product, 1, 1, 'Gal');
     UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_corrupt_delivery;
     -- Historical completed-delivery fixture: the completion marker records it the way
     -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
@@ -947,7 +947,7 @@ BEGIN
   INSERT INTO public.delivery_items (
     delivery_id, order_item_id, product_id, quantity,
     quantity_delivered, unit_size
-  ) VALUES (v_other_delivery, v_blocked_item, v_product, 1, 1, 'GL');
+  ) VALUES (v_other_delivery, v_blocked_item, v_product, 1, 1, 'Gal');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_other_delivery;
   -- Historical completed-delivery fixture: the completion marker records it the way
   -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
@@ -1058,7 +1058,7 @@ BEGIN
   INSERT INTO public.delivery_items (
     delivery_id, order_item_id, product_id, quantity,
     quantity_delivered, unit_size
-  ) VALUES (v_draw_delivery, v_draw_item, v_product, 1, 1, 'GL');
+  ) VALUES (v_draw_delivery, v_draw_item, v_product, 1, 1, 'Gal');
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_draw_delivery;
   -- Historical completed-delivery fixture: the completion marker records it the way
   -- complete_delivery does (the smoke-backfill-refuse-split-billing.sql pattern).
@@ -1170,7 +1170,7 @@ BEGIN
   ) RETURNING id INTO v_deleted_delivery;
   INSERT INTO public.delivery_items (
     delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size
-  ) VALUES (v_deleted_delivery, v_deleted_item, v_product, 2, 2, 'GL');
+  ) VALUES (v_deleted_delivery, v_deleted_item, v_product, 2, 2, 'Gal');
   UPDATE public.deliveries SET status = 'in_progress'
    WHERE id = v_deleted_delivery;
   -- Historical completed-delivery fixture: the completion marker records it the way

@@ -76,8 +76,8 @@ BEGIN
   -- [E2E] marker satisfies the live-testdata guard; terminal rollback removes it.
   INSERT INTO public.customers (farm_name)
   VALUES ('[E2E] H4 Farm ' || v_suffix) RETURNING id INTO v_customer;
-  INSERT INTO public.products (product_name, product_form)
-  VALUES ('[E2E] H4 Herbicide ' || v_suffix, 'liquid') RETURNING id INTO v_product;
+  INSERT INTO public.products (product_name, product_form, inventory_unit)
+  VALUES ('[E2E] H4 Herbicide ' || v_suffix, 'liquid', 'Gal') RETURNING id INTO v_product;
   -- Quote lines need a positive cost basis (COST_BASIS_REQUIRED); set it the governed way
   -- the Products page does ($6 cost, $10 every tier) instead of a priced products INSERT.
   v_pricing := public.preview_product_pricing_changes(

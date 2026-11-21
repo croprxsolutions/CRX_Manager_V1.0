@@ -91,8 +91,8 @@ BEGIN
   RETURNING id INTO v_customer;
 
   -- A product is born pricing-free, so price it through the governed preview/apply path.
-  INSERT INTO public.products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Delivery Job Replay Product ' || v_suffix, 'GL', '999999-99999', 'liquid')
+  INSERT INTO public.products (product_name, unit_size, epa_registration, product_form, inventory_unit)
+  VALUES ('[SMOKE] Delivery Job Replay Product ' || v_suffix, 'Gal', '999999-99999', 'liquid', 'Gal')
   RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes(
     'product_page', NULL,
@@ -108,7 +108,7 @@ BEGIN
     (v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint', v_admin, v_prefix || 'pricing-apply');
 
   INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
-  VALUES (v_product, 'Main Warehouse', 100, 6, 'GL');
+  VALUES (v_product, 'Main Warehouse', 100, 6, 'Gal');
 
   -- One order, three 2-unit lines; deliveries 1 (A), 2 (B) and 3 (offline), one line each, all
   -- in_progress (items are written while the delivery is still scheduled, as the app does).
@@ -128,7 +128,7 @@ BEGIN
     RETURNING id INTO v_id;
     v_del := v_del || v_id;
     INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
-    VALUES (v_id, v_oi, v_product, 2, 0, 'GL')
+    VALUES (v_id, v_oi, v_product, 2, 0, 'Gal')
     RETURNING id INTO v_id;
     v_item := v_item || v_id;
     UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_del[v_i];
@@ -150,7 +150,7 @@ BEGIN
     VALUES (v_id, v_field[v_i], 20, 1);
     INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit,
                                       cost_per_unit_cents, price_per_unit_cents, sort_order)
-    VALUES (v_id, v_product, 1, 'GL', 0.05, 'GL', 12000, 20000, 1);
+    VALUES (v_id, v_product, 1, 'Gal', 0.05, 'Gal', 12000, 20000, 1);
     v_res := public.start_job(v_id, v_admin, v_prefix || 'start-job-' || v_i);
     IF v_res->>'status' IS DISTINCT FROM 'in_progress' THEN
       RAISE EXCEPTION 'SMOKE_SETUP: start_job fixture failed: %', v_res;

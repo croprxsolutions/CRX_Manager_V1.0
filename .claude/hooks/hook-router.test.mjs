@@ -139,7 +139,8 @@ try {
 }
 
 eq(promptModulesFor("codex").length, 2, "Codex prompt router has two shared modules (owner-approval reply, CodeRabbit skip)");
-eq(promptModulesFor("claude").length, 2, "Claude prompt router has no Claude-only modules");
+eq(promptModulesFor("claude").length, 3, "Claude prompt router adds only the release pass (Mason, 2026-11-20)");
+ok(promptModulesFor("claude").includes("./release-pass-prompt.mjs") && !promptModulesFor("codex").includes("./release-pass-prompt.mjs"), "the release pass is Claude-only");
 ok(!promptModulesFor("claude").includes("./hold-latch-prompt.mjs"), "the hold latch is not routed (Mason, 2026-10-29)");
 {
   const claudeSettings = readFileSync(path.join(ROOT, ".claude", "settings.json"), "utf8");

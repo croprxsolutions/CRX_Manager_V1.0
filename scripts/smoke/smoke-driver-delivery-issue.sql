@@ -36,14 +36,14 @@ BEGIN
   PERFORM set_config('request.jwt.claims',jsonb_build_object('sub',v_admin,'role','authenticated')::text,true);
   UPDATE public.profiles SET is_active=false WHERE id=v_inactive;
   INSERT INTO public.customers(farm_name) VALUES ('[SMOKE] Driver report farm') RETURNING id INTO v_customer;
-  INSERT INTO public.products(product_name,unit_size,product_form)
-    VALUES ('[SMOKE] Atrazine <img src=x onerror=alert(1)>','GL','liquid') RETURNING id INTO v_product;
+  INSERT INTO public.products(product_name,unit_size,product_form, inventory_unit)
+    VALUES ('[SMOKE] Atrazine <img src=x onerror=alert(1)>','Gal','liquid', 'Gal') RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes('product_page',NULL,
     jsonb_build_array(jsonb_build_object('product_id',v_product,'row_version',1,'pricing_mode','price_driven',
     'new_cost','6.00','tier1_price','10.00','tier2_price','10.00','tier3_price','10.00')),v_admin,v_admin || ':preview');
   PERFORM public.apply_product_pricing_change_set((v_pricing->>'change_set_id')::uuid,v_pricing->>'request_fingerprint',v_admin,v_admin || ':apply');
   INSERT INTO public.inventory(product_id,location,quantity_available,quantity_prebooked,unit_size)
-    VALUES(v_product,'Main Warehouse',100,0,'GL');
+    VALUES(v_product,'Main Warehouse',100,0,'Gal');
 
   FOR v_i IN 1..11 LOOP
     PERFORM set_config('request.jwt.claim.sub',v_admin::text,true);
@@ -56,7 +56,7 @@ BEGIN
     INSERT INTO public.deliveries(delivery_number,order_id,customer_id,assigned_driver,scheduled_date,status,created_by)
       VALUES('[SMOKE] REPORT-DEL-' || gen_random_uuid(),v_order,v_customer,v_driver,CURRENT_DATE,'scheduled',v_admin) RETURNING id INTO v_d;
     INSERT INTO public.delivery_items(delivery_id,order_item_id,product_id,quantity,quantity_delivered,unit_size)
-      VALUES(v_d,v_oi,v_product,5,0,CASE WHEN v_i=3 THEN NULL ELSE 'GL' END) RETURNING id INTO v_di;
+      VALUES(v_d,v_oi,v_product,5,0,CASE WHEN v_i=3 THEN NULL ELSE 'Gal' END) RETURNING id INTO v_di;
     UPDATE public.deliveries SET status='in_progress' WHERE id=v_d;
     v_key := v_d || ':complete';
     v_path := 'signatures/' || v_d || '/' || left(encode(sha256(convert_to(v_key,'UTF8')),'hex'),32) || '.png';

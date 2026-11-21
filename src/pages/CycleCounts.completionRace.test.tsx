@@ -22,7 +22,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ReactNode } from 'react';
-import { render, screen, cleanup, waitFor, fireEvent, act } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent, act, within } from '@testing-library/react';
 
 const COUNT_A = '11111111-1111-4111-8111-111111111111';
 const COUNT_B = '22222222-2222-4222-8222-222222222222';
@@ -56,7 +56,7 @@ const counts = [
 
 // Every item is already counted so the completion runs straight through instead
 // of stopping at the "complete anyway?" confirmation.
-const itemsFor: Record<string, unknown[]> = {
+const baseItems: Record<string, Array<Record<string, unknown>>> = {
   [COUNT_A]: [{
     id: 'item-a', cycle_count_id: COUNT_A, product_id: 'p-a', expected_qty: 10,
     counted_qty: 10, variance: 0, is_counted: true,
@@ -68,6 +68,7 @@ const itemsFor: Record<string, unknown[]> = {
     product: { product_name: 'BRAVO PRODUCT' },
   }],
 };
+let itemsFor = structuredClone(baseItems);
 
 // Item queries are held open IN ORDER so the test controls resolution. A single
 // count is loaded more than once here (open, then the completion refresh), so
@@ -144,6 +145,40 @@ vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 
 const { default: CycleCounts } = await import('./CycleCounts');
 
+// jsdom loads no CSS, so "draws on top" is read off the real class names. Two fixed layers
+// paint by CSS rules: they must share one stacking context (no ancestor between them creates
+// one), the top one needs an equal-or-higher z-index, and on a tie the later one in the page wins.
+const CREATES_STACKING_CONTEXT = /(?:^|\s|:)(?:z-|isolate|opacity-|transform|translate-|scale-|rotate-|skew-|blur|filter|drop-shadow|backdrop-|will-change|contain-|mix-blend-)/;
+const zIndexOf = (el: Element) => Number(/(?:^|\s)z-(\d+)(?:\s|$)/.exec(el.getAttribute('class') ?? '')?.[1]);
+function stackingContextsBetween(el: Element, sharedAncestor: Node): Element[] {
+  const found: Element[] = [];
+  for (let node = el.parentElement; node && node !== sharedAncestor; node = node.parentElement) {
+    if (CREATES_STACKING_CONTEXT.test(node.getAttribute('class') ?? '')) found.push(node);
+  }
+  return found;
+}
+function expectDrawsOnTop(top: Element, under: Element) {
+  let shared: Node | null = top.parentNode;
+  while (shared && !shared.contains(under)) shared = shared.parentNode;
+  expect(shared, 'the two layers share an ancestor').toBeTruthy();
+  for (const layer of [top, under]) {
+    expect(layer.getAttribute('class')).toMatch(/(?:^|\s)fixed(?:\s|$)/);
+    expect(stackingContextsBetween(layer, shared as Node), 'no ancestor traps this layer in its own stacking context').toEqual([]);
+  }
+  expect(Number.isFinite(zIndexOf(top)) && Number.isFinite(zIndexOf(under))).toBe(true);
+  expect(zIndexOf(top)).toBeGreaterThanOrEqual(zIndexOf(under));
+  if (zIndexOf(top) === zIndexOf(under)) {
+    expect(under.compareDocumentPosition(top) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  }
+}
+
+async function openCount(number: string, product: string, heldIndex: number) {
+  fireEvent.click(screen.getByText(number));
+  await waitFor(() => expect(heldItemQueries.length).toBe(heldIndex + 1));
+  await release(heldIndex);
+  await waitFor(() => expect(screen.getByText(product)).toBeTruthy());
+}
+
 /** Release the Nth held item query (0-based) and let React flush. */
 async function release(index: number) {
   const held = heldItemQueries[index];
@@ -154,6 +189,7 @@ async function release(index: number) {
 describe('CycleCounts completion race', () => {
   beforeEach(() => {
     heldItemQueries = [];
+    itemsFor = structuredClone(baseItems);
     H.toast.mockReset();
     H.rpc.mockReset();
     H.rpc.mockResolvedValue({ data: null, error: null });
@@ -209,8 +245,7 @@ describe('CycleCounts completion race', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Cancel Count/ }));
     const confirm = await screen.findByRole('alertdialog', { name: 'Cancel Cycle Count' });
-    const detail = screen.getByRole('dialog');
-    expect(detail.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expectDrawsOnTop(confirm, screen.getByRole('dialog'));
 
     // The count window's inventory actions are unreachable while the confirm is open.
     expect(screen.getByText(/Complete & Apply Adjustments/).closest('[inert]')).not.toBeNull();
@@ -282,5 +317,104 @@ describe('CycleCounts completion race', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog', { name: 'Cancel Cycle Count' })).toBeNull());
     expect(screen.getByText('CC-2002').closest('[inert]')).toBeNull();
     expect(H.rpc.mock.calls.filter((call) => call[0] === 'cancel_cycle_count')).toEqual([]);
+  });
+
+  // Sol r2 (#1987): the lock while a completion loads belongs to that count, not the page.
+  it('locks Cancel only on the count being completed, not on another count', async () => {
+    render(<CycleCounts />);
+    await waitFor(() => expect(screen.getByText('CC-1001')).toBeTruthy());
+    await openCount('CC-1001', 'ALPHA PRODUCT', 0);
+
+    // Completing A stalls on its refresh; the operator closes A and opens B.
+    fireEvent.click(screen.getByText(/Complete & Apply Adjustments/));
+    await waitFor(() => expect(heldItemQueries.length).toBe(2));
+    fireEvent.click(screen.getByLabelText('Close'));
+    await openCount('CC-2002', 'BRAVO PRODUCT', 2);
+
+    const cancelB = screen.getByRole('button', { name: /Cancel Count/ }) as HTMLButtonElement;
+    expect(cancelB.disabled).toBe(false);
+    expect(screen.getByRole('button', { name: /Complete & Apply Adjustments/ }).hasAttribute('disabled')).toBe(false);
+    fireEvent.click(cancelB);
+    await screen.findByRole('alertdialog', { name: 'Cancel Cycle Count' });
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+
+    // Back on A while its completion is still in flight: A stays locked.
+    fireEvent.click(screen.getByLabelText('Close'));
+    await openCount('CC-1001', 'ALPHA PRODUCT', 3);
+    expect((screen.getByRole('button', { name: /Cancel Count/ }) as HTMLButtonElement).disabled).toBe(true);
+
+    // A's stale completion settles: it does not complete, and A unlocks.
+    await release(1);
+    await waitFor(() => expect((screen.getByRole('button', { name: /Cancel Count/ }) as HTMLButtonElement).disabled).toBe(false));
+    expect(H.rpc.mock.calls.filter((call) => call[0] === 'complete_cycle_count')).toEqual([]);
+  });
+
+  // Sol r4 (#1987): closing the window while completion prepares must not drop the
+  // "Complete Anyway?" question without a word.
+  it('says why nothing happened when the window closed before the uncounted-items question', async () => {
+    itemsFor[COUNT_A][0] = { ...itemsFor[COUNT_A][0], counted_qty: null, variance: null, is_counted: false };
+    render(<CycleCounts />);
+    await waitFor(() => expect(screen.getByText('CC-1001')).toBeTruthy());
+    await openCount('CC-1001', 'ALPHA PRODUCT', 0);
+
+    fireEvent.click(screen.getByText(/Complete & Apply Adjustments/));
+    await waitFor(() => expect(heldItemQueries.length).toBe(2));
+    fireEvent.click(screen.getByLabelText('Close'));
+    await release(1);
+
+    await waitFor(() => expect(H.toast).toHaveBeenCalledWith(
+      'warning',
+      'Cycle count CC-1001 was not completed: 1 products have not been counted yet. Open it to complete.',
+    ));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(H.rpc.mock.calls.filter((call) => call[0] === 'complete_cycle_count')).toEqual([]);
+  });
+
+  // Sol r5 (#1987): a late Cancel reply for A must not close the window or the confirm
+  // the operator has since opened on B.
+  it('a late cancel reply for one count leaves another count and its confirm open', async () => {
+    let finishCancel: () => void = () => undefined;
+    H.rpc.mockImplementation((name: string) => name === 'cancel_cycle_count'
+      ? new Promise((resolve) => { finishCancel = () => resolve({ data: { cancelled: true }, error: null }); })
+      : Promise.resolve({ data: null, error: null }));
+    render(<CycleCounts />);
+    await waitFor(() => expect(screen.getByText('CC-1001')).toBeTruthy());
+    await openCount('CC-1001', 'ALPHA PRODUCT', 0);
+
+    fireEvent.click(screen.getByRole('button', { name: /Cancel Count/ }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel Count' }));
+    await waitFor(() => expect(H.rpc).toHaveBeenCalledWith('cancel_cycle_count', expect.objectContaining({ p_cycle_count_id: COUNT_A })));
+
+    fireEvent.click(screen.getByLabelText('Close'));
+    await openCount('CC-2002', 'BRAVO PRODUCT', 1);
+    fireEvent.click(screen.getByRole('button', { name: /Cancel Count/ }));
+    await screen.findByRole('alertdialog', { name: 'Cancel Cycle Count' });
+
+    await act(async () => { finishCancel(); });
+    await waitFor(() => expect(H.toast).toHaveBeenCalledWith('success', 'Cycle count CC-1001 cancelled'));
+    expect(screen.getByRole('alertdialog', { name: 'Cancel Cycle Count' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: /CC-2002/ })).toBeTruthy();
+  });
+
+  // The same late reply DOES close a window reopened on the cancelled count: leaving it
+  // open would show a cancelled count as still in progress.
+  it('a late cancel reply closes the window when it shows the cancelled count again', async () => {
+    let finishCancel: () => void = () => undefined;
+    H.rpc.mockImplementation((name: string) => name === 'cancel_cycle_count'
+      ? new Promise((resolve) => { finishCancel = () => resolve({ data: { cancelled: true }, error: null }); })
+      : Promise.resolve({ data: null, error: null }));
+    render(<CycleCounts />);
+    await waitFor(() => expect(screen.getByText('CC-1001')).toBeTruthy());
+    await openCount('CC-1001', 'ALPHA PRODUCT', 0);
+
+    fireEvent.click(screen.getByRole('button', { name: /Cancel Count/ }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel Count' }));
+    await waitFor(() => expect(H.rpc).toHaveBeenCalledWith('cancel_cycle_count', expect.objectContaining({ p_cycle_count_id: COUNT_A })));
+
+    fireEvent.click(screen.getByLabelText('Close'));
+    await openCount('CC-1001', 'ALPHA PRODUCT', 1);
+    await act(async () => { finishCancel(); });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });

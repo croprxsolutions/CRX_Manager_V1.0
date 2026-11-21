@@ -97,7 +97,6 @@ export default function CycleCounts() {
   // A failed line read shows "could not be loaded" and hides Complete and Cancel:
   // an empty line list is never something to apply adjustments against.
   const [itemsFailed, setItemsFailed] = useState(false);
-  const [completing, setCompleting] = useState(false);
   const [completeConfirmOpen, setCompleteConfirmOpen] = useState(false);
   // The cycle count the open "complete anyway?" confirmation was asked ABOUT.
   // The confirm path completes without re-running the uncounted-items check —
@@ -129,7 +128,18 @@ export default function CycleCounts() {
       setCompleteConfirmCountId(null);
     }
   }, [shownCountId, cancelConfirmCountId, reverseConfirmCountId, completeConfirmCountId]);
-  const [preparingCompletion, setPreparingCompletion] = useState(false);
+  // Counts with a completion in flight (preparing or applying), keyed by count so a stalled
+  // completion of one count never locks another count's window (Sol r2, #1987). The ref is the
+  // synchronous guard; the state mirrors it for rendering.
+  const completingCountIdsRef = useRef(new Set<string>());
+  const [completingCountIds, setCompletingCountIds] = useState<ReadonlySet<string>>(() => new Set());
+  const markCompleting = (cycleCountId: string, inFlight: boolean) => {
+    if (inFlight) completingCountIdsRef.current.add(cycleCountId);
+    else completingCountIdsRef.current.delete(cycleCountId);
+    setCompletingCountIds(new Set(completingCountIdsRef.current));
+  };
+  // Covers the apply step too: executeComplete always runs inside this bracket.
+  const preparingCompletion = !!activeCount && completingCountIds.has(activeCount.id);
   const itemWriteQueuesRef = useRef(new Map<string, Promise<void>>());
   // Each pending write carries its own cycle_count_id. Completion may only wait
   // on writes belonging to the count being completed — see
@@ -167,7 +177,9 @@ export default function CycleCounts() {
   // gated on still being the session that started the work.
   const detailSessionRef = useRef(0);
   const itemWriteSequenceRef = useRef(0);
-  const completionInFlightRef = useRef(false);
+  // Which count the window is showing (null when closed), read after awaits where state
+  // would be a stale closure.
+  const shownCountIdRef = useRef<string | null>(null);
 
   const isAdmin = role === 'admin';
 
@@ -357,6 +369,7 @@ export default function CycleCounts() {
   };
 
   const closeDetail = () => {
+    shownCountIdRef.current = null;
     closeAllConfirms();
     setShowDetail(false);
   };
@@ -386,6 +399,7 @@ export default function CycleCounts() {
     const isCurrentSession = () => detailSessionRef.current === session;
 
     closeAllConfirms();
+    shownCountIdRef.current = count.id;
     setActiveCount(count);
     setShowDetail(true);
     setLoadingItems(true);
@@ -502,7 +516,7 @@ export default function CycleCounts() {
   // Queue writes per item so a slow earlier keystroke cannot arrive after a newer value and overwrite it.
   const updateCountedQty = async (itemId: string, countedQty: number | null) => {
     const item = countItems.find((i) => i.id === itemId);
-    if (!item || !profile || completionInFlightRef.current) return;
+    if (!item || !profile || completingCountIdsRef.current.has(item.cycle_count_id)) return;
 
     // Reject non-finite quantities before they reach the write intent. A
     // type="number" box accepts "1e309", which parseFloat turns into Infinity,
@@ -777,15 +791,15 @@ export default function CycleCounts() {
 
   const handleComplete = async () => {
     if (!activeCount || !profile) return;
-    if (completionInFlightRef.current) return;
+    const completingCount = activeCount;
+    if (completingCountIdsRef.current.has(completingCount.id)) return;
     // Capture the detail session HERE, synchronously with the operator's click, and
     // carry it through every await below. Capturing further down would read the
     // session as it is after a switch has already happened, which is the value that
     // makes a superseded call look current.
     const session = detailSessionRef.current;
     const isCurrentSession = () => detailSessionRef.current === session;
-    completionInFlightRef.current = true;
-    setPreparingCompletion(true);
+    markCompleting(completingCount.id, true);
 
     try {
       const snapshot = await waitForAuthoritativeCountItems(isCurrentSession);
@@ -797,6 +811,12 @@ export default function CycleCounts() {
 
       const uncounted = snapshot.items.filter((i) => !i.is_counted);
       if (uncounted.length > 0) {
+        // The window was closed while this loaded: the question has nowhere to show, so say
+        // why nothing happened instead of dropping it (Sol r4, #1987).
+        if (shownCountIdRef.current !== completingCount.id) {
+          toast('warning', `Cycle count ${completingCount.count_number} was not completed: ${uncounted.length} products have not been counted yet. Open it to complete.`);
+          return;
+        }
         setCompleteConfirmMsg(`${uncounted.length} products have not been counted yet. Complete anyway?`);
         setCompleteConfirmCountId(activeCount.id);
         setCompleteConfirmOpen(true);
@@ -805,8 +825,7 @@ export default function CycleCounts() {
 
       await executeComplete(snapshot, isCurrentSession);
     } finally {
-      completionInFlightRef.current = false;
-      setPreparingCompletion(false);
+      markCompleting(completingCount.id, false);
     }
   };
 
@@ -838,15 +857,14 @@ export default function CycleCounts() {
         toast('error', 'That confirmation was for a different cycle count. Open the count you want to complete and try again.');
         return;
       }
-      if (completionInFlightRef.current) return;
-      completionInFlightRef.current = true;
-      setPreparingCompletion(true);
+      const completingCountId = activeCount.id;
+      if (completingCountIdsRef.current.has(completingCountId)) return;
+      markCompleting(completingCountId, true);
       try {
         const refreshedSnapshot = await waitForAuthoritativeCountItems(stillCurrentSession);
         if (refreshedSnapshot) await executeComplete(refreshedSnapshot, stillCurrentSession);
       } finally {
-        completionInFlightRef.current = false;
-        setPreparingCompletion(false);
+        markCompleting(completingCountId, false);
       }
       return;
     }
@@ -935,7 +953,6 @@ export default function CycleCounts() {
         }
       },
       toast,
-      setLoading: setCompleting,
       // Name the count in the success message. The RPC can land after the operator has
       // opened a different count, and a bare "Cycle count completed" toast then reads
       // as a statement about whatever is on screen now.
@@ -956,8 +973,8 @@ export default function CycleCounts() {
   // Cancel cycle count
   const handleCancel = () => {
     if (!activeCount || !profile) return;
-    // A completion still loading could open its own confirm under this one (Sol HIGH, #1982).
-    if (completionInFlightRef.current) return;
+    // A completion of this count still loading could open its own confirm under this one (Sol HIGH, #1982).
+    if (completingCountIdsRef.current.has(activeCount.id)) return;
     setCancelConfirmCountId(activeCount.id);
     setCancelConfirmOpen(true);
   };
@@ -971,6 +988,9 @@ export default function CycleCounts() {
       toast('error', 'That confirmation was for a different cycle count. Open the count you want to cancel and try again.');
       return;
     }
+    // A late reply closes the window only if it still shows this count, never a window or
+    // confirm opened since on another count (Sol r5, #1987).
+    const cancelledId = activeCount.id;
 
     await runCriticalAction({
       action: async () => {
@@ -986,10 +1006,11 @@ export default function CycleCounts() {
         cancelCycleCountIdem.resetKeyFor(activeCount.id);
       },
       toast,
-      successMessage: 'Cycle count cancelled',
+      // Named: a late reply can land while another count is on screen (Sol r5, #1987).
+      successMessage: `Cycle count ${activeCount.count_number} cancelled`,
       sentryTag: 'cancel_cycle_count',
       onSuccess: () => {
-        closeDetail();
+        if (shownCountIdRef.current === cancelledId) closeDetail();
         fetchCounts();
       },
     });
@@ -1011,6 +1032,7 @@ export default function CycleCounts() {
       toast('error', 'That confirmation was for a different cycle count. Open the count you want to reverse and try again.');
       return;
     }
+    const reversedId = activeCount.id;
 
     setReversing(true);
     try {
@@ -1026,7 +1048,7 @@ export default function CycleCounts() {
       await logActivity({ event: 'cycle_count_reversed', description: `Cycle count ${activeCount.count_number} reversed — inventory adjustments undone`, performedBy: profile.id, entityType: 'cycle_count', entityId: activeCount.id });
 
       toast('success', `Cycle count ${activeCount.count_number} reversed. Inventory restored.`);
-      closeDetail();
+      if (shownCountIdRef.current === reversedId) closeDetail();
       fetchCounts();
     } catch (err: unknown) {
       // Refused as another request's or another person's retry key: nothing changed, so start the next try fresh.
@@ -1254,7 +1276,7 @@ export default function CycleCounts() {
                               type="number"
                               step="0.01"
                               value={item.counted_qty ?? ''}
-                              disabled={preparingCompletion || completing}
+                              disabled={preparingCompletion}
                               onChange={(e) => {
                                 const val = e.target.value === '' ? null : parseFloat(e.target.value);
                                 updateCountedQty(item.id, val);
@@ -1330,14 +1352,14 @@ export default function CycleCounts() {
                 <Button
                   variant="secondary"
                   onClick={handleCancel}
-                  disabled={completing || preparingCompletion}
+                  disabled={preparingCompletion}
                   icon={<XCircle className="w-4 h-4" />}
                 >
                   Cancel Count
                 </Button>
                 <Button
                   onClick={handleComplete}
-                  loading={completing || preparingCompletion}
+                  loading={preparingCompletion}
                   icon={<CheckCircle className="w-4 h-4" />}
                 >
                   Complete &amp; Apply Adjustments
@@ -1370,7 +1392,7 @@ export default function CycleCounts() {
         message={completeConfirmMsg || `Some products have not been counted yet. Complete anyway?`}
         confirmLabel="Complete Anyway"
         variant="warning"
-        loading={completing || preparingCompletion}
+        loading={preparingCompletion}
       />
       <ConfirmModal
         open={cancelConfirmOpen}

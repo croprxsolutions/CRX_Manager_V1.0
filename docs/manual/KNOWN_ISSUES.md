@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-20 for the live ledger only (latest live row `20261113011216`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
+**Last verified:** 2026-11-21 for the live ledger only (latest live row `20261121061349`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -1164,7 +1164,7 @@ text while invoices use presets. Every live value parses correctly today. Fix: t
 days)", and have `save_customer` refuse terms the parser would default.
 
 ### KI-148 — Deactivating a customer doesn't check open orders, deliveries, holds or quotes
-**LOW · FIX IN REVIEW (migration `20270128140000_customer_deactivation_checks_open_work`, not applied) · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #8) · Claude**
+**LOW · FIXED ON STAGING (PR #1997, merged 2026-11-19; live with the next release) · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #8) · Claude**
 `guard_customer_rep_edit_20261013` checks only posted/overdue invoices, and only for reps (admins skip it: To-Do
 decision 20); the Customers bulk Deactivate checks invoices only. Live: 1 inactive customer (deactivated 2026-02-06)
 still has 2 confirmed orders (To-Do decision 23). Fix: a new trigger refuses switching a customer from active to
@@ -1175,7 +1175,8 @@ including admins (decision 20 answered 2026-11-18), and names what is open (`CUS
 Deactivate and the edit page both hit it. The live inactive customer stays as it is (decision 23) and stays editable. It checks everything
 at once. Accepted limit (Mason, 2026-11-18 and 2026-11-19): work being saved at the same moment as the deactivation,
 or added after it, is not caught. Proof:
-`node scripts/smoke/prove-ki148-customer-deactivation-real-schema.mjs`.
+`node scripts/smoke/prove-ki148-customer-deactivation-real-schema.mjs`. Follow-ups (unbilled blend tickets, jobs billed
+through their blend ticket, split-billing payers, billing runs that skip inactive customers): #2000.
 
 ### KI-149 — Crop Programs and job print defaults let reps edit but only admins can save
 **LOW · OPEN · settings · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #9) · unassigned**

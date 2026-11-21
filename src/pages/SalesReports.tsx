@@ -180,8 +180,11 @@ export default function SalesReports() {
       return;
     }
     const cid = selectedCustomerIds[0];
+    // A reply for a customer no longer selected must not set the group (#1996).
+    let cancelled = false;
     (async () => {
       const { data, error } = await supabase.rpc('get_customer_farm_group', { p_customer_id: cid });
+      if (cancelled) return;
       if (error || !data) {
         setFarmGroupMembers([]);
         setFarmGroupCustomerIds([]);
@@ -196,6 +199,7 @@ export default function SalesReports() {
       setFarmGroupMembers(members);
       setFarmGroupCustomerIds(members.map(m => m.id));
     })();
+    return () => { cancelled = true; };
   }, [selectedCustomerIds]);
 
   // ── Fetch data ──

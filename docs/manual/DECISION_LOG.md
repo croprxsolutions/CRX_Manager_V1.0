@@ -1,5 +1,103 @@
 # Decision Log
 
+## 2026-11-20 — #2050: Mason owner-accepted 1 Sol finding(s) at `e4960bf1340d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #2050 at `e4960bf1340d` (base `e4e6e11fae1c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270129171000_field_app_refuses_product_without_sold_unit.sql:39`, text sha256 `30caf38e89c4de39` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business) (ref 23d2a64b72fd)
+## 2026-11-20 — #1990: Mason owner-accepted 5 Sol finding(s) at `b145a1514838`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #1990 at `b145a1514838` (base `5740b6c076ea`) found 5 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270109100200_sales_tax_checkbox.sql:433`, text sha256 `7af8d6a6d1bd6424` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 18b700d7c2f5)
+- Finding 2 (HIGH) at `supabase/migrations/20270125163000_ki81_invoices_bill_sent_quote_price.sql:106`, text sha256 `d7d2b6fb22f9f6d9` (the wording stays with the proof, not here)
+  Mason's reason: cant  happen in buisness (ref 25b4764b7e43)
+- Finding 3 (HIGH) at `supabase/migrations/20270129180000_ki81_quote_line_sent_field.sql:156`, text sha256 `ad3386c2899cd899` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen in our business (ref 5af6a1d395fa)
+- Finding 4 (HIGH) at `supabase/migrations/20270125100000_product_rate_cutover.sql:249`, text sha256 `5ec6a9d9c7841899` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen buisness (ref bc310644bea1)
+- Finding 5 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:90`, text sha256 `5b2f04ce0e54b88d` (the wording stays with the proof, not here)
+  Mason's reason: this canot happen (ref fd14bce41f72)
+
+## 2026-11-20 — #1990: Mason owner-accepted 4 Sol finding(s) at `a16895a707cf`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #1990 at `a16895a707cf` (base `eea1937e1a1a`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270109100200_sales_tax_checkbox.sql:433`, text sha256 `7ae2339e964c8d01` (the wording stays with the proof, not here)
+  Mason's reason: rollout gap closes when release lands (ref d1831a775c1a)
+- Finding 2 (HIGH) at `supabase/migrations/20270117120000_billing_sol_fixes_staging.sql:132`, text sha256 `2ff8d6f0eb3d6aee` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our buisness (ref e7a52bc9e5a2)
+- Finding 3 (HIGH) at `supabase/migrations/20270129180000_ki81_quote_line_sent_field.sql:156`, text sha256 `948c098efe541485` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref e494f6a5a5a0)
+- Finding 4 (HIGH) at `supabase/migrations/20270125100000_product_rate_cutover.sql:249`, text sha256 `56e7fe9a98e092e3` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our buinsess (ref 85fd875bb797)
+
+## 2026-11-20 — Release #1990: split the gate files out; release rule 4 removed
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, split it", then "Yes, go ahead").** Stop adding Sol release rules. The
+release's tool and guard files (the gate files `owner-accept-sol-finding.mjs` refuses) go to `main` in their own hotfix,
+so #1990 no longer changes any of them and Mason can accept its remaining Sol findings by name, each kept on a tracked
+issue. **What changes:** release rule 4 (`RELEASE_PRIOR_ROUND_HEAD`, entry below) is removed, since Sol round 56 rated it
+a BLOCKER and the accepts replace it. A `package.json` or `package-lock.json` that differs from the release's fork point
+only in its own version number no longer counts as a gate file (`packageVersionOnlyChange` in
+`.claude/hooks/sol-accept-lib.mjs`), because the release bot raises that number on every release; any dependency or
+script change in those files still counts. Every other gate is unchanged.
+
+## 2026-11-20 — Release #1990: only code changed since the previous Sol round blocks
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, adopt it"; proposed by Taha in Slack).** From Sol round 55 on
+release #1990 (head `28e3cf7ed`), a finding blocks the release only when it is in a file the candidate changes since
+the previous round's head. Findings in files that round already reviewed go on tracked issues (round 55: #2069-#2073)
+for next week's fixes. **Why:** each of 55 rounds found new items in the same large billing functions, so the release
+could not finish; live has no real sales yet. **What it does:** release rule 4 in `scripts/write-codex-push-proof.mjs`
+(`RELEASE_PRIOR_ROUND_HEAD`) gives Sol the wrapper-computed list of files changed since that head; a finding whose
+causing lines are all in other files is tagged `[PRIOR-ROUND]` and listed under RELEASE FOLLOW-UPS. A finding in a
+changed file, or one a change makes newly reachable, still blocks. Move the head to each new round's head; clear it
+after the release lands. Every other gate is unchanged.
+
+## 2026-11-20 — Release #1990 ships with three named known issues
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, add the rule"; Taha agreed in Slack).** Release #1990 ships today.
+Three Sol findings on head `ff46f6ca5` are known issues, each on a tracked issue and fixed before next week's release:
+#2064 (`20270120150000` `_enforce_below_cost_line`), #2065 (`20270129150000` `_enforce_booking_live_job_rules`) and
+#2066 (`20270109100200` `_return_customer_line_share`). **Why:** live has no real sales yet, Sol has found new items
+on every round of this release (round 54), and owner-accepts stay refused on release PRs that touch gate files.
+**What it does:** release rule 3 in `scripts/write-codex-push-proof.mjs` (`RELEASE_KNOWN_ISSUES`) tags only those
+findings, in only those functions; any other finding, including a different one in the same function, still blocks.
+Clear the list after the release lands. Every other gate is unchanged.
+
+## 2026-11-20 — Release rule 1 also covers unchanged live lines inside a changed function
+
+**Decision (Mason, in chat, 2026-11-20: "Yes, both" to logging Sol's #1990 findings 1 and 2 as tracked issues, then
+"Yes, loosen it").** Rule 1 below also covers a finding inside a function the release changes when every line causing
+it is copied unchanged from the live (base) definition and live already has the same defect, reachable the same way.
+It goes on a tracked issue and does not hold the release. A defect that any changed line introduces, widens or makes
+newly reachable still blocks. First case: `20270129171000` `_save_field_app_invoice_impl_20260714` (lines 262 and
+298 match live; issue #2058). **What it does:** the release rules in `scripts/write-codex-push-proof.mjs`; every other
+gate is unchanged.
+
+## 2026-11-20 — Release #1990: two release review rules, Sol past the round cap, field-app draft finding accepted
+
+**Decision (Mason, in chat, 2026-11-20: "yes do both rules"), asked for by Taha.** For release PR #1990 and later
+release PRs (`release/next` into `main`):
+
+1. **Live and unchanged code.** A Sol or migration-reviewer finding inside a database function whose body at the
+   reviewed head is byte-identical to the live definition (a read-only comparison against live `pg_proc.prosrc`,
+   recorded with the proof) is code the release does not change. It goes on a tracked GitHub issue for Taha's
+   follow-up and does not hold the release. Findings in new or changed code still block.
+2. **Self-abort under an absent live condition.** A finding whose only effect is that a migration aborts its own
+   apply (full rollback), under a live data condition the migration's record shows absent with read-only live
+   evidence, re-checked read-only right before the apply with the result posted on the PR, does not hold the
+   release. First case: `20270109100400` aborts its backfill if a posted return credit has an unlinked line
+   (live: 0 posted credit memos).
+
+**Also decided:** release #1990 may have its Sol review past the round cap today. Mason accepts the
+`20270129171000` finding that a field-application draft saved before the upgrade is not re-checked (live has 0
+such drafts; first recorded for #2050 on 2026-11-19).
+
+**What it does:** the Sol review instructions in `scripts/write-codex-push-proof.mjs` (release reviews only) and the
+`migration-drift-reviewer` and `rls-security-reviewer` charters carry both rules. Owner-accepts stay refused on
+release PRs that touch gate files; every other gate is unchanged.
+
 ## 2026-11-19 — #2050 (release #1990 Sol #2 fix) may have Sol round 5; old drafts are not re-checked
 
 **Decision (Mason, in chat, 2026-11-19: "Yes, accept #1, fix #2" and "Yes, push it").** PR #2050 may have its Sol

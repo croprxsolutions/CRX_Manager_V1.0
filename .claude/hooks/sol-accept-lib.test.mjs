@@ -28,6 +28,7 @@ import {
   decisionLogEntry,
   findingLocation,
   gateFilesIn,
+  packageVersionOnlyChange,
   insertDecisionEntry,
   parseSolFindings,
   reasonProblem,
@@ -180,6 +181,27 @@ assert.match(entry, /left unfixed\.\n- Finding 1/, "log: the decision line, then
 assert.equal(findingLocation("prose with no file"), "(location not stated)", "log: no location, none invented");
 assert.deepEqual(gateFilesIn(["src/a.ts", ".claude/hooks/x.mjs", "scripts/write-codex-push-proof.mjs", "docs/a.md", "package.json"]),
   [".claude/hooks/x.mjs", "scripts/write-codex-push-proof.mjs", "package.json"], "gate files: hooks, the proof writer and package.json are refused");
+{
+  const pkg = (v, dep = "^1.0.0") => JSON.stringify({ name: "crx", version: v, dependencies: { a: dep } });
+  const lock = (v, dep = "1.0.0") => JSON.stringify({ name: "crx", version: v, packages: { "": { version: v }, "node_modules/a": { version: dep } } });
+  const files = {
+    "package.json": [pkg("0.0.0"), pkg("0.1.0")],
+    "package-lock.json": [lock("0.0.0"), lock("0.1.0")],
+  };
+  assert.deepEqual(gateFilesIn(["package.json", "package-lock.json", ".github/x.mjs"], (p) => files[p]), [".github/x.mjs"],
+    "gate files: a version-only package.json/lock change is not a gate change");
+  files["package.json"] = [pkg("0.0.0"), pkg("0.1.0", "^2.0.0")];
+  files["package-lock.json"] = [lock("0.0.0"), lock("0.1.0", "2.0.0")];
+  assert.deepEqual(gateFilesIn(["package.json", "package-lock.json"], (p) => files[p]), ["package.json", "package-lock.json"],
+    "gate files: a dependency change still counts");
+  files["package.json"] = [null, pkg("0.1.0")];
+  files["package-lock.json"] = [lock("0.0.0"), "not json"];
+  assert.deepEqual(gateFilesIn(["package.json", "package-lock.json"], (p) => files[p]), ["package.json", "package-lock.json"],
+    "gate files: an unreadable or new package file still counts");
+  assert.equal(packageVersionOnlyChange(pkg("0.0.0"), pkg("0.0.0")), true, "gate files: identical is version-only");
+  assert.deepEqual(gateFilesIn(["scripts/lib/x.mjs"], () => [pkg("0.0.0"), pkg("0.1.0")]), ["scripts/lib/x.mjs"],
+    "gate files: the exemption is only for the two package files");
+}
 assert.equal(decisionLogEntry({ record, accepted: got.accepted }), entry, "log: deterministic");
 const log = "# Decision Log\n\nIntro.\n\n## 2026-11-09 — older\n\nbody\n";
 assert.equal(insertDecisionEntry(log, entry), `# Decision Log\n\nIntro.\n\n${entry}## 2026-11-09 — older\n\nbody\n`, "log: newest first");

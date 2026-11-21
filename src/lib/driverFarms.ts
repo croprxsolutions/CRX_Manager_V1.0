@@ -1,4 +1,5 @@
 import { supabase, assertRpcResult } from './db';
+import type { Customer } from '../types';
 
 /**
  * What a driver may see of a farm (#2018, Mason 2026-11-21): name, phone, email and the delivery address
@@ -21,4 +22,26 @@ export async function fetchDriverFarms(ids: (string | null | undefined)[]): Prom
   if (error) throw error;
   const rows = assertRpcResult<{ rows: DriverFarm[] }>(data, 'get_driver_customers').rows ?? [];
   return new Map(rows.map((farm) => [farm.id, farm]));
+}
+
+/**
+ * One delivery's farm for the delivery detail screen, in the customers-read result shape. A driver gets only the
+ * lookup's fields, with the delivery address where the office sees the billing and shipping address; others read
+ * the whole row as before.
+ */
+export async function fetchDeliveryFarm(
+  customerId: string,
+  isDriver: boolean,
+): Promise<{ data: Customer | null; error: unknown }> {
+  if (!isDriver) return supabase.from('customers').select('*').eq('id', customerId).maybeSingle();
+  try {
+    const farm = (await fetchDriverFarms([customerId])).get(customerId);
+    const data = farm
+      ? ({ id: farm.id, farm_name: farm.farm_name, phone: farm.phone, email: farm.email,
+          billing_address: farm.address, shipping_address: farm.address } as unknown as Customer)
+      : null;
+    return { data, error: null };
+  } catch (error) {
+    return { data: null, error };
+  }
 }

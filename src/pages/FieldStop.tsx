@@ -63,6 +63,14 @@ interface StopPhoto {
   uploaded_at?: string | null;
 }
 
+// The stop with a driver's view of its farm (#2018); throws when the lookup fails. Others keep the joined farm.
+async function withStopFarm(del: StopDelivery, isDriver: boolean): Promise<{ del: StopDelivery; address: string }> {
+  if (!isDriver) return { del, address: '' };
+  const farm = (await fetchDriverFarms([del.customer_id])).get(del.customer_id);
+  const customer = farm ? { farm_name: farm.farm_name, email: farm.email, contact_name: null } : null;
+  return { del: { ...del, customer }, address: farm?.address ?? '' };
+}
+
 interface StopDelivery {
   id: string;
   delivery_number: string | null;
@@ -176,26 +184,21 @@ export default function FieldStop() {
       return;
     }
 
-    let del = data as unknown as StopDelivery;
     // A driver reads the farm through get_driver_customers (#2018), not the customers table.
-    let farmAddress: string | null = null;
-    if (isDriver) {
-      try {
-        const farm = (await fetchDriverFarms([del.customer_id])).get(del.customer_id);
-        if (isStale()) return;
-        del = { ...del, customer: farm ? { farm_name: farm.farm_name, email: farm.email, contact_name: null } : null };
-        farmAddress = farm?.address ?? null;
-      } catch (farmErr) {
-        if (isStale()) return;
-        Sentry.captureException(farmErr, { tags: { source: 'fetch', page: 'field-stop' } });
-        toast('error', 'Could not load this stop');
-        navigate('/my-route');
-        return;
-      }
+    const stop = await withStopFarm(data as unknown as StopDelivery, isDriver).catch((farmErr: unknown) => {
+      Sentry.captureException(farmErr, { tags: { source: 'fetch', page: 'field-stop' } });
+      return null;
+    });
+    if (isStale()) return;
+    if (!stop) {
+      toast('error', 'Could not load this stop');
+      navigate('/my-route');
+      return;
     }
+    const { del, address: farmAddress } = stop;
     setDelivery(del);
     // The farm's shipping (else billing) address until a delivery address below replaces it.
-    setAddressLine(farmAddress ?? '');
+    setAddressLine(farmAddress);
     setReceiptRecipient(null);
     // Only an open stop sends a receipt on completion.
     if (!del.customer?.email && (del.status === 'scheduled' || del.status === 'in_progress')) {

@@ -1,5 +1,7 @@
 # Behavior contract: a rep edits only their own field-application invoices
 
+**DROPPED (Mason, 2026-11-21: "Drop the fix").** Any rep may edit any draft or unposted field invoice, as the app works today. Nothing below is built. Recorded in `docs/manual/DECISION_LOG.md` (2026-11-21) and under KI-01 and KI-03.
+
 Status: REVISED after one cold challenge (Astra `gpt-6.2-astra` high, 2026-11-21, 48 findings; disposition at the end).
 Code read at `origin/staging` `68045a72c` (2026-11-21). Closes the KI-01 related low ("any sales rep can edit
 another rep's draft field-invoice billing") and the field-invoice part of KI-03.

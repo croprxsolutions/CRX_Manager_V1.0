@@ -60,7 +60,7 @@ because the functions never checked who was asking. Until 2026-10-27 02:05 UTC (
 applicators could also read every field-table row, not only the fields of the jobs they were sent to. Proven by
 read-only impersonation on 2026-10-22. Planned as three parts: A (functions, PR #1065), B (tables, PR #1103),
 C (the job route); A, B and C are applied live and merged (part C: PR #1650, ledger `20261109052957`, see KI-73). Related lows: dispatched
-applicators can read chemical cost; any sales rep can edit another rep's draft field-invoice billing; invoice
+applicators can read chemical cost; any sales rep can edit another rep's draft field-invoice billing (ACCEPTED, Mason 2026-11-21: any rep may edit any draft field invoice; see KI-03); invoice
 emails put the invoice number and date into HTML unescaped (`src/lib/emailService.ts:123-139`).
 Status 2026-10-23: part A was written and not yet applied (`20261023090000_field_functions_require_field_access`,
 history row 980). It adds `_can_see_field`, filters the two field-map lookups by it, makes the other field and money
@@ -109,6 +109,7 @@ are; no new note gets a cost.
 
 ### KI-03 — Reps do not yet have the decided invoice and commission-split scoping
 **MED · OPEN · security/money · Mason decided, build unassigned**
+**Field-invoice part ACCEPTED (Mason, 2026-11-21, "Drop the fix"):** any rep may edit any draft or unposted field-application invoice (`update_field_app_applied_info`, `update_field_app_invoice_billing`, `save_field_app_invoice` on an existing invoice, and direct `invoice_shares` / field-location writes); no fix is planned (`DECISION_LOG.md` 2026-11-21). Posting and the split-invoice save keep their own-name checks. The rest of this entry stays open.
 Mason decided reps may see all invoices read-only but only act on their own, and that only admins may change
 commission splits on jobs, quotes and orders. Neither is built: no migration widens rep invoice reads or adds
 own-name checks (`INVOICE_SCOPE_DENIED`) to the full set of invoice actions any active rep can call today on any

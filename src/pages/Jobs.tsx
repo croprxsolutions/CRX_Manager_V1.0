@@ -13,11 +13,13 @@ import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
 import SplitHeading from '../components/ui/SplitHeading';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, checkMutationResult, assertRpcResult } from '../lib/db';
+import { supabase, assertRpcResult } from '../lib/db';
 import { JOB_COLUMNS } from '../lib/costFields';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { chunkIds } from '../lib/dispatchDisplay';
 import { logActivity } from '../lib/activityLogger';
+import { editJobs, editJobsErrorMessage, summarizeEditJobs } from '../lib/editJobs';
+import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
@@ -237,6 +239,7 @@ export default function Jobs() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { role, profile } = useAuth();
+  const deleteIdem = useIdempotencyKey('edit_jobs', profile?.id ?? '');
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [loading, setLoading] = useState(true);
   // The newest jobs read failed: show "could not be loaded", never "No jobs found" (To-Do 10.5).
@@ -1459,34 +1462,25 @@ export default function Jobs() {
         setDeleteModalOpen(false);
         return;
       }
-      // Belt-and-suspenders: scope the soft-delete by status IN DELETABLE at the
-      // QUERY level too (not just the in-memory `ids` filter above). If the
-      // in-memory status were ever stale/wrong, the DB query still refuses to
-      // stamp deleted_at on an invoiced/cancelled job. This mirrors the new
-      // server-side _enforce_billed_job_immutability trigger (#12 DB guard).
-      const result = await supabase
-        .from('jobs')
-        .update({ deleted_at: new Date().toISOString() })
-        .in('id', ids)
-        .in('status', DELETABLE)
-        .select('id');
-      checkMutationResult(result, 'Delete jobs');
-      // If the DB matched fewer rows than we asked to delete, a selected job was
-      // not in a deletable status (e.g. it was billed between fetch and delete) and
-      // the query correctly skipped it. Surface that instead of claiming success.
-      const deletedCount = result.data?.length ?? 0;
-      const dbSkipped = ids.length - deletedCount;
-      const totalSkipped = skipped + dbSkipped;
-      toast(
-        totalSkipped > 0 ? 'info' : 'success',
-        totalSkipped > 0
-          ? `Deleted ${deletedCount} job(s); ${totalSkipped} skipped — invoiced/finished jobs can't be deleted.`
-          : `Deleted ${deletedCount} job(s)`,
-      );
+      if (!profile) throw new Error('Sign in again to delete jobs.');
+      // #1979: edit_jobs soft-deletes in one transaction and skips any job no longer deletable
+      // (billed since loading; a rep's completed job). Selection skips are reported with the server's.
+      const jobIds = [...ids].sort();
+      const scope = JSON.stringify([jobIds, 'delete']);
+      const result = await editJobs({
+        jobIds, action: 'delete', performedBy: profile.id, idempotencyKey: deleteIdem.getKeyFor(scope),
+      });
+      deleteIdem.resetKeyFor(scope);
+      const localSkips = selectedRows
+        .filter((j) => !DELETABLE.includes(j.status))
+        .map((j) => ({ id: j.id, reason: 'status' as const, status: j.status }));
+      const all = { ...result, skipped: [...localSkips, ...result.skipped] };
+      toast(all.skipped.length > 0 ? 'info' : 'success', summarizeEditJobs(all));
       clearSelection();
       fetchJobs();
     } catch (err) {
-      toast('error', sanitizeError(err));
+      Sentry.captureException(toSentryError(err), { extra: { context: 'jobs_bulk_delete' } });
+      toast('error', editJobsErrorMessage(err));
     }
     setDeleting(false);
     setDeleteModalOpen(false);

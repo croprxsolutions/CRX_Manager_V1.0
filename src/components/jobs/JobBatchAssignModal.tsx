@@ -7,6 +7,8 @@ import { supabase, checkMutationResult } from '../../lib/db';
 import { sanitizeError } from '../../lib/errorSanitizer';
 import { Sentry } from '../../lib/sentry';
 import { useAuth } from '../../contexts/AuthContext';
+import { editJobs, editJobsErrorMessage, summarizeEditJobs } from '../../lib/editJobs';
+import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import type { JobBatch } from '../../types';
 import { toSentryError } from '../../lib/sentryError';
 
@@ -47,6 +49,7 @@ export default function JobBatchAssignModal({
 }: JobBatchAssignModalProps) {
   const { toast } = useToast();
   const { profile } = useAuth();
+  const editIdem = useIdempotencyKey('edit_jobs', profile?.id ?? '');
   const [choice, setChoice] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [newName, setNewName] = useState('');
@@ -102,23 +105,24 @@ export default function JobBatchAssignModal({
       onClose();
       return;
     }
+    if (!profile) return;
+    const newRef = choice === REMOVE ? null : choice;
+    const jobIds = [...selectedJobIds].sort();
+    const scope = JSON.stringify([jobIds, newRef]);
     setApplying(true);
     try {
-      const newRef = choice === REMOVE ? null : choice;
-      const result = await supabase
-        .from('jobs')
-        .update({ batch_ref: newRef })
-        .in('id', selectedJobIds)
-        .select('id');
-      checkMutationResult(result, 'Assign jobs to batch');
+      const result = await editJobs({
+        jobIds, changes: { batch_ref: newRef }, performedBy: profile.id, idempotencyKey: editIdem.getKeyFor(scope),
+      });
+      editIdem.resetKeyFor(scope);
       const verb = choice === REMOVE ? 'Removed from batch' : 'Added to batch';
-      toast('success', `${verb}: ${selectedJobIds.length} job(s)`);
+      toast(result.skipped.length > 0 ? 'info' : 'success', `${verb}: ${summarizeEditJobs(result)}`);
       setChoice(null);
       onApplied();
       onClose();
     } catch (err) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'JobBatchAssignModal.apply' } });
-      toast('error', sanitizeError(err));
+      toast('error', editJobsErrorMessage(err));
     }
     setApplying(false);
   };

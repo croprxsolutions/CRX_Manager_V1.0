@@ -3,8 +3,8 @@ import { Check, Calendar, CircleDot, User, Layers, AlertTriangle, Pencil, Truck 
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../ui/Toast';
-import { supabase, checkMutationResult } from '../../lib/db';
-import { sanitizeError } from '../../lib/errorSanitizer';
+import { editJobs, editJobsErrorMessage, summarizeEditJobs } from '../../lib/editJobs';
+import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { Sentry } from '../../lib/sentry';
 import { logActivity } from '../../lib/activityLogger';
 import { useAuth } from '../../contexts/AuthContext';
@@ -52,13 +52,13 @@ const inputCls =
  * unchanged. Apply writes ONLY the enabled sections to every selected job and
  * refreshes the list.
  *
- * Status is handled carefully: only a `cancelled` bulk-set is a safe pure
- * .update() (no required side-effects); the forward lifecycle steps run through
+ * Every change goes through edit_jobs (#1979) in one call. Status is handled
+ * carefully: only a `cancelled` bulk-set is offered (no required side-effects); the forward lifecycle steps run through
  * RPCs that create application records / inventory / invoices, so they are
  * offered but disabled here and surfaced as "do this per job". Even for the
  * safe target we pre-flight each job against _enforce_job_status_transition()'s
- * rules so we never fire an UPDATE the trigger would reject — jobs that can't
- * legally move are reported as skipped instead of silently failing the batch.
+ * rules to warn before Apply; the server skips jobs it cannot cancel and the
+ * toast reports them.
  *
  * NOTE (#10 wire-up): a Loader Worksheet opt-in section belongs here once
  * section #10 (Loader Worksheet PDF wired to FIELD JOBS) lands. See the marked
@@ -74,6 +74,7 @@ export default function JobMassEditModal({
 }: JobMassEditModalProps) {
   const { toast } = useToast();
   const { profile } = useAuth();
+  const editIdem = useIdempotencyKey('edit_jobs', profile?.id ?? '');
   const [draft, setDraft] = useState<MassEditDraft>(emptyMassEditDraft);
   const [applying, setApplying] = useState(false);
 
@@ -118,59 +119,26 @@ export default function JobMassEditModal({
       handleClose();
       return;
     }
+    if (!profile) return;
+    // #1979: field changes and the cancel go to edit_jobs in ONE call, so they save together or not
+    // at all. The server decides which jobs it can cancel (status after the changes) and reports skips.
+    const jobIds = selectedJobs.map((j) => j.id).sort();
+    const fieldChanges = buildFieldPatch(draft);
+    const action = draft.setStatus && draft.status === 'cancelled' ? 'cancel' as const : null;
+    const scope = JSON.stringify([jobIds, fieldChanges, action]);
     setApplying(true);
     try {
-      const allIds = selectedJobs.map((j) => j.id);
-      const now = new Date().toISOString();
-
-      // 1) Non-status fields (date / planning date / applicator / batch) — a
-      //    single .update() across ALL selected jobs. Only enabled sections ride.
-      const fieldPatch = buildFieldPatch(draft);
-      if (fieldPatch) {
-        const result = await supabase
-          .from('jobs')
-          .update({ ...fieldPatch, updated_at: now, updated_by: profile?.id ?? null })
-          .in('id', allIds)
-          .select('id');
-        checkMutationResult(result, 'Mass edit jobs');
-      }
-
-      // 2) Status — only the bulk-safe target (cancelled), and only on the jobs
-      //    the trigger will accept. Eligible jobs move; blocked jobs are skipped
-      //    and reported (never silently failed).
-      let statusMoved = 0;
-      let statusSkipped = 0;
-      if (draft.setStatus && draft.status && statusPartition) {
-        const eligibleIds = statusPartition.eligible.map((j) => j.id);
-        statusSkipped = statusPartition.blocked.length;
-        if (eligibleIds.length > 0) {
-          const result = await supabase
-            .from('jobs')
-            .update({ status: draft.status, updated_at: now, updated_by: profile?.id ?? null })
-            .in('id', eligibleIds)
-            .select('id');
-          checkMutationResult(result, 'Mass edit job status');
-          statusMoved = eligibleIds.length;
-        }
-      }
-
-      if (profile) {
-        logActivity({
-          event: 'jobs_mass_edited',
-          description: `Mass-edited ${count} job(s): ${changes.join('; ')}`,
-          performedBy: profile.id,
-        });
-      }
-
-      // Result toast — clear about what changed, including any skipped status moves.
-      if (statusSkipped > 0) {
-        toast(
-          'success',
-          `Updated ${count} job(s). Status set on ${statusMoved}; ${statusSkipped} skipped (not a legal status change).`
-        );
-      } else {
-        toast('success', `Updated ${count} job(s)`);
-      }
+      const result = await editJobs({
+        jobIds, changes: fieldChanges, action, performedBy: profile.id, idempotencyKey: editIdem.getKeyFor(scope),
+      });
+      editIdem.resetKeyFor(scope);
+      const summary = summarizeEditJobs(result);
+      logActivity({
+        event: 'jobs_mass_edited',
+        description: `Mass edit (${changes.join('; ')}): ${summary}`,
+        performedBy: profile.id,
+      });
+      toast(result.skipped.length > 0 ? 'info' : 'success', summary);
       reset();
       onApplied();
       onClose();
@@ -178,7 +146,7 @@ export default function JobMassEditModal({
       Sentry.captureException(toSentryError(err), {
         extra: { context: 'JobMassEditModal.apply' },
       });
-      toast('error', sanitizeError(err));
+      toast('error', editJobsErrorMessage(err));
     }
     setApplying(false);
   };

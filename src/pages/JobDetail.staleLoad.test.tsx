@@ -483,14 +483,14 @@ describe('JobDetail cross-record stale-load guard', () => {
         if (jobsCalls === 1) return buildChain({ data: JOB_A, error: null });
         // Start Job's refetch — held open, and carrying the OLDER answer.
         if (jobsCalls === 2) return buildGatedChain({ data: JOB_A_STALE, error: null }, staleGate.promise);
-        // #3 is handleCancelJob's own `.update()` on `jobs`, not a read.
-        if (jobsCalls === 3) return buildChain({ data: [JOB_A], error: null });
-        // Cancel Job's refetch — answers immediately, and is the NEWER answer.
+        // Cancel Job writes through the edit_jobs RPC (#1979), so #3 is its refetch: — answers immediately, and is the NEWER answer.
         return buildChain({ data: JOB_A_FRESH, error: null });
       }
       return buildChain({ data: [], error: null });
     });
-    mockRpc.mockResolvedValue({ data: { ok: true }, error: null });
+    mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'
+      ? { data: { updated: [], cancelled: ['job-a'], deleted: [], skipped: [] }, error: null }
+      : { data: { ok: true }, error: null }));
 
     mountAt('/jobs/job-a');
     await screen.findByRole('heading', { name: 'J-AAAA-1001' });
@@ -504,7 +504,7 @@ describe('JobDetail cross-record stale-load guard', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Cancel Job/ })); });
     const confirmButtons = screen.getAllByRole('button', { name: /Cancel Job/ });
     await act(async () => { fireEvent.click(confirmButtons[confirmButtons.length - 1]); });
-    await waitFor(() => expect(jobsCalls).toBe(4));
+    await waitFor(() => expect(jobsCalls).toBe(3));
     await screen.findByRole('heading', { name: 'J-AAAA-FRESH' });
 
     // The OLDER refetch lands last. It must install nothing.
@@ -535,12 +535,14 @@ describe('JobDetail cross-record stale-load guard', () => {
       if (table === 'jobs') {
         jobsCalls += 1;
         if (jobsCalls === 1) return buildChain({ data: JOB_A, error: null });
-        // #2 is A's cancel `.update()` — held open across the navigation.
-        if (jobsCalls === 2) return buildGatedChain({ data: [JOB_A], error: null }, cancelGate.promise);
         return buildChain({ data: JOB_B, error: null });
       }
       return buildChain({ data: [], error: null });
     });
+    // A's cancel (the edit_jobs RPC, #1979) is held open across the navigation.
+    mockRpc.mockImplementation((fn: string) => (fn === 'edit_jobs'
+      ? cancelGate.promise.then(() => ({ data: { updated: [], cancelled: ['job-a'], deleted: [], skipped: [] }, error: null }))
+      : Promise.resolve({ data: null, error: null })));
 
     const router = mountAt('/jobs/job-a');
     await screen.findByRole('heading', { name: 'J-AAAA-1001' });
@@ -550,7 +552,7 @@ describe('JobDetail cross-record stale-load guard', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Cancel Job/ })); });
     const confirmButtons = screen.getAllByRole('button', { name: /Cancel Job/ });
     await act(async () => { fireEvent.click(confirmButtons[confirmButtons.length - 1]); });
-    await waitFor(() => expect(jobsCalls).toBe(2));
+    await waitFor(() => expect(mockRpc.mock.calls.some((c) => c[0] === 'edit_jobs')).toBe(true));
 
     // The operator moves to job B and starts editing it.
     await act(async () => { await router.navigate('/jobs/job-b'); });
@@ -625,6 +627,9 @@ describe('JobDetail cross-record stale-load guard', () => {
       if (fn === 'save_job') {
         return saveGate.promise.then(() => ({ data: { job_id: 'job-created-1' }, error: null }));
       }
+      if (fn === 'edit_jobs') {
+        return Promise.resolve({ data: { updated: ['job-created-1'], cancelled: [], deleted: [], skipped: [] }, error: null });
+      }
       if (fn === 'check_customer_credit_limit') {
         return Promise.resolve({
           data: { exceeded: true, farm_name: 'Farm Alpha', outstanding_ar: 90000, credit_limit: 50000 },
@@ -681,7 +686,7 @@ describe('JobDetail cross-record stale-load guard', () => {
    * The credit check must survive the save handler's EARLY-RETURN BACKSTOPS.
    *
    * Saving a job commits in stages: `save_job` writes the row, then two fallible sub-writes
-   * follow — the crew/loader `.update()` and the override applicator assignment. Each has its
+   * follow — the crew/loader edit_jobs write and the override applicator assignment. Each has its
    * own catch that toasts 'Job created, but …' and RETURNS, precisely because the job row
    * HAS committed and a retry from /jobs/new would mint a SECOND job. Both those catches
    * deliberately preserve other post-commit work on the way out (they still write the
@@ -701,20 +706,22 @@ describe('JobDetail cross-record stale-load guard', () => {
    * not save' toast fires, and check_customer_credit_limit is never called at all.
    */
   it('still runs the credit check when the post-commit crew/loader write fails and the handler bails early', async () => {
-    // Flipped the moment save_job answers. The crew/loader `.update()` is the only
-    // from('jobs') call that happens after the commit, so this targets it without
-    // disturbing the new-job page's own lookups.
-    let jobCommitted = false;
     mockFrom.mockImplementation((table: string) => {
       if (table === 'customers') {
         return buildChain({ data: [{ id: 'cust-1', farm_name: 'Farm Alpha', is_active: true }], error: null });
       }
-      if (table === 'jobs' && jobCommitted) {
+      if (table === 'jobs') return buildChain({ data: JOB_B, error: null });
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn === 'save_job') {
+        return Promise.resolve({ data: { job_id: 'job-created-2' }, error: null });
+      }
+      if (fn === 'edit_jobs') {
         // The real failure this backstop was written for: the crew row was deleted by
-        // another user, so the ground_crew_id FK rejects the update. Modelled the way
-        // PostgREST actually reports it — the await RESOLVES with { data: null, error },
-        // a plain object (not an Error), and checkMutationResult is what throws.
-        return buildChain({
+        // another user, so the ground_crew_id FK rejects the crew/loader write (now the
+        // edit_jobs RPC, #1979). PostgREST RESOLVES with { data: null, error }.
+        return Promise.resolve({
           data: null,
           error: {
             code: '23503',
@@ -723,14 +730,6 @@ describe('JobDetail cross-record stale-load guard', () => {
             hint: null,
           },
         });
-      }
-      if (table === 'jobs') return buildChain({ data: JOB_B, error: null });
-      return buildChain({ data: [], error: null });
-    });
-    mockRpc.mockImplementation((fn: string) => {
-      if (fn === 'save_job') {
-        jobCommitted = true;
-        return Promise.resolve({ data: { job_id: 'job-created-2' }, error: null });
       }
       if (fn === 'check_customer_credit_limit') {
         return Promise.resolve({

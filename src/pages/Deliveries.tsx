@@ -903,11 +903,13 @@ export default function Deliveries() {
         (data || []).map((d: Record<string, unknown>) => (d.customer as { parent_customer_id?: string })?.parent_customer_id).filter(Boolean) as string[]
       )];
       // #1995: farm groups can be several levels deep; show the TOP parent, like the main list.
-      const pMap: Record<string, FarmParentRow> = {};
+      let pMap: Record<string, FarmParentRow> = {};
       let toRead = pIds;
-      for (let depth = 0; toRead.length > 0 && depth < 20; depth++) {
+      // Ends: each round reads only ids not read yet, so even a loop in the data stops.
+      while (toRead.length > 0) {
         const { data: parents, error: pErr } = await supabase.from('customers').select('id, farm_name, parent_customer_id').in('id', toRead);
-        if (pErr) { Sentry.captureException(pErr, { tags: { source: 'fetch', page: 'deliveries' } }); break; }
+        // A failed read part-way up would show a middle farm as the top: show no farm group instead.
+        if (pErr) { Sentry.captureException(pErr, { tags: { source: 'fetch', page: 'deliveries' } }); pMap = {}; break; }
         (parents || []).forEach((p) => { pMap[p.id] = { farm_name: p.farm_name, parent_customer_id: p.parent_customer_id }; });
         toRead = [...new Set((parents || []).map((p) => p.parent_customer_id).filter((id): id is string => !!id && !(id in pMap)))];
       }

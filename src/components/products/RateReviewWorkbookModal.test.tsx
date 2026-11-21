@@ -148,10 +148,13 @@ describe('RateReviewWorkbookModal', () => {
     const view = render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
     expect(await screen.findByText('Parent rate changed since this draft was made: was "4 oz/A", now "8 oz/A". Approving still saves it.')).toBeInTheDocument();
     view.unmount();
-    sessionStorage.setItem(name, stored({ was: 4, now: '8 oz/A' }));
-    render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
-    expect(await screen.findByText(/unreadable.*rows are unavailable/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText('Rate review preview')).not.toBeInTheDocument();
+    for (const bad of [{ was: 4, now: '8 oz/A' }, { was: '', now: '8 oz/A' }, { was: '4 oz/A', now: ' ' }]) {
+      sessionStorage.setItem(name, stored(bad));
+      const damaged = render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+      expect(await screen.findByText(/unreadable.*rows are unavailable/i)).toBeInTheDocument();
+      expect(screen.queryByLabelText('Rate review preview')).not.toBeInTheDocument();
+      damaged.unmount();
+    }
     expect(H.commit).not.toHaveBeenCalled();
   });
 

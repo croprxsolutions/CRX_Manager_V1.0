@@ -48,7 +48,8 @@ const isStoredOutcome = (value: unknown) => {
 const isLabelCheck = (value: unknown) => isRecord(value) && typeof value.status === 'string'
   && (value.status !== 'above' || (Array.isArray(value.above) && value.above.every(isRecord)))
   && (value.why == null || typeof value.why === 'string');
-const isParentChanged = (value: unknown) => isRecord(value) && typeof value.was === 'string' && nullableText(value.now);
+const filledText = (value: unknown) => typeof value === 'string' && value.trim() !== '';
+const isParentChanged = (value: unknown) => isRecord(value) && filledText(value.was) && (value.now === null || filledText(value.now));
 const isStoredPreviewRow = (value: unknown, count: number) => {
   if (!isRecord(value)) return false;
   if (typeof value.index !== 'number' || !Number.isInteger(value.index) || value.index < 0 || value.index >= count

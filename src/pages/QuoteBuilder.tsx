@@ -2160,10 +2160,14 @@ export default function QuoteBuilder() {
       if (s._key !== key) return s;
       // A live job's section keeps its needed-by date (save_quote refuses SECTION_HAS_JOB_LOCKED).
       const jobLocked = Boolean(s.id && sectionJobs[s.id] && sectionJobs[s.id].status !== 'cancelled');
+      if (jobLocked || !timing || !timingWindows) return { ...s, timing };
+      const today = todayInBusinessTz();
+      // A date still equal to the old timing's window start was auto-filled, so it follows the new timing; a typed date stays.
+      const autoFilled = Boolean(s.timing && s.needed_by_date === timingWindowStart(timingWindows, s.timing, today));
       return {
         ...s,
         timing,
-        needed_by_date: s.needed_by_date || jobLocked || !timing || !timingWindows ? s.needed_by_date : timingWindowStart(timingWindows, timing, todayInBusinessTz()),
+        needed_by_date: s.needed_by_date && !autoFilled ? s.needed_by_date : timingWindowStart(timingWindows, timing, today),
       };
     }));
   };

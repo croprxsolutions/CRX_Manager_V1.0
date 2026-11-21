@@ -20,7 +20,7 @@ interface PlanProduct { product_id: string; product_name: string; stock_unit: st
   incoming: Qty; drafted: Qty; committed: Qty; suggested: Qty; could_add: Qty; over_drawn: Qty;
   not_complete: boolean; reasons: string[] | null; suggestions: Suggestion[]; rows: DemandRow[];
   purchase_orders: PlanPo[] }
-interface BookingRef { quote_number: string; customer_name: string; product_name: string; quantity: Qty; section_name?: string }
+interface BookingRef { quote_number: string; customer_name: string | null; product_name: string; quantity: Qty; section_name?: string | null }
 interface ReviewRow { quote_id: string; section_id: string; quote_number: string; customer_name: string;
   section_name: string; timing: string | null; confidence: string | null; needed_by_date: string | null; window_end: string }
 export interface PurchasingPlan { today: string; lead_days: number; months_ahead: number; horizon_end: string;
@@ -38,7 +38,8 @@ const TIMING: Record<string, string> = { pre_plant: 'Pre-plant', in_season: 'In 
 const CLASS: Record<string, string> = { committed: 'Committed', could_add: 'Could add', shown: 'Maybe (shown only)' };
 
 const num = (q: Qty) => Number(q);
-const qty = (q: Qty) => num(q).toLocaleString('en-US', { maximumFractionDigits: 3 });
+// A positive amount under the shown precision reads "<0.001", never "0".
+const qty = (q: Qty) => (num(q) > 0 && num(q) < 0.0005 ? '<0.001' : num(q).toLocaleString('en-US', { maximumFractionDigits: 3 }));
 const day = (d: string | null) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
 
 // eslint-disable-next-line react-refresh/only-export-components -- exported for its unit test
@@ -168,7 +169,7 @@ export default function PurchasingTab() {
           </p>
           <ul className="mt-2 space-y-1">
             {plan.firm_needs_date.map((r, i) => (
-              <li key={i}>{r.customer_name} · Booking {r.quote_number} · {r.section_name} · {r.product_name}: {qty(r.quantity)}</li>
+              <li key={i}>{[r.customer_name, `Booking ${r.quote_number}`, r.section_name, r.product_name].filter(Boolean).join(' · ')}: {qty(r.quantity)}</li>
             ))}
           </ul>
         </div>

@@ -1,5 +1,6 @@
 import { supabase } from './db';
 import { Sentry } from './sentry';
+import type { BookingTiming, BookingConfidence } from '../types';
 
 /**
  * The Settings-page defaults that shape new records: Default Tier (new customers)
@@ -49,8 +50,7 @@ export function pickedExpiryStart(today: string, validDays: number | null, seaso
   return start < seasonEnd ? start : seasonEnd;
 }
 
-export type BookingTiming = 'pre_plant' | 'in_season' | 'late_summer';
-export type BookingConfidence = 'firm' | 'likely' | 'maybe';
+export type { BookingTiming, BookingConfidence };
 export type TimingWindows = Record<BookingTiming, { start: string; end: string }>;
 export const DEFAULT_TIMING_WINDOWS: TimingWindows = {
   pre_plant: { start: '03-01', end: '05-15' },

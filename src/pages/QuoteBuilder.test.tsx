@@ -2275,7 +2275,36 @@ describe('QuoteBuilder', () => {
     fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => expect(saves).toBe(2));
     expect(sentSection(1).timing).toBe('late_summer');
-    expect(sentSection(1).needed_by_date).toMatch(/^\d{4}-07-16$/);
+    expect(sentSection(1).needed_by_date).toBe('2026-07-16');
+    await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+
+    // Sol (2026-11-20) MED: an auto-filled date follows a later timing change; a typed date stays.
+    fireEvent.change(screen.getByLabelText('Timing'), { target: { value: 'pre_plant' } });
+    fireEvent.click(screen.getByText('Save draft'));
+    await waitFor(() => expect(saves).toBe(3));
+    expect(sentSection(2).needed_by_date).toBe('2026-03-16');
+  });
+
+  it('a timing change keeps a needed-by date the rep chose', async () => {
+    const fixture = makeQuoteFixture('draft', 7);
+    const quote = { ...fixture.quote, is_planned: false };
+    const section = { ...fixture.section, timing: 'pre_plant', confidence: 'firm', needed_by_date: '2030-05-05' };
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'app_settings' ? { setting_value: '{}' } : table === 'quotes' ? quote : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item] : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }] : table === 'products' ? [fixture.product] : [], error: null }));
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'save_quote'
+      ? { data: { status: 'saved', quote_id: quote.id, row_version: 8, item_ids: {}, section_ids: {} }, error: null }
+      : { data: null, error: null }));
+
+    renderQuoteBuilder(quote.id);
+    const timing = await screen.findByLabelText('Timing') as HTMLSelectElement;
+    await waitFor(() => expect(timing.value).toBe('pre_plant'));
+    await waitFor(() => expect(timing).not.toBeDisabled());
+    fireEvent.change(timing, { target: { value: 'late_summer' } });
+    fireEvent.click(screen.getByText('Save draft'));
+    await waitFor(() => expect(mockRpc.mock.calls.some(([name]) => name === 'save_quote')).toBe(true));
+    const sent = (mockRpc.mock.calls.find(([name]) => name === 'save_quote')![1] as {
+      p_sections: Array<{ timing: string | null; needed_by_date: string | null }>;
+    }).p_sections[0];
+    expect(sent).toMatchObject({ timing: 'late_summer', needed_by_date: '2030-05-05' });
   });
 
   it('a timing pick on a section with a live job leaves its needed-by date empty (the job locks it)', async () => {
@@ -2283,7 +2312,8 @@ describe('QuoteBuilder', () => {
     const quote = { ...fixture.quote, is_planned: true };
     const section = { ...fixture.section, field_id: 'field-1', needed_by_date: null };
     const job = { id: 'job-7', job_number: 'J-7', status: 'scheduled', quote_section_id: section.id };
-    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'quotes' ? quote
+    // Serve the timing windows so the pick is live and only the job rule can keep the date empty.
+    mockFrom.mockImplementation((table: string) => buildChain({ data: table === 'app_settings' ? { setting_value: '{}' } : table === 'quotes' ? quote
       : table === 'quote_sections' ? [section] : table === 'quote_items' ? [fixture.item]
         : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
           : table === 'products' ? [fixture.product] : table === 'fields' ? [HOME_QUARTER_OF_CUSTOMER_1]
@@ -2293,6 +2323,7 @@ describe('QuoteBuilder', () => {
       : { data: null, error: null }));
     renderQuoteBuilder(quote.id);
     await screen.findByText(/Job J-7 was scheduled from this section/);
+    await waitFor(() => expect(screen.getByLabelText('Timing')).not.toBeDisabled());
     fireEvent.change(screen.getByLabelText('Timing'), { target: { value: 'in_season' } });
     fireEvent.click(screen.getByText('Save draft'));
     await waitFor(() => expect(mockRpc.mock.calls.some(([name]) => name === 'save_quote')).toBe(true));

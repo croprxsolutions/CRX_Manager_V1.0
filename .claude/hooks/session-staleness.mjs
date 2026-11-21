@@ -308,7 +308,8 @@ try {
         `   run from that folder, so they may enforce outdated rules (for example, refusing valid gpt-6.2-sol Sol proofs).\n` +
         `   Fix: check that none of its uncommitted files change upstream\n` +
         `   (compare git -C ${root} status --short with git -C ${root} diff --name-only HEAD origin/main), then run:\n` +
-        `   git -C ${root} merge --ff-only origin/main`
+        `   git -C ${root} merge --ff-only origin/main\n` +
+        `   If git says it cannot fast-forward, that folder has its own local commits: stop and ask before changing it.`
       );
     }
   }

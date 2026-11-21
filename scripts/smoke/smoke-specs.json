@@ -1645,6 +1645,19 @@
         "security"
       ]
     },
+    "edit_jobs": {
+      "chain": "smoke-edit-jobs.sql",
+      "container_only": true,
+      "container_prover": "prove-edit-jobs-real-schema.mjs",
+      "description": "#1979 PR A (REQUIRES 20270203110000): edit_jobs, the one server function for spray job planning edits, cancel and soft delete. Auth probes (no user, anon, applicator, forged actor, inactive rep) refused with nothing written; mixed-status cancel with skips and hold release; same-key replay and refusal of other ids or another action; delete skips invoiced; every refused shape and value, also on an all-skipped selection; patch meaning (absent keys untouched, null clears); license rule unchanged; billed jobs skipped as invoiced for a rep and an admin, including one billed through a deleted blend ticket; changes + cancel in one call; a refused patch aborts the combined cancel; 500 jobs in one call (timed). Ends in SMOKE_PASS_ROLLBACK.",
+      "covers": [
+        "edit_jobs"
+      ],
+      "area": [
+        "lifecycle",
+        "inventory"
+      ]
+    },
     "enforce_billed_job_immutability": {
       "chain": "smoke-billed-job-immutability.sql",
       "description": "Field-app parity #12 + P1 remediation (REQUIRES 20260625190000 & 20260629120000): regression guard for the _enforce_billed_job_immutability BEFORE-UPDATE trigger on jobs. Proves with a sales_rep under RLS (role authenticated) on an INVOICED job: BLOCKED — soft-delete (deleted_at NULL->non-NULL) RAISES 'cannot be deleted by a non-admin'; rewrite total_price_cents RAISES 'cannot edit its billed-relevant fields'; rewrite invoice_id->NULL (detach) and invoice_id->other (repoint) BOTH RAISE the same (the P1 remediation closing the invoice_id hole); and a sanity check that no blocked path leaked a mutation. EXEMPT — printed_at/last_printed_by (print audit), applied_acres (as-applied recompute), updated_at/updated_by (bookkeeping) all SUCCEED for the non-admin. HATCH — an ADMIN (jwt sub=admin, is_admin()=true) CAN correct total_price_cents; the app.admin_override='true' definer-flow hatch lets an otherwise-blocked non-admin write through. LEGIT WRITERS — transfer_job_to_invoice (writes jobs.invoice_id while status='completed', guard early-returns) and transfer_invoice_to_job (clears invoice_id under the override hatch) both still succeed. Self-contained fixtures; ends in SMOKE_PASS_ROLLBACK. (Trigger-only migration; the covers token is the trigger/function name so `--spec enforce_billed_job_immutability` resolves this chain.)",

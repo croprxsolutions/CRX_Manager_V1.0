@@ -40,7 +40,7 @@ try {
     'the candidate must have replayed (its preflight and postflight passed)');
   if (scalar(`SELECT count(*) FROM public.inventory WHERE id = '${INV}';`) === '0') {
     const r = docker(['exec', '-i', NAME, 'psql', '-U', 'supabase_admin', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'], { allowFailure: true, input: `
-INSERT INTO public.products (id, product_name, is_active, product_form) VALUES ('${PROD}', '[1912] product', true, 'liquid');
+INSERT INTO public.products (id, product_name, is_active, product_form, inventory_unit) VALUES ('${PROD}', '[1912] product', true, 'liquid', 'Gal');
 INSERT INTO public.inventory (id, product_id, location, quantity_available, quantity_prebooked, quantity_on_order) VALUES ('${INV}', '${PROD}', 'Main Warehouse', 10, 0, 0);` });
     assert.equal(r.status, 0, `seed failed:\n${r.stderr}`);
   }

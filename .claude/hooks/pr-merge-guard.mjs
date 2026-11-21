@@ -551,8 +551,11 @@ function gateRequest(request) {
     try {
       const files = String(hardGateGh(["api", "--paginate", `${ghApiRepoPath(request.repo)}/pulls/${pr.number}/files?per_page=100`, "--jq", ".[] | [.status, .filename] | @tsv"]))
         .split(/\r?\n/).filter(Boolean).map((l) => l.split("\t"));
-      const snapFile = skipStateDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]).map((d) => path.join(d, "applied-migrations.json")).find((f) => existsSync(f));
-      live = unappliedMigrationsProblem({ files, snapshot: snapFile ? JSON.parse(readFileSync(snapFile, "utf8")) : null });
+      // The apply refreshes the snapshot in the checkout it ran from (a worktree), so look there first, then the main checkout (Codex P2, #2098).
+      const folders = [payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()].filter(Boolean);
+      const snapFiles = [...new Set([...folders.map((d) => path.join(d, ".claude", "session-state")), ...skipStateDirs(folders)].map((d) => path.join(d, "applied-migrations.json")))].filter((f) => existsSync(f));
+      const results = snapFiles.length ? snapFiles.map((f) => unappliedMigrationsProblem({ files, snapshot: JSON.parse(readFileSync(f, "utf8")) })) : [unappliedMigrationsProblem({ files, snapshot: null })];
+      live = results.includes(null) ? null : results[0];
     } catch (error) {
       live = `its migrations could not be checked against the live ledger (${String(error?.message || error).split(/\r?\n/)[0]}) (fail closed)`;
     }

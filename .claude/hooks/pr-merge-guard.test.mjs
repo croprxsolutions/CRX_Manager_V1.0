@@ -652,6 +652,8 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
     "the pass is checked for this exact PR, and an unreadable pass means none");
   ok(/if \(base === "main"\) \{\s*const github = stagingDestructiveProblem\([\s\S]{0,300}\);\s*if \(github\) deny\(/.test(gateRequestSource),
     "a release pass never lets an agent merge a .github/ change into main (Codex P1, PR #2098)");
+  ok(/folders\.map\(\(d\) => path\.join\(d, "\.claude", "session-state"\)\)[\s\S]{0,300}unappliedMigrationsProblem/.test(gateRequestSource),
+    "a release-pass merge into main reads the applying checkout's migration snapshot, not only the main checkout's (Codex P2, #2098)");
   ok(/headRefName,headRefOid/.test(gateRequestSource), "the guard reads the PR's head branch name to spot the back-merge");
   ok(gateRequestSource.indexOf("agentMergeProblem(") < gateRequestSource.indexOf("pullRequestReviewBlocked(pr)"),
     "the main and back-merge refusal runs before any allow point");

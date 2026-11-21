@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Star, Trash2 } from 'lucide-react';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
@@ -29,6 +29,11 @@ interface ProductVendorsSectionProps {
   userId: string | null;
   /** Called with the new preferred vendor's name; the database has already copied it onto the product. */
   onPreferredChanged: (vendorName: string) => void;
+  /**
+   * KI-170: true when the re-read after a link failed, so which vendor is preferred (and copied onto the
+   * product) is unknown; false once a re-read succeeds. The page blocks its Save while unknown.
+   */
+  onPreferredUnknown: (unknown: boolean) => void;
 }
 
 /** Every vendor an admin can add, page by page: one read stops silently at 1,000 rows. */
@@ -148,10 +153,35 @@ function AddVendorBar({ picker, addable, pick, onPick, disabled, onAdd }: AddVen
 }
 
 /**
+ * KI-170: after a failed re-read, who is preferred is unknown until a later re-read of the same product
+ * succeeds; that read's preferred vendor is mirrored and the page may save again. Returns "mark unknown".
+ */
+function usePreferredSettle(
+  productId: string,
+  linked: Loaded<ProductVendor[]>,
+  onPreferredChanged: (vendorName: string) => void,
+  onPreferredUnknown: (unknown: boolean) => void,
+) {
+  const [unknownFor, setUnknownFor] = useState<string | null>(null);
+  const freshList = linked.status === 'loaded' && !linked.stale && !linked.refreshing ? linked.data : null;
+  useEffect(() => {
+    if (unknownFor !== productId || !freshList) return;
+    const preferred = freshList.find((v) => v.is_preferred)?.vendor_name;
+    if (preferred) onPreferredChanged(preferred);
+    setUnknownFor(null);
+    onPreferredUnknown(false);
+  }, [unknownFor, productId, freshList, onPreferredChanged, onPreferredUnknown]);
+  return () => {
+    setUnknownFor(productId);
+    onPreferredUnknown(true);
+  };
+}
+
+/**
  * The vendors a product can be bought from (WP-PM-15b). Exactly one is preferred, and the product's
  * vendor name is a copy of it: the database keeps that copy and refuses to drop the preferred vendor.
  */
-export default function ProductVendorsSection({ productId, productName, isAdmin, userId, onPreferredChanged }: ProductVendorsSectionProps) {
+export default function ProductVendorsSection({ productId, productName, isAdmin, userId, onPreferredChanged, onPreferredUnknown }: ProductVendorsSectionProps) {
   const { toast } = useToast();
   // Costs come back only for admins, so a role change is a different read.
   const linked = useLoad(`vendors:${productId}:${isAdmin}`, () => listProductVendors(productId), {
@@ -169,6 +199,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
   const [busyFor, setBusyFor] = useState<string | null>(null);
   const busy = busyFor === productId;
   const [removing, setRemoving] = useState<ProductVendor | null>(null);
+  const markPreferredUnknown = usePreferredSettle(productId, linked, onPreferredChanged, onPreferredUnknown);
   // A new product or role starts clean: no pick and no open removal (React's reset-on-prop-change pattern).
   // The picker list is re-read only after a role change, so this also drops a pick across a picker reload.
   const owner = `${productId}:${isAdmin}`;
@@ -202,12 +233,15 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
       setPickedVendorId('');
       if (productRef.current !== productId) return; // the screen moved to another product; its own read is running
       // A first vendor becomes preferred even when not asked, so report whichever vendor now is.
-      // If the re-read fails, a vendor just made preferred (or the first one, preferred by default) is still the one to show.
-      const wasFirst = !vendors?.some((v) => v.is_preferred);
       const fresh = await linked.reload();
       if (fresh.status === 'skipped') return; // a newer read owns the list; guess nothing
-      const preferred = (fresh.status === 'applied' ? fresh.data.find((v) => v.is_preferred)?.vendor_name : undefined)
-        ?? (makePreferred || wasFirst ? name : null);
+      if (fresh.status === 'failed') {
+        // KI-170: another admin may have changed the preferred vendor meanwhile, so guess nothing; the
+        // page blocks Save until a re-read (Try again above the list) says which vendor is preferred.
+        markPreferredUnknown();
+        return;
+      }
+      const preferred = fresh.data.find((v) => v.is_preferred)?.vendor_name;
       if (preferred) onPreferredChanged(preferred);
     } catch (error) {
       toast('error', productVendorErrorMessage(error));

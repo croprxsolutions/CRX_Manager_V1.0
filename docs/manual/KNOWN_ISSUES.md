@@ -1230,14 +1230,17 @@ Since KI-143, vendor bills are checked against what arrived (capped at the order
 still compares billed amounts with the ordered value. Fix: decide whether it should follow the same rule.
 
 ### KI-170 — Two admins changing a product's vendors at the same moment can show the wrong preferred vendor
-**LOW · OPEN · products/purchasing · found 2026-11-20 (Sol 6.2 plan review, shared data loading pilot) · unassigned (Product Master Wave 2)**
+**LOW · FIXED ON STAGING (Product Master Wave 2 piece 6; live with the next release) · products/purchasing · found 2026-11-20 (Sol 6.2 plan review, shared data loading pilot) · Claude**
 After an admin links a vendor, the Vendors section re-reads the product's vendors to learn which one is preferred.
-If that re-read fails, it falls back to "the vendor just made preferred, or the first vendor". If two admins link the
-first vendor to the same product at the same moment, or one makes V2 preferred just before the other makes V1 preferred
-(Luna, 2026-11-20), that fallback can name the loser's vendor, and the product page mirrors that name into its form
-until a reload. The database keeps the true preferred vendor; the list says it may be
-out of date and offers Try again. Needs two admins acting together and a failed read. Fix: on a failed re-read, block
-the product's Save until the vendors are re-read (a `ProductDetail.tsx` change, so Wave 2).
+If that re-read failed, it fell back to "the vendor just made preferred, or the first vendor". If two admins linked the
+first vendor to the same product at the same moment, or one made V2 preferred just before the other made V1 preferred
+(Luna, 2026-11-20), that fallback could name the loser's vendor, and the product page mirrored that name into its form
+until a reload. The database always kept the true preferred vendor. Fix (screen only): a failed re-read now guesses
+nothing; the product page turns Save off ("Save is off until the vendors are re-read") until Try again in Vendors
+re-reads the list, and then mirrors the preferred vendor that read returns. Proof: `ProductVendorsSection.test.tsx`
+(no guess after a failed re-read for a preferred change or a first vendor; the re-read, not the click, decides the
+name; another product's list never settles it) and `ProductDetail.pricing-flow.test.tsx` (Save off, then on), plus the
+running local test app (forced failed re-read, Save off, Try again turns it back on).
 
 ### KI-176 — Cancelling part of a large booking's jobs rebuilds its stock holds once per job
 **LOW · ACCEPTED · jobs/bookings · found 2026-11-21 (Sol round 5, #2047) · Taha (bookings, after 2026-12-15)**

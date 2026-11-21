@@ -105,8 +105,11 @@ function chainable(resolveWith: unknown) {
   return builder;
 }
 
-// The Vendors section has its own tests; these page tests do not mock its reads.
-vi.mock('../components/products/ProductVendorsSection', () => ({ default: () => null }));
+// The Vendors section has its own tests; these page tests only keep its callbacks (KI-170).
+const vendorSection = vi.hoisted(() => ({ props: null as null | { onPreferredUnknown: (unknown: boolean) => void } }));
+vi.mock('../components/products/ProductVendorsSection', () => ({
+  default: (props: { onPreferredUnknown: (unknown: boolean) => void }) => { vendorSection.props = props; return null; },
+}));
 vi.mock('../lib/db', async () => {
   // Use the REAL sanitizeError. Stubbing it as `e instanceof Error ? e.message : …`
   // would re-implement the very defect these screens were just fixed for: a
@@ -182,7 +185,9 @@ vi.mock('../lib/productCostBasis', async (importOriginal) => {
 });
 
 vi.mock('../components/products/ProductPriceHistory', () => ({
-  default: ({ costBasisWorkspace, onSelectSupplierBasis, onSelectPurchaseBasis }: {
+  default: ({ costBasisWorkspace, costBasisBusy, reloadToken, onSelectSupplierBasis, onSelectPurchaseBasis }: {
+    costBasisBusy?: boolean;
+    reloadToken?: number;
     costBasisWorkspace?: {
       supplier_candidates: Array<{ supplier_price_observation_id: string }>;
       purchase_candidates: Array<{ purchase_order_item_id: string }>;
@@ -190,7 +195,7 @@ vi.mock('../components/products/ProductPriceHistory', () => ({
     onSelectSupplierBasis?: (candidate: unknown) => void;
     onSelectPurchaseBasis?: (candidate: unknown) => void;
   }) => (
-    <div>
+    <div data-testid="price-history" data-token={reloadToken} data-busy={String(Boolean(costBasisBusy))}>
       {costBasisWorkspace?.supplier_candidates.map((candidate) => (
         <button key={candidate.supplier_price_observation_id} type="button" onClick={() => onSelectSupplierBasis?.(candidate)}>
           Select supplier evidence
@@ -1072,5 +1077,92 @@ describe('ProductDetail governed pricing flow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
     expect(await screen.findByLabelText('Source')).toBeInTheDocument();
     expect(mockToast).not.toHaveBeenCalledWith('error', 'Save or discard the unsaved Product details before reviewing a pricing change.');
+  });
+
+  // PM Wave 2 piece 6: the product, cost history and cost-basis reads load through useLoad.
+  it('a failed first product read offers Try again instead of an empty form, and Try again recovers', async () => {
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    render(<ProductDetail />);
+    expect(await screen.findByText('Could not load this product.')).toBeInTheDocument();
+    expect(screen.queryByText('Product not found')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save Changes' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByLabelText('Quoting Notes')).toHaveValue('Default quote guidance');
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
+  });
+
+  it('says Product not found only when the read succeeds with no product', async () => {
+    productLoadResults.push({ data: null, error: null });
+    render(<ProductDetail />);
+    expect(await screen.findByText('Product not found')).toBeInTheDocument();
+    expect(screen.queryByText('Could not load this product.')).not.toBeInTheDocument();
+  });
+
+  it('a failed refresh after a save locks editing until the product reloads', async () => {
+    render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(await screen.findByText(/could not be refreshed, so what is shown may be out of date/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(screen.getByLabelText('Quoting Notes')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    await waitFor(() => expect(screen.queryByText(/could not be refreshed/i)).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
+    expect(screen.getByLabelText('Quoting Notes')).toBeEnabled();
+  });
+
+  it('a failed cost history read offers Try again, which recovers', async () => {
+    costHistoryLoadResult = { data: null, error: { message: 'history unavailable' } };
+    render(<ProductDetail />);
+    const failure = await screen.findByText('Cost history could not be loaded.');
+    costHistoryLoadResult = {
+      data: [{ id: 'history-1', old_cost: 49, new_cost: 50, change_note: 'Legacy cost update', changed_at: '2026-08-04T12:00:00Z' }],
+      error: null,
+    };
+    fireEvent.click(within(failure.parentElement!).getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('Legacy cost update')).toBeInTheDocument();
+    expect(screen.queryByText('Cost history could not be loaded.')).not.toBeInTheDocument();
+  });
+
+  it('a failed cost-basis read says so, not that options are unavailable, and Try again recovers', async () => {
+    mockGetCostBasisWorkspace.mockRejectedValueOnce(new Error('workspace unavailable'));
+    render(<ProductDetail />);
+    const failure = await screen.findByText('Could not load the governed cost-basis options.');
+    expect(screen.queryByText(/options are unavailable for this Product/)).not.toBeInTheDocument();
+    fireEvent.click(within(failure.parentElement!).getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByRole('button', { name: 'Select supplier evidence' })).toBeInTheDocument();
+    expect(screen.queryByText('Could not load the governed cost-basis options.')).not.toBeInTheDocument();
+  });
+
+  it('after a pricing apply the history cards refresh at once and cost-basis selection waits for the new options', async () => {
+    render(<ProductDetail />);
+    await screen.findByRole('button', { name: 'Select supplier evidence' });
+    expect(screen.getByTestId('price-history')).toHaveAttribute('data-token', '0');
+    fireEvent.change(screen.getByLabelText('Pricing mode'), { target: { value: 'margin_driven' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Update cost' }));
+    fireEvent.change(screen.getByLabelText('New Cost'), { target: { value: '55.00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Review Cost Change' }));
+    await giveSourceAndReason('Helena list', 'Cost up');
+    await screen.findByText('Ready for approval');
+    // The cost-basis re-read never answers: the cards must not wait for it (Sol r2 #29).
+    mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply approved changes' }));
+    await waitFor(() => expect(screen.getByTestId('price-history')).toHaveAttribute('data-token', '1'));
+    expect(screen.getByTestId('price-history')).toHaveAttribute('data-busy', 'true');
+    expect(screen.getByText('Refreshing the cost-basis options…')).toBeInTheDocument();
+  });
+
+  it('KI-170: Save stays off while the preferred vendor is unknown after a failed vendor re-read', async () => {
+    render(<ProductDetail />);
+    await screen.findByLabelText('Quoting Notes');
+    await waitFor(() => expect(vendorSection.props).not.toBeNull());
+    act(() => vendorSection.props!.onPreferredUnknown(true));
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(screen.getByText(/Save is off until the vendors are re-read/)).toBeInTheDocument();
+    act(() => vendorSection.props!.onPreferredUnknown(false));
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
+    expect(screen.queryByText(/Save is off until the vendors are re-read/)).not.toBeInTheDocument();
   });
 });

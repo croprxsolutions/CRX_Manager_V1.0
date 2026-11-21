@@ -1,0 +1,320 @@
+#!/usr/bin/env node
+/**
+ * Real-schema proof for 20270201120000_inactive_customer_refuses_new_work (#2000; contract
+ * docs/plans/2026-11-19-inactive-customer-no-new-work-CONTRACT.md, proof cases 1 to 8).
+ *
+ * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
+ * replays every post-baseline migration before the candidate (KI-148's deactivation check included), shows
+ * an inactive customer can get a new order today, applies the candidate, then checks that new, reopened and
+ * moved orders, deliveries, holds and spray jobs are refused for an inactive customer for every role, that
+ * finishing down existing work stays allowed, and that two sessions racing a deactivation against a new
+ * order cannot both win.
+ *
+ * Run: node scripts/smoke/prove-inactive-customer-new-work-real-schema.mjs   (needs Docker)
+ * Prints INACTIVE_CUSTOMER_NEW_WORK_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
+ */
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
+process.env.UNDO_PATHS_CONTAINER ||= `crx-inactive-work-${process.pid}-${Date.now().toString(36)}`;
+const { buildContainer, removeContainer, seedUsers, scalar, psql, claims, USERS, ROOT, NAME, docker, id } =
+  await import('./undo-paths/harness.mjs');
+
+const CANDIDATE = '20270201120000_inactive_customer_refuses_new_work.sql';
+const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
+const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
+const ADMIN = USERS.admin;
+const REP = USERS.rep;
+const DRIVER = USERS.driver;
+const APPLICATOR = USERS.applicator;
+const PRODUCT = id('d1');
+const PRODUCT2 = id('d2');
+const ACTIVE = id('c1'); // active customer
+const INACTIVE = id('c2'); // inactive, with open and closed work (like the live customer with 2 confirmed orders)
+const RACE1 = id('c3'); // active, deactivated while an order is being saved
+const RACE2 = id('c4'); // active, gets an order while a deactivation is running
+const RACE3 = id('c5'); // active, its deactivation rolls back while an order waits
+// Fixture rows of INACTIVE (seeded past the other triggers) and of ACTIVE.
+const R = {
+  openOrder: id('e1'), cancelledOrder: id('e2'), deletedOrder: id('e3'), activeOrder: id('e4'), activeDone: id('e5'), inactiveDone: id('e6'),
+  delDelivery: id('e7'), activeDelivery: id('e8'),
+  offHold: id('e9'), expiredHold: id('ea'), openHold: id('eb'), activeHold: id('ec'),
+  delJob: id('ed'), activeJob: id('ee'), openJob: id('ef'), activeClosed: id('f1'),
+  driverDelivery: id('f2'), datedHold: id('f3'), driverDone: id('f4'), driverDeleted: id('f5'),
+};
+const W = /CUSTOMER_INACTIVE_NEW_WORK: nothing was saved\. This customer is inactive\. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added/;
+
+// One script as `role`, signed in as `uid` (null: no claims at all); the last output line is the answer.
+function run(uid, sql, { role = 'authenticated', commit = false } = {}) {
+  const r = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'],
+    { input: `BEGIN;\n${uid ? claims(uid) : ''}\n${role === 'postgres' ? '' : `SET LOCAL ROLE ${role};`}\n${sql}\n${commit ? 'COMMIT' : 'ROLLBACK'};`, allowFailure: true });
+  return { status: r.status, out: r.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? '', err: r.stderr };
+}
+const allowed = (sql, opts = { role: 'postgres' }) => { const r = run(opts.uid ?? ADMIN, sql, opts); assert.equal(r.status, 0, `${sql}\n${r.err}`); return r.out; };
+const refused = (sql, pattern = W, opts = { role: 'postgres' }, uid = ADMIN) => {
+  const r = run(uid, sql, opts);
+  assert.notEqual(r.status, 0, `expected a refusal:\n${sql}`); assert.match(r.err, pattern, r.err);
+};
+
+let n = 0;
+const newOrder = (cid, status = 'confirmed') => `INSERT INTO public.orders (order_number, customer_id, status) VALUES ('NW-O${++n}', '${cid}', '${status}');`;
+const newDelivery = (cid, orderId) => `INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, status)
+  VALUES ('NW-D${++n}', '${orderId}', '${cid}', '${ADMIN}', 'scheduled');`;
+const newHold = (cid, source = null, type = 'job') => `INSERT INTO public.inventory_holds (product_id, customer_id, quantity, created_by, is_active, hold_type, source_id)
+  VALUES ('${PRODUCT}', '${cid}', 1, '${ADMIN}', true, '${type}', ${source ? `'${source}'` : 'NULL'});`;
+const newJob = (cid, status = 'scheduled') => `INSERT INTO public.jobs (job_number, customer_id, job_date, status) VALUES ('NW-J${++n}', '${cid}', current_date, '${status}');`;
+
+function seed() {
+  buildContainer({ stopBefore: CANDIDATE }); seedUsers();
+  psql(`BEGIN; SET LOCAL session_replication_role = replica; ${claims(ADMIN)}
+    INSERT INTO public.customers (id, farm_name, is_active) VALUES
+      ('${ACTIVE}', '[NEWWORK] active', true), ('${INACTIVE}', '[NEWWORK] inactive', false),
+      ('${RACE1}', '[NEWWORK] race1', true), ('${RACE2}', '[NEWWORK] race2', true),
+      ('${RACE3}', '[NEWWORK] race3', true);
+    INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, tier1_price, tier2_price, tier3_price, pricing_version, is_active)
+      VALUES ('${PRODUCT}', '[NEWWORK] Product', 'NW-P', 'liquid', 'Gal', 'Gal', 40, 36, 32, 1, true),
+             ('${PRODUCT2}', '[NEWWORK] Product 2', 'NW-P2', 'liquid', 'Gal', 'Gal', 40, 36, 32, 1, true);
+    INSERT INTO public.orders (id, order_number, customer_id, status, deleted_at) VALUES
+      ('${R.openOrder}', 'NW-OPEN', '${INACTIVE}', 'confirmed', NULL),
+      ('${R.cancelledOrder}', 'NW-CANC', '${INACTIVE}', 'cancelled', NULL),
+      ('${R.deletedOrder}', 'NW-DEL', '${INACTIVE}', 'confirmed', now()),
+      ('${R.inactiveDone}', 'NW-IDONE', '${INACTIVE}', 'fulfilled', NULL),
+      ('${R.activeOrder}', 'NW-AOPEN', '${ACTIVE}', 'confirmed', NULL),
+      ('${R.activeDone}', 'NW-ADONE', '${ACTIVE}', 'fulfilled', NULL),
+      ('${R.activeClosed}', 'NW-ACLOSED', '${ACTIVE}', 'cancelled', NULL);
+    INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, status, deleted_at) VALUES
+      ('${R.delDelivery}', 'NW-DDEL', '${R.inactiveDone}', '${INACTIVE}', '${ADMIN}', 'scheduled', now()),
+      ('${R.activeDelivery}', 'NW-DACT', '${R.activeDone}', '${ACTIVE}', '${ADMIN}', 'scheduled', NULL);
+    INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, status, assigned_driver, deleted_at) VALUES
+      ('${R.driverDelivery}', 'NW-DDRV', '${R.activeDone}', '${ACTIVE}', '${ADMIN}', 'in_progress', '${DRIVER}', NULL),
+      -- Sol r3 #3: the row names a customer the driver may see; its order belongs to the inactive one.
+      ('${R.driverDone}', 'NW-DDONE', '${R.inactiveDone}', '${ACTIVE}', '${ADMIN}', 'completed', '${DRIVER}', NULL),
+      ('${R.driverDeleted}', 'NW-DDELD', '${R.inactiveDone}', '${ACTIVE}', '${ADMIN}', 'in_progress', '${DRIVER}', now());
+    INSERT INTO public.inventory_holds (id, product_id, customer_id, quantity, created_by, is_active, expires_at, hold_type) VALUES
+      ('${R.offHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', false, NULL, 'manual'),
+      ('${R.expiredHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', true, (now() AT TIME ZONE 'America/Chicago')::date - 1, 'manual'),
+      ('${R.openHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', true, NULL, 'manual'),
+      ('${R.datedHold}', '${PRODUCT}', '${INACTIVE}', 1, '${ADMIN}', true, (now() AT TIME ZONE 'America/Chicago')::date + 1, 'manual'),
+      ('${R.activeHold}', '${PRODUCT}', '${ACTIVE}', 1, '${ADMIN}', true, NULL, 'manual');
+    INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, deleted_at) VALUES
+      ('${R.delJob}', 'NW-JDEL', '${INACTIVE}', current_date, 'scheduled', now()),
+      ('${R.openJob}', 'NW-JOPEN', '${INACTIVE}', current_date, 'scheduled', NULL),
+      ('${R.activeJob}', 'NW-JACT', '${ACTIVE}', current_date, 'scheduled', NULL);
+    COMMIT;`, { user: 'supabase_admin' });
+}
+
+// One psql session; resolves its result and the time it ended.
+function session(sql) {
+  return new Promise((resolve) => {
+    const p = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], { cwd: ROOT });
+    let out = ''; let err = '';
+    p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; });
+    p.on('close', (status) => resolve({ status, out, err, at: Date.now() }));
+    p.stdin.end(sql);
+  });
+}
+async function race(first, second) {
+  const a = session(first);
+  // The first session must already be holding its locks (asleep after its write) before the second
+  // starts: wait up to 10 s for it to be inside pg_sleep (Sol r3 #9: no fixed delay).
+  const asleep = `SELECT count(*) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND wait_event = 'PgSleep' AND query LIKE '%pg_sleep(4)%';`;
+  for (let i = 0; i < 40 && scalar(asleep) !== '1'; i++) await new Promise((r) => { setTimeout(r, 250); });
+  assert.equal(scalar(asleep), '1', 'the first session never reached pg_sleep holding its locks');
+  const start = Date.now();
+  const b = await session(second);
+  return { a: await a, b, bWaitedMs: b.at - start };
+}
+
+async function main() {
+  seed();
+  // Case 8, before: an inactive customer gets a new order today (rolled back).
+  allowed(newOrder(INACTIVE));
+  console.log('[new-work] BEFORE: a new order for an inactive customer is saved (the hole is real)');
+
+  const applied = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'],
+    { input: candidate, allowFailure: true });
+  assert.equal(applied.status, 0, `candidate failed:\n${applied.stderr}`);
+  const again = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'],
+    { input: candidate, allowFailure: true });
+  assert.notEqual(again.status, 0); assert.match(again.stderr, /INACTIVE_NEW_WORK_PREFLIGHT: the guard already exists/);
+  console.log('[new-work] candidate applied; postflight passed; a second apply is refused by the preflight');
+
+  // Case 1 and 5: every new row for the inactive customer is refused; the same row for the active one is saved.
+  const inserts = {
+    order: (c) => newOrder(c), 'closed order': (c) => newOrder(c, 'fulfilled'),
+    delivery: (c) => newDelivery(c, c === ACTIVE ? R.activeDone : R.inactiveDone),
+    'job-type hold with no source': (c) => newHold(c), job: (c) => newJob(c), 'cancelled job': (c) => newJob(c, 'cancelled'),
+  };
+  for (const sql of Object.values(inserts)) {
+    allowed(sql(ACTIVE));
+    refused(sql(INACTIVE));
+    refused(sql(INACTIVE), W, { role: 'service_role' }, null);
+  }
+  // Every hold, whatever its source (Mason, 2026-11-19: no exceptions): the customer's own job, another
+  // customer's job, a quote-built crop program hold.
+  for (const sql of [newHold(INACTIVE, R.openJob), newHold(INACTIVE, R.activeJob), newHold(INACTIVE, R.openJob, 'crop_program')]) refused(sql);
+  // Luna r6: a hold built from a job or quote may not drop its customer to skip the check.
+  const H = /violates check constraint "inventory_holds_source_needs_customer"/;
+  refused(newHold(null, R.openJob).replace("'null'", 'NULL'), H);
+  refused(`UPDATE public.inventory_holds SET customer_id = NULL, source_id = '${R.openJob}' WHERE id = '${R.activeHold}';`, H);
+  // Luna r7: an open hold with no customer and no source may not gain a source either.
+  refused(`UPDATE public.inventory_holds SET customer_id = NULL WHERE id = '${R.activeHold}'; UPDATE public.inventory_holds SET source_id = '${R.openJob}' WHERE id = '${R.activeHold}';`, H);
+  console.log('[new-work] a hold built from a job or quote with no customer is refused (new, or by dropping its customer)');
+  console.log('[new-work] new order (open or closed), delivery, stock hold of any type or source and spray job: refused for the inactive customer as postgres and service_role; saved for the active one');
+  // Signed-in admin and rep (the guard ignores who is asking; row-level security does not hide the flag).
+  for (const uid of [ADMIN, REP]) refused(newJob(INACTIVE), W, { role: 'authenticated' }, uid);
+  // A driver or applicator who may not add a spray job gets the same permission error for either
+  // customer, so it reveals no status. (One who may add it for the active customer is a real writer.)
+  for (const [who, uid] of [['driver', DRIVER], ['applicator', APPLICATOR]]) {
+    const [active, inactive] = [ACTIVE, INACTIVE].map((cid) => { const r = run(uid, newJob(cid)); return { ...r, err: r.err.replace(/NW-J\d+/g, '') }; });
+    if (active.status === 0) { assert.match(inactive.err, W, `${who}: ${inactive.err}`); console.log(`[new-work] the ${who} may add spray jobs: refused only for the inactive customer`); continue; }
+    assert.notEqual(inactive.status, 0, `the ${who} saved a spray job for the inactive customer`);
+    assert.doesNotMatch(inactive.err, /CUSTOMER_INACTIVE_NEW_WORK/, inactive.err);
+    assert.equal(inactive.err, active.err);
+    console.log(`[new-work] the ${who} adding a spray job gets the same permission error for an active and an inactive customer: ${active.err.split('\n')[0]}`);
+  }
+  // The real screen path for a hold: create_inventory_hold, signed in.
+  const holdRpc = (cid, uid) => `SELECT (public.create_inventory_hold('${PRODUCT}', '${cid}', 1, 'manual', NULL, 'NW', '${uid}', true, 'prover', gen_random_uuid()::text)) IS NOT NULL;`;
+  // Admin with force (no stock is seeded; a rep may not force, so the rep is proved on the job insert above).
+  // Committed, so the RPC's deferred checks run too (Sol r3 #10).
+  assert.equal(allowed(holdRpc(ACTIVE, ADMIN), { role: 'authenticated', uid: ADMIN, commit: true }), 't');
+  refused(holdRpc(INACTIVE, ADMIN), W, { role: 'authenticated' }, ADMIN);
+  console.log('[new-work] signed in: create_inventory_hold (admin) saves for the active customer and is refused for the inactive one; a direct spray job insert by an admin and a sales rep is refused');
+
+  // Case 6: a delivery of the inactive customer's order is refused even when its row names an active customer.
+  refused(newDelivery(ACTIVE, R.inactiveDone));
+  refused(newDelivery(INACTIVE, R.activeDone));
+  console.log('[new-work] a delivery is refused when either its own customer or its order\'s customer is inactive');
+
+  // Case 2: reopening closed work of the inactive customer.
+  const reopen = {
+    'undelete a confirmed order': `UPDATE public.orders SET deleted_at = NULL WHERE id = '${R.deletedOrder}';`,
+    'undelete a scheduled delivery': `UPDATE public.deliveries SET deleted_at = NULL WHERE id = '${R.delDelivery}';`,
+    'switch a hold back on': `UPDATE public.inventory_holds SET is_active = true WHERE id = '${R.offHold}';`,
+    'extend an expired hold': `UPDATE public.inventory_holds SET expires_at = NULL WHERE id = '${R.expiredHold}';`,
+    'undelete a scheduled job': `UPDATE public.jobs SET deleted_at = NULL WHERE id = '${R.delJob}';`,
+  };
+  // Restoring a deleted order is already refused by an older guard: that route does not exist.
+  refused(reopen['undelete a confirmed order'], /ORDER_DELETED_STATUS_LOCKED/);
+  delete reopen['undelete a confirmed order'];
+  for (const sql of Object.values(reopen)) refused(sql);
+  console.log(`[new-work] reopening refused: ${Object.keys(reopen).join(', ')} (restoring a deleted order was already impossible)`);
+
+  // Case 3: moving open work onto the inactive customer.
+  const move = {
+    order: `UPDATE public.orders SET customer_id = '${INACTIVE}' WHERE id = '${R.activeOrder}';`,
+    'delivery (customer)': `UPDATE public.deliveries SET customer_id = '${INACTIVE}' WHERE id = '${R.activeDelivery}';`,
+    'delivery (order)': `UPDATE public.deliveries SET order_id = '${R.inactiveDone}' WHERE id = '${R.activeDelivery}';`,
+    hold: `UPDATE public.inventory_holds SET customer_id = '${INACTIVE}' WHERE id = '${R.activeHold}';`,
+    job: `UPDATE public.jobs SET customer_id = '${INACTIVE}' WHERE id = '${R.activeJob}';`,
+    'closed order': `UPDATE public.orders SET customer_id = '${INACTIVE}' WHERE id = '${R.activeClosed}';`,
+  };
+  for (const sql of Object.values(move)) refused(sql);
+  console.log(`[new-work] moving work onto the inactive customer refused: ${Object.keys(move).join(', ')}`);
+
+  // Sol r2 #1: a driver may update their own in-progress delivery, but moving it to another customer
+  // or order is refused before any customer is looked at: the same answer for active and inactive.
+  const M = /WORK_CUSTOMER_MOVE_NOT_ALLOWED: nothing was saved\. Only an admin or sales rep can move/;
+  const driverMoves = {
+    'customer to the inactive one': `UPDATE public.deliveries SET customer_id = '${INACTIVE}' WHERE id = '${R.driverDelivery}' RETURNING 1;`,
+    'customer to an active one': `UPDATE public.deliveries SET customer_id = '${RACE1}' WHERE id = '${R.driverDelivery}' RETURNING 1;`,
+    'order to the inactive customer\'s': `UPDATE public.deliveries SET order_id = '${R.inactiveDone}' WHERE id = '${R.driverDelivery}' RETURNING 1;`,
+    'order to an active customer\'s': `UPDATE public.deliveries SET order_id = '${R.activeOrder}' WHERE id = '${R.driverDelivery}' RETURNING 1;`,
+  };
+  assert.equal(allowed(`UPDATE public.deliveries SET delivery_notes = 'driver note' WHERE id = '${R.driverDelivery}' RETURNING 1;`, { role: 'authenticated', uid: DRIVER }), '1',
+    'the driver could not update their own delivery, so this case proves nothing');
+  for (const sql of Object.values(driverMoves)) refused(sql, M, { role: 'authenticated' }, DRIVER);
+  console.log(`[new-work] the driver may edit their own in-progress delivery, but every move is refused with the same move error: ${Object.keys(driverMoves).join(', ')}`);
+  // Sol r3 #3: reopening a delivery (its order's customer may be hidden) gets the same fixed refusal.
+  // The older delivery state machine already refuses completed → in progress (only an admin override may).
+  refused(`UPDATE public.deliveries SET status = 'in_progress' WHERE id = '${R.driverDone}' RETURNING 1;`, /Invalid delivery status transition: completed → in_progress/, { role: 'authenticated' }, DRIVER);
+  const undelete = run(DRIVER, `UPDATE public.deliveries SET deleted_at = NULL WHERE id = '${R.driverDeleted}' RETURNING 1;`);
+  assert.doesNotMatch(undelete.err, /CUSTOMER_INACTIVE_NEW_WORK/, undelete.err);
+  if (undelete.status === 0) assert.notEqual(undelete.out, '1', 'the driver undeleted a delivery');
+  else assert.match(undelete.err, M, undelete.err);
+  console.log(`[new-work] the driver reopening a delivery whose order is the inactive customer's: same fixed refusal, no status (${undelete.status === 0 ? 'undelete: row not visible' : 'undelete: move error'})`);
+
+  // Sol r2 #2: pushing a dated hold's expiry later (or clearing it) is opening it; pulling it earlier is not.
+  refused(`UPDATE public.inventory_holds SET expires_at = expires_at + 5 WHERE id = '${R.datedHold}';`);
+  refused(`UPDATE public.inventory_holds SET expires_at = NULL WHERE id = '${R.datedHold}';`);
+  assert.equal(allowed(`UPDATE public.inventory_holds SET expires_at = (now() AT TIME ZONE 'America/Chicago')::date WHERE id = '${R.datedHold}' RETURNING 1;`), '1');
+  console.log('[new-work] an inactive customer\'s dated hold: pushing the expiry later or clearing it refused; pulling it earlier allowed');
+  // Sol r3 #6: raising an open hold's quantity reserves more stock; lowering it does not.
+  refused(`UPDATE public.inventory_holds SET quantity = quantity + 99 WHERE id = '${R.openHold}';`);
+  assert.equal(allowed(`UPDATE public.inventory_holds SET quantity = 0.5 WHERE id = '${R.openHold}' RETURNING 1;`), '1');
+  // Sol r4 #2: switching an open hold to another product reserves new stock, so it is opening it.
+  refused(`UPDATE public.inventory_holds SET product_id = '${PRODUCT2}' WHERE id = '${R.openHold}';`);
+  console.log('[new-work] an inactive customer\'s open hold: raising the quantity or switching the product refused; lowering it allowed');
+  // Sol r3 #4: a released hold built from a job may lose its customer (customer delete sets it NULL),
+  // but switching it back on with no customer is refused by the constraint.
+  assert.equal(allowed(`${newHold(ACTIVE, R.activeJob)}
+    UPDATE public.inventory_holds SET is_active = false WHERE source_id = '${R.activeJob}' AND customer_id = '${ACTIVE}';
+    UPDATE public.inventory_holds SET customer_id = NULL WHERE source_id = '${R.activeJob}' RETURNING 1;`), '1');
+  refused(`${newHold(ACTIVE, R.activeJob)}
+    UPDATE public.inventory_holds SET is_active = false WHERE source_id = '${R.activeJob}';
+    UPDATE public.inventory_holds SET customer_id = NULL WHERE source_id = '${R.activeJob}';
+    UPDATE public.inventory_holds SET is_active = true WHERE source_id = '${R.activeJob}';`, H);
+  console.log('[new-work] a released job hold may lose its customer; switching it back on with no customer is refused');
+
+  // Case 4: finishing down existing work of the inactive customer stays allowed.
+  const finish = {
+    'edit an open order': `UPDATE public.orders SET notes = 'edited' WHERE id = '${R.openOrder}' RETURNING 1;`,
+    'part-fill an open order': `UPDATE public.orders SET status = 'partially_fulfilled' WHERE id = '${R.openOrder}' RETURNING 1;`,
+    'cancel an open order': `UPDATE public.orders SET status = 'cancelled' WHERE id = '${R.openOrder}' RETURNING 1;`,
+    'release a hold': `UPDATE public.inventory_holds SET is_active = false WHERE id = '${R.openHold}' RETURNING 1;`,
+    'start a scheduled job': `UPDATE public.jobs SET status = 'in_progress' WHERE id = '${R.openJob}' RETURNING 1;`,
+    'cancel a scheduled job': `UPDATE public.jobs SET status = 'cancelled' WHERE id = '${R.openJob}' RETURNING 1;`,
+  };
+  for (const sql of Object.values(finish)) assert.equal(allowed(sql), '1', sql);
+  console.log(`[new-work] still allowed on the inactive customer's existing work: ${Object.keys(finish).join(', ')}`);
+
+  // Case 5: reactivating lifts the refusal.
+  assert.equal(allowed(`UPDATE public.customers SET is_active = true WHERE id = '${INACTIVE}' RETURNING 1; ${newOrder(INACTIVE)} SELECT 1;`), '1');
+  console.log('[new-work] after reactivation the same new order is saved');
+
+  // Case 7a: a deactivation is running when an order is saved: the order waits, then is refused.
+  const r1 = await race(
+    `BEGIN; UPDATE public.customers SET is_active = false WHERE id = '${RACE1}'; SELECT pg_sleep(4); COMMIT;`,
+    `BEGIN; ${newOrder(RACE1)} COMMIT;`);
+  assert.equal(r1.a.status, 0, r1.a.err);
+  assert.notEqual(r1.b.status, 0, 'the racing order was saved'); assert.match(r1.b.err, /CUSTOMER_INACTIVE_NEW_WORK/);
+  assert.ok(r1.bWaitedMs >= 1500, `the order did not wait for the deactivation (${r1.bWaitedMs} ms)`);
+  assert.equal(scalar(`SELECT count(*) FROM public.orders WHERE customer_id = '${RACE1}';`), '0');
+  console.log(`[new-work] race 1: an order saved during a deactivation waited ${r1.bWaitedMs} ms, then was refused; customer inactive, no order`);
+
+  // Case 7b: an order is being saved when the deactivation runs: the deactivation waits, then KI-148 refuses it.
+  const r2 = await race(
+    `BEGIN; ${newOrder(RACE2)} SELECT pg_sleep(4); COMMIT;`,
+    `BEGIN; UPDATE public.customers SET is_active = false WHERE id = '${RACE2}'; COMMIT;`);
+  assert.equal(r2.a.status, 0, r2.a.err);
+  assert.notEqual(r2.b.status, 0, 'the racing deactivation went through'); assert.match(r2.b.err, /CUSTOMER_HAS_OPEN_WORK: nothing was deactivated\. \[NEWWORK\] race2 still has 1 open order/);
+  assert.ok(r2.bWaitedMs >= 1500, `the deactivation did not wait for the order (${r2.bWaitedMs} ms)`);
+  assert.equal(scalar(`SELECT is_active FROM public.customers WHERE id = '${RACE2}';`), 't');
+  console.log(`[new-work] race 2: a deactivation during an order save waited ${r2.bWaitedMs} ms, then KI-148 refused it; customer active with its order`);
+
+  // Case 7c: a deactivation that rolls back lets the waiting order through.
+  const r3 = await race(
+    `BEGIN; UPDATE public.customers SET is_active = false WHERE id = '${RACE3}'; SELECT pg_sleep(4); ROLLBACK;`,
+    `BEGIN; ${newOrder(RACE3)} COMMIT;`);
+  assert.equal(r3.a.status, 0, r3.a.err); assert.equal(r3.b.status, 0, r3.b.err);
+  assert.ok(r3.bWaitedMs >= 1500, `the order did not wait (${r3.bWaitedMs} ms)`);
+  assert.equal(scalar(`SELECT count(*) FROM public.orders WHERE customer_id = '${RACE3}';`), '1');
+  console.log(`[new-work] race 3: a deactivation that rolled back released the waiting order after ${r3.bWaitedMs} ms; it was saved`);
+
+  // Case 7d: a delivery is being saved on a closed order when someone moves that order to another
+  // customer: the move waits for the delivery, then the older lineage guard refuses it.
+  const r4 = await race(
+    `BEGIN; ${newDelivery(ACTIVE, R.activeClosed)} SELECT pg_sleep(4); COMMIT;`,
+    `BEGIN; UPDATE public.orders SET customer_id = '${RACE3}' WHERE id = '${R.activeClosed}'; COMMIT;`);
+  assert.equal(r4.a.status, 0, r4.a.err);
+  assert.notEqual(r4.b.status, 0, 'the order moved under a new delivery'); assert.match(r4.b.err, /ORDER_CUSTOMER_LINEAGE_LOCKED/, r4.b.err);
+  assert.ok(r4.bWaitedMs >= 1500, `the order move did not wait for the delivery (${r4.bWaitedMs} ms)`);
+  assert.equal(scalar(`SELECT customer_id FROM public.orders WHERE id = '${R.activeClosed}';`), ACTIVE);
+  console.log(`[new-work] race 4: moving an order while a delivery on it is saved waited ${r4.bWaitedMs} ms, then was refused; the order kept its customer`);
+
+  console.log('INACTIVE_CUSTOMER_NEW_WORK_PROOF_PASS');
+}
+
+try { await main(); } finally { if (!KEEP) removeContainer(); else console.log(`Kept ${NAME}`); }

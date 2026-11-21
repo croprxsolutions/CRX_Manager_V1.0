@@ -92,6 +92,28 @@ accepted residuals; do not re-raise them as blockers on this PR.
 **Decision (Mason, in chat, 2026-11-19: "Approve round 5").** PR #2038 (#1976, EPA batch save checks in the database) may have Sol round 5.
 **Why:** the pre-push check required a regenerated workflow map (`docs/app-workflow-map.html`, its RPC count goes from 361 to 362), so the pushed head is one commit past the head Sol round 4 reviewed. The code reviewed in round 4 is unchanged.
 ## 2026-11-20 — #1990: Mason owner-accepted 5 Sol finding(s) at `b145a1514838`
+## 2026-11-21 — #2048: Mason owner-accepted 1 Sol finding(s) at `44d70d8bf839`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2048 at `44d70d8bf839` (base `ca1ed13c47fd`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201120000_inactive_customer_refuses_new_work.sql:144`, text sha256 `5ea6254975308c7b` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen (ref 6738a97a5e50)
+
+## 2026-11-21 — #2048 may have one more Sol round (round 6)
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, one more each").** PR #2048 (#2000 inactive customer refuses new work) may have one more Sol round (round 6).
+**Why:** after release #1990 and its back-merge, staging had to be merged in to clear a conflict, so the merge gate needs a fresh Sol review of the new head. The PR's own change is unchanged since its last clean or owner-accepted round.
+
+## 2026-11-19 — #2048: Mason owner-accepted 1 Sol finding(s) at `97c98ae44e88`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2048 at `97c98ae44e88` (base `c0b544a2383e`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201120000_inactive_customer_refuses_new_work.sql:144`, text sha256 `5e2922251fd2fb0f` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref d5394f1fb1d6)
+
+## 2026-11-19 — #2048: Mason owner-accepted 1 Sol finding(s) at `305882be9698`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2048 at `305882be9698` (base `c0b544a2383e`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201120000_inactive_customer_refuses_new_work.sql:138`, text sha256 `a0f64e129e986705` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 21555f0ab195)
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #1990 at `b145a1514838` (base `5740b6c076ea`) found 5 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
 - Finding 1 (HIGH) at `supabase/migrations/20270109100200_sales_tax_checkbox.sql:433`, text sha256 `7af8d6a6d1bd6424` (the wording stays with the proof, not here)

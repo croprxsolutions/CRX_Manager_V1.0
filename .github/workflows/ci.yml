@@ -371,7 +371,7 @@ jobs:
         # dependency, or let the Dependabot PR land first.
         # 2026-11-17: same high bar, run through scripts/npm-audit-gate.mjs so an
         # advisory with NO patched release anywhere can get a dated exception
-        # (Mason's approval). Only picomatch GHSA-fc5q-39xc-vjpf, until 2026-12-31.
+        # (Mason's approval). None today: see EXCEPTIONS in scripts/npm-audit-gate.mjs.
         if: ${{ needs.ci-scope.outputs.full_ci == 'true' }}
         run: node scripts/npm-audit-gate.test.mjs && node scripts/npm-audit-gate.mjs
 

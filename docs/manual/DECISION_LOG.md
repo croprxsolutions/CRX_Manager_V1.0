@@ -5,6 +5,12 @@
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2045 at `790859458268` (base `a90d3b34fc7a`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
 - Finding 1 (HIGH) at `supabase/migrations/20270201195000_inventory_edge_cases_1942.sql:315`, text sha256 `83a9f256b4f30c5e` (the wording stays with the proof, not here)
   Mason's reason: cant hapen (ref 5ed2ac568296)
+
+## 2026-11-21 — #2045 may have Sol round 10 after merging staging
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, round 10").** PR #2045 (#1942 inventory edge cases) may have Sol round 10.
+**Why:** after round 9, staging gained #2068, #2137, #2138 and #2143, and GitHub reported #2045 as conflicting. Merging staging in was clean, but staging had changed files this PR also edits, and a staging-bound branch has no carry-forward, so the merged head needs a full Sol review. The PR's own change is unchanged since round 9.
+
 ## 2026-11-21 — #2068: Mason owner-accepted 4 Sol finding(s) at `1d9202dcb57d`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `1d9202dcb57d` (base `dab22364c6bc`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

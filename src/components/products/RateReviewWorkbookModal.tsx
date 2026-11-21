@@ -13,6 +13,7 @@ import {
   commitRateReview,
   generateRateReviewWorkbook,
   labelCheckText,
+  parentChangedText,
   loadRateReviewWorkbook,
   parseRateReviewWorkbook,
   previewRateReview,
@@ -55,6 +56,8 @@ const isStoredPreviewRow = (value: unknown, count: number) => {
     if (value.label_check.status === 'above' && (!Array.isArray(value.label_check.above) || !value.label_check.above.every(isRecord))) return false;
     if (value.label_check.why != null && typeof value.label_check.why !== 'string') return false;
   }
+  if (value.parent_changed !== undefined
+      && (!isRecord(value.parent_changed) || typeof value.parent_changed.was !== 'string' || !nullableText(value.parent_changed.now))) return false;
   return true;
 };
 const isPendingRateReview = (value: unknown): value is PendingRateReview => {
@@ -249,7 +252,8 @@ function PreviewDetail({ shown, upload }: { shown: Shown; upload: ParsedRateRevi
                   <td>Draft Rates {r.sheetRow}</td><td>{r.label}</td>
                   <td>{(r.actions ?? []).map((a) => (r.isNew && a === 'save' ? 'add' : ACTION_WORDS[a] ?? a)).join(', ')}</td>
                   <td>{rateValueText(upload.rates[r.index])}</td>
-                  <td className={r.label_check?.status === 'above' || r.label_check?.status === 'not_checked' ? 'text-amber-800' : ''}>{labelCheckText(r.label_check)}</td>
+                  <td className={r.label_check?.status === 'above' || r.label_check?.status === 'not_checked' ? 'text-amber-800' : ''}>{labelCheckText(r.label_check)}
+                    {r.parent_changed && <span className="block text-amber-800">{parentChangedText(r.parent_changed)}</span>}</td>
                 </tr>
               ))}
               {shown.outcomes.filter((o) => o.status === 'change').map((o) => (
@@ -302,7 +306,10 @@ function ReviewPreview({ upload, preview, saved, pending, busy, commitInFlight, 
         <p className="text-secondary">Everything in this file already matches the database. Nothing to save.</p>
       )}
       {saved
-        ? <p className="text-green-700">Saved {count(saved.rates_changed, 'rate', 'rates')} and {count(saved.outcomes_changed, 'outcome', 'outcomes')}. Download a fresh workbook to continue.</p>
+        ? <><p className="text-green-700">Saved {count(saved.rates_changed, 'rate', 'rates')} and {count(saved.outcomes_changed, 'outcome', 'outcomes')}. Download a fresh workbook to continue.</p>
+          {saved.rates.filter((r) => r.parent_changed).map((r) => (
+            <p key={`changed-${r.index}`} className="text-amber-800">Draft Rates {upload.rates[r.index]?.sheetRow ?? '?'} ({r.name ?? upload.rates[r.index]?.parent_name ?? 'unknown parent'}): {parentChangedText(r.parent_changed)}</p>
+          ))}</>
         : shown && <Button onClick={onConfirm} loading={busy} disabled={busy || shown.blocked || !!pending?.expired || !profileId}>
           Confirm rate review ({count(shown.changes.length, 'change', 'changes')})
         </Button>}

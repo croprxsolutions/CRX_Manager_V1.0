@@ -103,7 +103,7 @@
 - `parent_id uuid NOT NULL` FK `product_parents(id)` (no cascade; parents are never deleted).
 - `basis text NOT NULL` CHECK in (`per_acre`, `per_100_gal`, `per_unit`, `per_cwt_seed`, `per_seed_unit`).
 - `source text NOT NULL` CHECK in (`label`, `house_standard`).
-- `low numeric`, `recommended numeric`, `high numeric` (deliberately **unconstrained** `numeric`, because a `numeric(18,6)` column would round a seventh decimal on assignment before any check could see it), each `CHECK (x IS NULL OR (x >= 0 AND x < 1e12 AND x = round(x, 6)))` (WP-PM-8's rate ≥ 0, overlap 4). This is `_product_rate_value_ok`'s rule (12 digits, 6 decimals) enforced by the table itself, so any future writer that sends `1.1234567` is refused, never rounded.
+- `low numeric`, `recommended numeric`, `high numeric` (deliberately **unconstrained** `numeric`, because a `numeric(18,6)` column would round a seventh decimal on assignment before any check could see it), each `CHECK (x IS NULL OR (x >= 0 AND x < 1e9 AND x = round(x, 6)))` (WP-PM-8's rate ≥ 0, overlap 4). This is `_product_rate_value_ok`'s rule (below 1e9, 6 decimals) enforced by the table itself, so any future writer that sends `1.1234567` is refused, never rounded.
 - `unit text NOT NULL` FK `product_rate_units(code)`. So a blank or unknown unit cannot be stored at all.
 - `is_quoting_default boolean NOT NULL DEFAULT false`.
 - `status text NOT NULL DEFAULT 'draft'` CHECK in (`draft`, `approved`). RT-1 writes only `draft`; `approved` is there so RT-3 needs no constraint change. `approved_by uuid`, `approved_at timestamptz`, with `CHECK ((status = 'draft' AND approved_by IS NULL AND approved_at IS NULL) OR (status = 'approved' AND approved_by IS NOT NULL AND approved_at IS NOT NULL))`, so a draft can carry neither approval field and an approved row must carry both.
@@ -266,7 +266,7 @@ Every mutating RPC:
 
 Inserts a draft (`p_rate_id` null) or edits one.
 1. Admin check, key check, replay (scope `save_draft_product_rate`).
-2. Check shapes: basis and source in their lists; each value null or a number ≥ 0, below 1e12, with at most 6 decimals (the 3.1 CHECK's exact rule, tested before any write so the caller gets `PRODUCT_RATE_INVALID`, never a raw constraint error); unit trimmed and present in `product_rate_units` (`PRODUCT_RATE_UNIT_UNKNOWN`); reason trimmed, ≤ 500.
+2. Check shapes: basis and source in their lists; each value null or a number ≥ 0, below 1e9, with at most 6 decimals (the 3.1 CHECK's exact rule, tested before any write so the caller gets `PRODUCT_RATE_INVALID`, never a raw constraint error); unit trimmed and present in `product_rate_units` (`PRODUCT_RATE_UNIT_UNKNOWN`); reason trimmed, ≤ 500.
 3. Lock (3.6). Parent missing or inactive: `PARENT_NOT_FOUND`.
 4. On edit: the row must belong to `p_parent_id` (`PRODUCT_RATE_NOT_FOUND`), be `draft` (`PRODUCT_RATE_APPROVED`) and match `p_expected_row_version` (`PRODUCT_RATE_STALE`).
 5. Run the section 3.4 checks in table order and raise the named refusal for the first that fails.
@@ -354,7 +354,7 @@ No other `src/` file changes. The PR description lists its file list against thi
   - followed by a denominator: `/acre`, `/ac`, `/a`, `per acre` → `per_acre`; `/100 gal` → `per_100_gal`; `/cwt` → `per_cwt_seed`; `/unit` → `per_seed_unit` (all 15 such rows are seed treatments; note `basis_from_text`; the 6 each-form ones then fail the unit check below); or the suffix `gpa` with no unit → `gal` per acre.
   - Units: the legacy spellings, plus `fl oz`, `pint(s)`, `quart(s)`, `gallon(s)`, `lb(s)`, `pound(s)`, `gram(s)`, `dry oz`. `oz` means `fl_oz` on a liquid parent and `dry_oz` on a dry one (in text, unlike the stored unit, "oz" on a dry label means dry ounces).
 - One number → `recommended`. A range → `low` and `high`, `recommended` null.
-- **Value check before any write (both rows):** every number derivation would store must pass the 3.1 value rule (≥ 0, below 1e12, at most 6 decimals). One that fails (for example `1.1234567 oz/acre`) makes no row and is noted `value_invalid` with the text; nothing is rounded and the batch carries on. So no derived write can hit the CHECK.
+- **Value check before any write (both rows):** every number derivation would store must pass the 3.1 value rule (≥ 0, below 1e9, at most 6 decimals). One that fails (for example `1.1234567 oz/acre`) makes no row and is noted `value_invalid` with the text; nothing is rounded and the batch carries on. So no derived write can hit the CHECK.
 - Anything else (`1.5 qt/ton`, `1-3lb`, `Beans 5 oz/acre -- Corn 14oz/acre`, `Spray on`, `2 products`): no row, note `text_unparsed` with the text. A unit that fails 3.3 for the parent's form (the each-form seed treatments' `oz/unit`): no row, note `unit_not_for_form`.
 - Never a quoting default.
 
@@ -494,7 +494,7 @@ The DB PR is one migration plus its types, docs and harness. Splitting it would 
 
 **Luna round 3** (head `9b08ad381`): no BLOCKER or HIGH; 2 findings, both fixed.
 - MED a parsed value with more than 6 decimals would fail the CHECK mid-batch: fixed, derivation checks every value first and notes `value_invalid` (section 5, R6).
-- LOW the save RPC's value check missed the `< 1e12` limit: fixed, it tests the CHECK's exact rule first (4.A step 2, R6).
+- LOW the save RPC's value check missed the `< 1e9` limit: fixed, it tests the CHECK's exact rule first (4.A step 2, R6).
 
 **Codex GitHub App, PR #1679:** 2 P2 findings, both fixed.
 - The idempotency receipt must use the `{actor_id, request_fingerprint, response}` envelope that `_product_parent_replay` reads (3.7).

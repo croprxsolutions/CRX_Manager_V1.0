@@ -9,7 +9,7 @@
  * admin, a sales rep and the server role that every kind of open work refuses deactivation, closed work
  * does not, a bulk update is all-or-nothing, and an already-inactive customer stays editable.
  *
- * Phase 2 (issue #2000) then applies 20270129170000_customer_deactivation_open_work_followups and checks
+ * Phase 2 (issue #2000) then applies 20270129210000_customer_deactivation_open_work_followups and checks
  * empty holds, the new wording and the 60-character farm name (contract section "Follow-up (issue #2000)").
  *
  * Run: node scripts/smoke/prove-ki148-customer-deactivation-real-schema.mjs   (needs Docker)
@@ -25,7 +25,7 @@ const { buildContainer, removeContainer, seedUsers, scalar, psql, claims, USERS,
 
 const CANDIDATE = '20270128140000_customer_deactivation_checks_open_work.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
-const FOLLOWUP = '20270129170000_customer_deactivation_open_work_followups.sql';
+const FOLLOWUP = '20270129210000_customer_deactivation_open_work_followups.sql';
 const followup = readFileSync(path.join(ROOT, 'supabase', 'migrations', FOLLOWUP), 'utf8').replaceAll('\r\n', '\n');
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const ADMIN = USERS.admin;

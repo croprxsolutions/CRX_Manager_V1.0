@@ -140,7 +140,7 @@ Recommendation: not now; it would also block finishing the legacy customer's two
 
 ## Follow-up (issue #2000), 2026-11-19
 
-Read at `origin/staging` 62ccaeaa2. Migration `20270129170000_customer_deactivation_open_work_followups.sql`
+Read at `origin/staging` 62ccaeaa2. Migration `20270129210000_customer_deactivation_open_work_followups.sql`
 re-emits only the guard function (same owner, mode, search_path, ACL, trigger; still one snapshot, no
 locks). Its preflight requires the exact `20270128140000` body (md5, carriage returns ignored), so it never
 overwrites a different later version. Both migrations ship in the same release (neither is live).

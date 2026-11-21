@@ -1,5 +1,5 @@
 -- Written 2026-11-19. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270129170000_customer_deactivation_open_work_followups.md.
+-- docs/reference/migrations.d/20270129210000_customer_deactivation_open_work_followups.md.
 --
 -- WHAT (issue #2000, follow-ups to KI-148 / 20270128140000; contract
 --   docs/plans/2026-11-18-ki148-customer-deactivation-CONTRACT.md, section "Follow-up (issue #2000)"):

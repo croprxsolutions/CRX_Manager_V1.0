@@ -895,8 +895,12 @@ export default function Deliveries() {
   // Open deliveries a driver may take. The read rule shows a driver only their own deliveries, so the database
   // returns these through get_available_deliveries_for_driver (#2018). A failed read clears the card and says so,
   // so an old list never stays clickable and a failure never looks like "nothing available".
+  // Only the newest read may set the card, so a slow older answer never brings back a delivery just taken.
+  const availableSeqRef = useRef(0);
   const loadAvailable = useCallback(async () => {
+    const seq = ++availableSeqRef.current;
     const { data, error: availableErr } = await supabase.rpc('get_available_deliveries_for_driver');
+    if (seq !== availableSeqRef.current) return;
     if (availableErr) {
       setUnassigned([]);
       toast('error', `Could not load available deliveries: ${sanitizeError(availableErr)}`);

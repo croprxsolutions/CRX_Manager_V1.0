@@ -44,8 +44,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 Highest-priority open items, in order: KI-02 (cost and
 margin: the table-level lock is live since 2026-10-25; the server-function audit is done and its fixes went live 2026-11-02 in
-migration `20261102200000`), KI-10 (about 69 functions still replay a saved answer on the retry
-key alone).
+migration `20261102200000`), KI-10 (outside quote, invoice and billing
+functions, every keyed function now checks its request on a retry; the billing remainder waits for Taha's work).
 
 ---
 
@@ -295,8 +295,24 @@ Both are in the live `void_invoice`, so they affect the ordinary Void Invoice bu
   when its invoice is voided, after checking its Chicago month is open. Live had 0 write-offs (2026-11-14).
 - **Credit month read in UTC — FIXED LIVE 2026-11-07.** `20261206110000` (KI-18) checks each credit's Chicago
   month; confirmed in the live body 2026-11-14.
-### KI-10 — About 69 live functions replay a saved result matched on the retry key alone
-**HIGH on money paths · PARTIAL · money/inventory/database · unassigned (batch 3 remainder is next)**
+### KI-10 — Some live functions replayed a saved result matched on the retry key alone
+**MED (billing remainder only) · PARTIAL · money/database · remainder deferred to after Taha's billing work (2026-12-15)**
+**Live re-check 2026-11-21 (read-only, production):** of the 252 public function versions that take a retry key, none
+outside quotes, invoices, payments and billing still replays a changed request. Batches 1–4e bind theirs to the
+caller and request; the rest check the request themselves: the Product Master functions through
+`_product_parent_replay` (caller and request fingerprint), the delivery-receipt email functions, customer, team-note,
+vendor-alias, supplier-link, pricing and EPA functions by a stored fingerprint or every argument, and
+`stamp_job_printed`, `reverse_application_record` and `resolve_offline_action` by their only business arguments
+after their role check. The stock movers the stock-unit work touches (`complete_delivery`,
+`start_and_complete_delivery`, `cancel_order`, `bulk_import_order`) are bound too. **Still open, deferred (Taha
+owns quotes, bookings, invoices and billing until 2026-12-15):** `post_invoice_group` replays on the key alone
+(confirmed); `auto_expire_quotes` takes no request to compare; the other quote, invoice, credit-memo, payment
+and finance-charge functions (`save_quote`, `save_invoice`, `post_invoice`, `create_quote_version`,
+`restore_quote_version`, `convert_quote_to_order`, `create_invoice_from_order`, `create_invoice_from_blend_ticket`,
+`create_invoice_for_unbilled_delivery`, `apply_credit_memo_to_invoice`, `reverse_credit_memo_application`,
+`unapply_credit_memo`, `allocate_payment`, `record_invoice_payment`, `generate_finance_charges`,
+`save_field_app_split_invoice`, `revert_quote_status`) show their own request checks but were not each proven;
+re-check them function by function when that work reopens. History of the batches follows.
 When a user retries an action with a saved "retry key", these functions return the first call's saved answer
 without checking that the retry is for the same person and record. Nothing is double-charged; a reused key with
 a different target gives a false "success" on the wrong record. Fixed on `main`: batch 1 (`20261016060000`,
@@ -986,7 +1002,7 @@ report and its CSV (`_get_inventory_cost_report_cost_impl_20261019`, `Reports.ts
 rows, so summing the CSV reproduces the old wrong total. Fix: match the rows to the summary's exclusions, or mark them.
 
 ### KI-136 — Receiving adds the typed number whatever unit the PO line is in
-**MED · OPEN · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #4) · unassigned**
+**MED · FIXED LIVE (`20270121110000` + `20270121120000`, PR #1896, released in #1990; checked live 2026-11-21: `a1_line_unit_is_stock_unit` on PO, order and delivery lines, no open PO line in another unit) · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #4) · Claude**
 `receive_po_items` adds quantity straight to stock without checking the line unit against the stock unit, and new PO
 lines take `products.unit_size`, not the stock unit (`PurchaseOrderDetail.tsx` ~L2154). Live: 4 of 102 received lines
 were in a different unit and 44 had a blank unit. D12 moves purchasing back into CRX before the season. Fix: fill a
@@ -998,7 +1014,7 @@ on a KI-137 product. Receiving them today adds the typed number. The on-order re
 (`_recompute_po_on_order_for_products`) and new stock-row creation mix units the same way. The per-line factor
 `inventory_units_per_supplier_unit_snapshot` exists but is unused. Repair step 1 (To-Do 0.17); orders and deliveries
 are KI-158. Do not convert historical balances; fix them from counts (KI-29).
-**Fix built 2026-11-15 (units batch, PR A; not live):** `20270121110000_line_unit_is_stock_unit.sql` fills a blank PO,
+**Fix (units batch, PR #1896; live 2026-11-21):** `20270121110000_line_unit_is_stock_unit.sql` fills a blank PO,
 order or delivery line unit with the stock unit, stores a matching spelling as the product's own (`EA` -> `Ea`),
 refuses any other unit (`LINE_UNIT_NOT_STOCK_UNIT`), checks a PO line again whenever it is received into, refuses a
 product stock-unit change while lines are open in the old unit (`PRODUCT_UNIT_HAS_OPEN_LINES`), and gives the one
@@ -1008,7 +1024,7 @@ relabelled first by `20270121100000` (KI-137). Still open after this: a fully re
 admin over-receive (re-enter it on a new line).
 
 ### KI-137 — Two seed-treatment products are stocked and priced per Lb at per-jug money
-**MED (data) · OPEN · inventory/pricing data · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #5) · unassigned**
+**MED (data) · FIXED LIVE (`20270121100000`, PR #1896, released in #1990) · inventory/pricing data · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #5) · Claude**
 Products `0b2e713b` and `17ccc5ba` have stock and rate unit Lb and container unit Ea, with cost and Tier 1 equal to a
 jug's money; their purchases were "EA". Selling or receiving by the pound would be wildly wrong. On-hand 0, one order
 line each. May already be on Mason's private unit-mismatch list (KI-30). Fix: Mason confirms the sales unit (To-Do
@@ -1016,10 +1032,10 @@ decision 24), then a reviewed unit correction.
 **Answered 2026-11-13 (Mason, DECISION_LOG):** both Powder Keg products are sold **by the each** at their current prices.
 Their stock and rate unit become Ea, with no stock conversion because on-hand is 0. This needs a reviewed migration
 (repair step 1, To-Do 0.17). One has an open EA PO line (KI-136), so correct it before that line is received.
-**Fix built 2026-11-15 (units batch, PR A; not live):** `20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql`
+**Fix (units batch, PR #1896; live 2026-11-21):** `20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql`
 moves both products, their families, stock rows and open order lines Lb -> Ea (a new cost basis at the same cents),
 and relabels Piksi Dust Plus's stock row and open PO, order and delivery lines "Dry oz" -> MG. Quantities and money
-do not change. Needs Mason's live-apply approval.
+do not change. Applied live 2026-11-21 (release #1990).
 
 ### KI-138 — Stored tier margins disagree with stored prices on a few products
 **LOW · OPEN · pricing data · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #6) · unassigned**
@@ -1069,7 +1085,7 @@ cancelled. The app cannot reach this today, because `cancel_order` cancels open 
 rule stops it. Fix: in a new migration, leave a cancelled order's status alone (or refuse the completion).
 
 ### KI-158 — Orders and deliveries move stock without checking units
-**MED · OPEN · inventory/units · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-4, C-16) · unassigned**
+**MED · FIXED LIVE (`20270121110000`, PR #1896, released in #1990; checked live 2026-11-21: 0 open order or delivery lines in another unit) · inventory/units · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-4, C-16) · Claude**
 The order-side twin of KI-136. New order lines default to `products.unit_size`, not `inventory_unit`
 (`_fill_order_line_unit`, `20270106100000`; the quote-to-order prebook copies the same). Delivery completion subtracts
 `delivery_items.quantity` with no unit check. So a product sold per case or each but stocked per gallon or pound loses
@@ -1077,7 +1093,7 @@ The order-side twin of KI-136. New order lines default to `products.unit_size`, 
 delivery lines** carry a unit different from the stock unit. Also, 25 `inventory.unit_size` labels are blank or
 misspelled; screens prefer `products.inventory_unit`. Fix: default and fill to the stock unit, and refuse or convert a
 mismatch, in the same units batch as KI-136 (repair step 1, To-Do 0.17).
-**Fix built 2026-11-15 (units batch, PR A; not live):** the KI-136 rule covers order and delivery lines too and
+**Fix (units batch, PR #1896; live 2026-11-21):** the KI-136 rule covers order and delivery lines too and
 replaces `_fill_order_line_unit` (it filled from `unit_size`). Existing closed lines keep their units and still save
 edits that do not touch the unit.
 
@@ -1510,6 +1526,20 @@ be chosen as an actual-purchase cost basis. 1 live open line (a Powder Keg line 
 parked, so nothing reads it yet. **Decision (Mason, 2026-11-17: "Accept and land"):** #1896 ships with this open. Fix
 before actual-purchase costing ships: compare units case-insensitively in the snapshot trigger, or normalize the
 spelling on receipt.
+
+### KI-171 — Grower-share rep coverage check (#2068): accepted limits and test gaps
+**MED · OPEN · field-app invoices · found 2026-11-20/21 (Sol rounds 1-2, Astra, #2068) · unassigned**
+#2068 lets a sales rep save a grower-share invoice only when its per-acre price covers the included chemicals' cost.
+Left open: (1) a rep's save passing or not depends on the chemicals' cost, so the outcome is not cost-blind (accepted
+with Mason's 2026-11-20 decision); (2) chemicals without a catalog product are outside the check
+for a rep (Mason, 2026-11-20: leave as is); (3) after a lost response, "Nothing was saved" can be wrong when the first
+save committed; (4) the reverse script leaves the migration ledger saying the candidate is applied; (5) the coverage
+check re-reads the invoice's approval rows on every $0 line, so a very large, often re-saved draft gets slower;
+(6) a refused new invoice still uses up an invoice number; (7) prover gaps: saves run as `postgres` with a rep/admin
+JWT (would not catch `authenticated` losing EXECUTE), reuse mode skips the replay and can overwrite unit conversions,
+and the preflight does not check the invoice trigger is attached. Pre-existing in the field-app save (Astra):
+incomplete chemical input, `save_invoice` on a field-app draft, invoice lock order, idempotency key binding,
+single-to-group edit, soft-deleted group members.
 
 ---
 

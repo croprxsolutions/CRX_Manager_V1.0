@@ -2164,9 +2164,8 @@ export default function QuoteBuilder() {
       const jobLocked = Boolean(s.id && sectionJobs[s.id] && sectionJobs[s.id].status !== 'cancelled');
       if (jobLocked || !timing || !timingWindows) return { ...s, timing };
       const today = todayInBusinessTz();
-      // A date the pick filled (this session, or still the old timing's window start) follows the new timing; a chosen date stays.
-      const autoFilled = Boolean(s.needed_by_date && (autoFilledNeededBy.current.get(key) === s.needed_by_date
-        || (s.timing && s.needed_by_date === timingWindowStart(timingWindows, s.timing, today))));
+      // Only a date this screen's Timing pick filled follows the new timing; any other date (typed, or saved earlier) stays.
+      const autoFilled = Boolean(s.needed_by_date && autoFilledNeededBy.current.get(key) === s.needed_by_date);
       if (s.needed_by_date && !autoFilled) return { ...s, timing };
       const filled = timingWindowStart(timingWindows, timing, today);
       autoFilledNeededBy.current.set(key, filled);

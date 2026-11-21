@@ -40,12 +40,13 @@ const CLASS: Record<string, string> = { committed: 'Committed', could_add: 'Coul
 const num = (q: Qty) => Number(q);
 // A positive amount under the shown precision reads "<0.001", never "0".
 const qty = (q: Qty) => (num(q) > 0 && num(q) < 0.0005 ? '<0.001' : num(q).toLocaleString('en-US', { maximumFractionDigits: 3 }));
+// A buy amount rounds UP to the shown precision (never below 0.001 when positive), so it never understates the order.
+const buyQty = (q: Qty) => (num(q) > 0 ? qty(Math.max(Math.ceil(num(q) * 1000 - 1e-9) / 1000, 0.001)) : qty(q));
 const day = (d: string | null) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
 
 // eslint-disable-next-line react-refresh/only-export-components -- exported for its unit test
 export function suggestionText(s: Suggestion, unit: string | null): string {
-  // A buy suggestion rounds UP to the shown precision, so it never understates the order (Luna LOW).
-  const n = `${qty(Math.ceil(num(s.quantity) * 1000 - 1e-9) / 1000)}${unit ? ` ${unit}` : ''}`;
+  const n = `${buyQty(s.quantity)}${unit ? ` ${unit}` : ''}`;
   const order = s.order_now ? `Order ${n} now` : `Order ${n} by ${day(s.order_by)}`;
   return `${order} (needed ${day(s.need_date)})`;
 }
@@ -249,7 +250,7 @@ export default function PurchasingTab() {
                         <td className="px-3 py-2 text-right font-mono">{qty(p.on_hand)}</td>
                         <td className="px-3 py-2 text-right font-mono">{qty(p.incoming)}</td>
                         <td className="px-3 py-2 text-right font-mono">{qty(p.committed)}</td>
-                        <td className={`px-3 py-2 text-right font-mono ${num(p.suggested) > 0 ? 'text-red-600 font-bold' : ''}`}>{qty(p.suggested)}</td>
+                        <td className={`px-3 py-2 text-right font-mono ${num(p.suggested) > 0 ? 'text-red-600 font-bold' : ''}`}>{buyQty(p.suggested)}</td>
                         <td className="px-3 py-2 text-right font-mono">{qty(p.could_add)}</td>
                         <td className="px-3 py-2 text-right">
                           <button type="button" onClick={() => setOpen(isOpen ? null : p.product_id)} aria-expanded={isOpen}

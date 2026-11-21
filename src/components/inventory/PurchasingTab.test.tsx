@@ -73,5 +73,7 @@ describe('PurchasingTab', () => {
       .toBe('Order 0.001 Gal now (needed Feb 5, 2027)');
     expect(suggestionText({ need_date: '2027-02-05', order_by: '2027-02-01', order_now: true, quantity: '1.2344' }, 'Gal'))
       .toBe('Order 1.235 Gal now (needed Feb 5, 2027)');
+    expect(suggestionText({ need_date: '2027-02-05', order_by: '2027-02-01', order_now: true, quantity: '0.0000000000005' }, 'Gal'))
+      .toBe('Order 0.001 Gal now (needed Feb 5, 2027)');
   });
 });

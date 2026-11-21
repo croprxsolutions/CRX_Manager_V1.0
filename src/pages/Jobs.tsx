@@ -2206,7 +2206,7 @@ export default function Jobs() {
       <BulkDeleteConfirmModal
         open={deleteModalOpen}
         onClose={() => setDeleteModalOpen(false)}
-        count={selectedCount}
+        count={selectedRows.filter((j) => deletableStatuses.includes(j.status)).length}
         entityName="job"
         onConfirm={handleDelete}
         loading={deleting}

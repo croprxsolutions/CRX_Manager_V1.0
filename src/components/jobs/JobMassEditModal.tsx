@@ -133,11 +133,13 @@ export default function JobMassEditModal({
       });
       editKey.done(scope);
       const summary = summarizeEditJobs(result);
-      logActivity({
-        event: 'jobs_mass_edited',
-        description: `Mass edit (${changes.join('; ')}): ${summary}`,
-        performedBy: profile.id,
-      });
+      if (result.updated.length + result.cancelled.length > 0) {
+        logActivity({
+          event: 'jobs_mass_edited',
+          description: `Mass edit (${changes.join('; ')}): ${summary}`,
+          performedBy: profile.id,
+        });
+      }
       toast(result.skipped.length > 0 ? 'info' : 'success', summary);
       reset();
       onApplied();

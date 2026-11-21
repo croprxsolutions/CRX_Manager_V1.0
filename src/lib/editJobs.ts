@@ -82,9 +82,13 @@ export function summarizeEditJobs(r: EditJobsResult): string {
   if (r.updated.length) parts.push(`${plural(r.updated.length, 'job')} edited.`);
   if (r.cancelled.length) parts.push(`${plural(r.cancelled.length, 'job')} cancelled.`);
   if (r.deleted.length) parts.push(`${plural(r.deleted.length, 'job')} deleted.`);
+  // A job whose field changes saved but whose cancel was refused is "not cancelled", not "skipped".
   const groups = new Map<string, number>();
-  for (const s of r.skipped) groups.set(skipLabel(s), (groups.get(skipLabel(s)) ?? 0) + 1);
-  for (const [label, n] of groups) parts.push(`${plural(n, 'job')} skipped (${label}).`);
+  for (const s of r.skipped) {
+    const key = `${r.updated.includes(s.id) ? 'not cancelled' : 'skipped'} (${skipLabel(s)})`;
+    groups.set(key, (groups.get(key) ?? 0) + 1);
+  }
+  for (const [label, n] of groups) parts.push(`${plural(n, 'job')} ${label}.`);
   return parts.length ? parts.join(' ') : 'Nothing changed.';
 }
 

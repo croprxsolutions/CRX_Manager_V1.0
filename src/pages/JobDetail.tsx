@@ -328,6 +328,9 @@ export default function JobDetail() {
   // loaded job is never wrongly flagged "unsaved". Baseline is re-captured after
   // every successful save/start/complete (which re-run fetchJob).
   const [isDirty, setIsDirty] = useState(false);
+  // Read after an await: an edit typed while a request was in flight must count.
+  const isDirtyRef = useRef(isDirty);
+  useEffect(() => { isDirtyRef.current = isDirty; }, [isDirty]);
   const baselineRef = useRef<string | null>(null);
   // Post-save refetch race guard: fetchJob nulls the baseline BEFORE its network
   // read resolves, and loading stays false on refetches — so any render in that
@@ -3318,8 +3321,9 @@ export default function JobDetail() {
       if (result.cancelled.length === 0) {
         if (stillOnThisJob()) {
           // Reload only when there is no unsaved edit to lose; the toast already says why it was not cancelled.
-          toast('info', `Job not cancelled: ${summarizeEditJobs(result)}${isDirty ? ' Your unsaved changes are kept; refresh to see the job as saved.' : ''}`);
-          if (!isDirty) await fetchJob();
+          const dirtyNow = isDirtyRef.current;
+          toast('info', `Job not cancelled: ${summarizeEditJobs(result)}${dirtyNow ? ' Your unsaved changes are kept; refresh to see the job as saved.' : ''}`);
+          if (!dirtyNow) await fetchJob();
         }
         setCancelling(false);
         return;

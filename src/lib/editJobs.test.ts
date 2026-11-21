@@ -52,7 +52,7 @@ describe('summarizeEditJobs', () => {
     expect(summarizeEditJobs({
       updated: ['a', 'b'], cancelled: ['a'], deleted: [],
       skipped: [{ id: 'b', reason: 'status', status: 'completed' }, { id: 'c', reason: 'status', status: 'invoiced' }, { id: 'd', reason: 'not_found' }],
-    })).toBe('2 jobs edited. 1 job cancelled. 1 job skipped (completed). 1 job skipped (invoiced). 1 job skipped (no longer exists).');
+    })).toBe('2 jobs edited. 1 job cancelled. 1 job not cancelled (completed). 1 job skipped (invoiced). 1 job skipped (no longer exists).');
     expect(summarizeEditJobs(empty)).toBe('Nothing changed.');
   });
 });
@@ -87,5 +87,14 @@ describe('editJobsLimitMessage', () => {
   it('flags more than 500 jobs before anything is confirmed', () => {
     expect(editJobsLimitMessage(500)).toBeNull();
     expect(editJobsLimitMessage(501)).toBe('Choose at most 500 jobs at a time (501 selected).');
+  });
+});
+
+describe('summarizeEditJobs with field changes and a refused cancel', () => {
+  it('calls a job whose fields saved but whose cancel was refused "not cancelled", not "skipped"', () => {
+    expect(summarizeEditJobs({
+      updated: ['a', 'b'], cancelled: ['a'], deleted: [],
+      skipped: [{ id: 'b', reason: 'status', status: 'completed' }, { id: 'c', reason: 'status', status: 'invoiced' }],
+    })).toBe('2 jobs edited. 1 job cancelled. 1 job not cancelled (completed). 1 job skipped (invoiced).');
   });
 });

@@ -251,7 +251,7 @@ function refusedProbe(sql, pattern, uid) {
 }
 
 const id = (s) => `a5a5a5a5-2058-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), A = id('c1'), B = id('c2'), GA = id('f1'), GA2 = id('f3'), GB = id('f2'), N = id('d1');
+const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), GA = id('f1'), GA2 = id('f3'), GB = id('f2'), N = id('d1');
 const SAVE_IMPL = 'public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)';
 const OLD_BODY = '1a4a2655e43392d867b195289df9b9a1';
 const body = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${SAVE_IMPL}'::regprocedure;`);
@@ -260,8 +260,10 @@ const grants = (sig) => scalar(`SELECT COALESCE(string_agg(g, ',' ORDER BY g), '
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
-    ('${ADMIN}', 'sdf-admin@example.invalid', '{"full_name":"[PROVER] SDF Admin","role":"admin"}'::jsonb);`);
+    ('${ADMIN}', 'sdf-admin@example.invalid', '{"full_name":"[PROVER] SDF Admin","role":"admin"}'::jsonb),
+    ('${REP}', 'sdf-rep@example.invalid', '{"full_name":"[PROVER] SDF Rep","role":"sales_rep"}'::jsonb);`);
   raw(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
+    UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '${REP}';
     DELETE FROM public.unit_conversions;
     INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};
     INSERT INTO public.customers (id, farm_name, assigned_tier, is_active) VALUES ('${A}', '[PROVER] SDF Farm A', 1, true), ('${B}', '[PROVER] SDF Farm B', 1, true);
@@ -280,12 +282,12 @@ function seed() {
     CREATE FUNCTION sdf.save(p_invoice uuid, p_fields uuid[], p_key text) RETURNS jsonb LANGUAGE plpgsql SET search_path = public, pg_temp AS $f$
     BEGIN
       RETURN public.save_field_app_invoice(p_invoice,
-        jsonb_build_object('invoice_date', ((now() AT TIME ZONE 'America/Chicago')::date)::text, 'salesman_id', '${ADMIN}'),
+        jsonb_build_object('invoice_date', ((now() AT TIME ZONE 'America/Chicago')::date)::text, 'salesman_id', COALESCE(auth.uid(), '${ADMIN}'::uuid)),
         (SELECT jsonb_agg(jsonb_build_object('field_id', f, 'map_number', o, 'total_acres', 100, 'planted_acres', 100,
           'applied_acres', 10, 'sort_order', o)) FROM unnest(p_fields) WITH ORDINALITY u(f, o)),
         jsonb_build_array(jsonb_build_object('description', 'SDF chem', 'rate_per_acre', 128, 'rate_unit', 'oz', 'unit_size', 'Gal',
           'cost_cents', 500, 'sort_order', 0, 'manual_override', false, 'product_id', '${N}')),
-        '${ADMIN}', NULL, p_key);
+        COALESCE(auth.uid(), '${ADMIN}'::uuid), NULL, p_key);
     END $f$;
     CREATE FUNCTION sdf.state() RETURNS text LANGUAGE sql SET search_path = public, pg_temp AS $f$
       SELECT COALESCE(string_agg(format('%s:%s:%s:%s:%s', right(c.farm_name, 1), i.status, i.total_amount_cents,
@@ -293,19 +295,30 @@ function seed() {
           ' ' ORDER BY c.farm_name, i.status), '-')
         FROM invoices i JOIN customers c ON c.id = i.customer_id
        WHERE c.farm_name LIKE '[PROVER] SDF%' AND i.deleted_at IS NULL;
+    $f$;
+    -- Every [PROVER] invoice and line as stored, plus the activity feed size: equal before and after a refused edit (#2164).
+    CREATE FUNCTION sdf.rows() RETURNS text LANGUAGE sql SET search_path = public, pg_temp AS $f$
+      SELECT md5(COALESCE((SELECT string_agg(to_jsonb(i)::text, '|' ORDER BY i.id) FROM invoices i JOIN customers c ON c.id = i.customer_id
+          WHERE c.farm_name LIKE '[PROVER] SDF%'), '')
+        || COALESCE((SELECT string_agg(to_jsonb(x)::text, '|' ORDER BY x.id) FROM invoice_items x JOIN invoices i ON i.id = x.invoice_id
+          JOIN customers c ON c.id = i.customer_id WHERE c.farm_name LIKE '[PROVER] SDF%'), '')
+        || (SELECT count(*) FROM activity_feed)::text);
     $f$;`);
   console.log('[prover] committed test rows: farms A and B; fields A1, A2 (A) and B (B); a liquid chemical sold by the Gal at $30');
 }
 const asAdmin = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);\n`;
+const asRep = `SELECT set_config('request.jwt.claims', '{"sub":"${REP}","role":"authenticated"}', true);\n`;
 // Create a draft for A on field A1 (or the given fields), run the optional setup, then edit it with the given fields
 // in a later statement; returns the state and whether the original id is among the returned ids.
-const scenario = (fields, start = `'${GA}'`, setup = '') => `${asAdmin}CREATE TEMP TABLE t AS SELECT (sdf.save(NULL, ARRAY[${start}]::uuid[], 'sdf-new-' || gen_random_uuid())->'invoice_ids'->>0)::uuid AS inv;
+const scenario = (fields, start = `'${GA}'`, setup = '', who = asAdmin) => `${who}CREATE TEMP TABLE t AS SELECT (sdf.save(NULL, ARRAY[${start}]::uuid[], 'sdf-new-' || gen_random_uuid())->'invoice_ids'->>0)::uuid AS inv;
   ${setup}
   CREATE TEMP TABLE r AS SELECT sdf.save(t.inv, ARRAY[${fields}]::uuid[], 'sdf-edit-' || gen_random_uuid()) AS r FROM t;
   SELECT sdf.state() || ' | ' || (SELECT CASE WHEN r.r->'invoice_ids' @> to_jsonb(ARRAY[t.inv]) THEN 'kept' ELSE 'replaced' END
     || ' | orphan-rows=' || (SELECT count(*) FROM activity_feed a WHERE a.related_entity_id = t.inv AND a.event_type = 'invoice_orphan_cancelled')
     || ' | original=' || (SELECT right(c.farm_name, 1) || ':' || i.status FROM invoices i JOIN customers c ON c.id = i.customer_id WHERE i.id = t.inv)
     FROM t, r);`;
+// A sales rep's own draft moved to B's field (#2164: the refusal is not admin-only).
+const REP_TO_B = scenario(`'${GB}'`, `'${GA}'`, '', asRep);
 const TO_B = scenario(`'${GB}'`), SPLIT = scenario(`'${GA}','${GB}'`), SAME = scenario(`'${GA}','${GA2}'`);
 // A grouped A+B draft (opened from its first member) edited down to A's field: the existing grouped rule, unchanged.
 const GROUPED = scenario(`'${GA}'`, `'${GA}','${GB}'`);
@@ -323,6 +336,19 @@ const DELETED = `${asAdmin}CREATE TEMP TABLE t AS SELECT (sdf.save(NULL, ARRAY['
   UPDATE invoices SET deleted_at = now() FROM t WHERE invoices.id = t.inv;
   SELECT sdf.save(t.inv, ARRAY['${GA}']::uuid[], 'sdf-edit-' || gen_random_uuid()) FROM t;`;
 
+// #2164: a refused edit leaves every stored row as it was and keeps no receipt under its key. The edit runs in an
+// exception block (a savepoint) so the state can be read again in the same transaction after the refusal.
+const REFUSED_LEAVES_STATE = `${asAdmin}CREATE TEMP TABLE t AS SELECT (sdf.save(NULL, ARRAY['${GA}']::uuid[], 'sdf-new-' || gen_random_uuid())->'invoice_ids'->>0)::uuid AS inv;
+  CREATE TEMP TABLE s AS SELECT sdf.rows() AS before;
+  DO $d$ BEGIN
+    PERFORM sdf.save((SELECT inv FROM t), ARRAY['${GB}']::uuid[], 'sdf-refused-edit');
+    RAISE EXCEPTION 'SDF_EDIT_WAS_NOT_REFUSED';
+  EXCEPTION WHEN others THEN
+    IF SQLERRM NOT LIKE 'FIELD_APP_PAYER_CHANGED:%' THEN RAISE; END IF;
+  END $d$;
+  SELECT CASE WHEN (SELECT before FROM s) = sdf.rows() THEN 'same' ELSE 'changed' END
+    || ' | receipts=' || (SELECT count(*) FROM idempotency_keys WHERE idempotency_key = 'sdf-refused-edit');`;
+
 async function main() {
   if (REUSE) {
     assert.match(REUSE, /^crx-[a-z0-9-]+$/, 'CRX_PROVER_REUSE must name a kept prover container (crx-...)');
@@ -336,6 +362,9 @@ async function main() {
   seed();
 
   // BEFORE (each case rolled back): 128 oz/ac x 10 ac = 10 Gal x $30 = $300.00 a field.
+  const repToBBefore = okProbe(REP_TO_B);
+  console.log(`[before] a sales rep's draft moved to B's field: ${repToBBefore}`);
+  assert.equal(repToBBefore, 'A:draft:30000:1:solo | kept | orphan-rows=0 | original=A:draft', "before: a rep can bill farm A for B's field");
   const toBBefore = okProbe(TO_B), splitBefore = okProbe(SPLIT), sameBefore = okProbe(SAME), groupedBefore = okProbe(GROUPED);
   console.log(`[before] a grouped A+B draft edited to A's field: ${groupedBefore}`);
   const deletedBefore = probe(DELETED);
@@ -374,6 +403,11 @@ async function main() {
   refusedProbe(TO_B, sentence(B_ONLY));
   refusedProbe(SPLIT, sentence(BOTH));
   console.log("[after] A's draft moved to B's field, or split over A's and B's: refused FIELD_APP_PAYER_CHANGED naming the farms (whole save rolled back)");
+  refusedProbe(REP_TO_B, sentence(B_ONLY));
+  console.log("[after] a sales rep moving their own draft to B's field: refused the same way");
+  const kept = okProbe(REFUSED_LEAVES_STATE);
+  assert.equal(kept, 'same | receipts=0', 'a refused edit must leave every row as it was and keep no receipt');
+  console.log(`[after] a refused edit, compared in the same transaction: ${kept}`);
   refusedProbe(UNPOSTED, sentence(B_ONLY));
   refusedProbe(FROM_JOB, sentence(B_ONLY, JOB_END));
   refusedProbe(UNPOSTED_SPLIT, sentence(BOTH));

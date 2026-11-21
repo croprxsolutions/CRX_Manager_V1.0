@@ -176,6 +176,8 @@ type CreatedInvoiceCheck =
  */
 // KI-14: each owner of a split keeps its own payment terms. choice is a preset, a legacy text, '' (the
 // customer's terms, filled in by the database on save) or CUSTOM_DUE (a typed due date).
+// #2164: the refusal says this save stored nothing; an earlier Save from the page did make the draft.
+const EARLIER_SAVE_CREATED_NOTE = 'An earlier Save from this page did create this invoice, with the fields it had then. That draft still exists.';
 const CUSTOM_DUE = 'Custom date…';
 const TERMS_PRESETS = ['Net 30', 'Net 15', 'Due on receipt'];
 type OwnerTerms = { choice: string; customText: string; dueDate: string };
@@ -1933,6 +1935,9 @@ export default function FieldApplicationInvoice() {
     const targetInvoiceId = id || createdInvoiceIdRef.current;
     const creating = !targetInvoiceId;
     if (saveInFlightRef.current) return;
+    // Set when an earlier Save from this page (its reply lost) turns out to have created the
+    // invoice: a refusal of this save then must not read as if no invoice exists (#2164).
+    let earlierSaveCreatedInvoice = false;
     saveInFlightRef.current = true;
     setSaving(true);
     try {
@@ -2038,6 +2043,7 @@ export default function FieldApplicationInvoice() {
       }
       const replayedInvoiceId = targetInvoiceId || ids[0];
       if (retryMayReplayOldValues && replayedInvoiceId) {
+        earlierSaveCreatedInvoice = creating;
         const followUpKey = saveIdem.getKey();
         unansweredSaveRef.current = { key: followUpKey, fingerprints: [fingerprint] };
         const followUp = await supabase.rpc('save_field_app_invoice', {
@@ -2280,8 +2286,10 @@ export default function FieldApplicationInvoice() {
     } catch (err) {
       const payerChange = rpcCodeDetail(err, RpcErrorCodes.FIELD_APP_PAYER_CHANGED);
       if (payerChange) {
+        // The user already left this invoice: no late note or toast about it (#2164).
+        if (!pageActiveRef.current) return;
+        setPayerChangeRefusal(earlierSaveCreatedInvoice ? `${payerChange} ${EARLIER_SAVE_CREATED_NOTE}` : payerChange);
         // An expected business refusal, explained in full at the top of the page.
-        setPayerChangeRefusal(payerChange);
         toast('error', "Not saved: these fields no longer bill this invoice's farm. See the note at the top of the invoice.");
         return;
       }

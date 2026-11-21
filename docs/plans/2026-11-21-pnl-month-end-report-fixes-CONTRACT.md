@@ -7,8 +7,8 @@ and `_close_accounting_period_replay_impl_20261015` match the newest migrations 
 ## 1. Outcome and authority
 
 **Business result.** The two profit reports (Reports › Bottom Line P&L, Month-End Close summary) subtract a commission only for the
-share of its sale billed in CRX in that period; fee lines' cost is not multiplied by acres twice; Month-End Close and the
-close receipt show real payments received and count every invoice that was posted; the AR line on Month-End Close says it is today's AR.
+share of its sale billed in CRX in that period; fee lines' cost is not multiplied by acres twice; the close receipt counts every invoice that was posted (payments received:
+moved to a follow-up after Sol round 3, see the settlement below); the AR line on Month-End Close says it is today's AR.
 
 **Smallest change.** One new migration re-emitting three report functions plus two internal read-only helpers; one label on
 `src/pages/MonthEndClose.tsx`. No table, lock, queue or flag. No invoice, billing, commission or payment writer changes.
@@ -56,7 +56,7 @@ whole-cent `round(commission_cents × share)`:
 - Return credits do not take back commission (Open decision Q1, recommended answer built).
 - Commission dates no longer matter; only the invoice dates do.
 R2 (KI-126) COGS per line: `CASE WHEN is_application_fee THEN cost_cents ELSE round(cost_cents*quantity) END` in both reports.
-R3 (KI-129) Payments received in [start,end] = legacy `payments` (not deleted, `payment_date`) UNION ALL active payment
+R3 (KI-129; WITHDRAWN from this change after Sol round 3, kept as the starting point for the follow-up) Payments received in [start,end] = legacy `payments` (not deleted, `payment_date`) UNION ALL active payment
 `allocation_sets` (`COALESCE(payment_date, Chicago date of this version's created_at, as the customer statement dates it)`, `total_payment_cents`); count and cents. Used by Month-End
 Close and the close receipt. Close receipt counts and sums invoices `posted/overdue/paid` (still including tax: "total invoiced").
 R4 (KI-130) Month-End Close label "AR Balance" → "Current AR (today)". Number unchanged.

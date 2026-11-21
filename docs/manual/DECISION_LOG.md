@@ -13,7 +13,11 @@ not change). The agent stops only for genuine business decisions (AGENTS.md). Ta
 every check, Sol and the apply proofs are unchanged; Codex still hands live work to Claude. A destructive migration may
 now merge into `staging` (test data); live still needs his `yes`. **Accepted residual:** like every chat-reply record
 here, an agent could forge the pass file; Sol's plan review (48 findings) also asked for a server-side approval store,
-a rehearsed restore and a production window shared with Taha, which Mason chose not to build now.
+a rehearsed restore and a production window shared with Taha, which Mason chose not to build now. Sol's whole-branch
+review of the build (20 findings: loose command wording, widening renews the 24 hours, no forced `Ready to merge`
+freeze under a pass, a partial apply not ending other passes, a `yes` surviving edits to another migration in the PR)
+was put to him with a tightening plan; he declined it ("this is too strict i want less rules and guards"). Those are
+accepted residuals; do not re-raise them as blockers on this PR.
 
 ## 2026-11-20 — Release #1990: split the gate files out; release rule 4 removed
 

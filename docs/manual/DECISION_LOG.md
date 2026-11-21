@@ -1,5 +1,23 @@
 # Decision Log
 
+## 2026-11-21 — #2047: Mason owner-accepted 5 Sol finding(s) at `9e22ac2b7e44`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2047 at `9e22ac2b7e44` (base `c1088f15be0c`) found 5 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:132`, text sha256 `1485baf82f399e31` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot hapen (ref 72369a6c3778)
+- Finding 2 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:181`, text sha256 `ab06033c80e17433` (the wording stays with the proof, not here)
+  Mason's reason: this cant hapen (ref c1c3a0118191)
+- Finding 3 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:182`, text sha256 `0b132d68996bcf1c` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 81a4b26c426c)
+- Finding 4 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:27`, text sha256 `5fd44f4829bcbf94` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref bd7b1fb0c469)
+- Finding 5 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:153`, text sha256 `1e39d9aefc0b6c02` (the wording stays with the proof, not here)
+  Mason's reason: this cannt happen (ref fe132c96fe3c)
+
+## 2026-11-21 — #1985: Sol rounds 7 to 10 for the MOA-1 group load
+
+**Decision (Mason, in chat, 2026-11-21: "i allow up to 10 rounds").** PR #1985 may have Sol rounds 7, 8, 9 and 10. The live EPA batch fill ran on 2026-11-21 (live: 97 active ingredients, all with a CAS, 0 salt links, 0 group rows), so the branch now merges staging and restamps the load to 20270204150000. The load SQL is unchanged since round 4.
+
 ## 2026-11-21 — #1985: Sol round 6 for the MOA-1 group load
 
 **Decision (Mason, in chat, 2026-11-21: "Yes, allow round 6").** PR #1985 may have Sol round 6 (the round ledger's next round; Mason first answered "Allow round 5 now", then confirmed round 6 once the count was corrected). This restates the 2026-11-19 entry below for today's round. It still merges into staging only after the live EPA batch fill has run.
@@ -15,19 +33,6 @@
   Mason's reason: this case cannot happen in our business (ref f7878916e856)
 - Finding 2 (HIGH) at `supabase/migrations/20270127140000_ingredient_modes_of_action_load.sql:269`, text sha256 `d62604642a3ee0ed` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our busines (ref 804bd04476c3)
-## 2026-11-21 — #2047: Mason owner-accepted 5 Sol finding(s) at `9e22ac2b7e44`
-
-**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2047 at `9e22ac2b7e44` (base `c1088f15be0c`) found 5 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
-- Finding 1 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:132`, text sha256 `1485baf82f399e31` (the wording stays with the proof, not here)
-  Mason's reason: this case cannot hapen (ref 72369a6c3778)
-- Finding 2 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:181`, text sha256 `ab06033c80e17433` (the wording stays with the proof, not here)
-  Mason's reason: this cant hapen (ref c1c3a0118191)
-- Finding 3 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:182`, text sha256 `0b132d68996bcf1c` (the wording stays with the proof, not here)
-  Mason's reason: this cant happen (ref 81a4b26c426c)
-- Finding 4 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:27`, text sha256 `5fd44f4829bcbf94` (the wording stays with the proof, not here)
-  Mason's reason: this cant happen (ref bd7b1fb0c469)
-- Finding 5 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:153`, text sha256 `1e39d9aefc0b6c02` (the wording stays with the proof, not here)
-  Mason's reason: this cannt happen (ref fe132c96fe3c)
 
 ## 2026-11-21 — #2047 (edit_jobs): Sol round 9 decisions
 

@@ -7,12 +7,12 @@
 // 2026-11-11 ("All but deletions") rewrites and access changes need no approval. This script builds the REQUEST he approves — computed here from the
 // file itself, never from text an agent supplies — saves it in this checkout's
 // .claude/session-state/, and prints the plain-English summary, which ends with a
-// 6-digit reference number. Show him the summary and ask him to reply `I approve`
+// 6-digit reference number. Show him the summary and ask him to reply `yes`
 // (Mason, 2026-10-13). A plain `I approve` counts only when your message just before
 // it showed the reference number, so if you talk about anything else first, show
 // the request again. (`approve <code>` also works.) His reply is recorded by
 // .claude/hooks/owner-approval-prompt.mjs and is good for ONE install of this exact
-// file, from this exact pull-request head, for 30 minutes.
+// file, for 24 hours (the PR head may move after it; Mason, 2026-11-20).
 //
 // Never send the reply yourself, in any session: only a message Mason sends counts.
 //
@@ -194,8 +194,8 @@ const { code, payload } = saveRequest((c) => buildApprovalPayload({
 
 console.log(`Approval request saved for ${migName} (PR #${pr.number}, head ${head.slice(0, 12)}):`);
 for (const c of categories) console.log(`  - ${PARKED_LABELS[c.category]}`);
-console.log("\nExplain the change to Mason in plain English BEFORE running this script (or in an earlier turn): text you write after this output joins the same message as the summary, and then a plain \"I approve\" is refused. Your reply now must be only this, exactly as printed:\n");
+console.log("\nExplain the change to Mason in plain English BEFORE running this script (or in an earlier turn): text you write after this output joins the same message as the summary, and then a plain \"yes\" is refused. Your reply now must be only this, exactly as printed:\n");
 for (const line of ownerApprovalSummary(JSON.parse(payload))) console.log(`  ${line}`);
-console.log(`\nThen wait for HIS reply "I approve" in this session — never send or relay it for him. The approval hook confirms it in the next turn.`);
-console.log(`A plain "I approve" only counts when your LAST message before it is this summary, exactly as printed (no bold, code or quote marks), and NOTHING else (no note, no question): end your turn with that message, and if you say anything else after it, show the request again.`);
-console.log(`After that: node scripts/apply-migration-file.mjs ${rel} (dry run), then again with --confirm, within 30 minutes.`);
+console.log(`\nThen wait for HIS reply "yes" (or "I approve") in this session — never send or relay it for him. The approval hook confirms it in the next turn.`);
+console.log(`A plain "yes" only counts when your LAST message before it is this summary, exactly as printed (no bold, code or quote marks), and NOTHING else (no note, no question): end your turn with that message, and if you say anything else after it, show the request again.`);
+console.log(`After that: node scripts/apply-migration-file.mjs ${rel} (dry run), then again with --confirm, within 24 hours.`);

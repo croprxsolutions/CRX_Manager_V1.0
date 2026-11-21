@@ -12,6 +12,7 @@
 
 **Why:** keep the levels simple and buy only on a grower's yes.
 **What this implies:** `docs/plans/2026-11-20-booking-confidence-rules.md` and `docs/plans/2026-11-20-inventory-purchasing-and-bookings-PLAN.md` are the build plan. A one-time switch-on (Planned bookings → Firm) must land before Plan A PR 3. It sits in Taha's area through Dec 15, so the switch-on and any booking or hold writer change is Taha's.
+
 ## 2026-11-20 — #2050: Mason owner-accepted 1 Sol finding(s) at `e4960bf1340d`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #2050 at `e4960bf1340d` (base `e4e6e11fae1c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

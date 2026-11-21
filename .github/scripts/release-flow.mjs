@@ -45,8 +45,11 @@ export function backportAllowed({ events, labels, head, by = 'TahaKhanAbdalli' }
 // release/next may differ from "staging merged with main" only in the files the bot writes.
 // Comparing trees (not commits or authors) also catches a change hidden in a merge commit.
 export const BOT_FILES = ['package.json', 'package-lock.json', 'CHANGELOG.md', 'src/releaseNotes.ts'];
+// Plus the owner-accept log: Mason's accept commit (scripts/owner-accept-sol-finding.mjs) sits on top of
+// the bot's head and is never on staging. It's a log, so it can't change what ships.
+export const OWNER_ACCEPT_LOG = 'docs/manual/DECISION_LOG.md';
 export function releaseExtraFiles(files) {
-  return files.filter((f) => !BOT_FILES.includes(f));
+  return files.filter((f) => !BOT_FILES.includes(f) && f !== OWNER_ACCEPT_LOG);
 }
 
 // X.Y.Z compared as numbers.

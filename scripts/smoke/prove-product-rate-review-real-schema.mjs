@@ -28,13 +28,12 @@ const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270104110000_product_rate_review.sql');
-// shortcut: 20270120100000 (#1880) is listed for ordering only and is NOT applied here; it also replaces
-// delivery-brand and receiving functions from later migrations this prover never replays. Its rate-function
-// changes were tested by Taha on a real-schema DB (#1880) and by the private behaviour prover; apply it here
-// once this prover replays the later chain (#1928).
+// 20270120100000 (#1880) also replaces delivery-brand and receiving functions from later migrations, so after the
+// rate cases the prover replays the chain up to it, applies it and re-checks the rate writers (#1928).
+const PRIORITY = path.join(MIGRATIONS, '20270120100000_priority_integrity_followups.sql');
 const FOLLOW_UPS = [
   path.join(MIGRATIONS, '20270110110000_inactive_rate_review_cleanup.sql'),
-  path.join(MIGRATIONS, '20270120100000_priority_integrity_followups.sql'),
+  PRIORITY,
   // KI-137 (ordering only, NOT applied): a one-time product relabel that only reads product_rate_lock (it refuses
   // while rates are locked); it changes no RT-3 table, function or grant.
   path.join(MIGRATIONS, '20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql'),
@@ -191,8 +190,10 @@ function plan() {
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED list)`);
     assert.ok(!TOUCHED.test(lf(file)), `${name} now touches what this proof covers; replay it or re-think the skip`);
   }
-  return before;
+  // The others' migrations between the candidate and PRIORITY, replayed (after the rate cases) before PRIORITY applies.
+  return { before, chain: all.slice(at + 1, all.indexOf(PRIORITY)).filter((f) => !FOLLOW_UPS.includes(f)) };
 }
+const CHAIN = [];
 function installLiveAuthUid() {
   psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
   assert.equal(scalar("SELECT md5(prosrc) FROM pg_proc WHERE oid = 'auth.uid()'::regprocedure;"), LIVE_AUTH_UID_MD5, "auth.uid() is not live's body");
@@ -216,7 +217,8 @@ function buildContainer() {
     GRANT ALL ON storage.objects, storage.buckets TO postgres;`, { user: 'supabase_admin' });
   psql('CREATE SCHEMA IF NOT EXISTS supabase_migrations; CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (version text PRIMARY KEY, name text NOT NULL, statements text[]);');
   for (const name of ['20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) psql(`\\i /tmp/${name}`, { user: name.includes('overlay') ? 'supabase_admin' : 'postgres' });
-  const files = plan();
+  const { before: files, chain } = plan();
+  CHAIN.push(...chain);
   let replayed = 0;
   for (const [i, file] of files.entries()) {
     const base = path.basename(file);
@@ -663,6 +665,66 @@ function accessCases() {
   console.log('[case] 11 a sales rep and anon are refused by every new function; reps read no outcomes; nobody writes the tables directly; the helpers are private');
 }
 
+// #1928: replay the others' migrations up to PRIORITY, apply it, and re-check the rate writers it replaces.
+function priorityCases() {
+  for (const [i, file] of CHAIN.entries()) {
+    const name = `c-${i}.sql`; stageText(name, lf(file)); const r = apply(name);
+    if (r.status !== 0) throw new Error(`later-chain replay failed at ${path.basename(file)}:\n${r.output}`);
+    ledger(path.basename(file, '.sql'));
+  }
+  stageText('priority.sql', lf(PRIORITY));
+  const applied = apply('priority.sql');
+  assert.equal(applied.status, 0, applied.output);
+  console.log(`[case] P0 replayed ${CHAIN.length} later migrations, then ${path.basename(PRIORITY)} applies`);
+
+  // Boundary invisible characters (em space, zero-width space, no-break space) the old btrim kept.
+  const pad = (s) => `  ${s}​ `;
+  const blank = '​  ';
+  const P = id('e1');
+  raw(`INSERT INTO public.product_parents (id, name, product_form, generic_epa_registration, is_active, created_by, updated_by)
+    VALUES ('${P}', '[PROVER] Priority', 'liquid', '${EPA}', true, '${ADMIN}', '${ADMIN}');`);
+  // Save: 2 pt/acre is above EPA 100-1's 24 oz/acre; a reason of only invisible characters is no reason.
+  refused(ADMIN, `SELECT public.save_draft_product_rate('${P}', NULL, NULL, 'per_acre', 'house_standard', NULL, 2, NULL, 'pt', true, ${q(blank)}, 'rt3-p-1');`,
+    /PRODUCT_RATE_ABOVE_LABEL_REASON_REQUIRED/);
+  const a = save(P, { rec: 2, def: true, reason: pad('heavy ground') });
+  assert.equal(scalar(`SELECT over_label_reason FROM public.product_rates WHERE id = '${a}';`), 'heavy ground', 'save trims the reason');
+  const d = pg(`UPDATE public.product_rates SET over_label_reason = ${q(pad('x'))} WHERE id = '${a}';`);
+  assert.notEqual(d.status, 0, 'a padded reason written directly is refused'); assert.match(d.output, /check constraint/);
+  console.log('[case] P1 save: a reason of only invisible characters is refused; boundary invisibles are trimmed and refused on a direct write');
+
+  // Delete: same trimming.
+  const b = save(P, { source: 'label', rec: 1 });
+  const ver = () => scalar(`SELECT row_version FROM public.product_rates WHERE id = '${b}';`);
+  refused(ADMIN, `SELECT public.delete_draft_product_rate('${b}', ${ver()}, ${q(blank)}, 'rt3-p-2');`, /PRODUCT_RATE_REASON_REQUIRED/);
+  js(ADMIN, `SELECT public.delete_draft_product_rate('${b}', ${ver()}, ${q(pad('wrong product'))}, 'rt3-p-3');`);
+  assert.equal(scalar(`SELECT reason FROM public.product_rate_draft_events WHERE rate_id = '${b}' AND event_type = 'deleted';`), 'wrong product');
+  console.log('[case] P2 delete: a reason of only invisible characters is refused; the logged reason is trimmed');
+
+  // Reopen: same trimming, through the review upload.
+  js(ADMIN, commit([upId(P, a, { decision: 'approve' })]));
+  refused(ADMIN, commit([upId(P, a, { decision: 'reopen', reason: blank })]), /PRODUCT_RATE_REASON_REQUIRED/);
+  assert.equal(statusOf(a), 'approved');
+  js(ADMIN, commit([upId(P, a, { decision: 'reopen', reason: pad('recheck') })]));
+  assert.equal(statusOf(a), 'draft');
+  assert.equal(scalar(`SELECT reason FROM public.product_rate_draft_events WHERE rate_id = '${a}' AND event_type = 'reopened';`), 'recheck');
+  console.log('[case] P3 reopen: a reason of only invisible characters is refused; the logged reason is trimmed');
+
+  // Clear-outcome: a signed-in change records that admin; a direct write records System (NULL), not the row's editor.
+  const clearedBy = () => scalar(`SELECT COALESCE(changed_by::text, '<system>') FROM public.product_rate_draft_events
+    WHERE parent_id = '${P}' AND event_type = 'outcome_cleared' AND ${CLEARED_BY_CHANGE} ORDER BY id DESC LIMIT 1;`);
+  js(ADMIN, commit([], [outRow(P, 'needs_label_data')]));
+  js(ADMIN, commit([upId(P, a, { recommended: '2.5' })]));
+  assert.equal(outcomeOf(P), '<undecided>'); assert.equal(clearedBy(), ADMIN);
+  js(ADMIN, commit([], [outRow(P, 'needs_label_data')]));
+  const w = pg(`UPDATE public.product_rates SET recommended = 3, row_version = row_version + 1 WHERE id = '${a}';`);
+  assert.equal(w.status, 0, w.output);
+  assert.equal(outcomeOf(P), '<undecided>'); assert.equal(clearedBy(), '<system>');
+  // Only that automatic event may have no actor.
+  const e = pg(`INSERT INTO public.product_rate_draft_events (parent_id, event_type, reason) VALUES ('${P}', 'saved', 'x');`);
+  assert.notEqual(e.status, 0); assert.match(e.output, /product_rate_draft_events_actor_required/);
+  console.log('[case] P4 clear-outcome: an admin change records the admin, a direct write records System; any other event needs an actor');
+}
+
 async function main() {
   buildContainer();
   seed();
@@ -683,6 +745,8 @@ async function main() {
   accessCases();
   console.log('PRODUCT_RATE_REVIEW_PROOF_PASS');
   await proveInactiveRateReview(NAME);
+  priorityCases();
+  console.log('PRODUCT_RATE_REVIEW_PRIORITY_FOLLOWUPS_PASS');
 }
 
 try { await main(); }

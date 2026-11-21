@@ -1,5 +1,18 @@
 # Decision Log
 
+## 2026-11-21 — #2047 (edit_jobs): Sol round 9 decisions
+
+**Decision (Mason, in chat, 2026-11-21, answering Sol round 9).** (1) The shared retry-code table lets a known PO-screen
+code be used first by another action: "Accept, log PO fix" (KI-182). (2) A live invoice on a deleted blend ticket now
+counts as billed: "Fix it". (3) An invoice saved in the same second as a bulk job edit: "Accept, log for Taha" (KI-181).
+The billed-job check had drawn HIGHs in three rounds, so it stops here; Mason owner-accepts findings (1) and (3).
+
+## 2026-11-21 — #2047 (edit_jobs): admins and reps stay assignable as applicators
+
+**Decision (Mason, in chat, 2026-11-21, answering Sol round 8: "Admin and sales rep sometimes are applicators").** The
+job screens keep offering admins and sales reps as applicators. The old applicator's dispatch staying open after such a
+reassignment is today's dispatch behaviour, logged as KI-180; Mason owner-accepts that Sol finding.
+
 ## 2026-11-21 — #2047 (edit_jobs): applicator changes on completed jobs stay as today
 
 **Decision (Mason, in chat, 2026-11-21, answering Sol round 7: "Keep today's rule").** Anyone who may edit jobs may
@@ -11,7 +24,7 @@ a rule change: the screens already offer only active applicators, admins and rep
 
 **Decision (Mason, in chat, 2026-11-21, answering Sol round 6).** (1) `edit_jobs` skips invoiced jobs for every
 action, admins included; Mass Edit already hides them, and a stale screen must not move billed work or its applicator
-access. (2) Two cancels on one booking at the same moment can make one fail safely, as today; logged as KI-174 for
+access. (2) Two cancels on one booking at the same moment can make one fail safely, as today; logged as KI-179 for
 Taha, and Mason owner-accepts that Sol finding.
 **What it does:** a third deliberate exception to the #1979 parity rule; admins fix billed jobs through the invoice flow.
 
@@ -19,8 +32,8 @@ Taha, and Mason owner-accepts that Sol finding.
 
 **Decision (Mason, in chat, 2026-11-21, answering Sol round 5).** (1) A sales rep whose Job Schedule page is blocked
 for them is refused by `edit_jobs`, as the screens already block them. (2) Only an admin may delete a completed job; a
-rep's delete skips it. (3) Changing a completed job's date stays allowed as today; logged as KI-172 for Taha's billing
-work. (4) Partial cancel of a large booking stays as today; logged as KI-171 for Taha, and Mason will owner-accept that
+rep's delete skips it. (3) Changing a completed job's date stays allowed as today; logged as KI-177 for Taha's billing
+work. (4) Partial cancel of a large booking stays as today; logged as KI-176 for Taha, and Mason will owner-accept that
 Sol finding after the next round.
 **What it does:** two deliberate exceptions to the #1979 "parity" rule (contract updated); no other job rule changes.
 
@@ -38,6 +51,27 @@ surviving two fix rounds goes back to Mason) and every other gate are unchanged.
   Mason's reason: this case cannot happen in our business (ref ca71e5988000)
 - Finding 2 (HIGH) at `supabase/migrations/20270131100000_job_writes_through_rpcs.sql:166`, text sha256 `847c3a966cb5ec80` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our business (ref 6b963a8267f1)
+## 2026-11-21 — #2068: Mason owner-accepted 4 Sol finding(s) at `1d9202dcb57d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `1d9202dcb57d` (base `dab22364c6bc`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:296`, text sha256 `8c9208ce2bfc73a0` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 541bb0106bf2)
+- Finding 2 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:174`, text sha256 `1eccf829c6361a8d` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 535732ca2aa9)
+- Finding 3 (HIGH) at `supabase/migrations/20270201180000_grower_share_rep_needs_price_to_cover_cost.sql:312`, text sha256 `43b3d94fb469bf0a` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 5d333eacec4e)
+- Finding 4 (HIGH) at `scripts/smoke/grower-share-rep-cover-reverse.sql:31`, text sha256 `3a19afa1d0a31d5f` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref d424445cef65)
+
+## 2026-11-21 — #2068: Mason owner-accepted 3 Sol finding(s) at `2f04db346c0b`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `2f04db346c0b` (base `912dd819a01f`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201135000_grower_share_rep_needs_price_to_cover_cost.sql:296`, text sha256 `478b5ca87698ebe6` (the wording stays with the proof, not here)
+  Mason's reason: reps knowing cost is acceptable , decided 11-20 (ref e09c1e3b226e)
+- Finding 2 (HIGH) at `supabase/migrations/20270201135000_grower_share_rep_needs_price_to_cover_cost.sql:174`, text sha256 `102a19fdd69df789` (the wording stays with the proof, not here)
+  Mason's reason: this can't happen in our buisness (ref 90055eb3a0d6)
+- Finding 3 (HIGH) at `supabase/migrations/20270201135000_grower_share_rep_needs_price_to_cover_cost.sql:312`, text sha256 `2295df5619029f50` (the wording stays with the proof, not here)
+  Mason's reason: nowhere near 9999 invoices a year (ref 0b77a9cf87d8)
 ## 2026-11-21 — Any rep may edit any draft field-application invoice (rep-scope fix dropped)
 
 **Decision (Mason, in chat, 2026-11-21: "Drop the fix").** A sales rep may save, change billing on, and change applied details (applicator, weather, carrier water) of ANY draft or unposted field-application invoice, not only their own, as the app works today. The planned fix (`docs/plans/2026-11-21-field-invoice-rep-scope-CONTRACT.md`) is dropped and nothing was built. The KI-01 related low and the field-invoice part of KI-03 are accepted.

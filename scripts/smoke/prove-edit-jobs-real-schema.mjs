@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270201170000_job_writes_through_rpcs (#1979 PR A: edit_jobs).
+ * Real-schema proof for 20270203110000_job_writes_through_rpcs (#1979 PR A: edit_jobs).
  * Container setup and replay copied from prove-booking-guard-rep-and-delete-real-schema.mjs. Then:
  *   1. BEFORE: edit_jobs does not exist and smoke-edit-jobs.sql fails.
  *   2. The candidate applies; a second apply is refused.
@@ -28,7 +28,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270201170000_job_writes_through_rpcs.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270203110000_job_writes_through_rpcs.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([
@@ -348,7 +348,7 @@ async function main() {
   assert.match(after.outcome, /^SMOKE_PASS_ROLLBACK/, after.output);
   const timing = /C10 500 jobs edited \+ cancelled in (\d+) ms/.exec(after.output);
   assert.ok(timing, 'the 500-job case did not report its time');
-  console.log(`[case] AFTER: smoke-edit-jobs.sql passes (P1-P6, C1-C10); 500 jobs edited + cancelled in ${timing[1]} ms`);
+  console.log(`[case] AFTER: smoke-edit-jobs.sql passes (P1-P6, C1-C11); 500 jobs edited + cancelled in ${timing[1]} ms`);
 
   // Case 11: a rep cancels the scheduled job made from their own open booking (committed; disposable container).
   psql(`DO $fx$

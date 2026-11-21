@@ -1649,7 +1649,7 @@
       "chain": "smoke-edit-jobs.sql",
       "container_only": true,
       "container_prover": "prove-edit-jobs-real-schema.mjs",
-      "description": "#1979 PR A (REQUIRES 20270201170000): edit_jobs, the one server function for spray job planning edits, cancel and soft delete. Auth probes (no user, anon, applicator, forged actor, inactive rep) refused with nothing written; mixed-status cancel with skips and hold release; same-key replay and refusal of other ids or another action; delete skips invoiced; every refused shape and value, also on an all-skipped selection; patch meaning (absent keys untouched, null clears); license rule unchanged; billed-job lock aborts a rep call, admin passes; changes + cancel in one call; a refused patch aborts the combined cancel; 500 jobs in one call (timed). Ends in SMOKE_PASS_ROLLBACK.",
+      "description": "#1979 PR A (REQUIRES 20270203110000): edit_jobs, the one server function for spray job planning edits, cancel and soft delete. Auth probes (no user, anon, applicator, forged actor, inactive rep) refused with nothing written; mixed-status cancel with skips and hold release; same-key replay and refusal of other ids or another action; delete skips invoiced; every refused shape and value, also on an all-skipped selection; patch meaning (absent keys untouched, null clears); license rule unchanged; billed jobs skipped as invoiced for a rep and an admin, including one billed through a deleted blend ticket; changes + cancel in one call; a refused patch aborts the combined cancel; 500 jobs in one call (timed). Ends in SMOKE_PASS_ROLLBACK.",
       "covers": [
         "edit_jobs"
       ],

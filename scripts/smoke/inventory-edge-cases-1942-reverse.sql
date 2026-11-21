@@ -1,4 +1,4 @@
--- Rollback for supabase/migrations/20270201195000_inventory_edge_cases_1942.sql (proven by
+-- Rollback for supabase/migrations/20270203120000_inventory_edge_cases_1942.sql (proven by
 -- scripts/smoke/prove-inventory-edge-cases-1942-real-schema.mjs). It first checks that the four bodies are still the ones
 -- #1942 installed (ROLLBACK_REFUSED otherwise, nothing changed), then restores the four previous bodies (md5-checked).
 -- cycle_count_items.expected_qty and variance stay plain numeric, with their finite check: narrowing them back would

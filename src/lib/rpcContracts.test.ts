@@ -2937,7 +2937,7 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // 20270130100000 (#1976, local candidate): the EPA batch fill's save; replays through _product_parent_replay and
   // commit_epa_proposal saves the receipt. Prune once the generated types carry it.
   'commit_epa_proposal_batch',
-  // 20270201195000 (#1942, local candidate): re-emits the private completion body under its current name
+  // 20270203120000 (#1942, local candidate): re-emits the private completion body under its current name
   // (20270126110000 renamed it, so no generated type carries it yet); keyed by complete_delivery's p_idempotency_key.
   // Prune once the generated types carry it.
   '_complete_delivery_authorized_impl_20270122',

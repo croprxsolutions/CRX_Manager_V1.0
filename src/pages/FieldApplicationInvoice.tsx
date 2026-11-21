@@ -304,6 +304,8 @@ export default function FieldApplicationInvoice() {
   // #2058: the server's explanation of why a save that would change the billed farm was refused. Kept on the page
   // (a toast is gone in 4 seconds) until the next Save.
   const [payerChangeRefusal, setPayerChangeRefusal] = useState<string | null>(null);
+  // A refusal belongs to the invoice it was raised on; drop it when the route opens another one.
+  useEffect(() => { setPayerChangeRefusal(null); }, [id]);
   const [showLocationsModal, setShowLocationsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   // #28: Post confirm + Unpost confirm/in-flight state.
@@ -2273,7 +2275,7 @@ export default function FieldApplicationInvoice() {
       if (payerChange) {
         // An expected business refusal, explained in full at the top of the page.
         setPayerChangeRefusal(payerChange);
-        toast('error', 'Not saved: these fields now bill a different farm. See the note at the top of the invoice.');
+        toast('error', "Not saved: these fields no longer bill this invoice's farm. See the note at the top of the invoice.");
         return;
       }
       Sentry.captureException(err, { tags: { rpc: 'save_field_app_invoice' } });

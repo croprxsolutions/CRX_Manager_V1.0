@@ -883,7 +883,7 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
     await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
     expect(await screen.findByRole('alert')).toHaveTextContent(why);
     expect(screen.getByRole('alert')).not.toHaveTextContent('FIELD_APP_PAYER_CHANGED');
-    expect(mockToast).toHaveBeenCalledWith('error', 'Not saved: these fields now bill a different farm. See the note at the top of the invoice.');
+    expect(mockToast).toHaveBeenCalledWith('error', "Not saved: these fields no longer bill this invoice's farm. See the note at the top of the invoice.");
     expect(mockNavigate).not.toHaveBeenCalled();
 
     mockRpc.mockImplementation((name: string, args: unknown) => name === 'save_field_app_invoice'

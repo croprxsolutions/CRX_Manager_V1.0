@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-21 — #1985: Mason owner-accepted 2 Sol finding(s) at `f8987ca2e979`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #1985 at `f8987ca2e979` (base `2bc2eea77328`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270204150000_ingredient_modes_of_action_load.sql:247`, text sha256 `fbe322c2fc7e4cc5` (the wording stays with the proof, not here)
+  Mason's reason: no salt kinks exist on live (ref dd4f62495a11)
+- Finding 2 (HIGH) at `supabase/migrations/20270204150000_ingredient_modes_of_action_load.sql:269`, text sha256 `9179f1b7e3910d5e` (the wording stays with the proof, not here)
+  Mason's reason: this can't happen (ref e739bb58e077)
+
 ## 2026-11-21 — #2047: Mason owner-accepted 5 Sol finding(s) at `9e22ac2b7e44`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2047 at `9e22ac2b7e44` (base `c1088f15be0c`) found 5 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

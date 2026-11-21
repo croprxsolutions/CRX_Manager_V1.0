@@ -60,8 +60,8 @@ BEGIN
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Live Job Farm ' || v_suffix) RETURNING id INTO v_customer_id;
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Live Job Farm B ' || v_suffix) RETURNING id INTO v_customer2_id;
-  INSERT INTO products (product_name, unit_size, product_form)
-  VALUES ('[SMOKE] Live Job Product ' || v_suffix, 'gal', 'liquid') RETURNING id INTO v_product_id;
+  INSERT INTO products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[SMOKE] Live Job Product ' || v_suffix, 'gal', 'liquid', 'Gal') RETURNING id INTO v_product_id;
   v_price_res := preview_product_pricing_changes('product_page', NULL, jsonb_build_array(jsonb_build_object(
     'product_id', v_product_id, 'row_version', (SELECT pricing_version FROM products WHERE id = v_product_id),
     'pricing_mode', 'margin_driven', 'new_cost', '6.00', 'tier1_margin_percent', '20',
@@ -457,8 +457,10 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (J10) a rep planted an invoiced job on a booking: %', v_err;
   END IF;
   v_refusals := v_refusals + 1;
-  -- J11 (Sol MED r6). A soft-deleted booking that is still sent cannot take a live job.
+  -- J11 (Sol MED r6). A soft-deleted booking that is still sent cannot take a live job. Its own live job is
+  -- cancelled first (undone with the block): since 20270129150000 a booking with a live job cannot be deleted.
   BEGIN
+    UPDATE jobs SET status = 'cancelled' WHERE job_number = 'SMK-LJ2-' || v_suffix;
     UPDATE quotes SET deleted_at = now() WHERE id = v_q;
     INSERT INTO jobs (job_number, customer_id, job_date, quote_id)
     VALUES ('SMK-J11-' || v_suffix, v_customer_id, CURRENT_DATE + 7, v_q);

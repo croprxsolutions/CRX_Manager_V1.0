@@ -2153,14 +2153,18 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   }) }), ACCESS), "picture or file", "an approval whose reply came with a picture is refused at the apply (Codex P1, PR #900)");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, {}, { replyMark: undefined }) }), ACCESS),
     "does not say where his reply is", "an approval that does not say where his reply is is refused");
-  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, {}, { approvedAt: new Date(Date.now() - OWNER_APPROVAL_MAX_AGE_MS - 60_000).toISOString() }) }), ACCESS),
-    "30 minutes after Mason replied", "an approval more than 30 minutes after his reply is refused");
+  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, {
+    issuedAt: new Date(Date.now() - OWNER_APPROVAL_MAX_AGE_MS - 2 * 60_000).toISOString(),
+    expiresAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+  }, { approvedAt: new Date(Date.now() - OWNER_APPROVAL_MAX_AGE_MS - 60_000).toISOString() }) }), ACCESS),
+    "24 hours after Mason replied", "an approval more than 24 hours after his reply is refused");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS, { ownerSessionId: "sess-other-chat-0002" }),
     "different conversation", "an approval given in another conversation is refused by the session applying it");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS, { ownerSessionId: undefined }),
     "applying session is unknown", "an apply with no session id fails closed");
-  denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, { prHead: "f".repeat(40) }) }), ACCESS),
-    "not the pull request's current head", "an approval for another head is refused");
+  // Mason, 2026-11-20: his yes survives the PR head moving; the exact SQL is what it binds.
+  allows(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, { prHead: "f".repeat(40) }) }), ACCESS),
+    "an approval given at an earlier head still applies the same SQL");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS, { categories: [{ category: "deletes-data", reason: "adds a comment" }] }) }), ACCESS),
     "in the words the safety check uses", "an approval that softened what Mason was told is refused");
   denies(scriptDoor(ownerFixture(ACCESS, { approval: approvalFor(ACCESS) }), ACCESS,

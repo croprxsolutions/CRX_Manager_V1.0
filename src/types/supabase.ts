@@ -18399,7 +18399,10 @@ export type Database = {
         }
         Returns: Json
       }
-      auto_expire_quotes: { Args: never; Returns: Json }
+      auto_expire_quotes: {
+        Args: { p_idempotency_key?: string }
+        Returns: Json
+      }
       batch_apply_all_prepayments: {
         Args: { p_idempotency_key?: string; p_performed_by?: string }
         Returns: Json
@@ -19265,6 +19268,16 @@ export type Database = {
           p_priority?: string
           p_scheduled_date?: string
           p_scheduled_time?: string
+        }
+        Returns: Json
+      }
+      edit_jobs: {
+        Args: {
+          p_action?: string
+          p_changes?: Json
+          p_idempotency_key?: string
+          p_job_ids: string[]
+          p_performed_by?: string
         }
         Returns: Json
       }

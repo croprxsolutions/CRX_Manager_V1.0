@@ -38,7 +38,9 @@ try {
   //    update_field_app_applied_info path forwards to its unchanged body, which refuses a forged actor first).
   // 44 after 2026-11-11 (20270104120000, Brand PR B-1a, PR #1808): complete_delivery and start_and_complete_delivery
   //    became pass-through wrappers over their renamed reviewed bodies, so p_performed_by is flagged beside p_signed_by.
-  equal(actorEntries.length, 44, '44 reviewed exceptions (save_job, save_field_app_invoice, apply_product_setup, six batch 4d and thirteen batch 4e wrappers added; three unflagged order/application exceptions removed; convert_quote_to_order has a live and a candidate entry; the two B-1a delivery wrappers carry p_signed_by and p_performed_by entries)');
+  // 45 after 2026-11-19 (20270201100000, KI-119): get_sales_summary_report gains a candidate entry beside its live one
+  //    (page access guard added first; prune the live one after the apply).
+  equal(actorEntries.length, 45, '45 reviewed exceptions (save_job, save_field_app_invoice, apply_product_setup, six batch 4d and thirteen batch 4e wrappers added; three unflagged order/application exceptions removed; convert_quote_to_order and get_sales_summary_report each have a live and a candidate entry; the two B-1a delivery wrappers carry p_signed_by and p_performed_by entries)');
   const convertEntries = actorEntries.filter((entry) => entry.violation_key.startsWith('convert_quote_to_order('));
   equal(convertEntries.length, 2, 'convert_quote_to_order has exactly one current-live and one candidate contract set');
   const convertImplKey = Object.keys(convertEntries[0].reviewed_contracts).find((key) => key.startsWith('public._convert_quote_to_order_below_cost_impl_20260810('));

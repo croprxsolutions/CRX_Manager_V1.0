@@ -4,6 +4,7 @@
 
 import { readFileSync } from "node:fs";
 import { runHookRouter } from "./hook-router-runtime.mjs";
+import { isGitPush } from "./codex-push-lib.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,6 +18,7 @@ export function postToolModulesFor(payload, surface = process.env.CRX_AGENT_SURF
   if (/apply_migration/i.test(toolName)) {
     modules.push("./registry-freshness.mjs", "./applied-snapshot-invalidate.mjs");
   }
+  if (isGitPush(payload?.tool_input?.command)) modules.push("./post-push-dirty-warning.mjs");
   if (surface !== "codex") modules.push("./session-heartbeat.mjs");
   return modules;
 }

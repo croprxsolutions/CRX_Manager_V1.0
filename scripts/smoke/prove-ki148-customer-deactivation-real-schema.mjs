@@ -9,8 +9,11 @@
  * admin, a sales rep and the server role that every kind of open work refuses deactivation, closed work
  * does not, a bulk update is all-or-nothing, and an already-inactive customer stays editable.
  *
+ * Phase 2 (issue #2000) then applies 20270129210000_customer_deactivation_open_work_followups and checks
+ * empty holds, the new wording and the 60-character farm name (contract section "Follow-up (issue #2000)").
+ *
  * Run: node scripts/smoke/prove-ki148-customer-deactivation-real-schema.mjs   (needs Docker)
- * Prints KI148_DEACTIVATION_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
+ * Prints KI148_DEACTIVATION_PROOF_PASS, then KI148_FOLLOWUP_PROOF_PASS, on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -22,6 +25,8 @@ const { buildContainer, removeContainer, seedUsers, scalar, psql, claims, USERS,
 
 const CANDIDATE = '20270128140000_customer_deactivation_checks_open_work.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
+const FOLLOWUP = '20270129210000_customer_deactivation_open_work_followups.sql';
+const followup = readFileSync(path.join(ROOT, 'supabase', 'migrations', FOLLOWUP), 'utf8').replaceAll('\r\n', '\n');
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const ADMIN = USERS.admin;
 const REP = USERS.rep;
@@ -30,7 +35,9 @@ const PRODUCT = id('d1');
 // One customer per case; `c` + suffix is its fixture id.
 const C = Object.fromEntries(['order', 'partial', 'sched', 'inprog', 'hold', 'qdraft', 'qsent', 'qrevised', 'qacc',
   'posted', 'overdue', 'closed', 'clean', 'inactive', 'bulkok', 'many', 'dorder', 'qaccdel',
-  'idraft', 'iunposted', 'jsched', 'jinprog', 'jdone', 'rapproved', 'rreceived', 'prepay'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
+  'idraft', 'iunposted', 'jsched', 'jinprog', 'jdone', 'rapproved', 'rreceived', 'prepay',
+  // Phase 2 (issue #2000).
+  'longname', 'closed2'].map((k, i) => [k, id(`c${(i + 1).toString(16).padStart(2, '0')}`)]));
 const N = Object.fromEntries(Object.keys(C).map((k) => [k, `[KI148] ${k}`]));
 
 // One statement as `role`, signed in as `uid` (null: no claims at all); the last output line is the answer.
@@ -48,8 +55,31 @@ const refused = (uid, sql, pattern, opts) => {
 };
 const active = (cid) => scalar(`SELECT is_active FROM public.customers WHERE id = '${cid}';`);
 
-function seed() {
+// Phase 2 fixtures (issue #2000).
+function seed2(order) {
+  return `
+    ${order(C.longname, 'confirmed')}
+    UPDATE public.customers SET farm_name = '[KI148] ' || repeat('L', 100) WHERE id = '${C.longname}';
+    -- closed2: none of this is open.
+    INSERT INTO public.inventory_holds (product_id, customer_id, quantity, created_by, is_active) VALUES ('${PRODUCT}', '${C.closed2}', 0, '${ADMIN}', true);`;
+}
+
+// Sol r4 (issue #2000): a hold "expiring today" turns expired at Chicago midnight. A full run takes about 7 minutes,
+// so never start within 30 minutes of it (#2115); main() also names a crossing if one still happens.
+const chicagoDate = () => scalar(`SELECT (now() AT TIME ZONE 'America/Chicago')::date;`);
+let seededOn = null;
+async function awayFromChicagoMidnight() {
+  const left = Number(scalar(`SELECT extract(epoch FROM (date_trunc('day', now() AT TIME ZONE 'America/Chicago') + interval '1 day') - (now() AT TIME ZONE 'America/Chicago'))::int;`));
+  if (left < 1800) {
+    console.log(`[ki148] ${left}s before Chicago midnight: waiting so the "expires today" hold keeps its day`);
+    await new Promise((r) => setTimeout(r, (left + 5) * 1000));
+  }
+}
+
+async function seed() {
   buildContainer({ stopBefore: CANDIDATE }); seedUsers();
+  await awayFromChicagoMidnight();
+  seededOn = chicagoDate();
   // Fixtures go in past every other trigger (replica), as the other provers seed them; the checks run normally.
   const customers = Object.keys(C).map((k) => `('${C[k]}', '${N[k]}', ${k === 'inactive' ? 'false' : 'true'})`).join(',');
   let n = 0;
@@ -120,11 +150,12 @@ function seed() {
     ${order(C.inactive, 'confirmed')} ${order(C.inactive, 'confirmed')}
     -- Several kinds at once, for the message.
     ${order(C.many, 'confirmed')} ${order(C.many, 'confirmed')} ${quote(C.many, 'sent')} ${invoice(C.many, 'posted')}
+    ${seed2(order)}
     COMMIT;`, { user: 'supabase_admin' });
 }
 
 async function main() {
-  seed();
+  await seed();
   // Case 8, before: an admin can deactivate a customer with an open order today (rolled back).
   assert.equal(allowed(ADMIN, deactivate(C.order)), '1');
   console.log('[ki148] BEFORE: an admin deactivates a customer with an open order (the hole is real)');
@@ -184,6 +215,40 @@ async function main() {
   assert.equal(allowed(ADMIN, deactivate(C.clean), { commit: true }), '1');
   assert.equal(active(C.clean), 'f');
   console.log('KI148_DEACTIVATION_PROOF_PASS');
+
+  // Phase 2 (issue #2000): before the follow-up, a zero hold blocks.
+  refused(ADMIN, deactivate(C.closed2), /CUSTOMER_HAS_OPEN_WORK/);
+  console.log('[ki148-2000] BEFORE: an active hold for zero blocks');
+  const applyFollowup = () => docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'], { input: followup, allowFailure: true });
+  const first = applyFollowup();
+  assert.equal(first.status, 0, `follow-up failed:\n${first.stderr}`);
+  const twice = applyFollowup();
+  assert.notEqual(twice.status, 0); assert.match(twice.stderr, /KI148_FOLLOWUP_PREFLIGHT: the follow-up guard is already in place/);
+  console.log('[ki148-2000] follow-up applied; postflight passed; a second apply is refused');
+
+  const kinds2 = { ...kinds, jsched: /1 open or unbilled spray job\(s\)\./, jinprog: /1 open or unbilled spray job\(s\)\./, jdone: /1 open or unbilled spray job\(s\)\./ };
+  for (const [k, pattern] of Object.entries(kinds2)) {
+    refused(ADMIN, deactivate(C[k]), new RegExp(`CUSTOMER_HAS_OPEN_WORK: nothing was deactivated\\. \\[KI148\\] ${k} still has ${pattern.source}`));
+    assert.equal(active(C[k]), 't');
+  }
+  refused(REP, deactivate(C.jdone), /1 open or unbilled spray job\(s\)/);
+  refused(null, deactivate(C.jdone), /1 open or unbilled spray job\(s\)/, { role: 'service_role' });
+  console.log('[ki148-2000] refused: every phase-1 kind again (jobs now "open or unbilled spray job(s)"); rep and service_role too');
+  refused(ADMIN, deactivate(C.longname), /nothing was deactivated\. \[KI148\] L{51}… still has 1 open order\(s\)\./);
+  console.log('[ki148-2000] a 108-character farm name is cut to 60 characters in the sentence');
+
+  assert.equal(allowed(ADMIN, deactivate(C.closed2)), '1');
+  assert.equal(allowed(REP, deactivate(C.closed2)), '1');
+  assert.equal(allowed(ADMIN, deactivate(C.closed)), '1');
+  console.log('[ki148-2000] allowed (admin and rep): an active hold for zero; phase-1 closed work still allowed');
+  console.log('KI148_FOLLOWUP_PROOF_PASS');
 }
 
-try { await main(); } finally { if (!KEEP) removeContainer(); else console.log(`Kept ${NAME}`); }
+try {
+  try { await main(); } catch (e) {
+    let now = seededOn;
+    try { now = chicagoDate(); } catch { /* keep the original failure */ }
+    if (seededOn && now !== seededOn) throw new Error(`the run crossed Chicago midnight (seeded ${seededOn}), so the "expires today" hold expired mid-run; rerun it`, { cause: e });
+    throw e;
+  }
+} finally { if (!KEEP) removeContainer(); else console.log(`Kept ${NAME}`); }

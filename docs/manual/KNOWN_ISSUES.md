@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-18 for the live ledger only (latest live row `20261113011216`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
+**Last verified:** 2026-11-21 for the live ledger only (latest live row `20261121061349`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -36,32 +36,31 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md)) | 108 |
-| Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106) | 17 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md); KI-170 added 2026-11-20 from the shared data loading pilot; KI-120 accepted and KI-169 split from KI-119 2026-11-19; KI-171 added 2026-11-21 from #2068; KI-178 and KI-182 added 2026-11-21 from #2047) | 112 |
+| Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106, KI-120, KI-176, KI-177, KI-179, KI-180, KI-181) | 23 |
 | Closed as FIXED, with proof (bottom of file and archive) | 25 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
 | WP-PM-11a-1 rate lock deferrals (KI-100; not applied) | 1 |
 
-Highest-priority open items, in order: KI-01 (its related lows; all three parts are live: A and B 2026-10-26 and
-2026-10-27 UTC, part C, access ending with the job, 2026-11-09 UTC), KI-02 (cost and
+Highest-priority open items, in order: KI-02 (cost and
 margin: the table-level lock is live since 2026-10-25; the server-function audit is done and its fixes went live 2026-11-02 in
-migration `20261102200000`), KI-10 (about 69 functions still replay a saved answer on the retry
-key alone).
+migration `20261102200000`), KI-10 (outside quote, invoice and billing
+functions, every keyed function now checks its request on a retry; the billing remainder waits for Taha's work).
 
 ---
 
 ## Security and access
 
 ### KI-01 — Drivers and applicators can read every customer's fields and some money totals
-**HIGH · PARTIAL · security · parts A, B and C applied live; the related lows below stay open**
+**HIGH · FIXED LIVE / ACCEPTED · security · parts A, B and C applied live; all three related lows settled 2026-11-21 (see below)**
 Until 2026-10-26 02:10 UTC (9:10 PM Central, 2026-10-25), any signed-in account, including drivers and applicators, could call database functions that
 returned every customer's field boundaries, owners, billing splits, balances and the company-wide overdue list,
 because the functions never checked who was asking. Until 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26),
 applicators could also read every field-table row, not only the fields of the jobs they were sent to. Proven by
 read-only impersonation on 2026-10-22. Planned as three parts: A (functions, PR #1065), B (tables, PR #1103),
 C (the job route); A, B and C are applied live and merged (part C: PR #1650, ledger `20261109052957`, see KI-73). Related lows: dispatched
-applicators can read chemical cost; any sales rep can edit another rep's draft field-invoice billing; invoice
-emails put the invoice number and date into HTML unescaped (`src/lib/emailService.ts:123-139`).
+applicators can read chemical cost (CLOSED by KI-02: checked live read-only 2026-11-21, signed-in users have no SELECT on any cost, margin or profit column of `job_chemicals`, `products`, `jobs`, `blend_ticket_products` or `invoice_items`, and KI-02's function audit made cost admin-only; the functions were not re-tested as an applicator); any sales rep can edit another rep's draft field-invoice billing (ACCEPTED, Mason 2026-11-21: any rep may edit any draft field invoice; see KI-03); invoice
+emails put the invoice number and date into HTML unescaped (`src/lib/emailService.ts:123-139`) (CLOSED, checked in the downloaded live `send-email` source 2026-11-21: the server rebuilds the invoice email and escapes both (`supabase/functions/_shared/invoiceEmailGate.ts:194,202`), sending `built.html`, never the screen's HTML; the screen-side builder still does not escape, but its HTML is not what gets sent).
 Status 2026-10-23: part A was written and not yet applied (`20261023090000_field_functions_require_field_access`,
 history row 980). It adds `_can_see_field`, filters the two field-map lookups by it, makes the other field and money
 functions office-only (plus three uncalled ones the review found), and was proven in a disposable copy of the
@@ -109,6 +108,7 @@ are; no new note gets a cost.
 
 ### KI-03 — Reps do not yet have the decided invoice and commission-split scoping
 **MED · OPEN · security/money · Mason decided, build unassigned**
+**Field-invoice part ACCEPTED (Mason, 2026-11-21, "Drop the fix"):** any rep may edit any draft or unposted field-application invoice (`update_field_app_applied_info`, `update_field_app_invoice_billing`, `save_field_app_invoice` on an existing invoice, and direct `invoice_shares` / field-location writes); no fix is planned (`DECISION_LOG.md` 2026-11-21). Posting and the split-invoice save keep their own-name checks. The rest of this entry stays open.
 Mason decided reps may see all invoices read-only but only act on their own, and that only admins may change
 commission splits on jobs, quotes and orders. Neither is built: no migration widens rep invoice reads or adds
 own-name checks (`INVOICE_SCOPE_DENIED`) to the full set of invoice actions any active rep can call today on any
@@ -225,24 +225,37 @@ Mason accepted this on 2026-11-02 when choosing how KI-97 would ship (`DECISION_
 ---
 
 ### KI-119 — Settings → Page Access hides screens but the database does not enforce it
-**MED (HIGH if meant as security) · OPEN · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #2) · unassigned**
-Page Access (`denied_pages`) is checked only by the screen router. A user with money pages hidden (one live rep today)
-keeps the abilities behind those pages. No decision says whether Page Access is a security control or menu tidiness
-(To-Do decision 16). Fix once decided: either rename it "Hide from menu" and record that, or enforce it in the
-database for the money and report functions. Exploit-level detail is held privately until a fix is live.
+**HIGH · REPORTS PART FIX IN REVIEW (Claude, `20270201100000_page_access_locks_reports.sql`, to staging after release #1990) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #2)**
+Page Access (`denied_pages`) is checked only by the screen router. Mason decided 2026-11-19 (To-Do decision 16) that
+it is a real security control: scope "actions + reports", reports now and money later. The fix makes the database
+refuse Reports Library and Sales Reports data to a person with that page hidden (including the commission rows the
+Reports Library shows, and the one-customer year-end summary when Customers is hidden too: Mason,
+2026-11-21), and limits the four logbook reports to admins and sales reps (Mason, 2026-11-19). Contract:
+[2026-11-19-ki119-page-access-lock-CONTRACT.md](../plans/2026-11-19-ki119-page-access-lock-CONTRACT.md); proof:
+`scripts/smoke/prove-page-access-locks-reports-real-schema.mjs`. The invoice and payment actions are KI-169. Known
+limit (Mason's scope): a person with reports hidden still sees the order and invoice rows on the screens they keep.
+Also accepted (Mason, 2026-11-21, Sol round 5): the Posted Applications and Price List tabs read the same records as
+the Record Book and Products pages, so they are not locked when those pages are hidden too; revisit when those pages
+get their own lock. Exploit-level detail is held privately until the fix is live.
+
+### KI-169 — Page Access does not yet lock the invoice and payment actions
+**HIGH · OPEN · security/money · split from KI-119 2026-11-19 · Taha, after 2026-12-15**
+Mason decided 2026-11-19 that Page Access also locks money actions, but the Invoices and Record Payments actions wait
+for Taha after 2026-12-15 (billing is his area until then). Reuse `public._require_page_access` from KI-119's
+migration, adding those page keys to it.
 
 ### KI-120 — Any rep can change a customer's payment terms and finance-charge settings
-**MED · OPEN · security/money · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #4, sweep 2 Q1) · unassigned**
+**ACCEPTED (Mason, 2026-11-19, To-Do decision 18: reps keep access; no code) · security/money · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #4, sweep 2 Q1)**
 The 2026-11-01 lock made price tier and credit limit admin-only; payment terms, finance-charge on/off, rate and grace
 days are not covered, so a rep can move a customer to Net 90 or turn off late fees (also parent customer and default
-application service). Fix if Mason agrees (To-Do decision 18): add these fields to `guard_customer_rep_edit_20261013`
-and disable them on the screen for non-admins.
+application service). Mason chose to keep it this way (To-Do decision 18); no fix is planned. Reopen only if he
+changes that decision.
 
 ### KI-121 — The last active admin can remove their own admin role
-**LOW · FIX IN REVIEW (not live) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #7) · Claude**
+**LOW · FIXED LIVE (`20270127130000`, PR #1981, released in #1990; checked live 2026-11-21: `trg_guard_last_active_admin` is BEFORE UPDATE OF is_active, role) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #7) · Claude**
 `_guard_last_active_admin` fires only on deactivation, not a role change, so the last admin can demote themselves and
 nobody can reach Settings without database access. 5 active admins today; the screen warns. Fix: extend the guard to
-role changes. Fix in review: `20270127130000_security_batch_ki121_ki123` (the guard also refuses a role change, and two
+role changes. Fixed live: `20270127130000_security_batch_ki121_ki123` (the guard also refuses a role change, and two
 admins removing each other at once cannot both succeed).
 
 ### KI-122 — An admin password reset leaves the user's existing sign-ins open and is not audited
@@ -282,8 +295,24 @@ Both are in the live `void_invoice`, so they affect the ordinary Void Invoice bu
   when its invoice is voided, after checking its Chicago month is open. Live had 0 write-offs (2026-11-14).
 - **Credit month read in UTC — FIXED LIVE 2026-11-07.** `20261206110000` (KI-18) checks each credit's Chicago
   month; confirmed in the live body 2026-11-14.
-### KI-10 — About 69 live functions replay a saved result matched on the retry key alone
-**HIGH on money paths · PARTIAL · money/inventory/database · unassigned (batch 3 remainder is next)**
+### KI-10 — Some live functions replayed a saved result matched on the retry key alone
+**MED (billing remainder only) · PARTIAL · money/database · remainder deferred to after Taha's billing work (2026-12-15)**
+**Live re-check 2026-11-21 (read-only, production):** of the 252 public function versions that take a retry key, none
+outside quotes, invoices, payments and billing still replays a changed request. Batches 1–4e bind theirs to the
+caller and request; the rest check the request themselves: the Product Master functions through
+`_product_parent_replay` (caller and request fingerprint), the delivery-receipt email functions, customer, team-note,
+vendor-alias, supplier-link, pricing and EPA functions by a stored fingerprint or every argument, and
+`stamp_job_printed`, `reverse_application_record` and `resolve_offline_action` by their only business arguments
+after their role check. The stock movers the stock-unit work touches (`complete_delivery`,
+`start_and_complete_delivery`, `cancel_order`, `bulk_import_order`) are bound too. **Still open, deferred (Taha
+owns quotes, bookings, invoices and billing until 2026-12-15):** `post_invoice_group` replays on the key alone
+(confirmed); `auto_expire_quotes` takes no request to compare; the other quote, invoice, credit-memo, payment
+and finance-charge functions (`save_quote`, `save_invoice`, `post_invoice`, `create_quote_version`,
+`restore_quote_version`, `convert_quote_to_order`, `create_invoice_from_order`, `create_invoice_from_blend_ticket`,
+`create_invoice_for_unbilled_delivery`, `apply_credit_memo_to_invoice`, `reverse_credit_memo_application`,
+`unapply_credit_memo`, `allocate_payment`, `record_invoice_payment`, `generate_finance_charges`,
+`save_field_app_split_invoice`, `revert_quote_status`) show their own request checks but were not each proven;
+re-check them function by function when that work reopens. History of the batches follows.
 When a user retries an action with a saved "retry key", these functions return the first call's saved answer
 without checking that the retry is for the same person and record. Nothing is double-charged; a reused key with
 a different target gives a false "success" on the wrong record. Fixed on `main`: batch 1 (`20261016060000`,
@@ -973,7 +1002,7 @@ report and its CSV (`_get_inventory_cost_report_cost_impl_20261019`, `Reports.ts
 rows, so summing the CSV reproduces the old wrong total. Fix: match the rows to the summary's exclusions, or mark them.
 
 ### KI-136 — Receiving adds the typed number whatever unit the PO line is in
-**MED · OPEN · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #4) · unassigned**
+**MED · FIXED LIVE (`20270121110000` + `20270121120000`, PR #1896, released in #1990; checked live 2026-11-21: `a1_line_unit_is_stock_unit` on PO, order and delivery lines, no open PO line in another unit) · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #4) · Claude**
 `receive_po_items` adds quantity straight to stock without checking the line unit against the stock unit, and new PO
 lines take `products.unit_size`, not the stock unit (`PurchaseOrderDetail.tsx` ~L2154). Live: 4 of 102 received lines
 were in a different unit and 44 had a blank unit. D12 moves purchasing back into CRX before the season. Fix: fill a
@@ -985,7 +1014,7 @@ on a KI-137 product. Receiving them today adds the typed number. The on-order re
 (`_recompute_po_on_order_for_products`) and new stock-row creation mix units the same way. The per-line factor
 `inventory_units_per_supplier_unit_snapshot` exists but is unused. Repair step 1 (To-Do 0.17); orders and deliveries
 are KI-158. Do not convert historical balances; fix them from counts (KI-29).
-**Fix built 2026-11-15 (units batch, PR A; not live):** `20270121110000_line_unit_is_stock_unit.sql` fills a blank PO,
+**Fix (units batch, PR #1896; live 2026-11-21):** `20270121110000_line_unit_is_stock_unit.sql` fills a blank PO,
 order or delivery line unit with the stock unit, stores a matching spelling as the product's own (`EA` -> `Ea`),
 refuses any other unit (`LINE_UNIT_NOT_STOCK_UNIT`), checks a PO line again whenever it is received into, refuses a
 product stock-unit change while lines are open in the old unit (`PRODUCT_UNIT_HAS_OPEN_LINES`), and gives the one
@@ -995,7 +1024,7 @@ relabelled first by `20270121100000` (KI-137). Still open after this: a fully re
 admin over-receive (re-enter it on a new line).
 
 ### KI-137 — Two seed-treatment products are stocked and priced per Lb at per-jug money
-**MED (data) · OPEN · inventory/pricing data · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #5) · unassigned**
+**MED (data) · FIXED LIVE (`20270121100000`, PR #1896, released in #1990) · inventory/pricing data · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #5) · Claude**
 Products `0b2e713b` and `17ccc5ba` have stock and rate unit Lb and container unit Ea, with cost and Tier 1 equal to a
 jug's money; their purchases were "EA". Selling or receiving by the pound would be wildly wrong. On-hand 0, one order
 line each. May already be on Mason's private unit-mismatch list (KI-30). Fix: Mason confirms the sales unit (To-Do
@@ -1003,10 +1032,10 @@ decision 24), then a reviewed unit correction.
 **Answered 2026-11-13 (Mason, DECISION_LOG):** both Powder Keg products are sold **by the each** at their current prices.
 Their stock and rate unit become Ea, with no stock conversion because on-hand is 0. This needs a reviewed migration
 (repair step 1, To-Do 0.17). One has an open EA PO line (KI-136), so correct it before that line is received.
-**Fix built 2026-11-15 (units batch, PR A; not live):** `20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql`
+**Fix (units batch, PR #1896; live 2026-11-21):** `20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql`
 moves both products, their families, stock rows and open order lines Lb -> Ea (a new cost basis at the same cents),
 and relabels Piksi Dust Plus's stock row and open PO, order and delivery lines "Dry oz" -> MG. Quantities and money
-do not change. Needs Mason's live-apply approval.
+do not change. Applied live 2026-11-21 (release #1990).
 
 ### KI-138 — Stored tier margins disagree with stored prices on a few products
 **LOW · OPEN · pricing data · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #6) · unassigned**
@@ -1056,7 +1085,7 @@ cancelled. The app cannot reach this today, because `cancel_order` cancels open 
 rule stops it. Fix: in a new migration, leave a cancelled order's status alone (or refuse the completion).
 
 ### KI-158 — Orders and deliveries move stock without checking units
-**MED · OPEN · inventory/units · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-4, C-16) · unassigned**
+**MED · FIXED LIVE (`20270121110000`, PR #1896, released in #1990; checked live 2026-11-21: 0 open order or delivery lines in another unit) · inventory/units · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-4, C-16) · Claude**
 The order-side twin of KI-136. New order lines default to `products.unit_size`, not `inventory_unit`
 (`_fill_order_line_unit`, `20270106100000`; the quote-to-order prebook copies the same). Delivery completion subtracts
 `delivery_items.quantity` with no unit check. So a product sold per case or each but stocked per gallon or pound loses
@@ -1064,7 +1093,7 @@ The order-side twin of KI-136. New order lines default to `products.unit_size`, 
 delivery lines** carry a unit different from the stock unit. Also, 25 `inventory.unit_size` labels are blank or
 misspelled; screens prefer `products.inventory_unit`. Fix: default and fill to the stock unit, and refuse or convert a
 mismatch, in the same units batch as KI-136 (repair step 1, To-Do 0.17).
-**Fix built 2026-11-15 (units batch, PR A; not live):** the KI-136 rule covers order and delivery lines too and
+**Fix (units batch, PR #1896; live 2026-11-21):** the KI-136 rule covers order and delivery lines too and
 replaces `_fill_order_line_unit` (it filled from `unit_size`). Existing closed lines keep their units and still save
 edits that do not touch the unit.
 
@@ -1164,7 +1193,7 @@ text while invoices use presets. Every live value parses correctly today. Fix: t
 days)", and have `save_customer` refuse terms the parser would default.
 
 ### KI-148 — Deactivating a customer doesn't check open orders, deliveries, holds or quotes
-**LOW · FIX IN REVIEW (migration `20270128140000_customer_deactivation_checks_open_work`, not applied) · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #8) · Claude**
+**LOW · FIXED ON STAGING (PR #1997, merged 2026-11-19; live with the next release) · customers · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #8) · Claude**
 `guard_customer_rep_edit_20261013` checks only posted/overdue invoices, and only for reps (admins skip it: To-Do
 decision 20); the Customers bulk Deactivate checks invoices only. Live: 1 inactive customer (deactivated 2026-02-06)
 still has 2 confirmed orders (To-Do decision 23). Fix: a new trigger refuses switching a customer from active to
@@ -1175,7 +1204,9 @@ including admins (decision 20 answered 2026-11-18), and names what is open (`CUS
 Deactivate and the edit page both hit it. The live inactive customer stays as it is (decision 23) and stays editable. It checks everything
 at once. Accepted limit (Mason, 2026-11-18 and 2026-11-19): work being saved at the same moment as the deactivation,
 or added after it, is not caught. Proof:
-`node scripts/smoke/prove-ki148-customer-deactivation-real-schema.mjs`.
+`node scripts/smoke/prove-ki148-customer-deactivation-real-schema.mjs`. Follow-ups (unbilled blend tickets, jobs billed
+through their blend ticket, split-billing payers, billing runs that skip inactive customers): #2000.
+**Gap closed in review (#2000, migration `20270201120000_inactive_customer_refuses_new_work`, not applied):** Mason, 2026-11-19: an inactive customer gets no new orders, deliveries, holds or spray jobs until reactivated; the check locks the customer row, so a racing deactivation and new work cannot both win (for READ COMMITTED transactions, which every app path uses; a REPEATABLE READ deactivation would count from its older snapshot, and none exists). Quotes, invoices and bookings wait for Taha's billing work.
 
 ### KI-149 — Crop Programs and job print defaults let reps edit but only admins can save
 **LOW · OPEN · settings · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #9) · unassigned**
@@ -1197,6 +1228,62 @@ order. Two multi-product completions at once can deadlock, and one retries. Fix:
 **LOW · OPEN · purchasing/payables · found 2026-11-11 (PR #1769 review) · unassigned**
 Since KI-143, vendor bills are checked against what arrived (capped at the ordered total). `set_purchase_order_item_costs`
 still compares billed amounts with the ordered value. Fix: decide whether it should follow the same rule.
+
+### KI-170 — Two admins changing a product's vendors at the same moment can show the wrong preferred vendor
+**LOW · OPEN · products/purchasing · found 2026-11-20 (Sol 6.2 plan review, shared data loading pilot) · unassigned (Product Master Wave 2)**
+After an admin links a vendor, the Vendors section re-reads the product's vendors to learn which one is preferred.
+If that re-read fails, it falls back to "the vendor just made preferred, or the first vendor". If two admins link the
+first vendor to the same product at the same moment, or one makes V2 preferred just before the other makes V1 preferred
+(Luna, 2026-11-20), that fallback can name the loser's vendor, and the product page mirrors that name into its form
+until a reload. The database keeps the true preferred vendor; the list says it may be
+out of date and offers Try again. Needs two admins acting together and a failed read. Fix: on a failed re-read, block
+the product's Save until the vendors are re-read (a `ProductDetail.tsx` change, so Wave 2).
+
+### KI-176 — Cancelling part of a large booking's jobs rebuilds its stock holds once per job
+**LOW · ACCEPTED · jobs/bookings · found 2026-11-21 (Sol round 5, #2047) · Taha (bookings, after 2026-12-15)**
+The booking hold trigger runs once per cancelled job, so cancelling part of a booking rebuilds the remaining jobs' holds
+every time. Today's screens do the same. It only matters with roughly 150+ open stocked jobs on one booking (measured
+200 rebuilds = 11.3 s); live has 4 jobs and none on a booking (2026-11-19). Mason accepted it for #2047 (2026-11-21).
+Fix: make the trigger rebuild once per statement (booking/inventory core).
+
+### KI-177 — Changing a completed job's date can change which quote prices its invoice
+**MED · ACCEPTED · jobs/billing · found 2026-11-21 (Sol round 5, #2047) · Taha (billing)**
+Admins and reps can change a completed, not-yet-invoiced job's `job_date`. Split-invoice pricing picks the quote by that
+date, so moving a June 10 job to June 13 can let a June 12 quote price it. Today's Mass Edit allows the same. Mason kept
+today's rule (2026-11-21). Fix belongs with the field-application invoice rules: lock the date once a job is completed,
+or price by the application record's date.
+
+### KI-178 — Soft-deleting a dispatched job leaves its dispatch rows open
+**LOW · OPEN · jobs · found 2026-11-11 (Sol, #2047) · unassigned**
+Deleting a job hides it but leaves its location dispatch rows marked `dispatched`; restoring the job shows the old
+dispatch again. Same as today's direct delete. Fix: close dispatch rows on delete, as cancel already does.
+
+### KI-179 — Two cancels on one booking at the same moment can make one fail
+**LOW · ACCEPTED · jobs/bookings · found 2026-11-21 (Sol round 6, #2047) · Taha (bookings, after 2026-12-15)**
+The booking hold trigger upgrades a cancelled job's row lock while it rebuilds the booking's other jobs. If two people
+cancel different jobs on the same booking at the same instant, PostgreSQL stops one: it saves nothing and shows an
+error, and a retry works. Today's screens behave the same way. Mason accepted it (2026-11-21). Fix: lock the booking
+before the job rows in the hold trigger's callers, or rebuild once per statement (booking/inventory core).
+
+### KI-180 — Reassigning a job to an admin or rep leaves the old applicator dispatched
+**MED · ACCEPTED · jobs/dispatch · found 2026-11-21 (Sol round 8, #2047) · unassigned (dispatch)**
+Admins and sales reps can be a job's applicator (they sometimes apply, Mason 2026-11-21). The dispatch-sync trigger
+only replaces dispatch rows when the new person has the applicator role, so moving an open job from applicator A to an
+admin or rep leaves A's dispatch open, and A can still see and finish the job. Today's screens do the same. Fix: close
+the previous applicator's open dispatch rows on any applicator change (dispatch-sync trigger).
+### KI-181 — An invoice saved in the same second as a bulk job edit can let both go through
+**MED · ACCEPTED · jobs/invoices · found 2026-11-21 (Sol round 9, #2047) · Taha (billing, after 2026-12-15)**
+`edit_jobs` skips billed jobs, but the generic invoice save can link an invoice to a job's blend ticket without taking
+the job's lock. If it commits between the billed check and the job change, a completed job can be reassigned or
+deleted just after it was billed. Needs two people on the same job in the same second. Mason accepted it (2026-11-21).
+Fix: have the invoice save lock the linked job (invoice code, Taha's area).
+
+### KI-182 — The Purchase Orders screen uses guessable retry codes
+**MED · OPEN · purchasing · found 2026-11-21 (Sol round 9, #2047) · unassigned**
+Every app action shares one table of retry codes (idempotency keys). The PO screen builds its cancel code from the user
+and order, so a staff member who knew it could use it first in any other action and block that cancel for 24 hours.
+Mason accepted the #2047 finding (2026-11-21) because every existing action already allows this. Fix: give the PO
+screen random retry codes, as the other screens use.
 
 ## Database and release process
 
@@ -1486,6 +1573,20 @@ parked, so nothing reads it yet. **Decision (Mason, 2026-11-17: "Accept and land
 before actual-purchase costing ships: compare units case-insensitively in the snapshot trigger, or normalize the
 spelling on receipt.
 
+### KI-171 — Grower-share rep coverage check (#2068): accepted limits and test gaps
+**MED · OPEN · field-app invoices · found 2026-11-20/21 (Sol rounds 1-2, Astra, #2068) · unassigned**
+#2068 lets a sales rep save a grower-share invoice only when its per-acre price covers the included chemicals' cost.
+Left open: (1) a rep's save passing or not depends on the chemicals' cost, so the outcome is not cost-blind (accepted
+with Mason's 2026-11-20 decision); (2) chemicals without a catalog product are outside the check
+for a rep (Mason, 2026-11-20: leave as is); (3) after a lost response, "Nothing was saved" can be wrong when the first
+save committed; (4) the reverse script leaves the migration ledger saying the candidate is applied; (5) the coverage
+check re-reads the invoice's approval rows on every $0 line, so a very large, often re-saved draft gets slower;
+(6) a refused new invoice still uses up an invoice number; (7) prover gaps: saves run as `postgres` with a rep/admin
+JWT (would not catch `authenticated` losing EXECUTE), reuse mode skips the replay and can overwrite unit conversions,
+and the preflight does not check the invoice trigger is attached. Pre-existing in the field-app save (Astra):
+incomplete chemical input, `save_invoice` on a field-app draft, invoice lock order, idempotency key binding,
+single-to-group edit, soft-deleted group members.
+
 ---
 
 ## Accepted risks (Mason decided to live with these; do not re-open without a new decision)
@@ -1497,6 +1598,7 @@ spelling on receipt.
 | KI-61 | A `LOCK TABLE` in a migration does not stop an already-running call of the OLD function body | Mason 2026-09-03; both instances applied with zero activity; future migrations of that shape need a quiet rollout and a concurrency proof |
 | KI-62 | Live migration ledger has older entries with no file on `main` | Pre-existing drift, not new |
 | KI-63 | Quote-version trust chain has live pins in two files (`quote-versions-rpc-owned.sql`, `quoteVersionWriteBoundary.test.ts`); migration `20260826220000` keeps its apply-time pin copy | Intentional friction; a live-pin change must update both live files, while the applied migration stays unchanged |
+| KI-120 | Any rep can change a customer's payment terms, finance-charge settings, parent customer and default application service | Mason, 2026-11-19 (To-Do decision 18): reps keep access |
 | KI-64 | All agents share Mason's admin GitHub identity; the manual merge override is fenced only by command matching | Mason declined a separate non-admin credential twice (2026-09-01) |
 | KI-65 | The write-time actor-binding guard is bypassable by design limits | Capped by decision 2026-09-01; real controls are Codex review and post-apply sweeps |
 | KI-66 | `review-proof-guard` denies destructive commands that spell out a worktree path | Mason "document, don't fix" 2026-08-20; narrowed 2026-11-03 (P3): only the worktree root, its `.claude`, an unreadable or `..` path, or a path-less wiper aimed at one still deny |

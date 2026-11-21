@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promptModulesFor } from "./prompt-router.mjs";
 import { postToolModulesFor } from "./posttool-router.mjs";
+import { dirtyWarning, pushDir } from "./post-push-dirty-warning.mjs";
 import { dedupeContextBlocks } from "./hook-router-runtime.mjs";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
@@ -138,7 +139,8 @@ try {
 }
 
 eq(promptModulesFor("codex").length, 2, "Codex prompt router has two shared modules (owner-approval reply, CodeRabbit skip)");
-eq(promptModulesFor("claude").length, 2, "Claude prompt router has no Claude-only modules");
+eq(promptModulesFor("claude").length, 3, "Claude prompt router adds only the release pass (Mason, 2026-11-20)");
+ok(promptModulesFor("claude").includes("./release-pass-prompt.mjs") && !promptModulesFor("codex").includes("./release-pass-prompt.mjs"), "the release pass is Claude-only");
 ok(!promptModulesFor("claude").includes("./hold-latch-prompt.mjs"), "the hold latch is not routed (Mason, 2026-10-29)");
 {
   const claudeSettings = readFileSync(path.join(ROOT, ".claude", "settings.json"), "utf8");
@@ -148,6 +150,22 @@ ok(!promptModulesFor("claude").includes("./hold-latch-prompt.mjs"), "the hold la
 }
 eq(postToolModulesFor({ tool_name: "Edit" }, "claude"), ["./posttooluse-migration.mjs", "./eslint-autofix.mjs", "./session-heartbeat.mjs"], "write/edit path is explicit");
 eq(postToolModulesFor({ tool_name: "mcp__supabase__apply_migration" }, "codex"), ["./registry-freshness.mjs", "./applied-snapshot-invalidate.mjs"], "Codex apply path is explicit");
+eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "git -C C:/x push origin HEAD" } }, "codex"), ["./post-push-dirty-warning.mjs"], "a push routes the DIRTY-PR warning");
+eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "git status" } }, "codex"), [], "a non-push command does not");
+{
+  // Warning only: DIRTY warns, UNKNOWN is retried once, anything else (or a gh failure) is silent.
+  const views = (...answers) => async () => { const a = answers.shift(); if (a instanceof Error) throw a; return a; };
+  const warn = (...answers) => dirtyWarning("x", { view: views(...answers), delayMs: 0 });
+  eq(await warn({ number: 7, state: "OPEN", mergeStateStatus: "DIRTY" }), "⚠️ PR #7 conflicts with its base; GitHub runs no full CI until you merge the base in.", "DIRTY PR warns");
+  eq(await warn({ state: "OPEN", mergeStateStatus: "UNKNOWN" }, { number: 8, state: "OPEN", mergeStateStatus: "DIRTY" }), "⚠️ PR #8 conflicts with its base; GitHub runs no full CI until you merge the base in.", "UNKNOWN is retried once");
+  eq(await warn({ number: 9, state: "OPEN", mergeStateStatus: "CLEAN" }), "", "clean PR is silent");
+  eq(await warn({ number: 9, state: "MERGED", mergeStateStatus: "DIRTY" }), "", "closed PR is silent");
+  eq(await warn(new Error("ETIMEDOUT")), "", "gh error or timeout is silent");
+  // Expected values go through path.resolve: CI runs on Linux, where "C:/a b" is a relative path.
+  eq(pushDir('git -C "C:/a b" push', "C:/cwd"), path.resolve("C:/cwd", "C:/a b"), "git -C folder wins");
+  eq(pushDir("git push", "C:/cwd"), "C:/cwd", "plain push uses the tool cwd");
+  eq(pushDir("git -C C:/repoA status; git -C C:/repoB push origin HEAD", "C:/cwd"), path.resolve("C:/cwd", "C:/repoB"), "only the push's own -C counts");
+}
 
 const claude = JSON.parse(readFileSync(path.join(ROOT, ".claude", "settings.json"), "utf8"));
 const codex = JSON.parse(readFileSync(path.join(ROOT, ".codex", "hooks.json"), "utf8"));

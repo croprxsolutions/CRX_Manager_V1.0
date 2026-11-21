@@ -7,6 +7,10 @@
 const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // KI-85: stock may be placed only at Main Warehouse until transfers exist; nothing was received or added.
   [/^UNKNOWN_STORAGE_LOCATION\b/, 'Nothing was saved. Stock can go only into Main Warehouse until transfers between warehouses exist. Choose Main Warehouse and try again'],
+  // #2000 (20270201120000): an inactive customer gets no new orders, deliveries, holds or spray jobs.
+  [/^CUSTOMER_INACTIVE_NEW_WORK\b/, 'Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added'],
+  [/violates check constraint "inventory_holds_source_needs_customer"/, 'Nothing was saved. A stock hold for a spray job or quote must name its customer'],
+  [/^WORK_CUSTOMER_MOVE_NOT_ALLOWED\b/, 'Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery'],
   [/^PRODUCT_CATEGORY_RETIRED\b/, 'This category is retired. Choose an active category'],
   [/^PRODUCT_CATEGORY_NAME_REQUIRED\b/, 'Enter a category name'],
   [/^PRODUCT_CATEGORY_FIELDS_REQUIRED\b/, 'Choose a category status and sort order'],
@@ -374,7 +378,8 @@ export function sanitizeError(error: unknown): string {
     return `Nothing was saved. ${setupRefusal.charAt(0).toUpperCase()}${setupRefusal.slice(1)}`;
   }
   // Grower-share line too small to record (20270120150000, Mason 2026-11-17): the server text names the product.
-  const growerShareRounding = message.match(/^FIELD_APP_GROWER_SHARE_ROUNDING:\s*(.+)$/s)?.[1];
+  // A rep's per-acre price below the chemicals' cost (20270201180000, Mason 2026-11-20): the server text says what to do.
+  const growerShareRounding = message.match(/^FIELD_APP_GROWER_SHARE_(?:ROUNDING|BELOW_COST):\s*(.+)$/s)?.[1];
   if (growerShareRounding) {
     return `Nothing was saved. ${growerShareRounding.charAt(0).toUpperCase()}${growerShareRounding.slice(1)}`;
   }

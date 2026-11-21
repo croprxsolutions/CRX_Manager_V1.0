@@ -76,6 +76,22 @@ function vitestFiles() {
     });
 }
 
+// A new branch is compared with whichever of origin/main and origin/staging it forked from last.
+// Staging runs ahead of main, so a main-only base made a docs-only staging branch re-run the
+// contract tests and the build (2026-11-21 retro: about 5 minutes per push). If the two bases are
+// unrelated, the earlier one (main) wins, which lists more files and so runs more checks.
+function newBranchBase(localSha, git) {
+  const bases = [];
+  for (const ref of ['origin/main', 'origin/staging']) {
+    try { bases.push(git('merge-base', localSha, ref)); } catch { /* ref not fetched here */ }
+  }
+  if (!bases.length) throw new Error('no base branch');
+  const isAncestor = (a, b) => {
+    try { execFileSync('git', ['merge-base', '--is-ancestor', a, b], { stdio: 'ignore' }); return true; } catch { return false; }
+  };
+  return bases.reduce((best, next) => (isAncestor(best, next) ? next : best));
+}
+
 function changedPaths(refLines) {
   const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
   const zero = /^0+$/;
@@ -85,7 +101,7 @@ function changedPaths(refLines) {
     if (!localSha || zero.test(localSha)) continue; // branch delete: nothing to build
     let base;
     try { base = !zero.test(remoteSha) && git('cat-file', '-t', remoteSha) === 'commit' ? remoteSha : null; } catch { base = null; }
-    base ??= git('merge-base', localSha, 'origin/main');
+    base ??= newBranchBase(localSha, git);
     paths.push(...git('diff', '--name-only', '--no-renames', base, localSha).split('\n').filter(Boolean));
   }
   return paths;

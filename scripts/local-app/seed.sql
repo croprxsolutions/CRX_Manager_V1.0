@@ -24,8 +24,8 @@ INSERT INTO public.product_form_units (product_form, unit)
 VALUES ('seed', 'Lb'), ('seed', 'Unit'), ('each', 'Ea'), ('each', 'Unit')
 ON CONFLICT DO NOTHING;
 
-INSERT INTO public.products (id, product_name, product_form, container_type, container_size)
-VALUES ('c0ca1000-0000-4000-8000-000000000002', 'Test Herbicide (invented)', 'liquid', 'Jug', 2.5)
+INSERT INTO public.products (id, product_name, product_form, inventory_unit, container_type, container_size)
+VALUES ('c0ca1000-0000-4000-8000-000000000002', 'Test Herbicide (invented)', 'liquid', 'Gal', 'Jug', 2.5)
 ON CONFLICT (id) DO UPDATE SET
   product_name = EXCLUDED.product_name,
   product_form = EXCLUDED.product_form,
@@ -33,8 +33,8 @@ ON CONFLICT (id) DO UPDATE SET
   container_size = EXCLUDED.container_size;
 
 -- A product with stock in two places, for screens that show stock. Stock has no direct browser write.
-INSERT INTO public.products (id, product_name, product_form)
-VALUES ('c0ca1000-0000-4000-8000-000000000003', 'Test Stocked Product (invented)', 'liquid')
+INSERT INTO public.products (id, product_name, product_form, inventory_unit)
+VALUES ('c0ca1000-0000-4000-8000-000000000003', 'Test Stocked Product (invented)', 'liquid', 'Gal')
 ON CONFLICT (id) DO UPDATE SET product_name = EXCLUDED.product_name;
 
 INSERT INTO public.inventory (id, product_id, location, quantity_available, reorder_point)

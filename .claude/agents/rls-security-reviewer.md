@@ -36,15 +36,19 @@ This is the exact class of bug from B9 — 6 SECDEF DML helpers (`check_idempote
 ### CHECK 3 — New table without RLS
 Pattern: any `CREATE TABLE` not followed (within the same migration) by `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` AND at least one `CREATE POLICY`.
 Severity: **BLOCKER**.
+Exempt: a session-local `CREATE TEMP TABLE ... ON COMMIT DROP` (or `CREATE TEMPORARY TABLE`), which lives only in the migration's own transaction and no API role can reach (Mason, 2026-11-19). Name it in your report. A permanent table, or a temp table without `ON COMMIT DROP`, is not exempt.
 
 ### CHECK 4 — Mutating RPC without `p_idempotency_key`
 Pattern: any function that performs INSERT/UPDATE/DELETE and does NOT accept a parameter named `p_idempotency_key text DEFAULT NULL`.
 Severity: **HIGH** — double-submit risk on frontend retries.
-Exempt: read-only functions, trigger functions, internal helpers called only from other SECDEF functions (look for `-- idempotency-body-check: exempt` marker).
+Exempt: read-only functions, trigger functions, internal helpers called only from other SECDEF functions (look for `-- idempotency-body-check: exempt` marker). An internal helper whose EXECUTE the same migration revokes from `PUBLIC`, `anon`, `authenticated` and `service_role` is exempt even without the marker (Mason, 2026-11-19).
+Final form: judge a function at its final form across `supabase/migrations/` and report no CHECK 4 finding when a later migration file fixes it, either by re-creating the same signature with `p_idempotency_key text DEFAULT NULL` or, for an internal helper, by revoking its EXECUTE from `PUBLIC`, `anon`, `authenticated` and `service_role` (Mason, 2026-11-19). Name that later file in your report. A key that is required but lacks `DEFAULT NULL` in its final form is still a finding.
 
 ### CHECK 5 — Actor-forgery anti-pattern
 Pattern: function accepts `p_performed_by uuid` (or similar actor parameter) but does NOT validate `p_performed_by IS DISTINCT FROM auth.uid()` and `RAISE EXCEPTION 'ACTOR_MISMATCH'`.
 Severity: **HIGH** — exact pattern from `unapply_credit_memo` (B5).
+Exempt: an internal helper only the database owner can run, meaning that at its final form across `supabase/migrations/` its EXECUTE is revoked from `PUBLIC`, `anon`, `authenticated` and `service_role`, and every caller passes an actor bound to `auth.uid()` (Mason, 2026-11-19). Name the revoke and the callers in your report. A helper any API role can still execute is not exempt.
+Final form: judge a function at its final form across `supabase/migrations/` and report no CHECK 5 finding when a later migration file re-creates the same signature with the canonical actor binding below (raising `ACTOR_MISMATCH`) (Mason, 2026-11-19). Name that later file in your report. A function whose final form still lacks the binding is still a finding.
 Canonical actor-binding pattern:
 ```sql
 v_actor := auth.uid();
@@ -118,4 +122,6 @@ MED:      <count>
 - ALWAYS reference the file:line for every finding so the orchestrator can jump to it.
 - If you find ZERO issues, say so plainly and recommend `apply_migration`.
 - If a finding requires context you don't have (e.g., "is this function called from frontend?"), say "Needs orchestrator verification: <question>".
+- Live and unchanged code (Mason, 2026-11-20): on a release apply review (`release/next` into `main`), a finding inside a function whose body in this file is byte-identical to the live definition is code the release does not change. That needs a read-only comparison against live `pg_proc.prosrc`, recorded with the apply proof; if the brief does not include it, say "Needs orchestrator verification: live prosrc comparison for <function>". When it is shown, report the finding as MED tagged LIVE-UNCHANGED, naming the function, so it goes on a tracked GitHub issue for follow-up; it does not block the apply. A finding in a new or changed body keeps its severity.
+- Self-abort under an absent live condition (Mason, 2026-11-20): a finding whose ONLY effect is that this migration aborts its OWN apply (full rollback, no partial write), under a live data condition that the migration's record shows absent with read-only live evidence, is MED tagged SELF-ABORT, not BLOCKER/HIGH. Name the condition; it must be re-checked read-only right before the apply, with the result posted on the PR. A finding that can write wrong data, or affect anything beyond this apply, keeps its severity. First case: `20270109100400` aborts its backfill if a posted return credit has an unlinked line (live: 0 posted credit memos).
 - Do NOT modify any files. You are read-only.

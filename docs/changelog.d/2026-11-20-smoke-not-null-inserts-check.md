@@ -1,0 +1,7 @@
+## 2026-11-20 — CI check: smoke chains name every column a migration made required
+
+- Why: a migration that makes a column required broke the live smoke chains twice, found only when a feature branch's prover failed. `20270103140000` made `products.product_form` NOT NULL (fixed in #1802), and `20270129171000` (#2050) made `products.inventory_unit` NOT NULL (fix in #2057). A written memory rule did not stop the repeat.
+- New `npm run check:smoke-not-null-inserts` (`scripts/smoke/check-smoke-not-null-inserts.mjs`, with its test), run in CI's regression job next to `check:smoke-product-inserts`. It replays `supabase/migrations/` in order to find columns a migration made required (`ALTER COLUMN x SET NOT NULL`, or `ADD COLUMN x ... NOT NULL` with no default; a later `DROP NOT NULL`, `SET DEFAULT` or `DROP COLUMN` clears one), then fails on any `INSERT` in a live smoke chain that leaves one out, listing `file:line`, the column and the migration. Takes under a second.
+- Only chains `run-smoke.mjs` can send to a real database count: every `smoke-specs.json` chain that is not `container_only`. Container provers and seeds replay a fixed older migration set and are skipped (the #1802 lesson). Columns that were NOT NULL from `CREATE TABLE` are not tracked.
+- Proof: on `origin/staging` at `afd562cb3` it fails with 50 inserts (46 `inventory_unit`, plus 4 live chains still missing `product_form` that #1802 missed); with `claude/smoke-sold-unit` (#2057) merged in it passes on all 118 live chains.
+- Staging stays red on this step until #2057 lands.

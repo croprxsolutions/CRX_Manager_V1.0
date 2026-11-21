@@ -90,7 +90,8 @@ const GIT_GLOBAL_OPTS =
 const CMD_START = `(?:^|[\\s;&|])`;
 // The push arguments are the NAMED group `args`: GIT_GLOBAL_OPTS now carries a
 // capture of its own, so a numbered `[1]` would silently read the wrong group.
-const GIT_PUSH_RE = new RegExp(`${CMD_START}${GIT_BIN}${GIT_GLOBAL_OPTS}\\s+push\\b(?<args>[^;&|]*)`, "i");
+// `&>` and `>&` are redirections, not separators: the command (and its args) runs on past them.
+const GIT_PUSH_RE = new RegExp(`${CMD_START}${GIT_BIN}${GIT_GLOBAL_OPTS}\\s+push\\b(?<args>(?:[^;&|]|&>|>&)*)`, "i");
 const GIT_PUSH_PREFIX_RE = new RegExp(`${CMD_START}${GIT_BIN}(${GIT_GLOBAL_OPTS})\\s+push\\b`, "i");
 export function isGitPush(cmd) {
   return GIT_PUSH_RE.test(String(cmd || ""));
@@ -257,8 +258,36 @@ function splitShellWordsRaw(value) {
 // The long-standing token view: words split correctly, wrapping quotes stripped,
 // everything else as typed. Callers that read VALUES (remote URLs, Windows
 // destination paths) use this, because the raw form is the correct one there.
+// Shell redirections (`>`, `2>`, `>>out`, `< in`) and their target file are not
+// git arguments: read as words they became fake refspecs/branches (2026-11-21).
+// Read on the RAW word, so a quoted `'>'` stays a real argument; a redirect glued
+// to a word (`feat/x>out.txt`) leaves the shell's argument `feat/x`.
+const SHELL_REDIRECT_OP_RE = /^(?:&>>|&>|>>|>\||>&|>|<<<|<<-|<<|<>|<&|<)/;
+function unquotedRedirectAt(word) {
+  let quote = "";
+  for (let i = 0; i < word.length; i += 1) {
+    const char = word[i];
+    if (quote) { if (char === quote) quote = ""; else if (char === "\\" && quote === '"') i += 1; continue; }
+    if (char === "\\") { i += 1; continue; }
+    if (char === "'" || char === '"') { quote = char; continue; }
+    if (char === ">" || char === "<") return i;
+    if (char === "&" && word[i + 1] === ">") return i;
+  }
+  return -1;
+}
 function splitShellArgs(value) {
-  return splitShellWordsRaw(value).map(unquoteShellArg);
+  const raw = splitShellWordsRaw(value);
+  const words = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const at = unquotedRedirectAt(raw[i]);
+    if (at === -1) { words.push(unquoteShellArg(raw[i])); continue; }
+    const prefix = raw[i].slice(0, at);
+    // `2>` names a file descriptor; any other prefix is a real argument.
+    if (prefix && !/^\d+$/.test(prefix)) words.push(unquoteShellArg(prefix));
+    const rest = raw[i].slice(at);
+    if (rest.match(SHELL_REDIRECT_OP_RE)[0] === rest) i += 1; // bare operator: its target is the next word
+  }
+  return words;
 }
 
 // Every argv a push's arguments can mean, because the guard reads text without
@@ -1279,6 +1308,8 @@ export function shellSegments(cmd) {
       start = i + 1;
       continue;
     }
+    // `&>` and `>&` (as in `2>&1`) are redirections, not command separators.
+    if (ch === "&" && (text[i + 1] === ">" || text[i - 1] === ">")) continue;
     if (ch === "&" || ch === "|") {
       segments.push(text.slice(start, i));
       let end = i;
@@ -1769,7 +1800,12 @@ export function proofValid(data, headSha, nowMs, expectedBaseSha, maxAgeMs = SOL
 // lowercase SHAs) or, without that list, in the head; and either way not already
 // in main, otherwise a merged PR's proof would cover any branch built on top of
 // it. `isAncestor` answers null when it cannot tell; only a plain false counts here.
-export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, prCommits = null }) {
+//
+// The proof's base must also BE the merge-base of the reviewed head and GitHub's
+// current base (#1913), not just any ancestor of that base, so the reviewed diff is
+// exactly the PR's own changes. `mergeBase(a, b)` returns that one commit, or null
+// when it cannot tell or there is more than one; a missing or null answer refuses.
+export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, mergeBase, prCommits = null }) {
   const SHA = /^[0-9a-f]{40}$/i;
   const proofBase = String(data?.base_sha || "");
   const proofHead = String(data?.head_sha || "").toLowerCase();
@@ -1784,7 +1820,10 @@ export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, 
       if (!onBranch || isAncestor(proofBase, proofHead) !== true) return false;
     }
     if (isAncestor(proofBase, headSha) !== true) return false;
-    return proofBase === baseSha || isAncestor(proofBase, baseSha) === true;
+    // The reviewed head contains its base (checked above), so a base equal to GitHub's is the merge-base: no call.
+    if (proofBase.toLowerCase() === String(baseSha).toLowerCase()) return true;
+    if (typeof mergeBase !== "function") return false;
+    return String(mergeBase(proofHead, baseSha) || "").toLowerCase() === proofBase.toLowerCase();
   } catch {
     return false;
   }
@@ -3673,6 +3712,18 @@ export function headContainsBaseOnGitHub({ baseSha, headSha, repo, gh }) {
   if (!repoPath || !SHA.test(String(baseSha || "")) || !SHA.test(String(headSha || ""))) return false;
   const behindBy = String(gh(["api", `${repoPath}/compare/${baseSha}...${headSha}`, "--jq", ".behind_by"])).trim();
   return behindBy === "0";
+}
+
+// The one merge-base GitHub's compare reports for `headSha` and `baseSha` (#1913),
+// or null for an unusable SHA or answer. Throws on a failed call; callers treat that as null.
+// shortcut: GitHub's compare names one merge-base, so a criss-cross history with two is not
+// refused here as the local check refuses it; still stricter than the old any-ancestor rule.
+export function mergeBaseOnGitHub({ baseSha, headSha, repo, gh }) {
+  const SHA = /^[0-9a-f]{40}$/i;
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath || !SHA.test(String(baseSha || "")) || !SHA.test(String(headSha || ""))) return null;
+  const sha = String(gh(["api", `${repoPath}/compare/${baseSha}...${headSha}`, "--jq", ".merge_base_commit.sha"])).trim();
+  return SHA.test(sha) ? sha.toLowerCase() : null;
 }
 
 export { RISKY_PATH_RES, RISKY_CONTENT_RE };

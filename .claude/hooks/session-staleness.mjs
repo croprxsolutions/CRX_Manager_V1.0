@@ -5,6 +5,7 @@
 //     (schema-neutral cron/data-only migrations do not create a false alarm)
 //   - Uncommitted files from a prior session
 //   - core.hooksPath pointing anywhere but this checkout's .husky
+//   - The main checkout (where hooks and merge gates run) far behind origin/main
 //   - Weekly DB backup missing or stale. Two evidence sources, newest wins:
 //     backups/LATEST-OK.json (stamped by a locally-run scripts/backup-db.mjs)
 //     and the "Off-site DB backup" GitHub Actions workflow in
@@ -100,11 +101,13 @@ function backupMarkerPath() {
   return best ?? localPath;
 }
 
+// Keyword pre-filter, not a semantic judgement: any DDL keyword that could
+// touch the registry counts, including CREATE OR REPLACE FUNCTION (#749).
 function migrationMayAffectSchemaRegistry(sql) {
   const withoutComments = String(sql)
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/--[^\r\n]*/g, " ");
-  return /\b(?:create|alter|drop)\s+(?:table|function|type|sequence)\b|\b(?:add|drop)\s+constraint\b/i.test(withoutComments);
+  return /\b(?:create|alter|drop)\s+(?:or\s+replace\s+)?(?:table|function|type|sequence|trigger|view|policy)\b|\b(?:add|drop)\s+constraint\b/i.test(withoutComments);
 }
 
 // ─── CHECK 1 — schema registry staleness (content-based, not mtime) ──────
@@ -284,6 +287,33 @@ try {
     );
   }
 } catch { /* not a git checkout, or git unavailable */ }
+
+// ─── CHECK 3b — main checkout far behind origin/main ──────────────────────
+// Every session's hooks and merge gates run from the main checkout, not the
+// worktree. When it lags, the gates enforce old rules: on 2026-11-21 it was 509
+// commits behind and refused every valid gpt-6.2-sol Sol proof (4th time).
+// Local refs only (whatever the last fetch left): no network at session start.
+const MAIN_BEHIND_LIMIT = 50;
+try {
+  const { resolveMainCheckoutRoot } = await import("./registry-freshness-lib.mjs");
+  const mainRoot = resolveMainCheckoutRoot(projectDir);
+  if (mainRoot) {
+    const behind = Number(execFileSync("git", ["-C", mainRoot, "rev-list", "--count", "HEAD..origin/main"], {
+      encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
+    }).trim());
+    if (behind > MAIN_BEHIND_LIMIT) {
+      const root = mainRoot.replace(/\\/g, "/");
+      warnings.push(
+        `🕰 The main checkout ${root} is ${behind} commits behind origin/main. Every session's hooks and merge gates\n` +
+        `   run from that folder, so they may enforce outdated rules (for example, refusing valid gpt-6.2-sol Sol proofs).\n` +
+        `   Fix: check that none of its uncommitted files change upstream\n` +
+        `   (compare git -C ${root} status --short with git -C ${root} diff --name-only HEAD origin/main), then run:\n` +
+        `   git -C ${root} merge --ff-only origin/main\n` +
+        `   If git says it cannot fast-forward, that folder has its own local commits: stop and ask before changing it.`
+      );
+    }
+  }
+} catch { /* no git, no origin/main, or folder missing: stay silent */ }
 
 // ─── CHECK 4 — weekly DB backup freshness ─────────────────────────────────
 // Two evidence sources, newest wins:

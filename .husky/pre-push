@@ -10,6 +10,16 @@ echo ""
 # git passes the pushed refs on stdin once; keep them for both checks below.
 PUSH_REFS="$(cat)"
 
+# A fresh worktree has no packages; the tests then failed with a misleading migration hint (2026-11-21 retro).
+require_packages() {
+  if [ ! -d node_modules/vitest ] || [ ! -d node_modules/vite ]; then
+    echo ""
+    echo "❌ PACKAGES NOT INSTALLED in this folder — push blocked."
+    echo "Run npm ci here, then push again."
+    exit 1
+  fi
+}
+
 # Only Taha pushes to Taha's branches (Mason, 2026-11-07; ship.md › Taha's PRs).
 if ! printf '%s
 ' "$PUSH_REFS" | node scripts/check-taha-branch-push.mjs; then
@@ -113,6 +123,7 @@ if [ "$(printf '%s
       exit 1
     fi
   done
+  require_packages
   if ! npx vitest run src/lib/rpcContracts.test.ts src/lib/costFields.test.ts 2>&1; then
     echo ""
     echo "❌ CONTRACT TESTS FAILED — push blocked."
@@ -126,6 +137,7 @@ EDGE_TESTS="$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs 
 if [ -n "$EDGE_TESTS" ]; then
   echo ""
   echo "Running tests that read the changed Edge Function source..."
+  require_packages
   # shellcheck disable=SC2086
   if ! npx vitest run $EDGE_TESTS 2>&1; then
     echo ""
@@ -142,6 +154,7 @@ if [ "$(printf '%s\n' "$PUSH_REFS" | node scripts/prepush-needs-build.mjs)" = "s
   exit 0
 fi
 
+require_packages
 echo "Running TypeScript type check..."
 if ! npm run typecheck 2>&1; then
   echo ""

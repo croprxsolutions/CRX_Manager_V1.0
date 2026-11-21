@@ -165,8 +165,8 @@ export function buildFieldPatch(draft: MassEditDraft): Record<string, string | n
 }
 
 // edit_jobs refuses loader numbers outside this range (carrier rate may also be 0).
-export const LOADER_NUMBER_MIN = 0.001;
-export const LOADER_NUMBER_MAX = 1_000_000;
+const LOADER_NUMBER_MIN = 0.001;
+const LOADER_NUMBER_MAX = 1_000_000;
 
 /** Message for a value the server would refuse, or null when the input is blank or in range. */
 export function loaderNumberError(raw: string, kind: 'carrier' | 'capacity'): string | null {

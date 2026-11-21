@@ -6,7 +6,7 @@ import type { JobStatus } from '../types';
 // #1979: every screen change to a spray job goes through the edit_jobs server function
 // (20270201170000_job_writes_through_rpcs.sql). This file is the one caller.
 
-export const EDIT_JOBS_MAX = 500;
+const EDIT_JOBS_MAX = 500;
 
 export type EditJobsAction = 'cancel' | 'delete';
 export type EditJobsChanges = Partial<Record<

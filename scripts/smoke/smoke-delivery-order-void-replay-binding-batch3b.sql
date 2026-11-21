@@ -83,8 +83,8 @@ BEGIN
   RETURNING id INTO v_customer;
 
   -- A product is born pricing-free, so price it through the governed preview/apply path.
-  INSERT INTO public.products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Void Replay Product ' || v_suffix, 'GL', '999999-99999', 'liquid')
+  INSERT INTO public.products (product_name, unit_size, epa_registration, product_form, inventory_unit)
+  VALUES ('[SMOKE] Void Replay Product ' || v_suffix, 'Gal', '999999-99999', 'liquid', 'Gal')
   RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes(
     'product_page', NULL,
@@ -100,7 +100,7 @@ BEGIN
     (v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint', v_admin, v_prefix || 'pricing-apply');
 
   INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
-  VALUES (v_product, 'Main Warehouse', 100, 14, 'GL');
+  VALUES (v_product, 'Main Warehouse', 100, 14, 'Gal');
 
   -- Order 1 carries five 2-unit lines with one delivery each (A, B, E stay scheduled; C, D are
   -- completed below); orders 2 and 3 carry one line each, delivered in full so they are fulfilled.
@@ -125,7 +125,7 @@ BEGIN
     RETURNING id INTO v_id;
     v_del := v_del || v_id;
     INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
-    VALUES (v_id, v_oi, v_product, 2, 0, 'GL');
+    VALUES (v_id, v_oi, v_product, 2, 0, 'Gal');
   END LOOP;
   -- Complete C, D and the two full-order deliveries (each under its own key).
   FOR v_i IN 4..7 LOOP

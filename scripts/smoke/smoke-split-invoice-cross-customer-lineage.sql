@@ -65,8 +65,8 @@ BEGIN
 
   -- Order lines need a positive cost basis, COST_BASIS_REQUIRED, and a product is born
   -- pricing-free, so price a fresh shell through the governed preview/apply path.
-  INSERT INTO public.products (product_name, unit_size)
-  VALUES ('[E2E] Split Lineage Product ' || v_suffix, 'GL') RETURNING id INTO v_product;
+  INSERT INTO public.products (product_name, unit_size, product_form, inventory_unit)
+  VALUES ('[E2E] Split Lineage Product ' || v_suffix, 'Gal', 'liquid', 'Gal') RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes(
     'product_page',
     NULL,
@@ -88,7 +88,7 @@ BEGIN
     'e2e-split-lineage-pricing-apply-' || v_suffix
   );
   INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
-  VALUES (v_product, 'Main Warehouse', 100, 0, 'GL');
+  VALUES (v_product, 'Main Warehouse', 100, 0, 'Gal');
 
   INSERT INTO public.customers (farm_name) VALUES ('[E2E] Lineage A ' || v_suffix) RETURNING id INTO v_a;
   INSERT INTO public.customers (farm_name) VALUES ('[E2E] Lineage B ' || v_suffix) RETURNING id INTO v_b;
@@ -165,7 +165,7 @@ BEGIN
       FROM public.orders o WHERE o.id = v_fixture_order
     RETURNING id INTO v_fixture_delivery;
     INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
-    SELECT v_fixture_delivery, oi.id, oi.product_id, oi.total_units_needed, oi.total_units_needed, 'GL'
+    SELECT v_fixture_delivery, oi.id, oi.product_id, oi.total_units_needed, oi.total_units_needed, 'Gal'
       FROM public.order_items oi WHERE oi.order_id = v_fixture_order;
     PERFORM set_config('crx.delivery_completion_evidence', v_fixture_delivery::text, true);
     PERFORM set_config('app.admin_override', 'true', true);

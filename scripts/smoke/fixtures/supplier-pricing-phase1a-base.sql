@@ -131,7 +131,9 @@ CREATE TABLE public.idempotency_keys (
 );
 
 INSERT INTO public.unit_conversions(unit, factor_oz, unit_type)
-VALUES ('oz', 1, 'both'), ('gal', 128, 'both'), ('lb', 16, 'both');
+VALUES ('oz', 1, 'both'), ('gal', 128, 'both'), ('lb', 16, 'both'),
+  -- Live's canonical liquid stock unit; the shared chains' test products use it.
+  ('Gal', 128, 'liquid');
 
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS boolean

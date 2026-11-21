@@ -1,5 +1,36 @@
 # Decision Log
 
+## 2026-11-20 — Mason's release pass: go live without codes or waiting for Taha
+
+**Decision (Mason, in chat, 2026-11-20: "i want to prior authorize a session to take multiple pr live overnight while
+i sleep ... i give prior authorization and the agent do what is best"; "deletions should never be automatic"; "if agent
+changes things that is for good shouldnt hold us up").** Mason starts a message with `ship the release` or
+`go live #<n>`; that Claude session may then take that release or hotfix live for 24 hours, including its
+non-destructive migrations, the merge into `main` and the back-merge, with no wait for Taha's merge or his
+`Ready to merge:` comment. `stop the release` withdraws it. The pass binds to the PR, not its head. A migration that
+deletes data still needs Mason's own reply, now a plain `yes`, good for 24 hours and surviving head moves (the SQL may
+not change). The agent stops only for genuine business decisions (AGENTS.md). Taha's 4-hour hold and `hold` comments,
+every check, Sol and the apply proofs are unchanged; Codex still hands live work to Claude. A destructive migration may
+now merge into `staging` (test data); live still needs his `yes`. **Accepted residual:** like every chat-reply record
+here, an agent could forge the pass file; Sol's plan review (48 findings) also asked for a server-side approval store,
+a rehearsed restore and a production window shared with Taha, which Mason chose not to build now. Sol's whole-branch
+review of the build (20 findings: loose command wording, widening renews the 24 hours, no forced `Ready to merge`
+freeze under a pass, a partial apply not ending other passes, a `yes` surviving edits to another migration in the PR)
+was put to him with a tightening plan; he declined it ("this is too strict i want less rules and guards"). Those are
+accepted residuals; do not re-raise them as blockers on this PR.
+## 2026-11-20 — Booking levels: Firm / Maybe / "Just quoting"; Likely removed; inventory plan v5
+
+**Decision (Mason, in chat, 2026-11-20).** A booking section is Firm, Maybe or blank ("Just quoting"). Likely is removed. Among booking levels only Firm buys and sets stock aside. Maybe is shown as a total and never buys or holds. Blank counts nowhere, even after the booking is sent. Also decided:
+- Purchasing shows the exact shortfall, with no pack rounding (the PO is rounded by hand).
+- The Forecast tab stays.
+- Order-by dates have no weekend or holiday adjustment.
+- A late PO turns red after 14 days.
+- A heads-up from Sep 15 warns of the Oct 1 hold release.
+- T1 is skipped.
+
+**Why:** keep the levels simple and buy only on a grower's yes.
+**What this implies:** `docs/plans/2026-11-20-booking-confidence-rules.md` and `docs/plans/2026-11-20-inventory-purchasing-and-bookings-PLAN.md` are the build plan. A one-time switch-on (Planned bookings → Firm) must land before Plan A PR 3. It sits in Taha's area through Dec 15, so the switch-on and any booking or hold writer change is Taha's.
+
 ## 2026-11-18 — CMP-2 (Brand vs Generic rebuild) waits for real ingredient data
 
 **Decision (Mason, in chat, 2026-11-18: "Fill chemistry first").** Live check that day: 0 `active_ingredients`, 0 parents with ingredient rows, 0 mode-of-action rows, 0 `ingredient_map` rows. The comparison is built entirely from ingredient strengths, so a page built now would show every row as incomplete. He was offered "build now on test data" and "a price-per-acre slice only", and chose to fill the chemistry first.

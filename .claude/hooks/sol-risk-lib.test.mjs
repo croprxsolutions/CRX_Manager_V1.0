@@ -81,13 +81,18 @@ check("GitHub failures and mismatched comparisons need Sol", () => {
 check("main and staging are the merge bases every gate covers", () => {
   assert.deepEqual([...GATED_MERGE_BASES], ["main", "staging"]);
 });
-check("an agent never merges into main, whatever the branch", () => {
+check("an agent never merges into main without Mason's release pass, whatever the branch", () => {
   for (const head of ["release/next", "hotfix/cents", "claude/x", "taha/x", "main", "", undefined]) {
-    assert.match(agentMergeProblem("main", head), /never merges into main.*Taha or Mason/, String(head));
+    assert.match(agentMergeProblem("main", head), /never merges into main.*Taha or Mason.*ship the release/, String(head));
   }
 });
-check("an agent never merges the back-merge (main into staging)", () => {
+check("an agent never merges the back-merge (main into staging) without the pass", () => {
   assert.match(agentMergeProblem("staging", "main"), /back-merge.*Taha's or Mason's/);
+});
+check("Mason's release pass lets the agent merge into main and the back-merge, nothing else", () => {
+  assert.equal(agentMergeProblem("main", "release/next", { releasePass: true }), null);
+  assert.equal(agentMergeProblem("staging", "main", { releasePass: true }), null);
+  assert.match(agentMergeProblem("staging", "release/next", { releasePass: true }), /go into main, not staging/);
 });
 check("feature work into staging is the agent's, migrations included", () => {
   for (const head of ["claude/x", "codex/y", "ship/z", "taha/x", "release/nextish", "hotfixes"]) assert.equal(agentMergeProblem("staging", head), null, head);
@@ -131,26 +136,22 @@ check("agents never approve a pull request (#1838 HIGH 2)", () => {
   for (const t of ["gh pr review 5 --comment -b 'approve later'", "gh pr view 5 --json reviewDecision", "gh pr review 5 -r", "rg APPROVED src/"]) assert.equal(prApprovalProblem(t), null, t);
 });
 
-check("staging merges wait while the release is being applied (#1838 MED 2)", () => {
+check("staging is frozen for agents while a release PR is open (#1838 MED 2, widened 2026-11-20)", () => {
   const gh = (answers) => (args) => { const a = answers.find(([re]) => re.test(args.join(" "))); if (!a) throw new Error(`unexpected ${args.join(" ")}`); if (a[1] instanceof Error) throw a[1]; return a[1]; };
   const list = /pulls\?base=main&state=open/;
-  const comments = /issues\/77\/comments/;
-  const HEAD = "abcdef123456".padEnd(40, "0");
-  const open = `77 ${HEAD}`;
-  const c = (login, body) => JSON.stringify({ login, at: "2026-11-19T09:00:00Z", body });
   const run = (answers) => releaseFreezeProblem({ repo: "o/r", gh: gh(answers) });
   assert.equal(run([[list, ""]]), null, "no release PR open");
-  assert.equal(run([[list, open], [comments, c("someone", "Staging proof: x")]]), null, "release open, nothing applied yet");
-  assert.match(run([[list, open], [comments, c("masonwells1", "note\nApplied live: 20270110100000_x")]]), /#77.*being applied live/);
-  assert.match(run([[list, open], [comments, c("TahaKhanAbdalli", "Ready to merge: abcdef123456")]]), /#77/, "Taha's go-ahead for the current head starts the freeze, with no expiry");
-  assert.equal(run([[list, open], [comments, c("TahaKhanAbdalli", "Ready to merge: 123456789abc")]]), null, "a go-ahead for an older head freezes nothing");
-  assert.equal(run([[list, open], [comments, c("stranger", "Ready to merge: abcdef123456") + "\n" + c("stranger", "Applied live: x")]]), null, "anyone else's text freezes nothing");
+  assert.match(run([[list, "77\n"]]), /release PR #77 .*is open.*frozen for agents/, "an open release PR freezes staging from the moment it opens, no comment needed");
+  assert.match(run([[list, "77\n78"]]), /#77, #78/, "every open release PR is named");
   assert.match(run([[list, new Error("HTTP 502")]]), /fail closed/);
-  assert.match(run([[list, open], [comments, new Error("HTTP 502")]]), /fail closed/);
-  assert.match(run([[list, "77"]]), /fail closed/);
+  assert.match(run([[list, "77 abc"]]), /fail closed/, "an unreadable answer refuses");
+  assert.match(run([[list, "0"]]), /fail closed/, "#0 is not a PR number");
+  let query = "";
+  releaseFreezeProblem({ repo: "o/r", gh: (args) => { query = args.join(" "); return ""; } });
+  assert.match(query, /\.head\.repo\.full_name == \.base\.repo\.full_name/, "a fork's release/next branch freezes nothing");
 });
 
-check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)", () => {
+check("a destructive migration no longer stops a staging merge (Mason, 2026-11-20; live still needs his yes)", () => {
   const H = "a".repeat(40);
   const b64 = (t) => Buffer.from(t).toString("base64");
   const gh = (files, sql) => (args) => {
@@ -166,13 +167,11 @@ check("an agent doesn't merge a destructive migration into staging (#1838 MED 3)
   assert.equal(run("modified\tsrc/a.ts\t\n", ""), null, "no migration");
   assert.equal(run(MIG, "ALTER TABLE t ADD COLUMN c int;"), null, "an additive migration");
   assert.equal(run("removed\tsupabase/migrations/x.sql\t\n", ""), null, "a removed migration is not read");
-  assert.match(run(MIG, "DELETE FROM invoices WHERE true;"), /destructive migration.*x\.sql/);
-  assert.match(run(MIG, "DROP TABLE t;"), /DROP TABLE/);
+  assert.equal(run(MIG, "DELETE FROM invoices WHERE true;"), null, "a deletion merges into staging");
+  assert.equal(run(MIG, "DROP TABLE t;"), null, "a drop merges into staging");
   assert.match(run(new Error("HTTP 502"), ""), /fail closed/);
-  assert.match(run(MIG, new Error("HTTP 502")), /fail closed/);
   assert.match(stagingDestructiveProblem({ repo: "o/r", gh: gh("", ""), number: undefined, headSha: H, baseSha: "b".repeat(40) }), /fail closed/);
   assert.match(stagingDestructiveProblem({ repo: "o/r", gh: gh("", ""), number: 5, headSha: H, baseSha: undefined }), /fail closed/, "no base sha");
-  assert.match(run(MIG, "   "), /came back empty/);
   assert.match(run("src/a.ts\n", ""), /unreadable file list.*fail closed/, "a list without status and tabs fails closed");
 });
 

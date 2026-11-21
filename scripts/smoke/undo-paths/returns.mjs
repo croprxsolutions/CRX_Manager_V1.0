@@ -26,8 +26,8 @@ function seedReturns() {
       'undo-seed-ret-${k}')->>'return_id')::uuid;
     SELECT public.approve_return(${RET[k]}, '${ADMIN}', 'undo-seed-ret-approve-${k}');`;
   seed('returns', `INSERT INTO public.customers (id, farm_name, account_number) VALUES ('${CUST}', '[UNDO] Return Farm', '[UNDO]-RET-1');
-    INSERT INTO public.products (id, product_name, unit_size, epa_registration, product_form)
-      VALUES ('${PROD}', '[UNDO] Return Product', 'GL', '999999-99997', 'liquid');
+    INSERT INTO public.products (id, product_name, unit_size, epa_registration, product_form, inventory_unit)
+      VALUES ('${PROD}', '[UNDO] Return Product', 'Gal', '999999-99997', 'liquid', 'Gal');
     DO $price$
     DECLARE v jsonb;
     BEGIN
@@ -38,15 +38,15 @@ function seedReturns() {
       PERFORM public.apply_product_pricing_change_set((v->>'change_set_id')::uuid, v->>'request_fingerprint', '${ADMIN}', 'undo-seed-ret-pricing-apply');
     END
     $price$;
-    INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size) VALUES ('${PROD}', 'Main Warehouse', 40, 10, 'GL');
+    INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size) VALUES ('${PROD}', 'Main Warehouse', 40, 10, 'Gal');
     INSERT INTO public.orders (id, order_number, customer_id, status, booking_draw) VALUES ('${ORDER}', '[UNDO] RET-ORDER', '${CUST}', 'confirmed', false);
     INSERT INTO public.order_items (id, order_id, product_id, product_name, price_per_unit, cost_per_unit,
         total_units_needed, total_price, profit, net_margin, quantity_delivered, quantity_remaining, unit_size)
-      VALUES ('${LINE}', '${ORDER}', '${PROD}', '[UNDO] return line', 10, 6, 10, 100, 40, 40, 0, 10, 'GL');
+      VALUES ('${LINE}', '${ORDER}', '${PROD}', '[UNDO] return line', 10, 6, 10, 100, 40, 40, 0, 10, 'Gal');
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, scheduled_date, status, created_by)
       VALUES ('${DEL}', '[UNDO] DEL-RET', '${ORDER}', '${CUST}', CURRENT_DATE, 'scheduled', '${ADMIN}');
     INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
-      VALUES ('${DEL}', '${LINE}', '${PROD}', 10, 0, 'GL');
+      VALUES ('${DEL}', '${LINE}', '${PROD}', 10, 0, 'Gal');
     UPDATE public.deliveries SET status = 'in_progress' WHERE id = '${DEL}';
     SELECT public.complete_delivery(p_delivery_id => '${DEL}', p_signed_by => '${NO_PROOF_SIGNER}', p_performed_by => '${ADMIN}',
       p_idempotency_key => 'undo-seed-ret-complete', p_evidence => 'no_proof', p_evidence_ref => '[UNDO] fixture');

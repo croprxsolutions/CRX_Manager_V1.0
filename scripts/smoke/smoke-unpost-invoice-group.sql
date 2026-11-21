@@ -46,8 +46,8 @@ BEGIN
 
   -- Posted split groups come only from the real split save, posted through post_invoice_group,
   -- with the product's cost set through the governed pricing path.
-  INSERT INTO products (product_name, unit_size, product_form)
-    VALUES ('[SMOKE] UPG Prod '||v_sfx, 'GL', 'liquid') RETURNING id INTO v_prod;
+  INSERT INTO products (product_name, unit_size, product_form, inventory_unit)
+    VALUES ('[SMOKE] UPG Prod '||v_sfx, 'Gal', 'liquid', 'Gal') RETURNING id INTO v_prod;
   v_pricing := preview_product_cost_basis_changes('product_page', NULL,
     jsonb_build_array(jsonb_build_object(
       'product_id', v_prod, 'row_version', (SELECT pricing_version FROM products WHERE id = v_prod),
@@ -75,9 +75,9 @@ BEGIN
         'field_id', v_field, 'map_number', 1, 'total_acres', 40, 'planted_acres', NULL,
         'applied_acres', 40, 'crop_type', NULL, 'wind_direction', NULL, 'sort_order', 0)),
       jsonb_build_array(jsonb_build_object(
-        'product_id', v_prod, 'description', '[SMOKE] UPG Chem', 'quantity', 0, 'unit_size', 'GL',
+        'product_id', v_prod, 'description', '[SMOKE] UPG Chem', 'quantity', 0, 'unit_size', 'Gal',
         'unit_price_cents', 1000 * v_n, 'cost_cents', 100, 'sort_order', 0, 'rate_per_acre', 0.1,
-        'rate_unit', 'GL', 'manual_override', true)),
+        'rate_unit', 'Gal', 'manual_override', true)),
       v_admin, NULL, '[SMOKE] upg-save-'||v_n||'-'||v_sfx);
     v_aset := (v_res->>'invoice_group_id')::uuid;
     IF v_aset IS NULL THEN RAISE EXCEPTION 'SMOKE_SETUP: the split save made no invoice group: %', v_res; END IF;

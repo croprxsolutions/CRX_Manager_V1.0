@@ -643,6 +643,10 @@ jobs:
         if: ${{ needs.ci-scope.outputs.full_ci == 'true' }}
         run: npm run check:smoke-product-inserts
 
+      - name: Smoke chains name every column a migration made required
+        if: ${{ needs.ci-scope.outputs.full_ci == 'true' }}
+        run: npm run check:smoke-not-null-inserts
+
       - name: Agent workflow truth-state and sync tests
         if: ${{ needs.ci-scope.outputs.full_ci == 'true' }}
         # Same chain as `npm run test:agent-workflows`, one suite at a time, failing any suite that leaves temp folders behind.

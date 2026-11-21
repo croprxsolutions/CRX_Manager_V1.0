@@ -4,6 +4,71 @@
 
 **Decision (Mason, in chat, 2026-11-21: "Fix them first").** Sol round 4 on the #2018 branch found that a driver who takes a delivery can read that farm's credit limit, prepay balance, payment terms and notes, and can edit their delivery's fields (such as the quick-delivery flag) straight through the table. Mason chose fixes over owner-accepts, and decided: drivers may see a farm's name, phone, email and delivery address (shipping, else billing) for every farm, never the financial fields; drivers keep every app action they have today, with only the direct table edit removed; and it goes live in two steps (release 1: edit lock, safe farm lookup, screens; release 2: drivers' whole-row customer read removed). This entry names #2161 so Sol may run round 5 on it.
 
+## 2026-11-21 — #2047: Mason owner-accepted 5 Sol finding(s) at `9e22ac2b7e44`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2047 at `9e22ac2b7e44` (base `c1088f15be0c`) found 5 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:132`, text sha256 `1485baf82f399e31` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot hapen (ref 72369a6c3778)
+- Finding 2 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:181`, text sha256 `ab06033c80e17433` (the wording stays with the proof, not here)
+  Mason's reason: this cant hapen (ref c1c3a0118191)
+- Finding 3 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:182`, text sha256 `0b132d68996bcf1c` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 81a4b26c426c)
+- Finding 4 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:27`, text sha256 `5fd44f4829bcbf94` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref bd7b1fb0c469)
+- Finding 5 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:153`, text sha256 `1e39d9aefc0b6c02` (the wording stays with the proof, not here)
+  Mason's reason: this cannt happen (ref fe132c96fe3c)
+
+## 2026-11-21 — #2047 (edit_jobs): Sol round 9 decisions
+
+**Decision (Mason, in chat, 2026-11-21, answering Sol round 9).** (1) The shared retry-code table lets a known PO-screen
+code be used first by another action: "Accept, log PO fix" (KI-182). (2) A live invoice on a deleted blend ticket now
+counts as billed: "Fix it". (3) An invoice saved in the same second as a bulk job edit: "Accept, log for Taha" (KI-181).
+The billed-job check had drawn HIGHs in three rounds, so it stops here; Mason owner-accepts findings (1) and (3).
+
+## 2026-11-21 — #2047 (edit_jobs): admins and reps stay assignable as applicators
+
+**Decision (Mason, in chat, 2026-11-21, answering Sol round 8: "Admin and sales rep sometimes are applicators").** The
+job screens keep offering admins and sales reps as applicators. The old applicator's dispatch staying open after such a
+reassignment is today's dispatch behaviour, logged as KI-180; Mason owner-accepts that Sol finding.
+
+## 2026-11-21 — #2047 (edit_jobs): applicator changes on completed jobs stay as today
+
+**Decision (Mason, in chat, 2026-11-21, answering Sol round 7: "Keep today's rule").** Anyone who may edit jobs may
+still change the applicator on a completed job; the new applicator then gets the usual 7-day record access. Mason
+owner-accepts that Sol finding. Separately, `edit_jobs` now refuses an inactive or wrong-role applicator (a check, not
+a rule change: the screens already offer only active applicators, admins and reps).
+
+## 2026-11-21 — #2047 (edit_jobs): invoiced jobs are never changed by bulk job edits; cancel clash accepted
+
+**Decision (Mason, in chat, 2026-11-21, answering Sol round 6).** (1) `edit_jobs` skips invoiced jobs for every
+action, admins included; Mass Edit already hides them, and a stale screen must not move billed work or its applicator
+access. (2) Two cancels on one booking at the same moment can make one fail safely, as today; logged as KI-179 for
+Taha, and Mason owner-accepts that Sol finding.
+**What it does:** a third deliberate exception to the #1979 parity rule; admins fix billed jobs through the invoice flow.
+
+## 2026-11-21 — #2047 (edit_jobs): who may edit and delete jobs, and two job issues left for Taha
+
+**Decision (Mason, in chat, 2026-11-21, answering Sol round 5).** (1) A sales rep whose Job Schedule page is blocked
+for them is refused by `edit_jobs`, as the screens already block them. (2) Only an admin may delete a completed job; a
+rep's delete skips it. (3) Changing a completed job's date stays allowed as today; logged as KI-177 for Taha's billing
+work. (4) Partial cancel of a large booking stays as today; logged as KI-176 for Taha, and Mason will owner-accept that
+Sol finding after the next round.
+**What it does:** two deliberate exceptions to the #1979 "parity" rule (contract updated); no other job rule changes.
+
+## 2026-11-21 — #2047 (job edits through edit_jobs, #1979 PR A) may have Sol rounds 5 to 10
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, allow 5–10").** PR #2047 may have its Sol review in rounds 5
+through 10. Most earlier rounds re-reviewed the PR after staging merges, not repeated findings in its own code.
+**What it does:** lifts the round cap for #2047 only, up to round 10; the stop rule (the same BLOCKER/HIGH
+surviving two fix rounds goes back to Mason) and every other gate are unchanged.
+
+## 2026-11-19 — #2047: Mason owner-accepted 2 Sol finding(s) at `d2525e72220a`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2047 at `d2525e72220a` (base `c79b2a04d9b3`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (BLOCKER) at `docs/plans/2026-11-19-job-writes-through-rpcs-CONTRACT.md:3`, text sha256 `eda3e2570ce59129` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref ca71e5988000)
+- Finding 2 (HIGH) at `supabase/migrations/20270131100000_job_writes_through_rpcs.sql:166`, text sha256 `847c3a966cb5ec80` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref 6b963a8267f1)
 ## 2026-11-21 — #2068: Mason owner-accepted 4 Sol finding(s) at `1d9202dcb57d`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `1d9202dcb57d` (base `dab22364c6bc`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
@@ -15,6 +80,25 @@
   Mason's reason: this cant happen (ref 5d333eacec4e)
 - Finding 4 (HIGH) at `scripts/smoke/grower-share-rep-cover-reverse.sql:31`, text sha256 `3a19afa1d0a31d5f` (the wording stays with the proof, not here)
   Mason's reason: this cant happen (ref d424445cef65)
+
+## 2026-11-21 — #2045: Mason owner-accepted 2 Sol finding(s) at `e6a349b6f20d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2045 at `e6a349b6f20d` (base `18be091ef88f`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201195000_inventory_edge_cases_1942.sql:315`, text sha256 `90719fc7dc6123a9` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen in our business (ref 9a9e909b0dbd)
+- Finding 2 (HIGH) at `supabase/migrations/20270201195000_inventory_edge_cases_1942.sql:307`, text sha256 `90d66f788657eace` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen in our bususines (ref aa35ddfaf298)
+
+## 2026-11-21 — #2045: Mason owner-accepted 1 Sol finding(s) at `790859458268`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2045 at `790859458268` (base `a90d3b34fc7a`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270201195000_inventory_edge_cases_1942.sql:315`, text sha256 `83a9f256b4f30c5e` (the wording stays with the proof, not here)
+  Mason's reason: cant hapen (ref 5ed2ac568296)
+
+## 2026-11-21 — #2045 may have Sol round 10 after merging staging
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, round 10").** PR #2045 (#1942 inventory edge cases) may have Sol round 10.
+**Why:** after round 9, staging gained #2068, #2137, #2138 and #2143, and GitHub reported #2045 as conflicting. Merging staging in was clean, but staging had changed files this PR also edits, and a staging-bound branch has no carry-forward, so the merged head needs a full Sol review. The PR's own change is unchanged since round 9.
 
 ## 2026-11-21 — #2068: Mason owner-accepted 3 Sol finding(s) at `2f04db346c0b`
 
@@ -37,6 +121,24 @@
 - Finding 1 (HIGH) at `supabase/migrations/20270201100000_page_access_locks_reports.sql:670`, text sha256 `5936f6b886f393ac` (the wording stays with the proof, not here)
   Mason's reason: a rep never has record book or product hidden on top of repirts (ref 604ba71bdaf6)
 
+
+## 2026-11-21 — #2045 may have one more Sol round (round 9)
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, round 9").** PR #2045 (#1942 inventory edge cases) may have Sol round 9.
+**Why:** #2068 merged migration `20270201180000`, so #2045's migration needed a newer stamp (`20270201141000` → `20270201195000`). The restamp carry refused because the reviewed proof sits two commits back (a DECISION_LOG reorder came after it), and rewriting history isn't allowed. The PR's own SQL is unchanged since round 8. Mason also chose to track the Codex App P2 (doubled repeated-line short-stock warning) as follow-up #2135 instead of fixing it here.
+
+## 2026-11-21 — #2045: Mason owner-accepted 2 Sol finding(s) at `2020eb077d1e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2045 at `2020eb077d1e` (base `a90d3b34fc7a`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (BLOCKER) at `supabase/migrations/20270130110000_inventory_edge_cases_1942.sql:1`, text sha256 `79bf2ebf7c7a05c4` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen in our buisnesss (ref 67585e7a72ad)
+- Finding 2 (HIGH) at `supabase/migrations/20270130110000_inventory_edge_cases_1942.sql:315`, text sha256 `2b013711c231adff` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref ff779839a0d5)
+
+## 2026-11-21 — #2045 may have two more Sol rounds (rounds 7 and 8)
+
+**Decision (Mason, in chat, 2026-11-21: "Yes 2 more").** PR #2045 (#1942 inventory edge cases) may have two more Sol rounds (rounds 7 and 8).
+**Why:** after Mason owner-accepted round 6's one HIGH finding, staging moved again and GitHub reported a conflict, so staging had to be merged in and the merge gate needs a fresh Sol review of the new head. The PR's own change is unchanged since round 6.
 ## 2026-11-21 — #2051 (KI-119): Mason chose to fix Sol round 4's year-end summary finding
 
 **Decision (Mason, 2026-11-21, "Fix it").** Sol round 4 on PR #2051 found that the one-customer year-end summary stays open to a sales rep with both Reports and Customers hidden. Mason chose a fix over an owner-accept: that summary is now refused only when BOTH pages are hidden (either page alone keeps it; admins always pass). This entry names #2051 so Sol may run round 5 on it.
@@ -69,6 +171,11 @@ review of the build (20 findings: loose command wording, widening renews the 24 
 freeze under a pass, a partial apply not ending other passes, a `yes` surviving edits to another migration in the PR)
 was put to him with a tightening plan; he declined it ("this is too strict i want less rules and guards"). Those are
 accepted residuals; do not re-raise them as blockers on this PR.
+## 2026-11-21 — #2045 may have one more Sol round (round 7)
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, one more round").** PR #2045 (#1942 inventory edge cases) may have one more Sol round (round 7).
+**Why:** #2038 merged into staging first and added RPC contract test entries beside #2045's, so staging had to be merged in again to clear a conflict in `src/lib/rpcContracts.test.ts`. The PR's own change is unchanged since its last owner-accepted round.
+
 ## 2026-11-20 — Booking levels: Firm / Maybe / "Just quoting"; Likely removed; inventory plan v5
 
 **Decision (Mason, in chat, 2026-11-20).** A booking section is Firm, Maybe or blank ("Just quoting"). Likely is removed. Among booking levels only Firm buys and sets stock aside. Maybe is shown as a total and never buys or holds. Blank counts nowhere, even after the booking is sent. Also decided:
@@ -92,6 +199,33 @@ accepted residuals; do not re-raise them as blockers on this PR.
 - Finding 1 (HIGH) at `supabase/migrations/20270129171000_field_app_refuses_product_without_sold_unit.sql:39`, text sha256 `30caf38e89c4de39` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our business) (ref 23d2a64b72fd)
 
+## 2026-11-21 — #2045: Mason owner-accepted 1 Sol finding(s) at `b75d3a0306ca`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2045 at `b75d3a0306ca` (base `ca1ed13c47fd`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270130110000_inventory_edge_cases_1942.sql:315`, text sha256 `d98bb40a0d45e8e1` (the wording stays with the proof, not here)
+  Mason's reason: this can’t happen (ref 622226788197)
+
+## 2026-11-21 — #2045 may have one more Sol round (round 6)
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, one more each").** PR #2045 (#1942 inventory edge cases) may have one more Sol round (round 6).
+**Why:** after release #1990 and its back-merge, staging had to be merged in to clear a conflict, so the merge gate needs a fresh Sol review of the new head. The PR's own change is unchanged since its last clean or owner-accepted round.
+
+## 2026-11-19 — #2045: Mason owner-accepted 1 Sol finding(s) at `41bdb733685d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2045 at `41bdb733685d` (base `677a28765975`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270130110000_inventory_edge_cases_1942.sql:315`, text sha256 `648cf1f5d3416edc` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref fc76edc08939)
+
+## 2026-11-19 — #2045 may have up to two more Sol rounds (5-6)
+
+**Decision (Mason, in chat, 2026-11-19: "Approve up to 2 more").** PR #2045 (#1942 inventory edge cases) may have Sol rounds 5 and 6.
+**Why:** Sol round 4 found a real one-line gap in the new stock-row locking (a row committed between the two lock passes was not locked), now fixed and proven. Earlier rounds also counted a migration-stamp rename forced by staging moving.
+
+## 2026-11-19 — #1942: Mason drops the open-stock-count guard from the migration
+
+**Decision (Mason, in chat via the coordinating session, 2026-11-19: "Drop the guard"; "none of the stock is real in live app so no need to be worried on that").** Migration `20270130110000_inventory_edge_cases_1942` no longer locks `cycle_count_items` or refuses to apply while an open stock count has saved lines.
+**Why:** that guard drew a new HIGH in three rounds (Luna r1, Luna r4, Sol r2), so the stop rule fired. Without it, the worst case is today's behaviour: a count saved before the apply and completed after it can land up to 0.00005 of a unit off, and only on stock with more than 4 decimals. Live stock is not real yet.
+**What it does:** the apply no longer waits on open counts. A read-only check for open counts before the apply is optional. Every other #1942 check and gate is unchanged.
 ## 2026-11-21 — #2038: Mason owner-accepted 2 Sol finding(s) at `9b5598f5d0d1`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2038 at `9b5598f5d0d1` (base `ca1ed13c47fd`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
@@ -203,6 +337,8 @@ on every round of this release (round 54), and owner-accepts stay refused on rel
 **What it does:** release rule 3 in `scripts/write-codex-push-proof.mjs` (`RELEASE_KNOWN_ISSUES`) tags only those
 findings, in only those functions; any other finding, including a different one in the same function, still blocks.
 Clear the list after the release lands. Every other gate is unchanged.
+**Cleared (Mason, 2026-11-21, "Yes, remove it"):** #1990 landed, so the list is empty and release rule 3 drops out of the
+release prompt until Mason names new known issues for a future release. #2064-#2066 stay open as normal issues.
 
 ## 2026-11-20 — Release rule 1 also covers unchanged live lines inside a changed function
 

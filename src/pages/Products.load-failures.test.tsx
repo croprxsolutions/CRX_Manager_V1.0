@@ -36,13 +36,16 @@ const categories = [
   { name: 'Seed', is_active: true, sort_order: 20 },
 ];
 
+// productsError fails product reads only; an update (a save) always succeeds.
 function chainable(resolveWith: () => unknown) {
   const builder: Record<string, unknown> = {};
-  for (const method of ['select', 'eq', 'is', 'in', 'or', 'order', 'limit', 'range', 'update']) {
+  let isUpdate = false;
+  for (const method of ['select', 'eq', 'is', 'in', 'or', 'order', 'limit', 'range']) {
     builder[method] = vi.fn(() => builder);
   }
+  builder.update = vi.fn(() => { isUpdate = true; return builder; });
   builder.then = vi.fn((resolve: (value: unknown) => void) => {
-    Promise.resolve(resolveWith()).then(resolve);
+    Promise.resolve(isUpdate ? { data: [{ id: product.id }], error: null } : resolveWith()).then(resolve);
   });
   return builder;
 }
@@ -56,7 +59,7 @@ vi.mock('../lib/db', () => ({
       : { data: mocks.products, error: null }))),
   },
   sanitizeError: (error: unknown) => (error instanceof Error ? error.message : String(error)),
-  checkMutationResult: vi.fn(),
+  checkMutationResult: vi.fn((result: { error: unknown }) => { if (result.error) throw result.error; }),
 }));
 vi.mock('../lib/marginFloors', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/marginFloors')>()),

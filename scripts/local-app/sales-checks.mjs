@@ -39,7 +39,7 @@ for (const chain of chains) {
         PERFORM set_config('request.jwt.claim.sub', '', true);
         PERFORM set_config('request.jwt.claims', '', true);
         PERFORM set_config('crx.pricing_mode', '', true);
-        INSERT INTO products (product_name, product_form, unit_size) VALUES ('[SMOKE] Current sales contract fixture ' || i, 'liquid', 'Gal') RETURNING id INTO p;
+        INSERT INTO products (product_name, product_form, unit_size, inventory_unit) VALUES ('[SMOKE] Current sales contract fixture ' || i, 'liquid', 'Gal', 'Gal') RETURNING id INTO p;
         PERFORM set_config('request.jwt.claim.sub', actor::text, true);
         PERFORM set_config('request.jwt.claims', jsonb_build_object('sub',actor,'role','authenticated')::text, true);
         plan := preview_product_pricing_changes('product_page',NULL,

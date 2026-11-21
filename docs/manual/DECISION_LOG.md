@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-21 — #2161 (#2018): Mason chose to fix Sol round 4's two driver-access findings
+
+**Decision (Mason, in chat, 2026-11-21: "Fix them first").** Sol round 4 on the #2018 branch found that a driver who takes a delivery can read that farm's credit limit, prepay balance, payment terms and notes, and can edit their delivery's fields (such as the quick-delivery flag) straight through the table. Mason chose fixes over owner-accepts, and decided: drivers may see a farm's name, phone, email and delivery address (shipping, else billing) for every farm, never the financial fields; drivers keep every app action they have today, with only the direct table edit removed; and it goes live in two steps (release 1: edit lock, safe farm lookup, screens; release 2: drivers' whole-row customer read removed). This entry names #2161 so Sol may run round 5 on it.
+
 ## 2026-11-21 — #2068: Mason owner-accepted 4 Sol finding(s) at `1d9202dcb57d`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2068 at `1d9202dcb57d` (base `dab22364c6bc`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

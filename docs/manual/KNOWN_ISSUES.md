@@ -1002,7 +1002,7 @@ report and its CSV (`_get_inventory_cost_report_cost_impl_20261019`, `Reports.ts
 rows, so summing the CSV reproduces the old wrong total. Fix: match the rows to the summary's exclusions, or mark them.
 
 ### KI-136 — Receiving adds the typed number whatever unit the PO line is in
-**MED · OPEN · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #4) · unassigned**
+**MED · FIXED LIVE (`20270121110000` + `20270121120000`, PR #1896, released in #1990; checked live 2026-11-21: `a1_line_unit_is_stock_unit` on PO, order and delivery lines, no open PO line in another unit) · inventory/purchasing · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #4) · Claude**
 `receive_po_items` adds quantity straight to stock without checking the line unit against the stock unit, and new PO
 lines take `products.unit_size`, not the stock unit (`PurchaseOrderDetail.tsx` ~L2154). Live: 4 of 102 received lines
 were in a different unit and 44 had a blank unit. D12 moves purchasing back into CRX before the season. Fix: fill a
@@ -1014,7 +1014,7 @@ on a KI-137 product. Receiving them today adds the typed number. The on-order re
 (`_recompute_po_on_order_for_products`) and new stock-row creation mix units the same way. The per-line factor
 `inventory_units_per_supplier_unit_snapshot` exists but is unused. Repair step 1 (To-Do 0.17); orders and deliveries
 are KI-158. Do not convert historical balances; fix them from counts (KI-29).
-**Fix built 2026-11-15 (units batch, PR A; not live):** `20270121110000_line_unit_is_stock_unit.sql` fills a blank PO,
+**Fix (units batch, PR #1896; live 2026-11-21):** `20270121110000_line_unit_is_stock_unit.sql` fills a blank PO,
 order or delivery line unit with the stock unit, stores a matching spelling as the product's own (`EA` -> `Ea`),
 refuses any other unit (`LINE_UNIT_NOT_STOCK_UNIT`), checks a PO line again whenever it is received into, refuses a
 product stock-unit change while lines are open in the old unit (`PRODUCT_UNIT_HAS_OPEN_LINES`), and gives the one
@@ -1024,7 +1024,7 @@ relabelled first by `20270121100000` (KI-137). Still open after this: a fully re
 admin over-receive (re-enter it on a new line).
 
 ### KI-137 — Two seed-treatment products are stocked and priced per Lb at per-jug money
-**MED (data) · OPEN · inventory/pricing data · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #5) · unassigned**
+**MED (data) · FIXED LIVE (`20270121100000`, PR #1896, released in #1990) · inventory/pricing data · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #5) · Claude**
 Products `0b2e713b` and `17ccc5ba` have stock and rate unit Lb and container unit Ea, with cost and Tier 1 equal to a
 jug's money; their purchases were "EA". Selling or receiving by the pound would be wildly wrong. On-hand 0, one order
 line each. May already be on Mason's private unit-mismatch list (KI-30). Fix: Mason confirms the sales unit (To-Do
@@ -1032,10 +1032,10 @@ decision 24), then a reviewed unit correction.
 **Answered 2026-11-13 (Mason, DECISION_LOG):** both Powder Keg products are sold **by the each** at their current prices.
 Their stock and rate unit become Ea, with no stock conversion because on-hand is 0. This needs a reviewed migration
 (repair step 1, To-Do 0.17). One has an open EA PO line (KI-136), so correct it before that line is received.
-**Fix built 2026-11-15 (units batch, PR A; not live):** `20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql`
+**Fix (units batch, PR #1896; live 2026-11-21):** `20270121100000_ki137_powder_keg_each_piksi_mg_labels.sql`
 moves both products, their families, stock rows and open order lines Lb -> Ea (a new cost basis at the same cents),
 and relabels Piksi Dust Plus's stock row and open PO, order and delivery lines "Dry oz" -> MG. Quantities and money
-do not change. Needs Mason's live-apply approval.
+do not change. Applied live 2026-11-21 (release #1990).
 
 ### KI-138 — Stored tier margins disagree with stored prices on a few products
 **LOW · OPEN · pricing data · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #6) · unassigned**
@@ -1085,7 +1085,7 @@ cancelled. The app cannot reach this today, because `cancel_order` cancels open 
 rule stops it. Fix: in a new migration, leave a cancelled order's status alone (or refuse the completion).
 
 ### KI-158 — Orders and deliveries move stock without checking units
-**MED · OPEN · inventory/units · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-4, C-16) · unassigned**
+**MED · FIXED LIVE (`20270121110000`, PR #1896, released in #1990; checked live 2026-11-21: 0 open order or delivery lines in another unit) · inventory/units · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-4, C-16) · Claude**
 The order-side twin of KI-136. New order lines default to `products.unit_size`, not `inventory_unit`
 (`_fill_order_line_unit`, `20270106100000`; the quote-to-order prebook copies the same). Delivery completion subtracts
 `delivery_items.quantity` with no unit check. So a product sold per case or each but stocked per gallon or pound loses
@@ -1093,7 +1093,7 @@ The order-side twin of KI-136. New order lines default to `products.unit_size`, 
 delivery lines** carry a unit different from the stock unit. Also, 25 `inventory.unit_size` labels are blank or
 misspelled; screens prefer `products.inventory_unit`. Fix: default and fill to the stock unit, and refuse or convert a
 mismatch, in the same units batch as KI-136 (repair step 1, To-Do 0.17).
-**Fix built 2026-11-15 (units batch, PR A; not live):** the KI-136 rule covers order and delivery lines too and
+**Fix (units batch, PR #1896; live 2026-11-21):** the KI-136 rule covers order and delivery lines too and
 replaces `_fill_order_line_unit` (it filled from `unit_size`). Existing closed lines keep their units and still save
 edits that do not touch the unit.
 

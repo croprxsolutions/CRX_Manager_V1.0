@@ -1,5 +1,21 @@
 # Decision Log
 
+## 2026-11-19 — #2045: Mason owner-accepted 1 Sol finding(s) at `41bdb733685d`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2045 at `41bdb733685d` (base `677a28765975`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270130110000_inventory_edge_cases_1942.sql:315`, text sha256 `648cf1f5d3416edc` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref fc76edc08939)
+
+## 2026-11-19 — #2045 may have up to two more Sol rounds (5-6)
+
+**Decision (Mason, in chat, 2026-11-19: "Approve up to 2 more").** PR #2045 (#1942 inventory edge cases) may have Sol rounds 5 and 6.
+**Why:** Sol round 4 found a real one-line gap in the new stock-row locking (a row committed between the two lock passes was not locked), now fixed and proven. Earlier rounds also counted a migration-stamp rename forced by staging moving.
+
+## 2026-11-19 — #1942: Mason drops the open-stock-count guard from the migration
+
+**Decision (Mason, in chat via the coordinating session, 2026-11-19: "Drop the guard"; "none of the stock is real in live app so no need to be worried on that").** Migration `20270130110000_inventory_edge_cases_1942` no longer locks `cycle_count_items` or refuses to apply while an open stock count has saved lines.
+**Why:** that guard drew a new HIGH in three rounds (Luna r1, Luna r4, Sol r2), so the stop rule fired. Without it, the worst case is today's behaviour: a count saved before the apply and completed after it can land up to 0.00005 of a unit off, and only on stock with more than 4 decimals. Live stock is not real yet.
+**What it does:** the apply no longer waits on open counts. A read-only check for open counts before the apply is optional. Every other #1942 check and gate is unchanged.
 ## 2026-11-20 — #1990: Mason owner-accepted 5 Sol finding(s) at `b145a1514838`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #1990 at `b145a1514838` (base `5740b6c076ea`) found 5 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

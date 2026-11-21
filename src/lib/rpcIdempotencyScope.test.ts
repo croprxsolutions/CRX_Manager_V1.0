@@ -431,6 +431,9 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // 20260817120000 is the first to CREATE the function under its post-rename
   // name (the rename itself defined no function body on disk).
   _complete_delivery_authorized_impl: ['complete_delivery'],
+  // The same completion body after 20270126110000 renamed it behind the authorizing wrapper; 20270130110000 (#1942)
+  // is the first to CREATE it under this name. It keeps the one 'complete_delivery' namespace for the same reason.
+  _complete_delivery_authorized_impl_20270122: ['complete_delivery'],
   // Direct EXECUTE is revoked from anon/authenticated/service_role (same
   // postflight). Implementation half of the public
   // create_invoice_for_unbilled_delivery RPC, which delegates to it

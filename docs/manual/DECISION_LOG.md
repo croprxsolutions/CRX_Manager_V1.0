@@ -1,5 +1,12 @@
 # Decision Log
 
+## 2026-11-21 — #2047 (job edits through edit_jobs, #1979 PR A) may have Sol rounds 5 to 10
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, allow 5–10").** PR #2047 may have its Sol review in rounds 5
+through 10. Most earlier rounds re-reviewed the PR after staging merges, not repeated findings in its own code.
+**What it does:** lifts the round cap for #2047 only, up to round 10; the stop rule (the same BLOCKER/HIGH
+surviving two fix rounds goes back to Mason) and every other gate are unchanged.
+
 ## 2026-11-19 — #2047: Mason owner-accepted 2 Sol finding(s) at `d2525e72220a`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #2047 at `d2525e72220a` (base `c79b2a04d9b3`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

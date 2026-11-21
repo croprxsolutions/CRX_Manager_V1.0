@@ -167,3 +167,22 @@ does not cover `field_app_location_shares` (admins can still change a posted inv
 - Pre-build checks: 8, 13 (P1); 28 (P2); 23, 25 (P3); 27, 30 (P4); 44 (P5).
 - Out of scope, stated: 11, 12 (existing save-rebuild behavior for owners; unchanged by this change), 18, 21 (direct
   child writes removed for reps, so policy-time resolution is not needed), 32 (stale content).
+
+## Targeted re-check (Astra high, 2026-11-21, 20 findings) — ON HOLD
+
+Build is on hold: Mason gave a conflicting answer in another session ("Anyone" / "Any rep"), and the parent session
+is confirming A (drop the fix) or B (lock down as planned). If A, this contract is dropped and the decision recorded
+under KI-01/KI-03. If B, settle these before building (no further challenge round, per `plan-contract` Step 3):
+- Business (ask Mason only if B): an A-only billing/applied change when sibling B has another owner (re-check 2);
+  a rep-owned group with one posted member (7).
+- Simplify the screen: drop `field_invoice_edit_state` if possible (findings 9-12 all come from it); otherwise give it
+  its own caller contract, existing-invoices only, one disclosure-safe reason, and leave Post/Delete on their own checks.
+- Server: field-type check on the save anchor (4); copy the save wrapper's anchor-then-fresh-set lock and group
+  re-check into billing/applied (5); identical outward error for hidden and unknown ids (3); parent-type check for the
+  `invoice_shares` policy that does not depend on the rep's read access (8); membership writers honor the group lock (6).
+- Proof additions: billing/applied two-session and opposite-order cases (17); keyed retry after a denial (14); admin
+  expected result per invalid-input case (16); partial-save message per committed call (15); new-invoice creation
+  through the screen (12); per-endpoint receipt binding (13); `post_invoice_group` :610 and `delete_invoices` bodies
+  quoted (19).
+- Refuted: 20 (an admin can set the salesperson on save: `20270129171000`:300 `CASE WHEN is_admin() THEN
+  COALESCE(v_salesman_id, salesman_id)`). 1 is a packet limitation (original findings are in the session record).

@@ -1784,6 +1784,8 @@ export default function FieldApplicationInvoice() {
   // silent data corruption). 'cannot_compare' / 'no_label_max' never gate a save.
   const handleSave = async () => {
     if (!profile) return;
+    // A new Save attempt supersedes the last refusal, even if this one stops at local validation.
+    setPayerChangeRefusal(null);
     // Opened at /new?created=<id>: nothing is saved here until the check has settled and the
     // page is a plain new invoice again (see the created-invoice check).
     if (isNew && createdCheck.state !== 'none') {
@@ -1927,7 +1929,6 @@ export default function FieldApplicationInvoice() {
     if (saveInFlightRef.current) return;
     saveInFlightRef.current = true;
     setSaving(true);
-    setPayerChangeRefusal(null);
     try {
       const saveArgs = {
         p_invoice: {

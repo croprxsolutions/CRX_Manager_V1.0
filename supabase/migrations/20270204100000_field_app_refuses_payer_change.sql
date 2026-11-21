@@ -10,8 +10,9 @@
 --   Live 2026-11-21 (read-only): 3 field-application invoices; neither shape exists.
 --
 -- WHAT (Mason, 2026-11-21: "refuse the save ... explain the problem"): _save_field_app_invoice_impl_20260714 refuses
---   that save with FIELD_APP_PAYER_CHANGED and a plain sentence naming the farm(s) the fields now bill, the farm the
---   invoice bills, and what to do (make a new invoice for those fields; delete or void this one). Nothing is written.
+--   that save with FIELD_APP_PAYER_CHANGED and a plain sentence naming the farm(s) the fields now bill and what to do
+--   (put the fields back, or an admin deletes or voids this one first; a job-made one is re-invoiced from its job).
+--   The whole save rolls back.
 --   An invoice never changes which farm it bills; grouped invoices keep their existing rules. Contract:
 --   docs/plans/2026-11-21-field-app-refuses-payer-change-CONTRACT.md.
 --
@@ -21,7 +22,7 @@
 -- ROLLBACK (its own reviewed migration): re-emit the body from
 --   20270129171000_field_app_refuses_product_without_sold_unit.sql (md5 1a4a2655e43392d867b195289df9b9a1).
 --
--- ORDERING: after 20270129171000. Not re-runnable (preflight refuses). Postflight pins the new body md5 b594d6f12001cccf5fbe41d5dbf6ec2c.
+-- ORDERING: after 20270129171000. Not re-runnable (preflight refuses). Postflight pins the new body md5 54c5e75581aff769ed2b856882d98ec0.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -221,12 +222,14 @@ BEGIN
   -- refuse with a sentence the office can act on (Mason, 2026-11-21) rather than move or orphan the invoice.
   IF p_invoice_id IS NOT NULL AND v_existing_group_id IS NULL AND (v_customer_count > 1 OR NOT EXISTS (
        SELECT 1 FROM jsonb_array_elements(v_customers) c WHERE (c->>'customer_id')::uuid = v_existing_customer_id)) THEN
-    RAISE EXCEPTION 'FIELD_APP_PAYER_CHANGED: Nothing was saved. The fields on this invoice now bill %, but invoice % bills %, and an invoice cannot change which farm it bills. Make a new field application invoice for these fields, then delete this one (void it if it was posted), or put back the fields for %.',
+    -- Names only the farm(s) of the fields the caller sent, never this invoice's own number or farm (Sol r3), and
+    -- puts the admin step first so a rep never leaves two live drafts; a job-made invoice is re-billed from its job.
+    RAISE EXCEPTION 'FIELD_APP_PAYER_CHANGED: Nothing was saved. These fields bill %, but this invoice bills a different farm, and an invoice cannot change which farm it bills. %',
       (SELECT string_agg(COALESCE(NULLIF(btrim(c->>'customer_name'), ''), 'another farm'), ' and ' ORDER BY c->>'customer_name')
          FROM jsonb_array_elements(v_customers) c),
-      (SELECT invoice_number FROM invoices WHERE id = p_invoice_id),
-      (SELECT farm_name FROM customers WHERE id = v_existing_customer_id),
-      (SELECT farm_name FROM customers WHERE id = v_existing_customer_id);
+      CASE WHEN (SELECT job_id FROM invoices WHERE id = p_invoice_id) IS NOT NULL
+        THEN 'Put back the original fields, or, if the job itself is wrong, have an admin delete this invoice (void it if it was posted), correct the job, and invoice it again from Scheduling.'
+        ELSE 'Put back the original fields, or have an admin delete this invoice (void it if it was posted) first, then make a new field application invoice for these fields.' END;
   END IF;
 
   IF p_application_service_id IS NOT NULL THEN
@@ -748,7 +751,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)'))
-     IS DISTINCT FROM 'b594d6f12001cccf5fbe41d5dbf6ec2c' THEN
+     IS DISTINCT FROM '54c5e75581aff769ed2b856882d98ec0' THEN
     RAISE EXCEPTION 'FIELD_APP_STANDALONE_DRAFT_POSTFLIGHT: _save_field_app_invoice_impl_20260714 is not the reviewed new body';
   END IF;
 END;

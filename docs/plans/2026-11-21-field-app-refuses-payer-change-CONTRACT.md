@@ -19,7 +19,13 @@ An earlier version moved the draft automatically (cancel the old one, make a new
 
 Saving a standalone invoice whose fields now bill a different farm, or several farms, is refused with `FIELD_APP_PAYER_CHANGED` and this sentence (farm names and invoice number filled in):
 
-> Nothing was saved. The fields on this invoice now bill <farm(s)>, but invoice <number> bills <farm>, and an invoice cannot change which farm it bills. Make a new field application invoice for these fields, then delete this one (void it if it was posted), or put back the fields for <farm>.
+> Nothing was saved. These fields bill <farm(s)>, but this invoice bills a different farm, and an invoice cannot change which farm it bills. Put back the original fields, or have an admin delete this invoice (void it if it was posted) first, then make a new field application invoice for these fields.
+
+An invoice made from a job ends instead:
+
+> … Put back the original fields, or, if the job itself is wrong, have an admin delete this invoice (void it if it was posted), correct the job, and invoice it again from Scheduling.
+
+The sentence names only the farm(s) of the fields the user sent, never this invoice's own number or farm (a rep may not be able to see that invoice; Sol r3), and it puts the admin step first so a rep never leaves two live drafts. A job-made invoice is re-billed from its job so the job is not billed twice (Sol r3).
 
 The invoice screen shows that sentence as is (no raw code). Nothing is written: no cancel, no new draft, no group.
 

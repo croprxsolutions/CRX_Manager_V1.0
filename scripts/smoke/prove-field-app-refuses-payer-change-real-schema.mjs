@@ -5,8 +5,8 @@
  * (field A1) is edited through save_field_app_invoice, each case rolled back:
  *   BEFORE: moved to B's field, A stays the customer and is billed for B's work; split over A's and B's fields, the
  *           original stays a live draft with no lines; a second A field is a normal edit.
- *   AFTER:  moved or split, the save is refused FIELD_APP_PAYER_CHANGED with a sentence naming the farm(s) the fields
- *           now bill, the invoice number and its farm, and nothing changes (Mason, 2026-11-21: refuse and explain);
+ *   AFTER:  moved or split, the save is refused FIELD_APP_PAYER_CHANGED with a sentence naming only the farm(s) the fields
+ *           now bill (a job-made invoice is told to re-invoice from its job), and nothing changes (Mason, 2026-11-21: refuse and explain);
  *           the normal edit and a grouped edit end exactly as before. A second apply stops at the preflight.
  *
  * Run: node scripts/smoke/prove-field-app-refuses-payer-change-real-schema.mjs   (needs Docker)
@@ -366,17 +366,18 @@ async function main() {
 
   // Refused, with the sentence the office reads (the farm names come from the derived payers and the invoice's farm).
   const lit = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const sentence = (now) => new RegExp(lit(`FIELD_APP_PAYER_CHANGED: Nothing was saved. The fields on this invoice now bill ${now}, but invoice `)
-    + '\\S+' + lit(' bills [PROVER] SDF Farm A, and an invoice cannot change which farm it bills. Make a new field application invoice'
-    + ' for these fields, then delete this one (void it if it was posted), or put back the fields for [PROVER] SDF Farm A.'));
+  const STANDALONE_END = 'Put back the original fields, or have an admin delete this invoice (void it if it was posted) first, then make a new field application invoice for these fields.';
+  const JOB_END = 'Put back the original fields, or, if the job itself is wrong, have an admin delete this invoice (void it if it was posted), correct the job, and invoice it again from Scheduling.';
+  // Names only the farm(s) of the fields sent; never this invoice's own number or farm (Sol r3).
+  const sentence = (now, end = STANDALONE_END) => new RegExp(lit(`FIELD_APP_PAYER_CHANGED: Nothing was saved. These fields bill ${now}, but this invoice bills a different farm, and an invoice cannot change which farm it bills. ${end}`));
   const B_ONLY = '[PROVER] SDF Farm B', BOTH = '[PROVER] SDF Farm A and [PROVER] SDF Farm B';
   refusedProbe(TO_B, sentence(B_ONLY));
   refusedProbe(SPLIT, sentence(BOTH));
   console.log("[after] A's draft moved to B's field, or split over A's and B's: refused FIELD_APP_PAYER_CHANGED naming the farms (whole save rolled back)");
   refusedProbe(UNPOSTED, sentence(B_ONLY));
-  refusedProbe(FROM_JOB, sentence(B_ONLY));
+  refusedProbe(FROM_JOB, sentence(B_ONLY, JOB_END));
   refusedProbe(UNPOSTED_SPLIT, sentence(BOTH));
-  refusedProbe(FROM_JOB_SPLIT, sentence(BOTH));
+  refusedProbe(FROM_JOB_SPLIT, sentence(BOTH, JOB_END));
   console.log('[after] an unposted invoice or a job-made draft, moved or split: refused the same way');
   const same = okProbe(SAME);
   console.log(`[after] A's draft given a second A field: ${same}`);

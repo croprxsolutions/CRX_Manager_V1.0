@@ -953,9 +953,13 @@ describe('FieldApplicationInvoice — existing single invoice (no group)', () =>
     withBilledFarms();
     await renderPage();
     await screen.findByText(/Field Application INV-1001/);
+    expect(screen.getByRole('button', { name: /^Delete$/i })).toBeInTheDocument();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Applied Info')));
     expect(mockNavigate).not.toHaveBeenCalled();
+    // The page still shows the cancelled draft: its own actions (Delete, Void, Print, Post...) would act on stale data.
+    expect(screen.getByRole('alert')).toHaveTextContent(/this draft was cancelled and a new draft was saved/);
+    for (const name of [/^Delete$/i, /Void/i, /Print/i, /^Post/i, /Email/i]) expect(screen.queryByRole('button', { name })).toBeNull();
 
     await act(async () => fireEvent.click(screen.getByRole('button', { name: /^Save$/i })));
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/invoices/field-app/inv-other-farm', { replace: true }));

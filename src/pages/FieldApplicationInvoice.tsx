@@ -541,6 +541,9 @@ export default function FieldApplicationInvoice() {
   // The new draft an earlier Save on this page moved the edited one to (its fields bill another farm, #2058).
   // The edited draft is cancelled, so after a partial failure every repeat Save writes to the new one.
   const replacementInvoiceIdRef = useRef<string | null>(null);
+  // Shown while this page still holds a draft the save cancelled (#2058): its own actions would act on stale data.
+  const [replacedBy, setReplacedBy] = useState<string | null>(null);
+  useEffect(() => { replacementInvoiceIdRef.current = null; setReplacedBy(null); }, [id]);
   const [searchParams] = useSearchParams();
   const createdIdInAddress = createdInvoiceIdFromAddress(searchParams);
   // Opened at /new?created=<id>: Save waits for the created-invoice check below.
@@ -2028,7 +2031,10 @@ export default function FieldApplicationInvoice() {
       }
       // #2058: the save cancelled the edited draft and saved a new one (its fields bill another farm). Record it before
       // any later step can fail, so every repeat Save from this page goes to the new draft, not the cancelled one.
-      if (!creating && targetInvoiceId && ids.length > 0 && !ids.includes(targetInvoiceId)) replacementInvoiceIdRef.current = ids[0];
+      if (!creating && targetInvoiceId && ids.length > 0 && !ids.includes(targetInvoiceId)) {
+        replacementInvoiceIdRef.current = ids[0];
+        setReplacedBy(ids[0]);
+      }
       // #2058: when the earlier save cancelled the edited draft (its fields bill another farm), repeat onto the new one.
       const replayedInvoiceId = targetInvoiceId && (ids.length === 0 || ids.includes(targetInvoiceId)) ? targetInvoiceId : ids[0];
       if (retryMayReplayOldValues && replayedInvoiceId) {
@@ -2264,6 +2270,7 @@ export default function FieldApplicationInvoice() {
         // Keep the typed values on the page (the error toast says what did not persist); Save again writes them to
         // the new draft, then opens it. Reloading here would show the cancelled draft.
         replacementInvoiceIdRef.current = savedInvoiceId;
+        setReplacedBy(savedInvoiceId);
         return;
       }
       if ((isNew || replaced) && savedInvoiceId) {
@@ -3046,6 +3053,8 @@ export default function FieldApplicationInvoice() {
           {!isNew && <Badge variant={statusToBadgeVariant[status] || 'default'}>{status}</Badge>}
         </div>
         <div className="flex flex-wrap gap-2 justify-end">
+          {/* #2058: after a save that replaced this draft, only Save (finishing onto the new draft) and Cancel remain. */}
+          {!replacedBy && (<>
           {!isNew && canEdit && (
             <Button variant="danger" size="sm" icon={<Trash2 className="w-4 h-4" />} onClick={() => setShowDeleteConfirm(true)}>
               Delete
@@ -3142,6 +3151,7 @@ export default function FieldApplicationInvoice() {
               Preview
             </Button>
           )}
+          </>)}
           {/* #24: explicit Cancel Without Saving (the unsaved-changes guard still prompts). */}
           <Button variant="secondary" size="sm" icon={<X className="w-4 h-4" />} onClick={handleCancel}>
             Cancel
@@ -3173,6 +3183,17 @@ export default function FieldApplicationInvoice() {
           records warning from #23). Editing inputs are also disabled via canEdit.
           #29: a voided/cancelled invoice is TERMINAL — it can't be unposted, so show a
           distinct red banner instead of the amber "unpost to edit" copy. */}
+      {replacedBy && (
+        <Card>
+          <div role="alert" className="flex items-start gap-2 px-4 py-3 bg-amber-50 border-l-4 border-amber-400 rounded text-sm text-amber-800">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span>
+              These fields now bill a different farm, so this draft was cancelled and a new draft was saved. Some details did not
+              save yet: press <strong>Save</strong> to finish them on the new draft, which then opens.
+            </span>
+          </div>
+        </Card>
+      )}
       {isLocked && (status === 'voided' || status === 'cancelled') && (
         <Card>
           <div className="flex items-start gap-2 px-4 py-3 bg-red-50 border-l-4 border-red-400 rounded text-sm text-red-800">

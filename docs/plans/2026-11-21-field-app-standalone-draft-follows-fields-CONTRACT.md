@@ -17,7 +17,7 @@ Read at `origin/staging` dab22364c (2026-11-21). Live checked read-only the same
 A standalone draft is treated exactly as a grouped draft's member already is:
 - reused (same id and number) only for the payer it already bills; when the fields are split, it joins the new group as that payer's draft;
 - if its payer is no longer among the fields' payers and it is a plain **draft** with no job or blend ticket, it is cancelled the same way a grouped orphan is (status `cancelled`, totals 0, `invoice_orphan_cancelled` activity), and the new payer(s) get new drafts;
-- an `unposted` invoice (posted once) or one made from a job or blend ticket is refused `FIELD_APP_PAYER_CHANGED` instead (migration reviewers 2026-11-21: a cancel would skip the void, or leave the job `invoiced` on a cancelled invoice; live has one job-made unposted field invoice). Nothing is cancelled; the office voids it or changes the job.
+- an `unposted` invoice or one made from a job or blend ticket is refused `FIELD_APP_PAYER_CHANGED` instead, whether moved or split (Sol r1: a split would put it in a group, whose later orphan cancel has no such check) (migration reviewers 2026-11-21: a cancel would skip the void, or leave the job `invoiced` on a cancelled invoice; live has one job-made unposted field invoice). Nothing is cancelled; the office voids it or changes the job.
 
 No new table, column, status, permission or argument. Who may save is unchanged (admin or sales rep; actor = caller; posted/voided refused). One new migration re-emits only this function: preflight pins live md5 `1a4a2655…`, and the change is the reuse condition plus the standalone orphan cancel. Files: that migration, its ledger record and changelog entry, a real-schema prover and SQL chain, `src/lib/rpcContracts` fixtures if the md5 list needs it.
 
@@ -42,7 +42,7 @@ No backfill. Live 2026-11-21 (read-only, by saved payer shares, both location pa
 
 ## Same as the grouped path today (Astra challenge, not changed here)
 
-A new payer's draft takes the saver as salesman (rep) and the sent date/notes; a zero-acre share still counts as a payer; an `unposted` source is cancelled like a draft; the cancelled draft keeps its number and history; stale-tab saves are last-save-wins; overlapping same-key retries rely on the wrapper's key lock. Each matches what a grouped edit already does; changing them is out of scope for #2058.
+A new payer's draft takes the saver as salesman (rep) and the sent date/notes; a zero-acre share still counts as a payer; the cancelled draft keeps its number and history; stale-tab saves are last-save-wins; overlapping same-key retries rely on the wrapper's key lock. Each matches what a grouped edit already does; changing them is out of scope for #2058.
 
 ## Proof cases (real migrated database, prover)
 
@@ -51,7 +51,7 @@ A new payer's draft takes the saver as salesman (rep) and the sent date/notes; a
 3. When a standalone draft for A is re-saved with A's fields only (normal edit), then the same id, number and customer are kept (regression).
 4. A grouped edit and a new save end exactly as before (existing smoke chains pass before and after).
 5. A second apply is refused by the preflight.
-6. Moving an unposted invoice, or a job-made draft, to another farm's fields is refused `FIELD_APP_PAYER_CHANGED`; before, it kept the old farm.
+6. Moving or splitting an unposted invoice, or a job-made draft, over another farm's fields is refused `FIELD_APP_PAYER_CHANGED`; before, it kept the old farm.
 7. A deleted draft is refused `Invoice not found` before and after.
 
 ## Open business decisions

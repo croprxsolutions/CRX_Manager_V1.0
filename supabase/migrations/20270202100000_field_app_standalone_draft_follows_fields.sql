@@ -24,7 +24,7 @@
 -- ROLLBACK (its own reviewed migration): re-emit the body from
 --   20270129171000_field_app_refuses_product_without_sold_unit.sql (md5 1a4a2655e43392d867b195289df9b9a1).
 --
--- ORDERING: after 20270129171000. Not re-runnable (preflight refuses). Postflight pins the new body md5 8a8c4150506511be27af0ffd4ed0c963.
+-- ORDERING: after 20270129171000. Not re-runnable (preflight refuses). Postflight pins the new body md5 28ce5328aff2e0ea24ab669596aa34f5.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -222,18 +222,21 @@ BEGIN
     END LOOP;
   END IF;
 
-  -- #2058: a standalone draft whose payer is no longer among its fields' payers is cancelled exactly as a
-  -- grouped orphan above; the fields' payers get their own drafts below.
+  -- #2058: a standalone invoice whose fields now bill another payer, or several, changes payers: it is cancelled
+  -- (moved) or joins a group (split). Only a plain draft may: an unposted invoice is past draft (void it instead), and
+  -- one made from a job or blend ticket keeps that link, which a cancel strands (job left 'invoiced' on a cancelled
+  -- invoice). Refusing the split too keeps such an invoice out of a group, whose orphan cancel above has no such check.
+  IF p_invoice_id IS NOT NULL AND v_existing_group_id IS NULL AND (v_customer_count > 1 OR NOT EXISTS (
+       SELECT 1 FROM jsonb_array_elements(v_customers) c WHERE (c->>'customer_id')::uuid = v_existing_customer_id))
+     AND (v_existing_status <> 'draft' OR EXISTS (SELECT 1 FROM invoices WHERE id = p_invoice_id
+                                                    AND (job_id IS NOT NULL OR blend_ticket_id IS NOT NULL))) THEN
+    RAISE EXCEPTION 'FIELD_APP_PAYER_CHANGED: these fields now bill another customer or several, and invoice % cannot change payers because it %. Void it, or change the job, then make a new invoice for these fields.',
+      (SELECT invoice_number FROM invoices WHERE id = p_invoice_id),
+      CASE WHEN v_existing_status <> 'draft' THEN 'is no longer a draft' ELSE 'came from a job or blend ticket' END;
+  END IF;
+  -- The payer left: the draft is cancelled exactly as a grouped orphan above; the fields' payers get their own drafts below.
   IF p_invoice_id IS NOT NULL AND v_existing_group_id IS NULL AND NOT EXISTS (
        SELECT 1 FROM jsonb_array_elements(v_customers) c WHERE (c->>'customer_id')::uuid = v_existing_customer_id) THEN
-    -- Only a plain draft is cancelled here. An unposted invoice was already posted once (void it instead), and one made
-    -- from a job or blend ticket keeps that link, which a cancel would strand (job left 'invoiced' on a cancelled invoice).
-    IF v_existing_status <> 'draft' OR EXISTS (SELECT 1 FROM invoices WHERE id = p_invoice_id
-                                                  AND (job_id IS NOT NULL OR blend_ticket_id IS NOT NULL)) THEN
-      RAISE EXCEPTION 'FIELD_APP_PAYER_CHANGED: these fields now bill another customer, and invoice % cannot move to them because it %. Void it, or change the job, then make a new invoice for these fields.',
-        (SELECT invoice_number FROM invoices WHERE id = p_invoice_id),
-        CASE WHEN v_existing_status <> 'draft' THEN 'was already posted once' ELSE 'came from a job or blend ticket' END;
-    END IF;
     UPDATE invoices SET
       status              = 'cancelled',
       total_amount_cents  = 0,
@@ -773,7 +776,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._save_field_app_invoice_impl_20260714(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)'))
-     IS DISTINCT FROM '8a8c4150506511be27af0ffd4ed0c963' THEN
+     IS DISTINCT FROM '28ce5328aff2e0ea24ab669596aa34f5' THEN
     RAISE EXCEPTION 'FIELD_APP_STANDALONE_DRAFT_POSTFLIGHT: _save_field_app_invoice_impl_20260714 is not the reviewed new body';
   END IF;
 END;

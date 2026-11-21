@@ -315,6 +315,10 @@ const viaReplica = (set) => `SET LOCAL session_replication_role = replica; UPDAT
 const UNPOSTED = scenario(`'${GB}'`, `'${GA}'`, viaReplica(`status = 'unposted'`));
 const FROM_JOB = scenario(`'${GB}'`, `'${GA}'`, `WITH j AS (INSERT INTO jobs (job_number, customer_id, job_date) VALUES ('SDF-J1', '${A}', CURRENT_DATE) RETURNING id)
     UPDATE invoices SET job_id = j.id FROM j, t WHERE invoices.id = t.inv;`);
+// Splitting either over A's and B's fields is refused too: in a group, a later edit's orphan cancel would strand it (Sol r1).
+const UNPOSTED_SPLIT = scenario(`'${GA}','${GB}'`, `'${GA}'`, viaReplica(`status = 'unposted'`));
+const FROM_JOB_SPLIT = scenario(`'${GA}','${GB}'`, `'${GA}'`, `WITH j AS (INSERT INTO jobs (job_number, customer_id, job_date) VALUES ('SDF-J2', '${A}', CURRENT_DATE) RETURNING id)
+    UPDATE invoices SET job_id = j.id FROM j, t WHERE invoices.id = t.inv;`);
 // A deleted standalone draft is refused (by the lock wrapper before, and by the impl too after).
 const DELETED = `${asAdmin}CREATE TEMP TABLE t AS SELECT (sdf.save(NULL, ARRAY['${GA}']::uuid[], 'sdf-new-' || gen_random_uuid())->'invoice_ids'->>0)::uuid AS inv;
   UPDATE invoices SET deleted_at = now() FROM t WHERE invoices.id = t.inv;
@@ -340,7 +344,8 @@ async function main() {
   console.log(`[before] A's draft moved to B's field: ${toBBefore}`);
   console.log(`[before] A's draft split over A's and B's fields: ${splitBefore}`);
   console.log(`[before] A's draft given a second A field: ${sameBefore}`);
-  const unpostedBefore = okProbe(UNPOSTED), jobBefore = okProbe(FROM_JOB);
+  const unpostedBefore = okProbe(UNPOSTED), jobBefore = okProbe(FROM_JOB), jobSplitBefore = okProbe(FROM_JOB_SPLIT);
+  console.log(`[before] A's job-made draft split over A's and B's fields: ${jobSplitBefore}`);
   console.log(`[before] A's once-posted (unposted) invoice moved to B's field: ${unpostedBefore}`);
   console.log(`[before] A's job-made draft moved to B's field: ${jobBefore}`);
   assert.equal(toBBefore, 'A:draft:30000:1:solo | kept | orphan-rows=0 | original=A:draft', 'before: farm A is billed for B\'s field');
@@ -371,9 +376,11 @@ async function main() {
   assert.equal(same, sameBefore, 'a normal edit is unchanged');
   assert.equal(okProbe(GROUPED), groupedBefore, 'a grouped edit is unchanged');
   refusedProbe(DELETED, /Invoice not found/);
-  refusedProbe(UNPOSTED, /FIELD_APP_PAYER_CHANGED: .*was already posted once/);
+  refusedProbe(UNPOSTED, /FIELD_APP_PAYER_CHANGED: .*is no longer a draft/);
   refusedProbe(FROM_JOB, /FIELD_APP_PAYER_CHANGED: .*came from a job or blend ticket/);
-  console.log("[after] moving a once-posted invoice or a job-made draft to another farm's fields is refused FIELD_APP_PAYER_CHANGED (nothing cancelled)");
+  refusedProbe(UNPOSTED_SPLIT, /FIELD_APP_PAYER_CHANGED: .*is no longer a draft/);
+  refusedProbe(FROM_JOB_SPLIT, /FIELD_APP_PAYER_CHANGED: .*came from a job or blend ticket/);
+  console.log("[after] moving or splitting a once-posted invoice or a job-made draft over another farm's fields is refused FIELD_APP_PAYER_CHANGED (nothing cancelled, no group)");
   console.log(`[after] the grouped edit ends as before (${groupedBefore}); a deleted standalone draft is refused 'Invoice not found'`);
   console.log('FIELD_APP_STANDALONE_DRAFT_PROOF_PASS');
 }

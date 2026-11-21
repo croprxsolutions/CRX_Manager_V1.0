@@ -10,6 +10,8 @@
  *
  * Run: node scripts/smoke/prove-setup-workbook-chemistry-tabs-real-schema.mjs   (needs Docker)
  * Prints SETUP_WORKBOOK_CHEMISTRY_TABS_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
+ * Later migrations (20270104110000 on) redefine what this proves, so plan() refuses on a newer tree: run this
+ * file from a checkout of b1dec0816 (the last commit where the candidate is the newest migration).
  */
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -445,6 +447,28 @@ function ingredientCases() {
   assert.equal(scalar(`SELECT status FROM public.chemistry_change_proposals WHERE id = '${pb.proposal_id}';`), 'proposed', 'a refused promote changes nothing');
   assert.equal(js(ADMIN, promote(pb.proposal_id, 1, 'reject')).status, 'rejected');
   console.log('[case] I5 a stale row is refused by name with nothing saved; a stale proposal is refused, then rejected');
+
+  // A mixed upload: retire one ingredient, change another and add a third in one go; all three apply together.
+  const dl3 = halexDownload();
+  const safA = dl3.ingredients.find((r) => r.name === 'Prover Safener A');
+  const gly3 = dl3.ingredients.find((r) => r.name === 'Glyphosate');
+  const mixed = [upRow(dl3, safA, { delete: true }), upRow(dl3, gly3, { strength_value: 22.5, source_note: 'Halex GT label 2027, page 1' }),
+    add('Prover Safener D', dl3.chemistry_version)];
+  const mp = js(ADMIN, `SELECT public.preview_ingredients_tab(${J(mixed)});`).parents;
+  assert.equal(mp.length, 1); assert.equal(mp[0].status, 'proposal', JSON.stringify(mp[0]));
+  assert.equal(mp[0].items.length, 3); assert.equal(mp[0].has_delete, true);
+  const mx = js(ADMIN, `SELECT public.commit_ingredients_tab(${J(mixed)}, 'dm1b-i-8');`).proposals[0];
+  assert.equal(mx.item_count, 3); assert.equal(mx.has_delete, true);
+  assert.equal(chemVer(HALEX), dl3.chemistry_version, 'nothing live changes at commit');
+  const mxa = js(ADMIN, promote(mx.proposal_id, 1, 'apply_delete'));
+  // _workbook_apply_items runs the retire/change list, then the adds: two DM-1 steps inside the one promote.
+  assert.equal(mxa.status, 'applied'); assert.equal(mxa.applied_chemistry_version, dl3.chemistry_version + 2);
+  assert.equal(chemVer(HALEX), dl3.chemistry_version + 2);
+  assert.equal(scalar(`SELECT status FROM public.product_parent_ingredients WHERE id = '${safA.row_id}';`), 'retired');
+  assert.equal(scalar(`SELECT strength_value::text FROM public.product_parent_ingredients WHERE id = '${gly3.row_id}';`), '22.5');
+  assert.equal(n(`SELECT count(*) FROM public.product_parent_ingredients ppi JOIN public.active_ingredients ai ON ai.id = ppi.ingredient_id WHERE ppi.parent_id = '${HALEX}' AND ppi.status = 'active' AND ai.name = 'Prover Safener D';`), 1);
+  assert.deepEqual(halexDownload().ingredients.map((r) => r.name).sort(), ['Glyphosate', 'Prover Safener D', 'S-metolachlor']);
+  console.log('[case] I5b a mixed upload (retire + change + add) previews as one delete proposal; one apply_delete retires, changes and adds');
 
   // A usable EPA number refuses the parent's workbook chemistry by name; with a good parent, the whole upload is refused.
   assert.match(js(ADMIN, 'SELECT public.get_setup_workbook_chemistry();').parents.find((p) => p.parent_id === PEPA).epa_refusal, /100-44/);

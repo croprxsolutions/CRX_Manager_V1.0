@@ -67,6 +67,35 @@ assert.deepEqual(cols(r, 't'), ['check', 'unique']);
 r = req(mig('1', 'CREATE TABLE t (a text, b text);'), mig('2', 'ALTER TABLE t ADD CONSTRAINT t_pk PRIMARY KEY (a, b);'));
 assert.deepEqual(cols(r, 't'), ['a', 'b']);
 
+// ADD PRIMARY KEY USING INDEX makes the unique index's columns NOT NULL.
+r = req(
+  mig('1', 'CREATE TABLE t (a text, b text, c text);'),
+  mig('2', 'CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS t_ab ON public.t USING btree (a, b DESC); ALTER TABLE t ADD CONSTRAINT t_pk PRIMARY KEY USING INDEX t_ab;'),
+);
+assert.deepEqual(cols(r, 't'), ['a', 'b']);
+
+// DEFAULT NULL with a cast or followed by NOT NULL is no default; DEFAULT 'x' NOT NULL is; SET DEFAULT on a column
+// named serial reads the value, not the name.
+r = req(
+  mig('1', 'CREATE TABLE t ("serial" text NOT NULL DEFAULT \'x\');'),
+  mig('2', `ALTER TABLE t ADD COLUMN a text DEFAULT NULL NOT NULL, ADD COLUMN b text NOT NULL DEFAULT NULL::text,
+    ADD COLUMN c varchar(5) DEFAULT NULL::character varying(5) NOT NULL, ADD COLUMN d text DEFAULT 'x' NOT NULL,
+    ADD COLUMN e text NOT NULL DEFAULT (NULL)::text[], ALTER COLUMN "serial" SET DEFAULT NULL;`),
+);
+assert.deepEqual(cols(r, 't'), ['a', 'b', 'c', 'e', 'serial']);
+
+// A table dropped and recreated tracks the columns the recreate newly requires; a brand-new table does not.
+r = req(
+  mig('1', 'CREATE TABLE t (a text NOT NULL, b text, c text NOT NULL DEFAULT \'x\', d text);'),
+  mig('2', 'ALTER TABLE t ALTER COLUMN d SET NOT NULL;'),
+  mig('3', 'DROP TABLE IF EXISTS t; CREATE TABLE t (a text NOT NULL, b text NOT NULL, c text NOT NULL, d text NOT NULL, e text NOT NULL DEFAULT \'y\');'),
+  mig('4', 'CREATE TABLE fresh (a text NOT NULL);'),
+);
+assert.deepEqual(cols(r, 't'), ['b', 'c', 'd']);
+assert.equal(r.get('t').get('b'), '3');
+assert.equal(r.get('t').get('d'), '2', 'keeps the migration that first required it');
+assert.deepEqual(cols(r, 'fresh'), []);
+
 // Comments, strings and other schemas are ignored.
 r = req(mig('1', "-- ALTER TABLE t ALTER COLUMN a SET NOT NULL;\nSELECT 'ALTER TABLE t ALTER COLUMN b SET NOT NULL;';\nALTER TABLE auth.users ALTER COLUMN c SET NOT NULL;"));
 assert.equal(r.size, 0);

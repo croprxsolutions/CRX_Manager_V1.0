@@ -5,8 +5,9 @@
 // 20270103140000 (products.product_form, fixed in #1802) and 20270129171000 (products.inventory_unit, #2057).
 // This replays the migrations in order to find required-by-migration columns, then reads the INSERT column lists
 // of every chain run-smoke.mjs can send to a real database (container-only chains replay an older fixed migration
-// set, so they are skipped, as in #1802). Columns that were NOT NULL from CREATE TABLE are not tracked: chains were
-// written against those, and some are filled by triggers.
+// set, so they are skipped, as in #1802). Columns that were NOT NULL from a table's first CREATE TABLE are not
+// tracked: chains were written against those, and some are filled by triggers. A table dropped and recreated keeps
+// its old chains, so a column the recreate newly requires is tracked.
 // Deliberate limits (a static omission check, not a SQL engine; none of these occur in the repo as of 2026-11-20):
 // it checks that a required column is NAMED, not that its value is non-NULL (VALUES (NULL) / (DEFAULT)); a default
 // expression that evaluates to NULL (other than a literal NULL) counts as a default; quoted identifiers are compared
@@ -46,8 +47,17 @@ function splitTopLevel(text) {
   return parts.map((p) => p.trim()).filter(Boolean);
 }
 
-// DEFAULT NULL is no default: an insert that omits the column still writes NULL.
-const hasDefault = (def) => /\b(?:DEFAULT(?![\s(]*NULL[\s)]*$)|GENERATED|(?:big|small)?serial\d?)\b/i.test(def);
+// DEFAULT NULL (also NULL::type, or followed by NOT NULL) is no default: an insert that omits the column still writes NULL.
+const COLUMN_WORDS = 'NOT|NULL|CONSTRAINT|CHECK|REFERENCES|UNIQUE|PRIMARY|COLLATE';
+const NULL_DEFAULT = new RegExp(
+  String.raw`^[\s(]*NULL[\s)]*(?:::\s*[\w."]+(?:\s+(?!(?:${COLUMN_WORDS})\b)[\w."]+)*(?:\s*\([^)]*\))?(?:\s*\[\])*[\s)]*)?(?:$|\b(?:${COLUMN_WORDS})\b)`,
+  'i',
+);
+const hasDefault = (def) => {
+  if (/\b(?:GENERATED|(?:big|small)?serial\d?)\b/i.test(def)) return true;
+  const m = def.match(/\bDEFAULT\b([\s\S]*)$/i);
+  return !!m && !NULL_DEFAULT.test(m[1]);
+};
 const CONSTRAINT_WORDS = /^(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE|LIKE)\b/i;
 
 /**
@@ -56,6 +66,8 @@ const CONSTRAINT_WORDS = /^(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE|LI
  */
 export function requiredColumnsFromMigrations(migrations) {
   const state = new Map(); // table -> Map(column -> { notNull, hasDefault, requiredBy })
+  const dropped = new Map(); // table -> its columns when last dropped, so a recreate can be compared
+  const uniqueIndexes = new Map(); // index -> columns, for ADD PRIMARY KEY USING INDEX
   const cols = (t) => state.get(t) ?? state.set(t, new Map()).get(t);
   const col = (t, c) => cols(t).get(c) ?? cols(t).set(c, { notNull: false, hasDefault: false, requiredBy: null }).get(c);
 
@@ -71,10 +83,28 @@ export function requiredColumnsFromMigrations(migrations) {
           const [, c] = el.match(/^"?(\w+)"?/) ?? [];
           if (c) Object.assign(col(t, ident(c)), { notNull: /\bNOT\s+NULL\b|\bPRIMARY\s+KEY\b/i.test(el), hasDefault: hasDefault(el.replace(/^"?\w+"?/, '')) });
         }
+        const before = dropped.get(t);
+        if (before) {
+          dropped.delete(t);
+          for (const [c, s] of cols(t)) {
+            if (!s.notNull || s.hasDefault) continue;
+            const was = before.get(c);
+            if (!was?.notNull || was.hasDefault) s.requiredBy = name;
+            else if (was.requiredBy) s.requiredBy = was.requiredBy;
+          }
+        }
+        continue;
+      }
+      // The index name is not captured: TABLE's back-reference \1 must stay group 1.
+      const index = stmt.match(new RegExp(String.raw`\bCREATE\s+UNIQUE\s+INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?\w+"?\s+ON\s+(?:ONLY\s+)?${TABLE}\s*(?:USING\s+\w+\s*)?\(([^)]*)\)`, 'i'));
+      if (index) {
+        const [, indexName] = index[0].match(/INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?/i);
+        uniqueIndexes.set(ident(indexName), splitTopLevel(index[4]).map((c) => ident(c.split(/\s/)[0])));
         continue;
       }
       const drop = stmt.match(new RegExp(String.raw`\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?${TABLE}`, 'i'));
       if (drop && isPublic(drop[2])) {
+        if (state.has(ident(drop[3]))) dropped.set(ident(drop[3]), state.get(ident(drop[3])));
         state.delete(ident(drop[3]));
         continue;
       }
@@ -91,11 +121,13 @@ export function requiredColumnsFromMigrations(migrations) {
             c.notNull = on;
             if (on) c.requiredBy = name; // counts once any default goes away, even in a later migration
           } else {
-            c.hasDefault = on && hasDefault(action);
+            c.hasDefault = on && hasDefault(`DEFAULT${action.slice(m[0].length)}`); // skip the column name (one named serial)
             if (!c.hasDefault && c.notNull) c.requiredBy = name; // dropping the default of a NOT NULL column
           }
         } else if ((m = action.match(/^ADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?PRIMARY\s+KEY\s*\(([^)]*)\)/i))) {
           for (const c of splitTopLevel(m[1]).map(ident)) Object.assign(col(t, c), { notNull: true, requiredBy: name });
+        } else if ((m = action.match(/^ADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?PRIMARY\s+KEY\s+USING\s+INDEX\s+"?(\w+)"?/i))) {
+          for (const c of uniqueIndexes.get(ident(m[1])) ?? []) Object.assign(col(t, c), { notNull: true, requiredBy: name });
         } else if ((m = action.match(/^ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?\s+([\s\S]*)$/i)) && !/^ADD\s+(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE)\b/i.test(action)) {
           if (/IF\s+NOT\s+EXISTS/i.test(action) && cols(t).has(ident(m[1]))) continue;
           const def = m[2];

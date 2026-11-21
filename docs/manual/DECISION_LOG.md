@@ -5,6 +5,32 @@
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #2050 at `e4960bf1340d` (base `e4e6e11fae1c`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
 - Finding 1 (HIGH) at `supabase/migrations/20270129171000_field_app_refuses_product_without_sold_unit.sql:39`, text sha256 `30caf38e89c4de39` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our business) (ref 23d2a64b72fd)
+## 2026-11-20 — #1990: Mason owner-accepted 5 Sol finding(s) at `b145a1514838`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #1990 at `b145a1514838` (base `5740b6c076ea`) found 5 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270109100200_sales_tax_checkbox.sql:433`, text sha256 `7af8d6a6d1bd6424` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen (ref 18b700d7c2f5)
+- Finding 2 (HIGH) at `supabase/migrations/20270125163000_ki81_invoices_bill_sent_quote_price.sql:106`, text sha256 `d7d2b6fb22f9f6d9` (the wording stays with the proof, not here)
+  Mason's reason: cant  happen in buisness (ref 25b4764b7e43)
+- Finding 3 (HIGH) at `supabase/migrations/20270129180000_ki81_quote_line_sent_field.sql:156`, text sha256 `ad3386c2899cd899` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen in our business (ref 5af6a1d395fa)
+- Finding 4 (HIGH) at `supabase/migrations/20270125100000_product_rate_cutover.sql:249`, text sha256 `5ec6a9d9c7841899` (the wording stays with the proof, not here)
+  Mason's reason: this cant happen buisness (ref bc310644bea1)
+- Finding 5 (HIGH) at `supabase/migrations/20270128140000_customer_deactivation_checks_open_work.sql:90`, text sha256 `5b2f04ce0e54b88d` (the wording stays with the proof, not here)
+  Mason's reason: this canot happen (ref fd14bce41f72)
+
+## 2026-11-20 — #1990: Mason owner-accepted 4 Sol finding(s) at `a16895a707cf`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-20).** Sol's review of PR #1990 at `a16895a707cf` (base `eea1937e1a1a`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270109100200_sales_tax_checkbox.sql:433`, text sha256 `7ae2339e964c8d01` (the wording stays with the proof, not here)
+  Mason's reason: rollout gap closes when release lands (ref d1831a775c1a)
+- Finding 2 (HIGH) at `supabase/migrations/20270117120000_billing_sol_fixes_staging.sql:132`, text sha256 `2ff8d6f0eb3d6aee` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our buisness (ref e7a52bc9e5a2)
+- Finding 3 (HIGH) at `supabase/migrations/20270129180000_ki81_quote_line_sent_field.sql:156`, text sha256 `948c098efe541485` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref e494f6a5a5a0)
+- Finding 4 (HIGH) at `supabase/migrations/20270125100000_product_rate_cutover.sql:249`, text sha256 `56e7fe9a98e092e3` (the wording stays with the proof, not here)
+  Mason's reason: this cannot happen in our buinsess (ref 85fd875bb797)
+
 ## 2026-11-20 — Release #1990: split the gate files out; release rule 4 removed
 
 **Decision (Mason, in chat, 2026-11-20: "Yes, split it", then "Yes, go ahead").** Stop adding Sol release rules. The

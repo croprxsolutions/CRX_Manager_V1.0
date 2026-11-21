@@ -36,7 +36,10 @@ export async function fetchDeliveryFarm(
   customerId: string,
   isDriver: boolean,
 ): Promise<{ data: Customer | null; error: unknown }> {
-  if (!isDriver) return supabase.from('customers').select('*').eq('id', customerId).maybeSingle();
+  if (!isDriver) {
+    const { data, error } = await supabase.from('customers').select('*').eq('id', customerId).maybeSingle();
+    return { data: data as Customer | null, error };
+  }
   try {
     const farm = (await fetchDriverFarms([customerId])).get(customerId);
     const data = farm

@@ -390,7 +390,7 @@ export default function DeliveryDetail() {
           supabase.from('delivery_items').select('*, product:products(id, product_name, sku, unit_size, packaging_variant, container_size, container_unit, inventory_unit, return_policy, is_full_tote_only, product_family:product_families(name))').eq('delivery_id', id!),
           del.delivery_address_id
             ? supabase.from('customer_addresses').select('*').eq('id', del.delivery_address_id).maybeSingle()
-            : Promise.resolve({ data: null }),
+            : Promise.resolve({ data: null, error: null }),
           // PR-07 follow-up: read driver name via profile_public_view (UI uses
           // only .full_name — see lines ~1534/1626/2395).
           del.assigned_driver
@@ -401,9 +401,10 @@ export default function DeliveryDetail() {
         if (isStale()) return;
 
         // No list, or no customer row read, is a failed load too: with no lines on screen
-        // Edit would offer every order line as new and save over the real ones.
-        if (itemsRes.error || !itemsRes.data || custRes.error) {
-          Sentry.captureException(itemsRes.error ?? custRes.error ?? new Error('delivery_items read returned no list'), { extra: { context: 'load_delivery_items', deliveryId: del.id } });
+        // Edit would offer every order line as new and save over the real ones. A failed delivery-site read
+        // fails too, or Navigate would fall back to the farm's default address (Sol #2165 round 2).
+        if (itemsRes.error || !itemsRes.data || custRes.error || addrRes.error) {
+          Sentry.captureException(itemsRes.error ?? custRes.error ?? addrRes.error ?? new Error('delivery_items read returned no list'), { extra: { context: 'load_delivery_items', deliveryId: del.id } });
           failLoad('Failed to load delivery items');
           return;
         }

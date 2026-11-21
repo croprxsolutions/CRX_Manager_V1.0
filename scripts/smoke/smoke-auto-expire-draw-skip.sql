@@ -85,8 +85,8 @@ BEGIN
   END IF;
 
   -- Belt-and-braces: re-assert the hardened grants in the same run
-  IF has_function_privilege('authenticated', 'public.auto_expire_quotes()', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.auto_expire_quotes()', 'EXECUTE') THEN
+  IF EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'auto_expire_quotes'
+               AND (has_function_privilege('authenticated', p.oid, 'EXECUTE') OR has_function_privilege('anon', p.oid, 'EXECUTE'))) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: authenticated/anon can EXECUTE auto_expire_quotes — 20260609203541 hardening regressed';
   END IF;
 

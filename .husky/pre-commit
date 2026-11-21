@@ -52,6 +52,13 @@ fi
 echo "🛡️ Validating staged SQL migrations..."
 bash scripts/validate-sql.sh || exit 1
 
+# A staged live smoke chain must still read as rollback-only to the live-SQL
+# guard, or guards.test.mjs fails only in CI (PR #1989).
+if printf '%s\n' "$STAGED_FILES" | grep -Eq '^scripts/smoke/([^/]+\.sql|smoke-specs\.json)$'; then
+  echo "🧪 Checking staged live smoke chains against the live-SQL guard..."
+  node scripts/check-staged-smoke-chains.mjs || exit 1
+fi
+
 # A migration can re-define an RPC that the idempotency/contract registries must
 # name; these tests failed only in CI on PR #1298. costFields: a column added to a
 # per-column-granted table needs its grants (CI-only catch on PR #1437). They read the working tree.

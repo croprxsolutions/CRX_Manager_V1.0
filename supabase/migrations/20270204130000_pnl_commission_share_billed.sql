@@ -16,7 +16,7 @@
 --   1. _report_commission_cents_20270203(start, end): commission matched to the share of its sale billed in CRX in
 --      the period. Per commission, recognized(d) = round(cents x share billed through d) in whole cents; a period gets
 --      recognized(end) - recognized(start - 1), so months add up exactly to the whole range. Same cancelled/replaced
---      filter as before, now also skipping deleted commissions and deleted replacements.
+--      filter as before (any replacement, deleted or not, retires the original), now also skipping deleted commissions.
 --      - application commission (invoice_id set): all of it when that invoice is recognized (posted/overdue/paid,
 --        not deleted) with invoice_date in the period; else none.
 --      - order commission: B = the order's booked total in cents (orders.total_price = sum of its lines, no tax);
@@ -165,10 +165,11 @@ AS $function$
       LEFT JOIN LATERAL (SELECT CASE WHEN ord.total_price < 1e15 THEN ROUND(ord.total_price * 100) END AS booked_cents
                            FROM public.orders ord WHERE ord.id = c.order_id) o ON true
       LEFT JOIN billed b ON b.order_id = c.order_id
-     -- A cancelled commission still counts unless a live row replaced it (Fix Delivery re-creates the order's commission).
+     -- A cancelled commission still counts unless a row replaced it (Fix Delivery re-creates the order's commission),
+     -- deleted or not, as before: a deleted middle copy in A -> B -> C must not bring A back.
      WHERE c.deleted_at IS NULL
        AND (c.status <> 'cancelled'
-            OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.replaces_commission_id = c.id AND r.deleted_at IS NULL))
+            OR NOT EXISTS (SELECT 1 FROM public.commissions r WHERE r.replaces_commission_id = c.id))
   ), periods AS (
     SELECT p.status, COALESCE(p.part_through, 0) - COALESCE(p.part_before, 0) AS cents
       FROM parts p

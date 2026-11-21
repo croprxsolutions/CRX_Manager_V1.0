@@ -320,6 +320,12 @@ function seed() {
     INSERT INTO public.invoices (id, invoice_number, customer_id, order_id, invoice_type, status, invoice_date, total_amount_cents, created_by, posted_at) VALUES ${invoices};
     INSERT INTO public.invoice_items (invoice_id, charge_type, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, is_application_fee) VALUES ${items};
     INSERT INTO public.commissions (customer_id, order_id, job_id, invoice_id, recipient, commission_amount, status, order_date) VALUES ${comms};
+    -- O6 went through Fix Delivery twice (A -> B -> C) and the middle copy B was later deleted: only C counts.
+    UPDATE public.commissions SET status = 'cancelled' WHERE recipient = '[PROVER] rep 6';
+    INSERT INTO public.commissions (customer_id, order_id, recipient, commission_amount, status, order_date, replaces_commission_id, deleted_at)
+      SELECT '${CUSTOMER}', '${id(6)}', '[PROVER] rep 6b', 100, 'cancelled', DATE '2025-10-15', a.id, now() FROM public.commissions a WHERE a.recipient = '[PROVER] rep 6';
+    INSERT INTO public.commissions (customer_id, order_id, recipient, commission_amount, status, order_date, replaces_commission_id)
+      SELECT '${CUSTOMER}', '${id(6)}', '[PROVER] rep 6c', 100, 'pending', DATE '2025-10-15', b.id FROM public.commissions b WHERE b.recipient = '[PROVER] rep 6b';
     -- Payments (not counted yet: payments received moved to a follow-up): one dated in November; one with no date, recorded the evening of Nov 30 Chicago (Dec 1 UTC);
     -- a superseded (inactive) version; one in December.
     INSERT INTO public.allocation_sets (entity_type, entity_id, customer_id, is_active, total_payment_cents, total_allocated_cents, payment_date, created_at) VALUES

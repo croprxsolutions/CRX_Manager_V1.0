@@ -47,7 +47,7 @@ R1 (KI-125) Commission counted in [start,end] = sum over counted commissions (ex
 whole-cent `round(commission_cents × share)`:
 - Application commission (`invoice_id` set): share 1 if that invoice is recognized with `invoice_date` in the period, else 0.
 - Order commission: `B` = order booked cents (`round(total_price*100)`); `billed(d)` = product-line cents (`charge_type IS NULL`)
-  (not application-fee lines) on the order's recognized `chemical_sale` invoices dated ≤ d, floored at 0.
+  (not application-fee lines, a product on the line) on the order's recognized `chemical_sale` or `misc_charge` invoices dated ≤ d, floored at 0.
   cumulative(d) = `round(commission_cents × LEAST(billed(d), B) / B)`; the period's figure is cumulative(end) −
   cumulative(start−1), so per-period rounding can never add up to more or less than the commission. When `B ≤ 0` the
   share is 1 once anything is billed (live: 3 such commissions, all $0). Clamping at B means billing over the booked

@@ -46,7 +46,7 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate changes or relies on.
-const TOUCHED = /(_require_page_access|get_customer_balance_listing|get_chemical_history|get_batch_year_end_summaries|get_customer_year_end_summary|get_logbook_|get_sales_summary_report|get_sales_detail_report|profiles_role_lock|denied_pages)/i;
+const TOUCHED = /(_require_page_access|get_customer_balance_listing|get_chemical_history|get_batch_year_end_summaries|get_customer_year_end_summary|get_logbook_|get_sales_summary_report|get_sales_detail_report|profiles_role_lock|denied_pages|comm_select|commissions)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -335,6 +335,8 @@ async function main() {
     assert.match(REUSE, /^crx-[a-z0-9-]+$/, 'CRX_PROVER_REUSE must name a kept prover container (crx-...)');
     assert.equal(docker(['inspect', '-f', '{{.HostConfig.NetworkMode}}', REUSE]).stdout.trim(), 'none', 'CRX_PROVER_REUSE must be a network-less prover container');
     assert.ok(/^[a-z0-9_]+$/.test(DB) && DB !== 'postgres', 'CRX_PROVER_REUSE needs CRX_PROVER_DB naming a copy (a bare database name), not postgres');
+    // The copy must be the bare replay: no customer rows yet, so it cannot be a database holding real data (#2122).
+    assert.equal(scalar('SELECT count(*) FROM public.customers;'), '0', 'CRX_PROVER_DB must be a fresh copy of the replayed database (it already has customer rows)');
   } else buildContainer();
   seed();
 
@@ -430,6 +432,8 @@ async function main() {
     if (!/^SMOKE_PASS_ROLLBACK/.test(before[f])) {
       // Only a stop at setup counts as uncovered; a chain that reached its assertions and failed them fails the proof.
       assert.doesNotMatch(before[f], /SMOKE_FAIL/, `${f} fails its own assertions on this container`);
+      // An error raised by a guarded report function is not a setup stop: the chain reached the code under proof (#2122).
+      assert.doesNotMatch(before[f], TOUCHED, `${f} stops in a function this proof covers, not at its own setup`);
       uncovered.push(f);
     }
   }

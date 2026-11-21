@@ -45,7 +45,7 @@ Read at `c0b544a23` (origin/staging, 2026-11-19). Booking items in #1979 are out
 - **Result:** `{"updated": [ids], "cancelled": [ids], "deleted": [ids], "skipped": [{"id", "reason", "status"?}]}`, ids sorted. A job can appear in both `updated` and `skipped` (edited, but not cancellable). Screens and activity entries word each count by operation ("2 jobs edited. 1 cancelled. 1 already completed and could not be cancelled."), never the selection size or a sum.
 - **Errors by caller:** `anon` cannot run the function at all (permission denied); a signed-in non-admin/rep → `INSUFFICIENT_ROLE`; a role with execute but no user (service role) → `AUTH_REQUIRED`.
 
-Files: `supabase/migrations/20270201170000_job_writes_through_rpcs.sql` (PR A), `src/types/supabase.ts`, the four screen files in F6 and their tests (PR B), a later revoke migration (PR C), `docs/changelog.d/` records, DECISION_LOG entry for C.
+Files: `supabase/migrations/20270203110000_job_writes_through_rpcs.sql` (PR A), `src/types/supabase.ts`, the four screen files in F6 and their tests (PR B), a later revoke migration (PR C), `docs/changelog.d/` records, DECISION_LOG entry for C.
 
 ## 2. State and failure
 
@@ -101,7 +101,7 @@ Files: `supabase/migrations/20270201170000_job_writes_through_rpcs.sql` (PR A), 
 
 ## Reviewer settlement (rls-security-reviewer, migration-drift-reviewer, 2026-11-19)
 
-- Both: no BLOCKER, HIGH or MED. Fixed: owner set to `postgres` explicitly; migration record `docs/reference/migrations.d/20270201170000_job_writes_through_rpcs.md` added. At apply: re-read the live ledger for ordering.
+- Both: no BLOCKER, HIGH or MED. Fixed: owner set to `postgres` explicitly; migration record `docs/reference/migrations.d/20270203110000_job_writes_through_rpcs.md` added. At apply: re-read the live ledger for ordering.
 - Invoiced jobs are skipped by every action, admins included (Mason, 2026-11-21, Sol round 6). Admins' field changes still reach cancelled jobs, as today.
 - Receipt-binding trigger list not extended for `edit_jobs`, matching every 2027 function that uses the same helpers; an unbound receipt fails closed (refused retry).
 - Time limit: live `authenticated` has `statement_timeout = 8s`. Case 10b's timing decides the cap: if 500 jobs is not well under 8 s locally, the cap is lowered and screens refuse a larger selection.
@@ -136,30 +136,30 @@ Files: `supabase/migrations/20270201170000_job_writes_through_rpcs.sql` (PR A), 
 - **BLOCKER fixed:** the "no further challenge rounds" wording at the top is gone.
 - **HIGH fixed (Mason, 2026-11-21):** a rep blocked from the Job Schedule page is refused (P6); only an admin deletes a completed job (C3).
 - **HIGH fixed:** job rows are locked `FOR NO KEY UPDATE`, which does not block the `FOR KEY SHARE` lock foreign-key checks take, so two cancels on one booking cannot deadlock.
-- **HIGH accepted for Taha (Mason, 2026-11-21):** partial cancel of a large booking rebuilds its holds per cancelled job (same as today's screens; KNOWN_ISSUES KI-171). Mason owner-accepts it after round 6.
-- **HIGH kept as today (Mason, 2026-11-21):** changing a completed job's date can change which quote prices its invoice (KNOWN_ISSUES KI-172, for Taha's billing work).
+- **HIGH accepted for Taha (Mason, 2026-11-21):** partial cancel of a large booking rebuilds its holds per cancelled job (same as today's screens; KNOWN_ISSUES KI-176). Mason owner-accepts it after round 6.
+- **HIGH kept as today (Mason, 2026-11-21):** changing a completed job's date can change which quote prices its invoice (KNOWN_ISSUES KI-177, for Taha's billing work).
 - **MED fixed:** C9 comment states the refusal happens before any write.
-- **MED deferred:** an all-skipped call can claim another operation's key (keys are random per click, so only a caller who already knows a key can do this, and the victim gets a clear refusal, never a wrong replay); a rep deactivated while the call waits on a booking lock can finish (both checks pass before the wait; the window is the length of one lock wait); soft delete leaves dispatch rows open and no dispatch row in the smoke cancel case (KI-173, parity); the opposite-order race test does not force lock overlap (ids are locked in one sorted statement, so caller order cannot reach the lock order).
+- **MED deferred:** an all-skipped call can claim another operation's key (keys are random per click, so only a caller who already knows a key can do this, and the victim gets a clear refusal, never a wrong replay); a rep deactivated while the call waits on a booking lock can finish (both checks pass before the wait; the window is the length of one lock wait); soft delete leaves dispatch rows open and no dispatch row in the smoke cancel case (KI-178, parity); the opposite-order race test does not force lock overlap (ids are locked in one sorted statement, so caller order cannot reach the lock order).
 - **LOW fixed:** numeric limits written into this contract. **LOW deferred:** prover cleanup by container name (the name carries a random suffix created in the same run).
 
 ## Sol round 6 settlement (4 HIGH, 7 MED, 5 LOW)
 
 - **HIGH fixed (Mason, 2026-11-21):** invoiced jobs are skipped by every action, admins included, so a stale Mass Edit cannot move billed work or hand its records to another applicator (C7, C9).
-- **HIGH accepted (Mason, 2026-11-21):** two cancels of different jobs on one booking at the same moment can deadlock inside the booking hold trigger (it upgrades the job lock); one call aborts, nothing of it is saved, a retry works. Identical to today's screen updates, whose UPDATE takes the same lock. KI-174, for Taha's booking work. Partial-cancel cost (KI-171) and completed-job date (KI-172) as decided in round 5.
+- **HIGH accepted (Mason, 2026-11-21):** two cancels of different jobs on one booking at the same moment can deadlock inside the booking hold trigger (it upgrades the job lock); one call aborts, nothing of it is saved, a retry works. Identical to today's screen updates, whose UPDATE takes the same lock. KI-179, for Taha's booking work. Partial-cancel cost (KI-176) and completed-job date (KI-177) as decided in round 5.
 - **MED fixed:** C9 rewritten around the skip rule.
-- **MED deferred (parity with today's direct writes):** a deactivation landing while the call waits on a booking lock; an all-skipped call claiming another operation's key; moving `job_date` across October 1 leaves `season` unchanged; assigning an inactive applicator leaves the old dispatch open; soft delete leaves dispatch rows open (KI-173); the replay marks `20261217100000` ledger-only.
+- **MED deferred (parity with today's direct writes):** a deactivation landing while the call waits on a booking lock; an all-skipped call claiming another operation's key; moving `job_date` across October 1 leaves `season` unchanged; assigning an inactive applicator leaves the old dispatch open; soft delete leaves dispatch rows open (KI-178); the replay marks `20261217100000` ledger-only.
 - **LOW fixed:** whitespace-only keys (tabs, newlines) refused; a NULL entry in `denied_pages` no longer blocks a rep; this contract's lock mode and KI reference. **LOW deferred:** a cancel waits on locks of jobs it will skip; prover cleanup by its random container name.
 
 ## Sol round 7 settlement (4 HIGH)
 
 - **HIGH fixed:** a new applicator must be an active applicator, admin or sales rep (the list the screens offer); the profile row is share-locked so a deactivation cannot slip in before commit (C6).
 - **HIGH kept as today (Mason, 2026-11-21):** changing the applicator on a recently completed job moves the 7-day record access to the new applicator; Mason kept today's rule and owner-accepts it.
-- **HIGH accepted (Mason, 2026-11-21):** completed-job date and invoice pricing (KI-172); partial-cancel cost (KI-171).
+- **HIGH accepted (Mason, 2026-11-21):** completed-job date and invoice pricing (KI-177); partial-cancel cost (KI-176).
 
 ## Sol round 8 settlement (6 HIGH)
 
 - **HIGH fixed:** the caller's profile is share-locked at the second role check, so a demotion, deactivation or page block waits until the call commits.
 - **HIGH fixed:** "billed" now also covers an `invoice_id` or any live invoice (not voided or cancelled) on the job or on one of its blend tickets; such jobs are skipped as `invoiced` by every action (C11).
-- **HIGH kept as today (Mason, 2026-11-21: admins and reps sometimes apply):** reassigning a job from an applicator to an admin or rep leaves the old applicator's dispatch open, because the dispatch-sync trigger only acts for the applicator role. KI-175; Mason owner-accepts.
-- **HIGH accepted, as before:** completed-job applicator access (round 7), completed-job date (KI-172), partial-cancel cost (KI-171).
-- **MED/LOW deferred (parity or named before):** locks on rows that will be skipped; same-booking cancel clash (KI-174); cancelled jobs reach the planning update (as today); `season` across October 1; retired crew; key claimed by an all-skipped call; C9 does not force a cancel-stage failure; the replay marks the job-access migrations ledger-only; dispatch rows on soft delete (KI-173); no key length limit; opposite-order race overlap.
+- **HIGH kept as today (Mason, 2026-11-21: admins and reps sometimes apply):** reassigning a job from an applicator to an admin or rep leaves the old applicator's dispatch open, because the dispatch-sync trigger only acts for the applicator role. KI-180; Mason owner-accepts.
+- **HIGH accepted, as before:** completed-job applicator access (round 7), completed-job date (KI-177), partial-cancel cost (KI-176).
+- **MED/LOW deferred (parity or named before):** locks on rows that will be skipped; same-booking cancel clash (KI-179); cancelled jobs reach the planning update (as today); `season` across October 1; retired crew; key claimed by an all-skipped call; C9 does not force a cancel-stage failure; the replay marks the job-access migrations ledger-only; dispatch rows on soft delete (KI-178); no key length limit; opposite-order race overlap.

@@ -1,6 +1,6 @@
 -- ============================================================================
 -- SMOKE TEST (rolled back by design): edit_jobs (#1979 PR A)
--- migration 20270201170000_job_writes_through_rpcs.sql
+-- migration 20270203110000_job_writes_through_rpcs.sql
 -- Contract: docs/plans/2026-11-19-job-writes-through-rpcs-CONTRACT.md (proof cases 1-11)
 --
 -- CONTAINER ONLY (smoke-specs container_only): probe P5 deactivates a sales rep inside the transaction,

@@ -4,7 +4,7 @@
 
 **Decision (Mason, in chat, 2026-11-21, answering Sol round 8: "Admin and sales rep sometimes are applicators").** The
 job screens keep offering admins and sales reps as applicators. The old applicator's dispatch staying open after such a
-reassignment is today's dispatch behaviour, logged as KI-175; Mason owner-accepts that Sol finding.
+reassignment is today's dispatch behaviour, logged as KI-180; Mason owner-accepts that Sol finding.
 
 ## 2026-11-21 — #2047 (edit_jobs): applicator changes on completed jobs stay as today
 
@@ -17,7 +17,7 @@ a rule change: the screens already offer only active applicators, admins and rep
 
 **Decision (Mason, in chat, 2026-11-21, answering Sol round 6).** (1) `edit_jobs` skips invoiced jobs for every
 action, admins included; Mass Edit already hides them, and a stale screen must not move billed work or its applicator
-access. (2) Two cancels on one booking at the same moment can make one fail safely, as today; logged as KI-174 for
+access. (2) Two cancels on one booking at the same moment can make one fail safely, as today; logged as KI-179 for
 Taha, and Mason owner-accepts that Sol finding.
 **What it does:** a third deliberate exception to the #1979 parity rule; admins fix billed jobs through the invoice flow.
 
@@ -25,8 +25,8 @@ Taha, and Mason owner-accepts that Sol finding.
 
 **Decision (Mason, in chat, 2026-11-21, answering Sol round 5).** (1) A sales rep whose Job Schedule page is blocked
 for them is refused by `edit_jobs`, as the screens already block them. (2) Only an admin may delete a completed job; a
-rep's delete skips it. (3) Changing a completed job's date stays allowed as today; logged as KI-172 for Taha's billing
-work. (4) Partial cancel of a large booking stays as today; logged as KI-171 for Taha, and Mason will owner-accept that
+rep's delete skips it. (3) Changing a completed job's date stays allowed as today; logged as KI-177 for Taha's billing
+work. (4) Partial cancel of a large booking stays as today; logged as KI-176 for Taha, and Mason will owner-accept that
 Sol finding after the next round.
 **What it does:** two deliberate exceptions to the #1979 "parity" rule (contract updated); no other job rule changes.
 

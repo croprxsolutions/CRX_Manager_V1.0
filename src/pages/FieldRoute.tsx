@@ -20,6 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getQueueSummary, type OfflineQueueSummary } from '../lib/offlineQueue';
 import { parseLocalDate } from '../lib/dateUtils';
 import { Sentry } from '../lib/sentry';
+import { fetchDriverFarms } from '../lib/driverFarms';
 
 const EMPTY_QUEUE_SUMMARY: OfflineQueueSummary = {
   ownedTotal: 0,
@@ -40,6 +41,7 @@ interface StopRow {
   priority: string | null;
   assigned_driver: string | null;
   delivery_notes: string | null;
+  customer_id: string | null;
   customer: { farm_name: string | null } | null;
 }
 
@@ -60,6 +62,7 @@ export default function FieldRoute() {
   const navigate = useNavigate();
   const isOnline = useOnlineStatus();
   const { profile } = useAuth();
+  const isDriver = profile?.role === 'driver';
 
   const [stops, setStops] = useState<StopRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,7 +78,8 @@ export default function FieldRoute() {
     // (admins/reps see all). Ordering: in_progress first, then date.
     const { data, error } = await supabase
       .from('deliveries')
-      .select('id, delivery_number, status, scheduled_date, scheduled_time, priority, assigned_driver, delivery_notes, customer:customers(farm_name)')
+      // A driver's farm names come from the driver lookup below, never the customers table (#2018).
+      .select(`id, delivery_number, status, scheduled_date, scheduled_time, priority, assigned_driver, delivery_notes, customer_id${isDriver ? '' : ', customer:customers(farm_name)'}`)
       .is('deleted_at', null)
       .in('status', OPEN_STATUSES)
       .order('scheduled_date', { ascending: true })
@@ -91,14 +95,29 @@ export default function FieldRoute() {
       return;
     }
 
-    const rows = ((data || []) as unknown as StopRow[]).slice().sort((a, b) => {
+    let rows = ((data || []) as unknown as StopRow[]).slice().sort((a, b) => {
       const r = statusRank(a.status) - statusRank(b.status);
       if (r !== 0) return r;
       return (a.scheduled_date || '').localeCompare(b.scheduled_date || '');
     });
+    // A driver reads farm names through get_driver_customers (#2018), not the customers table.
+    if (isDriver) {
+      try {
+        const farms = await fetchDriverFarms(rows.map((row) => row.customer_id));
+        if (requestSequence !== stopRequestSequence.current) return;
+        rows = rows.map((row) => ({ ...row, customer: { farm_name: farms.get(row.customer_id ?? '')?.farm_name ?? null } }));
+      } catch (farmErr) {
+        if (requestSequence !== stopRequestSequence.current) return;
+        Sentry.captureException(farmErr, { tags: { source: 'fetch', page: 'field-route' } });
+        setStops([]);
+        setLoadError(true);
+        setLoading(false);
+        return;
+      }
+    }
     setStops(rows);
     setLoading(false);
-  }, []);
+  }, [isDriver]);
 
   useEffect(() => {
     void fetchStops();

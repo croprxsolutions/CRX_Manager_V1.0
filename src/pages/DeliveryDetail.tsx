@@ -46,6 +46,7 @@ import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { formatCentsMinus } from '../lib/money';
 import { invoiceStatusBadge } from '../lib/statusLabel';
 import { Sentry } from '../lib/sentry';
+import { fetchDeliveryFarm } from '../lib/driverFarms';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
 import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
@@ -307,6 +308,8 @@ export default function DeliveryDetail() {
   }, [id]);
 
   const isDriver = role === 'driver';
+  // The load shape is fixed at first render: a role refresh must not reload and reset entered quantities (Sol #2165 r4).
+  const [loadAsDriver] = useState(isDriver);
   const isAdmin = role === 'admin';
   const isAdminOrRep = role === 'admin' || role === 'sales_rep';
   const canEdit = isAdminOrRep && delivery?.status !== 'completed' && delivery?.status !== 'cancelled';
@@ -384,11 +387,12 @@ export default function DeliveryDetail() {
       const photoSeq = ++photoSeqRef.current;
       try {
         const [custRes, itemsRes, addrRes, driverRes, photosRes] = await Promise.all([
-          supabase.from('customers').select('*').eq('id', del.customer_id).maybeSingle(),
+          // A driver reads the farm through get_driver_customers (#2018): nothing financial.
+          fetchDeliveryFarm(del.customer_id, loadAsDriver),
           supabase.from('delivery_items').select('*, product:products(id, product_name, sku, unit_size, packaging_variant, container_size, container_unit, inventory_unit, return_policy, is_full_tote_only, product_family:product_families(name))').eq('delivery_id', id!),
           del.delivery_address_id
             ? supabase.from('customer_addresses').select('*').eq('id', del.delivery_address_id).maybeSingle()
-            : Promise.resolve({ data: null }),
+            : Promise.resolve({ data: null, error: null }),
           // PR-07 follow-up: read driver name via profile_public_view (UI uses
           // only .full_name — see lines ~1534/1626/2395).
           del.assigned_driver
@@ -403,6 +407,12 @@ export default function DeliveryDetail() {
         if (itemsRes.error || !itemsRes.data || custRes.error) {
           Sentry.captureException(itemsRes.error ?? custRes.error ?? new Error('delivery_items read returned no list'), { extra: { context: 'load_delivery_items', deliveryId: del.id } });
           failLoad('Failed to load delivery items');
+          return;
+        }
+        // An unread delivery site fails the load, or Navigate would fall back to the farm's default address.
+        if (del.delivery_address_id && (addrRes.error || !addrRes.data)) {
+          Sentry.captureException(addrRes.error ?? new Error('delivery site not found'), { extra: { context: 'load_delivery_address', deliveryId: del.id } });
+          failLoad("Could not load this delivery's site address");
           return;
         }
 
@@ -587,7 +597,7 @@ export default function DeliveryDetail() {
     }
     setLoadFailedId(null);
     setLoading(false);
-  }, [id, toast]);
+  }, [id, toast, loadAsDriver]);
 
   useEffect(() => {
     if (id) fetchDelivery();
@@ -1554,7 +1564,7 @@ export default function DeliveryDetail() {
 
   const addressText = address
     ? [address.address_line, address.city, address.state, address.zip].map((part) => part?.trim()).filter(Boolean).join(', ')
-    : customer?.billing_address?.trim() || '';
+    : customer?.shipping_address?.trim() || customer?.billing_address?.trim() || '';
   const fullAddress = addressText || 'No address on file';
 
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`;
@@ -2356,7 +2366,7 @@ export default function DeliveryDetail() {
                 onChange={(e) => setEditAddress(e.target.value)}
                 className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
               >
-                <option value="">Use billing address</option>
+                <option value="">Use farm address (shipping, else billing)</option>
                 {addresses.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.label} - {[a.address_line, a.city, a.state].filter(Boolean).join(', ')}

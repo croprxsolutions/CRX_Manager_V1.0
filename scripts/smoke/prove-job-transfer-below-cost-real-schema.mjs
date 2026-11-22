@@ -255,11 +255,11 @@ function refusedProbe(sql, pattern, uid) {
 }
 
 const id = (s) => `b5b5b5b5-2207-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), O = id('f3'), OS = id('f4'), N = id('f5');
+const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), O = id('f3'), OS = id('f4'), N = id('f5'), X = id('f6'), SVC = id('e1');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const WALL = 'public._enforce_below_cost_line()';
-const PRICE = 'public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint)';
+const PRICE = 'public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint,bigint)';
 const SPLIT = 'public._job_transfer_split_qty_20270207(numeric,numeric[])';
 const OLD_BODY = 'a54e3e6a3a2b920e9bcd1a350cd92423';
 const OLD_WALL = '5fa0a5f975dc2a84b3c6599a84b8cc55';
@@ -289,7 +289,10 @@ function seed() {
     INSERT INTO public.fields (id, customer_id, field_name, total_acres, is_active) VALUES
       ('${G}', '${A}', '[PROVER] JBC field A', 100, true), ('${F}', '${A}', '[PROVER] JBC field A+B', 100, true),
       ('${O}', '${A}', '[PROVER] JBC field A per-acre', 100, true), ('${OS}', '${A}', '[PROVER] JBC field A+B per-acre', 100, true),
-      ('${N}', '${A}', '[PROVER] JBC field A 99.99%', 100, true);
+      ('${N}', '${A}', '[PROVER] JBC field A 99.99%', 100, true),
+      ('${X}', '${A}', '[PROVER] JBC field A, no billing defaults', 100, true);
+    INSERT INTO public.application_services (id, name, is_active, default_rate_per_acre_cents, cost_per_acre_cents) VALUES
+      ('${SVC}', '[PROVER] JBC spraying', true, 1000, 400);
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary, price_override_cents) VALUES
       ('${G}', '${A}', 100, true, NULL), ('${F}', '${A}', 60, true, NULL), ('${F}', '${B}', 40, false, NULL),
       ('${O}', '${A}', 100, true, 100), ('${OS}', '${A}', 60, true, 100), ('${OS}', '${B}', 40, false, 100),
@@ -310,6 +313,15 @@ function seed() {
       INSERT INTO job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit, price_per_unit_cents, cost_per_unit_cents, customer_supplied)
       VALUES (v_j, p_product, p_qty, p_unit, p_qty / 10, p_unit, CASE WHEN p_supplied THEN 0 ELSE p_price END,
               CASE WHEN p_supplied THEN 0 ELSE p_cost END, p_supplied);
+      RETURN v_j;
+    END $f$;
+    -- jbc.job plus the spraying service ($10/acre, $4 cost) and 90 more acres on a field with no billing defaults.
+    CREATE FUNCTION jbc.feejob(p_field uuid) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
+      SET session_replication_role = replica AS $f$
+    DECLARE v_j uuid := jbc.job('${A}', p_field, 'Gal', 10, 5000, 3000);
+    BEGIN
+      UPDATE jobs SET application_service_id = '${SVC}', total_acres = 100 WHERE id = v_j;
+      INSERT INTO job_fields (job_id, field_id, acres_to_treat) VALUES (v_j, '${X}', 90);
       RETURN v_j;
     END $f$;
     -- Every invoice the job made, as farm:total:share sum:booked cost:lines (quantity unit @price=amount/cost per unit/
@@ -395,6 +407,11 @@ const CASES = {
   overrideSplit: transfer(job('Gal', 10, 5000, 3000, OS)),
   // Luna round 2: a field whose split totals 99.99% (allowed) still bills every cent of its lines.
   nearHundred: transfer(job('Gal', 10, 5000, 3000, N)),
+  // Sol round 3 #2: the one owner's spraying fee covers every treated acre (10 on a field with defaults + 90 without).
+  feeMixed: transfer(`jbc.feejob('${G}')`),
+  feeMixedOverride: transfer(`jbc.feejob('${O}')`),
+  // Sol round 3 MED: a rate written in words is not a quantity unit.
+  perWordUnit: transfer(job('Gal per acre', 10, 5000)),
   // Sol round 2 #4: the editor's ordinary save keeps the lines, for an admin and a sales rep.
   resaveSmallAdmin: resave(job('fl oz', 3, 39, 23), ADMIN),
   resaveSmallRep: resave(job('fl oz', 3, 39, 23), REP),
@@ -450,6 +467,7 @@ async function main() {
   assert.match(tenBefore, /^A:25000:25000:\d+:1\.0000 \S+ @25000=25000\/c\d+\/product\/null \| approvals=0 \| invoiced$/,
     'before: 10 Gal sold for $250 against $300 of cost passed the wall, written as quantity 1');
   refusedProbe(directLine, /BELOW_COST_CONTEXT_REQUIRED/);
+  for (const k of ['feeMixed', 'feeMixedOverride']) console.log(`[before] ${k}: ${okProbe(CASES[k])}`);
   const nearBefore = okProbe(CASES.nearHundred);
   console.log(`[before] nearHundred: ${nearBefore}`);
   assert.match(nearBefore, /^A:49995:49995:/, 'before: a 99.99% split billed $499.95 of a $500.00 job');
@@ -471,33 +489,38 @@ async function main() {
 
   const ok = ' | approvals=0 | invoiced';
   const after = (k, expected, why) => { const v = okProbe(CASES[k]); console.log(`[after] ${k}: ${v}`); assert.equal(v, expected + ok, why); };
-  after('small3floz', 'A:117:117:70:0.0234 Gal @4992=117/c3000/product/manual', '3 fl oz bills $1.17 as 0.0234 Gal at $49.92');
-  after('half64floz', 'A:1920:1920:1500:0.5000 Gal @3840=1920/c3000/product/manual', '64 fl oz bills $19.20 as half a gallon');
+  // Sol round 3 #1: a line books the job's own saved cost (23c/fl oz = $29.44/Gal), not today's catalog cost ($30).
+  after('small3floz', 'A:117:117:69:0.0234 Gal @4992=117/c2944/product/manual', '3 fl oz bills $1.17 as 0.0234 Gal at $49.92');
+  after('half64floz', 'A:1920:1920:1472:0.5000 Gal @3840=1920/c2944/product/manual', '64 fl oz bills $19.20 as half a gallon');
   after('halfGalAtCost', 'A:1500:1500:1500:0.5000 Gal @3000=1500/c3000/product/manual', 'half a gallon exactly at cost bills');
   after('supplied', 'A:0:0:0:10.0000 Gal @0=0/c0/none/manual', "the grower's own product is a $0 information line with no catalog link");
   after('suppliedNoCost', 'A:0:0:0:10.0000 Gal @0=0/c0/none/manual', 'a grower product with no cost is a $0 information line');
   after('normal', 'A:50000:50000:30000:10.0000 Gal @5000=50000/c3000/product/manual', '10 Gal at $50 bills $500 as 10 Gal');
   after('dryOk', 'A:880:880:800:0.5000 Lb @1760=880/c1600/product/manual', '8 oz of a dry product bills $8.80 as half a pound');
   after('galOnQt', 'A:8000:8000:6400:8.0000 Qt @1000=8000/c800/product/manual', '2 Gal of a quart product bills as 8 Qt');
-  after('dottedSmall', 'A:117:117:70:0.0234 Gal @4992=117/c3000/product/manual', '3 fl. oz books the cost of 3 fl oz (70c), not of 3 gallons');
-  after('rupSmall', 'A:117:117:70:0.0234 Gal @4992=117/c3000/product/manual', 'a restricted-use line carries its real 0.0234 Gal');
+  after('dottedSmall', 'A:117:117:69:0.0234 Gal @4992=117/c2944/product/manual', '3 fl. oz books the cost of 3 fl oz (69c at the job 23c/fl oz), not of 3 gallons');
+  after('rupSmall', 'A:117:117:69:0.0234 Gal @4992=117/c2944/product/manual', 'a restricted-use line carries its real 0.0234 Gal');
   after('rupSupplied', 'A:0:0:0:10.0000 Gal @0=0/c0/none/manual', "the grower's own restricted-use product has no catalog link, so no sales record");
   // Mason, 2026-11-22 ("we never bill flat per acre"): a field's per-acre price is not billed; the lines are.
-  after('overrideSmall', 'A:117:117:70:0.0234 Gal @4992=117/c3000/product/manual', 'a per-acre-priced field bills its lines, not $10/acre');
+  after('overrideSmall', 'A:117:117:69:0.0234 Gal @4992=117/c2944/product/manual', 'a per-acre-priced field bills its lines, not $10/acre');
   after('overrideNormal', 'A:50000:50000:30000:10.0000 Gal @5000=50000/c3000/product/manual', 'a per-acre-priced field with a normal line bills its lines');
   // Two owners (60/40): the quantity is allocated by acre share at one price; header = share = lines per owner.
-  after('splitSmall', 'A:70:70:42:0.0140 Gal @4992=70/c3000/product/manual B:47:47:28:0.0094 Gal @4992=47/c3000/product/manual',
+  after('splitSmall', 'A:70:70:41:0.0140 Gal @4992=70/c2944/product/manual B:47:47:28:0.0094 Gal @4992=47/c2944/product/manual',
     'the owners split 0.0234 Gal 0.0140/0.0094, $0.70 + $0.47 = $1.17');
   after('splitNormal', 'A:30000:30000:18000:6.0000 Gal @5000=30000/c3000/product/manual B:20000:20000:12000:4.0000 Gal @5000=20000/c3000/product/manual',
     'the owners split 10 Gal 6/4');
   after('overrideSplit', 'A:30000:30000:18000:6.0000 Gal @5000=30000/c3000/product/manual B:20000:20000:12000:4.0000 Gal @5000=20000/c3000/product/manual',
     'two owners on a per-acre-priced field: no longer refused, each bills its lines');
+  for (const k of ['feeMixed', 'feeMixedOverride']) after(k, 'A:150000:150000:70000:10.0000 Gal @5000=50000/c3000/product/manual,100.0000 acre @1000=100000/c40000/none/tier',
+    'the spraying fee bills all 100 treated acres, with or without a per-acre price on the field');
   after('nearHundred', 'A:50000:50000:30000:10.0000 Gal @5000=50000/c3000/product/manual', 'a 99.99% split bills all $500.00 of its lines');
   for (const k of ['fullBelow', 'tenBelow', 'half64flozBelow', 'dottedBelow', 'spelledBelow']) {
     refusedProbe(CASES[k], /JOB_LINE_BELOW_COST: \[PROVER\] JBC chem is priced below its cost on this job\. Nothing was invoiced/);
     assert.doesNotMatch(probe(CASES[k]).output, /\b(3000|1500|30\.00|15\.00)\b/, 'the refusal never states the cost');
     console.log(`[after] ${k}: refused JOB_LINE_BELOW_COST, no cost shown, nothing billed`);
   }
+  refusedProbe(CASES.perWordUnit, /JOB_LINE_UNIT_UNCONVERTIBLE/);
+  console.log('[after] perWordUnit: refused JOB_LINE_UNIT_UNCONVERTIBLE');
   refusedProbe(CASES.dryBelow, /JOB_LINE_BELOW_COST: \[PROVER\] JBC dry/);
   console.log('[after] dryBelow: refused JOB_LINE_BELOW_COST');
   refusedProbe(CASES.eaUnit, /JOB_LINE_UNIT_UNCONVERTIBLE: \[PROVER\] JBC chem is recorded on this job in "Ea", which can't be converted to the unit it is sold in \("Gal"\)/);
@@ -513,7 +536,7 @@ async function main() {
   for (const [k, who] of [['resaveSmallAdmin', 'admin'], ['resaveSmallRep', 'sales rep']]) {
     const v = okProbe(CASES[k]);
     console.log(`[after] ${k}: ${v}`);
-    assert.equal(v, 'A:117:117:70:0.0234 Gal @4992=117/c3000/product/manual | approvals=0', `a ${who}'s ordinary re-save keeps the line`);
+    assert.equal(v, 'A:117:117:69:0.0234 Gal @4992=117/c2944/product/manual | approvals=0', `a ${who}'s ordinary re-save keeps the line`);
   }
   for (const [k, who] of [['resaveSuppliedAdmin', 'admin'], ['resaveSuppliedRep', 'sales rep']]) {
     const v = okProbe(CASES[k]);

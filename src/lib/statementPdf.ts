@@ -574,7 +574,7 @@ function drawFieldApplicationItems(
 
     const unitPrice = item.is_application_fee
       ? `${fmtNum(item.unit_price_cents / 100, 2)} /AC`
-      : `${fmtNum(item.unit_price_cents / 100, 2)} /${item.gl_lb_unit || item.unit_size || ''}`;
+      : `${fmtNum(item.unit_price_cents / 100, 2)} /${item.unit_size || item.gl_lb_unit || ''}`; // per the line's own (sold) unit
 
     return [
       item.product_name,

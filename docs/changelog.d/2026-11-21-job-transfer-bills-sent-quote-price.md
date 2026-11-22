@@ -17,7 +17,9 @@ sent quote for it. Contract: `docs/plans/2026-11-21-job-transfer-bills-sent-quot
 - Typed prices (Mason, 2026-11-21): new column `job_chemicals.price_typed` (false for every existing line), stored by
   the job save (`_save_job_cost_step2_impl`, re-emitted from its live body with only that column added). A typed line
   bills its own price and is never re-priced from a quote; when the sent quote differs or can't be read, Create Invoice
-  returns a plain sentence in `price_warnings`. The screens that set the mark and show the warning are a follow-up PR.
+  returns a plain sentence in `price_warnings`. A save that omits the mark (an older open screen) keeps it on a line
+  whose product and price are unchanged. The screens that set the mark and show the warning are a follow-up PR; until
+  it lands, no line is marked, so every line with a sent quote bills the quote price.
 - Proof: `node scripts/smoke/prove-job-transfer-sent-quote-price-real-schema.mjs`
   (`JOB_TRANSFER_SENT_QUOTE_PRICE_PROOF_PASS`): 10 Gal at list $50 with a sent $42 quote bills $500.00 before and
   $420.00 after; a typed $50 bills $500.00 with a warning naming the $42 quote.

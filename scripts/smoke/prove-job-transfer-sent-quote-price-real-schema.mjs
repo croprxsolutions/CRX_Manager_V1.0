@@ -495,11 +495,21 @@ CREATE TEMP TABLE s AS SELECT public.save_job(NULL, jsonb_build_object('customer
   '[{"product_id":"${P}","quantity":10,"unit":"Gal","rate_per_acre":1,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":0,"price_typed":true},
     {"product_id":"${P}","quantity":5,"unit":"Gal","rate_per_acre":0.5,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":1}]'::jsonb,
   auth.uid(), 'jtq-save-' || gen_random_uuid()) AS res;
+-- An older screen re-saves without price_typed: an unchanged product and price keep the mark; a new price or an
+-- explicit false clears it (Luna round 1).
+CREATE TEMP TABLE s2 AS SELECT public.save_job(((SELECT res FROM s)->>'job_id')::uuid,
+  jsonb_build_object('customer_id', '${A}', 'job_date', current_date),
+  '[{"field_id":"${G}","acres_to_treat":10,"sort_order":0}]'::jsonb,
+  '[{"product_id":"${P}","quantity":10,"unit":"Gal","rate_per_acre":1,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":0},
+    {"product_id":"${P}","quantity":5,"unit":"Gal","rate_per_acre":0.5,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":6000,"customer_supplied":false,"sort_order":1},
+    {"product_id":"${P}","quantity":5,"unit":"Gal","rate_per_acre":0.5,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":2,"price_typed":false}]'::jsonb,
+  auth.uid(), 'jtq-save2-' || gen_random_uuid()) AS res;
 RESET ROLE; -- read back as the owner (app roles read job lines through RLS screens, not needed here)
-SELECT (SELECT res->>'success' FROM s) || ' | ' || (SELECT string_agg(jc.sort_order || '=' || jc.price_typed, ',' ORDER BY jc.sort_order)
+SELECT (SELECT res->>'success' FROM s) || ' | ' || (SELECT res->>'success' FROM s2) || ' | ' || (SELECT string_agg(jc.sort_order || '=' || jc.price_typed, ',' ORDER BY jc.sort_order)
   FROM job_chemicals jc WHERE jc.job_id = ((SELECT res FROM s)->>'job_id')::uuid);`);
   console.log(`[after] save_job: ${saved}`);
-  assert.equal(saved, 'true | 0=true,1=false', 'save_job stores price_typed, default false');
+  assert.equal(saved, 'true | true | 0=true,1=false,2=false',
+    'save_job stores price_typed; an omitted mark survives an unchanged product and price; a new price or explicit false clears it');
   console.log('JOB_TRANSFER_SENT_QUOTE_PRICE_PROOF_PASS');
 }
 

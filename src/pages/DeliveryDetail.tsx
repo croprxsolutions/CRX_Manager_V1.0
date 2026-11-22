@@ -1465,6 +1465,39 @@ export default function DeliveryDetail() {
     await finishCompleted(completeResult);
   };
 
+  // KI-25: pause any receipt still queued for the server before a hand send; null = stop (the server is sending it now).
+  const pauseQueuedReceipt = async (deliveryId: string): Promise<ReceiptCloseResult | null> => {
+    try {
+      const scope = receiptCloseScope(deliveryId, 'manual_send');
+      const paused = await closeDeliveryReceipt(deliveryId, 'manual_send', receiptCloseIdem.getKeyFor(scope));
+      receiptCloseIdem.resetKeyFor(scope);
+      return paused;
+    } catch (err: unknown) {
+      if (isReceiptSendingNow(err)) { toast('warning', RECEIPT_SENDING_NOW_MESSAGE); return null; }
+      throw err;
+    }
+  };
+
+  // After the hand send: mark the paused receipt handled. A failure only leaves it on the office list.
+  const closeSentReceipt = async (deliveryId: string, queuedAt: string | null) => {
+    try {
+      // Only the receipt this send covered: one queued again since stays owed and listed (Sol HIGH).
+      if (!sameReceipt(await receiptQueuedAt(deliveryId), queuedAt)) {
+        toast('warning', 'A new receipt was queued for this delivery while the email was sending. It was left on "Customer receipts to check".');
+        return;
+      }
+      const scope = receiptCloseScope(deliveryId, 'handled');
+      await closeDeliveryReceipt(deliveryId, 'handled', receiptCloseIdem.getKeyFor(scope));
+      receiptCloseIdem.resetKeyFor(scope);
+    } catch (err: unknown) {
+      // The email went out; the paused receipt just stays on the office list for someone to mark handled.
+      Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+        level: 'warning', extra: { context: 'close_delivery_receipt after Email Confirmation', deliveryId },
+      });
+      toast('warning', 'The email went out, but its receipt is still on "Customer receipts to check". Mark it handled there.');
+    }
+  };
+
   // ── Resend Delivery Confirmation Email ──────────────────────────────────
   // KI-25: before the hand send, any receipt still queued for the server is paused on the office list, so the server
   // cannot email a second copy afterwards; once this email goes out it is marked handled. A hand send that fails
@@ -1480,15 +1513,8 @@ export default function DeliveryDetail() {
     setSendingEmail(true);
     try {
       // Always asked, a confirmed second copy too: the server refuses a delivery no longer completed (Sol HIGH).
-      let paused: ReceiptCloseResult;
-      try {
-        const scope = receiptCloseScope(delivery.id, 'manual_send');
-        paused = await closeDeliveryReceipt(delivery.id, 'manual_send', receiptCloseIdem.getKeyFor(scope));
-        receiptCloseIdem.resetKeyFor(scope);
-      } catch (err: unknown) {
-        if (isReceiptSendingNow(err)) { toast('warning', RECEIPT_SENDING_NOW_MESSAGE); return; }
-        throw err;
-      }
+      const paused = await pauseQueuedReceipt(delivery.id);
+      if (!paused) return;
       // The office moved to another delivery while this answer was on its way: send nothing, show nothing.
       if (signatureRouteIdRef.current !== delivery.id) return;
       if (confirmedFor !== delivery.id && receiptMayAlreadyBeSent(paused)) { setResendCopyCheck(paused); return; }
@@ -1522,22 +1548,7 @@ export default function DeliveryDetail() {
         idempotency_key: `delivery-resend-${delivery.id}-${Date.now()}`,
       });
       toast('success', `Confirmation email sent to ${customer.email}`);
-      try {
-        // Only the receipt this send covered: one queued again since stays owed and listed (Sol HIGH).
-        if (!sameReceipt(await receiptQueuedAt(delivery.id), paused.queued_at)) {
-          toast('warning', 'A new receipt was queued for this delivery while the email was sending. It was left on "Customer receipts to check".');
-          return;
-        }
-        const scope = receiptCloseScope(delivery.id, 'handled');
-        await closeDeliveryReceipt(delivery.id, 'handled', receiptCloseIdem.getKeyFor(scope));
-        receiptCloseIdem.resetKeyFor(scope);
-      } catch (err: unknown) {
-        // The email went out; the paused receipt just stays on the office list for someone to mark handled.
-        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
-          level: 'warning', extra: { context: 'close_delivery_receipt after Email Confirmation', deliveryId: delivery.id },
-        });
-        toast('warning', 'The email went out, but its receipt is still on "Customer receipts to check". Mark it handled there.');
-      }
+      await closeSentReceipt(delivery.id, paused.queued_at);
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
     } finally {

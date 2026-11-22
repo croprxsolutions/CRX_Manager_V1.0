@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-22 — #2260: Mason owner-accepted 1 Sol finding(s) at `554e0478f5fa`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2260 at `554e0478f5fa` (base `a7785529318b`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270220100000_split_save_refuses_blend_billed_job.sql:468`, text sha256 `5e2a94a0171ff80b` (the wording stays with the proof, not here)
+  Mason's reason: I acceot (ref eb5211ed82bb)
+
 ## 2026-11-22 — #2063: a job a blend ticket billed is not billed again by a split field invoice
 
 **Decision (Mason, 2026-11-22: "Yes, accept all four" in the Lane A session; "Accept all four (Recommended)" in the bug-captain session).** (1) A blend-ticket invoice counts as billing its job from creation, drafts included, until it is voided, cancelled or deleted (the rule Transfer to Invoice and the blend invoice already use). (2) A refused split save names the blend ticket and its invoice number, never the amount, and says to void that invoice first or ask an admin. (3) Bills entered without choosing the job are not caught; accepted gap. (4) A split set whose invoices were all voided keeps holding its job, unchanged; a possible follow-up. Lane A builds #2063 (supersedes the issue note naming Taha). Sol round 1 narrowed (2): the message names only the invoice numbers the person may already open (a rep sees "an invoice you cannot open" for an admin's invoice, never a count); Sol round 3 dropped the ticket number (user-typed text) and the message now says to ask an admin to void or delete it (voiding is admin-only). Contract: `docs/plans/2026-11-22-job-double-bill-blend-CONTRACT.md`.

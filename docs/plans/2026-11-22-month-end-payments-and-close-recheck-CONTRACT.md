@@ -194,3 +194,6 @@ passes before the apply; split not needed (memory rule exception for already-liv
   constraint refuses: both now set `payment_date`. Other provers that insert undated sets stop before this migration.
 - MED legacy cents/NaN, prepay grouping, split rollout; LOW e2e (#2245), number precision, private impl types: as
   rounds 2-5.
+- Luna on ff8906222: MED "ticks survive a reopen" refuted (the page learns of a reopen only through `fetchData`, which
+  clears every tick first, `MonthEndClose.tsx:149-153`); LOW legacy cents as before; LOW rpc-functions.md now names
+  `CLOSE_REOPENED_SINCE`.

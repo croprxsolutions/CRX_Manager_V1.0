@@ -255,7 +255,7 @@ function refusedProbe(sql, pattern, uid) {
 }
 
 const id = (s) => `b5b5b5b5-2207-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), MGP = id('d6'), O = id('f3'), OS = id('f4'), N = id('f5'), X = id('f6'), Y = id('f7'), SVC = id('e1');
+const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), MGP = id('d6'), O = id('f3'), OS = id('f4'), N = id('f5'), X = id('f6'), Y = id('f7'), Z = id('f8'), SVC = id('e1');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const WALL = 'public._enforce_below_cost_line()';
@@ -292,13 +292,15 @@ function seed() {
       ('${O}', '${A}', '[PROVER] JBC field A per-acre', 100, true), ('${OS}', '${A}', '[PROVER] JBC field A+B per-acre', 100, true),
       ('${N}', '${A}', '[PROVER] JBC field A 99.99%', 100, true),
       ('${X}', '${A}', '[PROVER] JBC field A, no billing defaults', 100, true),
-      ('${Y}', '${A}', '[PROVER] JBC field A extra', 100, true);
+      ('${Y}', '${A}', '[PROVER] JBC field A extra', 100, true),
+      ('${Z}', '${A}', '[PROVER] JBC field A billed to B', 100, true);
     INSERT INTO public.application_services (id, name, is_active, default_rate_per_acre_cents, cost_per_acre_cents) VALUES
       ('${SVC}', '[PROVER] JBC spraying', true, 1000, 400);
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary, price_override_cents) VALUES
       ('${G}', '${A}', 100, true, NULL), ('${F}', '${A}', 60, true, NULL), ('${F}', '${B}', 40, false, NULL),
       ('${O}', '${A}', 100, true, 100), ('${OS}', '${A}', 60, true, 100), ('${OS}', '${B}', 40, false, 100),
-      ('${N}', '${A}', 99.99, true, NULL), ('${Y}', '${A}', 100, true, NULL);`);
+      ('${N}', '${A}', 99.99, true, NULL), ('${Y}', '${A}', 100, true, NULL),
+      ('${Z}', '${B}', 100, true, NULL);`);
   // Test-only helpers (prover database only). jbc.job writes a completed job: 10 acres of the field and one chemical
   // line of p_qty p_unit at p_price (job cost p_cost) per p_unit; the stored job total is that line's total.
   psql(`CREATE SCHEMA jbc AUTHORIZATION supabase_admin;
@@ -428,12 +430,15 @@ const CASES = {
   nullJobCost: transfer(job('Gal', 10, 5000, 'NULL')),
   // Sol round 5 #1 (Mason, 2026-11-22: every field has a billing split): a field with none stops Create Invoice by name.
   noSplitField: transfer(job('Gal', 10, 5000, 3000, X)),
-  // Sol round 5 #2: metric units convert (1,000 g of the $16/Lb dry product = 2.2046 Lb; 1,000 mL = 0.2642 Gal);
-  // a mass on a liquid product still stops. Sol round 5 MED: a soft hyphen cannot hide "per".
+  // Sol round 6: a metric unit is used only when it is the sold unit (500 mg of a product stocked by the MG); any other
+  // stops by name, since job completion deducts it from stock unconverted. Sol round 5 MED: a soft hyphen cannot hide "per".
   gramsDry: transfer(job('g', 1000, 4, 2, G, false, DRY)),
   mgOnMg: transfer(job('mg', 500, 2, 1, G, false, MGP)),
   mlLiquid: transfer(job('mL', 1000, 15, 1, G)),
   gramsOnLiquid: transfer(job('g', 100, 50)),
+  // Sol round 6 #1 (Mason, 2026-11-22: each owner is billed for their own fields' acres): A's job on a field billed
+  // 100% to B is invoiced to B.
+  payerB: transfer(job('Gal', 10, 5000, 3000, Z)),
   perSoftHyphen: transfer(job('Gal p­er acre', 10, 5000)),
   // Sol round 4 #1: a per-Gal job cost saved against "fl. oz", or a $0 job cost, still books the catalog cost.
   dottedGalCost: transfer(job('fl. oz', 3, 39, 3000)),
@@ -499,6 +504,9 @@ async function main() {
   const nearBefore = okProbe(CASES.nearHundred);
   console.log(`[before] nearHundred: ${nearBefore}`);
   assert.match(nearBefore, /^A:49995:49995:/, 'before: a 99.99% split billed $499.95 of a $500.00 job');
+  const payerBefore = okProbe(CASES.payerB);
+  console.log(`[before] payerB: ${payerBefore}`);
+  assert.match(payerBefore, /^A:/, "before: A's job on a field billed 100% to B was invoiced to A");
 
   stageText('candidate.sql', lf(CANDIDATE));
   const first = apply('candidate.sql');
@@ -563,9 +571,11 @@ async function main() {
   console.log('[after] noSplitField: refused JOB_FIELD_NO_BILLING_SPLIT, naming the field');
   for (const k of ['gramsOnLiquid', 'perSoftHyphen']) refusedProbe(CASES[k], /JOB_LINE_UNIT_UNCONVERTIBLE/);
   console.log('[after] gramsOnLiquid, perSoftHyphen: refused JOB_LINE_UNIT_UNCONVERTIBLE');
-  after('gramsDry', 'A:3999:3999:3527:2.2046 Lb @1814=3999/c1600/product/manual', '1,000 g at 4c/g ($40) bills 2.2046 Lb (within 50c)');
+  refusedProbe(CASES.gramsDry, /JOB_LINE_UNIT_UNCONVERTIBLE: \[PROVER\] JBC dry is recorded on this job in "g", which can't be converted to the unit it is sold in \("Lb"\)/);
+  refusedProbe(CASES.mlLiquid, /JOB_LINE_UNIT_UNCONVERTIBLE: \[PROVER\] JBC chem is recorded on this job in "mL", which can't be converted to the unit it is sold in \("Gal"\)/);
+  console.log('[after] gramsDry, mlLiquid: refused JOB_LINE_UNIT_UNCONVERTIBLE (a metric unit other than the sold unit is not converted)');
   after('mgOnMg', 'A:1000:1000:500:500.0000 MG @2=1000/c1/product/manual', '500 mg of a product stocked by the MG bills as-is (no conversion)');
-  after('mlLiquid', 'A:15002:15002:793:0.2642 Gal @56781=15002/c3000/product/manual', '1,000 mL at 15c/mL ($150) bills 0.2642 Gal (within 50c)');
+  after('payerB', 'B:50000:50000:30000:10.0000 Gal @5000=50000/c3000/product/manual', "A's job on a field billed 100% to B is invoiced to B");
   refusedProbe(CASES.noCost, /JOB_LINE_COST_MISSING: \[PROVER\] JBC grower chem has no cost recorded/);
   console.log('[after] noCost: refused JOB_LINE_COST_MISSING');
   refusedProbe(CASES.roundingBig, /JOB_LINE_ROUNDING: \[PROVER\] JBC chem can't be recorded to 4 decimals in Gal/);

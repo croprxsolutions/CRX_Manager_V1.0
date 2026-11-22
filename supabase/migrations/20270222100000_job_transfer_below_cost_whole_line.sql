@@ -23,6 +23,9 @@
 --     commissions read a line's booked cost as cost x quantity; a single invoice bills the sum of its lines
 --     (a field's per-acre price is not billed: Mason, 2026-11-22). A deleted
 --     job is refused (JOB_DELETED) and a deleted blend ticket with a live invoice blocks (Sol round 1).
+--     Every field needs a billing split (JOB_FIELD_NO_BILLING_SPLIT names the ones without; the job's fields and
+--     splits are locked first), and a job whose fields are all billed to one owner is invoiced to that owner
+--     (Mason, 2026-11-22: each owner is billed for their own fields' acres).
 --  The below-cost wall is unchanged: a line priced per sold unit is judged by it exactly. Grants, owners, SECURITY
 --  DEFINER and search_path are unchanged. No stored row changes; old invoices keep their quantity-1 lines.
 --
@@ -92,17 +95,11 @@ BEGIN
     v_unit := CASE
       WHEN public.normalize_rate_unit(p_job_unit) = 'oz' AND lower(btrim(p_job_unit)) ~ '^(fl|fluid)' THEN 'fl oz'
       ELSE COALESCE(public.normalize_rate_unit(p_job_unit), btrim(p_job_unit)) END;
-    -- Sol round 5: a metric unit the catalog recognizes converts exactly to ounces (dry) or fluid ounces (liquid)
-    -- first (1 oz = 28.349523125 g; 1 fl oz = 29.5735295625 mL); a mass on a liquid or a volume on a dry product stays
-    -- unconvertible.
+    -- A job unit equal to the sold unit ("g" on a product stocked by the g) is used as-is (Codex App). Sol round 6:
+    -- any other metric unit is not converted, because job completion deducts it from stock unconverted; it reaches
+    -- field_app_priced_quantity, which returns NULL for it, so it stops by name below.
     o_exact_qty := CASE
-      -- Codex App: a job unit equal to the sold unit ("g" on a product stocked by the g) needs no conversion.
       WHEN lower(v_unit) = lower(v_sold) THEN p_quantity
-      WHEN v_form = 'dry' AND v_unit IN ('g', 'kg', 'mg') THEN public.field_app_priced_quantity(
-        p_quantity * CASE v_unit WHEN 'kg' THEN 1000 WHEN 'mg' THEN 0.001 ELSE 1 END / 28.349523125, 'oz', v_sold, v_form)
-      WHEN COALESCE(v_form, 'liquid') <> 'dry' AND v_unit IN ('ml', 'l') THEN public.field_app_priced_quantity(
-        p_quantity * CASE v_unit WHEN 'l' THEN 1000 ELSE 1 END / 29.5735295625, 'fl oz', v_sold, v_form)
-      WHEN v_unit IN ('g', 'kg', 'mg', 'ml', 'l') THEN NULL
       ELSE public.field_app_priced_quantity(p_quantity, v_unit, v_sold, v_form) END;
   END IF;
   -- Mason, 2026-11-22 ("Stop and name it").
@@ -195,6 +192,7 @@ CREATE OR REPLACE FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(
 AS $function$
 DECLARE
   v_unsplit_fields text;
+  v_payer_id uuid;
   v_job RECORD;
   v_invoice_id uuid;
   v_invoice_number text;
@@ -330,14 +328,16 @@ BEGIN
   -- U7 (#42 / #100 / #50): MULTI-OWNER per-owner invoice GROUP.
   -- Trigger ONLY on EXPLICIT multi-owner billing: >1 distinct field_billing_defaults
   -- customer across the job's fields (the landlord/tenant setup the finding is about).
-  -- A job with NO billing defaults keeps today's single-invoice behavior, even if its
-  -- fields belong to different customers — no surprise change. In the group path, any
-  -- field WITHOUT billing defaults falls back to the field's own customer at 100%
-  -- (mirror of create_split_invoices_from_order).
   -- ==========================================================================
   -- 20270222100000 (Mason, 2026-11-22: every field has a billing split, 100% or shared; each owner is billed the
   -- acres of their own fields): a field with no billing split stops Create Invoice by name, never falling back to a
   -- payer (Sol round 5: the fallback put every acre and the spraying fee on the one configured owner).
+  -- Sol round 6: the job's fields and their splits are locked first (FOR SHARE; Field Setup's save_field updates the
+  -- field row before replacing its splits), so a concurrent save can't remove a split after this check.
+  PERFORM 1 FROM job_fields jf JOIN fields f ON f.id = jf.field_id
+    WHERE jf.job_id = p_job_id ORDER BY f.id FOR SHARE OF f;
+  PERFORM 1 FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
+    WHERE jf.job_id = p_job_id ORDER BY fbd.id FOR SHARE OF fbd;
   SELECT string_agg(f.field_name, ', ' ORDER BY f.field_name) INTO v_unsplit_fields
     FROM job_fields jf JOIN fields f ON f.id = jf.field_id
     WHERE jf.job_id = p_job_id
@@ -365,8 +365,7 @@ BEGIN
     END IF;
 
     -- Ordered owner arrays (stable ORDER BY owner_id) with each owner's BILLABLE ACRES:
-    -- fbd fields contribute acres_to_treat * split_pct/100; non-fbd fields contribute
-    -- their full acres to the field's own customer.
+    -- each field contributes acres_to_treat * split_pct/100 (every field has a split: checked and locked above).
     SELECT array_agg(owner_id ORDER BY owner_id),
            array_agg(farm_name ORDER BY owner_id),
            array_agg(billable_acres ORDER BY owner_id),
@@ -385,15 +384,6 @@ BEGIN
           JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
           JOIN customers c ON c.id = fbd.customer_id
           WHERE jf.job_id = p_job_id
-        UNION ALL
-        SELECT COALESCE(f.customer_id, v_job.customer_id) AS owner_id,
-               COALESCE(jf.acres_to_treat, 0) AS billable_acres,
-               false AS is_primary, c.farm_name
-          FROM job_fields jf
-          JOIN fields f ON f.id = jf.field_id
-          JOIN customers c ON c.id = COALESCE(f.customer_id, v_job.customer_id)
-          WHERE jf.job_id = p_job_id
-            AND NOT EXISTS (SELECT 1 FROM field_billing_defaults fbd2 WHERE fbd2.field_id = jf.field_id)
       ) parts
       GROUP BY owner_id
     ) oa;
@@ -419,11 +409,6 @@ BEGIN
           FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
           JOIN fields f ON f.id = jf.field_id
           WHERE jf.job_id = p_job_id AND fbd.customer_id = v_owner_ids[v_oidx]
-        UNION
-        SELECT f.field_name AS fname
-          FROM job_fields jf JOIN fields f ON f.id = jf.field_id
-          WHERE jf.job_id = p_job_id AND f.customer_id = v_owner_ids[v_oidx]
-            AND NOT EXISTS (SELECT 1 FROM field_billing_defaults fbd2 WHERE fbd2.field_id = jf.field_id)
       ) mf;
 
       v_invoice_number := next_invoice_number('field_application');
@@ -693,6 +678,14 @@ BEGIN
     RAISE EXCEPTION 'FIELD_SPLIT_NOT_100: one or more of this job''s fields has billing splits that do not total 100%%. Fix the field billing defaults before invoicing.';
   END IF;
 
+  -- Sol round 6 (Mason, 2026-11-22: each owner is billed for their own fields' acres): a job whose fields are all
+  -- billed to one owner is invoiced to that owner (header, receivable, restricted-use buyer, commissions), even when
+  -- the job's own customer is someone else; a job with no fields stays on the job's customer.
+  SELECT fbd.customer_id INTO v_payer_id
+    FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
+    WHERE jf.job_id = p_job_id LIMIT 1;
+  v_payer_id := COALESCE(v_payer_id, v_job.customer_id);
+
   -- OVERNIGHT FIX (Run 2 cycle 6 — invoice-number canonicalization, Codex-confirmed MEDIUM):
   -- use the shared next_invoice_number() — the SAME invoice_number_seq, 'invoice_number:INV:<year>'
   -- advisory lock, and setval self-heal that every other invoice creator AND the
@@ -712,7 +705,7 @@ BEGIN
   ) VALUES (
     -- insert as 'draft' (DELTA-1) — trg_invoice_draft_insert rejects non-draft,
     -- non-credit_memo inserts; DELTA-4 flips to 'unposted' once fully built.
-    v_invoice_number, v_job.customer_id, 'field_application', 'draft',
+    v_invoice_number, v_payer_id, 'field_application', 'draft',
     (now() AT TIME ZONE 'America/Chicago')::date, NULL::date,  -- KI-14: the due-date trigger derives it from this owner's terms
     COALESCE(v_job.total_price_cents, 0), 0, 0, 0,
     v_field_names, v_crop_type, v_total_acres, v_applicator_name, v_vehicle_name,
@@ -951,7 +944,7 @@ BEGIN
     AND ii.product_id IS NOT NULL;
 
   PERFORM _insert_commissions_for_job(
-    p_job_id, v_invoice_id, v_job.customer_id,
+    p_job_id, v_invoice_id, v_payer_id,
     v_chem_profit_cents::numeric / 100.0,
     v_commission_split,
     (now() AT TIME ZONE 'America/Chicago')::date
@@ -977,7 +970,7 @@ BEGIN
     jsonb_build_object(
       'invoice_number', v_invoice_number,
       'job_id', p_job_id,
-      'customer_id', v_job.customer_id,
+      'customer_id', v_payer_id,
       'total_cents', (SELECT total_amount_cents FROM invoices WHERE id = v_invoice_id)
     ),
     (SELECT total_amount_cents FROM invoices WHERE id = v_invoice_id),
@@ -1008,9 +1001,9 @@ BEGIN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'a5f215672d97ede9b9b5ba95a2676a0b'
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '8597859b35d0c25b28046e94bda62cba'
      OR v_price IS NULL OR v_split IS NULL
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '9917c182fb0cf2adf628d6ec5d7f17cc'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '0d225231da5e5adc8d21ed092796270a'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: a body is not the one this file installs';
   END IF;

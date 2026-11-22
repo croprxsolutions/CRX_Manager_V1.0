@@ -2644,6 +2644,8 @@ export interface RateReviewOutcomeRow {
   note: string | null;
 }
 
+/** was = the parent value the draft was derived from; now = the parent's value today (null when cleared). */
+export interface RateReviewParentChanged { was: string; now: string | null }
 export type RateReviewRowStatus = 'unchanged' | 'change' | 'stale' | 'invalid' | 'not_found';
 /** preview_rate_review; commit_rate_review returns the same rows plus counts. */
 export interface RateReviewResult {
@@ -2652,6 +2654,8 @@ export interface RateReviewResult {
     index: number; rate_id?: string | null; parent_id?: string | null; name?: string; status: RateReviewRowStatus;
     decision?: 'approve' | 'reopen' | 'delete' | null; problem?: string;
     actions?: ('save' | 'approve' | 'reopen' | 'delete')[] | null; label_check?: ProductRateLabelCheck;
+    /** Approving a derived draft whose parent rate moved since it was derived (#1722: warns, never blocks). */
+    parent_changed?: RateReviewParentChanged;
   }[];
   outcomes: {
     index: number; parent_id: string | null; name: string | null; outcome?: ProductRateOutcome | null; note?: string | null;

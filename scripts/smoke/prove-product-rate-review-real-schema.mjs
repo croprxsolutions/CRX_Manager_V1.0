@@ -44,6 +44,9 @@ const FOLLOW_UPS = [
   // RT-4b (ordering only, NOT applied): revokes direct writes to products' rate columns; it names the rate
   // helpers only in postflight EXECUTE checks. Its own proof is scripts/smoke/prove-rate-writers-real-schema.mjs.
   path.join(MIGRATIONS, '20270126100000_product_rate_direct_writes_revoked.sql'),
+  // #1722 (ordering only, NOT applied): approve also returns and logs a parent_changed warning; every refusal and write
+  // stays the same. Its own proof is scripts/smoke/prove-rate-review-parent-changed-real-schema.mjs.
+  path.join(MIGRATIONS, '20270206100000_rate_review_parent_changed_warning.sql'),
 ];
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

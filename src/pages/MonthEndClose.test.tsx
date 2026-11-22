@@ -29,7 +29,7 @@ interface SummaryFixture {
   orders: { count: number; total_cents: number };
   deliveries: { count: number; completed_count: number };
   applications: { count: number; total_acres: number };
-  commissions: { earned_cents: number; paid_count: number };
+  commissions: { earned_cents: number; paid_count: number; basis?: 'billed_share' };
   ar_balance_cents: number;
 }
 
@@ -343,6 +343,49 @@ describe('MonthEndClose', () => {
       expect(screen.getByRole('button', { name: /Roll the Month/i })).toBeDisabled();
     });
     expect(screen.getByText(/Resolve all checklist items/i)).toBeInTheDocument();
+  });
+
+  it('labels commission as billed-sales commission and AR as today\'s (KI-125, KI-130)', async () => {
+    const summary = cleanSummary();
+    summary.commissions = { earned_cents: 31500, paid_count: 0, basis: 'billed_share' };
+    summary.ar_balance_cents = 1200;
+    mockRpc.mockImplementation((name: string) => (name === 'get_monthly_summary'
+      ? Promise.resolve({ data: summary, error: null })
+      : Promise.resolve({ data: null, error: null })));
+
+    renderMonthEnd();
+
+    expect(await screen.findByText('Current AR (today)')).toBeInTheDocument();
+    expect(screen.queryByText('AR Balance')).not.toBeInTheDocument();
+    expect(screen.getByText('Commissions on Sales Billed')).toBeInTheDocument();
+    expect(screen.getByText(/\$315\.00 on sales billed this period, 0 paid/)).toBeInTheDocument();
+  });
+
+  it('keeps the old commission label until the database reports the billed-share basis', async () => {
+    const summary = cleanSummary();
+    summary.commissions = { earned_cents: 31500, paid_count: 2 };
+    mockRpc.mockImplementation((name: string) => (name === 'get_monthly_summary'
+      ? Promise.resolve({ data: summary, error: null })
+      : Promise.resolve({ data: null, error: null })));
+
+    renderMonthEnd();
+
+    expect(await screen.findByText('Commissions Earned')).toBeInTheDocument();
+    expect(screen.queryByText('Commissions on Sales Billed')).not.toBeInTheDocument();
+    expect(screen.getByText(/\$315\.00 earned, 2 paid/)).toBeInTheDocument();
+  });
+
+  it('asks to confirm a negative commission figure too', async () => {
+    const summary = cleanSummary();
+    summary.commissions = { earned_cents: -200, paid_count: 0, basis: 'billed_share' };
+    mockRpc.mockImplementation((name: string) => (name === 'get_monthly_summary'
+      ? Promise.resolve({ data: summary, error: null })
+      : Promise.resolve({ data: null, error: null })));
+
+    renderMonthEnd();
+
+    expect(await screen.findByText(/on sales billed this period, 0 paid/)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /I have reviewed this and confirm it is correct/i })).toBeInTheDocument();
   });
 
   it('clears ticked review boxes when switching periods', async () => {

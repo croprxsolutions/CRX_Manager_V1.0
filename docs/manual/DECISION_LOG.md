@@ -83,7 +83,7 @@
 
 **Follow-up decision (Mason, 2026-11-22, in the Lane E session, "Yes, that rule"):** a cost cut is refused only when that cut itself puts the bills over the line. A bill already over what arrived (for example billed in full up front, goods still coming) does not block a correction.
 
-**What this implies:** a cost cut is refused when it moves the PO's active vendor bills from within 5% to more than 5% over either line: what arrived (like the bill check, capped at the ordered total; the ordered total before anything arrives), or the ordered total, so a cut can never leave the bills over everything that can still arrive. Owed and still-coming quantities are unchanged: receiving 8 of 10 still shows 2 coming, and a line whose ordered quantity matches what arrived shows nothing coming. Raising a cost is never refused.
+**What this implies:** a cost cut is refused when it moves the PO's active vendor bills from within 5% to more than 5% over what arrived (like the bill check, capped at the ordered total; the ordered total before anything arrives). Separately, as before KI-151, no cut may leave the bills more than 5% over the ordered total, even when a bill was already confirmed over it (Sol round 2, 2026-11-22: else a $110 bill on a $100 order lets the order be cut to $0). Owed and still-coming quantities are unchanged: receiving 8 of 10 still shows 2 coming, and a line whose ordered quantity matches what arrived shows nothing coming. Raising a cost is never refused.
 
 ## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
 

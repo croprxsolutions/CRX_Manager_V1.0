@@ -22,8 +22,8 @@ const candidate = readFileSync(path.join(MIG, CANDIDATE), 'utf8').replaceAll('\r
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });
 const [PROD, VENDOR] = ['b1', 'b2'].map(id);
-const [PO1, PO2, PO3] = ['c1', 'c2', 'c3'].map(id);
-const [LA, LB, LC, LD, LE] = ['d1', 'd2', 'd3', 'd4', 'd5'].map(id);
+const [PO1, PO2, PO3, PO4] = ['c1', 'c2', 'c3', 'c4'].map(id);
+const [LA, LB, LC, LD, LE, LF] = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6'].map(id);
 let n = 0;
 const setCosts = (po, items, reason = null) =>
   `public.set_purchase_order_item_costs('${po}'::uuid, '${JSON.stringify(items)}'::jsonb, ${reason === null ? 'NULL' : `'${reason}'`}, NULL, 'ki151-${(n += 1)}')`;
@@ -37,7 +37,8 @@ try {
   seedUsers();
   // PO1 partly received: LA 10 ordered @ $10.00, 8 arrived; LB 5 ordered @ $20.00, none arrived. Ordered $200, arrived
   // $80, active bill $80. PO2 nothing arrived: LC 10 @ $10.00, early bill $100. PO3 billed in full up front, then partly
-  // received: LD 10 @ $10.00, 5 arrived; LE 10 @ $10.00, none arrived. Ordered $200, arrived $50, bill $200.
+  // received: LD 10 @ $10.00, 5 arrived; LE 10 @ $10.00, none arrived. Ordered $200, arrived $50, bill $200. PO4 bill
+  // confirmed over the order before anything arrived: LF 10 @ $10.00, bill $110.
   psql(`BEGIN; ${claims(USERS.admin)}
     ALTER TABLE public.products DISABLE TRIGGER trigger_y_require_governed_product_pricing;
     INSERT INTO public.products (id, product_name, unit_size, current_cost, tier1_price, product_form, inventory_unit, is_active)
@@ -46,25 +47,29 @@ try {
     INSERT INTO public.purchase_orders (id, po_number, vendor, status, submitted_date, created_by) VALUES
       ('${PO1}', 'KI151-PO-1', '[KI151] Vendor', 'submitted', CURRENT_DATE - 2, '${USERS.admin}'),
       ('${PO2}', 'KI151-PO-2', '[KI151] Vendor', 'submitted', CURRENT_DATE - 1, '${USERS.admin}'),
-      ('${PO3}', 'KI151-PO-3', '[KI151] Vendor', 'submitted', CURRENT_DATE - 1, '${USERS.admin}');
+      ('${PO3}', 'KI151-PO-3', '[KI151] Vendor', 'submitted', CURRENT_DATE - 1, '${USERS.admin}'),
+      ('${PO4}', 'KI151-PO-4', '[KI151] Vendor', 'submitted', CURRENT_DATE - 1, '${USERS.admin}');
     INSERT INTO public.purchase_order_items (id, purchase_order_id, product_id, quantity_ordered, unit_cost, quantity_received, unit_size, product_name) VALUES
       ('${LA}', '${PO1}', '${PROD}', 10, 10.00, 8, 'gal', '[KI151] Chem'),
       ('${LB}', '${PO1}', '${PROD}', 5, 20.00, 0, 'gal', '[KI151] Chem'),
       ('${LC}', '${PO2}', '${PROD}', 10, 10.00, 0, 'gal', '[KI151] Chem'),
       ('${LD}', '${PO3}', '${PROD}', 10, 10.00, 5, 'gal', '[KI151] Chem'),
-      ('${LE}', '${PO3}', '${PROD}', 10, 10.00, 0, 'gal', '[KI151] Chem');
+      ('${LE}', '${PO3}', '${PROD}', 10, 10.00, 0, 'gal', '[KI151] Chem'),
+      ('${LF}', '${PO4}', '${PROD}', 10, 10.00, 0, 'gal', '[KI151] Chem');
     UPDATE public.purchase_orders SET total_cost = 200.00, status = 'partially_received' WHERE id = '${PO1}';
     UPDATE public.purchase_orders SET total_cost = 100.00 WHERE id = '${PO2}';
     UPDATE public.purchase_orders SET total_cost = 200.00, status = 'partially_received' WHERE id = '${PO3}';
+    UPDATE public.purchase_orders SET total_cost = 100.00 WHERE id = '${PO4}';
     SET LOCAL session_replication_role = replica;
     INSERT INTO public.vendors (id, name) VALUES ('${VENDOR}', '[KI151] Vendor');
     INSERT INTO public.vendor_bills (vendor_id, purchase_order_id, bill_number, bill_date, due_date, subtotal_cents, total_cents) VALUES
       ('${VENDOR}', '${PO1}', 'KI151-B1', CURRENT_DATE, CURRENT_DATE + 30, 8000, 8000),
       ('${VENDOR}', '${PO2}', 'KI151-B2', CURRENT_DATE, CURRENT_DATE + 30, 10000, 10000),
-      ('${VENDOR}', '${PO3}', 'KI151-B3', CURRENT_DATE, CURRENT_DATE + 30, 20000, 20000);
+      ('${VENDOR}', '${PO3}', 'KI151-B3', CURRENT_DATE, CURRENT_DATE + 30, 20000, 20000),
+      ('${VENDOR}', '${PO4}', 'KI151-B4', CURRENT_DATE, CURRENT_DATE + 30, 11000, 11000);
     COMMIT;`);
-  assert.equal(scalar(`SELECT string_agg(status || ':' || total_cost_cents, ',' ORDER BY id) FROM public.purchase_orders WHERE id IN ('${PO1}','${PO2}','${PO3}');`),
-    'partially_received:20000,submitted:10000,partially_received:20000');
+  assert.equal(scalar(`SELECT string_agg(status || ':' || total_cost_cents, ',' ORDER BY id) FROM public.purchase_orders WHERE id IN ('${PO1}','${PO2}','${PO3}','${PO4}');`),
+    'partially_received:20000,submitted:10000,partially_received:20000,submitted:10000');
 
   // Before: the old rule (ordered total) lets a received line's cost drop below what was billed for it.
   assert.equal(saved(PO1, [{ id: LA, unit_cost_cents: 700 }], 'vendor credit'), 'ok|1', 'old rule allowed the cut');
@@ -82,8 +87,11 @@ try {
   const added = newLines.filter((l) => !oldLines.includes(l)).filter((l) => l.trim());
   assert.ok(removed.every((l) => /vendor-bill control|bill is created|LOWERS the total|PO row lock above|v_new_total < v_old_total|PO_COST_BELOW_BILLED|DETAIL = jsonb_build_object\('po_total_cents', v_new_total, 'active/.test(l)),
     `unexpected removed lines:\n${removed.join('\n')}`);
-  assert.ok(added.every((l) => /KI-151|KI-143|v_received|v_old_limit|v_new_limit|poi\.|LOWERS that limit|ordered total before|PO row lock above|PO_COST_BELOW_BILLED|DETAIL|limit_cents|USING ERRCODE|INTO v_received|THIS cut|v_billed|v_new_total|ordered total, so/.test(l)),
+  assert.ok(added.every((l) => /KI-151|KI-143|v_received|v_old_limit|v_new_limit|poi\.|LOWERS that limit|ordered total before|PO row lock above|PO_COST_BELOW_BILLED|DETAIL|limit_cents|USING ERRCODE|INTO v_received|THIS cut|v_billed|v_new_total|ordered total, so|billed up front|Sol, 2026-11-22/.test(l)),
     `unexpected added lines:\n${added.join('\n')}`);
+  // Order and duplicates too: the kept lines must be the old body's kept lines, in order (Sol LOW).
+  const kept = (lines, drop) => lines.filter((l) => !drop.includes(l) || !l.trim());
+  assert.deepEqual(kept(newLines, added), kept(oldLines, removed), 'kept lines moved or duplicated');
   console.log(`[body] KI-197 body with ${removed.length} lines replaced by ${added.length}`);
 
   const auto = apply();
@@ -126,6 +134,8 @@ try {
   // 8. Same PO: the bill is already over what arrived ($50), so a 1-cent fix to the received line is not what puts it
   //    over; allowed (Mason, 2026-11-22: refuse only when THIS cut creates the overage).
   assert.equal(saved(PO3, [{ id: LD, unit_cost_cents: 999 }], 'typo'), 'ok|1');
+  // 8a. A bill confirmed over the whole order ($110 on $100, nothing arrived): a cut can never make it worse (Sol HIGH).
+  assert.equal(refused(PO4, [{ id: LF, unit_cost_cents: 0 }], null, LF), 'ok|PO_COST_BELOW_BILLED|1000');
   console.log('[billed up front] cut that leaves the bill over the whole order refused; 1-cent fix while goods still coming allowed');
 
   // 9. A voided bill does not count.

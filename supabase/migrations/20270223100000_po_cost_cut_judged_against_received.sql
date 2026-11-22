@@ -2,11 +2,11 @@
 -- a cost cut that would leave the PO's active vendor bills more than 5% over the ORDERED total. Since KI-143 (20270103110000)
 -- vendor bills are judged against what ARRIVED: once anything has arrived the limit is the smaller of the received value
 -- and the ordered total, before that the ordered total. The cost check now uses that same limit, and is refused
--- (PO_COST_BELOW_BILLED) only when THIS cut puts the active bills more than 5% over a line they were within (Mason,
--- 2026-11-22): the received-value limit (or zero with bills on the PO), or the ordered total, so a cut cannot leave bills
--- over everything that can still arrive. A bill already over what arrived (billed up front, goods still coming) does not
--- block a correction; a cut that leaves both lines where they were (e.g. an unreceived line on a partly received PO,
--- bills within its new total) is no longer refused. received value = sum over lines of round(quantity_received * unit_cost_cents), the
+-- (PO_COST_BELOW_BILLED) when THIS cut puts the active bills more than 5% over the received-value limit they were within
+-- (Mason, 2026-11-22; zero counts as over), so a bill already over what arrived (billed up front, goods still coming)
+-- does not block a correction. As before, no cut may leave the bills more than 5% over the ordered total. A cut that
+-- leaves the received-value limit where it was (e.g. an unreceived line on a partly received PO, bills within its new
+-- total) is no longer refused. received value = sum over lines of round(quantity_received * unit_cost_cents), the
 -- same per-line rounding as KI-143. Same signature and grants; the body is the 20270217120000 (KI-197) body (md5-pinned
 -- below) with only that block changed. No data changes (live 2026-11-22: no vendor bill is linked to a PO).
 --
@@ -72,9 +72,9 @@ DECLARE
   v_new_total bigint;
   v_billed bigint;
   v_received_any boolean;
-  v_old_limit bigint;
-  v_new_limit bigint;
-  v_received bigint;
+  v_old_limit numeric;
+  v_new_limit numeric;
+  v_received numeric;
   v_expected bigint;
   v_expected_num numeric;
   v_expected_product uuid;
@@ -141,7 +141,7 @@ BEGIN
   END IF;
   -- KI-151: the vendor-bill limit before this correction (KI-143's rule), read under the locks above.
   SELECT bool_or(COALESCE(poi.quantity_received, 0) > 0),
-         COALESCE(SUM(round(COALESCE(poi.quantity_received, 0) * poi.unit_cost_cents)), 0)::bigint
+         COALESCE(SUM(round(COALESCE(poi.quantity_received, 0) * poi.unit_cost_cents)), 0)
     INTO v_received_any, v_received
     FROM public.purchase_order_items poi WHERE poi.purchase_order_id = p_po_id;
   v_old_limit := CASE WHEN COALESCE(v_received_any, false) THEN LEAST(v_received, v_old_total) ELSE v_old_total END;
@@ -277,19 +277,20 @@ BEGIN
     -- ordered total before anything arrives, need a confirmed reason) runs when a bill is created; a correction that
     -- LOWERS that limit must not create the overage silently (KI-151: judged against what arrived, like the bill).
     -- The PO row lock above serializes this with bill creation and receiving, which lock the PO too (Sol, 2026-10-21).
-    SELECT COALESCE(SUM(round(COALESCE(poi.quantity_received, 0) * poi.unit_cost_cents)), 0)::bigint INTO v_received
+    SELECT COALESCE(SUM(round(COALESCE(poi.quantity_received, 0) * poi.unit_cost_cents)), 0) INTO v_received
       FROM public.purchase_order_items poi WHERE poi.purchase_order_id = p_po_id;
     v_new_limit := CASE WHEN COALESCE(v_received_any, false) THEN LEAST(v_received, v_new_total) ELSE v_new_total END;
     SELECT COALESCE(SUM(vb.total_cents), 0)::bigint INTO v_billed
       FROM public.vendor_bills vb
      WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided';
-    -- Refused only when THIS cut puts the bills over a line they were within (Mason, 2026-11-22): a bill already over
-    -- what arrived (billed up front, goods still coming) does not block a correction. Two lines: what arrived (KI-143
-    -- limit), and the ordered total, so a cut cannot leave bills over everything that can still arrive.
+    -- What arrived (KI-143 limit): refused only when THIS cut puts the bills over a limit they were within (Mason,
+    -- 2026-11-22), so a bill already over what arrived (billed up front, goods still coming) does not block a
+    -- correction. Ordered total: as before KI-151, no cut may leave the bills more than 5% over everything ordered
+    -- (Sol, 2026-11-22: else a bill confirmed over the order lets the order be cut to $0). Exact numeric, no overflow.
     IF v_billed > 0 AND (
-         (v_new_limit < v_old_limit AND v_old_limit > 0 AND v_billed * 100 <= v_old_limit * 105
-          AND (v_new_limit <= 0 OR v_billed * 100 > v_new_limit * 105))
-      OR (v_new_total < v_old_total AND v_billed * 100 <= v_old_total * 105 AND v_billed * 100 > v_new_total * 105)) THEN
+         (v_new_limit < v_old_limit AND v_billed::numeric * 100 <= v_old_limit * 105
+          AND v_billed::numeric * 100 > v_new_limit * 105)
+      OR (v_new_total < v_old_total AND v_billed::numeric * 100 > v_new_total::numeric * 105)) THEN
       RAISE EXCEPTION 'PO_COST_BELOW_BILLED: this correction would put the active vendor bills more than 5%% over what arrived on the purchase order or over its ordered total; void or adjust the bill first'
         USING ERRCODE = '22023',
               DETAIL = jsonb_build_object('po_total_cents', v_new_total, 'received_value_cents', v_received,
@@ -319,7 +320,7 @@ REVOKE ALL ON FUNCTION public.set_purchase_order_item_costs(uuid, jsonb, text, u
 GRANT EXECUTE ON FUNCTION public.set_purchase_order_item_costs(uuid, jsonb, text, uuid, text) TO authenticated;
 
 COMMENT ON FUNCTION public.set_purchase_order_item_costs(uuid, jsonb, text, uuid, text) IS
-  'Admin-only: set, correct or confirm purchase-order line unit cost (cents), received lines included (reason required). Optional per-line expected_unit_cost_cents and expected_product_id, sent together, refuse a stale screen (PO_COST_CHANGED_SINCE_LOADED). A cut that puts active vendor bills over 105% of what arrived (KI-143 limit) or of the ordered total, when they were within it, is refused (PO_COST_BELOW_BILLED). Changes only cost and the PO total; never inventory or catalog cost. Key required, bound to caller + request.';
+  'Admin-only: set, correct or confirm purchase-order line unit cost (cents), received lines included (reason required). Optional per-line expected_unit_cost_cents and expected_product_id, sent together, refuse a stale screen (PO_COST_CHANGED_SINCE_LOADED). A cut is refused (PO_COST_BELOW_BILLED) when it puts active vendor bills over 105% of what arrived (KI-143 limit) after being within it, or leaves them over 105% of the ordered total. Changes only cost and the PO total; never inventory or catalog cost. Key required, bound to caller + request.';
 
 DO $postflight$
 DECLARE

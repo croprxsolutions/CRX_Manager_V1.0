@@ -96,6 +96,8 @@ BEGIN
     -- first (1 oz = 28.349523125 g; 1 fl oz = 29.5735295625 mL); a mass on a liquid or a volume on a dry product stays
     -- unconvertible.
     o_exact_qty := CASE
+      -- Codex App: a job unit equal to the sold unit ("g" on a product stocked by the g) needs no conversion.
+      WHEN lower(v_unit) = lower(v_sold) THEN p_quantity
       WHEN v_form = 'dry' AND v_unit IN ('g', 'kg', 'mg') THEN public.field_app_priced_quantity(
         p_quantity * CASE v_unit WHEN 'kg' THEN 1000 WHEN 'mg' THEN 0.001 ELSE 1 END / 28.349523125, 'oz', v_sold, v_form)
       WHEN COALESCE(v_form, 'liquid') <> 'dry' AND v_unit IN ('ml', 'l') THEN public.field_app_priced_quantity(
@@ -1008,7 +1010,7 @@ BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'a5f215672d97ede9b9b5ba95a2676a0b'
      OR v_price IS NULL OR v_split IS NULL
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM 'af40ca5d0c28d9a060b86ce7ae3f16b6'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '9917c182fb0cf2adf628d6ec5d7f17cc'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: a body is not the one this file installs';
   END IF;

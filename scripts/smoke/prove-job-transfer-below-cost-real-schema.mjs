@@ -255,7 +255,7 @@ function refusedProbe(sql, pattern, uid) {
 }
 
 const id = (s) => `b5b5b5b5-2207-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), O = id('f3'), OS = id('f4'), N = id('f5'), X = id('f6'), Y = id('f7'), SVC = id('e1');
+const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), MGP = id('d6'), O = id('f3'), OS = id('f4'), N = id('f5'), X = id('f6'), Y = id('f7'), SVC = id('e1');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const WALL = 'public._enforce_below_cost_line()';
@@ -282,7 +282,8 @@ function seed() {
       ('${P}', '[PROVER] JBC chem', 'JBC-1', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 30, 50, 50, 50, true),
       ('${NC}', '[PROVER] JBC grower chem', 'JBC-2', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', NULL, 0, 0, 0, true),
       ('${DRY}', '[PROVER] JBC dry', 'JBC-3', 'dry', 'Lb', 'Lb', 'Lb', 'Lb', 16, 20, 20, 20, true),
-      ('${QT}', '[PROVER] JBC quart chem', 'JBC-5', 'liquid', 'Qt', 'Qt', 'Qt', 'Qt', 8, 10, 10, 10, true);
+      ('${QT}', '[PROVER] JBC quart chem', 'JBC-5', 'liquid', 'Qt', 'Qt', 'Qt', 'Qt', 8, 10, 10, 10, true),
+      ('${MGP}', '[PROVER] JBC milligram dry', 'JBC-6', 'dry', 'MG', 'MG', 'MG', 'MG', 0.01, 0.02, 0.02, 0.02, true);
     INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
         current_cost, tier1_price, tier2_price, tier3_price, is_active, is_rup) VALUES
       ('${RUP}', '[PROVER] JBC restricted chem', 'JBC-4', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 30, 50, 50, 50, true, true);
@@ -430,6 +431,7 @@ const CASES = {
   // Sol round 5 #2: metric units convert (1,000 g of the $16/Lb dry product = 2.2046 Lb; 1,000 mL = 0.2642 Gal);
   // a mass on a liquid product still stops. Sol round 5 MED: a soft hyphen cannot hide "per".
   gramsDry: transfer(job('g', 1000, 4, 2, G, false, DRY)),
+  mgOnMg: transfer(job('mg', 500, 2, 1, G, false, MGP)),
   mlLiquid: transfer(job('mL', 1000, 15, 1, G)),
   gramsOnLiquid: transfer(job('g', 100, 50)),
   perSoftHyphen: transfer(job('Gal p­er acre', 10, 5000)),
@@ -562,6 +564,7 @@ async function main() {
   for (const k of ['gramsOnLiquid', 'perSoftHyphen']) refusedProbe(CASES[k], /JOB_LINE_UNIT_UNCONVERTIBLE/);
   console.log('[after] gramsOnLiquid, perSoftHyphen: refused JOB_LINE_UNIT_UNCONVERTIBLE');
   after('gramsDry', 'A:3999:3999:3527:2.2046 Lb @1814=3999/c1600/product/manual', '1,000 g at 4c/g ($40) bills 2.2046 Lb (within 50c)');
+  after('mgOnMg', 'A:1000:1000:500:500.0000 MG @2=1000/c1/product/manual', '500 mg of a product stocked by the MG bills as-is (no conversion)');
   after('mlLiquid', 'A:15002:15002:793:0.2642 Gal @56781=15002/c3000/product/manual', '1,000 mL at 15c/mL ($150) bills 0.2642 Gal (within 50c)');
   refusedProbe(CASES.noCost, /JOB_LINE_COST_MISSING: \[PROVER\] JBC grower chem has no cost recorded/);
   console.log('[after] noCost: refused JOB_LINE_COST_MISSING');

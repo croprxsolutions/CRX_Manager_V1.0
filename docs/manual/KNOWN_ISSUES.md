@@ -49,6 +49,42 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 Fix first: see "Top 5" in [MASTER_FIX_PLAN.md](MASTER_FIX_PLAN.md).
 
+## BLOCKER and HIGH at a glance (re-checked 2026-11-21)
+
+There are 23 items: 1 BLOCKER and 22 HIGH.
+- 7 are fixed locally and parked: Sol round 1 on release #2189.
+- 3 are fixed on staging but not live yet.
+- 13 are open or partly open.
+
+Each item's full entry is in its area section below. "Severity unsure" marks a rating that needs more checking. "Check first" means a credible report that reading the code could not settle.
+
+| Area | ID | Sev | Status | Impact | Owner |
+|---|---|---|---|---|---|
+| Guards and release | SOL-1 | BLOCKER | Fixed locally, parked | The production merge gate could accept a local copy, instead of the live database record, as proof that a reviewed database change was applied. | Mason (un-park) |
+| Guards and release | SOL-2 | HIGH | Fixed locally, parked | A message that only mentioned a release, or added a condition or a future time, could count as Mason's go-ahead. | Mason (un-park) |
+| Guards and release | SOL-3 | HIGH | Fixed locally, parked | A go-ahead given for one release could cover a different release PR or another repository. | Mason (un-park) |
+| Guards and release | SOL-4 | HIGH | Fixed locally, parked | A new approval reset the 24-hour clock on older approvals. | Mason (un-park) |
+| Guards and release | SOL-5 | HIGH | Fixed locally, parked | A production merge could skip Taha's 4-hour review window. | Mason (un-park) |
+| Guards and release | SOL-6 | HIGH | Fixed locally, parked | A hotfix merged during a release could leave the release half-applied on the live database. | Mason (un-park) |
+| Guards and release | KI-48 | HIGH (severity unsure) | Open | Some protections around applying live database changes have known gaps; the live migration ledger is the backstop. | Mason decision |
+| Reports | SOL-7 | HIGH | Fixed locally, parked | A broken or absurd order total would distort the commission in profit reports. | Mason (un-park) |
+| Reports | KI-129 (+#2195) | HIGH | Partly open | Month-end close counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. | Agent (unassigned) |
+| Reports | KI-125 | HIGH | Fixed on staging, not live | Profit reports showed a fake large loss because commission was counted on sales billed elsewhere. | Taha (release) |
+| Field applications | #2196 | HIGH | Open | A sales rep may still be able to delete a completed, billable job outside the screens, so it drops out of Unbilled Jobs. | Mason (field-app billing) |
+| Field applications | KI-185 | HIGH | Open | A job sprayed on 80 acres but planned at 100 bills for 100, and deducts stock for 100. | Mason (field-app billing) |
+| Field applications | KI-198 | HIGH | Open | The same shared-field job can bill different totals depending on which billing screen is used. | Mason (field-app billing) |
+| Field applications | #2061 | HIGH (severity unsure) | Check first | A job could be billed twice. | Mason (field-app billing) |
+| Field applications | #2063 | HIGH (severity unsure) | Check first | A job could be billed twice: once on a blend invoice, then again on a split field invoice. | Mason (field-app billing) |
+| Field applications | KI-187 | HIGH | Open | One spray recorded through both a blend ticket and its job could deduct stock twice. Production has no blend tickets yet. | Mason (field-app billing) |
+| Orders and deliveries | KI-199 | HIGH | Fixed on staging, not live | Partial deliveries are overstated, and field drafts can go to the wrong grower. | Mason (field-app billing) |
+| Quotes and bookings | KI-190 | HIGH | Open | Two reps drawing from one booking can order at quantities or prices that neither of them saw. | Taha |
+| Orders and deliveries | KI-167 | HIGH (severity unsure) | Open | The office must fix a line's unit by hand before it can be re-delivered. No amounts change. | Taha |
+| Inventory | KI-168 | HIGH (severity unsure) | Open | That purchase cannot be used as an actual-cost basis. Nothing reads it yet because costing is parked. | Agent (unassigned) |
+| Payments | KI-75 | HIGH (severity unsure) | Check first | Applying a credit memo could clash with another action happening at the same moment. | Taha |
+| Permissions | KI-169 | HIGH | Open | Hiding Invoices or Record Payments from a person still lets them reach those actions in the database. | Taha |
+| Permissions | KI-119 | HIGH | Fixed on staging, not live | A person with Reports hidden can still pull report data. | Agent (release) |
+
+
 ---
 
 ## Quotes and bookings
@@ -198,7 +234,7 @@ conversion, with commission still following the booking split, and a rep naming 
 
 ### KI-199 — Fixed on staging, waiting for the production release
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** On staging, not live · HIGH · Taha (to 2026-12-15) · plan R-08 · #2045, #2142, #2171, #2164.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** On staging, not live · HIGH · Mason (field-app billing) · plan R-08 · #2045, #2142, #2171, #2164.
 
 **HIGH until released · OPEN (fixed on staging, awaiting the production release) · deliveries / field-app billing · recorded 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audits 5 and 6) · release owner: Taha or Mason (release/next)**
 - **A stale partial-delivery form can overstate what shipped.** On production, a partial delivery missing one line's
@@ -788,7 +824,7 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
 | #2072 | LOW | Check first | During a staged apply a draft could briefly carry sales tax. Release-time concern, checkable only by a live post-apply query. | Taha (to 2026-12-15) | W3-53 |
 | #2069 | LOW | Partly open | A line could be priced in a different unit than the quote. The grower-share cost read now locks the product row (FOR SHARE); other reads in the save not checked. | Taha (to 2026-12-15) | W3-22 |
 | #2066 | MED | Check first | A return could be refused after the tax box changes. Detail withheld in issue; not traced. | Taha (to 2026-12-15) | W2-47 |
-| #2105 | MED | Check first | A posting could use a product with no sold unit. The save path already refuses it (FIELD_APP_UNIT_UNCONVERTIBLE); posting itself not checked. | Taha (to 2026-12-15) | W2-48 |
+| #2105 | MED | Check first | A posting could use a product with no sold unit. The save path already refuses it (FIELD_APP_UNIT_UNCONVERTIBLE); posting itself not checked. | Mason (field-app billing) | W2-48 |
 | #2104 | LOW | Partly open | Mostly done for the grower-share cost read; other product reads in the save not confirmed locked. | Taha (to 2026-12-15) | W3-23 |
 
 ---
@@ -1003,7 +1039,7 @@ rows, so summing the CSV reproduces the old wrong total. Fix: match the rows to 
 
 ### KI-117 — A re-saved split-billed field-application invoice takes its product's current EPA number
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Taha (to 2026-12-15) · plan W3-28 · #2183 (related, KI-195).
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Mason (field-app billing) · plan W3-28 · #2183 (related, KI-195).
 
 **LOW · OPEN, parked for Mason · field-app billing / restricted-use records · found 2026-11-09 (review of #1688, carried into its replacement)**
 `_save_field_app_split_invoice_impl` (latest body now `20270129171000` ~L1054, insert ~L2105; re-verified 2026-11-21, which also found the line description falls back to the product's current name ~L2113; separate from KI-157's PDF fallback when the saved EPA is blank) rebuilds invoice lines without
@@ -1016,7 +1052,7 @@ Fix it together with KI-157, where every invoice PDF reads the live product name
 
 ### KI-118 — REG-1 step 2 deferrals: late restricted-use lines and small record gaps
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-29.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Mason (field-app billing) · plan W3-29.
 
 **LOW · OPEN, named deferrals · restricted-use records · found 2026-11-10 (REG-1 step 2 contract and reviews)**
 - A posted line that turns restricted use later (its registration or tick changes to Yes after posting) is listed
@@ -1031,9 +1067,9 @@ Fix it together with KI-157, where every invoice PDF reads the live product name
 
 ### KI-185 — Billing a finished job uses its planned acres, not the acres the applicator recorded
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · HIGH · Taha (to 2026-12-15) · plan W1-03 · #2176.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · HIGH · Mason (field-app billing) · plan W1-03 · #2176.
 
-**HIGH · OPEN (source-confirmed on main and staging; not reproduced end to end) · field-app billing/stock · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 6) · unassigned (Taha's billing area until 2026-12-15) · GitHub #2176**
+**HIGH · OPEN (source-confirmed on main and staging; not reproduced end to end) · field-app billing/stock · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 6) · Mason (field-app billing) · GitHub #2176**
 Job completion stores the actual acres per field on the application record (`_complete_job_replay_impl_20261015`,
 `20261217100000` ~L783-813; with no acres supplied it falls back to the plan) but never updates `job_fields` or `job_chemicals`. Transfer to Invoice
 (`_transfer_job_to_invoice_intent_impl_20260908`, `20261120100000` ~L407-412, ~L476-484) sums the planned
@@ -1049,9 +1085,9 @@ checking each payer's own acres and per-acre fee, the stock ledger in the invent
 
 ### KI-186 — A job-transfer invoice drops carrier water and prints a whole charge as the unit price
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Taha (to 2026-12-15) · plan W2-25 · #2177.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Mason (field-app billing) · plan W2-25 · #2177.
 
-**MED · OPEN (source-confirmed; PDF not rendered) · field-app billing/documents · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audits 6 and 7) · unassigned (Taha's billing area) · GitHub #2177**
+**MED · OPEN (source-confirmed; PDF not rendered) · field-app billing/documents · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audits 6 and 7) · Mason (field-app billing) · GitHub #2177**
 - Neither transfer insert copies `jobs.carrier_rate_gpa` into `invoices.diluent_rate_gpa` (`20261120100000`
   ~L524-541, ~L755-779); the PDF prints a diluent line only when that rate is set (shared renderer `supabase/functions/_shared/pdf/invoicePdf.ts`
   ~L1155; legacy `src/lib/invoicePdf.ts` ~L266). Blend and
@@ -1070,7 +1106,7 @@ total, billed unit and unit price, unchanged charge, both grouping configuration
 
 ### KI-195 — The Chemical Application Report prints today's EPA number, not the job's saved one
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-26 · #2183.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Mason (field-app billing) · plan W2-26 · #2183.
 
 **MED · OPEN (source-confirmed) · restricted-use/regulatory records · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 1) · unassigned · GitHub #2183**
 Sprayed jobs keep their EPA number in `job_product_epa` (`20261204120000` ~L143-152), including an explicit unknown,
@@ -1089,7 +1125,7 @@ unlocked job (which still uses the catalog, `20261204120000` ~L143-153). With KI
 
 ### KI-198 — Shared-field job billing: Transfer and per-line Split Billing price the same work differently
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · HIGH · Taha (to 2026-12-15) · plan W1-04. Rule decided 2026-11-21 (decision 31); build still needed before Transfer or office auto-draft bills shared fields.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · HIGH · Mason (field-app billing) · plan W1-04. Rule decided 2026-11-21 (decision 31); build still needed before Transfer or office auto-draft bills shared fields.
 
 **HIGH if Transfer is used for real billing · OPEN (rule decided 2026-11-21, To-Do decision 31; DECISION_LOG) · field-app billing · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 7)**
 Transfer to Invoice and office auto-draft take the job's saved chemical price and split the dollars by acres
@@ -1103,7 +1139,7 @@ shown. Decided 2026-11-21: Transfer and office auto-draft follow the per-grower 
 
 ### KI-32 — Scale limits: some lists and pickers are still row-capped
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · MED · Agent (unassigned) · plan W2-27 · #1497. Only the Dispatch Board 500-job cap remains; KI-28 (which it waited on) is fixed.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · MED · Mason (field-app billing) · plan W2-27 · #1497. Only the Dispatch Board 500-job cap remains; KI-28 (which it waited on) is fixed.
 
 **MED · PARTIAL · UI/database · Mason (Goal 4)**
 Most lists now page through every row (PRs #959, #1017, #1048). The order, job and purchase-order pickers now search
@@ -1123,7 +1159,7 @@ product 1,001 and beyond (2026-11-08; live only once the function is redeployed,
 
 ### KI-187 — A blend ticket's app record and its linked job's completion can each take the stock
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · HIGH · Agent (unassigned) · plan W1-07 · #2178 (open).
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · HIGH · Mason (field-app billing) · plan W1-07 · #2178 (open).
 
 **HIGH (conditional) · OPEN (source-confirmed on main and staging; not reproduced) · inventory/field app · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 6) · unassigned · GitHub #2178**
 "Create App Record" on a blend ticket deducts stock (`20260713060200` ~L194-198, now wrapped as
@@ -1136,9 +1172,9 @@ job and ticket, reading the stock ledger after each step.
 
 ### KI-177 — Changing a completed job's date can change which quote prices its invoice
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Accepted · MED · Taha (to 2026-12-15) · #2047.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Accepted · MED · Mason (field-app billing) · #2047.
 
-**MED · ACCEPTED · jobs/billing · found 2026-11-21 (Sol round 5, #2047) · Taha (billing)**
+**MED · ACCEPTED · jobs/billing · found 2026-11-21 (Sol round 5, #2047) · Mason (field-app billing)**
 Admins and reps can change a completed, not-yet-invoiced job's `job_date`. Split-invoice pricing picks the quote by that
 date, so moving a June 10 job to June 13 can let a June 12 quote price it. Today's Mass Edit allows the same. Mason kept
 today's rule (2026-11-21). Fix belongs with the field-application invoice rules: lock the date once a job is completed,
@@ -1146,7 +1182,7 @@ or price by the application record's date.
 
 ### KI-178 — Soft-deleting a dispatched job leaves its dispatch rows open
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-30 · #2047.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Mason (field-app billing) · plan W3-30 · #2047.
 
 **LOW · OPEN · jobs · found 2026-11-11 (Sol, #2047) · unassigned**
 Deleting a job hides it but leaves its location dispatch rows marked `dispatched`; restoring the job shows the old
@@ -1154,7 +1190,7 @@ dispatch again. Same as today's direct delete. Fix: close dispatch rows on delet
 
 ### KI-180 — Reassigning a job to an admin or rep leaves the old applicator dispatched
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Accepted · MED · Agent (unassigned) · #2047.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Accepted · MED · Mason (field-app billing) · #2047.
 
 **MED · ACCEPTED · jobs/dispatch · found 2026-11-21 (Sol round 8, #2047) · unassigned (dispatch)**
 Admins and sales reps can be a job's applicator (they sometimes apply, Mason 2026-11-21). The dispatch-sync trigger
@@ -1164,9 +1200,9 @@ the previous applicator's open dispatch rows on any applicator change (dispatch-
 
 ### KI-181 — An invoice saved in the same second as a bulk job edit can let both go through
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Accepted · MED · Taha (to 2026-12-15) · #2047.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Accepted · MED · Mason (field-app billing) · #2047.
 
-**MED · ACCEPTED · jobs/invoices · found 2026-11-21 (Sol round 9, #2047) · Taha (billing, after 2026-12-15)**
+**MED · ACCEPTED · jobs/invoices · found 2026-11-21 (Sol round 9, #2047) · Mason (field-app billing)**
 `edit_jobs` skips billed jobs, but the generic invoice save can link an invoice to a job's blend ticket without taking
 the job's lock. If it commits between the billed check and the job change, a completed job can be reassigned or
 deleted just after it was billed. Needs two people on the same job in the same second. Mason accepted it (2026-11-21).
@@ -1174,9 +1210,9 @@ Fix: have the invoice save lock the linked job (invoice code, Taha's area).
 
 ### KI-183 — Moving a job's date across October 1 leaves last season's label on the job
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Taha (to 2026-12-15) · plan W2-28 · #2047.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Mason (field-app billing) · plan W2-28 · #2047.
 
-**MED · OPEN · jobs/billing · found 2026-11-21 (Sol round 10, #2047) · Taha (billing, after 2026-12-15)**
+**MED · OPEN · jobs/billing · found 2026-11-21 (Sol round 10, #2047) · Mason (field-app billing)**
 Changing a job's date from September 30 to October 1 (or back) keeps the job's stored season. Split billing uses that
 season for the per-acre service rate and the invoice season, so it can use last season's rate. Today's Job Schedule
 screen does the same. Mason accepted it (2026-11-21). Fix: set the season from the new date whenever the job date
@@ -1184,7 +1220,7 @@ changes (in edit_jobs and any other date writer).
 
 ### KI-171 — Grower-share rep coverage check (#2068): accepted limits and test gaps
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Taha (to 2026-12-15) · plan W2-29 · #2068.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Mason (field-app billing) · plan W2-29 · #2068.
 
 **MED · OPEN · field-app invoices · found 2026-11-20/21 (Sol rounds 1-2, Astra, #2068) · unassigned**
 #2068 lets a sales rep save a grower-share invoice only when its per-acre price covers the included chemicals' cost.
@@ -1203,15 +1239,15 @@ single-to-group edit, soft-deleted group members.
 
 | ID | Sev | Status | What goes wrong | Owner | Plan |
 |---|---|---|---|---|---|
-| #2145 | LOW | Open | Two people editing jobs on the same booking at once can have one save refused (retry works); user deactivation can lag a moment. | Agent (unassigned) | W3-31 |
-| #2196 | HIGH | Open | A sales rep may still be able to delete a completed (billable) job through a direct table path, so it could drop out of Unbilled Jobs. | Agent (unassigned) | W1-02 |
-| #2188 | LOW | Open | An old link to a deleted job shows it as Scheduled with Cancel/Start buttons (database still refuses changes). | Agent (unassigned) | W3-32 |
-| #2141 | LOW | Open | A job-made group draft could be cancelled leaving the job pointing at a cancelled invoice. Live has none today. | Taha (to 2026-12-15) | W3-33 |
-| #2064 | MED | On staging, not live | A rep can now save an included grower-share chemical only if the per-acre price covers cost; otherwise an admin is needed. Not on main yet. | Agent (unassigned) | R-12 |
-| #2063 | HIGH | Check first | A job could be billed twice (blend invoice then split field invoice). Live data not checked; code region still in the unchanged file. | Taha (to 2026-12-15) | W1-06 |
-| #2061 | HIGH | Check first | A job could be billed a second time. Issue says live-unchanged; not traced. | Taha (to 2026-12-15) | W1-05 |
-| #1933 | MED | Check first | Some units cannot convert, so an application line may refuse or misprice. | Taha (to 2026-12-15) | W2-50 |
-| #1926 | LOW | Check first | A very small application could bill as zero. | Taha (to 2026-12-15) | W3-54 |
+| #2145 | LOW | Open | Two people editing jobs on the same booking at once can have one save refused (retry works); user deactivation can lag a moment. | Mason (field-app billing) | W3-31 |
+| #2196 | HIGH | Open | A sales rep may still be able to delete a completed (billable) job through a direct table path, so it could drop out of Unbilled Jobs. | Mason (field-app billing) | W1-02 |
+| #2188 | LOW | Open | An old link to a deleted job shows it as Scheduled with Cancel/Start buttons (database still refuses changes). | Mason (field-app billing) | W3-32 |
+| #2141 | LOW | Open | A job-made group draft could be cancelled leaving the job pointing at a cancelled invoice. Live has none today. | Mason (field-app billing) | W3-33 |
+| #2064 | MED | On staging, not live | A rep can now save an included grower-share chemical only if the per-acre price covers cost; otherwise an admin is needed. Not on main yet. | Mason (field-app billing) | R-12 |
+| #2063 | HIGH | Check first | A job could be billed twice (blend invoice then split field invoice). Live data not checked; code region still in the unchanged file. | Mason (field-app billing) | W1-06 |
+| #2061 | HIGH | Check first | A job could be billed a second time. Issue says live-unchanged; not traced. | Mason (field-app billing) | W1-05 |
+| #1933 | MED | Check first | Some units cannot convert, so an application line may refuse or misprice. | Mason (field-app billing) | W2-50 |
+| #1926 | LOW | Check first | A very small application could bill as zero. | Mason (field-app billing) | W3-54 |
 
 ---
 

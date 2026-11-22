@@ -208,8 +208,8 @@ BEGIN
     RETURN NULL;
   END IF;
   RETURN format('%s: the typed price of $%s per %s was billed; the sent quote is $%s per %s.', v_what,
-    to_char(COALESCE(p_typed_cents, 0) / 100.0, 'FM999,999,990.00'), COALESCE(NULLIF(btrim(p_line_unit), ''), p_stock_unit),
-    to_char(v_cents / 100.0, 'FM999,999,990.00'), p_stock_unit);
+    to_char(COALESCE(p_typed_cents, 0) / 100.0, 'FM999,999,999,999,999,990.00'), COALESCE(NULLIF(btrim(p_line_unit), ''), p_stock_unit),
+    to_char(v_cents / 100.0, 'FM999,999,999,999,999,990.00'), p_stock_unit);
 END;
 $fn$;
 ALTER FUNCTION public._job_transfer_typed_price_warning_20270207(uuid, text, text, text, uuid[], uuid, date, bigint, text) OWNER TO postgres;
@@ -1390,7 +1390,7 @@ BEGIN
 
   -- Replace chemicals (now incl. extras: diluent_rate, rei_hours, phi_days,
   -- warehouse, vendor)
-  SELECT jsonb_agg(jsonb_build_object('p', jc.product_id, 'c', jc.price_per_unit_cents))
+  SELECT jsonb_agg(jsonb_build_object('p', jc.product_id, 'c', jc.price_per_unit_cents, 's', jc.sort_order))
     INTO v_typed_before FROM job_chemicals jc WHERE jc.job_id = v_job_id AND jc.price_typed;
   DELETE FROM job_chemicals WHERE job_id = v_job_id;
   FOR v_chem IN SELECT * FROM jsonb_array_elements(p_chemicals) LOOP
@@ -1422,11 +1422,12 @@ BEGIN
       -- to NULL). The table CHECK job_chemicals_driver_chk is the second line of defence.
       NULLIF(v_chem->>'driver', ''),
       -- Mason, 2026-11-21: staff typed this price by hand; Create Invoice keeps it over a sent quote and warns.
-      -- A save that omits price_typed (an older open screen) keeps the mark on a line whose product and price are
+      -- A save that omits price_typed (an older open screen) keeps the mark on a line whose product, price and position are
       -- unchanged, so it can't silently turn a typed price back into a quote price (Luna round 1).
       CASE WHEN v_chem ? 'price_typed' THEN COALESCE((v_chem->>'price_typed')::boolean, false)
            ELSE COALESCE(v_typed_before @> jsonb_build_array(jsonb_build_object(
-                  'p', (v_chem->>'product_id')::uuid, 'c', COALESCE((v_chem->>'price_per_unit_cents')::bigint, 0))), false) END
+                  'p', (v_chem->>'product_id')::uuid, 'c', COALESCE((v_chem->>'price_per_unit_cents')::bigint, 0),
+                  's', COALESCE((v_chem->>'sort_order')::integer, 0))), false) END
     );
   END LOOP;
 

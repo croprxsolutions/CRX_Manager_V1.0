@@ -95,7 +95,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-05 | KI-152 | LOW | Open | No database rule stops a completion from reopening a cancelled order, but the app cannot reach it today. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-50 | #1960 | LOW | Check first | An old retried save may not get section ids back. | GitHub issue | #1960 | Taha (to 2026-12-15) |
 | D-01 | #2065 | MED | Mason decision | Closing short releases holds and purchasing demand; needs Mason's rule (booking's rep or admin only). Guard currently blocks reps only when a live job exists. | GitHub issue | #2065 | Mason decision |
-| W3-56 | KI-203 | LOW | Open | Quick Delivery shows a dash instead of the sales unit (e.g. Gal); saved records use the right unit. Fix in review: PR #2212. | KNOWN_ISSUES (2026-11-22 staging rehearsal) | #2208 | Agent (PR #2212) |
+| W3-56 | KI-203 | LOW | Open | Quick Delivery shows a dash instead of the sales unit (e.g. Gal); saved records use the right unit. Fix in review: PR #2213. | KNOWN_ISSUES (2026-11-22 staging rehearsal) | #2208 | Agent (PR #2213) |
 
 ### Inventory, purchasing and products (19)
 
@@ -211,7 +211,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | Order | ID | Sev | Status | What goes wrong (plain English) | Source | GitHub | Owner |
 |---|---|---|---|---|---|---|---|
 | W2-34 | KI-77 | MED | Open | Remaining: list paging can miss concurrent changes; CRM gaps (no pre-quote pipeline, no duplicate detection in bulk import, no bulk rep import, no email logging); offline-recovery gaps; delivery-photo ownership edge cases. Fixed: customer-form duplicate warning; delivery-photo uploader check (`20261222100000`) | KNOWN_ISSUES | #381, #1663, #1698 | Agent (unassigned) |
-| W2-35 | #2197 | MED | Open | Staff are told to reactivate a customer before new orders, but the screen offers no way, so it must be done outside the app. | Sol round 1, release #2189 (GitHub) | #2197 | Agent (unassigned) |
+| W2-35 | #2197 | MED | Fixed (staging PR) | Staff are told to reactivate a customer before new orders, but the screen offers no way, so it must be done outside the app. | Sol round 1, release #2189 (GitHub) | #2197 | Agent (Lane D) |
 | W2-36 | #2089 | MED | Open | A customer could be deactivated while an invoice posts, leaving a balance on an inactive customer. | GitHub issue | #2089 | Taha (to 2026-12-15) |
 | W3-38 | #2016 | LOW | Open | "1,200" in an unquoted CSV can save as 1 corn acre and 200 soybean acres. | GitHub issue | #2016 | Agent (unassigned) |
 | D-03 | KI-155 | MED | Mason decision | Handover from the old billing system lacks one written procedure, so old balances/credits could be mishandled. | KNOWN_ISSUES |  | Mason decision |

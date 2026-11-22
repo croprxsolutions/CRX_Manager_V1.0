@@ -340,7 +340,7 @@ reopens it.
 
 ### KI-203 — Quick Delivery shows a dash for the unit of a product stocked in Gal
 
-> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Fix in review: PR #2212 (shows the stock unit; Luna and Sol clean; click-tested on staging data) · LOW · plan W3-56. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
+> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Fix in review: PR #2213 (shows the stock unit; screen test fails without it) · LOW · plan W3-56. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
 
 **LOW (clarity) · OPEN (reproduced on staging; source-confirmed) · deliveries · found 2026-11-22 (rehearsal CRXN-03) · unassigned · GitHub #2208**
 The unit column shows the product's optional package size or a dash (`QuickDeliveryModal.tsx` ~L633), not the unit
@@ -1554,7 +1554,7 @@ Close each gap when a rehearsal case proves it or it moves to its own KI. To-Do 
 
 | ID | Sev | Status | What goes wrong | Owner | Plan |
 |---|---|---|---|---|---|
-| #2197 | MED | Open | Staff are told to reactivate a customer before new orders, but the screen offers no way, so it must be done outside the app. | Agent (unassigned) | W2-35 |
+| #2197 | MED | FIXED-ON-STAGING | Staff are told to reactivate a customer before new orders, but the screen offers no way, so it must be done outside the app. Fixed: an admin or sales rep now sees a Reactivate button (with a confirm) on an inactive customer's page. | Agent (Lane D) | W2-35 |
 | #2089 | MED | Open | A customer could be deactivated while an invoice posts, leaving a balance on an inactive customer. | Taha (to 2026-12-15) | W2-36 |
 | #2016 | LOW | Open | "1,200" in an unquoted CSV can save as 1 corn acre and 200 soybean acres. | Agent (unassigned) | W3-38 |
 

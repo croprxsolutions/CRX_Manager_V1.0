@@ -324,7 +324,8 @@ const split = (job, fieldsJob, key, uid, set = 'NULL') => `SELECT public.save_fi
     ${fieldsOf(fieldsJob)}, ${LINES}, '${uid}', NULL, '${key}')::text;`;
 const blendInvoice = (t, key) => `SELECT public.create_invoice_from_blend_ticket(${ticketId(t)}, '${ADMIN}', '${key}')->'invoice_ids'->>0;`;
 const voidInv = (idExpr, key) => `SELECT public.void_invoice(${idExpr}, '[PROVER] A2 release', '${key}');\nSELECT 'voided';`;
-const BLEND_REFUSAL = (t) => new RegExp(`BLEND_TICKET_ALREADY_BILLED: blend ticket BT-PRV-A2-${t} for this job is already billed on invoice \\S+; billing the job here too would double-bill the customer`);
+const BLEND_REFUSAL = (t, n = 1, shown = '[^)]*') => new RegExp(`BLEND_TICKET_ALREADY_BILLED: blend ticket BT-PRV-A2-${t} for this job is already billed on ${n} live invoice\\(s\\) \\(${shown}\\); billing the job here too would double-bill the customer`);
+const blendInvoiceNumber = (t) => scalar(`SELECT string_agg(invoice_number, ', ' ORDER BY invoice_number) FROM invoices WHERE blend_ticket_id = ${ticketId(t)};`);
 // Everything a split re-save writes for a job, as one fingerprint (rows, not counts).
 const snapshot = (n) => scalar(`WITH s AS (SELECT * FROM field_app_billing_sets WHERE source_job_id = ${jobId(n)}),
     inv AS (SELECT * FROM invoices WHERE job_id = ${jobId(n)} OR field_app_billing_set_id IN (SELECT id FROM s))
@@ -404,9 +405,13 @@ async function main() {
          public.current_season(), 100, 'manual', ${jobId('L4')}, now());
        INSERT INTO invoices (invoice_number, customer_id, invoice_type, status, invoice_date, created_by, total_amount_cents, total_cost_cents, blend_ticket_id, season)
        VALUES ('INV-PRV-A2-L4', (SELECT id FROM customers WHERE farm_name = '[PROVER] A2 Farm'), 'field_application', 'unposted', CURRENT_DATE, '${ADMIN}',
-         150000, 50000, ${ticketId('L4')}, public.current_season());`);
+         150000, 50000, ${ticketId('L4')}, public.current_season());
+       -- A second live invoice on M3a, made by REP2 (stands in for a two-payer blend bill: one ticket, two invoices).
+       INSERT INTO invoices (invoice_number, customer_id, invoice_type, status, invoice_date, created_by, total_amount_cents, total_cost_cents, blend_ticket_id, season)
+       VALUES ('INV-PRV-A2-M3R', (SELECT id FROM customers WHERE farm_name = '[PROVER] A2 Farm Two'), 'field_application', 'unposted', CURRENT_DATE, '${REP2}',
+         75000, 25000, ${ticketId('M3a')}, public.current_season());`);
   assert.equal(scalar(`SELECT count(*) FROM invoices i JOIN blend_tickets bt ON bt.id = i.blend_ticket_id
-    WHERE bt.ticket_number LIKE 'BT-PRV-A2-%' AND i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled');`), '3', 'fixture: B1, M3a and L4 carry a live blend invoice');
+    WHERE bt.ticket_number LIKE 'BT-PRV-A2-%' AND i.deleted_at IS NULL AND i.status NOT IN ('voided', 'cancelled');`), '4', 'fixture: B1, M3a (two) and L4 carry live blend invoices');
 
   // 1. BEFORE: the double bill is accepted.
   assert.match(ok(split('B1', 'B1', 'a2-before', ADMIN), ADMIN), /invoice_ids/, 'before the candidate the split save bills B1 again');
@@ -429,19 +434,26 @@ async function main() {
   console.log('[case] the candidate applies; a second apply stops at its preflight');
 
   // 3. AFTER. A committed attempt, then a separate connection checks nothing was left behind.
-  refused(split('B1', 'B1', 'a2-after-admin', ADMIN), BLEND_REFUSAL('B1'), ADMIN, { commit: true });
-  refused(split('B1', 'B1', 'a2-after-rep2', REP2), BLEND_REFUSAL('B1'), REP2, { commit: true });
+  const b1Invoice = blendInvoiceNumber('B1');
+  assert.ok(b1Invoice, 'fixture: B1 blend invoice number');
+  refused(split('B1', 'B1', 'a2-after-admin', ADMIN), BLEND_REFUSAL('B1', 1, b1Invoice), ADMIN, { commit: true });
+  // REP2 neither made nor is salesman on the admin's blend invoice, so invoices_select hides it: counted, not named.
+  const rep2Out = refused(split('B1', 'B1', 'a2-after-rep2', REP2), BLEND_REFUSAL('B1', 1, '1 you cannot open'), REP2, { commit: true });
+  assert.ok(!rep2Out.includes(b1Invoice), 'a rep never sees the number of an invoice they cannot read');
   assert.equal(scalar(`SELECT (SELECT count(*) FROM field_app_billing_sets WHERE source_job_id = ${jobId('B1')})
     + (SELECT count(*) FROM invoices WHERE job_id = ${jobId('B1')})
     + (SELECT count(*) FROM idempotency_keys WHERE idempotency_key IN ('a2-after-admin', 'a2-after-rep2'));`), '0', 'a refused save leaves no set, invoice or receipt');
   assert.equal(scalar(`SELECT status || ':' || (invoice_id IS NULL) FROM jobs WHERE id = ${jobId('B1')};`), 'completed:true', 'the job is untouched');
-  console.log('[case] AFTER: refused BLEND_TICKET_ALREADY_BILLED (admin, and a second rep who did not make the blend invoice); no set, invoice, receipt or job change');
+  console.log('[case] AFTER: refused BLEND_TICKET_ALREADY_BILLED (admin sees the invoice number; a rep who cannot read it sees only a count); no set, invoice, receipt or job change');
 
   assert.match(ok(split('U2', 'U2', 'a2-u2', ADMIN), ADMIN), /invoice_ids/, 'a job whose ticket is unbilled stays billable');
-  refused(split('M3', 'M3', 'a2-m3', ADMIN), BLEND_REFUSAL('M3a'), ADMIN);
+  // Two live invoices on one ticket: both counted; the admin sees both numbers, REP2 only its own.
+  const m3Admin = blendInvoiceNumber('M3a');
+  refused(split('M3', 'M3', 'a2-m3', ADMIN), BLEND_REFUSAL('M3a', 2, m3Admin), ADMIN);
+  refused(split('M3', 'M3', 'a2-m3-rep2', REP2), BLEND_REFUSAL('M3a', 2, 'INV-PRV-A2-M3R; 1 you cannot open'), REP2);
   assert.match(ok(split(null, 'U2', 'a2-jobless', ADMIN), ADMIN), /invoice_ids/, 'a jobless split is unaffected');
   refused(split('L4', 'L4', 'a2-l4', ADMIN), BLEND_REFUSAL('L4'), ADMIN);
-  console.log('[case] AFTER: unbilled ticket -> billable; one billed of two tickets -> refused; jobless split -> unaffected; live invoice on a soft-deleted ticket -> refused');
+  console.log('[case] AFTER: unbilled ticket -> billable; one billed of two tickets (with two live invoices, all counted) -> refused; jobless split -> unaffected; live invoice on a soft-deleted ticket -> refused');
 
   refused(split('I10', 'I10', 'a2-rr', ADMIN), /SPLIT_INVOICE_NEEDS_READ_COMMITTED/, ADMIN, { iso: 'REPEATABLE READ' });
   refused(split('I10', 'I10', 'a2-ser', ADMIN), /SPLIT_INVOICE_NEEDS_READ_COMMITTED/, ADMIN, { iso: 'SERIALIZABLE' });

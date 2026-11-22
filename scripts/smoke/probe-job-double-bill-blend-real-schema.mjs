@@ -341,6 +341,9 @@ async function main() {
   console.log(`[case] C3 #2063, split field invoice for a job a live blend invoice already billed: ${results.C3}`);
   console.log(`[case] C4 sales rep soft-deletes a billed blend ticket by direct update: ${results.C4}`);
   assert.match(results.C1, /BLEND_TICKET_ALREADY_BILLED/, 'control: the existing guard must refuse C1, else the fixture is wrong');
+  assert.match(results.C3, /^ACCEPTED \(\[/, 'C3: without the #2063 fix the split save bills the job again');
+  // A zero-row update (row security filtering the ticket out) would print ACCEPTED with no 'true' row, so require the refusal.
+  assert.match(results.C4, /^REFUSED/, 'C4: a rep cannot soft-delete a billed blend ticket');
   console.log('A2_PROBE_DONE');
 }
 

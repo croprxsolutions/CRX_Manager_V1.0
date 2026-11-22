@@ -8,9 +8,10 @@
 --
 -- WHAT: a split save that names a source job
 --   1. is refused (BLEND_TICKET_ALREADY_BILLED) when any invoice that is not deleted, voided or cancelled belongs to any
---      blend ticket of that job (deleted ticket or not), read under the existing job lock; the message names the ticket
---      and invoice and what to do. The whole save rolls back.
---   2. is refused unless it runs READ COMMITTED (SPLIT_INVOICE_NEEDS_READ_COMMITTED), as the blend invoice already is.
+--      blend ticket of that job (deleted ticket or not), read under the existing job lock; the message names the ticket,
+--      the invoices the caller may already read (others are only counted) and what to do. The whole save rolls back.
+--   2. is refused under REPEATABLE READ or SERIALIZABLE (SPLIT_INVOICE_NEEDS_READ_COMMITTED), as the blend invoice is;
+--      PostgreSQL runs READ UNCOMMITTED as READ COMMITTED, so both pass.
 --   A jobless split and an idempotent replay (answered by the wrapper) are unchanged. Voiding the blend invoice
 --   releases the job. Contract: docs/plans/2026-11-22-job-double-bill-blend-CONTRACT.md.
 --
@@ -20,7 +21,7 @@
 -- ROLLBACK (its own reviewed migration): re-emit the body from
 --   20270129171000_field_app_refuses_product_without_sold_unit.sql (md5 d72ff5547170c6a4a90bce083b6d7084).
 --
--- ORDERING: after 20270129171000. Not re-runnable (preflight refuses). Postflight pins the new body md5 7b1b1b9c0393edbee88cc2ced28d1981.
+-- ORDERING: after 20270129171000. Not re-runnable (preflight refuses). Postflight pins the new body md5 02fbe575a0e761a1ddfecb5c8af617a6.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -28,8 +29,10 @@ DO $preflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)'))
-     IS DISTINCT FROM 'd72ff5547170c6a4a90bce083b6d7084' THEN
-    RAISE EXCEPTION 'SPLIT_BLEND_BILLED_PREFLIGHT: _save_field_app_split_invoice_impl is not the reviewed body (missing, drifted or already replaced)';
+     IS DISTINCT FROM 'd72ff5547170c6a4a90bce083b6d7084'
+     OR (SELECT p.proconfig FROM pg_proc p WHERE p.oid = to_regprocedure('public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)'))
+     IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[] THEN
+    RAISE EXCEPTION 'SPLIT_BLEND_BILLED_PREFLIGHT: _save_field_app_split_invoice_impl is not the reviewed body and settings (missing, drifted or already replaced)';
   END IF;
 END;
 $preflight$;
@@ -140,8 +143,10 @@ DECLARE
   v_line_member_count  int;
   v_line_src_qty       numeric;
   v_result             jsonb;
-  v_blend_ticket_number  text;    -- #2063: the blend ticket whose live invoice already billed the source job
-  v_blend_invoice_number text;
+  v_blend_ticket_number  text;    -- #2063: the blend ticket(s) whose live invoice(s) already billed the source job
+  v_blend_invoice_number text;    -- the live blend invoice numbers this caller may read
+  v_blend_hidden_count   integer; -- live blend invoices this caller may not read (counted, never named)
+  v_blend_invoice_count  integer;
 BEGIN
   -- ---- GUARDS (defense-in-depth; the wrapper already checked these) -----------
   IF v_actor IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
@@ -452,17 +457,23 @@ BEGIN
     END IF;
     -- #2063: a live invoice on any blend ticket of this job (soft-deleted ticket or not) already billed this spray
     -- pass. Same live rule create_invoice_from_blend_ticket uses for the other direction. Read under the job lock.
-    SELECT bt.ticket_number, i.invoice_number INTO v_blend_ticket_number, v_blend_invoice_number
+    -- The caller sees only invoice numbers invoices_select already lets them read (admin, creator or salesman).
+    SELECT count(*),
+           string_agg(DISTINCT bt.ticket_number, ', '),
+           string_agg(i.invoice_number, ', ' ORDER BY i.invoice_number)
+             FILTER (WHERE (is_admin() OR i.created_by = p_performed_by OR i.salesman_id = p_performed_by) IS TRUE),
+           count(*) FILTER (WHERE (is_admin() OR i.created_by = p_performed_by OR i.salesman_id = p_performed_by) IS NOT TRUE)
+      INTO v_blend_invoice_count, v_blend_ticket_number, v_blend_invoice_number, v_blend_hidden_count
       FROM blend_tickets bt
       JOIN invoices i ON i.blend_ticket_id = bt.id
      WHERE bt.job_id = p_source_job_id
        AND COALESCE(i.status, '') NOT IN ('voided', 'cancelled')
-       AND i.deleted_at IS NULL
-     ORDER BY i.invoice_number, i.id
-     LIMIT 1;
-    IF FOUND THEN
-      RAISE EXCEPTION 'BLEND_TICKET_ALREADY_BILLED: blend ticket % for this job is already billed on invoice %; billing the job here too would double-bill the customer. Void that invoice first if you meant to bill the job here, or ask an admin if it is not yours.',
-        COALESCE(v_blend_ticket_number, '(no number)'), COALESCE(v_blend_invoice_number, '(no number)')
+       AND i.deleted_at IS NULL;
+    IF v_blend_invoice_count > 0 THEN
+      RAISE EXCEPTION 'BLEND_TICKET_ALREADY_BILLED: blend ticket % for this job is already billed on % live invoice(s) (%); billing the job here too would double-bill the customer. Void every one of them first if you meant to bill the job here, or ask an admin if they are not yours.',
+        COALESCE(v_blend_ticket_number, '(no number)'), v_blend_invoice_count,
+        concat_ws('; ', v_blend_invoice_number,
+          CASE WHEN v_blend_hidden_count > 0 THEN v_blend_hidden_count || ' you cannot open' END)
         USING ERRCODE = 'P0001';
     END IF;
     -- Must be completed (or already this set's) to bill — mirrors transfer_job_to_invoice.
@@ -1410,7 +1421,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)')
-                    AND md5(replace(p.prosrc, chr(13), '')) = '7b1b1b9c0393edbee88cc2ced28d1981'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '02fbe575a0e761a1ddfecb5c8af617a6'
                     AND p.proowner = 'postgres'::regrole AND p.prosecdef
                     AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]) THEN
     RAISE EXCEPTION 'SPLIT_BLEND_BILLED_POSTFLIGHT: body, owner, definer mode or search_path wrong';

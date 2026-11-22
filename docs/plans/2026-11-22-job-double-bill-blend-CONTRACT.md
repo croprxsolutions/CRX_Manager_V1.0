@@ -42,9 +42,12 @@ Migration: `supabase/migrations/20270220100000_split_save_refuses_blend_billed_j
 - A split save that names a source job is refused with `BLEND_TICKET_ALREADY_BILLED` when any invoice that is not
   deleted and not voided/cancelled belongs to any blend ticket of that job, **deleted ticket or not** — the same
   "live bill" rule `create_invoice_from_blend_ticket` already uses for the other direction. The message names the
-  ticket and invoice numbers and says how to resolve it. The whole save rolls back (new set row, re-save clearing).
-- A split save that names a source job is refused unless it runs READ COMMITTED (`SPLIT_INVOICE_NEEDS_READ_COMMITTED`),
-  as blend already is. Replays (F8) and jobless splits are unaffected.
+  ticket, counts every live invoice, and names only the invoice numbers the caller may already read under
+  `invoices_select` (admin, creator or salesman; Sol round 1, so a rep never learns a hidden invoice's number), and
+  says to void every one first or ask an admin. The whole save rolls back (new set row, re-save clearing).
+- A split save that names a source job is refused under REPEATABLE READ or SERIALIZABLE
+  (`SPLIT_INVOICE_NEEDS_READ_COMMITTED`), as blend already is; PostgreSQL runs READ UNCOMMITTED as READ COMMITTED, so
+  both pass. Replays (F8) and jobless splits are unaffected.
 - Voiding (or cancelling/deleting) the blend invoice releases the job to the split save again.
 - Nothing else changes: same signature, owner, grants, definer mode, search_path; no screen change (the split editor
   shows RPC refusals through `sanitizeError`; proof case 9).

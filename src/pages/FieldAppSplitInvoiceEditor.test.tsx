@@ -64,7 +64,7 @@ vi.mock('../lib/productParents', () => {
 });
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: mockSentryCaptureException } }));
 
-import FieldAppSplitInvoiceEditor from './FieldAppSplitInvoiceEditor';
+import FieldAppSplitInvoiceEditor, { splitBackendError } from './FieldAppSplitInvoiceEditor';
 
 // Fields and products are search pickers (Goal 4, M38): type into one, then click a result.
 async function searchAndPick(box: string, text: string, option: RegExp) {
@@ -407,5 +407,15 @@ describe('FieldAppSplitInvoiceEditor field search picker', () => {
     fireEvent.focus(box);
     fireEvent.change(box, { target: { value: 'Nor' } });
     await waitFor(() => expect(fieldCalls.not).toContainEqual(['id', 'in', expect.stringContaining('field-1')]));
+  });
+});
+
+describe('splitBackendError', () => {
+  it('keeps a named refusal whose quoted ticket number contains "does not exist"', () => {
+    const msg = 'BLEND_TICKET_ALREADY_BILLED: blend ticket BT does not exist 7 for this job is already billed on 1 live invoice(s) (1 you cannot open); billing the job here too would double-bill the customer.';
+    expect(splitBackendError(new Error(msg))).toContain('BLEND_TICKET_ALREADY_BILLED');
+  });
+  it('still reports a missing backend function', () => {
+    expect(splitBackendError(new Error('function public.save_field_app_split_invoice does not exist'))).toBe('Split billing backend not enabled yet.');
   });
 });

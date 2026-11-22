@@ -122,7 +122,8 @@ The [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) (sweep 3 #9) re-confirm
 logged here, not as a new KI.
 The 2026-11-02 cost audit noted more functions in this same ownership and role-check area (not cost); the list is in
 Mason's private notes until the scoping work is built. It also noted that an admin's automatic draft invoice for a job
-with a below-cost line always fails, so that job is billed by hand.
+with a below-cost line always fails, so that job is billed by hand; candidate 20270207125000 (not yet live) judges a job line on
+its whole quantity, so only a line truly below cost stops.
 
 ### KI-04 — Connected tools with no permission rule run without a prompt
 **LOW · FIXED 2026-11-02 (residual accepted) · tooling-guards/security**

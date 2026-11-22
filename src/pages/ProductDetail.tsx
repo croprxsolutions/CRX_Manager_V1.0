@@ -427,8 +427,10 @@ export default function ProductDetail() {
     const { data, error } = await supabase.from('products').select(PRODUCT_COLUMNS).eq('id', id!).maybeSingle();
     if (error) throw error;
     return { product: await withAdminCost('products', data as Product | null, isAdmin) };
-  }, { report: {} });
+  }, { report: { tags: { read: 'product_detail_product' } } });
   const reloadProduct = productRead.reload;
+  // The Vendors section may call back with a callback from an earlier render: read the current state here.
+  const productReadRef = useLatestRef(productRead);
   // A failed refresh keeps the form on screen but locks editing until a fresh read lands.
   const productStale = productRead.status === 'loaded' && productRead.stale;
   const reloadRequired = pricingReloadRequired || productStale;
@@ -449,14 +451,14 @@ export default function ProductDetail() {
     if (error) throw error;
     if (!Array.isArray(data)) throw new Error('cost history read returned no list');
     return data as CostHistory[];
-  }, { report: {} });
+  }, { report: { tags: { read: 'product_detail_cost_history' } } });
   const reloadCostHistory = costHistoryRead.reload;
   const costHistory = costHistoryRead.status === 'loaded' ? costHistoryRead.data : NO_ROWS;
   const costBasisRead = useLoad<ProductCostBasisWorkspace>(isAdmin && !isNew && id ? `cost-basis:${id}` : null, async () => {
     const workspace = await getProductCostBasisWorkspace(id!);
     if (workspace.product.id !== id) throw new Error('Cost-basis workspace returned the wrong Product.');
     return workspace;
-  }, { report: {} });
+  }, { report: { tags: { read: 'product_detail_cost_basis' } } });
   const reloadCostBasis = costBasisRead.reload;
   const costBasisWorkspace = costBasisRead.status === 'loaded' ? costBasisRead.data : null;
   const costBasisLoading = costBasisRead.status === 'loading';
@@ -2073,7 +2075,8 @@ export default function ProductDetail() {
                   setProduct((p) => ({ ...p, vendor: vendorName }));
                   setPersistedProduct((p) => (p ? { ...p, vendor: vendorName } : p));
                   // A product read already running may predate this vendor; read again so it cannot install over it.
-                  if (productRead.status === 'loaded' && productRead.refreshing) void reloadProduct();
+                  const current = productReadRef.current;
+                  if (current.status === 'loaded' && current.refreshing) void current.reload();
                 }}
                 onPreferredUnknown={setVendorPreferredUnknown}
                 preferredUnknown={vendorPreferredUnknown}

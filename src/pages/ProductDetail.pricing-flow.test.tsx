@@ -1175,13 +1175,15 @@ describe('ProductDetail governed pricing flow', () => {
     render(<ProductDetail />);
     const quotingNotes = await screen.findByLabelText('Quoting Notes');
     await waitFor(() => expect(vendorSection.props).not.toBeNull());
+    // The vendor action keeps the callback from when it was clicked, before the product refresh began (Sol r2).
+    const heldCallback = vendorSection.props!.onPreferredChanged;
     let answerOld!: (value: { data: typeof product; error: null }) => void;
     productLoadResults.push(new Promise((resolve) => { answerOld = resolve; }) as unknown as { data: typeof product; error: null });
     productLoadResults.push({ data: { ...product, vendor: 'New Vendor' }, error: null });
     fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     await waitFor(() => expect(productLoadResults).toHaveLength(1)); // the refresh after the save is running
-    act(() => vendorSection.props!.onPreferredChanged('New Vendor'));
+    act(() => heldCallback('New Vendor'));
     await waitFor(() => expect(productLoadResults).toHaveLength(0)); // read again
     await act(async () => { answerOld({ data: { ...product, vendor: 'Old Vendor' }, error: null }); });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled());

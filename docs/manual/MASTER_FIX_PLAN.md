@@ -246,7 +246,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W2-43 | #2191 | MED | Open | A squash of the main-into-staging merge would pass the gate and then break the release ancestry check, stalling a release. | Sol round 1, release #2189 (GitHub) | #2191 | Agent (unassigned) |
 | W2-44 | #2192 | MED | Open | A hidden "Fixes #n" in a PR description can close an issue nobody meant to close. Taha merges .github changes. | Sol round 1, release #2189 (GitHub) | #2192 | Agent (unassigned) |
 | W3-39 | KI-52 | LOW | Partly open | Flaky page tests, a few unwritten safety sweeps and small leftovers (e.g. Escape in the bulk-import prompt). | KNOWN_ISSUES | #1062, #1143, #1110, #350 (closed) | Agent (unassigned) |
-| W3-40 | KI-84 | LOW | Open | A safety test script is broken; the protection it proves is still live. No customer impact. | KNOWN_ISSUES | #1110 | Agent (unassigned) |
+| W3-40 | KI-84 | LOW | Resolved (PR pending) | The split-billing backfill safety test passes on today's schema again, and still fails first on its CRX-LIFE-001 check when that protection is removed. | KNOWN_ISSUES | #1110 | Agent (unassigned) |
 | W3-41 | KI-96 | LOW | Partly open | Dead code and copy-pasted helpers make every change slower and riskier; no behavior bug. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-42 | KI-107 | LOW | Open | Agents get blocked on harmless cleanup commands; workaround is to run the delete alone. | KNOWN_ISSUES | #1536 (closed) | Agent (unassigned) |
 | W3-43 | KI-113 | LOW | Resolved (PR pending) | The private-customer-files proof runs again on today's schema and function (30/30), and still fails when a browser read policy is re-added. | KNOWN_ISSUES | #1698, #1663, #635 | Agent (unassigned) |

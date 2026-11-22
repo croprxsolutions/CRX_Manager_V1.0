@@ -81,18 +81,13 @@ check("GitHub failures and mismatched comparisons need Sol", () => {
 check("main and staging are the merge bases every gate covers", () => {
   assert.deepEqual([...GATED_MERGE_BASES], ["main", "staging"]);
 });
-check("an agent never merges into main without Mason's release pass, whatever the branch", () => {
+check("an agent never merges into main, whatever the branch", () => {
   for (const head of ["release/next", "hotfix/cents", "claude/x", "taha/x", "main", "", undefined]) {
-    assert.match(agentMergeProblem("main", head), /never merges into main.*Taha or Mason.*ship the release/, String(head));
+    assert.match(agentMergeProblem("main", head), /never merges into main.*Taha or Mason/, String(head));
   }
 });
-check("an agent never merges the back-merge (main into staging) without the pass", () => {
+check("an agent never merges the back-merge (main into staging)", () => {
   assert.match(agentMergeProblem("staging", "main"), /back-merge.*Taha's or Mason's/);
-});
-check("Mason's release pass lets the agent merge into main and the back-merge, nothing else", () => {
-  assert.equal(agentMergeProblem("main", "release/next", { releasePass: true }), null);
-  assert.equal(agentMergeProblem("staging", "main", { releasePass: true }), null);
-  assert.match(agentMergeProblem("staging", "release/next", { releasePass: true }), /go into main, not staging/);
 });
 check("feature work into staging is the agent's, migrations included", () => {
   for (const head of ["claude/x", "codex/y", "ship/z", "taha/x", "release/nextish", "hotfixes"]) assert.equal(agentMergeProblem("staging", head), null, head);

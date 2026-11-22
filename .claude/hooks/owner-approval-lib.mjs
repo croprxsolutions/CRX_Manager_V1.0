@@ -53,7 +53,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { destructiveMigrationCheck } from "./live-testdata-lib.mjs";
 import { accessChangeCheck, dataRewriteCheck } from "./migration-access-lib.mjs";
-import { OWNER_SOL_ACCEPT_PURPOSE, OWNER_SOL_ACCEPT_VIA, reasonProblem, solAcceptFileName } from "./sol-accept-lib.mjs";
+import {
+  OWNER_SOL_ACCEPT_PURPOSE, OWNER_SOL_ACCEPT_VIA, OWNER_SOL_SKIP_PURPOSE, OWNER_SOL_SKIP_VIA, reasonProblem, skipSelection, solAcceptFileName,
+  solSkipFileName, solSkipSummary,
+} from "./sol-accept-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -284,12 +287,12 @@ const isMasonMessage = (e) => e?.type === "user" && !e.isMeta && !e.isSidechain 
 const DAMAGED = Symbol("damaged transcript line");
 
 /** The transcript's size and the whole lines in its last `maxBytes` (a damaged line is DAMAGED). */
-function readTranscriptTail(transcriptPath, maxBytes) {
+function readTranscriptTail(transcriptPath, maxBytes, end = Infinity) {
   const fd = openSync(transcriptPath, "r");
   let raw;
   let size;
   try {
-    size = fstatSync(fd).size;
+    size = Math.min(fstatSync(fd).size, end); // `end`: read the transcript as it was at that byte
     // Read from one byte before the window, so a window that starts exactly at a
     // line keeps that line: everything through the first newline is dropped, and
     // that newline is the byte before the line (Luna LOW, round 4).
@@ -328,9 +331,9 @@ function readTranscriptTail(transcriptPath, maxBytes) {
  * read, when a damaged line lies in what is scanned, or when the start of that
  * message cannot be found in the part read (Luna rounds 1-2).
  */
-export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes = 32 * 1024 * 1024 } = {}) {
+export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes = 32 * 1024 * 1024, end = Infinity } = {}) {
   if (typeof transcriptPath !== "string" || !transcriptPath) throw new Error("the message carried no transcript");
-  const { entries } = readTranscriptTail(transcriptPath, maxBytes);
+  const { entries } = readTranscriptTail(transcriptPath, maxBytes, end);
   const said = [];
   let messageId;
   let sawAgent = false;
@@ -477,8 +480,18 @@ export function assertReplyAlone(mark, { maxBytes = 8 * 1024 * 1024 } = {}) {
 export function requestShownIn(text, p) {
   if (!/^\d{6}$/.test(String(p?.code ?? ""))) return false;
   const words = (lines) => lines.filter((l) => !/^\s*```[\w-]*\s*$/.test(l)).join(" ").replace(/\s+/g, " ").trim();
-  const summary = words(ownerApprovalSummary(p));
+  const summary = words(p.purpose === OWNER_SOL_SKIP_PURPOSE ? solSkipSummary(p) : ownerApprovalSummary(p));
   return summary !== "" && words(String(text ?? "").split(/\r?\n/)) === summary;
+}
+
+/**
+ * At the proof: the agent's last message before Mason's skip reply (the transcript as it
+ * was when he replied, `mark.from`) was this request's summary, so a `skip` he sent for
+ * another request never counts for this one (Sol HIGH, gate round 2, 2026-11-21). Throws.
+ */
+export function assertSkipShown(mark, p) {
+  const shown = lastAgentMessageText(mark?.transcript, mark?.words, { end: mark?.from });
+  if (!requestShownIn(shown, p)) throw new Error("the agent's last message before his reply was not this request's summary");
 }
 
 /**
@@ -493,7 +506,8 @@ export function requestShownIn(text, p) {
  * @returns {{silent: true}|{ok: false, reason: string}|{ok: true, code: string}}
  *   silent: nothing is waiting in this conversation, so the message is ordinary chat.
  */
-export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now() }) {
+// `purposes`: the requests this reply may answer; a Sol skip reply (`skip`) passes [OWNER_SOL_SKIP_PURPOSE].
+export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now(), purposes = [OWNER_APPROVAL_PURPOSE, OWNER_SELFTEST_PURPOSE] }) {
   if (!usableSessionId(sessionId)) return { silent: true };
   const live = new Map();
   // Silence must mean "nothing is waiting", never "could not tell" (Luna LOW, round 2).
@@ -510,8 +524,9 @@ export function resolvePlainReply({ dirs, sessionId, readShown, now = Date.now()
       let p;
       try { p = JSON.parse(JSON.parse(readFileSync(path.join(dir, name), "utf8")).payload); }
       catch (e) { return { ok: false, reason: `the request file ${name} could not be read (${errText(e)})` }; }
-      // A Sol-finding request is answered only by `accept <code> <reason>` (sol-accept-lib.mjs).
-      if (p?.purpose !== OWNER_APPROVAL_PURPOSE && p?.purpose !== OWNER_SELFTEST_PURPOSE) continue;
+      // Each reply answers only its own kind of request: `I approve` a migration, `skip` a Sol skip
+      // request, `accept <code> <reason>` an old per-finding Sol request (sol-accept-lib.mjs).
+      if (!purposes.includes(p?.purpose)) continue;
       const deadline = Date.parse(p?.expiresAt);
       if (p?.sessionId === sessionId && String(p?.code) === m[1] && Number.isFinite(deadline) && now <= deadline) live.set(m[1], p);
     }
@@ -614,10 +629,11 @@ export function hooklessSessionRefusal({ checkout, sessionId }) {
  *
  * @returns {{ok: true, kind: "migration"|"selftest", payload: object, file: string, requestLeft: boolean}|{ok: false, reason: string}}
  */
-// `form` is "accept" for Mason's `accept <code> <reason>` reply to a Sol-finding request
+// `form` is "accept" for Mason's `accept <code> <reason>` reply to a Sol-finding request, and
+// "skip" for his plain skip reply to a Sol skip request, `skip` being skipFromReply's result
 // (sol-accept-lib.mjs); each form answers only its own kind of request.
 export function recordReplyApproval({
-  code, dirs, reply, sessionId, readMark, form = "approve", reason = "", now = Date.now(), removeRequest = (f) => rmSync(f, { force: true }),
+  code, dirs, reply, sessionId, readMark, form = "approve", reason = "", skip = null, now = Date.now(), removeRequest = (f) => rmSync(f, { force: true }),
 }) {
   const no = (reason) => ({ ok: false, reason });
   if (!usableSessionId(sessionId)) return no("the message carried no usable session id");
@@ -641,9 +657,19 @@ export function recordReplyApproval({
   if (String(p?.code) !== code) return no(`the request file does not carry the code ${code}`);
   const selftest = p.purpose === OWNER_SELFTEST_PURPOSE;
   const solAccept = p.purpose === OWNER_SOL_ACCEPT_PURPOSE;
+  const solSkip = p.purpose === OWNER_SOL_SKIP_PURPOSE;
+  if (form === "skip" && !solSkip) return no(`the request for code ${code} is not a Sol skip request`);
+  if (form !== "skip" && solSkip) return no(`the request for code ${code} lists Sol findings to skip; answer it with: skip (or skip and the finding numbers)`);
   if (form === "accept" && !solAccept) return no(`the request for code ${code} is not a Sol finding; approve it with: approve ${code}`);
   if (form !== "accept" && solAccept) return no(`the request for code ${code} is a Sol finding; accept it with: accept ${code} followed by your reason`);
-  if (!selftest && !solAccept && p.purpose !== OWNER_APPROVAL_PURPOSE) return no(`the request for code ${code} is not a migration approval request`);
+  if (!selftest && !solAccept && !solSkip && p.purpose !== OWNER_APPROVAL_PURPOSE) return no(`the request for code ${code} is not a migration approval request`);
+  let selected = null;
+  if (solSkip) {
+    if (!/^[0-9a-f]{40}$/i.test(String(p.prHead)) || !Array.isArray(p.findings)) return no(`the request for code ${code} names no usable head or findings`);
+    const sel = skipSelection(skip, p.findings);
+    if (sel.problem) return no(sel.problem);
+    selected = sel.numbers;
+  }
   const why = String(reason ?? "").trim();
   if (solAccept && reasonProblem(why)) {
     return no(`his reason cannot be logged (${reasonProblem(why)}); ask him to reply again: accept ${code} followed by his reason, on one line`);
@@ -665,13 +691,16 @@ export function recordReplyApproval({
   const approval = {
     payload: payloadText,
     approvedAt: new Date(now).toISOString(),
-    via: solAccept ? OWNER_SOL_ACCEPT_VIA : OWNER_APPROVAL_VIA,
-    reply: clip(String(reply ?? "").trim(), solAccept ? 340 : 40),
+    via: solAccept ? OWNER_SOL_ACCEPT_VIA : solSkip ? OWNER_SOL_SKIP_VIA : OWNER_APPROVAL_VIA,
+    reply: solSkip ? String(reply ?? "").trim() : clip(String(reply ?? "").trim(), solAccept ? 340 : 40),
     ...(solAccept ? { reason: why } : {}),
+    // One receipt for every finding he skipped in this reply, so a crash never records half of them.
+    ...(solSkip ? { selected } : {}),
     replyMark: mark,
   };
   const out = path.join(dir, selftest ? selfTestResultName(code)
-    : solAccept ? solAcceptFileName(String(p.prHead), Number(p.finding?.n)) : approvalFileName(safeMigrationName(p.migration)));
+    : solAccept ? solAcceptFileName(String(p.prHead), Number(p.finding?.n))
+      : solSkip ? solSkipFileName(String(p.prHead), code) : approvalFileName(safeMigrationName(p.migration)));
   // Retire the code FIRST, exclusively: if it cannot be retired, nothing is
   // approved, so a code is never live without its retirement on disk. If the
   // approval write below then fails, the code stays retired and Mason is asked
@@ -700,7 +729,7 @@ export function recordReplyApproval({
   // P2, PR #894). A leftover request can only be re-approved by another reply.
   let requestLeft = false;
   try { removeRequest(file); } catch { requestLeft = true; }
-  return { ok: true, kind: selftest ? "selftest" : solAccept ? "sol-accept" : "migration", payload: p, file: out, requestLeft };
+  return { ok: true, kind: selftest ? "selftest" : solAccept ? "sol-accept" : solSkip ? "sol-skip" : "migration", payload: p, selected, file: out, requestLeft };
 }
 
 // One marker FILE per used approval, created exclusively ("wx"): two applies
@@ -772,6 +801,8 @@ export const OWNER_TRUST_FILES = Object.freeze([
   ".claude/hooks/migration-landing-gate-lib.mjs",
   ".claude/hooks/codex-push-lib.mjs",
   "scripts/apply-migration-file.mjs",
+  // Decides whether the #2193 live prerequisite passes (Sol HIGH).
+  ".claude/hooks/migration-prerequisite-lib.mjs",
   "scripts/owner-approve-migration.mjs",
   ".claude/hooks/sol-accept-lib.mjs",
   "scripts/owner-accept-sol-finding.mjs",

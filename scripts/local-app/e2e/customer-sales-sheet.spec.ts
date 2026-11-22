@@ -24,7 +24,7 @@ async function addProductAndCustomers(page: Page): Promise<string> {
     if (customerError) throw new Error(customerError.message);
     const { data, error } = await supabase
       .from('products')
-      .insert({ product_name: name, product_form: 'liquid', is_active: true })
+      .insert({ product_name: name, product_form: 'liquid', inventory_unit: 'Gal', is_active: true })
       .select('id')
       .single();
     if (error) throw new Error(error.message);

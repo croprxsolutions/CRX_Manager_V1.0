@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-22 — #2217: Mason owner-accepted 1 Sol finding(s) at `15153d2a666e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-22).** Sol's review of PR #2217 at `15153d2a666e` (base `17a72d0ee032`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `docs/plans/2026-11-21-driver-available-deliveries-CONTRACT.md:189`, text sha256 `e2e592cbe2a95507` (the wording stays with the proof, not here)
+  Mason's reason: drivers will reopen the app before go-live (ref b7022addabd2)
+
 ## 2026-11-22 — #2185: Mason owner-accepted 3 Sol finding(s) at `6e92876aa47e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-22).** Sol's review of PR #2185 at `6e92876aa47e` (base `104ea5afe5bc`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

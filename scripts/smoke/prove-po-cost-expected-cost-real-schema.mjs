@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270214100000_po_cost_expected_cost_check.sql (KI-197;
+ * Real-schema proof for 20270217120000_po_cost_expected_cost_check.sql (KI-197;
  * contract docs/plans/2026-11-22-ki197-po-cost-stale-screen-CONTRACT.md).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
@@ -18,7 +18,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, attempt, asUser, refuse, signIn, id, USERS, ROOT, NAME, docker, psql, scalar, claims } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270214100000_po_cost_expected_cost_check.sql';
+const CANDIDATE = '20270217120000_po_cost_expected_cost_check.sql';
 const MIG = path.join(ROOT, 'supabase', 'migrations');
 const candidate = readFileSync(path.join(MIG, CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];

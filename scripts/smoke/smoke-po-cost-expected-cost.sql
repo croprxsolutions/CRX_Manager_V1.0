@@ -1,4 +1,4 @@
--- Rolled-back chain for set_purchase_order_item_costs' expected cost (KI-197, 20270214100000): with the cost the admin
+-- Rolled-back chain for set_purchase_order_item_costs' expected cost (KI-197, 20270217120000): with the cost the admin
 -- saw, a correction saves; from a stale screen it is refused with PO_COST_CHANGED_SINCE_LOADED and nothing changes.
 DO $smoke$
 DECLARE
@@ -11,7 +11,7 @@ DECLARE
   v_msg text;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'set_purchase_order_item_costs' AND prosrc LIKE '%PO_EXPECTED_PAIR_REQUIRED%') THEN
-    RAISE EXCEPTION 'SMOKE_PREREQ: 20270214100000 is not applied on this database';
+    RAISE EXCEPTION 'SMOKE_PREREQ: 20270217120000 is not applied on this database';
   END IF;
   IF NOT has_function_privilege('authenticated', 'public.set_purchase_order_item_costs(uuid,jsonb,text,uuid,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: signed-in users cannot run set_purchase_order_item_costs';

@@ -1315,7 +1315,7 @@
     },
     "po_cost_expected_cost": {
       "chain": "smoke-po-cost-expected-cost.sql",
-      "description": "REQUIRES 20270214100000 (KI-197). An active admin corrects a [SMOKE] PO line with the cost they saw (saved), then from a stale screen (refused PO_COST_CHANGED_SINCE_LOADED, cost unchanged). Terminal rollback.",
+      "description": "REQUIRES 20270217120000 (KI-197). An active admin corrects a [SMOKE] PO line with the cost they saw (saved), then from a stale screen (refused PO_COST_CHANGED_SINCE_LOADED, cost unchanged). Terminal rollback.",
       "covers": [
         "set_purchase_order_item_costs"
       ],

@@ -548,7 +548,7 @@ BEGIN
                'reasons', to_jsonb(r.list),
                'has_late_cover', COALESCE(t.has_late_cover, false),
                'has_followup', EXISTS (SELECT 1 FROM demb WHERE demb.product_id = prod.product_id AND demb.followup),
-               'estimated', EXISTS (SELECT 1 FROM demb WHERE demb.product_id = prod.product_id AND demb.estimated),
+               'estimated', EXISTS (SELECT 1 FROM s2 WHERE s2.product_id = prod.product_id AND s2.rem < s2.rem1),  -- from s2: a line the guess used up has no row left
                -- Coverage per demand group (horizon only): on time + late + not covered = booked.
                'coverage', COALESCE((
                  SELECT jsonb_agg(jsonb_build_object(
@@ -629,7 +629,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '399279025f1bc154837f7d2d849125b5' THEN
+     IS DISTINCT FROM 'b51afb97b4dd4659fb67dee22c8d4e9c' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

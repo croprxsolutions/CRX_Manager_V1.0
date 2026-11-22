@@ -1084,8 +1084,9 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (P28 infinite hold expiry) %', v_x;
   END IF;
   -- 42: the draw comes off the Maybe line, so the Firm 100 at +7 is still needed: buy 100, not 0.
+  -- The guess used up the whole Maybe line, so no row is left marked; the product is still estimated.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[42];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100 OR NOT COALESCE((v_x->>'estimated')::boolean, false)
      OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
           WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'firm' AND NOT (r->>'estimated')::boolean) <> 100
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe') THEN

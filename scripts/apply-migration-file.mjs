@@ -419,6 +419,7 @@ try {
     // --confirm re-reads the live ledger before transmitting (below), so the
     // snapshot's age is not refused here.
     liveOrderingRecheck: true,
+    livePrerequisiteRecheck: true,
   });
 } catch (err) {
   die(2,

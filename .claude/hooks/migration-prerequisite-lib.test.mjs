@@ -58,4 +58,21 @@ const mcp = evaluateMigrationApply({ name: LOAD, query: SQL, projectId: "rhyzpcq
 assert.equal(mcp.decision, "block");
 assert.match(mcp.reason, /MIGRATION PREREQUISITE \(#2193\).*apply-migration-file\.mjs/);
 
+// An owner-approval caller without the live re-check is refused too (Luna BLOCKER).
+const owner = evaluateMigrationApply({ name: LOAD, query: SQL, projectId: "rhyzpcqhnizqbxphqdkr", projectDir: ROOT, cwd: ROOT, ownerApprovalDoor: true });
+assert.equal(owner.decision, "block");
+assert.match(owner.reason, /MIGRATION PREREQUISITE \(#2193\)/);
+// Only with the live re-check flag does this gate step aside (later gates still run).
+const script = evaluateMigrationApply({ name: LOAD, query: SQL, projectId: "rhyzpcqhnizqbxphqdkr", projectDir: ROOT, cwd: ROOT, ownerApprovalDoor: true, livePrerequisiteRecheck: true });
+assert.doesNotMatch(String(script.reason || ""), /MIGRATION PREREQUISITE \(#2193\)/);
+
+// The one caller that sets the flag reads the live count and dies on a refusal
+// before the transaction it transmits is built.
+const applySrc = readFileSync(path.join(ROOT, "scripts", "apply-migration-file.mjs"), "utf8");
+const preAt = applySrc.indexOf("await checkLivePrerequisite(");
+assert.ok(preAt > 0, "apply-migration-file.mjs reads the live prerequisite");
+assert.match(applySrc.slice(preAt, preAt + 200), /if \(!pre\.ok\) die\(2, pre\.reason\)/);
+assert.ok(preAt < applySrc.indexOf("const wrapped ="), "checked before the transaction is built");
+assert.ok(preAt > applySrc.indexOf("if (!confirm)"), "checked on the --confirm path");
+
 console.log("MIGRATION_PREREQUISITE_LIB_TESTS_PASS");

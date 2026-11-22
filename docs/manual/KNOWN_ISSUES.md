@@ -863,7 +863,8 @@ checking each payer's own acres and per-acre fee, the stock ledger in the invent
 - The multi-owner Transfer confirmation (`JobDetail.tsx` ~L5387, counting field owners ~L1695-1704) says it creates
   ONE invoice, but when the job has more than one explicit billing-default customer the database creates an invoice
   group, one per payer (`20261120100000` ~L429-448, ~L504-545); without those defaults it can create one invoice.
-Fix: copy the carrier rate (state which origins: Transfer, blend, per-line split), store or print the real per-unit
+Fix: copy the carrier rate in all three header writers: Transfer (above), blend (`20270129190000` ~L890-901) and
+per-line split (`20270129171000` ~L1980-1999); store or print the real per-unit
 price, and tie the confirmation to the server's grouping rule. Proof per included origin: stored rate, rate-times-acres
 total, billed unit and unit price, unchanged charge, both grouping configurations, and the rendered customer PDF.
 
@@ -875,22 +876,24 @@ the order line (`_create_return_intent_impl_20260812`, `20261215110000` ~L2079-2
 price (`20261021155000` ~L963-988). A fictional order line at $100 billed at $90 can credit $100 a unit, and the cost
 reversal can lose its link. Discounted and taxed returns are NOT safe either: they find the billed line through the
 same `order_item_id` (`20270109100200` ~L557-616), so a repriced line falls back to the ordinary path or is refused.
-Only split returns with their own provenance survive. Live (audit aggregate, not re-run): 0 of 6 eligible posted lines
+Split provenance does not save it: it selects the share path, but the billed-line lookup still needs the kept
+`order_item_id` (~L546-571), so a split return on a repriced line finds no billed quantity and is refused
+(`20261215110000` ~L2066-2081). Live (audit aggregate, not re-run): 0 of 6 eligible posted lines
 differ from their order price. Fix: credit from the billed line. Proof (rolled back): a price decrease and an increase,
-a discounted or taxed reprice, the linked cost reversal, and the intended delivered-but-unbilled return path
+a discounted or taxed reprice, a split return with provenance on a repriced line, the linked cost reversal, and the intended delivered-but-unbilled return path
 (`20260827041100` ~L1281-1314) unchanged.
 
 ### KI-190 — Partial Order commits a booking's current terms, not the ones the rep reviewed
 **HIGH · OPEN (source-confirmed on main and staging; not reproduced) · quotes/bookings · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 4) · unassigned (Taha builds Bookings Phase B) · GitHub #2181**
 Whole Convert refuses a booking that changed since the screen loaded (`p_expected_row_version`, `QUOTE_STALE_WRITE`,
 `20261027080400`). `draw_down_quote` (`20261106110000` ~L56) takes no revision and the Partial Order screen sends
-none (`QuoteBuilder.tsx` ~L3838); the draw prices and splits against the current booking (`20261029110000` ~L298).
+none (`QuoteBuilder.tsx` ~L3838); the draw prices and splits against the current booking (remainder and booked/extras split `20261029110000` ~L545-573; booked versus today's tier price for extras ~L1503-1527).
 Example: the rep sees 100 left and asks for 110 (10 extras); another rep draws 25 first; the stale request makes 75
 booked and 35 extras. A newly approved booked price can also reach the order unreviewed. A same-key retry is safe.
 Staging adds an inactive-customer refusal (`20270201120000` ~L190-200); the stale path is the same on both for an
 active customer. Live (audit aggregate, not re-run): no partial orders yet. Not in the Phase B plan. Fix: bind the draw
 to the booking revision and the booked and extra prices shown; refuse and show what changed. Proof: an overdraw with
-extras, then separately a changed booked price and a changed extras price; each stale attempt writes nothing, and a
+extras, then separately a changed booked price and a changed tier price used for extras; each stale attempt writes nothing, and a
 previous successful draw still replays under its original key and payload.
 
 ### KI-191 — Orders converted from a booking have no salesperson
@@ -901,8 +904,8 @@ salesperson-filtered sales reports leave the sale out (`20261229150000` ~L194, ~
 order's tax checkbox when that feature is on. Commission is unaffected (it follows the booking split). Needs the rule
 first: the booking's salesperson, or the rep who converts. Either way the fix must set it on the server: the rep-scope
 guard refuses an order where a rep names a salesperson other than themselves (`20261015130000` ~L137-166,
-`20261027080400` ~L105-119), and a rep may convert another rep's booking. Proof: cross-rep whole and partial
-conversion, with commission still following the booking split.
+`20261027080400` ~L105-119), and a rep may convert another rep's booking. Rule needed: only the conversion functions may assign the salesperson taken from the locked booking; a rep still cannot name another salesperson by hand. Proof: cross-rep whole and partial
+conversion, with commission still following the booking split, and a rep naming another salesperson by hand is still refused.
 
 ### KI-192 — A booking's "left to draw" dollars are wrong when its lines have different prices
 **MED (display only) · OPEN · bookings · found 2026-11-17 (bookings flow audit D2), re-verified 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)) · unassigned (Bookings Phase B)**
@@ -922,7 +925,8 @@ emailed without a save therefore goes out at the old price, which conversion lat
 `QUOTE_TO_DELIVERY.md` ("a new draft at today's prices"). A save before sending reprices tier-derived lines, but a
 copied manual override still wins (`20261104130000` ~L603-617). Fix: one first-send readiness check (save, reprice,
 the rate/unit and rate/acres checks of `QuoteBuilder.tsx` ~L2388-2418) for never-sent drafts, and show which manual
-prices carried over. Proof: the sent version, PDF and converted order agree, including a kept manual price; a template
+prices carried over. Proof, two fixtures: a tier-derived line follows today's tier price, and a deliberately kept, different manual price
+survives, each in the sent version, PDF and converted order; a template
 with a rate but no acres, or no unit, is refused with no sent version or email; a valid template sends.
 
 ### KI-194 — Quote send and PDF gaps: "Sent" before the email result, and differing PDF dates
@@ -930,8 +934,9 @@ with a rate but no acres, or no unit, is refused with no sent version or email; 
 - The version is frozen and marked Sent (`20261029100000` ~L957) before the mail call (`QuoteBuilder.tsx` ~L3393),
   on purpose so a retry of the same send attempt reuses that version. Expiry and stale-version failures have their own
   messages; a delivery failure after the freeze shows a generic error. "Sent" also covers Mark Presented,
-  and the email log shows the last emailed time. Fix: for a delivery failure after a successful freeze, say the version is saved but the email failed; prove a retry
-  creates no extra version or email.
+  and the email log shows the last emailed time. Fix: after a successful freeze, say the version is saved and either that the email was refused or that its outcome
+  is unconfirmed and may have sent (`emailService.ts` ~L102-129). Prove a definite refusal and a lost reply after
+  acceptance, retrying with the same attempt keys, create no extra version or email.
   Related: To-Do 9.3.
 - Preview and download use today's date and the editor's expiry (~L2968-2977); email uses the saved date and stored
   expiry (~L3346). Re-downloading an already-sent quote prints today's date and possibly another expiry. Fix: issued
@@ -942,20 +947,21 @@ with a rate but no acres, or no unit, is refused with no sent version or email; 
 Sprayed jobs keep their EPA number in `job_product_epa` (`20261204120000` ~L143-152), including an explicit unknown,
 but nothing in `src/` reads it: the Chemical Application Report reads `products.epa_registration`
 (`chemicalApplicationReportFetch.ts` ~L125-135) and the WPS notice reads the catalog too (`JobDetail.tsx` ~L951-997).
-The applicator sheet prints no EPA column (`applicatorSheetPdf.ts` ~L239-260). The snapshot stores no product name, so
+The applicator sheet prints no EPA column (`applicatorSheetPdf.ts` ~L239-260). The sent proof fetches the catalog
+EPA (`20260630160000` ~L170-175) but the email drops it (`proofNotification.ts` ~L335-339, ~L430-444). The snapshot stores no product name, so
 the live name on the report (~L179-194) is a separate question. DECISION_LOG (~L1334-1338) promised a printout
 follow-up; it was never tracked. After a catalog correction a regenerated report can disagree with the job record.
-Live (audit aggregate, not re-run): the one eligible snapshot matches the catalog today. Fix: state each output's
-intended source, and have the report and WPS read the saved value. Proof: a corrected catalog number, an explicit
-unknown, and an unlocked job (which still uses the catalog, `20261204120000` ~L143-153). With KI-157 and KI-117.
+Live (audit aggregate, not re-run): the one eligible snapshot matches the catalog today. Fix: the report, WPS notice and
+sent proof print the saved value, and the applicator sheet gains an EPA column showing it. Proof for each of the four:
+a corrected catalog number keeps the saved one, an explicit unknown prints as unknown, and an unlocked job (which still uses the catalog, `20261204120000` ~L143-153). With KI-157 and KI-117.
 
 ### KI-198 — Shared-field job billing: Transfer and per-line Split Billing price the same work differently
 **HIGH if Transfer is used for real billing · OPEN (needs Mason, To-Do decision 31) · field-app billing · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 7)**
 Transfer to Invoice and office auto-draft take the job's saved chemical price and split the dollars by acres
 (`20261120100000` ~L547-566; auto-draft `20261217100000` ~L928-949). Per-line Split Billing resolves each grower's
 own eligible sent quote or tier, with manual overrides (`20270129171000` ~L1686-1755; latest sent-price helper
-`20270129180000` ~L117-190). Fictional 60/40 job (one product, the job price below one grower's own quote): the two
-paths give different totals.
+`20270129180000` ~L117-190). Fictional: 10 gal at the job price of $20/gal, grower A (60%) owns the job quote and grower
+B (40%) has its own sent quote at $36/gal: Transfer bills $200 ($120/$80); per-line billing bills $120 + $144 = $264.
 Neither is proven wrong: DECISION_LOG says a booked job and its invoices keep the booked price, "Own quote only"
 covers split and blend bills, and the old transfer screens are for testing only until replaced. No customer loss is
 shown. Decide which rule Transfer follows before field billing goes live.
@@ -965,12 +971,14 @@ shown. Decide which rule Transfer follows before field billing goes live.
 - **A stale partial-delivery form can overstate what shipped.** On production, a partial delivery missing one line's
   quantity delivers that line in full (`20261215110000` ~L1069-1073, reached through the KI-150 wrapper), which
   drives the stock deduction and the draft invoice. #2045 (`20270203120000_inventory_edge_cases_1942`) refuses it
-  with `DELIVERY_QUANTITIES_STALE`. Not in the live ledger 2026-11-21.
+  with `DELIVERY_QUANTITIES_STALE`. Migration not in the live ledger 2026-11-21.
 - **Editing a standalone field draft onto another grower's field kept the old grower.** #2142
-  (`20270205100000_field_app_refuses_payer_change`) refuses `FIELD_APP_PAYER_CHANGED`; #2171 (closes #2164) fixes
-  the lost-save message (browser code, `FieldApplicationInvoice.tsx` ~L2289-2293). Not in the live ledger 2026-11-21.
+  (`20270205100000_field_app_refuses_payer_change` ~L221-233) refuses `FIELD_APP_PAYER_CHANGED`; its migration is
+  not in the live ledger 2026-11-21. #2171 (closes #2164) fixes the lost-save message in browser code
+  (`FieldApplicationInvoice.tsx` ~L2289-2295), live only once the release is deployed.
 Close each bullet when its release is merged, its migration is applied live and the live body is read back; the
-field-draft bullet also needs the deployed screen checked through a lost-create-reply save. KI-125,
+field-draft bullet also needs the deployed screen checked: lose the create reply, recover the draft, change its payer;
+the change is refused, the original draft still exists with its payer, and the note explains the earlier save. KI-125,
 KI-126 and KI-130 (#2149) keep their own entries.
 
 ## Inventory and deliveries
@@ -1473,8 +1481,8 @@ screen random retry codes, as the other screens use.
   (`PurchaseOrderDetail.tsx` ~L1370). Saves are serialized and logged in cost history, but a second admin working from
   a stale screen silently replaces a newer correction. Admin-only. Fix: send and compare the cost the admin saw (same
   pattern as KI-170).
-- Product History's "Most recent received PO" (`ProductPriceHistory.tsx` ~L176) comes from
-  `get_supplier_market_evidence` (`20260720230000` ~L1095-1124), which keeps received lines but sorts by PO date.
+- Product History's "Most recent received PO" (`ProductPriceHistory.tsx`, main ~L165, staging ~L176) comes from
+  `get_supplier_market_evidence` (`20260720230000` ~L1095-1124), which keeps received lines but sorts by PO submission (or creation) date.
   The audit found 3 of 76 products would pick another PO by receipt date, at the same cost. Fix: sort by receipt
   date or relabel.
 

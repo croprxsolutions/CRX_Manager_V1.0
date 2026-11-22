@@ -11,7 +11,7 @@ Independent Claude re-check of the seven Codex quote-to-invoice audit reports (p
 | Claim | Report | Verdict | Where it is now | Tracker |
 |---|---|---|---|---|
 | P1 Piksi Dust Plus rate unit wrong | 1 Product master | CONFIRMED live (18 MG vs label text "18 grams per Acre"; on 4 March 2026 order lines, none rate-based) | Needs Mason's label check | KI-114, #1958 |
-| P2 Printouts use current product name/EPA | 1 | TRACKED | Open | KI-157, KI-117 (path refreshed to `20270129171000`) |
+| P2 Name and EPA on split re-save and PDFs (the split writer falls back to the live name and omits EPA; the PDF mapper prefers the live name and falls back to live EPA only when the saved one is blank, `supabase/functions/_shared/pdf/invoicePdf.ts` ~L98-112) | 1 | TRACKED | Open | KI-157, KI-117 (path refreshed to `20270129171000`) |
 | P3 Application Report ignores saved EPA number | 1 | CONFIRMED | Open | **KI-195**, To-Do 10.10, #2183 |
 | P4/P5 Search, labels, Summary grouping | 1 | CONFIRMED (LOW) | Open | **KI-196** |
 | P6 Catalog gaps (missing EPA, units, sizes) | 1 | TRACKED (report's KI-30 link is wrong) | Open | KI-138 |
@@ -25,7 +25,7 @@ Independent Claude re-check of the seven Codex quote-to-invoice audit reports (p
 | Q2/Q3 Smaller send gaps | 3 | NARROWED (LOW) | Open | **KI-194** |
 | Q4 Which version prices earlier field work | 3 | TRACKED | Needs decision 32 | #2075, #1966 (KI-177 related) |
 | Q5 Unit falls back to "Ea" | 3 | TRACKED | Open | KI-166 |
-| Q7 Quote PDF items / footer | 3 | Items fixed (#1892); footer open | Open | #1881 |
+| Q7 Quote PDF items / footer | 3 | Items fixed (#1892); footer open (mapping as reported by the audit) | Open | #1881 |
 | B1 Partial Order uses current, not reviewed, terms | 4 Quote to order | CONFIRMED (no partial orders live) | Open | **KI-190**, To-Do 1.13, #2181 |
 | B2/B3 Booking changes with a live job | 4 | TRACKED | Bookings Phase B | D1, #2065 |
 | B4 Converted orders have no salesperson | 4 | CONFIRMED live (no trigger fills it) | Needs decision 30 | **KI-191**, To-Do 1.15 |
@@ -37,9 +37,9 @@ Independent Claude re-check of the seven Codex quote-to-invoice audit reports (p
 | S5 Void filters to draft and posted | 5 | TRACKED | Open | KI-128 |
 | S6 Field-invoice void remainder | 5 | TRACKED | Open | KI-03 |
 | S7 Void keeps write-offs | 5 | CLOSED (live void body reverses write-offs; 0 write-offs exist) | Closed | KI-99 → Closed list |
-| S8 Two deliveries with inactive prior invoices | 5 | DATA REVIEW, not re-run | Office review | To-Do 15.1 |
+| S8 Two deliveries with inactive prior invoices | 5 | DATA REVIEW, not re-run | Office review | To-Do 15.1 (S8 check added) |
 | F1 Job bills planned acres | 6 Field application | CONFIRMED (one unposted live draft shows it) | Needs decision 33 | **KI-185**, To-Do 5.7, #2176 |
-| F2 Ticket and job both bill | 6 | TRACKED | Open | #2061, #2063 |
+| F2 Ticket and job both bill: a blend invoice then the linked job through per-line split (#2063); Transfer after a soft-deleted ticket's live invoice (#2061) | 6 | TRACKED | Open | #2061, #2063 |
 | F3 Blend ticket + job both deduct stock | 6 | CONFIRMED (latent: no live tickets) | Open | **KI-187**, To-Do 5.8, #2178 |
 | F4 Field-draft payer change | 6 | STAGING-FIXED (#2142, #2171; #2164 closed) | Awaiting release | **KI-199** |
 | F5 Carrier water dropped on transfer | 6 | CONFIRMED | Open | **KI-186**, To-Do 5.7, #2177 |
@@ -70,7 +70,9 @@ New tracker entries: KI-185 to KI-199 (15) and issues #2176 to #2183 (8).
 
 ## Sol review (2026-11-21)
 
-An independent Sol (gpt-6.2-sol, high) pass over this change, with production and staging source, returned 33 findings and refuted no defect. Corrections applied: the C4 return exemption (HIGH), the decision 30 salesperson guard (HIGH), proof criteria for F1, F5, S2, Q1, Q6, B1, KI-199, citation paths (shared PDF renderer, S2 per-branch completion, T2 main lines, W3 pricing path), status words, the KI-99 closed-list placement, coverage recount, and decision 15. Not changed, with reasons: the reviewer-directed text it flagged is in existing migrations and docs, not this change; owner names (Mason, Taha) are used throughout this public repo by design and are not customer data; KI-100 and KI-85 ID collisions predate this change; the closed/open totals follow the file's existing counting rule; #1966's wording was confirmed from the issue text.
+An independent Sol (gpt-6.2-sol, high) pass over this change, with production and staging source, returned 33 findings and refuted no defect. Corrections applied: the C4 return exemption (HIGH), the decision 30 salesperson guard (HIGH), proof criteria for F1, F5, S2, Q1, Q6, B1, KI-199, citation paths (shared PDF renderer, S2 per-branch completion, T2 main lines, W3 pricing path), status words, the KI-99 closed-list placement, coverage recount, and decision 15. Not changed, with reasons: the reviewer-directed text it flagged is in existing migrations and docs, not this change; owner names (Mason, Taha) are used throughout this public repo by design and are not customer data; KI-100 and KI-85 ID collisions predate this change; the open and closed totals are carried forward from the file and adjusted only by the verified deltas (+14 open, +1 closed, KI-99), as the file has no stricter counting rule; #1966's wording was confirmed from the issue text.
+
+**Round 2.** A second Sol pass confirmed 18 corrections and 2 refutations and raised 18 more points, all wording, scope and proof criteria: split returns on a repriced line (KI-189), the conversion-only salesperson rule (decision 30), all three carrier-water writers, both outcomes of the remainder proof, the two quote-price fixtures, the sent proof and applicator sheet in KI-195, decision 31's eligibility rules, KI-199's evidence split, two email-outcome messages, and citations. All applied. The packet-text point (round-1 item 1) is about the review input, not this change.
 
 ## Limits
 

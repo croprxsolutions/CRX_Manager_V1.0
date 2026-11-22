@@ -176,6 +176,8 @@ type CreatedInvoiceCheck =
  */
 // KI-14: each owner of a split keeps its own payment terms. choice is a preset, a legacy text, '' (the
 // customer's terms, filled in by the database on save) or CUSTOM_DUE (a typed due date).
+// #2164: the refusal says this save stored nothing; an earlier Save from the page did make the draft.
+const EARLIER_SAVE_CREATED_NOTE = 'An earlier Save from this page already created this invoice, and it still exists.';
 const CUSTOM_DUE = 'Custom date…';
 const TERMS_PRESETS = ['Net 30', 'Net 15', 'Due on receipt'];
 type OwnerTerms = { choice: string; customText: string; dueDate: string };
@@ -543,6 +545,9 @@ export default function FieldApplicationInvoice() {
   // save failure), a repeat Save must update THIS invoice — sending p_invoice_id = null
   // again would create a duplicate invoice for the same application.
   const createdInvoiceIdRef = useRef<string | null>(null);
+  // #2164: an earlier Save from this page (its reply lost) created the invoice, and no save has written this
+  // page's values onto it since. A payer-change refusal then says that draft exists, not just "Nothing was saved".
+  const earlierSaveCreatedRef = useRef(false);
   const [searchParams] = useSearchParams();
   const createdIdInAddress = createdInvoiceIdFromAddress(searchParams);
   // Opened at /new?created=<id>: Save waits for the created-invoice check below.
@@ -2038,6 +2043,7 @@ export default function FieldApplicationInvoice() {
       }
       const replayedInvoiceId = targetInvoiceId || ids[0];
       if (retryMayReplayOldValues && replayedInvoiceId) {
+        if (creating) earlierSaveCreatedRef.current = true;
         const followUpKey = saveIdem.getKey();
         unansweredSaveRef.current = { key: followUpKey, fingerprints: [fingerprint] };
         const followUp = await supabase.rpc('save_field_app_invoice', {
@@ -2054,6 +2060,8 @@ export default function FieldApplicationInvoice() {
         unansweredSaveRef.current = null;
         ids = result.invoice_ids || [];
       }
+      // The draft now holds this page's values, so a later refusal needs no note about it.
+      earlierSaveCreatedRef.current = false;
       const groupNote = result.invoice_group_id ? ` (group of ${ids.length})` : '';
 
       // §5: the save RPC committed the invoice atomically — NOW (and only now) write the
@@ -2280,8 +2288,10 @@ export default function FieldApplicationInvoice() {
     } catch (err) {
       const payerChange = rpcCodeDetail(err, RpcErrorCodes.FIELD_APP_PAYER_CHANGED);
       if (payerChange) {
+        // The user already left this invoice: no late note or toast about it (#2164).
+        if (!pageActiveRef.current) return;
+        setPayerChangeRefusal(earlierSaveCreatedRef.current ? `${payerChange} ${EARLIER_SAVE_CREATED_NOTE}` : payerChange);
         // An expected business refusal, explained in full at the top of the page.
-        setPayerChangeRefusal(payerChange);
         toast('error', "Not saved: these fields no longer bill this invoice's farm. See the note at the top of the invoice.");
         return;
       }

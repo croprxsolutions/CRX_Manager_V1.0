@@ -115,6 +115,51 @@ describe('RateReviewWorkbookModal', () => {
     expect(await screen.findByText(/Saved 2 rates and 1 outcome\./)).toBeInTheDocument();
   });
 
+  it('warns on a row whose parent rate moved, still lets Confirm save it, and repeats the warning on the saved result', async () => {
+    const moved = { was: '4 oz', now: '6 oz' };
+    H.preview.mockResolvedValue({
+      rates: [
+        { index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'], parent_changed: moved },
+        { index: 1, rate_id: 'r2', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['delete'] },
+      ],
+      outcomes: [],
+    });
+    H.commit.mockResolvedValue({ rates_changed: 2, outcomes_changed: 0, outcomes: [],
+      rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', parent_changed: { was: '4 oz', now: null } }] });
+    await uploadFile();
+    const text = 'Parent rate changed since this draft was made: was "4 oz", now "6 oz". Approving still saves it.';
+    expect(await screen.findByText(text)).toBeInTheDocument();
+    expect(screen.getAllByText(/Parent rate changed/)).toHaveLength(1);
+    const confirm = screen.getByRole('button', { name: 'Confirm rate review (2 changes)' });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(H.commit).toHaveBeenCalledOnce());
+    expect(await screen.findByText(/Saved 2 rates and 0 outcomes./)).toBeInTheDocument();
+    expect(screen.queryByText(text)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Parent rate changed/)).toHaveLength(1);
+    expect(screen.getByText('Draft Rates 2 (Atrazine 4L): Parent rate changed since this draft was made: was "4 oz", now none. Approved anyway.'))
+      .toBeInTheDocument();
+  });
+
+  it('restores a saved retry that carries a parent warning, and treats a malformed warning as damaged', async () => {
+    const name = 'crx:pending-retry:rate-review:u1';
+    const stored = (parent_changed: unknown) => JSON.stringify({ key: 'old-key', sentAt: Date.now(), request: {
+      actorId: 'u1', upload, preview: { rates: [{ index: 0, rate_id: 'r1', parent_id: P1, name: 'Atrazine 4L', status: 'change', actions: ['approve'], parent_changed }], outcomes: [] },
+    } });
+    sessionStorage.setItem(name, stored({ was: '4 oz/A', now: '8 oz/A' }));
+    const view = render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+    expect(await screen.findByText('Parent rate changed since this draft was made: was "4 oz/A", now "8 oz/A". Approving still saves it.')).toBeInTheDocument();
+    view.unmount();
+    for (const bad of [{ was: 4, now: '8 oz/A' }, { was: '', now: '8 oz/A' }, { was: '4 oz/A', now: '' }]) {
+      sessionStorage.setItem(name, stored(bad));
+      const damaged = render(<RateReviewWorkbookModal open profileId="u1" onClose={vi.fn()} />);
+      expect(await screen.findByText(/unreadable.*rows are unavailable/i)).toBeInTheDocument();
+      expect(screen.queryByLabelText('Rate review preview')).not.toBeInTheDocument();
+      damaged.unmount();
+    }
+    expect(H.commit).not.toHaveBeenCalled();
+  });
+
   it('warns that inactive rate cleanup clears its recorded outcome without suggesting Reconfirm', async () => {
     const inactiveUpload: ParsedRateReview = {
       ...upload, rates: [upload.rates[1]], outcomes: [], recorded: { [P1]: 'approved_default' }, inactive_parent_ids: [P1],

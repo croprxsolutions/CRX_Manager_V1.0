@@ -10,6 +10,7 @@ import {
   hasAnyChange,
   describeChanges,
   loaderInputsValid,
+  loaderNumberError,
 } from './jobMassEdit';
 import type { JobStatus } from '../../types';
 
@@ -224,6 +225,27 @@ describe('jobMassEdit — Loader Worksheet bulk fields (#10)', () => {
     expect(loaderInputsValid(draft({ setLoader: true, loaderTankCapacity: '-50' }))).toBe(false);
   });
 
+  it('mirrors the edit_jobs range: carrier 0 or 0.001-1,000,000; capacity 0.001-1,000,000', () => {
+    expect(loaderNumberError('0', 'carrier')).toBeNull();
+    expect(loaderNumberError('0.00', 'carrier')).toBeNull();
+    expect(loaderNumberError(`0.${'0'.repeat(400)}1`, 'carrier')).toMatch(/0, or 0.001/);
+    expect(loaderNumberError('0.001', 'carrier')).toBeNull();
+    expect(loaderNumberError('1000000', 'carrier')).toBeNull();
+    expect(loaderNumberError('0.0001', 'carrier')).not.toBeNull();
+    // Luna: a numeric prefix is refused, not saved as its leading number.
+    expect(loaderNumberError('12abc', 'carrier')).toBe('Carrier rate must be a number.');
+    expect(loaderNumberError('0oops', 'capacity')).toBe('Tank capacity must be a number.');
+    expect(loaderNumberError('1000001', 'carrier')).not.toBeNull();
+    expect(loaderNumberError('Infinity', 'carrier')).not.toBeNull();
+    expect(loaderNumberError('abc', 'carrier')).not.toBeNull();
+    expect(loaderNumberError('0', 'capacity')).not.toBeNull();
+    expect(loaderNumberError('0.001', 'capacity')).toBeNull();
+    expect(loaderNumberError('1000001', 'capacity')).not.toBeNull();
+    expect(loaderNumberError('  ', 'capacity')).toBeNull();
+    expect(loaderInputsValid(draft({ setLoader: true, loaderTankCapacity: '2000000' }))).toBe(false);
+    expect(buildFieldPatch(draft({ setLoader: true, carrierRateGpa: '0.0001' }))?.carrier_rate_gpa).toBeNull();
+  });
+
   it('hasAnyChange is true when only the loader section is enabled', () => {
     expect(hasAnyChange(draft({ setLoader: true }))).toBe(true);
   });
@@ -238,5 +260,15 @@ describe('jobMassEdit — Loader Worksheet bulk fields (#10)', () => {
     expect(lines.some((l) => l.includes('Carrier Rate') && l.includes('15'))).toBe(true);
     expect(lines.some((l) => l.includes('Tank Capacity') && l.includes('500'))).toBe(true);
     expect(lines.some((l) => l.includes('Loader Comment'))).toBe(true);
+  });
+});
+
+describe('loaderNumberError exponent input', () => {
+  it('refuses exponent forms that would round into the accepted range', () => {
+    expect(loaderNumberError('1e-400', 'carrier')).toBe('Carrier rate must be a number.');
+    expect(loaderNumberError('1e3', 'capacity')).toBe('Tank capacity must be a number.');
+    expect(loaderNumberError('15', 'carrier')).toBeNull();
+    expect(loaderNumberError('.5', 'capacity')).toBeNull();
+    expect(loaderNumberError('0', 'carrier')).toBeNull();
   });
 });

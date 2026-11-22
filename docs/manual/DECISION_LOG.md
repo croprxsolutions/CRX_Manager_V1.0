@@ -4,6 +4,93 @@
 
 **Decision (Mason, this task, 2026-11-21).** Two field jobs that finish together and both need a Main Warehouse stock row that does not exist yet must both finish. Stock ends at the sum of what they used. One job must not fail and need a retry. This is the delivery rule from #2045, applied to job completion. It narrows the 2026-11-18 acceptance of that deadlock as a non-issue, which stopped further patches on #1940; deliveries were fixed after that, and jobs were the piece still open (#2121). Rush-order stock rows stay on #2121.
 
+## 2026-11-21 — #2165: Mason owner-accepted 1 Sol finding(s) at `2c95807df876`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2165 at `2c95807df876` (base `1b127b005e8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/pages/Deliveries.tsx:902`, text sha256 `2c0b6c5b7684ea0d` (the wording stays with the proof, not here)
+  Mason's reason: cant happen (ref 168e652b8a1d)
+
+## 2026-11-21 — #2165 (#2018): a delivery with no site goes to the farm's shipping address, else billing
+
+Sol round 6 found Field Mode and the office Navigate button used the billing address while the printed load sheet and slip used shipping first.
+
+**Decision (Mason, in chat, 2026-11-21: "Shipping first"):** every screen sends a no-site delivery to the shipping address, else billing; the office choice now reads "Use farm address (shipping, else billing)".
+
+## 2026-11-21 — #2165 (#2018): Mason approved Sol round 5 on the driver screens
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, run round 5").** Sol rounds 1-4 on #2165 each found a different screen-side problem, and each was fixed: address typing, a missing delivery site falling back to the farm's default address, a missing stop site, and a role refresh resetting entered quantities. Round 3 also raised the drivers' whole-row farm read; Mason accepted that for one release ("Yes, accept it"), the same as on #2161, and #2162 removes it. Smaller items are deferred to #2167. This entry names #2165 so Sol may run round 5 on it.
+## 2026-11-21 — #2187: Mason owner-accepted 1 Sol finding(s) at `4e4e44138acc`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2187 at `4e4e44138acc` (base `f3e880f9710f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270207120000_driver_farm_billing_address.sql:58`, text sha256 `d32afb9a280e90a6` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 2fb67adff345)
+
+## 2026-11-21 — #2187: Mason owner-accepted 1 Sol finding(s) at `933aa4fe39a5`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2187 at `933aa4fe39a5` (base `f08df8ad6407`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270207120000_driver_farm_billing_address.sql:58`, text sha256 `deb6f2a254b48882` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 76f65aa0c473)
+
+## 2026-11-21 — #2151: Mason owner-accepted 1 Sol finding(s) at `1be1755e1188`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2151 at `1be1755e1188` (base `9abe45d4bc5f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/lib/editJobs.ts:43`, text sha256 `a253254446bb089f` (the wording stays with the proof, not here)
+  Mason's reason: logged isseu (ref 3bcb8445e850)
+
+## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B) may have Sol round 17
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, allow round 17").**
+PR #2151 may have one more Sol review, round 17, because merging newer staging work into the branch made a
+new version that round 16's sign-off does not cover. Its own code did not change after round 16.
+
+## 2026-11-21 — #2151: Mason owner-accepted 1 Sol finding(s) at `2e3a5b5e4ac0`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2151 at `2e3a5b5e4ac0` (base `dac995aac792`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/lib/editJobs.ts:42`, text sha256 `a4571e5195c8fa0d` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref b25f05e9d3b8)
+
+## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B): every job edit saves fresh
+
+**Decision (Mason, in chat, 2026-11-21: "Save fresh every click").**
+On PR #2151, every job-screen click that calls `edit_jobs` (Mass Edit, batch assign, bulk Cancel/Delete,
+Cancel on a job, and the crew/loader part of a job Save) sends a new request key. A second click never
+replays the answer to an earlier attempt; it re-sends the edit as it stands now. A notes-only job Save uses
+`save_job` alone and is not affected.
+**What it does:** `editJobs()` mints a new idempotency key per call instead of keeping one across retries.
+Re-sending sets the same values again. A cancel or delete already done is skipped and shown as "already
+cancelled"/"already deleted". One accepted edge: if the reply to a combined field edit + cancel is lost
+and the user clicks again, the field values are written again on the now-cancelled job (same values, so
+no change in meaning). Every other gate is unchanged.
+
+## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B) may have Sol rounds 11 to 16
+
+**Decision (Mason, in chat, 2026-11-21: "Yes", answering "Allow Sol review rounds 11 to 16 on PR B (#2151)?").**
+PR #2151 may have its Sol review in rounds 11 through 16. Its branch also carries #2047's commits, whose ten
+rounds count toward its total.
+**What it does:** lifts the round cap for #2151 only, up to round 16; the stop rule (the same BLOCKER/HIGH
+surviving two fix rounds goes back to Mason) and every other gate are unchanged.
+## 2026-11-21 — #2149: Mason owner-accepted 1 Sol finding(s) at `a8f491084ae1`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2149 at `a8f491084ae1` (base `dac995aac792`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270206110000_pnl_commission_share_billed.sql:165`, text sha256 `5de59fdaf2969068` (the wording stays with the proof, not here)
+  Mason's reason: only admins edit order totals and they can already edit commissions (ref 0af543254509)
+
+## 2026-11-21 — #2149 (KI-125): returns do not take commission back in the profit reports yet
+
+**Decision (Mason, in session, 2026-11-21: "Yes ship without, log as a follow up task").** Sol round 5 on #2149 found two
+new HIGHs in the return clawback (tax and discounts on return credits; billing above the booked total absorbing a
+return), the fourth round in a row with a new HIGH in the same calculation. #2149 ships with commission matched to the
+share billed and no return clawback; the clawback is KI-184.
+**Why:** no live credit memo exists, so no figure changes today; doing it right means reading credit memos (invoice
+records, Taha's area until 2026-12-15).
+**What this forbids/implies:** the 2026-08-09 / 2026-11-13 rule that a return takes commission back still stands; KI-184
+carries it.
+
+## 2026-11-21 — #2149 (KI-125): month close keeps saving the figures current at the click; payments received split out
+
+**Decision (Mason, in session, 2026-11-21: "Accept, follow-up later").** After Sol round 4 on #2149, Mason accepted that Month-End Close closes the period with its receipt figures (invoice, order, delivery and payment counts and totals; no commission figure) as they stand when Close is clicked (the period row keeps the closed state; the figures are returned to the screen and kept only in the 24-hour retry record), and does not re-check what the admin reviewed on screen (true of every close figure before #2149). A follow-up adds a "figures changed since you reviewed" check to the whole close. Sol reviews of #2149 may continue past round 4 for the remaining fixes.
+**Why:** the gap predates #2149 and closing it changes the close call itself; it is not part of the commission fix.
+**What this forbids/implies:** #2149 does not change the close call. KI-129's payments-received part stays open (it needs a rule for prepayment checks, which can be edited or deleted later); its follow-up must include the close re-check.
 ## 2026-11-21 — #1985: Mason owner-accepted 4 Sol finding(s) at `d549921a5aaf`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #1985 at `d549921a5aaf` (base `6a6462d4c469`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

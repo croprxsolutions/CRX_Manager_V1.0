@@ -66,6 +66,9 @@ const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
 const LIVE_AUTH_UID_MD5 = 'cdef18c69c4f4cbbced2eaf81e628b49';
 const SMOKE = path.join(ROOT, 'scripts', 'smoke');
 const CHAIN = path.join(SMOKE, 'smoke-delivery-job-replay-binding-batch3a.sql');
+// #2146 updated the shared chain for today's schema (proof photos, no offline delivery step). This proof replays
+// only up to 20261019200000, so it runs the chain as it was before that change.
+const CHAIN_PIN = '93d87f9716422980903ca142d34c1df545a0b83e';
 const SPECS = path.join(SMOKE, 'smoke-specs.json');
 // Every other non-container chain that completes a delivery or a job. Each must keep passing after
 // the candidate if it passed before it (some need live data this database lacks; those are
@@ -95,6 +98,11 @@ function psqlArgs(user = 'postgres') { return ['exec', '-i', NAME, 'psql', '-U',
 function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input: sql, allowFailure: options.allowFailure }); }
 function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
 function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
+function pinnedChain() {
+  const r = spawnSync('git', ['show', `${CHAIN_PIN}:scripts/smoke/${path.basename(CHAIN)}`], { cwd: ROOT, encoding: 'utf8' });
+  assert.equal(r.status, 0, `cannot read the pinned chain at ${CHAIN_PIN}: ${r.stderr}`);
+  return r.stdout.replaceAll('\r\n', '\n');
+}
 function stageText(name, text) {
   const staged = path.join(tmpdir(), `${NAME}-${name}`);
   writeFileSync(staged, text, 'utf8');
@@ -234,7 +242,7 @@ function seed() {
 
 /** Run a chain file; `prefix` runs first in the same transaction (a mutation). */
 function chain(file, prefix = '', user = 'postgres') {
-  stageText('chain.sql', lf(file));
+  stageText('chain.sql', file === CHAIN ? pinnedChain() : lf(file));
   const r = docker([...psqlArgs(user)], { input: `BEGIN;\n${prefix}\n\\i /tmp/chain.sql\nROLLBACK;\n`, allowFailure: true });
   const out = `${r.stdout}\n${r.stderr}`;
   const pass = /SMOKE_PASS_ROLLBACK/.test(out);

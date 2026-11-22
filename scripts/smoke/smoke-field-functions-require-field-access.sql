@@ -70,9 +70,10 @@ BEGIN
 
   -- a. The dispatched applicator gets both fields of their job, not the customer's off-job field.
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_applicator, 'role', 'authenticated')::text, true);
-  SELECT count(*) INTO v_count FROM public.get_fields_geojson_by_ids(ARRAY[v_field_mine, v_field_other, v_field_off]) g
+  -- Exactly the job's two fields, once each: every row returned is one of them, and both appear.
+  SELECT count(DISTINCT g.id) INTO v_count FROM public.get_fields_geojson_by_ids(ARRAY[v_field_mine, v_field_other, v_field_off]) g
    WHERE g.id IN (v_field_mine, v_field_other);
-  IF v_count <> 2 OR EXISTS (SELECT 1 FROM public.get_fields_geojson_by_ids(ARRAY[v_field_mine, v_field_other, v_field_off]) g WHERE g.id = v_field_off) THEN
+  IF v_count <> 2 OR (SELECT count(*) FROM public.get_fields_geojson_by_ids(ARRAY[v_field_mine, v_field_other, v_field_off])) <> 2 OR EXISTS (SELECT 1 FROM public.get_fields_geojson_by_ids(ARRAY[v_field_mine, v_field_other, v_field_off]) g WHERE g.id = v_field_off) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: a. the dispatched applicator got % of their job''s 2 fields from get_fields_geojson_by_ids, or the off-job field', v_count;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM public.get_field_geojson(v_field_mine)) OR NOT EXISTS (SELECT 1 FROM public.get_field_geojson(v_field_other))

@@ -168,7 +168,9 @@ BEGIN
    WHERE i.invoice_group_id = (v_grp->>'invoice_group_id')::uuid AND i.status = 'unposted'
      AND (SELECT count(*) FROM invoice_shares x WHERE x.invoice_id = i.id) = 1
      AND (SELECT x.customer_id FROM invoice_shares x WHERE x.invoice_id = i.id) = i.customer_id;
-  IF v_n <> 2 OR (SELECT count(DISTINCT customer_id) FROM invoices WHERE invoice_group_id = (v_grp->>'invoice_group_id')::uuid
+  -- The group holds exactly those two invoices, nothing else.
+  IF v_n <> 2 OR (SELECT count(*) FROM invoices WHERE invoice_group_id = (v_grp->>'invoice_group_id')::uuid) <> 2
+     OR (SELECT count(DISTINCT customer_id) FROM invoices WHERE invoice_group_id = (v_grp->>'invoice_group_id')::uuid
                     AND customer_id IN (v_cust, v_cust2)) <> 2 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: each owner should get one unposted invoice with one share to itself (% matched)', v_n; END IF;
   IF (SELECT invoice_id FROM jobs WHERE id=v_grp_job AND status='invoiced') IS DISTINCT FROM v_anchor THEN

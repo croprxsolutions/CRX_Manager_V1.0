@@ -288,6 +288,35 @@ describe('Returns loading and retry behavior', () => {
     expect(calls.map(([, args]) => args.p_reason)).toEqual(['Exact reason', 'Exact reason', 'Different reason']);
   });
 
+  it('renders the approval confirmation above the return detail modal', async () => {
+    const returns = [{
+      id: 'return-approval-uuid', return_number: 'RMA-APPROVAL', customer: { farm_name: 'Farm A' },
+      order: { order_number: 'ORD-A' }, requested_by: null, items: [], status: 'requested', reason: 'defective',
+      total_credit_cents: 100, requested_at: '2026-07-25T00:00:00Z',
+    }];
+    mockFrom.mockImplementation((table: string) => table === 'returns'
+      ? buildChain({ data: returns, error: null })
+      : buildChain({ data: [], error: null }));
+
+    render(<MemoryRouter><Returns /></MemoryRouter>);
+    await screen.findByText('RMA-APPROVAL');
+    fireEvent.click(screen.getByRole('button', { name: /RMA-APPROVAL/ }));
+    await screen.findByRole('heading', { name: 'Return: RMA-APPROVAL' });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    const detail = screen.getByRole('dialog', { name: 'Return: RMA-APPROVAL' });
+    const confirmation = await screen.findByRole('alertdialog', { name: 'Approve Return' });
+    expect(detail.className).toContain('z-50');
+    expect(confirmation.className).toContain('z-50');
+    expect(detail.compareDocumentPosition(confirmation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(confirmation).getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+
+    // Escape closes only the confirmation on top; the return stays open.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('alertdialog', { name: 'Approve Return' })).not.toBeInTheDocument());
+    expect(screen.getByRole('dialog', { name: 'Return: RMA-APPROVAL' })).toBeInTheDocument();
+  });
+
   it('reconciles a pre-migration Create Return receipt from mismatch details', async () => {
     setupCreateReturnData();
     mockRpc.mockImplementation((name: string) => name === 'create_return'

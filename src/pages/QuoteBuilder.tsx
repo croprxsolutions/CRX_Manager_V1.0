@@ -3892,23 +3892,26 @@ export default function QuoteBuilder() {
     const drawKey = resume?.key ?? kept?.key ?? drawDownIdem.getKeyFor(drawScope);
     // An earlier send with this key got no reply, so it may have made the order.
     const earlierUnresolved = kept?.key === drawKey;
-    // Without the note, a lost reply could not be finished after a reload, and a fresh key could draw twice.
-    if (!savePendingRetry(drawPendingName, drawKey, drawPayload)) {
-      setDrawing(false);
-      toast('error', 'This browser could not keep a safety note for the Partial Order, so it was not sent. Allow this site to store data, or use another browser, then try again.');
-      return;
-    }
     // KI-190: the dialog's balance belongs to drawSnapshot; its booked prices come from this
-    // screen. Both must be the same booking version, or the rep would order against terms they
-    // never saw: reload first.
+    // screen. For a fresh draw both must be the same booking version, or the rep would order
+    // against terms they never saw: reload first, before any retry note exists. A resend of an
+    // earlier draw skips this: the server returns that draw's order if it went through, and
+    // checks the version itself if it didn't.
     const drawVersion = drawSnapshot?.quoteId === id ? drawSnapshot.rowVersion : null;
-    if (drawVersion === null || drawVersion !== quoteRowVersionRef.current) {
+    if (!resume && !earlierUnresolved
+        && (drawVersion === null || drawVersion !== quoteRowVersionRef.current)) {
       setShowDrawModal(false);
       quoteVersionRecoveryRequiredRef.current = true;
       staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
       setStaleSaveOpen(true);
       toast('warning', 'This booking changed since you opened it. Nothing was ordered. Reload to see what is left and the prices, then try again.');
       setDrawing(false);
+      return;
+    }
+    // Without the note, a lost reply could not be finished after a reload, and a fresh key could draw twice.
+    if (!savePendingRetry(drawPendingName, drawKey, drawPayload)) {
+      setDrawing(false);
+      toast('error', 'This browser could not keep a safety note for the Partial Order, so it was not sent. Allow this site to store data, or use another browser, then try again.');
       return;
     }
     try {
@@ -3919,7 +3922,7 @@ export default function QuoteBuilder() {
         p_idempotency_key: drawKey,
         // KI-190: the booking version the dialog was prepared from. A booking that another
         // draw or an edit changed since is refused (QUOTE_STALE_WRITE), as Whole Convert does.
-        p_expected_row_version: drawVersion,
+        p_expected_row_version: drawVersion ?? quoteRowVersionRef.current,
       }, reason)));
       if (error) throw error;
       const result = assertRpcResult<{ status: string; order_id?: string; order_number?: string; warnings?: string[]; fully_drawn?: boolean; extra_order_id?: string; extra_order_number?: string }>(data, 'draw_down_quote');

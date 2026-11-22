@@ -997,6 +997,34 @@ describe('CustomerDetail stale whole-record save', () => {
     })));
   });
 
+  it('a stale Reactivate confirmation changes nothing and says so (#2197, Sol HIGH)', async () => {
+    const inactive = { ...original, is_active: false } as unknown as typeof original;
+    let updatePayload: unknown;
+    const eqCalls: unknown[][] = [];
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'customers') return query({ data: [], error: null });
+      const chain = customerQuery(() => inactive);
+      const baseEq = chain.eq as (...args: unknown[]) => unknown;
+      chain.eq = (...args: unknown[]) => { eqCalls.push(args); return baseEq(...args); };
+      chain.update = (payload: unknown) => {
+        updatePayload = payload;
+        chain.select = () => chain;
+        chain.then = (resolve: (value: QueryResult) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve);
+        return chain;
+      };
+      return chain;
+    });
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reactivate' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('changed by someone else')));
+    expect(updatePayload).toEqual({ is_active: true });
+    expect(eqCalls).toContainEqual(['row_version', inactive.row_version]);
+    expect(screen.getByText('Inactive')).toBeInTheDocument();
+    expect(mockToast).not.toHaveBeenCalledWith('success', expect.anything());
+  });
+
   it('locks the commission split editor while a save runs', async () => {
     mockFrom.mockImplementation((table: string) => {
       if (table === 'customers') return customerQuery(() => original);

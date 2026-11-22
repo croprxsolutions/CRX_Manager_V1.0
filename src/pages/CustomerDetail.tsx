@@ -278,7 +278,7 @@ export default function CustomerDetail() {
   // The customer id the Reactivate dialog was opened for, so it never shows on another customer.
   const [reactivateOpenFor, setReactivateOpenFor] = useState<string | null>(null);
   const [reactivating, setReactivating] = useState(false);
-  useEffect(() => { setDiscountDraft(null); }, [id]);
+  useEffect(() => { setDiscountDraft(null); setReactivateOpenFor(null); }, [id]);
 
   // Financials tab state
   interface TxnRow { transaction_date: string; transaction_type: string; reference_number: string; amount_cents: number; running_balance: number }
@@ -1345,13 +1345,32 @@ export default function CustomerDetail() {
     setReactivating(true);
     try {
       const previousRowVersion = customerRowVersionRef.current;
+      const changedElsewhere = () => toast('warning', 'This customer was changed by someone else since you opened the page. Nothing was saved. Reload the page and try again.');
+      if (previousRowVersion === null) { changedElsewhere(); return; }
+      // Only the exact version this admin was shown: an old confirmation must not undo a newer deactivation.
       const result = await supabase
         .from('customers')
         .update({ is_active: true })
         .eq('id', id)
         .eq('is_active', false)
+        .eq('row_version', previousRowVersion)
         .select('*');
+      if (result.error) throw result.error;
+      if (Array.isArray(result.data) && result.data.length === 0) {
+        if (currentIdRef.current === id && visitRef.current === visit) changedElsewhere();
+        return;
+      }
       checkMutationResult(result, 'reactivate customer');
+      // Logged as soon as the write commits, even if the admin has already left the page.
+      if (profile?.id) {
+        void Promise.resolve(logActivity({
+          event: 'customer_updated',
+          description: 'Customer reactivated',
+          performedBy: profile.id,
+          entityType: 'customer',
+          customerId: id,
+        })).catch(() => {});
+      }
       if (currentIdRef.current !== id || visitRef.current !== visit) return;
       const nextRowVersion = (result.data as Array<{ row_version?: unknown }>)[0]?.row_version;
       const rowVersionResult = resolveDirectMutationRowVersion(previousRowVersion, nextRowVersion);
@@ -1364,15 +1383,6 @@ export default function CustomerDetail() {
         toast('warning', 'The customer was reactivated, but another customer edit may have completed at the same time. Your current edits were kept; reload before saving other customer changes.');
       } else {
         toast('success', `${customer.farm_name || 'Customer'} is active again.`);
-      }
-      if (profile?.id) {
-        void Promise.resolve(logActivity({
-          event: 'customer_updated',
-          description: 'Customer reactivated',
-          performedBy: profile.id,
-          entityType: 'customer',
-          customerId: id,
-        })).catch(() => {});
       }
     } catch (error: unknown) {
       Sentry.captureException(toSentryError(error), { extra: { context: 'CustomerDetail.reactivateCustomer' } });
@@ -1456,7 +1466,7 @@ export default function CustomerDetail() {
         </div>
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
           {!isNew && isAdmin && customer.is_active === false && (
-            <Button variant="primary" size="sm" icon={<RotateCcw className="w-4 h-4" />} showChevron={false} onClick={() => setReactivateOpenFor(id ?? null)}>
+            <Button variant="primary" size="sm" icon={<RotateCcw className="w-4 h-4" />} showChevron={false} disabled={saving} onClick={() => setReactivateOpenFor(id ?? null)}>
               Reactivate
             </Button>
           )}

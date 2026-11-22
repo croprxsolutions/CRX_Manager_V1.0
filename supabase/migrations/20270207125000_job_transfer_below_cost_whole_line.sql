@@ -189,6 +189,8 @@ DECLARE
   v_share RECORD;
   v_share_total bigint := 0;
   v_has_price_override boolean := false;
+  v_share_cum_pct numeric := 0;
+  v_share_cum_cents bigint := 0;
   v_existing jsonb;
   v_result jsonb;
   -- DELTA-8 (G1 per-acre fee) locals
@@ -765,7 +767,10 @@ BEGIN
         CASE WHEN count(DISTINCT fbd.price_override_cents) = 1 AND min(fbd.price_override_cents) IS NOT NULL
           THEN min(fbd.price_override_cents) ELSE NULL END AS price_override_cents,
         max(fbd.pricing_note) AS pricing_note,
-        row_number() OVER (ORDER BY bool_or(fbd.is_primary) DESC, c.farm_name) AS sort_ord
+        row_number() OVER (ORDER BY bool_or(fbd.is_primary) DESC, c.farm_name) AS sort_ord,
+        sum(CASE WHEN sum(COALESCE(jf.acres_to_treat, 0)) > 0
+          THEN sum(fbd.split_pct * COALESCE(jf.acres_to_treat, 0)) / sum(COALESCE(jf.acres_to_treat, 0))
+          ELSE avg(fbd.split_pct) END) OVER () AS pct_total
       FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
       JOIN customers c ON c.id = fbd.customer_id WHERE jf.job_id = p_job_id
       GROUP BY fbd.customer_id, c.farm_name
@@ -774,8 +779,11 @@ BEGIN
       BEGIN
         -- 20270207125000 (Mason, 2026-11-22: "we never bill flat per acre it is always summary of chemical and sales
         -- lines"): each share is its part of the lines; a field's per-acre price is not billed, so the per-acre
-        -- application fee below applies as on any other field.
-        v_amount := ROUND(v_line_sum * v_share.avg_split_pct / 100.0)::bigint;
+        -- application fee below applies as on any other field. Luna round 2: the shares split exactly the lines
+        -- (cumulative rounding over the shares' own percentage total), so a 99.99% split still bills every cent.
+        v_share_cum_pct := v_share_cum_pct + v_share.avg_split_pct;
+        v_amount := ROUND(v_line_sum * v_share_cum_pct / v_share.pct_total)::bigint - v_share_cum_cents;
+        v_share_cum_cents := v_share_cum_cents + v_amount;
         v_ppa := NULL;
         INSERT INTO invoice_shares (invoice_id, customer_id, customer_name, split_percentage, acres, amount_cents, is_primary, sort_order, price_per_acre_cents, pricing_note)
         VALUES (v_invoice_id, v_share.customer_id, v_share.farm_name, v_share.avg_split_pct, v_share.share_acres, v_amount, v_share.is_primary, v_share.sort_ord, v_ppa, v_share.pricing_note);
@@ -946,7 +954,7 @@ BEGIN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '2a3e40900ba7702e998546d815eaf4b8'
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '2d78cd1251d44e11d68f400fe322156b'
      OR v_price IS NULL OR v_split IS NULL
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM 'c6a232b49bd296d9fc2dacb91e413bd0'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN

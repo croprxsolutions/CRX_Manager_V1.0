@@ -255,7 +255,7 @@ function refusedProbe(sql, pattern, uid) {
 }
 
 const id = (s) => `b5b5b5b5-2207-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), O = id('f3'), OS = id('f4');
+const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), O = id('f3'), OS = id('f4'), N = id('f5');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const WALL = 'public._enforce_below_cost_line()';
@@ -288,10 +288,12 @@ function seed() {
       ('${RUP}', '[PROVER] JBC restricted chem', 'JBC-4', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 30, 50, 50, 50, true, true);
     INSERT INTO public.fields (id, customer_id, field_name, total_acres, is_active) VALUES
       ('${G}', '${A}', '[PROVER] JBC field A', 100, true), ('${F}', '${A}', '[PROVER] JBC field A+B', 100, true),
-      ('${O}', '${A}', '[PROVER] JBC field A per-acre', 100, true), ('${OS}', '${A}', '[PROVER] JBC field A+B per-acre', 100, true);
+      ('${O}', '${A}', '[PROVER] JBC field A per-acre', 100, true), ('${OS}', '${A}', '[PROVER] JBC field A+B per-acre', 100, true),
+      ('${N}', '${A}', '[PROVER] JBC field A 99.99%', 100, true);
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary, price_override_cents) VALUES
       ('${G}', '${A}', 100, true, NULL), ('${F}', '${A}', 60, true, NULL), ('${F}', '${B}', 40, false, NULL),
-      ('${O}', '${A}', 100, true, 100), ('${OS}', '${A}', 60, true, 100), ('${OS}', '${B}', 40, false, 100);`);
+      ('${O}', '${A}', 100, true, 100), ('${OS}', '${A}', 60, true, 100), ('${OS}', '${B}', 40, false, 100),
+      ('${N}', '${A}', 99.99, true, NULL);`);
   // Test-only helpers (prover database only). jbc.job writes a completed job: 10 acres of the field and one chemical
   // line of p_qty p_unit at p_price (job cost p_cost) per p_unit; the stored job total is that line's total.
   psql(`CREATE SCHEMA jbc AUTHORIZATION supabase_admin;
@@ -388,6 +390,8 @@ const CASES = {
   overrideSmall: transfer(job('fl oz', 3, 39, 23, O)),
   overrideNormal: transfer(job('Gal', 10, 5000, 3000, O)),
   overrideSplit: transfer(job('Gal', 10, 5000, 3000, OS)),
+  // Luna round 2: a field whose split totals 99.99% (allowed) still bills every cent of its lines.
+  nearHundred: transfer(job('Gal', 10, 5000, 3000, N)),
   // Sol round 2 #4: the editor's ordinary save keeps the lines, for an admin and a sales rep.
   resaveSmallAdmin: resave(job('fl oz', 3, 39, 23), ADMIN),
   resaveSmallRep: resave(job('fl oz', 3, 39, 23), REP),
@@ -443,6 +447,9 @@ async function main() {
   assert.match(tenBefore, /^A:25000:25000:\d+:1\.0000 \S+ @25000=25000\/c\d+\/product\/null \| approvals=0 \| invoiced$/,
     'before: 10 Gal sold for $250 against $300 of cost passed the wall, written as quantity 1');
   refusedProbe(directLine, /BELOW_COST_CONTEXT_REQUIRED/);
+  const nearBefore = okProbe(CASES.nearHundred);
+  console.log(`[before] nearHundred: ${nearBefore}`);
+  assert.match(nearBefore, /^A:49995:49995:/, 'before: a 99.99% split billed $499.95 of a $500.00 job');
 
   stageText('candidate.sql', lf(CANDIDATE));
   const first = apply('candidate.sql');
@@ -482,6 +489,7 @@ async function main() {
     'the owners split 10 Gal 6/4');
   after('overrideSplit', 'A:30000:30000:18000:6.0000 Gal @5000=30000/c3000/product/manual B:20000:20000:12000:4.0000 Gal @5000=20000/c3000/product/manual',
     'two owners on a per-acre-priced field: no longer refused, each bills its lines');
+  after('nearHundred', 'A:50000:50000:30000:10.0000 Gal @5000=50000/c3000/product/manual', 'a 99.99% split bills all $500.00 of its lines');
   for (const k of ['fullBelow', 'tenBelow', 'half64flozBelow', 'dottedBelow', 'spelledBelow']) {
     refusedProbe(CASES[k], /JOB_LINE_BELOW_COST: \[PROVER\] JBC chem is priced below its cost on this job\. Nothing was invoiced/);
     assert.doesNotMatch(probe(CASES[k]).output, /\b(3000|1500|30\.00|15\.00)\b/, 'the refusal never states the cost');

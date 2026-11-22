@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270209120000_drivers_read_farms_only_through_lookup.sql (#2162, #2018 step 2).
+ * Real-schema proof for 20270215100000_drivers_read_farms_only_through_lookup.sql (#2162, #2018 step 2).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), records the before state, applies the candidate
@@ -28,7 +28,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, scalar, attempt, asUser, id, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270209120000_drivers_read_farms_only_through_lookup.sql';
+const CANDIDATE = '20270215100000_drivers_read_farms_only_through_lookup.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });

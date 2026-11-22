@@ -87,7 +87,7 @@
 > `from_base`) for a head that is exactly the conflict-free merge of the Sol-reviewed head (clean proof under 24
 > hours old, as is the original full review behind a chain of carries) and today's base tip (`origin/staging` for a
 > feature branch, `origin/main` for `hotfix/` and `release/`; Mason, 2026-11-22): with no model call
-> only when the PR's files and main's new files do not overlap and one side is plain documentation (notes-folder `.md` files,
+> only when the PR's files and the base's new files do not overlap and one side is plain documentation (notes-folder `.md` files,
 > which excludes every rule file, in regular non-executable files only); otherwise, including any two code changes in different files, only
 > after a focused Sol collision check returns CLEAN. The check starts from the database, guard, CI, dependency and
 > rule files (`CARRY_HOT_PATHS`) and counts any other blocker it sees. `proofValid()` in `codex-push-lib.mjs`

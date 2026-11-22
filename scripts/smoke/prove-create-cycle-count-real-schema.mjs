@@ -48,7 +48,7 @@ try {
   }
 
   // 1. Admin at a warehouse with 3 stock rows: one open count, 3 lines, expected = on-hand, number CC-YYYY-#####.
-  assert.equal(attempt(USERS.admin, `${asUser(`r := ${create('Alpha WH', 'k1', '  first  ')};`)}
+  assert.equal(attempt(USERS.admin, `${asUser(`r := ${create('Alpha WH', 'k1', '\t  first \n')};`)}
     v := concat_ws('|', r->>'line_count', r->>'warehouse', (r->>'count_number') ~ '^CC-\\d{4}-\\d{5}$',
       (SELECT concat_ws('/', status, warehouse, notes, initiated_by = '${USERS.admin}') FROM public.cycle_counts WHERE id = (r->>'cycle_count_id')::uuid),
       (SELECT string_agg(inventory_id::text || '=' || (expected_qty::float8)::text || ':' || is_counted, ',' ORDER BY inventory_id) FROM public.cycle_count_items WHERE cycle_count_id = (r->>'cycle_count_id')::uuid));`),

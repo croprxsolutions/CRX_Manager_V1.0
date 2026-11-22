@@ -6,7 +6,7 @@
 --
 -- WHAT: adds create_cycle_count(p_warehouse, p_notes, p_performed_by, p_idempotency_key). In one transaction it takes
 -- the next number (next_cycle_count_number, same lock), saves the count and one line per stock row at that location
--- (expected = on-hand), as the screen did; notes are stored trimmed (blank -> none). Active admin only. Any refusal
+-- (expected = on-hand), as the screen did; notes are stored with leading and trailing whitespace (tabs, newlines too) removed (blank -> none). Active admin only. Any refusal
 -- rolls everything back.
 -- Additive only: the deployed app keeps its direct inserts until the screen PR lands; nothing else changes. No rows change.
 --
@@ -48,7 +48,7 @@ DECLARE
   v_actor       uuid := auth.uid();
   -- Matched exactly as stored (the picker sends stored names), as the screen did; only blank is refused.
   v_warehouse   text := p_warehouse;
-  v_notes       text := NULLIF(btrim(p_notes), '');
+  v_notes       text := NULLIF(regexp_replace(p_notes, '^\s+|\s+$', '', 'g'), '');
   v_fingerprint text;
   v_replay      jsonb;
   v_number      text;

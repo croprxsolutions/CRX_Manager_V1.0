@@ -35,14 +35,14 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Reservations Farm ' || v_suffix) RETURNING id INTO v_customer;
-  FOR v_i IN 1..20 LOOP
+  FOR v_i IN 1..23 LOOP
     INSERT INTO products (product_name, unit_size, inventory_unit, product_form)
     VALUES ('[SMOKE] Reservations ' || lpad(v_i::text, 2, '0') || ' ' || v_suffix, 'Gal', 'Gal', 'liquid')
     RETURNING id INTO v_pid;
     v_p := v_p || v_pid;
   END LOOP;
   -- Every product is inserted before any is priced (pricing sets a transaction-wide mode).
-  FOR v_i IN 1..20 LOOP
+  FOR v_i IN 1..23 LOOP
     v_x := preview_product_pricing_changes('product_page', NULL,
       jsonb_build_array(jsonb_build_object(
         'product_id', v_p[v_i], 'row_version', (SELECT pricing_version FROM products WHERE id = v_p[v_i]),
@@ -450,21 +450,76 @@ BEGIN
      OR (pg_temp.prod(v_plan2, v_p[7])->>'suggested')::numeric <> 10 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (C21 non-finite stock, PO dates and PO quantities are not cover) % %', v_x, pg_temp.prod(v_plan2, v_p[7]);
   END IF;
-  -- A PO dated in year 300000 is a real date past the timestamp range: the plan still reads (no crash), the PO is
-  -- late cover like any later PO (so nothing to buy, flagged), and the monthly rollup is unchanged.
+  -- A PO dated in year 300000 is an impossible date (outside 2000-2099): the plan still reads (no crash), the PO is
+  -- skipped (still 10 to buy), and every bad record above is listed under check_data (Mason, 2026-11-22).
   PERFORM pg_temp.po(v_p[7], v_admin, 'SMKRS-C21A-' || v_suffix, 10, 0);
   UPDATE purchase_orders SET expected_delivery_date = '300000-01-01' WHERE po_number = 'SMKRS-C21A-' || v_suffix;
   v_plan2 := get_purchasing_plan(12);
-  IF pg_temp.prod(v_plan2, v_p[7]) IS NULL OR (pg_temp.prod(v_plan2, v_p[7])->>'suggested')::numeric <> 0
-     OR NOT (pg_temp.prod(v_plan2, v_p[7])->>'has_late_cover')::boolean
-     OR pg_temp.prod(v_plan2, v_p[7])->'months' IS DISTINCT FROM v_x->'months' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (C21 a PO dated year 300000) %', pg_temp.prod(v_plan2, v_p[7]);
+  IF pg_temp.prod(v_plan2, v_p[7]) IS NULL OR (pg_temp.prod(v_plan2, v_p[7])->>'suggested')::numeric <> 10
+     OR pg_temp.prod(v_plan2, v_p[7])->'coverage' IS DISTINCT FROM v_x->'coverage'
+     OR pg_temp.prod(v_plan2, v_p[7])->'months' IS DISTINCT FROM v_x->'months'
+     OR NOT (pg_temp.prod(v_plan2, v_p[7])->'reasons' ? 'check_data')
+     OR (SELECT count(*) FROM jsonb_array_elements(v_plan2->'check_data') c
+          WHERE (c->>'product_id')::uuid = v_p[7] AND c->>'kind' = 'po_line') <> 4
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
+                     WHERE (c->>'product_id')::uuid = v_p[7] AND c->>'kind' = 'stock') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C21 a PO dated year 300000) % %', pg_temp.prod(v_plan2, v_p[7]), v_plan2->'check_data';
   END IF;
   -- The allocator itself: a NaN or infinite supply is no cover, and a NaN need takes nothing from the next one.
   v_x := _purchasing_allocate('[{"d":null,"q":"NaN","shelf":true},{"d":null,"q":"Infinity","shelf":false},{"d":null,"q":5,"shelf":false}]',
                               '[{"r":3,"d":"2030-01-01","q":"NaN"},{"r":3,"d":"2030-01-01","q":12}]');
   IF (v_x->1->>'late')::numeric <> 5 OR (v_x->1->>'nc')::numeric <> 7 OR (v_x->1->>'on_time')::numeric <> 0 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (C21 the allocator skips non-finite values) %', v_x;
+  END IF;
+  v_n := v_n + 1;
+
+  -- C22: Sol round 10. Impossible values on needs are skipped and flagged too.
+  -- A: a draft Planned Firm booking dated at the minimum date the database stores: no crash, no date, flagged.
+  v_q := pg_temp.bk(v_p[21], v_customer, v_admin, 'C22A', 'planned_draft', '[{"q":10,"d":30,"c":"firm"}]');
+  UPDATE quote_sections SET needed_by_date = '4714-11-24 BC' WHERE quote_id = v_q;
+  -- B: 10 on the shelf, an order line whose remaining quantity is NaN, a Firm 10 at +5 and a Maybe 10 at +1:
+  -- the Firm line keeps the shelf (the NaN order is skipped), the Maybe is not covered.
+  PERFORM pg_temp.shelf(v_p[22], 10);
+  PERFORM pg_temp.ord(v_p[22], v_customer, v_admin, 'SMKRS-C22B-' || v_suffix, 10);
+  UPDATE order_items SET quantity_remaining = 'NaN'
+   WHERE order_id = (SELECT id FROM orders WHERE order_number = 'SMKRS-C22B-' || v_suffix);
+  PERFORM pg_temp.bk(v_p[22], v_customer, v_admin, 'C22BF', 'sent', '[{"q":10,"d":5,"c":"firm"}]');
+  PERFORM pg_temp.bk(v_p[22], v_customer, v_admin, 'C22BM', 'sent', '[{"q":10,"d":1,"c":"maybe"}]');
+  -- C: 10 on the shelf, an order of 10 whose only delivery is scheduled at 'infinity', a Firm 10 at +5:
+  -- the order counts as due today and takes the shelf; the Firm line is bought.
+  PERFORM pg_temp.shelf(v_p[23], 10);
+  PERFORM pg_temp.ord(v_p[23], v_customer, v_admin, 'SMKRS-C22C-' || v_suffix, 10);
+  PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
+  INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+  SELECT 'SMKRS-C22C-D-' || v_suffix, o.id, v_customer, 'scheduled', 'infinity', v_admin
+    FROM orders o WHERE o.order_number = 'SMKRS-C22C-' || v_suffix RETURNING id INTO v_q2;
+  INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+  SELECT v_q2, oi.id, v_p[23], 10, 'Gal' FROM order_items oi JOIN orders o ON o.id = oi.order_id
+   WHERE o.order_number = 'SMKRS-C22C-' || v_suffix;
+  PERFORM set_config('app.crx_below_cost_operation', '', true);
+  PERFORM pg_temp.bk(v_p[23], v_customer, v_admin, 'C22C', 'sent', '[{"q":10,"d":5,"c":"firm"}]');
+  v_plan2 := get_purchasing_plan(12);
+  v_x := pg_temp.prod(v_plan2, v_p[21]);
+  IF v_x IS NULL OR NOT (v_x->'reasons' ? 'check_data')
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'need_date' IS NULL)
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
+                     WHERE (c->>'product_id')::uuid = v_p[21] AND c->>'kind' = 'booking_line') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C22A a booking dated at the minimum date) %', v_x;
+  END IF;
+  v_x := pg_temp.prod(v_plan2, v_p[22]);
+  IF pg_temp.g(v_x, 'committed') <> '10/10/0/0' OR pg_temp.g(v_x, 'shown') <> '10/0/0/10'
+     OR (v_x->>'suggested')::numeric <> 0 OR NOT (v_x->'reasons' ? 'check_data')
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
+                     WHERE (c->>'product_id')::uuid = v_p[22] AND c->>'kind' = 'order_line') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C22B a NaN order line) %', v_x;
+  END IF;
+  v_x := pg_temp.prod(v_plan2, v_p[23]);
+  IF pg_temp.g(v_x, 'committed') <> '20/10/0/10' OR (v_x->>'suggested')::numeric <> 10
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r
+                     WHERE r->>'kind' = 'order' AND (r->>'need_date')::date = v_t)
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
+                     WHERE (c->>'product_id')::uuid = v_p[23] AND c->>'kind' = 'delivery') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C22C a delivery scheduled at infinity) %', v_x;
   END IF;
   v_n := v_n + 1;
 

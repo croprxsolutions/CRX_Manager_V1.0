@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — #1989: impossible stored values are skipped and flagged
+
+**Decision (Mason, in chat, 2026-11-22: "Skip and flag them").** Sol round 10 on #1989 found three more HIGHs from the same mechanism (stored values that are not real: a booking dated at the database's minimum date, a NaN order quantity, a delivery scheduled at infinity). Asked the business trade-off, Mason chose: treat any quantity that is not a finite number, and any date outside 2000-2099, as bad data. The purchasing plan leaves that value out of the stock math (a bad booking date counts as no date; a bad job date or delivery date counts as today; a bad quantity or PO date drops the row) and lists the record under a new `check_data` list so someone fixes it. This replaces the round-9 rule that only skipped NaN and infinity.
+
 ## 2026-11-22 — 3 more Sol rounds approved for #1989 (to round 13)
 
 **Decision (Mason, in chat, 2026-11-22: "i approve up to 3x more rounds").** Sol rounds 8 and 9 on #1989 each found HIGHs about stored values that are not real stock (a year-300000 PO date; NaN or infinite quantities and dates). Round 9's fix closes that class in one place: the allocator and its inputs ignore any non-finite quantity or date. This entry approves up to 3 more Sol rounds on #1989 beyond the earlier 3, so up to round 13; it waives no finding. If the same mechanism returns a BLOCKER or HIGH again, stop and put the business trade-off to Mason.

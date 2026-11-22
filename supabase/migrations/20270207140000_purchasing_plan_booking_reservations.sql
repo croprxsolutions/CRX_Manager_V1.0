@@ -135,6 +135,9 @@ BEGIN
   WITH
   prm AS (
     SELECT t.today, t.months,
+           -- Impossible stored values are skipped and flagged (Mason, 2026-11-22): a date outside 2000-2099, or a
+           -- quantity that is not a finite number. The row (or only its date) leaves the math and is listed in check_data.
+           '2000-01-01'::date AS d_lo, '2099-12-31'::date AS d_hi,
            (date_trunc('month', t.today) + make_interval(months => t.months) - interval '1 day')::date AS horizon_end,
            COALESCE((SELECT CASE WHEN btrim(a.setting_value) ~ '^[0-9]{1,3}$' AND btrim(a.setting_value)::int <= 120
                                  THEN btrim(a.setting_value)::int END
@@ -191,8 +194,8 @@ BEGIN
   ),
   bla AS (
     SELECT qi.id AS item_id, eq.id AS quote_id, qi.product_id, s.id AS section_id,
-           -- A non-finite date ('infinity') counts as no date, so one bad section cannot fail the plan.
-           CASE WHEN isfinite(s.needed_by_date) THEN s.needed_by_date END AS needed_by_date,
+           -- An impossible date ('infinity', or outside 2000-2099) counts as no date (listed in check_data).
+           CASE WHEN s.needed_by_date BETWEEN (SELECT d_lo FROM prm) AND (SELECT d_hi FROM prm) THEN s.needed_by_date END AS needed_by_date,
            s.timing, s.confidence, COALESCE(s.sort_order, 0) AS s_sort, COALESCE(qi.sort_order, 0) AS i_sort,
            GREATEST(COALESCE(qi.total_units_needed, 0), 0) AS qty,
            -- A line saved in a unit that no longer matches the stock unit is set aside (Mason, 2026-11-18):
@@ -202,14 +205,17 @@ BEGIN
       JOIN quote_items qi ON qi.quote_id = eq.id
       JOIN products p ON p.id = qi.product_id
       LEFT JOIN quote_sections s ON s.id = qi.section_id
-     WHERE qi.product_id IS NOT NULL
+     WHERE qi.product_id IS NOT NULL AND abs(COALESCE(qi.total_units_needed, 0)) < 'Infinity'::numeric
   ),
   bl AS (
     SELECT * FROM bla WHERE NOT bla.unit_problem
   ),
   -- Active job lines, with the reservation engine's own quantity (20261107070000).
   jcl AS (
-    SELECT jc.id AS line_id, jc.job_id, jc.product_id, j.job_date, j.quote_id, j.quote_section_id, j.customer_id,
+    SELECT jc.id AS line_id, jc.job_id, jc.product_id,
+           -- An impossible job date counts as today, so the line is never bought late (listed in check_data).
+           CASE WHEN j.job_date BETWEEN (SELECT d_lo FROM prm) AND (SELECT d_hi FROM prm) THEN j.job_date ELSE (SELECT today FROM prm) END AS job_date,
+           j.quote_id, j.quote_section_id, j.customer_id,
            COALESCE(field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form), jc.quantity) AS qty,
            (field_app_priced_quantity(jc.quantity, normalize_rate_unit(jc.unit), p.inventory_unit, p.product_form) IS NULL
             AND NOT _unit_matches_stock_unit(jc.unit, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size))) AS unit_problem
@@ -217,7 +223,7 @@ BEGIN
       JOIN job_chemicals jc ON jc.job_id = j.id
       JOIN products p ON p.id = jc.product_id
      WHERE j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')
-       AND jc.customer_supplied IS NOT TRUE AND COALESCE(jc.quantity, 0) > 0
+       AND jc.customer_supplied IS NOT TRUE AND COALESCE(jc.quantity, 0) > 0 AND abs(jc.quantity) < 'Infinity'::numeric
   ),
   -- Draws. A job draw belongs to the job's section when that section is on the same booking;
   -- an order draw (quote_product_draws) never records a section. An active job whose line for
@@ -230,10 +236,12 @@ BEGIN
       JOIN jobs j ON j.id = jpd.job_id
       LEFT JOIN quote_sections s ON s.id = j.quote_section_id AND s.quote_id = jpd.quote_id
      WHERE NOT EXISTS (SELECT 1 FROM jcl WHERE jcl.job_id = jpd.job_id AND jcl.product_id = jpd.product_id AND jcl.unit_problem)
+       AND abs(COALESCE(jpd.quantity_drawn, 0)) < 'Infinity'::numeric
   ),
   alld AS (
     SELECT qpd.quote_id, qpd.product_id, NULL::uuid AS section_id, COALESCE(qpd.quantity_drawn, 0) AS qty
       FROM quote_product_draws qpd JOIN eq ON eq.id = qpd.quote_id
+     WHERE abs(COALESCE(qpd.quantity_drawn, 0)) < 'Infinity'::numeric
     UNION ALL
     SELECT quote_id, product_id, section_id, qty FROM jd
   ),
@@ -329,7 +337,52 @@ BEGIN
      WHERE p.status IN ('draft', 'submitted', 'partially_received') AND poi.product_id IS NOT NULL
        AND poi.quantity_ordered - COALESCE(poi.quantity_received, 0) > 0
        AND poi.quantity_ordered - COALESCE(poi.quantity_received, 0) < 'Infinity'::numeric  -- (also excludes NaN)
-       AND (p.expected_delivery_date IS NULL OR isfinite(p.expected_delivery_date))  -- +/- infinity never arrives
+       -- An impossible date (+/- infinity, or outside 2000-2099): the PO is not counted (listed in check_data).
+       AND (p.expected_delivery_date IS NULL OR p.expected_delivery_date BETWEEN prm.d_lo AND prm.d_hi)
+  ),
+  -- Records holding an impossible value (see prm), skipped above and listed in check_data.
+  bad AS (
+    SELECT qi.product_id, 'booking_line'::text AS kind, qi.id
+      FROM eq JOIN quote_items qi ON qi.quote_id = eq.id LEFT JOIN quote_sections s ON s.id = qi.section_id CROSS JOIN prm
+     WHERE qi.product_id IS NOT NULL
+       AND (NOT abs(COALESCE(qi.total_units_needed, 0)) < 'Infinity'::numeric OR NOT s.needed_by_date BETWEEN prm.d_lo AND prm.d_hi)
+    UNION ALL
+    SELECT jc.product_id, 'job_line', jc.id
+      FROM jobs j JOIN job_chemicals jc ON jc.job_id = j.id CROSS JOIN prm
+     WHERE j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress') AND jc.customer_supplied IS NOT TRUE
+       AND jc.product_id IS NOT NULL
+       AND (NOT abs(COALESCE(jc.quantity, 0)) < 'Infinity'::numeric OR NOT j.job_date BETWEEN prm.d_lo AND prm.d_hi)
+    UNION ALL
+    SELECT qpd.product_id, 'draw', qpd.id FROM quote_product_draws qpd JOIN eq ON eq.id = qpd.quote_id
+     WHERE NOT abs(COALESCE(qpd.quantity_drawn, 0)) < 'Infinity'::numeric
+    UNION ALL
+    SELECT jpd.product_id, 'draw', jpd.id FROM job_product_draws jpd JOIN eq ON eq.id = jpd.quote_id
+     WHERE NOT abs(COALESCE(jpd.quantity_drawn, 0)) < 'Infinity'::numeric
+    UNION ALL
+    SELECT i.product_id, 'stock', i.id FROM inventory i
+     WHERE i.location = 'Main Warehouse' AND NOT abs(COALESCE(i.quantity_available, 0)) < 'Infinity'::numeric
+    UNION ALL
+    SELECT ih.product_id, 'hold', ih.id FROM inventory_holds ih
+     WHERE ih.is_active = true AND ih.hold_type IN ('manual', 'crop_program', 'job')
+       AND (ih.expires_at IS NULL OR ih.expires_at >= (SELECT today FROM prm))
+       AND NOT abs(COALESCE(ih.quantity, 0)) < 'Infinity'::numeric
+    UNION ALL
+    SELECT poi.product_id, 'po_line', poi.id
+      FROM purchase_order_items poi JOIN purchase_orders p ON p.id = poi.purchase_order_id CROSS JOIN prm
+     WHERE p.status IN ('submitted', 'partially_received') AND poi.product_id IS NOT NULL
+       AND (NOT abs(poi.quantity_ordered - COALESCE(poi.quantity_received, 0)) < 'Infinity'::numeric
+            OR NOT p.expected_delivery_date BETWEEN prm.d_lo AND prm.d_hi)
+    UNION ALL
+    SELECT oi.product_id, 'order_line', oi.id FROM order_items oi JOIN orders o ON o.id = oi.order_id
+     WHERE o.deleted_at IS NULL AND o.status IN ('confirmed', 'partially_fulfilled') AND oi.product_id IS NOT NULL
+       AND NOT abs(COALESCE(oi.quantity_remaining, 0)) < 'Infinity'::numeric
+    UNION ALL
+    SELECT oi.product_id, 'delivery', d.id
+      FROM delivery_items di JOIN deliveries d ON d.id = di.delivery_id
+      JOIN order_items oi ON oi.id = di.order_item_id JOIN orders o ON o.id = oi.order_id CROSS JOIN prm
+     WHERE o.deleted_at IS NULL AND o.status IN ('confirmed', 'partially_fulfilled') AND oi.product_id IS NOT NULL
+       AND d.deleted_at IS NULL AND d.status IN ('scheduled', 'in_progress')
+       AND (NOT d.scheduled_date BETWEEN prm.d_lo AND prm.d_hi OR NOT abs(COALESCE(di.quantity, 0)) < 'Infinity'::numeric)
   ),
   -- Every demand row, in stock units. A counted booking line (after draws) is its own reservation.
   dem AS (
@@ -357,18 +410,19 @@ BEGIN
            COALESCE((SELECT MIN(d.scheduled_date)
                        FROM delivery_items di JOIN deliveries d ON d.id = di.delivery_id
                       WHERE di.order_item_id = oi.id AND d.deleted_at IS NULL
-                        AND d.status IN ('scheduled', 'in_progress') AND d.scheduled_date IS NOT NULL
+                        AND d.status IN ('scheduled', 'in_progress')
+                        AND d.scheduled_date BETWEEN (SELECT d_lo FROM prm) AND (SELECT d_hi FROM prm) AND abs(COALESCE(di.quantity, 0)) < 'Infinity'::numeric
                      HAVING SUM(COALESCE(di.quantity, 0)) >= oi.quantity_remaining),
                     (SELECT today FROM prm)),
            oi.quantity_remaining, o.quote_id, o.id, NULL::uuid, NULL::uuid, NULL::text, false, false, o.customer_id, false, oi.id
       FROM order_items oi JOIN orders o ON o.id = oi.order_id
      WHERE o.deleted_at IS NULL AND o.status IN ('confirmed', 'partially_fulfilled')
-       AND oi.product_id IS NOT NULL AND oi.quantity_remaining > 0
+       AND oi.product_id IS NOT NULL AND oi.quantity_remaining > 0 AND oi.quantity_remaining < 'Infinity'::numeric
     UNION ALL
     -- Active jobs (a line that cannot be converted goes to Check units and reserves nothing).
     SELECT x.product_id, 'job', 'committed', x.job_date, x.qty, x.quote_id, NULL::uuid, x.job_id,
            x.quote_section_id, NULL::text, false, x.unit_problem, x.customer_id, false, x.line_id
-      FROM jcl x WHERE x.qty > 0
+      FROM jcl x WHERE x.qty > 0 AND x.qty < 'Infinity'::numeric
     UNION ALL
     -- Manual holds: committed today. Shelf-only holds: shelf stock only (class shelf_hold), never bought for.
     SELECT h.product_id, 'hold', CASE h.hold_use WHEN 'manual' THEN 'committed' ELSE 'shelf_hold' END,
@@ -401,6 +455,7 @@ BEGIN
      WHERE EXISTS (SELECT 1 FROM demb WHERE demb.product_id = p.id)
         OR EXISTS (SELECT 1 FROM po WHERE po.product_id = p.id)
         OR EXISTS (SELECT 1 FROM overdrawn WHERE overdrawn.product_id = p.id)
+        OR EXISTS (SELECT 1 FROM bad WHERE bad.product_id = p.id)
         OR COALESCE(oh.qty, 0) < 0
   ),
   -- Supply in order: shelf (today), then PO lines by date, PO number, line; undated POs last.
@@ -470,7 +525,8 @@ BEGIN
              CASE WHEN EXISTS (SELECT 1 FROM demb WHERE demb.product_id = prod.product_id AND demb.cls = 'committed' AND demb.bucket = 'later') THEN 'later' END,
              CASE WHEN EXISTS (SELECT 1 FROM overdrawn WHERE overdrawn.product_id = prod.product_id) THEN 'over_drawn' END,
              CASE WHEN EXISTS (SELECT 1 FROM po WHERE po.product_id = prod.product_id AND po.flag = 'late') THEN 'late_po' END,
-             CASE WHEN EXISTS (SELECT 1 FROM po WHERE po.product_id = prod.product_id AND po.flag = 'undated') THEN 'undated_po' END
+             CASE WHEN EXISTS (SELECT 1 FROM po WHERE po.product_id = prod.product_id AND po.flag = 'undated') THEN 'undated_po' END,
+             CASE WHEN EXISTS (SELECT 1 FROM bad WHERE bad.product_id = prod.product_id) THEN 'check_data' END
            ], NULL) AS list
       FROM prod
   ),
@@ -519,6 +575,11 @@ BEGIN
         LEFT JOIN quote_sections qs ON qs.id = demb.section_id
         JOIN products p ON p.id = demb.product_id
        WHERE demb.kind = 'booking' AND demb.confidence = 'firm' AND demb.raw_date IS NULL AND demb.qty > 0), '[]'::jsonb),
+    -- Records holding an impossible value, left out of the math until someone fixes them.
+    'check_data', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object('kind', b.kind, 'id', b.id, 'product_id', b.product_id, 'product_name', p.product_name)
+                       ORDER BY p.product_name, b.product_id, b.kind, b.id)
+        FROM (SELECT DISTINCT product_id, kind, id FROM bad) b LEFT JOIN products p ON p.id = b.product_id), '[]'::jsonb),
     'drawn_section_unknown', COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
                'quote_id', dt.quote_id, 'quote_number', eq.quote_number, 'customer_name', c.farm_name,
@@ -638,7 +699,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '14fdef01c579727fc116301a8a0efc4d' THEN
+     IS DISTINCT FROM 'e576a27782adf38cc15be71635e7acfc' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

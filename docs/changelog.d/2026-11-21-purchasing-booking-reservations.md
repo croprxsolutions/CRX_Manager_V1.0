@@ -7,6 +7,7 @@
 - A late or undated PO counts as cover and never adds a buy. Only the not-covered part of the deficit and committed needs is bought, and could-add comes from the Likely lines.
 - Stale holds (booking or job gone, closed or converted) take shelf stock only and never buy; the unbacked part shows as `hold_unbacked`.
 - New product keys: `coverage` (per group: booked, on_time, late, not_covered, from_shelf, POs), `has_late_cover`, `has_followup`, `estimated`, `hold_unbacked`. A booking row gains `overdue_followup` (14+ days past its need date). The horizon only filters what is shown; POs are no longer cut at the horizon (no `later` PO flag).
+- Impossible stored values (Mason, 2026-11-22, "Skip and flag them"): a quantity that is not a finite number, or a date outside 2000-2099, is left out of the math and the record is listed in a new top-level `check_data` key (product reason `check_data`).
 - Kept from the old #1989 build: the safe draw guess, the draw lists and the timing-window fixes.
 - No screen calls `get_purchasing_plan` yet (#1980 adds the first).
-- Proof: `node scripts/smoke/prove-purchasing-plan-reservations-real-schema.mjs` with `smoke-purchasing-plan-reservations.sql` (C1-C21) and `smoke-purchasing-plan.sql`. Not yet verified on staging.
+- Proof: `node scripts/smoke/prove-purchasing-plan-reservations-real-schema.mjs` with `smoke-purchasing-plan-reservations.sql` (C1-C22) and `smoke-purchasing-plan.sql`. Not yet verified on staging.

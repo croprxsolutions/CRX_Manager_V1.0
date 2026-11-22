@@ -378,10 +378,11 @@ async function afterCases() {
     /DELIVERY_EXCEEDS_ORDER: \[PROVER\] F05 Product/, ADMIN);
   // Way out when the extra load cannot be cancelled (Sol r1 #1: a return on the order refuses cancel and Cancel
   // Remaining): record nothing delivered on the extra load. Delivered does not rise, so it completes; the real one follows.
-  assert.equal(Number(okProbe(`${AS_ADMIN}
-    ${completeLegacy(DLB, DLB1, 0, 'f05-3z')}
-    ${completeLegacy(DLA, DLA1, 1, 'f05-3y')}
-    ${delivered(LL)}`)), 1);
+  // Both through the public call, signed in, as the driver or office would (Luna r4).
+  const publicComplete = (d, di, qty, key) => `SELECT public.complete_delivery(p_delivery_id => '${d}', p_signed_by => 'No proof — recorded by office', p_performed_by => '${ADMIN}', p_quantities => jsonb_build_object('${di}', ${qty}), p_idempotency_key => '${key}', p_evidence => 'no_proof', p_evidence_ref => '[PROVER] F05 way out');`;
+  assert.equal(Number(okProbe(`${publicComplete(DLB, DLB1, 0, 'f05-3z')}
+    ${publicComplete(DLA, DLA1, 1, 'f05-3y')}
+    ${delivered(LL)}`, ADMIN)), 1);
   console.log('[case 3p] signed in through the public completion call: refused the same way; recording 0 on the extra load completes it and the real load then completes (way out when a return blocks cancel)');
 
   // 3b. A delivered rise that would use units held by another open load is refused.

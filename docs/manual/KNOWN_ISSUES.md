@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md); KI-170 added 2026-11-20 from the shared data loading pilot; KI-120 accepted and KI-169 split from KI-119 2026-11-19; KI-171 added 2026-11-21 from #2068; KI-178 and KI-182 added 2026-11-21 from #2047; KI-184 added 2026-11-21 from #2149) | 113 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md); KI-170 added 2026-11-20 from the shared data loading pilot; KI-120 accepted and KI-169 split from KI-119 2026-11-19; KI-171 added 2026-11-21 from #2068; KI-178 and KI-182 added 2026-11-21 from #2047; KI-183 added 2026-11-21 from #2047; KI-184 added 2026-11-21 from #2149) | 114 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106, KI-120, KI-176, KI-177, KI-179, KI-180, KI-181) | 23 |
 | Closed as FIXED, with proof (bottom of file and archive) | 25 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
@@ -1304,6 +1304,13 @@ Every app action shares one table of retry codes (idempotency keys). The PO scre
 and order, so a staff member who knew it could use it first in any other action and block that cancel for 24 hours.
 Mason accepted the #2047 finding (2026-11-21) because every existing action already allows this. Fix: give the PO
 screen random retry codes, as the other screens use.
+
+### KI-183 — Moving a job's date across October 1 leaves last season's label on the job
+**MED · OPEN · jobs/billing · found 2026-11-21 (Sol round 10, #2047) · Taha (billing, after 2026-12-15)**
+Changing a job's date from September 30 to October 1 (or back) keeps the job's stored season. Split billing uses that
+season for the per-acre service rate and the invoice season, so it can use last season's rate. Today's Job Schedule
+screen does the same. Mason accepted it (2026-11-21). Fix: set the season from the new date whenever the job date
+changes (in edit_jobs and any other date writer).
 
 ## Database and release process
 

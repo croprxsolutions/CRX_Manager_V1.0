@@ -299,7 +299,10 @@ describe('JobDetail cross-record binding', () => {
       : buildChain({ data: [], error: null })));
     mockRpc.mockImplementation((fn: string) => (fn === 'save_job'
       ? saveGate.promise.then(() => ({ data: { job_id: 'job-a' }, error: null }))
-      : Promise.resolve({ data: null, error: null })));
+      // A real edit_jobs result, so a crew/loader write (if any) succeeds and the late-success guard is what is tested.
+      : Promise.resolve(fn === 'edit_jobs'
+        ? { data: { updated: ['job-a'], cancelled: [], deleted: [], skipped: [] }, error: null }
+        : { data: null, error: null })));
 
     const router = mountAt('/jobs/job-a');
     await screen.findByRole('heading', { name: 'J-AAAA-1001' });

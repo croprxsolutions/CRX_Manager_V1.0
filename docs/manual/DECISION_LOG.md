@@ -10,6 +10,44 @@
 
 **Decision (Mason, 2026-11-21, "Yes, block").** On the product page, vendor changes are off while the Product has unsaved edits, or is saving or loading ("Save or discard your Product changes before changing vendors."). After any vendor link, the page re-reads the whole Product instead of copying a vendor name from the Vendors section, and keeps Save, New product and Add a size off until that read lands; a failed read locks editing until Reload Product succeeds. This replaces patching the vendor name in place, which produced a new race in each of three review rounds (KI-170).
 
+## 2026-11-21 — #2151: Mason owner-accepted 1 Sol finding(s) at `1be1755e1188`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2151 at `1be1755e1188` (base `9abe45d4bc5f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/lib/editJobs.ts:43`, text sha256 `a253254446bb089f` (the wording stays with the proof, not here)
+  Mason's reason: logged isseu (ref 3bcb8445e850)
+
+## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B) may have Sol round 17
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, allow round 17").**
+PR #2151 may have one more Sol review, round 17, because merging newer staging work into the branch made a
+new version that round 16's sign-off does not cover. Its own code did not change after round 16.
+
+## 2026-11-21 — #2151: Mason owner-accepted 1 Sol finding(s) at `2e3a5b5e4ac0`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2151 at `2e3a5b5e4ac0` (base `dac995aac792`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/lib/editJobs.ts:42`, text sha256 `a4571e5195c8fa0d` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref b25f05e9d3b8)
+
+## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B): every job edit saves fresh
+
+**Decision (Mason, in chat, 2026-11-21: "Save fresh every click").**
+On PR #2151, every job-screen click that calls `edit_jobs` (Mass Edit, batch assign, bulk Cancel/Delete,
+Cancel on a job, and the crew/loader part of a job Save) sends a new request key. A second click never
+replays the answer to an earlier attempt; it re-sends the edit as it stands now. A notes-only job Save uses
+`save_job` alone and is not affected.
+**What it does:** `editJobs()` mints a new idempotency key per call instead of keeping one across retries.
+Re-sending sets the same values again. A cancel or delete already done is skipped and shown as "already
+cancelled"/"already deleted". One accepted edge: if the reply to a combined field edit + cancel is lost
+and the user clicks again, the field values are written again on the now-cancelled job (same values, so
+no change in meaning). Every other gate is unchanged.
+
+## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B) may have Sol rounds 11 to 16
+
+**Decision (Mason, in chat, 2026-11-21: "Yes", answering "Allow Sol review rounds 11 to 16 on PR B (#2151)?").**
+PR #2151 may have its Sol review in rounds 11 through 16. Its branch also carries #2047's commits, whose ten
+rounds count toward its total.
+**What it does:** lifts the round cap for #2151 only, up to round 16; the stop rule (the same BLOCKER/HIGH
+surviving two fix rounds goes back to Mason) and every other gate are unchanged.
 ## 2026-11-21 — #2149: Mason owner-accepted 1 Sol finding(s) at `a8f491084ae1`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2149 at `a8f491084ae1` (base `dac995aac792`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

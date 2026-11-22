@@ -14,6 +14,11 @@
 --   ACTOR        forged p_performed_by -> ACTOR_MISMATCH, writes nothing.
 --   GUARD        a POSTED invoice cannot be reversed (honest error, no mutation).
 --   GUARD        a non-job (engine-built) field invoice cannot be reversed.
+--   GROUP        a two-owner job bills one invoice per owner (U7, 20260707140000), each
+--                with one share to its own owner, and cannot be returned to scheduling
+--                from its anchor (JOB_BILLED_AS_GROUP; voiding each owner invoice does
+--                that). Rewritten for #2168: this chain used to expect ONE invoice with
+--                2 customer shares, the pre-U7 shape.
 --
 -- Ends in RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK'.
 -- ============================================================================
@@ -24,7 +29,7 @@ DECLARE
   v_job uuid; v_res jsonb; v_inv uuid; v_invR RECORD; v_jobR RECORD;
   v_n int; v_forged uuid := gen_random_uuid();
   v_apprec uuid; v_inv2 uuid; v_posted_job uuid; v_posted_inv uuid;
-  v_eng_inv uuid;
+  v_eng_inv uuid; v_grp_job uuid; v_grp jsonb; v_anchor uuid;
 BEGIN
   SELECT id INTO v_admin FROM profiles WHERE role='admin' AND is_active=true ORDER BY created_at LIMIT 1;
   IF v_admin IS NULL THEN RAISE EXCEPTION 'SMOKE_SETUP: no admin'; END IF;
@@ -56,9 +61,7 @@ BEGIN
   INSERT INTO fields (customer_id, field_name, crop_type) VALUES (v_cust,'[SMOKE] RT F2 '||v_sfx,'corn') RETURNING id INTO v_field2;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role','authenticated')::text, true);
 
-  -- Build a completed, multi-customer (split via field_billing_defaults) job and transfer it.
-  INSERT INTO field_billing_defaults (field_id, customer_id, split_pct, is_primary) VALUES (v_field, v_cust, 60, true);
-  INSERT INTO field_billing_defaults (field_id, customer_id, split_pct, is_primary) VALUES (v_field, v_cust2, 40, false);
+  -- Build a completed single-owner job and transfer it (round trip below).
   INSERT INTO jobs (job_number, customer_id, status, job_date, season, total_price_cents, total_cost_cents, created_by)
     VALUES ('[SMOKE] RT JOB-'||v_sfx, v_cust, 'scheduled', CURRENT_DATE-3, 2026, 50000, 20000, v_admin) RETURNING id INTO v_job;
   INSERT INTO job_fields (job_id, field_id, acres_to_treat, sort_order) VALUES (v_job, v_field, 100, 1);
@@ -74,7 +77,8 @@ BEGIN
   SELECT * INTO v_invR FROM invoices WHERE id=v_inv;
   SELECT * INTO v_jobR FROM jobs WHERE id=v_job;
   IF v_jobR.status<>'invoiced' OR v_jobR.invoice_id<>v_inv THEN RAISE EXCEPTION 'SMOKE_FAIL: fwd job not invoiced/linked (% / %)', v_jobR.status, v_jobR.invoice_id; END IF;
-  SELECT count(*) INTO v_n FROM invoice_shares WHERE invoice_id=v_inv; IF v_n<>2 THEN RAISE EXCEPTION 'SMOKE_FAIL: expected 2 customer shares, got %', v_n; END IF;
+  SELECT count(*) INTO v_n FROM invoice_shares WHERE invoice_id=v_inv; IF v_n<>1 THEN RAISE EXCEPTION 'SMOKE_FAIL: expected 1 customer share, got %', v_n; END IF;
+  IF v_invR.customer_id<>v_cust OR v_invR.invoice_group_id IS NOT NULL THEN RAISE EXCEPTION 'SMOKE_FAIL: single-owner invoice not billed alone to its owner'; END IF;
   SELECT count(*) INTO v_n FROM invoice_items WHERE invoice_id=v_inv; IF v_n<1 THEN RAISE EXCEPTION 'SMOKE_FAIL: no invoice items after fwd'; END IF;
   SELECT invoice_id INTO v_inv2 FROM application_records WHERE id=v_apprec; IF v_inv2 IS DISTINCT FROM v_inv THEN RAISE EXCEPTION 'SMOKE_FAIL: app record not linked to invoice'; END IF;
 
@@ -146,6 +150,41 @@ BEGIN
     IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
     IF SQLERRM NOT LIKE '%not created from a job%' THEN RAISE EXCEPTION 'SMOKE_FAIL: no-job-guard wrong error: %', SQLERRM; END IF;
   END;
+
+  -- GROUP: a two-owner (60/40) job bills one invoice per owner and refuses the reverse.
+  INSERT INTO field_billing_defaults (field_id, customer_id, split_pct, is_primary) VALUES (v_field2, v_cust, 60, true);
+  INSERT INTO field_billing_defaults (field_id, customer_id, split_pct, is_primary) VALUES (v_field2, v_cust2, 40, false);
+  INSERT INTO jobs (job_number, customer_id, status, job_date, season, total_price_cents, total_cost_cents, created_by)
+    VALUES ('[SMOKE] RT GRP-'||v_sfx, v_cust, 'scheduled', CURRENT_DATE-3, 2026, 50000, 20000, v_admin) RETURNING id INTO v_grp_job;
+  INSERT INTO job_fields (job_id, field_id, acres_to_treat, sort_order) VALUES (v_grp_job, v_field2, 100, 1);
+  INSERT INTO job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit, cost_per_unit_cents, price_per_unit_cents, sort_order)
+    VALUES (v_grp_job, v_prodA, 10, 'Gal', 0.5, 'PT', 2000, 5000, 1);
+  UPDATE jobs SET status='in_progress' WHERE id=v_grp_job; UPDATE jobs SET status='completed' WHERE id=v_grp_job;
+  v_grp := transfer_job_to_invoice(v_grp_job, v_admin, 'SMOKE-rt-grp-'||v_sfx);
+  v_anchor := (v_grp->>'invoice_id')::uuid;
+  IF jsonb_array_length(v_grp->'invoice_ids') <> 2 OR v_grp->>'invoice_group_id' IS NULL THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: two-owner job did not bill one invoice per owner (%)', v_grp; END IF;
+  SELECT count(*) INTO v_n FROM invoices i
+   WHERE i.invoice_group_id = (v_grp->>'invoice_group_id')::uuid AND i.status = 'unposted'
+     AND (SELECT count(*) FROM invoice_shares x WHERE x.invoice_id = i.id) = 1
+     AND (SELECT x.customer_id FROM invoice_shares x WHERE x.invoice_id = i.id) = i.customer_id;
+  -- The group holds exactly those two invoices, nothing else.
+  IF v_n <> 2 OR (SELECT count(*) FROM invoices WHERE invoice_group_id = (v_grp->>'invoice_group_id')::uuid) <> 2
+     OR (SELECT count(DISTINCT customer_id) FROM invoices WHERE invoice_group_id = (v_grp->>'invoice_group_id')::uuid
+                    AND customer_id IN (v_cust, v_cust2)) <> 2 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: each owner should get one unposted invoice with one share to itself (% matched)', v_n; END IF;
+  IF (SELECT invoice_id FROM jobs WHERE id=v_grp_job AND status='invoiced') IS DISTINCT FROM v_anchor THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: group job not invoiced to its anchor'; END IF;
+  BEGIN
+    PERFORM transfer_invoice_to_job(v_anchor, v_admin, '[SMOKE] rt-grp-rev-'||v_sfx);
+    RAISE EXCEPTION 'SMOKE_FAIL: returned a multi-owner group to scheduling';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE 'SMOKE_FAIL%' THEN RAISE; END IF;
+    IF SQLERRM NOT LIKE 'JOB_BILLED_AS_GROUP%' THEN RAISE EXCEPTION 'SMOKE_FAIL: group-guard wrong error: %', SQLERRM; END IF;
+  END;
+  IF (SELECT status FROM jobs WHERE id=v_grp_job) <> 'invoiced'
+     OR (SELECT count(*) FROM invoices WHERE invoice_group_id = (v_grp->>'invoice_group_id')::uuid AND status='unposted') <> 2 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: the refused group reverse changed the job or its invoices'; END IF;
 
   RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK';
 END $smoke$;

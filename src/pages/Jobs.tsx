@@ -13,11 +13,12 @@ import BulkDeleteConfirmModal from '../components/ui/BulkDeleteConfirmModal';
 import SplitHeading from '../components/ui/SplitHeading';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, checkMutationResult, assertRpcResult } from '../lib/db';
+import { supabase, assertRpcResult } from '../lib/db';
 import { JOB_COLUMNS } from '../lib/costFields';
 import { fetchAllRows, fetchAllRowsForIds, pageWithList } from '../lib/pagedRead';
 import { chunkIds } from '../lib/dispatchDisplay';
 import { logActivity } from '../lib/activityLogger';
+import { editJobs, editJobsErrorMessage, editJobsLimitMessage, summarizeEditJobs } from '../lib/editJobs';
 import { useRowSelection, createCheckboxColumn } from '../hooks/useRowSelection';
 import { exportToCSV, fmtCSV, fmtDateCSV } from '../lib/csvExport';
 import { downloadReportPdf, type ReportPdfColumn } from '../lib/reportPdf';
@@ -237,6 +238,8 @@ export default function Jobs() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { role, profile } = useAuth();
+  // edit_jobs lets only an admin delete a completed job; a rep is never offered one, and no other role may delete.
+  const deletableStatuses: JobStatus[] = role === 'admin' ? DELETABLE : role === 'sales_rep' ? ['scheduled', 'in_progress'] : [];
   const [jobs, setJobs] = useState<JobRow[]>([]);
   const [loading, setLoading] = useState(true);
   // The newest jobs read failed: show "could not be loaded", never "No jobs found" (To-Do 10.5).
@@ -1450,7 +1453,7 @@ export default function Jobs() {
       // summarized/exported). Delete must stay gated to DELETABLE: re-filter the
       // selection here so an invoiced/finished job is NEVER soft-deleted, even if
       // it's checkbox-selected for a report. Skipped jobs are surfaced in the toast.
-      const deletableRows = selectedRows.filter((j) => DELETABLE.includes(j.status));
+      const deletableRows = selectedRows.filter((j) => deletableStatuses.includes(j.status));
       const ids = deletableRows.map((j) => j.id);
       const skipped = selectedRows.length - ids.length;
       if (ids.length === 0) {
@@ -1459,42 +1462,50 @@ export default function Jobs() {
         setDeleteModalOpen(false);
         return;
       }
-      // Belt-and-suspenders: scope the soft-delete by status IN DELETABLE at the
-      // QUERY level too (not just the in-memory `ids` filter above). If the
-      // in-memory status were ever stale/wrong, the DB query still refuses to
-      // stamp deleted_at on an invoiced/cancelled job. This mirrors the new
-      // server-side _enforce_billed_job_immutability trigger (#12 DB guard).
-      const result = await supabase
-        .from('jobs')
-        .update({ deleted_at: new Date().toISOString() })
-        .in('id', ids)
-        .in('status', DELETABLE)
-        .select('id');
-      checkMutationResult(result, 'Delete jobs');
-      // If the DB matched fewer rows than we asked to delete, a selected job was
-      // not in a deletable status (e.g. it was billed between fetch and delete) and
-      // the query correctly skipped it. Surface that instead of claiming success.
-      const deletedCount = result.data?.length ?? 0;
-      const dbSkipped = ids.length - deletedCount;
-      const totalSkipped = skipped + dbSkipped;
-      toast(
-        totalSkipped > 0 ? 'info' : 'success',
-        totalSkipped > 0
-          ? `Deleted ${deletedCount} job(s); ${totalSkipped} skipped — invoiced/finished jobs can't be deleted.`
-          : `Deleted ${deletedCount} job(s)`,
-      );
+      if (!profile) throw new Error('Sign in again to delete jobs.');
+      // #1979: edit_jobs soft-deletes in one transaction and skips any job no longer deletable
+      // (billed since loading; a rep's completed job). Selection skips are reported with the server's.
+      const jobIds = [...ids].sort();
+      const result = await editJobs({
+        jobIds, action: 'delete', performedBy: profile.id,
+      });
+      const localSkips = selectedRows
+        .filter((j) => !deletableStatuses.includes(j.status))
+        .map((j) => ({ id: j.id, reason: 'status' as const, status: j.status }));
+      const all = { ...result, skipped: [...localSkips, ...result.skipped] };
+      toast(all.skipped.length > 0 ? 'info' : 'success', summarizeEditJobs(all));
       clearSelection();
       fetchJobs();
     } catch (err) {
-      toast('error', sanitizeError(err));
+      Sentry.captureException(toSentryError(err), { extra: { context: 'jobs_bulk_delete' } });
+      toast('error', editJobsErrorMessage(err));
     }
     setDeleting(false);
     setDeleteModalOpen(false);
   };
 
+  // edit_jobs takes at most 500 jobs per save: say so before the user confirms anything.
+  const openEditJobsAction = (open: () => void) => {
+    const limit = editJobsLimitMessage(editableSelectedRows.length);
+    if (limit) { toast('error', limit); return; }
+    openMutatingAction(open);
+  };
+  const openDeleteConfirm = () => {
+    const count = selectedRows.filter((j) => deletableStatuses.includes(j.status)).length;
+    if (count === 0) {
+      toast('error', role === 'admin'
+        ? "No deletable jobs selected — invoiced or cancelled jobs can't be deleted."
+        : 'No deletable jobs selected — only scheduled or in-progress jobs can be deleted.');
+      return;
+    }
+    const limit = editJobsLimitMessage(count);
+    if (limit) { toast('error', limit); return; }
+    setDeleteModalOpen(true);
+  };
+
   const bulkActions = [
-    { key: 'mass-edit', label: 'Mass Edit', icon: <Pencil className="w-4 h-4" />, onClick: () => openMutatingAction(() => setMassEditOpen(true)) },
-    { key: 'batch', label: 'Add to Batch', icon: <Layers className="w-4 h-4" />, onClick: () => openMutatingAction(() => setAssignBatchOpen(true)) },
+    { key: 'mass-edit', label: 'Mass Edit', icon: <Pencil className="w-4 h-4" />, onClick: () => openEditJobsAction(() => setMassEditOpen(true)) },
+    { key: 'batch', label: 'Add to Batch', icon: <Layers className="w-4 h-4" />, onClick: () => openEditJobsAction(() => setAssignBatchOpen(true)) },
     { key: 'tags', label: 'Edit Job Tags', icon: <Tag className="w-4 h-4" />, onClick: () => openMutatingAction(() => setBulkTagsOpen(true)) },
     { key: 'csv', label: 'Export CSV', icon: <Download className="w-4 h-4" />, onClick: handleExportCSV },
     { key: 'pdf', label: 'Download PDF', icon: <FileText className="w-4 h-4" />, onClick: handleExportPDF, loading: exporting },
@@ -1503,7 +1514,7 @@ export default function Jobs() {
     { key: 'chem-summary', label: 'Chemical Summary Report', icon: <ClipboardList className="w-4 h-4" />, onClick: handleChemicalSummaryReport, loading: summaryExporting },
     { key: 'projected-use', label: 'Projected Use Report', icon: <PackageOpen className="w-4 h-4" />, onClick: handleProjectedUseReport, loading: projectedExporting },
     { key: 'master-mix', label: 'Master Mix Summary', icon: <Beaker className="w-4 h-4" />, onClick: handleMasterMixSummary, loading: masterMixExporting },
-    { key: 'delete', label: 'Delete Jobs', icon: <Trash2 className="w-4 h-4" />, onClick: () => setDeleteModalOpen(true), variant: 'danger' as const },
+    { key: 'delete', label: 'Delete Jobs', icon: <Trash2 className="w-4 h-4" />, onClick: openDeleteConfirm, variant: 'danger' as const },
   ];
 
   const dataColumns: Column<JobRow>[] = [
@@ -2192,7 +2203,7 @@ export default function Jobs() {
       <BulkDeleteConfirmModal
         open={deleteModalOpen}
         onClose={() => setDeleteModalOpen(false)}
-        count={selectedCount}
+        count={selectedRows.filter((j) => deletableStatuses.includes(j.status)).length}
         entityName="job"
         onConfirm={handleDelete}
         loading={deleting}

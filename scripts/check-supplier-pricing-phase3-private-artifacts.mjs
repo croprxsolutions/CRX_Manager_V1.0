@@ -2076,7 +2076,11 @@ function outgoingCommitsForNewRemoteRef(localSha, root, execute, remoteName, rem
   const argv = ['rev-list', '--reverse', `--max-count=${MAX_HISTORY_COMMITS + 1}`, assertCommitSha(localSha, 'local')];
   const remoteHead = advertisedRemoteHeadCommit(remoteName, remoteLocation, root, execute);
   if (remoteHead) argv.push('--not', remoteHead);
-  return gitLines(argv, root, execute);
+  const commits = gitLines(argv, root, execute);
+  // KI-51: without a local copy of the remote's default branch the whole history is scanned, and it is now
+  // longer than the cap, so name the fix instead of a bare cap error. The refusal itself is unchanged.
+  if (!remoteHead && commits.length > MAX_HISTORY_COMMITS) throw new Error('private Phase 3C containment checked-commit cap exceeded: this new branch has no local copy of the remote\'s default branch to stop at, so its whole history would be scanned; run `git fetch` for that remote, push to it by remote name (one fetch and push URL), then push again');
+  return commits;
 }
 function peeledCommitSha(objectSha, root, execute) {
   try {

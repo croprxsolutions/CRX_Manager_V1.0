@@ -1683,13 +1683,18 @@ tools. `scripts/backup-claude-memory.mjs:476` refuses the same way.
 
 ### KI-51 — Supplier-pricing Phase 3C containment and time-bombs
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-41. The containment check caps history at 4,096 commits and main already has more; check whether new-branch pushes are affected.
+> **Re-checked 2026-11-22 on staging `f8ee14ee8`:** Resolved for new-branch pushes · LOW · plan W2-41.
 
-**MED · OPEN · tooling-guards · unassigned**
+**LOW · RESOLVED (cap) · tooling-guards**
 The trusted containment check is not a required check on `main` (rules: Vercel, Lint/Type/Test/Build, SQL
-Migration Validation). The first-push ancestry cap is 4,096 commits (`scripts/check-supplier-pricing-phase3-private-artifacts.mjs:25`);
-`main` has 3,032 and grows ~200/month, so about five months until every new branch push is blocked; raise it before
-then. Byte/candidate scan budgets (3 GiB, 100,000) need re-measuring. Maintenance watch.
+Migration Validation). History cap: 4,096 commits (`MAX_HISTORY_COMMITS` in
+`scripts/check-supplier-pricing-phase3-private-artifacts.mjs`); `origin/main` has 4,463 and `origin/staging` 4,550.
+**New-branch pushes are not affected** (checked 2026-11-22): the pre-push check scans only commits not on the
+remote's advertised default branch, so a new branch cut from staging scanned 87 commits and passed. CI scans only
+`base..head` for pull requests and runs on push only for `main` and `staging`, which are never created new. The cap
+still refuses a new-branch push when the checkout has no local copy of `main` (not fetched) or pushes to a URL that
+differs from the remote's fetch URL; that refusal now names the fix (fetch, push by remote name, push again).
+Byte/candidate scan budgets (3 GiB, 100,000) need re-measuring. Maintenance watch.
 
 ### KI-52 — Tests and tooling hygiene
 

@@ -47,6 +47,17 @@ interface MonthlySummary {
   // basis 'billed_share': the database counts commission on the share of each sale billed (KI-125); absent before that is live
   commissions: { earned_cents: number; paid_count: number; basis?: 'billed_share' };
   ar_balance_cents: number;
+  // #2175: fingerprint of this month's figures; the close is refused unless it still matches (absent before that is live)
+  review_token?: string;
+}
+
+// #2175 (20270208140000): the server's close refusals, each with the operator's answer.
+function closeRefusal(err: unknown): 'changed' | 'review' | 'reload' | null {
+  const message = String((err as { message?: unknown } | null)?.message ?? '');
+  if (message.startsWith('CLOSE_FIGURES_CHANGED')) return 'changed';
+  if (message.startsWith('CLOSE_REVIEW_REQUIRED: reload')) return 'reload';
+  if (message.startsWith('CLOSE_REVIEW_REQUIRED')) return 'review';
+  return null;
 }
 
 
@@ -264,12 +275,19 @@ export default function MonthEndClose() {
           done: true,
           detail: 'Generate from AR Aging page if needed — this step is optional',
         },
+        // #2175: without the figures' review token the server refuses the close; say why Close stays off.
+        ...(summary.review_token ? [] : [{
+          label: 'Figures ready to close',
+          done: false,
+          detail: 'This page needs the latest update before it can close a month — reload the page',
+        }]),
       ]
     : [];
 
   // Fail-closed: never enable close without a loaded summary for THIS period
   // (an empty checklist otherwise makes .every() vacuously true — Codex P1).
-  const allChecksPassed = summary !== null && checklist.every((c) => c.done);
+  // #2175: the close re-checks the figures against the token this page loaded, so no token = no close.
+  const allChecksPassed = summary !== null && !!summary.review_token && checklist.every((c) => c.done);
 
   const handleClose = async () => {
     if (!profile) {
@@ -293,6 +311,9 @@ export default function MonthEndClose() {
         p_period_end: current.end,
         p_performed_by: profile.id,
         p_idempotency_key: closeKey,
+        p_reviewed_token: summary?.review_token ?? null,
+        p_payments_reviewed: reviewedPayments,
+        p_commissions_reviewed: reviewedCommissions,
       });
       if (error) throw error;
       assertRpcResult(data, 'close_accounting_period');
@@ -309,8 +330,23 @@ export default function MonthEndClose() {
         closePeriodIdem.resetKey();
         fetchData();
       }
-      Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'close_accounting_period' } });
-      toast('error', sanitizeError(err));
+      const refusal = closeRefusal(err);
+      if (refusal === 'changed') {
+        // The month stays open; the same key may close it after a fresh review.
+        setReviewedPayments(false);
+        setReviewedCommissions(false);
+        setReviewedNeedsPricing(false);
+        setShowCloseModal(false);
+        fetchData();
+        toast('error', "This month's figures changed since you reviewed them. They have been reloaded; review them again before closing.");
+      } else if (refusal === 'reload') {
+        toast('error', 'The app was updated. Reload this page, then review and close the month again.');
+      } else if (refusal === 'review') {
+        toast('error', "Confirm you reviewed this month's payments and commissions before closing.");
+      } else {
+        Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'close_accounting_period' } });
+        toast('error', sanitizeError(err));
+      }
     }
     setClosing(false);
   };

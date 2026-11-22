@@ -31,6 +31,7 @@ interface SummaryFixture {
   applications: { count: number; total_acres: number };
   commissions: { earned_cents: number; paid_count: number; basis?: 'billed_share' };
   ar_balance_cents: number;
+  review_token?: string;
 }
 
 function buildChain(result: ChainResult): Record<string, unknown> {
@@ -64,6 +65,7 @@ function cleanSummary(): SummaryFixture {
     applications: { count: 0, total_acres: 0 },
     commissions: { earned_cents: 0, paid_count: 0 },
     ar_balance_cents: 0,
+    review_token: 'tok-june',
   };
 }
 
@@ -462,6 +464,7 @@ describe('MonthEndClose', () => {
       applications: { count: 0, total_acres: 0 },
       commissions: { earned_cents: 0, paid_count: 0 },
       ar_balance_cents: 0,
+      review_token: 'tok-june',
     };
     mockRpc.mockImplementation((name: string) => {
       if (name === 'get_monthly_summary') return Promise.resolve({ data: validSummary, error: null });
@@ -489,5 +492,52 @@ describe('MonthEndClose', () => {
       expect(screen.getByLabelText('Month to review')).toBeDisabled();
       expect(screen.getByLabelText('Year to review')).toBeDisabled();
     });
+  });
+
+  // #2175: the database re-checks the figures this page showed; the page sends what it reviewed.
+  async function openCloseModal() {
+    renderMonthEnd();
+    await switchToMonth(5);
+    await screen.findByText('June 2026');
+    const rollBtn = await screen.findByRole('button', { name: /Roll the Month/i });
+    await waitFor(() => expect(rollBtn).not.toBeDisabled());
+    fireEvent.click(rollBtn);
+    fireEvent.click(await screen.findByRole('button', { name: /^Close Period$/i }));
+  }
+
+  it('sends the review token and both review ticks with the close (#2175)', async () => {
+    mockCleanCloseableSummary();
+    await openCloseModal();
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('close_accounting_period', expect.objectContaining({
+      p_period_end: '2026-06-30',
+      p_reviewed_token: 'tok-june',
+      p_payments_reviewed: false,
+      p_commissions_reviewed: false,
+    })));
+  });
+
+  it('keeps Close off and says to reload when the summary has no review token (#2175)', async () => {
+    const summary = cleanSummary();
+    delete summary.review_token;
+    mockRpc.mockImplementation((name: string) => Promise.resolve({ data: name === 'get_monthly_summary' ? summary : null, error: null }));
+    renderMonthEnd();
+    await switchToMonth(5);
+    await screen.findByText('Figures ready to close');
+    expect(screen.getByRole('button', { name: /Roll the Month/i })).toBeDisabled();
+  });
+
+  it('reloads the figures and says they changed when the close is refused as stale (#2175)', async () => {
+    let summaryCalls = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'get_monthly_summary') { summaryCalls += 1; return Promise.resolve({ data: cleanSummary(), error: null }); }
+      if (name === 'close_accounting_period') {
+        return Promise.resolve({ data: null, error: { message: "CLOSE_FIGURES_CHANGED: this month's figures changed since you reviewed them; review them again before closing" } });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+    await openCloseModal();
+    const before = summaryCalls;
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/figures changed since you reviewed them/)));
+    await waitFor(() => expect(summaryCalls).toBeGreaterThan(before));
   });
 });

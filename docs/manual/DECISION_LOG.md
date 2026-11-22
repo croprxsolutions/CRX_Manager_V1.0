@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — KI-129 / #2195: prepayment checks count as payments received
+
+**Decision (Mason, 2026-11-22, relayed by the bug-sprint captain):** "yes should count as payment received". Month-End payments received counts each Prepayment Manager check in the month it was entered, at its current amount (all buckets of one check are one payment); Record Payment checks count in full (an overpayment's prepay credit is not added again); voided payments and deleted old-style payments do not count. A later edit or delete of a prepayment check changes that month's screen figure, never a closed month's saved close receipt. Shipped in migration `20270208140000_month_close_payments_received_recheck.sql` with the #2175 close re-check (the 2026-11-21 entry below asked for both together).
+
 ## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
 
 **Decision (Mason, in chat 2026-11-22, after Sol gate round 6 left 2 HIGH findings on the skip mechanism itself):** "then we will override SOL if we need to I don't want over complicated codes to type I want it to explicitly ask if I accept the risk and I say yes with reason and that's good enough". The skip request now asks plainly whether he accepts the risk of leaving the findings unfixed; `yes` and a reason is enough, and the reason is logged. Round 6's two findings (`.claude/hooks/sol-accept-lib.mjs:233`, `scripts/owner-accept-sol-finding.mjs:107`) are left unfixed as his business call: both concern how far a skip he gave can stretch, not money, stock, customer data or logins. This PR changes gate files, so the agent merge guard still requires a clean Sol; Mason or Taha merges it by hand.

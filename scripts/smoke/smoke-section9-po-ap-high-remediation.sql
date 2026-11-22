@@ -46,6 +46,8 @@ DECLARE
   v_old_date date := DATE '1990-01-15';
   v_today date := (clock_timestamp() AT TIME ZONE 'America/Chicago')::date;
   v_err text;
+  -- #2175 (20270208140000): the close re-checks the reviewed figures; NULL before that migration.
+  v_close_token text;
   v_due_date date;
   v_suffix text := substr(md5(random()::text), 1, 8);
 BEGIN
@@ -973,11 +975,22 @@ BEGIN
 
   -- Close through the real RPC. This makes the registered PO/AP chain cover
   -- the authoritative check_period_open refusals, not a hand-written closed row.
-  PERFORM public.close_accounting_period(
-    (date_trunc('month', v_old_date) + interval '1 month - 1 day')::date,
-    v_admin,
-    'smk-s9-close-old-period-' || v_suffix
-  );
+  IF to_regprocedure('public._month_close_figures_20270208(date,date)') IS NULL THEN
+    PERFORM public.close_accounting_period(
+      (date_trunc('month', v_old_date) + interval '1 month - 1 day')::date,
+      v_admin,
+      'smk-s9-close-old-period-' || v_suffix
+    );
+  ELSE
+    v_close_token := md5(public._month_close_figures_20270208(date_trunc('month', v_old_date)::date,
+      (date_trunc('month', v_old_date) + interval '1 month - 1 day')::date)::text);
+    PERFORM public.close_accounting_period(
+      (date_trunc('month', v_old_date) + interval '1 month - 1 day')::date,
+      v_admin,
+      'smk-s9-close-old-period-' || v_suffix,
+      v_close_token, true, true
+    );
+  END IF;
 
   BEGIN
     PERFORM public.update_vendor_bill(
@@ -1152,11 +1165,20 @@ BEGIN
       v_admin,
       'smk-s9-rpc-reopen-' || v_suffix
     );
-    PERFORM public.close_accounting_period(
-      (date_trunc('month', v_old_date) + interval '1 month - 1 day')::date,
-      v_admin,
-      'smk-s9-rpc-reclose-' || v_suffix
-    );
+    IF v_close_token IS NULL THEN
+      PERFORM public.close_accounting_period(
+        (date_trunc('month', v_old_date) + interval '1 month - 1 day')::date,
+        v_admin,
+        'smk-s9-rpc-reclose-' || v_suffix
+      );
+    ELSE
+      PERFORM public.close_accounting_period(
+        (date_trunc('month', v_old_date) + interval '1 month - 1 day')::date,
+        v_admin,
+        'smk-s9-rpc-reclose-' || v_suffix,
+        v_close_token, true, true
+      );
+    END IF;
     EXECUTE 'RESET ROLE';
   EXCEPTION WHEN OTHERS THEN
     v_err := SQLERRM;

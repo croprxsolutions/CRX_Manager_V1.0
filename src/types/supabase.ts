@@ -18574,9 +18574,12 @@ export type Database = {
       cleanup_rate_limits: { Args: never; Returns: undefined }
       close_accounting_period: {
         Args: {
+          p_commissions_reviewed?: boolean
           p_idempotency_key?: string
+          p_payments_reviewed?: boolean
           p_performed_by: string
           p_period_end: string
+          p_reviewed_token?: string
         }
         Returns: Json
       }

@@ -1,0 +1,5 @@
+-- Reverse of 20270207142500_retire_per_acre_field_pricing (prover use; a live rollback is its own reviewed migration).
+-- Drops the constraint only; the migration changed no rows. A second run refuses.
+SET LOCAL lock_timeout = '5s';
+
+ALTER TABLE public.field_billing_defaults DROP CONSTRAINT field_billing_defaults_no_per_acre_price;

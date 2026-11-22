@@ -33,7 +33,16 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270127110000_booking_timing_purchasing_plan.sql');
 const FOLLOW_UPS = [];
-const LATER_READ_ONLY = new Set([]);
+// Reviewed later files that match TOUCHED but leave what this proof asserts alone (not replayed; the chains test the candidate's own bodies).
+const LATER_READ_ONLY = new Set([
+  // Mentions get_purchasing_plan only in its 'NOT CHANGED' header; adds triggers on quotes/jobs/quote_sections and
+  // re-creates auto_expire_quotes. save_quote and the plan function are untouched, so the chains' subject is unchanged.
+  '20270127120000_booking_live_job_guard.sql',
+  // Re-creates get_purchasing_plan with ONE extra condition (a soft-deleted order no longer stands for an accepted
+  // booking unless product was drawn from it, Sol #1990). This proof's chains assert the candidate's body; the later
+  // body is proven by scripts/smoke/prove-release-fixes-1990-real-schema.mjs. Does not touch save_quote or the settings keys.
+  '20270129160000_release_fixes_1990.sql',
+]);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

@@ -34,7 +34,16 @@ const smokeFiles = [
 // #450, 2026-08-24: the last commit that changed this prover. Smokes rewritten since then for later
 // migrations run on the legacy catalog in their form at this commit.
 const CANDIDATE_ERA = '56321c0d083e958d445854c3310878b916aa971a';
-const CANDIDATE_ERA_LEGACY_SMOKES = new Set(['smoke-backfill-refuse-split-billing.sql']);
+// Every legacy chain edited since CANDIDATE_ERA runs in its era form: #1398 (ef922c9bf) and others
+// moved them onto functions (create_quote_version) that the legacy catalog does not have yet.
+const CANDIDATE_ERA_LEGACY_SMOKES = new Set([
+  'smoke-backfill-refuse-split-billing.sql',
+  'smoke-draw-ledger-reversal.sql',
+  'smoke-forbid-restore-cancelled-order.sql',
+  'smoke-order-draw-lock.sql',
+  'smoke-planned-holds-drawn-sync.sql',
+  'smoke-revert-quote-escape-hatch.sql',
+]);
 // Later migrations, replayed after the candidate the way the other real-schema provers replay them.
 // Live but not replayable here (storage.objects policies, storage.buckets settings).
 const PARKED = new Set([
@@ -47,6 +56,10 @@ const PARKED = new Set([
 const LEDGER_ONLY = new Set([
   '20261007150100_mark_spring_2026_deliveries_billed_in_chem_man.sql',
   '20261007150200_release_reservations_of_deleted_spring_orders.sql',
+  // Need live's storage.objects policies (this database has stubs only); same approach as the sibling
+  // real-schema provers. Neither touches quotes or customers.
+  '20261217100000_job_access_ends_with_the_job.sql',
+  '20261220100000_applicator_keeps_own_record_fields.sql',
 ]);
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Batch 2 (20261016140000) pins live's exact body.
@@ -78,6 +91,9 @@ const quoteLifecycleAnchors = [
   {
     label: 'draft-to-sent exact-version, sent_at, and commission-split',
     statement: "RAISE EXCEPTION 'SMOKE_FAIL: draft-to-sent save lost status, sent_at, commission split, or exact N+1 token';",
+    // Since 20261105160000 (#1398) a draft -> sent save is refused (QUOTE_SEND_REQUIRED); the same
+    // exact-version/sent_at/split check now runs on the save of the already-sent quote.
+    current: "RAISE EXCEPTION 'SMOKE_FAIL: sent save lost status, sent_at, commission split, or exact N+1 token';",
   },
   {
     label: 'repeated-sent exact-version, sent_at preservation, and commission-split preservation',
@@ -171,6 +187,51 @@ function restoreLiveCrLfCloseRemainder() {
     RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
     AS $live_crlf_close$${body}$live_crlf_close$;`);
 }
+// Later migrations pin live bodies/rows that the historical replay lacks; installed as the other
+// real-schema provers do (see prove-delivery-brands-real-schema.mjs).
+const LIVE_UNIT_ROWS = "('3f5c3827-8523-4b42-9913-ad479588ff95'::uuid, 'Dry oz', 1, 'dry', '1 dry ounce'), ('5ed18e4b-c4d9-42fc-b85e-22babd3fc098'::uuid, 'Ea', 1, 'both', 'Each / unit'), ('f9e10e66-5027-464e-bb9e-ed9800875256'::uuid, 'fl oz', 1, 'liquid', '1 fluid ounce'), ('4406cacd-a7fe-42db-8c84-694e61bb937b'::uuid, 'g', 0.03527396, 'dry', '1 gram = 0.03527396 dry ounces (1000 mg)'), ('29d05e43-cb40-461b-a969-88ee299faca8'::uuid, 'Gal', 128, 'liquid', '1 gallon = 128 fluid ounces'), ('53997e31-d152-4ab6-b768-d1aa81b657bf'::uuid, 'Lb', 16, 'dry', '1 pound = 16 dry ounces'), ('fc5d349f-b58c-48f1-991d-fa0161fd3d01'::uuid, 'LB', 16, 'dry', '1 pound (capitalized alias)'), ('ddde7daf-8090-492b-aed9-c0b7f8ecfd34'::uuid, 'MG', 0.00003527396, 'dry', '1 milligram = 0.00003527396 dry ounces'), ('438d5f7b-f015-4319-b2b7-4f9a672cb350'::uuid, 'oz', 1, 'liquid', '1 fluid ounce (alias for fl oz)'), ('b69ddac6-68ed-4f1d-8e09-e63a7fa6635a'::uuid, 'Oz', 1, 'liquid', '1 fluid ounce (capitalized alias)'), ('a31f95a0-df80-4025-977f-f1fb4e5c8d53'::uuid, 'Pt', 16, 'liquid', '1 pint = 16 fluid ounces'), ('35532f45-2fd0-4400-87d8-3509a58377c0'::uuid, 'qt', 32, 'liquid', '1 quart lowercase (alias for Qt)'), ('915f25ff-8876-4a49-a375-940047e38313'::uuid, 'Qt', 32, 'liquid', '1 quart = 32 fluid ounces'), ('722e8d86-8e68-47d8-a940-209fad38c70e'::uuid, 'Unit', 1, 'both', 'Each / unit (alias for Ea)')";
+const raw = (sql) => psql(`SET session_replication_role = replica;\n${sql}\nSET session_replication_role = origin;`, { user: 'supabase_admin' });
+// 20261104150000 (WP-PM-9, live) pins three live function bodies that the historical LF replay
+// does not reproduce; install them exactly as PM-9's own prover does, right before that file.
+const FORMS_SEED_EACH = '20261104150000_product_forms_seed_each.sql';
+const LIVE_BODY_MD5 = {
+  'public.field_app_priced_quantity(numeric,text,text,text)': 'bc91a52577840973f18f1710e47edf2b',
+  'public.convert_to_gl_lb(numeric,text,text)': 'ce9265521821c09b0cf74de45afb375b',
+  'public.validate_product_units()': '83a51c58c83cd83bea760bd117410a38',
+};
+
+function bodyFrom(file, expression) {
+  const match = expression.exec(readFileSync(path.join(ROOT, 'supabase', 'migrations', file), 'utf8'));
+  assert.ok(match, `${file} no longer contains its pinned function body`);
+  return match[1];
+}
+function restoreLiveBodies() {
+  // Historical replay uses LF staging; validate_product_units had CRLF in live prosrc.
+  const validate = bodyFrom('20260211000000_unit_tracking_pricing_overhaul.sql',
+    /CREATE OR REPLACE FUNCTION validate_product_units\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$;/)
+    .replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');  // same bytes on an LF or CRLF checkout
+  const field = bodyFrom('20260630180000_field_app_pricing_unit_fix.sql',
+    /CREATE OR REPLACE FUNCTION public.field_app_priced_quantity\([\s\S]*?AS \$fapq\$([\s\S]*?)\$fapq\$;/);
+  const seededConvert = bodyFrom(FORMS_SEED_EACH,
+    /CREATE OR REPLACE FUNCTION public.convert_to_gl_lb\([\s\S]*?AS \$function\$([\s\S]*?)\$function\$;/).replaceAll('\r\n', '\n');
+  const seedArm = "  IF lower(coalesce(p_product_form, '')) IN ('seed','each') THEN RETURN QUERY SELECT NULL::numeric, NULL::text; RETURN; END IF;\n";
+  assert.equal(seededConvert.split(seedArm).length - 1, 1);
+  const convert = seededConvert.replace(seedArm, '');
+  psql(`CREATE OR REPLACE FUNCTION public.validate_product_units() RETURNS trigger LANGUAGE plpgsql
+    SET search_path = public, pg_temp AS $live_validate$${validate}$live_validate$;`);
+  psql(`CREATE OR REPLACE FUNCTION public.field_app_priced_quantity(
+      p_applied_qty numeric, p_rate_unit text, p_inventory_unit text, p_product_form text)
+    RETURNS numeric LANGUAGE plpgsql IMMUTABLE SET search_path = public, pg_temp
+    AS $live_field$${field}$live_field$;`);
+  psql(`CREATE OR REPLACE FUNCTION public.convert_to_gl_lb(
+      p_total_applied numeric, p_rate_unit text, p_product_form text)
+    RETURNS TABLE(converted_value numeric, converted_unit text) LANGUAGE plpgsql IMMUTABLE
+    SET search_path = public AS $live_convert$${convert}$live_convert$;`);
+  for (const [signature, expected] of Object.entries(LIVE_BODY_MD5)) {
+    assert.equal(scalar(`SELECT md5(prosrc) FROM pg_proc WHERE oid = '${signature}'::regprocedure;`),
+      expected, `${signature} is not the pinned live body before the candidate`);
+  }
+}
 function replayLater(later) {
   // Users are seeded by now, so later postflights that impersonate one through
   // request.jwt.claims (20260807215532's role lock) need live's auth.uid().
@@ -183,6 +244,25 @@ function replayLater(later) {
     if (PARKED.has(base)) { ledger(path.basename(file, '.sql')); continue; }
     if (LEDGER_ONLY.has(base)) continue;
     if (base === '20260817120000_carry_allocated_line_cents_through_lifecycle.sql') restoreLiveCrLfCloseRemainder();
+    if (base === FORMS_SEED_EACH) restoreLiveBodies();
+    if (base === '20261117130000_tote_fill_from_bulk.sql') {
+      psql(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) SELECT u, 1, 'both' FROM (VALUES ('Ea'), ('Unit')) v(u)
+        WHERE NOT EXISTS (SELECT 1 FROM public.unit_conversions WHERE unit = v.u);`);
+    }
+    if (base === '20261229110000_product_rates_draft.sql') {
+      raw(`DELETE FROM public.unit_conversions;
+        INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};`);
+    }
+    if (base === '20261102220000_receive_po_items_active_warehouse_only.sql') {
+      psql(`UPDATE public.warehouses SET is_active = true WHERE name = 'Main Warehouse';
+        INSERT INTO public.warehouses (name, is_active) SELECT 'Main Warehouse', true
+        WHERE NOT EXISTS (SELECT 1 FROM public.warehouses WHERE name = 'Main Warehouse');`);
+    }
+    if (base === '20270106110000_invoice_brands_rup.sql') {
+      // Live ran REG-1's one-time seed before this file; its preflight refuses without the seed row.
+      raw(`INSERT INTO public.epa_registration_seed_run (seeded_by, rup_default, fingerprint)
+        SELECT '00000000-0000-4000-8000-000000000000', 'unknown', 'units-proof' WHERE NOT EXISTS (SELECT 1 FROM public.epa_registration_seed_run);`);
+    }
     const name = `later-${index}.sql`;
     stageText(name, lf(file));
     const result = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1', '-f', `/tmp/${name}`], { allowFailure: true });
@@ -193,10 +273,10 @@ function replayLater(later) {
   installLiveAuthUid();
   return replayed;
 }
-function assertQuoteLifecycleCoverage(sql) {
+function assertQuoteLifecycleCoverage(sql, era = 'candidate') {
   for (const anchor of quoteLifecycleAnchors) {
     assert.equal(
-      sql.split(anchor.statement).length - 1,
+      sql.split(era === 'current' ? anchor.current ?? anchor.statement : anchor.statement).length - 1,
       1,
       `quote lifecycle smoke must contain exactly one ${anchor.label} failure assertion`,
     );
@@ -204,14 +284,15 @@ function assertQuoteLifecycleCoverage(sql) {
 }
 function proveQuoteLifecycleAnchorMutationResistance(sql) {
   for (const anchor of quoteLifecycleAnchors) {
+    const text = anchor.current ?? anchor.statement;
     const mutations = [
-      ['removing', sql.replace(anchor.statement, '')],
-      ['renaming', sql.replace(anchor.statement, anchor.statement.replace('SMOKE_FAIL:', 'SMOKE_FAIL_RENAMED:'))],
+      ['removing', sql.replace(text, '')],
+      ['renaming', sql.replace(text, text.replace('SMOKE_FAIL:', 'SMOKE_FAIL_RENAMED:'))],
     ];
     for (const [action, mutated] of mutations) {
       assert.notEqual(mutated, sql, `failed to mutate ${anchor.label} assertion anchor`);
       assert.throws(
-        () => assertQuoteLifecycleCoverage(mutated),
+        () => assertQuoteLifecycleCoverage(mutated, 'current'),
         new RegExp(`exactly one ${anchor.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} failure assertion`),
         `${action} ${anchor.label} assertion anchor must fail closed`,
       );
@@ -237,7 +318,7 @@ function candidateEraText(file) {
 try {
   for (const file of [candidate, ...smokeFiles, ...legacyLifecycleSmokeFiles]) assert.ok(readFileSync(file, 'utf8').length > 0, `missing required artifact ${file}`);
   const quoteSmokeSql = readFileSync(smokeFiles[0], 'utf8');
-  assertQuoteLifecycleCoverage(quoteSmokeSql);
+  assertQuoteLifecycleCoverage(quoteSmokeSql, 'current');
   proveQuoteLifecycleAnchorMutationResistance(quoteSmokeSql);
   const candidateEraSmokes = new Map(smokeFiles.map((file) => [file, candidateEraText(file)]));
   assertQuoteLifecycleCoverage(candidateEraSmokes.get(smokeFiles[0]));
@@ -262,7 +343,7 @@ try {
     -- 20261022075000 (replayed after the candidate) checks in its preflight.
     CREATE TABLE IF NOT EXISTS storage.objects (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL,
-      name text NOT NULL, owner_id text, metadata jsonb, UNIQUE (bucket_id, name)
+      name text NOT NULL, owner_id text, metadata jsonb, created_at timestamptz DEFAULT now(), UNIQUE (bucket_id, name)
     );
     CREATE OR REPLACE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$ SELECT string_to_array(name, '/') $$;
     CREATE OR REPLACE FUNCTION storage.filename(name text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT split_part(name, '/', array_length(string_to_array(name, '/'), 1)) $$;
@@ -310,9 +391,9 @@ try {
   // any smoke runs. This never touches a live database.
   psql(`
     ALTER TABLE public.products DISABLE TRIGGER trigger_y_require_governed_product_pricing;
-    INSERT INTO public.products (product_name, unit_size, current_cost, tier1_price, inventory_unit)
-    VALUES ('[PROVER] Row Version Priced A', 'gal', 3.00, 10.00, 'Gal'),
-           ('[PROVER] Row Version Priced B', 'gal', 4.00, 8.00, 'Gal');
+    INSERT INTO public.products (product_name, unit_size, product_form, current_cost, tier1_price, inventory_unit)
+    VALUES ('[PROVER] Row Version Priced A', 'gal', 'liquid', 3.00, 10.00, 'Gal'),
+           ('[PROVER] Row Version Priced B', 'gal', 'liquid', 4.00, 8.00, 'Gal');
     ALTER TABLE public.products ENABLE TRIGGER trigger_y_require_governed_product_pricing;
   `);
   for (const file of legacyLifecycleSmokeFiles) {

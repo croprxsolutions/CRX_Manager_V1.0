@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -154,8 +155,8 @@ function concurrencyFixture(slot) {
       SET session_replication_role = replica;
       INSERT INTO public.customers (id, farm_name)
       VALUES ('${ids.customer}', '[SMOKE] PR361 concurrency ${suffix}');
-      INSERT INTO public.products (id, product_name, current_cost, unit_size, inventory_unit)
-      VALUES ('${ids.product}', '[SMOKE] PR361 concurrency product ${suffix}', 5.00, 'gal', 'gal');
+      INSERT INTO public.products (id, product_name, current_cost, unit_size, inventory_unit, product_form)
+      VALUES ('${ids.product}', '[SMOKE] PR361 concurrency product ${suffix}', 5.00, 'gal', 'gal', 'liquid');
       INSERT INTO public.orders (id, order_number, customer_id, salesman_id, status)
       VALUES ('${ids.order}', 'SMK-RCC-CONC-${suffix}', '${ids.customer}', '00000000-0000-4000-8000-000000000081', 'confirmed');
       INSERT INTO public.order_items (
@@ -265,8 +266,8 @@ function deliveryReturnRaceFixture(slot, operation) {
       SET session_replication_role = replica;
       INSERT INTO public.customers (id, farm_name)
       VALUES ('${ids.customer}', '[SMOKE] PR509 ${operation} race ${suffix}');
-      INSERT INTO public.products (id, product_name, current_cost, unit_size, inventory_unit)
-      VALUES ('${ids.product}', '[SMOKE] PR509 ${operation} race product ${suffix}', 5.00, 'gal', 'gal');
+      INSERT INTO public.products (id, product_name, current_cost, unit_size, inventory_unit, product_form)
+      VALUES ('${ids.product}', '[SMOKE] PR509 ${operation} race product ${suffix}', 5.00, 'gal', 'gal', 'liquid');
       INSERT INTO public.orders (id, order_number, customer_id, salesman_id, status)
       VALUES ('${ids.order}', 'SMK-RCC-${operation.toUpperCase()}-${suffix}', '${ids.customer}', '${actor}', 'confirmed');
       INSERT INTO public.order_items (
@@ -754,8 +755,12 @@ try {
     INSERT INTO public.customers (id, farm_name) VALUES
       ('df6087cb-232f-4962-bb33-c74580a06935', '[SMOKE] Exact Legacy Return Customer')
     ON CONFLICT (id) DO NOTHING;
-    INSERT INTO public.products (id, product_name, container_size, unit_size, inventory_unit) VALUES
-      ('fad3ea45-cd8c-4bb8-b0ce-8a515941586c', 'Gen Capture LFR: (Batallion LFC, Seguro) - 2.5 Gal', 2.5, 'Gal', 'Gal')
+    -- The schema-only dump has no unit_conversions rows, so give the product's own unit the row that makes it a valid liquid unit.
+    SET session_replication_role = replica;
+    INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) VALUES ('Gal', 128, 'liquid') ON CONFLICT (unit) DO NOTHING;
+    SET session_replication_role = origin;
+    INSERT INTO public.products (id, product_name, container_size, unit_size, inventory_unit, product_form) VALUES
+      ('fad3ea45-cd8c-4bb8-b0ce-8a515941586c', 'Gen Capture LFR: (Batallion LFC, Seguro) - 2.5 Gal', 2.5, 'Gal', 'Gal', 'liquid')
     ON CONFLICT (id) DO NOTHING;
     SELECT set_config('app.return_rpc', 'true', false);
     INSERT INTO public.returns (
@@ -1122,8 +1127,8 @@ try {
     SET LOCAL session_replication_role = replica;
     INSERT INTO public.customers (id, farm_name)
     VALUES ('f3614000-0000-4000-8000-0000000000${suffix}', '[SMOKE] order credit gate ${suffix}');
-    INSERT INTO public.products (id, product_name, current_cost, inventory_unit)
-    VALUES ('f3614000-0000-4000-8001-0000000000${suffix}', '[SMOKE] order credit product ${suffix}', 5, 'Gal');
+    INSERT INTO public.products (id, product_name, current_cost, inventory_unit, product_form)
+    VALUES ('f3614000-0000-4000-8001-0000000000${suffix}', '[SMOKE] order credit product ${suffix}', 5, 'Gal', 'liquid');
     INSERT INTO public.orders (id, order_number, customer_id, salesman_id, status)
     VALUES (
       'f3614000-0000-4000-8002-0000000000${suffix}', 'SMK-RCC-ORDER-GATE-${suffix}',
@@ -1256,10 +1261,10 @@ try {
         'f3611000-0000-4000-8000-000000000001',
         '00000000-0000-4000-8000-000000000081', 'cancelled'
       );
-    INSERT INTO public.products (id, product_name, current_cost, inventory_unit)
+    INSERT INTO public.products (id, product_name, current_cost, inventory_unit, product_form)
     VALUES (
       'f3611000-0000-4000-8000-000000000008',
-      '[SMOKE] PR361 tote provenance product', 5.00, 'Gal'
+      '[SMOKE] PR361 tote provenance product', 5.00, 'Gal', 'liquid'
     );
     INSERT INTO public.inventory (
       product_id, location, quantity_available, quantity_prebooked, unit_size
@@ -1513,7 +1518,14 @@ try {
   psql(canonicalAllocationHelper);
   assertLiveRestored('public._allocated_delivery_cents(uuid,numeric,uuid)');
 
-  copy(SMOKE, path.basename(SMOKE));
+  // The shared chain's same-product test product has no product_form (now NOT NULL); stage a copy that carries one rather than edit the shared chain.
+  const stagedChain = path.join(os.tmpdir(), `${NAME}-${path.basename(SMOKE)}`);
+  const chainText = readFileSync(SMOKE, 'utf8');
+  const noFormInsert = /INSERT INTO products \(id, product_name, unit_size, inventory_unit\)(\s+VALUES \(\s+v_same_product_product_id,\s+'\[SMOKE\] same-product cancel aggregate ' \|\| v_suffix,\s+'Gal', 'Gal')(\s+\);)/;
+  assert.match(chainText, noFormInsert, 'the same-product test product insert moved; update this staging patch');
+  writeFileSync(stagedChain, chainText.replace(noFormInsert, "INSERT INTO products (id, product_name, unit_size, inventory_unit, product_form)$1, 'liquid'$2"));
+  copy(stagedChain, path.basename(SMOKE));
+  rmSync(stagedChain, { force: true });
 
   const canonicalReceiveReturn = liveDefinition('public._receive_return_impl_20260714(uuid,uuid,text)');
   const receiveDeliveryGuardMutant = canonicalReceiveReturn.replace(
@@ -1727,7 +1739,7 @@ try {
   psql(canonicalDashboard);
   assertLiveRestored('public.get_dashboard_action_items(integer)');
 
-  const canonicalCompleteGate = liveDefinition('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)');
+  const canonicalCompleteGate = liveDefinition('public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamptz)');
   const completeGateMutant = canonicalCompleteGate.replace(
     /^\s*AND invoice_type <> 'credit_memo'\r?\n/m,
     '',
@@ -1744,7 +1756,7 @@ try {
   );
   completedProofs.add('DELIVERY_AUTO_INVOICE_CREDIT_FILTER_REMOVAL_DETECTED');
   psql(canonicalCompleteGate);
-  assertLiveRestored('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)');
+  assertLiveRestored('public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamptz)');
 
   const completeDeletedMutant = canonicalCompleteGate.replace(
     /(\s+AND invoice_type <> 'credit_memo'\r?\n)\s+AND deleted_at IS NULL\r?\n(\s+AND \(delivery_id = p_delivery_id OR delivery_id IS NULL\);)/,
@@ -1762,7 +1774,7 @@ try {
   );
   completedProofs.add('DELIVERY_AUTO_INVOICE_DELETED_FILTER_REMOVAL_DETECTED');
   psql(canonicalCompleteGate);
-  assertLiveRestored('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)');
+  assertLiveRestored('public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamptz)');
 
   const canonicalBackfillGate = liveDefinition('public._create_invoice_for_unbilled_delivery_impl_20260718(uuid,uuid,text)');
   const backfillGateMutant = canonicalBackfillGate.replace(

@@ -50,7 +50,16 @@ const num = (q: Qty) => Number(q);
 // A positive amount under the shown precision reads "<0.001", never "0".
 const qty = (q: Qty) => (num(q) > 0 && num(q) < 0.0005 ? '<0.001' : num(q).toLocaleString('en-US', { maximumFractionDigits: 3 }));
 // A buy amount rounds UP to the shown precision (never below 0.001 when positive), so it never understates the order.
-const buyQty = (q: Qty) => (num(q) > 0 ? qty(Math.max(Math.ceil(num(q) * 1000 - 1e-9) / 1000, 0.001)) : qty(q));
+// Works on the decimal text (numeric arrives as text; a JS number's shortest text is exact), so no float epsilon can round down.
+function buyQty(q: Qty): string {
+  if (!(num(q) > 0)) return qty(q);
+  const text = String(q).trim();
+  if (/e/i.test(text)) return qty(Math.max(Math.ceil(num(q) * 1000) / 1000, 0.001)); // exponent form: tiny (<0.001) or huge (whole)
+  const [whole, frac = ''] = text.split('.');
+  const kept = Number(`${whole}.${frac.slice(0, 3).padEnd(3, '0')}`);
+  const up = /[1-9]/.test(frac.slice(3)) ? Number((kept + 0.001).toFixed(3)) : kept;
+  return qty(Math.max(up, 0.001));
+}
 const day = (d: string | null) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
 
 // eslint-disable-next-line react-refresh/only-export-components -- exported for its unit test

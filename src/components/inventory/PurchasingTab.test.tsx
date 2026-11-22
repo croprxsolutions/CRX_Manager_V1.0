@@ -99,6 +99,25 @@ describe('PurchasingTab', () => {
     expect(screen.queryByText(/PO-8.*not counted/)).not.toBeInTheDocument();
   });
 
+  it('shows when the plan was loaded, reloads on return to the window, and hides old advice while reloading (Sol #1980 r7)', async () => {
+    mockRpc.mockResolvedValueOnce({ data: PLAN, error: null });
+    render(<PurchasingTab />);
+    fireEvent.click(await screen.findByRole('button', { name: /Show details for Herbicide X/ }));
+    expect(screen.getByText(/Order 30 Gal by Feb 15, 2027/)).toBeInTheDocument();
+    expect(screen.getByText(/^Loaded at /)).toBeInTheDocument();
+
+    // The buyer placed a PO elsewhere and comes back: the plan reloads, and the old advice is gone meanwhile.
+    let answer: (v: unknown) => void = () => {};
+    mockRpc.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+    fireEvent(window, new Event('focus'));
+    expect(mockRpc).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/Order 30 Gal/)).not.toBeInTheDocument();
+
+    answer({ data: { ...PLAN, products: [{ ...PLAN.products[0], suggested: 0, suggestions: [] }] }, error: null });
+    expect(await screen.findByText('Herbicide X')).toBeInTheDocument();
+    expect(screen.queryByText(/Order 30 Gal/)).not.toBeInTheDocument();
+  });
+
   it('a failed read shows Try again, not an empty plan', async () => {
     mockRpc.mockResolvedValue({ data: null, error: { message: 'Access denied', code: '42501' } });
     render(<PurchasingTab />);

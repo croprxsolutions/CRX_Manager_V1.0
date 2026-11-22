@@ -161,6 +161,7 @@ export default function PurchasingTab() {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const requestId = useRef(0);
 
   const load = useCallback(async () => {
@@ -176,6 +177,7 @@ export default function PurchasingTab() {
         throw new Error('get_purchasing_plan returned no plan, or one older than 20270216110000');
       }
       setPlan(result);
+      setLoadedAt(new Date());
       setFailed(false);
     } catch (loadErr) {
       if (id !== requestId.current) return;
@@ -190,7 +192,16 @@ export default function PurchasingTab() {
   // Leaving the tab retires the request in flight, so a late reply neither renders nor toasts.
   useEffect(() => { load(); return () => { requestId.current += 1; }; }, [load]);
 
-  if (loading && !plan) {
+  // A PO placed in another tab or window makes the advice stale: reload on return (Sol #1980 r7).
+  useEffect(() => {
+    const onReturn = () => { if (document.visibilityState === 'visible') load(); };
+    window.addEventListener('focus', onReturn);
+    document.addEventListener('visibilitychange', onReturn);
+    return () => { window.removeEventListener('focus', onReturn); document.removeEventListener('visibilitychange', onReturn); };
+  }, [load]);
+
+  // Old buy advice never shows while a reload is in flight.
+  if (loading) {
     return (
       <Card>
         <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-10 bg-gray-100 rounded-lg animate-pulse" />)}</div>
@@ -211,7 +222,10 @@ export default function PurchasingTab() {
               Read-only buy plan through {day(plan.horizon_end)}. Order-by dates are {plan.lead_days} days before the need. Quantities are in each product's stock unit.
             </p>
           </div>
-          <Button variant="secondary" size="sm" onClick={load} loading={loading}>Refresh</Button>
+          <div className="flex items-center gap-3">
+            {loadedAt && <span className="text-xs text-secondary">Loaded at {loadedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>}
+            <Button variant="secondary" size="sm" onClick={load}>Refresh</Button>
+          </div>
         </div>
       </Card>
 

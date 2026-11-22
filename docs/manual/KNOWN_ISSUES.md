@@ -40,8 +40,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status (re-checked 2026-11-21) | Count |
 |---|---|
-| Open, partly open, check-first or waiting on a Mason decision (numbered entries) | 85 |
-| Fixed on staging, waiting for the production release | 5 |
+| Open, partly open, check-first or waiting on a Mason decision (numbered entries) | 84 |
+| Fixed on staging, waiting for the production release | 6 |
 | Accepted numbered entries in the area sections (the full accepted list is the "Accepted risks" table) | 10 |
 | Backlog or roadmap entries, not defects | 3 |
 | Open items tracked only as GitHub issues or parked fixes (tables at the end of each area) | 60 |
@@ -490,16 +490,23 @@ still compares billed amounts with the ordered value. Fix: decide whether it sho
 
 ### KI-170 — Two admins changing a product's vendors at the same moment can show the wrong preferred vendor
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-13.
+> **Re-checked 2026-11-21 on staging `3a9694685`:** On staging, not live · LOW · Claude · plan R-15 (fixed by #2185, 2026-11-22).
 
-**LOW · OPEN · products/purchasing · found 2026-11-20 (Sol 6.2 plan review, shared data loading pilot) · unassigned (Product Master Wave 2)**
+**LOW · FIXED ON STAGING (Product Master Wave 2 piece 6; live with the next release) · products/purchasing · found 2026-11-20 (Sol 6.2 plan review, shared data loading pilot) · Claude**
 After an admin links a vendor, the Vendors section re-reads the product's vendors to learn which one is preferred.
-If that re-read fails, it falls back to "the vendor just made preferred, or the first vendor". If two admins link the
-first vendor to the same product at the same moment, or one makes V2 preferred just before the other makes V1 preferred
-(Luna, 2026-11-20), that fallback can name the loser's vendor, and the product page mirrors that name into its form
-until a reload. The database keeps the true preferred vendor; the list says it may be
-out of date and offers Try again. Needs two admins acting together and a failed read. Fix: on a failed re-read, block
-the product's Save until the vendors are re-read (a `ProductDetail.tsx` change, so Wave 2).
+If that re-read failed, it fell back to "the vendor just made preferred, or the first vendor". If two admins linked the
+first vendor to the same product at the same moment, or one made V2 preferred just before the other made V1 preferred
+(Luna, 2026-11-20), that fallback could name the loser's vendor, and the product page mirrored that name into its form
+until a reload. The database always kept the true preferred vendor. Fix (screen only; Mason, 2026-11-21, after Sol
+found a new race in each of three rounds of patching the name in place): the page no longer copies a vendor name from
+the Vendors section at all. After any vendor link (or one whose answer was lost) it re-reads the whole product, whose
+vendor the database keeps right, and Save, New product and Add a size stay off until that read lands; a failed read
+locks editing until Reload Product succeeds. Vendor changes are off while the product has unsaved edits ("Save or
+discard your Product changes before changing vendors") or is saving or loading, so the re-read never discards typing.
+Proof: `ProductVendorsSection.test.tsx` (every link, and a failed one, asks for the re-read; controls off with the
+reason) and `ProductDetail.pricing-flow.test.tsx` (Save and copies off until the re-read lands, even from a callback
+held since the click; a failed re-read locks until Reload Product; unsaved edits lock vendor changes), plus the
+running local test app.
 
 ### KI-196 — Product search, package labels and the Chemical Summary disagree across screens
 

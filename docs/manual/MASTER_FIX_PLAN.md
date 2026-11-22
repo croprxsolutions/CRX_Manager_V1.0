@@ -12,7 +12,7 @@
 |---|---|---|---|---|---|---|
 | Quotes and bookings |  | 1 | 3 | 7 | 11 |  |
 | Orders and deliveries |  | 1 | 6 | 3 | 10 | 1 |
-| Inventory, purchasing and products |  | 1 | 6 | 13 | 20 | 1 |
+| Inventory, purchasing and products |  | 1 | 6 | 12 | 19 | 2 |
 | Invoices, billing and returns |  |  | 9 | 8 | 17 |  |
 | Payments and receivables |  | 1 | 2 | 2 | 5 |  |
 | Reports and commissions |  | 1 | 4 | 2 | 7 | 4 |
@@ -20,7 +20,7 @@
 | Permissions and security |  | 1 | 4 | 4 | 9 | 1 |
 | Customers, data and cut-over |  |  | 4 | 2 | 6 |  |
 | Guards, tooling and release process | 1 | 5 | 13 | 12 | 31 | 6 |
-| **Total** | **1** | **17** | **58** | **60** | **136** | **14** |
+| **Total** | **1** | **17** | **58** | **59** | **135** | **15** |
 
 "Open total" counts Open, Partly open, Check first and Mason decision. Not counted: 32 accepted risks and 3 backlog entries (listed at the end), and 40 entries this re-check found already fixed (dropped, listed at the end).
 
@@ -61,6 +61,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | R-12 | #2064 | MED | On staging, not live | A rep can now save an included grower-share chemical only if the per-acre price covers cost; otherwise an admin is needed. Not on main yet. | GitHub issue | #2064 | Agent (unassigned) |
 | R-13 | #1912 | LOW | On staging, not live | Retry keys with hidden characters are now refused. Issue can be closed once released. | GitHub issue | #1912 | Agent (unassigned) |
 | R-14 | KI-130 | LOW | On staging, not live | Past months showed today's receivables under a misleading label; now labelled "Current AR (today)". | KNOWN_ISSUES | #2149 | Agent (unassigned) |
+| R-15 | KI-170 | LOW | On staging, not live | Rarely, a product page showed the wrong preferred vendor name until reload; the page now re-reads the whole product after any vendor change (#2185). | KNOWN_ISSUES | #2185 | Agent (unassigned) |
 
 ## Open items by area
 
@@ -95,7 +96,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-50 | #1960 | LOW | Check first | An old retried save may not get section ids back. | GitHub issue | #1960 | Taha (to 2026-12-15) |
 | D-01 | #2065 | MED | Mason decision | Closing short releases holds and purchasing demand; needs Mason's rule (booking's rep or admin only). Guard currently blocks reps only when a live job exists. | GitHub issue | #2065 | Mason decision |
 
-### Inventory, purchasing and products (20)
+### Inventory, purchasing and products (19)
 
 | Order | ID | Sev | Status | What goes wrong (plain English) | Source | GitHub | Owner |
 |---|---|---|---|---|---|---|---|
@@ -112,7 +113,6 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-10 | KI-138 | LOW | Open | A few products have a saved margin that does not match their prices; a recalculation could reprice one. | KNOWN_ISSUES |  | Mason decision |
 | W3-11 | KI-163 | LOW | Partly open | Items 1 and 2 fixed; reservation/return history rows are still linked to their source only by note text (3); item 4 is not a defect. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-12 | KI-151 | LOW | Open | A cost correction is compared to the ordered total, not to what actually arrived, so a bill check can differ from the receipt rule. | KNOWN_ISSUES |  | Agent (unassigned) |
-| W3-13 | KI-170 | LOW | Open | Rarely, a product page shows the wrong preferred vendor name until reload; the database stays correct. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-14 | KI-196 | LOW | Open | The same chemical can be found by different words on different screens and be grouped or labelled differently. | KNOWN_ISSUES (2026-11-21 audit) |  | Agent (unassigned) |
 | W3-15 | KI-197 | LOW | Open | A second admin on a stale screen can silently replace a newer cost correction; one label may point at the wrong PO. | KNOWN_ISSUES (2026-11-21 audit) |  | Agent (unassigned) |
 | W3-16 | #2172 | LOW | Open | A very large batch (about 3,000 approvals) could make Confirm silently send nothing. Not reachable today (hundreds of rates). | GitHub issue | #2172 | Agent (unassigned) |

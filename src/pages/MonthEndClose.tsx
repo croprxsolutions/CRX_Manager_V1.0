@@ -51,7 +51,7 @@ interface MonthlySummary {
   review_token?: string;
 }
 
-// #2175 (20270208140000): the server's close refusals, each with the operator's answer.
+// #2175 (20270220110000): the server's close refusals, each with the operator's answer.
 function closeRefusal(err: unknown): 'changed' | 'review' | 'reload' | null {
   const message = String((err as { message?: unknown } | null)?.message ?? '');
   if (message.startsWith('CLOSE_FIGURES_CHANGED')) return 'changed';

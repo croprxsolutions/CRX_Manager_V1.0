@@ -160,11 +160,11 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 
 | Order | ID | Sev | Status | What goes wrong (plain English) | Source | GitHub | Owner |
 |---|---|---|---|---|---|---|---|
-| W1-01 | KI-129 | HIGH | Partly open | The month-end close receipt shows payments received from the old payments table: it counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. The invoice-count half is fixed on staging (#2149); the payments half is in a PR with W2-24 (migration `20270208140000`). | KNOWN_ISSUES | #2149 (count part), #2195 (payments part) | Lane B agent |
+| W1-01 | KI-129 | HIGH | Partly open | The month-end close receipt shows payments received from the old payments table: it counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. The invoice-count half is fixed on staging (#2149); the payments half is in a PR with W2-24 (migration `20270220110000`). | KNOWN_ISSUES | #2149 (count part), #2195 (payments part) | Lane B agent |
 | W2-21 | KI-13 | MED | Open | A returned product still leaves the rep's commission in place; some commission money columns can still hold half-cents. Clawback overlaps KI-184 (profit reports) and To-Do 8.3; whole-cent commission columns still open. | KNOWN_ISSUES |  | Mason decision |
 | W2-22 | KI-184 | MED | Open | A returned sale keeps its commission cost in profit reports, so profit looks too low. | KNOWN_ISSUES | #2149 (follow-up) | Taha (to 2026-12-15) |
 | W2-23 | KI-154 | MED | Open | A salesperson could be paid commission on a sale the customer has not paid for; basis also ignores the standing discount. | KNOWN_ISSUES |  | Mason decision |
-| W2-24 | #2175 | MED | Open | Numbers can change between the admin's review and the click, and the close saves the new ones; the commission "reviewed" box is screen-only. Fix in a PR with W1-01: the close refuses changed figures and unconfirmed payments/commission (migration `20270208140000`). | GitHub issue | #2175 | Lane B agent |
+| W2-24 | #2175 | MED | Open | Numbers can change between the admin's review and the click, and the close saves the new ones; the commission "reviewed" box is screen-only. Fix in a PR with W1-01: the close refuses changed figures and unconfirmed payments/commission (migration `20270220110000`). | GitHub issue | #2175 | Lane B agent |
 | W3-26 | KI-133 | LOW | Open | Reports count undelivered orders as revenue without saying "booked"; people may misread profit. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-27 | KI-135 | LOW | Open | The Inventory value total is labelled as if it were an accounting value, but it is priced at price-list cost. | KNOWN_ISSUES |  | Agent (unassigned) |
 

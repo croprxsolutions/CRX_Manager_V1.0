@@ -46,7 +46,7 @@ DECLARE
   v_old_date date := DATE '1990-01-15';
   v_today date := (clock_timestamp() AT TIME ZONE 'America/Chicago')::date;
   v_err text;
-  -- #2175 (20270208140000): the close re-checks the reviewed figures; NULL before that migration.
+  -- #2175 (20270220110000): the close re-checks the reviewed figures; NULL before that migration.
   v_close_token text;
   v_due_date date;
   v_suffix text := substr(md5(random()::text), 1, 8);

@@ -552,7 +552,7 @@ spelling on receipt.
 | ID | Sev | Status | What goes wrong | Owner | Plan |
 |---|---|---|---|---|---|
 | #2190 | MED | Open | Two deliveries completing at the same moment on the same products can make one fail and need a retry; nothing is saved wrongly. | Agent (unassigned) | W2-12 |
-| #2193 | MED | Open | If applied before the EPA batch, the one-time load commits with some ingredients missing their groups and never fills them later. | Agent (unassigned) | W2-13 |
+| #2193 | MED | Closed (Mason decision 2026-11-22) | If applied before the EPA batch, the one-time load commits with some ingredients missing their groups and never fills them later. Accepted: the EPA batch fill runs before the load at go-live (DECISION_LOG 2026-11-22). | Mason | W2-13 |
 | #2172 | LOW | Open | A very large batch (about 3,000 approvals) could make Confirm silently send nothing. Not reachable today (hundreds of rates). | Agent (unassigned) | W3-16 |
 | #2135 | LOW | Open | Staff see an inflated short-stock count and get two warnings and two notifications; stock math is right. | Agent (unassigned) | W3-17 |
 | #1912 | LOW | On staging, not live | Retry keys with hidden characters are now refused. Issue can be closed once released. | Agent (unassigned) | R-13 |
@@ -1383,6 +1383,7 @@ overwrite each other (one settings record). Fix depends on who owns crop program
 ### KI-182 — The Purchase Orders screen uses guessable retry codes
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-31 · #2047.
+> **2026-11-22:** FIXED-ON-STAGING once branch `fix/ki182-po-random-retry-codes` merges: the bulk Cancel on the Purchase Orders list now sends one random code per PO (shared `useIdempotencyKey`), reused only for a retry of that PO's cancel. The PO detail page already used random codes.
 
 **MED · OPEN · purchasing · found 2026-11-21 (Sol round 9, #2047) · unassigned**
 Every app action shares one table of retry codes (idempotency keys). The PO screen builds its cancel code from the user

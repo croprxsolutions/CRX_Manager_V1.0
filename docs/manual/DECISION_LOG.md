@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — #2193: the modes-of-action load keeps its release-step order, no guard
+
+**Decision (Mason, in chat 2026-11-22, relayed by the bug captain: "no app isnt getting used yet so it will get finished").** Issue #2193 (the one-time load `20270205150000` can run before the EPA batch fill and never fill the gaps) is closed with no code and no guard. The 2026-11-18 rule stands: no in-migration readiness check; the EPA batch fill runs before the modes-of-action load at go-live, and the live apply needs his yes after he sees the matched count.
+
 ## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
 
 **Decision (Mason, in chat 2026-11-22, after Sol gate round 6 left 2 HIGH findings on the skip mechanism itself):** "then we will override SOL if we need to I don't want over complicated codes to type I want it to explicitly ask if I accept the risk and I say yes with reason and that's good enough". The skip request now asks plainly whether he accepts the risk of leaving the findings unfixed; `yes` and a reason is enough, and the reason is logged. Round 6's two findings (`.claude/hooks/sol-accept-lib.mjs:233`, `scripts/owner-accept-sol-finding.mjs:107`) are left unfixed as his business call: both concern how far a skip he gave can stretch, not money, stock, customer data or logins. This PR changes gate files, so the agent merge guard still requires a clean Sol; Mason or Taha merges it by hand.

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270207142500_retire_per_acre_field_pricing (Mason, 2026-11-22: always bill line by line).
+ * Real-schema proof for 20270219100000_retire_per_acre_field_pricing (Mason, 2026-11-22: always bill line by line).
  * Container setup and replay copied from prove-field-app-refuses-payer-change-real-schema.mjs. Field S is split
  * farm A 60% / farm B 40%; each case is rolled back:
  *   BEFORE: with a per-acre price on A's split, A's invoice bills a per-acre line and its chemical at $0.
@@ -30,7 +30,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270207142500_retire_per_acre_field_pricing.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270219100000_retire_per_acre_field_pricing.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([

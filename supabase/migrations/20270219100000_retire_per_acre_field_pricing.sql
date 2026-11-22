@@ -1,5 +1,5 @@
 -- Written 2026-11-22. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270207142500_retire_per_acre_field_pricing.md.
+-- docs/reference/migrations.d/20270219100000_retire_per_acre_field_pricing.md.
 --
 -- WHY (Mason, 2026-11-22): "we never bill a flat price per acre for chemical etc, we always bill line by line".
 --   A field's billing split could carry a per-acre price (field_billing_defaults.price_override_cents) and a pricing

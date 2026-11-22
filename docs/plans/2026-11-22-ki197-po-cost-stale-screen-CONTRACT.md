@@ -33,6 +33,13 @@ Read at `origin/staging` 2132d7795 (2026-11-22). Lane E, bug sprint.
   travel together: one without the other is refused with `PO_EXPECTED_PAIR_REQUIRED` (no caller sends either yet, so
   nothing deployed changes). Allowlist MED refuted: entries are keyed to the post-apply chain in the migration PR by
   convention (KI-142, KI-143); the live sweep flags it only between merge and apply.
+- **Sol round 3 (mechanism cap; Mason decided 2026-11-22, "go with B"):** the check stays cost and product only. A PO
+  vendor change or a product unit change between load and save is Mason's ACCEPTED RISK (admin-only corrections); a
+  later review must not reopen it. Fixed: the rollback hole (a rollback must keep the expected-field checks; open tabs
+  keep sending them) and the mixed batch (once any line sends the pair, every line must). Delivery wording fixed: the
+  screen sends both fields. LOWs noted, not changed: a cost at the 2^53 ceiling cannot be the expected value (no real PO
+  reaches it); the registered smoke runs as the database runner (the prover covers the signed-in admin); the race
+  timestamp is taken just before the call.
 
 ## State and failure
 - Always true: a correction only replaces the cost the admin was looking at. Nothing else changes: same checks, same
@@ -47,8 +54,8 @@ Read at `origin/staging` 2132d7795 (2026-11-22). Lane E, bug sprint.
 - PR 1 (database): `CREATE OR REPLACE` of the one function (same signature; body md5-pinned in preflight; the new body is
   the old body plus one validation block and one compare block), postflight checks SECURITY DEFINER, owner, search_path and
   grants; ledger; proof.
-- PR 2 (screen), after PR 1 is on staging: snapshot each line's stored cents when the cost editor opens and send it as
-  `expected_unit_cost_cents`; on `PO_COST_CHANGED_SINCE_LOADED` close the editor, drop the drafts, reload, and say the
+- PR 2 (screen), after PR 1 is on staging: snapshot each line's stored cents and product when the cost editor opens and send both
+  as `expected_unit_cost_cents` and `expected_product_id` on every line; on `PO_COST_CHANGED_SINCE_LOADED` close the editor, drop the drafts, reload, and say the
   whole save was refused and why.
 - PR 3 (follow-up, after PR 2 is live everywhere): make `expected_unit_cost_cents` required.
 - The "Most recent received PO" label is its own small screen PR.

@@ -4,13 +4,15 @@
 -- with PO_COST_CHANGED_SINCE_LOADED and nothing is saved. Absent = an older screen, unchanged until a follow-up requires it.
 -- An optional expected_product_id (the product the admin saw) is checked the same way: Edit Purchase Order can swap a
 -- not-yet-received line's product in place, keeping the line id and possibly the cost (Sol round 1). The two travel
--- together: one without the other is refused with PO_EXPECTED_PAIR_REQUIRED (Sol round 2).
+-- together: one without the other is refused with PO_EXPECTED_PAIR_REQUIRED (Sol round 2), and once any line of a call
+-- sends them every line must (Sol round 3). Mason, 2026-11-22 ("go with B"): the check is cost and product only; a PO
+-- vendor change or a product unit change between load and save is an accepted risk (admin-only corrections).
 -- Same signature, same grants; the body is the 20261021140000 body (md5-pinned below) plus validation and compare
 -- blocks. No data changes.
 --
--- Rollback: a NEW forward migration whose body is the CREATE FUNCTION body of set_purchase_order_item_costs from
--- 20261021140000_po_cost_admin_only_and_corrections.sql as CREATE OR REPLACE (after reverting the screen that sends the
--- fields). Never re-run or edit this file: it stays recorded as applied.
+-- Rollback: a NEW forward migration. It must keep refusing a stale expected cost or product whenever the fields are
+-- sent, because tabs opened before a screen rollback keep sending them (Sol round 3): never restore a body that ignores
+-- them. Reverting the screen alone needs no database change (the fields are optional). Never re-run or edit this file.
 
 SET LOCAL lock_timeout = '10s';
 
@@ -73,6 +75,7 @@ DECLARE
   v_expected bigint;
   v_expected_num numeric;
   v_expected_product uuid;
+  v_protected boolean;
 BEGIN
   IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: set_purchase_order_item_costs requires p_idempotency_key'
@@ -134,6 +137,10 @@ BEGIN
     RAISE EXCEPTION 'PO_CANCELLED: cannot change cost on a cancelled purchase order';
   END IF;
 
+  -- Sol round 3: a call that protects one line protects them all, so a dropped pair cannot slip a stale line through.
+  v_protected := EXISTS (SELECT 1 FROM jsonb_array_elements(p_items) AS e(value)
+                          WHERE jsonb_typeof(e.value) = 'object'
+                            AND (e.value ? 'expected_unit_cost_cents' OR e.value ? 'expected_product_id'));
   FOR v_item IN SELECT e.value FROM jsonb_array_elements(p_items) AS e(value)
   LOOP
     -- A JSON number: null or "" would otherwise read as no cost, which the parser treats as $0.
@@ -180,8 +187,8 @@ BEGIN
       v_expected_product := (v_item->>'expected_product_id')::uuid;
     END IF;
     -- Sol round 2: a cost check without the product would still reprice a product swapped in at the same cost.
-    IF (v_expected IS NULL) <> (v_expected_product IS NULL) THEN
-      RAISE EXCEPTION 'PO_EXPECTED_PAIR_REQUIRED: send expected_unit_cost_cents and expected_product_id together'
+    IF (v_expected IS NULL) <> (v_expected_product IS NULL) OR (v_protected AND v_expected IS NULL) THEN
+      RAISE EXCEPTION 'PO_EXPECTED_PAIR_REQUIRED: send expected_unit_cost_cents and expected_product_id together, on every line'
         USING ERRCODE = '22023';
     END IF;
 

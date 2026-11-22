@@ -101,7 +101,7 @@ try {
     cursor = at + 1;
   }
   const added = newLines.filter((_, i) => !kept.has(i));
-  assert.ok(added.every((l) => l.trim() === '' || /expected|KI-197|SQL does not promise|follow-up makes|replace a newer cost|reads as 0|PO_COST_CHANGED|USING ERRCODE|END IF;|RAISE EXCEPTION 'PO_EXPECTED|v_line\.product_id|\[0-9a-f\]|Sol round 2|PO_EXPECTED_PAIR|IS NULL\) <> \(v_expected_product/.test(l)),
+  assert.ok(added.every((l) => l.trim() === '' || /expected|KI-197|SQL does not promise|follow-up makes|replace a newer cost|reads as 0|PO_COST_CHANGED|USING ERRCODE|END IF;|RAISE EXCEPTION 'PO_EXPECTED|v_line\.product_id|\[0-9a-f\]|Sol round 2|PO_EXPECTED_PAIR|IS NULL\) <> \(v_expected_product|v_protected|Sol round 3|jsonb_typeof\(e\.value\)/.test(l)),
     `unexpected added lines:\n${added.filter((l) => l.trim()).join('\n')}`);
   console.log(`[body] new body = old body + ${added.filter((l) => l.trim()).length} KI-197 lines`);
 
@@ -160,7 +160,7 @@ try {
     ok(`${refuse(`r := ${sql};`)} v := t || '|' || ${cents(L1)};`,
       'PO_EXPECTED_PRODUCT_INVALID: expected_product_id must be a product id|1000', `expected_product_id ${bad} must be refused`);
   }
-  const PAIR = 'PO_EXPECTED_PAIR_REQUIRED: send expected_unit_cost_cents and expected_product_id together';
+  const PAIR = 'PO_EXPECTED_PAIR_REQUIRED: send expected_unit_cost_cents and expected_product_id together, on every line';
   ok(`SET LOCAL session_replication_role = replica;
     UPDATE public.purchase_order_items SET product_id = '${PROD_B}' WHERE id = '${L1}';
     SET LOCAL session_replication_role = origin;
@@ -169,7 +169,10 @@ try {
     ${refuse(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1200, expected_product_id: PROD_B }], 'k2i')};`)}
     v := v || '|' || t || '|' || ${cents(L1)};`,
   `${PAIR}|1000|${PAIR}|1000`, 'an expected cost without the product (or the reverse) is refused; the swapped product keeps its cost');
-  console.log('[swap] product swapped in place -> refused, cost unchanged; matching product saves; bad product ids refused; cost without product refused');
+  // Sol round 3: one protected line protects the whole call; a line without the pair is refused and nothing saves.
+  ok(`${refuse(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1100, expected_unit_cost_cents: 1000 }, { id: L2, unit_cost_cents: 2200 }], 'k2j')};`)}
+    v := t || '|' || ${cents(L1)} || '|' || ${cents(L2)};`, `${PAIR}|1000|2000`, 'a call mixing protected and unprotected lines is refused');
+  console.log('[swap] product swapped in place -> refused, cost unchanged; matching product saves; bad product ids refused; cost without product refused; mixed protected/unprotected call refused');
 
   // 3. Another admin already set the requested cost: still refused (expected $10, requested $11, stored $11).
   ok(`${asUser(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1100 }], 'k3a')};`)}

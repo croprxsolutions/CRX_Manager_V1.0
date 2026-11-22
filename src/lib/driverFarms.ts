@@ -12,6 +12,9 @@ export interface DriverFarm {
   phone: string | null;
   email: string | null;
   address: string | null;
+  // A delivery with no site goes to the billing address, as on the office screens (#2018, Sol round 5 on #2165).
+  billing_address?: string | null;
+  shipping_address?: string | null;
 }
 
 /** Farms by id. Throws on a failed read so a caller never mistakes a failure for "no farm". */
@@ -44,7 +47,7 @@ export async function fetchDeliveryFarm(
     const farm = (await fetchDriverFarms([customerId])).get(customerId);
     const data = farm
       ? ({ id: farm.id, farm_name: farm.farm_name, phone: farm.phone, email: farm.email,
-          billing_address: farm.address, shipping_address: farm.address } as unknown as Customer)
+          billing_address: farm.billing_address ?? null, shipping_address: farm.shipping_address ?? null } as unknown as Customer)
       : null;
     return { data, error: null };
   } catch (error) {

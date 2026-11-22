@@ -6,7 +6,7 @@ vi.mock('./db', () => ({
   assertRpcResult: <T,>(data: unknown) => data as T,
 }));
 
-import { fetchDriverFarms } from './driverFarms';
+import { fetchDriverFarms, fetchDeliveryFarm } from './driverFarms';
 
 describe('fetchDriverFarms', () => {
   it('asks for at most 500 farms per call and merges the answers', async () => {
@@ -16,5 +16,14 @@ describe('fetchDriverFarms', () => {
     const farms = await fetchDriverFarms([...ids, 'f0', null]);
     expect(rpc.mock.calls.map(([, args]) => (args as { p_customer_ids: string[] }).p_customer_ids.length)).toEqual([500, 500, 1]);
     expect(farms.size).toBe(1001);
+  });
+});
+
+describe('fetchDeliveryFarm (driver)', () => {
+  it('keeps billing and shipping apart, so "Use billing address" means billing', async () => {
+    rpc.mockResolvedValue({ data: { rows: [{ id: 'f1', farm_name: 'F', phone: null, email: null, address: 'SHIP', billing_address: 'BILL', shipping_address: 'SHIP' }] }, error: null });
+    const { data } = await fetchDeliveryFarm('f1', true);
+    expect(data?.billing_address).toBe('BILL');
+    expect(data?.shipping_address).toBe('SHIP');
   });
 });

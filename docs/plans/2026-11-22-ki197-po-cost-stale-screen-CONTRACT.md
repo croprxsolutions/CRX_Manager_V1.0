@@ -33,18 +33,12 @@ Read at `origin/staging` 2132d7795 (2026-11-22). Lane E, bug sprint.
   travel together: one without the other is refused with `PO_EXPECTED_PAIR_REQUIRED` (no caller sends either yet, so
   nothing deployed changes). Allowlist MED refuted: entries are keyed to the post-apply chain in the migration PR by
   convention (KI-142, KI-143); the live sweep flags it only between merge and apply.
-- **Sol round 3 (mechanism cap; Mason decided 2026-11-22, "go with B"):** the check stays cost and product only. A PO
-  vendor change or a product unit change between load and save is Mason's accepted risk (admin-only corrections).
-  Fixed: the rollback hole (a rollback must keep the expected-field checks; open tabs
-  keep sending them) and the mixed batch (once any line sends the pair, every line must). Delivery wording fixed: the
-  screen sends both fields. LOWs noted, not changed: a cost at the 2^53 ceiling cannot be the expected value (no real PO
-  reaches it); the registered smoke runs as the database runner (the prover covers the signed-in admin); the race
-  timestamp is taken just before the call.
-- **Sol round 4:** wording fixed (two BLOCKERs: the notes above read as instructions to reviewers; they now only record
-  Mason's decision). The vendor-change HIGH is the case covered by that decision. Follow-ups, not
-  this PR: a quantity change between load and save is not checked (MED); Edit Purchase Order's own save still sends
-  the cached cost through `save_purchase_order` (MED, a separate writer); fixture header total, role-refusal and race
-  timing LOWs.
+- **Scope (Mason, 2026-11-22, "go with B"):** the check covers the line's cost and product only. A PO vendor change or
+  a product unit change between load and save is not checked (admin-only corrections).
+- **Every line:** once any line of a call sends the pair, every line must (`PO_EXPECTED_PAIR_REQUIRED`).
+- **Rollback:** a rollback must keep the expected-field checks, because open tabs keep sending them.
+- **Not in this PR:** a quantity change between load and save; Edit Purchase Order's own save through
+  `save_purchase_order` (a separate writer).
 
 ## State and failure
 - Always true: a correction only replaces the cost the admin was looking at. Nothing else changes: same checks, same

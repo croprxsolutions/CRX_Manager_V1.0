@@ -109,10 +109,10 @@ try {
   if (scalar("SELECT count(*) FROM pg_proc WHERE proname = 'set_purchase_order_item_costs' AND prosrc LIKE '%PO_COST_CHANGED_SINCE_LOADED%';") === '0') {
   const auto = apply();
   assert.match(`${auto.stdout}${auto.stderr}`, /PREFLIGHT_FAIL: run this file as one transaction/, 'autocommit apply must refuse');
-  const once = apply(['-1']);
+  const once = apply(['-1', '-f', '-']);
   assert.equal(once.status, 0, `apply failed: ${once.stderr}`);
   assert.match(once.stderr, /POSTFLIGHT_OK/);
-  const again = apply(['-1']);
+  const again = apply(['-1', '-f', '-']);
   assert.match(`${again.stdout}${again.stderr}`, /PREFLIGHT_FAIL: set_purchase_order_item_costs changed since/, 're-apply must refuse');
   console.log('[apply] autocommit refused, applied once with POSTFLIGHT_OK, re-apply refused');
   }

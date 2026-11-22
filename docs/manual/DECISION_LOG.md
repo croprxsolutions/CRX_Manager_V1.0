@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2151: Mason owner-accepted 1 Sol finding(s) at `1be1755e1188`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2151 at `1be1755e1188` (base `9abe45d4bc5f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/lib/editJobs.ts:43`, text sha256 `a253254446bb089f` (the wording stays with the proof, not here)
+  Mason's reason: logged isseu (ref 3bcb8445e850)
+
 ## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B) may have Sol round 17
 
 **Decision (Mason, in chat, 2026-11-21: "Yes, allow round 17").**

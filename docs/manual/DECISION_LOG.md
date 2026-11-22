@@ -13,6 +13,16 @@
 ## 2026-11-21 — #2185: a vendor change re-reads the product; vendor changes wait for unsaved Product edits
 
 **Decision (Mason, 2026-11-21, "Yes, block").** On the product page, vendor changes are off while the Product has unsaved edits, or is saving or loading ("Save or discard your Product changes before changing vendors."). After any vendor link, the page re-reads the whole Product instead of copying a vendor name from the Vendors section, and keeps Save, New product and Add a size off until that read lands; a failed read locks editing until Reload Product succeeds. This replaces patching the vendor name in place, which produced a new race in each of three review rounds (KI-170).
+## 2026-11-21 — Quote-to-invoice audit answers: booking salesperson, shared-field pricing, sent-version cutoff, applied acres
+
+**Decision (Mason, in chat, 2026-11-21, To-Do decisions 30-33 from the [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)):**
+(30, "booking salesperson") an order converted from a booking takes the booking's salesperson; only the conversion functions set it, and a rep still cannot name another salesperson by hand.
+(31, "I agree") on a shared-field job the grower who owns the booked quote pays the booked price (falling back to their own eligible quote or tier when it cannot be used); each other grower pays their own eligible sent quote or, with none, their tier price; a manual job-line price wins; conflicting eligible prices for one grower and product are refused.
+(32, "I agree") earlier field work bills the latest quote version **sent** on or before the application date (clarifies the earlier "written on or before" wording; matches #1966).
+(33, "yes always bill if actual sprayed acres") a finished job always bills, splits payer shares and takes stock for the acres actually sprayed, not the planned acres.
+**Why:** the commission and booking already belong to the booking's rep; each grower should pay the price they were quoted; and customers pay for what was applied.
+**What this forbids/implies:** KI-191, KI-198, KI-185 and #2075 are built to these rules; Transfer, office auto-draft and Split Billing must agree.
+
 ## 2026-11-21 — #2165: Mason owner-accepted 1 Sol finding(s) at `2c95807df876`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2165 at `2c95807df876` (base `1b127b005e8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
@@ -28,6 +38,7 @@ Sol round 6 found Field Mode and the office Navigate button used the billing add
 ## 2026-11-21 — #2165 (#2018): Mason approved Sol round 5 on the driver screens
 
 **Decision (Mason, in chat, 2026-11-21: "Yes, run round 5").** Sol rounds 1-4 on #2165 each found a different screen-side problem, and each was fixed: address typing, a missing delivery site falling back to the farm's default address, a missing stop site, and a role refresh resetting entered quantities. Round 3 also raised the drivers' whole-row farm read; Mason accepted that for one release ("Yes, accept it"), the same as on #2161, and #2162 removes it. Smaller items are deferred to #2167. This entry names #2165 so Sol may run round 5 on it.
+
 ## 2026-11-21 — #2187: Mason owner-accepted 1 Sol finding(s) at `4e4e44138acc`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2187 at `4e4e44138acc` (base `f3e880f9710f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

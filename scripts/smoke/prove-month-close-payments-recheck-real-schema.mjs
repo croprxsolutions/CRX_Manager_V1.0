@@ -15,7 +15,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -373,26 +373,6 @@ async function main() {
   assert.deepEqual(Object.keys(ok).sort(), Object.keys(closeBefore).sort(), 'receipt keys unchanged');
   for (const k of ['invoices_posted', 'total_invoiced_cents', 'orders_count', 'deliveries_count', 'period_start', 'period_end']) assert.deepEqual(ok[k], closeBefore[k], `receipt ${k} unchanged`);
   console.log('[case] a close with the reviewed token and both ticks closes; the receipt saves $2,090.00 received, other receipt figures unchanged');
-
-  // Sol round 3: a Prepayment Manager edit still in flight holds the close until it ends (prepay writers take no
-  // month lock), so the close cannot check one amount while an edit commits another.
-  const holder = spawn('docker', [...psqlArgs('supabase_admin'), '-A', '-t'], { stdio: ['pipe', 'pipe', 'pipe'] });
-  let holderOut = '';
-  holder.stdout.on('data', (d) => { holderOut += d; });
-  holder.stderr.on('data', (d) => { holderOut += d; });
-  const holderDone = new Promise((resolve) => holder.on('close', resolve));
-  holder.stdin.end(`BEGIN; SET application_name = 'mc_prepay_edit'; SET LOCAL session_replication_role = replica; UPDATE public.prepay_credits SET reference_number = reference_number WHERE source_type = 'check'; SELECT pg_sleep(8); ROLLBACK;`);
-  let editing = false;
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  for (let i = 0; i < 40 && !editing; i += 1) {
-    editing = scalar(`SELECT count(*) FROM pg_locks WHERE pid <> pg_backend_pid() AND relation = 'public.prepay_credits'::regclass AND mode = 'RowExclusiveLock' AND granted;`) === '1';
-    // async wait: a blocking wait would keep the holder's SQL from ever reaching docker.
-    if (!editing) await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  assert.ok(editing, `the in-flight prepay edit did not start: ${holderOut}`);
-  refusedProbe(`SET LOCAL lock_timeout = '2s'; ${closeSql('mc-wait', tokenOf(...NOV))}`, /lock timeout/, ADMIN);
-  await holderDone;
-  console.log('[case] a close waits for a Prepayment Manager edit still in flight (it never checks one amount while another commits)');
   refusedProbe(`SELECT public.close_accounting_period(DATE '2025-11-30', '${ADMIN}', 'mc-old')::text;`, /CLOSE_REVIEW_REQUIRED: reload Month-End Close/, ADMIN);
   refusedProbe(closeSql('mc-pay', tokenOf(...NOV), 'false'), /CLOSE_REVIEW_REQUIRED: confirm you reviewed this month's payments/, ADMIN);
   refusedProbe(closeSql('mc-comm', tokenOf(...NOV), 'true', 'NULL'), /CLOSE_REVIEW_REQUIRED: confirm you reviewed this month's commissions/, ADMIN);

@@ -516,6 +516,28 @@ describe('MonthEndClose', () => {
     })));
   });
 
+  it('sends true for the payments and commission ticks the admin ticked (#2175)', async () => {
+    const summary = cleanSummary();
+    summary.payments = { count: 2, total_cents: 2500 };
+    summary.commissions = { earned_cents: 300, paid_count: 0, basis: 'billed_share' };
+    mockRpc.mockImplementation((name: string) => Promise.resolve({ data: name === 'get_monthly_summary' ? summary : null, error: null }));
+    renderMonthEnd();
+    await switchToMonth(5);
+    await screen.findByText('June 2026');
+    const boxes = await screen.findAllByRole('checkbox', { name: /I have reviewed this and confirm it is correct/i });
+    expect(boxes).toHaveLength(2);
+    boxes.forEach((box) => fireEvent.click(box));
+    const rollBtn = screen.getByRole('button', { name: /Roll the Month/i });
+    await waitFor(() => expect(rollBtn).not.toBeDisabled());
+    fireEvent.click(rollBtn);
+    fireEvent.click(await screen.findByRole('button', { name: /^Close Period$/i }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('close_accounting_period', expect.objectContaining({
+      p_reviewed_token: 'tok-june',
+      p_payments_reviewed: true,
+      p_commissions_reviewed: true,
+    })));
+  });
+
   it('keeps Close off and says to reload when the summary has no review token (#2175)', async () => {
     const summary = cleanSummary();
     delete summary.review_token;

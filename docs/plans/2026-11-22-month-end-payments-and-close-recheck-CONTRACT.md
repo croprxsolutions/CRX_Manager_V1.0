@@ -160,3 +160,13 @@ passes before the apply; split not needed (memory rule exception for already-liv
   same expressions as before (the summary already converted that total); no new conversion of an order amount is
   introduced. MED untyped prepay checks from an older writer: live read-only 2026-11-22 shows 0 `prepay_credits` rows
   with `source_type` NULL. MED rush orders, MED cutover, LOW grouping, LOW number precision: as round 2.
+
+## Sol round 4 (2026-11-22) and Mason's decision
+
+- Round 4 HIGHs: the round-3 `prepay_credits` SHARE lock can deadlock with an invoice void (void updates
+  `prepay_credits`, then takes a write-off month lock); delivery voids and commission payouts dated in another month
+  can change a reviewed figure while the close runs. Same mechanism (writers racing the close itself) for the third
+  round, so per AGENTS.md the business trade-off went to Mason.
+- **Decision (Mason, 2026-11-22, option A):** the re-check catches edits made while the admin reviews; an edit saved
+  in the same instant as the Close click shows on the screen, not on the saved receipt, the same as an edit after the
+  close. The prepay lock is removed (no deadlock); no writer is changed. DECISION_LOG 2026-11-22.

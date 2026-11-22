@@ -315,11 +315,8 @@ BEGIN
     RAISE EXCEPTION 'Period % to % is already closed', v_period_start, p_period_end;
   END IF;
 
-  -- Prepayment checks count in payments received but their writers take no month lock (Sol round 3): hold their
-  -- writes until this close commits, so an edit lands before the figures below (and refuses a stale review) or after
-  -- the month is closed (screen figure only; DECISION_LOG 2026-11-22). Other figures' writers take the month lock.
-  LOCK TABLE public.prepay_credits IN SHARE MODE;
-
+  -- An edit saved in the same instant as this close (by a writer that does not take this month's lock) shows on the
+  -- screen, not on the saved receipt, the same as an edit after the close (Mason, DECISION_LOG 2026-11-22, option A).
   -- (#2175) The figures the admin reviewed must still hold; computed once, so what is checked is what is saved.
   v_figures := public._month_close_figures_20270208(v_period_start, p_period_end);
   IF p_reviewed_token IS NULL THEN

@@ -53,8 +53,9 @@ export function inventoryValueNote({ belowZeroCount, noCostCount }: InventoryVal
 }
 
 /** Why a report row is left out of the inventory value ('' when it is counted or has no stock): the same rule as the total. */
-export function inventoryRowLeftOut(quantity: number | string | null, unitCost: number | string | null | undefined): '' | 'below zero' | 'no cost' {
+export function inventoryRowLeftOut(quantity: number | string | null, unitCost: number | string | null | undefined): '' | 'below zero' | 'no cost' | 'unreadable' {
   const q = Number(quantity ?? 0);
+  if (Number.isNaN(q)) return 'unreadable';
   if (q < 0) return 'below zero';
   if (q > 0 && (unitCost == null || !(Number(unitCost) > 0))) return 'no cost';
   return '';

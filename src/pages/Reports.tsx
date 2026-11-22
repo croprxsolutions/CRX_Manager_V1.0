@@ -1417,7 +1417,7 @@ export default function Reports() {
     { key: 'unit_cost', header: 'Unit Cost', render: (r) => <span className="font-mono">{fmt(r.unit_cost)}</span> },
     { key: 'total_cost_value', header: 'Total Value', sortable: true, render: (r) => {
       const leftOut = inventoryRowLeftOut(r.quantity_available, r.unit_cost);
-      return leftOut ? <span className="text-xs text-secondary">{leftOut === 'below zero' ? 'Below zero, not counted' : 'No cost, value unknown'}</span> : <span className="font-mono font-medium">{fmt(r.total_cost_value)}</span>;
+      return leftOut ? <span className="text-xs text-secondary">{leftOut === 'below zero' ? 'Below zero, not counted' : leftOut === 'no cost' ? 'No cost, value unknown' : 'Unreadable quantity'}</span> : <span className="font-mono font-medium">{fmt(r.total_cost_value)}</span>;
     } },
     { key: 'below_reorder', header: 'Status', render: (r) => r.below_reorder ? <Badge variant="error">Low Stock</Badge> : <Badge variant="success">OK</Badge> },
   ];

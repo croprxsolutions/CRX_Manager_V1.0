@@ -37,5 +37,6 @@ describe('inventoryRowLeftOut (KI-135: report rows match the total)', () => {
     expect(inventoryRowLeftOut(5, null)).toBe('no cost');
     expect(inventoryRowLeftOut(0, null)).toBe('');
     expect(inventoryRowLeftOut('5', '1.25')).toBe('');
+    expect(inventoryRowLeftOut('NaN', 10)).toBe('unreadable');
   });
 });

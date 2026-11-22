@@ -25,6 +25,11 @@ Read at `origin/staging` 2132d7795 (2026-11-22). Lane E, bug sprint.
 - "Most recent received PO": relabel to "Latest received PO (by order date)" — the evidence function's order is unchanged
   (smallest honest fix the KI offers; the audit found the same cost in all 3 differing products).
 
+- **Sol round 1 (HIGH, fixed):** Edit Purchase Order can swap a not-yet-received line's product in place (same line id,
+  maybe same cost), so a matching cost alone could reprice the replacement product. Each line may also carry
+  `expected_product_id` (a uuid string; else `PO_EXPECTED_PRODUCT_INVALID`); if it differs from the line's product the
+  whole call is refused with `PO_COST_CHANGED_SINCE_LOADED` (product wording). The screen PR sends both fields.
+
 ## State and failure
 - Always true: a correction only replaces the cost the admin was looking at. Nothing else changes: same checks, same
   history rows, same PO total recompute, same bill-overage check.

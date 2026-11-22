@@ -2,11 +2,14 @@
 -- from a stale screen must not silently replace a newer one. set_purchase_order_item_costs accepts an optional per-line
 -- expected_unit_cost_cents (the cost the admin saw); when present and the stored cost differs, the whole call is refused
 -- with PO_COST_CHANGED_SINCE_LOADED and nothing is saved. Absent = an older screen, unchanged until a follow-up requires it.
--- Same signature, same grants; the body is the 20261021140000 body (md5-pinned below) plus one validation block and one
--- compare block. No data changes.
+-- An optional expected_product_id (the product the admin saw) is checked the same way: Edit Purchase Order can swap a
+-- not-yet-received line's product in place, keeping the line id and possibly the cost (Sol round 1).
+-- Same signature, same grants; the body is the 20261021140000 body (md5-pinned below) plus validation and compare
+-- blocks. No data changes.
 --
--- Rollback: re-run the CREATE FUNCTION body of set_purchase_order_item_costs from
--- 20261021140000_po_cost_admin_only_and_corrections.sql as CREATE OR REPLACE (after reverting the screen that sends the field).
+-- Rollback: a NEW forward migration whose body is the CREATE FUNCTION body of set_purchase_order_item_costs from
+-- 20261021140000_po_cost_admin_only_and_corrections.sql as CREATE OR REPLACE (after reverting the screen that sends the
+-- fields). Never re-run or edit this file: it stays recorded as applied.
 
 SET LOCAL lock_timeout = '10s';
 
@@ -68,6 +71,7 @@ DECLARE
   v_billed bigint;
   v_expected bigint;
   v_expected_num numeric;
+  v_expected_product uuid;
 BEGIN
   IF p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' THEN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: set_purchase_order_item_costs requires p_idempotency_key'
@@ -164,8 +168,18 @@ BEGIN
       END IF;
       v_expected := v_expected_num::bigint;
     END IF;
+    -- KI-197: the product the admin saw on that line. Present must be a JSON string holding a uuid.
+    v_expected_product := NULL;
+    IF v_item ? 'expected_product_id' THEN
+      IF jsonb_typeof(v_item->'expected_product_id') IS DISTINCT FROM 'string'
+         OR (v_item->>'expected_product_id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+        RAISE EXCEPTION 'PO_EXPECTED_PRODUCT_INVALID: expected_product_id must be a product id'
+          USING ERRCODE = '22023';
+      END IF;
+      v_expected_product := (v_item->>'expected_product_id')::uuid;
+    END IF;
 
-    SELECT poi.id, poi.unit_cost_cents, poi.quantity_received, poi.cost_needs_review INTO v_line
+    SELECT poi.id, poi.unit_cost_cents, poi.quantity_received, poi.cost_needs_review, poi.product_id INTO v_line
       FROM public.purchase_order_items poi
      WHERE poi.id = v_item_id AND poi.purchase_order_id = p_po_id
      FOR UPDATE;
@@ -177,6 +191,10 @@ BEGIN
     -- replace a newer cost nor confirm one it never saw. A line with no cost reads as 0, as the screen shows it.
     IF v_expected IS NOT NULL AND COALESCE(v_line.unit_cost_cents, 0) IS DISTINCT FROM v_expected THEN
       RAISE EXCEPTION 'PO_COST_CHANGED_SINCE_LOADED: someone changed a line''s cost after this screen loaded it; nothing was saved. Reload and check the new cost.'
+        USING ERRCODE = 'P0001';
+    END IF;
+    IF v_expected_product IS NOT NULL AND v_line.product_id IS DISTINCT FROM v_expected_product THEN
+      RAISE EXCEPTION 'PO_COST_CHANGED_SINCE_LOADED: someone changed a line''s product after this screen loaded it; nothing was saved. Reload and check the line.'
         USING ERRCODE = 'P0001';
     END IF;
 
@@ -268,7 +286,7 @@ REVOKE ALL ON FUNCTION public.set_purchase_order_item_costs(uuid, jsonb, text, u
 GRANT EXECUTE ON FUNCTION public.set_purchase_order_item_costs(uuid, jsonb, text, uuid, text) TO authenticated;
 
 COMMENT ON FUNCTION public.set_purchase_order_item_costs(uuid, jsonb, text, uuid, text) IS
-  'Admin-only: set, correct or confirm purchase-order line unit cost (cents), received lines included (reason required). Optional per-line expected_unit_cost_cents refuses a stale screen (PO_COST_CHANGED_SINCE_LOADED). Changes only cost and the PO total; never inventory or catalog cost. Key required, bound to caller + request.';
+  'Admin-only: set, correct or confirm purchase-order line unit cost (cents), received lines included (reason required). Optional per-line expected_unit_cost_cents and expected_product_id refuse a stale screen (PO_COST_CHANGED_SINCE_LOADED). Changes only cost and the PO total; never inventory or catalog cost. Key required, bound to caller + request.';
 
 DO $postflight$
 DECLARE
@@ -281,7 +299,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = v_oid AND p.prosecdef
                    AND pg_get_userbyid(p.proowner) = 'postgres'
                    AND p.proconfig = ARRAY['search_path=public, pg_temp']
-                   AND p.prosrc LIKE '%PO_COST_CHANGED_SINCE_LOADED%') THEN
+                   AND p.prosrc LIKE '%PO_COST_CHANGED_SINCE_LOADED%' AND p.prosrc LIKE '%expected_product_id%') THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: security definer, owner, search_path or body is wrong';
   END IF;
   IF has_function_privilege('anon', v_oid, 'EXECUTE') OR has_function_privilege('service_role', v_oid, 'EXECUTE')

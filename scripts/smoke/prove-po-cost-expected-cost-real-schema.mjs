@@ -5,7 +5,7 @@
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), proves the candidate's body is the pinned old body plus
- * only the two KI-197 blocks, applies it (autocommit refused, POSTFLIGHT_OK, re-apply refused), then as the signed-in
+ * only the KI-197 blocks, applies it (autocommit refused, POSTFLIGHT_OK, re-apply refused), then as the signed-in
  * user (role authenticated) checks the contract's cases. Every probe rolls back except the two-session race at the end.
  *
  * Run: node scripts/smoke/prove-po-cost-expected-cost-real-schema.mjs   (needs Docker; never touches live)
@@ -42,8 +42,8 @@ const STALE = 'PO_COST_CHANGED_SINCE_LOADED: someone changed a line\'s cost afte
 const INVALID = 'PO_EXPECTED_COST_INVALID: expected_unit_cost_cents must be a whole number of cents';
 
 try {
-  // Iterating only: CRX_PROVER_REUSE=1 with UNDO_PATHS_CONTAINER=<a kept, unseeded-PO container> skips the build.
-  if (!process.env.CRX_PROVER_REUSE) { buildContainer({ stopBefore: CANDIDATE }); seedUsers(); }
+  buildContainer({ stopBefore: CANDIDATE });
+  seedUsers();
   const seeded = scalar(`SELECT count(*) FROM public.purchase_orders WHERE id = '${PO1}';`) === '1';
   if (!seeded) {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -89,12 +89,13 @@ try {
   const oldLines = fnOf(oldFile, 'CREATE FUNCTION public.set_purchase_order_item_costs(').split('\n').slice(1);
   const newLines = fnOf(candidate, 'CREATE OR REPLACE FUNCTION public.set_purchase_order_item_costs(').split('\n').slice(1);
   const added = [...newLines];
+  const OLD_SELECT = '    SELECT poi.id, poi.unit_cost_cents, poi.quantity_received, poi.cost_needs_review INTO v_line';
   for (const line of oldLines) {
-    const at = added.indexOf(line);
+    const at = added.indexOf(line === OLD_SELECT ? `${OLD_SELECT.replace(' INTO v_line', '')}, poi.product_id INTO v_line` : line);
     assert.ok(at >= 0, `old line missing from the new body: ${line}`);
     added.splice(at, 1);
   }
-  assert.ok(added.every((l) => l.trim() === '' || /expected|KI-197|SQL does not promise|follow-up makes|replace a newer cost|reads as 0|PO_COST_CHANGED|USING ERRCODE|END IF;|RAISE EXCEPTION 'PO_EXPECTED/.test(l)),
+  assert.ok(added.every((l) => l.trim() === '' || /expected|KI-197|SQL does not promise|follow-up makes|replace a newer cost|reads as 0|PO_COST_CHANGED|USING ERRCODE|END IF;|RAISE EXCEPTION 'PO_EXPECTED|v_line\.product_id|\[0-9a-f\]/.test(l)),
     `unexpected added lines:\n${added.filter((l) => l.trim()).join('\n')}`);
   console.log(`[body] new body = old body + ${added.filter((l) => l.trim()).length} KI-197 lines`);
 
@@ -128,7 +129,32 @@ try {
     v := t || '|' || (f0 = ${snapshot(PO1)})::text || '|' || f0;`,
   `${STALE}|true|1200,2000,700,t,${5 * 1200 + 4 * 2000 + 2 * 700},1,1`,
   'a stale line refuses the whole call; the earlier change and confirm are not saved');
-  console.log('[stale] stale line last -> PO_COST_CHANGED_SINCE_LOADED; cents, flag, total, history, activity unchanged');
+  ok(`${asUser(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1200, expected_unit_cost_cents: 1000 }], 'k2c')};`)}
+    f0 := ${snapshot(PO1)};
+    ${refuse(`r := ${setCosts(PO1, [
+      { id: L1, unit_cost_cents: 1100, expected_unit_cost_cents: 1000 },
+      { id: L2, unit_cost_cents: 2100, expected_unit_cost_cents: 2000 }], 'k2d')};`)}
+    v := t || '|' || (f0 = ${snapshot(PO1)})::text;`,
+  `${STALE}|true`, 'a stale FIRST line refuses the whole call; the later matching line is not saved');
+  console.log('[stale] stale line last or first -> PO_COST_CHANGED_SINCE_LOADED; cents, flag, total, history, activity unchanged');
+
+  // 2b. Sol round 1: Edit Purchase Order swapped the line's product in place (same id, same cost). A correction made
+  //     for the product the admin saw is refused; the cost of the new product is not touched.
+  const SWAP = 'PO_COST_CHANGED_SINCE_LOADED: someone changed a line\'s product after this screen loaded it; nothing was saved. Reload and check the line.';
+  ok(`SET LOCAL session_replication_role = replica;
+    UPDATE public.purchase_order_items SET product_id = '${PROD_B}' WHERE id = '${L1}';
+    SET LOCAL session_replication_role = origin;
+    ${refuse(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1200, expected_unit_cost_cents: 1000, expected_product_id: PROD }], 'k2e')};`)}
+    v := t || '|' || ${cents(L1)};
+    ${asUser(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1200, expected_unit_cost_cents: 1000, expected_product_id: PROD_B }], 'k2f')};`)}
+    v := v || '|' || ${cents(L1)};`,
+  `${SWAP}|1000|1200`, 'a swapped product refuses; the product the line now holds saves');
+  for (const bad of ['123', '"not-a-uuid"', 'null', 'true']) {
+    const sql = `public.set_purchase_order_item_costs('${PO1}'::uuid, '[{"id":"${L1}","unit_cost_cents":1100,"expected_product_id":${bad}}]'::jsonb, NULL, NULL, 'k2g')`;
+    ok(`${refuse(`r := ${sql};`)} v := t || '|' || ${cents(L1)};`,
+      'PO_EXPECTED_PRODUCT_INVALID: expected_product_id must be a product id|1000', `expected_product_id ${bad} must be refused`);
+  }
+  console.log('[swap] product swapped in place -> refused, cost unchanged; matching product saves; bad product ids refused');
 
   // 3. Another admin already set the requested cost: still refused (expected $10, requested $11, stored $11).
   ok(`${asUser(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1100 }], 'k3a')};`)}
@@ -164,7 +190,7 @@ try {
     ${asUser(`r2 := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1400, expected_unit_cost_cents: 1100 }], 'k7b')};`)}
     ${asUser(`r3 := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1100, expected_unit_cost_cents: 1000 }], 'k7')};`)}
     ${refuse(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1100, expected_unit_cost_cents: 999 }], 'k7')};`)}
-    v := (r3 = r)::text || '|' || ${cents(L1)} || '|' || ${hist(PO1)} || '|' || (t <> 'NOT REFUSED')::text;`,
+    v := (r3 = r)::text || '|' || ${cents(L1)} || '|' || ${hist(PO1)} || '|' || (t ~ '^IDEMPOTENCY_')::text;`,
   'true|1400|2|true', 'replay returns the first result; a changed expectation under the same key is refused');
   console.log('[replay] same key after the cost moved -> first result, no new history; same key, other expected -> refused');
 
@@ -210,6 +236,7 @@ try {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
   }
   assert.equal(scalar("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = 73492009 AND granted;"), '1', 'session A never took the lock');
+  assert.equal(sessionA.exitCode, null, 'session A must still hold the lock when session B starts');
   const b = attempt(ADMIN2, `${refuse(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1100, expected_unit_cost_cents: 1000 }], `race-b-${Date.now()}`)};`)} v := t || '|' || ${cents(L1)};`);
   const aCode = await aDone;
   assert.equal(aCode, 0, `session A failed: ${aErr}`);
@@ -217,7 +244,7 @@ try {
   assert.equal(scalar(`SELECT ${cents(L1)} || ':' || (SELECT count(*) FROM public.purchase_order_item_cost_changes WHERE purchase_order_item_id = '${L1}' AND changed_by = '${USERS.admin}' AND source = 'set_by_admin');`), '1500:1');
   console.log('[race] two real sessions: one winner (1500, one history row), the waiting one refused');
 
-  // The smoke chain the staging job runs (rolled back).
+  // The registered smoke chain (rolled back).
   const smoke = docker([...PSQL], { input: readFileSync(path.join(ROOT, 'scripts', 'smoke', 'smoke-po-cost-expected-cost.sql'), 'utf8'), allowFailure: true });
   assert.match(smoke.stderr, /SMOKE_PASS_ROLLBACK/, `smoke chain failed:
 ${smoke.stderr}`);

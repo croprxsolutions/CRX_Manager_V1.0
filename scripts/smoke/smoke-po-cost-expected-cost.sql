@@ -10,6 +10,9 @@ DECLARE
   r jsonb;
   v_msg text;
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'set_purchase_order_item_costs' AND prosrc LIKE '%expected_product_id%') THEN
+    RAISE EXCEPTION 'SMOKE_PREREQ: 20270214100000 is not applied on this database';
+  END IF;
   SELECT id INTO v_admin FROM profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at LIMIT 1;
   IF v_admin IS NULL THEN RAISE EXCEPTION 'SMOKE_SETUP: no active admin'; END IF;
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
@@ -24,7 +27,7 @@ BEGIN
   r := set_purchase_order_item_costs(v_po,
     jsonb_build_array(jsonb_build_object('id', v_line, 'unit_cost_cents', 1100, 'expected_unit_cost_cents', 1000)),
     NULL, v_admin, 'smk-po-exp-1-' || v_suffix);
-  IF (r->>'lines_changed')::int <> 1 OR (SELECT unit_cost_cents FROM purchase_order_items WHERE id = v_line) <> 1100 THEN
+  IF (r->>'lines_changed')::int IS DISTINCT FROM 1 OR (SELECT unit_cost_cents FROM purchase_order_items WHERE id = v_line) IS DISTINCT FROM 1100 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: matching expected gave %', r;
   END IF;
 
@@ -36,7 +39,7 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
   END;
   IF v_msg NOT LIKE 'PO_COST_CHANGED_SINCE_LOADED:%'
-     OR (SELECT unit_cost_cents FROM purchase_order_items WHERE id = v_line) <> 1100 THEN
+     OR (SELECT unit_cost_cents FROM purchase_order_items WHERE id = v_line) IS DISTINCT FROM 1100 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: stale save gave %', v_msg;
   END IF;
 

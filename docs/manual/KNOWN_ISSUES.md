@@ -552,7 +552,7 @@ spelling on receipt.
 | ID | Sev | Status | What goes wrong | Owner | Plan |
 |---|---|---|---|---|---|
 | #2190 | MED | Open | Two deliveries completing at the same moment on the same products can make one fail and need a retry; nothing is saved wrongly. | Agent (unassigned) | W2-12 |
-| #2193 | MED | Closed (Mason decision 2026-11-22) | If applied before the EPA batch, the one-time load commits with some ingredients missing their groups and never fills them later. Accepted: the EPA batch fill runs before the load at go-live (DECISION_LOG 2026-11-22). | Mason | W2-13 |
+| #2193 | MED | Open | If applied before the EPA batch, the one-time load commits with some ingredients missing their groups and never fills them later. | Agent (unassigned) | W2-13 |
 | #2172 | LOW | Open | A very large batch (about 3,000 approvals) could make Confirm silently send nothing. Not reachable today (hundreds of rates). | Agent (unassigned) | W3-16 |
 | #2135 | LOW | Open | Staff see an inflated short-stock count and get two warnings and two notifications; stock math is right. | Agent (unassigned) | W3-17 |
 | #1912 | LOW | On staging, not live | Retry keys with hidden characters are now refused. Issue can be closed once released. | Agent (unassigned) | R-13 |

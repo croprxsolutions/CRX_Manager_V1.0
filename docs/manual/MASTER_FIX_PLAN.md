@@ -105,7 +105,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W2-10 | KI-144 | MED | Open | A vendor rename does not carry to old purchase orders, so vendor reports and bill checks can miss some orders. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W2-11 | KI-165 | MED | Open | A count started before a unit change could record stock in the wrong unit; not reachable today. | KNOWN_ISSUES | #1896 | Agent (unassigned) |
 | W2-12 | #2190 | MED | Open | Two deliveries completing at the same moment on the same products can make one fail and need a retry; nothing is saved wrongly. | Sol round 1, release #2189 (GitHub) | #2190 | Agent (unassigned) |
-| W2-13 | #2193 | MED | Closed (Mason decision 2026-11-22) | If applied before the EPA batch, the one-time load commits with some ingredients missing their groups and never fills them later. | Sol round 1, release #2189 (GitHub) | #2193 | Agent (unassigned) |
+| W2-13 | #2193 | MED | Open | If applied before the EPA batch, the one-time load commits with some ingredients missing their groups and never fills them later. | Sol round 1, release #2189 (GitHub) | #2193 | Agent (unassigned) |
 | W3-07 | KI-100 | LOW | Open | An editor can type rate changes that get thrown away when another admin locks rates meanwhile. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-08 | KI-103 | LOW | Open | A file with an unknown extra column looks fine in preview, then the whole save is refused (nothing written) | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-09 | KI-109 | LOW | Open | Stale "previewed" price-change sets pile up; a completed job can still be edited; a few small UI/label gaps. | KNOWN_ISSUES |  | Agent (unassigned) |

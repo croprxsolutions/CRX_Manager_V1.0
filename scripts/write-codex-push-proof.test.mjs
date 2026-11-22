@@ -1238,6 +1238,7 @@ function collisionPromptSkipsWork(prompt) {
   const source = {
     codex_ran: true, verdict: "clean", model: CODEX_REVIEW_MODEL, reasoning_effort: CODEX_REVIEW_EFFORT,
     head_sha: head, base_sha: "2".repeat(40), timestamp: new Date(nowMs - 60_000).toISOString(),
+    review_ref: "origin/main", release_rules: false,
   };
   assert.equal(carrySourceProofProblem(source, { headSha: head, nowMs }), null, "carry: a fresh clean Sol proof carries");
   assert.equal(

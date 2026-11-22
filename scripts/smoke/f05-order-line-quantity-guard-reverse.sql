@@ -1,4 +1,4 @@
--- Rollback for 20270216100000_f05_order_line_quantity_guard.sql (F05), proven by
+-- Rollback for 20270218100000_f05_order_line_quantity_guard.sql (F05), proven by
 -- scripts/smoke/prove-f05-order-line-quantity-guard-real-schema.mjs.
 -- Removes the three refusal triggers and their helpers, all or nothing. The forward migration wrote no data, so nothing
 -- else changes. To use it live, copy it into a new migration through the gates (without the BEGIN / COMMIT lines), so

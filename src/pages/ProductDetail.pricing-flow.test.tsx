@@ -1170,6 +1170,8 @@ describe('ProductDetail governed pricing flow', () => {
     expect(screen.getByRole('button', { name: 'New product' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Add a size' })).toBeDisabled();
     expect(vendorSection.props!.lockedReason).toMatch(/finishes saving or loading/);
+    // Typing now would be replaced when the read lands, so the form waits too (Luna r5).
+    expect(screen.getByLabelText('Quoting Notes')).toBeDisabled();
     await act(async () => { answer({ data: { ...product, vendor: 'New Vendor' }, error: null }); });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled());
     expect(screen.getByDisplayValue('New Vendor')).toBeInTheDocument();

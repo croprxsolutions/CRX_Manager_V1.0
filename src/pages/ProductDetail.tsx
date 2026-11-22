@@ -1498,7 +1498,8 @@ export default function ProductDetail() {
               </fieldset>
             </Card>
           )}
-          <fieldset disabled={reloadRequired || (isNew && saving)} className="contents">
+          {/* A product read in flight would replace whatever is typed meanwhile, so the form waits for it. */}
+          <fieldset disabled={reloadRequired || productReading || (isNew && saving)} className="contents">
           {/* The fieldset disables these toggles too, so a locked page keeps every section open. */}
           <PhoneSection title="Product Information" {...sectionProps('information', reloadRequired)}>
           <Card>

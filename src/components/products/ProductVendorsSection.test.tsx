@@ -113,8 +113,11 @@ describe('ProductVendorsSection', () => {
     const button = await screen.findByRole('button', { name: 'Make preferred' });
     mocks.linkProductVendor.mockRejectedValueOnce(new Error('network'));
     fireEvent.click(button);
+    const readsBefore = mocks.listProductVendors.mock.calls.length;
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('error', expect.any(String)));
     expect(onVendorChanged).toHaveBeenCalledTimes(1);
+    // The vendor list is read again too, so it matches the product (Luna r5).
+    await waitFor(() => expect(mocks.listProductVendors.mock.calls.length).toBeGreaterThan(readsBefore));
   });
 
   it('vendor changes are off, with the reason, while the page says so', async () => {

@@ -222,6 +222,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
       // An unclear failure may still have committed, so the product is read again either way (re-reading the
       // page's current product is harmless even if the screen moved on).
       onVendorChanged();
+      void linked.reload();
     } finally {
       setBusyFor((current) => (current === productId ? null : current));
     }

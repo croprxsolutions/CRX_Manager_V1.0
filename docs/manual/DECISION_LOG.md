@@ -46,6 +46,32 @@
 
 **Decision (Mason, in chat, 2026-11-18: "1").** After Sol round 2 on PR #1980 found that stock held for a Maybe booking read as free, Mason chose: held stock is always spoken for in `get_purchasing_plan`, whatever the booking's confidence, but a hold never makes the plan buy on its own. A hold covering its booking's (or job's) own lines counts today only up to the stock on the shelf left after other holds, backing Firm lines first; the unbacked part stays as the booking line with its own date and confidence (a Maybe line stays shown only).
 **Supersedes:** rule (2) of "2026-11-18 — Purchasing plan: no 'expedite a later PO' alternative; a Maybe booking's held stock follows its confidence". Rule (1) stands.
+## 2026-11-22 — Mason's release pass removed (supersedes the 2026-11-20 release-pass decision)
+
+**Decision (Mason, in chat, 2026-11-22: "Take it out").** Sol found 6 BLOCKER/HIGH in the release pass on release #2189 and 5 new ones in round 2 on the fixes, all in the same mechanism (the AGENTS.md three-round stop). Mason chose to remove the pass rather than keep patching. Taha or Mason again merges the release, hotfixes and the back-merge, and live applies wait for Taha's `Ready to merge:` comment. Kept from 2026-11-20: the plain `yes` (24 hours, surviving head moves) for a destructive migration, and a destructive migration may merge into `staging`. The unpushed fix branch `claude/release-pass-sol-fixes` is superseded and not landed. Rollout: a session on a checkout from before this change still has the pass code, so no agent acts on `ship the release` / `go live #<n>` from now on, whatever its checkout says, and Mason will not send them (Mason confirmed in chat, 2026-11-22: "Yes, I agree"). Checked 2026-11-22: no recorded pass exists in any CRX checkout or worktree on Mason's computer.
+## 2026-11-22 — #2185: Mason owner-accepted 3 Sol finding(s) at `6e92876aa47e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-22).** Sol's review of PR #2185 at `6e92876aa47e` (base `104ea5afe5bc`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/components/products/ProductVendorsSection.tsx:221`, text sha256 `bbbd0728aecafee1` (the wording stays with the proof, not here)
+  Mason's reason: can’t hapone (ref b4db10190568)
+- Finding 2 (HIGH) at `src/pages/ProductDetail.tsx:441`, text sha256 `1e972ef0cb7168f8` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref f0d1b4bfc761)
+- Finding 3 (HIGH) at `src/components/products/ProductVendorsSection.tsx:227`, text sha256 `7e85905a56efea6d` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 4096755d03d7)
+
+## 2026-11-22 — #2185: Mason re-confirmed the vendor-change block and the accepted two-admins case
+
+**Decision (Mason, 2026-11-22, "Yes, re-confirm").** For #2185, vendor changes on the product page stay off while the Product has unsaved edits, or is saving or loading, and a vendor change re-reads the whole Product (the 2026-11-21 decision). The two-admins case accepted on 2026-11-21 (two admins changing the same product's preferred vendor within seconds, so a copy keeps the older vendor) stays accepted as a business non-issue.
+
+## 2026-11-21 — #2185: Mason owner-accepted 1 Sol finding(s) at `d66cf2bff2ed`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2185 at `d66cf2bff2ed` (base `f08df8ad6407`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/components/products/ProductVendorsSection.tsx:221`, text sha256 `f5320b8720eb0a44` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 48c944edbcb7)
+
+## 2026-11-21 — #2185: a vendor change re-reads the product; vendor changes wait for unsaved Product edits
+
+**Decision (Mason, 2026-11-21, "Yes, block").** On the product page, vendor changes are off while the Product has unsaved edits, or is saving or loading ("Save or discard your Product changes before changing vendors."). After any vendor link, the page re-reads the whole Product instead of copying a vendor name from the Vendors section, and keeps Save, New product and Add a size off until that read lands; a failed read locks editing until Reload Product succeeds. This replaces patching the vendor name in place, which produced a new race in each of three review rounds (KI-170).
 ## 2026-11-21 — Quote-to-invoice audit answers: booking salesperson, shared-field pricing, sent-version cutoff, applied acres
 
 **Decision (Mason, in chat, 2026-11-21, To-Do decisions 30-33 from the [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)):**

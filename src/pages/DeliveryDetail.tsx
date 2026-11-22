@@ -1501,6 +1501,11 @@ export default function DeliveryDetail() {
     }
   };
 
+  // A paused receipt whose hand send never went out: the server will not send it either, so say so (Taha LOW).
+  const warnHeldNotSent = (deliveryNumber: string) => {
+    toast('warning', `Delivery ${deliveryNumber}: the email did not go out. Its receipt is on "Customer receipts to check" and the server will not send it. Send it again or mark it handled.`);
+  };
+
   // ── Resend Delivery Confirmation Email ──────────────────────────────────
   // KI-25: before the hand send, any receipt still queued for the server is paused on the office list, so the server
   // cannot email a second copy afterwards; once this email goes out it is marked handled. A hand send that fails
@@ -1514,13 +1519,15 @@ export default function DeliveryDetail() {
     }
     setResendCopyCheck(null);
     setSendingEmail(true);
+    let heldNotSent = false;
     try {
       // Always asked, a confirmed second copy too: the server refuses a delivery no longer completed (Sol HIGH).
       const paused = await pauseQueuedReceipt(delivery.id);
       if (!paused) return;
+      heldNotSent = paused.outcome === 'paused';
       // The office moved to another delivery while this answer was on its way: send nothing, show nothing.
       if (signatureRouteIdRef.current !== delivery.id) return;
-      if (confirmedFor !== delivery.id && receiptMayAlreadyBeSent(paused)) { setResendCopyCheck(paused); return; }
+      if (confirmedFor !== delivery.id && receiptMayAlreadyBeSent(paused)) { heldNotSent = false; setResendCopyCheck(paused); return; }
       // The current picks, so a brand corrected after completion shows (Brand PR B-3).
       const brandInfo = await loadDeliveryBrandInfo(delivery.id);
       // Moved to another delivery during the lookup: send nothing; the paused receipt stays listed (Luna MED).
@@ -1550,11 +1557,13 @@ export default function DeliveryDetail() {
         resource_id: delivery.id,
         idempotency_key: `delivery-resend-${delivery.id}-${Date.now()}`,
       });
+      heldNotSent = false;
       toast('success', `Confirmation email sent to ${customer.email}`);
       await closeSentReceipt(delivery.id, paused.queued_at);
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
     } finally {
+      if (heldNotSent) warnHeldNotSent(delivery.delivery_number);
       setSendingEmail(false);
     }
   };
@@ -2262,7 +2271,10 @@ export default function DeliveryDetail() {
             )}
             <ConfirmModal
               open={resendCopyCheck !== null && resendCopyCheck.delivery_id === delivery.id}
-              onClose={() => setResendCopyCheck(null)}
+              onClose={() => {
+                if (resendCopyCheck?.outcome === 'paused') warnHeldNotSent(delivery.delivery_number);
+                setResendCopyCheck(null);
+              }}
               onConfirm={() => { void handleResendEmail(resendCopyCheck?.delivery_id); }}
               title="Receipt may already be sent"
               message={resendCopyCheck?.sent_at

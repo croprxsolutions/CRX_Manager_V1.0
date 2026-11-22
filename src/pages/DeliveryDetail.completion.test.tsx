@@ -543,6 +543,17 @@ describe('Email Confirmation and the server receipt queue', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'provider down'));
     expect(closeCalls()).toEqual(['manual_send']);
+    // The office is told the server will not send it either (Taha LOW).
+    expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/did not go out.*server will not send it/));
+  });
+
+  it('cancelling the second-copy question says the held receipt was not sent', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ send_authorized_at: '2026-10-21T15:04:00Z' })));
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/did not go out/)));
+    expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
   it('asks before sending another copy when the server already emailed it, and sends only on yes', async () => {
@@ -576,7 +587,7 @@ describe('Email Confirmation and the server receipt queue', () => {
     await renderPage();
     fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Send another copy' }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/DELIVERY_NOT_COMPLETED/)));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/not completed any more/))); // wording: errorSanitizer.test.ts
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 

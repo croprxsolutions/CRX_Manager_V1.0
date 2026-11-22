@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — KI-114 (#1958): Piksi Dust is grams everywhere, same prices
+
+**Decision (Mason, 2026-11-22, in the bug-captain session: "Yes, grams (Recommended)"; and in the Lane C session: "piksi dust is in grams we billed like mg but it is grams and all mg need changed to gram price is same as grams etc").** This supersedes the 2026-11-13 "MG means milligrams" decision. Every Piksi `MG` label (products, groups, stock, order, delivery and PO lines, receipts) becomes `g` with no quantity or price changed; the four older Plus delivery lines that still say "Dry oz" become `g` too ("all"). This replaces the 2026-11-13 reading ("MG means milligrams") used by `20270121100000` and the 2026-11-17 "keep both on today's values" choice. Migration `20270221100000_piksi_mg_to_grams`; contract `docs/plans/2026-11-22-ki114-piksi-grams-CONTRACT.md`. Releasing Piksi from the rate cut-over hold list stays a separate step.
+
 ## 2026-11-22 — PR #2231 (#2193): Mason overrides Sol round 4's one HIGH; hand merge
 
 **Decision (Mason, 2026-11-22, relayed by the bug captain: "A").** Sol round 4 (head `d86e4eefc`) left one HIGH: the MCP apply door runs the guard code from the main checkout, so the new prerequisite check protects that door only once the main checkout is updated past this PR. Override reason: the check is active once installed, and the modes-of-action load is applied only at release, after this PR lands; the script door (the normal path) carries the check itself. The race Sol raised in rounds 1-3 is fixed (in-transaction re-count under the ingredient lock). The skip tool cannot accept findings on gate files, and the agent merge guard needs a clean Sol on them, so Mason or Taha merges PR #2231 by hand; agents do not land it. Sol's MED/LOW findings are tracked in #2230.

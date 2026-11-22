@@ -1727,15 +1727,20 @@ against a live generation.
 
 ### KI-84 — The split-billing backfill smoke chain fails on current `main`
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-40 · #1110.
+> **Re-checked 2026-11-22 on staging `045464a22`:** Resolved · LOW · plan W3-40 · #1110.
 
-**LOW · OPEN · tooling/smoke · unassigned (Mason, 2026-10-27: noted, not now)**
-`scripts/smoke/smoke-backfill-refuse-split-billing.sql` stops before `SMOKE_PASS_ROLLBACK` on a current-main
-database. It completes a delivery with a direct `UPDATE`, which 20261022075000 now refuses
-(`COMPLETION_EVIDENCE_REQUIRED`). It also needs the versioned `post_invoice_group` branch, using the pattern in
-`smoke-field-app-split-penny-exact.sql`. This is a test gap, not a customer defect: the refusal it proves stays
-live, and `prove-quote-customer-row-version-real-schema.mjs` still runs the chain in its old form on the July
-catalog (#1110). Done = the chain passes on main and still fails first against 20261006200000 (CRX-LIFE-001).
+**LOW · RESOLVED 2026-11-22 · tooling/smoke**
+`scripts/smoke/smoke-backfill-refuse-split-billing.sql` reaches `SMOKE_PASS_ROLLBACK` on a database built from the
+baseline plus every migration (338 replayed, through `20270213100000`). Earlier repairs (#1523, #1524, #2057) already
+completed the delivery under the `crx.delivery_completion_evidence` marker that 20261022075000 requires, used the
+versioned `post_invoice_group` call and the split claim, and gave test products a form and sold unit, so the chain
+itself needed no further edit. It cannot run on the catalog just before 20261006200000 (it stops on the later
+split-claim rule). With 20261006200000's refusal reverted in a scratch database only (CHECK dropped, wrapper type
+refusal removed) it fails first on `create_split_invoices_from_order created field_application invoices from an
+order`, its CRX-LIFE-001 assertion. `prove-order-invoice-type-gate-real-schema.mjs` runs on that old catalog, so
+#2234 gives it the frozen copy `scripts/smoke/fixtures/backfill-refuse-split-billing-candidate-era.sql` (the chain as of
+`342135561`); `prove-quote-customer-row-version-real-schema.mjs` and four other provers already pull their
+candidate-era form from git.
 
 ### KI-96 — Unused code and copied helpers make every change slower
 

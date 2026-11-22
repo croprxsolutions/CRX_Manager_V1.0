@@ -493,23 +493,27 @@ SELECT (SELECT status FROM jobs WHERE id = (SELECT id FROM j)) || ' | invoices='
 CREATE TEMP TABLE s AS SELECT public.save_job(NULL, jsonb_build_object('customer_id', '${A}', 'job_date', current_date),
   '[{"field_id":"${G}","acres_to_treat":10,"sort_order":0}]'::jsonb,
   '[{"product_id":"${P}","quantity":10,"unit":"Gal","rate_per_acre":1,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":0,"price_typed":true},
-    {"product_id":"${P}","quantity":5,"unit":"Gal","rate_per_acre":0.5,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":1}]'::jsonb,
+    {"product_id":"${P}","quantity":5,"unit":"Gal","rate_per_acre":0.5,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":1},
+    {"product_id":"${P}","quantity":5,"unit":"Gal","rate_per_acre":0.5,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":2,"price_typed":true},
+    {"product_id":"${P}","quantity":5,"unit":"Gal","rate_per_acre":0.5,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":3,"price_typed":true}]'::jsonb,
   auth.uid(), 'jtq-save-' || gen_random_uuid()) AS res;
 -- An older screen re-saves without price_typed: the typed line (same product, price and position) keeps the mark; the
--- untyped line at the same product and price stays untyped; an explicit false clears it (Luna rounds 1 and 2).
+-- untyped line at the same product and price stays untyped; an explicit false clears it; a new unit clears it
+-- (Luna rounds 1, 2 and 4).
 CREATE TEMP TABLE s2 AS SELECT public.save_job(((SELECT res FROM s)->>'job_id')::uuid,
   jsonb_build_object('customer_id', '${A}', 'job_date', current_date),
   '[{"field_id":"${G}","acres_to_treat":10,"sort_order":0}]'::jsonb,
   '[{"product_id":"${P}","quantity":10,"unit":"Gal","rate_per_acre":1,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":0},
     {"product_id":"${P}","quantity":5,"unit":"Gal","rate_per_acre":0.5,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":1},
-    {"product_id":"${P}","quantity":5,"unit":"Gal","rate_per_acre":0.5,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":2,"price_typed":false}]'::jsonb,
+    {"product_id":"${P}","quantity":5,"unit":"Gal","rate_per_acre":0.5,"rate_unit":"Gal","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":2,"price_typed":false},
+    {"product_id":"${P}","quantity":20,"unit":"Qt","rate_per_acre":2,"rate_unit":"Qt","cost_per_unit_cents":3000,"price_per_unit_cents":5000,"customer_supplied":false,"sort_order":3}]'::jsonb,
   auth.uid(), 'jtq-save2-' || gen_random_uuid()) AS res;
 RESET ROLE; -- read back as the owner (app roles read job lines through RLS screens, not needed here)
 SELECT (SELECT res->>'success' FROM s) || ' | ' || (SELECT res->>'success' FROM s2) || ' | ' || (SELECT string_agg(jc.sort_order || '=' || jc.price_typed, ',' ORDER BY jc.sort_order)
   FROM job_chemicals jc WHERE jc.job_id = ((SELECT res FROM s)->>'job_id')::uuid);`);
   console.log(`[after] save_job: ${saved}`);
-  assert.equal(saved, 'true | true | 0=true,1=false,2=false',
-    'save_job stores price_typed; an omitted mark survives only on the same product, price and position; explicit false clears it');
+  assert.equal(saved, 'true | true | 0=true,1=false,2=false,3=false',
+    'save_job stores price_typed; an omitted mark survives only on the same product, price, unit and position; explicit false clears it');
   console.log('JOB_TRANSFER_SENT_QUOTE_PRICE_PROOF_PASS');
 }
 

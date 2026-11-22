@@ -59,8 +59,8 @@ when there is no sent quote for it. Field application invoices are Mason's own w
 - Automatic record changes (plan-contract, #2153): (1) Create Invoice prices an untyped chemical line from the paying
   grower's sent quote instead of the job line's price; the job itself is not changed, only the new invoice's lines,
   header and shares (Mason, 2026-11-21, rules 1-4). (2) A job save that omits `price_typed` (an older open screen)
-  keeps an existing mark on the line with the same product, price and position instead of clearing it; it never sets a
-  new mark (Luna rounds 1-2; keeps rule 2's typed price from silently turning into a quote price). Nothing else
+  keeps an existing mark on the line with the same product, price, unit and position instead of clearing it; it never sets a
+  new mark (Luna rounds 1, 2 and 4; keeps rule 2's typed price from silently turning into a quote price). Nothing else
   changes, moves or cancels a record automatically.
 
 ## State and failure

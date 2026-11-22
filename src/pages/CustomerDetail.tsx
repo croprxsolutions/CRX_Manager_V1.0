@@ -275,7 +275,8 @@ export default function CustomerDetail() {
   // null = not being edited (the field shows the saved rate).
   const [discountDraft, setDiscountDraft] = useState<string | null>(null);
   const [discountSaving, setDiscountSaving] = useState(false);
-  const [reactivateOpen, setReactivateOpen] = useState(false);
+  // The customer id the Reactivate dialog was opened for, so it never shows on another customer.
+  const [reactivateOpenFor, setReactivateOpenFor] = useState<string | null>(null);
   const [reactivating, setReactivating] = useState(false);
   useEffect(() => { setDiscountDraft(null); }, [id]);
 
@@ -1340,6 +1341,7 @@ export default function CustomerDetail() {
   // Customers list uses to deactivate (RLS governs it); admin-only on screen.
   const reactivateCustomer = async () => {
     if (!id || isNew || reactivating) return;
+    const visit = visitRef.current;
     setReactivating(true);
     try {
       const previousRowVersion = customerRowVersionRef.current;
@@ -1350,7 +1352,7 @@ export default function CustomerDetail() {
         .eq('is_active', false)
         .select('*');
       checkMutationResult(result, 'reactivate customer');
-      if (currentIdRef.current !== id) return;
+      if (currentIdRef.current !== id || visitRef.current !== visit) return;
       const nextRowVersion = (result.data as Array<{ row_version?: unknown }>)[0]?.row_version;
       const rowVersionResult = resolveDirectMutationRowVersion(previousRowVersion, nextRowVersion);
       customerRowVersionRef.current = rowVersionResult.rowVersion;
@@ -1377,7 +1379,8 @@ export default function CustomerDetail() {
       toast('error', sanitizeError(error));
     } finally {
       setReactivating(false);
-      setReactivateOpen(false);
+      // A late reply from a customer the admin has left must not close another customer's dialog.
+      setReactivateOpenFor((open) => (open === id ? null : open));
     }
   };
 
@@ -1420,8 +1423,8 @@ export default function CustomerDetail() {
         { label: isNew ? 'New Customer' : (customer.farm_name || 'Customer') },
       ]} />
       <ConfirmModal
-        open={reactivateOpen}
-        onClose={() => { if (!reactivating) setReactivateOpen(false); }}
+        open={!!id && reactivateOpenFor === id}
+        onClose={() => { if (!reactivating) setReactivateOpenFor(null); }}
         onConfirm={() => void reactivateCustomer()}
         title="Reactivate customer"
         message={`Reactivate ${customer.farm_name || 'this customer'}? Staff can then create orders, holds, deliveries and jobs for them again.`}
@@ -1453,7 +1456,7 @@ export default function CustomerDetail() {
         </div>
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
           {!isNew && isAdmin && customer.is_active === false && (
-            <Button variant="primary" size="sm" icon={<RotateCcw className="w-4 h-4" />} showChevron={false} onClick={() => setReactivateOpen(true)}>
+            <Button variant="primary" size="sm" icon={<RotateCcw className="w-4 h-4" />} showChevron={false} onClick={() => setReactivateOpenFor(id ?? null)}>
               Reactivate
             </Button>
           )}

@@ -36,7 +36,9 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270207125000_job_transfer_below_cost_whole_line.sql');
 const FOLLOW_UPS = [];
-const LATER_READ_ONLY = new Set([]);
+// Later migrations that only CALL helpers this proof relies on (field_app_priced_quantity, normalize_rate_unit) and
+// redefine none of them (checked 2026-11-22).
+const LATER_READ_ONLY = new Set(['20270216110000_purchasing_plan_booking_reservations.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

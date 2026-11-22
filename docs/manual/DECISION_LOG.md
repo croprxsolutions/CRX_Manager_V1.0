@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — PR #2239: per-acre field pricing retired with two constraints only
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 3 on PR #2239):** "Yes, simplify". Per-acre field pricing was never used (live, read-only: 0 of 6 field billing splits and 0 of 3 invoice shares carry a per-acre price or note; 0 invoice lines carry per-acre wording). The migration adds the two CHECK constraints (`field_billing_defaults_no_per_acre_price`, `invoice_shares_no_per_acre_price`) and does not search invoice history for per-acre invoices. Line-by-line billing, percent splits between payers and quoted prices are unchanged.
+
 ## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
 
 **Decision (Mason, in chat 2026-11-22, after Sol gate round 6 left 2 HIGH findings on the skip mechanism itself):** "then we will override SOL if we need to I don't want over complicated codes to type I want it to explicitly ask if I accept the risk and I say yes with reason and that's good enough". The skip request now asks plainly whether he accepts the risk of leaving the findings unfixed; `yes` and a reason is enough, and the reason is logged. Round 6's two findings (`.claude/hooks/sol-accept-lib.mjs:233`, `scripts/owner-accept-sol-finding.mjs:107`) are left unfixed as his business call: both concern how far a skip he gave can stretch, not money, stock, customer data or logins. This PR changes gate files, so the agent merge guard still requires a clean Sol; Mason or Taha merges it by hand.

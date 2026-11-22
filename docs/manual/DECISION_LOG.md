@@ -74,6 +74,13 @@
 ## 2026-11-22 — PR #2244 (KI-197): stale-screen PO cost check covers cost and product only (accepted risk)
 
 **Decision (Mason, relayed from his conversation with the bugs-triage session, 2026-11-22: "go with B"):** a purchase-order cost correction is refused when the line's cost or product changed after the screen loaded it. A PO vendor change or a product unit change in that window is NOT checked: an accepted risk, since only admins correct costs. Raised after Sol round 3 reached the AGENTS.md mechanism cap.
+## 2026-11-22 — A PO cost correction is judged against what arrived (KI-151)
+
+**Decision (Mason, relayed by the Lane E bug captain 2026-11-22):** "if cost is edited it needs edited if only receive 8 of 10 should show owing 2. if edited quantity to 8 and we receive 8 then we shouldn't show anymore coming". Cost corrections on a purchase order are judged against what actually arrived, not what was ordered.
+
+**Why:** since KI-143, vendor bills are already limited by what arrived (capped at the ordered total; the ordered total before anything arrives). The cost-correction check still used the ordered total, so a received line could be cut below what was billed for it.
+
+**What this implies:** a cost cut is refused when the PO's active vendor bills would end more than 5% over what arrived (or over the ordered total, before anything arrives); cuts on lines that have not arrived do not change that limit. Owed and still-coming quantities are unchanged: receiving 8 of 10 still shows 2 coming, and a line whose ordered quantity matches what arrived shows nothing coming. Raising a cost is never refused.
 
 ## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
 

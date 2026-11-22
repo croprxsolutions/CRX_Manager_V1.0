@@ -34,12 +34,17 @@ Read at `origin/staging` 2132d7795 (2026-11-22). Lane E, bug sprint.
   nothing deployed changes). Allowlist MED refuted: entries are keyed to the post-apply chain in the migration PR by
   convention (KI-142, KI-143); the live sweep flags it only between merge and apply.
 - **Sol round 3 (mechanism cap; Mason decided 2026-11-22, "go with B"):** the check stays cost and product only. A PO
-  vendor change or a product unit change between load and save is Mason's ACCEPTED RISK (admin-only corrections); a
-  later review must not reopen it. Fixed: the rollback hole (a rollback must keep the expected-field checks; open tabs
+  vendor change or a product unit change between load and save is Mason's accepted risk (admin-only corrections); a
+  finding on it still goes to Mason. Fixed: the rollback hole (a rollback must keep the expected-field checks; open tabs
   keep sending them) and the mixed batch (once any line sends the pair, every line must). Delivery wording fixed: the
   screen sends both fields. LOWs noted, not changed: a cost at the 2^53 ceiling cannot be the expected value (no real PO
   reaches it); the registered smoke runs as the database runner (the prover covers the signed-in admin); the race
   timestamp is taken just before the call.
+- **Sol round 4:** wording fixed (two BLOCKERs: the notes above read as instructions to reviewers; they now only record
+  Mason's decision). The vendor-change HIGH is the case Mason accepted; it goes to him as an owner skip. Follow-ups, not
+  this PR: a quantity change between load and save is not checked (MED); Edit Purchase Order's own save still sends
+  the cached cost through `save_purchase_order` (MED, a separate writer); fixture header total, role-refusal and race
+  timing LOWs.
 
 ## State and failure
 - Always true: a correction only replaces the cost the admin was looking at. Nothing else changes: same checks, same

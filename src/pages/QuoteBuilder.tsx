@@ -3922,7 +3922,10 @@ export default function QuoteBuilder() {
         p_idempotency_key: drawKey,
         // KI-190: the booking version the dialog was prepared from. A booking that another
         // draw or an edit changed since is refused (QUOTE_STALE_WRITE), as Whole Convert does.
-        p_expected_row_version: drawVersion ?? quoteRowVersionRef.current,
+        // A resend of an earlier key carries no version: if that draw went through the server
+        // returns its order; if not, the server refuses it rather than ordering against terms
+        // the rep may never have seen.
+        p_expected_row_version: resume || earlierUnresolved ? null : drawVersion,
       }, reason)));
       if (error) throw error;
       const result = assertRpcResult<{ status: string; order_id?: string; order_number?: string; warnings?: string[]; fully_drawn?: boolean; extra_order_id?: string; extra_order_number?: string }>(data, 'draw_down_quote');
@@ -4021,8 +4024,13 @@ export default function QuoteBuilder() {
       // KI-190: the booking changed since this screen loaded it, and nothing was ordered.
       // Reload the whole quote (balance and booked prices) before another draw.
       if (hasRpcCode(error, RpcErrorCodes.QUOTE_STALE_WRITE)) {
-        // A late reply for a booking this screen no longer shows changes nothing here.
+        // The server checks for a committed draw under this key before the version, so this
+        // refusal proves nothing was ordered: the kept retry note and key can go.
+        clearPendingRetry(drawPendingName);
+        drawDownIdem.resetKeyFor(drawScope);
+        // A late reply for a booking this screen no longer shows changes nothing else here.
         if (currentQuoteIdRef.current !== drawScope) return;
+        setPendingDraw(null);
         quoteVersionRecoveryRequiredRef.current = true;
         staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
         setShowDrawModal(false);

@@ -323,6 +323,8 @@ BEGIN
      OR position('public.check_idempotency_intent(' IN p.prosrc) = 0
      OR position('public.check_idempotency_intent(' IN p.prosrc)
         > position('IF v_row_version IS DISTINCT FROM p_expected_row_version THEN' IN p.prosrc)
+     OR position('public.check_idempotency_intent(' IN p.prosrc)
+        > position('IF p_expected_row_version IS NULL THEN' IN p.prosrc)
      OR p.proowner <> 'postgres'::regrole
      OR NOT p.prosecdef
      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]

@@ -107,7 +107,8 @@ try {
     INSERT INTO public.fields (id, customer_id, field_name) VALUES ('${FIELD_G}', '${G}', 'Golf North'), ('${FIELD_H}', '${H}', 'Hotel South');
     INSERT INTO public.job_fields (id, job_id, field_id) VALUES ('${JF_G}', '${JOB_G}', '${FIELD_G}'), ('${JF_H}', '${JOB_H}', '${FIELD_H}');
     INSERT INTO public.ground_crews (id, name, is_active) VALUES ('${CREW}', 'Crew One', true);
-    INSERT INTO public.ground_crew_members (crew_id, name, profile_id, is_active) VALUES ('${CREW}', 'Driver on crew', '${USERS.driver}', true);
+    INSERT INTO public.ground_crew_members (crew_id, name, profile_id, is_active) VALUES ('${CREW}', 'Driver on crew', '${USERS.driver}', true),
+      ('${CREW}', 'Inactive driver on crew', '${OFF_DRIVER}', true);
     INSERT INTO public.job_location_dispatches (job_field_id, job_id, applicator_id, crew_id, dispatch_status) VALUES
       ('${JF_G}', '${JOB_G}', NULL, '${CREW}', 'dispatched'),
       ('${JF_H}', '${JOB_H}', '${USERS.applicator}', NULL, 'dispatched');
@@ -137,6 +138,8 @@ try {
   assert.equal(readAll(USERS.driver), 'ok|<null>', 'a driver reads no customers row');
   assert.equal(readCol(USERS.driver, 'credit_limit_cents', D), 'ok|<null>', 'a driver no longer reads the farm on their own delivery');
   assert.equal(readCol(USERS.driver, 'notes', G), 'ok|<null>', 'a driver on a dispatched crew no longer reads that farm');
+  // NOT is_driver() is false for an inactive driver; _is_dispatched_to_me() itself requires an active profile.
+  assert.equal(readAll(OFF_DRIVER), 'ok|<null>', 'an inactive driver on a dispatched crew reads no customers row');
   const everyone = 'ok|Alpha Top Farms,Bravo Farms,Charlie Farms,Delta Farms,Echo Farms,Foxtrot Farms,Golf Farms,Hotel Farms';
   assert.equal(readAll(USERS.admin), everyone, 'admin reads every customer');
   assert.equal(readAll(USERS.rep), everyone, 'sales rep reads every customer');

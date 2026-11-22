@@ -25,7 +25,7 @@ Read at `origin/staging` f8ee14ee8.
    - Field Setup: remove the "Price Override ($/ac)" and "Pricing Note" inputs, and send null.
    - Field Dashboard: remove the "$/ac override" display.
    - Field-application invoice editor: remove the "Grower-share pricing is active" banner and its lookup.
-   - Job Detail: remove the "Grower-share override active" banner, its lookup, and the `SPLIT_OVERRIDE_UNSUPPORTED` toast (`src/lib/db.ts` code entry too). The transfer raises that code only when a field has an override, so it is unreachable after the constraint.
+   - Job Detail: remove the "Grower-share override active" banner and its lookup. Keep the `SPLIT_OVERRIDE_UNSUPPORTED` toast and its `src/lib/db.ts` code entry: the transfer raises that code only when a field has an override, so it is unreachable while the constraint holds, and the toast covers a database rollback window.
 
 **Deliberately NOT changed (dead but harmless):**
 - **The per-acre branches inside the money RPCs:** save, split save, preview, blend-ticket invoice, transfer, and the wall's grower-share exemption.

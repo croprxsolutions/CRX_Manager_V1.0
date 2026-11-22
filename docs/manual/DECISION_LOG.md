@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B) may have Sol round 17
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, allow round 17").**
+PR #2151 may have one more Sol review, round 17, because merging newer staging work into the branch made a
+new version that round 16's sign-off does not cover. Its own code did not change after round 16.
+
 ## 2026-11-21 — #2151: Mason owner-accepted 1 Sol finding(s) at `2e3a5b5e4ac0`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2151 at `2e3a5b5e4ac0` (base `dac995aac792`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

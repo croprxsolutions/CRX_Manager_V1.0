@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
  * Real-schema proof for #2197: the customer page's admin Reactivate button sends
- *   UPDATE customers SET is_active = true WHERE id = $1 AND is_active = false RETURNING *
+ *   UPDATE customers SET is_active = true WHERE id = $1 AND is_active = false AND row_version = $2 RETURNING *
  * as the signed-in user. Builds the production baseline plus the replayable migrations on disk (Docker; the image may be pulled once),
  * then checks: an admin reactivates an inactive customer (row comes back active, row_version moves on),
  * the inactive-customer refusal (#2048) stops new work before and not after, a second click matches no row,
- * and a driver cannot do it.
+ * a sales rep can do it too (Mason, 2026-11-22), and a driver cannot.
  *
  * Run: node scripts/smoke/prove-2197-customer-reactivate-real-schema.mjs   (needs Docker)
  * Prints CUSTOMER_REACTIVATE_PROOF_PASS on success.
@@ -58,6 +58,15 @@ try {
   assert.equal(scalar(`SELECT is_active FROM public.customers WHERE id = '${CUST}';`), 'f');
   console.log('[2197] a stale confirmation (old row_version) after a newer deactivation changes nothing');
   psql(`UPDATE public.customers SET is_active = true WHERE id = '${CUST}';`, { user: 'supabase_admin' });
+
+  // Mason 2026-11-22: sales reps may reactivate too (the database already allowed it).
+  psql(`UPDATE public.customers SET is_active = false WHERE id = '${CUST}';`, { user: 'supabase_admin' });
+  const repAt = scalar(`SELECT row_version FROM public.customers WHERE id = '${CUST}';`);
+  const rep = run(USERS.rep, reactivateAt(repAt));
+  assert.equal(rep.status, 0, rep.err);
+  assert.equal(rep.out, '1');
+  assert.equal(scalar(`SELECT is_active FROM public.customers WHERE id = '${CUST}';`), 't');
+  console.log('[2197] a sales rep reactivates: 1 row, is_active true');
 
   const ok = run(USERS.admin, newOrder, 'postgres');
   assert.equal(ok.status, 0, ok.err);

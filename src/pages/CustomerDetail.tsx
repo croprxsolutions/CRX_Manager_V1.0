@@ -1338,7 +1338,7 @@ export default function CustomerDetail() {
   };
 
   // #2197: staff are told to reactivate an inactive customer before new work. Same direct update the
-  // Customers list uses to deactivate (RLS governs it); admin-only on screen.
+  // Customers list uses to deactivate (RLS governs it). Admins and sales reps, as the database allows (Mason, 2026-11-22).
   const reactivateCustomer = async () => {
     if (!id || isNew || reactivating) return;
     const visit = visitRef.current;
@@ -1465,7 +1465,7 @@ export default function CustomerDetail() {
           {!isNew && customer.is_active === false && <Badge variant="default">Inactive</Badge>}
         </div>
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
-          {!isNew && isAdmin && customer.is_active === false && (
+          {!isNew && (isAdmin || profile?.role === 'sales_rep') && customer.is_active === false && (
             <Button variant="primary" size="sm" icon={<RotateCcw className="w-4 h-4" />} showChevron={false} disabled={saving} onClick={() => setReactivateOpenFor(id ?? null)}>
               Reactivate
             </Button>

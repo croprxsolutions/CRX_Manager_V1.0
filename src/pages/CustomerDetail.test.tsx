@@ -959,7 +959,7 @@ describe('CustomerDetail stale whole-record save', () => {
     expect(screen.queryByText(/only an admin can change the price tier, credit limit and standing discount/i)).not.toBeInTheDocument();
   });
 
-  it('an admin reactivates an inactive customer from the page; a later Save keeps it active; a rep gets no button (#2197)', async () => {
+  it('an admin reactivates an inactive customer from the page; a later Save keeps it active; a rep sees the button, a driver does not (#2197)', async () => {
     const inactive = { ...original, is_active: false } as unknown as typeof original;
     let customerReads = 0;
     mockFrom.mockImplementation((table: string) => {
@@ -971,13 +971,19 @@ describe('CustomerDetail stale whole-record save', () => {
       }
       return query({ data: [], error: null });
     });
-    mockProfile.current = { id: 'rep-1', role: 'sales_rep', full_name: 'Rep One' };
     try {
-      const { unmount } = renderDetail();
+      mockProfile.current = { id: 'driver-1', role: 'driver', full_name: 'Driver One' };
+      const driverView = renderDetail();
       await screen.findByDisplayValue('Original Farm');
       expect(screen.getByText('Inactive')).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Reactivate' })).not.toBeInTheDocument();
-      unmount();
+      driverView.unmount();
+      customerReads = 0;
+      mockProfile.current = { id: 'rep-1', role: 'sales_rep', full_name: 'Rep One' };
+      const repView = renderDetail();
+      await screen.findByDisplayValue('Original Farm');
+      expect(screen.getByRole('button', { name: 'Reactivate' })).toBeInTheDocument();
+      repView.unmount();
     } finally {
       mockProfile.current = { id: 'admin-1', role: 'admin', full_name: 'Admin' };
     }

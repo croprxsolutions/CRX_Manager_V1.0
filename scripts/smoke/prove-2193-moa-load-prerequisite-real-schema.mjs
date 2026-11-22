@@ -15,10 +15,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { checkLivePrerequisite, MOA_MIN_MATCHED } from '../../.claude/hooks/migration-prerequisite-lib.mjs';
+import { spawn } from 'node:child_process';
+import { checkLivePrerequisite, MOA_MIN_MATCHED, prerequisiteGuardSql } from '../../.claude/hooks/migration-prerequisite-lib.mjs';
 
 process.env.UNDO_PATHS_CONTAINER ||= `crx-2193-${process.pid}-${Date.now().toString(36)}`;
-const { buildContainer, removeContainer, seedUsers, psql, scalar, USERS, ROOT } = await import('./undo-paths/harness.mjs');
+const { buildContainer, removeContainer, seedUsers, psql, scalar, USERS, ROOT, NAME } = await import('./undo-paths/harness.mjs');
 
 const LOAD = readdirSync(path.join(ROOT, 'supabase', 'migrations'))
   .find((f) => /^\d{14}_ingredient_modes_of_action_load\.sql$/.test(f)).replace(/\.sql$/, '');
@@ -57,6 +58,41 @@ try {
   }
   assert.equal(last.ok, true, last.reason);
   console.log(`[2193] after ${added} ingredients: ALLOWED: ${last.matched} of ${last.listed} list rows match`);
+
+  // Inside the apply transaction (what apply-migration-file.mjs transmits, rolled back here).
+  const guard = prerequisiteGuardSql({ tag: 'crx_apply_proof', name: LOAD, sql: SQL });
+  const inTx = (body) => psql(`BEGIN;\n${guard}${body}\nSELECT 'GUARD_PASSED';\nROLLBACK;`, { allowFailure: true });
+  const atThreshold = inTx(SQL);
+  assert.equal(atThreshold.status, 0, atThreshold.stderr);
+  assert.match(atThreshold.stdout, /GUARD_PASSED/);
+  console.log(`[2193] in the apply transaction at ${MOA_MIN_MATCHED}: ALLOWED, and the real load ran under the guard's locks (rolled back)`);
+
+  // An ingredient retired AFTER the early check passed: the in-transaction count refuses.
+  const victim = CAS[0];
+  const retire = `UPDATE public.active_ingredients SET status = 'retired', retire_reason = '[2193] proof' WHERE cas = '${victim}';`;
+  assert.equal((await check()).ok, true, 'early check passes at the threshold');
+  psql(retire);
+  const between = inTx(SQL);
+  assert.notEqual(between.status, 0);
+  assert.match(between.stderr, new RegExp(`MIGRATION PREREQUISITE NOT MET \\(#2193\\): only ${MOA_MIN_MATCHED - 1} of the load's 123`));
+  assert.equal(scalar("SELECT count(*) FROM public.active_ingredient_modes_of_action WHERE source_note LIKE '%MOA-1 list v2%';"), '0', 'nothing written');
+  console.log(`[2193] retired one after the early check: REFUSED in the transaction (${MOA_MIN_MATCHED - 1} matched), nothing written`);
+  psql(`UPDATE public.active_ingredients SET status = 'active', retire_reason = NULL WHERE cas = '${victim}';`);
+
+  // While the guard holds its locks, a retirement cannot slip in: it waits, and here times out.
+  const holder = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  let held = '';
+  holder.stdout.on('data', (d) => { held += d; });
+  holder.stdin.write(`BEGIN;\n${guard}SELECT 'LOCKS_HELD';\nSELECT pg_sleep(6);\nROLLBACK;\n`);
+  holder.stdin.end();
+  for (let i = 0; i < 100 && !held.includes('LOCKS_HELD'); i += 1) await new Promise((r) => setTimeout(r, 100));
+  assert.match(held, /LOCKS_HELD/, 'the guard took its locks');
+  const blocked = psql(`SET lock_timeout = '1s';\n${retire}`, { allowFailure: true });
+  assert.notEqual(blocked.status, 0);
+  assert.match(blocked.stderr, /lock timeout/i);
+  await new Promise((r) => holder.on('close', r));
+  assert.equal(scalar(`SELECT status FROM public.active_ingredients WHERE cas = '${victim}';`), 'active');
+  console.log('[2193] while the guard holds its locks, a retirement waits (timed out here) and changes nothing');
 
   seedIngredients(CAS.slice(added), added);
   const all = await check();

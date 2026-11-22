@@ -9,8 +9,9 @@
 // active ingredient in the app (the load's own matching rule) and refuses below
 // the threshold, showing the count. No database change.
 //
-// Doors: scripts/apply-migration-file.mjs runs checkLivePrerequisite right before
-// it transmits (fails closed). The MCP apply_migration door cannot read the live
+// Doors: scripts/apply-migration-file.mjs runs checkLivePrerequisite before it
+// transmits (an early refusal; fails closed) and puts prerequisiteGuardSql at the
+// start of the apply transaction, which re-counts under the ingredient lock. The MCP apply_migration door cannot read the live
 // count from inside its hook, so evaluateMigrationApply refuses these migrations
 // there outright and points at the script.
 
@@ -36,11 +37,41 @@ const PREREQUISITES = {
   },
 };
 
+// SQL with its -- and /* */ comments (nested, as PostgreSQL allows) replaced by a
+// space; quoted strings and identifiers are kept whole. A comment can then neither
+// hide the load's list table nor supply a list of its own (Sol MED/LOW, round 3).
+export function stripSqlComments(sql) {
+  const s = String(sql || "");
+  let out = "";
+  for (let i = 0; i < s.length;) {
+    const c = s[i];
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      for (; j < s.length; j += 1) { if (s[j] === c) { if (s[j + 1] === c) { j += 1; continue; } break; } }
+      out += s.slice(i, j + 1); i = j + 1;
+    } else if (c === "-" && s[i + 1] === "-") {
+      while (i < s.length && s[i] !== "\n") i += 1;
+      out += " ";
+    } else if (c === "/" && s[i + 1] === "*") {
+      let depth = 0;
+      do {
+        if (s[i] === "/" && s[i + 1] === "*") { depth += 1; i += 2; }
+        else if (s[i] === "*" && s[i + 1] === "/") { depth -= 1; i += 2; }
+        else i += 1;
+      } while (depth > 0 && i < s.length);
+      out += " ";
+    } else { out += c; i += 1; }
+  }
+  return out;
+}
+
 // Matched on the name after its stamp (a restamped copy is still caught) or on the
 // load's own SQL (the same SQL sent under another name is caught too).
 export function prerequisiteFor(name, sql = "") {
   const stem = normalizeMigrationName(name).replace(/^\d{14}_/, "");
-  return (Object.hasOwn(PREREQUISITES, stem) && PREREQUISITES[stem]) || Object.values(PREREQUISITES).find((p) => p.sqlMarker.test(String(sql))) || null;
+  if (Object.hasOwn(PREREQUISITES, stem)) return PREREQUISITES[stem];
+  const code = stripSqlComments(sql);
+  return Object.values(PREREQUISITES).find((p) => p.sqlMarker.test(code)) || null;
 }
 
 // Reads the load's list as DATA: exactly one `INSERT INTO moa1_list (...) VALUES`,
@@ -49,8 +80,8 @@ export function prerequisiteFor(name, sql = "") {
 // migration is ever sent to live (Sol BLOCKER, round 2).
 const MOA_LIST_COLUMNS = "name,cas,scheme,group_code,source_note";
 export function parseMoaList(sql) {
-  const text = String(sql || "");
-  const heads = [...text.matchAll(/INSERT\s+INTO\s+moa1_list\s*\(([^)]*)\)\s*VALUES/gi)];
+  const text = stripSqlComments(sql);
+  const heads = [...text.matchAll(/INSERT\s+INTO\s+"?moa1_list"?\s*\(([^)]*)\)\s*VALUES/gi)];
   if (heads.length !== 1) throw new Error(`expected exactly one INSERT INTO moa1_list ... VALUES, found ${heads.length}`);
   if (heads[0][1].replace(/\s+/g, "").toLowerCase() !== MOA_LIST_COLUMNS) throw new Error("the load's list has unexpected columns");
   let i = heads[0].index + heads[0][0].length;
@@ -97,6 +128,33 @@ export function moaMatchCountQuery(sql) {
     `            OR (i.name_key = lower(regexp_replace(btrim(l.name), '\\s+', ' ', 'g'))\n` +
     `                AND (l.cas IS NULL OR i.cas IS NULL) AND i.name_unique)))::int AS matched\n` +
     `  FROM l;`
+  );
+}
+
+/**
+ * SQL placed at the start of the apply transaction, before the migration: take the
+ * ingredient-list advisory lock every ingredient writer takes first, plus a SHARE
+ * lock on the table (blocks any direct write, never a read), then re-count and
+ * raise below the threshold. Both locks hold until COMMIT, so no ingredient can be
+ * retired between this count and the load (Sol HIGH, rounds 1-3). "" when the
+ * migration has no prerequisite. `tag` is the apply script's dollar-quote tag.
+ */
+export function prerequisiteGuardSql({ tag, name, sql }) {
+  const p = prerequisiteFor(name, sql);
+  if (!p) return "";
+  const guardTag = `$${tag}_prereq$`;
+  const count = p.query(sql).replace(/;\s*$/, "");
+  if (String(sql).includes(guardTag) || count.includes(guardTag)) throw new Error(`dollar-quote tag ${guardTag} collides with the payload`);
+  return (
+    `SET LOCAL lock_timeout = '5s';\n` +
+    `SELECT pg_advisory_xact_lock(hashtext('crx.active_ingredients'));\n` +
+    `LOCK TABLE public.active_ingredients IN SHARE MODE;\n` +
+    `DO ${guardTag}\nDECLARE v_listed int; v_matched int;\nBEGIN\n` +
+    `  SELECT c.listed, c.matched INTO v_listed, v_matched FROM (\n${count}\n  ) c;\n` +
+    `  IF v_listed IS DISTINCT FROM ${MOA_LIST_ROWS} OR v_matched IS NULL OR v_matched < ${p.minMatched} THEN\n` +
+    `    RAISE EXCEPTION 'MIGRATION PREREQUISITE NOT MET (#2193): only % of the load''s % list rows match an active ingredient on live (counted inside the apply, under the ingredient lock); at least ${p.minMatched} are needed. Run ${p.what} first. Nothing was applied.', v_matched, v_listed;\n` +
+    `  END IF;\n` +
+    `END ${guardTag};\n`
   );
 }
 

@@ -6,7 +6,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  MOA_MIN_MATCHED, checkLivePrerequisite, mcpPrerequisiteRefusal, moaMatchCountQuery, parseMoaList, prerequisiteFor,
+  MOA_MIN_MATCHED, checkLivePrerequisite, mcpPrerequisiteRefusal, moaMatchCountQuery, parseMoaList, prerequisiteFor, prerequisiteGuardSql,
 } from "./migration-prerequisite-lib.mjs";
 import { evaluateMigrationApply } from "./migration-apply-lib.mjs";
 
@@ -58,6 +58,24 @@ assert.match(moaMatchCountQuery(`${head}  ('x''); DROP TABLE t; --', NULL, 'HRAC
 assert.equal(parseMoaList(SQL.replace(/(INSERT INTO moa1_list\s*\([^)]*\)\s*)VALUES/i, "$1values")).length, 123);
 // Sol MED round 2: a quoted table name is still the load.
 assert.ok(prerequisiteFor("20270208100000_other", 'CREATE TEMP TABLE "moa1_list" (name text);'));
+
+// Sol MED/LOW round 3: comments neither hide the load nor supply a list.
+assert.ok(prerequisiteFor("20270208100000_other", "CREATE TEMP TABLE /* the list */ moa1_list (name text);"), "comment inside the marker");
+assert.equal(prerequisiteFor("20270208100000_other", "-- CREATE TEMP TABLE moa1_list (name text);\nSELECT 1;"), null, "a comment documenting it is not the load");
+assert.equal(prerequisiteFor("20270208100000_other", "/* outer /* CREATE TEMP TABLE moa1_list */ still comment */ SELECT 1;"), null, "nested block comment");
+assert.deepEqual(parseMoaList(`/* ${head} ('Old', '9-9-9', 'HRAC', '1', 'n'); */\nINSERT INTO "moa1_list" (name, cas, scheme, group_code, source_note) VALUES ('New', '1-1-1', 'HRAC', '1', 'n');`), [{ name: "New", cas: "1-1-1" }], "a commented list is not counted; a quoted target is read");
+assert.deepEqual(parseMoaList(`${head}  ('A -- not a comment', '1', 'HRAC', '1', 'n /* kept */');`), [{ name: "A -- not a comment", cas: "1" }], "comment marks inside strings are text");
+
+// In-transaction guard (Sol HIGH, round 3): locks, re-count, refusal; nothing for other migrations.
+const g = prerequisiteGuardSql({ tag: "crx_apply_abc", name: LOAD, sql: SQL });
+assert.match(g, /^SET LOCAL lock_timeout = '5s';\nSELECT pg_advisory_xact_lock\(hashtext\('crx\.active_ingredients'\)\);\nLOCK TABLE public\.active_ingredients IN SHARE MODE;\nDO \$crx_apply_abc_prereq\$/);
+assert.match(g, /jsonb_to_recordset/);
+assert.match(g, new RegExp(`v_matched < ${MOA_MIN_MATCHED} THEN\\n    RAISE EXCEPTION 'MIGRATION PREREQUISITE NOT MET \\(#2193\\)`));
+assert.match(g, /v_listed IS DISTINCT FROM 123/);
+assert.ok(g.trimEnd().endsWith("END $crx_apply_abc_prereq$;"));
+assert.equal(prerequisiteGuardSql({ tag: "crx_apply_abc", name: "20270208100000_other", sql: "SELECT 1;" }), "");
+assert.throws(() => prerequisiteGuardSql({ tag: "crx_apply_abc", name: LOAD, sql: `${SQL}\n-- $crx_apply_abc_prereq$` }), /collides/);
+assert.throws(() => prerequisiteGuardSql({ tag: "crx_apply_abc", name: LOAD, sql: "SELECT 1;" }), /found 0/, "no list: no apply");
 assert.equal(prerequisiteFor("20270208100000_other", "-- see moa1_list in the load\nSELECT 1;"), null);
 assert.equal(prerequisiteFor("20270208100000_constructor"), null);
 assert.equal(prerequisiteFor("20270208100000___proto__"), null);
@@ -113,5 +131,8 @@ assert.match(applySrc.slice(preAt, preAt + 200), /if \(!pre\.ok\) die\(2, pre\.r
 assert.ok(preAt < applySrc.indexOf("const wrapped ="), "checked before the transaction is built");
 assert.ok(preAt > applySrc.indexOf("if (!confirm)"), "checked on the --confirm path");
 assert.ok(preAt < applySrc.indexOf("await checkLiveMigrationOrdering("), "the live ordering re-check stays the last read (Sol MED)");
+// ...and the transaction itself re-counts under the lock, before the migration runs.
+assert.match(applySrc, /prerequisiteGuard = prerequisiteGuardSql\(\{ tag, name: migName, sql \}\)/);
+assert.match(applySrc, /`BEGIN;\\n\$\{ownerOnceGuard\}\$\{prerequisiteGuard\}\$\{sql\}\\n;\\n`/);
 
 console.log("MIGRATION_PREREQUISITE_LIB_TESTS_PASS");

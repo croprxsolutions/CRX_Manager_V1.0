@@ -71,7 +71,7 @@ import {
 } from "../.claude/hooks/migration-apply-lib.mjs";
 import { assertWrappable } from "../.claude/hooks/migration-wrappability-lib.mjs";
 import { checkLiveMigrationOrdering } from "../.claude/hooks/migration-ordering-lib.mjs";
-import { checkLivePrerequisite, prerequisiteFor } from "../.claude/hooks/migration-prerequisite-lib.mjs";
+import { checkLivePrerequisite, prerequisiteFor, prerequisiteGuardSql } from "../.claude/hooks/migration-prerequisite-lib.mjs";
 import { assertApprovalStillValid, ownerOnceGuardSql, recordUsedApproval } from "../.claude/hooks/owner-approval-lib.mjs";
 import { CREDENTIAL_TARGET, readCredentialToken } from "./lib/supabase-credential.mjs";
 import { withRestampHint } from "./lib/migration-restamp-hint.mjs";
@@ -525,9 +525,16 @@ if (ownerApproval) {
   catch (err) { die(2, `apply-migration-file: ${err?.message || err}. Refusing to transmit.`); }
 }
 
+// LIVE PREREQUISITE, ENFORCED INSIDE THE TRANSACTION (#2193, Sol HIGH). The read
+// above is an early, friendly refusal; this re-count runs under the ingredient
+// lock, so an ingredient retired after that read still stops the load here.
+let prerequisiteGuard = "";
+try { prerequisiteGuard = prerequisiteGuardSql({ tag, name: migName, sql }); }
+catch (err) { die(2, `apply-migration-file: ${err?.message || err}. Refusing to transmit.`); }
+
 // One transaction: the migration and its ledger row commit together or not at all.
 const wrapped =
-  `BEGIN;\n${ownerOnceGuard}${sql}\n;\n` +
+  `BEGIN;\n${ownerOnceGuard}${prerequisiteGuard}${sql}\n;\n` +
   `INSERT INTO supabase_migrations.schema_migrations (version, name, statements, created_by)\n` +
   `VALUES (${dq}${version}${dq}, ${dq}${migName}${dq}, ARRAY[${dq}${sql}${dq}], ${dq}${createdBy}${dq});\n` +
   `COMMIT;`;

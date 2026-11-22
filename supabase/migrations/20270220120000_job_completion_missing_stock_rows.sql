@@ -57,9 +57,10 @@ BEGIN
       JOIN pg_class c ON c.oid = t.tgrelid
       JOIN pg_proc p ON p.oid = t.tgfoid
      WHERE c.relname = 'jobs' AND t.tgname = 'trg_zz_lock_job_stock_rows' AND NOT t.tgisinternal
+       AND t.tgenabled IN ('O', 'A')
        AND p.oid = v_fn.oid
   ) THEN
-    RAISE EXCEPTION 'JOB_STOCK_ROW_PREFLIGHT: trg_zz_lock_job_stock_rows is not bound to the reviewed function';
+    RAISE EXCEPTION 'JOB_STOCK_ROW_PREFLIGHT: trg_zz_lock_job_stock_rows is not bound to the reviewed function or is disabled';
   END IF;
 END;
 $preflight$;
@@ -144,9 +145,10 @@ BEGIN
       JOIN pg_class c ON c.oid = t.tgrelid
       JOIN pg_proc p ON p.oid = t.tgfoid
      WHERE c.relname = 'jobs' AND t.tgname = 'trg_zz_lock_job_stock_rows' AND NOT t.tgisinternal
+       AND t.tgenabled IN ('O', 'A')
        AND p.oid = v_fn.oid
   ) THEN
-    RAISE EXCEPTION 'JOB_STOCK_ROW_POSTFLIGHT: trg_zz_lock_job_stock_rows no longer calls the lock function';
+    RAISE EXCEPTION 'JOB_STOCK_ROW_POSTFLIGHT: trg_zz_lock_job_stock_rows no longer calls the lock function or is disabled';
   END IF;
 END;
 $postflight$;

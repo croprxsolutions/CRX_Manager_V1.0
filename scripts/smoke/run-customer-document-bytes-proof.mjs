@@ -42,6 +42,9 @@ const open = (port) => new Promise((resolve) => {
   s.once('error', () => resolve(false));
 });
 
+// Refuse a port someone else already owns: the proof must reach the server this run starts, not a leftover.
+if (await open(SERVE_PORT)) { console.error(`Port ${SERVE_PORT} is already in use; stop whatever is listening there and run again.`); process.exit(2); }
+
 const deno = spawn('deno', ['run', '--node-modules-dir=none', '--allow-net', '--allow-env', '--allow-read', path.join('scripts', 'smoke', 'serve-customer-document-files-local.ts')], {
   cwd: ROOT, stdio: 'inherit',
   env: {
@@ -51,6 +54,8 @@ const deno = spawn('deno', ['run', '--node-modules-dir=none', '--allow-net', '--
     SUPABASE_ANON_KEY: state.LOCAL_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY: state.LOCAL_SERVICE_KEY,
   },
 });
+let denoExit = null;
+deno.on('exit', (c) => { denoExit = c ?? 'signal'; });
 const stopDeno = () => spawnSync('taskkill', ['/pid', String(deno.pid), '/t', '/f'], { stdio: 'ignore' });
 
 function prove(capture = false) {
@@ -65,7 +70,8 @@ function prove(capture = false) {
 
 let code = 1;
 try {
-  for (let i = 0; i < 120 && !(await open(SERVE_PORT)); i += 1) await new Promise((r) => setTimeout(r, 500));
+  for (let i = 0; i < 120 && denoExit === null && !(await open(SERVE_PORT)); i += 1) await new Promise((r) => setTimeout(r, 500));
+  if (denoExit !== null) throw new Error(`The Edge Function server exited (${denoExit}) before it was ready.`);
   if (!(await open(SERVE_PORT))) throw new Error('The Edge Function server did not start.');
   code = prove();
   if (negativeControl) {

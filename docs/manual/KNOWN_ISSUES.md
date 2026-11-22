@@ -36,7 +36,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status | Count |
 |---|---|
-| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md); KI-170 added 2026-11-20 from the shared data loading pilot; KI-120 accepted and KI-169 split from KI-119 2026-11-19; KI-171 added 2026-11-21 from #2068; KI-178 and KI-182 added 2026-11-21 from #2047; KI-183 added 2026-11-21 from #2047; KI-184 added 2026-11-21 from #2149; KI-185 to KI-199 added and KI-99 closed 2026-11-21 from the [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)) | 128 |
+| Open or partly open entries (KI-15 and KI-27 closed; several entries bundle related items and UNVERIFIED sub-items; KI-107 to KI-112 added 2026-11-08 from the [branch salvage](../audits/2026-11-08-abandoned-branch-salvage.md); KI-113 and KI-114 (RT-1) added 2026-11-09; KI-115 and KI-116 added 2026-11-10 from the prod spot-check; KI-112 closed 2026-11-10; KI-117 and KI-118 added 2026-11-10 (REG-1 step 2); KI-119 to KI-149 added 2026-11-10 from the [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md); KI-143 closed and KI-150 and KI-151 added 2026-11-11; KI-108, KI-134 and KI-142 closed 2026-11-11; KI-152 and KI-153 added 2026-11-11 from #1805; KI-154 and KI-155 added 2026-11-13 from the [2026-11-11 business logic review](../audits/2026-11-11-business-logic-review.md); KI-156 to KI-164 added 2026-11-13 from the [Product Master review](../audits/2026-11-13-product-master-review.md); KI-170 added 2026-11-20 from the shared data loading pilot; KI-120 accepted and KI-169 split from KI-119 2026-11-19; KI-171 added 2026-11-21 from #2068; KI-178 and KI-182 added 2026-11-21 from #2047; KI-183 added 2026-11-21 from #2047; KI-184 added 2026-11-21 from #2149; KI-185 to KI-199 added and KI-99 closed 2026-11-21 from the [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md); KI-200 to KI-205 added 2026-11-22 from the [staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md)) | 134 |
 | Accepted by Mason (KI-17, KI-60 to KI-71, KI-79, KI-80, KI-104, KI-106, KI-120, KI-176, KI-177, KI-179, KI-180, KI-181) | 23 |
 | Closed as FIXED, with proof (bottom of file and archive) | 26 |
 | WP-PM-3 checks still owed (KI-92 closed 2026-11-10) | 0 |
@@ -1807,6 +1807,75 @@ JWT (would not catch `authenticated` losing EXECUTE), reuse mode skips the repla
 and the preflight does not check the invoice trigger is attached. Pre-existing in the field-app save (Astra):
 incomplete chemical input, `save_invoice` on a field-app draft, invoice lock order, idempotency key binding,
 single-to-group edit, soft-deleted group members.
+
+---
+
+## Staging rehearsal 2026-11-22
+
+From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md) (76 cases on staging build
+`9a1c5b2d`, synthetic records; [case-by-case coverage](../audits/2026-11-22-staging-rehearsal-coverage.csv)). Each
+defect below was also confirmed in source on `origin/staging` `17a72d0ee` on 2026-11-22. Field-app invoicing was out of scope.
+
+### KI-200 — Return approval: the confirmation opens underneath the return details
+**MED · OPEN (reproduced twice on staging; source-confirmed) · returns · found 2026-11-22 (rehearsal CRXN-01) · unassigned (a local, uncommitted fix sits in `C:\CRX_wt\return-dialog`)**
+Opening a requested return and clicking Approve shows the Approve/Reject `ConfirmModal`, but it is rendered before
+the return-details `Modal` (`Returns.tsx` ~L1190 vs ~L1222), so the details window covers it and a normal click
+cannot reach it. Keyboard (Enter) still works and approved exactly once, with the expected single stock and credit
+events. Fix: render the confirmation above the details window. Proof: a fresh requested return approved by a normal
+click, correct focus and Escape, exactly one approval, Approved after reload.
+
+### KI-201 — Quote Compare drops a line when the same product is on two sections
+**MED · OPEN (reproduced in two browsers; source-confirmed) · quotes · found 2026-11-22 (rehearsal CRXN-02) · unassigned (Taha's quote area until 2026-12-15)**
+Compare matches version lines by `product_id` only (`QuoteBuilder.tsx` ~L5861-5862), so the same product on two
+sections collapses into one row with no section label. Rehearsal: the unchanged $24.00 line vanished while the other
+showed $26.00 to $25.00. Saved versions, PDFs and totals ($50.00 and $49.00) were correct, so this is display only.
+Fix: match on saved line identity and show section names. Proof: change either line; both stay visible and the PDFs
+and totals still reconcile.
+
+### KI-202 — Payment History: expanding a payment's invoice allocation fails to load
+**MED · OPEN (reproduced on staging; source-confirmed) · payments/finance (display) · found 2026-11-22 (rehearsal CRXN-04) · unassigned (Taha's billing area)**
+The allocation read embeds `invoices ( invoice_number )` from `invoice_line_allocations` without naming which link to
+use (`PaymentHistory.tsx` ~L134-139). The table has two links to `invoices`, so the request is ambiguous and returns
+HTTP 300; the detail shows nothing. The $300.00 allocation itself was saved correctly. Fix: name the intended
+relationship in the embed. Proof: the exact fixture and one using the other link load, a failed load shows an error,
+and saved amounts and the customer balance are unchanged.
+
+### KI-203 — Quick Delivery shows a dash for the unit of a product stocked in Gal
+**LOW (clarity) · OPEN (reproduced on staging; source-confirmed) · deliveries · found 2026-11-22 (rehearsal CRXN-03) · unassigned**
+The unit column shows the product's optional package size or a dash (`QuickDeliveryModal.tsx` ~L633), not the unit
+the line is sold in. A two-Gal entry priced $10.00 and the saved delivery, order and invoice all used Gal correctly.
+Fix: show the selected or implied sales unit before submit. Proof: a pack size and a converted unit on test records,
+with visible quantity, saved units, stock and invoice reconciled.
+
+### KI-204 — Staging rehearsal: workflow and screen improvements awaiting a decision
+**LOW · OPEN (suggestions, not defects; some need a Mason rule) · several areas · found 2026-11-22 · Mason decision where noted**
+Each worked correctly in the rehearsal; the ask is clarity. Detail and evidence: the report's "Workflow and UX
+improvement candidates" table.
+- New Customer: point at the missing commission recipient beside the split row before Save.
+- Returns: show each stage (requested, approved, received, restocked, credited) and where the credit can be used next.
+- Credit and prepay: show available credit, amounts applied and remaining balance together; **Mason decision:** which
+  reversals staff may do and what history must be kept.
+- Prepay: the applied credit showed no source payment reference; check whether it should.
+- Quick Delivery / To Ship: unchecking "create draft" at scheduling still made a $10.00 draft at completion;
+  **Mason decision:** is that the rule, then word the checkbox to match; also give a clear next step for a completed,
+  uninvoiced order.
+- Purchasing: show ordered cost, receipt snapshot, corrected PO cost and current product cost distinctly, and the
+  effect of a correction before it is applied.
+- Pricing workbook: point at the invalid row when Apply is disabled; tell an already-applied replay from a bad file.
+- Pricing history: label current tier, last charged and quoted amounts with their scope, date and source.
+- Office exceptions and documents: an end-to-end dashboard-to-fix check by role, and one quote-to-statement trail
+  that highlights differences.
+
+### KI-205 — Staging rehearsal: cases not yet proven, and what blocked them
+**MED · UNVERIFIED (test gaps, not confirmed defects) · test coverage · found 2026-11-22 · unassigned**
+9 cases were blocked and 17 only partly proven (per-case owner and blocker in the coverage CSV). Main gaps: supplier
+returns and vendor credits; actual refunds; individual credit and prepay un-apply (the only paths found delete a ledger
+row, so they were not run); live split-payer invoice generation (could alert staff); quote version restore (deletes
+old section/line rows on the inspected path); signed driver delivery and offline reconnect (need a driver login and
+device); other staff roles; unit/pack conversions, warehouse-wide counts and product retirement fixtures; period
+close/reopen; larger load and multi-page reports. Test-runner lessons (setup checks, readiness waits, never treating a
+timeout as a failed write, sanitized auth output, closing every queued case) are in the report's runner section.
+Close each gap when a rehearsal case proves it or it moves to its own KI.
 
 ---
 

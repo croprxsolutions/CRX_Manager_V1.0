@@ -2603,7 +2603,7 @@ not json
     const accept = (n, code, reason) => {
       const now = Date.now();
       writeApprovalRequest(stateDir, buildSolAcceptPayload({
-        record: JSON.parse(readFileSync(path.join(stateDir, blockersRecordName(reviewed)), "utf8")), n, pullRequest: 4242,
+        record: JSON.parse(readFileSync(path.join(stateDir, blockersRecordName(reviewed)), "utf8")), n, pullRequest: 4242, pullRequestUrl: "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242",
         issuedAt: new Date(now - 1000).toISOString(), expiresAt: new Date(now + 60 * 60 * 1000).toISOString(), nonce: `n${code}`, code, sessionId: SESSION,
       }));
       const text = `accept ${code} ${reason}`;
@@ -2633,6 +2633,7 @@ not json
     assert.equal(minted.carry.mode, "owner_accepted");
     assert.equal(minted.codex_ran, false, "owner-accepted e2e: never claims a clean review ran");
     assert.deepEqual(minted.owner_accepted.map((a) => [a.n, a.reason]), [[1, "we never sell before switch-on"], [2, "not a live SaaS yet"]]);
+    assert.deepEqual(minted.owner_accepted.map((a) => a.pull_request_url), ["https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242", "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242"], "owner-accepted e2e: the proof names the PR's repository");
     assert.equal(proofValid(minted, logHead, Date.now(), base), true, "owner-accepted e2e: the gates accept it for the logged head");
     assert.equal(proofValid(minted, reviewed, Date.now(), base), false, "owner-accepted e2e: and for no other head");
 

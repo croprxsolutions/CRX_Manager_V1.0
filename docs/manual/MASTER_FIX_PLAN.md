@@ -199,7 +199,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 |---|---|---|---|---|---|---|---|
 | W1-08 | KI-169 | HIGH | Open | Hiding Invoices or Record Payments for a person still leaves those actions reachable in the database. Mason 2026-11-19: real lock; reports now (KI-119, on staging), money actions after 2026-12-15. | KNOWN_ISSUES |  | Taha (to 2026-12-15) |
 | W2-30 | KI-03 | MED | Partly open | Any rep can still unpost, move or consolidate another rep's invoices and change commission splits; the field-invoice part is accepted, the rest is unbuilt. | KNOWN_ISSUES |  | Taha (to 2026-12-15) |
-| W2-31 | KI-182 | MED | Open | Purchase Orders screen retry codes are predictable; they should be random like the other screens' codes. | KNOWN_ISSUES | #2047 | Agent (unassigned) |
+| W2-31 | KI-182 | MED | Fixed (staging PR) | Purchase Orders screen retry codes are predictable; they should be random like the other screens' codes. | KNOWN_ISSUES | #2047 | Agent (unassigned) |
 | W2-32 | KI-74 | MED | Partly open | Cost columns locked and safe posting view in place. Remaining: commission amount plus rate can reveal a rep's profit; Quick Receive shows which open PO line is cheaper. | KNOWN_ISSUES | #1057 | Mason decision |
 | W2-33 | #2162 | MED | Open | Drivers can still read full farm records directly, more than Mason wants them to see; planned for after step 1 is live. | GitHub issue | #2162 | Agent (unassigned) |
 | W3-34 | KI-07 | LOW | Partly open | Most small permission leftovers are revoked; an applicator-profile licensing field is unchecked and two document-restore edge cases are deferred. | KNOWN_ISSUES | #1698 | Agent (unassigned) |

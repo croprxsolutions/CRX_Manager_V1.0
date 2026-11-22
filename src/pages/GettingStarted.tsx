@@ -516,10 +516,11 @@ export default function GettingStarted() {
           title="Inventory Management"
           subtitle="On-hand tracking, forecasting, and cycle counts"
         >
-          <p>The inventory page has two tabs:</p>
+          <p>The inventory page's main tabs:</p>
           <div className="pl-4 space-y-2">
             <p><strong>Inventory tab:</strong> Shows every product with Available, Prebooked, On Order, Planned Holds, and Net Free quantities. Click the ledger icon to see the full transaction history for any product.</p>
-            <p><strong>Forecast tab:</strong> Shows projected inventory based on open orders, upcoming deliveries, and incoming POs — helps you spot shortages before they happen.</p>
+            <p><strong>Purchasing tab:</strong> Shows what to buy and when, from bookings, orders, jobs, stock holds and incoming POs. Booking sections feed it through their Needed by date, Timing and Confidence.</p>
+            <p><strong>Reservations (old view) tab:</strong> Planned holds by month. For buying, use the Purchasing tab.</p>
           </div>
           <div className="mt-3 p-3 bg-gray-50 rounded-lg">
             <p className="font-medium text-gray-900 mb-1">Key inventory concepts:</p>

@@ -1,0 +1,7 @@
+## 2026-11-22 - #2162: drivers read farm details only through the driver farm lookup (#2018 step 2)
+
+- Migration `20270209120000_drivers_read_farms_only_through_lookup.sql`: the `customers` read rule no longer lets a driver read a farm's whole record (credit limit, prepay balance, payment terms, notes). Drivers get farm name, phone, email and addresses only through `get_driver_customers`, which the #2165 driver screens already use. The Deliveries list (`get_deliveries_keyset_page`) now takes farm names and the top farm group from a new names-only helper, `_delivery_list_customer_labels()`, so drivers keep seeing farm names there; office lists are unchanged. The job-dispatch read rule (`customers_select_location_dispatchee`) no longer admits a driver who has been added to a field crew; applicators keep it.
+- Go-live: merge and apply only after the #2165 driver screens are live in production (Mason's two-step decision). A driver on an older app copy would see "Unknown customer" and no phone or address until the app updates.
+- No data changes. Recovery is fix-forward; restoring the drivers' whole-row read would reopen the exposure and needs Mason's explicit security decision.
+- Proof: `node scripts/smoke/prove-drivers-read-farms-only-through-lookup-real-schema.mjs` (`DRIVERS_READ_FARMS_ONLY_THROUGH_LOOKUP_PROOF_PASS`, local Docker).
+- Not verified: the staging and production databases (applied after merge / before the release merges).

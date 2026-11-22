@@ -297,9 +297,9 @@ decision only) immediately before the merge. It mints a carried proof for the ne
 - the reviewed head's proof records the same review kind a full review of this branch would use today
   (`review_ref` and `release_rules`; a release review never seeds a staging carry, a proof with no
   review kind refuses);
-- an owner-accepted proof (`--carry-owner-accepted`) carries, but never for free: it always gets the
-  collision check, which is given each accepted finding and reports any the merge makes newly reachable,
-  wider or worse; the carried proof keeps the acceptance list, so it counts only for that PR;
+- the proof is not owner-accepted: an owner-accepted proof (`--carry-owner-accepted`) never carries onto
+  a new base, because whether new base code widens an accepted defect needs the full review (2026-11-22);
+- neither side renamed or copied a file the other side changed;
 - the merge's one common ancestor is exactly the base the review used, so the reviewed diff is what the
   PR still changes (a branch that already held a commit the base gained later, or a revert of one, refuses);
 - the reviewed head's proof is a clean `gpt-6.2-sol`/`high` proof (full or itself carried) under 24 hours

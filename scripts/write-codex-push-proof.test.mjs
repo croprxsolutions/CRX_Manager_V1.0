@@ -1398,7 +1398,6 @@ function collisionPromptSkipsWork(prompt) {
 // A feature branch is reviewed against origin/staging, so a merge of origin/staging
 // must carry exactly as a main merge does on a main-bound branch (#2185 lost Sol round 6).
 {
-  const { ownerAcceptedForPr } = await import("../.claude/hooks/sol-accept-lib.mjs");
   const scriptPath = fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url));
   const STAGING = "origin/staging";
   const PR_URL = "https://github.com/example/app/pull/77";
@@ -1583,8 +1582,7 @@ function collisionPromptSkipsWork(prompt) {
     });
   }
 
-  // 5. An owner-accepted proof carries only through the focused check, which is shown each
-  //    accepted finding (Sol HIGH 2); one that lost its list is refused.
+  // 5. An owner-accepted proof never carries onto a new base, with or without its list (Sol r4 HIGH 1-2).
   withRepo(({ git, write, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
     const source = readProof(reviewedHead);
     write("docs/manual/DECISION_LOG.md", `${readFileSync(file("docs/manual/DECISION_LOG.md"), "utf8")}- accepted\n`);
@@ -1593,24 +1591,27 @@ function collisionPromptSkipsWork(prompt) {
     accepted.owner_accepted = [{ n: 1, severity: "HIGH", text: "a business call", reason: "not live yet", pull_request: 77, pull_request_url: PR_URL }];
     land("origin/staging", "docs-only staging PR", () => write("docs/manual/more.md", "# More\n"));
     git("merge", "-q", "--no-edit", "origin/staging");
-    const mergedHead = git("rev-parse", "HEAD");
-    // A later carry of the accepted review that lost the list (root still marked owner-accepted).
     const lostList = sameBaseCarry(head, { ...accepted, head_sha: reviewedHead });
     delete lostList.owner_accepted;
-    writeProof(head, lostList);
-    assert.match(carry("--dry-run").stderr, /does not list them/, "staging carry: an owner-accepted proof without its list is refused");
-    writeProof(head, accepted);
-    const dry = carry("--dry-run");
-    assert.equal(dry.status, 0, `staging carry: an owner-accepted proof is decided (${dry.stderr})`);
-    assert.match(dry.stdout, /collision check needed: .*owner-accepted, not fixed/, "staging carry: owner-accepted never carries for free");
-    // What the collision check would mint still binds to this PR at the merge gate (Sol LOW 6).
-    const carried = buildCarryForwardProof({ headSha: mergedHead, baseSha: git("rev-parse", "origin/staging"), source: accepted, mode: "collision_check" });
-    assert.deepEqual(carried.owner_accepted, accepted.owner_accepted, "staging carry: the acceptances travel with the proof");
-    assert.equal(ownerAcceptedForPr(carried, { number: 77, url: PR_URL, exactHead: true }), true, "staging carry: the merge gate counts it for its own PR");
-    assert.equal(ownerAcceptedForPr(carried, { number: 78, url: "https://github.com/example/app/pull/78", exactHead: true }), false, "staging carry: and for no other PR");
+    for (const [label, proof] of [["with its list", accepted], ["that lost its list", lostList]]) {
+      writeProof(head, proof);
+      const refused = carry("--dry-run");
+      assert.equal(refused.status, 1, `staging carry: an owner-accepted proof ${label} is refused`);
+      assert.match(refused.stderr, /owner-accepted, not fixed/, `staging carry: says why (${label})`);
+    }
   });
-  assert.ok(buildCollisionCheckPrompt({ ownerAccepted: true }).includes("ownerAcceptedFindings"), "collision prompt: points at the accepted findings it must weigh");
-  assert.ok(buildCollisionCheckPrompt({ ownerAccepted: true }).includes("REVIEWED_PR.patch"), "collision prompt: gives the reviewed branch state to compare an acceptance's reach");
+
+  // 6. A rename on the base side that moves a file the PR changed is refused (Sol r4 HIGH 1, MED 1).
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+    writeFileSync(file("src/a.ts"), "export const a = 2;\nexport const b = 3;\n");
+    const head = commitAll("pr edits a.ts again");
+    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+    land("origin/staging", "staging moves a.ts", () => git("mv", "src/a.ts", "src/moved.ts"));
+    git("merge", "-q", "--no-edit", "origin/staging");
+    const refused = carry("--dry-run");
+    assert.equal(refused.status, 1, `staging carry: a base-side rename of a PR file is refused (${refused.stdout})`);
+    assert.match(refused.stderr, /renamed or copied src\/a\.ts/, "staging carry: names the moved file");
+  });
   assert.match(buildCollisionCheckPrompt(), /BLOCKERS {2}— at least one blocker\/high-severity collision or other blocker\/high problem/, "collision prompt: any blocker counts in the verdict");
 }
 
@@ -2747,15 +2748,15 @@ not json
     assert.equal(proofValid(minted, reviewed, Date.now(), base), false, "owner-accepted e2e: and for no other head");
     assert.equal(minted.review_ref, GUARDED_BASE, "owner-accepted e2e: the proof keeps the review kind for a later carry");
     {
-      // The real owner-accepted proof survives a later base merge, through the focused check only.
+      // The real owner-accepted proof never carries onto a later base: that needs the full review.
       git("switch", "-q", "main");
       write("docs/manual/notes.md", "# Notes\n");
       git("update-ref", "refs/remotes/origin/main", commitAll("docs-only main PR"));
       git("switch", "-q", "feature");
       git("merge", "-q", "--no-edit", "origin/main");
       const later = run(scriptPath, "--carry-forward", "--dry-run");
-      assert.equal(later.status, 0, `owner-accepted e2e: a later base merge is decided (${later.stderr})`);
-      assert.match(later.stdout, /collision check needed: .*owner-accepted, not fixed/, "owner-accepted e2e: never a free carry");
+      assert.equal(later.status, 1, "owner-accepted e2e: a later base merge does not carry the acceptance");
+      assert.match(later.stderr, /owner-accepted, not fixed/, "owner-accepted e2e: says why");
       git("reset", "-q", "--hard", logHead);
     }
 

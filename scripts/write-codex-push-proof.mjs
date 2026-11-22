@@ -2178,24 +2178,13 @@ export function buildCarryForwardProof({
   };
 }
 
-const priorReviewLines = (ownerAccepted) => ownerAccepted
-  ? ["The candidate branch's own changes were already reviewed by an independent",
-    `${CODEX_REVIEW_MODEL}/${CODEX_REVIEW_EFFORT} review, which found BLOCKER/HIGH findings that the owner accepted by name`,
-    "as business non-issues (they are NOT fixed). Each one is listed in COLLISION_FOCUS.json ownerAcceptedFindings.",
-    "REVIEWED_PR.patch is the branch's changes exactly as that review (and the acceptance) saw them.",
-    "Do not re-report an accepted finding that is unchanged, but DO report it, counted in your verdict, when the",
-    "merged-in changes make it newly reachable, wider, or more severe than when it was accepted. If you cannot",
-    "tell from REVIEWED_PR.patch and the merged changes whether its reach changed, report that as a blocker.",
-    "That review ran against an older main. Main has since gained new"]
-  : ["The candidate branch's own changes were already reviewed clean by an independent",
-    `${CODEX_REVIEW_MODEL}/${CODEX_REVIEW_EFFORT} review against an older main. Main has since gained new`];
-
-export function buildCollisionCheckPrompt({ ownerAccepted = false, baseRef = GUARDED_BASE } = {}) {
+export function buildCollisionCheckPrompt({ baseRef = GUARDED_BASE } = {}) {
   return [
     "You are performing a focused MERGE-COLLISION check for CRX Manager. This is NOT a full review.",
     "",
     `"Main" in this check means ${baseRef}, the branch this pull request merges into.`,
-    ...priorReviewLines(ownerAccepted),
+    "The candidate branch's own changes were already reviewed clean by an independent",
+    `${CODEX_REVIEW_MODEL}/${CODEX_REVIEW_EFFORT} review against an older main. Main has since gained new`,
     "commits, and the branch was updated by a conflict-free merge of the new main with no other",
     "edits (verified mechanically before this check). This directory is a sanitized, Git-free packet:",
     "  BASE_SNAPSHOT/ is the exact NEW main tree.",
@@ -2397,6 +2386,21 @@ function resolveCarry(root, nowMs) {
   // lines, keeping both versions. Only pure additions on both sides are a clean union; a Git
   // read that fails or says anything unexpected refuses.
   const prPaths = new Set(prFiles.map((entry) => entry.path));
+  const mainPaths = new Set(mainFiles.map((entry) => entry.path));
+  // A rename on one side moves the other side's edits to a new path (into a guard folder, onto a
+  // union file), which the path-by-path checks here cannot see: refuse it.
+  for (const [a, b, other] of [[fromBase, baseSha, prPaths], [fromBase, fromHead, mainPaths]]) {
+    const read = runTrustedGit(["diff", "--name-status", "-z", "-M", "-C", "--no-ext-diff", a, b], { cwd: root, timeout: 120_000 });
+    if (read.error || read.status !== 0) return { problem: "could not list renamed files" };
+    const parts = (read.stdout || "").split("\0");
+    for (let i = 0; i < parts.length && parts[i]; ) {
+      const moved = /^[RC]/.test(parts[i]);
+      if (moved && other.has(parts[i + 1])) {
+        return { problem: `one side renamed or copied ${parts[i + 1]}, which the other side changed` };
+      }
+      i += moved ? 3 : 2;
+    }
+  }
   for (const file of new Set(mainFiles.map((entry) => entry.path).filter((p) => prPaths.has(p)))) {
     // The rule as each side of the merge had it, not as the merged tree has it.
     const attrs = [fromBase, fromHead, baseSha].map((sha) => runGit(["check-attr", "--source", sha, "merge", "--", file], { cwd: root }));
@@ -2429,16 +2433,15 @@ function runCarryForward(root, options) {
     return 1;
   }
   const plan = planCarryForward({ prFiles: facts.prFiles, mainFiles: facts.mainFiles });
-  // Findings Mason accepted unfixed never carry for free: the focused check sees each one and
-  // reports any the merged-in changes make reachable, wider or worse (Sol, 2026-11-22).
-  const ownerAccepted = facts.source?.carry?.root_review?.owner_accepted === true || Array.isArray(facts.source?.owner_accepted);
-  if (ownerAccepted && !(Array.isArray(facts.source.owner_accepted) && facts.source.owner_accepted.length > 0)) {
-    process.stderr.write("Carry-forward refused: the reviewed head's proof says findings were owner-accepted but does not list them. No proof written — run the full review.\n");
+  // Findings Mason accepted unfixed never carry onto a new base: whether new base code widens an
+  // accepted defect is a full-review question, and four Sol rounds kept finding ways a focused
+  // check could miss it (2026-11-22).
+  if (facts.source?.carry?.root_review?.owner_accepted === true || "owner_accepted" in (facts.source || {})) {
+    process.stderr.write(
+      "Carry-forward refused: the reviewed head's findings were owner-accepted, not fixed, and an acceptance does not " +
+      "carry onto a new base. No proof written — run the full review: node scripts/write-codex-push-proof.mjs\n",
+    );
     return 1;
-  }
-  if (ownerAccepted && plan.mode === "disjoint") {
-    plan.mode = "collision_check";
-    plan.reasons.push("the reviewed head's BLOCKER/HIGH findings were owner-accepted, not fixed");
   }
   process.stdout.write(
     `Carry-forward: reviewed head ${facts.fromHead.slice(0, 12)} (base ${facts.fromBase.slice(0, 12)}) → ` +
@@ -2498,10 +2501,8 @@ function runCarryForward(root, options) {
     return result.stdout || "";
   };
   let delta;
-  let reviewedPr;
   try {
     delta = patch(facts.fromBase, facts.baseSha);
-    if (ownerAccepted) reviewedPr = patch(facts.fromBase, facts.fromHead);
   } catch (error) {
     process.stderr.write(`Could not build or run the collision check: ${error.message}\n`);
     return 2;
@@ -2510,11 +2511,10 @@ function runCarryForward(root, options) {
     baseRef: facts.target,
     baseSha: facts.baseSha,
     headSha: facts.headSha,
-    prompt: buildCollisionCheckPrompt({ ownerAccepted, baseRef: facts.target }),
+    prompt: buildCollisionCheckPrompt({ baseRef: facts.target }),
     label: "collision check",
     files: {
       "MAIN_DELTA.patch": delta,
-      ...(ownerAccepted ? { "REVIEWED_PR.patch": reviewedPr } : {}),
       "COLLISION_FOCUS.json": `${JSON.stringify({
         reviewedHead: facts.fromHead,
         reviewedBase: facts.fromBase,
@@ -2522,9 +2522,6 @@ function runCarryForward(root, options) {
         reasons: plan.reasons,
         overlappingFiles: plan.overlap,
         databaseAndGuardFiles: plan.hotFiles,
-        ...(ownerAccepted ? {
-          ownerAcceptedFindings: (facts.source.owner_accepted || []).map((a) => ({ n: a.n, severity: a.severity, text: a.text, reason: a.reason })),
-        } : {}),
       }, null, 2)}\n`,
     },
   });
@@ -3049,8 +3046,8 @@ function usage() {
     "  --carry-forward  After merging the branch's base (origin/staging for a feature branch,",
     "                   origin/main for hotfix/ and release/) into an already-reviewed branch, keep that clean",
     "                   review instead of paying for a full one: carries with no model call only",
-    "                   when nothing needs a look (--dry-run says which); shared files, code on",
-    "                   both sides or owner-accepted findings run a focused Sol collision check.",
+    "                   when nothing needs a look (--dry-run says which); shared files or code on",
+    "                   both sides run a focused Sol collision check. Owner-accepted findings never carry.",
     "                   Refuses (use the full review) when anything else changed. With --dry-run,",
     "                   prints the decision only.",
     "  --carry-restamp  When HEAD is one commit on top of a reviewed head that only gave one",

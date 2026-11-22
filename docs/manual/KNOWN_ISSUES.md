@@ -40,8 +40,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status (re-checked 2026-11-21) | Count |
 |---|---|
-| Open, partly open, check-first or waiting on a Mason decision (numbered entries; KI-200 to KI-203 and KI-205 added 2026-11-22 from the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md)) | 88 |
-| Fixed on staging, waiting for the production release | 6 |
+| Open, partly open, check-first or waiting on a Mason decision (numbered entries; KI-201, KI-202 and KI-205 added 2026-11-22 from the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md)) | 86 |
+| Fixed on staging, waiting for the production release | 8 |
 | Accepted numbered entries in the area sections (the full accepted list is the "Accepted risks" table) | 10 |
 | Backlog or roadmap entries, not defects (KI-204 added 2026-11-22) | 4 |
 | Open items tracked only as GitHub issues or parked fixes (tables at the end of each area) | 59 |
@@ -340,9 +340,9 @@ reopens it.
 
 ### KI-203 — Quick Delivery shows a dash for the unit of a product stocked in Gal
 
-> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Fix in review: PR #2213 (shows the stock unit; screen test fails without it) · LOW · plan W3-56. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
+> **Re-checked 2026-11-22:** Merged to staging in PR #2213 · fresh deployed browser check pending · plan W3-56 · GitHub #2208 closed. [Acceptance checks](../audits/2026-11-22-staging-workflows-follow-up.md)
 
-**LOW (clarity) · OPEN (reproduced on staging; source-confirmed) · deliveries · found 2026-11-22 (rehearsal CRXN-03) · unassigned · GitHub #2208**
+**LOW (clarity) · FIXED ON STAGING BRANCH (browser retest pending) · found 2026-11-22 · GitHub #2208**
 The unit column shows the product's optional package size or a dash (`QuickDeliveryModal.tsx` ~L633), not the unit
 the line is sold in. A two-Gal entry priced $10.00 and the saved delivery, order and invoice all used Gal correctly.
 Fix: show the selected or implied sales unit before submit. Proof: a pack size and a converted unit on test records,
@@ -828,9 +828,9 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
 
 ### KI-200 — Return approval: the confirmation opens underneath the return details
 
-> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Fix in review: PR #2210 (Luna and Sol clean; click-tested on staging data) · MED · plan W2-51 · #2205. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
+> **Re-checked 2026-11-22:** Merged to staging in PR #2210 · fresh deployed browser check pending · plan W2-51 · GitHub #2205 closed. [Acceptance checks](../audits/2026-11-22-staging-workflows-follow-up.md)
 
-**MED · OPEN (reproduced twice on staging; source-confirmed) · returns · found 2026-11-22 (rehearsal CRXN-01) · unassigned (a local, uncommitted fix sits in `C:\CRX_wt\return-dialog`) · GitHub #2205**
+**MED · FIXED ON STAGING BRANCH (browser retest pending) · found 2026-11-22 · GitHub #2205**
 Opening a requested return and clicking Approve shows the Approve/Reject `ConfirmModal`, but it is rendered before
 the return-details `Modal` (`Returns.tsx` ~L1190 vs ~L1222), so the details window covers it and a normal click
 cannot reach it. Keyboard (Enter) still works and approved exactly once, with the expected single stock and credit
@@ -1519,7 +1519,7 @@ the first uploader's name and time. LOW.
 > **Re-checked 2026-11-22 on staging `17a72d0ee`:** Backlog, not a defect · LOW · Mason decision (To-Do decisions 34 and 35). From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
 
 **LOW · OPEN (suggestions, not defects; some need a Mason rule) · several areas · found 2026-11-22 · Mason decision where noted**
-Each worked correctly in the rehearsal; the ask is clarity. Detail and evidence: the report's "Workflow and UX
+These are workflow and clarity proposals. See the [later UX and evidence register](../audits/2026-11-22-staging-workflows-follow-up.md) and the original report's "Workflow and UX
 improvement candidates" table. To-Do section 17; decisions 34 and 35.
 - New Customer: point at the missing commission recipient beside the split row before Save.
 - Returns: show each stage (requested, approved, received, restocked, credited) and where the credit can be used next.
@@ -1535,20 +1535,22 @@ improvement candidates" table. To-Do section 17; decisions 34 and 35.
 - Pricing history: label current tier, last charged and quoted amounts with their scope, date and source.
 - Office exceptions and documents: an end-to-end dashboard-to-fix check by role, and one quote-to-statement trail
   that highlights differences.
+- Supplier quote: show package conversion and explain when approved cost can be selected. Lot Trace: explain application-only scope and link available lot evidence.
+- Delivery list: show whether the brand is confirmed or lead staff to Delivery Detail to confirm it.
+- Reporting and field planning: carry the customer/date scope and distinguish planning from dispatch and downstream work.
 
 ### KI-205 — Staging rehearsal: cases not yet proven, and what blocked them
 
 > **Re-checked 2026-11-22 on staging `17a72d0ee`:** Check first · MED · Agent (unassigned) · plan W2-54 · To-Do 16.12. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
 
 **MED · UNVERIFIED (test gaps, not confirmed defects) · test coverage · found 2026-11-22 · unassigned**
-9 cases were blocked and 17 only partly proven (per-case owner and blocker in the coverage CSV). Main gaps: supplier
-returns and vendor credits; actual refunds; individual credit and prepay un-apply (the only paths found delete a ledger
-row, so they were not run); live split-payer invoice generation (could alert staff); quote version restore (deletes
-old section/line rows on the inspected path); signed driver delivery and offline reconnect (need a driver login and
-device); other staff roles; unit/pack conversions, warehouse-wide counts and product retirement fixtures; period
-close/reopen; larger load and multi-page reports. Test-runner lessons (setup checks, readiness waits, never treating a
-timeout as a failed write, sanitized auth output, closing every queued case) are in the report's runner section.
-Close each gap when a rehearsal case proves it or it moves to its own KI. To-Do 16.12.
+The original ledger had 9 blocked and 17 partial. The later pass has 55 separately recorded cases, including
+13 blocks. The [follow-up](../audits/2026-11-22-staging-workflows-follow-up.md) cleared restricted-use sale on deployed staging, ran six isolated
+database actions or variants, and documented four partial results and two unavailable staff workflows.
+Remaining priorities include approved finance and supplier corrections with retained history, deployed chemical
+split and odd-cent return, missing-invoice recovery, quote restore, driver/offline and sales-rep roles, unit/pack
+and lifecycle fixtures, month-end late correction, Crop Programs persistence and wider reporting/load proof.
+Close each gap after a case proves it or it moves to its own issue. To-Do 16.12.
 
 ### Also open in this area (tracked as GitHub issues or parked fixes; plain-English detail in [the plan](MASTER_FIX_PLAN.md))
 

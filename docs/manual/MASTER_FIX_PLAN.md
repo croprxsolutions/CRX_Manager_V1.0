@@ -11,16 +11,16 @@
 | Area | BLOCKER | HIGH | MED | LOW | Open total | Built, awaiting release (R) |
 |---|---|---|---|---|---|---|
 | Quotes and bookings |  | 1 | 4 | 6 | 11 |  |
-| Orders and deliveries |  | 1 | 6 | 3 | 10 | 2 |
+| Orders and deliveries |  | 1 | 6 | 2 | 9 | 3 |
 | Inventory, purchasing and products |  | 1 | 6 | 12 | 19 | 2 |
-| Invoices, billing and returns |  |  | 10 | 8 | 18 |  |
+| Invoices, billing and returns |  |  | 9 | 8 | 17 | 1 |
 | Payments and receivables |  | 1 | 3 | 2 | 6 |  |
 | Reports and commissions |  | 1 | 4 | 2 | 7 | 4 |
 | Field applications (jobs, blend tickets, field invoices) |  | 6 | 7 | 7 | 20 | 1 |
 | Permissions and security |  | 1 | 4 | 4 | 9 | 1 |
 | Customers, data and cut-over |  |  | 5 | 2 | 7 |  |
 | Guards, tooling and release process | 1 | 5 | 13 | 12 | 31 | 6 |
-| **Total** | **1** | **17** | **62** | **58** | **138** | **16** |
+| **Total** | **1** | **17** | **61** | **57** | **136** | **18** |
 
 "Open total" counts Open, Partly open, Check first and Mason decision. Not counted: 32 accepted risks and 4 backlog entries (listed at the end), and 41 entries found already fixed (40 in the 2026-11-21 re-check, KI-82 in the 2026-11-22 triage) (dropped, listed at the end).
 
@@ -64,6 +64,9 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | R-15 | KI-170 | LOW | On staging, not live | Rarely, a product page showed the wrong preferred vendor name until reload; the page now re-reads the whole product after any vendor change (#2185). | KNOWN_ISSUES | #2185 | Agent (unassigned) |
 | R-16 | #2018 | LOW | On staging, not live | Drivers saw an empty Available deliveries card; the card now loads open deliveries through get_available_deliveries_for_driver (#2165). Issue closed. | GitHub issue | #2018, #2165 | Agent (unassigned) |
 
+| W3-56 | KI-203 | LOW | Staging; browser retest | Quick Delivery shows a dash instead of the sales unit (e.g. Gal); saved records use the right unit. Merged to staging in PR #2213. Acceptance check is in the [follow-up](../audits/2026-11-22-staging-workflows-follow-up.md). | KNOWN_ISSUES (2026-11-22 staging rehearsal) | #2208 | Agent (PR #2213) |
+| W2-51 | KI-200 | MED | Staging; browser retest | Approving a return: the confirmation opens behind the return details, so a normal click can't approve (Enter works). Merged to staging in PR #2210. Acceptance check is in the [follow-up](../audits/2026-11-22-staging-workflows-follow-up.md). | KNOWN_ISSUES (2026-11-22 staging rehearsal) | #2205 | Agent (PR #2210) |
+
 ## Open items by area
 
 ### Quotes and bookings (11)
@@ -82,7 +85,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-49 | #1970 | LOW | Check first | Sections already refuse repeated keys (SECTION_ID_INVALID); items not confirmed. | GitHub issue | #1970 | Taha (to 2026-12-15) |
 | W2-52 | KI-201 | MED | Open | Quote Compare hides one line when the same product is on two sections (display only; saved quotes and PDFs are right). | KNOWN_ISSUES (2026-11-22 staging rehearsal) | #2206 | Taha (to 2026-12-15) |
 
-### Orders and deliveries (10)
+### Orders and deliveries (9)
 
 | Order | ID | Sev | Status | What goes wrong (plain English) | Source | GitHub | Owner |
 |---|---|---|---|---|---|---|---|
@@ -95,7 +98,6 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-05 | KI-152 | LOW | Open | No database rule stops a completion from reopening a cancelled order, but the app cannot reach it today. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-50 | #1960 | LOW | Check first | An old retried save may not get section ids back. | GitHub issue | #1960 | Taha (to 2026-12-15) |
 | D-01 | #2065 | MED | Mason decision | Closing short releases holds and purchasing demand; needs Mason's rule (booking's rep or admin only). Guard currently blocks reps only when a live job exists. | GitHub issue | #2065 | Mason decision |
-| W3-56 | KI-203 | LOW | Open | Quick Delivery shows a dash instead of the sales unit (e.g. Gal); saved records use the right unit. Fix in review: PR #2213. | KNOWN_ISSUES (2026-11-22 staging rehearsal) | #2208 | Agent (PR #2213) |
 
 ### Inventory, purchasing and products (19)
 
@@ -121,7 +123,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-51 | #1829 | LOW | Check first | A confirmed rate approval could be lost if the reply is dropped and the user leaves. | GitHub issue | #1829 | Agent (unassigned) |
 | D-04 | KI-29 | LOW | Mason decision | Several stuck deliveries, negative stock rows, flagged products and odd PO lines need Mason's yes/no before anyone changes real records. | KNOWN_ISSUES |  | Mason decision |
 
-### Invoices, billing and returns (18)
+### Invoices, billing and returns (17)
 
 | Order | ID | Sev | Status | What goes wrong (plain English) | Source | GitHub | Owner |
 |---|---|---|---|---|---|---|---|
@@ -142,7 +144,6 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-23 | #2104 | LOW | Partly open | Mostly done for the grower-share cost read; other product reads in the save not confirmed locked. | GitHub issue | #2104 | Taha (to 2026-12-15) |
 | W3-52 | #2073 | LOW | Check first | Invoice header may show the earlier customer. Live-unchanged per the issue; not traced. | GitHub issue | #2073 | Taha (to 2026-12-15) |
 | W3-53 | #2072 | LOW | Check first | During a staged apply a draft could briefly carry sales tax. Release-time concern, checkable only by a live post-apply query. | GitHub issue | #2072 | Taha (to 2026-12-15) |
-| W2-51 | KI-200 | MED | Open | Approving a return: the confirmation opens behind the return details, so a normal click can't approve (Enter works). Fix in review: PR #2210. | KNOWN_ISSUES (2026-11-22 staging rehearsal) | #2205 | Agent (PR #2210) |
 
 ### Payments and receivables (6)
 
@@ -216,7 +217,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-38 | #2016 | LOW | Open | "1,200" in an unquoted CSV can save as 1 corn acre and 200 soybean acres. | GitHub issue | #2016 | Agent (unassigned) |
 | D-03 | KI-155 | MED | Mason decision | Handover from the old billing system lacks one written procedure, so old balances/credits could be mishandled. | KNOWN_ISSUES |  | Mason decision |
 | D-05 | KI-30 | LOW | Mason decision | Wrong/missing label numbers, customers with no sales rep and some junk rows need Mason's choices before cleanup. | KNOWN_ISSUES |  | Mason decision |
-| W2-54 | KI-205 | MED | Check first | 26 rehearsal cases were blocked or only partly proven (refunds, credit/prepay un-apply, supplier returns, driver signing, other roles, unit fixtures, period close); prove them before the December rehearsal. | KNOWN_ISSUES (2026-11-22 staging rehearsal) |  | Agent (unassigned) |
+| W2-54 | KI-205 | MED | Check first | Original backlog was 26 blocked/partial cases. Later follow-up cleared restricted-use sale on staging and verified six actions or variants in isolation. The [current gap list](../audits/2026-11-22-staging-workflows-follow-up.md) gives the remaining acceptance checks and owners. | KNOWN_ISSUES (2026-11-22 staging rehearsal) |  | Agent (unassigned) |
 
 ### Guards, tooling and release process (31)
 

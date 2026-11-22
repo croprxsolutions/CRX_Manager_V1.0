@@ -61,11 +61,12 @@ New rule in `AGENTS.md` (stop rule) and `ship.md` (round cap):
 - It does NOT cover Sol findings (above), required CI checks, or a labelled CodeRabbit review.
 - Soft declines go in the PR description only, never `DECISION_LOG.md`, so they never collide with the Sol carry.
 
-## Agents still warn, once
+## Real bugs are still fixed
 
-If a finding looks like a real money, stock, data or security bug, the agent says so in one plain sentence before
-showing the summary. Mason's answer wins; the agent does not argue again. (Sol wanted such findings refused outright;
-Mason's ask is that his word decides, so the warning stays a warning. This is Mason's call.)
+Built version (after the Sol gate review, round 1, BLOCKER): a finding the agent confirms is a real money, stock,
+data or security bug is fixed, never offered for skipping, as before. Skipping covers business calls and findings
+Mason and the agent judge not real. (The draft let Mason's word override even a confirmed bug; Sol blocked the
+merge on it. Mason can reopen this.)
 
 ## Unchanged
 

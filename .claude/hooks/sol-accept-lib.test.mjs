@@ -115,7 +115,9 @@ function request(n, { rec = record, sessionId = SESSION, issuedAt = NOW - 1000, 
 }
 // His reply as Claude Code writes it, so the verifier can read it back (assertReplyAlone).
 function markFor(reply) {
-  const transcript = path.join(root, `t-${codeSeq++}.jsonl`);
+  const dir = path.join(root, `t-${codeSeq++}`);
+  mkdirSync(dir, { recursive: true });
+  const transcript = path.join(dir, `${SESSION}.jsonl`);
   writeFileSync(transcript, `${JSON.stringify({ type: "user", message: { role: "user", content: reply } })}\n`);
   return () => ({ transcript, from: 0, written: true, words: reply.trim() });
 }
@@ -307,6 +309,10 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   assert.match(verifySolSkip({ approval: receipts[0], record: { ...rec3, timestamp: iso(NOW - 1000) } }).reason, /earlier Sol run/, "verify: a re-run of Sol voids it");
   assert.match(verifySolSkip({ approval: receipts[0], record: { ...rec3, head_sha: H2 } }).reason, /different version/, "verify: another head voids it");
   assert.match(verifySolSkip({ approval: receipts[0], record: rec3, checkReply: () => { throw new Error("picture attached"); } }).reason, /words alone/, "verify: words alone");
+  assert.match(verifySolSkip({ approval: { ...receipts[0], replyMark: { ...receipts[0].replyMark, words: "skip" } }, record: rec3 }).reason, /does not hold the recorded reply/,
+    "verify: the transcript mark must hold the recorded reply");
+  assert.match(verifySolSkip({ approval: { ...receipts[0], replyMark: { ...receipts[0].replyMark, transcript: path.join(root, "other-session.jsonl") } }, record: rec3 }).reason,
+    /different conversation/, "verify: the mark must be in the conversation that asked");
 
   const readNone = () => null;
   assert.match(collectAcceptances({ record: rec3, readAcceptance: readNone, readSkips: () => readSkipReceipts(stateDir, H3) }).problem, /finding 1/,

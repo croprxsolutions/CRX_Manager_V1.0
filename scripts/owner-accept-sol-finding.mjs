@@ -137,7 +137,7 @@ for (let attempt = 0; attempt < 5 && !saved; attempt++) {
 }
 if (!saved) die("could not find a free code; try again.");
 
-console.log("Explain each finding to Mason in plain English BEFORE running this script (and say so in one sentence if one looks like a " +
-  "real money, stock, data or security bug). Your reply now must be only this, exactly as printed, as the whole last message of your turn:\n");
+console.log("Explain each finding to Mason in plain English BEFORE running this script (a finding you confirm is a real money, stock, " +
+  "data or security bug is fixed, never listed here). Your reply now must be only this, exactly as printed, as the whole last message of your turn:\n");
 for (const line of solSkipSummary(saved)) console.log(`  ${line}`);
 console.log("\nThen wait for HIS reply (skip, or skip and numbers) in this session; never send or relay it for him.");

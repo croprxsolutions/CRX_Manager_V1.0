@@ -220,7 +220,7 @@ export function skipSelection(skip, shownFindings) {
 export function solSkipSummary(p) {
   const nums = (p.findings || []).map((f) => f.n);
   return [
-    `Skip ${nums.length === 1 ? "this Sol finding" : `these ${nums.length} Sol findings`}? A skipped finding stays unfixed and the pull request may land with it.`,
+    `${nums.length === 1 ? "This Sol finding gets fixed" : `These ${nums.length} Sol findings get fixed`} unless you skip ${nums.length === 1 ? "it" : "them"}. A skipped finding stays unfixed and the pull request may land with it.`,
     "",
     `Pull request: #${p.pullRequest} (version ${String(p.prHead).slice(0, 12)})`,
     ...(p.findings || []).map((f) => `Finding ${f.n} of ${p.findingCount} (${f.severity}): ${f.text}`),
@@ -229,7 +229,7 @@ export function solSkipSummary(p) {
     "Every other finding and every other safety check still applies.",
     "",
     nums.length === 1 ? "To skip it, reply: skip" : "To skip them all, reply: skip",
-    ...(nums.length > 1 ? [`To skip only some, reply skip and their numbers (for example: skip ${nums.slice(0, 2).join(" ")})`] : []),
+    ...(nums.length > 1 ? [`To skip only some, reply skip and their numbers (for example: skip ${nums[0]})`] : []),
     `Anything else skips nothing. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
   ];
 }
@@ -286,7 +286,10 @@ export function verifySolSkip({ approval, record, checkReply }) {
   const deadline = Date.parse(p.expiresAt);
   const approved = Date.parse(approval.approvedAt);
   if (![issued, deadline, approved].every(Number.isFinite) || approved < issued || approved > deadline) return no("it has no usable time window");
-  try { checkReply?.(approval.replyMark); }
+  const mark = approval.replyMark;
+  if (!mark || mark.words !== String(approval.reply ?? "").trim()) return no("where his reply is in the conversation does not hold the recorded reply");
+  if (path.basename(String(mark.transcript ?? ""), ".jsonl") !== p.sessionId) return no("his reply is in a different conversation from the one that asked");
+  try { checkReply?.(mark); }
   catch (e) { return no(`his reply could not be confirmed as his words alone (${e?.message || e})`); }
   return { ok: true, payload: p, numbers: sel.numbers, approvedAt: approval.approvedAt };
 }
@@ -418,7 +421,7 @@ export function insertDecisionEntry(log, entry) {
 export function collectAcceptances({ record, readAcceptance, readSkips = () => [], checkReply }) {
   // Plain skip replies first (one receipt may cover several findings); the first valid one wins.
   const skipped = new Map();
-  for (const s of readSkips()) {
+  for (const s of [...readSkips()].sort((a, b) => String(a?.approvedAt).localeCompare(String(b?.approvedAt)))) {
     const r = verifySolSkip({ approval: s, record, checkReply });
     if (!r.ok) continue; // a receipt from an earlier run on this head simply does not count
     for (const n of r.numbers) {

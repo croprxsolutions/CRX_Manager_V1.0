@@ -682,7 +682,7 @@ export function recordReplyApproval({
     payload: payloadText,
     approvedAt: new Date(now).toISOString(),
     via: solAccept ? OWNER_SOL_ACCEPT_VIA : solSkip ? OWNER_SOL_SKIP_VIA : OWNER_APPROVAL_VIA,
-    reply: clip(String(reply ?? "").trim(), solAccept ? 340 : solSkip ? 80 : 40),
+    reply: solSkip ? String(reply ?? "").trim() : clip(String(reply ?? "").trim(), solAccept ? 340 : 40),
     ...(solAccept ? { reason: why } : {}),
     // One receipt for every finding he skipped in this reply, so a crash never records half of them.
     ...(solSkip ? { selected } : {}),

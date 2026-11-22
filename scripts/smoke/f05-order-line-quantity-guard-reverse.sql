@@ -3,10 +3,12 @@
 -- Removes the three refusal triggers and their helpers, all or nothing. The forward migration wrote no data, so nothing
 -- else changes. To use it live, copy it into a new migration through the gates (without the BEGIN / COMMIT lines), so
 -- the migration ledger records the removal; never run it by hand against a live database.
--- Removing it re-opens F05: two loads for the same units (New Delivery and Follow-up) and order cuts below what is
--- scheduled. Pause Follow-up scheduling and order quantity cuts while it is off.
+-- Removing it re-opens F05: more scheduled or delivered than ordered on a line, and order cuts below what is
+-- scheduled. Pause scheduling extra loads and order quantity cuts while it is off.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
+-- Same table order as completion and the forward migration (Sol r2), so dropping the triggers cannot deadlock with it.
+LOCK TABLE public.deliveries, public.delivery_items, public.order_items IN ACCESS EXCLUSIVE MODE;
 DROP TRIGGER IF EXISTS zz_delivery_line_within_order ON public.delivery_items;
 DROP TRIGGER IF EXISTS zz_delivery_reopen_within_order ON public.deliveries;
 DROP TRIGGER IF EXISTS zz_order_line_within_deliveries ON public.order_items;

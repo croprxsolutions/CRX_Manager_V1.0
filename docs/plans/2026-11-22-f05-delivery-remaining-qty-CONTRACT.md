@@ -62,7 +62,7 @@ Database PR first (target `staging`, Sol required: migration + inventory). Scree
 
 ## 4. Proof cases (disposable Postgres via the real-schema prover; then staging app)
 
-1. ORD-2026-0017 replay: order 2, deliver 1, schedule last unit through `create_delivery_with_items`, then `create_followup_delivery` for the same remainder → follow-up refused `DELIVERY_OVER_ORDER`; nothing created.
+1. The audit's over-scheduling case (staging ORD-2026-0017): a second load for an order line's last unit is refused `DELIVERY_OVER_ORDER`; nothing created. (Exact steps stay in the private audit notes until the fix is live.)
 2. Reverse order (follow-up first, then New Delivery) → New Delivery refused (existing check), follow-up stands.
 3. Legacy double schedule already present (two open loads for one unit, created with the trigger disabled): completing either → refused `DELIVERY_EXCEEDS_ORDER`, naming the other load (Mason, 2026-11-22); nothing kept by the refused call; after the office cancels one, the other completes. An in-progress load cannot be edited, so the message says cancel, not reduce (rls-security-reviewer M1).
 4. Order cut 10 → 6 while 10 scheduled → refused `ORDER_LINE_BELOW_DELIVERIES`; after editing the delivery to 6, the cut succeeds.
@@ -72,7 +72,7 @@ Database PR first (target `staging`, Sol required: migration + inventory). Scree
 8. Quick Delivery and start-and-complete still succeed on normal inputs.
 9. Same idempotency key retried after a refusal → refused again, no receipt saved; distinct keys from two sessions at once → exactly one succeeds (two psql sessions).
 10. Cancel and void of an already-over legacy delivery → allowed.
-11. Staging app (synthetic QA fixture, after staging apply): reproduce case 1 through the New Delivery screen and the Create Follow-up Delivery button; the second shows the refusal; database unchanged.
+11. Staging app (synthetic QA fixture, after staging apply): case 1 through the screens; the second load shows the refusal; database unchanged.
 
 ## Challenge (Astra `gpt-6.2-astra` high, 2026-11-22, 43 findings) and settlement
 
@@ -97,8 +97,10 @@ The design above was revised; the migration implements the revision.
 
 ## Sol round 1 (2026-11-22) settlement
 
-- **HIGH #1 (fixed by a proven way out):** two legacy loads on a line whose order has a return: the return guard refuses cancelling either (`20270126110000…:316-333`) and Cancel Remaining refuses on a received/credited return (`20260721152604…:126-133`). Recording 0 delivered on the extra load does not raise delivered, so it completes; the real load then completes. The refusal now says so. Case 3p. Luna r6 (HIGH: the hint could hide a real shipment) → Mason chose to reword: record 0 only if the extra load never went out; otherwise call the office (F05b fixes real double deliveries).
+- **HIGH #1 (superseded after Sol r2, see below):** two legacy loads on a line whose order has a return: the return guard refuses cancelling either (`20270126110000…:316-333`) and Cancel Remaining refuses on a received/credited return (`20260721152604…:126-133`). Recording 0 delivered on the extra load does not raise delivered, so it completes; the real load then completes. The refusal now says so. Case 3p. Luna r6 (HIGH: the hint could hide a real shipment) → Mason chose to reword: record 0 only if the extra load never went out; otherwise call the office (F05b fixes real double deliveries).
 - **Luna r7 MED refuted (deadlock, line added or re-linked during completion):** the line is never locked order-line-first. On insert or re-link, `a2_delivery_line_matches_order_line` share-locks the delivery (`20270126110000…:119`) before it locks the order line (`:123`), so the completion and the line edit queue on the delivery, not in a cycle; `zz_delivery_line_within_order` re-takes a share lock it already holds. On a quantity-only raise (a2 does not fire), zz share-locks the delivery (`20270218100000…:143`) before `_assert_order_line_fits` locks the order line. Same order everywhere: delivery, then order line.
+- **Sol r2 HIGH (the 0-delivered way out is not reachable from the app):** confirmed — `src/pages/DeliveryDetail.tsx:1140` and `src/pages/FieldStop.tsx:411` refuse a completion with no quantity above zero. Fourth BLOCKER/HIGH on the same way-out mechanism, so patching stopped and Mason chose (2026-11-22, "drop it"): the refusal says only "Call the office"; leftover double-booked lines blocked by a return are counted before the live apply and fixed by hand in F05b. Rejected: relaxing the return guard on cancel.
+- **Sol r2 MEDs/LOW:** (a) 0-delivered leaves a pending remainder and a $0 draft — moot: that way out is no longer offered. (b) New Delivery still counts a soft-deleted load: existing `create_delivery_with_items` behaviour, stricter not looser, unchanged by F05; deferred to the F05b cleanup (owner: this F05 thread). (c) Race test could pass without a real wait — fixed: case 9b now sees the Follow-up waiting on a lock while New Delivery is open. (d) Rollback lock order — fixed: the reverse script locks deliveries, delivery_items, order_items first, the same order as completion. (e) Reproduction steps in public docs — removed from this contract, the changelog, the decision log and the reverse script. (f) Reference note said every refusal names other loads — corrected.
 - **HIGH #2 (fixed):** soft-deleted loads no longer count (`deleted_at IS NULL`, as Cancel Remaining already does); un-deleting an open load is checked like a reopen. Case 3e.
 - **MED driver sees another load (fixed):** the completion refusal no longer names the other load or its quantity.
 - **MED REPEATABLE READ stale read (fixed after Luna r5 raised it as HIGH):** every app caller runs in READ COMMITTED, and the check now refuses any stricter level (`ORDER_LINE_CHECK_ISOLATION`), as `20270119130000…:81` does. Case 3i.

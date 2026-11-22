@@ -112,11 +112,11 @@
 **What this forbids/implies:** KI-191, KI-198, KI-185 and #2075 are built to these rules; Transfer, office auto-draft and Split Billing must agree.
 ## 2026-11-22 — F05: two open loads holding the same units: neither completes until the office cancels one
 
-The staging audit (2026-11-21) found one order line scheduled twice (New Delivery and Create Follow-up Delivery each took the last unit), so 2 ordered ended 3 delivered. The fix (`20270218100000_f05_order_line_quantity_guard.sql`) refuses any write that would put delivered + open loads past what was ordered.
+The staging audit (2026-11-21) found one order line scheduled past what was ordered, so 2 ordered ended 3 delivered. The fix (`20270218100000_f05_order_line_quantity_guard.sql`) refuses any write that would put delivered + open loads past what was ordered.
 
 **Decision (Mason, in chat, 2026-11-22: "yes"):** where two open loads already hold the same units from before the fix, completing either is refused until the office cancels or reduces the extra load. The driver is told to call the office; stock never moves twice. Rejected: first load to complete wins (the second driver finds out only at the farm).
 
-**Follow-up decision (Mason, in chat, 2026-11-22: "Reword the hint"):** when a return stops the office cancelling the extra load, the message says to complete it with 0 delivered only if it never actually went out; if it did go out, call the office. A real double delivery is fixed in the F05b cleanup. Rejected: dropping the 0-delivered way out (every case becomes manual office work).
+**Follow-up decision (Mason, in chat, 2026-11-22: "drop it"):** the refusal only tells the driver to call the office; no "complete the extra load with 0 delivered" tip (the delivery screens refuse an all-zero completion, Sol r2). A leftover double-booked line the office cannot cancel because a return is logged stays blocked until the F05b cleanup fixes it by hand; before the live apply, count those lines and fix each one. Rejected: letting the office cancel an undelivered load despite a return on the line (changes the return rule; bigger and riskier). Superseded: Mason's earlier "Reword the hint" (record 0 only if the extra load never went out).
 
 ## 2026-11-21 — #2165: Mason owner-accepted 1 Sol finding(s) at `2c95807df876`
 

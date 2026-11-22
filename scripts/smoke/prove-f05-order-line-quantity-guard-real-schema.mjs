@@ -364,7 +364,7 @@ async function afterCases() {
   // 3. Legacy double schedule (two open loads of 1 for 1 ordered): neither completes while the other is open, the whole
   // call rolls back (no stock, line or draft change); once the office cancels the extra load, the other completes.
   refusedProbe(`${AS_ADMIN} ${completeLegacy(DLA, DLA1, 1, 'f05-3a')}`,
-    /DELIVERY_EXCEEDS_ORDER: \[PROVER\] F05 Product — this would bring the line to 1(\.0+)? delivered, but only 1(\.0+)? was ordered and another open delivery for this order still holds units\. Ask the office to cancel the extra delivery, then complete this one. If it cannot be cancelled: if the extra delivery never actually went out, complete it with 0 delivered; if it did go out, call the office./);
+    /DELIVERY_EXCEEDS_ORDER: \[PROVER\] F05 Product — this would bring the line to 1(\.0+)? delivered, but only 1(\.0+)? was ordered and another open delivery for this order still holds units\. Call the office: the extra delivery must be cancelled before this one can be completed\./);
   assert.equal(scalar(`SELECT quantity_available || '/' || quantity_prebooked FROM public.inventory WHERE id = '${INV}';`).replace(/\.0+/g, ''), '50/13');
   assert.equal(scalar(`SELECT quantity_delivered || '/' || (SELECT count(*) FROM public.invoices WHERE order_id = '${OL}') || '/' || (SELECT status FROM public.deliveries WHERE id = '${DLA}') FROM public.order_items WHERE id = '${LL}';`).replace(/\.0+/g, ''), '0/0/in_progress');
   assert.equal(Number(okProbe(`${AS_ADMIN}
@@ -375,15 +375,10 @@ async function afterCases() {
 
   // The same refusal through the public completion call, signed in (Sol r1: not only the private body as postgres).
   refusedProbe(`SELECT public.complete_delivery(p_delivery_id => '${DLA}', p_signed_by => 'No proof — recorded by office', p_performed_by => '${ADMIN}', p_quantities => jsonb_build_object('${DLA1}', 1), p_idempotency_key => 'f05-3p', p_evidence => 'no_proof', p_evidence_ref => '[PROVER] F05 public path');`,
-    /DELIVERY_EXCEEDS_ORDER: \[PROVER\] F05 Product/, ADMIN);
-  // Way out when the extra load cannot be cancelled (Sol r1 #1: a return on the order refuses cancel and Cancel
-  // Remaining): record nothing delivered on the extra load. Delivered does not rise, so it completes; the real one follows.
-  // Both through the public call, signed in, as the driver or office would (Luna r4).
-  const publicComplete = (d, di, qty, key) => `SELECT public.complete_delivery(p_delivery_id => '${d}', p_signed_by => 'No proof — recorded by office', p_performed_by => '${ADMIN}', p_quantities => jsonb_build_object('${di}', ${qty}), p_idempotency_key => '${key}', p_evidence => 'no_proof', p_evidence_ref => '[PROVER] F05 way out');`;
-  assert.equal(Number(okProbe(`${publicComplete(DLB, DLB1, 0, 'f05-3z')}
-    ${publicComplete(DLA, DLA1, 1, 'f05-3y')}
-    ${delivered(LL)}`, ADMIN)), 1);
-  console.log('[case 3p] signed in through the public completion call: refused the same way; recording 0 on the extra load completes it and the real load then completes (way out when a return blocks cancel)');
+    /DELIVERY_EXCEEDS_ORDER: \[PROVER\] F05 Product.*Call the office/, ADMIN);
+  // No 0-delivered way out is offered: the screens refuse an all-zero completion (Sol r2). A leftover double booking the
+  // office cannot cancel is fixed by hand in the F05b cleanup (Mason, 2026-11-22: "drop it").
+  console.log('[case 3p] signed in through the public completion call: refused the same way, telling the driver to call the office');
 
   // 3b. A delivered rise that would use units held by another open load is refused.
   refusedProbe(`${AS_ADMIN}
@@ -494,7 +489,11 @@ async function race() {
     ${schedule(O17, L17, 1, 'f05-rc', 'd2')}
     SELECT pg_sleep(3); COMMIT;`);
   const b = session(`BEGIN; ${AS_ADMIN} SET LOCAL ROLE authenticated; SELECT public.create_followup_delivery('${d1}', current_date, '${ADMIN}', 'f05-rd'); COMMIT;`, 1000);
-  const [ra, rb] = await Promise.all([a, b]);
+  // Sol r2: prove the Follow-up is really waiting on a lock while New Delivery is still open (not just arriving late).
+  const w = session(`SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%create_followup_delivery%' AND pid <> pg_backend_pid();`, 2200);
+  const [ra, rb, rw] = await Promise.all([a, b, w]);
+  assert.equal(rw.code, 0, rw.out);
+  assert.equal(rw.out.trim().split(/\r?\n/).filter(Boolean).at(-1), '1', `the Follow-up must be waiting on a lock mid-race:\n${rw.out}`);
   assert.equal(ra.code, 0, ra.out);
   assert.notEqual(rb.code, 0, `the second scheduler must be refused:\n${rb.out}`);
   assert.match(rb.out, /DELIVERY_OVER_ORDER/);

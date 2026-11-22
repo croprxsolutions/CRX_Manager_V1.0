@@ -217,7 +217,7 @@ BEGIN
     RAISE EXCEPTION 'DELIVERY_EXCEEDS_ORDER: % — this would bring the line to % delivered, but only % was ordered%. %',
       COALESCE(NEW.product_name, 'this order line'), NEW.quantity_delivered, NEW.total_units_needed,
       CASE WHEN v_open > 0 THEN ' and another open delivery for this order still holds units' ELSE '' END,
-      CASE WHEN v_open > 0 THEN 'Ask the office to cancel the extra delivery, then complete this one. If it cannot be cancelled: if the extra delivery never actually went out, complete it with 0 delivered; if it did go out, call the office.'
+      CASE WHEN v_open > 0 THEN 'Call the office: the extra delivery must be cancelled before this one can be completed.'
            ELSE 'Record no more than what was ordered, or ask the office to raise the order.' END
       USING ERRCODE = 'check_violation';
   END IF;

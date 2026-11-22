@@ -29,7 +29,7 @@ import {
   promptHookSeen,
   writeApprovalRequest,
 } from "../.claude/hooks/owner-approval-lib.mjs";
-import {
+import { pullRequestUrlFor,
   DECISION_LOG_PATH,
   blockersRecordName,
   blockersRecordProblem,
@@ -104,12 +104,13 @@ if (!promptHookSeen({ dirs: [stateDir], sessionId })) die(hooklessSessionRefusal
 const ACCEPT_BASES = new Set(["main", "staging"]);
 let pr;
 try {
-  pr = JSON.parse(String(execFileSync("gh", ["pr", "view", git(["rev-parse", "--abbrev-ref", "HEAD"]), "--json", "number,state,headRefOid,baseRefName"], {
+  pr = JSON.parse(String(execFileSync("gh", ["pr", "view", git(["rev-parse", "--abbrev-ref", "HEAD"]), "--json", "number,url,state,headRefOid,baseRefName"], {
     cwd: checkout, encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"],
   })));
 } catch (err) {
   die(`could not find this branch's open pull request (${err?.message || err}).`);
 }
+if (pullRequestUrlFor(pr?.url, pr?.number) === null) die(`GitHub gave no usable address for pull request #${pr?.number ?? "?"}.`);
 if (String(pr?.state).toUpperCase() !== "OPEN" || !ACCEPT_BASES.has(pr?.baseRefName) || String(pr?.headRefOid).toLowerCase() !== head.toLowerCase()) {
   die(`pull request #${pr?.number ?? "?"} must be open against main or staging with head ${head.slice(0, 12)}; push first.`);
 }
@@ -128,7 +129,7 @@ let saved = null;
 for (let attempt = 0; attempt < 5 && !saved; attempt++) {
   const code = newApprovalCode();
   const payload = buildSolSkipPayload({
-    record, numbers, pullRequest: pr.number,
+    record, numbers, pullRequest: pr.number, pullRequestUrl: pr.url,
     issuedAt: new Date(now).toISOString(),
     expiresAt: new Date(deadline).toISOString(),
     nonce: randomBytes(16).toString("hex"), code, sessionId,

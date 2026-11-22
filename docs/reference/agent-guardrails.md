@@ -132,7 +132,7 @@
 > accepts the other carries accepts it on the same head/base/24-hour terms.
 >
 > **Owner-accepted Sol findings (Mason, 2026-11-10; plain-word skips 2026-11-21).** Since 2026-11-21 `owner-accept-sol-finding.mjs
-> <n> ...` (any finding he disagrees with: a business call, or a bug or gap too small or impractical to affect the business; an owner-accepted proof counts only for its own PR at merge and migration apply) builds ONE request (`crx-owner-sol-skip-v1`) for several findings, its deadline never past the Sol
+> <n> ...` (any finding he disagrees with: a business call, or a bug or gap too small or impractical to affect the business; an owner-accepted proof counts only for its own PR, by number and repository address, at its exact head, at merge and migration apply, Codex merge guard included) builds ONE request (`crx-owner-sol-skip-v1`) for several findings, its deadline never past the Sol
 > run's own 24 hours, and Mason answers in plain words with no code: the whole message `skip`, `skip 1 3`, `I disagree`, `I don't want that`,
 > `don't fix`, `accept` and the like (`skipFromReply`; `ok`, `yes`, `move on`, `merge it`, questions and mixed text skip nothing;
 > `that` or `it` skips only when the list holds one finding).
@@ -141,7 +141,7 @@
 > (`owner-approval-sol-skip-<head>-<code>.json`, `selected` numbers), which `verifySolSkip` re-checks against the Sol run, the
 > findings shown, his reply read back from the transcript, and the agent's last message before it being this request's
 > summary (`assertSkipShown`). The log records a fixed sentence, never free text. The older flow
-> below (one request per finding, `accept <code> <reason>`) only describes requests built before then; the script
+> below (one request per finding, `accept <code> <reason>`) only describes requests built before then (such a reply names no repository, so since 2026-11-22 the carry refuses it and Mason is asked again); the script
 > now always builds the skip request. When Sol answers BLOCKERS, the wrapper saves its numbered
 > `SOL_FINDING` list as `codex-review-blockers-<head>.json` (review-proof-guard protects it) only when Sol's
 > `SOL_FINDING_COUNT` line matches the list; any later run on that head deletes it. For a finding Mason judges a

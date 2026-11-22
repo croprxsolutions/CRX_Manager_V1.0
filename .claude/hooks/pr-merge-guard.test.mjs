@@ -635,7 +635,8 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(/firstAcceptedProof\(proofs, headSha, \(data, exactHead\) =>\s*proofValidForMerge\(\{ data, headSha[^\n]*\)\s*&& \(exactHead \|\| !solRiskOnGitHub\(\{ baseSha: data\.head_sha, headSha, repo: request\.repo, gh: hardGateGh \}\)\.risky\)\);/.test(gateRequestSource),
     "an earlier Sol proof is accepted only when the commits after it are low risk; exact-head proofs are tried first");
   // Owner acceptances count only for the PR they were given for (Sol gate round 3, 2026-11-21).
-  ok(/prCommits \}\) && ownerAcceptedForPr\(data, pr\.number\)\r?\n/.test(gateRequestSource), "an owner-accepted proof counts only for its own pull request");
+  ok(/prCommits \}\) && ownerAcceptedForPr\(data, \{ number: pr\.number, url: pr\.url, exactHead \}\)\r?\n/.test(gateRequestSource), "an owner-accepted proof counts only for its own pull request, at its exact version");
+  ok(/"--json", "number,url,baseRefName/.test(gateRequestSource), "the merge gate reads the pull request's address");
   ok(/const valid = proof !== null;/.test(gateRequestSource), "only an accepted proof opens the Sol allow point");
   ok(/const risk = solRiskOnGitHub\(\{\s*baseSha,\s*headSha,\s*repo:\s*request\.repo,\s*gh:\s*hardGateGh\s*\}\);/.test(gateRequestSource),
     "the risk check spends the shared hard-gate budget");
@@ -663,7 +664,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(!/docs\/changelog\.d|docs\/workflows/.test(guardSource), "no path list is forked into the guard itself");
   // Follow-ups section (Mason, 2026-11-09): the PR view asks for body and author, and the
   // shared rule denies before any allow point. The rule itself: followups-lib.test.mjs.
-  ok(/"number,baseRefName,baseRefOid,headRefName,headRefOid,[^"]*,body,author"/.test(gateRequestSource), "the PR view asks for the description and author");
+  ok(/"number,url,baseRefName,baseRefOid,headRefName,headRefOid,[^"]*,body,author"/.test(gateRequestSource), "the PR view asks for the description and author");
   ok(/const followUps = followUpsProblem\(pr\);\s*if \(followUps\) deny\(followUpsDenial\("PR MERGE GATE", request\.selector, followUps\)\);/.test(gateRequestSource),
     "a PR without a usable Follow-ups section is denied");
   ok(gateRequestSource.indexOf("followUpsProblem(pr)") < gateRequestSource.indexOf("advisoryQueue.push(request)"),

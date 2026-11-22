@@ -3075,12 +3075,16 @@ function runCarryOwnerAccepted(root, options) {
     source: { head_sha: fromHead, base_sha: record.base_sha, timestamp: record.timestamp },
     mode: "owner_accepted",
   });
+  if (got.accepted.some((a) => !a.payload.pullRequestUrl)) {
+    return refuse("an old accept <code> reply names no repository and cannot land since 2026-11-22; ask Mason again with node scripts/owner-accept-sol-finding.mjs <numbers>");
+  }
   proof.owner_accepted = got.accepted.map((a) => ({
     n: a.payload.finding.n,
     severity: a.payload.finding.severity,
     text: a.payload.finding.text,
     reason: a.reason,
     pull_request: a.payload.pullRequest,
+    pull_request_url: a.payload.pullRequestUrl,
     accepted_at: a.approvedAt,
     ref: a.payload.nonce,
   }));

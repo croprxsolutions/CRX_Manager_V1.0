@@ -447,7 +447,7 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
         if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(file)) continue;
         let data;
         try { data = JSON.parse(readFileSync(path.join(stateDir, file), "utf8")); } catch { continue; }
-        if (proofValid(data, head, now, baseSha, APPLY_SOL_PROOF_MAX_AGE_MS) && ownerAcceptedForPr(data, pr.number)) { proven = true; break; }
+        if (proofValid(data, head, now, baseSha, APPLY_SOL_PROOF_MAX_AGE_MS) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead: String(data.head_sha).toLowerCase() === String(head).toLowerCase() })) { proven = true; break; }
       }
     } catch { /* an unreadable directory holds no proof — keep looking */ }
     if (proven) break;

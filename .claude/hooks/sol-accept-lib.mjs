@@ -217,11 +217,25 @@ export function skipSelection(skip, shownFindings) {
   return { numbers: [...nums].sort((a, b) => a - b) };
 }
 
-/** True unless the proof carries owner acceptances given for another pull request (Sol gate rounds 3-4). */
-export function ownerAcceptedForPr(proof, prNumber) {
+const PR_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d+)$/i;
+const normUrl = (u) => String(u ?? "").trim().replace(/\/+$/, "").toLowerCase();
+/** A GitHub pull request URL naming PR `number` (repository included), or null. */
+export const pullRequestUrlFor = (url, number) => {
+  const m = PR_URL_RE.exec(String(url ?? "").trim().replace(/\/+$/, ""));
+  return m && Number(m[1]) === number ? normUrl(url) : null;
+};
+/**
+ * Whether a Sol proof may count for this pull request (Sol gate rounds 3-5). A proof with no owner
+ * acceptances always may. One with acceptances counts only for the exact pull request (repository
+ * and number, by URL) they were given for, and only at the exact version reviewed: never across later
+ * commits. A carry that says it came from an owner-accepted review but lost its list never counts.
+ */
+export function ownerAcceptedForPr(proof, { number, url, exactHead } = {}) {
   const acc = proof?.owner_accepted;
-  if (acc === undefined) return true;
-  return Array.isArray(acc) && acc.length > 0 && acc.every((a) => a?.pull_request === prNumber);
+  if (acc === undefined) return proof?.carry?.mode !== "owner_accepted" && proof?.carry?.root_review?.owner_accepted !== true;
+  const want = pullRequestUrlFor(url, number);
+  return exactHead === true && want !== null && Array.isArray(acc) && acc.length > 0
+    && acc.every((a) => a?.pull_request === number && normUrl(a?.pull_request_url) === want);
 }
 
 /** The lines Mason reads before he replies to a skip request. Derived only from payload fields. */
@@ -230,24 +244,25 @@ export function solSkipSummary(p) {
   return [
     `${nums.length === 1 ? "This Sol finding gets fixed" : `These ${nums.length} Sol findings get fixed`} unless you skip ${nums.length === 1 ? "it" : "them"}. A skipped finding stays unfixed and the pull request may land with it.`,
     "",
-    `Pull request: #${p.pullRequest} (version ${String(p.prHead).slice(0, 12)})`,
+    `Pull request: ${String(p.pullRequestUrl ?? "").replace(/^https:\/\/github\.com\//i, "").replace(/\/pull\//, "#")} (version ${String(p.prHead).slice(0, 12)})`,
     ...(p.findings || []).map((f) => `Finding ${f.n} of ${p.findingCount} (${f.severity}): ${f.text}`),
     "",
     `Each skipped finding's file and line goes in ${DECISION_LOG_PATH}, which is public; the wording stays private.`,
     "Every other finding and every other safety check still applies.",
     "",
-    nums.length === 1 ? "To skip it, reply: skip" : "To skip them all, reply: skip",
-    ...(nums.length > 1 ? [`To skip only some, reply skip and their numbers (for example: skip ${nums[0]})`] : []),
-    `Anything else skips nothing. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
+    `To skip ${nums.length === 1 ? "it" : "all of them"}, reply with only one of: skip, accept, don't fix, I disagree, ${nums.length === 1 ? "I don't want that, leave it" : "I don't want those, leave them"}.`,
+    ...(nums.length > 1 ? [`To skip only some, reply skip, accept or don't fix and their numbers (for example: skip ${nums[0]})`] : []),
+    `Any other reply (ok, yes, a question, or more words) skips nothing. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
   ];
 }
 
 /** One request covering findings `numbers` of `record` (all of them when omitted). Field order is fixed. */
-export function buildSolSkipPayload({ record, numbers, pullRequest, issuedAt, expiresAt, nonce, code, sessionId }) {
+export function buildSolSkipPayload({ record, numbers, pullRequest, pullRequestUrl, issuedAt, expiresAt, nonce, code, sessionId }) {
   const want = numbers?.length ? numbers : record.findings.map((f) => f.n);
   const p = {
     purpose: OWNER_SOL_SKIP_PURPOSE,
     pullRequest,
+    pullRequestUrl,
     prHead: record.head_sha,
     baseSha: record.base_sha,
     reviewedAt: record.timestamp,
@@ -286,6 +301,7 @@ export function verifySolSkip({ approval, record, checkReply, checkShown }) {
     if (!r || f.n !== r.n || f.severity !== r.severity || f.text !== r.text) return no("it shows a finding this Sol run did not report");
   }
   if (!Number.isInteger(p.pullRequest) || p.pullRequest <= 0) return no("it names no pull request");
+  if (pullRequestUrlFor(p.pullRequestUrl, p.pullRequest) === null) return no("it does not name the pull request's repository");
   if (JSON.stringify(p.summary) !== JSON.stringify(solSkipSummary(p))) return no("what Mason was shown does not match what it covers");
   const sel = skipSelection(skipFromReply(approval.reply), p.findings);
   if (sel.problem) return no(`the recorded reply does not hold (${sel.problem})`);
@@ -317,11 +333,12 @@ export function readSkipReceipts(stateDir, head) {
 }
 
 /** The request for finding `n` of `record`. Field order is fixed. */
-export function buildSolAcceptPayload({ record, n, pullRequest, issuedAt, expiresAt, nonce, code, sessionId }) {
+export function buildSolAcceptPayload({ record, n, pullRequest, pullRequestUrl, issuedAt, expiresAt, nonce, code, sessionId }) {
   const f = record.findings[n - 1];
   const p = {
     purpose: OWNER_SOL_ACCEPT_PURPOSE,
     pullRequest,
+    ...(pullRequestUrl === undefined ? {} : { pullRequestUrl }),
     prHead: record.head_sha,
     baseSha: record.base_sha,
     reviewedAt: record.timestamp,
@@ -356,6 +373,7 @@ export function verifySolAcceptance({ approval, record, n, checkReply }) {
   if (!f || p.finding?.n !== f.n || p.finding?.severity !== f.severity || p.finding?.text !== f.text) return no("it accepts a different finding");
   if (p.findingCount !== record.findings.length) return no("it was shown a different number of findings");
   if (!Number.isInteger(p.pullRequest) || p.pullRequest <= 0) return no("it names no pull request");
+  if (p.pullRequestUrl !== undefined && pullRequestUrlFor(p.pullRequestUrl, p.pullRequest) === null) return no("it names an unusable pull request address");
   if (JSON.stringify(p.summary) !== JSON.stringify(solAcceptSummary(p))) return no("what Mason was shown does not match what the acceptance covers");
   const reason = String(approval.reason ?? "").trim();
   const bad = reasonProblem(reason);
@@ -449,7 +467,7 @@ export function collectAcceptances({ record, readAcceptance, readSkips = () => [
     if (!r.ok) return { problem: r.reason };
     accepted.push(r);
   }
-  if (new Set(accepted.map((a) => a.payload.pullRequest)).size !== 1) return { problem: "the acceptances name different pull requests" };
+  if (new Set(accepted.map((a) => `${a.payload.pullRequest} ${String(a.payload.pullRequestUrl ?? "").toLowerCase()}`)).size !== 1) return { problem: "the acceptances name different pull requests" };
   return { accepted };
 }
 

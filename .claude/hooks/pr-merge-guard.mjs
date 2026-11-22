@@ -511,7 +511,7 @@ function gateRequest(request) {
     // merge actually lands on. The proof must be bound to THAT, not to the local
     // origin/main, which can be stale (Codex round-6: a proof reviewed against an
     // old local base validated while GitHub merged onto newer main content).
-    viewArgs.push("--json", "number,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
+    viewArgs.push("--json", "number,url,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,commits,body,author");
     if (request.repo) viewArgs.push("--repo", request.repo);
     pr = JSON.parse(hardGateGh(viewArgs));
     if (!pr?.baseRefName || !pr?.headRefOid || !pr?.baseRefOid) {
@@ -706,7 +706,7 @@ function gateRequest(request) {
   // A proof of an earlier commit covers the commits after it unless those
   // touch the Sol list; same module, same budgeted gh. Exact-head proofs are tried first.
   const proof = firstAcceptedProof(proofs, headSha, (data, exactHead) =>
-    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits }) && ownerAcceptedForPr(data, pr.number)
+    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits }) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead })
       && (exactHead || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky));
   const valid = proof !== null;
   const carried = proof?.carried_forward === true ? proof.carry : null;

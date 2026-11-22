@@ -269,11 +269,24 @@ for (const one of ["I don't want that", "leave it alone", "skip it", "don't fix 
 assert.deepEqual(skipSelection(skipFromReply("I don't want that"), [{ n: 1 }]), { numbers: [1] }, "skip: 'that' skips a lone finding");
 for (const no of ["I disagree, fix it later", "do you disagree?", "disagree"]) assert.equal(skipFromReply(no), null, `skip: "${no}" skips nothing`);
 // A skip counts only for the PR it was given for (Sol gate rounds 3-4).
-assert.equal(ownerAcceptedForPr({ verdict: "clean" }, 7), true, "PR binding: a plain clean proof is unaffected");
-assert.equal(ownerAcceptedForPr({ owner_accepted: [{ pull_request: 7 }, { pull_request: 7 }] }, 7), true, "PR binding: own PR");
-assert.equal(ownerAcceptedForPr({ owner_accepted: [{ pull_request: 7 }, { pull_request: 8 }] }, 7), false, "PR binding: a skip from another PR is refused");
-assert.equal(ownerAcceptedForPr({ owner_accepted: [] }, 7), false, "PR binding: an empty list is refused");
-assert.equal(ownerAcceptedForPr({ owner_accepted: null }, 7), false, "PR binding: a damaged list is refused");
+{
+  const U7 = "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/7";
+  const pr7 = { number: 7, url: U7, exactHead: true };
+  const acc = (n, u = U7) => ({ pull_request: n, pull_request_url: u });
+  assert.equal(ownerAcceptedForPr({ verdict: "clean" }, pr7), true, "PR binding: a plain clean proof is unaffected");
+  assert.equal(ownerAcceptedForPr({ verdict: "clean" }, { ...pr7, exactHead: false }), true, "PR binding: a plain proof may still cover later low-risk commits");
+  assert.equal(ownerAcceptedForPr({ owner_accepted: [acc(7), acc(7)] }, pr7), true, "PR binding: own PR at its exact version");
+  assert.equal(ownerAcceptedForPr({ owner_accepted: [acc(7)] }, { ...pr7, url: `${U7}/` }), true, "PR binding: a trailing slash does not matter");
+  assert.equal(ownerAcceptedForPr({ owner_accepted: [acc(7)] }, { ...pr7, exactHead: false }), false, "PR binding: never across later commits");
+  assert.equal(ownerAcceptedForPr({ owner_accepted: [acc(7), acc(8)] }, pr7), false, "PR binding: a skip from another PR is refused");
+  assert.equal(ownerAcceptedForPr({ owner_accepted: [acc(7, "https://github.com/someone/fork/pull/7")] }, pr7), false, "PR binding: the same number in another repository is refused");
+  assert.equal(ownerAcceptedForPr({ owner_accepted: [{ pull_request: 7 }] }, pr7), false, "PR binding: an acceptance with no repository is refused");
+  assert.equal(ownerAcceptedForPr({ owner_accepted: [acc(7)] }, { number: 7, exactHead: true }), false, "PR binding: a gate that cannot name the PR's address refuses");
+  assert.equal(ownerAcceptedForPr({ owner_accepted: [] }, pr7), false, "PR binding: an empty list is refused");
+  assert.equal(ownerAcceptedForPr({ owner_accepted: null }, pr7), false, "PR binding: a damaged list is refused");
+  assert.equal(ownerAcceptedForPr({ carry: { mode: "carry_forward", root_review: { owner_accepted: true } } }, pr7), false, "PR binding: a carry that lost its acceptance list is refused");
+  assert.equal(ownerAcceptedForPr({ carry: { mode: "owner_accepted" } }, pr7), false, "PR binding: an owner-accepted carry with no list is refused");
+}
 assert.match(skipSelection(skipFromReply("I don't want that"), [{ n: 1 }, { n: 2 }]).problem, /"that" or "it"/, "skip: 'that' never skips a list of two");
 assert.deepEqual(skipFromReply("skip 1 3"), { numbers: [1, 3] }, "skip: numbers");
 assert.deepEqual(skipFromReply("skip 1, 3 and 4"), { numbers: [1, 3, 4] }, "skip: a list with commas and and");
@@ -299,7 +312,7 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   ], timestamp: iso(NOW - 60 * 60 * 1000) });
   const shownFor = {};
   const skipReq = (numbers, code = String(codeSeq++), extra = {}) => {
-    const text = buildSolSkipPayload({ record: rec3, numbers, pullRequest: 2200, issuedAt: iso(NOW - 1000),
+    const text = buildSolSkipPayload({ record: rec3, numbers, pullRequest: 2200, pullRequestUrl: "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/2200", issuedAt: iso(NOW - 1000),
       expiresAt: iso(skipDeadlineMs(rec3, NOW - 1000, 24 * 60 * 60 * 1000)), nonce: `skipnonce${code}`, code, sessionId: SESSION, ...extra });
     writeApprovalRequest(stateDir, text);
     shownFor[code] = JSON.parse(text).summary.join("\n");
@@ -311,7 +324,9 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   const r1 = skipReq([1, 3]);
   assert.equal(Date.parse(r1.payload.expiresAt), Date.parse(rec3.timestamp) + 24 * 60 * 60 * 1000, "request: deadline never past the Sol run's own 24 hours");
   assert.match(r1.payload.summary.join("\n"), /Finding 1 of 3 \(HIGH\).*\nFinding 3 of 3 \(HIGH\)/, "request: lists only the findings asked about");
-  assert.match(r1.payload.summary.join("\n"), /To skip them all, reply: skip/, "request: tells him the one word");
+  assert.match(r1.payload.summary.join("\n"), /To skip all of them, reply with only one of: skip, accept, don't fix, I disagree, I don't want those, leave them\./, "request: lists every reply that skips");
+  assert.match(r1.payload.summary.join("\n"), /Any other reply \(ok, yes, a question, or more words\) skips nothing\./, "request: says what skips nothing");
+  assert.match(r1.payload.summary.join("\n"), /Pull request: croprxsolutions\/CRX_Manager_V1\.0#2200 /, "request: names the repository and PR");
   assert.doesNotMatch(r1.payload.summary.join("\n"), /accept \d{6}/, "request: no code to type");
   const shownText = r1.payload.summary.join("\n");
   const resolveSkip = (shown, sessionId = SESSION) => resolvePlainReply({ dirs, sessionId, readShown: () => shown, purposes: [OWNER_SOL_SKIP_PURPOSE] });

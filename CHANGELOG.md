@@ -40,6 +40,7 @@ Releases of CRX Manager, newest first.
 * sql-column-check reads select and RETURNING list commas in one pass (#2046)
 
 #### 🧹 Refactors & Chore
+* ask about automatic record changes before building them (#2153)
 * rewrite two stale job chains to current behaviour (#2168) (#2186)
 * repair seven job smoke chains and run them in the edit_jobs prover (#2146) (#2173)
 * record list C leftovers written, #1724 closed (#2152)

@@ -1,35 +1,36 @@
--- Create Invoice on a spray job stops refusing small and customer-supplied chemical lines (Mason, 2026-11-21).
--- Contract: docs/plans/2026-11-21-job-transfer-below-cost-CONTRACT.md.
+-- Create Invoice on a spray job writes each chemical line's real quantity (Mason, 2026-11-21 and 2026-11-22).
+-- Contract: docs/plans/2026-11-21-job-transfer-below-cost-CONTRACT.md ("Redesign: real quantities").
 -- actor-binding-check: exempt -- no new caller-facing function; the transfer's public wrapper (transfer_job_to_invoice)
--- and its actor binding and p_idempotency_key are unchanged; the helper and the trigger are not callable by API roles.
+-- and its actor binding and p_idempotency_key are unchanged; the two helpers are not callable by API roles.
 --
--- WHY: the transfer writes each chemical line as quantity 1 with the whole line total as its price, and the
--- below-cost wall compared that total with the cost of ONE stock unit. A 3 fl oz line ($1.17) on a product costing
--- $30 a gallon, and every customer-supplied $0 line, were refused; 10 gallons sold for $250 at $30 a gallon passed.
+-- WHY: the transfer wrote each chemical line as quantity 1 with the whole line total as its price, and the below-cost
+-- wall compared that total with the cost of ONE stock unit. A 3 fl oz line ($1.17) on a product costing $30 a gallon,
+-- and every customer-supplied $0 line, were refused; 10 gallons sold for $250 at $30 a gallon passed. The "1" also
+-- reached the restricted-use sales register and the sales reports.
 --
--- WHAT:
---  1. New private _job_transfer_line_clears_cost_20270207: customer-supplied lines clear. Otherwise, when the job
---     line's own unit converts to the product's stock unit (field_app_priced_quantity, the product's form) and the
---     product has a whole-cent cost (cost, stock unit and form read from one row locked FOR SHARE), the line total must
---     be at least cost cents x quantity in stock units, exactly (no rounding), else the transfer stops
---     (JOB_LINE_BELOW_COST, naming the product, never the cost). Anything else is not judged (the wall decides, as
---     before). Not SECURITY DEFINER; owner postgres; executable by no API role.
---  2. _transfer_job_to_invoice_intent_impl_20260908 (re-emitted from 20261120100000) asks (1) for each chemical line
---     and declares the below-cost context 'field_app_job_transfer', with crx.job_transfer_product = that product, only
---     around the inserts of a cleared line, clearing both right after. Nothing else in the body changes.
---  3. _enforce_below_cost_line (re-emitted from 20270201180000) accepts an invoice_items INSERT under that context only
---     when it is that product's line on a job's field-application invoice, with no order link, not a fee, quantity 1 and
---     price = amount ($0 price, amount and cost, manual, for a customer-supplied line, accepted before the cost check). Every other table, operation and line is judged exactly as before.
---  Grants, owners, SECURITY DEFINER and search_path are unchanged. No stored row changes (live 2026-11-21, read only:
---  0 completed unbilled jobs). Taha's open issue #2061 concerns the same transfer; no open PR re-emits it.
+-- WHAT (Mason, 2026-11-22: "Redesign", "Allow up to 50c", "$0 info line", "Stop and name it"):
+--  1. New private _job_transfer_line_price_20270207 prices one job chemical line the way field-application invoices
+--     already do: quantity converted to the product's sold unit (inventory_unit) and rounded to 4 decimals, a price
+--     per sold unit (the job's agreed price, converted, nearest cent) and the product's current cost per sold unit,
+--     read from the product row locked FOR SHARE. It stops Create Invoice, naming the product, when the unit can't be
+--     converted (JOB_LINE_UNIT_UNCONVERTIBLE), the product has no cost (JOB_LINE_COST_MISSING), the exact agreed
+--     price is below the exact cost (JOB_LINE_BELOW_COST, never stating the cost), or rounding would move the line's
+--     amount or booked cost by more than 50 cents or bill a priced line at $0 (JOB_LINE_ROUNDING).
+--  2. New private _job_transfer_split_qty_20270207 allocates a quantity to owners by acre share (largest remainder).
+--  3. _transfer_job_to_invoice_intent_impl_20260908 (re-emitted from 20261120100000) writes each line with (1); a
+--     multi-owner line gives each owner its allocated quantity at the same price, within 50 cents of its exact share.
+--     A customer-supplied product is a $0 information line with no catalog link. Header, member totals and
+--     commissions read a line's booked cost as cost x quantity; a single invoice bills the sum of its lines. A deleted
+--     job is refused (JOB_DELETED) and a deleted blend ticket with a live invoice blocks (Sol round 1).
+--  The below-cost wall is unchanged: a line priced per sold unit is judged by it exactly. Grants, owners, SECURITY
+--  DEFINER and search_path are unchanged. No stored row changes; old invoices keep their quantity-1 lines.
 --
--- ROLLBACK: scripts/smoke/job-transfer-below-cost-reverse.sql restores both bodies and drops the helper, proven by
--- scripts/smoke/prove-job-transfer-below-cost-real-schema.mjs.
+-- ROLLBACK: scripts/smoke/job-transfer-below-cost-reverse.sql restores the transfer body and drops the helpers, proven
+-- by scripts/smoke/prove-job-transfer-below-cost-real-schema.mjs. Invoices already written keep their real quantities.
 
 DO $preflight$
 DECLARE
   v_impl oid := to_regprocedure('public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)');
-  v_wall oid := to_regprocedure('public._enforce_below_cost_line()');
 BEGIN
   IF v_impl IS NULL
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_impl) IS DISTINCT FROM 'a54e3e6a3a2b920e9bcd1a350cd92423'
@@ -40,92 +41,123 @@ BEGIN
                        AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]) THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: the transfer body, owner, settings or grants are not the reviewed ones (20261120100000)';
   END IF;
-  IF v_wall IS NULL
-     OR (SELECT count(*) FROM pg_proc o WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_enforce_below_cost_line') <> 1
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_wall) IS DISTINCT FROM '5fa0a5f975dc2a84b3c6599a84b8cc55'
-     OR NOT EXISTS (SELECT 1 FROM pg_proc p
-                     WHERE p.oid = v_wall AND p.prosecdef AND p.proowner = 'postgres'::regrole
-                       AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
-                       AND p.provolatile = 'v' AND NOT p.proisstrict AND NOT p.proleakproof AND NOT p.proretset) THEN
-    RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: _enforce_below_cost_line is not the reviewed 20270201180000 body, or its header changed';
-  END IF;
-  IF to_regprocedure('public._job_transfer_line_clears_cost_20270207(uuid,text,numeric,text,bigint,boolean)') IS NOT NULL THEN
+  IF to_regprocedure('public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint)') IS NOT NULL
+     OR to_regprocedure('public._job_transfer_split_qty_20270207(numeric,numeric[])') IS NOT NULL THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: already applied';
   END IF;
   IF to_regprocedure('public.field_app_priced_quantity(numeric,text,text,text)') IS NULL
      OR to_regprocedure('public.safe_cents_qty(bigint,numeric)') IS NULL
-     OR to_regprocedure('public.normalize_rate_unit(text)') IS NULL
-     OR to_regprocedure('public._invoice_line_rup_facts(uuid,text)') IS NULL THEN
-    RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: field_app_priced_quantity, safe_cents_qty, normalize_rate_unit or _invoice_line_rup_facts is missing';
+     OR to_regprocedure('public.normalize_rate_unit(text)') IS NULL THEN
+    RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: field_app_priced_quantity, safe_cents_qty or normalize_rate_unit is missing';
   END IF;
   PERFORM set_config('crx.jbc_xid', pg_current_xact_id()::text, true);
-  PERFORM set_config('crx.jbc_wall_acl', (SELECT coalesce(proacl::text, '') FROM pg_proc WHERE oid = v_wall), true);
 END;
 $preflight$;
 
--- 1. Whole-line below-cost check for a job chemical line.
-CREATE FUNCTION public._job_transfer_line_clears_cost_20270207(
-  p_product_id uuid, p_product_name text, p_quantity numeric, p_job_unit text,
-  p_line_price_cents bigint, p_customer_supplied boolean
-) RETURNS boolean
+-- 1. One job chemical line, priced per sold unit.
+CREATE FUNCTION public._job_transfer_line_price_20270207(
+  p_product_id uuid, p_product_name text, p_quantity numeric, p_job_unit text, p_price_per_unit_cents bigint,
+  OUT o_quantity numeric, OUT o_unit text, OUT o_unit_price_cents bigint, OUT o_cost_cents bigint,
+  OUT o_exact_qty numeric, OUT o_exact_cents numeric
+)
  LANGUAGE plpgsql
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
+  v_name text := COALESCE(NULLIF(btrim(p_product_name), ''), 'A chemical');
   v_cost numeric;
-  v_stock_unit text;
+  v_sold text;
   v_form text;
-  v_stock_qty numeric;
   v_unit text;
 BEGIN
-  -- true: the line may be written under 'field_app_job_transfer'. false: not judged here; the wall judges it as before.
-  -- A restricted-use (or not yet known) product keeps today's path: the transfer writes the line as quantity 1 and
-  -- posting copies that quantity into the restricted-use sales register, so a newly accepted line would record the
-  -- wrong amount sold (Sol round 1).
-  IF COALESCE((SELECT f.rup_status FROM public._invoice_line_rup_facts(p_product_id, NULL::text) f), 'unknown') <> 'no' THEN
-    RETURN false;
-  END IF;
-  IF p_customer_supplied THEN
-    RETURN true;
-  END IF;
-  IF p_quantity IS NULL OR p_quantity <= 0 OR p_line_price_cents IS NULL OR p_line_price_cents < 0
-     OR NULLIF(btrim(p_job_unit), '') IS NULL THEN
-    RETURN false;
-  END IF;
-  -- Cost, stock unit and form from one locked product row: the same cost the wall reads, and nothing can change it
-  -- before the line is written (FOR SHARE).
-  SELECT p.current_cost, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size), p.product_form
-    INTO v_cost, v_stock_unit, v_form
+  -- Cost, sold unit and form from one locked product row: the same row the wall reads, unchanged until the line is
+  -- written (FOR SHARE).
+  SELECT p.current_cost, NULLIF(btrim(p.inventory_unit), ''), p.product_form
+    INTO v_cost, v_sold, v_form
     FROM public.products p WHERE p.id = p_product_id FOR SHARE;
-  IF NOT FOUND OR v_cost IS NULL OR v_cost::text IN ('NaN', 'Infinity', '-Infinity')
-     OR v_cost <= 0 OR v_cost <> round(v_cost, 2) OR NULLIF(btrim(v_stock_unit), '') IS NULL THEN
-    RETURN false;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'PRODUCT_NOT_FOUND' USING ERRCODE = 'P0001';
   END IF;
-  -- Spellings are folded the way job completion folds them (normalize_rate_unit: 'fl. oz', 'gallons', 'lbs', a
-  -- '/ac' suffix ...; Sol round 1), except that a fluid-ounce spelling stays 'fl oz', so a dry product never reads it
-  -- as a dry ounce (normalize_rate_unit folds 'fl oz' to 'oz').
-  v_unit := CASE
-    WHEN public.normalize_rate_unit(p_job_unit) = 'oz' AND lower(btrim(p_job_unit)) ~ '^(fl|fluid)' THEN 'fl oz'
-    ELSE COALESCE(public.normalize_rate_unit(p_job_unit), p_job_unit) END;
-  v_stock_qty := public.field_app_priced_quantity(p_quantity, v_unit, v_stock_unit, v_form);
-  IF v_stock_qty IS NULL THEN
-    RETURN false;
+  IF p_quantity IS NULL OR p_quantity::text IN ('NaN', 'Infinity', '-Infinity') OR p_quantity <= 0 THEN
+    RAISE EXCEPTION 'JOB_LINE_QUANTITY_INVALID: % has no quantity on this job that can be recorded. Nothing was invoiced; correct the job''s quantity first.', v_name USING ERRCODE = 'P0001';
   END IF;
-  -- Exact: the line must cover the cost of its whole quantity, with no rounding in the line's favour.
-  IF p_line_price_cents::numeric < round(v_cost * 100) * v_stock_qty THEN
-    -- Never states the cost (cost is admin-only, 2026-10-15).
-    RAISE EXCEPTION USING ERRCODE = 'P0001',
-      MESSAGE = 'JOB_LINE_BELOW_COST: ' || COALESCE(p_product_name, 'A chemical')
-        || ' is priced below its cost on this job. Nothing was invoiced; its price must be corrected before this job can be invoiced.';
+  -- Spellings are folded the way job completion folds them (normalize_rate_unit: 'fl. oz', 'gallons', 'lbs' ...),
+  -- except that a fluid-ounce spelling stays 'fl oz' (so a dry product never reads it as a dry ounce) and a per-area
+  -- unit ('/ac') is never a quantity.
+  IF NULLIF(btrim(p_job_unit), '') IS NOT NULL AND position('/' IN p_job_unit) = 0 AND v_sold IS NOT NULL THEN
+    v_unit := CASE
+      WHEN public.normalize_rate_unit(p_job_unit) = 'oz' AND lower(btrim(p_job_unit)) ~ '^(fl|fluid)' THEN 'fl oz'
+      ELSE COALESCE(public.normalize_rate_unit(p_job_unit), btrim(p_job_unit)) END;
+    o_exact_qty := public.field_app_priced_quantity(p_quantity, v_unit, v_sold, v_form);
   END IF;
-  RETURN true;
+  -- Mason, 2026-11-22 ("Stop and name it").
+  IF o_exact_qty IS NULL OR o_exact_qty <= 0 THEN
+    RAISE EXCEPTION 'JOB_LINE_UNIT_UNCONVERTIBLE: % is recorded on this job in "%", which can''t be converted to the unit it is sold in ("%"). Nothing was invoiced; correct the unit on the job or the product first.', v_name, COALESCE(btrim(p_job_unit), ''), COALESCE(v_sold, 'not set') USING ERRCODE = 'P0001';
+  END IF;
+  IF v_cost IS NULL OR v_cost::text IN ('NaN', 'Infinity', '-Infinity') OR v_cost <= 0 OR v_cost <> round(v_cost, 2) THEN
+    RAISE EXCEPTION 'JOB_LINE_COST_MISSING: % has no cost recorded. Nothing was invoiced; an admin must set the product''s cost first.', v_name USING ERRCODE = 'P0001';
+  END IF;
+  o_cost_cents := round(v_cost * 100)::bigint;
+  o_exact_cents := p_quantity * COALESCE(p_price_per_unit_cents, 0);
+  -- Exact, before any rounding: the agreed amount must cover the cost of the whole quantity. Never states the cost
+  -- (cost is admin-only, 2026-10-15). No override (Mason, 2026-11-21).
+  IF o_exact_cents < o_cost_cents * o_exact_qty THEN
+    RAISE EXCEPTION 'JOB_LINE_BELOW_COST: % is priced below its cost on this job. Nothing was invoiced; its price must be corrected before this job can be invoiced.', v_name USING ERRCODE = 'P0001';
+  END IF;
+  -- At or above cost exactly, so the nearest whole cent per sold unit is too (the cost is whole cents).
+  o_unit_price_cents := round(o_exact_cents / o_exact_qty)::bigint;
+  o_quantity := round(o_exact_qty, 4);
+  o_unit := v_sold;
+  -- Mason, 2026-11-22 ("Allow up to 50c"): the line stores 4 decimals; refuse when that moves its amount or booked cost
+  -- by more than 50 cents, bills a priced line at $0, or does not fit the column.
+  IF o_quantity <= 0 OR o_quantity >= 100000000
+     OR abs(public.safe_cents_qty(o_unit_price_cents, o_quantity) - o_exact_cents) > 50
+     OR abs(public.safe_cents_qty(o_cost_cents, o_quantity) - o_cost_cents * o_exact_qty) > 50
+     OR (o_exact_cents > 0 AND public.safe_cents_qty(o_unit_price_cents, o_quantity) = 0) THEN
+    RAISE EXCEPTION 'JOB_LINE_ROUNDING: % can''t be recorded to 4 decimals in % without its amount changing by more than $0.50. Nothing was invoiced; record this product in a smaller sold unit first.', v_name, v_sold USING ERRCODE = 'P0001';
+  END IF;
 END;
 $function$;
-ALTER FUNCTION public._job_transfer_line_clears_cost_20270207(uuid, text, numeric, text, bigint, boolean) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public._job_transfer_line_clears_cost_20270207(uuid, text, numeric, text, bigint, boolean)
+ALTER FUNCTION public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint)
   FROM PUBLIC, anon, authenticated, service_role;
 
--- 2. The transfer, from 20261120100000 with the check and the scoped context added.
+-- 2. A quantity allocated by weight in steps of 0.0001 (largest remainder; ties to the earlier owner).
+CREATE FUNCTION public._job_transfer_split_qty_20270207(p_quantity numeric, p_weights numeric[])
+ RETURNS numeric[]
+ LANGUAGE plpgsql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_units bigint := round(p_quantity * 10000)::bigint;
+  v_total numeric := (SELECT sum(GREATEST(w, 0)) FROM unnest(p_weights) w);
+  v_base bigint[] := '{}';
+  v_left bigint;
+  v_i integer;
+BEGIN
+  IF v_total IS NULL OR v_total <= 0 THEN
+    RAISE EXCEPTION 'JOB_SPLIT_INVALID: the owners'' shares of this job add up to nothing' USING ERRCODE = 'P0001';
+  END IF;
+  FOR v_i IN 1 .. array_length(p_weights, 1) LOOP
+    v_base := array_append(v_base, floor(v_units * GREATEST(p_weights[v_i], 0) / v_total)::bigint);
+  END LOOP;
+  v_left := v_units - (SELECT sum(b) FROM unnest(v_base) b);
+  FOR v_i IN
+    SELECT u.ord FROM unnest(p_weights) WITH ORDINALITY AS u(w, ord)
+     ORDER BY (v_units * GREATEST(u.w, 0) / v_total) - floor(v_units * GREATEST(u.w, 0) / v_total) DESC, u.ord
+     LIMIT v_left
+  LOOP
+    v_base[v_i] := v_base[v_i] + 1;
+  END LOOP;
+  RETURN ARRAY(SELECT b / 10000.0 FROM unnest(v_base) b);
+END;
+$function$;
+ALTER FUNCTION public._job_transfer_split_qty_20270207(numeric, numeric[]) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._job_transfer_split_qty_20270207(numeric, numeric[])
+  FROM PUBLIC, anon, authenticated, service_role;
+
+-- 3. The transfer, from 20261120100000: real quantities, the deleted-job and deleted-ticket refusals.
 CREATE OR REPLACE FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(p_job_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -149,8 +181,10 @@ DECLARE
   v_total_cost_cents bigint := 0;
   v_conversion RECORD;
   v_total_applied numeric;
-  v_cleared boolean;
-  v_prev_ctx text;
+  v_line RECORD;
+  v_qtys numeric[];
+  v_line_sum bigint := 0;
+  v_owner_ext bigint;
   v_share RECORD;
   v_share_total bigint := 0;
   v_has_price_override boolean := false;
@@ -175,8 +209,6 @@ DECLARE
   v_owner_primary boolean[];
   v_total_billable_acres numeric := 0;
   v_acre_pcts numeric[];
-  v_chem_price_split bigint[];
-  v_chem_cost_split bigint[];
   v_oidx integer;
   v_member_id uuid;
   v_member_ids uuid[] := '{}';
@@ -386,6 +418,7 @@ BEGIN
       SELECT jc.product_id, jc.rate_per_acre,
              safe_cents_qty(jc.cost_per_unit_cents, jc.quantity) AS chem_cost,
              safe_cents_qty(jc.price_per_unit_cents, jc.quantity) AS chem_price,
+           jc.price_per_unit_cents AS job_price,
              jc.quantity,
              jc.customer_supplied, jc.unit AS job_unit,
              p.product_name, COALESCE(NULLIF(btrim(jc.unit), ''), p.unit_size) AS unit_size, p.epa_registration, p.product_form,
@@ -394,59 +427,74 @@ BEGIN
       WHERE jc.job_id = p_job_id ORDER BY p.product_name
     LOOP
       v_item_order := v_item_order + 1;
-      -- Below-cost judged on the whole job line (20270207125000); a cleared line saves under its own wall context.
-      -- No inherited product binding: a line this check does not clear can never meet the wall exemption.
-      PERFORM set_config('crx.job_transfer_product', '', true);
-      v_cleared := public._job_transfer_line_clears_cost_20270207(
-        v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit,
-        v_chem.chem_price, v_chem.customer_supplied);
-      IF v_cleared THEN
-        v_prev_ctx := current_setting('app.crx_below_cost_operation', true);
-        PERFORM set_config('app.crx_below_cost_operation', 'field_app_job_transfer', true);
-        PERFORM set_config('crx.job_transfer_product', v_chem.product_id::text, true);
+      -- 20270207125000 (Mason, 2026-11-22, "Redesign"): the line carries its real quantity in the product's sold unit,
+      -- priced and checked once for the whole job line, then the quantity is allocated to the owners by acre share
+      -- (largest remainder, so the owners' quantities add up to the line's).
+      IF v_chem.customer_supplied THEN
+        IF ROUND(COALESCE(v_chem.quantity, 0), 4) <= 0 THEN
+          RAISE EXCEPTION 'JOB_LINE_QUANTITY_INVALID: % has no quantity on this job that can be recorded. Nothing was invoiced; correct the job''s quantity first.', v_chem.product_name USING ERRCODE = 'P0001';
+        END IF;
+        v_qtys := public._job_transfer_split_qty_20270207(ROUND(v_chem.quantity, 4), v_acre_pcts);
+      ELSE
+        SELECT * INTO v_line FROM public._job_transfer_line_price_20270207(
+          v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit, v_chem.job_price);
+        v_qtys := public._job_transfer_split_qty_20270207(v_line.o_quantity, v_acre_pcts);
       END IF;
-      -- customer-supplied products carry $0 price AND $0 cost (we didn't buy them).
-      v_chem_price_split := calculate_billing_splits(
-        CASE WHEN v_chem.customer_supplied THEN 0 ELSE COALESCE(v_chem.chem_price, 0) END, v_acre_pcts);
-      v_chem_cost_split := calculate_billing_splits(
-        CASE WHEN v_chem.customer_supplied THEN 0 ELSE COALESCE(v_chem.chem_cost, 0) END, v_acre_pcts);
 
       FOR v_oidx IN 1 .. array_length(v_owner_ids, 1) LOOP
         v_member_acres := v_owner_acres[v_oidx];
-        -- Owner's applied amount = rate x their acres (their slice of the uniform-rate
-        -- application). The line quantity stays 1 (a single job-chemical line, matching
-        -- the single-owner path where unit_price == extended); the real applied amount
-        -- lives in total_applied / total_applied_gl_lb.
+        -- Owner's applied amount = rate x their acres (their slice of the uniform-rate application).
         v_total_applied := CASE WHEN v_chem.rate_per_acre IS NOT NULL AND v_member_acres > 0
           THEN v_chem.rate_per_acre * v_member_acres ELSE NULL END;
         SELECT * INTO v_conversion
           FROM convert_to_gl_lb(v_total_applied, v_chem.rate_unit, v_chem.product_form);
 
-        INSERT INTO invoice_items (
-          invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents,
-          cost_cents, sort_order, acres, rate_per_acre, rate_unit,
-          total_applied, total_applied_unit, total_applied_gl_lb, gl_lb_unit,
-          epa_registration, product_form, is_application_fee, price_source
-        ) VALUES (
-          v_member_ids[v_oidx], v_chem.product_id,
-          CASE WHEN v_chem.customer_supplied THEN v_chem.product_name || ' (customer supplied)' ELSE v_chem.product_name END,
-          1,
-          v_chem.unit_size,
-          v_chem_price_split[v_oidx],
-          v_chem_price_split[v_oidx],
-          v_chem_cost_split[v_oidx],
-          v_item_order, v_member_acres,
-          v_chem.rate_per_acre, v_chem.rate_unit, v_total_applied,
-          COALESCE(v_chem.rate_unit, v_chem.unit_size),
-          v_conversion.converted_value, v_conversion.converted_unit,
-          v_chem.epa_registration, v_chem.product_form, false,
-          CASE WHEN v_chem.customer_supplied THEN 'manual' ELSE NULL END
-        );
+        IF v_chem.customer_supplied THEN
+          CONTINUE WHEN v_qtys[v_oidx] <= 0;
+          -- The grower's own product: a $0 information line with no catalog link (Mason, 2026-11-22, "$0 info line"):
+          -- never a sale of ours, so no below-cost check, restricted-use sales record or sales report counts it.
+          INSERT INTO invoice_items (
+            invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents,
+            cost_cents, sort_order, acres, rate_per_acre, rate_unit,
+            total_applied, total_applied_unit, total_applied_gl_lb, gl_lb_unit,
+            epa_registration, product_form, is_application_fee, price_source
+          ) VALUES (
+            v_member_ids[v_oidx], NULL, v_chem.product_name || ' (customer supplied)',
+            v_qtys[v_oidx], v_chem.unit_size, 0, 0, 0,
+            v_item_order, v_member_acres,
+            v_chem.rate_per_acre, v_chem.rate_unit, v_total_applied,
+            COALESCE(v_chem.rate_unit, v_chem.unit_size),
+            v_conversion.converted_value, v_conversion.converted_unit,
+            v_chem.epa_registration, v_chem.product_form, false, 'manual'
+          );
+        ELSE
+          v_owner_ext := safe_cents_qty(v_line.o_unit_price_cents, v_qtys[v_oidx]);
+          -- Mason, 2026-11-22 ("Allow up to 50c"): each owner's line within 50 cents of its exact share, never $0.
+          IF v_acre_pcts[v_oidx] > 0 AND (
+               v_qtys[v_oidx] <= 0
+               OR (v_owner_ext = 0 AND v_line.o_exact_cents > 0)
+               OR abs(v_owner_ext - v_line.o_exact_cents * v_acre_pcts[v_oidx] / 100) > 50
+               OR abs(safe_cents_qty(v_line.o_cost_cents, v_qtys[v_oidx])
+                      - v_line.o_cost_cents * v_line.o_exact_qty * v_acre_pcts[v_oidx] / 100) > 50) THEN
+            RAISE EXCEPTION 'JOB_LINE_ROUNDING: % can''t be split between this job''s owners to 4 decimals in % without an owner''s amount changing by more than $0.50. Nothing was invoiced; record this product in a smaller sold unit, or invoice the owners from the field-application editor.', v_chem.product_name, v_line.o_unit USING ERRCODE = 'P0001';
+          END IF;
+          CONTINUE WHEN v_qtys[v_oidx] <= 0;
+          INSERT INTO invoice_items (
+            invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents,
+            cost_cents, sort_order, acres, rate_per_acre, rate_unit,
+            total_applied, total_applied_unit, total_applied_gl_lb, gl_lb_unit,
+            epa_registration, product_form, is_application_fee, price_source
+          ) VALUES (
+            v_member_ids[v_oidx], v_chem.product_id, v_chem.product_name,
+            v_qtys[v_oidx], v_line.o_unit, v_line.o_unit_price_cents, v_owner_ext, v_line.o_cost_cents,
+            v_item_order, v_member_acres,
+            v_chem.rate_per_acre, v_chem.rate_unit, v_total_applied,
+            COALESCE(v_chem.rate_unit, v_chem.unit_size),
+            v_conversion.converted_value, v_conversion.converted_unit,
+            v_chem.epa_registration, v_chem.product_form, false, 'manual'
+          );
+        END IF;
       END LOOP;
-      IF v_cleared THEN
-        PERFORM set_config('app.crx_below_cost_operation', COALESCE(v_prev_ctx, ''), true);
-        PERFORM set_config('crx.job_transfer_product', '', true);
-      END IF;
     END LOOP;
 
     -- Per-owner totals, per-acre application fee, header flip, and per-member commission.
@@ -454,7 +502,8 @@ BEGIN
       v_member_id := v_member_ids[v_oidx];
       v_member_acres := v_owner_acres[v_oidx];
 
-      SELECT COALESCE(SUM(extended_cents), 0), COALESCE(SUM(cost_cents), 0)
+      -- 20270207125000: a chemical line's cost is per sold unit; its booked cost is cost x quantity.
+      SELECT COALESCE(SUM(extended_cents), 0), COALESCE(SUM(safe_cents_qty(COALESCE(cost_cents, 0), quantity)), 0)
         INTO v_member_total, v_member_cost
         FROM invoice_items WHERE invoice_id = v_member_id;
 
@@ -525,7 +574,7 @@ BEGIN
     -- excludes the per-acre fee). Sum across members == the whole job's chemical profit.
     FOR v_oidx IN 1 .. array_length(v_member_ids, 1) LOOP
       v_member_id := v_member_ids[v_oidx];
-      SELECT COALESCE(SUM(COALESCE(ii.extended_cents, 0) - COALESCE(ii.cost_cents, 0)), 0)
+      SELECT COALESCE(SUM(COALESCE(ii.extended_cents, 0) - safe_cents_qty(COALESCE(ii.cost_cents, 0), COALESCE(ii.quantity, 1))), 0)
         INTO v_member_profit_cents
       FROM invoice_items ii
       WHERE ii.invoice_id = v_member_id
@@ -636,6 +685,7 @@ BEGIN
     SELECT jc.product_id, jc.rate_per_acre,
            safe_cents_qty(jc.cost_per_unit_cents, jc.quantity) AS chem_cost,
            safe_cents_qty(jc.price_per_unit_cents, jc.quantity) AS chem_price,
+           jc.price_per_unit_cents AS job_price,
            jc.quantity, jc.customer_supplied, jc.unit AS job_unit,
            p.product_name, COALESCE(NULLIF(btrim(jc.unit), ''), p.unit_size) AS unit_size, p.epa_registration, p.product_form,
            COALESCE(NULLIF(btrim(jc.rate_unit), ''), NULLIF(btrim(jc.unit), ''), p.unit_size) AS rate_unit
@@ -645,7 +695,6 @@ BEGIN
     v_item_order := v_item_order + 1;
     -- U4<<< a grower-supplied product costs us nothing (we didn't buy it) — keep
     -- it OUT of the invoice cost so margin isn't understated. (#53/#54)
-    v_total_cost_cents := v_total_cost_cents + CASE WHEN v_chem.customer_supplied THEN 0 ELSE COALESCE(v_chem.chem_cost, 0) END;
     -- >>>U4
     v_total_applied := CASE WHEN v_chem.rate_per_acre IS NOT NULL AND v_total_acres > 0
       THEN v_chem.rate_per_acre * v_total_acres ELSE NULL END;
@@ -654,53 +703,53 @@ BEGIN
     -- yields (NULL, NULL) without leaving v_conversion unassigned.
     SELECT * INTO v_conversion
       FROM convert_to_gl_lb(v_total_applied, v_chem.rate_unit, v_chem.product_form);
-    -- Below-cost judged on the whole job line (20270207125000); a cleared line saves under its own wall context.
-    -- No inherited product binding: a line this check does not clear can never meet the wall exemption.
-    PERFORM set_config('crx.job_transfer_product', '', true);
-    -- A job whose fields carry a per-acre price override bills that price, not these lines, so its lines keep today's
-    -- path (Sol round 1).
-    v_cleared := NOT EXISTS (SELECT 1 FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
-                              WHERE jf.job_id = p_job_id AND fbd.price_override_cents IS NOT NULL)
-      AND public._job_transfer_line_clears_cost_20270207(
-        v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit,
-        v_chem.chem_price, v_chem.customer_supplied);
-    IF v_cleared THEN
-      v_prev_ctx := current_setting('app.crx_below_cost_operation', true);
-      PERFORM set_config('app.crx_below_cost_operation', 'field_app_job_transfer', true);
-      PERFORM set_config('crx.job_transfer_product', v_chem.product_id::text, true);
-    END IF;
-    INSERT INTO invoice_items (
-      invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents,
-      cost_cents, sort_order, acres, rate_per_acre, rate_unit,
-      total_applied, total_applied_unit, total_applied_gl_lb, gl_lb_unit,
-      epa_registration, product_form, is_application_fee, price_source
-    ) VALUES (
-      v_invoice_id, v_chem.product_id,
-      -- U4<<< customer-supplied: keep the line (legal/application record) but at $0
-      -- with a labeled description; force cost + price to 0. price_source='manual'
-      -- pins the $0 (Codex R5 P1: a product-backed $0 line without it would be
-      -- re-priced by tier when the unposted invoice is edited + re-saved). (#53/#54)
-      CASE WHEN v_chem.customer_supplied THEN v_chem.product_name || ' (customer supplied)' ELSE v_chem.product_name END,
-      1,
-      v_chem.unit_size,
-      CASE WHEN v_chem.customer_supplied THEN 0 ELSE COALESCE(v_chem.chem_price, 0) END,
-      CASE WHEN v_chem.customer_supplied THEN 0 ELSE COALESCE(v_chem.chem_price, 0) END,
-      CASE WHEN v_chem.customer_supplied THEN 0 ELSE COALESCE(v_chem.chem_cost, 0) END,
-      -- >>>U4
-      v_item_order, v_total_acres,
-      v_chem.rate_per_acre, v_chem.rate_unit, v_total_applied,
-      COALESCE(v_chem.rate_unit, v_chem.unit_size),
-      v_conversion.converted_value, v_conversion.converted_unit,
-      v_chem.epa_registration, v_chem.product_form, false,
-      CASE WHEN v_chem.customer_supplied THEN 'manual' ELSE NULL END
-    );
-    IF v_cleared THEN
-      PERFORM set_config('app.crx_below_cost_operation', COALESCE(v_prev_ctx, ''), true);
-      PERFORM set_config('crx.job_transfer_product', '', true);
+    -- 20270207125000 (Mason, 2026-11-22, "Redesign"): the line carries its real quantity in the product's sold unit,
+    -- with a price and cost per sold unit (_job_transfer_line_price_20270207 checks it against cost and rounding).
+    IF v_chem.customer_supplied THEN
+      IF ROUND(COALESCE(v_chem.quantity, 0), 4) <= 0 THEN
+        RAISE EXCEPTION 'JOB_LINE_QUANTITY_INVALID: % has no quantity on this job that can be recorded. Nothing was invoiced; correct the job''s quantity first.', v_chem.product_name USING ERRCODE = 'P0001';
+      END IF;
+      -- The grower's own product: a $0 information line with no catalog link (Mason, 2026-11-22, "$0 info line").
+      INSERT INTO invoice_items (
+        invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents,
+        cost_cents, sort_order, acres, rate_per_acre, rate_unit,
+        total_applied, total_applied_unit, total_applied_gl_lb, gl_lb_unit,
+        epa_registration, product_form, is_application_fee, price_source
+      ) VALUES (
+        v_invoice_id, NULL, v_chem.product_name || ' (customer supplied)',
+        ROUND(v_chem.quantity, 4), v_chem.unit_size, 0, 0, 0,
+        v_item_order, v_total_acres,
+        v_chem.rate_per_acre, v_chem.rate_unit, v_total_applied,
+        COALESCE(v_chem.rate_unit, v_chem.unit_size),
+        v_conversion.converted_value, v_conversion.converted_unit,
+        v_chem.epa_registration, v_chem.product_form, false, 'manual'
+      );
+    ELSE
+      SELECT * INTO v_line FROM public._job_transfer_line_price_20270207(
+        v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit, v_chem.job_price);
+      v_owner_ext := safe_cents_qty(v_line.o_unit_price_cents, v_line.o_quantity);
+      v_line_sum := v_line_sum + v_owner_ext;
+      v_total_cost_cents := v_total_cost_cents + safe_cents_qty(v_line.o_cost_cents, v_line.o_quantity);
+      INSERT INTO invoice_items (
+        invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents,
+        cost_cents, sort_order, acres, rate_per_acre, rate_unit,
+        total_applied, total_applied_unit, total_applied_gl_lb, gl_lb_unit,
+        epa_registration, product_form, is_application_fee, price_source
+      ) VALUES (
+        v_invoice_id, v_chem.product_id, v_chem.product_name,
+        v_line.o_quantity, v_line.o_unit, v_line.o_unit_price_cents, v_owner_ext, v_line.o_cost_cents,
+        v_item_order, v_total_acres,
+        v_chem.rate_per_acre, v_chem.rate_unit, v_total_applied,
+        COALESCE(v_chem.rate_unit, v_chem.unit_size),
+        v_conversion.converted_value, v_conversion.converted_unit,
+        v_chem.epa_registration, v_chem.product_form, false, 'manual'
+      );
     END IF;
   END LOOP;
 
-  UPDATE invoices SET total_cost_cents = v_total_cost_cents WHERE id = v_invoice_id;
+  -- 20270207125000: the header bills the lines as written (they differ from the job's own total only by the rounding
+  -- allowed above).
+  UPDATE invoices SET total_amount_cents = v_line_sum, total_cost_cents = v_total_cost_cents WHERE id = v_invoice_id;
 
   IF EXISTS (SELECT 1 FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id WHERE jf.job_id = p_job_id) THEN
     SELECT EXISTS (SELECT 1 FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id WHERE jf.job_id = p_job_id AND fbd.price_override_cents IS NOT NULL) INTO v_has_price_override;
@@ -728,7 +777,7 @@ BEGIN
           v_amount := safe_cents_qty(v_share.price_override_cents, v_share.share_acres);
           v_ppa := v_share.price_override_cents;
         ELSE
-          v_amount := ROUND(COALESCE(v_job.total_price_cents, 0) * v_share.avg_split_pct / 100.0)::bigint;
+          v_amount := ROUND(v_line_sum * v_share.avg_split_pct / 100.0)::bigint;
           v_ppa := NULL;
         END IF;
         INSERT INTO invoice_shares (invoice_id, customer_id, customer_name, split_percentage, acres, amount_cents, is_primary, sort_order, price_per_acre_cents, pricing_note)
@@ -747,7 +796,7 @@ BEGIN
     UPDATE invoices SET total_amount_cents = v_share_total WHERE id = v_invoice_id;
   ELSE
     INSERT INTO invoice_shares (invoice_id, customer_id, customer_name, split_percentage, acres, amount_cents, is_primary, sort_order)
-    SELECT v_invoice_id, v_job.customer_id, c.farm_name, 100.0, v_total_acres, COALESCE(v_job.total_price_cents, 0), true, 1
+    SELECT v_invoice_id, v_job.customer_id, c.farm_name, 100.0, v_total_acres, v_line_sum, true, 1
     FROM customers c WHERE c.id = v_job.customer_id;
   END IF;
 
@@ -835,7 +884,7 @@ BEGIN
   -- (COMMISSION_SPLIT_INVALID aborts, matching the order-conversion behavior).
   -- Pending amounts stay in sync with later unposted-invoice edits via the
   -- recompute in the item-rewrite path (Codex R2 P1), mirroring update_order_items.
-  SELECT COALESCE(SUM(COALESCE(ii.extended_cents, 0) - COALESCE(ii.cost_cents, 0)), 0)
+  SELECT COALESCE(SUM(COALESCE(ii.extended_cents, 0) - safe_cents_qty(COALESCE(ii.cost_cents, 0), COALESCE(ii.quantity, 1))), 0)
     INTO v_chem_profit_cents
   FROM invoice_items ii
   WHERE ii.invoice_id = v_invoice_id
@@ -891,394 +940,19 @@ REVOKE ALL ON FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(uuid
 GRANT EXECUTE ON FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)
   TO postgres;
 
--- 3. The below-cost wall, from 20270201180000 with the job-transfer context added.
-CREATE OR REPLACE FUNCTION public._enforce_below_cost_line()
- RETURNS trigger
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-  v_operation text := current_setting('app.crx_below_cost_operation', true);
-  v_reason text := NULLIF(btrim(current_setting('app.crx_below_cost_reason', true)), '');
-  v_actor uuid := auth.uid();
-  v_actor_role text;
-  v_product_name text;
-  v_cost numeric;
-  v_cost_cents bigint;
-  v_price_cents bigint;
-  v_quantity numeric;
-  v_entity_type text;
-  v_entity_id uuid;
-  v_line_id uuid;
-  v_product_id uuid;
-  v_is_application_fee boolean;
-  v_detail jsonb;
-  v_grower_share boolean := false;
-  v_job_transfer boolean := false;
-BEGIN
-  -- KI-156 (Mason, 2026-11-15: "Admins and reps"): _save_field_app_invoice_impl_20260714 declares
-  -- 'field_app_grower_share' around its $0 "included in grower share" line only. That line is not a
-  -- below-cost sale; it is judged at the refusal below. For every other check this context counts as none.
-  IF v_operation = 'field_app_grower_share' THEN
-    v_grower_share := TG_TABLE_NAME = 'invoice_items' AND TG_OP = 'INSERT';
-    v_operation := NULL;
-  END IF;
-  -- 20270207125000 (Mason, 2026-11-21): Create Invoice on a spray job (_transfer_job_to_invoice_intent_impl_20260908)
-  -- judges each chemical line's whole total against the cost of its whole quantity in stock units before it writes the
-  -- line, and declares 'field_app_job_transfer' (with crx.job_transfer_product) only around the lines it cleared. Such a line is written as quantity 1 with
-  -- the line total as its price, so the one-unit comparison below does not apply to it. Counts as no context otherwise.
-  IF v_operation = 'field_app_job_transfer' THEN
-    v_job_transfer := TG_TABLE_NAME = 'invoice_items' AND TG_OP = 'INSERT';
-    v_operation := NULL;
-  END IF;
-  IF v_job_transfer THEN
-    -- A customer-supplied line (the grower's own product: $0 price, $0 cost) is not a sale; nested so NEW's invoice
-    -- columns are read only on an invoice_items row. Checked before the cost lock so a product with no cost saves too.
-    IF NEW.product_id IS NOT NULL AND NEW.order_item_id IS NULL AND NOT COALESCE(NEW.is_application_fee, false)
-       AND NEW.quantity = 1 AND NEW.unit_price_cents = 0 AND COALESCE(NEW.extended_cents, 0) = 0
-       AND NEW.cost_cents = 0 AND NEW.price_source = 'manual'
-       AND NEW.product_id::text = current_setting('crx.job_transfer_product', true)
-       AND EXISTS (SELECT 1 FROM public.invoices i WHERE i.id = NEW.invoice_id
-                     AND i.job_id IS NOT NULL AND i.invoice_type = 'field_application') THEN
-      RETURN NEW;
-    END IF;
-  END IF;
-
-  IF TG_TABLE_NAME = 'order_items' THEN
-    -- Delivery completion and cancellation update fulfillment counters on an
-    -- already-approved sale. They do not make a new pricing decision. Let
-    -- context-free bookkeeping (and exposure-reducing quantity corrections)
-    -- proceed, while a product/price change or quantity increase still reaches
-    -- the fail-closed approval wall below.
-    IF TG_OP = 'UPDATE'
-       AND COALESCE(v_operation, '') = ''
-       AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id
-       AND NEW.price_per_unit IS NOT DISTINCT FROM OLD.price_per_unit
-       AND COALESCE(NEW.total_units_needed, 0)
-           <= COALESCE(OLD.total_units_needed, 0) THEN
-      RETURN NEW;
-    END IF;
-    -- Rush orders intentionally carry zero prices until price_order. They are
-    -- not sales decisions yet, so defer the wall to the pricing RPC.
-    IF NEW.pricing_pending = true AND NEW.price_per_unit = 0 THEN
-      RETURN NEW;
-    END IF;
-    IF NEW.price_per_unit IS NULL
-       OR NEW.price_per_unit::text IN ('NaN', 'Infinity', '-Infinity')
-       OR NEW.price_per_unit <> round(NEW.price_per_unit, 2) THEN
-      RAISE EXCEPTION 'INVALID_UNIT_PRICE_CENTS';
-    END IF;
-    v_entity_type := 'order';
-    v_entity_id := NEW.order_id;
-    v_line_id := NEW.id;
-    v_product_id := NEW.product_id;
-    v_price_cents := round(NEW.price_per_unit * 100)::bigint;
-    v_quantity := NEW.total_units_needed;
-  ELSIF TG_TABLE_NAME = 'invoice_items' THEN
-    -- complete_delivery can materialize an invoice line from an already-made
-    -- order pricing decision. Permit only an exact, exposure-bounded descendant
-    -- of that governed order line; a caller cannot use this hatch to substitute
-    -- another Product, price, cost snapshot, or larger quantity. Browser roles
-    -- also have no direct INSERT privilege on invoice_items.
-    -- save_invoice rebuilds a draft's lines; an order-linked line it writes back
-    -- unchanged is the same descendant and is judged the same way (#13), not
-    -- against today's product cost. A draft line repriced above its order price
-    -- (checked against cost when it was repriced) keeps that higher price: it
-    -- is less exposed below cost than the order decision it descends from.
-    IF TG_OP = 'INSERT'
-       AND COALESCE(v_operation, '') IN ('', 'save_invoice')
-       AND NEW.order_item_id IS NOT NULL
-       AND EXISTS (
-         SELECT 1
-         FROM public.order_items oi
-         WHERE oi.id = NEW.order_item_id
-           AND oi.product_id IS NOT DISTINCT FROM NEW.product_id
-           AND (round(oi.price_per_unit * 100)::bigint = NEW.unit_price_cents
-                OR (COALESCE(v_operation, '') = 'save_invoice'
-                    AND NEW.unit_price_cents > round(oi.price_per_unit * 100)::bigint))
-           AND round(COALESCE(oi.cost_per_unit, 0) * 100)::bigint = NEW.cost_cents
-           AND COALESCE(NEW.quantity, 0) >= 0
-           AND COALESCE(NEW.quantity, 0) <= COALESCE(oi.total_units_needed, 0)
-       ) THEN
-      RETURN NEW;
-    END IF;
-    -- Partial delivery can reduce a draft invoice line and tote-copy updates
-    -- bookkeeping only. Neither increases the approved below-cost exposure.
-    -- save_invoice restores a rebuilt line's identity the same way (#13).
-    IF TG_OP = 'UPDATE'
-       AND COALESCE(v_operation, '') IN ('', 'save_invoice')
-       AND NEW.product_id IS NOT NULL
-       AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id
-       AND NEW.order_item_id IS NOT DISTINCT FROM OLD.order_item_id
-       AND NEW.unit_price_cents IS NOT DISTINCT FROM OLD.unit_price_cents
-       AND NEW.cost_cents IS NOT DISTINCT FROM OLD.cost_cents
-       AND COALESCE(NEW.is_application_fee, false)
-           IS NOT DISTINCT FROM COALESCE(OLD.is_application_fee, false)
-       AND COALESCE(NEW.quantity, 0) <= COALESCE(OLD.quantity, 0) THEN
-      RETURN NEW;
-    END IF;
-    v_is_application_fee := COALESCE(NEW.is_application_fee, false);
-    IF v_is_application_fee AND NEW.product_id IS NOT NULL THEN
-      RAISE EXCEPTION 'APPLICATION_FEE_PRODUCT_INVALID';
-    END IF;
-    v_entity_type := 'invoice';
-    v_entity_id := NEW.invoice_id;
-    v_line_id := NEW.id;
-    v_product_id := NEW.product_id;
-    IF v_product_id IS NULL THEN
-      -- A non-product line has no catalog row to lock, but save_invoice lets a
-      -- caller supply cost_cents. Zero-cost fees/miscellaneous charges are not
-      -- below cost. Positive-cost lines compare their total stored revenue to
-      -- total stored cost and use quantity=1 in the approval audit so neither
-      -- an application fee nor a null-product misc line can bypass the wall.
-      IF COALESCE(NEW.cost_cents, 0) < 0 THEN
-        RAISE EXCEPTION 'INVALID_COST';
-      END IF;
-      IF NEW.quantity IS NULL
-         OR NEW.quantity::text IN ('NaN', 'Infinity', '-Infinity')
-         OR NEW.quantity <= 0 THEN
-        RAISE EXCEPTION 'INVALID_QUANTITY';
-      END IF;
-      IF COALESCE(NEW.cost_cents, 0) = 0 THEN
-        RETURN NEW;
-      END IF;
-      v_product_name := COALESCE(
-        NULLIF(btrim(NEW.description), ''),
-        CASE WHEN v_is_application_fee
-          THEN 'Application fee'
-          ELSE 'Non-product invoice line'
-        END
-      );
-      v_price_cents := COALESCE(
-        NEW.extended_cents,
-        round(COALESCE(NEW.unit_price_cents, 0) * COALESCE(NEW.quantity, 0))::bigint
-      );
-      v_cost_cents := CASE
-        WHEN v_is_application_fee THEN NEW.cost_cents
-        ELSE round(NEW.cost_cents * COALESCE(NEW.quantity, 0))::bigint
-      END;
-      v_quantity := 1;
-    ELSE
-      v_price_cents := NEW.unit_price_cents;
-      v_quantity := NEW.quantity;
-    END IF;
-  ELSIF TG_TABLE_NAME = 'quote_items' THEN
-    -- save_quote first inserts the client shape and then, in the same
-    -- transaction, recomputes every line from the locked Product row. App
-    -- roles cannot insert quote_items directly. Defer this private transient
-    -- INSERT so the authoritative UPDATE below is the single enforcement and
-    -- approval-audit point; any failure there rolls the entire save back.
-    IF TG_OP = 'INSERT' AND v_operation = 'save_quote' THEN
-      RETURN NEW;
-    END IF;
-    IF TG_OP = 'UPDATE'
-       AND COALESCE(v_operation, '') = ''
-       AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id
-       AND NEW.price_per_unit IS NOT DISTINCT FROM OLD.price_per_unit
-       AND COALESCE(NEW.total_units_needed, 0)
-           <= COALESCE(OLD.total_units_needed, 0) THEN
-      RETURN NEW;
-    END IF;
-    IF NEW.price_per_unit IS NULL
-       OR NEW.price_per_unit::text IN ('NaN', 'Infinity', '-Infinity')
-       OR NEW.price_per_unit <> round(NEW.price_per_unit, 2) THEN
-      RAISE EXCEPTION 'INVALID_UNIT_PRICE_CENTS';
-    END IF;
-    v_entity_type := 'quote';
-    v_entity_id := NEW.quote_id;
-    v_line_id := NEW.id;
-    v_product_id := NEW.product_id;
-    v_price_cents := round(NEW.price_per_unit * 100)::bigint;
-    v_quantity := COALESCE(NEW.total_units_needed, 0);
-  ELSE
-    RAISE EXCEPTION 'BELOW_COST_TRIGGER_TABLE_INVALID';
-  END IF;
-
-  IF v_price_cents < 0 THEN RAISE EXCEPTION 'INVALID_PRICE'; END IF;
-
-  IF v_product_id IS NOT NULL THEN
-    -- FOR SHARE prevents products.current_cost from changing between the check
-    -- and the line write, while allowing unrelated product rows to proceed.
-    SELECT p.product_name, p.current_cost
-      INTO v_product_name, v_cost
-    FROM public.products p
-    WHERE p.id = v_product_id
-    FOR SHARE;
-
-    IF NOT FOUND THEN RAISE EXCEPTION 'PRODUCT_NOT_FOUND'; END IF;
-    IF v_cost IS NULL
-       OR v_cost::text IN ('NaN', 'Infinity', '-Infinity')
-       OR v_cost <= 0 THEN
-      RAISE EXCEPTION 'COST_BASIS_REQUIRED:%', v_product_id;
-    END IF;
-    IF v_cost <> round(v_cost, 2) THEN
-      RAISE EXCEPTION 'COST_BASIS_CENTS_REQUIRED:%', v_product_id;
-    END IF;
-
-    v_cost_cents := round(v_cost * 100)::bigint;
-  END IF;
-
-  -- update_order_items previously trusted p_items.cost_per_unit, and
-  -- price_order previously reused an older snapshot. Both must write the same
-  -- locked current cost used by this guard, including every dependent amount.
-  IF TG_TABLE_NAME = 'order_items'
-     AND v_operation IN (
-       'create_direct_order', 'bulk_import_order',
-       'update_order_items', 'price_order'
-     ) THEN
-    NEW.cost_per_unit := v_cost_cents::numeric / 100;
-    NEW.cost_at_time_cents := v_cost_cents;
-    -- This trigger sorts after trg_order_items_round_money, so it must preserve
-    -- that canonical whole-cent invariant after replacing caller/stale cost.
-    NEW.total_price := round(NEW.price_per_unit * NEW.total_units_needed, 2);
-    NEW.profit := NEW.total_price
-                  - round(NEW.cost_per_unit * NEW.total_units_needed, 2);
-    NEW.net_margin := CASE
-      WHEN NEW.price_per_unit > 0
-        THEN round(((NEW.price_per_unit - NEW.cost_per_unit) / NEW.price_per_unit) * 100, 2)
-      ELSE 0
-    END;
-  END IF;
-
-  IF v_price_cents >= v_cost_cents THEN
-    RETURN NEW;
-  END IF;
-
-  -- 20270207125000: a spray-job chemical line the transfer already cleared on its whole quantity.
-  IF v_job_transfer THEN
-    IF NEW.product_id IS NOT NULL AND NEW.order_item_id IS NULL AND NOT COALESCE(NEW.is_application_fee, false)
-       AND NEW.quantity = 1 AND NEW.unit_price_cents = NEW.extended_cents
-       AND NEW.product_id::text = current_setting('crx.job_transfer_product', true)
-       AND EXISTS (SELECT 1 FROM public.invoices i WHERE i.id = NEW.invoice_id
-                     AND i.job_id IS NOT NULL AND i.invoice_type = 'field_application') THEN
-      RETURN NEW;
-    END IF;
-  END IF;
-
-  -- KI-156: the declared $0 grower-share line (no price, no amount, not a fee, not from an order) saves for an
-  -- active admin or sales rep. Nested so NEW's invoice columns are read only on an invoice_items row.
-  IF v_grower_share THEN
-    IF NEW.unit_price_cents = 0
-       AND COALESCE(NEW.extended_cents, 0) = 0
-       AND NOT COALESCE(NEW.is_application_fee, false)
-       AND NEW.order_item_id IS NULL
-       AND (public.is_admin() OR public.is_sales_rep()) THEN
-      -- #1990 Sol (Mason, 2026-11-20: "Reps if price covers cost"): a sales rep's grower-share chemicals must be
-      -- paid for by the per-acre price. The save writes this invoice's per-acre lines (no product, acres set, not a
-      -- fee) before any $0 line, so these sums are the whole invoice's by its last $0 line. Earlier $0 lines are
-      -- counted from their approval rows whose line still exists (a re-save deletes the old lines). An admin may
-      -- save it uncovered, as before. The message never states a cost (cost is admin-only, 2026-10-15).
-      -- Mason, 2026-11-21 (#2068 Sol round 3, chose "Add a cushion"): each $0 line's cost is counted as it is
-      -- booked (rounded per line, as the invoice records it) plus 51 cents. The save already refuses a line whose
-      -- booked cost differs from its exact cost by more than 50 cents (20270129171000), so the per-acre total then
-      -- covers the chemicals' exact cost however the lines are split or rounded.
-      IF NOT public.is_admin()
-         AND (SELECT COALESCE(sum(a.total_shortfall_cents + 51), 0)
-                FROM public.below_cost_approvals a
-               WHERE a.operation = 'field_app_grower_share'
-                 AND a.entity_type = 'invoice'
-                 AND a.entity_id = NEW.invoice_id
-                 AND EXISTS (SELECT 1 FROM public.invoice_items ii
-                              WHERE ii.id = a.line_id AND ii.invoice_id = NEW.invoice_id))
-             + round((v_cost_cents - v_price_cents) * v_quantity)::bigint + 51
-           > (SELECT COALESCE(sum(ii.extended_cents), 0)
-                FROM public.invoice_items ii
-               WHERE ii.invoice_id = NEW.invoice_id
-                 AND ii.product_id IS NULL
-                 AND ii.acres IS NOT NULL
-                 AND NOT COALESCE(ii.is_application_fee, false)
-                 AND ii.order_item_id IS NULL) THEN
-        RAISE EXCEPTION USING
-          ERRCODE = 'P0001',
-          MESSAGE = 'FIELD_APP_GROWER_SHARE_BELOW_COST: the grower''s per-acre price on this invoice does not cover the cost of the chemicals included in it, with a small allowance for rounding. Raise the per-acre price, bill the chemicals on their own lines, or ask an admin to save this invoice.';
-      END IF;
-      -- Mason, 2026-11-16 ("Yes, record it"): log who approved this $0 line, in this transaction.
-      INSERT INTO public.below_cost_approvals (
-        operation, entity_type, entity_id, line_id, product_id, actor_user_id,
-        reason, unit_price_cents, locked_unit_cost_cents, quantity,
-        total_shortfall_cents
-      ) VALUES (
-        'field_app_grower_share', v_entity_type, v_entity_id, v_line_id, v_product_id, v_actor,
-        'Included in the grower''s per-acre price', v_price_cents, v_cost_cents, v_quantity,
-        round((v_cost_cents - v_price_cents) * v_quantity)::bigint
-      );
-      RETURN NEW;
-    END IF;
-  END IF;
-
-  -- Cost is admin-only (Mason, 2026-10-15). Look the caller up BEFORE the
-  -- refusal detail is built: the detail travels back to the browser in the
-  -- error message, so it may carry the locked cost only for an active admin.
-  -- Without this, a sales rep could type a one-cent price and read the exact
-  -- product cost out of BELOW_COST_ADMIN_REQUIRED.
-  SELECT p.role INTO v_actor_role
-  FROM public.profiles p
-  WHERE p.id = v_actor
-    AND p.is_active = true;
-
-  v_detail := jsonb_build_object(
-    'operation', v_operation,
-    'entity_type', v_entity_type,
-    'entity_id', v_entity_id,
-    'line_id', v_line_id,
-    'product_id', v_product_id,
-    'product_name', v_product_name,
-    'unit_price_cents', v_price_cents,
-    'locked_unit_cost_cents', v_cost_cents
-  );
-  IF v_actor_role IS DISTINCT FROM 'admin' THEN
-    v_detail := v_detail - 'locked_unit_cost_cents';
-  END IF;
-
-  -- There are many owner-run RPCs and triggers that can write these shared line
-  -- tables. A missing context may proceed above cost, but it can never create a
-  -- below-cost sale. Known customer-facing paths declare context through thin
-  -- wrappers below; any missed future path fails closed here automatically.
-  IF v_operation IS NULL OR v_operation = '' THEN
-    RAISE EXCEPTION USING
-      ERRCODE = 'P0001',
-      MESSAGE = 'BELOW_COST_CONTEXT_REQUIRED:' || v_detail::text;
-  END IF;
-
-  IF v_actor_role IS DISTINCT FROM 'admin' THEN
-    RAISE EXCEPTION USING
-      ERRCODE = 'P0001',
-      MESSAGE = 'BELOW_COST_ADMIN_REQUIRED:' || v_detail::text;
-  END IF;
-  IF v_reason IS NULL THEN
-    RAISE EXCEPTION USING
-      ERRCODE = 'P0001',
-      MESSAGE = 'BELOW_COST_REASON_REQUIRED:' || v_detail::text;
-  END IF;
-
-  INSERT INTO public.below_cost_approvals (
-    operation, entity_type, entity_id, line_id, product_id, actor_user_id,
-    reason, unit_price_cents, locked_unit_cost_cents, quantity,
-    total_shortfall_cents
-  ) VALUES (
-    v_operation, v_entity_type, v_entity_id, v_line_id, v_product_id, v_actor,
-    left(v_reason, 1000), v_price_cents, v_cost_cents, v_quantity,
-    round((v_cost_cents - v_price_cents) * v_quantity)::bigint
-  );
-
-  RETURN NEW;
-END;
-$function$;
-
 DO $postflight$
 DECLARE
-  v_helper oid := to_regprocedure('public._job_transfer_line_clears_cost_20270207(uuid,text,numeric,text,bigint,boolean)');
+  v_price oid := to_regprocedure('public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint)');
+  v_split oid := to_regprocedure('public._job_transfer_split_qty_20270207(numeric,numeric[])');
 BEGIN
   IF current_setting('crx.jbc_xid', true) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'd209538774abe0da783a5cb9c4dfd5a8'
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-          WHERE p.oid = 'public._enforce_below_cost_line()'::regprocedure) IS DISTINCT FROM '4fd1f1040d9b4dc436ae16b5a5698016'
-     OR v_helper IS NULL
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_helper) IS DISTINCT FROM 'ef3f407181436ff5f7a8f089697e0dd7' THEN
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '4000e7d36a701fb08e034f936255f346'
+     OR v_price IS NULL OR v_split IS NULL
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM 'c6a232b49bd296d9fc2dacb91e413bd0'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: a body is not the one this file installs';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
@@ -1286,16 +960,12 @@ BEGIN
                     AND p.prosecdef AND p.proowner = 'postgres'::regrole
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
                     AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[])
-     OR NOT EXISTS (SELECT 1 FROM pg_proc p
-                     WHERE p.oid = 'public._enforce_below_cost_line()'::regprocedure
-                       AND p.prosecdef AND p.proowner = 'postgres'::regrole
-                       AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
-                       AND coalesce(p.proacl::text, '') = current_setting('crx.jbc_wall_acl', true))
-     OR NOT EXISTS (SELECT 1 FROM pg_proc p
-                     WHERE p.oid = v_helper AND NOT p.prosecdef AND p.proowner = 'postgres'::regrole
-                       AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[])
+     OR EXISTS (SELECT 1 FROM pg_proc p
+                 WHERE p.oid IN (v_price, v_split)
+                   AND (p.prosecdef OR p.proowner <> 'postgres'::regrole
+                        OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]))
      OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
-                 WHERE p.oid = v_helper AND a.privilege_type = 'EXECUTE' AND a.grantee <> 'postgres'::regrole) THEN
+                 WHERE p.oid IN (v_price, v_split) AND a.privilege_type = 'EXECUTE' AND a.grantee <> 'postgres'::regrole) THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: owner, settings or grants are not as reviewed';
   END IF;
 END;

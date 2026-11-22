@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 /**
  * Real-schema proof for 20270207125000_job_transfer_below_cost_whole_line (contract
- * docs/plans/2026-11-21-job-transfer-below-cost-CONTRACT.md). Container setup and replay copied from
- * prove-field-app-refuses-payer-change-real-schema.mjs. Completed spray jobs go through transfer_job_to_invoice as a
- * signed-in admin, each case rolled back. A chemical stocked by the Gal costs $30; a dry one by the Lb costs $16:
- *   BEFORE: 3 fl oz, half a gallon (64 fl oz, or 0.5 Gal at cost), 8 oz dry, a customer-supplied line and a split small
- *           line are refused; 10 Gal sold for $250 total passes.
- *   AFTER:  those lines bill at the same cents with no approval row; one Gal at $25, 10 Gal at $250, 64 fl oz at $14.72
- *           and 8 oz dry at $4.80 stop (JOB_LINE_BELOW_COST, no cost shown, job stays completed); a unit that does not
- *           convert is judged as before; a below-cost line written outside the transfer is still refused. A second
- *           apply stops at the preflight; grants unchanged; the rollback script restores both bodies.
+ * docs/plans/2026-11-21-job-transfer-below-cost-CONTRACT.md, "Redesign: real quantities"). Container setup and replay
+ * copied from prove-field-app-refuses-payer-change-real-schema.mjs. Completed spray jobs go through
+ * transfer_job_to_invoice as a signed-in admin, each case rolled back. A chemical stocked by the Gal costs $30:
+ *   BEFORE: 3 fl oz, half a gallon, 8 oz dry, a customer-supplied line and a split small line are refused; 10 Gal sold
+ *           for $250 total passes, written as quantity 1.
+ *   AFTER:  each line carries its real quantity in the sold unit at a price per sold unit (3 fl oz = 0.0234 Gal at
+ *           $49.92 = $1.17); a grower's own product is a $0 information line with no catalog link; two owners split the
+ *           quantity by acre share; below-cost lines stop (JOB_LINE_BELOW_COST, no cost shown), as do units that can't
+ *           convert, a missing cost and rounding over 50 cents; an admin's and a sales rep's ordinary re-save keeps the
+ *           lines; the below-cost wall is unchanged. A second apply stops at the preflight; grants unchanged; the
+ *           rollback script restores the transfer body and drops the helpers.
  *
  * Run: node scripts/smoke/prove-job-transfer-below-cost-real-schema.mjs   (needs Docker)
  * Prints JOB_TRANSFER_BELOW_COST_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
@@ -50,7 +52,7 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate changes or relies on.
-const TOUCHED = /(_transfer_job_to_invoice_intent_impl_20260908|_enforce_below_cost_line|_job_transfer_line_clears_cost|field_app_priced_quantity|safe_cents_qty|crx_below_cost_operation)/i;
+const TOUCHED = /(_transfer_job_to_invoice_intent_impl_20260908|_enforce_below_cost_line|_job_transfer_line_price|_job_transfer_split_qty|normalize_rate_unit|field_app_priced_quantity|safe_cents_qty|crx_below_cost_operation)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -253,11 +255,12 @@ function refusedProbe(sql, pattern, uid) {
 }
 
 const id = (s) => `b5b5b5b5-2207-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), O = id('f3');
+const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), O = id('f3');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const WALL = 'public._enforce_below_cost_line()';
-const HELPER = 'public._job_transfer_line_clears_cost_20270207(uuid,text,numeric,text,bigint,boolean)';
+const PRICE = 'public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint)';
+const SPLIT = 'public._job_transfer_split_qty_20270207(numeric,numeric[])';
 const OLD_BODY = 'a54e3e6a3a2b920e9bcd1a350cd92423';
 const OLD_WALL = '5fa0a5f975dc2a84b3c6599a84b8cc55';
 const md5Of = (sig) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
@@ -267,8 +270,10 @@ const grants = (sig) => scalar(`SELECT COALESCE(string_agg(g, ',' ORDER BY g), '
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
-    ('${ADMIN}', 'jbc-admin@example.invalid', '{"full_name":"[PROVER] JBC Admin","role":"admin"}'::jsonb);`);
+    ('${ADMIN}', 'jbc-admin@example.invalid', '{"full_name":"[PROVER] JBC Admin","role":"admin"}'::jsonb),
+    ('${REP}', 'jbc-rep@example.invalid', '{"full_name":"[PROVER] JBC Rep","role":"sales_rep"}'::jsonb);`);
   raw(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
+    UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '${REP}';
     DELETE FROM public.unit_conversions;
     INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};
     INSERT INTO public.customers (id, farm_name, assigned_tier, is_active) VALUES ('${A}', '[PROVER] JBC Farm A', 1, true), ('${B}', '[PROVER] JBC Farm B', 1, true);
@@ -276,7 +281,8 @@ function seed() {
         current_cost, tier1_price, tier2_price, tier3_price, is_active) VALUES
       ('${P}', '[PROVER] JBC chem', 'JBC-1', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 30, 50, 50, 50, true),
       ('${NC}', '[PROVER] JBC grower chem', 'JBC-2', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', NULL, 0, 0, 0, true),
-      ('${DRY}', '[PROVER] JBC dry', 'JBC-3', 'dry', 'Lb', 'Lb', 'Lb', 'Lb', 16, 20, 20, 20, true);
+      ('${DRY}', '[PROVER] JBC dry', 'JBC-3', 'dry', 'Lb', 'Lb', 'Lb', 'Lb', 16, 20, 20, 20, true),
+      ('${QT}', '[PROVER] JBC quart chem', 'JBC-5', 'liquid', 'Qt', 'Qt', 'Qt', 'Qt', 8, 10, 10, 10, true);
     INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
         current_cost, tier1_price, tier2_price, tier3_price, is_active, is_rup) VALUES
       ('${RUP}', '[PROVER] JBC restricted chem', 'JBC-4', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 30, 50, 50, 50, true, true);
@@ -287,7 +293,7 @@ function seed() {
       ('${G}', '${A}', 100, true, NULL), ('${F}', '${A}', 60, true, NULL), ('${F}', '${B}', 40, false, NULL),
       ('${O}', '${A}', 100, true, 100);`);
   // Test-only helpers (prover database only). jbc.job writes a completed job: 10 acres of the field and one chemical
-  // line of p_qty p_unit at p_price (cost p_cost) per p_unit; the stored job total is that line's total.
+  // line of p_qty p_unit at p_price (job cost p_cost) per p_unit; the stored job total is that line's total.
   psql(`CREATE SCHEMA jbc AUTHORIZATION supabase_admin;
     CREATE FUNCTION jbc.job(p_customer uuid, p_field uuid, p_unit text, p_qty numeric, p_price bigint, p_cost bigint,
                             p_supplied boolean DEFAULT false, p_product uuid DEFAULT '${P}')
@@ -304,31 +310,49 @@ function seed() {
               CASE WHEN p_supplied THEN 0 ELSE p_cost END, p_supplied);
       RETURN v_j;
     END $f$;
-    -- Every invoice the job made, as farm:total:share sum:line amount/cost/price source, ordered by farm.
+    -- Every invoice the job made, as farm:total:share sum:booked cost:lines (quantity unit @price=amount/cost per unit/
+    -- catalog link/price source), ordered by farm.
     CREATE FUNCTION jbc.billed(p_job uuid) RETURNS text LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $f$
-      SELECT COALESCE(string_agg(format('%s:%s:%s:%s', right(c.farm_name, 1), i.total_amount_cents,
-          (SELECT COALESCE(sum(s.amount_cents), 0) FROM invoice_shares s WHERE s.invoice_id = i.id),
-          (SELECT string_agg(x.extended_cents || '/' || x.cost_cents || '/' || COALESCE(x.price_source, 'null'), ',' ORDER BY x.sort_order)
+      SELECT COALESCE(string_agg(format('%s:%s:%s:%s:%s', right(c.farm_name, 1), i.total_amount_cents,
+          (SELECT COALESCE(sum(s.amount_cents), 0) FROM invoice_shares s WHERE s.invoice_id = i.id), i.total_cost_cents,
+          (SELECT string_agg(format('%s %s @%s=%s/c%s/%s/%s', x.quantity, x.unit_size, x.unit_price_cents, x.extended_cents,
+                    x.cost_cents, CASE WHEN x.product_id IS NULL THEN 'none' ELSE 'product' END, COALESCE(x.price_source, 'null')), ',' ORDER BY x.sort_order)
              FROM invoice_items x WHERE x.invoice_id = i.id)), ' ' ORDER BY c.farm_name), '-')
         FROM invoices i JOIN customers c ON c.id = i.customer_id WHERE i.job_id = p_job AND i.deleted_at IS NULL $f$;
     CREATE FUNCTION jbc.approvals() RETURNS bigint LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $f$
       SELECT count(*) FROM below_cost_approvals $f$;
+    -- The job's invoice lines as the invoice editor sends them back on a save.
+    CREATE FUNCTION jbc.items(p_invoice uuid) RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $f$
+      SELECT COALESCE(jsonb_agg(jsonb_build_object('id', x.id, 'product_id', x.product_id, 'description', x.description,
+          'quantity', x.quantity, 'unit_size', x.unit_size, 'unit_price_cents', x.unit_price_cents,
+          'extended_cents', x.extended_cents, 'cost_cents', x.cost_cents, 'sort_order', x.sort_order, 'acres', x.acres,
+          'rate_per_acre', x.rate_per_acre, 'rate_unit', x.rate_unit, 'epa_registration', x.epa_registration,
+          'product_form', x.product_form, 'is_application_fee', x.is_application_fee, 'price_source', x.price_source)
+          ORDER BY x.sort_order), '[]'::jsonb)
+        FROM invoice_items x WHERE x.invoice_id = p_invoice $f$;
     GRANT USAGE ON SCHEMA jbc TO authenticated;
     GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA jbc TO authenticated;`, { user: 'supabase_admin' });
-  console.log('[prover] committed test rows: farms A and B; field A (A 100%), field A+B (A 60%, B 40%); a chemical stocked by the Gal at cost $30; a grower product with no cost; a dry product by the Lb at $16');
+  console.log('[prover] committed test rows: an admin and a sales rep; farms A and B; field A (A 100%), field A+B (A 60%, B 40%), a per-acre-priced field; chemicals stocked by the Gal at $30 (one restricted-use), by the Qt at $8 and by the Lb at $16 (dry); a grower product with no cost');
 }
-// A rolled-back case, as the signed-in admin through the app's own transfer_job_to_invoice.
-const asAdmin = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);\nSET LOCAL ROLE authenticated;\n`;
-const transfer = (job) => `${asAdmin}
+const as = (uid) => `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);\nSET LOCAL ROLE authenticated;\n`;
+const asAdmin = as(ADMIN);
+const transferOnly = (job) => `${asAdmin}
 CREATE TEMP TABLE j AS SELECT ${job} AS id;
-SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());
+SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());`;
+// A rolled-back case, as the signed-in admin through the app's own transfer_job_to_invoice.
+const transfer = (job) => `${transferOnly(job)}
 SELECT jbc.billed((SELECT id FROM j)) || ' | approvals=' || jbc.approvals() || ' | ' || (SELECT status FROM jobs WHERE id = (SELECT id FROM j));`;
 const job = (unit, qty, price, cost = 3000, field = G, supplied = false, product = P) =>
   `jbc.job('${A}', '${field}', '${unit}', ${qty}, ${price}, ${cost}, ${supplied}, '${product}')`;
+// The invoice editor's ordinary save of a transfer-made invoice, unchanged, by uid.
+const resave = (jobSql, uid) => `${transferOnly(jobSql)}
+${as(uid)}SELECT public.save_invoice(jsonb_build_object('id', i.id, 'customer_id', i.customer_id, 'invoice_type', i.invoice_type),
+  jbc.items(i.id), 'jbc-' || gen_random_uuid()) FROM invoices i WHERE i.job_id = (SELECT id FROM j);
+SELECT jbc.billed((SELECT id FROM j)) || ' | approvals=' || jbc.approvals();`;
 const CASES = {
-  // 3 fl oz at 39c/fl oz = $1.17; cost of 3 fl oz = 3/128 Gal x $30 = 70.3c.
+  // 3 fl oz at 39c/fl oz = $1.17 is 0.0234 Gal at $49.92 ($1.17); its cost is 3/128 Gal x $30 = 70.3c.
   small3floz: transfer(job('fl oz', 3, 39, 23)),
-  // Half a gallon: 64 fl oz at 30c ($19.20); 0.5 Gal at $30 ($15.00, exactly the cost); 64 fl oz at 23c ($14.72, under $15).
+  // Half a gallon: 64 fl oz at 30c ($19.20); 0.5 Gal at $30 (exactly the cost); 64 fl oz at 23c ($14.72, under $15).
   half64floz: transfer(job('fl oz', 64, 30, 23)),
   halfGalAtCost: transfer(job('Gal', 0.5, 3000)),
   half64flozBelow: transfer(job('fl oz', 64, 23, 23)),
@@ -339,22 +363,35 @@ const CASES = {
   tenBelow: transfer(job('Gal', 10, 2500)),
   normal: transfer(job('Gal', 10, 5000)),
   splitSmall: transfer(job('fl oz', 3, 39, 23, F)),
-  // Dry: 8 oz of a $16/Lb product costs $8.00; at $1.10/oz ($8.80) it bills, at 60c/oz ($4.80) it stops.
+  splitNormal: transfer(job('Gal', 10, 5000, 3000, F)),
+  // Dry: 8 oz of a $16/Lb product is 0.5 Lb ($8.00 of cost); at $1.10/oz ($8.80) it bills, at 60c/oz ($4.80) it stops.
   dryOk: transfer(job('oz', 8, 110, 100, G, false, DRY)),
   dryBelow: transfer(job('oz', 8, 60, 100, G, false, DRY)),
-  // Ea does not convert to Gal: judged by the wall exactly as before.
-  eaLarge: transfer(job('Ea', 10, 5000)),
-  eaSmall: transfer(job('Ea', 1, 100)),
+  // A product sold by the quart, recorded in gallons: 2 Gal at $40 = 8 Qt at $10.
+  galOnQt: transfer(job('Gal', 2, 4000, 3200, G, false, QT)),
+  // Units that can't be converted to the sold unit stop and name it (Mason, 2026-11-22).
+  eaUnit: transfer(job('Ea', 10, 5000)),
+  perAcreUnit: transfer(job('Gal/ac', 10, 5000)),
+  noCost: transfer(job('Gal', 10, 5000, 0, G, false, NC)),
+  // Rounding (Mason, 2026-11-22, "Allow up to 50c"): 1 fl oz at $1,000 rounds to 0.0078 Gal and moves $1.60;
+  // 0.001 fl oz rounds to no quantity at all.
+  roundingBig: transfer(job('fl oz', 1, 100000)),
+  roundingZero: transfer(job('fl oz', 0.001, 39)),
   // Sol round 1: a dotted fluid ounce is judged on its whole quantity (1,280 fl. oz = 10 Gal; $256 against $300).
   dottedBelow: transfer(job('fl. oz', 1280, 20, 23)),
+  // Sol round 2 #1: a dotted fluid-ounce line books the cost of what was used, not a gallon per ounce.
   dottedSmall: transfer(job('fl. oz', 3, 39, 23)),
-  // Any spelling job completion folds is judged on its whole quantity too ('gallons': 10 Gal for $250 against $300).
   spelledBelow: transfer(job('gallons', 10, 2500)),
-  // Sol round 1: a restricted-use product and a field with a per-acre price keep today's path.
+  // Sol round 2 #3: a restricted-use product's line carries its real quantity (the register copies the line's).
   rupSmall: transfer(job('fl oz', 3, 39, 23, G, false, RUP)),
   rupSupplied: transfer(job('Gal', 10, 0, 0, G, true, RUP)),
   overrideSmall: transfer(job('fl oz', 3, 39, 23, O)),
   overrideNormal: transfer(job('Gal', 10, 5000, 3000, O)),
+  // Sol round 2 #4: the editor's ordinary save keeps the lines, for an admin and a sales rep.
+  resaveSmallAdmin: resave(job('fl oz', 3, 39, 23), ADMIN),
+  resaveSmallRep: resave(job('fl oz', 3, 39, 23), REP),
+  resaveSuppliedAdmin: resave(job('Gal', 10, 0, 0, G, true, NC), ADMIN),
+  resaveSuppliedRep: resave(job('Gal', 10, 0, 0, G, true, NC), REP),
   // Sol round 1: a soft-deleted blend ticket whose invoice is still live blocks; a deleted job is never invoiced.
   deletedTicket: `${asAdmin}
 CREATE TEMP TABLE j AS SELECT ${job('Gal', 10, 5000)} AS id;
@@ -375,13 +412,10 @@ SET LOCAL session_replication_role = origin;
 ${asAdmin}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());`,
 };
 // The wall itself, outside the transfer: a below-cost line written straight into a transfer-made draft invoice.
-const directLine = (ctx, product, qty) => `${asAdmin}
-CREATE TEMP TABLE j AS SELECT ${job('Gal', 10, 5000)} AS id;
-SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());
+const directLine = `${transferOnly(job('Gal', 10, 5000))}
 RESET ROLE;
-SELECT set_config('app.crx_below_cost_operation', '${ctx}', true), set_config('crx.job_transfer_product', '${product}', true);
 INSERT INTO invoice_items (invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, cost_cents, sort_order, is_application_fee)
-SELECT i.id, '${P}', 'direct', ${qty}, 'Gal', 100, ${qty} * 100, 0, 99, false FROM invoices i WHERE i.job_id = (SELECT id FROM j);
+SELECT i.id, '${P}', 'direct', 1, 'Gal', 100, 100, 0, 99, false FROM invoices i WHERE i.job_id = (SELECT id FROM j);
 SELECT 'written';`;
 
 async function main() {
@@ -397,84 +431,87 @@ async function main() {
   const implGrants = grants(IMPL), wrapperGrants = grants(WRAPPER), wallAcl = acl(WALL);
   seed();
 
-  // BEFORE: every small line is refused; ten Gal below cost passes.
+  // BEFORE: every small line is refused; ten Gal below cost passes, as quantity 1.
   const refusedBefore = { small3floz: /BELOW_COST_CONTEXT_REQUIRED/, half64floz: /BELOW_COST_CONTEXT_REQUIRED/,
     halfGalAtCost: /BELOW_COST_CONTEXT_REQUIRED/, supplied: /BELOW_COST_CONTEXT_REQUIRED/, suppliedNoCost: /COST_BASIS_REQUIRED/,
     fullBelow: /BELOW_COST_CONTEXT_REQUIRED/, splitSmall: /BELOW_COST_CONTEXT_REQUIRED/, dryOk: /BELOW_COST_CONTEXT_REQUIRED/,
-    eaSmall: /BELOW_COST_CONTEXT_REQUIRED/, rupSmall: /BELOW_COST_CONTEXT_REQUIRED/, overrideSmall: /BELOW_COST_CONTEXT_REQUIRED/ };
+    rupSmall: /BELOW_COST_CONTEXT_REQUIRED/, overrideSmall: /BELOW_COST_CONTEXT_REQUIRED/ };
   for (const [k, re] of Object.entries(refusedBefore)) { refusedProbe(CASES[k], re); console.log(`[before] ${k}: refused ${re.source}`); }
-  const before = Object.fromEntries(['tenBelow', 'normal', 'eaLarge', 'dottedBelow', 'spelledBelow', 'overrideNormal', 'deletedTicket', 'deletedJob'].map((k) => [k, okProbe(CASES[k])]));
-  for (const [k, v] of Object.entries(before)) console.log(`[before] ${k}: ${v}`);
-  assert.equal(before.tenBelow, 'A:25000:25000:25000/30000/null | approvals=0 | invoiced', 'before: 10 Gal sold for $250 against $300 of cost passed the wall');
-  refusedProbe(directLine('', '', 1), /BELOW_COST_CONTEXT_REQUIRED/);
+  const tenBefore = okProbe(CASES.tenBelow);
+  console.log(`[before] tenBelow: ${tenBefore}`);
+  assert.match(tenBefore, /^A:25000:25000:\d+:1\.0000 \S+ @25000=25000\/c\d+\/product\/null \| approvals=0 \| invoiced$/,
+    'before: 10 Gal sold for $250 against $300 of cost passed the wall, written as quantity 1');
+  refusedProbe(directLine, /BELOW_COST_CONTEXT_REQUIRED/);
 
   stageText('candidate.sql', lf(CANDIDATE));
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
   assert.notEqual(md5Of(IMPL), OLD_BODY);
-  assert.notEqual(md5Of(WALL), OLD_WALL);
+  assert.equal(md5Of(WALL), OLD_WALL, 'the below-cost wall is unchanged');
   assert.equal(grants(IMPL), implGrants, 'the transfer body grants must not change');
   assert.equal(grants(WRAPPER), wrapperGrants, 'the public wrapper grants must not change');
   assert.equal(acl(WALL), wallAcl, 'the wall ACL must not change');
-  assert.equal(grants(HELPER), 'postgres', 'the new helper is executable by no API role');
+  assert.equal(grants(PRICE), 'postgres', 'the line-price helper is executable by no API role');
+  assert.equal(grants(SPLIT), 'postgres', 'the split helper is executable by no API role');
   const second = apply('candidate.sql');
   assert.notEqual(second.status, 0);
   assert.match(second.output, /JOB_BELOW_COST_PREFLIGHT/);
-  console.log(`[case] the candidate applies (transfer EXECUTE unchanged: ${implGrants}; wrapper: ${wrapperGrants}; wall ACL unchanged; helper: postgres only); a second apply stops at its preflight`);
+  console.log(`[case] the candidate applies (transfer EXECUTE unchanged: ${implGrants}; wrapper: ${wrapperGrants}; wall body and ACL unchanged; helpers: postgres only); a second apply stops at its preflight`);
 
   const ok = ' | approvals=0 | invoiced';
   const after = (k, expected, why) => { const v = okProbe(CASES[k]); console.log(`[after] ${k}: ${v}`); assert.equal(v, expected + ok, why); };
-  after('small3floz', 'A:117:117:117/69/null', '3 fl oz at $1.17 bills (cost of 3 fl oz is 70.3c)');
-  after('half64floz', 'A:1920:1920:1920/1472/null', '64 fl oz (half a gallon) at $19.20 bills');
-  after('halfGalAtCost', 'A:1500:1500:1500/1500/null', 'half a gallon exactly at cost bills');
-  after('supplied', 'A:0:0:0/0/manual', 'a customer-supplied line bills at $0');
-  after('suppliedNoCost', 'A:0:0:0/0/manual', 'a customer-supplied product with no cost bills at $0');
-  after('dryOk', 'A:880:880:880/800/null', '8 oz of a dry product at $8.80 bills');
-  after('normal', before.normal.replace(ok, ''), 'a normal line: unchanged');
-  after('eaLarge', before.eaLarge.replace(ok, ''), 'a unit that does not convert: judged by the wall as before');
-  const split = okProbe(CASES.splitSmall);
-  console.log(`[after] splitSmall: ${split}`);
-  assert.match(split, /^A:(\d+):\1:\1\/\d+\/null B:(\d+):\2:\2\/\d+\/null \| approvals=0 \| invoiced$/, 'each owner: header = share = their line');
-  const [, a, b] = /^A:(\d+).* B:(\d+)/.exec(split);
-  assert.equal(Number(a) + Number(b), 117, 'the owner shares add up to the whole line');
-  assert.deepEqual([Number(a), Number(b)], [70, 47], 'A carries 60%, B 40% of $1.17');
-  for (const k of ['fullBelow', 'tenBelow', 'half64flozBelow']) {
+  after('small3floz', 'A:117:117:70:0.0234 Gal @4992=117/c3000/product/manual', '3 fl oz bills $1.17 as 0.0234 Gal at $49.92');
+  after('half64floz', 'A:1920:1920:1500:0.5000 Gal @3840=1920/c3000/product/manual', '64 fl oz bills $19.20 as half a gallon');
+  after('halfGalAtCost', 'A:1500:1500:1500:0.5000 Gal @3000=1500/c3000/product/manual', 'half a gallon exactly at cost bills');
+  after('supplied', 'A:0:0:0:10.0000 Gal @0=0/c0/none/manual', "the grower's own product is a $0 information line with no catalog link");
+  after('suppliedNoCost', 'A:0:0:0:10.0000 Gal @0=0/c0/none/manual', 'a grower product with no cost is a $0 information line');
+  after('normal', 'A:50000:50000:30000:10.0000 Gal @5000=50000/c3000/product/manual', '10 Gal at $50 bills $500 as 10 Gal');
+  after('dryOk', 'A:880:880:800:0.5000 Lb @1760=880/c1600/product/manual', '8 oz of a dry product bills $8.80 as half a pound');
+  after('galOnQt', 'A:8000:8000:6400:8.0000 Qt @1000=8000/c800/product/manual', '2 Gal of a quart product bills as 8 Qt');
+  after('dottedSmall', 'A:117:117:70:0.0234 Gal @4992=117/c3000/product/manual', '3 fl. oz books the cost of 3 fl oz (70c), not of 3 gallons');
+  after('rupSmall', 'A:117:117:70:0.0234 Gal @4992=117/c3000/product/manual', 'a restricted-use line carries its real 0.0234 Gal');
+  after('rupSupplied', 'A:0:0:0:10.0000 Gal @0=0/c0/none/manual', "the grower's own restricted-use product has no catalog link, so no sales record");
+  // The per-acre price bills the owner (header = share = $10.00), the chemical line keeps its real quantity.
+  after('overrideSmall', 'A:1000:1000:70:0.0234 Gal @4992=117/c3000/product/manual', 'a per-acre-priced field: the per-acre price bills, the line is real');
+  after('overrideNormal', 'A:1000:1000:30000:10.0000 Gal @5000=50000/c3000/product/manual', 'a per-acre-priced field with a normal line');
+  // Two owners (60/40): the quantity is allocated by acre share at one price; header = share = lines per owner.
+  after('splitSmall', 'A:70:70:42:0.0140 Gal @4992=70/c3000/product/manual B:47:47:28:0.0094 Gal @4992=47/c3000/product/manual',
+    'the owners split 0.0234 Gal 0.0140/0.0094, $0.70 + $0.47 = $1.17');
+  after('splitNormal', 'A:30000:30000:18000:6.0000 Gal @5000=30000/c3000/product/manual B:20000:20000:12000:4.0000 Gal @5000=20000/c3000/product/manual',
+    'the owners split 10 Gal 6/4');
+  for (const k of ['fullBelow', 'tenBelow', 'half64flozBelow', 'dottedBelow', 'spelledBelow']) {
     refusedProbe(CASES[k], /JOB_LINE_BELOW_COST: \[PROVER\] JBC chem is priced below its cost on this job\. Nothing was invoiced/);
     assert.doesNotMatch(probe(CASES[k]).output, /\b(3000|1500|30\.00|15\.00)\b/, 'the refusal never states the cost');
-    console.log(`[after] ${k}: refused JOB_LINE_BELOW_COST, nothing billed`);
+    console.log(`[after] ${k}: refused JOB_LINE_BELOW_COST, no cost shown, nothing billed`);
   }
   refusedProbe(CASES.dryBelow, /JOB_LINE_BELOW_COST: \[PROVER\] JBC dry/);
   console.log('[after] dryBelow: refused JOB_LINE_BELOW_COST');
-  refusedProbe(CASES.eaSmall, /BELOW_COST_CONTEXT_REQUIRED/);
-  console.log('[after] eaSmall: refused BELOW_COST_CONTEXT_REQUIRED, as before');
-  // Sol round 1 #3: the dotted spelling.
-  refusedProbe(CASES.dottedBelow, /JOB_LINE_BELOW_COST: \[PROVER\] JBC chem/);
-  refusedProbe(CASES.spelledBelow, /JOB_LINE_BELOW_COST: \[PROVER\] JBC chem/);
-  console.log('[after] spelledBelow (10 "gallons" for $250 against $300): refused JOB_LINE_BELOW_COST');
-  after('dottedSmall', 'A:117:117:117/69/null', '3 fl. oz at $1.17 bills like 3 fl oz');
-  console.log('[after] dottedBelow (1,280 fl. oz for $256 against $300): refused JOB_LINE_BELOW_COST');
-  // Sol round 1 #1 and #2: restricted-use products and per-acre-priced fields are judged by the wall as before.
-  for (const k of ['rupSmall', 'rupSupplied', 'overrideSmall']) {
-    refusedProbe(CASES[k], /BELOW_COST_CONTEXT_REQUIRED/);
-    console.log(`[after] ${k}: refused BELOW_COST_CONTEXT_REQUIRED, as before`);
+  refusedProbe(CASES.eaUnit, /JOB_LINE_UNIT_UNCONVERTIBLE: \[PROVER\] JBC chem is recorded on this job in "Ea", which can't be converted to the unit it is sold in \("Gal"\)/);
+  refusedProbe(CASES.perAcreUnit, /JOB_LINE_UNIT_UNCONVERTIBLE: \[PROVER\] JBC chem is recorded on this job in "Gal\/ac"/);
+  console.log('[after] eaUnit, perAcreUnit: refused JOB_LINE_UNIT_UNCONVERTIBLE, naming the product and both units');
+  refusedProbe(CASES.noCost, /JOB_LINE_COST_MISSING: \[PROVER\] JBC grower chem has no cost recorded/);
+  console.log('[after] noCost: refused JOB_LINE_COST_MISSING');
+  refusedProbe(CASES.roundingBig, /JOB_LINE_ROUNDING: \[PROVER\] JBC chem can't be recorded to 4 decimals in Gal/);
+  refusedProbe(CASES.roundingZero, /JOB_LINE_ROUNDING: \[PROVER\] JBC chem/);
+  console.log('[after] roundingBig ($1.60 off), roundingZero (no quantity left): refused JOB_LINE_ROUNDING');
+  for (const [k, who] of [['resaveSmallAdmin', 'admin'], ['resaveSmallRep', 'sales rep']]) {
+    const v = okProbe(CASES[k]);
+    console.log(`[after] ${k}: ${v}`);
+    assert.equal(v, 'A:117:117:70:0.0234 Gal @4992=117/c3000/product/manual | approvals=0', `a ${who}'s ordinary re-save keeps the line`);
   }
-  after('overrideNormal', before.overrideNormal.replace(ok, ''), 'a normal line on a per-acre-priced field: unchanged');
-  // Sol round 1 #4 and MED: a live invoice on a deleted blend ticket, and a deleted job.
+  for (const [k, who] of [['resaveSuppliedAdmin', 'admin'], ['resaveSuppliedRep', 'sales rep']]) {
+    const v = okProbe(CASES[k]);
+    console.log(`[after] ${k}: ${v}`);
+    assert.equal(v, 'A:0:0:0:10.0000 Gal @0=0/c0/none/manual | approvals=0', `a ${who}'s ordinary re-save keeps the $0 information line`);
+  }
   refusedProbe(CASES.deletedTicket, /BLEND_TICKET_ALREADY_BILLED/);
   console.log('[after] deletedTicket: a deleted blend ticket with a live invoice blocks (BLEND_TICKET_ALREADY_BILLED)');
   refusedProbe(CASES.deletedJob, /JOB_DELETED/);
   console.log('[after] deletedJob: refused JOB_DELETED');
-  // Luna round 1 HIGH: a job-transfer context already set before Create Invoice gives an uncleared line no exemption.
-  refusedProbe(`SELECT set_config('app.crx_below_cost_operation', 'field_app_job_transfer', true), set_config('crx.job_transfer_product', '${P}', true);
-` + CASES.eaSmall, /BELOW_COST_CONTEXT_REQUIRED/);
-  console.log('[after] eaSmall with a job-transfer context set beforehand: still refused');
-  // The new context gives nothing outside the transfer's own line: no context, a quantity-2 line, or another product.
-  refusedProbe(directLine('', '', 1), /BELOW_COST_CONTEXT_REQUIRED/);
-  refusedProbe(directLine('field_app_job_transfer', P, 2), /BELOW_COST_CONTEXT_REQUIRED/);
-  refusedProbe(directLine('field_app_job_transfer', DRY, 1), /BELOW_COST_CONTEXT_REQUIRED/);
-  console.log('[after] a below-cost invoice line written outside the transfer: refused with no context, and with the new context at quantity 2 or for another product');
+  refusedProbe(directLine, /BELOW_COST_CONTEXT_REQUIRED/);
+  console.log('[after] a below-cost invoice line written outside the transfer: still refused by the unchanged wall');
 
-  // Rollback restores both bodies and drops the helper; the old refusals come back.
+  // Rollback restores the transfer body and drops the helpers; the old refusals come back.
   stageText('reverse.sql', lf(path.join(ROOT, 'scripts', 'smoke', 'job-transfer-below-cost-reverse.sql')));
   const back = apply('reverse.sql');
   assert.equal(back.status, 0, back.output);
@@ -482,9 +519,9 @@ async function main() {
   assert.equal(md5Of(WALL), OLD_WALL);
   assert.equal(acl(WALL), wallAcl);
   assert.equal(grants(IMPL), implGrants);
-  assert.equal(scalar(`SELECT to_regprocedure('${HELPER}') IS NULL;`), 't');
+  assert.equal(scalar(`SELECT to_regprocedure('${PRICE}') IS NULL AND to_regprocedure('${SPLIT}') IS NULL;`), 't');
   refusedProbe(CASES.small3floz, /BELOW_COST_CONTEXT_REQUIRED/);
-  console.log('[rollback] both bodies and grants restored, helper dropped; 3 fl oz is refused again');
+  console.log('[rollback] transfer body and grants restored, helpers dropped; 3 fl oz is refused again');
   console.log('JOB_TRANSFER_BELOW_COST_PROOF_PASS');
 }
 

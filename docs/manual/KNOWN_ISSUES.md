@@ -850,7 +850,7 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
 
 ### KI-200 — Return approval: the confirmation opens underneath the return details
 
-> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Open · MED · Agent (unassigned; local fix in `C:\CRX_wt\return-dialog`) · plan W2-51 · #2205. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
+> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Fix in review: PR #2210 (Luna and Sol clean; click-tested on staging data) · MED · plan W2-51 · #2205. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
 
 **MED · OPEN (reproduced twice on staging; source-confirmed) · returns · found 2026-11-22 (rehearsal CRXN-01) · unassigned (a local, uncommitted fix sits in `C:\CRX_wt\return-dialog`) · GitHub #2205**
 Opening a requested return and clicking Approve shows the Approve/Reject `ConfirmModal`, but it is rendered before

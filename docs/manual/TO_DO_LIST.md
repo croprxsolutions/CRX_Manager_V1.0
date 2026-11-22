@@ -202,7 +202,7 @@ Mason, 2026-10-15: "for regular order and deliveries we have to have the split b
 | 7.4 | Old-sale returns after 2026-12-31: staff know how to accept the goods, issue the credit in Chem Man or the books, and still open Chem Man history | **Process not written** (goals doc, L3; decision 2026-10-07). | Mason (L3) | CAN-WAIT (returns wait) |
 | 7.5 | Split-order returns | See 4.4. | Done | CAN-WAIT |
 | 7.6 | **A return credits what the customer was billed**, not the order price, when the invoice line was repriced | **Not built.** KNOWN_ISSUES KI-189; GitHub #2180. 0 of 6 eligible live lines differ today (audit aggregate). | Taha's billing work | CAN-WAIT (returns wait, Mason 2026-10-22) (Proposed by the [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md); rank is Mason's call) |
-| 7.7 | **Approving a return works with a normal click** (the confirmation opens on top of the return details) | **Not built; a local fix exists, not yet in a PR.** KNOWN_ISSUES KI-200 (reproduced twice on staging; Enter on the keyboard works). GitHub #2205. | Unassigned | SHOULD (Proposed by the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md); rank is Mason's call; returns otherwise CAN-WAIT per section 17) |
+| 7.7 | **Approving a return works with a normal click** (the confirmation opens on top of the return details) | **Fix in review: PR #2210.** KNOWN_ISSUES KI-200 (reproduced twice on staging; Enter on the keyboard works). GitHub #2205. | Unassigned | SHOULD (Proposed by the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md); rank is Mason's call; returns otherwise CAN-WAIT per section 17) |
 
 ## 8. Commissions
 

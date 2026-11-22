@@ -143,7 +143,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-23 | #2104 | LOW | Partly open | Mostly done for the grower-share cost read; other product reads in the save not confirmed locked. | GitHub issue | #2104 | Taha (to 2026-12-15) |
 | W3-52 | #2073 | LOW | Check first | Invoice header may show the earlier customer. Live-unchanged per the issue; not traced. | GitHub issue | #2073 | Taha (to 2026-12-15) |
 | W3-53 | #2072 | LOW | Check first | During a staged apply a draft could briefly carry sales tax. Release-time concern, checkable only by a live post-apply query. | GitHub issue | #2072 | Taha (to 2026-12-15) |
-| W2-51 | KI-200 | MED | Open | Approving a return: the confirmation opens behind the return details, so a normal click can't approve (Enter works). A local fix exists. | KNOWN_ISSUES (2026-11-22 staging rehearsal) | #2205 | Agent (unassigned) |
+| W2-51 | KI-200 | MED | Open | Approving a return: the confirmation opens behind the return details, so a normal click can't approve (Enter works). Fix in review: PR #2210. | KNOWN_ISSUES (2026-11-22 staging rehearsal) | #2205 | Agent (PR #2210) |
 
 ### Payments and receivables (6)
 

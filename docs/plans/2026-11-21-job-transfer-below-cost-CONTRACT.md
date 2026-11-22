@@ -76,7 +76,8 @@ normal line that is genuinely sold below cost must still be refused. Field appli
   1, 2); this change neither adds nor removes them.
 - A job unit spelled in a way the converter does not know (for example "gals") also takes today's path (security
   review LOW 1). Not normalised here: `normalize_rate_unit` maps "fl oz" to "oz", which would price a fluid-ounce line
-  on a dry product as weight. Same as before this change, never looser.
+  on a dry product as weight. Without it, `field_app_priced_quantity` has no "fl oz" in its dry list, so a fluid-ounce
+  line on a dry product does not convert and takes today's path. Same as before this change, never looser.
 - Re-saving a transfer invoice later through the invoice screen (`save_invoice`) still judges a quantity-1 small line
   against one stock unit, so a rep is refused and an admin needs a reason. Named as a follow-up, not fixed here.
 - Overlap: Taha's open issue #2061 (job transfer re-billing a soft-deleted blend ticket's job) touches the same function

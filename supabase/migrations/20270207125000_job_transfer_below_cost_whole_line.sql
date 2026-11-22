@@ -4,7 +4,7 @@
 -- and its actor binding and p_idempotency_key are unchanged; the helper and the trigger are not callable by API roles.
 --
 -- WHY: the transfer writes each chemical line as quantity 1 with the whole line total as its price, and the
--- below-cost wall compared that total with the cost of ONE stock unit. A 3 fl oz line ($0.98) on a product costing
+-- below-cost wall compared that total with the cost of ONE stock unit. A 3 fl oz line ($1.17) on a product costing
 -- $30 a gallon, and every customer-supplied $0 line, were refused; 10 gallons sold for $250 at $30 a gallon passed.
 --
 -- WHAT:

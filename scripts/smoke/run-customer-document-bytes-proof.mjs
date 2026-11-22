@@ -48,7 +48,7 @@ if (await open(SERVE_PORT)) { console.error(`Port ${SERVE_PORT} is already in us
 const deno = spawn('deno', ['run', '--node-modules-dir=none', '--allow-net', '--allow-env', '--allow-read', path.join('scripts', 'smoke', 'serve-customer-document-files-local.ts')], {
   cwd: ROOT, stdio: 'inherit',
   env: {
-    PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, USERPROFILE: process.env.USERPROFILE, LOCALAPPDATA: process.env.LOCALAPPDATA,
+    PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME, LOCALAPPDATA: process.env.LOCALAPPDATA,
     APPDATA: process.env.APPDATA, TEMP: process.env.TEMP, DENO_DIR: process.env.DENO_DIR ?? '',
     GATEWAY_URL: GATEWAY, SERVE_PORT: String(SERVE_PORT), SUPABASE_URL: GATEWAY, ALLOWED_ORIGIN: 'http://127.0.0.1:5199',
     SUPABASE_ANON_KEY: state.LOCAL_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY: state.LOCAL_SERVICE_KEY,
@@ -56,7 +56,7 @@ const deno = spawn('deno', ['run', '--node-modules-dir=none', '--allow-net', '--
 });
 let denoExit = null;
 deno.on('exit', (c) => { denoExit = c ?? 'signal'; });
-const stopDeno = () => spawnSync('taskkill', ['/pid', String(deno.pid), '/t', '/f'], { stdio: 'ignore' });
+const stopDeno = () => (process.platform === 'win32' ? spawnSync('taskkill', ['/pid', String(deno.pid), '/t', '/f'], { stdio: 'ignore' }) : deno.kill());
 
 function prove(capture = false) {
   const result = spawnSync(process.execPath, ['scripts/smoke/prove-customer-document-bytes-server-only.mjs', '--phase=after'], {

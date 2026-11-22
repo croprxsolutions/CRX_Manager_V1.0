@@ -165,11 +165,11 @@ async function runAfter(admin, rep, otherRep, driver, customerA) {
   const direct = await rep.client.storage.from(BUCKET).upload(directPath, bytes, { contentType: 'application/pdf' });
   check('rep cannot upload directly to Storage', Boolean(direct.error), direct.error?.message);
 
-  const refused = await invoke(otherRep, {
+  const otherRepUpload = await invoke(otherRep, {
     action: 'prepare_upload', customer_id: customerA, filename: 'x.pdf', mime_type: 'application/pdf', size_bytes: 10,
   });
   // Mason, 2026-10-13 (20261013220000): reps work any customer, so assignment no longer gates documents.
-  check('any active rep may prepare an upload for any customer (2026-10-13 decision)', refused.status === 200, `HTTP ${refused.status}`);
+  check('any active rep may prepare an upload for any customer (2026-10-13 decision)', otherRepUpload.status === 200, `HTTP ${otherRepUpload.status}`);
 
   const driverRefused = await invoke(driver, {
     action: 'prepare_upload', customer_id: customerA, filename: 'x.pdf', mime_type: 'application/pdf', size_bytes: 10,

@@ -306,4 +306,14 @@ describe('QuickDeliveryModal', () => {
     expect(screen.getByRole('button', { name: /create quick delivery/i })).toBeDisabled();
     expect(mockToast).toHaveBeenCalledWith('error', 'Failed to load products or drivers. Please close and try again.');
   });
+  // KI-203: the Unit column shows the unit the line is sold in, not a dash.
+  it('shows the sales unit for a product with no package size', async () => {
+    productReply.rows = [{ ...product(7), inventory_unit: 'Gal' }];
+    await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /add product/i }));
+    fireEvent.click(await screen.findByText('Product 0007'));
+    const row = (await screen.findAllByText('Product 0007')).map((el) => el.closest('tr')).find(Boolean)!;
+    expect(row).toHaveTextContent('Gal');
+    expect(row).not.toHaveTextContent('—');
+  });
 });

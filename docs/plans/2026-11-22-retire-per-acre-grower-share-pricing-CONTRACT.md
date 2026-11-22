@@ -33,15 +33,16 @@ Read at `origin/staging` f8ee14ee8.
   - Behavior is identical with or without them once the constraint holds. Deleting them is an optional later cleanup.
 - **`src/components/ui/BelowCostApprovalModal.tsx` wording.** It is hands-off (Taha) and unreachable.
 - **`errorSanitizer.ts` `FIELD_APP_GROWER_SHARE_*` text.** Both sibling PRs edit that file; the text is unreachable.
-- **PDFs.** They print `invoice_shares.pricing_note` beside a payer's name whenever it is set; live has 0 such rows, and the new CHECK keeps it empty. There is no "included in grower share" text in the PDFs; that wording lives only in the hands-off modal above.
+- **PDFs.** They print `invoice_shares.pricing_note` beside a payer's name whenever it is set; live has 0 such rows, and the new CHECK keeps it empty. A legacy manual line can print its stored description, which could carry per-acre wording; live has 0 such lines.
 
 ## State and failure
 
 - **Rule that always holds:** no `field_billing_defaults` row and no `invoice_shares` row has a per-acre price or pricing note. Both are enforced by validated CHECKs, so they hold in every transaction.
 - **Existing rows** (production, read-only, 2026-11-22):
   - `field_billing_defaults`: 6 rows; 0 with an override; 0 with a non-blank note.
-  - `invoice_shares`: 3 rows; 0 with `price_per_acre_cents`; 0 with a note. `invoice_items`: 0 lines containing "grower share" (Sol r2: a legacy draft's lines carry the per-acre charge even if its share row were cleared).
-  - The migration's preflight locks both tables (ACCESS EXCLUSIVE, the ALTERs' own mode), re-counts splits, shares and "grower share" lines, and refuses (`PER_ACRE_PRICING_IN_USE`, naming the count) if any row has either, so it never silently clears a price.
+  - `invoice_shares`: 3 rows; 0 with `price_per_acre_cents`; 0 with a note. `invoice_items`: 0 lines containing "grower share" or "/ac" wording.
+  - **No legacy per-acre invoice exists** (the feature was never used). Mason, 2026-11-22, after three Sol rounds each found a new kind of hypothetical legacy invoice: simplify, do not hunt for them. Sol findings that only concern such never-created invoices are his to skip.
+  - The migration's preflight locks both tables (ACCESS EXCLUSIVE, the ALTERs' own mode), re-counts splits and shares, and refuses (`PER_ACRE_PRICING_IN_USE`, naming the count) if any row has either, so it never silently clears a price.
   - It does not blank-coerce: an empty-string note also blocks the apply.
 - **Already-deployed app during rollout:**
   - The old Field Setup still shows the inputs. Saving a field with an override typed in is refused, and nothing is saved.
@@ -67,7 +68,7 @@ Two PRs, database first:
   - Release order (10, 11, 32): two PRs, database first.
   - Exact-predicate recount (19): live 2026-11-22 found 0 of 6 rows with `price_override_cents IS NOT NULL OR pricing_note IS NOT NULL`.
   - The amber hint (12).
-  - Lock before count (27): the preflight now takes `SHARE ROW EXCLUSIVE` before it counts.
+  - Lock before count (27): the preflight now takes `ACCESS EXCLUSIVE` (the ALTERs' own mode, Sol r2) before it counts.
   - Real saves after the constraint, not only preview (30): the prover runs `save_field_app_invoice` on a 60/40 field.
 - **Disproved:**
   - Note without a price (8): live has 0 notes of any kind.

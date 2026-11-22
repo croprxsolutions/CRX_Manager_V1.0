@@ -48,7 +48,7 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate changes or relies on.
-const TOUCHED = /(field_billing_defaults|_save_field_app_invoice_impl_20260714|derive_customer_shares_from_fields|_save_field_replay_impl_20261015|save_field\()/i;
+const TOUCHED = /(field_billing_defaults|invoice_shares|invoice_items|_save_field_app_invoice_impl_20260714|derive_customer_shares_from_fields|_save_field_replay_impl_20261015|save_field\()/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -329,7 +329,7 @@ async function main() {
     stageText('dirty.sql', `UPDATE public.field_billing_defaults SET ${set} WHERE field_id = '${GS}' AND customer_id = '${A}';\n${lf(CANDIDATE)}`);
     const r = apply('dirty.sql');
     assert.notEqual(r.status, 0, `${label}: the apply must be refused`);
-    assert.match(r.output, /PER_ACRE_PRICING_IN_USE: 1 field billing split\(s\), 0 invoice share\(s\) and 0 invoice line\(s\) still carry per-acre pricing/);
+    assert.match(r.output, /PER_ACRE_PRICING_IN_USE: 1 field billing split\(s\) and 0 invoice share\(s\) still carry per-acre pricing/);
     console.log(`[apply] with ${label} on a split: refused PER_ACRE_PRICING_IN_USE (rolled back)`);
   }
   // Sol r1: a draft saved at $20/ac whose split was then cleared still carries the rate on its invoice share.
@@ -339,18 +339,8 @@ UPDATE public.field_billing_defaults SET price_override_cents = NULL WHERE field
 ${lf(CANDIDATE)}`);
   const draft = apply('dirty-draft.sql');
   assert.notEqual(draft.status, 0, 'a saved per-acre draft must refuse the apply');
-  assert.match(draft.output, /PER_ACRE_PRICING_IN_USE: 0 field billing split\(s\), 1 invoice share\(s\) and 2 invoice line\(s\) still carry per-acre pricing/);
+  assert.match(draft.output, /PER_ACRE_PRICING_IN_USE: 0 field billing split\(s\) and 1 invoice share\(s\) still carry per-acre pricing/);
   console.log('[apply] with a saved $20/ac draft whose split was cleared: refused PER_ACRE_PRICING_IN_USE (rolled back)');
-  // Sol r2: the same draft with its share row cleared too still carries the per-acre lines.
-  stageText('dirty-lines.sql', `${asAdminClaims}UPDATE public.field_billing_defaults SET price_override_cents = 2000 WHERE field_id = '${GS}' AND customer_id = '${A}';
-SELECT rpa.invoice();
-UPDATE public.field_billing_defaults SET price_override_cents = NULL WHERE field_id = '${GS}' AND customer_id = '${A}';
-UPDATE public.invoice_shares SET price_per_acre_cents = NULL, pricing_note = NULL;
-${lf(CANDIDATE)}`);
-  const lines = apply('dirty-lines.sql');
-  assert.notEqual(lines.status, 0, 'per-acre lines left on a draft must refuse the apply');
-  assert.match(lines.output, /PER_ACRE_PRICING_IN_USE: 0 field billing split\(s\), 0 invoice share\(s\) and 2 invoice line\(s\) still carry per-acre pricing/);
-  console.log('[apply] with that draft\'s share cleared but its per-acre lines left: refused PER_ACRE_PRICING_IN_USE (rolled back)');
   assert.equal(constraintState(), 'absent');
   assert.equal(splits(), 'A:60.00:-:- B:40.00:-:-', 'refused applies leave every split as it was');
 

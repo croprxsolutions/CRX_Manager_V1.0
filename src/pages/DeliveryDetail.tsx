@@ -29,7 +29,7 @@ import { loadDeliveryBrandInfo } from '../lib/deliveryBrandPaper';
 import { receiptBrandNotes } from '../../supabase/functions/_shared/brandNotes.ts';
 import { logActivity } from '../lib/activityLogger';
 import { sumNeedByProduct } from '../lib/inventoryShortage';
-import { sendEmail } from '../lib/emailService';
+import { sendEmail, EmailUnconfirmedError } from '../lib/emailService';
 import { buildDeliveryReceiptHtml } from '../lib/deliveryReceiptEmail';
 import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
 import { fetchReceiptRecipient, INVALID_SIGNATURE_MESSAGE, isNetworkFailure, isSignatureDataUrl, isSignatureImageMissing, latestEvidencePhoto, reconcileFailedCompletion, signatureDigest, signatureImagePathFor, storedNoProofReason, uploadSignatureImage } from '../lib/deliveryEvidence';
@@ -1562,6 +1562,11 @@ export default function DeliveryDetail() {
       await closeSentReceipt(delivery.id, paused.queued_at);
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
+      // No answer came back: the email may have gone out, so never say it did not (Codex P2).
+      if (heldNotSent && err instanceof EmailUnconfirmedError) {
+        heldNotSent = false;
+        toast('warning', `Delivery ${delivery.delivery_number}: the email may have gone out. Its receipt is on "Customer receipts to check" and the server will not send it. Check before sending again, then mark it handled.`);
+      }
     } finally {
       if (heldNotSent) warnHeldNotSent(delivery.delivery_number);
       setSendingEmail(false);

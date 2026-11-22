@@ -94,7 +94,7 @@ vi.mock('../lib/notificationTriggers', () => ({
 }));
 vi.mock('../lib/connectivity', () => ({ hasSignal: () => Promise.resolve(true), NO_SIGNAL_MESSAGE: 'no signal' }));
 vi.mock('../lib/deliveryPdf', () => ({ downloadDeliveryPdf: vi.fn() }));
-vi.mock('../lib/emailService', () => ({ sendEmail: mockSendEmail, buildEmailHtml: () => '<p></p>' }));
+vi.mock('../lib/emailService', () => ({ sendEmail: mockSendEmail, buildEmailHtml: () => '<p></p>', EmailUnconfirmedError: class extends Error {} }));
 vi.mock('../lib/rupCompliance', () => ({ checkRUPCompliance: () => Promise.resolve({ compliant: true, warnings: [] }) }));
 vi.mock('../lib/deliverySplitBilling', () => ({
   fetchSplitBillingOrderIds: () => Promise.resolve({ data: new Set(), error: null }), SPLIT_BILLING_BLOCK_REASON: '', billSplitFailed: () => false, BILL_SPLIT_FAILED_MESSAGE: '',
@@ -545,6 +545,17 @@ describe('Email Confirmation and the server receipt queue', () => {
     expect(closeCalls()).toEqual(['manual_send']);
     // The office is told the server will not send it either (Taha LOW).
     expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/did not go out.*server will not send it/));
+  });
+
+  it('an unconfirmed send never says the email did not go out (Codex P2)', async () => {
+    const { EmailUnconfirmedError } = await import('../lib/emailService');
+    mockRpc.mockImplementation(() => Promise.resolve(answer()));
+    mockSendEmail.mockRejectedValue(new EmailUnconfirmedError('no answer; this email may have been sent'));
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/may have gone out.*Check before sending again/)));
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringMatching(/did not go out/));
+    expect(closeCalls()).toEqual(['manual_send']);
   });
 
   it('cancelling the second-copy question says the held receipt was not sent', async () => {

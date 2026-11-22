@@ -99,7 +99,7 @@ try {
     INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, scheduled_date, status, assigned_driver) VALUES
       ('FR-01', gen_random_uuid(), '${D}', '${USERS.admin}', CURRENT_DATE, 'scheduled', '${USERS.driver}'),
       ('FR-02', gen_random_uuid(), '${C}', '${USERS.admin}', CURRENT_DATE + 1, 'in_progress', '${USERS.driver}'),
-      ('FR-03', gen_random_uuid(), '${D}', '${USERS.admin}', CURRENT_DATE - 30, 'completed', '${USERS.driver}'),
+      ('FR-03', gen_random_uuid(), '${B}', '${USERS.admin}', CURRENT_DATE - 30, 'completed', '${USERS.driver}'),
       ('FR-04', gen_random_uuid(), '${E}', '${USERS.admin}', CURRENT_DATE, 'scheduled', '${DRIVER2}'),
       ('FR-05', gen_random_uuid(), '${E}', '${USERS.admin}', CURRENT_DATE, 'scheduled', NULL),
       ('FR-06', gen_random_uuid(), '${D}', '${USERS.admin}', CURRENT_DATE, 'scheduled', '${OFF_DRIVER}'),
@@ -124,7 +124,7 @@ try {
   assert.equal(readAll(USERS.driver), 'ok|Charlie Farms,Delta Farms,Golf Farms', 'before: a driver reads their delivery farms and the crew-dispatched farm');
   assert.equal(readAll(USERS.applicator), 'ok|Foxtrot Farms,Hotel Farms', 'before: an applicator reads their job farm and dispatched farm');
   // Before: the driver could not read the parent farms, so their list showed no farm group.
-  assert.equal(driverList(), 'ok|FR-01=Delta Farms/-,FR-02=Charlie Farms/-,FR-03=Delta Farms/-', 'before: driver list');
+  assert.equal(driverList(), 'ok|FR-01=Delta Farms/-,FR-02=Charlie Farms/-,FR-03=Unknown/-', 'before: driver list');
   const before = { admin: officeList(USERS.admin), rep: officeList(USERS.rep) };
   assert.match(before.admin, /^ok\|.*Echo Farms/, 'the office list carries other drivers\' farms');
   assert.match(before.rep, /^ok\|.*Alpha Top Farms/, 'the office list carries the top farm group');
@@ -153,9 +153,9 @@ try {
   console.log('[read] a driver reads no delivery farm row (crew dispatch kept); admin, sales rep and applicator unchanged');
 
   // 3. The Deliveries list.
-  assert.equal(driverList(), 'ok|FR-01=Delta Farms/-,FR-02=Charlie Farms/Alpha Top Farms,FR-03=Delta Farms/-',
+  assert.equal(driverList(), 'ok|FR-01=Delta Farms/-,FR-02=Charlie Farms/Alpha Top Farms,FR-03=Bravo Farms/Alpha Top Farms',
     'a driver\'s list keeps names and the top farm group, the old delivery included');
-  assert.equal(driverList(", p_search => 'alpha top'"), 'ok|FR-02=Charlie Farms/Alpha Top Farms', 'a driver searches by farm group');
+  assert.equal(driverList(", p_search => 'alpha top'"), 'ok|FR-02=Charlie Farms/Alpha Top Farms,FR-03=Bravo Farms/Alpha Top Farms', 'a driver searches by farm group');
   const driverText = attempt(USERS.driver, `${asUser(`r := ${page()};`)} v := r::text;`);
   for (const secret of SECRETS) assert.ok(!driverText.includes(secret), `the list must not return ${secret}`);
   for (const other of ['FR-04', 'FR-05', 'FR-06', 'FR-07']) assert.ok(!driverText.includes(other), `a driver must not see ${other}`);
@@ -166,9 +166,9 @@ try {
   // 4. The label helper.
   assert.equal(attempt(USERS.driver, `${asUser(`r := (SELECT to_jsonb(x) FROM public._delivery_list_customer_labels() x LIMIT 1);`)} v := (SELECT string_agg(k, ',' ORDER BY k) FROM jsonb_object_keys(r) k);`),
     'ok|farm_group_name,farm_name,id', 'only three columns');
-  assert.equal(labels(USERS.driver), 'ok|Charlie Farms/Alpha Top Farms,Delta Farms/-', 'a driver: labels for their deliveries\' farms only');
-  assert.equal(labels(USERS.admin), 'ok|Charlie Farms/Alpha Top Farms,Delta Farms/-,Echo Farms/-', 'admin: every farm on a delivery');
-  assert.equal(labels(USERS.rep), 'ok|Charlie Farms/Alpha Top Farms,Delta Farms/-,Echo Farms/-', 'sales rep: every farm on a delivery');
+  assert.equal(labels(USERS.driver), 'ok|Bravo Farms/Alpha Top Farms,Charlie Farms/Alpha Top Farms,Delta Farms/-', 'a driver: labels for their deliveries\' farms only');
+  assert.equal(labels(USERS.admin), 'ok|Bravo Farms/Alpha Top Farms,Charlie Farms/Alpha Top Farms,Delta Farms/-,Echo Farms/-', 'admin: every farm on a delivery');
+  assert.equal(labels(USERS.rep), 'ok|Bravo Farms/Alpha Top Farms,Charlie Farms/Alpha Top Farms,Delta Farms/-,Echo Farms/-', 'sales rep: every farm on a delivery');
   assert.equal(labels(USERS.applicator), 'ok|<null>', 'an applicator holding a delivery assignment: nothing');
   assert.equal(labels(OFF_DRIVER), 'ok|<null>', 'an inactive driver: nothing');
   assert.equal(labels(DRIVER2), 'ok|<null>', 'a driver denied the Deliveries page: nothing, though FR-04 is assigned to them');

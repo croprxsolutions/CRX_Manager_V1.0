@@ -2,16 +2,19 @@
 // Tests for the live migration prerequisite (#2193): the modes-of-action load is
 // refused until the live EPA batch fill has run.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  MOA_MIN_MATCHED, checkLivePrerequisite, mcpPrerequisiteRefusal, moaMatchCountQuery, prerequisiteFor,
+  MOA_MIN_MATCHED, checkLivePrerequisite, mcpPrerequisiteRefusal, moaMatchCountQuery, parseMoaList, prerequisiteFor,
 } from "./migration-prerequisite-lib.mjs";
 import { evaluateMigrationApply } from "./migration-apply-lib.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const LOAD = "20270205150000_ingredient_modes_of_action_load";
+// Found by name stem, so a restamp of the load does not break this test (Sol LOW).
+const loads = readdirSync(path.join(ROOT, "supabase", "migrations")).filter((f) => /^\d{14}_ingredient_modes_of_action_load\.sql$/.test(f));
+assert.equal(loads.length, 1, "exactly one modes-of-action load on disk");
+const LOAD = loads[0].replace(/\.sql$/, "");
 const SQL = readFileSync(path.join(ROOT, "supabase", "migrations", `${LOAD}.sql`), "utf8");
 const fakeFetch = (body, ok = true) => async () => ({ ok, status: ok ? 200 : 500, json: async () => body });
 const check = (fetchImpl, name = LOAD, sql = SQL) =>
@@ -28,14 +31,33 @@ assert.match(mcpPrerequisiteRefusal("20270208100000_something_else", SQL), /MIGR
 const renamed = evaluateMigrationApply({ name: "20270208100000_something_else", query: SQL, projectId: "rhyzpcqhnizqbxphqdkr", projectDir: ROOT, cwd: ROOT });
 assert.match(renamed.reason, /MIGRATION PREREQUISITE \(#2193\)/);
 
-// The count query carries all 123 list rows from the migration itself.
+// The list is read as data: all 123 rows, names and CAS only, sent as one JSON literal.
+const list = parseMoaList(SQL);
+assert.equal(list.length, 123);
+assert.ok(list.every((r) => typeof r.name === "string" && r.name && (r.cas === null || /^[0-9-]+$/.test(r.cas))));
 const q = moaMatchCountQuery(SQL);
-assert.equal((q.match(/MOA-1 list v2, approved by Mason 2026-11-18'\)/g) || []).length, 123);
+assert.match(q, /jsonb_to_recordset\('\[/);
 assert.match(q, /FROM public\.active_ingredients a WHERE a\.status = 'active'/);
-assert.throws(() => moaMatchCountQuery("SELECT 1;"), /could not find the load's list/);
+assert.doesNotMatch(q, /HRAC|IRAC|FRAC|approved by Mason/, "only names and CAS leave the migration");
+assert.throws(() => moaMatchCountQuery("SELECT 1;"), /found 0/);
+
+// Sol BLOCKER round 2: nothing but plain literals is accepted, so no migration SQL runs in the read.
+const head = "INSERT INTO moa1_list (name, cas, scheme, group_code, source_note) VALUES\n";
+const ok = `${head}  ('A', '1-2-3', 'HRAC', '1', 'n'),\n  ('B''s', NULL, 'IRAC', '2', 'n') ;`;
+assert.deepEqual(parseMoaList(ok), [{ name: "A", cas: "1-2-3" }, { name: "B's", cas: null }], "quotes, NULL, space before ;");
+assert.throws(() => parseMoaList(`${head}  ('A', (SELECT pg_sleep(9))::text, 'HRAC', '1', 'n');`), /not plain literals/);
+assert.throws(() => parseMoaList(`${head}  ('A', '1', 'HRAC', '1', 'n') UNION SELECT 1;`), /not plain literals/);
+assert.throws(() => parseMoaList(`${head}  ('A', '1', 'HRAC', '1');`), /not plain literals/);
+assert.throws(() => parseMoaList(`${head}  ('A', '1', 'HRAC', '1', 'n');\n${ok}`), /found 2/);
+assert.throws(() => parseMoaList("INSERT INTO moa1_list (name, cas) VALUES ('A', '1');"), /unexpected columns/);
+assert.throws(() => parseMoaList(`${head}  ('A, '1', 'HRAC', '1', 'n');`), /not plain literals|unterminated/);
+// A JSON-breaking name stays inside the single escaped literal.
+assert.match(moaMatchCountQuery(`${head}  ('x''); DROP TABLE t; --', NULL, 'HRAC', '1', 'n');`), /'\[\{"name":"x''\); DROP TABLE t; --","cas":null\}\]'::jsonb/);
 
 // Sol MED/LOW round 1: lowercase VALUES, a comment naming the list, inherited names.
-assert.equal((moaMatchCountQuery(SQL.replace(/(INSERT INTO moa1_list\s*\([^)]*\)\s*)VALUES/i, "$1values")).match(/MOA-1 list v2, approved by Mason 2026-11-18'\)/g) || []).length, 123);
+assert.equal(parseMoaList(SQL.replace(/(INSERT INTO moa1_list\s*\([^)]*\)\s*)VALUES/i, "$1values")).length, 123);
+// Sol MED round 2: a quoted table name is still the load.
+assert.ok(prerequisiteFor("20270208100000_other", 'CREATE TEMP TABLE "moa1_list" (name text);'));
 assert.equal(prerequisiteFor("20270208100000_other", "-- see moa1_list in the load\nSELECT 1;"), null);
 assert.equal(prerequisiteFor("20270208100000_constructor"), null);
 assert.equal(prerequisiteFor("20270208100000___proto__"), null);
@@ -43,6 +65,7 @@ assert.equal(prerequisiteFor("20270208100000___proto__"), null);
 assert.match((await check(fakeFetch([{ listed: 123, matched: 124 }]))).reason, /unreadable/);
 assert.match((await check(fakeFetch([{ listed: 123, matched: [95] }]))).reason, /unreadable/);
 assert.match((await check(fakeFetch([{ listed: "123", matched: "95" }]))).reason, /unreadable/);
+assert.match((await check(fakeFetch([{ listed: 123, matched: 95 }, { listed: 123, matched: 95 }]))).reason, /unreadable/, "exactly one row");
 
 // Refused below the threshold, with the count shown.
 let r = await check(fakeFetch([{ listed: 123, matched: 12 }]));
@@ -89,5 +112,6 @@ assert.ok(preAt > 0, "apply-migration-file.mjs reads the live prerequisite");
 assert.match(applySrc.slice(preAt, preAt + 200), /if \(!pre\.ok\) die\(2, pre\.reason\)/);
 assert.ok(preAt < applySrc.indexOf("const wrapped ="), "checked before the transaction is built");
 assert.ok(preAt > applySrc.indexOf("if (!confirm)"), "checked on the --confirm path");
+assert.ok(preAt < applySrc.indexOf("await checkLiveMigrationOrdering("), "the live ordering re-check stays the last read (Sol MED)");
 
 console.log("MIGRATION_PREREQUISITE_LIB_TESTS_PASS");

@@ -463,6 +463,17 @@ if (!token) {
     "none), so there is no way to reach the management API. Do not write it to a file.");
 }
 
+// ── LIVE PREREQUISITE (#2193) ──────────────────────────────────────────────
+// The modes-of-action load must follow the live EPA batch fill: count how many of
+// its list rows match an active ingredient now, and refuse below the threshold.
+// Fails closed. Every other migration has no prerequisite and passes untouched.
+// Runs before the ordering re-check so that one stays the last read (Sol MED).
+{
+  const pre = await checkLivePrerequisite({ fetchImpl: fetch, projectId, token, name: migName, sql });
+  if (!pre.ok) die(2, pre.reason);
+  if (!pre.skipped) console.log(`Live prerequisite passed: ${pre.matched} of ${pre.listed} list rows match an active ingredient.`);
+}
+
 // ── LIVE ORDERING RE-CHECK ─────────────────────────────────────────────────
 // The gate above judged ordering against the local snapshot, which may be hours
 // old. On 2026-11-02 a peer session applied 20261102200000 after this checkout's
@@ -475,16 +486,6 @@ if (!token) {
   const live = await checkLiveMigrationOrdering({ fetchImpl: fetch, projectId, token, name: migName, sql });
   if (!live.ok) die(2, withRestampHint(live.reason));
   console.log(`Live ordering re-check passed (${live.count} applied rows; newest stamp ${live.newestApplied || "n/a"}).`);
-}
-
-// ── LIVE PREREQUISITE (#2193) ──────────────────────────────────────────────
-// The modes-of-action load must follow the live EPA batch fill: count how many of
-// its list rows match an active ingredient now, and refuse below the threshold.
-// Fails closed. Every other migration has no prerequisite and passes untouched.
-{
-  const pre = await checkLivePrerequisite({ fetchImpl: fetch, projectId, token, name: migName, sql });
-  if (!pre.ok) die(2, pre.reason);
-  if (!pre.skipped) console.log(`Live prerequisite passed: ${pre.matched} of ${pre.listed} list rows match an active ingredient.`);
 }
 
 // ── LEDGER PARITY ──────────────────────────────────────────────────────────

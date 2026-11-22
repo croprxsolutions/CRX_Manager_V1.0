@@ -17,7 +17,7 @@
 import { normalizeMigrationName } from "./migration-ordering-lib.mjs";
 
 const MOA_LIST_ROWS = 123;
-const PREREQUISITE_READ_TIMEOUT_MS = 20_000;
+const PREREQUISITE_READ_TIMEOUT_MS = 10_000;
 // Threshold: at least 90 of the 123 list rows (73%) must match an active
 // ingredient. Measured on live 2026-11-22, after the 2026-11-21 EPA batch fill:
 // 99 of 123 match. Before the fill the app had few ingredients, so the count sits
@@ -32,7 +32,7 @@ const PREREQUISITES = {
     minMatched: MOA_MIN_MATCHED,
     query: moaMatchCountQuery,
     // The load's own list table: catches its SQL sent under any other name (Luna MED).
-    sqlMarker: /CREATE\s+TEMP(?:ORARY)?\s+TABLE\s+moa1_list\b/i,
+    sqlMarker: /CREATE\s+TEMP(?:ORARY)?\s+TABLE\s+"?moa1_list\b/i,
   },
 };
 
@@ -43,19 +43,51 @@ export function prerequisiteFor(name, sql = "") {
   return (Object.hasOwn(PREREQUISITES, stem) && PREREQUISITES[stem]) || Object.values(PREREQUISITES).find((p) => p.sqlMarker.test(String(sql))) || null;
 }
 
-// The load's own 123 list rows, read from the migration being applied, matched by
-// the load's own rule: CAS decides; the name counts only when one side has no CAS
-// and exactly one active ingredient has that name.
-export function moaMatchCountQuery(sql) {
+// Reads the load's list as DATA: exactly one `INSERT INTO moa1_list (...) VALUES`,
+// whose rows are 5 plain string literals (or NULL) each. Anything else (an
+// expression, a function call, a second list) fails closed, so no SQL from the
+// migration is ever sent to live (Sol BLOCKER, round 2).
+const MOA_LIST_COLUMNS = "name,cas,scheme,group_code,source_note";
+export function parseMoaList(sql) {
   const text = String(sql || "");
-  const head = /INSERT INTO moa1_list\s*\([^)]*\)\s*VALUES/i.exec(text);
-  if (!head) throw new Error("could not find the load's list (INSERT INTO moa1_list ... VALUES)");
-  const valuesAt = head.index + head[0].length;
-  const end = text.indexOf("');", valuesAt);
-  if (end < 0) throw new Error("could not find the end of the load's list");
-  const values = text.slice(valuesAt, end + 2);
+  const heads = [...text.matchAll(/INSERT\s+INTO\s+moa1_list\s*\(([^)]*)\)\s*VALUES/gi)];
+  if (heads.length !== 1) throw new Error(`expected exactly one INSERT INTO moa1_list ... VALUES, found ${heads.length}`);
+  if (heads[0][1].replace(/\s+/g, "").toLowerCase() !== MOA_LIST_COLUMNS) throw new Error("the load's list has unexpected columns");
+  let i = heads[0].index + heads[0][0].length;
+  const ws = () => { while (/\s/.test(text[i] || "")) i += 1; };
+  const expect = (ch) => { ws(); if (text[i] !== ch) throw new Error(`the load's list is not plain literals (expected "${ch}" at ${i})`); i += 1; };
+  const literal = () => {
+    ws();
+    if (/^NULL\b/i.test(text.slice(i, i + 5))) { i += 4; return null; }
+    if (text[i] !== "'") throw new Error(`the load's list is not plain literals (at ${i})`);
+    let v = "";
+    for (i += 1; ; i += 1) {
+      if (i >= text.length) throw new Error("the load's list has an unterminated string");
+      if (text[i] === "'") { if (text[i + 1] === "'") { v += "'"; i += 1; continue; } i += 1; return v; }
+      v += text[i];
+    }
+  };
+  const rows = [];
+  for (;;) {
+    expect("(");
+    const row = [literal()];
+    for (let c = 1; c < 5; c += 1) { expect(","); row.push(literal()); }
+    expect(")");
+    rows.push({ name: row[0], cas: row[1] });
+    ws();
+    if (text[i] === ",") { i += 1; continue; }
+    if (text[i] === ";") return rows;
+    throw new Error(`the load's list is not plain literals (at ${i})`);
+  }
+}
+
+// The load's own list rows, matched by the load's own rule: CAS decides; the name
+// counts only when one side has no CAS and exactly one active ingredient has that
+// name. Only the parsed names and CAS numbers are sent, as one escaped JSON literal.
+export function moaMatchCountQuery(sql) {
+  const json = JSON.stringify(parseMoaList(sql)).replace(/'/g, "''");
   return (
-    `WITH l(name, cas, scheme, group_code, source_note) AS (VALUES ${values}),\n` +
+    `WITH l AS (SELECT * FROM jsonb_to_recordset('${json}'::jsonb) AS x(name text, cas text)),\n` +
     `ing AS (SELECT a.name_key, NULLIF(btrim(a.cas), '') AS cas,\n` +
     `              count(*) OVER (PARTITION BY a.name_key) = 1 AS name_unique\n` +
     `          FROM public.active_ingredients a WHERE a.status = 'active')\n` +
@@ -104,6 +136,7 @@ export async function checkLivePrerequisite({ fetchImpl, projectId, token, name,
   } catch (err) {
     return fail(`could not read the live ingredient count (${err?.message || err})`);
   }
+  if (!Array.isArray(rows) || rows.length !== 1) return fail("the live count came back unreadable");
   const listed = rows?.[0]?.listed;
   const matched = rows?.[0]?.matched;
   if (!Number.isInteger(listed) || !Number.isInteger(matched) || matched < 0 || matched > listed) {

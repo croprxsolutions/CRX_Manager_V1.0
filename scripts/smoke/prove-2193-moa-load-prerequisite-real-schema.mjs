@@ -13,14 +13,15 @@
  * Prints MOA_LOAD_PREREQUISITE_PROOF_PASS on success.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { checkLivePrerequisite, MOA_MIN_MATCHED } from '../../.claude/hooks/migration-prerequisite-lib.mjs';
 
 process.env.UNDO_PATHS_CONTAINER ||= `crx-2193-${process.pid}-${Date.now().toString(36)}`;
 const { buildContainer, removeContainer, seedUsers, psql, scalar, USERS, ROOT } = await import('./undo-paths/harness.mjs');
 
-const LOAD = '20270205150000_ingredient_modes_of_action_load';
+const LOAD = readdirSync(path.join(ROOT, 'supabase', 'migrations'))
+  .find((f) => /^\d{14}_ingredient_modes_of_action_load\.sql$/.test(f)).replace(/\.sql$/, '');
 const SQL = readFileSync(path.join(ROOT, 'supabase', 'migrations', `${LOAD}.sql`), 'utf8');
 // Distinct CAS numbers on the load's list, in list order.
 const CAS = [...new Set([...SQL.matchAll(/^\s*\('(?:[^']|'')*', '([0-9-]+)', '(?:HRAC|IRAC|FRAC)'/gm)].map((m) => m[1]))];

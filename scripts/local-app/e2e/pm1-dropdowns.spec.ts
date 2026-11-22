@@ -21,7 +21,7 @@ async function addProducts(page: Page) {
   batch += 1;
   const rows = categories.map((category, i) => ({
     product_name: `Dropdown ${category} ${run} ${batch}`,
-    product_form: 'liquid',
+    product_form: 'liquid', inventory_unit: 'Gal',
     category,
     vendor: vendors[i],
     manufacturer: makers[i % 2],

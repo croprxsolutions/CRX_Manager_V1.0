@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('product setup refuses invalid fields and saves Seed with a first form choice', async ({ page }) => {
+test('product setup refuses invalid fields and saves Seed; the saved form stays locked', async ({ page }) => {
   await page.goto('/login');
   await page.fill('#email', process.env.LOCAL_TEST_EMAIL!);
   await page.fill('#password', process.env.LOCAL_TEST_PASSWORD!);
@@ -8,10 +8,12 @@ test('product setup refuses invalid fields and saves Seed with a first form choi
   await expect(page).not.toHaveURL(/login/);
 
   // Products are an allowed admin insert. Inventory and order lines are never seeded directly.
+  // Form and sold unit are required on every saved product, so the form is set here and stays locked
+  // (first-form choice on the new-product screen is covered by pm9-product-forms).
   const productId = await page.evaluate(async (name) => {
     const { supabase } = await import(/* @vite-ignore */ '/src/lib/db.ts');
     const { data, error } = await supabase.from('products')
-      .insert({ product_name: name, category: 'Herbicide' }).select('id').single();
+      .insert({ product_name: name, product_form: 'dry', inventory_unit: 'Lb', category: 'Herbicide' }).select('id').single();
     if (error || !data) throw new Error(error?.message ?? 'Local product insert failed');
     return data.id;
   }, `Setup ${Date.now()} (invented)`);
@@ -30,7 +32,8 @@ test('product setup refuses invalid fields and saves Seed with a first form choi
 
   await page.getByLabel('EPA Registration').fill('');
   await page.getByLabel('Category').selectOption('Seed');
-  await page.getByLabel('Product Form').selectOption('dry');
+  await expect(page.getByLabel('Product Form')).toBeDisabled();
+  await expect(page.getByLabel('Product Form')).toHaveValue('dry');
   await page.getByRole('button', { name: 'Save Changes' }).click();
   await expect(page.getByText('Product updated')).toBeVisible();
   await page.reload();

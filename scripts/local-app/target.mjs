@@ -2,15 +2,20 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { connect } from 'node:net';
 
-if (process.env.CRX_LOCAL_APP_PROFILE && process.env.CRX_LOCAL_APP_PROFILE !== 'sales-gauntlet') {
+// doc-bytes: a third, separate stack for the customer-document byte proof (KI-113); never the other two.
+const PROFILE = process.env.CRX_LOCAL_APP_PROFILE;
+if (PROFILE && PROFILE !== 'sales-gauntlet' && PROFILE !== 'doc-bytes') {
   throw new Error('LOCAL_APP_REFUSED: Unknown local test profile.');
 }
-export const IS_SALES_GAUNTLET = process.env.CRX_LOCAL_APP_PROFILE === 'sales-gauntlet';
-export const STATE_FOLDER = IS_SALES_GAUNTLET ? '.state/sales-gauntlet' : '.state';
-export const PROJECT = IS_SALES_GAUNTLET ? 'crx-sales-gauntlet' : 'crx-local-app';
-export const API_PORT = IS_SALES_GAUNTLET ? 54821 : 54721;
-export const DB_PORT = IS_SALES_GAUNTLET ? 54822 : 54722;
-export const APP_PORT = IS_SALES_GAUNTLET ? 5209 : 5199;
+export const IS_SALES_GAUNTLET = PROFILE === 'sales-gauntlet';
+export const IS_DOC_BYTES = PROFILE === 'doc-bytes';
+export const PROFILE_NAME = PROFILE ?? '';
+const pick = (normal, sales, docBytes) => (IS_SALES_GAUNTLET ? sales : IS_DOC_BYTES ? docBytes : normal);
+export const STATE_FOLDER = pick('.state', '.state/sales-gauntlet', '.state/doc-bytes');
+export const PROJECT = pick('crx-local-app', 'crx-sales-gauntlet', 'crx-doc-bytes-proof');
+export const API_PORT = pick(54721, 54821, 54831);
+export const DB_PORT = pick(54722, 54822, 54832);
+export const APP_PORT = pick(5199, 5209, 5219);
 export const API_URL = `http://127.0.0.1:${API_PORT}`;
 export const APP_URL = `http://127.0.0.1:${APP_PORT}`;
 export const DB_URL_PREFIX = `postgresql://postgres:`;
@@ -190,7 +195,7 @@ export async function assertFrontendIsOurs(anonKey, { isOpen = portIsOpen, fetch
  */
 export function assertExtraAppPort(port) {
   const number = /^\d{4,5}$/.test(String(port ?? '')) ? Number(port) : NaN;
-  if (!(number >= 1024 && number <= 65535) || [5199, 54721, 54722, 5209, 54821, 54822].includes(number)) {
+  if (!(number >= 1024 && number <= 65535) || [5199, 54721, 54722, 5209, 54821, 54822, 5219, 54831, 54832].includes(number)) {
     throw new Refused('--port needs a port from 1024 to 65535 outside both test profiles\' reserved ports.');
   }
   return number;

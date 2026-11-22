@@ -40,8 +40,8 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status (re-checked 2026-11-21) | Count |
 |---|---|
-| Open, partly open, check-first or waiting on a Mason decision (numbered entries; KI-200 to KI-203 and KI-205 added 2026-11-22 from the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md)) | 88 |
-| Fixed on staging, waiting for the production release | 6 |
+| Open, partly open, check-first or waiting on a Mason decision (numbered entries; KI-201, KI-202 and KI-205 added 2026-11-22 from the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md)) | 86 |
+| Fixed on staging, waiting for the production release | 8 |
 | Accepted numbered entries in the area sections (the full accepted list is the "Accepted risks" table) | 10 |
 | Backlog or roadmap entries, not defects (KI-204 added 2026-11-22) | 4 |
 | Open items tracked only as GitHub issues or parked fixes (tables at the end of each area) | 59 |
@@ -340,9 +340,9 @@ reopens it.
 
 ### KI-203 — Quick Delivery shows a dash for the unit of a product stocked in Gal
 
-> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Fix in review: PR #2213 (shows the stock unit; screen test fails without it) · LOW · plan W3-56. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
+> **Re-checked 2026-11-22:** Merged to staging in PR #2213 · fresh deployed browser check pending · plan W3-56 · GitHub #2208 closed. [Acceptance checks](../audits/2026-11-22-staging-workflows-follow-up.md)
 
-**LOW (clarity) · OPEN (reproduced on staging; source-confirmed) · deliveries · found 2026-11-22 (rehearsal CRXN-03) · unassigned · GitHub #2208**
+**LOW (clarity) · FIXED ON STAGING BRANCH (browser retest pending) · found 2026-11-22 · GitHub #2208**
 The unit column shows the product's optional package size or a dash (`QuickDeliveryModal.tsx` ~L633), not the unit
 the line is sold in. A two-Gal entry priced $10.00 and the saved delivery, order and invoice all used Gal correctly.
 Fix: show the selected or implied sales unit before submit. Proof: a pack size and a converted unit on test records,
@@ -575,7 +575,7 @@ spelling on receipt.
 | #2190 | MED | Open | Two deliveries completing at the same moment on the same products can make one fail and need a retry; nothing is saved wrongly. | Agent (unassigned) | W2-12 |
 | #2193 | MED | Open | If applied before the EPA batch, the one-time load commits with some ingredients missing their groups and never fills them later. | Agent (unassigned) | W2-13 |
 | #2172 | LOW | Open | A very large batch (about 3,000 approvals) could make Confirm silently send nothing. Not reachable today (hundreds of rates). | Agent (unassigned) | W3-16 |
-| #2135 | LOW | Open | Staff see an inflated short-stock count and get two warnings and two notifications; stock math is right. | Agent (unassigned) | W3-17 |
+| #2135 | LOW | Fix in review (`20270213100000`, branch `claude/lane-c2-single-short-stock`) | Staff see an inflated short-stock count and get two warnings and two notifications; stock math is right. | Agent (unassigned) | W3-17 |
 | #1912 | LOW | On staging, not live | Retry keys with hidden characters are now refused. Issue can be closed once released. | Agent (unassigned) | R-13 |
 | #1829 | LOW | Check first | A confirmed rate approval could be lost if the reply is dropped and the user leaves. | Agent (unassigned) | W3-51 |
 
@@ -828,9 +828,9 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
 
 ### KI-200 — Return approval: the confirmation opens underneath the return details
 
-> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Fix in review: PR #2210 (Luna and Sol clean; click-tested on staging data) · MED · plan W2-51 · #2205. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
+> **Re-checked 2026-11-22:** Merged to staging in PR #2210 · fresh deployed browser check pending · plan W2-51 · GitHub #2205 closed. [Acceptance checks](../audits/2026-11-22-staging-workflows-follow-up.md)
 
-**MED · OPEN (reproduced twice on staging; source-confirmed) · returns · found 2026-11-22 (rehearsal CRXN-01) · unassigned (a local, uncommitted fix sits in `C:\CRX_wt\return-dialog`) · GitHub #2205**
+**MED · FIXED ON STAGING BRANCH (browser retest pending) · found 2026-11-22 · GitHub #2205**
 Opening a requested return and clicking Approve shows the Approve/Reject `ConfirmModal`, but it is rendered before
 the return-details `Modal` (`Returns.tsx` ~L1190 vs ~L1222), so the details window covers it and a normal click
 cannot reach it. Keyboard (Enter) still works and approved exactly once, with the expected single stock and credit
@@ -1519,7 +1519,7 @@ the first uploader's name and time. LOW.
 > **Re-checked 2026-11-22 on staging `17a72d0ee`:** Backlog, not a defect · LOW · Mason decision (To-Do decisions 34 and 35). From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
 
 **LOW · OPEN (suggestions, not defects; some need a Mason rule) · several areas · found 2026-11-22 · Mason decision where noted**
-Each worked correctly in the rehearsal; the ask is clarity. Detail and evidence: the report's "Workflow and UX
+These are workflow and clarity proposals. See the [later UX and evidence register](../audits/2026-11-22-staging-workflows-follow-up.md) and the original report's "Workflow and UX
 improvement candidates" table. To-Do section 17; decisions 34 and 35.
 - New Customer: point at the missing commission recipient beside the split row before Save.
 - Returns: show each stage (requested, approved, received, restocked, credited) and where the credit can be used next.
@@ -1535,26 +1535,28 @@ improvement candidates" table. To-Do section 17; decisions 34 and 35.
 - Pricing history: label current tier, last charged and quoted amounts with their scope, date and source.
 - Office exceptions and documents: an end-to-end dashboard-to-fix check by role, and one quote-to-statement trail
   that highlights differences.
+- Supplier quote: show package conversion and explain when approved cost can be selected. Lot Trace: explain application-only scope and link available lot evidence.
+- Delivery list: show whether the brand is confirmed or lead staff to Delivery Detail to confirm it.
+- Reporting and field planning: carry the customer/date scope and distinguish planning from dispatch and downstream work.
 
 ### KI-205 — Staging rehearsal: cases not yet proven, and what blocked them
 
 > **Re-checked 2026-11-22 on staging `17a72d0ee`:** Check first · MED · Agent (unassigned) · plan W2-54 · To-Do 16.12. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
 
 **MED · UNVERIFIED (test gaps, not confirmed defects) · test coverage · found 2026-11-22 · unassigned**
-9 cases were blocked and 17 only partly proven (per-case owner and blocker in the coverage CSV). Main gaps: supplier
-returns and vendor credits; actual refunds; individual credit and prepay un-apply (the only paths found delete a ledger
-row, so they were not run); live split-payer invoice generation (could alert staff); quote version restore (deletes
-old section/line rows on the inspected path); signed driver delivery and offline reconnect (need a driver login and
-device); other staff roles; unit/pack conversions, warehouse-wide counts and product retirement fixtures; period
-close/reopen; larger load and multi-page reports. Test-runner lessons (setup checks, readiness waits, never treating a
-timeout as a failed write, sanitized auth output, closing every queued case) are in the report's runner section.
-Close each gap when a rehearsal case proves it or it moves to its own KI. To-Do 16.12.
+The original ledger had 9 blocked and 17 partial. The later pass has 55 separately recorded cases, including
+13 blocks. The [follow-up](../audits/2026-11-22-staging-workflows-follow-up.md) cleared restricted-use sale on deployed staging, ran six isolated
+database actions or variants, and documented four partial results and two unavailable staff workflows.
+Remaining priorities include approved finance and supplier corrections with retained history, deployed chemical
+split and odd-cent return, missing-invoice recovery, quote restore, driver/offline and sales-rep roles, unit/pack
+and lifecycle fixtures, month-end late correction, Crop Programs persistence and wider reporting/load proof.
+Close each gap after a case proves it or it moves to its own issue. To-Do 16.12.
 
 ### Also open in this area (tracked as GitHub issues or parked fixes; plain-English detail in [the plan](MASTER_FIX_PLAN.md))
 
 | ID | Sev | Status | What goes wrong | Owner | Plan |
 |---|---|---|---|---|---|
-| #2197 | MED | Open | Staff are told to reactivate a customer before new orders, but the screen offers no way, so it must be done outside the app. | Agent (unassigned) | W2-35 |
+| #2197 | MED | FIXED-ON-STAGING | Staff are told to reactivate a customer before new orders, but the screen offers no way, so it must be done outside the app. Fixed: an admin or sales rep now sees a Reactivate button (with a confirm) on an inactive customer's page. | Agent (Lane D) | W2-35 |
 | #2089 | MED | Open | A customer could be deactivated while an invoice posts, leaving a balance on an inactive customer. | Taha (to 2026-12-15) | W2-36 |
 | #2016 | LOW | Open | "1,200" in an unquoted CSV can save as 1 corn acre and 200 soybean acres. | Agent (unassigned) | W3-38 |
 
@@ -1681,13 +1683,18 @@ tools. `scripts/backup-claude-memory.mjs:476` refuses the same way.
 
 ### KI-51 — Supplier-pricing Phase 3C containment and time-bombs
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-41. The containment check caps history at 4,096 commits and main already has more; check whether new-branch pushes are affected.
+> **Re-checked 2026-11-22 on staging `f8ee14ee8`:** Resolved for new-branch pushes · LOW · plan W2-41.
 
-**MED · OPEN · tooling-guards · unassigned**
+**LOW · RESOLVED (cap) · tooling-guards**
 The trusted containment check is not a required check on `main` (rules: Vercel, Lint/Type/Test/Build, SQL
-Migration Validation). The first-push ancestry cap is 4,096 commits (`scripts/check-supplier-pricing-phase3-private-artifacts.mjs:25`);
-`main` has 3,032 and grows ~200/month, so about five months until every new branch push is blocked; raise it before
-then. Byte/candidate scan budgets (3 GiB, 100,000) need re-measuring. Maintenance watch.
+Migration Validation). History cap: 4,096 commits (`MAX_HISTORY_COMMITS` in
+`scripts/check-supplier-pricing-phase3-private-artifacts.mjs`); `origin/main` has 4,463 and `origin/staging` 4,550.
+**New-branch pushes are not affected** (checked 2026-11-22): the pre-push check scans only commits not on the
+remote's advertised default branch, so a new branch cut from staging scanned 87 commits and passed. CI scans only
+`base..head` for pull requests and runs on push only for `main` and `staging`, which are never created new. The cap
+still refuses a new-branch push when the checkout has no local copy of `main` (not fetched) or pushes to a URL that
+differs from the remote's fetch URL; that refusal now names the fix (fetch, push by remote name, push again).
+Byte/candidate scan budgets (3 GiB, 100,000) need re-measuring. Maintenance watch.
 
 ### KI-52 — Tests and tooling hygiene
 
@@ -1767,17 +1774,17 @@ cases only. Workaround: run a delete or cleanup as its own command, not in one t
 
 ### KI-113 — The customer-document byte-boundary prover is out of date
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-43 · #1698, #1663, #635.
+> **Re-checked 2026-11-22 on staging `f8ee14ee8`:** Resolved (after phase) · LOW · plan W3-43 · #1698, #1663, #635.
 
-**LOW · OPEN · tooling-tests · source: #1698 (from #1663)**
-`scripts/smoke/prove-customer-document-bytes-server-only.mjs` (PR #635) builds a hand-made scratch project (a
-`profiles`/`customers` fixture plus `20260717013415`, then `20260914100700`) and serves today's
-`customer-document-files`. Its `--phase=after` fails on `profiles.email NOT NULL`, and today's function also relies on
-later migrations (`20261013220000`, `20261222100000`) its fixture lacks, so a one-line email fix would not make it
-pass. Not a customer risk today: live read-only 2026-11-09, the `customer-documents` bucket is private and no
-`storage.objects` policy names it or omits `bucket_id`, so browser users reach its files only through
-`customer-document-files`; the 2026-11-08 local click-through (KI-07) exercised that path. No other prover covers this
-boundary. Fix when next needed: rebuild it on the real-schema harness.
+**LOW · RESOLVED 2026-11-22 · tooling-tests**
+`scripts/smoke/prove-customer-document-bytes-server-only.mjs --phase=after` runs again on today's full migration
+chain and today's unmodified `customer-document-files` function: `node scripts/local-app/doc-bytes.mjs rebuild`
+(a third, separate local stack) then `node scripts/smoke/run-customer-document-bytes-proof.mjs` (30/30 checks;
+`--negative-control` re-adds a browser read policy on the bucket and 4 checks fail, so the boundary is still
+tested). Three assertions follow later decisions: any active rep may work any customer (20261013220000), and an
+admin can still download a removed document (KI-07); a rep is still refused after removal and a driver is refused.
+Still not covered: `--phase=before` (the original hole) needs the chain stopped before 20260914100700 and is kept
+as historical; the function runs under host Deno, not the Edge Runtime container.
 
 ### KI-115 — Many screens send database errors to Sentry as "[object Object]"
 

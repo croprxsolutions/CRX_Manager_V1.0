@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   API_PORT, API_URL, APP_PORT, APP_URL, DB_PORT, DB_URL_PREFIX, DB_URL_SUFFIX, ISSUER, PROJECT, Refused, TEST_EMAIL,
-  IS_SALES_GAUNTLET, STATE_FOLDER, REP_EMAIL, OTHER_REP_EMAIL,
+  IS_SALES_GAUNTLET, IS_DOC_BYTES, PROFILE_NAME, STATE_FOLDER, REP_EMAIL, OTHER_REP_EMAIL,
   assertAppPortIsLoopback, assertCleanEnvironment, assertExtraAppPort, assertFrontendIsOurs, assertLocalDockerEndpoint, assertLocalState, assertLoopbackBindings, portIsOpen,
 } from './target.mjs';
 
@@ -28,7 +28,7 @@ const SUPABASE_CLI = '2.109.1';
 const PASSTHROUGH = /^(path|pathext|systemroot|systemdrive|windir|comspec|temp|tmp|home|homedrive|homepath|userprofile|username|appdata|localappdata|programdata|programfiles|programfiles\(x86\)|supabase_go_binary|ms_playwright_browsers_path)$/i;
 function childEnv(extra = {}) {
   return { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => PASSTHROUGH.test(k))),
-    ...(IS_SALES_GAUNTLET ? { CRX_LOCAL_APP_PROFILE: 'sales-gauntlet' } : {}), ...extra };
+    ...(PROFILE_NAME ? { CRX_LOCAL_APP_PROFILE: PROFILE_NAME } : {}), ...extra };
 }
 
 function run(command, args, { input, allowFailure, env, stdio } = {}) {
@@ -102,8 +102,8 @@ function assertExistingStackIsOurs() {
     if (!/scripts[\\/]local-app[\\/]compose\.yaml$/.test(container.Config.Labels['com.docker.compose.project.config_files'] ?? '')) {
       throw new Refused(`Another stack is using the name ${PROJECT}. Nothing was changed.`);
     }
-    if (IS_SALES_GAUNTLET && path.resolve(container.Config.Labels['com.docker.compose.project.config_files']) !== path.join(HERE, 'compose.yaml')) {
-      throw new Refused('The sales test stack belongs to another checkout. Nothing was changed.');
+    if ((IS_SALES_GAUNTLET || IS_DOC_BYTES) && path.resolve(container.Config.Labels['com.docker.compose.project.config_files']) !== path.join(HERE, 'compose.yaml')) {
+      throw new Refused(`The ${IS_DOC_BYTES ? 'document-proof' : 'sales'} test stack belongs to another checkout. Nothing was changed.`);
     }
   }
   assertLoopbackBindings(inspected.flatMap((c) => Object.values(c.HostConfig.PortBindings ?? {}).flat()));
@@ -243,12 +243,25 @@ AS $live_crlf_close$${body}$live_crlf_close$;\n${sql}`;
 
 const approvedMigrations = () => text(run(process.execPath, ['scripts/list-post-baseline-migrations.mjs'])).split(/\r?\n/).filter(Boolean);
 
+// The doc-bytes proof stack applies the same ordered files straight through psql, one transaction each, and
+// writes the ledger row the CLI would (version + whole file stem), so it needs no Supabase CLI at all.
+function applyWithPsql(name) {
+  psql(migrationBytes(`supabase/migrations/${name}`));
+  recordLedger(name.replace(/\.sql$/, ''));
+}
+function recordLedger(stem) {
+  psql(`INSERT INTO supabase_migrations.schema_migrations (version, name) VALUES ('${stem.slice(0, 14)}', '${stem}') ON CONFLICT (version) DO NOTHING;`);
+}
+
 async function pushPostBaselineMigrations(state) {
-  const version = text(run('supabase', ['--version']));
-  if (version !== SUPABASE_CLI) throw new Error(`The push steps are proven on Supabase CLI ${SUPABASE_CLI}, not ${version}.`);
-  const launcher = process.platform === 'win32' ? text(run('where.exe', ['supabase'])).split(/\r?\n/)[0] : null;
-  const companion = process.env.SUPABASE_GO_BINARY ?? (launcher ? path.join(path.dirname(launcher), 'supabase-go.exe') : 'supabase-go');
-  if (text(run(companion, ['--version'])) !== SUPABASE_CLI) throw new Error(`Use the matching Supabase ${SUPABASE_CLI} companion executable.`);
+  let companion;
+  if (!IS_DOC_BYTES) {
+    const version = text(run('supabase', ['--version']));
+    if (version !== SUPABASE_CLI) throw new Error(`The push steps are proven on Supabase CLI ${SUPABASE_CLI}, not ${version}.`);
+    const launcher = process.platform === 'win32' ? text(run('where.exe', ['supabase'])).split(/\r?\n/)[0] : null;
+    companion = process.env.SUPABASE_GO_BINARY ?? (launcher ? path.join(path.dirname(launcher), 'supabase-go.exe') : 'supabase-go');
+    if (text(run(companion, ['--version'])) !== SUPABASE_CLI) throw new Error(`Use the matching Supabase ${SUPABASE_CLI} companion executable.`);
+  }
   const files = approvedMigrations();
   const workdir = mkdtempSync(path.join(STATE_DIR, 'push-'));
   // The password travels in the environment so it never shows in a process list.
@@ -275,6 +288,7 @@ async function pushPostBaselineMigrations(state) {
         await seedRegistrationPrerequisite(state);
         names = names.slice(registrationBoundary);
       }
+      if (IS_DOC_BYTES) { names.forEach(applyWithPsql); return; }
       for (const name of names) writeFileSync(path.join(workdir, 'supabase', 'migrations', ledgerFile(name)), migrationBytes(`supabase/migrations/${name}`));
       const db = ['--workdir', workdir, 'db', 'push', '--db-url', urlWithoutPassword, '--include-all'];
       const dry = run('supabase', [...db, '--dry-run'], { env });
@@ -296,7 +310,8 @@ async function pushPostBaselineMigrations(state) {
       await push(names.slice(done, next));
       done = next;
       writeFileSync(path.join(workdir, 'supabase', 'migrations', ledgerFile(`${stem}.sql`)), '');
-      run('supabase', ['--workdir', workdir, 'migration', 'repair', stem.slice(0, 14), '--status', 'applied', '--db-url', urlWithoutPassword], { env });
+      if (IS_DOC_BYTES) recordLedger(stem);
+      else run('supabase', ['--workdir', workdir, 'migration', 'repair', stem.slice(0, 14), '--status', 'applied', '--db-url', urlWithoutPassword], { env });
     }
     await push(names.slice(done));
   } finally {
@@ -342,6 +357,8 @@ async function seedRegistrationPrerequisite(state) {
   } finally {
     compose(['stop', 'auth']);
   }
+  // The gateway restart above drops its database relay for a moment; the next push connects through it.
+  await waitFor('database through the gateway', databaseAnswers);
   const actor = scalar(`SELECT id FROM auth.users WHERE email = '${state.LOCAL_TEST_EMAIL}';`);
   psql(`BEGIN;
     SELECT set_config('request.jwt.claim.sub', '${actor}', true);

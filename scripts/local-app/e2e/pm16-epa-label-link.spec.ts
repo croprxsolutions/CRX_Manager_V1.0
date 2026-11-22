@@ -14,7 +14,7 @@ test('the product page and brand rows link to EPA for their own number', async (
   const id: string = await page.evaluate(async (name) => {
     const path = '/src/lib/db.ts';
     const { supabase } = await import(/* @vite-ignore */ path);
-    const { data, error } = await supabase.from('products').insert({ product_name: name, product_form: 'liquid' }).select('id').single();
+    const { data, error } = await supabase.from('products').insert({ product_name: name, product_form: 'liquid', inventory_unit: 'Gal' }).select('id').single();
     if (error) throw new Error(error.message);
     return data.id;
   }, `EPA Link ${Date.now()} (invented)`);

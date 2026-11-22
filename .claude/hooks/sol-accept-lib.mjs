@@ -193,7 +193,8 @@ export function skipFromReply(prompt) {
   if (BREAK_RE.test(raw.trim())) return null;
   const t = raw.toLowerCase().replace(/[‘’ʼ]/g, "'").replace(/\s*[.!]+\s*$/, "").replace(/[ \t]+/g, " ").trim();
   if (!t) return null;
-  if (SKIP_ALL_RES.some((re) => re.test(t))) return { all: true };
+  // "that"/"it" name ONE finding: they skip only when the list has one (Luna, 2026-11-21).
+  if (SKIP_ALL_RES.some((re) => re.test(t))) return / (?:it|that)(?: alone| fixed)?$/.test(t) ? { all: true, single: true } : { all: true };
   const m = SKIP_SOME_RE.exec(t);
   return m ? { numbers: m[1].split(/\D+/).filter(Boolean).map(Number) } : null;
 }
@@ -205,6 +206,7 @@ export function skipFromReply(prompt) {
 export function skipSelection(skip, shownFindings) {
   const shown = (shownFindings || []).map((f) => f.n);
   if (!skip) return { problem: "his reply is not a skip" };
+  if (skip.all && skip.single && shown.length !== 1) return { problem: `his reply says "that" or "it" but the list has ${shown.length} findings; he replies skip (all of them) or skip and the numbers` };
   if (skip.all) return shown.length ? { numbers: shown } : { problem: "the request shows no findings" };
   const nums = skip.numbers || [];
   if (!nums.length) return { problem: "his reply names no finding" };

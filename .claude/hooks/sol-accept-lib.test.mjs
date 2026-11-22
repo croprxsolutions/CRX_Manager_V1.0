@@ -239,9 +239,14 @@ assert.equal("owner_accepted" in buildCarryForwardProof({ headSha: H2, baseSha: 
 
 // ── Skipping in plain words: one request, one reply, no code (Mason, 2026-11-21) ──
 for (const yes of ["skip", "Skip.", "SKIP!", "skip all", "skip them", "skip these", "accept", "Accept all", "don't fix", "Don’t fix them",
-  "do not fix", "I don't want that", "I don’t want those", "i do not want them fixed", "leave them", "leave it alone", "  skip  "]) {
+  "do not fix", "I don’t want those", "i do not want them fixed", "leave them", "  skip  "]) {
   assert.deepEqual(skipFromReply(yes), { all: true }, `skip: "${yes}" skips everything shown`);
 }
+for (const one of ["I don't want that", "leave it alone", "skip it", "don't fix that", "i do not want it fixed"]) {
+  assert.deepEqual(skipFromReply(one), { all: true, single: true }, `skip: "${one}" names one finding`);
+}
+assert.deepEqual(skipSelection(skipFromReply("I don't want that"), [{ n: 1 }]), { numbers: [1] }, "skip: 'that' skips a lone finding");
+assert.match(skipSelection(skipFromReply("I don't want that"), [{ n: 1 }, { n: 2 }]).problem, /"that" or "it"/, "skip: 'that' never skips a list of two");
 assert.deepEqual(skipFromReply("skip 1 3"), { numbers: [1, 3] }, "skip: numbers");
 assert.deepEqual(skipFromReply("skip 1, 3 and 4"), { numbers: [1, 3, 4] }, "skip: a list with commas and and");
 assert.deepEqual(skipFromReply("don't fix finding 2"), { numbers: [2] }, "skip: 'finding 2'");
@@ -308,7 +313,8 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
     "collect: findings 1 and 2 still open");
   const r2 = skipReq(undefined);
   assert.equal(r2.payload.findings.length, 3, "request: --all lists every finding");
-  assert.equal(skipReply(r2.code, "I don't want that").ok, true, "reply: plain words skip them all");
+  assert.equal(skipReply(r2.code, "I don't want that").ok, false, "reply: 'that' on a list of three skips nothing");
+  assert.equal(skipReply(r2.code, "I don't want those").ok, true, "reply: plain words skip them all");
   const got3 = collectAcceptances({ record: rec3, readAcceptance: readNone, readSkips: () => readSkipReceipts(stateDir, H3), checkReply: assertReplyAlone });
   assert.equal(got3.problem, undefined, `collect: all three skipped (${got3.problem})`);
   assert.deepEqual(got3.accepted.map((a) => [a.payload.finding.n, a.reason]), [[1, SKIP_REASON], [2, SKIP_REASON], [3, SKIP_REASON]]);

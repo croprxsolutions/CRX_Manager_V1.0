@@ -141,6 +141,10 @@ try {
 eq(promptModulesFor("codex").length, 2, "Codex prompt router has two shared modules (owner-approval reply, CodeRabbit skip)");
 eq(promptModulesFor("claude").length, 2, "Claude prompt router has no Claude-only modules");
 ok(!promptModulesFor("claude").includes("./hold-latch-prompt.mjs"), "the hold latch is not routed (Mason, 2026-10-29)");
+for (const surface of ["claude", "codex"]) {
+  ok(promptModulesFor(surface).includes("./owner-approval-prompt.mjs"), `${surface} still routes the owner-approval reply`);
+  ok(!promptModulesFor(surface).includes("./release-pass-prompt.mjs"), `${surface} does not route the removed release pass (Mason, 2026-11-22)`);
+}
 {
   const claudeSettings = readFileSync(path.join(ROOT, ".claude", "settings.json"), "utf8");
   const codexHooks = readFileSync(path.join(ROOT, ".codex", "hooks.json"), "utf8");

@@ -224,6 +224,11 @@ DECLARE
   v_open numeric;
   v_more_delivered boolean;
 BEGIN
+  -- Luna r12: NaN sorts above every number, so it would switch the check off for this line.
+  IF NEW.total_units_needed = 'NaN'::numeric OR NEW.quantity_delivered = 'NaN'::numeric THEN
+    RAISE EXCEPTION 'ORDER_LINE_QUANTITY_NOT_A_NUMBER: % — ordered and delivered quantities must be numbers.',
+      COALESCE(NEW.product_name, 'this order line') USING ERRCODE = 'check_violation';
+  END IF;
   v_more_delivered := TG_OP = 'INSERT' OR COALESCE(NEW.quantity_delivered, 0) > COALESCE(OLD.quantity_delivered, 0);
   IF NOT v_more_delivered
      AND NOT (COALESCE(NEW.total_units_needed, 0) < COALESCE(OLD.total_units_needed, 0)) THEN

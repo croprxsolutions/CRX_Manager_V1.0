@@ -2182,8 +2182,10 @@ const priorReviewLines = (ownerAccepted) => ownerAccepted
   ? ["The candidate branch's own changes were already reviewed by an independent",
     `${CODEX_REVIEW_MODEL}/${CODEX_REVIEW_EFFORT} review, which found BLOCKER/HIGH findings that the owner accepted by name`,
     "as business non-issues (they are NOT fixed). Each one is listed in COLLISION_FOCUS.json ownerAcceptedFindings.",
+    "REVIEWED_PR.patch is the branch's changes exactly as that review (and the acceptance) saw them.",
     "Do not re-report an accepted finding that is unchanged, but DO report it, counted in your verdict, when the",
-    "merged-in changes make it newly reachable, wider, or more severe than when it was accepted.",
+    "merged-in changes make it newly reachable, wider, or more severe than when it was accepted. If you cannot",
+    "tell from REVIEWED_PR.patch and the merged changes whether its reach changed, report that as a blocker.",
     "That review ran against an older main. Main has since gained new"]
   : ["The candidate branch's own changes were already reviewed clean by an independent",
     `${CODEX_REVIEW_MODEL}/${CODEX_REVIEW_EFFORT} review against an older main. Main has since gained new`];
@@ -2401,8 +2403,11 @@ function resolveCarry(root, nowMs) {
     if (attrs.some((attr) => !attr.startsWith(`${file}: merge: `))) return { problem: `could not read the merge rule for ${file}` };
     if (!attrs.some((attr) => attr.endsWith(": merge: union"))) continue;
     for (const [a, b] of [[fromBase, fromHead], [fromBase, baseSha]]) {
-      const stat = /^(\d+)\t(\d+)\t/.exec(runGit(["diff", "--numstat", a, b, "--", file], { cwd: root }));
-      if (!stat || stat[2] !== "0") {
+      // No converters or helpers (they could run repo code and rewrite the counts); the path is literal.
+      const read = runTrustedGit(["diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", a, b, "--", `:(literal)${file}`], { cwd: root, timeout: 120_000 });
+      const rows = read.error || read.status !== 0 ? [] : (read.stdout || "").split("\0").filter(Boolean);
+      const stat = rows.length === 1 ? /^(\d+)\t(\d+)\t([\s\S]*)$/.exec(rows[0]) : null;
+      if (!stat || stat[3] !== file || stat[2] !== "0") {
         return { problem: `both sides changed ${file} and one side edited or removed existing lines, which a union merge keeps twice; resolve it by hand and run the full review` };
       }
     }
@@ -2487,13 +2492,16 @@ function runCarryForward(root, options) {
   }
 
   const patch = (from, to) => {
-    const result = runTrustedGit(["diff", "--no-ext-diff", "--no-textconv", "--binary", from, to], { cwd: root, timeout: 120_000 });
+    // No --binary: the reviewer never needs blob bytes, and deleted blobs may hold what was removed for a reason.
+    const result = runTrustedGit(["diff", "--no-ext-diff", "--no-textconv", from, to], { cwd: root, timeout: 120_000 });
     if (result.error || result.status !== 0) throw result.error || new Error(`diff failed with exit ${result.status}`);
     return result.stdout || "";
   };
   let delta;
+  let reviewedPr;
   try {
     delta = patch(facts.fromBase, facts.baseSha);
+    if (ownerAccepted) reviewedPr = patch(facts.fromBase, facts.fromHead);
   } catch (error) {
     process.stderr.write(`Could not build or run the collision check: ${error.message}\n`);
     return 2;
@@ -2506,6 +2514,7 @@ function runCarryForward(root, options) {
     label: "collision check",
     files: {
       "MAIN_DELTA.patch": delta,
+      ...(ownerAccepted ? { "REVIEWED_PR.patch": reviewedPr } : {}),
       "COLLISION_FOCUS.json": `${JSON.stringify({
         reviewedHead: facts.fromHead,
         reviewedBase: facts.fromBase,
@@ -3039,8 +3048,9 @@ function usage() {
     "  --dry-run        Resolve the binary and print the command; do not run Codex.",
     "  --carry-forward  After merging the branch's base (origin/staging for a feature branch,",
     "                   origin/main for hotfix/ and release/) into an already-reviewed branch, keep that clean",
-    "                   review instead of paying for a full one: carries with no model call when",
-    "                   the two sides share no files, otherwise runs a focused Sol collision check.",
+    "                   review instead of paying for a full one: carries with no model call only",
+    "                   when nothing needs a look (--dry-run says which); shared files, code on",
+    "                   both sides or owner-accepted findings run a focused Sol collision check.",
     "                   Refuses (use the full review) when anything else changed. With --dry-run,",
     "                   prints the decision only.",
     "  --carry-restamp  When HEAD is one commit on top of a reviewed head that only gave one",

@@ -1516,6 +1516,22 @@ function collisionPromptSkipsWork(prompt) {
     assert.match(refused.stderr, /edited or removed existing lines/, "staging carry: says why");
   });
 
+  // 3a. A repo-local diff converter that hides the rewritten line must not make it look additions-only (Sol r3 HIGH 1).
+  withRepo(({ repo, git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+    git("config", "diff.hide.textconv", "sed /old.entry/d");
+    writeFileSync(`${repo}/.git/info/attributes`, "docs/manual/DECISION_LOG.md diff=hide\n");
+    const log = file("docs/manual/DECISION_LOG.md");
+    const swap = (to) => writeFileSync(log, readFileSync(log, "utf8").replace("- old entry", to));
+    swap("- old entry, PR version");
+    const head = commitAll("pr rewrites a decision");
+    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+    land("origin/staging", "staging rewrites it too", () => swap("- old entry, staging version"));
+    git("merge", "-q", "--no-edit", "origin/staging");
+    const refused = carry("--dry-run");
+    assert.equal(refused.status, 1, `staging carry: a diff converter cannot hide a rewrite (${refused.stdout})`);
+    assert.match(refused.stderr, /edited or removed existing lines/, "staging carry: says why");
+  });
+
   // 3b. Staging drops the union rule while both sides rewrite the line: git still merged with the PR
   // side's union rule, so the rule is read from each side, not the merged tree (Luna MED).
   withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
@@ -1594,6 +1610,7 @@ function collisionPromptSkipsWork(prompt) {
     assert.equal(ownerAcceptedForPr(carried, { number: 78, url: "https://github.com/example/app/pull/78", exactHead: true }), false, "staging carry: and for no other PR");
   });
   assert.ok(buildCollisionCheckPrompt({ ownerAccepted: true }).includes("ownerAcceptedFindings"), "collision prompt: points at the accepted findings it must weigh");
+  assert.ok(buildCollisionCheckPrompt({ ownerAccepted: true }).includes("REVIEWED_PR.patch"), "collision prompt: gives the reviewed branch state to compare an acceptance's reach");
   assert.match(buildCollisionCheckPrompt(), /BLOCKERS {2}— at least one blocker\/high-severity collision or other blocker\/high problem/, "collision prompt: any blocker counts in the verdict");
 }
 

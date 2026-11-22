@@ -31,7 +31,7 @@ BEGIN
     INTO v_job
     FROM pg_proc p
    WHERE p.oid = to_regprocedure('public.complete_job(uuid, jsonb, uuid, text)');
-  IF v_job.oid IS NULL OR md5(replace(v_job.prosrc, chr(13), '')) IS DISTINCT FROM 'cb32addd7999eae75282813e94962bba'
+  IF v_job.oid IS NULL OR md5(replace(v_job.prosrc, chr(13), '')) IS DISTINCT FROM '77f826191eb137cbe03e1756220192d0'
      OR (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'complete_job') <> 1 THEN
     RAISE EXCEPTION 'ROLLBACK_REFUSED: complete_job is not the reviewed single wrapper';
   END IF;

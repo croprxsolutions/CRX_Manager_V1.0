@@ -265,6 +265,7 @@ function session(sql, delayMs = 0) {
 const id = (s) => `a3480000-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1');
 const CUST = id('c1');
+const DRIVER = id('a2');
 // PA < PB < PC < PD < PE < PF by id. None of these start with a stock row except PF.
 const PA = id('b1'), PB = id('b2'), PC = id('b3'), PD = id('b4'), PE = id('b5'), PF = id('b6'), PG = id('b7');
 const INV_F = id('d6');
@@ -281,8 +282,10 @@ const PM = id('b0'); // sorts before PF: a completion that created PM before loc
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
-    ('${ADMIN}', 'jobstock-admin@example.invalid', '{"full_name":"[PROVER] Job Stock Admin","role":"admin"}'::jsonb);`);
+    ('${ADMIN}', 'jobstock-admin@example.invalid', '{"full_name":"[PROVER] Job Stock Admin","role":"admin"}'::jsonb),
+    ('${DRIVER}', 'jobstock-driver@example.invalid', '{"full_name":"[PROVER] Job Stock Driver","role":"driver"}'::jsonb);`);
   raw(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
+    UPDATE public.profiles SET role = 'driver', is_active = true WHERE id = '${DRIVER}';
     INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST}', '[PROVER] Job Stock Farm', true);
     INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
         rate_per_acre, current_cost, tier1_price, tier2_price, tier3_price, pricing_version, is_active) VALUES
@@ -458,7 +461,7 @@ async function afterCases() {
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._lock_job_stock_rows_in_order()'::regprocedure;`),
     'e3344479412462cc3bdecee378f4d495');
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) || ',' || prosecdef::text || ',' || array_to_string(proconfig, ';') || ',' || has_function_privilege('authenticated', oid, 'EXECUTE') || ',' || has_function_privilege('service_role', oid, 'EXECUTE') || ',' || has_function_privilege('anon', oid, 'EXECUTE') FROM pg_proc WHERE oid = 'public.complete_job(uuid, jsonb, uuid, text)'::regprocedure;`),
-    'cb32addd7999eae75282813e94962bba,true,search_path=public, pg_temp,true,true,false');
+    '77f826191eb137cbe03e1756220192d0,true,search_path=public, pg_temp,true,true,false');
   assert.equal(scalar(`SELECT prosecdef::text || ',' || array_to_string(proconfig, ';') || ',' || has_function_privilege('authenticated', oid, 'EXECUTE') || ',' || has_function_privilege('anon', oid, 'EXECUTE') FROM pg_proc WHERE oid = 'public._lock_job_stock_rows_in_order()'::regprocedure;`),
     'true,search_path=public, pg_temp,false,false');
   console.log('[case] the migration applies once, a second apply refuses, the lock function stays private and complete_job keeps its grants');
@@ -472,6 +475,17 @@ async function afterCases() {
   // and the stock-row trigger all run inside the body's status update, after the wrapper takes it).
   assert.equal(await numberLockWhileWaiting(), 'Lock/true', 'complete_job must hold the number lock while it waits on a stock row');
   console.log('[case] complete_job holds the application-record number lock while it waits on a stock row');
+
+  // Security review MED-1: a signed-in role the body can never authorize is refused before the shared lock.
+  const [numberHolder, driverRun] = await Promise.all([
+    session(`BEGIN; SELECT pg_advisory_xact_lock(hashtext('next_application_record_number')); SELECT pg_sleep(3); ROLLBACK;`),
+    session(`SET statement_timeout = '1500ms'; SELECT set_config('request.jwt.claims', '{"sub":"${DRIVER}","role":"authenticated"}', false);
+      SET ROLE authenticated; SELECT public.complete_job('${J_ORDER}', '{}'::jsonb, '${DRIVER}', 'job-stock-driver');`, 400),
+  ]);
+  assert.equal(numberHolder.code, 0, numberHolder.out);
+  assert.match(driverRun.out, /Not authorized to complete this job/, driverRun.out);
+  assert.ok(!/statement timeout/i.test(driverRun.out), driverRun.out);
+  console.log('[case] a signed-in driver is refused at once, without queueing on the number lock');
 
   const raced = await race(J_AFTER_A, J_AFTER_B);
   assert.ok(!raced.failed, `no collision expected:\n${raced.t1.out}\n${raced.t2.out}`);
@@ -549,7 +563,7 @@ async function rollbackCases() {
   assert.notEqual(refusedJob.status, 0, 'rollback must refuse a complete_job it did not install');
   assert.match(refusedJob.output, /ROLLBACK_REFUSED: complete_job/, refusedJob.output);
   putBack('job');
-  assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.complete_job(uuid, jsonb, uuid, text)'::regprocedure;`), 'cb32addd7999eae75282813e94962bba');
+  assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.complete_job(uuid, jsonb, uuid, text)'::regprocedure;`), '77f826191eb137cbe03e1756220192d0');
   psql('DROP TABLE public.zz_defs;');
   const rolled = apply('reverse.sql');
   assert.equal(rolled.status, 0, rolled.output);

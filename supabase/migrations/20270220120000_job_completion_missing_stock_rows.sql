@@ -24,6 +24,9 @@
 --
 -- idempotency-body-check: complete_job's key check, fingerprint and receipt binding are unchanged; the
 --   number lock and the completion mark come after check_idempotency_intent. The trigger has no key.
+-- auth: before the shared number lock, a new caller (no saved receipt) must be admin, sales_rep or an
+--   active applicator; every branch of the body's own check needs one of these, so nobody it allows is
+--   refused, and other signed-in roles cannot queue on that lock. A replay takes no lock.
 -- caller-analysis: complete_job :: public RPC, same signature, grants unchanged (authenticated,
 --   service_role); callers: the field app and process_offline_action. _lock_job_stock_rows_in_order ::
 --   trigger only; EXECUTE stays revoked from PUBLIC, anon, authenticated and service_role.
@@ -166,8 +169,15 @@ BEGIN
   END IF;
   -- Number lock before any stock row (the hold sync and trg_zz_lock_job_stock_rows run on the body's status
   -- update), the same order as create_application_record_from_blend_ticket. Then mark this job so the trigger
-  -- creates its missing stock rows; the mark ends with the transaction.
-  PERFORM pg_advisory_xact_lock(hashtext('next_application_record_number'));
+  -- creates its missing stock rows; the mark ends with the transaction. A saved receipt returns before the
+  -- body's status update, so a replay takes no lock. Only roles the body can authorize reach the shared lock
+  -- (every branch of the body's check needs admin, sales_rep or an active applicator); same message.
+  IF v_replay IS NULL THEN
+    IF NOT (public.is_admin() OR public.is_sales_rep() OR public.is_applicator()) THEN
+      RAISE EXCEPTION 'Not authorized to complete this job';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext('next_application_record_number'));
+  END IF;
   PERFORM set_config('crx.complete_job_rpc', p_job_id::text, true);
   v_result := public._complete_job_replay_impl_20261015(p_job_id, p_applied_info, p_performed_by, p_idempotency_key);
   PERFORM set_config('crx.complete_job_rpc', '', true);
@@ -208,7 +218,7 @@ BEGIN
     INTO v_job
     FROM pg_proc p
    WHERE p.oid = to_regprocedure('public.complete_job(uuid, jsonb, uuid, text)');
-  IF v_job.oid IS NULL OR md5(replace(v_job.prosrc, chr(13), '')) IS DISTINCT FROM 'cb32addd7999eae75282813e94962bba'
+  IF v_job.oid IS NULL OR md5(replace(v_job.prosrc, chr(13), '')) IS DISTINCT FROM '77f826191eb137cbe03e1756220192d0'
      OR (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'complete_job') <> 1 THEN
     RAISE EXCEPTION 'JOB_STOCK_ROW_POSTFLIGHT: complete_job is not the reviewed single wrapper';
   END IF;

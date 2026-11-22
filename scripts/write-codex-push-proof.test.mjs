@@ -1516,6 +1516,24 @@ function collisionPromptSkipsWork(prompt) {
     assert.match(refused.stderr, /edited or removed existing lines/, "staging carry: says why");
   });
 
+  // 3b. Staging drops the union rule while both sides rewrite the line: git still merged with the PR
+  // side's union rule, so the rule is read from each side, not the merged tree (Luna MED).
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+    const log = file("docs/manual/DECISION_LOG.md");
+    const swap = (to) => writeFileSync(log, readFileSync(log, "utf8").replace("- old entry", to));
+    swap("- old entry, PR version");
+    const head = commitAll("pr rewrites a decision");
+    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+    land("origin/staging", "staging drops the rule and rewrites it", () => {
+      writeFileSync(file(".gitattributes"), "");
+      swap("- old entry, staging version");
+    });
+    git("merge", "-q", "--no-edit", "origin/staging");
+    const refused = carry("--dry-run");
+    assert.equal(refused.status, 1, "staging carry: a union rule dropped by one side still refuses");
+    assert.match(refused.stderr, /edited or removed existing lines|does not merge cleanly/, "staging carry: says why");
+  });
+
   // 4. The branch already holds a commit staging gains later, so the reviewed diff is not what
   //    the PR now changes: refused, whichever side reverts it (Sol round 1 HIGH 1, round 2 BLOCKER 1).
   for (const branchReverts of [false, true]) {

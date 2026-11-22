@@ -2396,9 +2396,10 @@ function resolveCarry(root, nowMs) {
   // read that fails or says anything unexpected refuses.
   const prPaths = new Set(prFiles.map((entry) => entry.path));
   for (const file of new Set(mainFiles.map((entry) => entry.path).filter((p) => prPaths.has(p)))) {
-    const attr = runGit(["check-attr", "merge", "--", file], { cwd: root });
-    if (!attr.startsWith(`${file}: merge: `)) return { problem: `could not read the merge rule for ${file}` };
-    if (!attr.endsWith(": merge: union")) continue;
+    // The rule as each side of the merge had it, not as the merged tree has it.
+    const attrs = [fromBase, fromHead, baseSha].map((sha) => runGit(["check-attr", "--source", sha, "merge", "--", file], { cwd: root }));
+    if (attrs.some((attr) => !attr.startsWith(`${file}: merge: `))) return { problem: `could not read the merge rule for ${file}` };
+    if (!attrs.some((attr) => attr.endsWith(": merge: union"))) continue;
     for (const [a, b] of [[fromBase, fromHead], [fromBase, baseSha]]) {
       const stat = /^(\d+)\t(\d+)\t/.exec(runGit(["diff", "--numstat", a, b, "--", file], { cwd: root }));
       if (!stat || stat[2] !== "0") {

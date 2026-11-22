@@ -85,13 +85,14 @@
 > re-review. `node scripts/write-codex-push-proof.mjs --carry-forward` mints a carried proof
 > (`codex_ran: false`, `carried_forward: true`, `carry.mode` `disjoint` or `collision_check`, `carry.from_head` /
 > `from_base`) for a head that is exactly the conflict-free merge of the Sol-reviewed head (clean proof under 24
-> hours old, as is the original full review behind a chain of carries) and today's base tip (`origin/staging` for a
-> feature branch, `origin/main` for `hotfix/` and `release/`; Mason, 2026-11-22), never from an owner-accepted
+> hours old, as is the original full review behind a chain of carries) and today's `origin/main` tip, on `hotfix/` and
+> `release/` branches only (a feature branch that merged `origin/staging` always needs the full review, and the gates
+> refuse any proof carried onto a staging base; Mason, 2026-11-22, #2226), never from an owner-accepted
 > proof, never across a rename of a file the other side changed, and never across any copy: with no model call
 > only when the PR's files and the base's new files do not overlap and one side is plain documentation (notes-folder `.md` files,
 > which excludes every rule file, in regular non-executable files only); otherwise, including any two code changes in different files, only
-> after a focused Sol collision check returns CLEAN, and that check runs only for `hotfix/` and `release/`: a
-> staging merge that is not the free case needs the full review (Mason, 2026-11-22, #2226). The check starts from the database, guard, CI, dependency and
+> after a focused Sol collision check returns CLEAN, and only when main's changes add text lines and remove or edit
+> none (a removed line may be a credential, and the delta goes to the reviewer). The check starts from the database, guard, CI, dependency and
 > rule files (`CARRY_HOT_PATHS`) and counts any other blocker it sees. `proofValid()` in `codex-push-lib.mjs`
 > accepts that shape on the same exact-head, exact-base and 24-hour terms as a full proof (the 24 hours also bind the
 > original full review at the root of the chain), so both merge gates and the push gate honour it, and the migration

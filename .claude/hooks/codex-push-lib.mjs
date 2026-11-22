@@ -1765,7 +1765,9 @@ export function carriedSolProof(data) {
         && (carry.mode !== "owner_accepted" || (Array.isArray(data.owner_accepted) && data.owner_accepted.length > 0))
       // Owner-accepted findings never carry onto a newer base (Mason, 2026-11-22, #2226), whichever writer made the proof.
       : (carry.mode === "disjoint" || carry.mode === "collision_check") && carry.from_base !== data.base_sha
-        && carry.root_review?.owner_accepted !== true && !("owner_accepted" in data))
+        && carry.root_review?.owner_accepted !== true && !("owner_accepted" in data)
+        // A staging merge never carries (Mason, 2026-11-22, #2226 Sol r7), including a proof minted before that.
+        && data.review_ref !== "origin/staging")
     && CARRY_SHA_RE.test(String(carry.from_head || ""))
     && CARRY_SHA_RE.test(String(carry.from_base || ""))
     && carry.from_head !== data.head_sha;

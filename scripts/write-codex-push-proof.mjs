@@ -2316,6 +2316,11 @@ export function solReviewBase(root, headSha, mainSha) {
 function resolveCarry(root, nowMs) {
   // The base a full review of this branch would use, so a carry never swaps one base for another.
   const target = currentSolTarget(root);
+  // A feature branch catching up with staging always gets the full review: Sol found a new hole in
+  // the staging carry in each of 7 rounds, and staging is fully reviewed again before release (Mason, 2026-11-22, #2226).
+  if (target !== GUARDED_BASE) {
+    return { problem: `a branch that merged ${target} needs the full review (Sol proofs carry only for hotfix/ and release/ branches merging ${GUARDED_BASE})` };
+  }
   const headSha = runGit(["rev-parse", "HEAD"], { cwd: root });
   const baseSha = runGit(["rev-parse", `${target}^{commit}`], { cwd: root });
   if (!CARRY_SHA_RE.test(headSha) || !CARRY_SHA_RE.test(baseSha)) {
@@ -2450,12 +2455,6 @@ function runCarryForward(root, options) {
     `${facts.target}'s new files ${facts.mainFiles.length}; ` +
     (plan.mode === "disjoint" ? "no overlap — carries with no model call.\n" : `collision check needed: ${plan.reasons.join("; ")}.\n`),
   );
-  // A staging merge carries only for free; anything that needs a look gets the full review
-  // (Mason, 2026-11-22, #2226). The collision check stays for hotfix/ and release/ branches.
-  if (facts.target !== GUARDED_BASE && plan.mode !== "disjoint") {
-    process.stderr.write(`Carry-forward refused: a ${facts.target} merge carries only when nothing overlaps. No proof written — run the full review: node scripts/write-codex-push-proof.mjs\n`);
-    return 1;
-  }
   if (options.dryRun) {
     if (plan.overlap.length) process.stdout.write(`[dry-run] Overlapping files: ${plan.overlap.join(", ")}\n`);
     if (plan.hotFiles.length) process.stdout.write(`[dry-run] Database/guard files: ${plan.hotFiles.join(", ")}\n`);
@@ -2514,15 +2513,13 @@ function runCarryForward(root, options) {
     process.stderr.write(`Could not build or run the collision check: ${error.message}\n`);
     return 2;
   }
-  // The delta goes to the reviewer: a removed line that looks like a credential must not, and a
-  // binary change the reviewer cannot compare is not checkable. Either one means the full review.
-  // Every "-" line, "---" headers included: a removed line that starts with "--" looks like one.
-  const removed = delta.split("\n").filter((line) => line.startsWith("-"));
-  const unreadable = removed.some((line) => REVIEW_CAPTURE_SECRET_RE.test(line))
-    ? "a line the base removed looks like a credential"
-    : /^Binary files .* differ$/m.test(delta) ? "the base changed a file Git treats as binary" : null;
-  if (unreadable) {
-    process.stderr.write(`Carry-forward refused: ${unreadable}, so the collision check cannot be given it. No proof written — run the full review: node scripts/write-codex-push-proof.mjs\n`);
+  // The delta goes to the reviewer, so the base may only have ADDED text lines: a removed line may be
+  // a credential taken out for a reason (no pattern catches every format), and a binary change is not
+  // comparable. Either one means the full review (Mason, 2026-11-22, Sol r7).
+  const stats = runTrustedGit(["diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", facts.fromBase, facts.baseSha], { cwd: root, timeout: 120_000 });
+  const rows = stats.error || stats.status !== 0 ? null : (stats.stdout || "").split("\0").filter(Boolean);
+  if (!rows || rows.some((row) => !/^\d+\t0\t/.test(row))) {
+    process.stderr.write("Carry-forward refused: the base removed or edited existing lines, or changed a binary file, so the collision check cannot be given it. No proof written — run the full review: node scripts/write-codex-push-proof.mjs\n");
     return 1;
   }
   const check = runFocusedSolCheck(root, options, {
@@ -3061,11 +3058,11 @@ function usage() {
     `  --timeout <sec>  Max seconds for the Codex review (default ${DEFAULT_TIMEOUT_SEC}). A timeout writes no`,
     "                   proof; it means the review was cut off, not that it found problems.",
     "  --dry-run        Resolve the binary and print the command; do not run Codex.",
-    "  --carry-forward  After merging the branch's base (origin/staging for a feature branch,",
-    "                   origin/main for hotfix/ and release/) into an already-reviewed branch, keep that clean",
-    "                   review instead of paying for a full one: carries with no model call only",
-    "                   when nothing needs a look (--dry-run says which); shared files or code on",
-    "                   both sides run a focused Sol collision check (hotfix/ and release/ only: a staging merge then needs the full review). Owner-accepted findings never carry.",
+    "  --carry-forward  hotfix/ and release/ only: after merging origin/main into an already-reviewed",
+    "                   branch, keep that clean review instead of paying for a full one: carries with",
+    "                   no model call only when nothing needs a look (--dry-run says which); shared",
+    "                   files or code on both sides run a focused Sol collision check. A feature branch",
+    "                   that merged origin/staging always needs the full review. Owner-accepted findings never carry.",
     "                   Refuses (use the full review) when anything else changed. With --dry-run,",
     "                   prints the decision only.",
     "  --carry-restamp  When HEAD is one commit on top of a reviewed head that only gave one",
@@ -3407,7 +3404,7 @@ export function run(argv = process.argv.slice(2)) {
         "the base it covered, so the merge gates accept it." +
         (target === GUARDED_BASE
           ? " If this head still needs a push, the push gate wants the exact base: merge origin/main into the branch and run this script with --carry-forward.\n"
-          : " Nothing else to do; if the branch later merges origin/staging, run this script with --carry-forward.\n"),
+          : " Nothing else to do; if the branch later merges origin/staging, it needs a new full review.\n"),
       );
     }
     return 0;

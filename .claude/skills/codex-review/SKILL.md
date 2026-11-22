@@ -284,9 +284,10 @@ ordinary full review. The proof lists matched files under `applied_history`.
 a head behind main when the head contains the base its proof reviewed and main only moved forward, so
 merge as it is. If GitHub reports a conflict, resolving it changes the PR, so it needs a fresh full
 Sol review. If you merge main in anyway and it merges cleanly, carry the review forward (Mason,
-2026-10-21) rather than paying for a second full Sol review. "Main" here means the PR's base: `origin/staging`
-for a feature branch, `origin/main` for `hotfix/` and `release/` (Mason, 2026-11-22). Merge it into the branch (`git fetch origin`,
-`git merge origin/staging` or `git merge origin/main`, push; no other edits in that commit), wait for the checks on the new head,
+2026-10-21) rather than paying for a second full Sol review. This carry is for `hotfix/` and `release/`
+branches merging `origin/main` only: a feature branch that merges `origin/staging` always needs a new full
+Sol review, because staging is fully reviewed again before release (Mason, 2026-11-22, #2226). Merge main into the branch (`git fetch origin`,
+`git merge origin/main`, push; no other edits in that commit), wait for the checks on the new head,
 then run `node scripts/write-codex-push-proof.mjs --carry-forward` (add `--dry-run` to see the
 decision only) immediately before the merge. It mints a carried proof for the new head only when:
 
@@ -295,15 +296,15 @@ decision only) immediately before the merge. It mints a carried proof for the ne
   (a resolved conflict or any hand edit refuses; a `DECISION_LOG.md` union merge is clean when both
   sides only added lines, and refuses when either side edited or removed an existing line);
 - the reviewed head's proof records the same review kind a full review of this branch would use today
-  (`review_ref` and `release_rules`; a release review never seeds a staging carry, a proof with no
-  review kind refuses);
+  (`review_ref` and `release_rules`; a proof with no review kind refuses, and the gates never accept a
+  proof carried onto a staging base);
 - the proof is not owner-accepted: an owner-accepted proof (`--carry-owner-accepted`) never carries onto
   a new base, because whether new base code widens an accepted defect needs the full review (2026-11-22);
 - neither side renamed a file the other side changed, and neither side copied any file (Git may name an
   unchanged twin as a copy's source);
-- for the collision check, the base's changes hold no binary file and remove no credential-shaped line
-  (that text would be sent to the reviewer); a proof recording its review kind counts at merge only for
-  a PR into that branch;
+- for the collision check, the base's changes only ADD text lines: a removed or edited line (it may be a
+  credential taken out on purpose, and the delta is sent to the reviewer) or a binary change means the full
+  review; a proof recording its review kind counts at merge only for a PR into that branch;
 - the merge's one common ancestor is exactly the base the review used, so the reviewed diff is what the
   PR still changes (a branch that already held a commit the base gained later, or a revert of one, refuses);
 - the reviewed head's proof is a clean `gpt-6.2-sol`/`high` proof (full or itself carried) under 24 hours
@@ -313,9 +314,7 @@ decision only) immediately before the merge. It mints a carried proof for the ne
   call — OR a focused Sol collision check returns CLEAN. Two code or configuration changes always
   get the check, even in different files (Mason, 2026-10-21). The check centres on the interaction,
   starting from the database, guard, CI, dependency and rule files (`CARRY_HOT_PATHS`), and counts
-  any other blocker it sees. The collision check runs only on `hotfix/` and `release/` branches: a
-  staging merge carries only in the free case, and anything else needs the full review (Mason,
-  2026-11-22, #2226).
+  any other blocker it sees.
 
 Anything else refuses, and the full Step 3B review above is the answer. The carried proof states
 `codex_ran: false, carried_forward: true`, names the head and base it came from, and expires 24 hours

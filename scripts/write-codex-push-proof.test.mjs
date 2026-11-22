@@ -1394,16 +1394,16 @@ function collisionPromptSkipsWork(prompt) {
   }
 }
 
-// ── carry-forward on a STAGING-bound branch (Mason, 2026-11-22) ─────────────
-// A feature branch is reviewed against origin/staging, so a merge of origin/staging
-// must carry exactly as a main merge does on a main-bound branch (#2185 lost Sol round 6).
+// ── carry-forward after a base merge (Mason, 2026-11-22, #2226) ─────────────
+// A feature branch that merged origin/staging always gets the full review (Sol found a new hole in
+// that carry in each of 7 rounds); hotfix/ and release/ branches merging origin/main still carry.
 {
   const scriptPath = fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url));
   const STAGING = "origin/staging";
   const PR_URL = "https://github.com/example/app/pull/77";
   // One throwaway repo: main and staging at one commit, a feature branch with one code change.
   // A hotfix/ branch is reviewed against origin/main instead, where the collision check still runs.
-  const setup = (branch = "claude/feature-x") => {
+  const setup = (branch = "hotfix/x") => {
     const target = branch.startsWith("hotfix/") ? "origin/main" : STAGING;
     const repo = tempDir("crx-carry-staging-");
     const git = (...args) => execFileSync("git", ["-c", "user.name=Carry Test", "-c", "user.email=carry@example.invalid", ...args], {
@@ -1446,57 +1446,60 @@ function collisionPromptSkipsWork(prompt) {
     write("src/a.ts", "export const a = 2;\n");
     const reviewedHead = commitAll("pr change");
     writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: target }));
-    return { repo, git, commitAll, file, write, readProof, writeProof, land, carry, base, reviewedHead };
+    return { repo, git, commitAll, file, write, readProof, writeProof, land, carry, base, reviewedHead, target, branch };
   };
   const withRepo = (fn, branch) => { const ctx = setup(branch); try { fn(ctx); } finally { rmSync(ctx.repo, { recursive: true, force: true }); } };
   // A carried proof for `head` on the same base (a restamp-shaped carry needs no model call to fake).
   const sameBaseCarry = (head, source) => buildCarryForwardProof({ headSha: head, baseSha: source.base_sha, source, mode: "restamp" });
 
-  // 1. A docs-only staging merge carries with no model call, bound to the staging tip.
-  withRepo(({ repo, git, write, land, carry, writeProof, readProof, reviewedHead, base }) => {
-    // Merging main (which moved) into a staging-bound branch is not its base: refused (Sol LOW 7).
-    land("origin/main", "a hotfix on main", () => write("src/hotfix.ts", "export const h = 1;\n"));
-    git("merge", "-q", "--no-edit", "origin/main");
-    assert.equal(git("rev-list", "--count", "--merges", "HEAD^..HEAD"), "1", "wrong-base setup: a real two-parent merge of main");
-    assert.match(carry().stderr, /not a merge of origin\/staging/, "staging carry: a main merge is not this branch's base");
-    git("reset", "-q", "--hard", reviewedHead);
+  // 1a. A feature branch that merged staging never carries, even a docs-only merge (Mason, 2026-11-22, Sol r7).
+  withRepo(({ git, write, land, carry, target }) => {
+    assert.equal(target, STAGING, "feature setup: reviewed against staging");
+    land(target, "a docs-only PR landed on staging", () => write("docs/manual/notes.md", "# Notes\n"));
+    git("merge", "-q", "--no-edit", target);
+    const refused = carry();
+    assert.equal(refused.status, 1, `carry: a staging merge is refused (${refused.stdout})`);
+    assert.match(refused.stderr, /needs the full review/, "carry: says a staging merge needs the full review");
+  }, "claude/feature-x");
 
-    const stagingTip = land("origin/staging", "a docs-only PR landed on staging", () => write("docs/manual/notes.md", "# Notes\n"));
-    git("merge", "-q", "--no-edit", "origin/staging");
+  // 1b. On a hotfix/ branch, a docs-only main merge carries with no model call, bound to the main tip.
+  withRepo(({ repo, git, write, land, carry, writeProof, readProof, reviewedHead, base, target }) => {
+    const mainTip = land(target, "a docs-only PR landed on main", () => write("docs/manual/notes.md", "# Notes\n"));
+    git("merge", "-q", "--no-edit", target);
     const mergedHead = git("rev-parse", "HEAD");
 
-    // A release review's proof never seeds a staging carry (Sol HIGH 3), nor one with no review kind.
-    writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: GUARDED_BASE, releaseRules: true }));
-    assert.match(carry().stderr, /records a origin\/main release review, not the origin\/staging review/, "staging carry: a release proof is refused");
-    writeProof(reviewedHead, { ...buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean" }), review_ref: undefined });
-    assert.match(carry().stderr, /records no review kind/, "staging carry: a proof with no review kind is refused");
+    // A staging review's proof never seeds a main carry, nor one with no review kind.
     writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: STAGING }));
+    assert.match(carry().stderr, /records a origin\/staging review/, "carry: a staging proof is refused");
+    writeProof(reviewedHead, { ...buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean" }), review_ref: undefined });
+    assert.match(carry().stderr, /records no review kind/, "carry: a proof with no review kind is refused");
+    writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: GUARDED_BASE }));
 
     const ok = carry();
-    assert.equal(ok.status, 0, `staging carry: a docs-only staging merge carries with no model call (${ok.stderr})`);
+    assert.equal(ok.status, 0, `carry: a docs-only main merge carries with no model call (${ok.stderr})`);
     const minted = readProof(mergedHead);
-    assert.equal(minted.carry.mode, "disjoint", "staging carry: minted as a disjoint carry");
-    assert.equal(minted.base_sha, stagingTip, "staging carry: bound to the staging tip, not main");
-    assert.equal(minted.review_ref, STAGING, "staging carry: keeps the review kind for the next carry");
-    assert.equal(proofValid(minted, mergedHead, Date.now(), stagingTip), true, "staging carry: the gates accept it for the merged head and staging tip");
+    assert.equal(minted.carry.mode, "disjoint", "carry: minted as a disjoint carry");
+    assert.equal(minted.base_sha, mainTip, "carry: bound to the main tip");
+    assert.equal(minted.review_ref, GUARDED_BASE, "carry: keeps the review kind for the next carry");
+    assert.equal(proofValid(minted, mergedHead, Date.now(), mainTip), true, "carry: the gates accept it for the merged head and main tip");
     assert.equal(proofValidForMerge({
-      data: minted, headSha: mergedHead, nowMs: Date.now(), baseSha: stagingTip,
+      data: minted, headSha: mergedHead, nowMs: Date.now(), baseSha: mainTip,
       isAncestor: (a, b) => spawnSync("git", ["merge-base", "--is-ancestor", a, b], { cwd: repo }).status === 0,
       mergeBase: (a, b) => git("merge-base", a, b),
-    }), true, "staging carry: the PR merge gate accepts it against GitHub's staging base");
+    }), true, "carry: the PR merge gate accepts it against GitHub's main base");
 
-    // A hand edit inside the staging merge commit is refused.
+    // A hand edit inside the merge commit is refused.
     write("src/c.ts", "export const sneaky = true;\n");
     git("add", ".");
     git("commit", "-q", "--amend", "--no-edit");
-    assert.match(carry().stderr, /something else changed/, "staging carry: an edited staging merge is refused");
+    assert.match(carry().stderr, /something else changed/, "carry: an edited merge is refused");
   });
 
   // 2. Both sides add a DECISION_LOG entry (the #2185 case): the union merge is clean, so the
   //    shared file is not "something else changed". On a hotfix/ branch it gets the focused check;
-  //    a staging merge carries only for free, so it needs the full review (Mason, 2026-11-22).
+  //    a staging merge always needs the full review (Mason, 2026-11-22).
   for (const [branch, base, expect] of [["hotfix/x", "origin/main", "check"], ["claude/feature-x", "origin/staging", "refuse"]]) {
-    withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+    withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
       const log = file("docs/manual/DECISION_LOG.md");
       const append = (text) => writeFileSync(log, readFileSync(log, "utf8") + text);
       append("- PR entry\n");
@@ -1505,32 +1508,32 @@ function collisionPromptSkipsWork(prompt) {
       land(base, "another PR's decision entry", () => append("- base entry\n"));
       git("merge", "-q", "--no-edit", base);
       const dry = carry("--dry-run");
-      assert.match(dry.stdout, /collision check needed: both sides changed 1 file/, `${branch}: a shared DECISION_LOG needs a look (${dry.stderr})`);
       if (expect === "check") {
+        assert.match(dry.stdout, /collision check needed: both sides changed 1 file/, `${branch}: a shared DECISION_LOG needs a look (${dry.stderr})`);
         assert.equal(dry.status, 0, `${branch}: a union-merged DECISION_LOG gets the focused check (${dry.stderr})`);
       } else {
-        assert.equal(dry.status, 1, `${branch}: a staging merge that needs a look is refused`);
-        assert.match(dry.stderr, /carries only when nothing overlaps/, `${branch}: says why`);
+        assert.equal(dry.status, 1, `${branch}: a staging merge is refused`);
+        assert.match(dry.stderr, /needs the full review/, `${branch}: says why`);
       }
     }, branch);
   }
 
   // 3. Both sides rewrite the same existing DECISION_LOG line: union keeps both, so refused (Sol MED 4).
-  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
     const log = file("docs/manual/DECISION_LOG.md");
     const swap = (to) => writeFileSync(log, readFileSync(log, "utf8").replace("- old entry", to));
     swap("- old entry, PR version");
     const head = commitAll("pr rewrites a decision");
     writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
-    land("origin/staging", "staging rewrites it too", () => swap("- old entry, staging version"));
-    git("merge", "-q", "--no-edit", "origin/staging");
+    land(target, "staging rewrites it too", () => swap("- old entry, staging version"));
+    git("merge", "-q", "--no-edit", target);
     const refused = carry("--dry-run");
-    assert.equal(refused.status, 1, "staging carry: contradictory union edits are refused");
-    assert.match(refused.stderr, /edited or removed existing lines/, "staging carry: says why");
+    assert.equal(refused.status, 1, "carry: contradictory union edits are refused");
+    assert.match(refused.stderr, /edited or removed existing lines/, "carry: says why");
   });
 
   // 3a. A repo-local diff converter that hides the rewritten line must not make it look additions-only (Sol r3 HIGH 1).
-  withRepo(({ repo, git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+  withRepo(({ repo, git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
     git("config", "diff.hide.textconv", "sed /old.entry/d");
     writeFileSync(`${repo}/.git/info/attributes`, "docs/manual/DECISION_LOG.md diff=hide\n");
     const log = file("docs/manual/DECISION_LOG.md");
@@ -1538,39 +1541,39 @@ function collisionPromptSkipsWork(prompt) {
     swap("- old entry, PR version");
     const head = commitAll("pr rewrites a decision");
     writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
-    land("origin/staging", "staging rewrites it too", () => swap("- old entry, staging version"));
-    git("merge", "-q", "--no-edit", "origin/staging");
+    land(target, "staging rewrites it too", () => swap("- old entry, staging version"));
+    git("merge", "-q", "--no-edit", target);
     const refused = carry("--dry-run");
-    assert.equal(refused.status, 1, `staging carry: a diff converter cannot hide a rewrite (${refused.stdout})`);
-    assert.match(refused.stderr, /edited or removed existing lines/, "staging carry: says why");
+    assert.equal(refused.status, 1, `carry: a diff converter cannot hide a rewrite (${refused.stdout})`);
+    assert.match(refused.stderr, /edited or removed existing lines/, "carry: says why");
   });
 
   // 3b. Staging drops the union rule while both sides rewrite the line: git still merged with the PR
   // side's union rule, so the rule is read from each side, not the merged tree (Luna MED).
-  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
     const log = file("docs/manual/DECISION_LOG.md");
     const swap = (to) => writeFileSync(log, readFileSync(log, "utf8").replace("- old entry", to));
     swap("- old entry, PR version");
     const head = commitAll("pr rewrites a decision");
     writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
-    land("origin/staging", "staging drops the rule and rewrites it", () => {
+    land(target, "staging drops the rule and rewrites it", () => {
       writeFileSync(file(".gitattributes"), "");
       swap("- old entry, staging version");
     });
-    git("merge", "-q", "--no-edit", "origin/staging");
+    git("merge", "-q", "--no-edit", target);
     const refused = carry("--dry-run");
-    assert.equal(refused.status, 1, "staging carry: a union rule dropped by one side still refuses");
-    assert.match(refused.stderr, /edited or removed existing lines|does not merge cleanly/, "staging carry: says why");
+    assert.equal(refused.status, 1, "carry: a union rule dropped by one side still refuses");
+    assert.match(refused.stderr, /edited or removed existing lines|does not merge cleanly/, "carry: says why");
   });
 
   // 4. The branch already holds a commit staging gains later, so the reviewed diff is not what
   //    the PR now changes: refused, whichever side reverts it (Sol round 1 HIGH 1, round 2 BLOCKER 1).
   for (const branchReverts of [false, true]) {
-    withRepo(({ git, write, file, carry, commitAll, writeProof, base }) => {
+    withRepo(({ git, write, file, carry, commitAll, writeProof, base, target, branch }) => {
       git("switch", "-q", "-c", "shared", base);
       write("src/auth.ts", "export const strict = true;\n");
       const shared = commitAll("shared tightening");
-      git("switch", "-q", "claude/feature-x");
+      git("switch", "-q", branch);
       git("merge", "-q", "--no-edit", "shared");
       if (branchReverts) {
         git("revert", "--no-edit", shared);
@@ -1578,7 +1581,7 @@ function collisionPromptSkipsWork(prompt) {
         commitAll("pr note");
       }
       const head = git("rev-parse", "HEAD");
-      writeProof(head, buildCodexPushProof({ headSha: head, baseSha: base, verdict: "clean", reviewRef: STAGING }));
+      writeProof(head, buildCodexPushProof({ headSha: head, baseSha: base, verdict: "clean", reviewRef: target }));
       git("switch", "-q", "--detach", shared);
       if (branchReverts) {
         write("docs/manual/staging-note.md", "# Staging note\n");
@@ -1586,70 +1589,72 @@ function collisionPromptSkipsWork(prompt) {
       } else {
         git("revert", "--no-edit", "HEAD");
       }
-      git("update-ref", "refs/remotes/origin/staging", git("rev-parse", "HEAD"));
-      git("switch", "-q", "claude/feature-x");
-      git("merge", "-q", "--no-edit", "origin/staging");
+      git("update-ref", `refs/remotes/${target}`, git("rev-parse", "HEAD"));
+      git("switch", "-q", branch);
+      git("merge", "-q", "--no-edit", target);
       assert.equal(existsSync(file("src/auth.ts")), false, "shared-commit setup: the merged branch lacks the shared check");
       const refused = carry("--dry-run");
-      assert.equal(refused.status, 1, `staging carry: a branch holding a later base commit is refused (branch reverts: ${branchReverts})`);
-      assert.match(refused.stderr, /common ancestor is not the reviewed base/, "staging carry: says why");
+      assert.equal(refused.status, 1, `carry: a branch holding a later base commit is refused (branch reverts: ${branchReverts})`);
+      assert.match(refused.stderr, /common ancestor is not the reviewed base/, "carry: says why");
     });
   }
 
   // 5. An owner-accepted proof never carries onto a new base, with or without its list (Sol r4 HIGH 1-2).
-  withRepo(({ git, write, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+  withRepo(({ git, write, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
     const source = readProof(reviewedHead);
     write("docs/manual/DECISION_LOG.md", `${readFileSync(file("docs/manual/DECISION_LOG.md"), "utf8")}- accepted\n`);
     const head = commitAll("owner acceptance");
     const accepted = buildCarryForwardProof({ headSha: head, baseSha: source.base_sha, source, mode: "owner_accepted" });
     accepted.owner_accepted = [{ n: 1, severity: "HIGH", text: "a business call", reason: "not live yet", pull_request: 77, pull_request_url: PR_URL }];
-    land("origin/staging", "docs-only staging PR", () => write("docs/manual/more.md", "# More\n"));
-    git("merge", "-q", "--no-edit", "origin/staging");
+    land(target, "docs-only staging PR", () => write("docs/manual/more.md", "# More\n"));
+    git("merge", "-q", "--no-edit", target);
     const lostList = sameBaseCarry(head, { ...accepted, head_sha: reviewedHead });
     delete lostList.owner_accepted;
     for (const [label, proof] of [["with its list", accepted], ["that lost its list", lostList]]) {
       writeProof(head, proof);
       const refused = carry("--dry-run");
-      assert.equal(refused.status, 1, `staging carry: an owner-accepted proof ${label} is refused`);
-      assert.match(refused.stderr, /owner-accepted, not fixed/, `staging carry: says why (${label})`);
+      assert.equal(refused.status, 1, `carry: an owner-accepted proof ${label} is refused`);
+      assert.match(refused.stderr, /owner-accepted, not fixed/, `carry: says why (${label})`);
     }
   });
 
   // 6. A rename on the base side that moves a file the PR changed is refused (Sol r4 HIGH 1, MED 1).
-  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
     writeFileSync(file("src/a.ts"), "export const a = 2;\nexport const b = 3;\n");
     const head = commitAll("pr edits a.ts again");
     writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
-    land("origin/staging", "staging moves a.ts", () => git("mv", "src/a.ts", "src/moved.ts"));
-    git("merge", "-q", "--no-edit", "origin/staging");
+    land(target, "staging moves a.ts", () => git("mv", "src/a.ts", "src/moved.ts"));
+    git("merge", "-q", "--no-edit", target);
     const refused = carry("--dry-run");
-    assert.equal(refused.status, 1, `staging carry: a base-side rename of a PR file is refused (${refused.stdout})`);
-    assert.match(refused.stderr, /renamed or copied src\/a\.ts/, "staging carry: names the moved file");
+    assert.equal(refused.status, 1, `carry: a base-side rename of a PR file is refused (${refused.stdout})`);
+    assert.match(refused.stderr, /renamed or copied src\/a\.ts/, "carry: names the moved file");
   });
 
   // 7. A copy of a file the base side left unchanged is still seen (Sol r5 HIGH 3).
-  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
     writeFileSync(file("docs/manual/note.md"), "# Note\nDo the safer thing.\n");
     const head = commitAll("pr corrects the note");
     writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
-    land("origin/staging", "staging copies the old note into a command", () => {
+    land(target, "staging copies the old note into a command", () => {
       mkdirSync(file(".claude/commands"), { recursive: true });
       // Same basename as the twin, so Git names the twin (unchanged by the PR) as the source.
       writeFileSync(file(".claude/commands/twin.md"), "# Note\nDo the safe thing.\n");
     });
-    git("merge", "-q", "--no-edit", "origin/staging");
+    git("merge", "-q", "--no-edit", target);
     const refused = carry("--dry-run");
-    assert.equal(refused.status, 1, `staging carry: a copy of a PR-changed file is refused (${refused.stdout})`);
+    assert.equal(refused.status, 1, `carry: a copy of a PR-changed file is refused (${refused.stdout})`);
     // Git may name the base's unchanged twin (docs/twin.md) as the source; any copy refuses (Sol r6 HIGH 3).
-    assert.match(refused.stderr, /renamed or copied docs\/(manual\/note|twin)\.md/, "staging carry: names the copied file");
+    assert.match(refused.stderr, /renamed or copied docs\/(manual\/note|twin)\.md/, "carry: names the copied file");
   });
 
   // 8. A base delta that removes a credential-shaped line, or changes a binary file, is never sent (Sol r5 HIGH 4, MED).
   for (const [label, edit, why] of [
-    ["a removed credential", (file) => writeFileSync(file("src/cfg.ts"), "export const cfg = {};\n"), /looks like a credential/],
+    ["a removed credential", (file) => writeFileSync(file("src/cfg.ts"), "export const cfg = {};\n"), /removed or edited existing lines/],
     // A removed line that itself starts with "--" shows as "---" in the patch (Sol r6 HIGH 1).
-    ["a removed credential comment", (file) => writeFileSync(file("src/cfg.sql"), "select 1;\n"), /looks like a credential/],
-    ["a binary change", (file) => writeFileSync(file("src/blob.bin"), Buffer.from([0, 1, 2, 0, 3])), /treats as binary/],
+    ["a removed credential comment", (file) => writeFileSync(file("src/cfg.sql"), "select 1;\n"), /removed or edited existing lines/],
+    // Any removed line, credential-shaped or not (no pattern catches every format; Sol r7 HIGH 3).
+    ["a removed plain line", (file) => writeFileSync(file("src/cfg.sql"), '-- password: "y"\n'), /removed or edited existing lines/],
+    ["a binary change",(file) => writeFileSync(file("src/blob.bin"), Buffer.from([0, 1, 2, 0, 3])), /changed a binary file/],
   ]) {
     // On a hotfix/ branch, where the collision check still runs.
     withRepo(({ git, file, land, carry, readProof, reviewedHead }) => {

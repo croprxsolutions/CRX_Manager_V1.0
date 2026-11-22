@@ -259,6 +259,9 @@ assert.equal(proofValid({ ...proof, carry: { ...proof.carry, from_base: "d".repe
   assert.equal(carriedSolProof(unlisted), false, "gate: nor when the carry dropped the acceptance list");
   const clean = buildCarryForwardProof({ headSha: "e".repeat(40), baseSha: moved, source: { head_sha: H1, base_sha: BASE, timestamp: record.timestamp }, mode: "collision_check", timestamp: iso(NOW) });
   assert.equal(carriedSolProof(clean), true, "gate: a clean review still carries onto a newer base");
+  // A staging merge never carries, even a proof minted before that rule (Mason, 2026-11-22, Sol r7 HIGH 1).
+  assert.equal(carriedSolProof({ ...clean, review_ref: "origin/staging" }), false, "gate: a staging-carried proof is not a proof");
+  assert.equal(carriedSolProof({ ...clean, carry: { ...clean.carry, mode: "disjoint" }, review_ref: "origin/staging" }), false, "gate: nor a free staging carry");
 }
 assert.equal(proofValid(proof, H2, NOW + 24 * 60 * 60 * 1000, BASE), false, "gate: expires with the Sol run it came from");
 

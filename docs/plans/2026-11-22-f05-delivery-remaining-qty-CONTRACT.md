@@ -97,7 +97,7 @@ The design above was revised; the migration implements the revision.
 
 ## Sol round 1 (2026-11-22) settlement
 
-- **HIGH #1 (fixed by a proven way out):** two legacy loads on a line whose order has a return: the return guard refuses cancelling either (`20270126110000…:316-333`) and Cancel Remaining refuses on a received/credited return (`20260721152604…:126-133`). Recording 0 delivered on the extra load does not raise delivered, so it completes; the real load then completes. The refusal now says so. Case 3p.
+- **HIGH #1 (fixed by a proven way out):** two legacy loads on a line whose order has a return: the return guard refuses cancelling either (`20270126110000…:316-333`) and Cancel Remaining refuses on a received/credited return (`20260721152604…:126-133`). Recording 0 delivered on the extra load does not raise delivered, so it completes; the real load then completes. The refusal now says so. Case 3p. Luna r6 (HIGH: the hint could hide a real shipment) → Mason chose to reword: record 0 only if the extra load never went out; otherwise call the office (F05b fixes real double deliveries).
 - **HIGH #2 (fixed):** soft-deleted loads no longer count (`deleted_at IS NULL`, as Cancel Remaining already does); un-deleting an open load is checked like a reopen. Case 3e.
 - **MED driver sees another load (fixed):** the completion refusal no longer names the other load or its quantity.
 - **MED REPEATABLE READ stale read (fixed after Luna r5 raised it as HIGH):** every app caller runs in READ COMMITTED, and the check now refuses any stricter level (`ORDER_LINE_CHECK_ISOLATION`), as `20270119130000…:81` does. Case 3i.

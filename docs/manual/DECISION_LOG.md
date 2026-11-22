@@ -56,6 +56,8 @@ The staging audit (2026-11-21) found one order line scheduled twice (New Deliver
 
 **Decision (Mason, in chat, 2026-11-22: "yes"):** where two open loads already hold the same units from before the fix, completing either is refused until the office cancels or reduces the extra load. The driver is told to call the office; stock never moves twice. Rejected: first load to complete wins (the second driver finds out only at the farm).
 
+**Follow-up decision (Mason, in chat, 2026-11-22: "Reword the hint"):** when a return stops the office cancelling the extra load, the message says to complete it with 0 delivered only if it never actually went out; if it did go out, call the office. A real double delivery is fixed in the F05b cleanup. Rejected: dropping the 0-delivered way out (every case becomes manual office work).
+
 ## 2026-11-21 — #2165: Mason owner-accepted 1 Sol finding(s) at `2c95807df876`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2165 at `2c95807df876` (base `1b127b005e8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

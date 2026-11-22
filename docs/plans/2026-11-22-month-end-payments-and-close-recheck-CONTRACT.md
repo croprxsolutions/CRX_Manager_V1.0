@@ -146,3 +146,17 @@ passes before the apply; split not needed (memory rule exception for already-liv
   figure moves, as DECISION_LOG 2026-11-22 accepts). MED rush-order count not in the token: screen-only checklist item,
   declined above (#16-#19). MED cutover: accepted (State and failure). LOW number precision: needs a total above
   $90 trillion.
+
+## Sol round 3 (2026-11-22) and how each settled
+
+- **Fixed:** HIGH (round 1 #3 / round 2 MED #4 again) "a prepay edit commits between the close's check and the month
+  being marked closed": the close impl now takes `LOCK TABLE public.prepay_credits IN SHARE MODE` after the month
+  lock and before computing the figures, so an in-flight Prepayment Manager write finishes first (then the token no
+  longer matches and the close refuses) or waits until the close commits (then it is a post-close edit: screen figure
+  only, DECISION_LOG 2026-11-22). Writers unchanged; the hold lasts only for the close transaction. Proof case: a
+  close waits for an in-flight edit. LOW: the rollback note now drops `allocation_sets_payment_has_date` too.
+- **Refuted / accepted (evidence):** MED legacy `payments` rounding/NaN (round 2, unchanged: superseded table, 0 rows,
+  no writers). MED `orders.total_price` NaN: the close receipt's order count and the summary's order total are the
+  same expressions as before (the summary already converted that total); no new conversion of an order amount is
+  introduced. MED untyped prepay checks from an older writer: live read-only 2026-11-22 shows 0 `prepay_credits` rows
+  with `source_type` NULL. MED rush orders, MED cutover, LOW grouping, LOW number precision: as round 2.

@@ -37,7 +37,8 @@
 -- caller-analysis: close_accounting_period :: re-created with three added review arguments; the REVOKE is only from PUBLIC and anon, authenticated keeps EXECUTE; its one caller (src/pages/MonthEndClose.tsx) sends the review arguments in this same PR
 -- ROLLBACK (its own reviewed migration): re-create get_monthly_summary and the close impl from
 -- 20270206110000_pnl_commission_share_billed.sql and the 3-argument wrapper from
--- 20261102180000_bind_money_replay_receipts_batch4a.sql, then drop the two helpers.
+-- 20261102180000_bind_money_replay_receipts_batch4a.sql, then drop the two helpers and the
+-- allocation_sets_payment_has_date constraint.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -313,6 +314,11 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'Period % to % is already closed', v_period_start, p_period_end;
   END IF;
+
+  -- Prepayment checks count in payments received but their writers take no month lock (Sol round 3): hold their
+  -- writes until this close commits, so an edit lands before the figures below (and refuses a stale review) or after
+  -- the month is closed (screen figure only; DECISION_LOG 2026-11-22). Other figures' writers take the month lock.
+  LOCK TABLE public.prepay_credits IN SHARE MODE;
 
   -- (#2175) The figures the admin reviewed must still hold; computed once, so what is checked is what is saved.
   v_figures := public._month_close_figures_20270208(v_period_start, p_period_end);

@@ -367,7 +367,7 @@ export function sanitizeError(error: unknown): string {
     return detail ? `${detail.charAt(0).toUpperCase()}${detail.slice(1)}.`
       : 'This customer still has open work (orders, deliveries, holds, quotes, invoices, spray jobs, returns or prepay money). Finish, bill or settle it before deactivating it.';
   }
-  // #2063 (20270220100000): the server names the blend ticket (user-typed) and what to do; keep it whole.
+  // #2063 (20270220100000): the server names only invoices the caller may read and what to do; keep it whole.
   if (/^BLEND_TICKET_ALREADY_BILLED:/.test(message)) {
     return message.slice('BLEND_TICKET_ALREADY_BILLED:'.length)
       .replace(/[؜‎‏‪-‮⁦-⁩]/g, '').trim();

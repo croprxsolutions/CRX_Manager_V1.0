@@ -258,7 +258,8 @@ async function until(sql, what) {
   }
   throw new Error(`timed out waiting for ${what}`);
 }
-const idleInTxn = (app) => until(`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE application_name = '${app}' AND state = 'idle in transaction');`, `${app} to hold its transaction`);
+// Idle in its transaction AFTER the billing call itself (not between setup statements): the last query names the RPC.
+const idleInTxn = (app, rpc) => until(`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE application_name = '${app}' AND state = 'idle in transaction' AND position('${rpc}' IN query) > 0);`, `${app} to hold its transaction after ${rpc}`);
 const waitingOnLock = (app) => until(`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE application_name = '${app}' AND wait_event_type = 'Lock');`, `${app} to wait on a lock`);
 
 const ADMIN = 'e1100000-0000-4000-8000-0000000000a1';
@@ -324,7 +325,7 @@ const split = (job, fieldsJob, key, uid, set = 'NULL') => `SELECT public.save_fi
     ${fieldsOf(fieldsJob)}, ${LINES}, '${uid}', NULL, '${key}')::text;`;
 const blendInvoice = (t, key) => `SELECT public.create_invoice_from_blend_ticket(${ticketId(t)}, '${ADMIN}', '${key}')->'invoice_ids'->>0;`;
 const voidInv = (idExpr, key) => `SELECT public.void_invoice(${idExpr}, '[PROVER] A2 release', '${key}');\nSELECT 'voided';`;
-const BLEND_REFUSAL = (t, shown = '[^)]*') => new RegExp(`BLEND_TICKET_ALREADY_BILLED: blend ticket BT-PRV-A2-${t} for this job is already billed \\(${shown}\\); billing the job here too would double-bill the customer`);
+const BLEND_REFUSAL = (_ticket, shown = '[^)]*') => new RegExp(`BLEND_TICKET_ALREADY_BILLED: a blend ticket for this job is already billed \\(${shown}\\); billing the job here too would double-bill the customer`);
 const blendInvoiceNumber = (t) => scalar(`SELECT string_agg(invoice_number, ', ' ORDER BY invoice_number) FROM invoices WHERE blend_ticket_id = ${ticketId(t)};`);
 // Everything a split re-save writes for a job, as one fingerprint (rows, not counts).
 const snapshot = (n) => scalar(`WITH s AS (SELECT * FROM field_app_billing_sets WHERE source_job_id = ${jobId(n)}),
@@ -340,7 +341,7 @@ const snapshot = (n) => scalar(`WITH s AS (SELECT * FROM field_app_billing_sets 
 
 async function race(firstApp, firstSql, firstUid, secondApp, secondSql, secondUid, firstEnd) {
   const a = openSession(firstApp, `BEGIN;\n${claimsFor(firstUid)}\n${firstSql}\n`);
-  await idleInTxn(firstApp);
+  await idleInTxn(firstApp, /create_invoice_from_blend_ticket|save_field_app_split_invoice/.exec(firstSql)[0]);
   const b = openSession(secondApp, `BEGIN;\n${claimsFor(secondUid)}\n${secondSql}\nCOMMIT;\n`);
   b.end();
   await waitingOnLock(secondApp);
@@ -436,7 +437,8 @@ async function main() {
   // 3. AFTER. A committed attempt, then a separate connection checks nothing was left behind.
   const b1Invoice = blendInvoiceNumber('B1');
   assert.ok(b1Invoice, 'fixture: B1 blend invoice number');
-  refused(split('B1', 'B1', 'a2-after-admin', ADMIN), BLEND_REFUSAL('B1', `invoice ${b1Invoice}`), ADMIN, { commit: true });
+  const adminOut = refused(split('B1', 'B1', 'a2-after-admin', ADMIN), BLEND_REFUSAL('B1', `invoice ${b1Invoice}`), ADMIN, { commit: true });
+  assert.ok(!adminOut.includes('BT-PRV-A2-B1'), 'the refusal carries no user-typed ticket number');
   // REP2 neither made nor is salesman on the admin's blend invoice, so invoices_select hides it: neither named nor counted.
   const rep2Out = refused(split('B1', 'B1', 'a2-after-rep2', REP2), BLEND_REFUSAL('B1', 'an invoice you cannot open'), REP2, { commit: true });
   assert.ok(!rep2Out.includes(b1Invoice), 'a rep never sees the number of an invoice they cannot read');

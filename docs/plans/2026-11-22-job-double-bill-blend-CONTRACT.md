@@ -41,10 +41,10 @@ Migration: `supabase/migrations/20270220100000_split_save_refuses_blend_billed_j
 
 - A split save that names a source job is refused with `BLEND_TICKET_ALREADY_BILLED` when any invoice that is not
   deleted and not voided/cancelled belongs to any blend ticket of that job, **deleted ticket or not** — the same
-  "live bill" rule `create_invoice_from_blend_ticket` already uses for the other direction. The message names the
-  ticket and names only the invoice numbers the caller may already read under
+  "live bill" rule `create_invoice_from_blend_ticket` already uses for the other direction. The message carries no
+  ticket number (user-typed text; Sol round 3) and names only the invoice numbers the caller may already read under
   `invoices_select` (admin, creator or salesman; Sol round 1, so a rep never learns a hidden invoice's number), and
-  says to void every one first or ask an admin. The whole save rolls back (new set row, re-save clearing).
+  says to ask an admin to void or delete that blend-ticket invoice first (voiding is admin-only). The whole save rolls back (new set row, re-save clearing).
 - A split save that names a source job is refused under REPEATABLE READ or SERIALIZABLE
   (`SPLIT_INVOICE_NEEDS_READ_COMMITTED`), as blend already is; PostgreSQL runs READ UNCOMMITTED as READ COMMITTED, so
   both pass. Replays (F8) and jobless splits are unaffected.
@@ -66,7 +66,7 @@ non-replay request.
   in a rare interleaving end in a Postgres deadlock error that rolls one save back — never a double bill. This PR
   adds no lock. Deferred: unify order (follow-up).
 - Rollout: one migration, md5 preflight on the live body, postflight md5 on the new body. Pre-apply and post-apply
-  read-only check (in the ledger record): count jobs billed both by a live blend invoice and a live split/transfer
+  read-only check (text in the migrations.d record; live 2026-11-22: 0): count jobs billed both by a live blend invoice and a live split/transfer
   invoice — expected 0.
 - Rollback: a reviewed migration re-emitting the `20270129171000` body (md5 `d72ff554…`); it touches no transfer or
   spray code, so it cannot erase the pricing change.
@@ -79,7 +79,7 @@ staff-photo policies; named in the prover), so a pass shows the split refusal on
 
 1. BEFORE: split save for job J billed by a live blend invoice → accepted (the bug, asserted).
 2. Candidate applies; a second apply is refused by the preflight.
-3. AFTER: same split save → refused `BLEND_TICKET_ALREADY_BILLED` naming the ticket; no set row, no invoice, job
+3. AFTER: same split save → refused `BLEND_TICKET_ALREADY_BILLED` (no ticket number); no set row, no invoice, job
    unchanged, no idempotency receipt; as an admin (sees the invoice number) and as a second sales rep who cannot read
    the blend invoice (sees "an invoice you cannot open": neither its number nor a count).
 4. Void the blend invoice (`void_invoice`) → the split save for J succeeds (genuine re-bill).
@@ -133,7 +133,7 @@ staff-photo policies; named in the prover), so a pass shows the split refusal on
 | 26 | Blend wording is the blend function's; deferred to the transfer follow-up. The new split message names the specific ticket and invoice. |
 | 27 | DECISION Q2: Mason accepted 2026-11-22 (message names ticket and invoice; void it or ask an admin). |
 | 28 | Decided: see Error precedence. |
-| 29, 42 | No duplicate can exist live (F6: 0 blend tickets). Pre/post-apply read-only reconciliation query is in the ledger record. |
+| 29, 42 | No duplicate can exist live (F6: 0 blend tickets). Pre/post-apply read-only reconciliation query is in the migrations.d record (live 2026-11-22: 0). |
 | 30 | Proof 4 (real `void_invoice`) and proof 9 (one sibling voided, other live). |
 | 31 | The legacy deleted-ticket state is unreachable (F3); its recovery belongs to the transfer follow-up. |
 | 32, 33, 34 | Fixed: the new prover asserts every outcome and committed state; blend invoices come from the RPC; the legacy state is the only triggers-off fixture and is exercised against split. Transfer on it: transfer follow-up. |

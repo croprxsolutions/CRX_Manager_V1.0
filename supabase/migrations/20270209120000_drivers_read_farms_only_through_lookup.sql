@@ -5,11 +5,11 @@
 -- later, and since #2018 a driver can pick that farm by taking an open delivery. Mason accepted that for one
 -- release only (Sol on #2161, #2187, #2165; DECISION_LOG.md); this file removes it.
 --
--- 1. customers_select loses its driver branch; its admin, sales rep and applicator branches are unchanged.
---    customers_select_location_dispatchee (job dispatches) no longer admits an active driver: office staff may add
---    any profile to a field crew, so a driver on a dispatched crew would otherwise still read the whole row. It is
---    unchanged for everyone else. A driver then reads no customers row directly; the driver screens (#2165) already
---    read farm name, phone, email and addresses through get_driver_customers.
+-- 1. customers_select loses its driver branch; its admin, sales rep and applicator branches are unchanged. A driver
+--    then reads no customers row through a delivery; the driver screens (#2165) already read farm name, phone,
+--    email and addresses through get_driver_customers. customers_select_location_dispatchee (job dispatches) is
+--    unchanged: a driver an office user puts on a field crew is field crew and sees what field crew sees (Mason,
+--    2026-11-22, "2: Yes").
 -- 2. New _delivery_list_customer_labels(): SECURITY DEFINER, STABLE, names only: id, farm_name and the TOP farm
 --    group name (the same walk as #1995). An active admin or sales rep gets a label for every customer on any
 --    delivery; an active driver only for customers on deliveries assigned to them; anyone else (an inactive user,
@@ -25,8 +25,8 @@
 -- phone or address. No row changes.
 --
 -- Recovery: fix forward (repair the helper, the list or the screens); the drivers' whole-row read stays closed.
--- Restoring it (the 20261013220000 customers_select and 20260626120000 dispatchee rule) would reopen the credit,
--- prepay, terms and notes exposure and needs Mason's explicit security decision first.
+-- Restoring it (the 20261013220000 customers_select) would reopen the credit, prepay, terms and notes exposure and
+-- needs Mason's explicit security decision first.
 
 CREATE TEMP TABLE drivers_farm_read_2162_tx ON COMMIT DROP AS SELECT pg_current_xact_id()::text AS transaction_id;
 
@@ -50,7 +50,7 @@ BEGIN
      IS DISTINCT FROM '7e0066e0ab2cc42f8ce8c6249eebd700' THEN
     RAISE EXCEPTION 'DRIVER_FARM_READ_BASELINE_DRIFT: customers_select_location_dispatchee is not the 20260626120000 rule';
   END IF;
-  -- Only these two rules let anyone read customers rows, so ending the drivers' read in both ends it.
+  -- Only these two rules let anyone read customers rows: the driver's delivery read is in customers_select alone.
   IF (SELECT count(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = 'customers' AND cmd IN ('SELECT', 'ALL')) <> 2 THEN
     RAISE EXCEPTION 'DRIVER_FARM_READ_BASELINE_DRIFT: customers has a read rule this file does not know';
   END IF;
@@ -61,6 +61,15 @@ BEGIN
   END IF;
   IF to_regprocedure('public._delivery_list_customer_labels()') IS NOT NULL THEN
     RAISE EXCEPTION 'DRIVER_FARM_READ_BASELINE_DRIFT: _delivery_list_customer_labels already exists';
+  END IF;
+  -- The driver screens read billing and shipping addresses from the 20270207120000 lookup; without it this file
+  -- would leave a driver's stop with no address.
+  IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
+       WHERE oid = to_regprocedure('public.get_driver_customers(uuid[])')) IS DISTINCT FROM 'f49caaf5f387375c92be94c52c74e4ed' THEN
+    RAISE EXCEPTION 'DRIVER_FARM_READ_BASELINE_DRIFT: get_driver_customers is not the 20270207120000 body';
+  END IF;
+  IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.customers'::regclass) THEN
+    RAISE EXCEPTION 'DRIVER_FARM_READ_BASELINE_DRIFT: row level security is off on customers';
   END IF;
 END;
 $preflight$;
@@ -74,12 +83,14 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
   WITH me AS (
-    SELECT p.id, p.role FROM public.profiles p WHERE p.id = (SELECT auth.uid()) AND p.is_active
+    SELECT p.id, p.role, p.denied_pages FROM public.profiles p WHERE p.id = (SELECT auth.uid()) AND p.is_active
   ), shown AS (
-    -- Office: every delivery (del_select shows them all). A driver: deliveries assigned to them.
+    -- Office: every delivery (del_select shows them all). A driver allowed the Deliveries page (the same check as
+    -- get_driver_available_deliveries): deliveries assigned to them.
     SELECT DISTINCT d.customer_id
       FROM public.deliveries d
-      JOIN me ON me.role IN ('admin', 'sales_rep') OR (me.role = 'driver' AND d.assigned_driver = me.id)
+      JOIN me ON me.role IN ('admin', 'sales_rep')
+              OR (me.role = 'driver' AND NOT COALESCE('deliveries' = ANY (me.denied_pages), false) AND d.assigned_driver = me.id)
      WHERE d.customer_id IS NOT NULL
   )
   SELECT c.id, c.farm_name, pc.farm_name
@@ -380,15 +391,6 @@ ALTER POLICY customers_select ON public.customers
          AND j.applicator_id = (SELECT auth.uid() AS uid)
          AND j.job_date >= (CURRENT_DATE - '7 days'::interval))))
   );
-ALTER POLICY customers_select_location_dispatchee ON public.customers
-  USING (
-    NOT is_driver()
-    AND EXISTS (
-      SELECT 1 FROM public.jobs j
-       WHERE j.customer_id = customers.id
-         AND public._is_dispatched_to_me(j.id)
-    )
-  );
 
 DO $postflight$
 BEGIN
@@ -402,8 +404,8 @@ BEGIN
   END IF;
   IF (SELECT md5(coalesce(qual, '') || '|' || coalesce(with_check, '')) FROM pg_policies
        WHERE schemaname = 'public' AND tablename = 'customers' AND policyname = 'customers_select_location_dispatchee')
-     IS DISTINCT FROM '3319c0edd05857b6f00bcde285379af2' THEN
-    RAISE EXCEPTION 'POSTFLIGHT_FAIL: customers_select_location_dispatchee is not this file''s rule';
+     IS DISTINCT FROM '7e0066e0ab2cc42f8ce8c6249eebd700' THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: customers_select_location_dispatchee must stay the 20260626120000 rule';
   END IF;
   IF (SELECT md5(replace(prosrc, chr(13), '')) || prosecdef::text FROM pg_proc
        WHERE oid = to_regprocedure('public.get_deliveries_keyset_page(date,date,text,text[],uuid,text,uuid,date,date,text,boolean,integer,integer,uuid,jsonb)'))
@@ -416,6 +418,9 @@ BEGIN
      OR NOT has_function_privilege('authenticated', 'public._delivery_list_customer_labels()', 'EXECUTE')
      OR NOT has_function_privilege('service_role', 'public._delivery_list_customer_labels()', 'EXECUTE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: _delivery_list_customer_labels must be definer, stable, fixed search_path, authenticated and service_role only';
+  END IF;
+  IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.customers'::regclass) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: row level security is off on customers';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK';
 END;

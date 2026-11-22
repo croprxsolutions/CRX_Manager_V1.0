@@ -179,8 +179,8 @@ Read at `origin/staging` 3a9694685 (2026-11-22), plus #2165 head 09d7ffade for t
 
 ### Outcome and authority
 
-1. `customers_select` loses its driver branch; everything else in it is unchanged. `customers_select_location_dispatchee` gains `NOT is_driver()`: office staff may add any profile to a field crew (`ground_crew_members_insert`), so a driver on a dispatched crew would otherwise still read the whole row (Astra #2). Unchanged for everyone else.
-2. New `_delivery_list_customer_labels()` (definer, stable, fixed search path, authenticated + service_role): `id, farm_name, farm_group_name` (top parent) only. Active admin or sales rep: every customer on a delivery. Active driver: customers on deliveries assigned to them. Anyone else (inactive, or another role holding an assignment): nothing, as `is_driver()` gave them before (Astra #3). A driver already may see every farm's name (Mason, 2026-11-21), so this is narrower than allowed.
+1. `customers_select` loses its driver branch; everything else in it is unchanged. `customers_select_location_dispatchee` is unchanged: office staff may add any profile to a field crew (`ground_crew_members_insert`), and a driver on a dispatched crew is field crew and sees what field crew sees, the whole farm record and the job paperwork included (Mason, 2026-11-22, "2: Yes"; Astra #2, Sol round 1 #1). Live: no driver is on a crew.
+2. New `_delivery_list_customer_labels()` (definer, stable, fixed search path, authenticated + service_role): `id, farm_name, farm_group_name` (top parent) only. Active admin or sales rep: every customer on a delivery. Active driver allowed the Deliveries page (the `get_driver_available_deliveries` check): customers on deliveries assigned to them. Anyone else (inactive, or another role holding an assignment): nothing, as `is_driver()` gave them before (Astra #3). A driver already may see every farm's name (Mason, 2026-11-21), so this is narrower than allowed.
 3. `get_deliveries_keyset_page` reads names from the helper; otherwise byte-for-byte the `20270201110000` body (still invoker). Office output identical. A driver's list now also shows the top farm group and names on deliveries older than yesterday (before: none and "Unknown", since a driver could not read the parent farm), within Mason's "every farm's name" decision.
 4. No screen change: #2165 already reads farms through the lookup.
 
@@ -191,18 +191,18 @@ Read at `origin/staging` 3a9694685 (2026-11-22), plus #2165 head 09d7ffade for t
 
 ### Proof cases (`scripts/smoke/prove-drivers-read-farms-only-through-lookup-real-schema.mjs`, local Docker)
 
-1. When a driver reads `customers` directly, then no row: not the farm on their own delivery, not the farm of a job dispatched to a crew they are on (before the change: both whole rows).
+1. When a driver reads `customers` directly, then no row through a delivery, not even the farm on their own delivery (before: the whole row); a driver on a dispatched crew still reads that job's farm; an inactive driver on that crew reads nothing.
 2. When admin or sales rep read `customers`, then every row and column; an applicator still reads their recent job's farm and the farm of a job location dispatched to them, and no other.
 3. When a driver loads their Deliveries list, then each delivery keeps its farm name and top farm group (also an old delivery), search by farm group works, no other delivery and no secret appears; admin and sales rep responses are identical to before for every sort key both ways, two searches, a status filter and a short page.
-4. When anyone calls the helper, then only three columns; driver: their deliveries' farms; office: every farm on a delivery; an applicator holding a delivery assignment and an inactive driver: nothing; anon: no execute.
+4. When anyone calls the helper, then only three columns; driver: their deliveries' farms; office: every farm on a delivery; an applicator holding a delivery assignment, an inactive driver and a driver denied the Deliveries page: nothing; anon: no execute.
 5. When a driver calls `get_driver_customers`, then it still answers.
-6. When a driver calls every function a signed-in user may run (definer and invoker), then none returns the seeded credit limit, prepay, terms or notes; the same sweep as an admin does find them.
+6. When a driver calls every function a signed-in user may run (definer and invoker; every uuid argument tried as the delivery farm, the crew farm, its job and its job field), then none returns the delivery farms' seeded credit limit, prepay, terms or notes; the same sweep as an admin does find them. Limit: other argument types get NULL and erroring calls are skipped; the guarantee is the read rule, proved directly in case 1.
 
 ### Challenge settlement (Astra gpt-6.2-astra high, 38 findings, 2026-11-22)
 
 | Finding | Settlement |
 |---|---|
-| #2 crew-dispatched driver keeps the whole row | Fixed: dispatchee rule excludes drivers; proof 1 |
+| #2 crew-dispatched driver keeps the whole row | DECISION: Mason, 2026-11-22: a driver on a crew is field crew ("2: Yes"); rule unchanged; proof 1 |
 | #3 helper gave labels to any active assignee | Fixed: driver only; proof 4 |
 | #4 inactive driver | Refuted: `is_driver()` requires an active profile, same as before; proof 4 |
 | #5 helper office branch vs `is_admin()`/`is_sales_rep()` | Refuted: same active-role check; no service_role caller of the list |
@@ -217,6 +217,19 @@ Read at `origin/staging` 3a9694685 (2026-11-22), plus #2165 head 09d7ffade for t
 | #15-#18 | Belong to #2165 or earlier proofs |
 | Others | Wording, or declined as out of scope |
 
+### Sol round 1 settlement (2026-11-22)
+
+| Finding | Settlement |
+|---|---|
+| HIGH 1 crew driver gets account number via billed-customer functions | DECISION: Mason "2: Yes", crew drivers are field crew; dispatch rule left unchanged |
+| HIGH 2 preflight passes without the address lookup | Fixed: preflight pins the 20270207120000 `get_driver_customers` body |
+| MED 3 helper skips the Deliveries page check | Fixed: driver branch requires the page; proof 4 |
+| MED 4 service_role / applicator assignee lose labels | Refuted: no service_role caller (no Edge Function calls the list); live, non-driver assignees are admin or sales rep only |
+| MED 5 autocommit without ON_ERROR_STOP | Refuted: `scripts/apply-migration-file.mjs` runs the file and its ledger row in one transaction |
+| MED 6 row level security off | Fixed: preflight and postflight require it on `customers` |
+| MED 7 sweep uses one uuid | Fixed: four uuids; remaining limit named in proof 6 |
+| LOW 8 comment | Fixed |
+
 ### Open business decisions
 
-None. Mason, 2026-11-21: two-step go-live, drivers see every farm's name, phone, email and addresses through the lookup only.
+None. Mason, 2026-11-22: a driver put on a field crew is field crew ("2: Yes"). Mason, 2026-11-21: two-step go-live, drivers see every farm's name, phone, email and addresses through the lookup only.

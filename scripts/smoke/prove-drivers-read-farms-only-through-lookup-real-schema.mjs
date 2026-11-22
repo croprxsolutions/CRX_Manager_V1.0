@@ -5,8 +5,8 @@
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), records the before state, applies the candidate
  * (autocommit refused, POSTFLIGHT_OK, re-apply refused), then as the signed-in user (role authenticated) checks:
- *   1. a driver reads NO customers row directly, neither the farm on today's delivery assigned to them nor the
- *      farm of a job dispatched to a field crew they belong to (before the candidate: both whole rows);
+ *   1. a driver reads NO customers row through a delivery, not even the farm on today's delivery assigned to them
+ *      (before the candidate: the whole row); a driver on a dispatched field crew keeps field-crew access (Mason, 2026-11-22);
  *   2. admin and sales rep still read every customer with every column; an applicator still reads the farm of
  *      their job and the farm of a job location dispatched to them, and no other;
  *   3. get_deliveries_keyset_page: a driver's list still shows the customer name and TOP farm group of each of their
@@ -52,14 +52,14 @@ const labels = (who) => attempt(who, asUser(`v := (SELECT string_agg(farm_name |
 const driverList = (extra = '') => attempt(USERS.driver, `${asUser(`r := ${page(extra)};`)}
   v := (SELECT string_agg((x->>'delivery_number') || '=' || (x->>'customer_name') || '/' || COALESCE(x->>'farm_group_name', '-'), ',' ORDER BY x->>'delivery_number')
           FROM jsonb_array_elements(r->'rows') x);`);
-// Calls every function authenticated may run (definer and invoker; uuid arguments = farm D, uuid[] = {D}, the rest
+// Calls every function authenticated may run (definer and invoker; every uuid argument = u, uuid[] = {u}, the rest
 // NULL), each as the signed-in user in its own step, and lists the ones whose result shows a secret.
-const SWEEP = `SET LOCAL statement_timeout = '5s';
+const sweep = (u) => `SET LOCAL statement_timeout = '5s';
   n := 0; v := '';
   FOR f0, f1 IN
     SELECT format('public.%I', p.proname),
-           COALESCE((SELECT string_agg(CASE t.oid WHEN 'uuid'::regtype THEN quote_literal('${D}') || '::uuid'
-                                                WHEN 'uuid[]'::regtype THEN 'ARRAY[' || quote_literal('${D}') || ']::uuid[]'
+           COALESCE((SELECT string_agg(CASE t.oid WHEN 'uuid'::regtype THEN quote_literal('${u}') || '::uuid'
+                                                WHEN 'uuid[]'::regtype THEN 'ARRAY[' || quote_literal('${u}') || ']::uuid[]'
                                                 ELSE 'NULL::' || format_type(t.oid, NULL) END, ', ' ORDER BY a.ord)
                      FROM unnest(p.proargtypes::oid[]) WITH ORDINALITY a(typ, ord) JOIN pg_type t ON t.oid = a.typ), '')
     FROM pg_proc p
@@ -83,15 +83,16 @@ try {
   buildContainer({ stopBefore: CANDIDATE });
   seedUsers();
   docker(PSQL, { input: `SET session_replication_role = replica;
-    INSERT INTO public.profiles (id, email, full_name, role, is_active) VALUES
-      ('${DRIVER2}', 'd2@example.invalid', 'Driver Two', 'driver', true),
-      ('${OFF_DRIVER}', 'd3@example.invalid', 'Driver Off', 'driver', false);
+    INSERT INTO public.profiles (id, email, full_name, role, is_active, denied_pages) VALUES
+      ('${DRIVER2}', 'd2@example.invalid', 'Driver Two', 'driver', true, ARRAY['deliveries']),
+      ('${OFF_DRIVER}', 'd3@example.invalid', 'Driver Off', 'driver', false, '{}');
     INSERT INTO public.customers (id, farm_name, parent_customer_id) VALUES
       ('${A}', 'Alpha Top Farms', NULL), ('${B}', 'Bravo Farms', '${A}'), ('${C}', 'Charlie Farms', '${B}'),
       ('${D}', 'Delta Farms', NULL), ('${E}', 'Echo Farms', NULL), ('${F}', 'Foxtrot Farms', NULL),
       ('${G}', 'Golf Farms', NULL), ('${H}', 'Hotel Farms', NULL);
     UPDATE public.customers SET credit_limit_cents = 987654321, prepay_balance_cents = 123456789,
-      payment_terms = 'ZZTERMS2162', notes = 'ZZNOTE2162' WHERE id IN ('${C}', '${D}', '${G}');
+      payment_terms = 'ZZTERMS2162', notes = 'ZZNOTE2162' WHERE id IN ('${C}', '${D}');
+    UPDATE public.customers SET notes = 'CREWNOTE2162' WHERE id = '${G}';
     INSERT INTO public.deliveries (delivery_number, order_id, customer_id, created_by, scheduled_date, status, assigned_driver) VALUES
       ('FR-01', gen_random_uuid(), '${D}', '${USERS.admin}', CURRENT_DATE, 'scheduled', '${USERS.driver}'),
       ('FR-02', gen_random_uuid(), '${C}', '${USERS.admin}', CURRENT_DATE + 1, 'in_progress', '${USERS.driver}'),
@@ -116,7 +117,7 @@ try {
 
   // Before the candidate: the holes this closes, and the office results to compare with.
   assert.equal(readCol(USERS.driver, 'credit_limit_cents', D), 'ok|987654321', 'before: a driver reads the whole row of the farm on their delivery');
-  assert.equal(readCol(USERS.driver, 'notes', G), 'ok|ZZNOTE2162', 'before: a crew dispatch gives a driver the whole row');
+  assert.equal(readCol(USERS.driver, 'notes', G), 'ok|CREWNOTE2162', 'before: a crew dispatch gives a driver the whole row');
   assert.equal(readAll(USERS.driver), 'ok|Charlie Farms,Delta Farms,Golf Farms', 'before: a driver reads their delivery farms and the crew-dispatched farm');
   assert.equal(readAll(USERS.applicator), 'ok|Foxtrot Farms,Hotel Farms', 'before: an applicator reads their job farm and dispatched farm');
   // Before: the driver could not read the parent farms, so their list showed no farm group.
@@ -135,10 +136,10 @@ try {
   console.log('[apply] autocommit refused, applied once with POSTFLIGHT_OK, re-apply refused');
 
   // 1-2. Direct reads.
-  assert.equal(readAll(USERS.driver), 'ok|<null>', 'a driver reads no customers row');
+  assert.equal(readAll(USERS.driver), 'ok|Golf Farms', 'a driver reads no delivery farm row, only the crew-dispatched farm');
   assert.equal(readCol(USERS.driver, 'credit_limit_cents', D), 'ok|<null>', 'a driver no longer reads the farm on their own delivery');
-  assert.equal(readCol(USERS.driver, 'notes', G), 'ok|<null>', 'a driver on a dispatched crew no longer reads that farm');
-  // NOT is_driver() is false for an inactive driver; _is_dispatched_to_me() itself requires an active profile.
+  // _is_dispatched_to_me() requires an active profile, so an inactive driver on a dispatched crew reads nothing.
+  // For an inactive driver is_driver() is false, so NOT is_driver() admits them; _is_dispatched_to_me() requires an active profile.
   assert.equal(readAll(OFF_DRIVER), 'ok|<null>', 'an inactive driver on a dispatched crew reads no customers row');
   const everyone = 'ok|Alpha Top Farms,Bravo Farms,Charlie Farms,Delta Farms,Echo Farms,Foxtrot Farms,Golf Farms,Hotel Farms';
   assert.equal(readAll(USERS.admin), everyone, 'admin reads every customer');
@@ -146,7 +147,7 @@ try {
   assert.equal(readCol(USERS.admin, 'credit_limit_cents', D), 'ok|987654321', 'admin reads every column');
   assert.equal(readCol(USERS.rep, 'credit_limit_cents', D), 'ok|987654321', 'sales rep reads every column');
   assert.equal(readAll(USERS.applicator), 'ok|Foxtrot Farms,Hotel Farms', 'an applicator still reads their job farm and dispatched farm only');
-  console.log('[read] a driver reads no farm row (delivery or crew dispatch); admin, sales rep and applicator unchanged');
+  console.log('[read] a driver reads no delivery farm row (crew dispatch kept); admin, sales rep and applicator unchanged');
 
   // 3. The Deliveries list.
   assert.equal(driverList(), 'ok|FR-01=Delta Farms/-,FR-02=Charlie Farms/Alpha Top Farms,FR-03=Delta Farms/-',
@@ -167,6 +168,7 @@ try {
   assert.equal(labels(USERS.rep), 'ok|Charlie Farms/Alpha Top Farms,Delta Farms/-,Echo Farms/-', 'sales rep: every farm on a delivery');
   assert.equal(labels(USERS.applicator), 'ok|<null>', 'an applicator holding a delivery assignment: nothing');
   assert.equal(labels(OFF_DRIVER), 'ok|<null>', 'an inactive driver: nothing');
+  assert.equal(labels(DRIVER2), 'ok|<null>', 'a driver denied the Deliveries page: nothing, though FR-04 is assigned to them');
   assert.match(attempt(USERS.driver, `SET LOCAL ROLE anon; BEGIN PERFORM public._delivery_list_customer_labels(); v := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN v := SQLERRM; END; RESET ROLE;`),
     /permission denied/, 'anon cannot run the helper');
   console.log('[labels] names only, for a driver\'s own deliveries; office all; others nothing; anon refused');
@@ -178,9 +180,13 @@ try {
   console.log('[lookup] get_driver_customers unchanged');
 
   // 6. No function a signed-in user may run hands a driver the secret farm fields; as an admin the sweep finds them.
-  const driverSweep = attempt(USERS.driver, SWEEP);
-  assert.match(driverSweep, /^ok\|\d+:$/, `functions showing a driver secret farm fields: ${driverSweep}`);
-  const adminSweep = attempt(USERS.admin, SWEEP);
+  // Every uuid argument is tried as a delivery farm (D), the crew-dispatched farm (G), its job and its job field.
+  let driverSweep;
+  for (const u of [D, G, JOB_G, JF_G]) {
+    driverSweep = attempt(USERS.driver, sweep(u));
+    assert.match(driverSweep, /^ok\|\d+:$/, `functions showing a driver secret farm fields (uuid ${u}): ${driverSweep}`);
+  }
+  const adminSweep = attempt(USERS.admin, sweep(D));
   assert.match(adminSweep, /^ok\|\d+:\S/, `the sweep must see the secrets as an admin: ${adminSweep}`);
   console.log(`[sweep] driver: ${driverSweep.split('|')[1].split(':')[0]} functions answered, none showed a secret; admin sees them in: ${adminSweep.split(':')[1]}`);
 

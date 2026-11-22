@@ -7,6 +7,7 @@ import { supabase, checkMutationResult } from '../../lib/db';
 import { sanitizeError } from '../../lib/errorSanitizer';
 import { Sentry } from '../../lib/sentry';
 import { useAuth } from '../../contexts/AuthContext';
+import { editJobs, editJobsErrorMessage, summarizeEditJobs } from '../../lib/editJobs';
 import type { JobBatch } from '../../types';
 import { toSentryError } from '../../lib/sentryError';
 
@@ -102,23 +103,24 @@ export default function JobBatchAssignModal({
       onClose();
       return;
     }
+    if (!profile) { toast('error', 'Sign in again to save these changes.'); return; }
+    const newRef = choice === REMOVE ? null : choice;
+    const jobIds = [...selectedJobIds].sort();
     setApplying(true);
     try {
-      const newRef = choice === REMOVE ? null : choice;
-      const result = await supabase
-        .from('jobs')
-        .update({ batch_ref: newRef })
-        .in('id', selectedJobIds)
-        .select('id');
-      checkMutationResult(result, 'Assign jobs to batch');
+      const result = await editJobs({
+        jobIds, changes: { batch_ref: newRef }, performedBy: profile.id,
+      });
       const verb = choice === REMOVE ? 'Removed from batch' : 'Added to batch';
-      toast('success', `${verb}: ${selectedJobIds.length} job(s)`);
+      // All skipped: say nothing changed rather than announce the action.
+      const lead = result.updated.length > 0 ? verb : 'Batch not changed';
+      toast(result.skipped.length > 0 ? 'info' : 'success', `${lead}: ${summarizeEditJobs(result)}`);
       setChoice(null);
       onApplied();
       onClose();
     } catch (err) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'JobBatchAssignModal.apply' } });
-      toast('error', sanitizeError(err));
+      toast('error', editJobsErrorMessage(err));
     }
     setApplying(false);
   };

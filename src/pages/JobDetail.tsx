@@ -14,7 +14,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { logActivity } from '../lib/activityLogger';
 import { notifyApplicatorDispatched, notifyApplicatorRescheduled, notifyApplicatorUndispatched } from '../lib/notificationTriggers';
-import { supabase, checkMutationResult, assertRpcResult, assertTransferDataPresent, assertTransferResultForJob, hasRpcCode, isTransferInvoiceResultInvalid, RpcErrorCodes, sanitizeError, transferInvoiceErrorMessage } from '../lib/db';
+import { supabase, assertRpcResult, assertTransferDataPresent, assertTransferResultForJob, hasRpcCode, isTransferInvoiceResultInvalid, RpcErrorCodes, sanitizeError, transferInvoiceErrorMessage } from '../lib/db';
 import { warnIfOverCreditLimit } from '../lib/creditLimit';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
@@ -80,6 +80,8 @@ import type { DispatchLocation } from '../lib/dispatchWizard';
 const JobFieldMap = lazy(() => import('../components/jobs/JobFieldMap'));
 // The picker contains Mapbox GL, so keep it out of the normal job-editor load.
 const JobFieldPickerModal = lazy(() => import('../components/jobs/JobFieldPickerModal'));
+import { loaderNumberError } from '../components/jobs/jobMassEdit';
+import { editJobs, editJobsErrorMessage, summarizeEditJobs, type EditJobsChanges } from '../lib/editJobs';
 import JobAttachments from '../components/jobs/JobAttachments';
 import { LegacyLoaderWorksheet } from '../components/jobs/LegacyLoaderWorksheet';
 import { LoaderWorksheetsPanel } from '../components/jobs/LoaderWorksheetsPanel';
@@ -308,6 +310,8 @@ export default function JobDetail() {
   const completeJobIdem = useIdempotencyKey('complete_job', profile?.id || '');
   const startJobIdem = useIdempotencyKey('start_job', profile?.id || '');
   const transferJobIdem = useIdempotencyKey('transfer_job_to_invoice', profile?.id || '');
+  // Crew/loader values as last loaded, so a save sends (and checks) only the ones the user changed.
+  const savedLoaderRef = useRef({ groundCrewId: '', carrier: '', capacity: '' });
   const isNew = id === 'new';
   const isEditable = role === 'admin' || role === 'sales_rep';
   // Cost is admin-only (Mason, 2026-10-15): the server works it out for everyone else's saves.
@@ -323,6 +327,9 @@ export default function JobDetail() {
   // loaded job is never wrongly flagged "unsaved". Baseline is re-captured after
   // every successful save/start/complete (which re-run fetchJob).
   const [isDirty, setIsDirty] = useState(false);
+  // Read after an await: an edit typed while a request was in flight must count.
+  const isDirtyRef = useRef(isDirty);
+  useEffect(() => { isDirtyRef.current = isDirty; }, [isDirty]);
   const baselineRef = useRef<string | null>(null);
   // Post-save refetch race guard: fetchJob nulls the baseline BEFORE its network
   // read resolves, and loading stays false on refetches — so any render in that
@@ -2041,6 +2048,11 @@ export default function JobDetail() {
     // #10 loader-worksheet inputs (numbers stored as strings in the form).
     setCarrierRateGpa(j.carrier_rate_gpa != null ? String(j.carrier_rate_gpa) : '');
     setTankCapacity(j.loader_tank_capacity != null ? String(j.loader_tank_capacity) : '');
+    savedLoaderRef.current = {
+      groundCrewId: j.ground_crew_id || '',
+      carrier: j.carrier_rate_gpa != null ? String(j.carrier_rate_gpa) : '',
+      capacity: j.loader_tank_capacity != null ? String(j.loader_tank_capacity) : '',
+    };
     setLoaderVesselId(ASSIGNED_VEHICLE_VESSEL_VALUE);
     // Quote traceability (typed via JobDbRow)
     if (j.quote_id) {
@@ -2640,19 +2652,13 @@ export default function JobDetail() {
     // clear message — otherwise the post-save direct .update() would clear the
     // previously-saved value (or be rejected by the CHECK). Blank stays allowed
     // (it clears intentionally). Mirrors the mass-edit loaderInputsValid guard.
-    if (carrierRateGpa.trim() !== '') {
-      const c = parseFloat(carrierRateGpa);
-      if (Number.isNaN(c) || c < 0) {
-        toast('error', 'Carrier rate must be zero or more — fix it on the Loader Worksheet tab (or clear it).');
-        return;
-      }
-    }
-    if (tankCapacity.trim() !== '') {
-      const cap = parseFloat(tankCapacity);
-      if (Number.isNaN(cap) || cap <= 0) {
-        toast('error', 'Tank capacity must be greater than zero — fix it on the Loader Worksheet tab (or clear it to use the vehicle).');
-        return;
-      }
+    // Only a changed value is checked: an older stored value the server would now refuse must not block a notes-only save.
+    const loaderBase = isNew ? { carrier: '', capacity: '' } : savedLoaderRef.current;
+    const loaderError = (carrierRateGpa !== loaderBase.carrier ? loaderNumberError(carrierRateGpa, 'carrier') : null)
+      ?? (tankCapacity !== loaderBase.capacity ? loaderNumberError(tankCapacity, 'capacity') : null);
+    if (loaderError) {
+      toast('error', `${loaderError} Fix it on the Loader Worksheet tab (or clear it).`);
+      return;
     }
 
     // B5 license gate pre-check — only when assigning or CHANGING the applicator.
@@ -2785,6 +2791,8 @@ export default function JobDetail() {
   };
 
   const performSave = async (licenseOverride: boolean, overrideReasonForAudit?: string) => {
+    // Crew/loader values as loaded when Save was clicked: a reload during the save must not make an untouched value look edited.
+    const loaderBaseAtSave = isNew ? { groundCrewId: '', carrier: '', capacity: '' } : { ...savedLoaderRef.current };
     // Bound to the route this save STARTED on — see captureRouteEpoch. Captured here
     // rather than in handleSave because the expired-license override path calls
     // performSave directly, and this is where the save actually begins. The job row is
@@ -2956,18 +2964,13 @@ export default function JobDetail() {
       // inputs persist as NULL (the worksheet then shows its "enter …" guard state).
       {
         const savedJobId = isNew ? result.job_id : id!;
-        const parsedCarrier = parseFloat(carrierRateGpa);
-        const parsedCapacity = parseFloat(tankCapacity);
-        // handleSave already BLOCKS an out-of-range value before we get here, so
-        // these only ever see a blank or a CHECK-valid number. This final guard
-        // (NULL unless carrier_rate_gpa >= 0 / loader_tank_capacity > 0) is a
-        // defense-in-depth backstop: this direct .update() runs AFTER save_job has
-        // committed, so it must never send a value the CHECK would reject.
-        const carrierVal = carrierRateGpa.trim() !== '' && !Number.isNaN(parsedCarrier) && parsedCarrier >= 0 ? parsedCarrier : null;
-        const capacityVal = tankCapacity.trim() !== '' && !Number.isNaN(parsedCapacity) && parsedCapacity > 0 ? parsedCapacity : null;
+        // handleSave already BLOCKS an out-of-range value before we get here (same range edit_jobs
+        // enforces), so these only ever see a blank or a valid number.
+        const carrierVal = carrierRateGpa.trim() !== '' ? Number(carrierRateGpa.trim()) : null;
+        const capacityVal = tankCapacity.trim() !== '' ? Number(tankCapacity.trim()) : null;
         // FIX 2 (Wave 2b): wrap this crew/loader sub-write in its OWN try/catch.
         // save_job has already INSERTED the row and the idempotency key was reset
-        // above. If this separate .update() then fails (e.g. ground_crew_id FK
+        // above. If this separate write then fails (e.g. ground_crew_id FK
         // rejected because the crew was deleted by another user), the outer catch
         // would toast but NOT navigate — leaving an isNew user on /jobs/new with
         // isDirty still true. A retry there mints a FRESH idempotency key and
@@ -2975,20 +2978,32 @@ export default function JobDetail() {
         // risk). Instead, on failure we move the user onto the SAVED job (exactly
         // the applicator-reassign-failure pattern below) so any retry edits the
         // existing row rather than inserting again.
+        // Why edit_jobs skipped the job (e.g. invoiced meanwhile), so the toast can say it instead of "adjust them here".
+        let crewSkipReason: string | null = null;
         try {
-          const crewResult = await supabase
-            .from('jobs')
-            .update({
-              ground_crew_id: groundCrewId || null,
-              carrier_rate_gpa: carrierVal,
-              loader_tank_capacity: capacityVal,
-            })
-            .eq('id', savedJobId)
-            .select('id');
-          checkMutationResult(crewResult, 'Assign ground crew / loader worksheet');
+          // #1979: through edit_jobs; a skipped job (e.g. invoiced) counts as not saved.
+          // Only the values the user changed are sent, so an untouched older value is left as it is.
+          const base = loaderBaseAtSave;
+          const crewChanges: EditJobsChanges = {};
+          if (groundCrewId !== base.groundCrewId) crewChanges.ground_crew_id = groundCrewId || null;
+          if (carrierRateGpa !== base.carrier) crewChanges.carrier_rate_gpa = carrierVal;
+          if (tankCapacity !== base.capacity) crewChanges.loader_tank_capacity = capacityVal;
+          if (Object.keys(crewChanges).length > 0) {
+            const crewResult = await editJobs({
+              jobIds: [savedJobId], changes: crewChanges, performedBy: profile!.id,
+            });
+            if (crewResult.skipped.length > 0) {
+              crewSkipReason = summarizeEditJobs(crewResult);
+              throw new Error(crewSkipReason);
+            }
+          }
         } catch (crewErr) {
           Sentry.captureException(toSentryError(crewErr), { extra: { context: 'job_crew_loader_after_save' } });
-          toast('error', 'Job created, but the crew/loader settings did not save — adjust them on this page.');
+          toast('error', stillOnThisJob()
+            ? (crewSkipReason
+              ? `${isNew ? 'Job created' : 'Job saved'}, but the crew/loader settings did not save: ${crewSkipReason}`
+              : `${isNew ? 'Job created' : 'Job saved'}, but the crew/loader settings did not save — adjust them on this page.`)
+            : 'A job was saved, but its crew/loader settings did not save — open it from the Job Schedule and adjust them.');
           // §5: the job + over-label mix DID commit (only the crew/loader sub-write failed),
           // so still record the override audit linked to the saved job before bailing.
           if (overrideReasonForAudit) {
@@ -3302,12 +3317,18 @@ export default function JobDetail() {
     }
     setCancelling(true);
     try {
-      const result = await supabase
-        .from('jobs')
-        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-        .eq('id', id!)
-        .select('id');
-      checkMutationResult(result, 'Cancel job');
+      // #1979: through edit_jobs. A job that moved on since loading is skipped, not cancelled.
+      const result = await editJobs({
+        jobIds: [id!], action: 'cancel', performedBy: profile!.id,
+      });
+      if (result.cancelled.length === 0) {
+        if (stillOnThisJob()) {
+          // No reload: the form stays editable, so a reload could overwrite what the user types meanwhile.
+          toast('info', `Job not cancelled: ${summarizeEditJobs(result)} Refresh to see the job as saved.`);
+        }
+        setCancelling(false);
+        return;
+      }
       if (profile) logActivity({ event: 'job_cancelled', description: `Job ${jobNumber} cancelled`, performedBy: profile.id });
       // The cancel committed and is logged. Gate the on-screen half: a stale success
       // toast would claim the job the operator is NOW looking at was cancelled, and the
@@ -3319,7 +3340,7 @@ export default function JobDetail() {
       }
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), { extra: { context: 'cancel_job' } });
-      toast('error', sanitizeError(err));
+      toast('error', editJobsErrorMessage(err));
     }
     setCancelling(false);
   };

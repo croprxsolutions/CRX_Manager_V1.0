@@ -8,15 +8,17 @@
 -- Rule under test (To-Do row 11.4, part A): field roles see only the fields assigned to them through
 -- the field functions, office-only functions refuse them, global search returns them nothing, and
 -- notes follow the linked record.
---   a. an applicator dispatched to one field of a two-field job gets only that field from
---      get_fields_geojson_by_ids and get_field_geojson;
+--   a. an applicator dispatched to one field of a two-field job gets both of that job's fields, and
+--      not the same customer's field that is on no job of theirs, from get_fields_geojson_by_ids and
+--      get_field_geojson (row 11.4 part B, Mason 2026-10-25: someone sent to a job sees the whole job;
+--      rewritten for #2168, it used to expect only the dispatched field);
 --   b. a driver is refused by get_field_dashboard, get_fields_with_geojson and get_customer_summary
 --      (Permission denied: requires admin or sales_rep role);
 --   c. global_search returns nothing to the driver and the [SMOKE] customer to an active admin;
 --   d. a note on the job: the dispatched applicator and the admin read it, the driver does not;
---   e. the admin still gets both fields and the field dashboard.
+--   e. the admin still gets all three fields and the field dashboard.
 --
--- Fail-first: before the migration the applicator gets both fields (step a fails).
+-- Fail-first (as first written): before 20261023090000 the applicator got every field (step a fails).
 --
 -- HOW TO RUN: as ONE statement inside a transaction that rolls back. It ALWAYS ends with RAISE
 -- EXCEPTION 'SMOKE_PASS_ROLLBACK': that exact text = PASS; any other error = FAIL.
@@ -31,6 +33,7 @@ DECLARE
   v_customer uuid := gen_random_uuid();
   v_field_mine uuid := gen_random_uuid();
   v_field_other uuid := gen_random_uuid();
+  v_field_off uuid := gen_random_uuid();
   v_job uuid := gen_random_uuid();
   v_jf_mine uuid := gen_random_uuid();
   v_count int;
@@ -51,7 +54,8 @@ BEGIN
   INSERT INTO public.customers (id, farm_name, is_active) VALUES (v_customer, '[SMOKE] FFA Farm ' || v_suffix, true);
   INSERT INTO public.fields (id, customer_id, field_name, total_acres, is_active) VALUES
     (v_field_mine,  v_customer, '[SMOKE] FFA mine '  || v_suffix, 10, true),
-    (v_field_other, v_customer, '[SMOKE] FFA other ' || v_suffix, 10, true);
+    (v_field_other, v_customer, '[SMOKE] FFA other ' || v_suffix, 10, true),
+    (v_field_off,   v_customer, '[SMOKE] FFA off-job ' || v_suffix, 10, true);
   INSERT INTO public.jobs (id, job_number, customer_id, job_date, status)
     VALUES (v_job, 'SMK-FFA-' || v_suffix, v_customer, current_date, 'scheduled');
   INSERT INTO public.job_fields (id, job_id, field_id) VALUES (v_jf_mine, v_job, v_field_mine), (gen_random_uuid(), v_job, v_field_other);
@@ -64,14 +68,17 @@ BEGIN
   -- get_notes_for_entity (now SECURITY INVOKER); postgres would bypass it.
   EXECUTE 'SET LOCAL ROLE authenticated';
 
-  -- a.The dispatched applicator gets only their own field.
+  -- a. The dispatched applicator gets both fields of their job, not the customer's off-job field.
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_applicator, 'role', 'authenticated')::text, true);
-  SELECT count(*) INTO v_count FROM public.get_fields_geojson_by_ids(ARRAY[v_field_mine, v_field_other]);
-  IF v_count <> 1 OR NOT EXISTS (SELECT 1 FROM public.get_fields_geojson_by_ids(ARRAY[v_field_mine, v_field_other]) g WHERE g.id = v_field_mine) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: a. the dispatched applicator got % fields from get_fields_geojson_by_ids, expected only their own', v_count;
+  -- Exactly the job's two fields, once each: every row returned is one of them, and both appear.
+  SELECT count(DISTINCT g.id) INTO v_count FROM public.get_fields_geojson_by_ids(ARRAY[v_field_mine, v_field_other, v_field_off]) g
+   WHERE g.id IN (v_field_mine, v_field_other);
+  IF v_count <> 2 OR (SELECT count(*) FROM public.get_fields_geojson_by_ids(ARRAY[v_field_mine, v_field_other, v_field_off])) <> 2 OR EXISTS (SELECT 1 FROM public.get_fields_geojson_by_ids(ARRAY[v_field_mine, v_field_other, v_field_off]) g WHERE g.id = v_field_off) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a. the dispatched applicator got % of their job''s 2 fields from get_fields_geojson_by_ids, or the off-job field', v_count;
   END IF;
-  IF EXISTS (SELECT 1 FROM public.get_field_geojson(v_field_other)) OR NOT EXISTS (SELECT 1 FROM public.get_field_geojson(v_field_mine)) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: a. get_field_geojson did not return exactly the applicator''s own field';
+  IF NOT EXISTS (SELECT 1 FROM public.get_field_geojson(v_field_mine)) OR NOT EXISTS (SELECT 1 FROM public.get_field_geojson(v_field_other))
+     OR EXISTS (SELECT 1 FROM public.get_field_geojson(v_field_off)) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: a. get_field_geojson did not return exactly the applicator''s job fields';
   END IF;
 
   -- b. Office-only functions refuse the driver.
@@ -116,7 +123,7 @@ BEGIN
 
   -- e. The admin is unchanged.
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
-  IF (SELECT count(*) FROM public.get_fields_geojson_by_ids(ARRAY[v_field_mine, v_field_other])) <> 2
+  IF (SELECT count(*) FROM public.get_fields_geojson_by_ids(ARRAY[v_field_mine, v_field_other, v_field_off])) <> 3
      OR public.get_field_dashboard(v_field_other, NULL) -> 'field' ->> 'field_name' IS DISTINCT FROM '[SMOKE] FFA other ' || v_suffix THEN
     RAISE EXCEPTION 'SMOKE_FAIL: e. the admin no longer gets both fields and the field dashboard';
   END IF;

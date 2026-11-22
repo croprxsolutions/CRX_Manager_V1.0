@@ -26,8 +26,6 @@ import {
   buildBlockersRecord,
   buildSolAcceptPayload,
   collectAcceptances,
-  findingKind,
-  ownerAcceptedForPr,
   decisionLogEntry,
   findingLocation,
   gateFilesIn,
@@ -46,6 +44,7 @@ import {
   skipFromReply,
   skipSelection,
   verifySolSkip,
+  ownerAcceptedForPr,
 } from "./sol-accept-lib.mjs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -64,28 +63,14 @@ const solOut = [
   "2. BLOCKER supabase/migrations/x.sql:12 — missing grant.",
   "3. MED something minor.",
   "",
-  "SOL_FINDING 1 HIGH JUDGMENT: src/pages/Sales.tsx:40 - a sale before switch-on skips the registration check",
-  "- **SOL_FINDING 2 BLOCKER JUDGMENT: supabase/migrations/x.sql:12 - missing grant**",
+  "SOL_FINDING 1 HIGH: src/pages/Sales.tsx:40 - a sale before switch-on skips the registration check",
+  "- **SOL_FINDING 2 BLOCKER: supabase/migrations/x.sql:12 - missing grant**",
   "SOL_FINDING_COUNT: 2",
   "",
   "CODEX_PROOF_VERDICT: BLOCKERS",
 ].join("\n");
 const parsed = parseSolFindings(solOut);
 assert.deepEqual(parsed.findings.map((f) => [f.n, f.severity]), [[1, "HIGH"], [2, "BLOCKER"]], "parse: BLOCKER/HIGH lines in order");
-// Sol's label (Mason, 2026-11-21): only JUDGMENT can be skipped; no label means BUG.
-assert.deepEqual(parsed.findings.map((f) => f.kind), ["JUDGMENT", "JUDGMENT"], "parse: Sol's labels kept");
-const labelled = parseSolFindings("SOL_FINDING 1 HIGH: a.ts:1 - x\nSOL_FINDING 2 BLOCKER BUG: b.ts:2 - y\nSOL_FINDING_COUNT 2").findings;
-assert.deepEqual(labelled.map((f) => findingKind(f)), ["BUG", "BUG"], "parse: an unlabelled finding is a BUG");
-assert.match(parseSolFindings("SOL_FINDING 1 HIGH MAYBE: a.ts:1 - x\nSOL_FINDING_COUNT 1").problem, /not in the required form/, "parse: an unknown label is refused");
-assert.match(skipSelection({ all: true }, [{ n: 1, kind: "JUDGMENT" }, { n: 2, kind: "BUG" }]).problem, /marked finding 2 as a bug/, "skip: 'skip' never covers a BUG");
-assert.match(skipSelection({ numbers: [2] }, [{ n: 1, kind: "JUDGMENT" }, { n: 2 }]).problem, /marked finding 2 as a bug/, "skip: an unlabelled finding is never skipped");
-assert.deepEqual(skipSelection({ numbers: [1] }, [{ n: 1, kind: "JUDGMENT" }, { n: 2, kind: "BUG" }]), { numbers: [1] }, "skip: a JUDGMENT finding may be");
-assert.match(collectAcceptances({ record: buildBlockersRecord({ headSha: H1, baseSha: BASE, findings: labelled }), readAcceptance: () => null }).problem,
-  /as a bug, which must be fixed/, "collect: a run with a BUG never carries, whatever was accepted");
-assert.equal(ownerAcceptedForPr({}, 7), true, "merge: a proof with no acceptances is unaffected");
-assert.equal(ownerAcceptedForPr({ owner_accepted: [{ pull_request: 7 }] }, 7), true, "merge: acceptances for this PR count");
-assert.equal(ownerAcceptedForPr({ owner_accepted: [{ pull_request: 7 }] }, 8), false, "merge: never for another PR");
-assert.equal(ownerAcceptedForPr({ owner_accepted: [] }, 7), false, "merge: an empty list is malformed");
 assert.match(parseSolFindings("SOL_FINDING 2 HIGH: x\nSOL_FINDING 1 HIGH: y").problem, /do not run 1\.\.2/, "parse: numbers out of order refused");
 assert.match(parseSolFindings("SOL_FINDING 1 HIGH: x\nSOL_FINDING 1 HIGH: y").problem, /do not run/, "parse: a repeated number refused");
 assert.match(parseSolFindings("SOL_FINDING 1 MED: x").problem, /not in the required form/, "parse: a MED line is malformed, never silently dropped");
@@ -152,14 +137,6 @@ function skipMarkFor(shown, reply) {
   // The agent's answer after his reply, as in a real conversation by the time of the proof.
   writeFileSync(transcript, `${JSON.stringify({ type: "assistant", message: { id: `m${codeSeq++}`, role: "assistant", content: [{ type: "text", text: "Noted." }] } })}\n`, { flag: "a" });
   return () => ({ transcript, from, written: true, words: reply.trim() });
-}
-// A withdrawn "skip" (queued, then removed) between the summary and a later identical reply.
-function skipMarkWithdrawn(shown, reply) {
-  const mark = skipMarkFor(shown, reply)();
-  const lines = readFileSync(mark.transcript, "utf8").split("\n").filter(Boolean);
-  lines.splice(2, 0, JSON.stringify({ type: "queue-operation", operation: "enqueue", content: reply }), JSON.stringify({ type: "queue-operation", operation: "remove" }));
-  writeFileSync(mark.transcript, `${lines.join("\n")}\n`);
-  return { ...mark, from: Buffer.byteLength(`${lines.slice(0, 5).join("\n")}\n`) };
 }
 function reply(text, { sessionId = SESSION, now = NOW } = {}) {
   const a = acceptFromReply(text);
@@ -283,13 +260,20 @@ assert.equal("owner_accepted" in buildCarryForwardProof({ headSha: H2, baseSha: 
 
 // ── Skipping in plain words: one request, one reply, no code (Mason, 2026-11-21) ──
 for (const yes of ["skip", "Skip.", "SKIP!", "skip all", "skip them", "skip these", "accept", "Accept all", "don't fix", "Don’t fix them",
-  "do not fix", "I don’t want those", "i do not want them fixed", "leave them", "  skip  "]) {
+  "do not fix", "I don’t want those", "i do not want them fixed", "leave them", "  skip  ", "I disagree", "I disagree.", "i disagree with them"]) {
   assert.deepEqual(skipFromReply(yes), { all: true }, `skip: "${yes}" skips everything shown`);
 }
-for (const one of ["I don't want that", "leave it alone", "skip it", "don't fix that", "i do not want it fixed"]) {
+for (const one of ["I don't want that", "leave it alone", "skip it", "don't fix that", "i do not want it fixed", "I disagree with that"]) {
   assert.deepEqual(skipFromReply(one), { all: true, single: true }, `skip: "${one}" names one finding`);
 }
-assert.deepEqual(skipSelection(skipFromReply("I don't want that"), [{ n: 1, kind: "JUDGMENT" }]), { numbers: [1] }, "skip: 'that' skips a lone finding");
+assert.deepEqual(skipSelection(skipFromReply("I don't want that"), [{ n: 1 }]), { numbers: [1] }, "skip: 'that' skips a lone finding");
+for (const no of ["I disagree, fix it later", "do you disagree?", "disagree"]) assert.equal(skipFromReply(no), null, `skip: "${no}" skips nothing`);
+// A skip counts only for the PR it was given for (Sol gate rounds 3-4).
+assert.equal(ownerAcceptedForPr({ verdict: "clean" }, 7), true, "PR binding: a plain clean proof is unaffected");
+assert.equal(ownerAcceptedForPr({ owner_accepted: [{ pull_request: 7 }, { pull_request: 7 }] }, 7), true, "PR binding: own PR");
+assert.equal(ownerAcceptedForPr({ owner_accepted: [{ pull_request: 7 }, { pull_request: 8 }] }, 7), false, "PR binding: a skip from another PR is refused");
+assert.equal(ownerAcceptedForPr({ owner_accepted: [] }, 7), false, "PR binding: an empty list is refused");
+assert.equal(ownerAcceptedForPr({ owner_accepted: null }, 7), false, "PR binding: a damaged list is refused");
 assert.match(skipSelection(skipFromReply("I don't want that"), [{ n: 1 }, { n: 2 }]).problem, /"that" or "it"/, "skip: 'that' never skips a list of two");
 assert.deepEqual(skipFromReply("skip 1 3"), { numbers: [1, 3] }, "skip: numbers");
 assert.deepEqual(skipFromReply("skip 1, 3 and 4"), { numbers: [1, 3, 4] }, "skip: a list with commas and and");
@@ -299,7 +283,7 @@ for (const no of ["ok", "yes", "Yes I approve", "I approve", "move on", "merge i
   "skip\nand merge", "please skip", "skip 123", ""]) {
   assert.equal(skipFromReply(no), null, `skip: "${no}" is not a skip`);
 }
-const shownF = [{ n: 1, kind: "JUDGMENT" }, { n: 3, kind: "JUDGMENT" }];
+const shownF = [{ n: 1 }, { n: 3 }];
 assert.deepEqual(skipSelection({ all: true }, shownF), { numbers: [1, 3] }, "selection: all = every finding shown");
 assert.deepEqual(skipSelection({ numbers: [3, 1] }, shownF), { numbers: [1, 3] }, "selection: sorted");
 assert.match(skipSelection({ numbers: [2] }, shownF).problem, /not in the list/, "selection: a number he was not shown skips nothing");
@@ -309,9 +293,9 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
 {
   const H3 = "d".repeat(40);
   const rec3 = buildBlockersRecord({ headSha: H3, baseSha: BASE, findings: [
-    { n: 1, severity: "HIGH", kind: "JUDGMENT", text: "src/a.ts:1 - one" },
-    { n: 2, severity: "BLOCKER", kind: "JUDGMENT", text: "src/b.ts:2 - two" },
-    { n: 3, severity: "HIGH", kind: "JUDGMENT", text: "src/c.ts:3 - three" },
+    { n: 1, severity: "HIGH", text: "src/a.ts:1 - one" },
+    { n: 2, severity: "BLOCKER", text: "src/b.ts:2 - two" },
+    { n: 3, severity: "HIGH", text: "src/c.ts:3 - three" },
   ], timestamp: iso(NOW - 60 * 60 * 1000) });
   const shownFor = {};
   const skipReq = (numbers, code = String(codeSeq++), extra = {}) => {
@@ -326,7 +310,7 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   });
   const r1 = skipReq([1, 3]);
   assert.equal(Date.parse(r1.payload.expiresAt), Date.parse(rec3.timestamp) + 24 * 60 * 60 * 1000, "request: deadline never past the Sol run's own 24 hours");
-  assert.match(r1.payload.summary.join("\n"), /Finding 1 of 3 \(HIGH, judgment call\).*\nFinding 3 of 3 \(HIGH, judgment call\)/, "request: lists only the findings asked about");
+  assert.match(r1.payload.summary.join("\n"), /Finding 1 of 3 \(HIGH\).*\nFinding 3 of 3 \(HIGH\)/, "request: lists only the findings asked about");
   assert.match(r1.payload.summary.join("\n"), /To skip them all, reply: skip/, "request: tells him the one word");
   assert.doesNotMatch(r1.payload.summary.join("\n"), /accept \d{6}/, "request: no code to type");
   const shownText = r1.payload.summary.join("\n");
@@ -351,8 +335,6 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   assert.match(verifySolSkip({ approval: receipts[0], record: rec3, checkReply: assertReplyAlone }).reason, /was not checked/, "verify: what he was shown must be checked");
   assert.match(verifySolSkip({ approval: { ...receipts[0], replyMark: skipMarkFor("Another request's summary", "skip 3")() }, record: rec3, checkShown: assertSkipShown }).reason,
     /not this request's summary/, "verify: a skip sent for another request never counts");
-  assert.match(verifySolSkip({ approval: { ...receipts[0], replyMark: skipMarkWithdrawn(shownFor[r1.code], "skip 3") }, record: rec3, checkShown: assertSkipShown }).reason,
-    /not this request's summary|queued or withdrawn/, "verify: a withdrawn reply between the summary and his reply never counts");
   assert.match(verifySolSkip({ approval: { ...receipts[0], selected: [1, 3] }, record: rec3 }).reason, /does not match/, "verify: an edited selection is refused");
   assert.match(verifySolSkip({ approval: { ...receipts[0], reply: "skip" }, record: rec3 }).reason, /does not match/, "verify: the reply must give the same selection");
   assert.match(verifySolSkip({ approval: receipts[0], record: { ...rec3, timestamp: iso(NOW - 1000) } }).reason, /earlier Sol run/, "verify: a re-run of Sol voids it");

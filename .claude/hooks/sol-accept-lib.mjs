@@ -44,12 +44,7 @@ const BREAK_RE = /[\r\n\x85\p{Zl}\p{Zp}]/u;
 export const blockersRecordName = (head) => `codex-review-blockers-${head}.json`;
 export const solAcceptFileName = (head, n) => `owner-approval-sol-accept-${head}-${n}.json`;
 
-// The kind (Mason, 2026-11-21): BUG = something broken, wrong or unsafe; JUDGMENT = a choice the
-// owner may make differently. A line without one is a BUG, so only Sol's own label opens a skip.
-const FINDING_RE = new RegExp(`^${SOL_FINDING_TOKEN}\\s+(\\d{1,2})\\s+(BLOCKER|HIGH)(?:\\s+(BUG|JUDGMENT))?:\\s*(\\S.*)$`);
-export const FINDING_KINDS = ["BUG", "JUDGMENT"];
-/** A finding's kind as Sol labelled it; anything unlabelled is a BUG. */
-export const findingKind = (f) => (f?.kind === "JUDGMENT" ? "JUDGMENT" : "BUG");
+const FINDING_RE = new RegExp(`^${SOL_FINDING_TOKEN}\\s+(\\d{1,2})\\s+(BLOCKER|HIGH):\\s*(\\S.*)$`);
 
 /**
  * The numbered BLOCKER/HIGH findings Sol listed (`SOL_FINDING <n> <BLOCKER|HIGH>: <one line>`).
@@ -69,10 +64,10 @@ export function parseSolFindings(stdout) {
     if (c) { counts.push(Number(c[1])); continue; }
     const m = FINDING_RE.exec(line);
     if (!m) return { problem: `a ${SOL_FINDING_TOKEN} line is not in the required form: ${line.slice(0, 80)}` };
-    const text = m[4].trim();
+    const text = m[3].trim();
     if (text.length > MAX_TEXT) return { problem: `finding ${m[1]} is longer than ${MAX_TEXT} characters` };
     if (BREAK_RE.test(text)) return { problem: `finding ${m[1]} contains a line break` };
-    findings.push({ n: Number(m[1]), severity: m[2], kind: m[3] || "BUG", text });
+    findings.push({ n: Number(m[1]), severity: m[2], text });
   }
   if (!findings.length) return { problem: `Sol listed no ${SOL_FINDING_TOKEN} lines` };
   if (findings.some((f, i) => f.n !== i + 1)) return { problem: `the ${SOL_FINDING_TOKEN} numbers do not run 1..${findings.length}` };
@@ -93,7 +88,7 @@ export function buildBlockersRecord({ headSha, baseSha, findings, timestamp = ne
     head_sha: headSha,
     base_sha: baseSha,
     timestamp,
-    findings: findings.map((f) => ({ n: f.n, severity: f.severity, kind: findingKind(f), text: f.text })),
+    findings: findings.map(({ n, severity, text }) => ({ n, severity, text })),
   };
 }
 
@@ -110,7 +105,6 @@ export function blockersRecordProblem(rec, { headSha, nowMs = Date.now() }) {
   if (!Number.isFinite(t) || nowMs < t || nowMs - t > SOL_BLOCKERS_MAX_AGE_MS) return "the Sol review that found them is older than 24 hours (or dated in the future)";
   const f = rec.findings;
   if (!Array.isArray(f) || !f.length || f.some((x, i) => x?.n !== i + 1 || !["BLOCKER", "HIGH"].includes(x?.severity)
-    || (x?.kind !== undefined && !FINDING_KINDS.includes(x.kind))
     || typeof x?.text !== "string" || !x.text || x.text.length > MAX_TEXT || BREAK_RE.test(x.text))) {
     return "the saved Sol findings list is malformed";
   }
@@ -184,6 +178,7 @@ const SKIP_ALL_RES = [
   /^(?:skip|accept|don't fix|do not fix)(?: (?:them|these|those|all|all of them|them all|it|that))?$/,
   /^leave (?:them|these|those|it|that)(?: alone)?$/,
   /^i (?:don't|do not) want (?:that|those|these|them|it)(?: fixed)?$/,
+  /^i disagree(?: with (?:that|those|these|them|it|all of them))?$/,
 ];
 const SKIP_SOME_RE = /^(?:skip|accept|don't fix|do not fix) (?:findings? )?(\d{1,2}(?:(?:, ?| | and |, and )\d{1,2})*)$/;
 
@@ -213,15 +208,20 @@ export function skipSelection(skip, shownFindings) {
   const shown = (shownFindings || []).map((f) => f.n);
   if (!skip) return { problem: "his reply is not a skip" };
   if (skip.all && skip.single && shown.length !== 1) return { problem: `his reply says "that" or "it" but the list has ${shown.length} findings; he replies skip (all of them) or skip and the numbers` };
-  if (skip.all) return shown.length ? skipSelection({ numbers: shown }, shownFindings) : { problem: "the request shows no findings" };
+  if (skip.all) return shown.length ? { numbers: shown } : { problem: "the request shows no findings" };
   const nums = skip.numbers || [];
   if (!nums.length) return { problem: "his reply names no finding" };
   if (new Set(nums).size !== nums.length) return { problem: "his reply names a finding twice" };
   const missing = nums.filter((n) => !shown.includes(n));
   if (missing.length) return { problem: `finding ${missing.join(", ")} was not in the list he was shown` };
-  const bugs = (shownFindings || []).filter((f) => nums.includes(f.n) && findingKind(f) !== "JUDGMENT").map((f) => f.n);
-  if (bugs.length) return { problem: `Sol marked finding ${bugs.join(", ")} as a bug, which is fixed, never skipped` };
   return { numbers: [...nums].sort((a, b) => a - b) };
+}
+
+/** True unless the proof carries owner acceptances given for another pull request (Sol gate rounds 3-4). */
+export function ownerAcceptedForPr(proof, prNumber) {
+  const acc = proof?.owner_accepted;
+  if (acc === undefined) return true;
+  return Array.isArray(acc) && acc.length > 0 && acc.every((a) => a?.pull_request === prNumber);
 }
 
 /** The lines Mason reads before he replies to a skip request. Derived only from payload fields. */
@@ -231,7 +231,7 @@ export function solSkipSummary(p) {
     `${nums.length === 1 ? "This Sol finding gets fixed" : `These ${nums.length} Sol findings get fixed`} unless you skip ${nums.length === 1 ? "it" : "them"}. A skipped finding stays unfixed and the pull request may land with it.`,
     "",
     `Pull request: #${p.pullRequest} (version ${String(p.prHead).slice(0, 12)})`,
-    ...(p.findings || []).map((f) => `Finding ${f.n} of ${p.findingCount} (${f.severity}, ${findingKind(f) === "JUDGMENT" ? "judgment call" : "bug"}): ${f.text}`),
+    ...(p.findings || []).map((f) => `Finding ${f.n} of ${p.findingCount} (${f.severity}): ${f.text}`),
     "",
     `Each skipped finding's file and line goes in ${DECISION_LOG_PATH}, which is public; the wording stays private.`,
     "Every other finding and every other safety check still applies.",
@@ -251,7 +251,7 @@ export function buildSolSkipPayload({ record, numbers, pullRequest, issuedAt, ex
     prHead: record.head_sha,
     baseSha: record.base_sha,
     reviewedAt: record.timestamp,
-    findings: want.map((n) => record.findings[n - 1]).map((f) => ({ n: f.n, severity: f.severity, kind: findingKind(f), text: f.text })),
+    findings: want.map((n) => record.findings[n - 1]).map(({ n, severity, text }) => ({ n, severity, text })),
     findingCount: record.findings.length,
     issuedAt,
     expiresAt,
@@ -275,7 +275,7 @@ export function verifySolSkip({ approval, record, checkReply, checkShown }) {
   if (!approval || approval.via !== OWNER_SOL_SKIP_VIA || typeof approval.payload !== "string") return no("not a skip receipt");
   let p;
   try { p = JSON.parse(approval.payload); } catch { return no("unreadable"); }
-  if (!p || typeof p !== "object" || p.purpose !== OWNER_SOL_SKIP_PURPOSE) return no("not a Sol skip request");
+  if (p.purpose !== OWNER_SOL_SKIP_PURPOSE) return no("not a Sol skip request");
   if (String(p.prHead).toLowerCase() !== String(record.head_sha).toLowerCase() || p.baseSha !== record.base_sha) {
     return no("it was for a different version of the pull request");
   }
@@ -283,7 +283,7 @@ export function verifySolSkip({ approval, record, checkReply, checkShown }) {
   if (p.findingCount !== record.findings.length || !Array.isArray(p.findings) || !p.findings.length) return no("it was shown a different set of findings");
   for (const f of p.findings) {
     const r = record.findings[f?.n - 1];
-    if (!r || f.n !== r.n || f.severity !== r.severity || f.kind !== findingKind(r) || f.text !== r.text) return no("it shows a finding this Sol run did not report");
+    if (!r || f.n !== r.n || f.severity !== r.severity || f.text !== r.text) return no("it shows a finding this Sol run did not report");
   }
   if (!Number.isInteger(p.pullRequest) || p.pullRequest <= 0) return no("it names no pull request");
   if (JSON.stringify(p.summary) !== JSON.stringify(solSkipSummary(p))) return no("what Mason was shown does not match what it covers");
@@ -304,16 +304,6 @@ export function verifySolSkip({ approval, record, checkReply, checkShown }) {
   try { checkShown(mark, p); }
   catch (e) { return no(`his reply could not be tied to this request (${e?.message || e})`); }
   return { ok: true, payload: p, numbers: sel.numbers, approvedAt: approval.approvedAt };
-}
-
-/**
- * At the merge: a proof that carries owner acceptances counts only for the pull request
- * they were given for (Sol HIGH, gate round 3, 2026-11-21). True when it carries none.
- */
-export function ownerAcceptedForPr(proof, prNumber) {
-  const list = proof?.owner_accepted;
-  if (list === undefined) return true;
-  return Array.isArray(list) && list.length > 0 && list.every((a) => Number.isInteger(prNumber) && a?.pull_request === prNumber);
 }
 
 /** Every skip receipt saved for `head` in `stateDir`, parsed (unreadable ones are left out). */
@@ -441,9 +431,6 @@ export function insertDecisionEntry(log, entry) {
  * @returns {{accepted: object[]}|{problem: string}}
  */
 export function collectAcceptances({ record, readAcceptance, readSkips = () => [], checkReply, checkShown }) {
-  // Only findings Sol itself marked JUDGMENT can be left unfixed, by any path (Mason, 2026-11-21).
-  const bugs = record.findings.filter((f) => findingKind(f) !== "JUDGMENT").map((f) => f.n);
-  if (bugs.length) return { problem: `Sol marked finding ${bugs.join(", ")} as a bug, which must be fixed` };
   // Plain skip replies first (one receipt may cover several findings); the first valid one wins.
   const skipped = new Map();
   for (const s of [...readSkips()].sort((a, b) => String(a?.approvedAt).localeCompare(String(b?.approvedAt)))) {

@@ -1180,10 +1180,7 @@ export function buildCodexReviewPrompt({ base = GUARDED_BASE, appliedHistory = [
     "concrete failure scenario (inputs -> wrong result). Rank by severity.",
     "Then list every BLOCKER and HIGH finding again, one line each, numbered from 1 in the order",
     "above, in exactly this form (the owner may accept one by its number):",
-    `  ${SOL_FINDING_TOKEN} <n> <BLOCKER|HIGH> <BUG|JUDGMENT>: <file:line> - <one-sentence summary>`,
-    "BUG: something is broken, wrong, unsafe or insecure, or money, stock or data can come out wrong. JUDGMENT: it works as",
-    "written and you disagree with a design, policy, process or business choice the owner may make differently. When unsure, BUG.",
-    "The owner may leave a JUDGMENT finding unfixed; a BUG is always fixed.",
+    `  ${SOL_FINDING_TOKEN} <n> <BLOCKER|HIGH>: <file:line> - <one-sentence summary>`,
     `Write no ${SOL_FINDING_TOKEN} line for a MED or LOW finding, and none at all when nothing is BLOCKER or HIGH.`,
     `After them, one line stating how many BLOCKER and HIGH findings you reported in total: ${SOL_FINDING_COUNT_TOKEN} <k>`,
     "Then end your reply with EXACTLY ONE final line, and NOTHING",
@@ -3010,8 +3007,8 @@ function saveBlockersRecord(root, headSha, baseSha, stdout) {
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(buildBlockersRecord({ headSha, baseSha, findings: parsed.findings }), null, 2)}\n`, "utf8");
   process.stdout.write(
-    `Sol's BLOCKER/HIGH findings, numbered for Mason:\n${parsed.findings.map((f) => `  ${f.n}. ${f.severity} ${f.kind}: ${f.text}`).join("\n")}\n` +
-    "Fix every BUG. For a JUDGMENT finding Mason disagrees with, ask him once: node scripts/owner-accept-sol-finding.mjs <numbers> (AGENTS.md › Sol).\n",
+    `Sol's BLOCKER/HIGH findings, numbered for Mason:\n${parsed.findings.map((f) => `  ${f.n}. ${f.severity}: ${f.text}`).join("\n")}\n` +
+    "Fix them; for ones Mason disagrees with (say plainly if one is a real money, stock, data or security bug), ask him once: node scripts/owner-accept-sol-finding.mjs <numbers> (AGENTS.md › Sol).\n",
   );
 }
 

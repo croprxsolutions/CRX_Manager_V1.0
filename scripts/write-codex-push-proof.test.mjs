@@ -2485,7 +2485,7 @@ not json
     const reviewed = commitAll("pr change");
 
     // What a BLOCKERS run leaves, and Mason's two accept replies.
-    const findings = parseSolFindings("SOL_FINDING 1 HIGH JUDGMENT: src/sale.ts:1 - a sale before switch-on is not checked\nSOL_FINDING 2 BLOCKER JUDGMENT: src/sale.ts:1 - x\nSOL_FINDING_COUNT 2\n").findings;
+    const findings = parseSolFindings("SOL_FINDING 1 HIGH: src/sale.ts:1 - a sale before switch-on is not checked\nSOL_FINDING 2 BLOCKER: src/sale.ts:1 - x\nSOL_FINDING_COUNT 2\n").findings;
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(path.join(stateDir, blockersRecordName(reviewed)), JSON.stringify(buildBlockersRecord({ headSha: reviewed, baseSha: base, findings })));
     const accept = (n, code, reason) => {

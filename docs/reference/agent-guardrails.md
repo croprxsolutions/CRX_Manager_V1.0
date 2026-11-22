@@ -132,8 +132,8 @@
 > accepts the other carries accepts it on the same head/base/24-hour terms.
 >
 > **Owner-accepted Sol findings (Mason, 2026-11-10; plain-word skips 2026-11-21).** Since 2026-11-21 `owner-accept-sol-finding.mjs
-> <n> ...` (only findings Sol labelled `JUDGMENT` that he disagrees with; a `BUG` is refused here, in the carry and at merge, where an owner-accepted proof also counts only for its own PR) builds ONE request (`crx-owner-sol-skip-v1`) for several findings, its deadline never past the Sol
-> run's own 24 hours, and Mason answers in plain words with no code: the whole message `skip`, `skip 1 3`, `I don't want that`,
+> <n> ...` (any finding he disagrees with: a business call, or a bug or gap too small or impractical to affect the business; an owner-accepted proof counts only for its own PR at merge and migration apply) builds ONE request (`crx-owner-sol-skip-v1`) for several findings, its deadline never past the Sol
+> run's own 24 hours, and Mason answers in plain words with no code: the whole message `skip`, `skip 1 3`, `I disagree`, `I don't want that`,
 > `don't fix`, `accept` and the like (`skipFromReply`; `ok`, `yes`, `move on`, `merge it`, questions and mixed text skip nothing;
 > `that` or `it` skips only when the list holds one finding).
 > The reply hook records it only when a skip request built in this session is waiting and the agent's last message is exactly

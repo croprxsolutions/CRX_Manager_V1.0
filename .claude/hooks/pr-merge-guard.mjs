@@ -70,10 +70,10 @@ import {
 } from "./teammate-comments-lib.mjs";
 import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
-import { ownerAcceptedForPr } from "./sol-accept-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "./pr-claim-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 import { findReleasePass, releasePassCovers, unappliedMigrationsProblem } from "./release-pass-lib.mjs";
+import { ownerAcceptedForPr } from "./sol-accept-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
 

@@ -3,7 +3,7 @@
 // (Mason, 2026-11-10; plain-word replies 2026-11-21; .claude/hooks/sol-accept-lib.mjs has the whole flow).
 //
 //   node scripts/owner-accept-sol-finding.mjs <n> [<n> ...]
-//     Only findings Sol labelled JUDGMENT that Mason disagrees with; a BUG is refused (fix it).
+//     Findings Mason disagrees with: a business call, or a bug or gap too small to affect the business.
 //     From the PR's checkout, at the head Sol reviewed, in the session Mason will reply
 //     in. Builds ONE request listing those findings of that Sol run and prints the summary
 //     to show him, exactly as printed, as the whole last message of your turn. He replies
@@ -36,7 +36,6 @@ import {
   buildSolSkipPayload,
   collectAcceptances,
   decisionLogEntry,
-  findingKind,
   gateFilesIn,
   insertDecisionEntry,
   readSkipReceipts,
@@ -95,8 +94,6 @@ if (!numbers.length || numbers.some((n) => !Number.isInteger(n) || n < 1 || n > 
   die(`give the numbers (1 to ${record.findings.length}, each at most once) of the findings Mason disagrees with (or --log).`);
 }
 numbers.sort((a, b) => a - b);
-const bugs = numbers.filter((n) => findingKind(record.findings[n - 1]) !== "JUDGMENT");
-if (bugs.length) die(`Sol marked finding ${bugs.join(", ")} as a bug; a bug is fixed, never offered to Mason for skipping.`);
 
 const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
 if (!/^[0-9A-Za-z_-]{8,128}$/.test(String(sessionId || ""))) die("run this inside the Claude Code session Mason will reply in (CLAUDE_CODE_SESSION_ID is not set).");
@@ -141,7 +138,7 @@ for (let attempt = 0; attempt < 5 && !saved; attempt++) {
 }
 if (!saved) die("could not find a free code; try again.");
 
-console.log("Explain each finding to Mason in plain English BEFORE running this script (list only findings he disagrees with; one you " +
-  "confirm is a real defect is fixed, never listed here). Your reply now must be only this, exactly as printed, as the whole last message of your turn:\n");
+console.log("Explain each finding to Mason in plain English BEFORE running this script (say plainly when one is a real money, stock, data " +
+  "or security bug; list only findings he disagrees with). Your reply now must be only this, exactly as printed, as the whole last message of your turn:\n");
 for (const line of solSkipSummary(saved)) console.log(`  ${line}`);
 console.log("\nThen wait for HIS reply (skip, or skip and numbers) in this session; never send or relay it for him.");

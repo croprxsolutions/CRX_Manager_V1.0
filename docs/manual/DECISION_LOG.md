@@ -68,7 +68,7 @@
 
 **Decision (Mason, in chat, 2026-11-18: "1").** After Sol round 2 on PR #1980 found that stock held for a Maybe booking read as free, Mason chose: held stock is always spoken for in `get_purchasing_plan`, whatever the booking's confidence, but a hold never makes the plan buy on its own. A hold covering its booking's (or job's) own lines counts today only up to the stock on the shelf left after other holds, backing Firm lines first; the unbacked part stays as the booking line with its own date and confidence (a Maybe line stays shown only).
 **Supersedes:** rule (2) of "2026-11-18 — Purchasing plan: no 'expedite a later PO' alternative; a Maybe booking's held stock follows its confidence". Rule (1) stands.
-## 2026-11-22 — KI-144: one vendor name = one vendor
+## 2026-11-22 — PR #2248 (KI-144): one vendor name = one vendor
 
 **Decision (Mason, relayed from his conversation with the bugs-triage session, 2026-11-22: "go with a"):** a purchase order keeps the vendor name it was written with ("Keep original name", earlier the same day), and a vendor may not be created, renamed or restored to a name already printed on another vendor's purchase orders; the app refuses it and suggests a slightly different name (for example "Acme Ag LLC"). Raised after Sol round 3 reached the AGENTS.md mechanism cap on vendor-name reuse.
 

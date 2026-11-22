@@ -507,7 +507,7 @@ try {
   const overCapPrePushExecute = (command, args, options) => args[0] === 'rev-list'
     ? `${Array.from({ length: MAX_HISTORY_COMMITS + 1 }, (_unused, index) => index.toString(16).padStart(40, '0')).join('\n')}\n`
     : fixtureGitExecute(command, args, options);
-  await assert.rejects(() => checkPrePushPrivateArtifactContainment({ root: boundedHistoryRepo, execute: overCapPrePushExecute, remoteName: 'origin', stdin: `refs/heads/packet ${boundedHistoryHead} refs/heads/packet ${'0'.repeat(40)}\n` }), /checked-commit cap exceeded: this new branch has no local copy of the remote.s default branch.*run `git fetch`/);
+  await assert.rejects(() => checkPrePushPrivateArtifactContainment({ root: boundedHistoryRepo, execute: overCapPrePushExecute, remoteName: 'origin', stdin: `refs/heads/packet ${boundedHistoryHead} refs/heads/packet ${'0'.repeat(40)}\n` }), /checked-commit cap exceeded: this push has no local copy of the remote.s default branch.*run `git fetch`/);
   assert.deepEqual(STRUCTURAL_SIGNATURE_EXEMPTIONS, {}, 'structural-signature path exemptions must remain empty');
   assert.equal(isStructuralSignatureExempt('scripts/supplier-pricing-phase3-private-artifacts.test.mjs', STRUCTURAL_SIGNATURE_REASON), false);
   const reviewedHistoryIdentities = Object.keys(STRUCTURAL_SIGNATURE_HISTORY_EXEMPTIONS);

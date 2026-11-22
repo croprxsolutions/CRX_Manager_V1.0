@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: booking reservations in the Purchasing buy plan (#1989 redesign)
 -- ----------------------------------------------------------------------------
--- REQUIRES 20270207140000_purchasing_plan_booking_reservations. Proof cases C1-C19 of
+-- REQUIRES 20270216110000_purchasing_plan_booking_reservations. Proof cases C1-C19 of
 -- docs/plans/2026-11-21-booking-reservations-CONTRACT.md (v4, per-product build), against
 -- get_purchasing_plan(12). Dates are relative to today (Chicago) so the chain never ages. One product per case.
 -- Each product's 'coverage' lists its demand groups (shelf_hold, deficit, committed, could_add, shown) with

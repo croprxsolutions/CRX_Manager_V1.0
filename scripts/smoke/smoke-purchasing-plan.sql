@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: the read-only Purchasing buy plan (bookings Phase A, PR 1b)
 -- ----------------------------------------------------------------------------
--- REQUIRES 20270127110000_booking_timing_purchasing_plan and 20270207140000 (#1989 redesign: P10, P12, P22-P33
+-- REQUIRES 20270127110000_booking_timing_purchasing_plan and 20270216110000 (#1989 redesign: P10, P12, P22-P33
 -- rewritten to its rules; docs/plans/2026-11-21-booking-reservations-CONTRACT.md). Proof cases of
 -- docs/plans/2026-11-17-bookings-phase-a-CONTRACT.md (v4) and plan v3, against
 -- get_purchasing_plan(12). Dates are relative to today (Chicago) so the chain never ages.
@@ -13,7 +13,7 @@
 --   P11  on hand -10 and nothing else: order 10 now
 --   P23  a booking line saved in lb on a Gal product: Check units, not counted; its booking's hold is not read
 --   P24  Firm 100 at +100 and a PO of only 10 due +126: the PO is late cover, buy 90
---   P12  a late PO counts today (flagged), an undated PO is late cover (20270207140000), a
+--   P12  a late PO counts today (flagged), an undated PO is late cover (20270216110000), a
 --        draft PO shows as drafted; the product is not complete
 --   P13  booking 100, order draw 60, job draw 40: 0 + 60 + 40 = 100; after the order is
 --        cancelled (draw returned) 60 + 40; after the job completes, what is still owed
@@ -807,7 +807,7 @@ BEGIN
 
   -- P10
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[4];
-  -- 20270207140000 (answer 4): the PO arriving at +126 is late cover for the Firm 100, never a second buy;
+  -- 20270216110000 (answer 4): the PO arriving at +126 is late cover for the Firm 100, never a second buy;
   -- the Likely 100 then has nothing left and is could-add.
   IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR (v_x->>'could_add')::numeric <> 100 OR (v_x->>'incoming')::numeric <> 100
      OR jsonb_array_length(v_x->'suggestions') <> 0 OR NOT (v_x->>'has_late_cover')::boolean THEN
@@ -826,7 +826,7 @@ BEGIN
 
   -- P12: late 20 counts today; the undated 30 is late cover for the rest of the Firm 50 at +30.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[6];
-  -- 20270207140000: the undated PO 30 now counts as late cover (after every dated PO), so nothing is bought.
+  -- 20270216110000: the undated PO 30 now counts as late cover (after every dated PO), so nothing is bought.
   IF v_x IS NULL OR (v_x->>'incoming')::numeric <> 50 OR (v_x->>'drafted')::numeric <> 7 OR (v_x->>'suggested')::numeric <> 0
      OR (SELECT trim_scale((c->>'on_time')::numeric) || '/' || trim_scale((c->>'late')::numeric) FROM jsonb_array_elements(v_x->'coverage') c
           WHERE c->>'group' = 'committed') <> '20/30'

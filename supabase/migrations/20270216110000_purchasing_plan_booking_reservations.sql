@@ -1,5 +1,5 @@
 -- ============================================================================
--- 20270207140000_purchasing_plan_booking_reservations
+-- 20270216110000_purchasing_plan_booking_reservations
 -- Bookings Phase A follow-up, #1989 rebuilt (contract docs/plans/2026-11-21-booking-reservations-CONTRACT.md,
 -- v4, approved by Mason 2026-11-21, "Yes, build it"; first build per product, "Per product").
 --

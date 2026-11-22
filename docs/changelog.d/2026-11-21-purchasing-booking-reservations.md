@@ -1,6 +1,6 @@
 ## 2026-11-21 — Purchasing plan: the booking line is the reservation (#1989 redesign)
 
-- New migration `20270207140000_purchasing_plan_booking_reservations.sql` (not applied live; record in `docs/reference/migrations.d/`). Replaces the never-applied `20270206130000` held-stock candidate. Built on release #1990's body (`20270129160000`); re-emits `get_purchasing_plan` and adds a private helper `_purchasing_allocate` (no client can call it).
+- New migration `20270216110000_purchasing_plan_booking_reservations.sql` (not applied live; record in `docs/reference/migrations.d/`). Replaces the never-applied `20270206130000` held-stock candidate. Built on release #1990's body (`20270129160000`); re-emits `get_purchasing_plan` and adds a private helper `_purchasing_allocate` (no client can call it).
 - Contract `docs/plans/2026-11-21-booking-reservations-CONTRACT.md` (v4, Mason "Yes, build it", first build "Per product"); it replaces `2026-11-18-purchasing-held-stock-CONTRACT.md`.
 - An open booking line reserves stock itself; the plan no longer reads a counted booking's or active job's own hold rows. A draft Planned booking counts like a sent one.
 - One allocation per product: shelf, then POs by date. Orders, jobs, manual holds and Firm lines choose first, then Likely, then Maybe. Each need takes the latest supply arriving by its date, then the earliest later supply (late cover), and the rest is not covered.

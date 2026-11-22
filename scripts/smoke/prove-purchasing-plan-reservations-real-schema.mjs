@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270207140000_purchasing_plan_booking_reservations (#1989 redesign; contract
+ * Real-schema proof for 20270216110000_purchasing_plan_booking_reservations (#1989 redesign; contract
  * docs/plans/2026-11-21-booking-reservations-CONTRACT.md). Container setup copied from
  * prove-booking-timing-purchasing-plan-real-schema.mjs: the checked-in production schema baseline in a
  * network-disabled Supabase PostgreSQL 17 container, every post-baseline migration before the candidate
@@ -30,7 +30,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270207140000_purchasing_plan_booking_reservations.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270216110000_purchasing_plan_booking_reservations.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([

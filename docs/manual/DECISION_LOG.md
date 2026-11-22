@@ -1,5 +1,15 @@
 # Decision Log
 
+## 2026-11-22 — #2242: Mason owner-accepted 3 Sol finding(s) at `45ea58992506`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2242 at `45ea58992506` (base `a7785529318b`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:225`, text sha256 `41e6f35169a9d380` (the wording stays with the proof, not here)
+  Mason's reason: I accept the risk small (ref 2446394212b1)
+- Finding 2 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:342`, text sha256 `c042e4fd26071826` (the wording stays with the proof, not here)
+  Mason's reason: I accept the risk small (ref 2446394212b1)
+- Finding 3 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:301`, text sha256 `1e38154081a33ee1` (the wording stays with the proof, not here)
+  Mason's reason: I accept the risk small (ref 2446394212b1)
+
 ## 2026-11-22 — PR #2242: a retried close replays only the month's current close
 
 **Decision (Mason, 2026-11-22, in the Lane B session):** "Refuse it". A retried close shows its saved receipt only if the month's current close is the one that retry made. If the month was reopened and closed again since, the retry is refused (`CLOSE_REOPENED_SINCE`) instead of showing the older, superseded totals; the screen asks the admin to check the month's status. Why: Sol round 7 showed an old retry could return a superseded receipt as success. The alternative was accepting that rare case.

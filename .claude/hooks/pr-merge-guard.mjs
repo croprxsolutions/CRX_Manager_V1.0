@@ -70,6 +70,7 @@ import {
 } from "./teammate-comments-lib.mjs";
 import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "./sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
+import { ownerAcceptedForPr } from "./sol-accept-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "./pr-claim-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
 import { findReleasePass, releasePassCovers, unappliedMigrationsProblem } from "./release-pass-lib.mjs";
@@ -705,7 +706,7 @@ function gateRequest(request) {
   // A proof of an earlier commit covers the commits after it unless those
   // touch the Sol list; same module, same budgeted gh. Exact-head proofs are tried first.
   const proof = firstAcceptedProof(proofs, headSha, (data, exactHead) =>
-    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits })
+    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits }) && ownerAcceptedForPr(data, pr.number)
       && (exactHead || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky));
   const valid = proof !== null;
   const carried = proof?.carried_forward === true ? proof.carry : null;

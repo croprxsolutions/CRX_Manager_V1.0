@@ -132,7 +132,7 @@
 > accepts the other carries accepts it on the same head/base/24-hour terms.
 >
 > **Owner-accepted Sol findings (Mason, 2026-11-10; plain-word skips 2026-11-21).** Since 2026-11-21 `owner-accept-sol-finding.mjs
-> <n> ...` (only findings he disagrees with, never a confirmed defect) builds ONE request (`crx-owner-sol-skip-v1`) for several findings, its deadline never past the Sol
+> <n> ...` (only findings Sol labelled `JUDGMENT` that he disagrees with; a `BUG` is refused here, in the carry and at merge, where an owner-accepted proof also counts only for its own PR) builds ONE request (`crx-owner-sol-skip-v1`) for several findings, its deadline never past the Sol
 > run's own 24 hours, and Mason answers in plain words with no code: the whole message `skip`, `skip 1 3`, `I don't want that`,
 > `don't fix`, `accept` and the like (`skipFromReply`; `ok`, `yes`, `move on`, `merge it`, questions and mixed text skip nothing;
 > `that` or `it` skips only when the list holds one finding).

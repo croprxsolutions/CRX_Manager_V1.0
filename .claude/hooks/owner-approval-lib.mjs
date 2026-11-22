@@ -331,7 +331,8 @@ function readTranscriptTail(transcriptPath, maxBytes, end = Infinity) {
  * read, when a damaged line lies in what is scanned, or when the start of that
  * message cannot be found in the part read (Luna rounds 1-2).
  */
-export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes = 32 * 1024 * 1024, end = Infinity } = {}) {
+// `strictQueue`: a queued or withdrawn message (even one with his words) ends the scan (Sol HIGH, gate round 3).
+export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes = 32 * 1024 * 1024, end = Infinity, strictQueue = false } = {}) {
   if (typeof transcriptPath !== "string" || !transcriptPath) throw new Error("the message carried no transcript");
   const { entries } = readTranscriptTail(transcriptPath, maxBytes, end);
   const said = [];
@@ -342,7 +343,7 @@ export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes =
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
     if (e === DAMAGED) throw new Error("a damaged transcript line lies in what had to be read");
-    if (isBookkeeping(e, currentPrompt) || e?.isSidechain) continue; // a subagent's entries are not the conversation with Mason
+    if (isBookkeeping(e, strictQueue ? null : currentPrompt) || e?.isSidechain) continue; // a subagent's entries are not the conversation with Mason
     // A tool call or its result after the agent's last words means it went on
     // working, or asked him something through a tool, after them: "I approve" may
     // answer that instead, so nothing it said counts (Sol HIGH, PR #900). Before
@@ -420,7 +421,7 @@ export function replyMark(transcriptPath, reply, { maxBytes = 1024 * 1024 } = {}
  * first, his reply was already written, and checked, when he sent it. Throws
  * otherwise, so the approval is refused.
  */
-export function assertReplyAlone(mark, { maxBytes = 8 * 1024 * 1024 } = {}) {
+export function assertReplyAlone(mark, { maxBytes = 8 * 1024 * 1024, strictQueue = false } = {}) {
   if (!mark || typeof mark.transcript !== "string" || !mark.transcript || !Number.isSafeInteger(mark.from) || mark.from < 0 ||
     typeof mark.written !== "boolean" || typeof mark.words !== "string" || !mark.words) {
     throw new Error("the approval does not say where his reply is in the conversation");
@@ -446,6 +447,7 @@ export function assertReplyAlone(mark, { maxBytes = 8 * 1024 * 1024 } = {}) {
     let e;
     // A damaged line, or the last one cut by the read or still being written.
     try { e = JSON.parse(line); } catch { throw new Error("a damaged or unfinished transcript line lies where his reply should be"); }
+    if (strictQueue && e?.type === "queue-operation" && e.content != null) throw new Error("a queued or withdrawn message lies where his reply should be");
     if (isMasonMessage(e)) {
       if (masonText(e.message?.content).trim() !== mark.words) throw new Error("the message written where his reply should be is not his reply");
       assertWordsAlone(e.message?.content);
@@ -490,7 +492,9 @@ export function requestShownIn(text, p) {
  * another request never counts for this one (Sol HIGH, gate round 2, 2026-11-21). Throws.
  */
 export function assertSkipShown(mark, p) {
-  const shown = lastAgentMessageText(mark?.transcript, mark?.words, { end: mark?.from });
+  // His reply comes straight after the summary: no queued or withdrawn message on either side of `from`.
+  assertReplyAlone(mark, { strictQueue: true });
+  const shown = lastAgentMessageText(mark?.transcript, mark?.words, { end: mark?.from, strictQueue: true });
   if (!requestShownIn(shown, p)) throw new Error("the agent's last message before his reply was not this request's summary");
 }
 

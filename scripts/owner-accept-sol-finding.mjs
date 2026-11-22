@@ -3,7 +3,7 @@
 // (Mason, 2026-11-10; plain-word replies 2026-11-21; .claude/hooks/sol-accept-lib.mjs has the whole flow).
 //
 //   node scripts/owner-accept-sol-finding.mjs <n> [<n> ...]
-//     Only findings Mason disagrees with; one you confirm is a real defect is fixed, never listed.
+//     Only findings Sol labelled JUDGMENT that Mason disagrees with; a BUG is refused (fix it).
 //     From the PR's checkout, at the head Sol reviewed, in the session Mason will reply
 //     in. Builds ONE request listing those findings of that Sol run and prints the summary
 //     to show him, exactly as printed, as the whole last message of your turn. He replies
@@ -36,6 +36,7 @@ import {
   buildSolSkipPayload,
   collectAcceptances,
   decisionLogEntry,
+  findingKind,
   gateFilesIn,
   insertDecisionEntry,
   readSkipReceipts,
@@ -94,6 +95,8 @@ if (!numbers.length || numbers.some((n) => !Number.isInteger(n) || n < 1 || n > 
   die(`give the numbers (1 to ${record.findings.length}, each at most once) of the findings Mason disagrees with (or --log).`);
 }
 numbers.sort((a, b) => a - b);
+const bugs = numbers.filter((n) => findingKind(record.findings[n - 1]) !== "JUDGMENT");
+if (bugs.length) die(`Sol marked finding ${bugs.join(", ")} as a bug; a bug is fixed, never offered to Mason for skipping.`);
 
 const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
 if (!/^[0-9A-Za-z_-]{8,128}$/.test(String(sessionId || ""))) die("run this inside the Claude Code session Mason will reply in (CLAUDE_CODE_SESSION_ID is not set).");

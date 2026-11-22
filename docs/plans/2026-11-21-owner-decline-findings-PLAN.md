@@ -50,7 +50,9 @@ Then the agent logs it, commits the log entry, mints the carried proof and keeps
    adding `AGENTS.md` and `.claude/commands/ship.md` to that list; not done: it would block every release's
    owner-skips, the exact slowdown this change removes. The code checks, not those docs, are the gate.)
 
-## Luna / Astra / Codex-CLI / gauntlet findings (soft) — what changes
+## Luna / Astra / Codex-CLI / gauntlet findings (soft) — DROPPED from this change
+
+Sol blocked it in gate rounds 1-3 (a prose-only waiver); it is not built. Original proposal, for the record:
 
 New rule in `AGENTS.md` (stop rule) and `ship.md` (round cap):
 
@@ -62,6 +64,8 @@ New rule in `AGENTS.md` (stop rule) and `ship.md` (round cap):
 - Soft declines go in the PR description only, never `DECISION_LOG.md`, so they never collide with the Sol carry.
 
 ## Real bugs are still fixed
+
+Built (Mason, after Sol gate round 3): Sol labels each BLOCKER/HIGH `BUG` or `JUDGMENT`; only `JUDGMENT` can be skipped, and the code refuses `BUG`.
 
 Built version (after the Sol gate review, round 1, BLOCKER): a finding the agent confirms is a real money, stock,
 data or security bug is fixed, never offered for skipping, as before. Skipping covers business calls and findings
@@ -92,7 +96,7 @@ Migration approvals; Sol's 24-hour and head/base binding; Codex sessions hand ow
   text, attachments, numbers not shown, a stale summary, another session, a tool call in between, a notification
   shaped like a reply; old `accept <code>` still works and a bad code declines nothing; `I approve` for a migration
   is unaffected while a decline request waits; batch receipt is all-or-nothing; old log entries still verify.
-- Live: a scratch PR with Sol blockers → `--all` → Mason (or a typed test reply in a test session) sends `skip` →
+- Live: a scratch PR with Sol JUDGMENT blockers → `owner-accept-sol-finding.mjs <numbers>` → Mason (or a typed test reply in a test session) sends `skip` →
   log, commit, carry → `pr-merge-guard` accepts it; and the same with `ok` is refused. Show the outputs.
 - This PR changes gate files, so it needs its own clean Sol run (cannot be owner-accepted).
 

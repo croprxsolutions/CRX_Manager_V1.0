@@ -865,6 +865,13 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
     // The plain reply, end to end.
     ok(run("prompt-router.mjs", "I approve", SID, tx([masonSaid("ship it"), agentSaid("Merged.")])) === "",
       "\"I approve\" with no request waiting is ordinary chat: the hook says nothing");
+    // A bare "yes" also reads as a Sol skip word; with no skip request waiting it must still
+    // reach the migration approval (Codex P1, PR #2199).
+    const pY = { ...live, migration: "20260914101700_plain_yes", code: "902614", nonce: "9f1e2d3c4b5a69788796a5b4c3d2e1f0" };
+    writeApprovalRequest(dir, buildApprovalPayload(pY));
+    const yesOut = run("prompt-router.mjs", "yes", SID, tx([masonSaid("fix it"), agentSaid(ownerApprovalSummary(JSON.parse(buildApprovalPayload(pY))).join("\n"))]));
+    ok(yesOut.includes("OWNER APPROVAL RECORDED") && !existsSync(path.join(dir, requestFileName("902614"))),
+      `a plain "yes" to a migration request records it, not swallowed by the Sol skip check: ${yesOut}`);
     const p2 = { ...live, migration: "20260914101800_plain", code: "515151", nonce: "abcdefabcdefabcdefabcdefabcdef01" };
     writeApprovalRequest(dir, buildApprovalPayload(p2));
     const shown2 = ownerApprovalSummary(JSON.parse(buildApprovalPayload(p2))).join("\n");

@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-21 for the live ledger only (latest live row `20261121061349`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates.
+**Last verified:** 2026-11-21 for the live ledger only (latest live row `20261121061349`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates. Triage 2026-11-22: see changelog.d.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -40,12 +40,12 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status (re-checked 2026-11-21) | Count |
 |---|---|
-| Open, partly open, check-first or waiting on a Mason decision (numbered entries; KI-200 to KI-203 and KI-205 added 2026-11-22 from the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md)) | 89 |
+| Open, partly open, check-first or waiting on a Mason decision (numbered entries; KI-200 to KI-203 and KI-205 added 2026-11-22 from the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md)) | 88 |
 | Fixed on staging, waiting for the production release | 6 |
 | Accepted numbered entries in the area sections (the full accepted list is the "Accepted risks" table) | 10 |
 | Backlog or roadmap entries, not defects (KI-204 added 2026-11-22) | 4 |
 | Open items tracked only as GitHub issues or parked fixes (tables at the end of each area) | 59 |
-| Closed as FIXED (closed list below; 40 added 2026-11-21) | 65 |
+| Closed as FIXED (closed list below; 40 added 2026-11-21, 1 added 2026-11-22) | 66 |
 
 Fix first: see "Top 5" in [MASTER_FIX_PLAN.md](MASTER_FIX_PLAN.md).
 
@@ -94,20 +94,6 @@ Each item's full entry is in its area section below. "Severity unsure" marks a r
 ---
 
 ## Quotes and bookings
-
-### KI-82 — The open quote screen can show a stale cost for a line it just saved
-
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Taha (to 2026-12-15) · plan W3-01.
-
-**LOW · FIX IN REVIEW (Taha, branch `taha/quote-saved-line-cost`; found 2026-10-27, Sol review of PR #1105) · money (display only)**
-After Save, `src/pages/QuoteBuilder.tsx` records a new line's saved id and stored price but does not load the
-cost the database recorded for that line (`quote_items.cost_at_quote_cents`). If the product's cost changed after
-the page loaded, the Cost, Profit and Margin shown to an admin can differ from the saved figures until the page is
-reloaded. Saved prices, costs and totals are correct; PDFs never show cost. Fix: refresh each saved line's recorded
-cost after a save, and prove it on the live screen.
-The fix re-reads each saved line's recorded cost (and, for a line whose cost moved, the product's cost
-today) through `get_admin_cost_fields` after an admin's save, without marking the quote changed; proven on a
-local replay's screen (a new line added after its product's cost rose shows the recorded cost after Save).
 
 ### KI-190 — Partial Order commits a booking's current terms, not the ones the rep reviewed
 
@@ -173,13 +159,13 @@ with a rate but no acres, or no unit, is refused with no sent version or email; 
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · LOW · Taha (to 2026-12-15) · plan W3-03. Screen warning is merged; only the database refusal is missing.
 
-**LOW today, MUST before the first regular rep · PARKED 2026-11-05 · quotes/pricing · To-Do 1.6**
+**LOW today, MUST before the first regular rep · PARTIAL (screen note merged: PR #1605, in main, 2026-11-07; the database refusal for reps is still open) · quotes/pricing · To-Do 1.6**
 Quote Builder lets any tier be picked, so a quote can be priced at a tier other than the customer's assigned one
 with no warning. A screen check (a note with "Use Tier N" and a "Quote at Tier M anyway" tick box that Save
-needs) is built on branch `claude/quote-tier-credit-status` and parked unmerged (Mason, 2026-11-05: screen only,
-then parked until the database rule exists). Only office staff and admins quote today. Before the first regular
+needs) was merged as PR #1605 on 2026-11-07 (Mason, 2026-11-05: screen only,
+then the database rule). Only office staff and admins quote today. Before the first regular
 rep gets an account: the database must refuse a different tier from reps (admins may override). When it resumes,
-also fix Sol's two MED findings on that branch: (1) the customer's assigned tier is read once, so an admin
+also fix Sol's two MED findings on that screen check (not re-verified 2026-11-22): (1) the customer's assigned tier is read once, so an admin
 changing it while a quote is open leaves the check comparing against the old tier; (2) "Use Tier N" on a sent
 quote changes the tier label without repricing its locked lines.
 
@@ -195,7 +181,7 @@ Widened 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-
 math (`_save_quote_below_cost_impl_20260810`, `20261104130000` ~L620-656, `COALESCE(factor_oz,1)`) has the same
 fallback. That is the real money path; only the quote screen's unit picker keeps other units out today. It is part of
 the units batch (To-Do 0.17): refuse an unknown or wrong-type unit in both places.
-**Partly fixed 2026-11-15 (units batch, PR A; not live):** `product_price_per_acre` returns no figure for an unknown
+**Partly fixed (units batch, PR #1896, `20270121110000_line_unit_is_stock_unit`, in main via release #1990):** `product_price_per_acre` returns no figure for an unknown
 rate or stock unit, and a quote line with a non-zero rate refuses an unknown rate unit (`QUOTE_RATE_UNIT_UNKNOWN`) or
 stock unit (`QUOTE_STOCK_UNIT_UNKNOWN`), so `save_quote` never reaches its 1-oz fallback. **Still open:** the liquid vs
 dry check (4 live dry products use a liquid `oz` rate; KI-114, rates work), and the quote screen's own 1-oz fallback
@@ -465,7 +451,7 @@ Tier 2 above Tier 3; 3 active products have no cost, 4 have no Tier 1 price, and
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · MED · Agent (unassigned) · plan W2-09.
 
-**MED (latent) · PART FIX IN REVIEW (branch `claude/pm-stock-history`, migration `20270119130000`; not live) · inventory/counts · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-6, C-14) · Claude**
+**MED (latent) · PARTIAL (migration `20270119130000_one_open_count_per_stock_row` in main via release #1990; count creation still open) · inventory/counts · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-6, C-14) · Claude**
 `_complete_cycle_count_impl` adds the stored `variance` to current on-hand, and nothing stops two open counts on one
 inventory row: no unique or partial index on `cycle_counts` or `cycle_count_items` (live-verified). Example: counts A
 and B both record +10 on a shelf going from 90 to 100; after both complete, stock is 110. Named out of scope in the
@@ -473,7 +459,7 @@ KI-134 contract, with no KI until now. Smaller: admins hold a column UPDATE gran
 which bypasses the KI-134 baseline. Count creation is also three browser requests (`CycleCounts.tsx` ~L246-292), so a
 failed create leaves an empty open count. 0 open counts today. Fix: one open count per row, variance written only by
 the RPCs, atomic create. Repair step 2 (To-Do 0.17), before the pre-season count.
-**Part fix in review:** one in-progress count per warehouse; a stock row on only one item of any in-progress count
+**Part fixed (in main via release #1990):** one in-progress count per warehouse; a stock row on only one item of any in-progress count
 (also refuses the same row twice on one count; concurrent claims serialized); a count's status only moves forward (in progress
 to completed or cancelled, completed to cancelled), so no count can be reopened or reversed twice; signed-in users lose direct UPDATE on `cycle_counts` and `cycle_count_items`, so a
 completed count cannot be marked cancelled without its reversal and a line's variance is only what the save RPC computed (a direct line insert may set only the four columns the app sends). **Still open here:** the three-request creation (a failed create leaves an empty open count, which
@@ -483,8 +469,8 @@ now blocks a new count at that warehouse until it is cancelled from the Cycle Co
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · LOW · Agent (unassigned) · plan W3-11.
 
-**LOW · OPEN · inventory · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-15, C-16) · unassigned**
-**Fix pending 2026-11-17:** `20270126110000_inventory_cleanup_ki161_163_150` (not applied live) fixes (1) (the `released` row records what was really released; none when nothing was) and (2) (count lines keep 4 decimals). (4) is not a defect: the header equals the sum of its lines each rounded to whole cents (house rule); only the unrounded sum is 1¢ lower, and it has no vendor bill. (3) stays open (needs a link column; no figure is wrong). Old `released` rows stay as written.
+**LOW · PARTIAL (items 1 and 2 fixed; item 3 open) · inventory · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md) C-15, C-16) · unassigned**
+**Fixed 2026-11-17:** `20270126110000_inventory_cleanup_ki161_163_150` (in main via release #1990) fixes (1) (the `released` row records what was really released; none when nothing was) and (2) (count lines keep 4 decimals). (4) is not a defect: the header equals the sum of its lines each rounded to whole cents (house rule); only the unrounded sum is 1¢ lower, and it has no vendor bill. (3) stays open (needs a link column; no figure is wrong). Old `released` rows stay as written.
 (1) Quick-delivery cancel (`_cancel_delivery_replay_impl_20261015`) clamps `quantity_prebooked` at 0 but logs a
 `released` row for the full amount, so reservation history can disagree with the figure. (2) Count rounding in
 `update_cycle_count_item` (`20270103170000`) can leave up to 0.005 on 4-decimal bulk rows. (3) Return and
@@ -706,9 +692,6 @@ After 4e, only the accepted exceptions listed for batch 4c remain.
   customer. One live split field was off by 0.01; the percentages still added to 100. The billed money is exact:
   the field-application split uses largest-remainder cents. No fix applied. The acre display can stay unless Mason
   wants the shares to add up to the field.
-- Quote Builder's line math (`recalcItem`, `catalogPricePerAcre` in `src/lib/quoteCalc.ts`) multiplies and rounds
-  in dollars, not integer cents. Found by CodeRabbit on PR #1078 (2026-10-23) and deferred: moving it to cents
-  changes rounding on every quote line, so it needs its own money PR. LOW.
 - Partial-delivery draft resize stores header cost as the sum of unrounded line extensions (main `20261215110000`
   ~L1237, staging `20270203120000` ~L640), while automatic invoice creation rounds each line (main ~L1403, staging
   ~L806): two half-cent lines give 1¢ versus 2¢. The verified effect is a draft cost-header difference; no ordinary-sale
@@ -812,10 +795,6 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
 **MED/LOW · OPEN · money**
 - Quote re-save can still be refused when a save both deletes or switches a saved line and adds several new lines
   for the same product (LOW).
-- `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; from `20261103120000` (applied live 2026-11-03, ledger `20261103003731`) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
-- `get_customer_summary` and `operational_dashboard_summary` season: FIXED by `20261204110000` (KI-18 batch 2,
-  applied live); both read the Chicago date (live bodies checked 2026-11-10).
-- Transfer Net 30 (KI-14): FIXED 2026-11-06 (PR #1556); see KI-14.
 - Split billing: a split can bill any customer named in editable order allocations, field owners or billing
   defaults (MED). Decided for field splits (Mason, 2026-11-08): only payers saved on the field's split, or on
   the job's own split; built in foundation 18.1 (`docs/plans/2026-11-08-fields-who-pays-BUILD-SHEET.md`). Any rep can read another rep's
@@ -838,8 +817,7 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
   billing is credited at an average price (MED, partly by design).
 - KI-69 detail: voiding a return credit is not enough; the voided credit memo must be permanently deleted before the
   source invoice can be hard-deleted or re-saved.
-- Whole-order invoice quantities and unit prices are not capped server-side (MED; quantities change when PR #1174 applies). Voiding a delivery whose invoice
-  is posted leaves the invoice active (MED; changes when PR #1174 applies: the delivery then cannot be voided until the invoice is voided). Removing a product from a
+- Whole-order invoice unit prices are not capped server-side (MED). Removing a product from a
   scheduled delivery can leave its drafted invoice unpostable, and lowering a quantity leaves the draft over the
   delivery quantity until staff edit it (MED). Freezing a soft-deleted order can block cancelling or voiding its
   completed delivery (reversal needs a reviewed migration) (LOW). Draft invoice CS-2026-0055 is deliberately left
@@ -912,8 +890,8 @@ changes that decision.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · MED · Mason decision · plan W2-20. Screen label already says "% a year"; only Mason confirming the two customers' rates remains.
 
-**MED · OPEN · money/AR · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #3) · unassigned**
-`CustomerDetail.tsx` labels it "Finance Charge Rate (%)"; the generator and preview compute overdue x rate / 100 / 12.
+**MED · PARTIAL (the screen label now says "Finance charge rate" with "% a year", PR #1872, in main; Mason still has to confirm the two customers' values) · money/AR · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #3) · unassigned**
+`CustomerDetail.tsx` used to label it "Finance Charge Rate (%)"; the generator and preview compute overdue x rate / 100 / 12.
 Two active customers are set to 1.5; if that means 1.5% a month they would be charged one-twelfth. No finance charges
 have run yet. Fix: label "Annual rate (%)" with helper text, and Mason confirms the two values (To-Do decision 17).
 
@@ -987,7 +965,7 @@ date, invoiced or not. Most 2026 sales were billed in Chem Man, so net profit sh
 `get_monthly_summary` (`20261106150000_fix_delivery_one_screen.sql`). Mason decided 2026-11-10 (To-Do decision 15,
 DECISION_LOG): count a commission only when its order has a CRX invoice in the period's revenue set. Refined 2026-11-13 (DECISION_LOG,
 "Split by share billed"): a partly billed order counts only the share of its commission matching the share billed in
-that period, so checking that an invoice exists is not enough. Fix in review: an order's commission counts in each
+that period, so checking that an invoice exists is not enough. Fix on staging: an order's commission counts in each
 period by the share of its product sales billed on CRX sale invoices (cumulative, capped at 100%); a field application's
 commission counts when its field invoice is billed. A return credit does not take commission back yet (KI-184).
 
@@ -1018,7 +996,7 @@ today. Fix: use the `is_application_fee` case `save_invoice` already uses, plus 
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · HIGH · Agent (unassigned) · plan W1-01 · #2149 (count part), #2195 (payments part). Invoice count fixed on staging (#2149). Payments received still totals the old payments table, counts deleted payments and misses allocation-set receipts (#2195, Sol on #2189), so a month paid through allocations can show $0 received.
 
-**MED · PARTLY IN REVIEW (Claude: the close receipt's invoice count is fixed with KI-125; payments received is OPEN, a follow-up: it needs a rule for prepayment checks, which can be edited or deleted later, and a re-check at close that the figures still match what the admin reviewed) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #6)**
+**MED · PARTIAL (the close receipt's invoice count is fixed on staging with KI-125 (#2149), awaiting the production release; payments received is OPEN, a follow-up: it needs a rule for prepayment checks, which can be edited or deleted later, and a re-check at close that the figures still match what the admin reviewed) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #6)**
 Both read the legacy `payments` table (0 rows; payments now live in `allocation_sets`), so the one July 2026 customer
 payment shows as $0. The close summary also counts only invoices still `posted`, missing ones since paid or overdue.
 Where: `get_monthly_summary` and `_close_accounting_period_replay_impl_20261015`. Fix: sum active payment
@@ -1401,7 +1379,7 @@ with a below-cost line always fails, so that job is billed by hand.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** On staging, not live · HIGH · Agent (unassigned) · plan R-10.
 
-**HIGH · REPORTS PART FIX IN REVIEW (Claude, `20270201100000_page_access_locks_reports.sql`, to staging after release #1990) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #2)**
+**HIGH · REPORTS PART FIXED ON STAGING (PR #2051 merged to staging 2026-11-21, `20270201100000_page_access_locks_reports.sql`; awaiting the production release) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #2)**
 Page Access (`denied_pages`) is checked only by the screen router. Mason decided 2026-11-19 (To-Do decision 16) that
 it is a real security control: scope "actions + reports", reports now and money later. The fix makes the database
 refuse Reports Library and Sales Reports data to a person with that page hidden (including the commission rows the
@@ -1427,14 +1405,14 @@ migration, adding those page keys to it.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · LOW · Mason decision · plan W3-35. Code is merged on main; whether the two Edge Functions were redeployed (needs Mason) is not confirmed.
 
-**LOW · FIX IN REVIEW (not live; Edge deploy needs Mason) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #11) · Claude**
+**LOW · PARTIAL (code merged: PR #1981, in main via release #1990; the Edge deploy needs Mason and is not confirmed) · security · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #11) · Claude**
 Both reset paths (`create-user` `reset_password` and `reset-user-password`) only set the new password: the account's
 existing sessions stay signed in, and no record says which admin reset whose password. Deactivation, by contrast, ends
 sessions. Fix: end the target's sessions after a reset and write an audit row. Read from code; not tested live. Edge
 Function deploys need Mason's approval. Correction (2026-11-18): live Auth (GoTrue v2.198.0) already ends every
-session on an admin password update, so only the audit half was real. Fix in review: both functions share
+session on an admin password update, so only the audit half was real. Fix merged: both functions share
 `_shared/passwordReset.ts`, which refuses unless the target loads, and writes the server's own `activity_feed` row
-naming the admin before the password changes (no row, no reset). Not deployed.
+naming the admin before the password changes (no row, no reset). Redeploy of the two functions not confirmed.
 
 ### KI-149 — Crop Programs and job print defaults let reps edit but only admins can save
 
@@ -1460,64 +1438,21 @@ screen random retry codes, as the other screens use.
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · LOW · Mason decision · plan W3-37 · #1065, #1103, #1650. Only a LOW leftover remains (retried job start/complete answered before the access check; nothing written).
 
 **HIGH · PARTIAL · security · Mason approval to narrow permissions**
-- FIXED LIVE 2026-10-26 02:10 UTC (9:10 PM Central, 2026-10-25) by part A (PR #1065, history row 980, ledger `20261026021016`): `global_search` let any
-  signed-in user search customer names and contacts, order/invoice/delivery numbers and farm names, and
-  `get_notes_for_entity` let any signed-in user with a record ID read its team notes. Now search returns nothing
-  to field roles and notes follow the linked record (`get_notes_for_entity` runs as the caller, checked live). `team_notes` itself still admits every active profile, so the Team Board shows field roles every note;
-  Mason decided 2026-10-23 to keep that for now (To-Do row 11.11, `DECISION_LOG.md`).
+- `team_notes` admits every active profile, so the Team Board shows field roles every note; Mason decided 2026-10-23 to keep that for now (To-Do row 11.11, `DECISION_LOG.md`).
 - Every active account reads every `customer_addresses` row (To-Do row 11.7). ACCEPTED AS IS by Mason, 2026-11-08: drivers
   keep the delivery address (FieldStop) even past the delivery date, and applicators keep theirs; no later change. Taken out of
   part C because tying addresses to `customers_select` would hide it from a driver on an overdue delivery (Sol).
 - DEFERRED (LOW, Sol 2026-11-08, part C): `start_job` and `complete_job` return a matching idempotency result before
   the job-access check, so a former applicator replaying their own key gets back the earlier result (ids they already
   had). Nothing new is written. Fix: check access before the replay lookup.
-- FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B: drivers could read every customer's
-  billing splits and spray-record field/acres data through `field_billing_defaults` and
-  `application_record_fields` (MED); both now admit only office staff and applicators who can see the field.
-- Whole-job applicators keep access to completed, cancelled and soft-deleted jobs indefinitely, and dispatch access
-  can survive a job deletion; affected functions include `start_job` and `complete_job` (HIGH). FIXED LIVE 2026-11-09
-  05:29 UTC (11:29 PM Central, 2026-11-08) by part C (PR #1650, ledger `20261109052957`, `20261217100000`), which ends the whole-job applicator's access when
-  the job is cancelled, deleted, or completed/invoiced more than 7 days ago (new server-stamped `jobs.completed_at`), in
-  `jobs_select`, every policy that reaches the job through `jobs`, and eleven functions; dispatch access, including
-  the assignee's own `job_location_dispatches` row, ends on deletion or cancellation, or 7 days after the job's completion. Proven per role in a disposable
-  copy (`scripts/smoke/prove-job-access-ends-with-the-job-real-schema.mjs`). Taha's review (MED): it also hid the field
-  of an applicator's own spray record once the job's window ended (Record Book showed "-"); `20261220100000`
-  (live 2026-11-09, ledger `20261109123130`) gives `fields_select` and `arf_select` an own-record leg
-  (`scripts/smoke/prove-applicator-keeps-own-record-fields-real-schema.mjs`).
-- FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B (PR #1103, history row 985, ledger
-  `20261027020546`): applicators read every `fields` row, and `field_polygons`, crop history, obstacles and
-  `field_app_locations` followed the same rule (HIGH; 5 of 5 rows live for the real applicator on 2026-10-25,
-  Central). After the apply the 1 active applicator sees 2 of 5 fields, drivers and entity recipients 0, admins
-  and sales reps 5 of 5 (computed read-only from the live policy rules, not a signed-in test). Part B also closed: the
-  `field_billing_defaults`/`application_record_fields` driver reads above; direct `field_polygons` writes by any
-  applicator (made office-only); `field_app_locations`/`_shares` reads (office-only); and
-  `get_job_billed_customers` letting any applicator through on a job with no whole-job applicator (NULL gate).
-  Mason decided 2026-10-25 that someone sent to a job sees the entire job (`DECISION_LOG.md`), so part B also
-  widens `_can_see_field`'s dispatch leg to every field of the dispatched job and keeps the job pages job-wide;
-  that resolves the split-job report mismatch a per-field view would have caused. Left after part B: anon reads
-  of `application_record_fields` now error instead of returning nothing (LOW, fails closed; three other field
-  tables already did); a crew member
-  whose role is driver keeps the crew job and its map but not the field tables (by design).
-- Opposite gap: dispatch-only applicators cannot read their assigned fields' shares, application records and
-  details, attachments, or job-attachment photos (LOW). Mason's 2026-10-25 decision (they see the entire job and
-  ticket) means these should be widened to the dispatch route too. Part C (live 2026-11-09 UTC, PR #1650)
-  gives them read-only access to those rows of the job they are dispatched to.
 
 ### KI-74 — More cost exposure and prerequisites (extends KI-02)
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · MED · Mason decision · plan W2-32 · #1057.
 
 **MED · PARTIAL · security/money · Mason**
-~~`blend_recipe_items` and cost fields reachable through field-billing and dispatch paths remain readable (HIGH).~~
-**Settled by the 2026-11-02 audit (KI-02):** `blend_recipe_items` cost was closed by the column lock; field billing,
-delivery and offline sync give an applicator or driver no cost; the remaining dispatch path is covered by
-`20261102200000` (live 2026-11-02).
 Commission amount plus rate can reveal a rep's profit, and Quick Receive reveals which open PO line is cheaper
-(MED). The computed field `invoice_post_version` reads the whole invoice row, so revoking invoice columns can break
-posting: the cost-column lock must ship with a column-safe version design in the same change (MED). **Done in
-`20261022090000` (PR #1057, applied live 2026-10-23):** the version is a computed field, `invoice_postable_version`, on
-the `invoices_postable` view (every column but `total_cost_cents`), the seven screens read it there, and the cost lock
-(`20261022101000`, applied live 2026-10-25) dropped the `invoices` overload.
+(MED).
 
 ### Also open in this area (tracked as GitHub issues or parked fixes; plain-English detail in [the plan](MASTER_FIX_PLAN.md))
 
@@ -1663,10 +1598,10 @@ one offline signed completion; that pass was not repeated in this check.
 
 ### KI-45 — Hold-latch helper-report edge cases
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-37 · #1084 (shipped), #1152 (open).
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-37 · #1084 (shipped), #1152 (merged 2026-10-28).
 
-**MED · OPEN · tooling-guards · unassigned**
-PR #1084 fixed the four recognized helper-report frames that were falsely latching the session. A helper report in another text shape can still be mistaken for Mason's words (`.claude/hooks/prompt-source-lib.mjs`, text-shape rules only); message-origin support is still needed for a complete fix. Further narrowing is in open PR #1152, not counted as shipped here.
+**MED · PARTIAL (the narrowing in PR #1152 is merged, 2026-10-28; message-origin support is still missing) · tooling-guards · unassigned**
+PR #1084 fixed the four recognized helper-report frames that were falsely latching the session. A helper report in another text shape can still be mistaken for Mason's words (`.claude/hooks/prompt-source-lib.mjs`, text-shape rules only); message-origin support is still needed for a complete fix. Further narrowing shipped in PR #1152 (merged to main 2026-10-28).
 
 ### KI-46 — A review proof can be rewritten through its Windows 8.3 short name
 
@@ -1857,7 +1792,7 @@ plain error objects with their own message and drop network blips, and Group Pro
 message. The other call sites now use the shared `toSentryError` (batch 1 #1748, billing #1751, orders, deliveries,
 inventory, receiving and POs #1771, jobs, blend tickets, products and settings S3). Still open: 34 call sites in the
 quote screens (QuoteBuilder, Quotes, `components/quotes`), which wait for Taha's quote UI work, and OrderDetail, which
-waits for #1764. Login-token scrubbing (Luna, PR #1730) is replaced by a safe-fields-only
+waited for #1764 (now merged to staging, 2026-11-17). Login-token scrubbing (Luna, PR #1730) is replaced by a safe-fields-only
 event (Mason, 2026-11-10, DECISION_LOG): Sentry gets the error type and title, stack file, function and line, our tags,
 the user id, breadcrumb categories and path-only urls. The title is the only free text, and tokens are removed whole
 before figures are blanked. Extra, other contexts, request query, headers and cookies, the serialized copy and breadcrumb
@@ -2080,6 +2015,7 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 63. **KI-38 — Edge Function error alerting fails quiet** — closed 2026-11-21 by the [master-plan re-check](MASTER_FIX_PLAN.md): `warnIfSentryMisconfigured` referenced 21 times under `supabase/functions` on both staging and main.
 64. **KI-83 — The `idempotency_keys` table has no TypeScript type** — closed 2026-11-21 by the [master-plan re-check](MASTER_FIX_PLAN.md): `src/types/index.ts:1856` `IdempotencyKey`, on both staging and origin/main. Entry header still says "FIX IN REVIEW"; stale.
 65. **KI-166 — A quote for a product with no stock unit is priced as if sold by the each** — closed 2026-11-21 by the [master-plan re-check](MASTER_FIX_PLAN.md): `20270129171000_field_app_refuses_product_without_sold_unit.sql:40` `inventory_unit SET NOT NULL` + alnum CHECK (also on origin/main). The `COALESCE(...,'Ea')` fallback remains but is unreachable (`20270121110000:210`, `20270125110000:725`). This is the entry's own proposed fix Closed: every product now must have a stock unit (20270129171000, live).
+66. **KI-82 — The open quote screen can show a stale cost for a line it just saved** — closed 2026-11-22 (triage): PR #1209 merged to `main` 2026-10-30 (`QuoteBuilder.tsx` `refreshSavedLineCosts` re-reads the saved cost after an admin save). Original text appended to the archive. Fixed parts also removed in this triage and appended to the archive: KI-16 (Quote Builder line math in exact cents, PRs #1430 and #1892), KI-73 (parts A, B, C), KI-74 (cost paths, `invoice_post_version`), KI-76 (season fallbacks, the whole-order quantity cap and the posted-invoice delivery void: PR #1174, `20261029160000`, live 2026-10-30).
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

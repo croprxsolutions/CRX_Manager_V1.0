@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Star, Trash2 } from 'lucide-react';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
@@ -27,15 +27,13 @@ interface ProductVendorsSectionProps {
   isAdmin: boolean;
   /** The signed-in user's profile id; only needed for admin edits. */
   userId: string | null;
-  /** Called with the new preferred vendor's name; the database has already copied it onto the product. */
-  onPreferredChanged: (vendorName: string) => void;
   /**
-   * KI-170: true when the re-read after a link failed, so which vendor is preferred (and copied onto the
-   * product) is unknown; false once a re-read succeeds. The page blocks its Save while unknown.
+   * A vendor was linked: the database may have copied a new preferred vendor's name onto the product, so the
+   * page re-reads the product (KI-170: its Save waits for that read).
    */
-  onPreferredUnknown: (unknown: boolean) => void;
-  /** The page still waits on a re-read (KI-170), e.g. from before this section was last shown. */
-  preferredUnknown?: boolean;
+  onVendorChanged: () => void;
+  /** Why vendor changes are off right now (e.g. unsaved product edits), or null when they are allowed. */
+  lockedReason: string | null;
 }
 
 /** Every vendor an admin can add, page by page: one read stops silently at 1,000 rows. */
@@ -124,10 +122,12 @@ interface AddVendorBarProps {
   pick: string;
   onPick: (vendorId: string) => void;
   disabled: boolean;
+  /** Why vendor changes are off, shown under the bar. */
+  lockedReason: string | null;
   onAdd: () => void;
 }
 
-function AddVendorBar({ picker, addable, pick, onPick, disabled, onAdd }: AddVendorBarProps) {
+function AddVendorBar({ picker, addable, pick, onPick, disabled, lockedReason, onAdd }: AddVendorBarProps) {
   return (
     <div className="mt-3 flex flex-wrap items-end gap-2">
       <div className="min-w-[14rem] flex-1">
@@ -143,6 +143,7 @@ function AddVendorBar({ picker, addable, pick, onPick, disabled, onAdd }: AddVen
       <Button size="sm" disabled={disabled || !pick} onClick={onAdd}>
         Add vendor
       </Button>
+      {lockedReason && <p className="w-full text-sm text-amber-800">{lockedReason}</p>}
       {picker.status === 'loading' && <p className="w-full text-sm text-gray-500">Loading the vendor list…</p>}
       {picker.status === 'failed' && (
         <div role="alert" className="flex w-full flex-wrap items-center gap-2 text-sm text-red-700">
@@ -154,45 +155,16 @@ function AddVendorBar({ picker, addable, pick, onPick, disabled, onAdd }: AddVen
   );
 }
 
-/**
- * KI-170: after a failed re-read, who is preferred is unknown until a later re-read of the same product
- * succeeds; that read's preferred vendor is mirrored and the page may save again. Returns "mark unknown".
- */
-function usePreferredSettle(
-  productId: string,
-  linked: Loaded<ProductVendor[]>,
-  onPreferredChanged: (vendorName: string) => void,
-  onPreferredUnknown: (unknown: boolean) => void,
-  pageUnknown: boolean,
-) {
-  const [unknownFor, setUnknownFor] = useState<string | null>(null);
-  const freshList = linked.status === 'loaded' && !linked.stale && !linked.refreshing ? linked.data : null;
-  useEffect(() => {
-    if (unknownFor !== productId || !freshList) return;
-    const preferred = freshList.find((v) => v.is_preferred)?.vendor_name;
-    if (preferred) onPreferredChanged(preferred);
-    setUnknownFor(null);
-    onPreferredUnknown(false);
-  }, [unknownFor, productId, freshList, onPreferredChanged, onPreferredUnknown]);
-  // Shown again (role change) while Save waits: this section's first read may predate the vendor change, so
-  // only a read started now may settle it.
-  const { reload } = linked;
-  useEffect(() => {
-    if (!pageUnknown || unknownFor === productId) return;
-    setUnknownFor(productId);
-    void reload();
-  }, [pageUnknown, unknownFor, productId, reload]);
-  return () => {
-    setUnknownFor(productId);
-    onPreferredUnknown(true);
-  };
+/** Vendor changes wait for a running change, a usable list, and the page's go-ahead. */
+function vendorControlsOff(busy: boolean, listUsable: boolean, lockedReason: string | null): boolean {
+  return busy || !listUsable || lockedReason !== null;
 }
 
 /**
  * The vendors a product can be bought from (WP-PM-15b). Exactly one is preferred, and the product's
  * vendor name is a copy of it: the database keeps that copy and refuses to drop the preferred vendor.
  */
-export default function ProductVendorsSection({ productId, productName, isAdmin, userId, onPreferredChanged, onPreferredUnknown, preferredUnknown }: ProductVendorsSectionProps) {
+export default function ProductVendorsSection({ productId, productName, isAdmin, userId, onVendorChanged, lockedReason }: ProductVendorsSectionProps) {
   const { toast } = useToast();
   // Costs come back only for admins, so a role change is a different read.
   const linked = useLoad(`vendors:${productId}:${isAdmin}`, () => listProductVendors(productId), {
@@ -210,7 +182,6 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
   const [busyFor, setBusyFor] = useState<string | null>(null);
   const busy = busyFor === productId;
   const [removing, setRemoving] = useState<ProductVendor | null>(null);
-  const markPreferredUnknown = usePreferredSettle(productId, linked, onPreferredChanged, onPreferredUnknown, preferredUnknown === true);
   // A new product or role starts clean: no pick and no open removal (React's reset-on-prop-change pattern).
   // The picker list is re-read only after a role change, so this also drops a pick across a picker reload.
   const owner = `${productId}:${isAdmin}`;
@@ -243,22 +214,14 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
       });
       setPickedVendorId('');
       if (productRef.current !== productId) return; // the screen moved to another product; its own read is running
-      // A first vendor becomes preferred even when not asked, so report whichever vendor now is.
-      const fresh = await linked.reload();
-      if (productRef.current !== productId) return;
-      if (fresh.status !== 'applied') {
-        // KI-170: failed, or overtaken by a newer read. Another admin may have changed the preferred vendor
-        // meanwhile, so guess nothing: the page blocks Save until a fresh read of this product's vendors
-        // (the newer one, or Try again above the list) says which vendor is preferred, then mirrors it.
-        // Every read that can settle it began after this change: useLoad applies only the newest read, and
-        // this reload started after the save, so any older read in flight is discarded.
-        markPreferredUnknown();
-        return;
-      }
-      const preferred = fresh.data.find((v) => v.is_preferred)?.vendor_name;
-      if (preferred) onPreferredChanged(preferred);
+      // The product's vendor name may have changed (a first vendor becomes preferred even when not asked).
+      onVendorChanged();
+      await linked.reload();
     } catch (error) {
       toast('error', productVendorErrorMessage(error));
+      // An unclear failure may still have committed, so the product is read again either way (re-reading the
+      // page's current product is harmless even if the screen moved on).
+      onVendorChanged();
     } finally {
       setBusyFor((current) => (current === productId ? null : current));
     }
@@ -287,6 +250,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
     }
   };
 
+  const controlsOff = vendorControlsOff(busy, listUsable, lockedReason);
   const linkedIds = new Set((vendors ?? []).map((v) => v.vendor_id));
   const addable = allVendors.filter((v) => !linkedIds.has(v.id));
   // A pick that is no longer offered (list reloaded, failed, or vendor now linked) is no pick.
@@ -299,7 +263,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
       {vendors !== null && vendors.length > 0 && (
         <ul className="divide-y divide-gray-100">
           {vendors.map((v, i) => (
-            <VendorRow key={v.link_id} vendor={v} isAdmin={isAdmin} disabled={busy || !listUsable}
+            <VendorRow key={v.link_id} vendor={v} isAdmin={isAdmin} disabled={controlsOff}
               // One action per vendor: the server makes that vendor's best link preferred.
               canMakePreferred={!vendors.some((o, j) => o.vendor_id === v.vendor_id && (o.is_preferred || j < i))}
               onMakePreferred={() => void link(v.vendor_id, true)} onRemove={() => setRemoving(v)} />
@@ -308,7 +272,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
       )}
       {isAdmin && vendors !== null && (
         <AddVendorBar picker={picker} addable={addable} pick={pick} onPick={setPickedVendorId}
-          disabled={busy || !listUsable} onAdd={() => void link(pick, false)} />
+          disabled={controlsOff} lockedReason={lockedReason} onAdd={() => void link(pick, false)} />
       )}
       <ConfirmModal
         open={removable}

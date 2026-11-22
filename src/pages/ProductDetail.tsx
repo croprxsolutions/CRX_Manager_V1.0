@@ -150,6 +150,12 @@ function pricingChanged(
   return PRODUCT_PRICING_FIELDS.some((field) => product[field] !== persisted[field]);
 }
 
+/** Why vendor changes are off (they re-read the whole product, which would replace unsaved edits). */
+function vendorLockReason(loading: boolean, unsaved: boolean): string | null {
+  if (loading) return 'Vendor changes wait until this Product finishes saving or loading.';
+  return unsaved ? 'Save or discard your Product changes before changing vendors.' : null;
+}
+
 function productDetailsChanged(product: Partial<Product>, persisted: Product | null): boolean {
   if (!persisted) return false;
   return PRODUCT_NONPRICING_FIELDS.some((field) => field === 'use_timings'
@@ -429,15 +435,12 @@ export default function ProductDetail() {
     return { product: await withAdminCost('products', data as Product | null, isAdmin) };
   }, { report: { tags: { read: 'product_detail_product' } } });
   const reloadProduct = productRead.reload;
-  // The Vendors section may call back with a callback from an earlier render: read the current state here.
-  const productReadRef = useLatestRef(productRead);
+  // KI-170: a vendor change re-reads the product (the database copies the preferred vendor onto it); Save and
+  // the copy actions wait for any product read in flight, so they never use an older vendor.
+  const productReading = productRead.status === 'loaded' && productRead.refreshing;
   // A failed refresh keeps the form on screen but locks editing until a fresh read lands.
   const productStale = productRead.status === 'loaded' && productRead.stale;
   const reloadRequired = pricingReloadRequired || productStale;
-  // KI-170: a vendor was linked but the vendors could not be re-read, so the preferred vendor (copied onto
-  // the product) is unknown. Save waits for the Vendors section to re-read them.
-  // No reset on a product change is needed: ProductDetailRoute mounts a new page per product (key={id}).
-  const [vendorPreferredUnknown, setVendorPreferredUnknown] = useState(false);
   // cost_history is admin-only under RLS (the panel only renders for admins).
   const costHistoryRead = useLoad<CostHistory[]>(isAdmin && !isNew && id ? `cost-history:${id}` : null, async () => {
     const { data, error } = await supabase
@@ -770,9 +773,8 @@ export default function ProductDetail() {
       toast('error', 'Reload this Product before making another change.');
       return;
     }
-    if (vendorPreferredUnknown) {
-      toast('error', 'The vendors could not be re-read. Press Try again in Vendors before saving.');
-      revealPhoneSection('vendors');
+    if (productReading) {
+      toast('error', 'Wait for this Product to finish loading before saving.');
       return;
     }
     for (const [field, label] of [
@@ -1263,13 +1265,19 @@ export default function ProductDetail() {
     setPricingMode(mode);
   };
 
+  // A role change re-reads the product, so these screens can follow unsaved edits: leaving still asks first.
+  const unsavedModal = (
+    <UnsavedChangesModal open={blocker.state === 'blocked'} onStay={() => blocker.reset?.()} onLeave={() => blocker.proceed?.()} />
+  );
+
   if (productRead.status === 'loading') {
-    return <div className="animate-pulse space-y-4"><div className="h-8 bg-gray-200 rounded w-1/3" /><div className="h-64 bg-gray-200 rounded" /></div>;
+    return <>{unsavedModal}<div className="animate-pulse space-y-4"><div className="h-8 bg-gray-200 rounded w-1/3" /><div className="h-64 bg-gray-200 rounded" /></div></>;
   }
 
   if (productRead.status === 'failed') {
     return (
       <div role="alert" className="flex flex-col items-center justify-center py-16 space-y-4">
+        {unsavedModal}
         <p className="text-secondary text-lg">Could not load this product.</p>
         <div className="flex gap-2">
           <Button onClick={() => void reloadProduct()}>Try again</Button>
@@ -1282,6 +1290,7 @@ export default function ProductDetail() {
   if (productRead.status === 'loaded' && productRead.data.product === null) {
     return (
       <div className="flex flex-col items-center justify-center py-16 space-y-4">
+        {unsavedModal}
         <p className="text-secondary text-lg">Product not found</p>
         <Button variant="secondary" onClick={() => navigate('/products')}>Back to Products</Button>
       </div>
@@ -1329,7 +1338,7 @@ export default function ProductDetail() {
               size="sm"
               icon={<Plus className="w-4 h-4" />}
               showChevron={false}
-              disabled={reloadRequired || vendorPreferredUnknown || !parent || !parent.is_active}
+              disabled={reloadRequired || productReading || !parent || !parent.is_active}
               title={parent === null ? 'This product has no parent yet, so it has no sizes to add to. Use New product.' : undefined}
               onClick={() => parent && navigate('/products/new', { state: { duplicateFrom: duplicateProductSource(persistedProduct!), addSizeTo: parent } })}
             >
@@ -1340,7 +1349,7 @@ export default function ProductDetail() {
               size="sm"
               icon={<Copy className="w-4 h-4" />}
               showChevron={false}
-              disabled={reloadRequired || vendorPreferredUnknown}
+              disabled={reloadRequired || productReading}
               onClick={() => navigate('/products/new', { state: { duplicateFrom: duplicateProductSource(persistedProduct!) } })}
             >
               New product
@@ -2070,16 +2079,10 @@ export default function ProductDetail() {
                 productName={persistedProduct.product_name}
                 isAdmin={isAdmin}
                 userId={profile?.id ?? null}
-                // The database copied the name onto the product; mirror it so a later save does not resend the old one.
-                onPreferredChanged={(vendorName) => {
-                  setProduct((p) => ({ ...p, vendor: vendorName }));
-                  setPersistedProduct((p) => (p ? { ...p, vendor: vendorName } : p));
-                  // A product read already running may predate this vendor; read again so it cannot install over it.
-                  const current = productReadRef.current;
-                  if (current.status === 'loaded' && current.refreshing) void current.reload();
-                }}
-                onPreferredUnknown={setVendorPreferredUnknown}
-                preferredUnknown={vendorPreferredUnknown}
+                onVendorChanged={() => void reloadProduct()}
+                // The margin floor card keeps its own draft across a product re-read, so it does not count here.
+                lockedReason={vendorLockReason(saving || productReading, isDirty
+                  || productDetailsChanged(product, persistedProduct) || pricingChanged(product, persistedProduct, pricingMoneyDrafts))}
               />
             </PhoneSection>
           )}
@@ -2233,14 +2236,10 @@ export default function ProductDetail() {
               data-testid="product-save-bar"
               className="flex justify-end max-md:fixed max-md:inset-x-0 max-md:bottom-[calc(2.75rem+env(safe-area-inset-bottom))] max-md:z-20 max-md:border-t max-md:border-gray-200 max-md:bg-white max-md:px-4 max-md:py-2"
             >
-              {vendorPreferredUnknown && (
-                <p role="alert" className="mr-3 self-center text-sm text-amber-800">
-                  {reloadRequired
-                    ? 'Save is off until the product and its vendors are re-read: press Reload Product, then Try again in Vendors.'
-                    : 'Save is off until the vendors are re-read: press Try again in Vendors.'}
-                </p>
+              {productReading && !saving && (
+                <p role="status" className="mr-3 self-center text-sm text-secondary">Loading the latest Product values…</p>
               )}
-              <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving} disabled={vendorPreferredUnknown} className="max-md:w-full">
+              <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving} disabled={productReading} className="max-md:w-full">
                 {isNew ? 'Create Product' : 'Save Changes'}
               </Button>
             </div>
@@ -2532,11 +2531,7 @@ export default function ProductDetail() {
           }}
         />
       )}
-      <UnsavedChangesModal
-        open={blocker.state === 'blocked'}
-        onStay={() => blocker.reset?.()}
-        onLeave={() => blocker.proceed?.()}
-      />
+      {unsavedModal}
       <ConfirmModal
         open={pendingCategory !== undefined}
         title="Clear use timings?"

@@ -106,7 +106,7 @@ function chainable(resolveWith: unknown) {
 }
 
 // The Vendors section has its own tests; these page tests only keep its callbacks (KI-170).
-type VendorSectionProps = { onPreferredUnknown: (unknown: boolean) => void; onPreferredChanged: (vendorName: string) => void };
+type VendorSectionProps = { onVendorChanged: () => void; lockedReason: string | null };
 const vendorSection = vi.hoisted(() => ({ props: null as null | VendorSectionProps }));
 vi.mock('../components/products/ProductVendorsSection', () => ({
   default: (props: VendorSectionProps) => { vendorSection.props = props; return null; },
@@ -224,8 +224,9 @@ vi.mock('react-router-dom', () => ({
   useLocation: () => ({ pathname: `/products/${product.id}`, state: routeState }),
 }));
 
+const unsavedPrompt = vi.hoisted(() => ({ state: 'unblocked' as 'unblocked' | 'blocked' }));
 vi.mock('../hooks/useUnsavedChanges', () => ({
-  useUnsavedChanges: () => ({ state: 'unblocked' }),
+  useUnsavedChanges: () => ({ state: unsavedPrompt.state, reset: vi.fn(), proceed: vi.fn() }),
 }));
 
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
@@ -1155,39 +1156,59 @@ describe('ProductDetail governed pricing flow', () => {
     expect(screen.getByText('Refreshing the cost-basis options…')).toBeInTheDocument();
   });
 
-  it('KI-170: Save stays off while the preferred vendor is unknown after a failed vendor re-read', async () => {
+  it('KI-170: a vendor change re-reads the product; Save and the copy actions wait for that read', async () => {
     render(<ProductDetail />);
     await screen.findByLabelText('Quoting Notes');
     await waitFor(() => expect(vendorSection.props).not.toBeNull());
-    act(() => vendorSection.props!.onPreferredUnknown(true));
-    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
-    // A copy would carry the unconfirmed vendor onto a new product (Sol r1).
+    let answer!: (value: { data: typeof product; error: null }) => void;
+    productLoadResults.push(new Promise((resolve) => { answer = resolve; }) as unknown as { data: typeof product; error: null });
+    // The section keeps the callback from when the vendor action was clicked; it must still re-read.
+    const heldCallback = vendorSection.props!.onVendorChanged;
+    act(() => heldCallback());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled());
+    expect(screen.getByText('Loading the latest Product values…')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'New product' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Add a size' })).toBeDisabled();
-    expect(screen.getByText(/Save is off until the vendors are re-read/)).toBeInTheDocument();
-    act(() => vendorSection.props!.onPreferredUnknown(false));
-    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'New product' })).toBeEnabled();
-    expect(screen.queryByText(/Save is off until the vendors are re-read/)).not.toBeInTheDocument();
-  });
-
-  it('a product read already running when a vendor change is confirmed never installs the older vendor', async () => {
-    render(<ProductDetail />);
-    const quotingNotes = await screen.findByLabelText('Quoting Notes');
-    await waitFor(() => expect(vendorSection.props).not.toBeNull());
-    // The vendor action keeps the callback from when it was clicked, before the product refresh began (Sol r2).
-    const heldCallback = vendorSection.props!.onPreferredChanged;
-    let answerOld!: (value: { data: typeof product; error: null }) => void;
-    productLoadResults.push(new Promise((resolve) => { answerOld = resolve; }) as unknown as { data: typeof product; error: null });
-    productLoadResults.push({ data: { ...product, vendor: 'New Vendor' }, error: null });
-    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
-    await waitFor(() => expect(productLoadResults).toHaveLength(1)); // the refresh after the save is running
-    act(() => heldCallback('New Vendor'));
-    await waitFor(() => expect(productLoadResults).toHaveLength(0)); // read again
-    await act(async () => { answerOld({ data: { ...product, vendor: 'Old Vendor' }, error: null }); });
+    expect(vendorSection.props!.lockedReason).toMatch(/finishes saving or loading/);
+    await act(async () => { answer({ data: { ...product, vendor: 'New Vendor' }, error: null }); });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled());
     expect(screen.getByDisplayValue('New Vendor')).toBeInTheDocument();
-    expect(screen.queryByDisplayValue('Old Vendor')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New product' })).toBeEnabled();
+    expect(vendorSection.props!.lockedReason).toBeNull();
+  });
+
+  it('KI-170: a failed product re-read after a vendor change keeps Save off until Reload Product', async () => {
+    render(<ProductDetail />);
+    await screen.findByLabelText('Quoting Notes');
+    await waitFor(() => expect(vendorSection.props).not.toBeNull());
+    productLoadResults.push({ data: null, error: new Error('products unavailable') });
+    act(() => vendorSection.props!.onVendorChanged());
+    expect(await screen.findByText(/could not be refreshed, so what is shown may be out of date/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'New product' })).toBeDisabled();
+    productLoadResults.push({ data: { ...product, vendor: 'New Vendor' }, error: null });
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled());
+    expect(screen.getByDisplayValue('New Vendor')).toBeInTheDocument();
+  });
+
+  it('vendor changes are off while the product has unsaved edits, so a re-read never discards them', async () => {
+    render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    await waitFor(() => expect(vendorSection.props?.lockedReason).toBeNull());
+    fireEvent.change(quotingNotes, { target: { value: 'Unsaved guidance' } });
+    await waitFor(() => expect(vendorSection.props!.lockedReason).toBe('Save or discard your Product changes before changing vendors.'));
+  });
+
+  it('a leave blocked by unsaved edits still asks on the load-failure screen (Sol r3)', async () => {
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    unsavedPrompt.state = 'blocked';
+    try {
+      render(<ProductDetail />);
+      expect(await screen.findByText('Could not load this product.')).toBeInTheDocument();
+      expect(screen.getByText('Leave without saving?')).toBeInTheDocument();
+    } finally {
+      unsavedPrompt.state = 'unblocked';
+    }
   });
 });

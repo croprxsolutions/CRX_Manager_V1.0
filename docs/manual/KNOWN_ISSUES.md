@@ -40,10 +40,10 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 | Status (re-checked 2026-11-21) | Count |
 |---|---|
-| Open, partly open, check-first or waiting on a Mason decision (numbered entries) | 83 |
-| Fixed on staging, waiting for the production release | 6 |
+| Open, partly open, check-first or waiting on a Mason decision (numbered entries; KI-201, KI-202 and KI-205 added 2026-11-22 from the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md)) | 86 |
+| Fixed on staging, waiting for the production release | 8 |
 | Accepted numbered entries in the area sections (the full accepted list is the "Accepted risks" table) | 10 |
-| Backlog or roadmap entries, not defects | 3 |
+| Backlog or roadmap entries, not defects (KI-204 added 2026-11-22) | 4 |
 | Open items tracked only as GitHub issues or parked fixes (tables at the end of each area) | 59 |
 | Closed as FIXED (closed list below; 40 added 2026-11-21, 1 added 2026-11-22) | 66 |
 
@@ -187,6 +187,17 @@ stock unit (`QUOTE_STOCK_UNIT_UNKNOWN`), so `save_quote` never reaches its 1-oz 
 dry check (4 live dry products use a liquid `oz` rate; KI-114, rates work), and the quote screen's own 1-oz fallback
 (quote screens are Taha's).
 
+### KI-201 — Quote Compare drops a line when the same product is on two sections
+
+> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Open · MED · Taha (to 2026-12-15) · plan W2-52 · #2206. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
+
+**MED · OPEN (reproduced in two browsers; source-confirmed) · quotes · found 2026-11-22 (rehearsal CRXN-02) · unassigned (Taha's quote area until 2026-12-15) · GitHub #2206**
+Compare matches version lines by `product_id` only (`QuoteBuilder.tsx` ~L5861-5862), so the same product on two
+sections collapses into one row with no section label. Rehearsal: the unchanged $24.00 line vanished while the other
+showed $26.00 to $25.00. Saved versions, PDFs and totals ($50.00 and $49.00) were correct, so this is display only.
+Fix: match on saved line identity and show section names. Proof: change either line; both stay visible and the PDFs
+and totals still reconcile.
+
 ### Also open in this area (tracked as GitHub issues or parked fixes; plain-English detail in [the plan](MASTER_FIX_PLAN.md))
 
 | ID | Sev | Status | What goes wrong | Owner | Plan |
@@ -326,6 +337,16 @@ before the job rows in the hold trigger's callers, or rebuild once per statement
 No amount is changed; the office must correct the line's unit by hand. **Decision (Mason, 2026-11-17: "Accept and
 land"):** #1896 ships with this open. Fix: relabel completed lines to the stock unit, or relabel a line when a void
 reopens it.
+
+### KI-203 — Quick Delivery shows a dash for the unit of a product stocked in Gal
+
+> **Re-checked 2026-11-22:** Merged to staging in PR #2213 · fresh deployed browser check pending · plan W3-56 · GitHub #2208 closed. [Acceptance checks](../audits/2026-11-22-staging-workflows-follow-up.md)
+
+**LOW (clarity) · FIXED ON STAGING BRANCH (browser retest pending) · found 2026-11-22 · GitHub #2208**
+The unit column shows the product's optional package size or a dash (`QuickDeliveryModal.tsx` ~L633), not the unit
+the line is sold in. A two-Gal entry priced $10.00 and the saved delivery, order and invoice all used Gal correctly.
+Fix: show the selected or implied sales unit before submit. Proof: a pack size and a converted unit on test records,
+with visible quantity, saved units, stock and invoice reconciled.
 
 ### Also open in this area (tracked as GitHub issues or parked fixes; plain-English detail in [the plan](MASTER_FIX_PLAN.md))
 
@@ -554,7 +575,7 @@ spelling on receipt.
 | #2190 | MED | Open | Two deliveries completing at the same moment on the same products can make one fail and need a retry; nothing is saved wrongly. | Agent (unassigned) | W2-12 |
 | #2193 | MED | Open | If applied before the EPA batch, the one-time load commits with some ingredients missing their groups and never fills them later. | Agent (unassigned) | W2-13 |
 | #2172 | LOW | Open | A very large batch (about 3,000 approvals) could make Confirm silently send nothing. Not reachable today (hundreds of rates). | Agent (unassigned) | W3-16 |
-| #2135 | LOW | Open | Staff see an inflated short-stock count and get two warnings and two notifications; stock math is right. | Agent (unassigned) | W3-17 |
+| #2135 | LOW | Fix in review (`20270213100000`, branch `claude/lane-c2-single-short-stock`) | Staff see an inflated short-stock count and get two warnings and two notifications; stock math is right. | Agent (unassigned) | W3-17 |
 | #1912 | LOW | On staging, not live | Retry keys with hidden characters are now refused. Issue can be closed once released. | Agent (unassigned) | R-13 |
 | #1829 | LOW | Check first | A confirmed rate approval could be lost if the reply is dropped and the user leaves. | Agent (unassigned) | W3-51 |
 
@@ -805,6 +826,17 @@ PO-2026-0030 sent and arrived on v21. See `CURRENT_STATE.md`, Recent production 
 
 - PR #1174 also preserves physical quick-delivery and follow-up completion while an edited draft needs correction; posting still rechecks the whole bill. Its split generator conserves each source quantity exactly, and the order-line and product caps have no fractional tolerance.
 
+### KI-200 — Return approval: the confirmation opens underneath the return details
+
+> **Re-checked 2026-11-22:** Merged to staging in PR #2210 · fresh deployed browser check pending · plan W2-51 · GitHub #2205 closed. [Acceptance checks](../audits/2026-11-22-staging-workflows-follow-up.md)
+
+**MED · FIXED ON STAGING BRANCH (browser retest pending) · found 2026-11-22 · GitHub #2205**
+Opening a requested return and clicking Approve shows the Approve/Reject `ConfirmModal`, but it is rendered before
+the return-details `Modal` (`Returns.tsx` ~L1190 vs ~L1222), so the details window covers it and a normal click
+cannot reach it. Keyboard (Enter) still works and approved exactly once, with the expected single stock and credit
+events. Fix: render the confirmation above the details window. Proof: a fresh requested return approved by a normal
+click, correct focus and Escape, exactly one approval, Approved after reload.
+
 ### Also open in this area (tracked as GitHub issues or parked fixes; plain-English detail in [the plan](MASTER_FIX_PLAN.md))
 
 | ID | Sev | Status | What goes wrong | Owner | Plan |
@@ -894,6 +926,17 @@ split-check modal, because batch 1 (`20261016060000`) binds `create_prepay_check
 screen already resets only after a confirmed save. Also accepted: OrderDetail. `update_order_items` keeps one key
 per order, and a payload change is refused with a conflict dialog that reloads the order (by design).
 `price_order` already rotates its key when the payload hash changes. Cancel and split are per-order.
+
+### KI-202 — Payment History: expanding a payment's invoice allocation fails to load
+
+> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Open · MED · Taha (to 2026-12-15) · plan W2-53 · #2207. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
+
+**MED · OPEN (reproduced on staging; source-confirmed) · payments/finance (display) · found 2026-11-22 (rehearsal CRXN-04) · unassigned (Taha's billing area) · GitHub #2207**
+The allocation read embeds `invoices ( invoice_number )` from `invoice_line_allocations` without naming which link to
+use (`PaymentHistory.tsx` ~L134-139). The table has two links to `invoices`, so the request is ambiguous and returns
+HTTP 300; the detail shows nothing. The $300.00 allocation itself was saved correctly. Fix: name the intended
+relationship in the embed. Proof: the exact fixture and one using the other link load, a failed load shows an error,
+and saved amounts and the customer balance are unchanged.
 
 ---
 
@@ -1471,11 +1514,49 @@ on purpose to prove that). LOW. Also deferred from #1663 (#1698): photo ownershi
 added, so if a photo file is deleted and someone else uploads a different file at the same path, the existing row keeps
 the first uploader's name and time. LOW.
 
+### KI-204 — Staging rehearsal: workflow and screen improvements awaiting a decision
+
+> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Backlog, not a defect · LOW · Mason decision (To-Do decisions 34 and 35). From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
+
+**LOW · OPEN (suggestions, not defects; some need a Mason rule) · several areas · found 2026-11-22 · Mason decision where noted**
+These are workflow and clarity proposals. See the [later UX and evidence register](../audits/2026-11-22-staging-workflows-follow-up.md) and the original report's "Workflow and UX
+improvement candidates" table. To-Do section 17; decisions 34 and 35.
+- New Customer: point at the missing commission recipient beside the split row before Save.
+- Returns: show each stage (requested, approved, received, restocked, credited) and where the credit can be used next.
+- Credit and prepay: show available credit, amounts applied and remaining balance together; **Mason decision:** which
+  reversals staff may do and what history must be kept.
+- Prepay: the applied credit showed no source payment reference; check whether it should.
+- Quick Delivery / To Ship: unchecking "create draft" at scheduling still made a $10.00 draft at completion;
+  **Mason decision:** is that the rule, then word the checkbox to match; also give a clear next step for a completed,
+  uninvoiced order.
+- Purchasing: show ordered cost, receipt snapshot, corrected PO cost and current product cost distinctly, and the
+  effect of a correction before it is applied.
+- Pricing workbook: point at the invalid row when Apply is disabled; tell an already-applied replay from a bad file.
+- Pricing history: label current tier, last charged and quoted amounts with their scope, date and source.
+- Office exceptions and documents: an end-to-end dashboard-to-fix check by role, and one quote-to-statement trail
+  that highlights differences.
+- Supplier quote: show package conversion and explain when approved cost can be selected. Lot Trace: explain application-only scope and link available lot evidence.
+- Delivery list: show whether the brand is confirmed or lead staff to Delivery Detail to confirm it.
+- Reporting and field planning: carry the customer/date scope and distinguish planning from dispatch and downstream work.
+
+### KI-205 — Staging rehearsal: cases not yet proven, and what blocked them
+
+> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Check first · MED · Agent (unassigned) · plan W2-54 · To-Do 16.12. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
+
+**MED · UNVERIFIED (test gaps, not confirmed defects) · test coverage · found 2026-11-22 · unassigned**
+The original ledger had 9 blocked and 17 partial. The later pass has 55 separately recorded cases, including
+13 blocks. The [follow-up](../audits/2026-11-22-staging-workflows-follow-up.md) cleared restricted-use sale on deployed staging, ran six isolated
+database actions or variants, and documented four partial results and two unavailable staff workflows.
+Remaining priorities include approved finance and supplier corrections with retained history, deployed chemical
+split and odd-cent return, missing-invoice recovery, quote restore, driver/offline and sales-rep roles, unit/pack
+and lifecycle fixtures, month-end late correction, Crop Programs persistence and wider reporting/load proof.
+Close each gap after a case proves it or it moves to its own issue. To-Do 16.12.
+
 ### Also open in this area (tracked as GitHub issues or parked fixes; plain-English detail in [the plan](MASTER_FIX_PLAN.md))
 
 | ID | Sev | Status | What goes wrong | Owner | Plan |
 |---|---|---|---|---|---|
-| #2197 | MED | Open | Staff are told to reactivate a customer before new orders, but the screen offers no way, so it must be done outside the app. | Agent (unassigned) | W2-35 |
+| #2197 | MED | FIXED-ON-STAGING | Staff are told to reactivate a customer before new orders, but the screen offers no way, so it must be done outside the app. Fixed: an admin or sales rep now sees a Reactivate button (with a confirm) on an inactive customer's page. | Agent (Lane D) | W2-35 |
 | #2089 | MED | Open | A customer could be deactivated while an invoice posts, leaving a balance on an inactive customer. | Taha (to 2026-12-15) | W2-36 |
 | #2016 | LOW | Open | "1,200" in an unquoted CSV can save as 1 corn acre and 200 soybean acres. | Agent (unassigned) | W3-38 |
 

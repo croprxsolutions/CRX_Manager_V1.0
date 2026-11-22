@@ -342,6 +342,8 @@ async function seedRegistrationPrerequisite(state) {
   } finally {
     compose(['stop', 'auth']);
   }
+  // The gateway restart above drops its database relay for a moment; the next push connects through it.
+  await waitFor('database through the gateway', databaseAnswers);
   const actor = scalar(`SELECT id FROM auth.users WHERE email = '${state.LOCAL_TEST_EMAIL}';`);
   psql(`BEGIN;
     SELECT set_config('request.jwt.claim.sub', '${actor}', true);

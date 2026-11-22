@@ -12,9 +12,9 @@ test('blocked order, stock warning, and admin reactivation', async ({ page }) =>
     const suffix = Date.now().toString(36);
     const customer = await supabase.from('customers').insert({ farm_name: `PM3 Customer ${suffix}` }).select('id').single();
     if (customer.error || !customer.data) throw new Error(customer.error?.message ?? 'customer seed failed');
-    const held = await supabase.from('products').insert({ product_name: `PM3 Held ${suffix}`, product_form: 'liquid' }).select('id, product_name').single();
+    const held = await supabase.from('products').insert({ product_name: `PM3 Held ${suffix}`, product_form: 'liquid', inventory_unit: 'Gal' }).select('id, product_name').single();
     if (held.error || !held.data) throw new Error(held.error?.message ?? 'held product seed failed');
-    const stock = await supabase.from('products').insert({ product_name: `PM3 Stock ${suffix}` }).select('id, product_name').single();
+    const stock = await supabase.from('products').insert({ product_name: `PM3 Stock ${suffix}`, product_form: 'liquid', inventory_unit: 'Gal' }).select('id, product_name').single();
     if (stock.error || !stock.data) throw new Error(stock.error?.message ?? 'stock product seed failed');
     return { suffix, customerId: customer.data.id, held: held.data, stock: stock.data };
   });
@@ -44,7 +44,7 @@ test('blocked order, stock warning, and admin reactivation', async ({ page }) =>
       p_order_date: new Date().toISOString().slice(0, 10),
       p_order_name: `PM3-${suffix}`,
       p_items: [{ product_id: held.id, product_name: held.product_name,
-        quantity: 1, price_per_unit: 62.5, unit_cost: 50, unit_size: 'gal' }],
+        quantity: 1, price_per_unit: 62.5, unit_cost: 50, unit_size: 'Gal' }],
       p_performed_by: actor,
       p_idempotency_key: `pm3-e2e-order-${suffix}`,
     });

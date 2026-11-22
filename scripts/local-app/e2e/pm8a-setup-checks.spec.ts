@@ -11,7 +11,7 @@ test('product setup refuses invalid fields and saves Seed with a first form choi
   const productId = await page.evaluate(async (name) => {
     const { supabase } = await import(/* @vite-ignore */ '/src/lib/db.ts');
     const { data, error } = await supabase.from('products')
-      .insert({ product_name: name, category: 'Herbicide' }).select('id').single();
+      .insert({ product_name: name, product_form: 'liquid', inventory_unit: 'Gal', category: 'Herbicide' }).select('id').single();
     if (error || !data) throw new Error(error?.message ?? 'Local product insert failed');
     return data.id;
   }, `Setup ${Date.now()} (invented)`);

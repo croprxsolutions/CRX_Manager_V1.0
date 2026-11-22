@@ -91,7 +91,9 @@ END
 $backfill$;
 
 -- 3. The trigger that owns the link. Named to fire before trigger_0_guard_closed_po, so a closed PO's link is put back
---    before the guard compares the row.
+--    before the guard compares the row. A live save links only an active vendor's exact (normalized) name: a stale
+--    screen re-sending a renamed vendor's old name must not link to another vendor holding that name as an alias
+--    (Luna round 1); unmatched text stays NULL and keeps today's name rule. Aliases are used by the backfill only.
 CREATE FUNCTION public._po_stamp_vendor_id()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -101,7 +103,10 @@ AS $function$
 BEGIN
   IF TG_OP = 'INSERT'
      OR public.normalize_vendor_alias(NEW.vendor) IS DISTINCT FROM public.normalize_vendor_alias(OLD.vendor) THEN
-    NEW.vendor_id := public._po_vendor_id_for_text(NEW.vendor);
+    SELECT CASE WHEN count(*) = 1 THEN min(v.id::text)::uuid END INTO NEW.vendor_id
+      FROM public.vendors v
+     WHERE v.deleted_at IS NULL
+       AND public.normalize_vendor_alias(v.name) = public.normalize_vendor_alias(NULLIF(btrim(NEW.vendor), ''));
   ELSE
     NEW.vendor_id := OLD.vendor_id;
   END IF;

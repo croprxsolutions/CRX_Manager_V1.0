@@ -35,7 +35,8 @@ written with; reports and bill checks find them by vendor id. (DECISION_LOG entr
   among active vendors); otherwise `_vendor_id_for_text` (approved alias or legacy resolution, unique or NULL). So a
   vendor picked by its exact name is never lost to another vendor's alias.
 - A BEFORE INSERT OR UPDATE trigger owns `vendor_id`: on insert, or when the NORMALIZED `vendor` text changes, it
-  matches again; on any other update (including case or spacing edits) it keeps `OLD.vendor_id`. Whatever a writer
+  matches again against active vendors' exact names only (no alias; Luna round 1: a stale renamed name that is another
+  vendor's alias stays NULL rather than linking that vendor; aliases are used by the backfill only); on any other update (including case or spacing edits) it keeps `OLD.vendor_id`. Whatever a writer
   puts in `vendor_id` is overwritten, so nothing the screen sends is trusted. No RPC signature changes; the deployed
   app keeps working unchanged.
 - Order inside the one migration transaction: add the column, backfill, THEN create the trigger (a trigger created

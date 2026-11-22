@@ -116,6 +116,10 @@ try {
   assert.equal(attempt(USERS.admin, `${RENAME_A} UPDATE public.purchase_orders SET vendor = 'ki144 acme  SUPPLY' WHERE id = '${PO1}';
       v := ${link(PO1)} || '|' || (SELECT vendor FROM public.purchase_orders WHERE id = '${PO1}');`),
   `ok|${VA}|ki144 acme  SUPPLY`, 'case/space-only edit after a rename keeps the link');
+  // A stale screen saving a renamed vendor's old name (now only B's alias) links nobody, not B (Luna round 1).
+  assert.equal(attempt(USERS.admin, `${RENAME_A} INSERT INTO public.purchase_orders (po_number, vendor, status, created_by)
+      VALUES ('KI144-PO-7', 'KI144 Acme Supply', 'draft', '${USERS.admin}') RETURNING coalesce(vendor_id::text, 'NULL') INTO v;`), 'ok|NULL',
+  'live save after a rename: old name held as an alias by another vendor stays unlinked');
   // Closed PO: a forged link change is put back before the guard compares the row; a real edit is still refused.
   assert.equal(attempt(USERS.admin, `UPDATE public.purchase_orders SET vendor_id = '${VA}', updated_at = now() WHERE id = '${PO5}'; v := ${link(PO5)};`),
     `ok|${VB}`);

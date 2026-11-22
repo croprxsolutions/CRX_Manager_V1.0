@@ -1740,6 +1740,34 @@ describe('QuoteBuilder', () => {
       expect(await screen.findByText('Reload this quote before saving?')).toBeInTheDocument();
     });
 
+    it('refuses locally when the booking moved on between loading this screen and opening the dialog', async () => {
+      const fixture = configureDrawDownFixture({ message: 'unused' });
+      const tables = (quote: unknown) => (table: string) => buildChain({
+        data: table === 'quotes' ? quote
+          : table === 'quote_sections' ? [fixture.section]
+          : table === 'quote_items' ? [fixture.item]
+          : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+          : table === 'products' ? [fixture.product]
+          : [],
+        error: null,
+      });
+      mockFrom.mockImplementation(tables(fixture.quote));
+      renderQuoteBuilder(fixture.quote.id);
+      const createOrderButton = await screen.findByRole('button', { name: 'Create order' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+      // Another rep drew from the booking: the database is now at version 8, this screen at 7.
+      mockFrom.mockImplementation(tables({ ...fixture.quote, row_version: 8 }));
+      fireEvent.click(createOrderButton);
+      fireEvent.click(await screen.findByRole('menuitem', { name: /Draw part of booking/ }));
+      const dialog = await screen.findByRole('dialog', { name: 'Create order from booking' });
+      fireEvent.change(await within(dialog).findByRole('spinbutton'), { target: { value: '1' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('changed since you opened it')));
+      expect(mockRpc.mock.calls.some(([name]) => name === 'draw_down_quote')).toBe(false);
+      expect(await screen.findByText('Reload this quote before saving?')).toBeInTheDocument();
+    });
+
     it('sends the booked price when the rep picks it', async () => {
       const dialog = await openDrawAndEnter('3');
       fireEvent.click(within(dialog).getByRole('radio', { name: /Booked price/ }));

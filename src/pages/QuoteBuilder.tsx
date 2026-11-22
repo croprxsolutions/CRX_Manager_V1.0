@@ -55,7 +55,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useBelowCostApproval } from '../contexts/BelowCostApprovalContext';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useLatestRef } from '../hooks/useLatestRef';
-import { sanitizeError, supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpcCode, rpcAuthErrorMessage, RpcErrorCodes } from '../lib/db';
+import { sanitizeError, supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpcCode, rpcAuthErrorMessage, rpcCodeDetail, RpcErrorCodes } from '../lib/db';
 import {
   convertQuoteToOrderWithRowVersion,
   createQuoteVersionWithRowVersion,
@@ -471,8 +471,10 @@ export default function QuoteBuilder() {
   const [saving, setSaving] = useState(false);
   // Kept locally rather than in generated DB types until post-apply regeneration.
   const quoteRowVersionRef = useRef<number | null>(null);
-  // KI-190: the booking version the open Partial Order dialog was prepared from, and its quote.
-  const drawSnapshotRef = useRef<{ quoteId: string; rowVersion: number | null } | null>(null);
+  // KI-190: the booking version the open Partial Order dialog was prepared from, read from the
+  // database before its balance, and the quote it belongs to.
+  const [drawSnapshot, setDrawSnapshot] = useState<{ quoteId: string; rowVersion: number } | null>(null);
+  const currentQuoteIdRef = useRef<string | undefined>(undefined);
   // Unlike the dialog's open/closed state, this latch survives "Keep Editing".
   // Only a complete, stable Quote reload may clear it.
   const quoteVersionRecoveryRequiredRef = useRef(false);
@@ -3753,11 +3755,11 @@ export default function QuoteBuilder() {
   };
 
 
-  // KI-190: when the Partial Order dialog opens, keep the booking version its balance and
-  // booked prices belong to; the draw sends that version.
+  // KI-190: a late reply for a booking this screen no longer shows must not touch it.
   useEffect(() => {
-    if (showDrawModal && id) drawSnapshotRef.current = { quoteId: id, rowVersion: quoteRowVersionRef.current };
-  }, [showDrawModal, id]);
+    currentQuoteIdRef.current = id;
+    setDrawSnapshot(null);
+  }, [id]);
 
   // Partial booking draw-down: open the modal with the per-product balance
   const openDrawDownModal = async () => {
@@ -3770,9 +3772,16 @@ export default function QuoteBuilder() {
     }
     let loaded = false;
     setPendingDraw(loadPendingRetry(drawPendingName, isDrawRequest));
+    setDrawSnapshot(null);
     setDrawLoading(true);
     setShowDrawModal(true);
     try {
+      // KI-190: read the booking's version BEFORE its balance. A draw that lands in between
+      // makes the server refuse (safe); the draw sends this version.
+      const versionRes = await supabase.from('quotes').select('row_version').eq('id', id).maybeSingle();
+      if (versionRes.error) throw versionRes.error;
+      const loadedRowVersion = readRowVersion((versionRes.data as { row_version?: unknown } | null)?.row_version);
+      if (loadedRowVersion === null) throw new Error('The booking version could not be read');
       const [itemsRes, drawsRes, jobDrawsRes] = await Promise.all([
         supabase.from('quote_items').select('product_id, total_units_needed').eq('quote_id', id),
         supabase.from('quote_product_draws').select('product_id, quantity_drawn').eq('quote_id', id),
@@ -3821,6 +3830,7 @@ export default function QuoteBuilder() {
         })
         .sort((a, b) => a.product_name.localeCompare(b.product_name));
       setDrawRows(rows);
+      setDrawSnapshot({ quoteId: id, rowVersion: loadedRowVersion });
       loaded = true;
     } catch (error: unknown) {
       Sentry.captureException(error, { tags: { source: 'critical_action', action: 'draw_down_quote_load' } });
@@ -3888,6 +3898,19 @@ export default function QuoteBuilder() {
       toast('error', 'This browser could not keep a safety note for the Partial Order, so it was not sent. Allow this site to store data, or use another browser, then try again.');
       return;
     }
+    // KI-190: the dialog's balance belongs to drawSnapshot; its booked prices come from this
+    // screen. Both must be the same booking version, or the rep would order against terms they
+    // never saw: reload first.
+    const drawVersion = drawSnapshot?.quoteId === id ? drawSnapshot.rowVersion : null;
+    if (drawVersion === null || drawVersion !== quoteRowVersionRef.current) {
+      setShowDrawModal(false);
+      quoteVersionRecoveryRequiredRef.current = true;
+      staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
+      setStaleSaveOpen(true);
+      toast('warning', 'This booking changed since you opened it. Nothing was ordered. Reload to see what is left and the prices, then try again.');
+      setDrawing(false);
+      return;
+    }
     try {
       const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('draw_down_quote', withBelowCostReason('draw_down_quote', {
         p_quote_id: id,
@@ -3896,9 +3919,7 @@ export default function QuoteBuilder() {
         p_idempotency_key: drawKey,
         // KI-190: the booking version the dialog was prepared from. A booking that another
         // draw or an edit changed since is refused (QUOTE_STALE_WRITE), as Whole Convert does.
-        p_expected_row_version: drawSnapshotRef.current?.quoteId === id
-          ? drawSnapshotRef.current.rowVersion
-          : quoteRowVersionRef.current,
+        p_expected_row_version: drawVersion,
       }, reason)));
       if (error) throw error;
       const result = assertRpcResult<{ status: string; order_id?: string; order_number?: string; warnings?: string[]; fully_drawn?: boolean; extra_order_id?: string; extra_order_number?: string }>(data, 'draw_down_quote');
@@ -3998,12 +4019,15 @@ export default function QuoteBuilder() {
       // Reload the whole quote (balance and booked prices) before another draw.
       if (hasRpcCode(error, RpcErrorCodes.QUOTE_STALE_WRITE)) {
         // A late reply for a booking this screen no longer shows changes nothing here.
-        if (drawSnapshotRef.current?.quoteId !== drawScope) return;
+        if (currentQuoteIdRef.current !== drawScope) return;
         quoteVersionRecoveryRequiredRef.current = true;
         staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
         setShowDrawModal(false);
         setStaleSaveOpen(true);
-        toast('warning', 'This booking changed since you opened it (another order was drawn from it, or it was edited). Nothing was ordered. Reload to see what is left and the prices, then try again.');
+        const staleDetail = rpcCodeDetail(error, RpcErrorCodes.QUOTE_STALE_WRITE)?.replace(/^[:\s]+/, '') ?? '';
+        toast('warning', staleDetail
+          ? staleDetail.charAt(0).toUpperCase() + staleDetail.slice(1)
+          : 'This booking changed since you opened it. Nothing was ordered. Reload to see what is left and the prices, then try again.');
         setDrawing(false);
         return;
       }

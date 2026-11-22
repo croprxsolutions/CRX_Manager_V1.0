@@ -30,10 +30,14 @@ BEGIN
   IF NOT FOUND
      OR (SELECT count(*) FROM pg_proc o
           WHERE o.pronamespace = 'public'::regnamespace AND o.proname = 'draw_down_quote') <> 1
-     OR md5(p.prosrc) IS DISTINCT FROM 'f7b823a4f232f67c24a8c7383f7c56b9' THEN
+     OR md5(p.prosrc) IS DISTINCT FROM 'f7b823a4f232f67c24a8c7383f7c56b9'
+     -- Grants too: if draws were suspended by revoking EXECUTE, don't silently restore them.
+     OR ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+                FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
+        IS DISTINCT FROM ARRAY['authenticated', 'postgres'] THEN
     -- md5 of the reviewed 20261106110000 body: any other body (a hotfix, or this
     -- migration already applied) stops here rather than being dropped.
-    RAISE EXCEPTION 'PREFLIGHT: draw_down_quote is not the reviewed 20261106110000 body (md5 f7b823a4f232f67c24a8c7383f7c56b9), or this migration already ran';
+    RAISE EXCEPTION 'PREFLIGHT: draw_down_quote is not the reviewed 20261106110000 body (md5 f7b823a4f232f67c24a8c7383f7c56b9) with EXECUTE for authenticated only, or this migration already ran';
   END IF;
 END
 $preflight$;
@@ -308,6 +312,8 @@ BEGIN
           WHERE o.pronamespace = 'public'::regnamespace AND o.proname = 'draw_down_quote') <> 1
      OR position('BOOKING_QUANTITY_PRECISION' IN p.prosrc) = 0
      OR position('DRAW_DOWN_BOOKING_VERSION' IN p.prosrc) = 0
+     OR position('IF p_expected_row_version IS NULL THEN' IN p.prosrc) = 0
+     OR position('IF v_row_version IS DISTINCT FROM p_expected_row_version THEN' IN p.prosrc) = 0
      OR position('DRAW_DOWN_INTENT_REPLAY' IN p.prosrc) = 0
      OR position('DRAW_DOWN_INTENT_REPLAY' IN p.prosrc) > position('DRAW_DOWN_BOOKING_VERSION' IN p.prosrc)
      OR p.proowner <> 'postgres'::regrole

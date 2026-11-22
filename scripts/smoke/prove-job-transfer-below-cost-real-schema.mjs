@@ -387,6 +387,9 @@ const CASES = {
   // Sol round 2 #3: a restricted-use product's line carries its real quantity (the register copies the line's).
   rupSmall: transfer(job('fl oz', 3, 39, 23, G, false, RUP)),
   rupSupplied: transfer(job('Gal', 10, 0, 0, G, true, RUP)),
+  // Luna round 4: a grower's own product with a not-a-number quantity is refused (the job's line read stops), one owner or two.
+  suppliedNaN: transfer(job('Gal', "'NaN'::numeric", 0, 0, G, true, NC)),
+  suppliedNaNSplit: transfer(job('Gal', "'NaN'::numeric", 0, 0, F, true, NC)),
   overrideSmall: transfer(job('fl oz', 3, 39, 23, O)),
   overrideNormal: transfer(job('Gal', 10, 5000, 3000, O)),
   overrideSplit: transfer(job('Gal', 10, 5000, 3000, OS)),
@@ -505,6 +508,8 @@ async function main() {
   refusedProbe(CASES.roundingBig, /JOB_LINE_ROUNDING: \[PROVER\] JBC chem can't be recorded to 4 decimals in Gal/);
   refusedProbe(CASES.roundingZero, /JOB_LINE_ROUNDING: \[PROVER\] JBC chem/);
   console.log('[after] roundingBig ($1.60 off), roundingZero (no quantity left): refused JOB_LINE_ROUNDING');
+  for (const k of ['suppliedNaN', 'suppliedNaNSplit']) refusedProbe(CASES[k], /cannot convert NaN/);
+  console.log('[after] suppliedNaN, suppliedNaNSplit: refused (NaN quantity), nothing billed');
   for (const [k, who] of [['resaveSmallAdmin', 'admin'], ['resaveSmallRep', 'sales rep']]) {
     const v = okProbe(CASES[k]);
     console.log(`[after] ${k}: ${v}`);

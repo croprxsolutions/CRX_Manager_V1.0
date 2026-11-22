@@ -94,7 +94,9 @@ BEGIN
     UPDATE jobs SET status = 'completed', deleted_at = now() WHERE id = v_job;
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM;
   END;
-  IF v_err IS NULL OR v_err NOT LIKE 'BOOKING_NOT_YOURS: spray job SMK-D1-%' THEN
+  -- Since 20270210110000 (#2196) the completed-job delete guard may refuse it first; either refusal holds.
+  IF v_err IS NULL OR (v_err NOT LIKE 'BOOKING_NOT_YOURS: spray job SMK-D1-%'
+                       AND v_err NOT LIKE 'A completed job is billable work and only an admin can delete it (job SMK-D1-%') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (N1b) rep B completing and deleting rep A''s booked job in one update was not refused: %', v_err;
   END IF;
   v_n := v_n + 1;

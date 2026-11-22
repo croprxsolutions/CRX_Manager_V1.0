@@ -3,6 +3,9 @@
 ## 2026-11-22 — KI-129 / #2195: prepayment checks count as payments received
 
 **Decision (Mason, 2026-11-22, relayed by the bug-sprint captain):** "yes should count as payment received". Month-End payments received counts each Prepayment Manager check in the month it was entered, at its current amount (all buckets of one check are one payment); Record Payment checks count in full (an overpayment's prepay credit is not added again); voided payments and deleted old-style payments do not count. A later edit or delete of a prepayment check changes that month's screen figure, never a closed month's saved close receipt. Made in migration `20270208140000_month_close_payments_received_recheck.sql` (live only once applied) with the #2175 close re-check (the 2026-11-21 entry below asked for both together).
+## 2026-11-22 — #2197: sales reps may reactivate an inactive customer from its page
+
+**Decision (Mason, 2026-11-22, relayed by the bug captain: "Yes, reps too").** The customer page's Reactivate button shows for admins and sales reps, matching what the database already allows (`customers_update` policy: admin or sales rep) and the #2048 refusal text ("An admin or sales rep must reactivate"). Screen-only change; the database rule is unchanged. Drivers and applicators still get no button and are refused by the database.
 
 ## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
 

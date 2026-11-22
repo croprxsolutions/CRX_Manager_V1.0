@@ -35,6 +35,7 @@ interface QuickItem {
   product_name: string;
   quantity: number;
   unit_size: string;
+  inventory_unit: string; // display only: the unit the line is sold and stocked in (KI-203)
   price_cents: number;
 }
 
@@ -332,6 +333,7 @@ export default function QuickDeliveryModal({
           product_name: product.product_name,
           quantity: 1,
           unit_size: product.unit_size || '',
+          inventory_unit: product.inventory_unit || '',
           price_cents: getTierPrice(product),
         },
       ]);
@@ -630,7 +632,7 @@ export default function QuickDeliveryModal({
                             className="w-20 text-center px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-crx-green/30"
                           />
                         </td>
-                        <td className="px-3 py-2 text-secondary">{item.unit_size || '—'}</td>
+                        <td className="px-3 py-2 text-secondary">{item.inventory_unit || item.unit_size || '—'}</td>
                         {showPricing && (
                           <td className="px-3 py-2 text-right font-mono text-secondary">
                             {fmtCurrency(item.price_cents)}

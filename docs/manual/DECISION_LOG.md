@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-21 — #2165 (#2018): Mason approved Sol round 5 on the driver screens
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, run round 5").** Sol rounds 1-4 on #2165 each found a different screen-side problem, and each was fixed: address typing, a missing delivery site falling back to the farm's default address, a missing stop site, and a role refresh resetting entered quantities. Round 3 also raised the drivers' whole-row farm read; Mason accepted that for one release ("Yes, accept it"), the same as on #2161, and #2162 removes it. Smaller items are deferred to #2167. This entry names #2165 so Sol may run round 5 on it.
+
 ## 2026-11-21 — #2161: Mason owner-accepted 1 Sol finding(s) at `203179d85e5e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2161 at `203179d85e5e` (base `0ac30a2fc832`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

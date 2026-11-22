@@ -203,15 +203,17 @@ describe('column lists match the schema registry', () => {
 const COLUMN_CARVED = [...COST_TABLES, 'quote_versions'];
 const LOCK_STAMP = '20261022101000';
 const NO_ANON = ['quote_items', 'quote_versions'];
+// KI-123 (20270127130000) removed every anon read; columns added from then on must not grant anon anything.
+const ANON_REVOKED_STAMP = '20270127130000';
 
-function requiredGrants(table: string): Array<[privilege: string, role: string]> {
+function requiredGrants(table: string, anonReads: boolean): Array<[privilege: string, role: string]> {
   const out: Array<[string, string]> = [['SELECT', 'authenticated']];
   if (table !== 'quote_versions') out.push(['REFERENCES', 'authenticated']);
-  if (!NO_ANON.includes(table)) out.push(['SELECT', 'anon']);
+  if (anonReads && !NO_ANON.includes(table)) out.push(['SELECT', 'anon']);
   return out;
 }
 
-function ungrantedNewColumns(sql: string): string[] {
+function ungrantedNewColumns(sql: string, anonReads = true): string[] {
   const text = sql.replace(/--[^\n]*/g, '');
   const missing: string[] = [];
   const tables = COLUMN_CARVED.join('|');
@@ -228,7 +230,10 @@ function ungrantedNewColumns(sql: string): string[] {
         missing.push(`${table}.${column}: looks like a cost field; add it to COST_COLUMNS or rename it`);
         continue;
       }
-      for (const [privilege, role] of requiredGrants(table)) {
+      if (!anonReads && new RegExp(`GRANT[^;]*\\(([^)]*\\b${column}\\b[^)]*)\\)[^;]*\\bON\\s+(?:TABLE\\s+)?(?:public\\.)?"?${table}"?\\s+TO\\s+[^;]*\\banon\\b`, 'i').test(text)) {
+        missing.push(`${table}.${column}: anon must not be granted (KI-123)`);
+      }
+      for (const [privilege, role] of requiredGrants(table, anonReads)) {
         // Each privilege needs its own list: `GRANT SELECT, REFERENCES (cols)` scopes only REFERENCES.
         const grant = new RegExp(`GRANT\\s+(?:[A-Z]+\\s*,\\s*)*${privilege}\\s*\\(([^)]*)\\)\\s*ON\\s+(?:TABLE\\s+)?(?:public\\.)?"?${table}"?\\s+TO\\s+[^;]*\\b${role}\\b`, 'gi');
         const granted = [...text.matchAll(grant)].some((g) => g[1].split(',').map((c) => c.trim().replace(/"/g, '').toLowerCase()).includes(column));
@@ -245,7 +250,7 @@ describe('new columns on the column-carved cost tables ship with their grants', 
   it(`every ADD COLUMN after ${LOCK_STAMP} grants the table's read privileges on it`, () => {
     const problems: string[] = [];
     for (const name of readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql') && n.slice(0, 14) > LOCK_STAMP)) {
-      for (const col of ungrantedNewColumns(readFileSync(join(MIGRATIONS, name), 'utf8'))) problems.push(`${name}: ${col}`);
+      for (const col of ungrantedNewColumns(readFileSync(join(MIGRATIONS, name), 'utf8'), name.slice(0, 14) < ANON_REVOKED_STAMP)) problems.push(`${name}: ${col}`);
     }
     expect(problems, 'add the column to the SELECT (and REFERENCES / INSERT / UPDATE where the table has them) grants in the same migration').toEqual([]);
   });
@@ -253,6 +258,10 @@ describe('new columns on the column-carved cost tables ship with their grants', 
   it('the scanner catches each shape it exists for (mutation guard)', () => {
     const ALL_READS = (t: string, c: string) => [`${t}.${c}: authenticated SELECT`, `${t}.${c}: authenticated REFERENCES`, `${t}.${c}: anon SELECT`];
     expect(ungrantedNewColumns('ALTER TABLE public.invoices ADD COLUMN zz_new text;')).toEqual(ALL_READS('invoices', 'zz_new'));
+    // After KI-123: no anon grant required, and one given is refused.
+    const SIGNED_IN = 'ALTER TABLE public.invoices ADD COLUMN zz_new text;\nGRANT SELECT (zz_new) ON public.invoices TO authenticated;\nGRANT REFERENCES (zz_new) ON public.invoices TO authenticated;';
+    expect(ungrantedNewColumns(SIGNED_IN, false)).toEqual([]);
+    expect(ungrantedNewColumns(`${SIGNED_IN}\nGRANT SELECT (zz_new) ON public.invoices TO anon;`, false)).toEqual(['invoices.zz_new: anon must not be granted (KI-123)']);
     expect(ungrantedNewColumns('ALTER TABLE ONLY quotes ADD COLUMN IF NOT EXISTS zz_a int, ADD zz_b int;')).toEqual([...ALL_READS('quotes', 'zz_a'), ...ALL_READS('quotes', 'zz_b')]);
     expect(ungrantedNewColumns('ALTER TABLE IF EXISTS ONLY public.quotes ADD COLUMN zz_c int;')).toEqual(ALL_READS('quotes', 'zz_c'));
     // quote_versions: authenticated SELECT only; quote_items: no anon.

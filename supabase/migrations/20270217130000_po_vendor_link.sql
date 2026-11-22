@@ -56,10 +56,9 @@ $tx$;
 -- 1. The link.
 ALTER TABLE public.purchase_orders ADD COLUMN vendor_id uuid REFERENCES public.vendors(id);
 CREATE INDEX idx_purchase_orders_vendor_id ON public.purchase_orders (vendor_id);
--- The table's standing read grants for a non-cost column (20261021141000): anon has no row policy, so it sees no rows.
+-- Signed-in read grants for a non-cost column (20261021141000); anon gets none (20270127130000 removed anon reads).
 GRANT SELECT (vendor_id) ON public.purchase_orders TO authenticated;
 GRANT REFERENCES (vendor_id) ON public.purchase_orders TO authenticated;
-GRANT SELECT (vendor_id) ON public.purchase_orders TO anon;
 COMMENT ON COLUMN public.purchase_orders.vendor_id IS
   'KI-144: the vendor this PO was written for. Set only by trigger_00_po_vendor_id from the vendor text when the PO is created or its vendor text changes; a vendor rename keeps it. NULL = the text matched no single active vendor. The vendor column keeps the printed name.';
 
@@ -123,6 +122,10 @@ AS $function$
 DECLARE
   v_id uuid;
 BEGIN
+  IF TG_OP = 'INSERT' OR NEW.vendor IS DISTINCT FROM OLD.vendor THEN
+    -- Takes turns with a vendor create/rename/restore on the same name (one name = one vendor).
+    PERFORM pg_advisory_xact_lock(144, hashtext(lower(btrim(COALESCE(NEW.vendor, '')))));
+  END IF;
   IF TG_OP = 'INSERT' THEN
     NEW.vendor_id := public._po_vendor_id_for_text(NEW.vendor);
     RETURN NEW;
@@ -160,6 +163,13 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
 BEGIN
+  IF TG_OP = 'INSERT' OR lower(btrim(NEW.name)) IS DISTINCT FROM lower(btrim(OLD.name)) OR OLD.deleted_at IS DISTINCT FROM NEW.deleted_at THEN
+    -- Takes turns with PO writes on the old and new names, so the check below sees them committed.
+    IF TG_OP = 'UPDATE' THEN
+      PERFORM pg_advisory_xact_lock(144, hashtext(lower(btrim(COALESCE(OLD.name, '')))));
+    END IF;
+    PERFORM pg_advisory_xact_lock(144, hashtext(lower(btrim(COALESCE(NEW.name, '')))));
+  END IF;
   IF NEW.deleted_at IS NULL
      AND (TG_OP = 'INSERT' OR lower(btrim(NEW.name)) IS DISTINCT FROM lower(btrim(OLD.name)) OR OLD.deleted_at IS NOT NULL)
      AND EXISTS (
@@ -316,7 +326,7 @@ BEGIN
   END IF;
   IF NOT has_column_privilege('authenticated', 'public.purchase_orders', 'vendor_id', 'SELECT')
      OR NOT has_column_privilege('authenticated', 'public.purchase_orders', 'vendor_id', 'REFERENCES')
-     OR NOT has_column_privilege('anon', 'public.purchase_orders', 'vendor_id', 'SELECT')
+     OR has_column_privilege('anon', 'public.purchase_orders', 'vendor_id', 'SELECT')
      OR has_column_privilege('authenticated', 'public.purchase_orders', 'vendor_id', 'UPDATE')
      OR has_table_privilege('authenticated', 'public.purchase_orders', 'SELECT') THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: vendor_id grants are wrong';

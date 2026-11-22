@@ -167,11 +167,11 @@ try {
   assert.match(attempt(USERS.admin, `UPDATE public.purchase_orders SET notes = 'x' WHERE id = '${PO5}'; v := 'NOT REFUSED';`), /PO_CLOSED/);
   console.log('[trigger] insert and real save link; text change follows; notes/forged link/case-only edit keep it; closed PO guard intact');
 
-  // Access: the table's standing read grants (anon has no row policy, so no rows); never writable by signed-in users.
+  // Access: signed-in read grant only (no anon read); never writable by signed-in users.
   assert.equal(scalar(`SELECT has_column_privilege('authenticated', 'public.purchase_orders', 'vendor_id', 'SELECT')::text || has_column_privilege('authenticated', 'public.purchase_orders', 'vendor_id', 'UPDATE')::text || has_column_privilege('anon', 'public.purchase_orders', 'vendor_id', 'SELECT')::text;`),
-    'truefalsetrue');
+    'truefalsefalse');
   assert.match(attempt(USERS.rep, `${refuse(`u := ${bill(VA, PO1)};`)} v := t;`), /NOT_AUTHORIZED/);
-  console.log('[access] vendor_id has the standard PO column read grants (anon sees no rows), not writable; a rep still cannot create a bill');
+  console.log('[access] vendor_id readable when signed in, not by anon, not writable; a rep still cannot create a bill');
 
   console.log('\nPO_VENDOR_LINK_PROOF_PASS');
 } finally {

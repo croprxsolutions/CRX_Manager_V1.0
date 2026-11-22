@@ -7,10 +7,12 @@
 -- locks existing rows in product order, then creates each missing row in that same order and locks it.
 -- Job completion locked existing rows (trg_zz_lock_job_stock_rows, KI-150) but still inserted a missing
 -- row inside _complete_job_replay_impl_20261015, in chemical order, with no conflict handling.
--- Two complete_job calls are also held apart by the application-record number lock, which is taken
--- before that insert, so they do not hit it today. A delivery (or any other writer) creating the same
--- missing row is not held by that lock. Moving creation into this trigger, in product order, is the
--- same wait the delivery completion already uses, and it stays safe if that number lock ever moves.
+-- Lock order is the application-record number lock, then stock rows. create_application_record_from_blend_ticket
+-- takes that number lock first and the stock row after. This trigger used to take the stock row on the
+-- status update, and complete_job only took the number lock later, so a job and a blend ticket could deadlock.
+-- The trigger now takes pg_advisory_xact_lock(hashtext('next_application_record_number')) before any stock row
+-- (existing or missing). complete_job takes the same lock again in next_application_record_number; a transaction
+-- advisory lock stacks, so the second take returns at once and both release when the transaction ends.
 --
 -- This replaces only _lock_job_stock_rows_in_order. The trigger still runs after the hold sync and
 -- before the deduction loop. It still locks existing rows first. Then, for each product the job will
@@ -71,6 +73,11 @@ AS $function$
 DECLARE
   v_product record;
 BEGIN
+  -- Number lock first, then stock rows: the same order as create_application_record_from_blend_ticket.
+  -- Taking a stock row here and the number lock later deadlocks with that path. The same transaction
+  -- takes this lock again inside next_application_record_number; that second take does not wait.
+  PERFORM pg_advisory_xact_lock(hashtext('next_application_record_number'));
+
   -- KI-150: existing Main Warehouse rows first, in product order, after the hold sync and before the
   -- deduction loop. Creating a row before this lock can deadlock with a writer that already holds an
   -- existing row (the delivery completion's Sol r2 case).
@@ -121,7 +128,7 @@ BEGIN
     INTO v_fn
     FROM pg_proc p
    WHERE p.oid = to_regprocedure('public._lock_job_stock_rows_in_order()');
-  IF v_fn.oid IS NULL OR md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM '3aa1bb8f25907ab7bf1c58a83fd0331d' THEN
+  IF v_fn.oid IS NULL OR md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM 'cf1dbb690d8249733e9db0e60e0528a7' THEN
     RAISE EXCEPTION 'JOB_STOCK_ROW_POSTFLIGHT: the lock function is not the reviewed body';
   END IF;
   IF NOT v_fn.prosecdef OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']

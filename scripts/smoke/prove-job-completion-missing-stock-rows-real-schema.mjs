@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270206120000_job_completion_missing_stock_rows.sql.
+ * Real-schema proof for 20270207130000_job_completion_missing_stock_rows.sql.
  * Contract: docs/plans/2026-11-21-job-completion-missing-stock-rows-CONTRACT.md.
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
@@ -25,7 +25,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270206120000_job_completion_missing_stock_rows.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270207130000_job_completion_missing_stock_rows.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'job-completion-missing-stock-rows-reverse.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
@@ -272,6 +272,9 @@ const J_BEFORE_A = id('11'), J_BEFORE_B = id('12');
 const J_AFTER_A = id('21'), J_AFTER_B = id('22');
 const J_EXISTING = id('31'), J_RETRY = id('32'), J_NOT_STARTED = id('33');
 const J_MIX = id('41');
+const J_BLEND_BEFORE = id('61'), J_BLEND_AFTER = id('62');
+const PX = id('ba');
+const INV_X = id('da');
 const PM = id('b0'); // sorts before PF: a completion that created PM before locking PF would deadlock with the writer
 
 function seed() {
@@ -288,13 +291,15 @@ function seed() {
       ('${PE}', '[PROVER] Retry', 'JS-PE', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true),
       ('${PF}', '[PROVER] On hand', 'JS-PF', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true),
       ('${PG}', '[PROVER] Grower supplied', 'JS-PG', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true),
-      ('${PM}', '[PROVER] Mixed missing', 'JS-PM', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true);
+      ('${PM}', '[PROVER] Mixed missing', 'JS-PM', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true),
+      ('${PX}', '[PROVER] Blend race', 'JS-PX', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true);
     INSERT INTO public.products (product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
         rate_per_acre, current_cost, tier1_price, tier2_price, tier3_price, pricing_version, is_active)
       SELECT '[PROVER] Filler ' || g, 'JS-F' || g, 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, false
         FROM generate_series(1, 2000) g;
     INSERT INTO public.inventory (id, product_id, location, unit_size, quantity_available, quantity_prebooked, quantity_on_order)
-      VALUES ('${INV_F}', '${PF}', 'Main Warehouse', 'Gal', 10, 0, 0);`);
+      VALUES ('${INV_F}', '${PF}', 'Main Warehouse', 'Gal', 10, 0, 0),
+             ('${INV_X}', '${PX}', 'Main Warehouse', 'Gal', 20, 0, 0);`);
   const job = (jid, number, status) =>
     `INSERT INTO public.jobs (id, job_number, customer_id, job_date, status, created_by) VALUES ('${jid}', '${number}', '${CUST}', current_date, '${status}', '${ADMIN}');`;
   const chem = (jid, pid, qty, sort, supplied = false) =>
@@ -322,6 +327,10 @@ function seed() {
     ${job(J_MIX, 'JS-MX', 'in_progress')}
     ${chem(J_MIX, PM, 1, 1)}
     ${chem(J_MIX, PF, 1, 2)}
+    ${job(J_BLEND_BEFORE, 'JS-BBT', 'in_progress')}
+    ${chem(J_BLEND_BEFORE, PX, 1, 1)}
+    ${job(J_BLEND_AFTER, 'JS-BAT', 'in_progress')}
+    ${chem(J_BLEND_AFTER, PX, 1, 1)}
   `);
   psql(`DROP INDEX IF EXISTS public.idx_job_chemicals_product_id;
     DROP INDEX IF EXISTS public.idx_job_chemicals_job;
@@ -395,7 +404,23 @@ async function beforeCases() {
   assert.equal(jobs.t2.code, 0, jobs.t2.out);
   assert.equal(scalar(`${onHand(PA)}`), '-9');
   assert.equal(scalar(`${onHand(PB)}`), '-13');
-  console.log('[case] before: the plain stock insert collides in opposite order; two jobs still both finish because the record-number lock runs first, and the on-hand is minus both jobs');
+  const blend = await blendVersusJob(J_BLEND_BEFORE);
+  assert.ok(/deadlock detected/i.test(blend.blend.out + blend.job.out), `a blend ticket and a job must deadlock before the number lock moves:\n${blend.blend.out}\n${blend.job.out}`);
+  assert.ok(Number.isFinite(at(blend.blend.out, 'S')) && Number.isFinite(at(blend.job.out, 'S')), `both must start:\n${blend.blend.out}\n${blend.job.out}`);
+  console.log('[case] before: the plain stock insert collides in opposite order; two jobs still both finish because the record-number lock runs first; a blend ticket that holds that lock and then the stock row deadlocks with a job');
+}
+
+// Same order as create_application_record_from_blend_ticket: the application-record number lock, then the stock row.
+async function blendVersusJob(job) {
+  const [blend, jobRun] = await Promise.all([
+    session(`BEGIN; ${STAMP('S')}
+      SELECT pg_advisory_xact_lock(hashtext('next_application_record_number'));
+      SELECT pg_sleep(2.5);
+      SELECT 1 FROM public.inventory WHERE product_id = '${PX}' AND location = 'Main Warehouse' FOR UPDATE;
+      SELECT 'blend done'; ${STAMP('E')} ROLLBACK;`),
+    session(`BEGIN; ${STAMP('S')} ${complete(job)} SELECT 'job ' || (SELECT status FROM public.jobs WHERE id = '${job}'); ${STAMP('E')} COMMIT;`, 400),
+  ]);
+  return { blend, job: jobRun };
 }
 
 async function afterCases() {
@@ -406,7 +431,7 @@ async function afterCases() {
   assert.notEqual(again.status, 0, 'a second apply must refuse');
   assert.match(again.output, /JOB_STOCK_ROW_PREFLIGHT/, again.output);
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._lock_job_stock_rows_in_order()'::regprocedure;`),
-    '3aa1bb8f25907ab7bf1c58a83fd0331d');
+    'cf1dbb690d8249733e9db0e60e0528a7');
   assert.equal(scalar(`SELECT prosecdef::text || ',' || array_to_string(proconfig, ';') || ',' || has_function_privilege('authenticated', oid, 'EXECUTE') || ',' || has_function_privilege('anon', oid, 'EXECUTE') FROM pg_proc WHERE oid = 'public._lock_job_stock_rows_in_order()'::regprocedure;`),
     'true,search_path=public, pg_temp,false,false');
   console.log('[case] the migration applies once, a second apply refuses, and the lock function stays private');
@@ -454,6 +479,22 @@ async function afterCases() {
   assert.equal(scalar(`SELECT status FROM public.jobs WHERE id = '${J_NOT_STARTED}';`), 'scheduled');
   assert.equal(scalar(`${rowCount(PE)}`), '1');
   console.log('[case] one job still deducts an existing row, skips a customer-supplied chemical, replays a saved key, and refuses a job that has not been started');
+
+  const retook = psql(`BEGIN;
+    SELECT pg_advisory_xact_lock(hashtext('next_application_record_number'));
+    SELECT pg_advisory_xact_lock(hashtext('next_application_record_number'));
+    SELECT 'retook';
+  ROLLBACK;`);
+  assert.match(retook.stdout, /retook/, 'taking the number lock twice in one transaction must not wait');
+  const beforeHand = scalar(`${onHand(PX)}`);
+  const blend = await blendVersusJob(J_BLEND_AFTER);
+  const blendOut = blend.blend.out + blend.job.out;
+  assert.ok(!/deadlock detected/i.test(blendOut), `no deadlock expected:\n${blendOut}`);
+  assert.equal(blend.blend.code, 0, blend.blend.out);
+  assert.equal(blend.job.code, 0, blend.job.out);
+  assert.match(blend.job.out, /job completed/, blend.job.out);
+  assert.equal(scalar(`${onHand(PX)}`), String(Number(beforeHand) - 1));
+  console.log('[case] a job and a blend ticket both finish: the job takes the number lock before the stock row, and takes that lock again without waiting');
 }
 
 async function rollbackCases() {

@@ -1,4 +1,4 @@
--- Rollback for supabase/migrations/20270206120000_job_completion_missing_stock_rows.sql
+-- Rollback for supabase/migrations/20270207130000_job_completion_missing_stock_rows.sql
 -- (proven by scripts/smoke/prove-job-completion-missing-stock-rows-real-schema.mjs).
 -- Refuses, changing nothing, unless the lock function is still the body that migration installed.
 -- Then restores the KI-150 body (lock existing rows only). Rows already created stay; the deduction
@@ -15,7 +15,7 @@ BEGIN
     INTO v_fn
     FROM pg_proc p
    WHERE p.oid = to_regprocedure('public._lock_job_stock_rows_in_order()');
-  IF v_fn.oid IS NULL OR md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM '3aa1bb8f25907ab7bf1c58a83fd0331d' THEN
+  IF v_fn.oid IS NULL OR md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM 'cf1dbb690d8249733e9db0e60e0528a7' THEN
     RAISE EXCEPTION 'ROLLBACK_REFUSED: _lock_job_stock_rows_in_order is not the reviewed body';
   END IF;
   IF NOT v_fn.prosecdef OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']

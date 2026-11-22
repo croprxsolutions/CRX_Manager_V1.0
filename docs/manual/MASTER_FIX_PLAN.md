@@ -117,7 +117,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-14 | KI-196 | LOW | Open | The same chemical can be found by different words on different screens and be grouped or labelled differently. | KNOWN_ISSUES (2026-11-21 audit) |  | Agent (unassigned) |
 | W3-15 | KI-197 | LOW | Open | A second admin on a stale screen can silently replace a newer cost correction; one label may point at the wrong PO. | KNOWN_ISSUES (2026-11-21 audit) |  | Agent (unassigned) |
 | W3-16 | #2172 | LOW | Open | A very large batch (about 3,000 approvals) could make Confirm silently send nothing. Not reachable today (hundreds of rates). | GitHub issue | #2172 | Agent (unassigned) |
-| W3-17 | #2135 | LOW | Open | Staff see an inflated short-stock count and get two warnings and two notifications; stock math is right. | GitHub issue | #2135 | Agent (unassigned) |
+| W3-17 | #2135 | LOW | Fix in review (`20270213100000`) | Staff see an inflated short-stock count and get two warnings and two notifications; stock math is right. | GitHub issue | #2135 | Agent (unassigned) |
 | W3-51 | #1829 | LOW | Check first | A confirmed rate approval could be lost if the reply is dropped and the user leaves. | GitHub issue | #1829 | Agent (unassigned) |
 | D-04 | KI-29 | LOW | Mason decision | Several stuck deliveries, negative stock rows, flagged products and odd PO lines need Mason's yes/no before anyone changes real records. | KNOWN_ISSUES |  | Mason decision |
 

@@ -25,6 +25,9 @@ const CANDIDATE = '20270213100000_single_short_stock_warning.sql';
 const lf = (f) => readFileSync(f, 'utf8').replaceAll('\r\n', '\n');
 const candidate = lf(path.join(ROOT, 'supabase', 'migrations', CANDIDATE));
 const reverse = lf(path.join(ROOT, 'scripts', 'smoke', 'single-short-stock-warning-reverse.sql'));
+const reverse1942 = lf(path.join(ROOT, 'scripts', 'smoke', 'inventory-edge-cases-1942-reverse.sql'));
+const INNER = 'public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)';
+const innerMd5 = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${INNER}'::regprocedure;`);
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const run = (sql, flags = []) => docker([...PSQL, ...flags], { input: sql, allowFailure: true });
 const ADMIN = USERS.admin;
@@ -94,7 +97,8 @@ const probe = (name) => {
       p_quantities => ${qty ?? 'NULL'}, p_idempotency_key => 'c2-${name}', p_evidence => 'no_proof', p_evidence_ref => '[C2] fixture');`)}
     v := v || ' | replay_same=' || (r = r2)
       || ' activity=' || (SELECT count(*) FROM public.activity_feed WHERE related_entity_id = '${del}' AND event_type = 'delivery_short_stock')
-      || ' notices=' || (SELECT count(*) FROM public.notifications WHERE related_entity_id = '${del}' AND notification_type = 'stock_warning');`));
+      || ' notices=' || (SELECT count(*) FROM public.notifications WHERE related_entity_id = '${del}' AND notification_type = 'stock_warning')
+      || ' stock_same=' || (${stock(del)} = split_part(split_part(v, ' stock=', 2), ' ', 1));`));
 };
 
 // Expected warnings come from the business rule (one warning per short product), not from the new code.
@@ -106,9 +110,9 @@ const EXPECT = {
   noStockRow: 'count=1 flag=true warnings=1 activity=1 notices=1 admins=1',
 };
 const split = (got) => {
-  const m = got.match(/^ok\|(.*) stock=(\w+) \| replay_same=(\w+) activity=(\d+) notices=(\d+)$/);
+  const m = got.match(/^ok\|(.*) stock=(\w+) \| replay_same=(\w+) activity=(\d+) notices=(\d+) stock_same=(\w+)$/);
   assert.ok(m, `unexpected probe output: ${got}`);
-  return { warn: m[1], stock: m[2], replaySame: m[3], replayWarn: `activity=${m[4]} notices=${m[5]}` };
+  return { warn: m[1], stock: m[2], replaySame: m[3], replayWarn: `activity=${m[4]} notices=${m[5]}`, replayStock: m[6] };
 };
 
 try {
@@ -138,7 +142,16 @@ try {
     assert.equal(now.stock, old[name].stock, `${name}: stock and ledger must match the old body exactly`);
     assert.equal(now.replaySame, 'true', `${name}: replay must return the same receipt`);
     assert.equal(now.replayWarn, expected.match(/activity=\d+ notices=\d+/)[0], `${name}: replay must write nothing`);
+    assert.equal(now.replayStock, 'true', `${name}: replay must leave stock and ledger as they were`);
   }
+
+  console.log('Rollback order:');
+  const inner = innerMd5();
+  assert.match(`${run(reverse1942).stderr}`, /ROLLBACK_REFUSED: #2135 relies on this body/, '#1942 rollback must refuse while #2135 is live');
+  assert.equal(innerMd5(), inner, 'a refused #1942 rollback changes nothing');
+  run(`GRANT EXECUTE ON FUNCTION ${WRAP} TO authenticated;`);
+  assert.match(`${run(reverse, ['-1']).stderr}`, /SINGLE_SHORT_STOCK_REVERSE_DRIFT: an API role/, 'reverse must refuse when an API role can run the wrapper');
+  run(`REVOKE EXECUTE ON FUNCTION ${WRAP} FROM authenticated;`);
 
   console.log('Reverse:');
   const back = run(reverse, ['-1']);
@@ -149,6 +162,13 @@ try {
   assert.equal(wrapMd5(), before, 'a refused reverse changes nothing');
   const again = run(candidate, ['-1']);
   assert.match(`${again.stdout}${again.stderr}`, /POSTFLIGHT_OK/, 'candidate must re-apply after the reverse');
+  // Other order: undo #2135, then #1942; the candidate must then refuse (it needs #1942's per-product check).
+  assert.equal(run(reverse, ['-1']).status, 0, 'reverse again');
+  const back1942 = run(reverse1942);
+  assert.equal(back1942.status, 0, `#1942 rollback after #2135's: ${back1942.stdout}${back1942.stderr}`);
+  assert.notEqual(innerMd5(), inner, '#1942 rollback restored the earlier completion body');
+  assert.match(`${run(candidate, ['-1']).stderr}`, /SINGLE_SHORT_STOCK_BASELINE_DRIFT: the completion body is not #1942/, 'candidate must refuse without #1942');
+  assert.equal(wrapMd5(), before, 'a refused candidate changes nothing');
 
   console.log('SINGLE_SHORT_STOCK_WARNING_PROOF_PASS');
 } finally {

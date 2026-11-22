@@ -5,8 +5,12 @@ DO $reverse_preflight$
 BEGIN
   -- Only undo this file's body: a later change to the wrapper would be silently discarded.
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._complete_delivery_period_preflight_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)'))
-     IS DISTINCT FROM 'd73f5f4d99609013f9f2097d41b25ff1' THEN
+     IS DISTINCT FROM 'f13018d7449506ff80c69facfb51b000' THEN
     RAISE EXCEPTION 'SINGLE_SHORT_STOCK_REVERSE_DRIFT: the wrapper is not 20270213100000_single_short_stock_warning''s body';
+  END IF;
+  IF has_function_privilege('anon', 'public._complete_delivery_period_preflight_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)', 'EXECUTE') OR has_function_privilege('authenticated', 'public._complete_delivery_period_preflight_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._complete_delivery_period_preflight_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'SINGLE_SHORT_STOCK_REVERSE_DRIFT: an API role can run the wrapper now; this script would revoke that';
   END IF;
 END;
 $reverse_preflight$;

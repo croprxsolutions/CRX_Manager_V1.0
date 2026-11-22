@@ -37,9 +37,9 @@ BEGIN
     RAISE EXCEPTION 'SINGLE_SHORT_STOCK_BASELINE_DRIFT: the wrapper body is not the one this file replaces (already applied?)';
   END IF;
   -- The warning this file keeps lives in the completion body (#1942): it must still check each product's total.
-  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regproc('public._complete_delivery_authorized_impl_20270122')
-                  AND prosrc LIKE '%quantity_available, 0) < v_need_total%') THEN
-    RAISE EXCEPTION 'SINGLE_SHORT_STOCK_BASELINE_DRIFT: the completion body no longer checks each product''s total';
+  IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._complete_delivery_authorized_impl_20270122(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
+     IS DISTINCT FROM '70e318a7f05d51d2cf6c3c6ea6226379' THEN
+    RAISE EXCEPTION 'SINGLE_SHORT_STOCK_BASELINE_DRIFT: the completion body is not #1942''s (it must check each product''s total)';
   END IF;
 END;
 $preflight$;
@@ -122,7 +122,7 @@ BEGIN
    FOR UPDATE;
 
   -- #2135: the repeated-line short-stock check that stood here duplicated the completion body's own check
-  -- (#2045 counts each product once against the delivery's total), so its warnings were written twice. Removed;
+  -- (#1942 counts each product once against the delivery's total), so its warnings were written twice. Removed;
   -- the row lock pass above is kept as it was.
   v_result := public._complete_delivery_aggregate_impl(
     p_delivery_id,
@@ -144,7 +144,7 @@ REVOKE ALL ON FUNCTION public._complete_delivery_period_preflight_impl(uuid,text
 DO $postflight$
 BEGIN
   IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._complete_delivery_period_preflight_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)'))
-     IS DISTINCT FROM 'd73f5f4d99609013f9f2097d41b25ff1' THEN
+     IS DISTINCT FROM 'f13018d7449506ff80c69facfb51b000' THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: the wrapper is not this file''s body';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('public._complete_delivery_period_preflight_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)')

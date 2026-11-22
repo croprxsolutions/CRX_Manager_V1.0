@@ -189,6 +189,8 @@ export default function DeliveryDetail() {
   const completeClaimRef = useRef(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [resendCopyCheck, setResendCopyCheck] = useState<ReceiptCloseResult | null>(null);
+  // An "already sent" answer belongs to the delivery it was asked for; a new route never reuses it (Luna LOW).
+  useEffect(() => { setResendCopyCheck(null); }, [id]);
   const [quickTaskOpen, setQuickTaskOpen] = useState(false);
   const [deliveryQtys, setDeliveryQtys] = useState<Record<string, number>>({});
   const [driverIssueType, setDriverIssueType] = useState<DeliveryIssueType>('none');
@@ -1493,6 +1495,8 @@ export default function DeliveryDetail() {
       }
       // The current picks, so a brand corrected after completion shows (Brand PR B-3).
       const brandInfo = await loadDeliveryBrandInfo(delivery.id);
+      // Moved to another delivery during the lookup: send nothing; the paused receipt stays listed (Luna MED).
+      if (signatureRouteIdRef.current !== delivery.id) return;
       const deliveredLines = items
         .filter((item) => (item.quantity_delivered ?? item.quantity) > 0)
         .map((item) => ({ name: item.product?.product_name || 'Product', qty: item.quantity_delivered ?? item.quantity, ...brandInfo.get(item.id) }));

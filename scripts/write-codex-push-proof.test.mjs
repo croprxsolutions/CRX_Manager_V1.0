@@ -1398,56 +1398,81 @@ function collisionPromptSkipsWork(prompt) {
 // A feature branch is reviewed against origin/staging, so a merge of origin/staging
 // must carry exactly as a main merge does on a main-bound branch (#2185 lost Sol round 6).
 {
+  const { ownerAcceptedForPr } = await import("../.claude/hooks/sol-accept-lib.mjs");
   const scriptPath = fileURLToPath(new URL("./write-codex-push-proof.mjs", import.meta.url));
-  const repo = tempDir("crx-carry-staging-");
-  const git = (...args) => execFileSync("git", ["-c", "user.name=Carry Test", "-c", "user.email=carry@example.invalid", ...args], {
-    cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
-  }).trim();
-  const carry = (...extra) => spawnSync(process.execPath, [scriptPath, "--carry-forward", ...extra], { cwd: repo, encoding: "utf8" });
-  const commitAll = (message) => { git("add", "-A"); git("commit", "-qm", message); return git("rev-parse", "HEAD"); };
-  const decisionLog = path.join(repo, "docs", "manual", "DECISION_LOG.md");
-  const append = (file, text) => writeFileSync(file, readFileSync(file, "utf8") + text);
-  const writeProof = (headSha, proof) => {
-    const proofPath = codexPushProofPath(repo, headSha);
-    mkdirSync(path.dirname(proofPath), { recursive: true });
-    writeFileSync(proofPath, JSON.stringify(proof));
-  };
-  try {
+  const STAGING = "origin/staging";
+  const PR_URL = "https://github.com/example/app/pull/77";
+  // One throwaway repo: main and staging at one commit, a feature branch with one code change.
+  const setup = () => {
+    const repo = tempDir("crx-carry-staging-");
+    const git = (...args) => execFileSync("git", ["-c", "user.name=Carry Test", "-c", "user.email=carry@example.invalid", ...args], {
+      cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const commitAll = (message) => { git("add", "-A"); git("commit", "-qm", message); return git("rev-parse", "HEAD"); };
+    const file = (rel) => path.join(repo, ...rel.split("/"));
+    const write = (rel, text) => { mkdirSync(path.dirname(file(rel)), { recursive: true }); writeFileSync(file(rel), text); };
+    const readProof = (headSha) => JSON.parse(readFileSync(codexPushProofPath(repo, headSha), "utf8"));
+    const writeProof = (headSha, proof) => {
+      const proofPath = codexPushProofPath(repo, headSha);
+      mkdirSync(path.dirname(proofPath), { recursive: true });
+      writeFileSync(proofPath, JSON.stringify(proof));
+    };
+    // Land a commit on a remote-tracking ref without leaving the feature branch.
+    const land = (ref, message, edit) => {
+      git("switch", "-q", "--detach", ref);
+      edit();
+      const sha = commitAll(message);
+      git("update-ref", `refs/remotes/${ref}`, sha);
+      git("switch", "-q", "claude/feature-x");
+      return sha;
+    };
+    const carry = (...extra) => spawnSync(process.execPath, [scriptPath, "--carry-forward", ...extra], { cwd: repo, encoding: "utf8" });
     git("init", "-q", "-b", "main");
     git("config", "core.autocrlf", "false");
-    writeFileSync(path.join(repo, ".gitignore"), ".claude/session-state/\n");
+    write(".gitignore", ".claude/session-state/\n");
     // The repo's real rule: GitHub ignores it, a local merge honours it.
-    writeFileSync(path.join(repo, ".gitattributes"), "docs/manual/DECISION_LOG.md merge=union\n");
-    mkdirSync(path.join(repo, "src"), { recursive: true });
-    mkdirSync(path.dirname(decisionLog), { recursive: true });
-    writeFileSync(path.join(repo, "src", "a.ts"), "export const a = 1;\n");
-    writeFileSync(decisionLog, "# Decisions\n");
-    const mainTip = commitAll("base");
-    git("update-ref", "refs/remotes/origin/main", mainTip);
-    git("update-ref", "refs/remotes/origin/staging", mainTip);
-    git("switch", "-q", "-c", "claude/feature-x", "origin/staging");
-    writeFileSync(path.join(repo, "src", "a.ts"), "export const a = 2;\n");
+    write(".gitattributes", "docs/manual/DECISION_LOG.md merge=union\n");
+    write("src/a.ts", "export const a = 1;\n");
+    write("docs/manual/DECISION_LOG.md", "# Decisions\n- old entry\n");
+    const base = commitAll("base");
+    git("update-ref", "refs/remotes/origin/main", base);
+    git("update-ref", "refs/remotes/origin/staging", base);
+    git("switch", "-q", "-c", "claude/feature-x", STAGING);
+    write("src/a.ts", "export const a = 2;\n");
     const reviewedHead = commitAll("pr change");
-    writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: mainTip, verdict: "clean" }));
+    writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: STAGING }));
+    return { repo, git, commitAll, file, write, readProof, writeProof, land, carry, base, reviewedHead };
+  };
+  const withRepo = (fn) => { const ctx = setup(); try { fn(ctx); } finally { rmSync(ctx.repo, { recursive: true, force: true }); } };
+  // A carried proof for `head` on the same base (a restamp-shaped carry needs no model call to fake).
+  const sameBaseCarry = (head, source) => buildCarryForwardProof({ headSha: head, baseSha: source.base_sha, source, mode: "restamp" });
 
-    // Staging gains a docs-only PR.
-    git("switch", "-q", "--detach", "origin/staging");
-    writeFileSync(path.join(repo, "docs", "manual", "notes.md"), "# Notes\n");
-    const stagingTip = commitAll("a docs-only PR landed on staging");
-    git("update-ref", "refs/remotes/origin/staging", stagingTip);
-    git("switch", "-q", "claude/feature-x");
-
-    // Merging main into a staging-bound branch is not its base: refused.
+  // 1. A docs-only staging merge carries with no model call, bound to the staging tip.
+  withRepo(({ repo, git, write, land, carry, writeProof, readProof, reviewedHead, base }) => {
+    // Merging main (which moved) into a staging-bound branch is not its base: refused (Sol LOW 7).
+    land("origin/main", "a hotfix on main", () => write("src/hotfix.ts", "export const h = 1;\n"));
     git("merge", "-q", "--no-edit", "origin/main");
-    assert.match(carry().stderr, /not a merge of origin\/staging/, "staging carry: names origin/staging as the base to merge");
+    assert.equal(git("rev-list", "--count", "--merges", "HEAD^..HEAD"), "1", "wrong-base setup: a real two-parent merge of main");
+    assert.match(carry().stderr, /not a merge of origin\/staging/, "staging carry: a main merge is not this branch's base");
+    git("reset", "-q", "--hard", reviewedHead);
 
+    const stagingTip = land("origin/staging", "a docs-only PR landed on staging", () => write("docs/manual/notes.md", "# Notes\n"));
     git("merge", "-q", "--no-edit", "origin/staging");
     const mergedHead = git("rev-parse", "HEAD");
+
+    // A release review's proof never seeds a staging carry (Sol HIGH 3), nor one with no review kind.
+    writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: GUARDED_BASE, releaseRules: true }));
+    assert.match(carry().stderr, /records a origin\/main release review, not the origin\/staging review/, "staging carry: a release proof is refused");
+    writeProof(reviewedHead, { ...buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean" }), review_ref: undefined });
+    assert.match(carry().stderr, /records no review kind/, "staging carry: a proof with no review kind is refused");
+    writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: STAGING }));
+
     const ok = carry();
     assert.equal(ok.status, 0, `staging carry: a docs-only staging merge carries with no model call (${ok.stderr})`);
-    const minted = JSON.parse(readFileSync(codexPushProofPath(repo, mergedHead), "utf8"));
+    const minted = readProof(mergedHead);
     assert.equal(minted.carry.mode, "disjoint", "staging carry: minted as a disjoint carry");
     assert.equal(minted.base_sha, stagingTip, "staging carry: bound to the staging tip, not main");
+    assert.equal(minted.review_ref, STAGING, "staging carry: keeps the review kind for the next carry");
     assert.equal(proofValid(minted, mergedHead, Date.now(), stagingTip), true, "staging carry: the gates accept it for the merged head and staging tip");
     assert.equal(proofValidForMerge({
       data: minted, headSha: mergedHead, nowMs: Date.now(), baseSha: stagingTip,
@@ -1456,54 +1481,90 @@ function collisionPromptSkipsWork(prompt) {
     }), true, "staging carry: the PR merge gate accepts it against GitHub's staging base");
 
     // A hand edit inside the staging merge commit is refused.
-    writeFileSync(path.join(repo, "src", "c.ts"), "export const sneaky = true;\n");
+    write("src/c.ts", "export const sneaky = true;\n");
     git("add", ".");
     git("commit", "-q", "--amend", "--no-edit");
     assert.match(carry().stderr, /something else changed/, "staging carry: an edited staging merge is refused");
-    git("reset", "-q", "--hard", mergedHead);
+  });
 
-    // Both sides add a DECISION_LOG entry (the #2185 case): the union merge is clean, the
-    // shared file routes to the focused collision check, never a refusal or a free carry.
-    append(decisionLog, "- PR entry\n");
-    const prDecision = commitAll("pr decision entry");
-    writeProof(prDecision, buildCarryForwardProof({
-      headSha: prDecision, baseSha: stagingTip, source: { head_sha: mergedHead, base_sha: stagingTip, timestamp: new Date().toISOString() },
-      mode: "owner_accepted",
-    }));
-    const accepted = JSON.parse(readFileSync(codexPushProofPath(repo, prDecision), "utf8"));
-    accepted.owner_accepted = [{ n: 1, reason: "business non-issue" }];
-    writeProof(prDecision, accepted);
-    git("switch", "-q", "--detach", "origin/staging");
-    append(decisionLog, "- staging entry\n");
-    const stagingTip2 = commitAll("another PR's decision entry landed on staging");
-    git("update-ref", "refs/remotes/origin/staging", stagingTip2);
+  // 2. Both sides add a DECISION_LOG entry (the #2185 case): the union merge is clean and the
+  //    shared file gets the focused check, never a refusal or a free carry.
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+    const log = file("docs/manual/DECISION_LOG.md");
+    const append = (text) => writeFileSync(log, readFileSync(log, "utf8") + text);
+    append("- PR entry\n");
+    const head = commitAll("pr decision entry");
+    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+    land("origin/staging", "another PR's decision entry", () => append("- staging entry\n"));
+    git("merge", "-q", "--no-edit", "origin/staging");
+    const dry = carry("--dry-run");
+    assert.equal(dry.status, 0, `staging carry: a union-merged DECISION_LOG is not "something else changed" (${dry.stderr})`);
+    assert.match(dry.stdout, /collision check needed: both sides changed 1 file/, "staging carry: a shared DECISION_LOG gets the focused check");
+  });
+
+  // 3. Both sides rewrite the same existing DECISION_LOG line: union keeps both, so refused (Sol MED 4).
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+    const log = file("docs/manual/DECISION_LOG.md");
+    const swap = (to) => writeFileSync(log, readFileSync(log, "utf8").replace("- old entry", to));
+    swap("- old entry, PR version");
+    const head = commitAll("pr rewrites a decision");
+    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+    land("origin/staging", "staging rewrites it too", () => swap("- old entry, staging version"));
+    git("merge", "-q", "--no-edit", "origin/staging");
+    const refused = carry("--dry-run");
+    assert.equal(refused.status, 1, "staging carry: contradictory union edits are refused");
+    assert.match(refused.stderr, /edited or removed existing lines/, "staging carry: says why");
+  });
+
+  // 4. Staging lands a commit the branch also carries, then reverts it: the base nets to no
+  //    change, but the merge undoes it in the branch, so it needs the focused check (Sol HIGH 1).
+  withRepo(({ git, write, file, carry, commitAll, writeProof, base }) => {
+    git("switch", "-q", "-c", "shared", base);
+    write("src/auth.ts", "export const strict = true;\n");
+    const shared = commitAll("shared tightening");
+    git("switch", "-q", "claude/feature-x");
+    git("merge", "-q", "--no-edit", "shared");
+    const head = git("rev-parse", "HEAD");
+    writeProof(head, buildCodexPushProof({ headSha: head, baseSha: base, verdict: "clean", reviewRef: STAGING }));
+    git("switch", "-q", "--detach", shared);
+    git("revert", "--no-edit", "HEAD");
+    git("update-ref", "refs/remotes/origin/staging", git("rev-parse", "HEAD"));
     git("switch", "-q", "claude/feature-x");
     git("merge", "-q", "--no-edit", "origin/staging");
-    const unionHead = git("rev-parse", "HEAD");
-    const unionDry = carry("--dry-run");
-    assert.equal(unionDry.status, 0, `staging carry: a union-merged DECISION_LOG is not "something else changed" (${unionDry.stderr})`);
-    assert.match(unionDry.stdout, /collision check needed: both sides changed 1 file/, "staging carry: a shared DECISION_LOG gets the focused check");
-    assert.match(unionDry.stdout, /docs\/manual\/DECISION_LOG\.md/, "staging carry: names the shared file");
-    assert.equal(existsSync(codexPushProofPath(repo, unionHead)), false, "staging carry: the dry run writes nothing");
+    assert.equal(existsSync(file("src/auth.ts")), false, "revert setup: the merge removed the shared file from the branch");
+    const dry = carry("--dry-run");
+    assert.equal(dry.status, 0, `staging carry: the revert case is decided (${dry.stderr})`);
+    assert.match(dry.stdout, /collision check needed: both sides changed 1 file/, "staging carry: a merge that undoes branch content is never a free carry");
+  });
 
-    // An owner-accepted proof carries too (decision, 2026-11-22), keeping the acceptances.
-    git("reset", "-q", "--hard", prDecision);
-    git("switch", "-q", "--detach", stagingTip);
-    writeFileSync(path.join(repo, "docs", "manual", "more.md"), "# More\n");
-    const stagingTip3 = commitAll("docs-only staging PR");
-    git("update-ref", "refs/remotes/origin/staging", stagingTip3);
-    git("switch", "-q", "claude/feature-x");
+  // 5. An owner-accepted proof carries only through the focused check, which is shown each
+  //    accepted finding (Sol HIGH 2); one that lost its list is refused.
+  withRepo(({ git, write, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+    const source = readProof(reviewedHead);
+    write("docs/manual/DECISION_LOG.md", `${readFileSync(file("docs/manual/DECISION_LOG.md"), "utf8")}- accepted\n`);
+    const head = commitAll("owner acceptance");
+    const accepted = buildCarryForwardProof({ headSha: head, baseSha: source.base_sha, source, mode: "owner_accepted" });
+    accepted.owner_accepted = [{ n: 1, severity: "HIGH", text: "a business call", reason: "not live yet", pull_request: 77, pull_request_url: PR_URL }];
+    land("origin/staging", "docs-only staging PR", () => write("docs/manual/more.md", "# More\n"));
     git("merge", "-q", "--no-edit", "origin/staging");
-    const acceptedHead = git("rev-parse", "HEAD");
-    const ownerCarry = carry();
-    assert.equal(ownerCarry.status, 0, `staging carry: an owner-accepted proof carries over a staging merge (${ownerCarry.stderr})`);
-    const ownerMinted = JSON.parse(readFileSync(codexPushProofPath(repo, acceptedHead), "utf8"));
-    assert.deepEqual(ownerMinted.owner_accepted, accepted.owner_accepted, "staging carry: the acceptances travel with the proof");
-    assert.equal(ownerMinted.carry.root_review.owner_accepted, true, "staging carry: still marked owner-accepted, not fixed");
-    assert.equal(proofValid(ownerMinted, acceptedHead, Date.now(), stagingTip3), true, "staging carry: the gates accept it");
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-  }
+    const mergedHead = git("rev-parse", "HEAD");
+    // A later carry of the accepted review that lost the list (root still marked owner-accepted).
+    const lostList = sameBaseCarry(head, { ...accepted, head_sha: reviewedHead });
+    delete lostList.owner_accepted;
+    writeProof(head, lostList);
+    assert.match(carry("--dry-run").stderr, /does not list them/, "staging carry: an owner-accepted proof without its list is refused");
+    writeProof(head, accepted);
+    const dry = carry("--dry-run");
+    assert.equal(dry.status, 0, `staging carry: an owner-accepted proof is decided (${dry.stderr})`);
+    assert.match(dry.stdout, /collision check needed: .*owner-accepted, not fixed/, "staging carry: owner-accepted never carries for free");
+    // What the collision check would mint still binds to this PR at the merge gate (Sol LOW 6).
+    const carried = buildCarryForwardProof({ headSha: mergedHead, baseSha: git("rev-parse", "origin/staging"), source: accepted, mode: "collision_check" });
+    assert.deepEqual(carried.owner_accepted, accepted.owner_accepted, "staging carry: the acceptances travel with the proof");
+    assert.equal(ownerAcceptedForPr(carried, { number: 77, url: PR_URL, exactHead: true }), true, "staging carry: the merge gate counts it for its own PR");
+    assert.equal(ownerAcceptedForPr(carried, { number: 78, url: "https://github.com/example/app/pull/78", exactHead: true }), false, "staging carry: and for no other PR");
+  });
+  assert.ok(buildCollisionCheckPrompt({ ownerAccepted: true }).includes("ownerAcceptedFindings"), "collision prompt: points at the accepted findings it must weigh");
+  assert.match(buildCollisionCheckPrompt(), /BLOCKERS {2}— at least one blocker\/high-severity collision or other blocker\/high problem/, "collision prompt: any blocker counts in the verdict");
 }
 
 // ── restamp carry (Mason, 2026-11-04), end to end on a throwaway repository ──

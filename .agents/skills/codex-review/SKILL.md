@@ -292,9 +292,16 @@ decision only) immediately before the merge. It mints a carried proof for the ne
 
 - the new head is a merge whose parents are the Sol-reviewed head and today's base tip, and its
   content is exactly the conflict-free `git merge-tree` of those two, in the merge's own parent order
-  (a resolved conflict or any hand edit refuses; a `DECISION_LOG.md` union merge is clean);
-- an owner-accepted proof (`--carry-owner-accepted`) is a valid source: the carried proof keeps its
-  acceptance list and owner-accepted mark, and the collision check is told not to re-report them;
+  (a resolved conflict or any hand edit refuses; a `DECISION_LOG.md` union merge is clean when both
+  sides only added lines, and refuses when either side edited or removed an existing line);
+- the reviewed head's proof records the same review kind a full review of this branch would use today
+  (`review_ref` and `release_rules`; a release review never seeds a staging carry, a proof with no
+  review kind refuses);
+- an owner-accepted proof (`--carry-owner-accepted`) carries, but never for free: it always gets the
+  collision check, which is given each accepted finding and reports any the merge makes newly reachable,
+  wider or worse; the carried proof keeps the acceptance list, so it counts only for that PR;
+- "main's new files" are both what the base gained and what the merge changed in the branch's tree, so a
+  base change that was later reverted but undoes something the branch carried still gets the check;
 - the reviewed head's proof is a clean `gpt-6.2-sol`/`high` proof (full or itself carried) under 24 hours
   old, and for a carried one the original full review is under 24 hours old too (a chain expires);
 - and EITHER the PR's files and main's new files do not overlap and one side is plain documentation

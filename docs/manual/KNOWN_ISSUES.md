@@ -484,9 +484,11 @@ can make old splits refuse to save (LOW-MED).
 - Quote Builder's line math (`recalcItem`, `catalogPricePerAcre` in `src/lib/quoteCalc.ts`) multiplies and rounds
   in dollars, not integer cents. Found by CodeRabbit on PR #1078 (2026-10-23) and deferred: moving it to cents
   changes rounding on every quote line, so it needs its own money PR. LOW.
-- Partial-delivery draft resize stores header cost as the sum of unrounded line extensions (`20270203120000` ~L640),
-  while automatic invoice creation rounds each line (~L806): two half-cent lines give 1¢ versus 2¢. Cost only; the
-  P&L and Monthly Summary figure sale cost per line, so report impact looks nil. Found by Terra, re-verified
+- Partial-delivery draft resize stores header cost as the sum of unrounded line extensions (main `20261215110000`
+  ~L1237, staging `20270203120000` ~L640), while automatic invoice creation rounds each line (main ~L1403, staging
+  ~L806): two half-cent lines give 1¢ versus 2¢. The verified effect is a draft cost-header difference; no ordinary-sale
+  P&L or Monthly Summary effect is shown (they recompute cost per line; their credit-memo/header branches are unchecked).
+  Proof: the same half-cent fixture through both creation paths. Found by Terra, re-verified
   2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)). LOW.
 
 ### KI-18 — Dates and seasons follow the UTC clock or the browser clock (fixed; last part `20261208100000`)
@@ -675,7 +677,7 @@ RT-1's draft rates (`20261229110000`, live 2026-11-10) copy these as they are; n
 
 ### KI-117 — A re-saved split-billed field-application invoice takes its product's current EPA number
 **LOW · OPEN, parked for Mason · field-app billing / restricted-use records · found 2026-11-09 (review of #1688, carried into its replacement)**
-`_save_field_app_split_invoice_impl` (latest body now `20270129171000` ~L1054, insert ~L2105; re-verified 2026-11-21, which also found the line description falls back to the product's current name ~L2113) rebuilds invoice lines without
+`_save_field_app_split_invoice_impl` (latest body now `20270129171000` ~L1054, insert ~L2105; re-verified 2026-11-21, which also found the line description falls back to the product's current name ~L2113; separate from KI-157's PDF fallback when the saved EPA is blank) rebuilds invoice lines without
 `epa_registration`, so `_fill_invoice_line_epa` gives each rebuilt line its product's current number. If a split
 invoice is un-posted, edited and re-posted after its size's number changed, the restricted-use record uses the new
 number, not the one it was sold under. Live behavior today; REG-1 step 2 does not change it. The fix is to
@@ -733,7 +735,7 @@ fix needs an Edge deploy with Mason's approval. Repair step 3 (To-Do 0.17).
   window. `label_url` accepts any text. The Step 1 assign/preview stubs keep their "not set up" message.
 
 ### KI-125 — Bottom Line P&L and Monthly Summary subtract commissions on every booked order but count only CRX-invoiced revenue
-**HIGH · FIXED ON STAGING, awaiting the production release (#2149 merged to staging 2026-11-22; `20270206110000` not in the live ledger 2026-11-21, re-verified in the [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)) · was: FIX IN REVIEW (Claude, `20270206110000_pnl_commission_share_billed.sql`, to staging; [contract](../plans/2026-11-21-pnl-month-end-report-fixes-CONTRACT.md)) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #1)**
+**HIGH · OPEN (fixed on staging, awaiting the production release: #2149 merged to staging 2026-11-22; `20270206110000` not in the live ledger 2026-11-21, re-verified in the [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)) · was: FIX IN REVIEW (Claude, `20270206110000_pnl_commission_share_billed.sql`, to staging; [contract](../plans/2026-11-21-pnl-month-end-report-fixes-CONTRACT.md)) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #1)**
 Revenue counts posted/overdue/paid invoices by invoice date; commissions count every non-replaced commission by order
 date, invoiced or not. Most 2026 sales were billed in Chem Man, so net profit shows a six-figure loss that is not real
 (only 1 of 35 commissioned orders has a posted CRX invoice). Where: `_get_bottom_line_pnl_cost_impl_20261019` and
@@ -756,7 +758,7 @@ discounted the same way), against what was billed rather than the capped total. 
 invoice records: plan it with Taha (billing until 2026-12-15). Commission rows themselves are KI-13.
 
 ### KI-126 — P&L and Monthly Summary would multiply application-fee cost by acres twice
-**MED (latent) · FIXED ON STAGING with KI-125 (#2149; both reports use the fee-cost case, `20270206110000` get_monthly_summary ~L207 and the P&L cost function ~L249), awaiting the production release · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #2)**
+**MED (latent) · OPEN (fixed on staging with KI-125 (#2149; both reports use the fee-cost case, `20270206110000` get_monthly_summary ~L207 and the P&L cost function ~L249; awaiting the production release) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #2)**
 Fee lines store cost already extended by acres, with quantity = acres; both reports compute `cost_cents x quantity`.
 100 acres at $2/acre cost would show $20,000 COGS instead of $200. Latent: every live application service costs $0
 today. Fix: use the `is_application_fee` case `save_invoice` already uses, plus a prover with a costed fee line.
@@ -782,7 +784,7 @@ Where: `get_monthly_summary` and `_close_accounting_period_replay_impl_20261015`
 `allocation_sets` (UNION the legacy table, as the statement does) and use posted/overdue/paid.
 
 ### KI-130 — Monthly Summary's "AR balance" is always today's AR
-**LOW · FIXED ON STAGING with KI-125 (#2149, screen label only: "Current AR (today)"), awaiting the production release · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #7)**
+**LOW · OPEN (fixed on staging with KI-125: #2149, screen label only, "Current AR (today)"; awaiting the production release) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #7)**
 `get_monthly_summary.ar_balance_cents` has no date filter, so a past month shows today's receivables. The AR Aging tab
 has the real as-of figure. Fix: relabel "Current AR (today)" or reuse `get_ar_aging(p_period_end)`.
 
@@ -822,7 +824,7 @@ order's invoices or payments. Also unsettled: how partial deliveries, partial pa
 credits move a commission (returns are KI-13). Decided 2026-11-13 (DECISION_LOG): commission counts in profit when its sale
 is invoiced (by share billed, KI-125) and becomes payable only when the customer pays, a partial payment releasing the
 same share. Fix later: enforce the payable rule, per sale and per paid share, in the payout function.
-- **Commission basis ignores the standing discount (re-verified 2026-11-21, [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)).** Order commission is figured from `orders.total_profit` before the standing grower discount (`20270117130000_standing_discount_in_order_profit.sql` ~L21 says "commission after the discount is its own planned change"), while the invoice and profit reports subtract the discount. Not tracked elsewhere; latent on production while the billing switch is off. Belongs with this payout fix and To-Do 8.5.
+- **Commission basis ignores the standing discount (re-verified 2026-11-21, [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)).** Order commission is figured from `orders.total_profit` before the standing grower discount (`20270117130000_standing_discount_in_order_profit.sql` ~L21 says "commission after the discount is its own planned change"), while the invoice and profit reports subtract the discount. Not tracked elsewhere; latent on production while the billing switch is off. Separate from the payout gap above (payout checks pending status and balanced amounts but no customer-payment eligibility, `20261204100000` ~L1104-1207); To-Do 8.5 keeps commission basis and release-on-payment as distinct acceptance checks.
 
 ### KI-155 — The cut-over plan has two finish lines and no rules for opening-balance exceptions
 **MED · OPEN · launch/money · found 2026-11-11 ([business logic review](../audits/2026-11-11-business-logic-review.md) finding 6) · Mason + agents**
@@ -836,37 +838,47 @@ once). Fix later: one current cut-over procedure (To-Do 16.3, 16.4) that covers 
 ### KI-185 — Billing a finished job uses its planned acres, not the acres the applicator recorded
 **HIGH · OPEN (source-confirmed on main and staging; not reproduced end to end) · field-app billing/stock · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 6) · unassigned (Taha's billing area until 2026-12-15) · GitHub #2176**
 Job completion stores the actual acres per field on the application record (`_complete_job_replay_impl_20261015`,
-`20261217100000` ~L783-813) but never updates `job_fields` or `job_chemicals`. Transfer to Invoice
+`20261217100000` ~L783-813; with no acres supplied it falls back to the plan) but never updates `job_fields` or `job_chemicals`. Transfer to Invoice
 (`_transfer_job_to_invoice_intent_impl_20260908`, `20261120100000` ~L407-412, ~L476-484) sums the planned
 `acres_to_treat` for the invoice, the payer shares and per-acre service charges; office auto-draft uses the same
-transfer. Completion deducts the saved chemical quantity (~L817-869), not one matched to the acres applied. A job
-planned at 100 acres and sprayed on 80 bills 100 and deducts stock for 100. Live read-only 2026-11-21: the only
+transfer. Completion deducts the saved, company-supplied chemical quantities after unit conversion (~L817-869), not ones matched
+to the acres applied. A job planned at 100 acres and sprayed on 80 bills 100, and deducts stock for 100 when the saved
+quantities still reflect the plan. Live read-only 2026-11-21: the only
 active job-linked invoice is an **unposted draft** (one payer, so whole-job scope) whose acres follow the plan and
 differ from its application record by a few acres; review it before it is posted. Related: KI-186, To-Do 5.3.
-Fix: settle that billing follows applied acres, then make transfer, payer shares and stock use the same figure; prove
-an 80-of-100-acre two-grower job through the record, invoices, stock ledger and PDF.
+Fix: settle that billing follows applied acres, then make transfer, payer shares and stock use the same figure. Proof:
+a two-grower job with an uneven shortfall across fields, through both manual Transfer and office auto-draft (~L928-949),
+checking each payer's own acres and per-acre fee, the stock ledger in the inventory unit, and the PDF.
 
 ### KI-186 — A job-transfer invoice drops carrier water and prints a whole charge as the unit price
 **MED · OPEN (source-confirmed; PDF not rendered) · field-app billing/documents · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audits 6 and 7) · unassigned (Taha's billing area) · GitHub #2177**
 - Neither transfer insert copies `jobs.carrier_rate_gpa` into `invoices.diluent_rate_gpa` (`20261120100000`
-  ~L524-541, ~L755-779); the PDF prints a diluent line only when that rate is set (`invoicePdf.ts` ~L1155). Blend and
+  ~L524-541, ~L755-779); the PDF prints a diluent line only when that rate is set (shared renderer `supabase/functions/_shared/pdf/invoicePdf.ts`
+  ~L1155; legacy `src/lib/invoicePdf.ts` ~L266). Blend and
   per-line split invoices have no hand-off either. Staff can type it on the field invoice screen afterwards. Live
   2026-11-21: the one active job-linked invoice has no rate while its job has one.
 - Transfer stores each payer's whole chemical charge as quantity 1 at that price (~L585-590; single payer ~L818-822),
-  and the field-invoice PDF prints the applied total beside "$unit_price unit" (`invoicePdf.ts` ~L1180-1189), so
+  and the field-invoice PDF prints the applied total beside "$unit_price unit" (shared renderer ~L1178-1185; legacy ~L311-314), so
   12 gal can print as "$120.00 Gal". Single-grower jobs too.
-- The multi-owner Transfer confirmation (`JobDetail.tsx` ~L5387) says it creates ONE invoice; the database creates
-  one per owner (`20261120100000` ~L437-441, ~L504-545).
-Fix: copy the carrier rate, store or print the real per-unit price, correct the confirmation; render one PDF.
+- The multi-owner Transfer confirmation (`JobDetail.tsx` ~L5387, counting field owners ~L1695-1704) says it creates
+  ONE invoice, but when the job has more than one explicit billing-default customer the database creates an invoice
+  group, one per payer (`20261120100000` ~L429-448, ~L504-545); without those defaults it can create one invoice.
+Fix: copy the carrier rate (state which origins: Transfer, blend, per-line split), store or print the real per-unit
+price, and tie the confirmation to the server's grouping rule. Proof per included origin: stored rate, rate-times-acres
+total, billed unit and unit price, unchanged charge, both grouping configurations, and the rendered customer PDF.
 
 ### KI-189 — A return after a repriced invoice line credits the order price
 **MED · OPEN (source-confirmed on main and staging; not reproduced) · money/returns · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 2) · unassigned (credit memos are Taha's billing area) · GitHub #2180**
 Re-saving an ordinary draft invoice keeps a line's `order_item_id` and saved cost only when its unit price is unchanged
 (`_save_invoice_lineage_unaware_impl_20260827`, `20261106140000` ~L306-312). The ordinary return prices the credit from
 the order line (`_create_return_intent_impl_20260812`, `20261215110000` ~L2079-2081) and its cap checks the order
-price. An order line at $100 billed at $90 can credit $100 a unit, and the cost reversal can lose its link. Split,
-discount and tax returns use billed cents and are not affected. Live (audit aggregate, not re-run): 0 of 6 eligible
-posted lines differ from their order price. Fix: credit from the billed line; rolled-back edit, post, return, credit proof.
+price (`20261021155000` ~L963-988). A fictional order line at $100 billed at $90 can credit $100 a unit, and the cost
+reversal can lose its link. Discounted and taxed returns are NOT safe either: they find the billed line through the
+same `order_item_id` (`20270109100200` ~L557-616), so a repriced line falls back to the ordinary path or is refused.
+Only split returns with their own provenance survive. Live (audit aggregate, not re-run): 0 of 6 eligible posted lines
+differ from their order price. Fix: credit from the billed line. Proof (rolled back): a price decrease and an increase,
+a discounted or taxed reprice, the linked cost reversal, and the intended delivered-but-unbilled return path
+(`20260827041100` ~L1281-1314) unchanged.
 
 ### KI-190 — Partial Order commits a booking's current terms, not the ones the rep reviewed
 **HIGH · OPEN (source-confirmed on main and staging; not reproduced) · quotes/bookings · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 4) · unassigned (Taha builds Bookings Phase B) · GitHub #2181**
@@ -875,8 +887,11 @@ Whole Convert refuses a booking that changed since the screen loaded (`p_expecte
 none (`QuoteBuilder.tsx` ~L3838); the draw prices and splits against the current booking (`20261029110000` ~L298).
 Example: the rep sees 100 left and asks for 110 (10 extras); another rep draws 25 first; the stale request makes 75
 booked and 35 extras. A newly approved booked price can also reach the order unreviewed. A same-key retry is safe.
-Live (audit aggregate, not re-run): no partial orders yet. Not in the Phase B plan. Fix: bind the draw to the booking
-revision and the booked and extra prices shown; refuse and show what changed; two-tab proof.
+Staging adds an inactive-customer refusal (`20270201120000` ~L190-200); the stale path is the same on both for an
+active customer. Live (audit aggregate, not re-run): no partial orders yet. Not in the Phase B plan. Fix: bind the draw
+to the booking revision and the booked and extra prices shown; refuse and show what changed. Proof: an overdraw with
+extras, then separately a changed booked price and a changed extras price; each stale attempt writes nothing, and a
+previous successful draw still replays under its original key and payload.
 
 ### KI-191 — Orders converted from a booking have no salesperson
 **MED · OPEN (source-confirmed; live 2026-11-21: no orders trigger fills it) · quotes/orders/reports · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 4) · Mason decision (To-Do decision 30)**
@@ -884,12 +899,16 @@ Whole Convert, Partial Order and the extras order insert no `salesman_id` (`2026
 ~L426 and ~L1531); the only orders trigger on that column is the rep-scope guard. Order Detail shows no salesperson,
 salesperson-filtered sales reports leave the sale out (`20261229150000` ~L194, ~L249), and the rep cannot use the
 order's tax checkbox when that feature is on. Commission is unaffected (it follows the booking split). Needs the rule
-first: the booking's salesperson, or the rep who converts.
+first: the booking's salesperson, or the rep who converts. Either way the fix must set it on the server: the rep-scope
+guard refuses an order where a rep names a salesperson other than themselves (`20261015130000` ~L137-166,
+`20261027080400` ~L105-119), and a rep may convert another rep's booking. Proof: cross-rep whole and partial
+conversion, with commission still following the booking split.
 
 ### KI-192 — A booking's "left to draw" dollars are wrong when its lines have different prices
 **MED (display only) · OPEN · bookings · found 2026-11-17 (bookings flow audit D2), re-verified 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)) · unassigned (Bookings Phase B)**
 `get_booking_settlement` (`20260702180000` ~L237-250) values the remainder at the booking's weighted-average price.
-100 units at $1 plus 100 at $3, with the $1 line drawn, shows $200 left instead of $300 (and $300 booked instead of
+Fictional: the same product on two lines, 100 units at $1 and 100 at $3, with the $1 line drawn first (draws follow
+section and line order, `20261029110000` ~L1167-1173), shows $200 left instead of $300 (and $300 booked instead of
 $400). Orders use the real line prices, so only the card is wrong. Fix: value the remainder from the surviving line
 quantities and prices, as a Phase B line item.
 
@@ -900,48 +919,58 @@ cost. A template draft (`create_quote_from_template`, `20260611211058` ~L1074-11
 but no acres or quantities. "Email to grower" (`QuoteBuilder.tsx` ~L3277-3310) freezes the version through
 `create_quote_version` without the save that reprices a never-sent draft and validates its lines. A duplicate
 emailed without a save therefore goes out at the old price, which conversion later treats as the sent price, against
-`QUOTE_TO_DELIVERY.md` ("a new draft at today's prices"). Any save before sending avoids it. Fix: one first-send
-readiness check (save, reprice, line checks) for never-sent drafts, and show which manual prices carried over.
+`QUOTE_TO_DELIVERY.md` ("a new draft at today's prices"). A save before sending reprices tier-derived lines, but a
+copied manual override still wins (`20261104130000` ~L603-617). Fix: one first-send readiness check (save, reprice,
+the rate/unit and rate/acres checks of `QuoteBuilder.tsx` ~L2388-2418) for never-sent drafts, and show which manual
+prices carried over. Proof: the sent version, PDF and converted order agree, including a kept manual price; a template
+with a rate but no acres, or no unit, is refused with no sent version or email; a valid template sends.
 
 ### KI-194 — Quote send and PDF gaps: "Sent" before the email result, and differing PDF dates
 **LOW · OPEN · quotes/documents · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 3) · unassigned**
 - The version is frozen and marked Sent (`20261029100000` ~L957) before the mail call (`QuoteBuilder.tsx` ~L3393),
-  on purpose so a retry resends the same version; a failure shows a generic error. "Sent" also covers Mark Presented,
-  and the email log shows the last emailed time. Fix: say plainly that the version is saved but the email failed.
+  on purpose so a retry of the same send attempt reuses that version. Expiry and stale-version failures have their own
+  messages; a delivery failure after the freeze shows a generic error. "Sent" also covers Mark Presented,
+  and the email log shows the last emailed time. Fix: for a delivery failure after a successful freeze, say the version is saved but the email failed; prove a retry
+  creates no extra version or email.
   Related: To-Do 9.3.
 - Preview and download use today's date and the editor's expiry (~L2968-2977); email uses the saved date and stored
   expiry (~L3346). Re-downloading an already-sent quote prints today's date and possibly another expiry. Fix: issued
   copies use the frozen dates.
 
-### KI-195 — The Chemical Application Report prints today's EPA number and name, not the job's saved ones
+### KI-195 — The Chemical Application Report prints today's EPA number, not the job's saved one
 **MED · OPEN (source-confirmed) · restricted-use/regulatory records · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 1) · unassigned · GitHub #2183**
 Sprayed jobs keep their EPA number in `job_product_epa` (`20261204120000` ~L143-152), including an explicit unknown,
-but nothing in `src/` reads it: the report reads `products.epa_registration` and the live name
-(`chemicalApplicationReportFetch.ts` ~L100, ~L127). The 2026-11-06 changelog and DECISION_LOG promised a follow-up
-moving the sent proof, applicator sheet, chemical application report and WPS notice to the saved number; it was never
-tracked. After a catalog correction a regenerated report can disagree with the job record. Live (audit aggregate, not
-re-run): the one eligible snapshot matches the catalog today. Fix: those four printouts read the saved value, with
-KI-157 and KI-117.
+but nothing in `src/` reads it: the Chemical Application Report reads `products.epa_registration`
+(`chemicalApplicationReportFetch.ts` ~L125-135) and the WPS notice reads the catalog too (`JobDetail.tsx` ~L951-997).
+The applicator sheet prints no EPA column (`applicatorSheetPdf.ts` ~L239-260). The snapshot stores no product name, so
+the live name on the report (~L179-194) is a separate question. DECISION_LOG (~L1334-1338) promised a printout
+follow-up; it was never tracked. After a catalog correction a regenerated report can disagree with the job record.
+Live (audit aggregate, not re-run): the one eligible snapshot matches the catalog today. Fix: state each output's
+intended source, and have the report and WPS read the saved value. Proof: a corrected catalog number, an explicit
+unknown, and an unlocked job (which still uses the catalog, `20261204120000` ~L143-153). With KI-157 and KI-117.
 
 ### KI-198 — Shared-field job billing: Transfer and per-line Split Billing price the same work differently
-**HIGH if Transfer is used for real billing · MASON DECISION (To-Do decision 31) · field-app billing · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 7)**
+**HIGH if Transfer is used for real billing · OPEN (needs Mason, To-Do decision 31) · field-app billing · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 7)**
 Transfer to Invoice and office auto-draft take the job's saved chemical price and split the dollars by acres
 (`20261120100000` ~L547-566; auto-draft `20261217100000` ~L928-949). Per-line Split Billing resolves each grower's
-own eligible sent quote or tier (`20270129171000` ~L1229-1245). Fictional 60/40 job: $200 by Transfer, $264 per line.
+own eligible sent quote or tier, with manual overrides (`20270129171000` ~L1686-1755; latest sent-price helper
+`20270129180000` ~L117-190). Fictional 60/40 job (one product, the job price below one grower's own quote): the two
+paths give different totals.
 Neither is proven wrong: DECISION_LOG says a booked job and its invoices keep the booked price, "Own quote only"
 covers split and blend bills, and the old transfer screens are for testing only until replaced. No customer loss is
 shown. Decide which rule Transfer follows before field billing goes live.
 
 ### KI-199 — Fixed on staging, waiting for the production release
-**HIGH until released · FIXED ON STAGING · deliveries / field-app billing · recorded 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audits 5 and 6) · release owner: Taha or Mason (release/next)**
+**HIGH until released · OPEN (fixed on staging, awaiting the production release) · deliveries / field-app billing · recorded 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audits 5 and 6) · release owner: Taha or Mason (release/next)**
 - **A stale partial-delivery form can overstate what shipped.** On production, a partial delivery missing one line's
   quantity delivers that line in full (`20261215110000` ~L1069-1073, reached through the KI-150 wrapper), which
   drives the stock deduction and the draft invoice. #2045 (`20270203120000_inventory_edge_cases_1942`) refuses it
   with `DELIVERY_QUANTITIES_STALE`. Not in the live ledger 2026-11-21.
 - **Editing a standalone field draft onto another grower's field kept the old grower.** #2142
   (`20270205100000_field_app_refuses_payer_change`) refuses `FIELD_APP_PAYER_CHANGED`; #2171 (closes #2164) fixes
-  the lost-save message. Not in the live ledger 2026-11-21.
-Close each bullet when its release is merged, its migration is applied live and the live body is read back. KI-125,
+  the lost-save message (browser code, `FieldApplicationInvoice.tsx` ~L2289-2293). Not in the live ledger 2026-11-21.
+Close each bullet when its release is merged, its migration is applied live and the live body is read back; the
+field-draft bullet also needs the deployed screen checked through a lost-create-reply save. KI-125,
 KI-126 and KI-130 (#2149) keep their own entries.
 
 ## Inventory and deliveries
@@ -1289,10 +1318,12 @@ job and ticket, reading the stock ledger after each step.
 **MED · OPEN (source-confirmed on main and staging; reproduced by the audit in an isolated database) · deliveries · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 5) · unassigned · GitHub #2179**
 Cancel (`20270126110000` ~L431) updates remainders only where the cancelled delivery is the original, so a remainder
 whose follow-up was cancelled stays `scheduled`. Completion marks the follow-up's remainder `fulfilled`
-(`20270203120000` ~L597) and void (`20261107120000` ~L272) never reverts it. The order still shows the quantity owed
+(main `20261215110000` ~L1187-1197 via `20270126110000` ~L197-227; staging `20270203120000` ~L590-600, same
+behavior) and void (`20261107120000` ~L272) never reverts it. The order still shows the quantity owed
 and reserved, but the pending queue (`DeliveryRemainders.tsx`, default filter `pending`) no longer lists it. Live
 (audit aggregate, not re-run): no remainder rows yet. Fix: return the row to `pending` when its follow-up is cancelled
-or voided and the order still owes product; rolled-back proof of both paths.
+or voided and the order still owes product. Proof (rolled back): after each cancel and void, staff can schedule exactly
+one replacement for the owed quantity; include a partly completed follow-up and a case with nothing still owed.
 
 ## Customers, purchasing and settings
 
@@ -1428,11 +1459,13 @@ screen random retry codes, as the other screens use.
 **LOW · OPEN (source-confirmed) · products/reports · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 1) · unassigned**
 - The Field Application Invoice picker searches name and EPA only (`FieldAppChemicalEntry.tsx` ~L183); Quote Builder
   searches SKU, category, vendor, group and nickname but not EPA (`QuoteBuilder.tsx` ~L4316).
-- The shared package label prefers the old `unit_size` over the explicit size pair (`ProductOptionPresentation.tsx`
-  ~L34), so a 2.5 gal jug can read "Gal". Goes away with To-Do 2.14 (retire `unit_size`).
+- The shared package label prefers the packaging variant, then the old `unit_size`, then the size pair
+  (`ProductOptionPresentation.tsx` ~L32-37), so a jug with no variant and `unit_size` "Gal" reads "Gal". To-Do 2.14
+  (retire `unit_size`) must also say which text wins afterward.
 - Chemical Summary groups by product name and unit (`chemicalSummaryReportData.ts` ~L158); an active product may reuse
   a retired one's name (`20261107130000` ~L70), and a renamed product regroups. No completed-job group spans two
-  products today (audit aggregate). Fix: group by product id.
+  products today (audit aggregate). Fix: group by product id and normalized unit (units stay separate, ~L147-158), with
+  a fallback for lines lacking an id.
 
 ### KI-197 — PO cost corrections can overwrite each other; "Most recent received PO" sorts by PO date
 **LOW · OPEN (source-confirmed) · purchasing · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 2) · unassigned**
@@ -2005,14 +2038,14 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 19. **KI-112, a draft return-credit prover failed just after midnight UTC** — closed 2026-11-10 with no bug found. `main`'s `scripts/smoke/verify-return-credit-real-schema.mjs` (live-dump version) passed twice on a fresh read-only dump of the live schema: at 2:15 PM Central, and at 6:05 PM Central (`main` `a1ba9e63d`, 00:05 UTC on 2026-11-11, so the UTC date was a day ahead of Central, the window where the closed PR #1319 version failed). Both printed `RETURN_CREDIT_LIVE_SCHEMA_PASS ... smoke=SMOKE_PASS_ROLLBACK residue=0`, including the fractional COGS proofs (`FRACTIONAL_COGS_DOUBLE_ROUNDING_DETECTED`, `FRACTIONAL_REPORT_HALF_CENT_DETECTED`). The old failure belonged to the abandoned baseline-replay version only. Original text appended to the archive.
 20. **KI-143, vendor bills were checked against the ordered value** — closed 2026-11-11 by PR #1769, migration `20270103110000_ki143_vendor_bill_received_value_checks` (applied live 2026-11-11 8:24 AM Central, ledger `20261111142411`): a bill on a PO now needs a reason once the PO's bills go above 105% of what arrived (never more than the ordered total). Cancelled POs and a different vendor were already refused by the database. Proven by `scripts/smoke/prove-ki143-vendor-bill-received-value-real-schema.mjs`; live functions re-read after the apply.
 21. **KI-135, Inventory Value subtracted negative stock and counted no-cost stock as $0** — closed 2026-11-11 by PR #1792
-22. **KI-108, five products' stored stock did not match their transaction history** — closed 2026-11-11 by PR #1770, migration `20270103150000_ki108_stock_matches_history` (applied live 2026-11-11 9:17 AM Central, ledger `20261111151710`). Mason chose on 2026-11-10 to trust the history: Black Strap Molasses Tote 2,000 → 675, Start Right 2.0 Tote 670.19 → 140.19, 2,4D Amine Bulk 55 → 0, Start Right 2.0 2.5G 290 → 280; 2,4D Amine 2.5 Gal keeps 25 and got the missing +95 opening-stock row. Black Strap Bulk (−1,325) already matched and was not touched. Proven by `scripts/smoke/prove-ki108-stock-matches-history.mjs`; after the apply a read-only live check found every product's stored stock equal to its history and no open stock count, and the `/integrity-report` Inventory Ledger check passed (117 rows). Stock counts that overlap stock movement stay open as KI-134.
-23. **KI-134, a stock count double-counted anything that moved while the count was open** — closed 2026-11-11 by PR #1775, migration `20270103170000_cycle_count_variance_vs_onhand_at_count` (applied live 2026-11-11 1:21 PM Central, ledger `20261111192101`, with Mason's in-chat approval): each saved count line is now compared with the on hand read at that save, so a receipt or delivery during an open count is no longer applied twice by Complete. Proven by `scripts/smoke/prove-cycle-count-onhand-at-count-real-schema.mjs` (`CYCLE_COUNT_ONHAND_PROOF_PASS`) and the live smoke `update_cycle_count_item` (PASS, rolled back). Mason accepted the remaining window (stock posted between looking at a shelf and saving its count; DECISION_LOG 2026-11-11); D12 procedure: post a product's receipts and deliveries before counting it.
-24. **KI-142, a partly received purchase order could never be closed short** — closed 2026-11-11 by PR #1798 (database and list screens), migration `20270103180000_po_close_short` (applied live 2026-11-11 3:14 PM Central, ledger `20261111211435`, with Mason's `I approve` for its column grant), and PR #1807 (Close Short button, banner, records). A closed PO drops its unreceived remainder from on order, is final, can be billed only up to what arrived, and its line costs can be raised but never lowered (Mason, 2026-11-11). Proven by `scripts/smoke/prove-po-close-short-real-schema.mjs`; live read-only after apply: the function, three guard triggers and three columns exist, and no PO is closed. Which live POs to close is Mason's To-Do decision 23. Deferred polish: #1804.
-25. **KI-99, voiding an invoice left its write-off active** — closed 2026-11-21: `20270116100000_ki99_void_reverses_write_offs` (PR #1883, shipped in release #1990) is in the live ledger (`20261121055645`), and the installed `_void_invoice_split_provenance_impl_20260719` marks active write-offs reversed (read-only check 2026-11-21; 0 write-offs live). The UTC credit-month part was already fixed live 2026-11-07. Original text appended to the archive.
    (browser only, no migration): both totals come from `src/lib/inventoryValue.ts` and value only stock above zero with a
    cost, in exact whole cents; the Reports total adds the database's own rounded row values. Checked live 2026-11-11 as
    admin: the Inventory card and the Reports Inventory Cost total show the same figure, each with "19 below zero, not
    counted". The D12 item 7 relabel stays open under KI-135.
+22. **KI-108, five products' stored stock did not match their transaction history** — closed 2026-11-11 by PR #1770, migration `20270103150000_ki108_stock_matches_history` (applied live 2026-11-11 9:17 AM Central, ledger `20261111151710`). Mason chose on 2026-11-10 to trust the history: Black Strap Molasses Tote 2,000 → 675, Start Right 2.0 Tote 670.19 → 140.19, 2,4D Amine Bulk 55 → 0, Start Right 2.0 2.5G 290 → 280; 2,4D Amine 2.5 Gal keeps 25 and got the missing +95 opening-stock row. Black Strap Bulk (−1,325) already matched and was not touched. Proven by `scripts/smoke/prove-ki108-stock-matches-history.mjs`; after the apply a read-only live check found every product's stored stock equal to its history and no open stock count, and the `/integrity-report` Inventory Ledger check passed (117 rows). Stock counts that overlap stock movement stay open as KI-134.
+23. **KI-134, a stock count double-counted anything that moved while the count was open** — closed 2026-11-11 by PR #1775, migration `20270103170000_cycle_count_variance_vs_onhand_at_count` (applied live 2026-11-11 1:21 PM Central, ledger `20261111192101`, with Mason's in-chat approval): each saved count line is now compared with the on hand read at that save, so a receipt or delivery during an open count is no longer applied twice by Complete. Proven by `scripts/smoke/prove-cycle-count-onhand-at-count-real-schema.mjs` (`CYCLE_COUNT_ONHAND_PROOF_PASS`) and the live smoke `update_cycle_count_item` (PASS, rolled back). Mason accepted the remaining window (stock posted between looking at a shelf and saving its count; DECISION_LOG 2026-11-11); D12 procedure: post a product's receipts and deliveries before counting it.
+24. **KI-142, a partly received purchase order could never be closed short** — closed 2026-11-11 by PR #1798 (database and list screens), migration `20270103180000_po_close_short` (applied live 2026-11-11 3:14 PM Central, ledger `20261111211435`, with Mason's `I approve` for its column grant), and PR #1807 (Close Short button, banner, records). A closed PO drops its unreceived remainder from on order, is final, can be billed only up to what arrived, and its line costs can be raised but never lowered (Mason, 2026-11-11). Proven by `scripts/smoke/prove-po-close-short-real-schema.mjs`; live read-only after apply: the function, three guard triggers and three columns exist, and no PO is closed. Which live POs to close is Mason's To-Do decision 23. Deferred polish: #1804.
+25. **KI-99, voiding an invoice left its write-off active** — closed 2026-11-21: `20270116100000_ki99_void_reverses_write_offs` (PR #1883, shipped in release #1990) is in the live ledger (`20261121055645`), and the installed `_void_invoice_split_provenance_impl_20260719` marks active write-offs reversed (read-only check 2026-11-21; 0 write-offs live). The UTC credit-month part was already fixed live 2026-11-07. Original text appended to the archive.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

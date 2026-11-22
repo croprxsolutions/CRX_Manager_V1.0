@@ -8,6 +8,66 @@
 
 **Decision (Mason, in chat 2026-11-22, after Sol gate round 6: "Keep 10-30 rule").** Sol round 6 pointed out that the merge gates can still accept a Sol review of an earlier commit after a staging merge that "free carry only" would send to a full review. That is the 2026-10-30 rule (a later commit that touches no Sol-list file needs no new Sol), and Mason kept it: a staging merge that touches no Sol-list file keeps the earlier review, like any other harmless later commit, and one that touches the list is still refused at merge. The round's other two findings were fixed: the credential check on a collision delta now reads removed lines that start with `--`, and any copied file refuses the carry.
 
+## 2026-11-22 — #1989: Mason owner-accepted 1 Sol finding(s) at `52212b29d85a`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #1989 at `52212b29d85a` (base `9f791a20dcb3`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270216110000_purchasing_plan_booking_reservations.sql:256`, text sha256 `2eba2d64c8ca47b1` (the wording stays with the proof, not here)
+  Mason's reason: impossible numbers don't exist in real data (ref b001eb1cd7ba)
+
+## 2026-11-22 — #1989: impossible stored values are skipped and flagged
+
+**Decision (Mason, in chat, 2026-11-22: "Skip and flag them").** Sol round 10 on #1989 found three more HIGHs from the same mechanism (stored values that are not real: a booking dated at the database's minimum date, a NaN order quantity, a delivery scheduled at infinity). Asked the business trade-off, Mason chose: treat any quantity that is not a finite number, and any date outside 2000-2099, as bad data. The purchasing plan leaves only the bad piece out of the stock math, choosing the side that never buys short: a bad booking date counts as no date; a bad job date counts as today; a bad delivery is left out (the good ones still date the order); a bad hold expiry counts as no expiry; a bad stock, PO or draw value is not counted; a job with a bad line keeps its draw only up to its good lines. The record is listed under a new `check_data` list so someone fixes it. This replaces the round-9 rule that only skipped NaN and infinity.
+
+## 2026-11-22 — 3 more Sol rounds approved for #1989 (to round 13)
+
+**Decision (Mason, in chat, 2026-11-22: "i approve up to 3x more rounds").** Sol rounds 8 and 9 on #1989 each found HIGHs about stored values that are not real stock (a year-300000 PO date; NaN or infinite quantities and dates). Round 9's fix closes that class in one place: the allocator and its inputs ignore any non-finite quantity or date. This entry approves up to 3 more Sol rounds on #1989 beyond the earlier 3, so up to round 13; it waives no finding. If the same mechanism returns a BLOCKER or HIGH again, stop and put the business trade-off to Mason.
+
+## 2026-11-22 — Up to 3 Sol rounds approved for #1989 (booking-reservations redesign)
+
+**Decision (Mason, in chat, 2026-11-22: "Yes, approve Sol", then "approve up to 3 more sols").** #1989 was rebuilt from scratch to the 2026-11-21 redesign (the booking line is the reservation; contract `docs/plans/2026-11-21-booking-reservations-CONTRACT.md`), so it needs a fresh Sol review past the round-5 cap. This entry approves up to 3 more Sol rounds on #1989; it waives no finding.
+
+## 2026-11-21 — #1989 redesign: the booking line is the reservation; Firm first; a late PO is cover, never a second buy
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, build it"; first build "Per product").** After Sol raised a new HIGH on "which hold belongs to which line and PO" in rounds 5, 6, 7 and on Nov 20, Mason redesigned #1989 from the start. In `get_purchasing_plan` the open booking LINE is the reservation and the plan never reads a counted booking's or active job's own hold rows. One allocation per product, worked out fresh on every read, gives coverage and buying: shelf, then POs by date; orders, jobs, manual holds and Firm lines first, then Likely, then Maybe. A late PO counts as cover (flagged) and adds no buy. A reservation lasts while the booking is open; a line 14 days past its need date is flagged for follow-up. Stale holds take shelf stock only and never buy. A draft Planned booking counts like a sent one. Contract: `docs/plans/2026-11-21-booking-reservations-CONTRACT.md` (v4, replaces `2026-11-18-purchasing-held-stock-CONTRACT.md`); migration `20270207140000`.
+**Reverses:**
+- 2026-11-18 "held stock always counts as spoken for" (decision "1"): a Maybe booking's stock may now go to a Firm need elsewhere; the Maybe line then shows *not covered* and is not bought for.
+- 2026-11-18 "I agree cap it" (a draft booking's hold counted as must-buy, even for Maybe): a draft Planned booking now counts exactly like a sent one, by each line's own confidence and date.
+- Buying for a need whose only PO lands after it (`20270127110000`, #1971/#1990): a late PO keeps its claim and the plan never buys twice for it, for orders, jobs, manual holds and bookings alike.
+**Supersedes:** "2026-11-21 — #1989 rebuild: holds keep taking incoming stock (option B)" and "2026-11-19 — holds take incoming stock first" (the draw guess of that entry stays).
+
+## 2026-11-21 — #1989 rebuild: holds keep taking incoming stock (option B); Mason takes #1989 back from Taha
+
+**Decision (Mason, in chat, 2026-11-21: "option B").** Sol's Nov 20 review of #1989 raised four HIGHs on the hold and PO-claim logic, so the round-cap rule put the trade-off to Mason: (A) holds count only stock on the shelf, or (B) keep "holds take incoming stock first" (2026-11-19) and fix the HIGHs inside it. He chose B. The rebuild on #1990's body: a hold claims only PO stock arriving by its own expiry (earliest-expiring first); a Maybe, Likely, unset or undated line's claimed part keeps its own class and date and only reserves its PO stock; a hold whose source is gone, closed or converted, or beside a set-aside line, or a job hold on an unconvertible line, reserves shelf stock only and never buys. Mason started this session on 2026-11-21 to fix and land #1989, taking it back from the 2026-11-19 handover to Taha. Contract: `docs/plans/2026-11-18-purchasing-held-stock-CONTRACT.md` rules 9-11.
+
+## 2026-11-19 — #1989: Mason owner-accepted 1 Sol finding(s) at `eb7dc3196550`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1989 at `eb7dc3196550` (base `b81667dddc5b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270128150000_purchasing_plan_held_stock_never_free.sql:357`, text sha256 `26b59541609dbae7` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref afd784259870)
+
+## 2026-11-19 — Purchasing plan: the safe draw guess, and holds take incoming stock first (#1989)
+
+**Decision (Mason, in chat, 2026-11-19), after Sol round 5 on PR #1989** (third round in a row with a HIGH on draw allocation, so the business trade-off was put to him). (1) "Safe guess": draws keep the `20270127110000` least-sure, latest-first rule; matching each order to the line it names is dropped. Accepted cost: the plan may suggest buying for a Firm line an order already drew. (2) "Holds claim POs first": the part of a hold not on the shelf takes incoming purchase-order stock first, on each PO's date, as the hold does on receipt.
+**Supersedes:** the "order draws follow the line the order names" entry below.
+
+## 2026-11-19 — Sol round 5 approved for PR #1989 (purchasing plan held stock)
+
+**Decision (Mason, in chat, 2026-11-19: "ok round 5").** A fifth Sol round may run on PR #1989 after the round-4 fixes (draw order matching `draw_down_quote` exactly; a named line's excess shown as over-drawn). If round 5 raises another BLOCKER or HIGH on the draw-allocation mechanism, stop patching and put the business trade-off to Mason (AGENTS.md, Operating Contract).
+
+## 2026-11-19 — Purchasing plan: order draws follow the line the order names, else document order (#1989)
+
+**Decision (Mason, in chat, 2026-11-19: "a"), after Sol round 3 on PR #1989.** `get_purchasing_plan` takes an order draw off the booking line its order line names (`order_items.quote_item_id`, as `draw_down_quote` stamps it), and any draw left over off the lines top-down in document order, the way the writer itself takes it. Chosen over "earliest-needed first" (Taha's review): going by date could erase a Firm line the order never drew and suggest buying nothing.
+**Supersedes:** the "earliest-needed lines first" draw order in the entry below. `_sync_planned_holds` still goes by date; that mismatch predates this PR and is a follow-up.
+
+## 2026-11-18 — Purchasing plan: holds that count today are capped at the shelf; unknown draws come off the earliest lines (#1989)
+
+**Decision (Mason, in chat, 2026-11-18: "I agree cap it"), after Taha's review of PR #1989.** In `get_purchasing_plan`, a manual hold or a crop-program hold that does not cover its booking's own line (for example a draft booking's) counts today only up to the stock on the shelf; the rest of a crop-program hold counts at its booking's need date, the same way a sent booking's line does, so a hold never makes the plan say "order now" for stock nobody needs yet. Also from Taha's review: a draw whose section is unknown (an order's) now comes off the earliest-needed lines first, matching how `_sync_planned_holds` consumes draws.
+**Supersedes:** the "least-sure first, latest first" draw order of `20270127110000` (#1971), and the "still counts today as before" wording for uncovered holds in the entry below.
+
+## 2026-11-18 — Purchasing plan: held stock always counts as spoken for (reverses rule 2 of the #1971 entry below)
+
+**Decision (Mason, in chat, 2026-11-18: "1").** After Sol round 2 on PR #1980 found that stock held for a Maybe booking read as free, Mason chose: held stock is always spoken for in `get_purchasing_plan`, whatever the booking's confidence, but a hold never makes the plan buy on its own. A hold covering its booking's (or job's) own lines counts today only up to the stock on the shelf left after other holds, backing Firm lines first; the unbacked part stays as the booking line with its own date and confidence (a Maybe line stays shown only).
+**Supersedes:** rule (2) of "2026-11-18 — Purchasing plan: no 'expedite a later PO' alternative; a Maybe booking's held stock follows its confidence". Rule (1) stands.
 ## 2026-11-22 — #2197: sales reps may reactivate an inactive customer from its page
 
 **Decision (Mason, 2026-11-22, relayed by the bug captain: "Yes, reps too").** The customer page's Reactivate button shows for admins and sales reps, matching what the database already allows (`customers_update` policy: admin or sales rep) and the #2048 refusal text ("An admin or sales rep must reactivate"). Screen-only change; the database rule is unchanged. Drivers and applicators still get no button and are refused by the database.

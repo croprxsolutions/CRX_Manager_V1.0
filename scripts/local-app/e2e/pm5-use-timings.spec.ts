@@ -15,7 +15,7 @@ test('Herbicide keeps two timings and category change asks before clearing', asy
     const modulePath = '/src/lib/db.ts';
     const { supabase } = await import(/* @vite-ignore */ modulePath);
     const { data, error } = await supabase.from('products')
-      .insert({ product_name: productName, category: 'Herbicide', use_timings: [] })
+      .insert({ product_name: productName, product_form: 'liquid', inventory_unit: 'Gal', category: 'Herbicide', use_timings: [] })
       .select('id').single();
     if (error || !data) throw new Error(error?.message ?? 'Product insert returned no row');
     return data.id;

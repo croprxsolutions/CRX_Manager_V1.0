@@ -30,9 +30,7 @@ export const SHARED_PROMPT_MODULES = [
   "./coderabbit-skip-prompt.mjs",
 ];
 
-// release-pass-prompt (Mason, 2026-11-20) records `ship the release` / `go live #n`.
-// Claude only: Codex never merges into main or applies live migrations.
-export const CLAUDE_ONLY_PROMPT_MODULES = ["./release-pass-prompt.mjs"];
+export const CLAUDE_ONLY_PROMPT_MODULES = [];
 
 export function promptModulesFor(surface = process.env.CRX_AGENT_SURFACE || "claude") {
   return surface === "codex"

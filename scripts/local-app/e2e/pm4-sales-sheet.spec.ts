@@ -30,8 +30,8 @@ async function addProducts(page: Page) {
     const { error } = await supabase.from('products').insert(rows);
     if (error) throw new Error(error.message);
   }, [
-    { product_name: activeName, product_form: 'liquid', category, manufacturer: `Maker ${run}`, epa_registration: epa, is_rup: true, signal_word: 'Caution', is_active: true },
-    { product_name: inactiveName, product_form: 'liquid', category, manufacturer: null, epa_registration: null, is_rup: false, signal_word: null, is_active: false },
+    { product_name: activeName, product_form: 'liquid', inventory_unit: 'Gal', category, manufacturer: `Maker ${run}`, epa_registration: epa, is_rup: true, signal_word: 'Caution', is_active: true },
+    { product_name: inactiveName, product_form: 'liquid', inventory_unit: 'Gal', category, manufacturer: null, epa_registration: null, is_rup: false, signal_word: null, is_active: false },
   ]);
 }
 

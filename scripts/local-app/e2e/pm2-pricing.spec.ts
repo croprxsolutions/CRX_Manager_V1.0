@@ -43,7 +43,7 @@ test('margins type cleanly on all tiers, save exactly, and reopen priced', async
   const id: string = await page.evaluate(async (name) => {
     const path = '/src/lib/db.ts';
     const { supabase } = await import(/* @vite-ignore */ path);
-    const { data, error } = await supabase.from('products').insert({ product_name: name, product_form: 'liquid' }).select('id').single();
+    const { data, error } = await supabase.from('products').insert({ product_name: name, product_form: 'liquid', inventory_unit: 'Gal' }).select('id').single();
     if (error) throw new Error(error.message);
     return data.id;
   }, productName);
@@ -104,7 +104,7 @@ test('moving between products keeps Stay and Leave honest', async ({ page }) => 
   const ids: string[] = await page.evaluate(async (names) => {
     const path = '/src/lib/db.ts';
     const { supabase } = await import(/* @vite-ignore */ path);
-    const rows = names.map((product_name) => ({ product_name, product_form: 'liquid' }));
+    const rows = names.map((product_name) => ({ product_name, product_form: 'liquid', inventory_unit: 'Gal' }));
     const { data, error } = await supabase.from('products').insert(rows).select('id, product_name');
     if (error) throw new Error(error.message);
     return names.map((name) => data.find((row: { product_name: string }) => row.product_name === name).id);

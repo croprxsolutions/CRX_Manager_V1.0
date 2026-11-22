@@ -15,7 +15,7 @@ test('a saved signal word change shows the signed-in staff member after reload',
       .select('full_name').eq('id', auth.user.id).single();
     if (profileError || !profile?.full_name) throw new Error('Local test profile name missing');
     const { data: product, error } = await supabase.from('products')
-      .insert({ product_name: productName, product_form: 'liquid', signal_word: 'Caution' })
+      .insert({ product_name: productName, product_form: 'liquid', inventory_unit: 'Gal', signal_word: 'Caution' })
       .select('id').single();
     if (error || !product) throw new Error(error?.message ?? 'Local test product insert failed');
     return { id: product.id, name: profile.full_name };

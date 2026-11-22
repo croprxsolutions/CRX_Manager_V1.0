@@ -41,7 +41,7 @@ Read at `origin/staging` f8ee14ee8.
 - **Existing rows** (production, read-only, 2026-11-22):
   - `field_billing_defaults`: 6 rows; 0 with an override; 0 with a non-blank note.
   - `invoice_shares`: 3 rows; 0 with `price_per_acre_cents`; 0 with a note. `invoice_items`: 0 lines containing "grower share" or "/ac" wording.
-  - **No legacy per-acre invoice exists** (the feature was never used). Mason, 2026-11-22, after three Sol rounds each found a new kind of hypothetical legacy invoice: simplify, do not hunt for them. Sol findings that only concern such never-created invoices are his to skip.
+  - **Decision (Mason, 2026-11-22):** the feature was never used (the counts above), so the migration adds the two constraints and does not search invoice history for per-acre invoices.
   - The migration's preflight locks both tables (ACCESS EXCLUSIVE, the ALTERs' own mode), re-counts splits and shares, and refuses (`PER_ACRE_PRICING_IN_USE`, naming the count) if any row has either, so it never silently clears a price.
   - It does not blank-coerce: an empty-string note also blocks the apply.
 - **Already-deployed app during rollout:**

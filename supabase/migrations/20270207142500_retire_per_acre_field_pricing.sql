@@ -6,7 +6,8 @@
 --   note. When set, invoices billed that payer one "$X/acre" line with the chemicals at $0, and stored the rate on the
 --   invoice's share row (invoice_shares.price_per_acre_cents / pricing_note). Live 2026-11-22 (read-only): 0 of 6
 --   split rows and 0 of 3 invoice shares carry a per-acre price or a note, and 0 invoice lines carry per-acre
---   wording: the feature was never used, so no legacy per-acre invoice exists (Mason, 2026-11-22: no hunt for one).
+--   wording. Decision (Mason, 2026-11-22): the feature was never used, so this migration adds the two constraints
+--   and does not search invoice history for per-acre invoices.
 --
 -- WHAT: both tables refuse a per-acre price and a pricing note (CHECK, validated):
 --   - field_billing_defaults: every per-acre billing path reads its price from here, so none can be reached again;
@@ -32,8 +33,9 @@ DECLARE
   v_shares bigint;
 BEGIN
   -- Lock first, in the ALTERs' own mode, so nothing can add a per-acre price (or a second apply slip in) between these
-  -- checks and the constraints, and no later lock upgrade can deadlock with a save.
-  LOCK TABLE public.field_billing_defaults, public.invoice_shares IN ACCESS EXCLUSIVE MODE;
+  -- checks and the constraints, and no later lock upgrade can deadlock with a save. Shares before splits: the same
+  -- order as the field-application draft edit (it writes invoice_shares, then reads field_billing_defaults).
+  LOCK TABLE public.invoice_shares, public.field_billing_defaults IN ACCESS EXCLUSIVE MODE;
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE (conrelid = 'public.field_billing_defaults'::regclass
                      AND conname = 'field_billing_defaults_no_per_acre_price')

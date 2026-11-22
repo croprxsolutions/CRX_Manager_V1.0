@@ -43,9 +43,16 @@ describe('buildJobChemicalsPayload', () => {
       warehouse: 'main',
       vendor: 'acme',
       customer_supplied: false,
+      price_typed: false,
       sort_order: 0,
       driver: null,
     });
+  });
+
+  it('always sends price_typed, true only for a price typed by hand (migration 20270207130000)', () => {
+    expect(buildJobChemicalsPayload([row({ price_typed: true })])[0].price_typed).toBe(true);
+    expect(buildJobChemicalsPayload([row({ price_typed: false })])[0].price_typed).toBe(false);
+    expect(buildJobChemicalsPayload([row()])[0].price_typed).toBe(false);
   });
 
   describe('F06: driver is persisted so a reloaded line knows which field was typed', () => {

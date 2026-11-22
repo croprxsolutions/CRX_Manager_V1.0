@@ -12,6 +12,8 @@ export interface JobChemicalPayloadSource {
   warehouse: string;
   vendor: string;
   customer_supplied: boolean;
+  /** The price was typed by hand (job_chemicals.price_typed); undefined = not typed. */
+  price_typed?: boolean;
   /** F06: which field the operator typed ('rate' | 'qty'); undefined = unknown. */
   driver?: 'rate' | 'qty';
 }
@@ -33,6 +35,8 @@ export function buildJobChemicalsPayload(rows: JobChemicalPayloadSource[]) {
     warehouse: row.warehouse || null,
     vendor: row.vendor || null,
     customer_supplied: row.customer_supplied || false,
+    // Always sent, so save_job never has to guess the mark from an older screen's payload.
+    price_typed: row.price_typed === true,
     sort_order: index,
     // F06 (2026-09-03): persisted to job_chemicals.driver so a RELOADED line knows which
     // side to hold when the acreage changes. Only the two values the calculator produces

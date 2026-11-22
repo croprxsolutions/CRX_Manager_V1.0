@@ -12,54 +12,68 @@
 --     cancelled or deleted; written on or before the date and not expired by it; passes the sent-price lock; quote unit
 --     is the stock unit; two different prices stop. Its refusals end with what to do from a job instead of "type the
 --     price on this invoice line". A job line in another unit than the stock unit is converted (Mason, 2026-11-21,
---     "Convert automatically"): _job_transfer_qty_in_stock_unit_20270207 turns its quantity into stock units with the
---     unit_conversions factors (via _unit_factor_oz), only within liquid or within dry and only where both factors are
---     whole fluid/dry ounces (fl oz, Pt, Qt, Gal; Dry oz, Lb), so the conversion is exact. The line then bills
---     ROUND(quote cents x converted quantity) through safe_cents_qty, as a same-unit line does. Units that can't be
---     converted that way (volume vs weight, Ea, grams, unknown) still stop (JOB_QUOTE_UNIT_MISMATCH).
+--     "Convert automatically"): field_app_priced_quantity (the converter the field-app invoices and the below-cost
+--     check already use) turns its quantity into stock units with exact factors within the product's form (fl oz,
+--     Pt, Qt, Gal; a dry product's oz, Lb, ton). The line then bills ROUND(quote cents x converted quantity) through
+--     safe_cents_qty, as a same-unit line does. Units that can't be converted (volume vs weight, Ea, seed, unknown)
+--     still stop (JOB_QUOTE_UNIT_MISMATCH).
 --     Not SECURITY DEFINER; owned by postgres; executable by no API role.
 --  2. The transfer body: each billable chemical line asks (1) on the job's date (else Chicago today).
+--     Only treated fields (acres above zero) are looked up.
 --     Single owner: the paying grower (the one billing-default customer of the job's fields, else the job's
---     customer), all job fields; a found price bills safe_cents_qty(price, quantity), price_source 'quoted'; when
+--     customer); when that grower's sent quote sets a price but the job is for another customer, the transfer
+--     stops (JOB_QUOTE_PAYER_MISMATCH; Mason, 2026-11-22), since the invoice goes to the job's customer; a found price bills safe_cents_qty(price, quantity), price_source 'quoted'; when
 --     any line was quote-priced, the header and invoice_shares start from the sum of the written lines instead of
 --     the stored job total (figured at the old prices). A per-acre all-inclusive field price still wins, as today.
---     Multi-owner: each owner, the job fields billed to them; a found price bills their acre share of the quantity;
---     an owner with no quote keeps their acre share of the job price. No price found: exactly as before.
---     Customer-supplied lines stay $0 and never look. Nothing else in the body changes.
+--     Multi-owner: each owner, the job fields billed to them; a found price bills quote x quantity x their acres /
+--     all acres, rounded once; an owner with no quote keeps their acre share of the job price. No price found:
+--     exactly as before. Customer-supplied lines stay $0 and never look.
+--     The below-cost check of 20270207125000 (kept) judges each job line at what it is actually billed (the quote
+--     price; for a multi-owner job the owners' total).
+--     Locks (Sol): every quote of the job's possible payers is locked FOR SHARE in id order BEFORE the job (the
+--     blend-ticket invoice's order), the job's fields are held FOR SHARE after it (Field Setup can't change who pays
+--     mid-transfer; a payer added in between stops with JOB_PAYERS_CHANGED, retryable), and each product row is
+--     held FOR SHARE from the read of its stock unit to the bill. Nothing else in the body changes.
 --  3. Typed prices (Mason, 2026-11-21): new job_chemicals.price_typed (false for every existing line), stored by the
---     job save (_save_job_cost_step2_impl, re-emitted from its live body with only that column added). A typed line
+--     job save (_save_job_cost_step2_impl, re-emitted from its live body with only that column added; on a completed
+--     or invoiced job the marks can't change, JOB_PRICE_MARK_LOCKED). A typed line
 --     keeps its own price (price_source 'manual') and is never re-priced from a quote; when the paying grower's sent
 --     quote differs (or can't be read), Create Invoice returns a plain sentence in price_warnings for the screen.
 --     _job_transfer_typed_price_warning_20270207 writes it; it never stops the invoice.
 --  Grants, owner, SECURITY DEFINER, search_path and idempotency of the transfer are unchanged. No stored row changes
 --  (live 2026-11-21, read only: 0 completed unbilled jobs). Taha's #2061 plans its own change in this same body.
 --
--- ROLLBACK: re-run the body of 20261120100000 (lines 301-1023) and its REVOKE/GRANT; re-create
+-- ROLLBACK: re-run the transfer body of 20270207125000 and its REVOKE/GRANT; re-create
 -- _save_job_cost_step2_impl from the save_job body of 20260904185900 (owner postgres, SECURITY DEFINER,
 -- search_path public, pg_temp, EXECUTE postgres only); DROP FUNCTION
 -- public._job_transfer_quote_price_cents_20270207(uuid, text, text, text, uuid[], uuid, date) and
--- public._job_transfer_typed_price_warning_20270207(uuid, text, text, text, uuid[], uuid, date, bigint, text) and
--- public._job_transfer_qty_in_stock_unit_20270207(numeric, text, text); then
+-- public._job_transfer_typed_price_warning_20270207(uuid, text, text, text, uuid[], uuid, date, bigint, text); then
 -- ALTER TABLE public.job_chemicals DROP COLUMN price_typed (the typed marks are lost).
 
 DO $preflight$
 DECLARE
   v_impl oid := to_regprocedure('public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)');
 BEGIN
+  -- Checked first, so a second apply says so (Sol LOW).
+  IF to_regprocedure('public._job_transfer_quote_price_cents_20270207(uuid,text,text,text,uuid[],uuid,date)') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'job_chemicals' AND column_name = 'price_typed') THEN
+    RAISE EXCEPTION 'JOB_QUOTE_PRICE_PREFLIGHT: already applied';
+  END IF;
   IF v_impl IS NULL
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_impl) IS DISTINCT FROM 'a54e3e6a3a2b920e9bcd1a350cd92423'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_impl) IS DISTINCT FROM 'd209538774abe0da783a5cb9c4dfd5a8'
      OR NOT EXISTS (SELECT 1 FROM pg_proc p
                      WHERE p.oid = v_impl AND p.prosecdef
                        AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
                        AND p.proowner = 'postgres'::regrole
                        AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]) THEN
-    RAISE EXCEPTION 'JOB_QUOTE_PRICE_PREFLIGHT: the transfer body, owner, settings or grants are not the reviewed ones (20261120100000)';
+    RAISE EXCEPTION 'JOB_QUOTE_PRICE_PREFLIGHT: the transfer body, owner, settings or grants are not the reviewed ones (20270207125000)';
   END IF;
   IF to_regprocedure('public._field_app_sent_quote_price_cents(uuid,uuid[],uuid[],date)') IS NULL
-     OR to_regprocedure('public._unit_matches_stock_unit(text,text)') IS NULL
-     OR to_regprocedure('public._unit_factor_oz(text,text)') IS NULL
-     OR to_regprocedure('public._quote_item_sent_field_20270129(uuid,uuid)') IS NULL THEN
-    RAISE EXCEPTION 'JOB_QUOTE_PRICE_PREFLIGHT: KI-81 (20270129180000) or the stock-unit check (20270121110000) is missing';
+     OR to_regprocedure('public._quote_item_sent_field_20270129(uuid,uuid)') IS NULL
+     OR to_regprocedure('public.field_app_priced_quantity(numeric,text,text,text)') IS NULL
+     OR to_regprocedure('public._job_transfer_line_clears_cost_20270207(uuid,text,numeric,text,bigint,boolean)') IS NULL THEN
+    RAISE EXCEPTION 'JOB_QUOTE_PRICE_PREFLIGHT: KI-81 (20270129180000), field_app_priced_quantity or the below-cost check (20270207125000) is missing';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._save_job_cost_step2_impl(uuid,jsonb,jsonb,jsonb,uuid,text)')) IS DISTINCT FROM '8acf34542105a90212ddb0a5e7c5d272'
@@ -68,11 +82,6 @@ BEGIN
                        AND p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
                        AND p.proowner = 'postgres'::regrole AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]) THEN
     RAISE EXCEPTION 'JOB_QUOTE_PRICE_PREFLIGHT: the job save body, owner, settings or grants are not the reviewed ones (20260904185900)';
-  END IF;
-  IF to_regprocedure('public._job_transfer_quote_price_cents_20270207(uuid,text,text,text,uuid[],uuid,date)') IS NOT NULL
-     OR EXISTS (SELECT 1 FROM information_schema.columns
-                 WHERE table_schema = 'public' AND table_name = 'job_chemicals' AND column_name = 'price_typed') THEN
-    RAISE EXCEPTION 'JOB_QUOTE_PRICE_PREFLIGHT: already applied';
   END IF;
 END;
 $preflight$;
@@ -84,39 +93,6 @@ COMMENT ON COLUMN public.job_chemicals.price_typed IS
 -- so the new column gets the same read grants and nothing else.
 GRANT SELECT (price_typed) ON public.job_chemicals TO authenticated;
 GRANT REFERENCES (price_typed) ON public.job_chemicals TO authenticated;
-
--- Rule 3 (Mason, 2026-11-21, "Convert automatically"): a job line's quantity in the product's stock (quote) unit.
--- Same unit (or a blank one): the quantity unchanged. Else both units must be in unit_conversions as the same kind
--- (liquid or dry, never "both"/Ea) with whole-ounce factors (fl oz 1, Pt 16, Qt 32, Gal 128; Dry oz 1, Lb 16), so
--- quantity x from / to is exact (every such divisor is a power of two). NULL when the units can't be converted.
--- Example: 16 Pt in Gal = 16 x 16 / 128 = 2.
-CREATE FUNCTION public._job_transfer_qty_in_stock_unit_20270207(p_qty numeric, p_line_unit text, p_stock_unit text)
-RETURNS numeric
-LANGUAGE plpgsql
-STABLE
-SET search_path = public, pg_temp
-AS $fn$
-DECLARE
-  v_kind text;
-  v_from numeric;
-  v_to   numeric;
-BEGIN
-  IF public._unit_matches_stock_unit(p_line_unit, p_stock_unit) THEN
-    RETURN p_qty;
-  END IF;
-  FOREACH v_kind IN ARRAY ARRAY['liquid', 'dry'] LOOP
-    v_from := public._unit_factor_oz(p_line_unit, v_kind);
-    v_to   := public._unit_factor_oz(p_stock_unit, v_kind);
-    IF v_from IS NOT NULL AND v_to IS NOT NULL AND v_from = trunc(v_from) AND v_to = trunc(v_to) THEN
-      RETURN p_qty * v_from / v_to;
-    END IF;
-  END LOOP;
-  RETURN NULL;
-END;
-$fn$;
-ALTER FUNCTION public._job_transfer_qty_in_stock_unit_20270207(numeric, text, text) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public._job_transfer_qty_in_stock_unit_20270207(numeric, text, text)
-  FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE FUNCTION public._job_transfer_quote_price_cents_20270207(
   p_product_id   uuid,
@@ -151,7 +127,10 @@ BEGIN
     END IF;
     RAISE;
   END;
-  IF v_cents IS NOT NULL AND public._job_transfer_qty_in_stock_unit_20270207(1, p_line_unit, p_stock_unit) IS NULL THEN
+  -- Rule 3 (Mason, 2026-11-21, "Convert automatically"): the line converts to the stock unit by
+  -- field_app_priced_quantity (exact factors within the product's form; a dry product's "oz" is a dry ounce).
+  IF v_cents IS NOT NULL AND public.field_app_priced_quantity(1, p_line_unit, p_stock_unit,
+       (SELECT p.product_form FROM public.products p WHERE p.id = p_product_id)) IS NULL THEN
     RAISE EXCEPTION 'JOB_QUOTE_UNIT_MISMATCH: % is quoted per % but this job bills it per %, and those units can''t be converted, so the quote price can''t be billed. Nothing was billed. Change the job line to %, or bill this job through Split Billing (per line) and type the price.',
       COALESCE(p_product_name, 'A product'), p_stock_unit, p_line_unit, p_stock_unit
       USING ERRCODE = 'P0001';
@@ -204,7 +183,8 @@ BEGIN
     RETURN NULL;
   END IF;
   -- Same price once converted (e.g. $10.50 per Qt against $42.00 per Gal): no warning.
-  IF COALESCE(v_cents * public._job_transfer_qty_in_stock_unit_20270207(1, p_line_unit, p_stock_unit) = COALESCE(p_typed_cents, 0), false) THEN
+  IF COALESCE(v_cents * public.field_app_priced_quantity(1, p_line_unit, p_stock_unit,
+       (SELECT p.product_form FROM public.products p WHERE p.id = p_product_id)) = COALESCE(p_typed_cents, 0), false) THEN
     RETURN NULL;
   END IF;
   RETURN format('%s: the typed price of $%s per %s was billed; the sent quote is $%s per %s.', v_what,
@@ -237,6 +217,7 @@ DECLARE
   v_field jsonb;
   v_chem jsonb;
   v_typed_before jsonb;
+  v_job_status text;
   v_share jsonb;
   v_field_id uuid;
   v_season integer;
@@ -1276,7 +1257,7 @@ BEGIN
     )
     RETURNING id INTO v_job_id;
   ELSE
-    SELECT id INTO v_job_id FROM jobs WHERE id = p_job_id FOR UPDATE;
+    SELECT id, status INTO v_job_id, v_job_status FROM jobs WHERE id = p_job_id FOR UPDATE;
     IF v_job_id IS NULL THEN
       RAISE EXCEPTION 'Job not found: %', p_job_id;
     END IF;
@@ -1390,8 +1371,9 @@ BEGIN
 
   -- Replace chemicals (now incl. extras: diluent_rate, rei_hours, phi_days,
   -- warehouse, vendor)
-  SELECT jsonb_agg(jsonb_build_object('p', jc.product_id, 'c', jc.price_per_unit_cents, 's', jc.sort_order, 'u', jc.unit))
-    INTO v_typed_before FROM job_chemicals jc WHERE jc.job_id = v_job_id AND jc.price_typed;
+  SELECT jsonb_agg(t.o ORDER BY t.o) INTO v_typed_before
+    FROM (SELECT jsonb_build_object('p', jc.product_id, 'c', jc.price_per_unit_cents, 's', jc.sort_order, 'u', jc.unit) AS o
+            FROM job_chemicals jc WHERE jc.job_id = v_job_id AND jc.price_typed) t;
   DELETE FROM job_chemicals WHERE job_id = v_job_id;
   FOR v_chem IN SELECT * FROM jsonb_array_elements(p_chemicals) LOOP
     INSERT INTO job_chemicals (
@@ -1422,14 +1404,34 @@ BEGIN
       -- to NULL). The table CHECK job_chemicals_driver_chk is the second line of defence.
       NULLIF(v_chem->>'driver', ''),
       -- Mason, 2026-11-21: staff typed this price by hand; Create Invoice keeps it over a sent quote and warns.
-      -- A save that omits price_typed (an older open screen) keeps the mark on a line whose product, price, unit and position are
-      -- unchanged, so it can't silently turn a typed price back into a quote price (Luna round 1).
+      -- A save that omits price_typed (an older open screen) keeps the mark on a line whose product, price and unit
+      -- are unchanged, so it can't silently turn a typed price back into a quote price (Luna round 1). The position
+      -- must match too only when the payload has more than one such line (a row deleted above it renumbers the rest:
+      -- Sol MED).
       CASE WHEN v_chem ? 'price_typed' THEN COALESCE((v_chem->>'price_typed')::boolean, false)
-           ELSE COALESCE(v_typed_before @> jsonb_build_array(jsonb_build_object(
-                  'p', (v_chem->>'product_id')::uuid, 'c', COALESCE((v_chem->>'price_per_unit_cents')::bigint, 0),
-                  's', COALESCE((v_chem->>'sort_order')::integer, 0), 'u', v_chem->>'unit')), false) END
+           ELSE COALESCE(EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(v_typed_before) b
+                   WHERE (b->>'p')::uuid = (v_chem->>'product_id')::uuid
+                     AND (b->>'c')::bigint = COALESCE((v_chem->>'price_per_unit_cents')::bigint, 0)
+                     AND b->>'u' IS NOT DISTINCT FROM v_chem->>'unit'
+                     AND ((b->>'s')::integer = COALESCE((v_chem->>'sort_order')::integer, 0)
+                          OR (SELECT count(*) FROM jsonb_array_elements(p_chemicals) o
+                               WHERE (o->>'product_id')::uuid = (v_chem->>'product_id')::uuid
+                                 AND COALESCE((o->>'price_per_unit_cents')::bigint, 0) = (b->>'c')::bigint
+                                 AND o->>'unit' IS NOT DISTINCT FROM b->>'u') = 1)), false) END
     );
   END LOOP;
+
+  -- Q1 / Sol #2 (Mason, 2026-11-22): once a job is completed the screen locks its prices, so its typed marks are
+  -- locked here too; a save can't mark (or unmark) a line to change what Create Invoice bills.
+  IF NOT v_is_new AND v_job_status NOT IN ('scheduled', 'in_progress')
+     AND v_typed_before IS DISTINCT FROM (
+       SELECT jsonb_agg(t.o ORDER BY t.o)
+         FROM (SELECT jsonb_build_object('p', jc.product_id, 'c', jc.price_per_unit_cents, 's', jc.sort_order, 'u', jc.unit) AS o
+                 FROM job_chemicals jc WHERE jc.job_id = v_job_id AND jc.price_typed) t) THEN
+    RAISE EXCEPTION 'JOB_PRICE_MARK_LOCKED: this job is %, so which prices were typed by hand can''t change. Nothing was saved.', v_job_status
+      USING ERRCODE = 'P0001';
+  END IF;
 
   v_result := jsonb_build_object('success', true, 'job_id', v_job_id, 'is_new', v_is_new);
 
@@ -1485,6 +1487,8 @@ DECLARE
   v_total_cost_cents bigint := 0;
   v_conversion RECORD;
   v_total_applied numeric;
+  v_cleared boolean;
+  v_prev_ctx text;
   v_share RECORD;
   v_share_total bigint := 0;
   v_has_price_override boolean := false;
@@ -1518,8 +1522,6 @@ DECLARE
   v_member_acres numeric;
   v_member_total bigint;
   v_member_cost bigint;
-  v_member_profit_cents bigint := 0;
-  v_member_field_names text[];
   -- Sent quote price (Mason, 2026-11-21): locals
   v_on date;
   v_quote_cents bigint;
@@ -1529,6 +1531,13 @@ DECLARE
   v_bill_to uuid;
   v_warning text;
   v_price_warnings jsonb := '[]'::jsonb;
+  v_owner_prices bigint[];
+  v_owner_quoted boolean[];
+  v_owner_fields uuid[];
+  v_stock_qty numeric;
+  v_growers uuid[];
+  v_member_profit_cents bigint := 0;
+  v_member_field_names text[];
 BEGIN
   PERFORM set_config('crx.chicago_date_cutover', '20260905200400', true);
   IF NOT EXISTS (
@@ -1551,12 +1560,39 @@ BEGIN
     IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
   END IF;
 
+  -- Sol #7: every quote of every grower this job can bill is locked before the job, in id order: the order the
+  -- blend-ticket invoice and save_quote take them (quote, then job), so those paths and this one can't deadlock.
+  v_growers := ARRAY(SELECT DISTINCT g FROM (
+      SELECT j.customer_id AS g FROM jobs j WHERE j.id = p_job_id
+      UNION ALL SELECT fbd.customer_id FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
+                 WHERE jf.job_id = p_job_id
+      UNION ALL SELECT f.customer_id FROM job_fields jf JOIN fields f ON f.id = jf.field_id WHERE jf.job_id = p_job_id) s
+    WHERE g IS NOT NULL ORDER BY g);
+  PERFORM 1 FROM quotes q WHERE q.customer_id = ANY (v_growers) ORDER BY q.id FOR SHARE OF q;
+
   SELECT j.* INTO v_job FROM jobs j WHERE j.id = p_job_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Job not found: %', p_job_id; END IF;
-  IF v_job.status = 'invoiced' THEN RAISE EXCEPTION 'Job already invoiced'; END IF;
-  IF v_job.status != 'completed' THEN RAISE EXCEPTION 'Job must be completed to invoice (status: %)', v_job.status; END IF;
+  -- 20270207125000 (Sol round 1 MED): a deleted job is never invoiced, even from a screen opened before it was deleted.
+  IF v_job.deleted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'JOB_DELETED: this job was deleted, so it can''t be invoiced. Nothing was invoiced.' USING ERRCODE = 'P0001';
+  END IF;
+  -- Sol #4: the job's fields are held, so Field Setup (save_field updates the field before its billing defaults)
+  -- can't change who pays between the quote lookup and the shares.
+  PERFORM 1 FROM fields f WHERE f.id IN (SELECT jf.field_id FROM job_fields jf WHERE jf.job_id = p_job_id)
+   ORDER BY f.id FOR SHARE OF f;
+  IF EXISTS (SELECT 1 FROM (
+      SELECT v_job.customer_id AS g
+      UNION ALL SELECT fbd.customer_id FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
+                 WHERE jf.job_id = p_job_id
+      UNION ALL SELECT f.customer_id FROM job_fields jf JOIN fields f ON f.id = jf.field_id WHERE jf.job_id = p_job_id) s
+     WHERE g IS NOT NULL AND NOT (g = ANY (v_growers))) THEN
+    RAISE EXCEPTION 'JOB_PAYERS_CHANGED: who pays for this job changed while the invoice was being created. Nothing was billed. Create the invoice again.'
+      USING ERRCODE = '40001';
+  END IF;
   -- The date a sent quote must be valid on (KI-81's rule): the job's date, else Chicago today.
   v_on := COALESCE(v_job.job_date, (now() AT TIME ZONE 'America/Chicago')::date);
+  IF v_job.status = 'invoiced' THEN RAISE EXCEPTION 'Job already invoiced'; END IF;
+  IF v_job.status != 'completed' THEN RAISE EXCEPTION 'Job must be completed to invoice (status: %)', v_job.status; END IF;
 
   -- U6 #91b: refuse to invoice the job if a blend ticket for the SAME job has already
   -- been billed (payment_status='billed' = a live, non-voided invoice exists for it).
@@ -1571,7 +1607,8 @@ BEGIN
     SELECT 1 FROM blend_tickets bt
     JOIN invoices i ON i.blend_ticket_id = bt.id
     WHERE bt.job_id = p_job_id
-      AND bt.deleted_at IS NULL  -- Codex R2 P2: a soft-deleted ticket must not block forever
+      -- 20270207125000 (Sol round 1): a soft-deleted ticket blocks too while its invoice is live; voiding that invoice
+      -- unblocks it (the Codex R2 P2 "block forever" case is the voided one).
       AND i.status NOT IN ('voided', 'cancelled')
       AND i.deleted_at IS NULL
   ) THEN
@@ -1727,13 +1764,14 @@ BEGIN
              safe_cents_qty(jc.cost_per_unit_cents, jc.quantity) AS chem_cost,
              safe_cents_qty(jc.price_per_unit_cents, jc.quantity) AS chem_price,
              jc.quantity,
-             jc.customer_supplied,
+             jc.customer_supplied, jc.unit AS job_unit,
              p.product_name, COALESCE(NULLIF(btrim(jc.unit), ''), p.unit_size) AS unit_size, p.epa_registration, p.product_form,
              COALESCE(NULLIF(btrim(jc.rate_unit), ''), NULLIF(btrim(jc.unit), ''), p.unit_size) AS rate_unit,
              COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size) AS stock_unit,
              jc.price_typed, jc.price_per_unit_cents
       FROM job_chemicals jc JOIN products p ON p.id = jc.product_id
       WHERE jc.job_id = p_job_id ORDER BY p.product_name
+      FOR SHARE OF p  -- Sol #6: the stock unit read here can't change before the line is billed
     LOOP
       v_item_order := v_item_order + 1;
       -- customer-supplied products carry $0 price AND $0 cost (we didn't buy them).
@@ -1741,6 +1779,53 @@ BEGIN
         CASE WHEN v_chem.customer_supplied THEN 0 ELSE COALESCE(v_chem.chem_price, 0) END, v_acre_pcts);
       v_chem_cost_split := calculate_billing_splits(
         CASE WHEN v_chem.customer_supplied THEN 0 ELSE COALESCE(v_chem.chem_cost, 0) END, v_acre_pcts);
+      -- Sent quote price (Mason, 2026-11-21): each owner's own sent quote on the treated job fields billed to them
+      -- prices their acre share of the quantity; else their acre share of the job's price, as before. A price typed
+      -- by hand on the job is kept; the quote only warns.
+      v_owner_prices := v_chem_price_split;
+      v_owner_quoted := array_fill(false, ARRAY[array_length(v_owner_ids, 1)]);
+      IF NOT v_chem.customer_supplied THEN
+        FOR v_oidx IN 1 .. array_length(v_owner_ids, 1) LOOP
+          v_owner_fields := ARRAY(SELECT jf.field_id FROM job_fields jf
+                 WHERE jf.job_id = p_job_id AND COALESCE(jf.acres_to_treat, 0) > 0
+                   AND (EXISTS (SELECT 1 FROM field_billing_defaults fbd
+                                 WHERE fbd.field_id = jf.field_id AND fbd.customer_id = v_owner_ids[v_oidx])
+                        OR (NOT EXISTS (SELECT 1 FROM field_billing_defaults fbd2 WHERE fbd2.field_id = jf.field_id)
+                            AND (SELECT COALESCE(f.customer_id, v_job.customer_id) FROM fields f WHERE f.id = jf.field_id) = v_owner_ids[v_oidx]))
+                 ORDER BY jf.field_id);
+          IF v_chem.price_typed THEN
+            v_warning := _job_transfer_typed_price_warning_20270207(
+              v_chem.product_id, v_chem.product_name, v_chem.unit_size, v_chem.stock_unit,
+              v_owner_fields, v_owner_ids[v_oidx], v_on, v_chem.price_per_unit_cents, v_owner_names[v_oidx]);
+            IF v_warning IS NOT NULL THEN v_price_warnings := v_price_warnings || to_jsonb(v_warning); END IF;
+          ELSE
+            v_quote_cents := _job_transfer_quote_price_cents_20270207(
+              v_chem.product_id, v_chem.product_name, v_chem.unit_size, v_chem.stock_unit,
+              v_owner_fields, v_owner_ids[v_oidx], v_on);
+            IF v_quote_cents IS NOT NULL THEN
+              -- Quote x quantity x owner acres, divided once at the end, so an exact half cent rounds up (Sol MED).
+              v_stock_qty := field_app_priced_quantity(v_chem.quantity, v_chem.unit_size, v_chem.stock_unit, v_chem.product_form);
+              v_owner_prices[v_oidx] := ROUND(v_quote_cents::numeric * v_stock_qty * v_owner_acres[v_oidx] / v_total_billable_acres)::bigint;
+              v_owner_quoted[v_oidx] := true;
+            END IF;
+          END IF;
+        END LOOP;
+      END IF;
+      -- Below-cost judged on the whole job line, at what the owners are billed in total (20270207125000); a cleared
+      -- line saves under its own wall context. No inherited product binding.
+      PERFORM set_config('crx.job_transfer_product', '', true);
+      -- A job whose fields carry a per-acre price override bills that price, not these lines, so its lines keep
+      -- today's path (20270207125000, Sol round 1).
+      v_cleared := NOT EXISTS (SELECT 1 FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
+                                WHERE jf.job_id = p_job_id AND fbd.price_override_cents IS NOT NULL)
+        AND public._job_transfer_line_clears_cost_20270207(
+          v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit,
+          (SELECT sum(x) FROM unnest(v_owner_prices) x)::bigint, v_chem.customer_supplied);
+      IF v_cleared THEN
+        v_prev_ctx := current_setting('app.crx_below_cost_operation', true);
+        PERFORM set_config('app.crx_below_cost_operation', 'field_app_job_transfer', true);
+        PERFORM set_config('crx.job_transfer_product', v_chem.product_id::text, true);
+      END IF;
 
       FOR v_oidx IN 1 .. array_length(v_owner_ids, 1) LOOP
         v_member_acres := v_owner_acres[v_oidx];
@@ -1752,36 +1837,6 @@ BEGIN
           THEN v_chem.rate_per_acre * v_member_acres ELSE NULL END;
         SELECT * INTO v_conversion
           FROM convert_to_gl_lb(v_total_applied, v_chem.rate_unit, v_chem.product_form);
-        -- Sent quote price (Mason, 2026-11-21): this owner's own sent quote on the job fields billed to them prices
-        -- their share of the quantity; else their acre share of the job's price, as before.
-        -- A price typed by hand on the job (Mason, 2026-11-21) is kept; the quote only warns.
-        v_quote_cents := CASE WHEN v_chem.customer_supplied OR v_chem.price_typed THEN NULL ELSE _job_transfer_quote_price_cents_20270207(
-          v_chem.product_id, v_chem.product_name, v_chem.unit_size, v_chem.stock_unit,
-          ARRAY(SELECT jf.field_id FROM job_fields jf
-                 WHERE jf.job_id = p_job_id
-                   AND (EXISTS (SELECT 1 FROM field_billing_defaults fbd
-                                 WHERE fbd.field_id = jf.field_id AND fbd.customer_id = v_owner_ids[v_oidx])
-                        OR (NOT EXISTS (SELECT 1 FROM field_billing_defaults fbd2 WHERE fbd2.field_id = jf.field_id)
-                            AND (SELECT COALESCE(f.customer_id, v_job.customer_id) FROM fields f WHERE f.id = jf.field_id) = v_owner_ids[v_oidx]))
-                 ORDER BY jf.field_id),
-          v_owner_ids[v_oidx], v_on) END;
-        IF v_chem.price_typed AND NOT v_chem.customer_supplied THEN
-          v_warning := _job_transfer_typed_price_warning_20270207(
-            v_chem.product_id, v_chem.product_name, v_chem.unit_size, v_chem.stock_unit,
-            ARRAY(SELECT jf.field_id FROM job_fields jf
-                   WHERE jf.job_id = p_job_id
-                     AND (EXISTS (SELECT 1 FROM field_billing_defaults fbd
-                                   WHERE fbd.field_id = jf.field_id AND fbd.customer_id = v_owner_ids[v_oidx])
-                          OR (NOT EXISTS (SELECT 1 FROM field_billing_defaults fbd2 WHERE fbd2.field_id = jf.field_id)
-                              AND (SELECT COALESCE(f.customer_id, v_job.customer_id) FROM fields f WHERE f.id = jf.field_id) = v_owner_ids[v_oidx]))
-                   ORDER BY jf.field_id),
-            v_owner_ids[v_oidx], v_on, v_chem.price_per_unit_cents, v_owner_names[v_oidx]);
-          IF v_warning IS NOT NULL THEN v_price_warnings := v_price_warnings || to_jsonb(v_warning); END IF;
-        END IF;
-        v_line_price := CASE WHEN v_quote_cents IS NOT NULL
-          THEN safe_cents_qty(v_quote_cents, _job_transfer_qty_in_stock_unit_20270207(
-                 v_chem.quantity * v_acre_pcts[v_oidx] / 100, v_chem.unit_size, v_chem.stock_unit))
-          ELSE v_chem_price_split[v_oidx] END;
 
         INSERT INTO invoice_items (
           invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents,
@@ -1793,17 +1848,21 @@ BEGIN
           CASE WHEN v_chem.customer_supplied THEN v_chem.product_name || ' (customer supplied)' ELSE v_chem.product_name END,
           1,
           v_chem.unit_size,
-          v_line_price,
-          v_line_price,
+          v_owner_prices[v_oidx],
+          v_owner_prices[v_oidx],
           v_chem_cost_split[v_oidx],
           v_item_order, v_member_acres,
           v_chem.rate_per_acre, v_chem.rate_unit, v_total_applied,
           COALESCE(v_chem.rate_unit, v_chem.unit_size),
           v_conversion.converted_value, v_conversion.converted_unit,
           v_chem.epa_registration, v_chem.product_form, false,
-          CASE WHEN v_chem.customer_supplied OR v_chem.price_typed THEN 'manual' WHEN v_quote_cents IS NOT NULL THEN 'quoted' ELSE NULL END
+          CASE WHEN v_chem.customer_supplied OR v_chem.price_typed THEN 'manual' WHEN v_owner_quoted[v_oidx] THEN 'quoted' ELSE NULL END
         );
       END LOOP;
+      IF v_cleared THEN
+        PERFORM set_config('app.crx_below_cost_operation', COALESCE(v_prev_ctx, ''), true);
+        PERFORM set_config('crx.job_transfer_product', '', true);
+      END IF;
     END LOOP;
 
     -- Per-owner totals, per-acre application fee, header flip, and per-member commission.
@@ -1994,14 +2053,14 @@ BEGIN
     SELECT jc.product_id, jc.rate_per_acre,
            safe_cents_qty(jc.cost_per_unit_cents, jc.quantity) AS chem_cost,
            safe_cents_qty(jc.price_per_unit_cents, jc.quantity) AS chem_price,
-           jc.quantity,
-           jc.customer_supplied,
+           jc.quantity, jc.customer_supplied, jc.unit AS job_unit,
            p.product_name, COALESCE(NULLIF(btrim(jc.unit), ''), p.unit_size) AS unit_size, p.epa_registration, p.product_form,
            COALESCE(NULLIF(btrim(jc.rate_unit), ''), NULLIF(btrim(jc.unit), ''), p.unit_size) AS rate_unit,
            COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size) AS stock_unit,
            jc.price_typed, jc.price_per_unit_cents
     FROM job_chemicals jc JOIN products p ON p.id = jc.product_id
     WHERE jc.job_id = p_job_id ORDER BY p.product_name
+    FOR SHARE OF p  -- Sol #6: the stock unit read here can't change before the line is billed
   LOOP
     v_item_order := v_item_order + 1;
     -- U4<<< a grower-supplied product costs us nothing (we didn't buy it) — keep
@@ -2023,24 +2082,49 @@ BEGIN
                                JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
                               WHERE jf.job_id = p_job_id), v_job.customer_id);
     END IF;
+    -- Only fields actually treated count: a zero-acre field on the job does not need a quote (Sol MED).
+    v_owner_fields := ARRAY(SELECT jf.field_id FROM job_fields jf
+                             WHERE jf.job_id = p_job_id AND COALESCE(jf.acres_to_treat, 0) > 0 ORDER BY jf.field_id);
     -- A price typed by hand on the job (Mason, 2026-11-21) is kept; the quote only warns.
     v_quote_cents := CASE WHEN v_chem.customer_supplied OR v_chem.price_typed THEN NULL ELSE _job_transfer_quote_price_cents_20270207(
-      v_chem.product_id, v_chem.product_name, v_chem.unit_size, v_chem.stock_unit,
-      ARRAY(SELECT jf.field_id FROM job_fields jf WHERE jf.job_id = p_job_id ORDER BY jf.field_id),
-      v_bill_to, v_on) END;
+      v_chem.product_id, v_chem.product_name, v_chem.unit_size, v_chem.stock_unit, v_owner_fields, v_bill_to, v_on) END;
+    -- Q2 (Mason, 2026-11-22): the invoice goes to the job's customer, so a price from a different paying grower's
+    -- sent quote would show that grower's price to someone else. Stop only when such a quote sets the price.
+    IF v_quote_cents IS NOT NULL AND v_bill_to IS DISTINCT FROM v_job.customer_id THEN
+      RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = format(
+        'JOB_QUOTE_PAYER_MISMATCH: %s would be billed from the sent quote of %s, who pays for this job''s fields, but this job is for %s. Nothing was billed. Change the job''s customer to %s, or bill this job through Split Billing (per line) and type the price.',
+        COALESCE(v_chem.product_name, 'A product'),
+        COALESCE((SELECT c.farm_name FROM customers c WHERE c.id = v_bill_to), 'another grower'),
+        COALESCE((SELECT c.farm_name FROM customers c WHERE c.id = v_job.customer_id), 'another grower'),
+        COALESCE((SELECT c.farm_name FROM customers c WHERE c.id = v_bill_to), 'the paying grower'));
+    END IF;
     IF v_chem.price_typed AND NOT v_chem.customer_supplied THEN
       v_warning := _job_transfer_typed_price_warning_20270207(
         v_chem.product_id, v_chem.product_name, v_chem.unit_size, v_chem.stock_unit,
-        ARRAY(SELECT jf.field_id FROM job_fields jf WHERE jf.job_id = p_job_id ORDER BY jf.field_id),
-        v_bill_to, v_on, v_chem.price_per_unit_cents, NULL);
+        v_owner_fields, v_bill_to, v_on, v_chem.price_per_unit_cents, NULL);
       IF v_warning IS NOT NULL THEN v_price_warnings := v_price_warnings || to_jsonb(v_warning); END IF;
     END IF;
     v_line_price := CASE WHEN v_chem.customer_supplied THEN 0
                          WHEN v_quote_cents IS NOT NULL THEN safe_cents_qty(v_quote_cents,
-                           _job_transfer_qty_in_stock_unit_20270207(v_chem.quantity, v_chem.unit_size, v_chem.stock_unit))
+                           field_app_priced_quantity(v_chem.quantity, v_chem.unit_size, v_chem.stock_unit, v_chem.product_form))
                          ELSE COALESCE(v_chem.chem_price, 0) END;
     v_line_sum := v_line_sum + v_line_price;
     v_any_quoted := v_any_quoted OR v_quote_cents IS NOT NULL;
+    -- Below-cost judged on the whole job line (20270207125000); a cleared line saves under its own wall context.
+    -- No inherited product binding: a line this check does not clear can never meet the wall exemption.
+    PERFORM set_config('crx.job_transfer_product', '', true);
+    -- A job whose fields carry a per-acre price override bills that price, not these lines, so its lines keep today's
+    -- path (20270207125000, Sol round 1).
+    v_cleared := NOT EXISTS (SELECT 1 FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
+                              WHERE jf.job_id = p_job_id AND fbd.price_override_cents IS NOT NULL)
+      AND public._job_transfer_line_clears_cost_20270207(
+        v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit,
+        v_line_price, v_chem.customer_supplied);
+    IF v_cleared THEN
+      v_prev_ctx := current_setting('app.crx_below_cost_operation', true);
+      PERFORM set_config('app.crx_below_cost_operation', 'field_app_job_transfer', true);
+      PERFORM set_config('crx.job_transfer_product', v_chem.product_id::text, true);
+    END IF;
     INSERT INTO invoice_items (
       invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents,
       cost_cents, sort_order, acres, rate_per_acre, rate_unit,
@@ -2066,6 +2150,10 @@ BEGIN
       v_chem.epa_registration, v_chem.product_form, false,
       CASE WHEN v_chem.customer_supplied OR v_chem.price_typed THEN 'manual' WHEN v_quote_cents IS NOT NULL THEN 'quoted' ELSE NULL END
     );
+    IF v_cleared THEN
+      PERFORM set_config('app.crx_below_cost_operation', COALESCE(v_prev_ctx, ''), true);
+      PERFORM set_config('crx.job_transfer_product', '', true);
+    END IF;
   END LOOP;
 
   -- Sent quote price (Mason, 2026-11-21): when a quote priced any line, the invoice bills the sum of its lines
@@ -2278,8 +2366,7 @@ BEGIN
                        AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[])
      OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
                  WHERE p.oid IN ('public._job_transfer_quote_price_cents_20270207(uuid,text,text,text,uuid[],uuid,date)'::regprocedure,
-                                 'public._job_transfer_typed_price_warning_20270207(uuid,text,text,text,uuid[],uuid,date,bigint,text)'::regprocedure,
-                                 'public._job_transfer_qty_in_stock_unit_20270207(numeric,text,text)'::regprocedure)
+                                 'public._job_transfer_typed_price_warning_20270207(uuid,text,text,text,uuid[],uuid,date,bigint,text)'::regprocedure)
                    AND a.privilege_type = 'EXECUTE' AND a.grantee <> 'postgres'::regrole)
      OR NOT has_column_privilege('authenticated', 'public.job_chemicals', 'price_typed', 'SELECT')
      OR NOT has_column_privilege('authenticated', 'public.job_chemicals', 'price_typed', 'REFERENCES')

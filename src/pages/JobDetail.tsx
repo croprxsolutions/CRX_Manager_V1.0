@@ -177,6 +177,8 @@ interface JobDbRow {
     sort_order: number;
     /** F06: 'rate' | 'qty' | null; absent on a pre-apply schema (select is `*`). */
     driver?: string | null;
+    /** Typed by hand (migration 20270207130000). */
+    price_typed?: boolean | null;
     product?: { product_name: string } | null;
   }>;
   job_field_shares?: Array<{
@@ -215,6 +217,8 @@ interface CompleteJobResult { record_number: string }
 interface TransferJobResult {
   // Checked against the route's job before the request key is retired.
   job_id: string;
+  /** One sentence per typed price that differs from the grower's sent quote (migration 20270207130000). */
+  price_warnings?: string[];
   invoice_id: string;
   // single-owner path returns the invoice number; the multi-owner group path returns
   // the group fields instead (U7). invoice_id is always the anchor member to navigate to.
@@ -264,6 +268,10 @@ interface ChemRow {
   /** #53/#54: grower brought this product — apply it, but don't deduct our
    *  inventory or bill for it. Persisted to job_chemicals.customer_supplied. */
   customer_supplied: boolean;
+  /** The price was typed by hand, so Create Invoice bills it instead of the grower's sent quote price
+   *  (job_chemicals.price_typed, migration 20270207130000). Autofill, a unit change that clears the
+   *  price, and re-pricing an un-ticked customer-supplied line all set it back to false. */
+  price_typed?: boolean;
   sort_order: number;
   /** Which field the user last drove — so an acreage change re-derives the OTHER
    *  field and never silently rewrites a hand-entered quantity (Codex P2).
@@ -2112,6 +2120,7 @@ export default function JobDetail() {
           warehouse: c.warehouse || '',
           vendor: c.vendor || '',
           customer_supplied: c.customer_supplied ?? false,
+          price_typed: c.price_typed ?? false,
           sort_order: c.sort_order,
         };
       })
@@ -3370,6 +3379,7 @@ export default function JobDetail() {
         } else {
           toast('success', `Invoice ${result.invoice_number} created`);
         }
+        for (const warning of result.price_warnings ?? []) toast('warning', warning);
         navigate(`/field-invoices/${result.invoice_id}`);
       }
     } catch (err: unknown) {
@@ -3782,6 +3792,7 @@ export default function JobDetail() {
       const statedCents = p && tier != null ? getStatedTierPriceCents(p, tier) : null;
       // Priced per the line's own billed unit (its quantity is in it), not the rate's.
       updated[i].price_per_unit_cents = p ? priceTextInLineUnit(p.unit_size, row.unit, statedCents) : '';
+      updated[i].price_typed = false;
     }
     setChemRows(updated);
   };
@@ -3813,7 +3824,7 @@ export default function JobDetail() {
       if (carriesMoney && beforeNorm != null && afterNorm != null && beforeNorm !== afterNorm) {
         // A non-admin cannot see or enter cost (the server derives it on save), so their line resets
         // cost to 0, not blank, or the blank-cost gate would block a save they cannot fix (CodeRabbit).
-        updated[i] = { ...updated[i], cost_per_unit_cents: isAdmin ? '' : '0', price_per_unit_cents: '' };
+        updated[i] = { ...updated[i], cost_per_unit_cents: isAdmin ? '' : '0', price_per_unit_cents: '', price_typed: false };
         toast('info', isAdmin
           ? `The Unit changed from ${beforeRaw} to ${value}. The line's cost and price were entered per ${beforeRaw}, `
             + `so they were cleared — re-enter them per ${value} before saving.`
@@ -3822,6 +3833,8 @@ export default function JobDetail() {
       }
     }
     updated[i] = { ...updated[i], [key]: value };
+    // A price typed by hand bills as typed; everything that fills the price for the operator clears the mark.
+    if (key === 'price_per_unit_cents') updated[i].price_typed = true;
     if (key === 'product_id') {
       const p = allProducts.find(ap => ap.id === value);
       updated[i].product_name = p?.product_name || '';
@@ -3864,6 +3877,7 @@ export default function JobDetail() {
         // unit, blanks the line's price rather than keeping the previous product's (or a rounded
         // one): chemRowDefects then refuses the save until a price is typed.
         updated[i].price_per_unit_cents = autofillPriceText(tierPriceCents, reconciled);
+        updated[i].price_typed = false;
         if (tierPriceCents != null && !reconciled.priceIsExact) {
           toast('warning', `${p.product_name}: its price per ${p.unit_size} is not a whole number of cents per ${reconciled.unit}, so the price was left blank. Enter the price per ${reconciled.unit} to bill.`);
         }
@@ -4681,6 +4695,9 @@ export default function JobDetail() {
                         <label className="block text-xs font-medium text-secondary mb-1">Price ¢/unit</label>
                         <input type="number" value={c.price_per_unit_cents} onChange={(e) => updateChemRow(i, 'price_per_unit_cents', e.target.value)}
                           disabled={!canEdit} step="1" className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50" />
+                        {c.price_typed && !c.customer_supplied && (
+                          <p className="mt-1 text-xs text-secondary">Typed by hand: bills this price, not the quote</p>
+                        )}
                       </div>
                     </div>
                     {/* #53/#54: grower-supplied product — applied but not deducted or billed. */}

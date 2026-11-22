@@ -32,9 +32,11 @@ const SRC = join(HERE, '..');
 const COST_TABLES = Object.keys(COST_COLUMNS) as CostTable[];
 
 // Keep the production registry authoritative while this feature branch includes its pending
-// staging migration. Remove this exact overlay after 20261231120000_sales_tax_checkbox applies live.
+// staging migration. Remove each overlay after its migration applies live: orders.sales_tax
+// (20261231120000_sales_tax_checkbox), job_chemicals.price_typed (20270207130000).
 const PENDING_STAGING_COLUMNS: Partial<Record<CostTable, readonly string[]>> = {
   orders: ['sales_tax'],
+  job_chemicals: ['price_typed'],
 };
 
 function sourceFiles(dir: string, out: string[] = []): string[] {

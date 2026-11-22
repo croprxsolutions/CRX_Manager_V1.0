@@ -70,6 +70,8 @@ interface TransferJobInvoiceResult {
   invoice_number?: string;
   invoice_count?: number;
   split?: boolean;
+  /** One sentence per typed price that differs from the grower's sent quote (migration 20270207130000). */
+  price_warnings?: string[];
 }
 
 interface JobInvoiceKeyControls {
@@ -269,6 +271,7 @@ export default function UnbilledApplicationsPanel() {
       setLastCreatedMessage(successMessage);
       setBillNextReady(remainingJobs.length > 0);
       toast('success', successMessage);
+      for (const warning of result.price_warnings ?? []) toast('warning', warning);
     } catch (err: unknown) {
       Sentry.captureException(toSentryError(err), {
         extra: { context: 'transfer_job_to_invoice', jobId: pendingJobInvoice.row.id },
@@ -499,7 +502,7 @@ export default function UnbilledApplicationsPanel() {
         onConfirm={() => { void handleCreateInvoice(); }}
         title="Create Invoice"
         message={pendingJobInvoice
-          ? `Create the invoice for job ${pendingJobInvoice.row.ref}? This bills the job's chemicals + application fee.`
+          ? `Create the invoice for job ${pendingJobInvoice.row.ref}? This bills the job's chemicals + application fee. A chemical whose price wasn't typed by hand bills at the grower's sent quote price when one covers the field, so the total can differ from Est. $.`
           : ''}
         confirmLabel="Create Invoice"
         variant="info"

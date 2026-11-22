@@ -69,7 +69,8 @@ when there is no sent quote for it. Field application invoices are Mason's own w
   the same transaction as the insert. Header = sum of shares (single) and = sum of lines + fee (each member).
 - Existing rows: none change. The deployed screen keeps working; only new refusals can appear. A job built from a
   quote section usually gets the same price it already carries; if its quote was revised and not re-sent since, the
-  transfer now stops (it used to bill silently).
+  transfer now stops (it used to bill silently), except for the price changes the sent-price lock already accepts without
+  a resend (e.g. a booking-price change, `20261101100000`), which bill at the changed price (Sol LOW).
 - Timing: idempotency unchanged (same key returns the stored result). A quote re-sent while a transfer waits on the
   FOR SHARE lock is billed at the newer sent price or refused by the lock; no partial invoice.
 - Undo: void the invoice as today; nothing new.
@@ -102,7 +103,8 @@ when there is no sent quote for it. Field application invoices are Mason's own w
    session): exact factors within one kind only; whole cents by the documented rounding; anything else stops.
    **Decision 2 changed by Mason, 2026-11-21:** a price typed by hand stays and is what posts; warn when it differs
    from the sent quote. Built: `job_chemicals.price_typed` stored by the job save (Mason approved the plan 2026-11-21);
-   the job screen's mark and the Unbilled Applications warning come in a follow-up screen PR.
+   the job screen's mark and both Create Invoice warnings ship in this PR (Mason, 2026-11-22, Q1); on a completed or
+   invoiced job the marks can't change (`JOB_PRICE_MARK_LOCKED`); no backfill.
 2. A price typed on the job line itself versus the sent quote. Recommend: the sent quote wins (the job can't tell a
    typed price from the auto-filled list price); staff can still change the line on the unposted invoice afterwards.
 3. Job line unit differs from the quote's (stock) unit, e.g. job in Pt, quote per Gal. Options: (a) stop and ask staff

@@ -1,5 +1,15 @@
 # Decision Log
 
+## 2026-11-21 — Quote-to-invoice audit answers: booking salesperson, shared-field pricing, sent-version cutoff, applied acres
+
+**Decision (Mason, in chat, 2026-11-21, To-Do decisions 30-33 from the [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)):**
+(30, "booking salesperson") an order converted from a booking takes the booking's salesperson; only the conversion functions set it, and a rep still cannot name another salesperson by hand.
+(31, "I agree") on a shared-field job the grower who owns the booked quote pays the booked price (falling back to their own eligible quote or tier when it cannot be used); each other grower pays their own eligible sent quote or, with none, their tier price; a manual job-line price wins; conflicting eligible prices for one grower and product are refused.
+(32, "I agree") earlier field work bills the latest quote version **sent** on or before the application date (clarifies the earlier "written on or before" wording; matches #1966).
+(33, "yes always bill if actual sprayed acres") a finished job always bills, splits payer shares and takes stock for the acres actually sprayed, not the planned acres.
+**Why:** the commission and booking already belong to the booking's rep; each grower should pay the price they were quoted; and customers pay for what was applied.
+**What this forbids/implies:** KI-191, KI-198, KI-185 and #2075 are built to these rules; Transfer, office auto-draft and Split Billing must agree.
+
 ## 2026-11-21 — #2151: Mason owner-accepted 1 Sol finding(s) at `1be1755e1188`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2151 at `1be1755e1188` (base `9abe45d4bc5f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

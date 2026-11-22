@@ -631,7 +631,7 @@ this number is fixed and live (archive, 2026-11-05).
 RT-1's draft rates (`20261229110000`, live 2026-11-10) copy these as they are; nothing here is fixed yet. RT-2 step 1
 (PR #1706, open) has its unit converter live (`20261229160000`, ledger `20261110061547`); its spelling remap
 `20261229170000` is not live (2026-11-10). Derive notes the basis doubts (`basis_suspect`, `unit_not_for_form`, no basis), but not the Piksi grams: its house row is an `18 mg/acre` quoting default beside an `18 g/acre` label row, so RT-3 must fix it before any draft is approved.
-**Re-verified live 2026-11-21 (read-only, [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)):** Piksi Dust Plus is `18 MG` per acre with suggested-rate text "18 grams per Acre"; Piksi Dust Infurrow is `6 MG` ("1.5 gram per G"); all 456 product groups are still `rate_source = legacy` (cutover `20270125100000` live, ledger `20261121060539`). The code refuses BOTH Piksi parents by ID (`PRODUCT_PARENT_CUTOVER_HELD`, `20270125100000` ~L281, preflight ~L38), not only Plus. The three Piksi sizes appear on 4 order lines from March 2026, none rate-based, and on no quote or invoice line, so no bill has used the mg default. Tracked in #1958; the correct rate and price basis is still Mason's label check.
+**Re-verified live 2026-11-21 (read-only, [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)):** Piksi Dust Plus is `18 MG` per acre with suggested-rate text "18 grams per Acre"; Piksi Dust Infurrow is `6 MG` ("1.5 gram per G"); all 456 product groups are still `rate_source = legacy` (cutover `20270125100000` live, ledger `20261121060539`). The code refuses BOTH Piksi parents by ID (`PRODUCT_PARENT_CUTOVER_HELD`, `20270125100000` ~L281, preflight ~L38), not only Plus. The three Piksi sizes appear on 4 order lines from March 2026, none rate-based, and on no quote or invoice line, so no bill has used the mg default. Tracked in #1958. **Label answered 2026-11-21 (Mason): 18 grams per acre**, so the stored `18 MG` unit is wrong; correct it through a reviewed change before the cutover releases Piksi.
 **Derived on live 2026-11-17** (714 drafts, [run record](../changelog.d/2026-11-17-rt1-derivation-run.md)): as predicted, `Piksi Dust Plus` has an `18 mg` per-acre house draft proposed as the quoting default beside an `18 g` label draft; `Piksi Dust Infurrow` has a `6 mg` house draft (not default). The two dry `oz` products got no house draft (`unit_not_for_form`).
 - Seed treatments: the 9 liquid seed treatments with `/unit` text store the per-seed-unit number as a per-acre rate
   (Ilevo 2.5 Gal: `1.18 oz` "per acre", text `1.18 oz/unit`), so a quote multiplies it by acres. RT-3.
@@ -846,7 +846,7 @@ to the acres applied. A job planned at 100 acres and sprayed on 80 bills 100, an
 quantities still reflect the plan. Live read-only 2026-11-21: the only
 active job-linked invoice is an **unposted draft** (one payer, so whole-job scope) whose acres follow the plan and
 differ from its application record by a few acres; review it before it is posted. Related: KI-186, To-Do 5.3.
-Fix: settle that billing follows applied acres, then make transfer, payer shares and stock use the same figure. Proof:
+Decided 2026-11-21 (decision 33): always bill the acres actually sprayed. Fix: make transfer, payer shares and stock use the same figure. Proof:
 a two-grower job with an uneven shortfall across fields, through both manual Transfer and office auto-draft (~L928-949),
 checking each payer's own acres and per-acre fee, the stock ledger in the inventory unit, and the PDF.
 
@@ -899,12 +899,12 @@ extras, then separately a changed booked price and a changed tier price used for
 previous successful draw still replays under its original key and payload.
 
 ### KI-191 — Orders converted from a booking have no salesperson
-**MED · OPEN (source-confirmed; live 2026-11-21: no orders trigger fills it) · quotes/orders/reports · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 4) · Mason decision (To-Do decision 30)**
+**MED · OPEN (source-confirmed; live 2026-11-21: no orders trigger fills it) · quotes/orders/reports · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 4) · rule decided 2026-11-21 (To-Do decision 30: the booking's salesperson; DECISION_LOG) · unassigned (Bookings Phase B)**
 Whole Convert, Partial Order and the extras order insert no `salesman_id` (`20260914100500` ~L655, `20261029110000`
 ~L426 and ~L1531); the only orders trigger on that column is the rep-scope guard. Order Detail shows no salesperson,
 salesperson-filtered sales reports leave the sale out (`20261229150000` ~L194, ~L249), and the rep cannot use the
-order's tax checkbox when that feature is on. Commission is unaffected (it follows the booking split). Needs the rule
-first: the booking's salesperson, or the rep who converts. Either way the fix must set it on the server: the rep-scope
+order's tax checkbox when that feature is on. Commission is unaffected (it follows the booking split). Decided
+2026-11-21: the booking's salesperson. The fix must set it on the server: the rep-scope
 guard refuses an order where a rep names a salesperson other than themselves (`20261015130000` ~L137-166,
 `20261027080400` ~L105-119), and a rep may convert another rep's booking. Rule needed: only the conversion functions may assign the salesperson taken from the locked booking; a rep still cannot name another salesperson by hand. Proof: cross-rep whole and partial
 conversion, with commission still following the booking split, and a rep naming another salesperson by hand is still refused.
@@ -961,7 +961,7 @@ The unlocked-job case applies only to outputs reachable before completion (the s
 unlocked job (which still uses the catalog, `20261204120000` ~L143-153). With KI-157 and KI-117.
 
 ### KI-198 — Shared-field job billing: Transfer and per-line Split Billing price the same work differently
-**HIGH if Transfer is used for real billing · OPEN (needs Mason, To-Do decision 31) · field-app billing · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 7)**
+**HIGH if Transfer is used for real billing · OPEN (rule decided 2026-11-21, To-Do decision 31; DECISION_LOG) · field-app billing · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 7)**
 Transfer to Invoice and office auto-draft take the job's saved chemical price and split the dollars by acres
 (`20261120100000` ~L547-566; auto-draft `20261217100000` ~L928-949). Per-line Split Billing resolves each grower's
 own eligible sent quote or tier, with manual overrides (`20270129171000` ~L1686-1755; latest sent-price helper
@@ -969,7 +969,7 @@ own eligible sent quote or tier, with manual overrides (`20270129171000` ~L1686-
 B (40%) has its own sent quote at $36/gal: Transfer bills $200 ($120/$80); per-line billing bills $120 + $144 = $264.
 Neither is proven wrong: DECISION_LOG says a booked job and its invoices keep the booked price, "Own quote only"
 covers split and blend bills, and the old transfer screens are for testing only until replaced. No customer loss is
-shown. Decide which rule Transfer follows before field billing goes live.
+shown. Decided 2026-11-21: Transfer and office auto-draft follow the per-grower rule (decision 31); build before field billing goes live.
 
 ### KI-199 — Fixed on staging, waiting for the production release
 **HIGH until released · OPEN (fixed on staging, awaiting the production release) · deliveries / field-app billing · recorded 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audits 5 and 6) · release owner: Taha or Mason (release/next)**

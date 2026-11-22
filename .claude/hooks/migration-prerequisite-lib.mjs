@@ -30,13 +30,16 @@ const PREREQUISITES = {
     what: "the live EPA batch fill",
     minMatched: MOA_MIN_MATCHED,
     query: moaMatchCountQuery,
+    // The load's own list table: catches its SQL sent under any other name (Luna MED).
+    sqlMarker: /\bmoa1_list\b/i,
   },
 };
 
-// Keyed on the name after its stamp, so a restamped copy of the load is still caught.
-export function prerequisiteFor(name) {
+// Matched on the name after its stamp (a restamped copy is still caught) or on the
+// load's own SQL (the same SQL sent under another name is caught too).
+export function prerequisiteFor(name, sql = "") {
   const stem = normalizeMigrationName(name).replace(/^\d{14}_/, "");
-  return PREREQUISITES[stem] || null;
+  return PREREQUISITES[stem] || Object.values(PREREQUISITES).find((p) => p.sqlMarker.test(String(sql))) || null;
 }
 
 // The load's own 123 list rows, read from the migration being applied, matched by
@@ -65,8 +68,8 @@ export function moaMatchCountQuery(sql) {
 }
 
 /** Refusal text for the MCP door, or null when the migration has no live prerequisite. */
-export function mcpPrerequisiteRefusal(name) {
-  const p = prerequisiteFor(name);
+export function mcpPrerequisiteRefusal(name, sql = "") {
+  const p = prerequisiteFor(name, sql);
   if (!p) return null;
   return (
     `MIGRATION PREREQUISITE (#2193): ${normalizeMigrationName(name)} may only be applied after ${p.what} ` +
@@ -81,7 +84,7 @@ export function mcpPrerequisiteRefusal(name) {
  * Fails closed on any read or shape problem.
  */
 export async function checkLivePrerequisite({ fetchImpl, projectId, token, name, sql }) {
-  const p = prerequisiteFor(name);
+  const p = prerequisiteFor(name, sql);
   if (!p) return { ok: true, skipped: true };
   const fail = (why) => ({ ok: false, reason: `MIGRATION PREREQUISITE CHECK FAILED (#2193): ${why}. Refusing to transmit.` });
   let query;

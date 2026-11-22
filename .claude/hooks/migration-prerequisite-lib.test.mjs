@@ -22,6 +22,11 @@ assert.ok(prerequisiteFor(LOAD));
 assert.ok(prerequisiteFor(`supabase/migrations/20270301000000_ingredient_modes_of_action_load.sql`), "restamped copy");
 assert.equal(prerequisiteFor("20270205140000_ingredient_modes_of_action"), null);
 assert.equal(mcpPrerequisiteRefusal("20270208100000_something_else"), null);
+// The load's SQL under another name is still caught (Luna MED), at both doors.
+assert.ok(prerequisiteFor("20270208100000_something_else", SQL));
+assert.match(mcpPrerequisiteRefusal("20270208100000_something_else", SQL), /MIGRATION PREREQUISITE/);
+const renamed = evaluateMigrationApply({ name: "20270208100000_something_else", query: SQL, projectId: "rhyzpcqhnizqbxphqdkr", projectDir: ROOT, cwd: ROOT });
+assert.match(renamed.reason, /MIGRATION PREREQUISITE \(#2193\)/);
 
 // The count query carries all 123 list rows from the migration itself.
 const q = moaMatchCountQuery(SQL);
@@ -50,7 +55,7 @@ assert.match((await check(fakeFetch([]), LOAD, "SELECT 1;")).reason, /CHECK FAIL
 
 // Any other migration is not touched (and nothing is read).
 let called = false;
-assert.deepEqual(await check(async () => { called = true; }, "20270208100000_other"), { ok: true, skipped: true });
+assert.deepEqual(await check(async () => { called = true; }, "20270208100000_other", "ALTER TABLE x ADD COLUMN y int;"), { ok: true, skipped: true });
 assert.equal(called, false);
 
 // MCP door: refused outright, before any other gate, pointing at the script door.

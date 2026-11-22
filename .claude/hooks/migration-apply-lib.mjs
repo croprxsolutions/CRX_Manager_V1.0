@@ -396,7 +396,7 @@ export function evaluateMigrationApply({
   }
   // A migration with a live prerequisite (#2193) goes through the script door,
   // which reads the live count right before it transmits; this door cannot.
-  const prerequisite = livePrerequisiteRecheck ? null : mcpPrerequisiteRefusal(migName);
+  const prerequisite = livePrerequisiteRecheck ? null : mcpPrerequisiteRefusal(migName, migQuery);
   if (prerequisite) return block(prerequisite);
   const currentHash = createHash("sha256").update(migQuery).digest("hex");
   const safeName = migName.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 80) || "unknown";

@@ -22,7 +22,7 @@ const lineFp = (line) => `(SELECT row(oi.price_per_unit, oi.cost_per_unit, oi.to
 
 function seedPeriodsPricing() {
   seed('periods-pricing', `SELECT public.close_accounting_period('${PERIOD_END}', '${ADMIN}', 'undo-seed-close-period',
-    md5(public._month_close_figures_20270208(date_trunc('month', DATE '${PERIOD_END}')::date, DATE '${PERIOD_END}')::text), true, true);
+    public.get_monthly_summary(date_trunc('month', DATE '${PERIOD_END}')::date, DATE '${PERIOD_END}') ->> 'review_token', true, true);
     INSERT INTO public.customers (id, farm_name, account_number) VALUES ('${CUST}', '[UNDO] Pricing Farm', '[UNDO]-PRC-1');
     INSERT INTO public.products (id, product_name, unit_size, epa_registration, product_form, inventory_unit)
       VALUES ('${PROD}', '[UNDO] Pricing Product', 'Gal', '999999-99996', 'liquid', 'Gal');

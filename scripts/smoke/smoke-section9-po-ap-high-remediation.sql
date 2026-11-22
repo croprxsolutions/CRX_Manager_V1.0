@@ -982,8 +982,8 @@ BEGIN
       'smk-s9-close-old-period-' || v_suffix
     );
   ELSE
-    v_close_token := md5(public._month_close_figures_20270208(date_trunc('month', v_old_date)::date,
-      (date_trunc('month', v_old_date) + interval '1 month - 1 day')::date)::text);
+    v_close_token := public.get_monthly_summary(date_trunc('month', v_old_date)::date,
+      (date_trunc('month', v_old_date) + interval '1 month - 1 day')::date) ->> 'review_token';
     PERFORM public.close_accounting_period(
       (date_trunc('month', v_old_date) + interval '1 month - 1 day')::date,
       v_admin,

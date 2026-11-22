@@ -1,17 +1,13 @@
 -- F05: an order line can never be scheduled or delivered past what was ordered.
 -- Contract: docs/plans/2026-11-22-f05-delivery-remaining-qty-CONTRACT.md.
 -- One rule, checked at the three places a line's commitment can grow, after locking the order line:
---     delivered + quantity on open (scheduled / in-progress) loads <= ordered
+--     delivered + quantity on open (scheduled / in-progress, not soft-deleted) loads <= ordered
 --   * delivery line: inserted, re-linked, or its scheduled quantity raised while its load is open;
---   * delivery header: a load that was not open (cancelled, voided, completed) becomes open again;
+--   * delivery header: a load that was not counted (cancelled, voided, completed, soft-deleted) becomes counted again;
 --   * order line: inserted, delivered raised (completion marks its own load completed first, so it is not counted twice),
 --     or ordered lowered.
 -- The triggers only refuse; they never change a record. A write that does not grow the commitment (a reduction,
 -- cancel, void) is never checked, so an already-over legacy line can always be brought back within its order.
-
-SET LOCAL lock_timeout = '5s';
--- In completion's order (header, lines, order lines), so the trigger creation cannot deadlock with a live completion.
-LOCK TABLE public.deliveries, public.delivery_items, public.order_items IN SHARE ROW EXCLUSIVE MODE;
 
 DO $preflight$
 DECLARE
@@ -34,16 +30,21 @@ BEGIN
     FROM public.order_items oi
    WHERE oi.quantity_delivered + (SELECT COALESCE(sum(di.quantity), 0) FROM public.delivery_items di
                                     JOIN public.deliveries d ON d.id = di.delivery_id
-                                   WHERE di.order_item_id = oi.id AND d.status IN ('scheduled', 'in_progress'))
+                                   WHERE di.order_item_id = oi.id AND d.status IN ('scheduled', 'in_progress') AND d.deleted_at IS NULL)
          > oi.total_units_needed
      AND EXISTS (SELECT 1 FROM public.delivery_items di JOIN public.deliveries d ON d.id = di.delivery_id
-                  WHERE di.order_item_id = oi.id AND d.status IN ('scheduled', 'in_progress'));
+                  WHERE di.order_item_id = oi.id AND d.status IN ('scheduled', 'in_progress') AND d.deleted_at IS NULL);
   RAISE NOTICE 'F05_PREFLIGHT: % order line(s) have open loads beyond what was ordered', v_open_over;
   -- Lines already delivered past their order (staging ORD-2026-0017): left as they are, listed for office cleanup (F05b).
   SELECT count(*) INTO v_open_over FROM public.order_items oi WHERE oi.quantity_delivered > oi.total_units_needed;
   RAISE NOTICE 'F05_PREFLIGHT: % order line(s) are already delivered beyond what was ordered', v_open_over;
 END
 $preflight$;
+
+-- After the report scan, so the scan holds no write-blocking lock. In completion's order (header, lines, order lines),
+-- so creating the triggers cannot deadlock with a live completion.
+SET LOCAL lock_timeout = '5s';
+LOCK TABLE public.deliveries, public.delivery_items, public.order_items IN SHARE ROW EXCLUSIVE MODE;
 
 -- What one order line has delivered plus on open loads, leaving out one delivery line and/or one whole delivery.
 -- VOLATILE: called right after the order line lock, it must read what a session it waited for just committed.
@@ -58,7 +59,7 @@ AS $function$
     FROM public.delivery_items di
     JOIN public.deliveries d ON d.id = di.delivery_id
    WHERE di.order_item_id = p_order_item_id
-     AND d.status IN ('scheduled', 'in_progress')
+     AND d.status IN ('scheduled', 'in_progress') AND d.deleted_at IS NULL
      AND di.id IS DISTINCT FROM p_exclude_delivery_item_id
      AND d.id IS DISTINCT FROM p_exclude_delivery_id;
 $function$;
@@ -76,7 +77,7 @@ AS $function$
     FROM public.delivery_items di
     JOIN public.deliveries d ON d.id = di.delivery_id
    WHERE di.order_item_id = p_order_item_id
-     AND d.status IN ('scheduled', 'in_progress')
+     AND d.status IN ('scheduled', 'in_progress') AND d.deleted_at IS NULL
      AND di.id IS DISTINCT FROM p_exclude_delivery_item_id
      AND d.id IS DISTINCT FROM p_exclude_delivery_id;
 $function$;
@@ -122,7 +123,7 @@ CREATE FUNCTION public._delivery_line_within_order()
  SET search_path = public, pg_temp
 AS $function$
 DECLARE
-  v_status text;
+  v_counted boolean;
 BEGIN
   IF NEW.order_item_id IS NULL THEN
     RETURN NEW;
@@ -134,8 +135,9 @@ BEGIN
     RETURN NEW;
   END IF;
   -- FOR SHARE: the load cannot change status until this line commits.
-  SELECT d.status INTO v_status FROM public.deliveries d WHERE d.id = NEW.delivery_id FOR SHARE;
-  IF v_status IN ('scheduled', 'in_progress') THEN
+  SELECT d.status IN ('scheduled', 'in_progress') AND d.deleted_at IS NULL INTO v_counted
+    FROM public.deliveries d WHERE d.id = NEW.delivery_id FOR SHARE;
+  IF v_counted THEN
     PERFORM public._assert_order_line_fits(NEW.order_item_id, NEW.quantity, NEW.id, NULL);
   END IF;
   RETURN NEW;
@@ -148,7 +150,8 @@ CREATE TRIGGER zz_delivery_line_within_order
   BEFORE INSERT OR UPDATE OF quantity, order_item_id, delivery_id ON public.delivery_items
   FOR EACH ROW EXECUTE FUNCTION public._delivery_line_within_order();
 
--- 2. Delivery header: a load that was not open becomes open again (restore_cancelled_delivery and any later path).
+-- 2. Delivery header: a load that was not counted becomes counted again (restore_cancelled_delivery, an un-delete,
+--    and any later path).
 CREATE FUNCTION public._delivery_reopen_within_order()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -158,8 +161,8 @@ AS $function$
 DECLARE
   v_line record;
 BEGIN
-  IF NEW.status IN ('scheduled', 'in_progress')
-     AND OLD.status IS DISTINCT FROM 'scheduled' AND OLD.status IS DISTINCT FROM 'in_progress' THEN
+  IF NEW.status IN ('scheduled', 'in_progress') AND NEW.deleted_at IS NULL
+     AND NOT (OLD.status IN ('scheduled', 'in_progress') AND OLD.deleted_at IS NULL) THEN
     -- Order lines in id order, as the order edit locks them.
     FOR v_line IN
       SELECT di.order_item_id, sum(di.quantity) AS qty
@@ -177,7 +180,7 @@ $function$;
 REVOKE ALL ON FUNCTION public._delivery_reopen_within_order() FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TRIGGER zz_delivery_reopen_within_order
-  BEFORE UPDATE OF status ON public.deliveries
+  BEFORE UPDATE OF status, deleted_at ON public.deliveries
   FOR EACH ROW EXECUTE FUNCTION public._delivery_reopen_within_order();
 
 -- 3. Order line: inserted, delivered raised, or ordered lowered. The row is already locked by this write.
@@ -201,10 +204,11 @@ BEGIN
     RETURN NEW;
   END IF;
   IF v_more_delivered THEN
-    RAISE EXCEPTION 'DELIVERY_EXCEEDS_ORDER: % — this would bring the line to % delivered with % more on open deliveries (%), but only % was ordered. %',
-      COALESCE(NEW.product_name, 'this order line'), NEW.quantity_delivered, v_open,
-      public._order_line_open_loads(NEW.id, NULL, NULL), NEW.total_units_needed,
-      CASE WHEN v_open > 0 THEN 'Ask the office to cancel the extra delivery, then complete this one.'
+    -- Drivers see this: no other load's number or quantity (they may not be allowed to read that load).
+    RAISE EXCEPTION 'DELIVERY_EXCEEDS_ORDER: % — this would bring the line to % delivered, but only % was ordered%. %',
+      COALESCE(NEW.product_name, 'this order line'), NEW.quantity_delivered, NEW.total_units_needed,
+      CASE WHEN v_open > 0 THEN ' and another open delivery for this order still holds units' ELSE '' END,
+      CASE WHEN v_open > 0 THEN 'Ask the office to cancel the extra delivery (or, if it cannot be cancelled, complete it with 0 delivered), then complete this one.'
            ELSE 'Record no more than what was ordered, or ask the office to raise the order.' END
       USING ERRCODE = 'check_violation';
   END IF;

@@ -364,14 +364,25 @@ async function afterCases() {
   // 3. Legacy double schedule (two open loads of 1 for 1 ordered): neither completes while the other is open, the whole
   // call rolls back (no stock, line or draft change); once the office cancels the extra load, the other completes.
   refusedProbe(`${AS_ADMIN} ${completeLegacy(DLA, DLA1, 1, 'f05-3a')}`,
-    /DELIVERY_EXCEEDS_ORDER: \[PROVER\] F05 Product — this would bring the line to 1(\.0+)? delivered with 1(\.0+)? more on open deliveries \(F05-DLB\), but only 1(\.0+)? was ordered. Ask the office to cancel the extra delivery/);
+    /DELIVERY_EXCEEDS_ORDER: \[PROVER\] F05 Product — this would bring the line to 1(\.0+)? delivered, but only 1(\.0+)? was ordered and another open delivery for this order still holds units\. Ask the office to cancel the extra delivery/);
   assert.equal(scalar(`SELECT quantity_available || '/' || quantity_prebooked FROM public.inventory WHERE id = '${INV}';`).replace(/\.0+/g, ''), '50/13');
   assert.equal(scalar(`SELECT quantity_delivered || '/' || (SELECT count(*) FROM public.invoices WHERE order_id = '${OL}') || '/' || (SELECT status FROM public.deliveries WHERE id = '${DLA}') FROM public.order_items WHERE id = '${LL}';`).replace(/\.0+/g, ''), '0/0/in_progress');
   assert.equal(Number(okProbe(`${AS_ADMIN}
     SELECT public.cancel_delivery('${DLB}', 'Prover: legacy duplicate load', '${ADMIN}', 'f05-3b');
     ${completeLegacy(DLA, DLA1, 1, 'f05-3c')}
     ${delivered(LL)}`)), 1);
-  console.log('[case 3] legacy double schedule: completing either load is refused (DELIVERY_EXCEEDS_ORDER, names the other load) and nothing is kept; after the office cancels the extra load the other completes');
+  console.log('[case 3] legacy double schedule: completing either load is refused (DELIVERY_EXCEEDS_ORDER, without naming the other load) and nothing is kept; after the office cancels the extra load the other completes');
+
+  // The same refusal through the public completion call, signed in (Sol r1: not only the private body as postgres).
+  refusedProbe(`SELECT public.complete_delivery(p_delivery_id => '${DLA}', p_signed_by => 'No proof — recorded by office', p_performed_by => '${ADMIN}', p_quantities => jsonb_build_object('${DLA1}', 1), p_idempotency_key => 'f05-3p', p_evidence => 'no_proof', p_evidence_ref => '[PROVER] F05 public path');`,
+    /DELIVERY_EXCEEDS_ORDER: \[PROVER\] F05 Product/, ADMIN);
+  // Way out when the extra load cannot be cancelled (Sol r1 #1: a return on the order refuses cancel and Cancel
+  // Remaining): record nothing delivered on the extra load. Delivered does not rise, so it completes; the real one follows.
+  assert.equal(Number(okProbe(`${AS_ADMIN}
+    ${completeLegacy(DLB, DLB1, 0, 'f05-3z')}
+    ${completeLegacy(DLA, DLA1, 1, 'f05-3y')}
+    ${delivered(LL)}`)), 1);
+  console.log('[case 3p] signed in through the public completion call: refused the same way; recording 0 on the extra load completes it and the real load then completes (way out when a return blocks cancel)');
 
   // 3b. A delivered rise that would use units held by another open load is refused.
   refusedProbe(`${AS_ADMIN}
@@ -398,6 +409,19 @@ async function afterCases() {
   refusedProbe(`INSERT INTO public.order_items (order_id, product_id, product_name, unit_size, total_units_needed, quantity_delivered, quantity_remaining, price_per_unit, cost_per_unit)
     VALUES ('${O17}', '${P}', '[PROVER] F05 Product', 'Gal', 2, 3, 0, 10, 8);`, /DELIVERY_EXCEEDS_ORDER/);
   console.log('[case 3d] an order line written already over its order is refused');
+
+  // 3e (Sol r1 #2). A soft-deleted open load holds nothing: the line can be cut past it (as Cancel Remaining does), and
+  // un-deleting it is refused once its units are taken.
+  const deletedLoad = `${AS_ADMIN}
+    ${schedule(O14, L14, 10, 'f05-3e', 'd1')}
+    UPDATE public.deliveries SET deleted_at = now() WHERE id = :'d1'::uuid;`;
+  assert.equal(okProbe(`${deletedLoad}
+    UPDATE public.order_items SET total_units_needed = 4 WHERE id = '${L14}';
+    SELECT total_units_needed FROM public.order_items WHERE id = '${L14}';`).replace(/\.0+$/, ''), '4');
+  refusedProbe(`${deletedLoad}
+    UPDATE public.order_items SET total_units_needed = 4 WHERE id = '${L14}';
+    UPDATE public.deliveries SET deleted_at = NULL WHERE id = :'d1'::uuid;`, /DELIVERY_OVER_ORDER: \[PROVER\] F05 Product — only 4(\.0+)? left/);
+  console.log('[case 3e] a soft-deleted open load holds nothing (the line can be cut past it); un-deleting it is checked like a reopen');
 
   // 4. ORD-2026-0014 replay: cut 10 -> 6 with 10 scheduled is refused; after editing the load to 6, the cut goes through.
   refusedProbe(`${AS_ADMIN}
@@ -459,14 +483,14 @@ async function race() {
   const d1 = scalar(`SELECT id FROM public.deliveries WHERE order_id = '${O17}' AND status = 'completed';`);
   const a = session(`BEGIN; ${AS_ADMIN} SET LOCAL ROLE authenticated;
     ${schedule(O17, L17, 1, 'f05-rc', 'd2')}
-    SELECT pg_sleep(1.5); COMMIT;`);
-  const b = session(`BEGIN; ${AS_ADMIN} SET LOCAL ROLE authenticated; SELECT public.create_followup_delivery('${d1}', current_date, '${ADMIN}', 'f05-rd'); COMMIT;`, 400);
+    SELECT pg_sleep(3); COMMIT;`);
+  const b = session(`BEGIN; ${AS_ADMIN} SET LOCAL ROLE authenticated; SELECT public.create_followup_delivery('${d1}', current_date, '${ADMIN}', 'f05-rd'); COMMIT;`, 1000);
   const [ra, rb] = await Promise.all([a, b]);
   assert.equal(ra.code, 0, ra.out);
   assert.notEqual(rb.code, 0, `the second scheduler must be refused:\n${rb.out}`);
   assert.match(rb.out, /DELIVERY_OVER_ORDER/);
   assert.equal(Number(scalar(openScheduled(L17))), 1);
-  console.log('[case 9b] two signed-in sessions at once, as the authenticated role (New Delivery holds the line, Follow-up waits): the Follow-up is refused after the wait; exactly one load holds the last unit');
+  console.log('[case 9b] two signed-in sessions at once, as the authenticated role (New Delivery commits first, Follow-up waits for it — on the delivery-number or order-line lock — then re-checks): the Follow-up is refused; exactly one load holds the last unit');
 }
 
 function rollbackCases() {

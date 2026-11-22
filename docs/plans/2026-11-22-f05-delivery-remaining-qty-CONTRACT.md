@@ -95,6 +95,18 @@ The design above was revised; the migration implements the revision.
   - #28 (driver sees other delivery numbers): only loads of the same order and customer; acceptable.
   - #32, #33 ("Remaining After" meaning): screen PR shows remaining as of now on completed loads; handled there.
 
+## Sol round 1 (2026-11-22) settlement
+
+- **HIGH #1 (fixed by a proven way out):** two legacy loads on a line whose order has a return: the return guard refuses cancelling either (`20270126110000…:316-333`) and Cancel Remaining refuses on a received/credited return (`20260721152604…:126-133`). Recording 0 delivered on the extra load does not raise delivered, so it completes; the real load then completes. The refusal now says so. Case 3p.
+- **HIGH #2 (fixed):** soft-deleted loads no longer count (`deleted_at IS NULL`, as Cancel Remaining already does); un-deleting an open load is checked like a reopen. Case 3e.
+- **MED driver sees another load (fixed):** the completion refusal no longer names the other load or its quantity.
+- **MED REPEATABLE READ stale read (refuted):** every caller runs in PostgREST's default READ COMMITTED; restore is service role only and no code sets a stricter level.
+- **MED restore vs order edit lock order (accepted, documented under Timing):** restore is service role only with no screen; Postgres cancels one side cleanly.
+- **MED race probe (fixed):** wider timing; the claim now says Follow-up waits on either shared lock, then re-checks.
+- **MED proof coverage (fixed in part):** signed-in public completion refusal and the 0-delivered way out added (case 3p). Quick Delivery and start-and-complete are left to the staging-app proof (case 11); neither raises a line above its order (Quick Delivery inserts the order line first; start-and-complete runs the same completion body).
+- **MED rollback (fixed):** all-or-nothing, and live use goes through a new migration so the ledger records it.
+- **LOW retry test:** it proves a refused call saves no receipt under its key (the retry re-checks); a second identical persisted call is not needed for that. **LOW rollback warning:** now names order cuts too. **LOW scan under lock (fixed):** the report scan runs before the table locks.
+
 ## Open business decisions
 
 1. **Answered — Mason, in chat, 2026-11-22: "yes".** (#4) When two open loads already hold the same units from before this fix, should completing either one be refused until the office cancels the extra load? **Recommended: yes.** Effect: a driver with such a load is told to call the office; no stock moves twice. (Alternative: first load to complete wins and the other is refused — the driver of the second load finds out only at the farm.)

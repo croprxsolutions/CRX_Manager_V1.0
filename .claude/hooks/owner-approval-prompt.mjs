@@ -90,7 +90,9 @@ if (skip) {
   } catch (error) {
     res = { ok: false, reason: `the approval hook failed (${error?.message || error})` };
   }
-  if (!res && which?.silent) emit();
+  // No skip request waiting: not ours. Fall through, so a plain `yes` still reaches the
+  // migration approval below (Codex P1, #2199).
+  if (res || !which?.silent) {
   if (!res?.ok) {
     emit(`SOL FINDINGS NOT SKIPPED — Mason replied "${reply.trim().slice(0, 60)}", but ${res?.reason || which?.reason || "no skip request was found"}. ` +
       "Nothing was skipped. Tell him in one line; if he still wants to skip, run node scripts/owner-accept-sol-finding.mjs again " +
@@ -101,6 +103,7 @@ if (skip) {
     `(head ${String(p.prHead).slice(0, 12)}). Acknowledge it in one line and carry on without asking again. ` +
     "Once every BLOCKER/HIGH of that Sol run is skipped or fixed: node scripts/owner-accept-sol-finding.mjs --log, commit only docs/manual/DECISION_LOG.md, " +
     "then node scripts/write-codex-push-proof.mjs --carry-owner-accepted, then keep landing.");
+  }
 }
 let code = approvalCodeFromReply(reply);
 const plain = !code && isPlainApprovalReply(reply);

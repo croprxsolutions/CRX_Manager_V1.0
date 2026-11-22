@@ -8,7 +8,7 @@
  * bodies (BEFORE) and, when the candidate migration exists, again on a fresh fixture set after applying it (AFTER).
  *
  * Run: node scripts/smoke/prove-one-lock-order-real-schema.mjs   (needs Docker; never touches live)
- * Prints ONE_LOCK_ORDER_BEFORE_PASS, then ONE_LOCK_ORDER_BEFORE_PASS (today) and ONE_LOCK_ORDER_PROOF_PASS (only after every case incl. 6-9) once the candidate exists and passes.
+ * Prints ONE_LOCK_ORDER_BEFORE_PASS (today), then ONE_LOCK_ORDER_PROOF_PASS only once the candidate exists and every case (incl. 6-9) passes.
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -111,7 +111,7 @@ function start(label, sql) {
     let out = '';
     c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; });
     c.on('close', (code) => { const r = { label, code, out: out.trim(), ok: out.includes(`DONE ${label}`) }; ended.set(label, r); resolve(r); });
-    c.stdin.end(`SET application_name = '${label}';\n${sql}\nSELECT 'DONE ${label}';\n`);
+    c.stdin.end(`\\set VERBOSITY verbose\nSET application_name = '${label}';\n${sql}\nSELECT 'DONE ${label}';\n`);
   });
 }
 /** An app call: signed in as the admin, run as the `authenticated` role, committed. */
@@ -124,7 +124,11 @@ const waitOf = (label) => scalar(`SELECT coalesce(string_agg(wait_event_type || 
 async function blockedOn(label, ms = 8000) {
   for (const t0 = Date.now(); Date.now() - t0 < ms; await new Promise((r) => setTimeout(r, 100))) {
     const w = waitOf(label);
-    if (w.startsWith('Lock:')) return w;
+    if (w.startsWith('Lock:')) {
+      const by = scalar(`SELECT coalesce(string_agg(DISTINCT b.application_name, '+'), '?') FROM pg_stat_activity a, unnest(pg_blocking_pids(a.pid)) bp JOIN pg_stat_activity b ON b.pid = bp WHERE a.application_name = '${label}';`);
+      const key = w !== 'Lock:advisory' ? '' : scalar(`SELECT coalesce(string_agg(DISTINCT l.classid || ',' || l.objid || '/' || l.objsubid, ' '), '') FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE a.application_name = '${label}' AND l.locktype = 'advisory' AND NOT l.granted;`);
+      return `${w}${key ? `(${key})` : ''} by ${by}`;
+    }
     if (ended.has(label)) return 'ended';
   }
   throw new Error(`${label} never blocked on a lock (last wait: ${waitOf(label) || 'none'})`);
@@ -134,7 +138,7 @@ async function sleeping(label, ms = 8000) {
   for (const t0 = Date.now(); Date.now() - t0 < ms; await new Promise((r) => setTimeout(r, 100))) if (waitOf(label) === 'Timeout:PgSleep') return;
   throw new Error(`${label} never reached its hold`);
 }
-const deadlocked = (...rs) => rs.some((r) => /deadlock detected/i.test(r.out));
+const deadlocked = (...rs) => rs.some((r) => /ERROR:\s+40P01:/.test(r.out));
 const summary = (rs) => rs.map((r) => `${r.label}:${r.ok ? 'ok' : (r.out.match(/ERROR:\s*([^\n]*)/)?.[1] ?? r.out).slice(0, 90)}`).join(' | ');
 const onHand = (pid) => scalar(`SELECT string_agg(quantity_available::numeric(12,2)::text, ',') FROM public.inventory WHERE product_id = '${pid}' AND location = 'Main Warehouse';`);
 const voidCall = (del, key) => `SELECT public.void_delivery('${del}', '[C3] race test', '${ADMIN}', '${key}');`;
@@ -183,7 +187,8 @@ async function case4(I, p, set) {
   const f = session(`${p}-schedG4`, `SELECT public.create_followup_delivery('${g4}', CURRENT_DATE, '${ADMIN}', 'c3-${p}-h4');`);
   const fWait = await blockedOn(`${p}-schedG4`);
   const rs = await Promise.all([v, f]); await h;
-  const created = scalar(`SELECT count(*) FROM public.delivery_remainders WHERE original_delivery_id = '${g4}' AND status = 'scheduled';`);
+  const child = scalar(`SELECT coalesce(string_agg(DISTINCT r.followup_delivery_id::text, ','), '') FROM public.delivery_remainders r JOIN public.deliveries d ON d.id = r.followup_delivery_id WHERE r.original_delivery_id = '${g4}' AND r.status = 'scheduled' AND d.status = 'scheduled' AND d.deleted_at IS NULL;`);
+  const created = String(child ? child.split(',').filter((id) => rs[1].out.includes(id)).length : 0);
   return { rs, fWait, created, line: `scheduler waited ${fWait} | ${summary(rs)} | follow-ups of G4=${created}` };
 }
 
@@ -220,7 +225,7 @@ async function main() {
     assert.ok(deadlocked(...b.case2.rs) || b.case2.rs.some((r) => /DELIVERY_ORDER_BUSY_RETRY/.test(r.out)), `case 2: today the void collides with the running completion (deadlock or busy-retry refusal): ${b.case2.line}`);
     if (b.case3.held === 'Q3') assert.ok(deadlocked(...b.case3.rs), `case 3 (void holds Q3 only) must deadlock: ${b.case3.line}`);
     else console.log(`[before] case3: the void visited P3 first on this plan (held ${b.case3.held}); no inversion to show`);
-    assert.ok(b.case4.rs.every((r) => r.ok) && b.case4.created === '1' && b.case4.fWait !== 'Lock:advisory', `case 4: today the scheduler runs alongside the void: ${b.case4.line}`);
+    assert.ok(b.case4.rs.every((r) => r.ok) && b.case4.created === '1' && !b.case4.fWait.startsWith('Lock:advisory'), `case 4: today the scheduler runs alongside the void: ${b.case4.line}`);
     assert.match(b.s5, /^ok\|NOT REFUSED new_deliveries=1/, `case 5: today a voided source with a pending row can still be scheduled: ${b.s5}`);
     assert.equal(b.s6, 'ok|true');
     console.log('ONE_LOCK_ORDER_BEFORE_PASS');
@@ -237,13 +242,13 @@ async function main() {
     assert.ok(!deadlocked(...a[c].rs), `${c} must not deadlock: ${a[c].line}`);
     assert.ok(a[c].rs.every((r) => r.ok), `${c}: both operations finish: ${a[c].line}`);
   }
-  assert.equal(a.case1.zWait, 'Lock:advisory', 'case 1: the second completion waits its turn');
+  assert.equal(a.case1.zWait, `Lock:advisory(2190,1/2) by after${AFTER_SET}-Y`, 'case 1: the second completion waits its turn');
   assert.match(a.case1.line, /A rows=1 A=-12\.00 B=88\.00/, 'case 1: one A row (created at 0) down 5 + 7; B down 5 + 7 from 100');
-  assert.equal(a.case2.vWait, 'Lock:advisory', 'case 2: the void waits its turn');
+  assert.equal(a.case2.vWait, `Lock:advisory(2190,1/2) by after${AFTER_SET}-complete2`, 'case 2: the void waits its turn');
   assert.match(a.case2.line, new RegExp(`-> ${a.case2.expectP2.replace('.', '\\.')}$`), `case 2: P2 = start - 4 + 3: ${a.case2.line}`);
-  assert.equal(a.case3.cWait, 'Lock:advisory', 'case 3: the completion waits its turn');
+  assert.equal(a.case3.cWait, `Lock:advisory(2190,1/2) by after${AFTER_SET}-void3`, 'case 3: the completion waits its turn');
   assert.equal(a.case3.got, a.case3.expect, `case 3: P3 and Q3 = start + 4 (void) - 6 (completion): ${a.case3.line}`);
-  assert.equal(a.case4.fWait, 'Lock:advisory', 'case 4: the scheduler waits for the void before reading anything');
+  assert.equal(a.case4.fWait, `Lock:advisory(2190,1/2) by after${AFTER_SET}-voidF4`, 'case 4: the scheduler waits for the void before reading anything');
   assert.equal(a.case4.created, '1', 'case 4: after the void commits, G4 is still a live completed delivery, so its follow-up is created');
   assert.match(a.s5, /FOLLOWUP_SOURCE_NOT_LIVE.* new_deliveries=0/, `case 5: a voided source is refused and nothing is written: ${a.s5}`);
   assert.equal(a.s6, 'ok|true', 'case 5b: the saved receipt is still answered');

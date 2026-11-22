@@ -1,6 +1,7 @@
 # C3 behavior contract: delivery and stock lifecycle operations take turns (#2190)
 
-Status: revision 3 (catalog-confirmed entry list) after the Astra cold challenge (gpt-6.2-astra high, 2026-11-22, round 1: 31 findings, 8 BLOCKER).
+Status: revision 4, settled. Astra cold challenge (gpt-6.2-astra high, 2026-11-22): round 1 31 findings (8 BLOCKER);
+targeted re-check on revision 3: 0 BLOCKER, 11 HIGH/MED, dispositions at the end. No further Astra rounds.
 Read at `origin/staging` 9c82aa65e. Reserved migration stamp `20270214100000`. Gate: the migration is written only
 after #2170 (job completion stock rows) merges; it does not touch #2170's function, but its prover must run on top of it.
 
@@ -45,16 +46,23 @@ check after the migration and fails on any public caller that reaches a body wit
 `complete_delivery` / `complete_job`, so it must take the lock before that row lock, or it would wait for its turn
 while holding a row the current turn-holder needs) | as today |
 
-Rule: the lock must come before any row lock in the whole transaction. Nested calls (`process_offline_action` →
+Rule: the lock must come before any row lock in the whole transaction. The guarantee covers transactions that start
+with one of these calls, which is how the app and the offline queue call them (one RPC per transaction,
+`src/lib/offlineReceipts.ts`); a hand-written transaction that locks rows first and then calls an entry is outside it. Nested calls (`process_offline_action` →
 `complete_delivery`) take it again, which is free inside one transaction. `create_invoice_from_order` and the split
 invoice path only mention completion in comments and refuse orders with live deliveries; they are untouched.
 
-Who may act is unchanged. The lock is taken before authorization, so an unauthorized caller can make others wait for
-the length of its own refusal (milliseconds); it changes nothing.
+Who may act is unchanged. The lock is taken before authorization, so an unauthorized caller makes others wait for the
+length of its own refusal. Before its role check, `batch_cancel_deliveries` takes the per-key idempotency lock
+(`check_idempotency_intent`), which waits only on another in-flight call with the same key; keys are client-made random
+UUIDs, so a refused caller cannot aim that wait at someone else's request.
 
-**Follow-up source check.** Inside the new `create_followup_delivery` wrapper, after the lock and only when the caller
-passes the existing role test and the key has no saved receipt: refuse `FOLLOWUP_SOURCE_NOT_LIVE` unless the source
-delivery is `completed` and `deleted_at IS NULL`. Remainder rows are only created by completing a delivery
+**Follow-up source check.** Inside the new `create_followup_delivery` wrapper, after the lock, in this order: if the
+actor or role test would fail, or the key already has a saved receipt, call the entry unchanged (same refusal or
+receipt as today). Otherwise lock the source delivery row (`FOR UPDATE`, the same row the entry locks next); if no
+row exists, call the entry (it raises `DELIVERY_NOT_FOUND` as today); if the row is not `completed` with
+`deleted_at IS NULL`, refuse `FOLLOWUP_SOURCE_NOT_LIVE`. Existence and liveness are decided on that one locked row,
+so a direct table update by an admin or rep (outside writer) cannot slip in between. Remainder rows are only created by completing a delivery
 (`20270203120000` L578-590) and a void deletes them (`20261107120000` L272), so a non-completed source with pending
 rows is legacy damage, not work. A replayed key still returns its saved receipt.
 
@@ -71,9 +79,13 @@ rows is legacy damage, not work. A replayed key still returns its saved receipt.
 
 **Timing.**
 - Wait limit: requests from the app run under the database's statement time limit (Supabase `authenticated` role,
-  normally 8 s). A request waiting longer behind a very large batch cancel fails with a timeout: nothing saved, the
-  screen shows its normal error, a retry works. Accepted: rare, safe, and better than a deadlock.
-- Double click / retry after timeout: unchanged idempotency; the second call waits, then gets the saved receipt.
+  normally 8 s). Operations now queue company-wide, so a call waits for every listed call ahead of it; one that is
+  itself stuck behind an outside writer (for example a return holding an order) delays the queue too. A request that
+  waits too long fails with a timeout: nothing saved, the screen shows its normal error, a retry runs it again (it
+  returns a saved receipt only if an earlier attempt committed). Offline: a timeout counts as one of the field app's
+  four automatic attempts; after four failures the action goes to the office's needs-attention list, as any failure
+  does today. Accepted as a technical trade-off: rare, nothing half-saved, and better than a deadlock.
+- Double click: unchanged idempotency; the second call waits, then gets the saved receipt.
 
 **Named limits (pre-existing, not made worse).**
 - Writers outside the list (receiving, cycle counts, returns, blend tickets, transfers) do not take the lock; a
@@ -87,8 +99,10 @@ rows is legacy damage, not work. A replayed key still returns its saved receipt.
 `SELECT d.id, d.delivery_number, d.status, r.id AS remainder_id, r.quantity_remaining FROM delivery_remainders r JOIN deliveries d ON d.id = r.original_delivery_id WHERE r.status = 'pending' AND (d.status <> 'completed' OR d.deleted_at IS NOT NULL);`
 The deployed app needs no change; `FOLLOWUP_SOURCE_NOT_LIVE` gets a plain message in `src/lib/errorSanitizer.ts`.
 
-**Undo.** Rollback script restores the previous public functions (drops the lock wrappers, renames the entries back,
-restores grants and comments) and is proven by calling every entry after reversal.
+**Undo.** Rollback script, one transaction: first refuses if any wrapper or private entry differs from the hash the
+migration recorded (e.g. C1 later replaced a wrapper) or anything new depends on them; then drops the wrappers,
+renames the entries back, restores grants and comments. Proven by calling every entry after reversal. Reversal
+reopens today's deadlocks and today's scheduling of a dead source; deliveries already committed stay as they are.
 
 ## 3. Delivery
 
@@ -98,8 +112,10 @@ on it.
 ## 4. Proof cases (real migrated database in a network-disabled container, invented rows; never live)
 
 `scripts/smoke/prove-one-lock-order-real-schema.mjs`. Every race uses observed lock waits (`pg_stat_activity`
-`wait_event_type = 'Lock'` for the named session) instead of sleeps alone, and checks exact error text
-(`deadlock detected` = SQLSTATE 40P01). Each case runs BEFORE the migration (failure expected) and AFTER on fresh rows.
+`wait_event_type = 'Lock'` for the named session), records which session blocks it (`pg_blocking_pids`) and, for the
+take-turns wait, the exact advisory key (2190, 1); errors are matched by SQLSTATE (`40P01` = deadlock). Case 4 checks
+the follow-up is a live scheduled delivery and is the one the scheduler returned. Case 8 fingerprints the public
+result, invoice and cents, stock ledger, reservations, receipt and notifications per entry. Each case runs BEFORE the migration (failure expected) and AFTER on fresh rows.
 
 1. #2190: completion Y passes its existing-row lock while A has no row; A appears; completion Z (A, B, other order)
    locks A then B. Before: one gets `deadlock detected`. After: Z waits on the take-turns lock; both finish; one A row;
@@ -115,14 +131,17 @@ on it.
    follow-up created; checked after both commit).
 5. Voided or soft-deleted source with a pending row: scheduler refuses `FOLLOWUP_SOURCE_NOT_LIVE`, writes nothing;
    the key saved before the void still returns its saved follow-up.
-6. Job completion (with #2170) and delivery completion sharing products, one missing: both finish; #2170's own
-   prover still passes after this migration.
+6. Job completion (with #2170) and delivery completion sharing products, one missing: both finish. #2170's
+   mixed-writer fixture is run inside this prover against the combined schema (both migrations applied), not only
+   #2170's own prover on its own baseline.
 7. Batch cancel of two deliveries racing a completion that shares their products: both finish.
 8. Each entry point, single session, before and after: same rows, ledger, receipt (fingerprint), same refusal for a
    rep voiding, a driver cancelling, an unassigned driver completing.
 9. Migration: refuses unexpected starting functions and a second apply; postflight checks every wrapper's security,
-   search_path, grants (authenticated/service_role as before, never anon/PUBLIC) and that each private entry is not
-   callable by app roles. Reverse restores the previous functions and every entry still works after it.
+   search_path, owner, grants (authenticated/service_role as before, never anon/PUBLIC), that each private entry is not
+   callable by app roles, that no stored object (`pg_depend`: view, default, policy, trigger) depends on the ten
+   original function identities, and re-runs the catalog caller search (every public caller of a body takes the lock
+   first). Reverse refuses a changed wrapper, restores the previous functions, and every entry still works after it.
 
 Observed before the migration (dev run, 2026-11-22): case 1 `deadlock detected`; case 2 busy-retry refusal; case 3 no
 inversion on this plan; case 4 the scheduler creates the follow-up alongside the void; case 5 a voided source is
@@ -147,3 +166,17 @@ case above ran after the candidate, including 6 and 9.
 
 None. (Operations queueing one at a time is a technical trade-off with no customer-visible effect beyond a sub-second
 wait; the rare timeout is a safe failure.)
+
+## Astra round 2 (targeted re-check of revision 3) dispositions
+
+- Resolved in design per Astra: 1, 4, 5, 7, 8, 12, 13, 24, 28, 29, 30. Out of scope as stated: 2, 3, 6, 9, 10, 15,
+  16, 17. 11: lock order resolved; the zero-row reversal update that can skip restoring stock is a pre-existing defect,
+  to be filed as its own known issue (not C3).
+- 20, 27: source check now decided on the one locked row after actor/role/receipt checks (section 1).
+- 22: SQLSTATE, blocking session and advisory key now asserted (prover updated, before-run re-observed 2026-11-22).
+- 23, 25, 26, D: case 8 fingerprints, case 6 combined-schema fixture, reverse hash guard, `pg_depend` check (cases 6,
+  8, 9; written with the migration after #2170 merges).
+- 31: case 4 now checks the child delivery itself.
+- A: guarantee scoped to transactions that start with a listed call (section 1).
+- B: queueing cost and offline retry behaviour stated in Timing; accepted technical trade-off.
+- C: refuted. The pre-role idempotency lock only waits on the same random key (section 1).

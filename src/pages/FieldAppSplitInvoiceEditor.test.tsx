@@ -411,9 +411,13 @@ describe('FieldAppSplitInvoiceEditor field search picker', () => {
 });
 
 describe('splitBackendError', () => {
-  it('keeps a named refusal whose quoted ticket number contains "does not exist"', () => {
-    const msg = 'BLEND_TICKET_ALREADY_BILLED: blend ticket BT does not exist 7 for this job is already billed (an invoice you cannot open); billing the job here too would double-bill the customer.';
-    expect(splitBackendError(new Error(msg))).toContain('would double-bill the customer');
+  it('keeps the blend-billed refusal (#2063) instead of reporting a missing backend', () => {
+    const msg = 'BLEND_TICKET_ALREADY_BILLED: a blend ticket for this job is already billed (invoice INV-1001); billing the job here too would double-bill the customer. If you meant to bill the job here, ask an admin to void or delete that blend-ticket invoice first.';
+    expect(splitBackendError(new Error(msg))).toContain('ask an admin to void or delete that blend-ticket invoice first');
+  });
+  it('keeps the read-committed refusal (#2063) instead of reporting a missing backend', () => {
+    const msg = 'SPLIT_INVOICE_NEEDS_READ_COMMITTED: save a split invoice for a job in a READ COMMITTED transaction, so an invoice billed meanwhile for the same job is seen.';
+    expect(splitBackendError(new Error(msg))).not.toBe('Split billing backend not enabled yet.');
   });
   it('still reports a missing backend function', () => {
     expect(splitBackendError(new Error('function public.save_field_app_split_invoice does not exist'))).toBe('Split billing backend not enabled yet.');

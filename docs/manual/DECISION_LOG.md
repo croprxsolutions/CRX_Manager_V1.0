@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — PR #2226: skipped Sol findings never carry onto a newer base
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 4: "Yes, full review").** `--carry-forward` now works after merging `origin/staging` into a feature branch, as it already did after merging `origin/main`. A proof whose BLOCKER/HIGH findings Mason skipped (owner-accepted) never carries onto a newer base: once the branch merges its base again, it needs a full Sol review. This is stricter than before, when an owner-accepted main-bound proof could carry. Sol rounds 1-4 each found a new way the carried owner-accepted form could cover a defect that new base code had widened, so that path was removed rather than patched.
+
 ## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
 
 **Decision (Mason, in chat 2026-11-22, after Sol gate round 6 left 2 HIGH findings on the skip mechanism itself):** "then we will override SOL if we need to I don't want over complicated codes to type I want it to explicitly ask if I accept the risk and I say yes with reason and that's good enough". The skip request now asks plainly whether he accepts the risk of leaving the findings unfixed; `yes` and a reason is enough, and the reason is logged. Round 6's two findings (`.claude/hooks/sol-accept-lib.mjs:233`, `scripts/owner-accept-sol-finding.mjs:107`) are left unfixed as his business call: both concern how far a skip he gave can stretch, not money, stock, customer data or logins. This PR changes gate files, so the agent merge guard still requires a clean Sol; Mason or Taha merges it by hand.

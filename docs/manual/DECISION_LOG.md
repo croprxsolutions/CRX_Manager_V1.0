@@ -9,6 +9,17 @@
 (33, "yes always bill if actual sprayed acres") a finished job always bills, splits payer shares and takes stock for the acres actually sprayed, not the planned acres.
 **Why:** the commission and booking already belong to the booking's rep; each grower should pay the price they were quoted; and customers pay for what was applied.
 **What this forbids/implies:** KI-191, KI-198, KI-185 and #2075 are built to these rules; Transfer, office auto-draft and Split Billing must agree.
+## 2026-11-21 — #2187: Mason owner-accepted 1 Sol finding(s) at `4e4e44138acc`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2187 at `4e4e44138acc` (base `f3e880f9710f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270207120000_driver_farm_billing_address.sql:58`, text sha256 `d32afb9a280e90a6` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 2fb67adff345)
+
+## 2026-11-21 — #2187: Mason owner-accepted 1 Sol finding(s) at `933aa4fe39a5`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2187 at `933aa4fe39a5` (base `f08df8ad6407`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270207120000_driver_farm_billing_address.sql:58`, text sha256 `deb6f2a254b48882` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 76f65aa0c473)
 
 ## 2026-11-21 — #2151: Mason owner-accepted 1 Sol finding(s) at `1be1755e1188`
 

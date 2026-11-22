@@ -142,10 +142,8 @@ export function partitionByStatusLegality<T extends { id: string; status: JobSta
  *
  * Returns `null` when no non-status section is enabled (nothing to write).
  *
- * Loader-worksheet numbers respect the jobs CHECK constraints: a blank input
- * clears to NULL; an invalid (negative / non-positive capacity) value is dropped
- * so the batch is never rejected by jobs_carrier_rate_gpa_nonneg /
- * jobs_loader_tank_capacity_pos. Use `loaderInputsValid` to surface that in the UI.
+ * Loader-worksheet numbers: a blank input clears to NULL; a value outside the
+ * edit_jobs range is dropped to NULL. Use `loaderInputsValid` to block it in the UI.
  */
 export function buildFieldPatch(draft: MassEditDraft): Record<string, string | number | null> | null {
   const patch: Record<string, string | number | null> = {};
@@ -154,34 +152,47 @@ export function buildFieldPatch(draft: MassEditDraft): Record<string, string | n
   if (draft.setApplicator) patch.applicator_id = draft.applicatorId;
   if (draft.setBatch) patch.batch_ref = draft.batchRef;
   if (draft.setLoader) {
-    // Carrier rate: blank => NULL; >= 0 only (CHECK jobs_carrier_rate_gpa_nonneg).
-    const carrier = parseFloat(draft.carrierRateGpa);
-    patch.carrier_rate_gpa = draft.carrierRateGpa.trim() !== '' && !Number.isNaN(carrier) && carrier >= 0 ? carrier : null;
-    // Capacity: blank => NULL; > 0 only (CHECK jobs_loader_tank_capacity_pos).
-    const cap = parseFloat(draft.loaderTankCapacity);
-    patch.loader_tank_capacity = draft.loaderTankCapacity.trim() !== '' && !Number.isNaN(cap) && cap > 0 ? cap : null;
+    // Blank clears (NULL); an out-of-range number is dropped to NULL here, but the modal blocks
+    // Apply first (loaderInputsValid), so it never reaches edit_jobs, which would refuse it.
+    patch.carrier_rate_gpa = draft.carrierRateGpa.trim() !== '' && !loaderNumberError(draft.carrierRateGpa, 'carrier')
+      ? Number(draft.carrierRateGpa.trim()) : null;
+    patch.loader_tank_capacity = draft.loaderTankCapacity.trim() !== '' && !loaderNumberError(draft.loaderTankCapacity, 'capacity')
+      ? Number(draft.loaderTankCapacity.trim()) : null;
     // Comment: blank => NULL (clear).
     patch.loader_comment = draft.loaderComment.trim() !== '' ? draft.loaderComment.trim() : null;
   }
   return Object.keys(patch).length > 0 ? patch : null;
 }
 
+// edit_jobs refuses loader numbers outside this range (carrier rate may also be 0).
+const LOADER_NUMBER_MIN = 0.001;
+const LOADER_NUMBER_MAX = 1_000_000;
+
+/** Message for a value the server would refuse, or null when the input is blank or in range. */
+export function loaderNumberError(raw: string, kind: 'carrier' | 'capacity'): string | null {
+  if (raw.trim() === '') return null;
+  const label = kind === 'carrier' ? 'Carrier rate' : 'Tank capacity';
+  // Plain decimals only: "12abc" and "1e-400" (which Number reads as 0) are refused.
+  if (!/^-?(\d+(\.\d*)?|\.\d+)$/.test(raw.trim())) return `${label} must be a number.`;
+  const n = Number(raw.trim());
+  // Only text that IS zero counts as 0: "0.000…001" with hundreds of zeros reads as 0 in Number and is refused below.
+  if (kind === 'carrier' && /^-?(0+(\.0*)?|\.0+)$/.test(raw.trim())) return null;
+  if (n < LOADER_NUMBER_MIN || n > LOADER_NUMBER_MAX) {
+    return kind === 'carrier'
+      ? 'Carrier rate must be 0, or 0.001 to 1,000,000.'
+      : 'Tank capacity must be 0.001 to 1,000,000.';
+  }
+  return null;
+}
+
 /**
- * True when the loader section's numeric inputs are usable (or blank). A negative
- * carrier rate or a non-positive capacity is invalid (the DB CHECK would reject
- * them) — the modal uses this to warn rather than silently dropping the value.
+ * True when the loader section's numeric inputs are blank or inside the range edit_jobs
+ * accepts (carrier 0 or 0.001-1,000,000; capacity 0.001-1,000,000). The modal uses this
+ * to block Apply rather than silently dropping the value.
  */
 export function loaderInputsValid(draft: MassEditDraft): boolean {
   if (!draft.setLoader) return true;
-  if (draft.carrierRateGpa.trim() !== '') {
-    const c = parseFloat(draft.carrierRateGpa);
-    if (Number.isNaN(c) || c < 0) return false;
-  }
-  if (draft.loaderTankCapacity.trim() !== '') {
-    const cap = parseFloat(draft.loaderTankCapacity);
-    if (Number.isNaN(cap) || cap <= 0) return false;
-  }
-  return true;
+  return !loaderNumberError(draft.carrierRateGpa, 'carrier') && !loaderNumberError(draft.loaderTankCapacity, 'capacity');
 }
 
 /**

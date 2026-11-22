@@ -110,6 +110,7 @@ describe('PurchasingTab', () => {
     let answer: (v: unknown) => void = () => {};
     mockRpc.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
     fireEvent(window, new Event('focus'));
+    fireEvent(document, new Event('visibilitychange'));
     expect(mockRpc).toHaveBeenCalledTimes(2);
     expect(screen.queryByText(/Order 30 Gal/)).not.toBeInTheDocument();
 

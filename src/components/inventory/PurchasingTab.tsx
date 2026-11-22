@@ -194,7 +194,13 @@ export default function PurchasingTab() {
 
   // A PO placed in another tab or window makes the advice stale: reload on return (Sol #1980 r7).
   useEffect(() => {
-    const onReturn = () => { if (document.visibilityState === 'visible') load(); };
+    // focus and visibilitychange often fire together; one read is enough (Luna #1980 r7 LOW).
+    let last = 0;
+    const onReturn = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - last < 2000) return;
+      last = Date.now();
+      load();
+    };
     window.addEventListener('focus', onReturn);
     document.addEventListener('visibilitychange', onReturn);
     return () => { window.removeEventListener('focus', onReturn); document.removeEventListener('visibilitychange', onReturn); };

@@ -11,7 +11,7 @@ vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast: mockToast }) }));
 
 import PurchasingTab, { suggestionText, type PurchasingPlan } from './PurchasingTab';
 
-// Shaped like get_purchasing_plan's answer (20270127110000); numerics arrive as JSON numbers.
+// Shaped like get_purchasing_plan's answer (20270216110000); numerics arrive as JSON numbers.
 const PLAN: PurchasingPlan = {
   today: '2027-02-01', lead_days: 14, months_ahead: 6, horizon_end: '2027-07-31',
   firm_needs_date: [{ quote_number: 'Q-1', customer_name: 'North Farm', section_name: 'Field A', product_id: 'p1', product_name: 'Herbicide X', quantity: 40 }],
@@ -29,8 +29,9 @@ const PLAN: PurchasingPlan = {
       confidence: null, estimated: null, quote_number: null, order_number: 'O-9', job_number: null, customer_name: 'West Farm', section_name: null },
     { kind: 'hold', class: 'committed', bucket: 'dated', need_date: '2027-01-20', raw_date: '2027-01-05', overdue: true, quantity: 5,
       confidence: null, estimated: null, quote_number: null, order_number: null, job_number: null, customer_name: null, section_name: null }],
-    purchase_orders: [],
+    purchase_orders: [], coverage: [],
   }],
+  check_data: [],
 };
 
 describe('PurchasingTab', () => {
@@ -71,7 +72,7 @@ describe('PurchasingTab', () => {
     }, error: null });
     render(<PurchasingTab />);
     expect(await screen.findByText(/Check data: 1 record holds an impossible quantity or date/)).toBeInTheDocument();
-    expect(screen.getByText('PO line · Herbicide X')).toBeInTheDocument();
+    expect(screen.getByText('PO line pl1 · Herbicide X')).toBeInTheDocument();
     expect(screen.getByText('PO arrives late')).toBeInTheDocument();
     expect(screen.getByText('follow up')).toBeInTheDocument();
 
@@ -81,13 +82,21 @@ describe('PurchasingTab', () => {
     expect(screen.getByText(/· follow up/)).toBeInTheDocument();
   });
 
-  it('an older plan without the #1989 keys still renders', async () => {
-    mockRpc.mockResolvedValue({ data: PLAN, error: null });
+  it('refuses an older plan without the #1989 cover keys, so it never shows its duplicate-buy advice (Sol #1980 r6)', async () => {
+    const { check_data: _c, ...older } = PLAN;
+    mockRpc.mockResolvedValue({ data: { ...older, products: PLAN.products.map(({ coverage: _v, ...p }) => p) }, error: null });
     render(<PurchasingTab />);
-    expect(await screen.findByText('Herbicide X')).toBeInTheDocument();
-    expect(screen.queryByText(/Check data:/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Show details for Herbicide X/ }));
-    expect(screen.queryByText('Covers')).not.toBeInTheDocument();
+    expect(await screen.findByText('The purchasing plan could not be loaded')).toBeInTheDocument();
+    expect(screen.queryByText('Herbicide X')).not.toBeInTheDocument();
+  });
+
+  it('labels an undated PO as late supply, not as uncounted (Sol #1980 r6)', async () => {
+    mockRpc.mockResolvedValue({ data: { ...PLAN, products: [{ ...PLAN.products[0],
+      purchase_orders: [{ po_id: 'po2', po_number: 'PO-8', status: 'submitted', expected_date: null, flag: 'undated', quantity: 60 }] }] }, error: null });
+    render(<PurchasingTab />);
+    fireEvent.click(await screen.findByRole('button', { name: /Show details for Herbicide X/ }));
+    expect(screen.getByText(/PO PO-8: 60 \(no expected date: counted as late, after every dated PO\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/PO-8.*not counted/)).not.toBeInTheDocument();
   });
 
   it('a failed read shows Try again, not an empty plan', async () => {

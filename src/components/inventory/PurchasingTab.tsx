@@ -8,7 +8,7 @@ import { useToast } from '../ui/Toast';
 import { supabase, assertRpcResult } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 
-// Read-only view of get_purchasing_plan (20270216110000; the keys it added are optional so an older server still renders). Quantities are in each product's stock unit.
+// Read-only view of get_purchasing_plan (20270216110000; an older plan without its cover keys is refused, since it can advise a duplicate buy). Quantities are in each product's stock unit.
 type Qty = number | string;
 interface Suggestion { need_date: string; order_by: string; order_now: boolean; quantity: Qty }
 interface DemandRow { kind: 'booking' | 'order' | 'job' | 'hold' | 'deficit'; class: 'committed' | 'could_add' | 'shown' | 'shelf_hold';
@@ -145,7 +145,7 @@ function ProductDetails({ p }: { p: PlanProduct }) {
         <ul className="text-xs text-secondary space-y-0.5">
           {p.purchase_orders.map((po, i) => (
             <li key={i}>
-              PO {po.po_number}: {qty(po.quantity)} {po.flag === 'draft' ? '(draft, not counted)' : po.flag === 'undated' ? '(no expected date, not counted)'
+              PO {po.po_number}: {qty(po.quantity)} {po.flag === 'draft' ? '(draft, not counted)' : po.flag === 'undated' ? '(no expected date: counted as late, after every dated PO)'
                 : po.flag === 'late' ? `(was due ${day(po.expected_date)}, counted today)` : po.flag === 'later' ? `(due ${day(po.expected_date)}, after the plan window)` : `due ${day(po.expected_date)}`}
             </li>
           ))}
@@ -172,8 +172,8 @@ export default function PurchasingTab() {
       if (error) throw error;
       const result = assertRpcResult<PurchasingPlan>(data, 'get_purchasing_plan');
       if (!result || ![result.products, result.firm_needs_date, result.drawn_section_unknown, result.review].every(Array.isArray)
-        || (result.check_data != null && !Array.isArray(result.check_data))) {
-        throw new Error('get_purchasing_plan returned no plan');
+        || !Array.isArray(result.check_data) || !result.products.every((p) => Array.isArray(p.coverage))) {
+        throw new Error('get_purchasing_plan returned no plan, or one older than 20270216110000');
       }
       setPlan(result);
       setFailed(false);
@@ -233,10 +233,12 @@ export default function PurchasingTab() {
         <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800" role="alert">
           <p className="font-semibold">
             <AlertTriangle className="w-4 h-4 inline mr-2" />
-            Check data: {(plan.check_data ?? []).length} {(plan.check_data ?? []).length === 1 ? 'record holds an impossible quantity or date and is' : 'records hold an impossible quantity or date and are'} left out of the plan until fixed.
+            Check data: {(plan.check_data ?? []).length} {(plan.check_data ?? []).length === 1 ? 'record holds' : 'records hold'} an impossible quantity or date. The plan skips the bad value, so these products' numbers may be off until it is fixed.
           </p>
           <ul className="mt-2 space-y-1">
-            {(plan.check_data ?? []).map((c) => <li key={`${c.kind}:${c.id}`}>{CHECK_KIND[c.kind] ?? c.kind} · {c.product_name ?? 'unknown product'}</li>)}
+            {(plan.check_data ?? []).map((c) => (
+              <li key={`${c.kind}:${c.id}:${c.product_id ?? ''}`}>{CHECK_KIND[c.kind] ?? c.kind} {c.id.slice(0, 8)} · {c.product_name ?? 'unknown product'}</li>
+            ))}
           </ul>
         </div>
       )}
@@ -310,6 +312,7 @@ export default function PurchasingTab() {
                           <span className="font-medium text-nav-dark">{p.product_name}</span>
                           {p.stock_unit && <span className="text-secondary"> ({p.stock_unit})</span>}
                           {p.not_complete && <Badge variant="warning" className="ml-2">not complete</Badge>}
+                          {p.estimated && <Badge variant="warning" className="ml-2">estimated</Badge>}
                           {p.has_late_cover && <Badge variant="warning" className="ml-2">PO arrives late</Badge>}
                           {p.has_followup && <Badge variant="warning" className="ml-2">follow up</Badge>}
                         </td>

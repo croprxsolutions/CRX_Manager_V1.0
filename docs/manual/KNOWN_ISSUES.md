@@ -374,7 +374,7 @@ If another admin locks rates while a product page is open, the page still offers
 
 > **Fix in review (Lane E, 2026-11-22):** migration `20270214110000` makes the preview refuse the unknown field by name; closes once it is live.
 
-**LOW · OPEN, no fix planned · products/import · found 2026-11-05 (Sol LOW on #1486)**
+**LOW · OPEN, fix in review · products/import · found 2026-11-05 (Sol LOW on #1486)**
 `preview_product_import` ignores unknown top-level keys on a row, but `apply_product_setup` refuses them, so such a
 file previews "ready" and then the whole save is refused with nothing written. The screen never sends extra keys,
 and keys inside `insert` or `rates` are already refused by the preview. The Check File timeout first filed under

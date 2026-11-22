@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-21 — #1989 rebuild: holds keep taking incoming stock (option B); Mason takes #1989 back from Taha
+
+**Decision (Mason, in chat, 2026-11-21: "option B").** Sol's Nov 20 review of #1989 raised four HIGHs on the hold and PO-claim logic, so the round-cap rule put the trade-off to Mason: (A) holds count only stock on the shelf, or (B) keep "holds take incoming stock first" (2026-11-19) and fix the HIGHs inside it. He chose B. The rebuild on #1990's body: a hold claims only PO stock arriving by its own expiry (earliest-expiring first); a Maybe, Likely, unset or undated line's claimed part keeps its own class and date and only reserves its PO stock; a hold whose source is gone, closed or converted, or beside a set-aside line, or a job hold on an unconvertible line, reserves shelf stock only and never buys. Mason started this session on 2026-11-21 to fix and land #1989, taking it back from the 2026-11-19 handover to Taha. Contract: `docs/plans/2026-11-18-purchasing-held-stock-CONTRACT.md` rules 9-11.
+
 ## 2026-11-19 — #1989: Mason owner-accepted 1 Sol finding(s) at `eb7dc3196550`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1989 at `eb7dc3196550` (base `b81667dddc5b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

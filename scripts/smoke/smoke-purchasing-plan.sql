@@ -1,7 +1,7 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: the read-only Purchasing buy plan (bookings Phase A, PR 1b)
 -- ----------------------------------------------------------------------------
--- REQUIRES 20270127110000_booking_timing_purchasing_plan and 20270128150000 (P26-P30). Proof cases of
+-- REQUIRES 20270127110000_booking_timing_purchasing_plan and 20270206130000 (P26-P35). Proof cases of
 -- docs/plans/2026-11-17-bookings-phase-a-CONTRACT.md (v4) and plan v3, against
 -- get_purchasing_plan(12). Dates are relative to today (Chicago) so the chain never ages.
 --   P9   on hand 100, Firm 80 at +100, an open order of 50 (no delivery: needed today),
@@ -11,7 +11,7 @@
 --        100, with no "expedite the later PO" alternative; could add 0
 --   P11  on hand -10 and nothing else: order 10 now
 --   P23  a booking line saved in lb on a Gal product: Check units, not counted; it does not cover its
---        booking's crop-program hold (20), which counts
+--        booking's crop-program hold (20), which reserves the shelf only (8 on hand)
 --   P24  Firm 100 at +100 and a PO of only 10 due +126: buy 100, no PO offered instead
 --   P12  a late PO counts today (flagged), an undated PO is listed not counted, a
 --        draft PO shows as drafted; the product is not complete
@@ -30,10 +30,10 @@
 --   P20  job lines in qt and Gal convert; a '2.5 GL' line goes to Check units on a Gal product (also
 --        when the product is sized 2.5 GL: its stock unit is Gal, a product must have a sold unit)
 --   P21  a job's draw comes off its own (August) section: March still needs 100
---   P22  a draft booking's crop-program hold (20) counts now; a counted booking's hold on a product it books (10) does not;
---        its hold on a product it does not book (5 of product 22) does; an expired manual hold (7) does not
+--   P22  a counted booking's hold on a product it books (10) does not count; holds on a product the booking does not
+--        book (20 + 5 of product 22, 10 on hand) reserve the shelf only (10, nothing to buy); an expired manual hold (7) does not
 --   P25  an active job whose line cannot be converted draws nothing from its booking (Firm 20 stays);
---        a hold on a booking that also has a set-aside line of the product counts (30 + 20);
+--        a hold beside a set-aside line of the product reserves shelf stock only (none here): Firm 30 stays;
 --        an 'infinity' needed-by date counts as no date (P17) and does not fail the plan
 --   P26  held stock never reads as free (Mason, 2026-11-18): a hold covering its booking's own line is
 --        backed by stock on the shelf (after other holds) and counts today; an unbacked hold buys nothing;
@@ -50,6 +50,12 @@
 --   P30  Sol round 5 on #1989: a hold not on the shelf takes incoming PO stock first (Mason, 2026-11-19):
 --        0 on hand, Maybe 100 held, PO 100 at +10, another booking's Firm 100 at +20: buy 100, not 0;
 --        a held Firm 100 at +1 with a PO of 100 at +10 keeps its +1 date: buy 100 (product 46)
+--   P31  (Sol on #1989, Nov 20; option B kept by Mason, 2026-11-21) a hold claims only PO stock arriving by its
+--        expiry: of two Maybe holds, the one expiring before any PO claims nothing; a later PO stays free (product 47)
+--   P32  a closed booking's hold reserves the shelf only: no PO claim, no buy (product 48)
+--   P33  a job hold beside an unconvertible job line still reserves its stock (product 49)
+--   P34  a draw against a line set aside for its unit is not over-drawn (product 50)
+--   P35  a job's draw beyond its own section is listed as drawn, section unknown (product 51)
 --   P27  a window crossing New Year ends next year; an invalid start month-day falls back the whole window
 --   P8   an applicator and a caller with no user are refused
 --
@@ -92,16 +98,16 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Purchasing Farm ' || v_suffix) RETURNING id INTO v_customer;
-  -- Products 1..46, all stocked in Gal (product 20 is sized 2.5 GL, but its stock unit is Gal: a product must have a sold unit); every product is inserted before any is priced
+  -- Products 1..51, all stocked in Gal (product 20 is sized 2.5 GL, but its stock unit is Gal: a product must have a sold unit); every product is inserted before any is priced
   -- (pricing sets a transaction-wide mode).
-  FOR v_i IN 1..46 LOOP
+  FOR v_i IN 1..51 LOOP
     INSERT INTO products (product_name, unit_size, inventory_unit, product_form)
     VALUES ('[SMOKE] Purchasing ' || lpad(v_i::text, 2, '0') || ' ' || v_suffix,
             (ARRAY['Gal', '2.5 GL'])[(v_i = 20)::int + 1], 'Gal', 'liquid')
     RETURNING id INTO v_pid;
     v_p := v_p || v_pid;
   END LOOP;
-  FOR v_i IN 1..46 LOOP
+  FOR v_i IN 1..51 LOOP
     v_price_res := preview_product_pricing_changes('product_page', NULL,
       jsonb_build_array(jsonb_build_object(
         'product_id', v_p[v_i], 'row_version', (SELECT pricing_version FROM products WHERE id = v_p[v_i]),
@@ -377,7 +383,7 @@ BEGIN
     v_admin, 'smk-pp21-' || v_suffix);
   INSERT INTO smk_pp_bookings VALUES ('P21', (v_res->>'quote_id')::uuid, v_res->'section_ids');
 
-  -- P26 (20270128150000, held stock never reads as free): one booking.
+  -- P26 (20270206130000, held stock never reads as free): one booking.
   --   _a Maybe at +60: product 28 (100), 29 (100), 30 (100), 33 (20); _b Firm at +400: product 31 (100);
   --   _c Firm, no date: product 32 (50); _d pre_plant, Likely, needed Dec 31 this year: product 34 (5);
   --   _e Firm at +30: product 35 (40), 37 (50), 38 (0); _f Maybe at +10: product 37 (50).
@@ -435,7 +441,7 @@ BEGIN
          (v_order, v_p[36], '[SMOKE] P26h', 'Gal', 20, 6, 100, 2000, 0, 100);
   PERFORM set_config('app.crx_below_cost_operation', '', true);
 
-  -- P28 (Taha on #1989): product 39 on a draft booking (Firm 500 at +45); product 40 on a sent booking
+  -- P28 (Taha on #1989): products 39 and 41 on a draft booking (Firm 500 and Firm 50 at +45); product 40 on a sent booking
   -- (Firm 100 at +45, Maybe 100 at +120). 13 on hand of each.
   v_res := save_quote(NULL, jsonb_build_object(
       'quote_number', '[SMOKE] PP28D-' || v_suffix, 'customer_id', v_customer, 'status', 'draft',
@@ -445,9 +451,14 @@ BEGIN
         'needed_by_date', v_t + 45, 'confidence', 'firm',
         'items', jsonb_build_array(jsonb_build_object('client_key', '_ka', 'product_id', v_p[39], 'sort_order', 0,
           'calc_mode', 'units_direct', 'total_units_needed', 500, 'price_override', 20, 'price_per_unit', 20,
+          'current_cost', 6, 'unit_size', 'Gal', 'acres', 0),
+          jsonb_build_object('client_key', '_kb', 'product_id', v_p[41], 'sort_order', 1,
+          'calc_mode', 'units_direct', 'total_units_needed', 50, 'price_override', 20, 'price_per_unit', 20,
           'current_cost', 6, 'unit_size', 'Gal', 'acres', 0)))),
     v_admin, 'smk-pp28d-' || v_suffix);
   INSERT INTO smk_pp_bookings VALUES ('P28D', (v_res->>'quote_id')::uuid, v_res->'section_ids');
+  -- A draft booking's program holds exist only while it is planned (_sync_planned_holds); its holds are inserted below.
+  UPDATE quotes SET is_planned = true WHERE id = (v_res->>'quote_id')::uuid;
   v_res := save_quote(NULL, jsonb_build_object(
       'quote_number', '[SMOKE] PP28-' || v_suffix, 'customer_id', v_customer, 'status', 'draft',
       'tier', 1, 'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true),
@@ -577,6 +588,8 @@ BEGIN
          (v_p[22], v_customer, 5, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-4'), v_admin, true),
          (v_p[10], v_customer, 4, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-4'), v_admin, true),
          (v_p[23], v_customer, 20, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P23'), v_admin, true);
+  INSERT INTO inventory (product_id, location, quantity_available, quantity_prebooked, quantity_on_order)
+  VALUES (v_p[22], 'Main Warehouse', 10, 0, 0), (v_p[23], 'Main Warehouse', 8, 0, 0);
   -- source_id set: the standalone-insert guard (20260908130000) refuses an unsourced manual hold outside its RPC.
   INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active, expires_at)
   VALUES (v_p[22], v_customer, 7, 'manual', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-1'), v_admin, true, v_t - 1);
@@ -676,6 +689,89 @@ BEGIN
   VALUES ('SMK-PP21-' || v_suffix, v_customer, 'scheduled', v_t + 150, v_q, v_s2, v_admin) RETURNING id INTO v_job;
   INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order) VALUES (v_job, v_p[19], 100, 'Gal', 1);
   INSERT INTO job_product_draws (job_id, quote_id, product_id, quantity_drawn) VALUES (v_job, v_q, v_p[19], 100);
+
+  -- P31-P35 (the Nov 20 Sol review of #1989; Mason kept "holds take incoming stock first", 2026-11-21).
+  -- P31, product 47 (no stock): bookings P31A and P31B, each Maybe 50 at +60 and fully held; A's hold expires
+  -- at +5, B's at +74. POs of 50 at +10 and +30. Booking P31F: Firm 50 at +40.
+  -- P34, product 50: booking P34 with a Gal line of 30 and a set-aside lb line of 10, drawn 35 by an order.
+  -- P35, product 51: booking P35, Firm 5 at +20 (section _a) and Firm 100 at +60 (section _b); a job on _a draws 12.
+  FOR v_i IN 1..5 LOOP
+    v_res := save_quote(NULL, jsonb_build_object(
+        'quote_number', '[SMOKE] PP' || (ARRAY['31A', '31B', '31F', '34', '35'])[v_i] || '-' || v_suffix,
+        'customer_id', v_customer, 'status', 'draft',
+        'tier', 1, 'commission_split', '{"splits": []}'::jsonb, 'section_ids_v1', true),
+      CASE v_i
+        WHEN 4 THEN jsonb_build_array(jsonb_build_object('client_key', '_a', 'section_name', 'P34', 'sort_order', 0,
+            'needed_by_date', v_t + 30, 'confidence', 'firm',
+            'items', jsonb_build_array(
+              jsonb_build_object('client_key', '_ka', 'product_id', v_p[50], 'sort_order', 0, 'calc_mode', 'units_direct',
+                'total_units_needed', 30, 'price_override', 20, 'price_per_unit', 20, 'current_cost', 6, 'unit_size', 'Gal', 'acres', 0),
+              jsonb_build_object('client_key', '_kb', 'product_id', v_p[50], 'sort_order', 1, 'calc_mode', 'units_direct',
+                'total_units_needed', 10, 'price_override', 20, 'price_per_unit', 20, 'current_cost', 6, 'unit_size', 'lb', 'acres', 0))))
+        WHEN 5 THEN jsonb_build_array(
+          jsonb_build_object('client_key', '_a', 'section_name', 'P35 a', 'sort_order', 0,
+            'needed_by_date', v_t + 20, 'confidence', 'firm',
+            'items', jsonb_build_array(jsonb_build_object('client_key', '_ka', 'product_id', v_p[51], 'sort_order', 0,
+              'calc_mode', 'units_direct', 'total_units_needed', 5, 'price_override', 20, 'price_per_unit', 20,
+              'current_cost', 6, 'unit_size', 'Gal', 'acres', 0))),
+          jsonb_build_object('client_key', '_b', 'section_name', 'P35 b', 'sort_order', 1,
+            'needed_by_date', v_t + 60, 'confidence', 'firm',
+            'items', jsonb_build_array(jsonb_build_object('client_key', '_kb', 'product_id', v_p[51], 'sort_order', 0,
+              'calc_mode', 'units_direct', 'total_units_needed', 100, 'price_override', 20, 'price_per_unit', 20,
+              'current_cost', 6, 'unit_size', 'Gal', 'acres', 0))))
+        ELSE jsonb_build_array(jsonb_build_object('client_key', '_a', 'section_name', 'P31', 'sort_order', 0,
+            'needed_by_date', v_t + (ARRAY[60, 60, 40])[v_i], 'confidence', (ARRAY['maybe', 'maybe', 'firm'])[v_i],
+            'items', jsonb_build_array(jsonb_build_object('client_key', '_ka', 'product_id', v_p[47], 'sort_order', 0,
+              'calc_mode', 'units_direct', 'total_units_needed', 50, 'price_override', 20, 'price_per_unit', 20,
+              'current_cost', 6, 'unit_size', 'Gal', 'acres', 0))))
+      END,
+      v_admin, 'smk-pp3x' || v_i || '-' || v_suffix);
+    INSERT INTO smk_pp_bookings VALUES ('P' || (ARRAY['31A', '31B', '31F', '34', '35'])[v_i], (v_res->>'quote_id')::uuid, v_res->'section_ids');
+  END LOOP;
+  FOR v_q IN SELECT quote_id FROM smk_pp_bookings WHERE tag IN ('P31A', 'P31B', 'P31F', 'P34', 'P35') LOOP
+    PERFORM create_quote_version(v_q, v_admin, 'presented', 'smk-pp-ver-' || v_q || '-' || v_suffix,
+      (SELECT row_version FROM quotes WHERE id = v_q));
+  END LOOP;
+  UPDATE quotes SET status = 'sent' WHERE id IN (SELECT quote_id FROM smk_pp_bookings WHERE tag IN ('P31A', 'P31B', 'P31F', 'P34', 'P35'));
+  INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active, expires_at)
+  VALUES (v_p[47], v_customer, 50, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P31A'), v_admin, true, v_t + 5),
+         (v_p[47], v_customer, 50, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P31B'), v_admin, true, v_t + 74);
+  FOR v_i IN 1..2 LOOP
+    INSERT INTO purchase_orders (po_number, vendor, status, expected_delivery_date, created_by)
+    VALUES ('SMK-PP31-' || v_i || '-' || v_suffix, '[SMOKE] Vendor', 'submitted', v_t + (ARRAY[10, 30])[v_i], v_admin) RETURNING id INTO v_po;
+    INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity_ordered, quantity_received, unit_cost, unit_size)
+    VALUES (v_po, v_p[47], 50, 0, 6, 'Gal');
+  END LOOP;
+  INSERT INTO quote_product_draws (quote_id, product_id, quantity_drawn)
+  VALUES ((SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P34'), v_p[50], 35);
+  SELECT quote_id, (section_ids->>'_a')::uuid INTO v_q, v_s1 FROM smk_pp_bookings WHERE tag = 'P35';
+  INSERT INTO jobs (job_number, customer_id, status, job_date, quote_id, quote_section_id, created_by)
+  VALUES ('SMK-PP35-' || v_suffix, v_customer, 'scheduled', v_t + 20, v_q, v_s1, v_admin) RETURNING id INTO v_job;
+  INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order) VALUES (v_job, v_p[51], 12, 'Gal', 1);
+  INSERT INTO job_product_draws (job_id, quote_id, product_id, quantity_drawn) VALUES (v_job, v_q, v_p[51], 12);
+  DELETE FROM inventory_holds WHERE source_id = v_job;
+  -- P32, product 48: 5 on hand, PO of 30 at +10; a hold of 20 on the closed booking P15-2: it reserves 5 on
+  -- the shelf and never claims the PO or buys.
+  INSERT INTO inventory (product_id, location, quantity_available, quantity_prebooked, quantity_on_order)
+  VALUES (v_p[48], 'Main Warehouse', 5, 0, 0), (v_p[49], 'Main Warehouse', 10, 0, 0);
+  INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active, expires_at)
+  VALUES (v_p[48], v_customer, 20, 'crop_program', (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P15-2'), v_admin, true, v_t + 60);
+  INSERT INTO purchase_orders (po_number, vendor, status, expected_delivery_date, created_by)
+  VALUES ('SMK-PP32-' || v_suffix, '[SMOKE] Vendor', 'submitted', v_t + 10, v_admin) RETURNING id INTO v_po;
+  INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity_ordered, quantity_received, unit_cost, unit_size)
+  VALUES (v_po, v_p[48], 30, 0, 6, 'Gal');
+  -- P33, product 49: 10 on hand; an active job at +5 with a '2.5 GL' line of 10 (stock Gal: not convertible) and
+  -- its job hold of 10; another job at +3 needs 10 Gal (no hold). The held 10 is not free: buy 10.
+  INSERT INTO jobs (job_number, customer_id, status, job_date, created_by)
+  VALUES ('SMK-PP33H-' || v_suffix, v_customer, 'scheduled', v_t + 5, v_admin) RETURNING id INTO v_job;
+  INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order) VALUES (v_job, v_p[49], 10, '2.5 GL', 1);
+  DELETE FROM inventory_holds WHERE source_id = v_job;
+  INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active)
+  VALUES (v_p[49], v_customer, 10, 'job', v_job, v_admin, true);
+  INSERT INTO jobs (job_number, customer_id, status, job_date, created_by)
+  VALUES ('SMK-PP33O-' || v_suffix, v_customer, 'scheduled', v_t + 3, v_admin) RETURNING id INTO v_job;
+  INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order) VALUES (v_job, v_p[49], 10, 'Gal', 1);
+  DELETE FROM inventory_holds WHERE source_id = v_job;
 
   -- ------------------------------------------------------------------ the plan
   v_plan := get_purchasing_plan(12);
@@ -779,16 +875,16 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (P25 unconvertible job draw) %', v_x;
   END IF;
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[27];
-  IF v_x IS NULL OR (v_x->>'committed')::numeric IS DISTINCT FROM 50
-     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND (r->>'quantity')::numeric = 20) THEN
+  IF v_x IS NULL OR (v_x->>'committed')::numeric IS DISTINCT FROM 30 OR NOT (v_x->'reasons' ? 'check_units')
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P25 hold beside a set-aside line) %', v_x;
   END IF;
   v_n := v_n + 1;
 
-  -- P22: product 22. The draft booking's hold and the counted booking's hold on a product it does not book.
+  -- P22: product 22. Holds on a product their bookings do not book reserve the 10 on the shelf only.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[22];
-  IF v_x IS NULL OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 25
-     OR (v_x->>'committed')::numeric <> 25 THEN
+  IF v_x IS NULL OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 10
+     OR (v_x->>'committed')::numeric <> 10 OR (v_x->>'suggested')::numeric <> 0 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P22) %', v_x;
   END IF;
   v_n := v_n + 1;
@@ -815,9 +911,9 @@ BEGIN
 
   -- P23
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[23];
-  IF v_x IS NULL OR NOT (v_x->'reasons' ? 'check_units') OR (v_x->>'committed')::numeric <> 20
+  IF v_x IS NULL OR NOT (v_x->'reasons' ? 'check_units') OR (v_x->>'committed')::numeric <> 8 OR (v_x->>'suggested')::numeric <> 0
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'bucket' = 'check_units' AND (r->>'quantity')::numeric = 50)
-     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND (r->>'quantity')::numeric = 20) THEN
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND (r->>'quantity')::numeric = 8) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P23 booking line in another unit) %', v_x;
   END IF;
   v_n := v_n + 1;
@@ -894,7 +990,7 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
-  -- P26 (20270128150000): held stock never reads as free; a hold never makes the plan buy on its own.
+  -- P26 (20270206130000): held stock never reads as free; a hold never makes the plan buy on its own.
   SELECT quote_id INTO v_q FROM smk_pp_bookings WHERE tag = 'P26';
   -- a: 100 on hand all held for the Maybe line, plus an order of 100 today: buy 100.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[28];
@@ -967,10 +1063,10 @@ BEGIN
                      AND (r->>'quantity')::numeric = 50) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26i Firm before Maybe) %', v_x;
   END IF;
-  -- j: a booking line of 0 is no line: its hold of 100 counts today in full; 60 on hand, so buy 40.
+  -- j: a booking line of 0 is no line: its hold of 100 reserves the 60 on the shelf only and buys nothing (rule 10).
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[38];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 40
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 100 THEN
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 60 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26j zero booking line) %', v_x;
   END IF;
   v_n := v_n + 1;
@@ -1031,11 +1127,12 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
-  -- P30: the Maybe hold takes the PO's 100 on its date, so the other booking's Firm 100 at +20 is bought.
+  -- P30: the Maybe hold takes the PO's 100, so the other booking's Firm 100 at +20 is bought; the held part stays
+  -- Maybe at its own +60 date (Sol on #1989: never turned into committed demand on the PO's date).
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[45];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100 OR (v_x->>'committed')::numeric <> 100
      OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'hold' AND (r->>'raw_date')::date = v_t + 10) <> 100
+          WHERE r->>'kind' = 'hold' AND r->>'class' = 'shown' AND r->>'confidence' = 'maybe' AND (r->>'raw_date')::date = v_t + 60) <> 100
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P30 a hold takes incoming stock first) %', v_x;
   END IF;
@@ -1048,7 +1145,50 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
-  -- P27 (20270128150000, #1977 MEDs): the P26 window section (pre_plant, needed Dec 31 this year).
+  -- P31: A's hold expires (+5) before any PO lands, so it claims nothing and its Maybe 50 stays a Maybe line;
+  -- B's hold claims the +10 PO, kept as Maybe at its own +60 date; the +30 PO stays free for Firm 50 at +40.
+  SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[47];
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
+          WHERE r->>'kind' = 'hold' AND r->>'class' = 'shown' AND (r->>'raw_date')::date = v_t + 60
+            AND (r->>'quote_id')::uuid = (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P31B')) <> 50
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
+          WHERE r->>'kind' = 'booking' AND r->>'class' = 'shown'
+            AND (r->>'quote_id')::uuid = (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P31A')) <> 50
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND r->>'class' = 'committed') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P31 a hold claims only stock arriving by its expiry) %', v_x;
+  END IF;
+  v_n := v_n + 1;
+
+  -- P32: the closed booking's hold reserves the 5 on the shelf only; the +10 PO of 30 stays free; nothing to buy.
+  SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[48];
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR (v_x->>'committed')::numeric <> 5
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 5 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P32 a closed booking''s hold reserves the shelf only) %', v_x;
+  END IF;
+  v_n := v_n + 1;
+
+  -- P33: the job hold beside an unconvertible line still reserves its 10; the other job's 10 at +3 is bought.
+  SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[49];
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 10 OR NOT (v_x->'reasons' ? 'check_units')
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 10 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P33 a job hold on an unconvertible line keeps its stock) %', v_x;
+  END IF;
+  v_n := v_n + 1;
+
+  -- P34: 35 drawn against Gal 30 + set-aside lb 10 is not over-drawn; the lb line is under Check units.
+  SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[50];
+  IF v_x IS NULL OR (v_x->'reasons' ? 'over_drawn') OR (v_x->>'over_drawn')::numeric <> 0 OR NOT (v_x->'reasons' ? 'check_units') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P34 a draw against a set-aside line is not over-drawn) %', v_x;
+  END IF;
+  -- P35: the job draws 12 from its 5 section; the 7 beyond it is listed as drawn, section unknown.
+  IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan->'drawn_section_unknown') d
+                  WHERE (d->>'product_id')::uuid = v_p[51] AND (d->>'quantity')::numeric = 7) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P35 a job draw beyond its section is listed) %', v_plan->'drawn_section_unknown';
+  END IF;
+  v_n := v_n + 1;
+
+  -- P27 (20270206130000, #1977 MEDs): the P26 window section (pre_plant, needed Dec 31 this year).
   -- A window crossing New Year (start 12-31, end today) ends next year, so it is not yet on the review list
   -- (the old rule ended it today). Skipped on Dec 31 (the window then does not cross) and Feb 29 (not a month-day).
   SELECT (section_ids->>'_d')::uuid INTO v_s1 FROM smk_pp_bookings WHERE tag = 'P26';

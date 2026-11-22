@@ -22,7 +22,8 @@ held than the shelf has, the unbacked part stays as the booking line (its own da
 1. **Covered hold.** A hold is *covered* when its own source's counted lines of the product are its demand: a
    crop-program hold (active, not expired) whose booking counts a line of the product and has no set-aside line of it
    with quantity > 0; or a job hold whose active job has a convertible line of the product and none that is not.
-   Other manual and crop-program holds count today as before; any other job hold is left out as before.
+   A manual hold, and a draft Planned booking's hold on a product it books (every line in the stock unit), count
+   today (rule 7). Every other hold is *shelf-only* (rule 10).
 2. **Backed stock.** Per product, `backed = LEAST(sum covered, GREATEST(on_hand - holds counted today, 0))`. Held
    stock is only ever stock on the shelf; a hold with nothing behind it reserves nothing extra.
 3. **Allocation.** A covered hold backs its own lines (booking lines after draws, or job lines) in this order: Firm
@@ -33,7 +34,7 @@ held than the shelf has, the unbacked part stays as the booking line (its own da
 4. **Output.** The held part of each line becomes a `hold` row: committed, dated today, with the line's booking,
    section and confidence (or its job). A hold's rest beyond its lines is a `hold` row with its source. The rest of
    each line stays as before (same class, date, bucket). Line qty = held part + rest; nothing double-counted.
-5. **Unchanged** (except as rules 7 and 8 change them): manual holds, crop holds of non-counted bookings and of bookings with a set-aside line, draws,
+5. **Unchanged** (except as rules 7, 8, 10 and 11 change them): manual holds, draws,
    orders, POs, the review list (`rev` still uses the line's full remaining). The Firm-needs-a-date list and the
    `needs_date` reason read the lines before the hold split, so a held undated Firm line is still listed.
 7. **Cap on holds that count today (Mason, 2026-11-18, "I agree cap it", after Taha's review of #1989).** A manual hold or
@@ -54,6 +55,19 @@ held than the shelf has, the unbacked part stays as the booking line (its own da
    order), as the hold does when the stock is received; that part is a committed hold row on the PO's date (or on its own earlier committed date: a Firm line's, a job's, a hold's rest; Codex App on #1989) and only
    the rest of a PO is free for other demand. With no PO, rules 3 and 7 are unchanged: a hold never makes the plan
    buy on its own. (0 on hand, Maybe 100 held, PO 100 at +10, another booking's Firm 100 at +20: buy 100; smoke P30.)
+   **Kept by Mason, 2026-11-21 (option B), with the Nov 20 Sol fixes:** a hold claims only PO stock arriving on or
+   before its own expiry; earlier-expiring holds claim first (a covered group's shelf part goes to its
+   earliest-expiring holds); a later PO stays free for other demand. Only a dated Firm line's or a job line's claimed
+   part is committed (on the PO's date or its own earlier date). A Maybe, Likely, unset or undated line's claimed part
+   keeps that line's class and date and only *reserves* its PO stock: it is left out of the buying walk and that PO
+   stock is taken out of supply, so no other grower can use it. A hold's rest beyond its lines claims nothing.
+10. **Shelf-only holds (Sol on #1989, 2026-11-20).** A hold whose booking or job is gone, closed, converted or no
+   longer books the product, a hold beside a line set aside for its unit, and a job hold whose job line cannot be
+   converted reserve stock already on the shelf only (after the holds of rule 7, before covered holds). They never
+   claim a PO and never make the plan buy. Integrity Cleanup already lists stale program holds.
+11. **Draw lists (Sol on #1989).** A draw against a line set aside for its unit is not over-drawn (over-drawn compares
+   with every line, set-aside ones included). The Drawn-section-unknown list shows every draw not taken off its own
+   job's section, so a job's draw beyond its section is listed. Held rows keep the line's estimated flag.
 6. **Window MEDs.** A timing window is taken from settings only when both `start` and `end` are valid month-days
    (as `parseTimingWindows` on the screen does); otherwise both fall back to that timing's default. When `end` is
    before `start` (window crosses New Year) and the needed-by month-day is on/after `start`, the window end is in

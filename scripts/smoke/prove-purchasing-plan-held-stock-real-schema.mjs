@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270128150000_purchasing_plan_held_stock_never_free (contract
+ * Real-schema proof for 20270206130000_purchasing_plan_held_stock_never_free (contract
  * docs/plans/2026-11-18-purchasing-held-stock-CONTRACT.md). Container setup copied from
  * prove-booking-timing-purchasing-plan-real-schema.mjs: the checked-in production schema baseline in a
  * network-disabled Supabase PostgreSQL 17 container, every post-baseline migration before the candidate
- * replayed (20270127110000 included), then:
- *   1. BEFORE: smoke-purchasing-plan.sql fails (its P14 document-order draw and P26/P27/P28 groups need the candidate);
+ * replayed (release #1990's 20270129160000 included), then:
+ *   1. BEFORE: smoke-purchasing-plan.sql fails at a held-stock group (P22-P35 need the candidate);
  *      smoke-booking-planning-fields.sql passes.
  *   2. The candidate applies; a second apply is refused by its preflight (PREFLIGHT_PLAN_DRIFT).
  *   3. AFTER: both chains pass; the function stays SECURITY DEFINER, search_path pinned, anon refused, authenticated allowed.
@@ -29,7 +29,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270128150000_purchasing_plan_held_stock_never_free.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270206130000_purchasing_plan_held_stock_never_free.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([
@@ -282,8 +282,9 @@ async function main() {
   // 1. BEFORE
   const planBefore = chainOutcome('smoke-purchasing-plan.sql');
   assert.doesNotMatch(planBefore, /SMOKE_PASS_ROLLBACK/, 'smoke-purchasing-plan.sql must fail before the candidate');
-  // The old body fails at the first held-stock group (P26): stock held for a Maybe booking read as free.
-  assert.match(planBefore, /SMOKE_FAIL: \(P26/, `the old plan must fail at a held-stock case: ${planBefore}`);
+  // The old body fails at the first held-stock group (P25 today): a hold beside a set-aside line, or stock held
+  // for a Maybe booking (P26), read as free or bought.
+  assert.match(planBefore, /SMOKE_FAIL: \(P(2[2-9]|3[0-5])/, `the old plan must fail at a held-stock case: ${planBefore}`);
   console.log(`[case] BEFORE: smoke-purchasing-plan.sql: ${planBefore.slice(0, 120)}`);
   assert.match(chainOutcome('smoke-booking-planning-fields.sql'), /^SMOKE_PASS_ROLLBACK/);
 

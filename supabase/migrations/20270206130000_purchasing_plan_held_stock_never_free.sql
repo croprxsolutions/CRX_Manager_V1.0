@@ -1,8 +1,8 @@
 -- ============================================================================
--- 20270128150000_purchasing_plan_held_stock_never_free
+-- 20270206130000_purchasing_plan_held_stock_never_free
 -- Bookings Phase A follow-up (contract docs/plans/2026-11-18-purchasing-held-stock-CONTRACT.md).
 --
--- WHY: get_purchasing_plan (20270127110000) dropped a crop-program hold whose booking books
+-- WHY: get_purchasing_plan (20270127110000; re-created with #1990's order fix by 20270129160000) dropped a crop-program hold whose booking books
 -- the product and then counted that booking's Maybe lines as shown only, so stock held for a
 -- Planned Maybe booking read as free (Sol round 2 HIGH on #1980). Mason, 2026-11-18: held stock
 -- always counts as spoken for, but a booking's hold never makes the plan buy on its own.
@@ -25,8 +25,16 @@
 --      round 5 on #1989: the safe guess, over matching each order to its line).
 --   6. The part of a hold not yet on the shelf takes incoming purchase-order stock first, on each
 --      PO's date, as the hold does when the stock is received; only the rest of a PO is free for
---      other demand (Mason, 2026-11-19, after Sol round 5 on #1989).
--- ROLLBACK: re-run the get_purchasing_plan CREATE from 20270127110000 as CREATE OR REPLACE
+--      other demand (Mason, 2026-11-19, after Sol round 5 on #1989; kept by Mason 2026-11-21).
+--      Rebuild after the Nov 20 Sol review: a hold claims only stock arriving by its own expiry
+--      (earliest-expiring first); a Maybe, Likely, unset or undated line's claimed part keeps its own
+--      class and date and only reserves the PO stock; a hold whose booking or job is gone, closed or
+--      converted, or beside a line set aside for its unit, reserves shelf stock only (never buys or
+--      claims a PO); a job hold on a line with a unit problem still reserves its shelf stock.
+--   7. Built on #1990's body (20270129160000): its soft-deleted-order rule for accepted bookings is kept.
+--   8. A draw against a line set aside for its unit is not over-drawn; the Drawn-section-unknown list
+--      includes a job's draw beyond its own section; held rows keep the line's estimated flag.
+-- ROLLBACK: re-run the get_purchasing_plan CREATE OR REPLACE from 20270129160000 (line 1138)
 --   (read-only function; no data to restore).
 -- ============================================================================
 
@@ -34,8 +42,8 @@ DO $preflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = to_regprocedure('public.get_purchasing_plan(integer)'))
-     IS DISTINCT FROM '25b0591e2df6d2c34d3aaaf9e5df5e71' THEN
-    RAISE EXCEPTION 'PREFLIGHT_PLAN_DRIFT: get_purchasing_plan is not the reviewed 20270127110000 body';
+     IS DISTINCT FROM 'c36fde7853b4bc1297d8fc70200a459d' THEN
+    RAISE EXCEPTION 'PREFLIGHT_PLAN_DRIFT: get_purchasing_plan is not the released 20270129160000 body';
   END IF;
 END;
 $preflight$;
@@ -108,7 +116,10 @@ BEGIN
       FROM quotes q
      WHERE q.deleted_at IS NULL
        AND (q.status IN ('sent', 'revised')
-            OR (q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.quote_id = q.id)))
+            -- #1990 Sol: a soft-deleted order no longer stands for the booking (as 20270128140000 counts it), unless
+            -- product was drawn from the booking (a voided whole conversion keeps its draw: the booking stays converted).
+            OR (q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.quote_id = q.id
+                  AND (o.deleted_at IS NULL OR EXISTS (SELECT 1 FROM quote_product_draws d WHERE d.quote_id = q.id AND d.quantity_drawn > 0)))))
   ),
   bla AS (
     SELECT qi.id AS item_id, eq.id AS quote_id, qi.product_id, s.id AS section_id,
@@ -200,23 +211,29 @@ BEGIN
                                     ROWS UNBOUNDED PRECEDING) - s2a.rem1))) AS rem
       FROM s2a
   ),
+  -- Over-drawn: drawn beyond every line of the product, set-aside lines included (a draw against a line
+  -- set aside for its unit is not over-drawn: that line is listed under Check units until it is fixed).
+  bkall AS (SELECT quote_id, product_id, SUM(qty) AS booked FROM bla GROUP BY quote_id, product_id),
   overdrawn AS (
-    SELECT dt.quote_id, dt.product_id, dt.total - COALESCE(ap1.booked, 0) AS qty
-      FROM dt LEFT JOIN ap1 ON ap1.quote_id = dt.quote_id AND ap1.product_id = dt.product_id
-     WHERE dt.total > COALESCE(ap1.booked, 0)
+    SELECT dt.quote_id, dt.product_id, dt.total - COALESCE(bk.booked, 0) AS qty
+      FROM dt LEFT JOIN bkall bk ON bk.quote_id = dt.quote_id AND bk.product_id = dt.product_id
+     WHERE dt.total > COALESCE(bk.booked, 0)
   ),
   onhand AS (
     SELECT i.product_id, SUM(COALESCE(i.quantity_available, 0)) AS qty
       FROM inventory i WHERE i.location = 'Main Warehouse' GROUP BY i.product_id
   ),
   -- Live holds. An expired hold reserves nothing (as in the inventory position, 20261204100000).
-  -- A hold is "covered" when its own source's counted lines of the product are its demand: a
-  -- crop-program hold whose booking counts a line of the product and has no set-aside line of it
-  -- in quantity, or a job hold whose active job has a convertible line of the product and none that
-  -- cannot be converted. A covered hold is not counted again; its stock is set aside below.
-  -- Every other manual or crop-program hold (a draft Planned booking, one gone or closed, one with
-  -- no counted line of the product, or one beside a set-aside line, which it may belong to) counts
-  -- now. Any other job hold is left out, as before (its job line is counted, or listed under Check units).
+  -- 'covered': its own source's counted lines of the product are its demand (a crop-program hold
+  --   whose booking counts a line of the product and has no set-aside line of it, or a job hold whose
+  --   active job has a convertible line of the product and none that cannot be converted). Not
+  --   counted again; its stock is set aside below.
+  -- 'now': a manual hold, or a draft Planned booking's hold on a product the booking books, every
+  --   line in the stock unit (the hold stands in for that booking's demand until it is sent).
+  -- 'shelf': every other hold (its booking or job gone, closed, converted or no longer booking the
+  --   product, or beside a line set aside for its unit). It reserves stock already on the shelf only:
+  --   it never claims a PO and never makes the plan buy (Sol on #1989, 2026-11-20). Integrity
+  --   Cleanup lists the stale program holds.
   hraw AS (
     SELECT ih.id AS hold_id, ih.product_id, ih.quantity, ih.source_id, ih.customer_id, ih.hold_type, ih.expires_at,
            CASE WHEN ih.hold_type = 'crop_program'
@@ -228,7 +245,17 @@ BEGIN
                  AND EXISTS (SELECT 1 FROM jcl WHERE jcl.job_id = ih.source_id AND jcl.product_id = ih.product_id AND NOT jcl.unit_problem)
                  AND NOT EXISTS (SELECT 1 FROM jcl WHERE jcl.job_id = ih.source_id AND jcl.product_id = ih.product_id AND jcl.unit_problem)
                   THEN 'covered'
-                WHEN ih.hold_type IN ('manual', 'crop_program') THEN 'now'
+                WHEN ih.hold_type = 'manual' THEN 'now'
+                WHEN ih.hold_type = 'crop_program'
+                 AND EXISTS (SELECT 1 FROM quotes q WHERE q.id = ih.source_id AND q.deleted_at IS NULL
+                                AND q.is_planned AND q.status = 'draft')
+                 AND EXISTS (SELECT 1 FROM quote_items qi WHERE qi.quote_id = ih.source_id AND qi.product_id = ih.product_id
+                                AND COALESCE(qi.total_units_needed, 0) > 0)
+                 AND NOT EXISTS (SELECT 1 FROM quote_items qi JOIN products p ON p.id = qi.product_id
+                                  WHERE qi.quote_id = ih.source_id AND qi.product_id = ih.product_id
+                                    AND NOT _unit_matches_stock_unit(qi.unit_size, COALESCE(NULLIF(btrim(p.inventory_unit), ''), p.unit_size)))
+                  THEN 'now'
+                ELSE 'shelf'
            END AS hold_use
       FROM inventory_holds ih
      WHERE ih.is_active = true AND ih.quantity > 0 AND ih.quantity < 'Infinity'::numeric  -- (also excludes NaN)
@@ -239,19 +266,17 @@ BEGIN
     SELECT hold_type, source_id, product_id, SUM(quantity) AS held
       FROM hraw WHERE hold_use = 'covered' GROUP BY hold_type, source_id, product_id
   ),
-  -- Holds that count now take the shelf first (manual, then crop-program by need date), but only
-  -- up to the stock on it (Mason, 2026-11-18, "I agree cap it"): the rest of a crop-program hold
-  -- falls to its booking line's need date (the hold sync sets the expiry date = need date + 14 days),
-  -- as it would once the booking is sent. A manual hold, a hold with no booking behind it, and an
-  -- infinite expiry (an 'infinity' need date, which a counted line also treats as no date) stay today.
+  -- Holds that count now take the shelf first (manual, then a draft booking's by need date, then
+  -- shelf-only holds), but only up to the stock on it (Mason, 2026-11-18, "I agree cap it"): the rest
+  -- of a draft booking's hold falls to its need date (the hold sync sets the expiry date = need date
+  -- + 14 days), as it would once the booking is sent. A manual hold and an infinite expiry stay today.
   hnow0 AS (
     SELECT h.*,
-           CASE WHEN h.hold_type = 'crop_program' AND isfinite(h.expires_at)
+           CASE WHEN h.hold_use = 'now' AND h.hold_type = 'crop_program' AND isfinite(h.expires_at)
                      AND h.expires_at > (SELECT today FROM prm)
-                     AND EXISTS (SELECT 1 FROM quotes q WHERE q.id = h.source_id AND q.deleted_at IS NULL)
                 THEN GREATEST((SELECT today FROM prm), h.expires_at - 14)
                 ELSE (SELECT today FROM prm) END AS rest_date
-      FROM hraw h WHERE h.hold_use = 'now'
+      FROM hraw h WHERE h.hold_use IN ('now', 'shelf')
   ),
   hnow AS (
     SELECT h.*,
@@ -259,11 +284,12 @@ BEGIN
            ROW_NUMBER() OVER w AS ord
       FROM hnow0 h LEFT JOIN onhand oh ON oh.product_id = h.product_id
     WINDOW w AS (PARTITION BY h.product_id
-                 ORDER BY CASE h.hold_type WHEN 'manual' THEN 0 ELSE 1 END, h.rest_date, h.source_id, h.hold_id
+                 ORDER BY CASE WHEN h.hold_use = 'shelf' THEN 2 WHEN h.hold_type = 'manual' THEN 0 ELSE 1 END,
+                          h.rest_date, h.source_id, h.hold_id
                  ROWS UNBOUNDED PRECEDING)
   ),
   -- Held stock never reads as free, but a hold never makes the plan buy on its own (Mason, 2026-11-18):
-  -- covered holds are backed only by the stock on the shelf left after the holds that count now.
+  -- covered holds are backed only by the stock on the shelf left after the holds above.
   hback AS (
     SELECT c.product_id,
            LEAST(c.held, GREATEST(COALESCE((SELECT oh.qty FROM onhand oh WHERE oh.product_id = c.product_id), 0)
@@ -308,8 +334,8 @@ BEGIN
   ),
   hl AS (
     SELECT hl1.hold_type, hl1.source_id, hl1.product_id, hl1.line_id, hl1.h1,
-           LEAST(hl1.h1, GREATEST(0, hb.qty - (SUM(hl1.h1) OVER wp - hl1.h1))) AS held,
-           ROW_NUMBER() OVER wp AS ord
+           hl1.rnk, hl1.d, hl1.s_sort, hl1.sec, hl1.i_sort,
+           LEAST(hl1.h1, GREATEST(0, hb.qty - (SUM(hl1.h1) OVER wp - hl1.h1))) AS held
       FROM hl1 JOIN hback hb ON hb.product_id = hl1.product_id
     WINDOW wp AS (PARTITION BY hl1.product_id
                   ORDER BY hl1.rnk, hl1.d NULLS LAST, hl1.hold_type, hl1.source_id, hl1.s_sort, hl1.sec, hl1.i_sort, hl1.line_id
@@ -331,63 +357,132 @@ BEGIN
        AND poi.quantity_ordered - COALESCE(poi.quantity_received, 0) > 0
   ),
   -- Rule 6: the part of each hold not on the shelf takes incoming PO stock first, as the hold does
-  -- on receipt (Mason, 2026-11-19, after Sol round 5 on #1989): holds that count now first (hnow
-  -- order), then covered holds (hl order); POs by date. Each claimed part is a committed hold row on
-  -- the PO's date, so only the rest of a PO is free for other demand.
-  cl AS (
-    SELECT h.product_id, 0 AS grp, h.ord, 'now'::text AS ckind, h.hold_id AS ckey, h.quantity - h.on_shelf AS un
-      FROM hnow h WHERE h.quantity > h.on_shelf
+  -- on receipt (Mason, 2026-11-19, after Sol round 5 on #1989), but only stock arriving on or before
+  -- the hold's own expiry (Sol on #1989, 2026-11-20): a later PO stays free for other demand.
+  -- A covered group's shelf part goes to its earliest-expiring holds; each hold may claim only up to
+  -- its share of the group's lines still to back (the part beyond its lines claims nothing).
+  hgrp AS (
+    SELECT hold_type, source_id, product_id, SUM(held) AS shelf,
+           COALESCE(SUM(h1 - held) FILTER (WHERE line_id IS NOT NULL), 0) AS line_un
+      FROM hl GROUP BY hold_type, source_id, product_id
+  ),
+  hcovh AS (
+    SELECT h.hold_id, h.product_id, h.expires_at,
+           GREATEST(0, LEAST(SUM(h.quantity) OVER w, g.shelf + g.line_un)
+                       - GREATEST(SUM(h.quantity) OVER w - h.quantity, g.shelf)) AS un
+      FROM hraw h
+      JOIN hgrp g ON g.hold_type = h.hold_type AND g.source_id = h.source_id AND g.product_id = h.product_id
+     WHERE h.hold_use = 'covered'
+    WINDOW w AS (PARTITION BY h.hold_type, h.source_id, h.product_id
+                 ORDER BY h.expires_at NULLS LAST, h.hold_id ROWS UNBOUNDED PRECEDING)
+  ),
+  cl0 AS (
+    SELECT h.product_id, h.hold_id, 'now'::text AS src, h.expires_at, 0 AS grp, h.ord, h.quantity - h.on_shelf AS un
+      FROM hnow h WHERE h.hold_use = 'now' AND h.quantity > h.on_shelf
     UNION ALL
-    SELECT hl.product_id, 1, hl.ord, hl.hold_type || CASE WHEN hl.line_id IS NULL THEN '_rest' ELSE '' END,
-           COALESCE(hl.line_id, hl.source_id), hl.h1 - hl.held
-      FROM hl WHERE hl.h1 > hl.held
+    SELECT c.product_id, c.hold_id, 'covered', c.expires_at, 1, 0, c.un FROM hcovh c WHERE c.un > 0
+  ),
+  -- Earliest-expiring holds claim first. cap = the incoming stock arriving by the hold's expiry; caps
+  -- only grow in this order, so the claimed total through each hold is min over k (cap_k + U - U_k).
+  cl1 AS (
+    SELECT cl0.*,
+           SUM(cl0.un) OVER w AS u,
+           COALESCE((SELECT SUM(po.qty) FROM po
+                      WHERE po.product_id = cl0.product_id AND po.flag IN ('counted', 'late')
+                        AND (cl0.expires_at IS NULL OR po.eff_date <= cl0.expires_at)), 0) AS cap
+      FROM cl0
+    WINDOW w AS (PARTITION BY cl0.product_id ORDER BY cl0.expires_at NULLS LAST, cl0.grp, cl0.ord, cl0.hold_id
+                 ROWS UNBOUNDED PRECEDING)
+  ),
+  cl2 AS (
+    SELECT cl1.*,
+           cl1.u + LEAST(0, MIN(cl1.cap - cl1.u) OVER w) AS t
+      FROM cl1
+    WINDOW w AS (PARTITION BY cl1.product_id ORDER BY cl1.expires_at NULLS LAST, cl1.grp, cl1.ord, cl1.hold_id
+                 ROWS UNBOUNDED PRECEDING)
   ),
   clc AS (
-    SELECT cl.*, SUM(cl.un) OVER (PARTITION BY cl.product_id ORDER BY cl.grp, cl.ord ROWS UNBOUNDED PRECEDING) - cl.un AS a
-      FROM cl
+    SELECT cl2.*,
+           COALESCE(LAG(cl2.t) OVER (PARTITION BY cl2.product_id
+                                     ORDER BY cl2.expires_at NULLS LAST, cl2.grp, cl2.ord, cl2.hold_id), 0) AS a
+      FROM cl2
   ),
   poc AS (
     SELECT po.product_id, po.eff_date, po.qty,
            SUM(po.qty) OVER (PARTITION BY po.product_id ORDER BY po.eff_date, po.po_id, po.qty ROWS UNBOUNDED PRECEDING) - po.qty AS b
       FROM po WHERE po.flag IN ('counted', 'late')
   ),
+  -- Each hold's claim, split by the PO dates it takes.
   clm AS (
-    SELECT c.product_id, c.ckind, c.ckey, p.eff_date AS d,
-           LEAST(c.a + c.un, p.b + p.qty) - GREATEST(c.a, p.b) AS q
+    SELECT c.product_id, c.hold_id, c.src, p.eff_date AS d,
+           LEAST(c.t, p.b + p.qty) - GREATEST(c.a, p.b) AS q
       FROM clc c JOIN poc p ON p.product_id = c.product_id
-     WHERE LEAST(c.a + c.un, p.b + p.qty) > GREATEST(c.a, p.b)
+     WHERE c.t > c.a AND LEAST(c.t, p.b + p.qty) > GREATEST(c.a, p.b)
   ),
-  clt AS (SELECT ckind, ckey, SUM(q) AS q FROM clm GROUP BY ckind, ckey),
+  -- A covered group's claims go to its lines still to back, PO dates in order, in the lines' own order.
+  gseg AS (
+    SELECT h.hold_type, h.source_id, m.product_id, m.d, m.q,
+           SUM(m.q) OVER w - m.q AS gb
+      FROM clm m JOIN hraw h ON h.hold_id = m.hold_id
+     WHERE m.src = 'covered'
+    WINDOW w AS (PARTITION BY h.hold_type, h.source_id, m.product_id ORDER BY m.d, m.hold_id ROWS UNBOUNDED PRECEDING)
+  ),
+  lun AS (
+    SELECT hl.hold_type, hl.source_id, hl.product_id, hl.line_id, hl.h1 - hl.held AS un,
+           SUM(hl.h1 - hl.held) OVER w - (hl.h1 - hl.held) AS la
+      FROM hl WHERE hl.line_id IS NOT NULL AND hl.h1 > hl.held
+    WINDOW w AS (PARTITION BY hl.hold_type, hl.source_id, hl.product_id
+                 ORDER BY hl.rnk, hl.d NULLS LAST, hl.s_sort, hl.sec, hl.i_sort, hl.line_id
+                 ROWS UNBOUNDED PRECEDING)
+  ),
+  lcl AS (
+    SELECT l.hold_type, l.line_id, l.product_id, g.d,
+           LEAST(l.la + l.un, g.gb + g.q) - GREATEST(l.la, g.gb) AS q
+      FROM lun l
+      JOIN gseg g ON g.hold_type = l.hold_type AND g.source_id = l.source_id AND g.product_id = l.product_id
+     WHERE LEAST(l.la + l.un, g.gb + g.q) > GREATEST(l.la, g.gb)
+  ),
+  clt AS (SELECT hold_type, line_id, SUM(q) AS q FROM lcl GROUP BY hold_type, line_id),
+  nclt AS (SELECT hold_id, SUM(q) AS q FROM clm WHERE src = 'now' GROUP BY hold_id),
+  -- A claimed part of a dated Firm line or a job line is committed on its PO's date, or on its own
+  -- earlier date, so a late PO never makes a need look timely. Any other line's claimed part (Maybe,
+  -- Likely or unset, or undated) keeps the line's own class and date and only reserves its PO stock:
+  -- it is left out of the buying walk, and that PO stock is taken out of supply (Sol on #1989).
+  lclr AS (
+    SELECT lcl.product_id, lcl.d, lcl.q, lcl.hold_type, lcl.line_id,
+           (lcl.hold_type = 'crop_program' AND (s2.confidence IS DISTINCT FROM 'firm' OR s2.needed_by_date IS NULL)) AS reserved
+      FROM lcl LEFT JOIN s2 ON lcl.hold_type = 'crop_program' AND s2.item_id = lcl.line_id
+  ),
   -- Each counted booking line, split into its held part (hq), its part claiming incoming stock, and the rest (qty_left).
   s3 AS (
     SELECT s2.*, COALESCE(hl.held, 0) AS hq, s2.rem - COALESCE(hl.held, 0) - COALESCE(t.q, 0) AS qty_left
       FROM s2 LEFT JOIN hl ON hl.hold_type = 'crop_program' AND hl.line_id = s2.item_id
-      LEFT JOIN clt t ON t.ckind = 'crop_program' AND t.ckey = s2.item_id
+      LEFT JOIN clt t ON t.hold_type = 'crop_program' AND t.line_id = s2.item_id
   ),
   -- Each active job line, split the same way.
   jcl2 AS (
     SELECT x.*, COALESCE(hl.held, 0) AS hq, x.qty - COALESCE(hl.held, 0) - COALESCE(t.q, 0) AS qty_left
       FROM jcl x LEFT JOIN hl ON hl.hold_type = 'job' AND hl.line_id = x.line_id
-      LEFT JOIN clt t ON t.ckind = 'job' AND t.ckey = x.line_id
+      LEFT JOIN clt t ON t.hold_type = 'job' AND t.line_id = x.line_id
   ),
-  -- Every demand row, in stock units.
+  -- Every demand row, in stock units. reserved: shown, but left out of the buying walk (its PO stock is reserved).
   dem AS (
     SELECT s3.product_id, 'booking'::text AS kind,
            CASE s3.confidence WHEN 'firm' THEN 'committed' WHEN 'maybe' THEN 'shown' ELSE 'could_add' END AS cls,
            s3.needed_by_date AS raw_date, s3.qty_left AS qty, s3.quote_id, NULL::uuid AS order_id, NULL::uuid AS job_id,
            s3.section_id, s3.confidence, (s3.rem < s3.rem1) AS estimated, s3.unit_problem,
-           (SELECT eq.customer_id FROM eq WHERE eq.id = s3.quote_id) AS customer_id
+           (SELECT eq.customer_id FROM eq WHERE eq.id = s3.quote_id) AS customer_id, false AS reserved
       FROM s3 WHERE s3.qty_left > 0
     UNION ALL
     -- Held stock: on the shelf and already spoken for, so committed today. A booking line's held part
-    -- keeps its booking, section and confidence; a job line's its job; a hold's rest beyond its lines its source.
+    -- keeps its booking, section, confidence and estimate; a job line's its job; a hold's rest beyond its lines its source.
     SELECT s3.product_id, 'hold', 'committed', (SELECT today FROM prm), s3.hq, s3.quote_id, NULL::uuid, NULL::uuid,
-           s3.section_id, s3.confidence, false, false,
-           (SELECT eq.customer_id FROM eq WHERE eq.id = s3.quote_id)
+           s3.section_id, s3.confidence, (s3.rem < s3.rem1), false,
+           (SELECT eq.customer_id FROM eq WHERE eq.id = s3.quote_id), false
       FROM s3 WHERE s3.hq > 0
     UNION ALL
     SELECT x.product_id, 'hold', 'committed', (SELECT today FROM prm), x.hq, x.quote_id, NULL::uuid, x.job_id,
-           x.quote_section_id, NULL::text, false, false, x.customer_id
+           x.quote_section_id, NULL::text, false, false, x.customer_id, false
       FROM jcl2 x WHERE x.hq > 0
     UNION ALL
     SELECT hl.product_id, 'hold', 'committed', (SELECT today FROM prm), hl.held,
@@ -395,7 +490,7 @@ BEGIN
            CASE WHEN hl.hold_type = 'job' THEN hl.source_id END,
            NULL::uuid, NULL::text, false, false,
            CASE WHEN hl.hold_type = 'crop_program' THEN (SELECT eq.customer_id FROM eq WHERE eq.id = hl.source_id)
-                ELSE (SELECT j.customer_id FROM jobs j WHERE j.id = hl.source_id) END
+                ELSE (SELECT j.customer_id FROM jobs j WHERE j.id = hl.source_id) END, false
       FROM hl WHERE hl.line_id IS NULL AND hl.held > 0
     UNION ALL
     -- Set-aside lines (unit does not match stock): Check units, in full.
@@ -403,7 +498,7 @@ BEGIN
            CASE bla.confidence WHEN 'firm' THEN 'committed' WHEN 'maybe' THEN 'shown' ELSE 'could_add' END,
            bla.needed_by_date, bla.qty, bla.quote_id, NULL::uuid, NULL::uuid,
            bla.section_id, bla.confidence, false, true,
-           (SELECT eq.customer_id FROM eq WHERE eq.id = bla.quote_id)
+           (SELECT eq.customer_id FROM eq WHERE eq.id = bla.quote_id), false
       FROM bla WHERE bla.unit_problem AND bla.qty > 0
     UNION ALL
     -- Open orders: dated by the earliest scheduled, undelivered delivery of the line only when the
@@ -415,42 +510,44 @@ BEGIN
                         AND d.status IN ('scheduled', 'in_progress') AND d.scheduled_date IS NOT NULL
                      HAVING SUM(COALESCE(di.quantity, 0)) >= oi.quantity_remaining),
                     (SELECT today FROM prm)),
-           oi.quantity_remaining, o.quote_id, o.id, NULL::uuid, NULL::uuid, NULL::text, false, false, o.customer_id
+           oi.quantity_remaining, o.quote_id, o.id, NULL::uuid, NULL::uuid, NULL::text, false, false, o.customer_id, false
       FROM order_items oi JOIN orders o ON o.id = oi.order_id
      WHERE o.deleted_at IS NULL AND o.status IN ('confirmed', 'partially_fulfilled')
        AND oi.product_id IS NOT NULL AND oi.quantity_remaining > 0
     UNION ALL
     -- Active jobs (jcl), less any held part listed above.
     SELECT x.product_id, 'job', 'committed', x.job_date, x.qty_left, x.quote_id, NULL::uuid, x.job_id,
-           x.quote_section_id, NULL::text, false, x.unit_problem, x.customer_id
+           x.quote_section_id, NULL::text, false, x.unit_problem, x.customer_id, false
       FROM jcl2 x WHERE x.qty_left > 0
     UNION ALL
-    -- Holds that count now: the part on the shelf today, the rest by its date (hnow).
+    -- Holds that count now, and shelf-only holds: the part on the shelf today.
     SELECT h.product_id, 'hold', 'committed', (SELECT today FROM prm), h.on_shelf, NULL::uuid, NULL::uuid, NULL::uuid,
-           NULL::uuid, NULL::text, false, false, h.customer_id
+           NULL::uuid, NULL::text, false, false, h.customer_id, false
       FROM hnow h WHERE h.on_shelf > 0
     UNION ALL
+    -- The rest of a hold that counts now (never a shelf-only hold's), by its date.
     SELECT h.product_id, 'hold', 'committed', h.rest_date, h.quantity - h.on_shelf - COALESCE(t.q, 0),
-           NULL::uuid, NULL::uuid, NULL::uuid, NULL::uuid, NULL::text, false, false, h.customer_id
-      FROM hnow h LEFT JOIN clt t ON t.ckind = 'now' AND t.ckey = h.hold_id
-     WHERE h.quantity - h.on_shelf - COALESCE(t.q, 0) > 0
+           NULL::uuid, NULL::uuid, NULL::uuid, NULL::uuid, NULL::text, false, false, h.customer_id, false
+      FROM hnow h LEFT JOIN nclt t ON t.hold_id = h.hold_id
+     WHERE h.hold_use = 'now' AND h.quantity - h.on_shelf - COALESCE(t.q, 0) > 0
     UNION ALL
-    -- Rule 6: each hold part claiming incoming stock, committed on its PO's date, or on its own earlier
-    -- committed date (a Firm line's, a job's, a hold's rest), so a late PO never makes a need look timely.
-    SELECT m.product_id, 'hold', 'committed',
-           LEAST(m.d, CASE WHEN s2.confidence = 'firm' THEN s2.needed_by_date END, x.job_date, h.rest_date), m.q,
-           COALESCE(s2.quote_id, x.quote_id, CASE WHEN m.ckind = 'crop_program_rest' THEN m.ckey END),
-           NULL::uuid,
-           COALESCE(x.job_id, CASE WHEN m.ckind = 'job_rest' THEN m.ckey END),
-           COALESCE(s2.section_id, x.quote_section_id), s2.confidence, false, false,
-           COALESCE((SELECT eq.customer_id FROM eq WHERE eq.id = COALESCE(s2.quote_id,
-                       CASE WHEN m.ckind = 'crop_program_rest' THEN m.ckey END)),
-                    x.customer_id, h.customer_id,
-                    (SELECT j.customer_id FROM jobs j WHERE m.ckind = 'job_rest' AND j.id = m.ckey))
-      FROM clm m
-      LEFT JOIN s2 ON m.ckind = 'crop_program' AND s2.item_id = m.ckey
-      LEFT JOIN jcl x ON m.ckind = 'job' AND x.line_id = m.ckey
-      LEFT JOIN hnow h ON m.ckind = 'now' AND h.hold_id = m.ckey
+    -- Rule 6: a hold that counts now, its part claiming incoming stock, committed on its PO's date or its own earlier date.
+    SELECT h.product_id, 'hold', 'committed', LEAST(m.d, h.rest_date), m.q,
+           NULL::uuid, NULL::uuid, NULL::uuid, NULL::uuid, NULL::text, false, false, h.customer_id, false
+      FROM clm m JOIN hnow h ON h.hold_id = m.hold_id
+     WHERE m.src = 'now'
+    UNION ALL
+    -- Rule 6: a covered line's part claiming incoming stock (see lclr).
+    SELECT r.product_id, 'hold',
+           CASE WHEN r.hold_type = 'job' THEN 'committed'
+                ELSE CASE s2.confidence WHEN 'firm' THEN 'committed' WHEN 'maybe' THEN 'shown' ELSE 'could_add' END END,
+           CASE WHEN r.reserved THEN s2.needed_by_date ELSE LEAST(r.d, s2.needed_by_date, x.job_date) END, r.q,
+           COALESCE(s2.quote_id, x.quote_id), NULL::uuid, x.job_id,
+           COALESCE(s2.section_id, x.quote_section_id), s2.confidence, COALESCE(s2.rem < s2.rem1, false), false,
+           COALESCE((SELECT eq.customer_id FROM eq WHERE eq.id = s2.quote_id), x.customer_id), r.reserved
+      FROM lclr r
+      LEFT JOIN s2 ON r.hold_type = 'crop_program' AND s2.item_id = r.line_id
+      LEFT JOIN jcl x ON r.hold_type = 'job' AND x.line_id = r.line_id
   ),
   demb AS (
     SELECT dem.*,
@@ -478,9 +575,12 @@ BEGIN
            COALESCE(SUM(qty) FILTER (WHERE cls = 'committed'), 0) AS dc,
            COALESCE(SUM(qty) FILTER (WHERE cls IN ('committed', 'could_add')), 0) AS da,
            0::numeric AS s
-      FROM demb WHERE bucket = 'dated' GROUP BY product_id, need_date
+      FROM demb WHERE bucket = 'dated' AND NOT reserved GROUP BY product_id, need_date
     UNION ALL
     SELECT product_id, eff_date, 0, 0, SUM(qty) FROM po WHERE flag IN ('counted', 'late') GROUP BY product_id, eff_date
+    UNION ALL
+    -- PO stock reserved by a held line that is not in the walk (lclr) is not supply for anyone else.
+    SELECT product_id, d, 0, 0, -SUM(q) FROM lclr WHERE reserved GROUP BY product_id, d
     UNION ALL
     SELECT product_id, (SELECT today FROM prm), 0, 0, 0 FROM prod
   ),
@@ -567,12 +667,14 @@ BEGIN
     'drawn_section_unknown', COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
                'quote_id', dt.quote_id, 'quote_number', eq.quote_number, 'customer_name', c.farm_name,
-               'product_id', dt.product_id, 'product_name', p.product_name, 'quantity', dt.unknown)
+               'product_id', dt.product_id, 'product_name', p.product_name, 'quantity', dt.total - COALESCE(ap1.applied, 0))
                ORDER BY eq.quote_number, p.product_name)
         FROM dt JOIN eq ON eq.id = dt.quote_id
+        -- Every draw not taken off its own job's section: an order's, and a job's beyond its section (Sol on #1989).
+        LEFT JOIN ap1 ON ap1.quote_id = dt.quote_id AND ap1.product_id = dt.product_id
         LEFT JOIN customers c ON c.id = eq.customer_id
         JOIN products p ON p.id = dt.product_id
-       WHERE dt.unknown > 0), '[]'::jsonb),
+       WHERE dt.total - COALESCE(ap1.applied, 0) > 0), '[]'::jsonb),
     'review', COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
                'quote_id', rev.quote_id, 'quote_number', eq.quote_number, 'customer_name', c.farm_name,
@@ -656,7 +758,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM 'f0c891e7240b8a50b8f97038532efaaa' THEN
+     IS DISTINCT FROM '50c3779f1b10b1ec71e92ee4dce1eab9' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

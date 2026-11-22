@@ -1,8 +1,10 @@
 # Decision Log
 
-## 2026-11-22 — PR #2226: skipped Sol findings never carry onto a newer base
+## 2026-11-22 — PR #2226: staging merges never carry a Sol proof; skipped Sol findings never carry onto a newer base
 
-**Decision (Mason, in chat 2026-11-22, after Sol gate round 4: "Yes, full review").** `--carry-forward` now works after merging `origin/staging` into a feature branch, as it already did after merging `origin/main`. A proof whose BLOCKER/HIGH findings Mason skipped (owner-accepted) never carries onto a newer base: once the branch merges its base again, it needs a full Sol review. This is stricter than before, when an owner-accepted main-bound proof could carry. Sol rounds 1-4 each found a new way the carried owner-accepted form could cover a defect that new base code had widened, so that path was removed rather than patched.
+**Final rule:** a feature branch that merges `origin/staging` always needs a new full Sol review; `--carry-forward` is only for `hotfix/` and `release/` branches merging `origin/main` (round 7 decision below). The earlier decisions are kept as history.
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 4: "Yes, full review").** *(Its first sentence was replaced by the round 7 decision.)* `--carry-forward` now works after merging `origin/staging` into a feature branch, as it already did after merging `origin/main`. A proof whose BLOCKER/HIGH findings Mason skipped (owner-accepted) never carries onto a newer base: once the branch merges its base again, it needs a full Sol review. This is stricter than before, when an owner-accepted main-bound proof could carry. Sol rounds 1-4 each found a new way the carried owner-accepted form could cover a defect that new base code had widened, so that path was removed rather than patched.
 
 **Decision (Mason, in chat 2026-11-22, after Sol gate round 5: "Yes, free carry only").** A staging merge keeps an earlier Sol review only in the free case: the PR's files and staging's new files do not overlap and one side is notes only. Any other staging merge, including both sides adding to `DECISION_LOG.md`, gets a full Sol review. The focused collision check stays only for `hotfix/` and `release/` branches merging `main`.
 

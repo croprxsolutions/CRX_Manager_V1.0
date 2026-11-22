@@ -4,6 +4,48 @@
 
 **Decision (Mason, in chat, 2026-11-21: "Yes, run round 5").** Sol rounds 1-4 on #2165 each found a different screen-side problem, and each was fixed: address typing, a missing delivery site falling back to the farm's default address, a missing stop site, and a role refresh resetting entered quantities. Round 3 also raised the drivers' whole-row farm read; Mason accepted that for one release ("Yes, accept it"), the same as on #2161, and #2162 removes it. Smaller items are deferred to #2167. This entry names #2165 so Sol may run round 5 on it.
 
+## 2026-11-21 — #1985: Mason owner-accepted 4 Sol finding(s) at `d549921a5aaf`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #1985 at `d549921a5aaf` (base `6a6462d4c469`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270205150000_ingredient_modes_of_action_load.sql:49`, text sha256 `eb47212d17b069a5` (the wording stays with the proof, not here)
+  Mason's reason: cnat happen (ref ba3bbf98566a)
+- Finding 2 (HIGH) at `supabase/migrations/20270205150000_ingredient_modes_of_action_load.sql:247`, text sha256 `25af93926cbb1dbc` (the wording stays with the proof, not here)
+  Mason's reason: cant happen (ref c5d81d8a7658)
+- Finding 3 (HIGH) at `supabase/migrations/20270205150000_ingredient_modes_of_action_load.sql:241`, text sha256 `a2e074c5182807ca` (the wording stays with the proof, not here)
+  Mason's reason: cnat happen (ref 9ae6f1d73ffe)
+- Finding 4 (HIGH) at `supabase/migrations/20270205150000_ingredient_modes_of_action_load.sql:39`, text sha256 `6dcc56be7c42e0c7` (the wording stays with the proof, not here)
+  Mason's reason: cant happen (ref 74f3d6cd886c)
+
+## 2026-11-21 — #1985: Mason owner-accepted 4 Sol finding(s) at `5890f0710c43`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #1985 at `5890f0710c43` (base `81cb83cfbb6f`) found 4 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270204150000_ingredient_modes_of_action_load.sql:269`, text sha256 `b039aacf846a6f46` (the wording stays with the proof, not here)
+  Mason's reason: can't happen (ref c3a91922c1ef)
+- Finding 2 (HIGH) at `supabase/migrations/20270204150000_ingredient_modes_of_action_load.sql:247`, text sha256 `30341a49d911c184` (the wording stays with the proof, not here)
+  Mason's reason: can't happen (ref 10f7452111d3)
+- Finding 3 (HIGH) at `supabase/migrations/20270204150000_ingredient_modes_of_action_load.sql:249`, text sha256 `16628448d62df8bd` (the wording stays with the proof, not here)
+  Mason's reason: can't happne (ref 1afa7d265b26)
+- Finding 4 (HIGH) at `supabase/migrations/20270204150000_ingredient_modes_of_action_load.sql:39`, text sha256 `fe45418c382cf162` (the wording stays with the proof, not here)
+  Mason's reason: can't happen (ref f2cb146c2a39)
+
+## 2026-11-21 — #1985: Mason owner-accepted 2 Sol finding(s) at `f8987ca2e979`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #1985 at `f8987ca2e979` (base `2bc2eea77328`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270204150000_ingredient_modes_of_action_load.sql:247`, text sha256 `fbe322c2fc7e4cc5` (the wording stays with the proof, not here)
+  Mason's reason: no salt kinks exist on live (ref dd4f62495a11)
+- Finding 2 (HIGH) at `supabase/migrations/20270204150000_ingredient_modes_of_action_load.sql:269`, text sha256 `9179f1b7e3910d5e` (the wording stays with the proof, not here)
+  Mason's reason: this can't happen (ref e739bb58e077)
+## 2026-11-21 — #2142: Mason owner-accepted 1 Sol finding(s) at `2d2d74cbf2bb`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2142 at `2d2d74cbf2bb` (base `81cb83cfbb6f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270205100000_field_app_refuses_payer_change.sql:223`, text sha256 `e5366b8e2723b1c1` (the wording stays with the proof, not here)
+  Mason's reason: this can't happen (ref 7b827def922e)
+
+## 2026-11-21 — #2058/#2142: a field-application invoice refuses a save that changes which farm it bills
+
+**Decision (Mason, in chat via the issue-triage session, 2026-11-21: "refuse the save and warn explain probvlem"; and directly: "refuse save but explain issue so they know and it just doestn say error cant save").** When a standalone field-application invoice is edited so its fields now belong to another farm, or to several farms, Save is refused and nothing changes. The screen shows a plain sentence: which farm(s) the fields now bill, which farm the invoice bills, and what to do (put the original fields back, or have an admin delete or void this one first and then make a new invoice; a job-made invoice is re-invoiced from its job). A refusal may reveal to a rep whether another rep's draft bills that farm or came from a job; Mason accepted that (2026-11-21, #2163) because any rep may already edit any draft field-application invoice.
+**Why:** the first design moved the draft automatically (cancel it, make a new one for the new farm). Sol found new HIGH findings from that move in two rounds (copied PO, notes and negotiated prices; another rep's draft cancelled; stale Void on a new group; the screen losing the new draft), so the stop rule applied and Mason chose the simpler refusal.
+**What this changes:** `_save_field_app_invoice_impl_20260714` via `20270205100000_field_app_refuses_payer_change.sql`; `src/pages/FieldApplicationInvoice.tsx` shows the sentence. Grouped invoices, new invoices and same-farm edits are unchanged.
 ## 2026-11-21 — #2161: Mason owner-accepted 1 Sol finding(s) at `203179d85e5e`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2161 at `203179d85e5e` (base `0ac30a2fc832`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
@@ -27,6 +69,26 @@
   Mason's reason: this cant happen (ref bd7b1fb0c469)
 - Finding 5 (HIGH) at `supabase/migrations/20270203110000_job_writes_through_rpcs.sql:153`, text sha256 `1e39d9aefc0b6c02` (the wording stays with the proof, not here)
   Mason's reason: this cannt happen (ref fe132c96fe3c)
+
+## 2026-11-21 — #1985: Sol rounds 7 to 10 for the MOA-1 group load
+
+**Decision (Mason, in chat, 2026-11-21: "i allow up to 10 rounds").** PR #1985 may have Sol rounds 7, 8, 9 and 10. The live EPA batch fill ran on 2026-11-21 (live: 97 active ingredients, all with a CAS, 0 salt links, 0 group rows), so the branch now merges staging and restamps the load to 20270204150000. The load SQL is unchanged since round 4.
+
+## 2026-11-21 — #1985: Sol round 6 for the MOA-1 group load
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, allow round 6").** PR #1985 may have Sol round 6 (the round ledger's next round; Mason first answered "Allow round 5 now", then confirmed round 6 once the count was corrected). This restates the 2026-11-19 entry below for today's round. It still merges into staging only after the live EPA batch fill has run.
+
+## 2026-11-19 — #1985: two more Sol rounds for the MOA-1 group load
+
+**Decision (Mason, 2026-11-19, in chat).** PR #1985 may have up to two more Sol rounds (rounds 5 and 6). Since round 4 the load's SQL is unchanged: the branch only merged staging and re-dated the migration file. The load stays as built: the CAS number decides the match, the name counts only when the list row or the ingredient has no CAS and exactly one active ingredient has that name, and there is no in-migration readiness check (Mason, 2026-11-18). It merges into staging only after release PR #1990 is in main and the live EPA batch fill has run.
+
+## 2026-11-18 — #1985: Mason owner-accepted 2 Sol finding(s) at `9f609cefac7e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-18).** Sol's review of PR #1985 at `9f609cefac7e` (base `5f87729d2685`) found 2 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270127140000_ingredient_modes_of_action_load.sql:247`, text sha256 `061069a84227d39e` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref f7878916e856)
+- Finding 2 (HIGH) at `supabase/migrations/20270127140000_ingredient_modes_of_action_load.sql:269`, text sha256 `d62604642a3ee0ed` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our busines (ref 804bd04476c3)
 
 ## 2026-11-21 — #2047 (edit_jobs): Sol round 9 decisions
 

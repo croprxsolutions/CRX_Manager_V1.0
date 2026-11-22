@@ -1683,13 +1683,18 @@ tools. `scripts/backup-claude-memory.mjs:476` refuses the same way.
 
 ### KI-51 — Supplier-pricing Phase 3C containment and time-bombs
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-41. The containment check caps history at 4,096 commits and main already has more; check whether new-branch pushes are affected.
+> **Re-checked 2026-11-22 on staging `f8ee14ee8`:** Resolved for new-branch pushes · LOW · plan W2-41.
 
-**MED · OPEN · tooling-guards · unassigned**
+**LOW · RESOLVED (cap) · tooling-guards**
 The trusted containment check is not a required check on `main` (rules: Vercel, Lint/Type/Test/Build, SQL
-Migration Validation). The first-push ancestry cap is 4,096 commits (`scripts/check-supplier-pricing-phase3-private-artifacts.mjs:25`);
-`main` has 3,032 and grows ~200/month, so about five months until every new branch push is blocked; raise it before
-then. Byte/candidate scan budgets (3 GiB, 100,000) need re-measuring. Maintenance watch.
+Migration Validation). History cap: 4,096 commits (`MAX_HISTORY_COMMITS` in
+`scripts/check-supplier-pricing-phase3-private-artifacts.mjs`); `origin/main` has 4,463 and `origin/staging` 4,550.
+**New-branch pushes are not affected** (checked 2026-11-22): the pre-push check scans only commits not on the
+remote's advertised default branch, so a new branch cut from staging scanned 87 commits and passed. CI scans only
+`base..head` for pull requests and runs on push only for `main` and `staging`, which are never created new. The cap
+still refuses a new-branch push when the checkout has no local copy of `main` (not fetched) or pushes to a URL that
+differs from the remote's fetch URL; that refusal now names the fix (fetch, push by remote name, push again).
+Byte/candidate scan budgets (3 GiB, 100,000) need re-measuring. Maintenance watch.
 
 ### KI-52 — Tests and tooling hygiene
 
@@ -1769,17 +1774,17 @@ cases only. Workaround: run a delete or cleanup as its own command, not in one t
 
 ### KI-113 — The customer-document byte-boundary prover is out of date
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-43 · #1698, #1663, #635.
+> **Re-checked 2026-11-22 on staging `f8ee14ee8`:** Resolved (after phase) · LOW · plan W3-43 · #1698, #1663, #635.
 
-**LOW · OPEN · tooling-tests · source: #1698 (from #1663)**
-`scripts/smoke/prove-customer-document-bytes-server-only.mjs` (PR #635) builds a hand-made scratch project (a
-`profiles`/`customers` fixture plus `20260717013415`, then `20260914100700`) and serves today's
-`customer-document-files`. Its `--phase=after` fails on `profiles.email NOT NULL`, and today's function also relies on
-later migrations (`20261013220000`, `20261222100000`) its fixture lacks, so a one-line email fix would not make it
-pass. Not a customer risk today: live read-only 2026-11-09, the `customer-documents` bucket is private and no
-`storage.objects` policy names it or omits `bucket_id`, so browser users reach its files only through
-`customer-document-files`; the 2026-11-08 local click-through (KI-07) exercised that path. No other prover covers this
-boundary. Fix when next needed: rebuild it on the real-schema harness.
+**LOW · RESOLVED 2026-11-22 · tooling-tests**
+`scripts/smoke/prove-customer-document-bytes-server-only.mjs --phase=after` runs again on today's full migration
+chain and today's unmodified `customer-document-files` function: `node scripts/local-app/doc-bytes.mjs rebuild`
+(a third, separate local stack) then `node scripts/smoke/run-customer-document-bytes-proof.mjs` (30/30 checks;
+`--negative-control` re-adds a browser read policy on the bucket and 4 checks fail, so the boundary is still
+tested). Three assertions follow later decisions: any active rep may work any customer (20261013220000), and an
+admin can still download a removed document (KI-07); a rep is still refused after removal and a driver is refused.
+Still not covered: `--phase=before` (the original hole) needs the chain stopped before 20260914100700 and is kept
+as historical; the function runs under host Deno, not the Edge Runtime container.
 
 ### KI-115 — Many screens send database errors to Sentry as "[object Object]"
 

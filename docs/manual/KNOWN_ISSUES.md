@@ -1426,6 +1426,7 @@ overwrite each other (one settings record). Fix depends on who owns crop program
 ### KI-182 — The Purchase Orders screen uses guessable retry codes
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-31 · #2047.
+> **2026-11-22:** FIXED-ON-STAGING once branch `fix/ki182-po-random-retry-codes` merges: the bulk Cancel on the Purchase Orders list now sends one random code per PO (shared `useIdempotencyKey`), reused only for a retry of that PO's cancel. The PO detail page already used random codes.
 
 **MED · OPEN · purchasing · found 2026-11-21 (Sol round 9, #2047) · unassigned**
 Every app action shares one table of retry codes (idempotency keys). The PO screen builds its cancel code from the user

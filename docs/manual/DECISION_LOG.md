@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2149: Mason owner-accepted 1 Sol finding(s) at `a8f491084ae1`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2149 at `a8f491084ae1` (base `dac995aac792`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270206110000_pnl_commission_share_billed.sql:165`, text sha256 `5de59fdaf2969068` (the wording stays with the proof, not here)
+  Mason's reason: only admins edit order totals and they can already edit commissions (ref 0af543254509)
+
 ## 2026-11-21 — #2149 (KI-125): returns do not take commission back in the profit reports yet
 
 **Decision (Mason, in session, 2026-11-21: "Yes ship without, log as a follow up task").** Sol round 5 on #2149 found two

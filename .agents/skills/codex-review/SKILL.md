@@ -284,14 +284,17 @@ ordinary full review. The proof lists matched files under `applied_history`.
 a head behind main when the head contains the base its proof reviewed and main only moved forward, so
 merge as it is. If GitHub reports a conflict, resolving it changes the PR, so it needs a fresh full
 Sol review. If you merge main in anyway and it merges cleanly, carry the review forward (Mason,
-2026-10-21) rather than paying for a second full Sol review. Merge the new main into the branch (`git fetch origin`,
-`git merge origin/main`, push; no other edits in that commit), wait for the checks on the new head,
+2026-10-21) rather than paying for a second full Sol review. "Main" here means the PR's base: `origin/staging`
+for a feature branch, `origin/main` for `hotfix/` and `release/` (Mason, 2026-11-22). Merge it into the branch (`git fetch origin`,
+`git merge origin/staging` or `git merge origin/main`, push; no other edits in that commit), wait for the checks on the new head,
 then run `node scripts/write-codex-push-proof.mjs --carry-forward` (add `--dry-run` to see the
 decision only) immediately before the merge. It mints a carried proof for the new head only when:
 
-- the new head is a merge whose parents are the Sol-reviewed head and today's origin/main, and its
-  content is exactly the conflict-free `git merge-tree` of those two (a resolved conflict or any hand
-  edit refuses);
+- the new head is a merge whose parents are the Sol-reviewed head and today's base tip, and its
+  content is exactly the conflict-free `git merge-tree` of those two, in the merge's own parent order
+  (a resolved conflict or any hand edit refuses; a `DECISION_LOG.md` union merge is clean);
+- an owner-accepted proof (`--carry-owner-accepted`) is a valid source: the carried proof keeps its
+  acceptance list and owner-accepted mark, and the collision check is told not to re-report them;
 - the reviewed head's proof is a clean `gpt-6.2-sol`/`high` proof (full or itself carried) under 24 hours
   old, and for a carried one the original full review is under 24 hours old too (a chain expires);
 - and EITHER the PR's files and main's new files do not overlap and one side is plain documentation

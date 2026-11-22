@@ -1984,10 +1984,13 @@ function preflightReport({ problems, notes }) {
 // A clean Sol proof is bound to one head and one base, so every merge into main
 // voided every waiting PR's review and each one paid for a full Sol pass again
 // (~12 merges a day). `--carry-forward` keeps an earlier clean review when the
-// only thing that changed is main:
+// only thing that changed is the branch's base. "main" below means the ref Sol
+// reviews this branch against (solTargetRef): origin/staging for a feature branch,
+// origin/main for hotfix/ and release/ (Mason, 2026-11-22: staging merges, often
+// forced by DECISION_LOG.md conflicts GitHub cannot union, cost #2185 Sol round 6).
 //
 //   1. HEAD is a merge commit whose parents are exactly the reviewed head and
-//      today's origin/main, and its tree is byte-for-byte what a conflict-free
+//      today's base tip, and its tree is byte-for-byte what a conflict-free
 //      `git merge-tree` of those two produces — so nothing was hand-edited.
 //   2. The files main gained since the review do not overlap the PR's files, and
 //      one of the two sides is plain documentation → the proof carries with no
@@ -2173,10 +2176,11 @@ const priorReviewLines = (ownerAccepted) => ownerAccepted
   : ["The candidate branch's own changes were already reviewed clean by an independent",
     `${CODEX_REVIEW_MODEL}/${CODEX_REVIEW_EFFORT} review against an older main. Main has since gained new`];
 
-export function buildCollisionCheckPrompt({ ownerAccepted = false } = {}) {
+export function buildCollisionCheckPrompt({ ownerAccepted = false, baseRef = GUARDED_BASE } = {}) {
   return [
     "You are performing a focused MERGE-COLLISION check for CRX Manager. This is NOT a full review.",
     "",
+    `"Main" in this check means ${baseRef}, the branch this pull request merges into.`,
     ...priorReviewLines(ownerAccepted),
     "commits, and the branch was updated by a conflict-free merge of the new main with no other",
     "edits (verified mechanically before this check). This directory is a sanitized, Git-free packet:",
@@ -2306,16 +2310,18 @@ export function solReviewBase(root, headSha, mainSha) {
 
 // Everything the carry needs from Git, checked. Returns { problem } or the facts.
 function resolveCarry(root, nowMs) {
+  // The base a full review of this branch would use, so a carry never swaps one base for another.
+  const target = currentSolTarget(root);
   const headSha = runGit(["rev-parse", "HEAD"], { cwd: root });
-  const baseSha = runGit(["rev-parse", `${GUARDED_BASE}^{commit}`], { cwd: root });
+  const baseSha = runGit(["rev-parse", `${target}^{commit}`], { cwd: root });
   if (!CARRY_SHA_RE.test(headSha) || !CARRY_SHA_RE.test(baseSha)) {
-    return { problem: "could not resolve HEAD and origin/main to exact commits" };
+    return { problem: `could not resolve HEAD and ${target} to exact commits` };
   }
   const parents = runGit(["rev-list", "--parents", "-n", "1", headSha], { cwd: root }).split(/\s+/).slice(1);
   if (parents.length !== 2 || !parents.includes(baseSha)) {
     return {
-      problem: "HEAD is not a merge of origin/main into the branch (update the branch with " +
-        "`git fetch origin && git merge origin/main`, push, and run this right after)",
+      problem: `HEAD is not a merge of ${target} into the branch (update the branch with ` +
+        `\`git fetch origin && git merge ${target}\`, push, and run this right after)`,
     };
   }
   const fromHead = parents[0] === baseSha ? parents[1] : parents[0];
@@ -2328,23 +2334,25 @@ function resolveCarry(root, nowMs) {
   const sourceProblem = carrySourceProofProblem(source, { headSha: fromHead, nowMs });
   if (sourceProblem) return { problem: `${sourceProblem} (${fromHead.slice(0, 12)})` };
   const fromBase = source.base_sha;
-  if (fromBase === baseSha) return { problem: "origin/main has not moved since the review, so there is nothing to carry" };
+  if (fromBase === baseSha) return { problem: `${target} has not moved since the review, so there is nothing to carry` };
   if (!gitOk(["merge-base", "--is-ancestor", fromBase, baseSha], root)) {
-    return { problem: "the reviewed base is not an ancestor of today's origin/main" };
+    return { problem: `the reviewed base is not an ancestor of today's ${target}` };
   }
   if (!gitOk(["merge-base", "--is-ancestor", fromBase, fromHead], root)) {
     return { problem: "the reviewed head did not contain the base it was reviewed against" };
   }
-  const merged = runTrustedGit(["merge-tree", "--write-tree", "--no-messages", baseSha, fromHead], {
+  // HEAD's own parent order: a union-merged file (DECISION_LOG.md) lists "ours" first,
+  // so the reversed order rebuilds a different tree from the same clean merge.
+  const merged = runTrustedGit(["merge-tree", "--write-tree", "--no-messages", parents[0], parents[1]], {
     cwd: root, timeout: 120_000, stdio: ["ignore", "pipe", "ignore"],
   });
   const mergedTree = String(merged.stdout || "").split(/\r?\n/)[0].trim();
   if (merged.error || merged.status !== 0 || !CARRY_SHA_RE.test(mergedTree)) {
-    return { problem: "the reviewed head does not merge cleanly onto today's origin/main" };
+    return { problem: `the reviewed head does not merge cleanly onto today's ${target}` };
   }
   const headTree = runGit(["rev-parse", `${headSha}^{tree}`], { cwd: root });
   if (headTree !== mergedTree) {
-    return { problem: "HEAD's content is not exactly the conflict-free merge of the reviewed head and origin/main (something else changed)" };
+    return { problem: `HEAD's content is not exactly the conflict-free merge of the reviewed head and ${target} (something else changed)` };
   }
   let prFiles;
   let mainFiles;
@@ -2354,7 +2362,7 @@ function resolveCarry(root, nowMs) {
   } catch {
     return { problem: "could not list the changed files" };
   }
-  return { headSha, baseSha, fromHead, fromBase, source, prFiles, mainFiles };
+  return { target, headSha, baseSha, fromHead, fromBase, source, prFiles, mainFiles };
 }
 
 function runCarryForward(root, options) {
@@ -2374,7 +2382,7 @@ function runCarryForward(root, options) {
   process.stdout.write(
     `Carry-forward: reviewed head ${facts.fromHead.slice(0, 12)} (base ${facts.fromBase.slice(0, 12)}) → ` +
     `head ${facts.headSha.slice(0, 12)} (base ${facts.baseSha.slice(0, 12)}); PR files ${facts.prFiles.length}, ` +
-    `main's new files ${facts.mainFiles.length}; ` +
+    `${facts.target}'s new files ${facts.mainFiles.length}; ` +
     (plan.mode === "disjoint" ? "no overlap — carries with no model call.\n" : `collision check needed: ${plan.reasons.join("; ")}.\n`),
   );
   if (options.dryRun) {
@@ -2411,12 +2419,12 @@ function runCarryForward(root, options) {
   };
   const stillSame = () =>
     runGit(["rev-parse", "HEAD"], { cwd: root }) === facts.headSha &&
-    runGit(["rev-parse", `${GUARDED_BASE}^{commit}`], { cwd: root }) === facts.baseSha &&
+    runGit(["rev-parse", `${facts.target}^{commit}`], { cwd: root }) === facts.baseSha &&
     worktreeIsClean(root);
 
   if (plan.mode === "disjoint") {
     if (!stillSame()) {
-      process.stderr.write("HEAD, origin/main or the worktree moved during the carry check. No proof written; re-run.\n");
+      process.stderr.write(`HEAD, ${facts.target} or the worktree moved during the carry check. No proof written; re-run.\n`);
       return 1;
     }
     return mint();
@@ -2434,10 +2442,10 @@ function runCarryForward(root, options) {
     return 2;
   }
   const check = runFocusedSolCheck(root, options, {
-    baseRef: GUARDED_BASE,
+    baseRef: facts.target,
     baseSha: facts.baseSha,
     headSha: facts.headSha,
-    prompt: buildCollisionCheckPrompt({ ownerAccepted: facts.source?.carry?.root_review?.owner_accepted === true }),
+    prompt: buildCollisionCheckPrompt({ ownerAccepted: facts.source?.carry?.root_review?.owner_accepted === true, baseRef: facts.target }),
     label: "collision check",
     files: {
       "MAIN_DELTA.patch": delta.stdout || "",
@@ -2453,7 +2461,7 @@ function runCarryForward(root, options) {
   });
   if (check !== 0) return check;
   if (!stillSame()) {
-    process.stderr.write("HEAD, origin/main or the worktree moved during the collision check. No proof written; re-run.\n");
+    process.stderr.write(`HEAD, ${facts.target} or the worktree moved during the collision check. No proof written; re-run.\n`);
     return 1;
   }
   return mint();
@@ -2969,7 +2977,8 @@ function usage() {
     `  --timeout <sec>  Max seconds for the Codex review (default ${DEFAULT_TIMEOUT_SEC}). A timeout writes no`,
     "                   proof; it means the review was cut off, not that it found problems.",
     "  --dry-run        Resolve the binary and print the command; do not run Codex.",
-    "  --carry-forward  After merging origin/main into an already-reviewed branch, keep that clean",
+    "  --carry-forward  After merging the branch's base (origin/staging for a feature branch,",
+    "                   origin/main for hotfix/ and release/) into an already-reviewed branch, keep that clean",
     "                   review instead of paying for a full one: carries with no model call when",
     "                   the two sides share no files, otherwise runs a focused Sol collision check.",
     "                   Refuses (use the full review) when anything else changed. With --dry-run,",
@@ -3301,7 +3310,7 @@ export function run(argv = process.argv.slice(2)) {
         "the base it covered, so the merge gates accept it." +
         (target === GUARDED_BASE
           ? " If this head still needs a push, the push gate wants the exact base: merge origin/main into the branch and run this script with --carry-forward.\n"
-          : " Nothing else to do: --carry-forward is for main-bound branches only.\n"),
+          : " Nothing else to do; if the branch later merges origin/staging, run this script with --carry-forward.\n"),
       );
     }
     return 0;

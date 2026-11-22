@@ -4033,7 +4033,7 @@ export default function JobDetail() {
           )}
           {canTransfer && growerShareFieldNames.length > 0 && (
             <div className="max-w-sm px-3 py-1.5 rounded-lg bg-blue-50 text-xs text-blue-800">
-              Grower-share override active on <strong>{growerShareFieldNames.join(', ')}</strong> — the invoice will bill those growers at the override rate.
+              Per-acre price set on <strong>{growerShareFieldNames.join(', ')}</strong> is not used: the invoice bills each chemical line at its job price, plus any spraying fee.
             </div>
           )}
           {canTransfer && (
@@ -5407,7 +5407,7 @@ export default function JobDetail() {
         onConfirm={() => { setShowTransferConfirm(false); handleTransferToInvoice(); }}
         title="Transfer to Invoice"
         message={isMultiOwner
-          ? `This job has fields billed to more than one owner. Transfer to Invoice creates ONE invoice to ${customers.find((c) => c.id === customerId)?.farm_name || 'the primary customer'}; each landlord's share shows on statements but CANNOT be paid separately (per-owner billing for spray jobs is coming soon). Continue only if the tenant is collecting from the other owners.`
+          ? 'This job has fields billed to more than one owner. Transfer to Invoice creates a separate invoice for each owner, billing each owner their acre share of every chemical line and of any spraying fee.'
           : 'Transfer this job to an invoice? This will create a new invoice from the job chemicals.'}
         confirmLabel="Transfer to Invoice"
         variant="warning"

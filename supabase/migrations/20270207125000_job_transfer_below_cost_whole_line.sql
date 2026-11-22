@@ -42,7 +42,7 @@ BEGIN
                        AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]) THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: the transfer body, owner, settings or grants are not the reviewed ones (20261120100000)';
   END IF;
-  IF to_regprocedure('public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint,bigint)') IS NOT NULL
+  IF to_regprocedure('public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint)') IS NOT NULL
      OR to_regprocedure('public._job_transfer_split_qty_20270207(numeric,numeric[])') IS NOT NULL THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: already applied';
   END IF;
@@ -58,7 +58,6 @@ $preflight$;
 -- 1. One job chemical line, priced per sold unit.
 CREATE FUNCTION public._job_transfer_line_price_20270207(
   p_product_id uuid, p_product_name text, p_quantity numeric, p_job_unit text, p_price_per_unit_cents bigint,
-  p_cost_per_unit_cents bigint,
   OUT o_quantity numeric, OUT o_unit text, OUT o_unit_price_cents bigint, OUT o_cost_cents bigint,
   OUT o_exact_qty numeric, OUT o_exact_cents numeric, OUT o_exact_cost_cents numeric
 )
@@ -103,16 +102,10 @@ BEGIN
   END IF;
   v_cost_cents := round(v_cost * 100)::bigint;
   o_exact_cents := p_quantity * COALESCE(p_price_per_unit_cents, 0);
-  -- Sol round 3: the line books the job's own saved cost (as before this change), per sold unit; only the below-cost
-  -- check reads today's catalog cost, as the wall does.
-  -- Luna round 5: a job line with no saved cost books today's catalog cost, never $0.
-  IF p_cost_per_unit_cents IS NULL THEN
-    o_exact_cost_cents := v_cost_cents * o_exact_qty;
-    o_cost_cents := v_cost_cents;
-  ELSE
-    o_exact_cost_cents := p_quantity * p_cost_per_unit_cents;
-    o_cost_cents := round(o_exact_cost_cents / o_exact_qty)::bigint;
-  END IF;
+  -- Sol round 4: the line books today's catalog cost per sold unit, as field-application invoices do and the wall
+  -- checks; a job's saved cost may be per a different unit than its quantity ("fl. oz" against a per-Gal cost) or $0.
+  o_exact_cost_cents := v_cost_cents * o_exact_qty;
+  o_cost_cents := v_cost_cents;
   -- Exact, before any rounding: the agreed amount must cover the cost of the whole quantity. Never states the cost
   -- (cost is admin-only, 2026-10-15). No override (Mason, 2026-11-21).
   IF o_exact_cents < v_cost_cents * o_exact_qty THEN
@@ -132,8 +125,8 @@ BEGIN
   END IF;
 END;
 $function$;
-ALTER FUNCTION public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint, bigint) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint, bigint)
+ALTER FUNCTION public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint)
   FROM PUBLIC, anon, authenticated, service_role;
 
 -- 2. A quantity allocated by weight in steps of 0.0001 (largest remainder; ties to the earlier owner).
@@ -430,7 +423,7 @@ BEGIN
       SELECT jc.product_id, jc.rate_per_acre,
              safe_cents_qty(jc.cost_per_unit_cents, jc.quantity) AS chem_cost,
              safe_cents_qty(jc.price_per_unit_cents, jc.quantity) AS chem_price,
-           jc.price_per_unit_cents AS job_price, jc.cost_per_unit_cents AS job_cost,
+           jc.price_per_unit_cents AS job_price,
              jc.quantity,
              jc.customer_supplied, jc.unit AS job_unit,
              p.product_name, COALESCE(NULLIF(btrim(jc.unit), ''), p.unit_size) AS unit_size, p.epa_registration, p.product_form,
@@ -451,7 +444,7 @@ BEGIN
         v_qtys := public._job_transfer_split_qty_20270207(ROUND(v_chem.quantity, 4), v_acre_pcts);
       ELSE
         SELECT * INTO v_line FROM public._job_transfer_line_price_20270207(
-          v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit, v_chem.job_price, v_chem.job_cost);
+          v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit, v_chem.job_price);
         v_qtys := public._job_transfer_split_qty_20270207(v_line.o_quantity, v_acre_pcts);
       END IF;
       v_owners_ext := 0;
@@ -514,9 +507,11 @@ BEGIN
         END IF;
       END LOOP;
       -- Luna round 3: the owners' lines together also stay within 50 cents of the whole line (Mason, "Allow up to 50c").
-      IF NOT v_chem.customer_supplied AND (abs(v_owners_ext - v_line.o_exact_cents) > 50
-                                           OR abs(v_owners_cost - v_line.o_exact_cost_cents) > 50) THEN
-        RAISE EXCEPTION 'JOB_LINE_ROUNDING: % can''t be split between this job''s owners to 4 decimals in % without the line''s total or cost changing by more than $0.50. Nothing was invoiced; record this product in a smaller sold unit, or invoice the owners from the field-application editor.', v_chem.product_name, v_line.o_unit USING ERRCODE = 'P0001';
+      -- Sol round 4: nested, so a customer-supplied line never reads v_line (unassigned when it is the job's first line).
+      IF NOT v_chem.customer_supplied THEN
+        IF abs(v_owners_ext - v_line.o_exact_cents) > 50 OR abs(v_owners_cost - v_line.o_exact_cost_cents) > 50 THEN
+          RAISE EXCEPTION 'JOB_LINE_ROUNDING: % can''t be split between this job''s owners to 4 decimals in % without the line''s total or cost changing by more than $0.50. Nothing was invoiced; record this product in a smaller sold unit, or invoice the owners from the field-application editor.', v_chem.product_name, v_line.o_unit USING ERRCODE = 'P0001';
+        END IF;
       END IF;
     END LOOP;
 
@@ -708,7 +703,7 @@ BEGIN
     SELECT jc.product_id, jc.rate_per_acre,
            safe_cents_qty(jc.cost_per_unit_cents, jc.quantity) AS chem_cost,
            safe_cents_qty(jc.price_per_unit_cents, jc.quantity) AS chem_price,
-           jc.price_per_unit_cents AS job_price, jc.cost_per_unit_cents AS job_cost,
+           jc.price_per_unit_cents AS job_price,
            jc.quantity, jc.customer_supplied, jc.unit AS job_unit,
            p.product_name, COALESCE(NULLIF(btrim(jc.unit), ''), p.unit_size) AS unit_size, p.epa_registration, p.product_form,
            COALESCE(NULLIF(btrim(jc.rate_unit), ''), NULLIF(btrim(jc.unit), ''), p.unit_size) AS rate_unit
@@ -751,7 +746,7 @@ BEGIN
       );
     ELSE
       SELECT * INTO v_line FROM public._job_transfer_line_price_20270207(
-        v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit, v_chem.job_price, v_chem.job_cost);
+        v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit, v_chem.job_price);
       v_owner_ext := safe_cents_qty(v_line.o_unit_price_cents, v_line.o_quantity);
       v_line_sum := v_line_sum + v_owner_ext;
       v_total_cost_cents := v_total_cost_cents + safe_cents_qty(v_line.o_cost_cents, v_line.o_quantity);
@@ -972,16 +967,16 @@ GRANT EXECUTE ON FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(u
 
 DO $postflight$
 DECLARE
-  v_price oid := to_regprocedure('public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint,bigint)');
+  v_price oid := to_regprocedure('public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint)');
   v_split oid := to_regprocedure('public._job_transfer_split_qty_20270207(numeric,numeric[])');
 BEGIN
   IF current_setting('crx.jbc_xid', true) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'c685e841177fd393addc61478a5599dd'
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'ab519a8426fda48653f4aae887ce8c2f'
      OR v_price IS NULL OR v_split IS NULL
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '819d2c8b23140adcf7d8c2d0278ed1b2'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '0fdf9babeecaa206ddc6bd74905d435c'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: a body is not the one this file installs';
   END IF;

@@ -1549,7 +1549,7 @@ describe('QuoteBuilder', () => {
       const fixture = configureDrawDownFixture({ message: 'IDEMPOTENCY_RESULT_INVALID' });
       await submitOneUnitDraw(fixture.quote.id);
       await waitFor(() => expect(mockResetIdempotencyKey).toHaveBeenCalled());
-      expect(sessionStorage.length).toBe(1);
+      expect(sessionStorage.length).toBe(2); // the kept draw and its booking version (KI-190)
 
       const dialog = await reloadAndOpenDraw(fixture.quote.id);
       expect(await within(dialog).findByRole('button', { name: 'I checked' })).toBeInTheDocument();
@@ -1577,7 +1577,7 @@ describe('QuoteBuilder', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Finish it' }));
       await waitFor(() => expect(drawCalls()).toHaveLength(2));
       await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Finish it' })).not.toBeDisabled());
-      expect(sessionStorage.length).toBe(1);
+      expect(sessionStorage.length).toBe(2); // the kept draw and its booking version (KI-190)
 
       dialog = await reloadAndOpenDraw(fixture.quote.id);
       expect(await within(dialog).findByText(/got no reply/)).toBeInTheDocument();

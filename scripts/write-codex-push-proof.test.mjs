@@ -1435,8 +1435,10 @@ function collisionPromptSkipsWork(prompt) {
     write(".gitattributes", "docs/manual/DECISION_LOG.md merge=union\n");
     write("src/a.ts", "export const a = 1;\n");
     write("src/cfg.ts", 'export const cfg = { password: "x" };\n');
+    write("src/cfg.sql", '-- password: "y"\nselect 1;\n');
     write("docs/manual/DECISION_LOG.md", "# Decisions\n- old entry\n");
     write("docs/manual/note.md", "# Note\nDo the safe thing.\n");
+    write("docs/twin.md", "# Note\nDo the safe thing.\n");
     const base = commitAll("base");
     git("update-ref", "refs/remotes/origin/main", base);
     git("update-ref", "refs/remotes/origin/staging", base);
@@ -1632,17 +1634,21 @@ function collisionPromptSkipsWork(prompt) {
     writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
     land("origin/staging", "staging copies the old note into a command", () => {
       mkdirSync(file(".claude/commands"), { recursive: true });
-      writeFileSync(file(".claude/commands/x.md"), "# Note\nDo the safe thing.\n");
+      // Same basename as the twin, so Git names the twin (unchanged by the PR) as the source.
+      writeFileSync(file(".claude/commands/twin.md"), "# Note\nDo the safe thing.\n");
     });
     git("merge", "-q", "--no-edit", "origin/staging");
     const refused = carry("--dry-run");
     assert.equal(refused.status, 1, `staging carry: a copy of a PR-changed file is refused (${refused.stdout})`);
-    assert.match(refused.stderr, /renamed or copied docs\/manual\/note\.md/, "staging carry: names the copied file");
+    // Git may name the base's unchanged twin (docs/twin.md) as the source; any copy refuses (Sol r6 HIGH 3).
+    assert.match(refused.stderr, /renamed or copied docs\/(manual\/note|twin)\.md/, "staging carry: names the copied file");
   });
 
   // 8. A base delta that removes a credential-shaped line, or changes a binary file, is never sent (Sol r5 HIGH 4, MED).
   for (const [label, edit, why] of [
     ["a removed credential", (file) => writeFileSync(file("src/cfg.ts"), "export const cfg = {};\n"), /looks like a credential/],
+    // A removed line that itself starts with "--" shows as "---" in the patch (Sol r6 HIGH 1).
+    ["a removed credential comment", (file) => writeFileSync(file("src/cfg.sql"), "select 1;\n"), /looks like a credential/],
     ["a binary change", (file) => writeFileSync(file("src/blob.bin"), Buffer.from([0, 1, 2, 0, 3])), /treats as binary/],
   ]) {
     // On a hotfix/ branch, where the collision check still runs.

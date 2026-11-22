@@ -6,6 +6,8 @@
 
 **Decision (Mason, in chat 2026-11-22, after Sol gate round 5: "Yes, free carry only").** A staging merge keeps an earlier Sol review only in the free case: the PR's files and staging's new files do not overlap and one side is notes only. Any other staging merge, including both sides adding to `DECISION_LOG.md`, gets a full Sol review. The focused collision check stays only for `hotfix/` and `release/` branches merging `main`.
 
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 6: "Keep 10-30 rule").** Sol round 6 pointed out that the merge gates can still accept a Sol review of an earlier commit after a staging merge that "free carry only" would send to a full review. That is the 2026-10-30 rule (a later commit that touches no Sol-list file needs no new Sol), and Mason kept it: a staging merge that touches no Sol-list file keeps the earlier review, like any other harmless later commit, and one that touches the list is still refused at merge. The round's other two findings were fixed: the credential check on a collision delta now reads removed lines that start with `--`, and any copied file refuses the carry.
+
 ## 2026-11-22 — #2197: sales reps may reactivate an inactive customer from its page
 
 **Decision (Mason, 2026-11-22, relayed by the bug captain: "Yes, reps too").** The customer page's Reactivate button shows for admins and sales reps, matching what the database already allows (`customers_update` policy: admin or sales rep) and the #2048 refusal text ("An admin or sales rep must reactivate"). Screen-only change; the database rule is unchanged. Drivers and applicators still get no button and are refused by the database.

@@ -299,7 +299,8 @@ decision only) immediately before the merge. It mints a carried proof for the ne
   review kind refuses);
 - the proof is not owner-accepted: an owner-accepted proof (`--carry-owner-accepted`) never carries onto
   a new base, because whether new base code widens an accepted defect needs the full review (2026-11-22);
-- neither side renamed or copied a file the other side changed;
+- neither side renamed a file the other side changed, and neither side copied any file (Git may name an
+  unchanged twin as a copy's source);
 - for the collision check, the base's changes hold no binary file and remove no credential-shaped line
   (that text would be sent to the reviewer); a proof recording its review kind counts at merge only for
   a PR into that branch;

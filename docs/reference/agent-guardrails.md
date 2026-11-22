@@ -87,7 +87,7 @@
 > `from_base`) for a head that is exactly the conflict-free merge of the Sol-reviewed head (clean proof under 24
 > hours old, as is the original full review behind a chain of carries) and today's base tip (`origin/staging` for a
 > feature branch, `origin/main` for `hotfix/` and `release/`; Mason, 2026-11-22), never from an owner-accepted
-> proof and never across a rename of a file the other side changed: with no model call
+> proof, never across a rename of a file the other side changed, and never across any copy: with no model call
 > only when the PR's files and the base's new files do not overlap and one side is plain documentation (notes-folder `.md` files,
 > which excludes every rule file, in regular non-executable files only); otherwise, including any two code changes in different files, only
 > after a focused Sol collision check returns CLEAN, and that check runs only for `hotfix/` and `release/`: a

@@ -2395,7 +2395,8 @@ function resolveCarry(root, nowMs) {
     const parts = (read.stdout || "").split("\0");
     for (let i = 0; i < parts.length && parts[i]; ) {
       const moved = /^[RC]/.test(parts[i]);
-      if (moved && other.has(parts[i + 1])) {
+      // Any copy refuses: among identical files Git may name an unchanged one as the source (Sol r6 HIGH 3).
+      if (moved && (parts[i].startsWith("C") || other.has(parts[i + 1]))) {
         return { problem: `one side renamed or copied ${parts[i + 1]}, which the other side changed` };
       }
       i += moved ? 3 : 2;
@@ -2515,7 +2516,8 @@ function runCarryForward(root, options) {
   }
   // The delta goes to the reviewer: a removed line that looks like a credential must not, and a
   // binary change the reviewer cannot compare is not checkable. Either one means the full review.
-  const removed = delta.split("\n").filter((line) => line.startsWith("-") && !line.startsWith("---"));
+  // Every "-" line, "---" headers included: a removed line that starts with "--" looks like one.
+  const removed = delta.split("\n").filter((line) => line.startsWith("-"));
   const unreadable = removed.some((line) => REVIEW_CAPTURE_SECRET_RE.test(line))
     ? "a line the base removed looks like a credential"
     : /^Binary files .* differ$/m.test(delta) ? "the base changed a file Git treats as binary" : null;

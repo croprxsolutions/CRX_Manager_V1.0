@@ -69,11 +69,9 @@ const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + '  )::uuid\n';
 const LIVE_AUTH_UID_MD5 = 'cdef18c69c4f4cbbced2eaf81e628b49';
 const legacyLifecycleSmokeFiles = [
-  // Runs as it stood at CANDIDATE_ERA. Since #885 the current file also asserts
-  // the CRX-LIFE-001 refusal from 20261006200000, fail-first, so it cannot pass
-  // on this legacy catalog; nor does it pass on current main (it completes a
-  // delivery by direct UPDATE, which 20261022075000 refuses), so it is not run
-  // there either until that chain is repaired.
+  // All six run as they stood at CANDIDATE_ERA: their current forms call later RPCs this legacy
+  // catalog lacks (the backfill chain also asserts the later CRX-LIFE-001 refusal). The current
+  // forms pass on today's schema and are covered by their own provers (KI-84, #2236).
   path.join(ROOT, 'scripts', 'smoke', 'smoke-backfill-refuse-split-billing.sql'),
   path.join(ROOT, 'scripts', 'smoke', 'smoke-draw-ledger-reversal.sql'),
   path.join(ROOT, 'scripts', 'smoke', 'smoke-forbid-restore-cancelled-order.sql'),
@@ -425,7 +423,7 @@ try {
   console.log(`[prover] replayed ${replayedLater} later migrations after the candidate (through ${path.basename(later.at(-1))}; skipped: ${[...PARKED].join(', ')}; ledger only: ${[...LEDGER_ONLY].join(', ')})`);
   // Today's matrices on current main.
   for (const file of smokeFiles) expectRollbackMarker(file, lf(file), 'current');
-  console.log(`ROW_VERSION_REAL_SCHEMA_RESTORE_PASS baseline=20260727174805 post_baseline_replay=through_candidate_then_${replayedLater}_later smoke_matrices=candidate_era_after_candidate+current_on_${path.basename(later.at(-1), '.sql')} legacy_lifecycle_smokes=${legacyLifecycleSmokeFiles.length}/${legacyLifecycleSmokeFiles.length} smoke_backfill_split=candidate_era_on_legacy smoke_quote_customer=SMOKE_PASS_ROLLBACK quote_lifecycle=draft-sent-sent stale_before_lifecycle=QUOTE_STALE_WRITE smoke_drawn_guard=NOT_RUN_HERE_SEE_DRAW_TIER_PROVER smoke_planned_holds=SMOKE_PASS_ROLLBACK`);
+  console.log(`ROW_VERSION_REAL_SCHEMA_RESTORE_PASS baseline=20260727174805 post_baseline_replay=through_candidate_then_${replayedLater}_later smoke_matrices=candidate_era_after_candidate+current_on_${path.basename(later.at(-1), '.sql')} legacy_lifecycle_smokes=${legacyLifecycleSmokeFiles.length}/${legacyLifecycleSmokeFiles.length}_candidate_era_on_legacy smoke_quote_customer=SMOKE_PASS_ROLLBACK quote_lifecycle=candidate:draft-sent-sent,current:draft-send_refused-version-sent stale_before_lifecycle=QUOTE_STALE_WRITE smoke_drawn_guard=NOT_RUN_HERE_SEE_DRAW_TIER_PROVER smoke_planned_holds=SMOKE_PASS_ROLLBACK`);
 } catch (error) {
   console.error(`ROW_VERSION_REAL_SCHEMA_RESTORE_FAIL ${error.stack ?? error.message}`);
   process.exitCode = 1;

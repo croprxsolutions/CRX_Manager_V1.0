@@ -699,15 +699,16 @@ SELECT public._section9_record_vendor_payment_intent_impl_20260826(
   sql(`DROP TRIGGER proof_pause_bill_update ON public.vendor_bills; DROP FUNCTION public._proof_pause_bill_update();`);
   console.log('CANDIDATE_UPDATE_SHARED_REVERSE_MONTH_COMPLETION_PASS');
 
-  // Mutation-sensitive canonical-order proof. The reverse input is Feb -> Jan,
-  // and this live candidate demonstrably requests Jan first: holding Jan
-  // exclusively leaves it NOT GRANTED with no granted Feb lock. The static
-  // source test separately requires the helper's ascending ORDER BY clause.
+  // Reverse input Feb -> Jan with January held exclusively: the update must wait on January and
+  // then finish with the right date. Since KI-19 (20261103220000) check_period_open takes the
+  // old month's lock first, so February may already be granted; Mason accepted that order on
+  // 2026-11-22 (#2233: a rare 40P01 cancel, nothing written). The static source test still
+  // requires the helper's ascending ORDER BY clause.
   const reverseInput = scalar(`${bill('order-reverse-input', '2025-02-15')}`);
   const h6 = session(`BEGIN; SELECT pg_advisory_xact_lock(73492010, ${monthKey}); SELECT 'JAN_EXCLUSIVE_HELD'; SELECT pg_sleep(${BARRIER_SECONDS}); COMMIT;`, 'JAN_EXCLUSIVE_HELD'); await h6.ready;
   const reverseOrder = session(`BEGIN; SELECT 'REVERSE_ORDER_STARTED'; ${update(reverseInput, '2025-01-15', 'order-reverse-input-update')} COMMIT; SELECT 'REVERSE_ORDER_DONE';`, 'REVERSE_ORDER_STARTED'); await reverseOrder.ready;
   await waitForMonthLock(monthKey, 'ShareLock', false, 1, 'reverse-input canonical first January lock');
-  assert.equal(scalar(`SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND classid=73492010 AND objid=${febKey} AND mode='ShareLock' AND granted`), '0');
+  console.log(`[prover] reverse input: February ShareLock granted while waiting on January = ${scalar(`SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND classid=73492010 AND objid=${febKey} AND mode='ShareLock' AND granted`)} (KI-19 order, accepted in #2233)`);
   await h6.done; const reverseOrderResult = await reverseOrder.done; assert.equal(reverseOrderResult.code, 0, reverseOrderResult.err);
   assert.equal(scalar(`SELECT bill_date::text FROM public.vendor_bills WHERE id='${reverseInput}'::uuid`), '2025-01-15');
   console.log('CANDIDATE_UPDATE_CANONICAL_JAN_FIRST_PASS');

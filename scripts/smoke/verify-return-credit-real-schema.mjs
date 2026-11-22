@@ -1518,14 +1518,7 @@ try {
   psql(canonicalAllocationHelper);
   assertLiveRestored('public._allocated_delivery_cents(uuid,numeric,uuid)');
 
-  // The shared chain's same-product test product has no product_form (now NOT NULL); stage a copy that carries one rather than edit the shared chain.
-  const stagedChain = path.join(os.tmpdir(), `${NAME}-${path.basename(SMOKE)}`);
-  const chainText = readFileSync(SMOKE, 'utf8');
-  const noFormInsert = /INSERT INTO products \(id, product_name, unit_size, inventory_unit\)(\s+VALUES \(\s+v_same_product_product_id,\s+'\[SMOKE\] same-product cancel aggregate ' \|\| v_suffix,\s+'Gal', 'Gal')(\s+\);)/;
-  assert.match(chainText, noFormInsert, 'the same-product test product insert moved; update this staging patch');
-  writeFileSync(stagedChain, chainText.replace(noFormInsert, "INSERT INTO products (id, product_name, unit_size, inventory_unit, product_form)$1, 'liquid'$2"));
-  copy(stagedChain, path.basename(SMOKE));
-  rmSync(stagedChain, { force: true });
+  copy(SMOKE, path.basename(SMOKE));
 
   const canonicalReceiveReturn = liveDefinition('public._receive_return_impl_20260714(uuid,uuid,text)');
   const receiveDeliveryGuardMutant = canonicalReceiveReturn.replace(

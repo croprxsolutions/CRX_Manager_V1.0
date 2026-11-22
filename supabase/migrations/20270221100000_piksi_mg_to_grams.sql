@@ -43,17 +43,21 @@ DECLARE
   c_po_guards constant text[] := ARRAY['trigger_0_guard_closed_po_item', 'trigger_capture_purchase_order_item_cost_snapshot'];
   -- md5 of the sorted ids of every Piksi stock movement, read live 2026-11-22 (13 rows); the reverse pins the same set.
   c_movements_md5 constant text := '55f9f30a1ab11f683093743f27168fd2';
+  -- md5 of the sorted ids of every Piksi cycle-count line, read live 2026-11-22 (17 rows); both directions pin it.
+  c_counts_md5 constant text := 'b1a5558d9e8b96a22839a02f99137226';
 BEGIN
   IF current_setting('transaction_isolation') <> 'read committed' THEN
     RAISE EXCEPTION 'PIKSI_G_ISOLATION: run in a READ COMMITTED transaction (this one is %). Nothing was changed.',
       current_setting('transaction_isolation');
   END IF;
   PERFORM set_config('lock_timeout', '10s', true);
-  LOCK TABLE public.products, public.product_parents, public.product_parent_members, public.product_cost_basis,
+  -- Receiving locks a PO line before stock, so PO tables come first: a live receipt makes this wait, not deadlock.
+  LOCK TABLE public.purchase_orders, public.purchase_order_items, public.receiving_records,
+             public.products, public.product_parents, public.product_parent_members, public.product_cost_basis,
              public.product_rate_lock, public.product_rate_correction_passes, public.unit_conversions, public.inventory,
              public.inventory_holds, public.inventory_transactions, public.orders, public.order_items, public.deliveries,
-             public.delivery_items, public.delivery_remainders, public.purchase_orders, public.purchase_order_items,
-             public.receiving_records, public.return_items, public.quote_items, public.quote_versions, public.invoice_items,
+             public.delivery_items, public.delivery_remainders, public.return_items, public.quote_items, public.quote_versions,
+             public.quote_templates, public.invoice_items,
              public.job_chemicals, public.blend_recipe_items, public.blend_ticket_products, public.cycle_counts,
              public.cycle_count_items, public.product_size_net_weight_values, public.product_weight_events,
              public.app_settings, public.product_cost_basis_rollout, public.product_supplier_links
@@ -72,6 +76,15 @@ BEGIN
   IF (SELECT md5(COALESCE(string_agg(t.id::text, ',' ORDER BY t.id), '')) FROM public.inventory_transactions t
        WHERE t.product_id IN (c_plus, c_inf, c_old)) <> c_movements_md5 THEN
     RAISE EXCEPTION 'PIKSI_G_ROW_MOVED: the set of Piksi stock movements is not the reviewed one. Nothing was changed.';
+  END IF;
+  IF (SELECT md5(COALESCE(string_agg(c.id::text, ',' ORDER BY c.id), '')) FROM public.cycle_count_items c
+       WHERE c.product_id IN (c_plus, c_inf, c_old)) <> c_counts_md5 THEN
+    RAISE EXCEPTION 'PIKSI_G_ROW_MOVED: the set of Piksi cycle-count lines is not the reviewed one';
+  END IF;
+  -- A saved quote template would restore its old rate and unit verbatim into a new quote (none live).
+  IF EXISTS (SELECT 1 FROM public.quote_templates q WHERE strpos(lower(q.sections::text), c_plus::text) > 0
+               OR strpos(lower(q.sections::text), c_inf::text) > 0 OR strpos(lower(q.sections::text), c_old::text) > 0) THEN
+    RAISE EXCEPTION 'PIKSI_G_ROW_MOVED: a quote template now uses Piksi';
   END IF;
   -- A supplier link carrying its own unit label would keep saying MG after stock becomes g (none live).
   IF EXISTS (SELECT 1 FROM public.product_supplier_links l WHERE l.product_id IN (c_plus, c_inf, c_old) AND l.conversion_unit IS NOT NULL) THEN

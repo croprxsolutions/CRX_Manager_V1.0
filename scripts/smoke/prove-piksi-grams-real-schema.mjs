@@ -28,10 +28,14 @@ const LIVE_MOVEMENTS_PIN = "c_movements_md5 constant text := '55f9f30a1ab11f6830
 const EMPTY_MOVEMENTS_PIN = "c_movements_md5 constant text := 'd41d8cd98f00b204e9800998ecf8427e';";
 const FORWARD_LIVE = lf(path.join(MIGRATIONS, CANDIDATE));
 assert.ok(FORWARD_LIVE.includes(LIVE_MOVEMENTS_PIN), 'forward still pins the live movement set');
-const FORWARD = FORWARD_LIVE.replace(LIVE_MOVEMENTS_PIN, EMPTY_MOVEMENTS_PIN);
+const LIVE_COUNTS_PIN = "c_counts_md5 constant text := 'b1a5558d9e8b96a22839a02f99137226';";
+const EMPTY_COUNTS_PIN = "c_counts_md5 constant text := 'd41d8cd98f00b204e9800998ecf8427e';";
+assert.ok(FORWARD_LIVE.includes(LIVE_COUNTS_PIN), 'forward still pins the live cycle-count set');
+const FORWARD = FORWARD_LIVE.replace(LIVE_MOVEMENTS_PIN, EMPTY_MOVEMENTS_PIN).replace(LIVE_COUNTS_PIN, EMPTY_COUNTS_PIN);
 const REVERSE_LIVE = lf(path.join(ROOT, 'scripts', 'smoke', 'piksi-grams-reverse.sql'));
 assert.ok(REVERSE_LIVE.includes(LIVE_MOVEMENTS_PIN), 'reverse still pins the live movement set');
-const REVERSE = REVERSE_LIVE.replace(LIVE_MOVEMENTS_PIN, EMPTY_MOVEMENTS_PIN);
+assert.ok(REVERSE_LIVE.includes(LIVE_COUNTS_PIN), 'reverse still pins the live cycle-count set');
+const REVERSE = REVERSE_LIVE.replace(LIVE_MOVEMENTS_PIN, EMPTY_MOVEMENTS_PIN).replace(LIVE_COUNTS_PIN, EMPTY_COUNTS_PIN);
 const ADMIN = USERS.admin;
 const raw = (sql) => psql(`SET session_replication_role = replica; ${sql} SET session_replication_role = origin;`, { user: 'supabase_admin' });
 /** Runs SQL in one transaction (committed or rolled back) as postgres with every trigger on. */

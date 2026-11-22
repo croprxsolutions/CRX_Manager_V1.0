@@ -20,16 +20,20 @@ DECLARE
   c_di_guards constant text[] := ARRAY['a1_line_unit_is_stock_unit', 'a2_delivery_line_matches_order_line'];
   -- md5 of the sorted ids of every Piksi stock movement, read live 2026-11-22 (re-pin when copying into a migration).
   c_movements_md5 constant text := '55f9f30a1ab11f683093743f27168fd2';
+  -- md5 of the sorted ids of every Piksi cycle-count line, read live 2026-11-22 (17 rows); both directions pin it.
+  c_counts_md5 constant text := 'b1a5558d9e8b96a22839a02f99137226';
 BEGIN
   IF current_setting('transaction_isolation') <> 'read committed' THEN
     RAISE EXCEPTION 'PIKSI_REV_ISOLATION: run in a READ COMMITTED transaction';
   END IF;
   PERFORM set_config('lock_timeout', '10s', true);
-  LOCK TABLE public.products, public.product_parents, public.product_parent_members, public.product_cost_basis,
+  -- Receiving locks a PO line before stock, so PO tables come first: a live receipt makes this wait, not deadlock.
+  LOCK TABLE public.purchase_orders, public.purchase_order_items, public.receiving_records,
+             public.products, public.product_parents, public.product_parent_members, public.product_cost_basis,
              public.product_rate_lock, public.product_rate_correction_passes, public.unit_conversions, public.inventory,
              public.inventory_holds, public.inventory_transactions, public.orders, public.order_items, public.deliveries,
-             public.delivery_items, public.delivery_remainders, public.purchase_orders, public.purchase_order_items,
-             public.receiving_records, public.return_items, public.quote_items, public.quote_versions, public.invoice_items,
+             public.delivery_items, public.delivery_remainders, public.return_items, public.quote_items, public.quote_versions,
+             public.quote_templates, public.invoice_items,
              public.job_chemicals, public.blend_recipe_items, public.blend_ticket_products, public.cycle_counts,
              public.cycle_count_items, public.product_size_net_weight_values, public.product_weight_events,
              public.app_settings, public.product_cost_basis_rollout, public.product_supplier_links
@@ -114,6 +118,15 @@ BEGIN
   IF (SELECT md5(COALESCE(string_agg(t.id::text, ',' ORDER BY t.id), '')) FROM public.inventory_transactions t
        WHERE t.product_id IN (c_plus, c_inf, c_old)) <> c_movements_md5 THEN
     RAISE EXCEPTION 'PIKSI_REV_ROW_MOVED: a Piksi stock movement was recorded after the change to grams';
+  END IF;
+  IF (SELECT md5(COALESCE(string_agg(c.id::text, ',' ORDER BY c.id), '')) FROM public.cycle_count_items c
+       WHERE c.product_id IN (c_plus, c_inf, c_old)) <> c_counts_md5 THEN
+    RAISE EXCEPTION 'PIKSI_REV_ROW_MOVED: the set of Piksi cycle-count lines is not the reviewed one';
+  END IF;
+  -- A saved quote template would restore its old rate and unit verbatim into a new quote (none live).
+  IF EXISTS (SELECT 1 FROM public.quote_templates q WHERE strpos(lower(q.sections::text), c_plus::text) > 0
+               OR strpos(lower(q.sections::text), c_inf::text) > 0 OR strpos(lower(q.sections::text), c_old::text) > 0) THEN
+    RAISE EXCEPTION 'PIKSI_REV_ROW_MOVED: a quote template now uses Piksi';
   END IF;
   IF EXISTS (SELECT 1 FROM public.product_supplier_links l WHERE l.product_id IN (c_plus, c_inf, c_old) AND l.conversion_unit IS NOT NULL) THEN
     RAISE EXCEPTION 'PIKSI_REV_ROW_MOVED: a Piksi supplier link now carries a unit label';
@@ -225,8 +238,11 @@ BEGIN
         AND tgrelid IN ('public.products'::regclass, 'public.purchase_order_items'::regclass)) <> 6
      OR (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.delivery_items'::regclass AND tgname = ANY (c_di_guards) AND tgenabled = 'O') <> 2
      OR EXISTS (SELECT 1 FROM public.product_rate_correction_passes WHERE txid = txid_current())
-     OR (SELECT count(*) FROM public.inventory x JOIN rev_rows r ON r.kind = 'inv' AND r.id = x.id WHERE x.unit_size = 'MG') <> 2 THEN
-    RAISE EXCEPTION 'PIKSI_REV_POSTFLIGHT: a guard is off, a pass is left, or a stock row was not relabelled';
+     OR (SELECT count(*) FROM public.inventory x JOIN rev_rows r ON r.kind = 'inv' AND r.id = x.id WHERE x.unit_size = 'MG') <> 2
+     -- Versions must step again (2 -> 3) so any pricing preview opened in the gram era is invalidated.
+     OR (SELECT count(*) FROM public.products p JOIN rev_prod m ON m.id = p.id WHERE p.pricing_version = 3) <> 3
+     OR (SELECT count(*) FROM public.product_parents pp JOIN rev_prod m ON m.parent_id = pp.id WHERE pp.parent_version = 3) <> 2 THEN
+    RAISE EXCEPTION 'PIKSI_REV_POSTFLIGHT: a guard is off, a pass is left, a stock row was not relabelled, or a version did not step';
   END IF;
   IF (SELECT count(*) FROM rev_nw b JOIN public.product_size_net_weight_state s ON s.product_id = b.product_id
        WHERE s.net_weight_version = COALESCE(b.net_weight_version, 0) + 1

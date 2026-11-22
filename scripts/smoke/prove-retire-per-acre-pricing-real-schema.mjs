@@ -4,29 +4,28 @@
  * Container setup and replay copied from prove-field-app-refuses-payer-change-real-schema.mjs. Field S is split
  * farm A 60% / farm B 40%; each case is rolled back:
  *   BEFORE: with a per-acre price on A's split, A's invoice bills a per-acre line and its chemical at $0.
- *   APPLY:  refused PER_ACRE_PRICING_IN_USE while any split has a per-acre price or a note (blank too); applies on clean
- *           rows (validated constraint, no row changes); a second apply stops at its preflight.
+ *   APPLY:  refused PER_ACRE_PRICING_IN_USE while any split has a per-acre price or a note (blank too), and while a saved
+ *           draft's invoice share still carries a per-acre rate after its split was cleared (Sol r1); applies on clean
+ *           rows (both constraints validated, no row changes); a second apply stops at its preflight.
  *   AFTER:  save_field as an admin with a per-acre price or a note is refused (check_violation) and the splits stay as
- *           they were; a plain 60/40 save works; the same invoice bills both farms line by line (60/40 of $300.00).
- *   REVERSE: scripts/smoke/retire-per-acre-pricing-reverse.sql drops the constraint; a second run refuses.
+ *           they were; a plain 70/30 save works; a saved draft's invoice share refuses a per-acre rate; the same
+ *           invoice bills both farms line by line (60/40 of $300.00).
+ *   REVERSE: scripts/smoke/retire-per-acre-pricing-reverse.sql drops both constraints; a second run refuses.
  *
  * Run: node scripts/smoke/prove-retire-per-acre-pricing-real-schema.mjs   (needs Docker)
  * Prints RETIRE_PER_ACRE_PRICING_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
 import assert from 'node:assert/strict';
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-// Iterating: CRX_PROVER_REUSE=<kept container> CRX_PROVER_DB=<a copy of its replayed database> skips the replay.
-const REUSE = process.env.CRX_PROVER_REUSE;
-const NAME = REUSE || `crx-rpa-${process.pid}-${Date.now().toString(36)}`;
-const DB = process.env.CRX_PROVER_DB || 'postgres';
-// Shell commands below name the database; only a bare name is accepted (Sol r1).
-if (!/^[a-z0-9_]+$/.test(DB)) throw new Error('CRX_PROVER_DB must be a bare database name (a-z, 0-9, _)');
+// Always a fresh container and database (no reuse: Sol r1 on this prover).
+const NAME = `crx-rpa-${process.pid}-${Date.now().toString(36)}`;
+const DB = 'postgres';
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -67,11 +66,13 @@ function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input
 function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
 function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
 function stageText(name, text) {
-  const staged = path.join(tmpdir(), `${NAME}-${name}`);
-  writeFileSync(staged, text, 'utf8');
-  try { docker(['cp', staged, `${NAME}:/tmp/${name}`]); } finally {
-    try { unlinkSync(staged); } catch (e) { if (e.code !== 'ENOENT') console.error(`could not remove ${staged}: ${e.message}`); }
-  }
+  // A private new directory, so no existing file or link in the shared temp folder is ever written (Sol r1).
+  const dir = mkdtempSync(path.join(tmpdir(), 'crx-rpa-'));
+  const staged = path.join(dir, name);
+  try {
+    writeFileSync(staged, text, { encoding: 'utf8', flag: 'wx' });
+    docker(['cp', staged, `${NAME}:/tmp/${name}`]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 function apply(name) {
   const r = docker([...psqlArgs(), '-1', '-f', `/tmp/${name}`], { allowFailure: true });
@@ -255,12 +256,14 @@ const id = (s) => `a5a5a5a5-0ac4-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1'), A = id('c1'), B = id('c2'), GS = id('f1'), N = id('d1');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'retire-per-acre-pricing-reverse.sql');
 const CONSTRAINT = 'field_billing_defaults_no_per_acre_price';
+const SHARE_CONSTRAINT = 'invoice_shares_no_per_acre_price';
 const asAdmin = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);\nSET LOCAL ROLE authenticated;\n`;
 const splits = () => scalar(`SELECT string_agg(format('%s:%s:%s:%s', right(c.farm_name, 1), d.split_pct::numeric(5,2), COALESCE(d.price_override_cents::text, '-'), COALESCE(d.pricing_note, '-')), ' ' ORDER BY c.farm_name)
   FROM field_billing_defaults d JOIN customers c ON c.id = d.customer_id WHERE d.field_id = '${GS}';`);
-const constraintState = () => scalar(`SELECT COALESCE((SELECT convalidated::text || ':' || pg_get_constraintdef(oid) FROM pg_constraint
-  WHERE conrelid = 'public.field_billing_defaults'::regclass AND conname = '${CONSTRAINT}'), 'absent');`);
-const fingerprint = () => scalar("SELECT md5(string_agg(to_jsonb(d)::text, '|' ORDER BY d.id)) FROM field_billing_defaults d;");
+const constraintState = () => scalar(`SELECT COALESCE((SELECT string_agg(conname || '=' || convalidated::text || ':' || pg_get_constraintdef(oid), ' ' ORDER BY conname)
+  FROM pg_constraint WHERE conname IN ('${CONSTRAINT}', '${SHARE_CONSTRAINT}')), 'absent');`);
+const fingerprint = () => scalar(`SELECT md5(COALESCE((SELECT string_agg(to_jsonb(d)::text, '|' ORDER BY d.id) FROM field_billing_defaults d), '')
+  || '#' || COALESCE((SELECT string_agg(to_jsonb(s)::text, '|' ORDER BY s.id) FROM invoice_shares s), ''));`);
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -304,11 +307,7 @@ const saveField = (rows, key) => `${asAdmin}SELECT public.save_field('${GS}',
 const row = (cust, pct, primary, extra = {}) => ({ customer_id: cust, split_pct: pct, is_primary: primary, notes: null, price_override_cents: null, pricing_note: null, ...extra });
 
 async function main() {
-  if (REUSE) {
-    assert.match(REUSE, /^crx-[a-z0-9-]+$/, 'CRX_PROVER_REUSE must name a kept prover container (crx-...)');
-    assert.equal(docker(['inspect', '-f', '{{.HostConfig.NetworkMode}}', REUSE]).stdout.trim(), 'none', 'CRX_PROVER_REUSE must be a network-less prover container');
-    assert.match(DB, /^rpa_run_[a-z0-9_]+$/, 'CRX_PROVER_REUSE needs CRX_PROVER_DB naming a fresh copy called rpa_run_<n>');
-  } else buildContainer();
+  buildContainer();
   assert.equal(constraintState(), 'absent');
   assert.equal(scalar(`SELECT (SELECT count(*) FROM auth.users WHERE id = '${ADMIN}') + (SELECT count(*) FROM pg_namespace WHERE nspname = 'rpa');`),
     '0', 'this database was already used by a proof run: make a fresh copy');
@@ -330,9 +329,18 @@ async function main() {
     stageText('dirty.sql', `UPDATE public.field_billing_defaults SET ${set} WHERE field_id = '${GS}' AND customer_id = '${A}';\n${lf(CANDIDATE)}`);
     const r = apply('dirty.sql');
     assert.notEqual(r.status, 0, `${label}: the apply must be refused`);
-    assert.match(r.output, /PER_ACRE_PRICING_IN_USE: 1 field billing split\(s\) still have a per-acre price or pricing note/);
+    assert.match(r.output, /PER_ACRE_PRICING_IN_USE: 1 field billing split\(s\) and 0 invoice share\(s\) still have a per-acre price or pricing note/);
     console.log(`[apply] with ${label} on a split: refused PER_ACRE_PRICING_IN_USE (rolled back)`);
   }
+  // Sol r1: a draft saved at $20/ac whose split was then cleared still carries the rate on its invoice share.
+  stageText('dirty-draft.sql', `${asAdminClaims}UPDATE public.field_billing_defaults SET price_override_cents = 2000 WHERE field_id = '${GS}' AND customer_id = '${A}';
+SELECT rpa.invoice();
+UPDATE public.field_billing_defaults SET price_override_cents = NULL WHERE field_id = '${GS}' AND customer_id = '${A}';
+${lf(CANDIDATE)}`);
+  const draft = apply('dirty-draft.sql');
+  assert.notEqual(draft.status, 0, 'a saved per-acre draft must refuse the apply');
+  assert.match(draft.output, /PER_ACRE_PRICING_IN_USE: 0 field billing split\(s\) and 1 invoice share\(s\) still have a per-acre price or pricing note/);
+  console.log('[apply] with a saved $20/ac draft whose split was cleared: refused PER_ACRE_PRICING_IN_USE (rolled back)');
   assert.equal(constraintState(), 'absent');
   assert.equal(splits(), 'A:60.00:-:- B:40.00:-:-', 'refused applies leave every split as it was');
 
@@ -340,11 +348,12 @@ async function main() {
   const rowsBefore = fingerprint();
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
-  assert.equal(constraintState(), 'true:CHECK (((price_override_cents IS NULL) AND (pricing_note IS NULL)))');
+  assert.equal(constraintState(), `${CONSTRAINT}=true:CHECK (((price_override_cents IS NULL) AND (pricing_note IS NULL))) `
+    + `${SHARE_CONSTRAINT}=true:CHECK (((price_per_acre_cents IS NULL) AND (pricing_note IS NULL)))`);
   assert.equal(fingerprint(), rowsBefore, 'the migration changes no row');
   const second = apply('candidate.sql');
   assert.notEqual(second.status, 0);
-  assert.match(second.output, /PER_ACRE_PRICING_PREFLIGHT: field_billing_defaults_no_per_acre_price already exists/);
+  assert.match(second.output, /PER_ACRE_PRICING_PREFLIGHT: a no_per_acre_price constraint already exists/);
   console.log('[apply] clean rows: applies, constraint validated, no row changed; a second apply stops at its preflight');
 
   // AFTER: save_field as the signed-in admin, fresh keys.
@@ -365,6 +374,15 @@ async function main() {
   assert.equal(plain, 'A:70.00 B:30.00', 'a plain percent split still saves');
   console.log(`[after] save_field with a plain 70/30 split: saved (${plain})`);
 
+  // AFTER: a saved draft's invoice share refuses a per-acre rate or a note, even from the table owner.
+  for (const [label, set] of [['a $20.00/ac rate', 'price_per_acre_cents = 2000'], ['a pricing note', "pricing_note = 'Prepaid'"]]) {
+    refusedProbe(`${asAdminClaims}UPDATE field_billing_defaults SET split_pct = CASE WHEN customer_id = '${A}' THEN 60 ELSE 40 END WHERE field_id = '${GS}';
+      SELECT rpa.invoice();
+      UPDATE invoice_shares s SET ${set} FROM invoices i JOIN customers c ON c.id = i.customer_id
+       WHERE s.invoice_id = i.id AND c.farm_name LIKE '[PROVER] RPA%';`, new RegExp(SHARE_CONSTRAINT));
+    console.log(`[after] a saved draft's invoice share with ${label}: refused by ${SHARE_CONSTRAINT}`);
+  }
+
   // AFTER: the 60/40 invoice bills both farms line by line, exactly as before (60/40 of $300.00).
   const plainAfter = okProbe(`${asAdminClaims}SELECT rpa.invoice();`);
   console.log(`[after] 60/40 field invoice: ${plainAfter}`);
@@ -381,9 +399,9 @@ async function main() {
   const again = apply('reverse.sql');
   assert.notEqual(again.status, 0);
   assert.match(again.output, /does not exist/);
-  console.log('[reverse] drops the constraint, no row changed; a second run refuses');
+  console.log('[reverse] drops both constraints, no row changed; a second run refuses');
   console.log('RETIRE_PER_ACRE_PRICING_PROOF_PASS');
 }
 
 try { await main(); }
-finally { if (!KEEP && !REUSE) docker(['rm', '-f', NAME], { allowFailure: true }); }
+finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }

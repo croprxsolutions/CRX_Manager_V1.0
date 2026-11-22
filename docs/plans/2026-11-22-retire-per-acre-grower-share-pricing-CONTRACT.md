@@ -16,7 +16,7 @@ Read at `origin/staging` f8ee14ee8.
 - Quoted and locked prices. The carry-forward is a separate PR, `claude/spray-invoice-quote-price-c2a6fc`.
 
 **Smallest change:**
-1. **One new migration** adds `CHECK (price_override_cents IS NULL AND pricing_note IS NULL)` on `field_billing_defaults`.
+1. **One new migration** adds `CHECK (price_override_cents IS NULL AND pricing_note IS NULL)` on `field_billing_defaults`, and `CHECK (price_per_acre_cents IS NULL AND pricing_note IS NULL)` on `invoice_shares` (Sol r1: a draft saved at a per-acre rate keeps that rate on its share and would still post it after the split was cleared; an admin could also type a rate straight onto a draft share).
    - Every per-acre branch reads its override from this one table: `derive_customer_shares_from_fields`, read by the field-app save, split save, preview and blend-ticket invoice, and the job transfer's direct `fbd.price_override_cents` read.
    - The below-cost wall's grower-share exemption is only marked by those callers.
    - So once no row can hold a value, every per-acre branch is unreachable.
@@ -34,15 +34,14 @@ Read at `origin/staging` f8ee14ee8.
 - **`src/components/ui/BelowCostApprovalModal.tsx` wording.** It is hands-off (Taha) and unreachable.
 - **`errorSanitizer.ts` `FIELD_APP_GROWER_SHARE_*` text.** Both sibling PRs edit that file; the text is unreachable.
 - **PDFs.** They print `invoice_shares.pricing_note` beside a payer's name only on per-acre shares, and live has 0 such rows. There is no "included in grower share" text in the PDFs; that wording lives only in the hands-off modal above.
-- **`invoice_shares.price_per_acre_cents`.** Historical column, 0 rows live, and only ever written from the override.
 
 ## State and failure
 
-- **Rule that always holds:** no `field_billing_defaults` row has a per-acre price or pricing note. It is enforced by a validated CHECK, so it holds in every transaction.
+- **Rule that always holds:** no `field_billing_defaults` row and no `invoice_shares` row has a per-acre price or pricing note. Both are enforced by validated CHECKs, so they hold in every transaction.
 - **Existing rows** (production, read-only, 2026-11-22):
   - `field_billing_defaults`: 6 rows; 0 with an override; 0 with a non-blank note.
-  - `invoice_shares`: 0 with `price_per_acre_cents`; 0 with a non-blank note.
-  - The migration's preflight re-counts and refuses (`PER_ACRE_PRICING_IN_USE`, naming the count) if any row has either, so it never silently clears a price.
+  - `invoice_shares`: 3 rows; 0 with `price_per_acre_cents`; 0 with a note. `invoice_items`: 0 "grower share @" lines.
+  - The migration's preflight locks both tables, re-counts both and refuses (`PER_ACRE_PRICING_IN_USE`, naming the count) if any row has either, so it never silently clears a price.
   - It does not blank-coerce: an empty-string note also blocks the apply.
 - **Already-deployed app during rollout:**
   - The old Field Setup still shows the inputs. Saving a field with an override typed in is refused, and nothing is saved.

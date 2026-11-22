@@ -300,8 +300,8 @@ decision only) immediately before the merge. It mints a carried proof for the ne
 - an owner-accepted proof (`--carry-owner-accepted`) carries, but never for free: it always gets the
   collision check, which is given each accepted finding and reports any the merge makes newly reachable,
   wider or worse; the carried proof keeps the acceptance list, so it counts only for that PR;
-- "main's new files" are both what the base gained and what the merge changed in the branch's tree, so a
-  base change that was later reverted but undoes something the branch carried still gets the check;
+- the merge's one common ancestor is exactly the base the review used, so the reviewed diff is what the
+  PR still changes (a branch that already held a commit the base gained later, or a revert of one, refuses);
 - the reviewed head's proof is a clean `gpt-6.2-sol`/`high` proof (full or itself carried) under 24 hours
   old, and for a carried one the original full review is under 24 hours old too (a chain expires);
 - and EITHER the PR's files and main's new files do not overlap and one side is plain documentation

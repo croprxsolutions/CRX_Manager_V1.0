@@ -1516,26 +1516,38 @@ function collisionPromptSkipsWork(prompt) {
     assert.match(refused.stderr, /edited or removed existing lines/, "staging carry: says why");
   });
 
-  // 4. Staging lands a commit the branch also carries, then reverts it: the base nets to no
-  //    change, but the merge undoes it in the branch, so it needs the focused check (Sol HIGH 1).
-  withRepo(({ git, write, file, carry, commitAll, writeProof, base }) => {
-    git("switch", "-q", "-c", "shared", base);
-    write("src/auth.ts", "export const strict = true;\n");
-    const shared = commitAll("shared tightening");
-    git("switch", "-q", "claude/feature-x");
-    git("merge", "-q", "--no-edit", "shared");
-    const head = git("rev-parse", "HEAD");
-    writeProof(head, buildCodexPushProof({ headSha: head, baseSha: base, verdict: "clean", reviewRef: STAGING }));
-    git("switch", "-q", "--detach", shared);
-    git("revert", "--no-edit", "HEAD");
-    git("update-ref", "refs/remotes/origin/staging", git("rev-parse", "HEAD"));
-    git("switch", "-q", "claude/feature-x");
-    git("merge", "-q", "--no-edit", "origin/staging");
-    assert.equal(existsSync(file("src/auth.ts")), false, "revert setup: the merge removed the shared file from the branch");
-    const dry = carry("--dry-run");
-    assert.equal(dry.status, 0, `staging carry: the revert case is decided (${dry.stderr})`);
-    assert.match(dry.stdout, /collision check needed: both sides changed 1 file/, "staging carry: a merge that undoes branch content is never a free carry");
-  });
+  // 4. The branch already holds a commit staging gains later, so the reviewed diff is not what
+  //    the PR now changes: refused, whichever side reverts it (Sol round 1 HIGH 1, round 2 BLOCKER 1).
+  for (const branchReverts of [false, true]) {
+    withRepo(({ git, write, file, carry, commitAll, writeProof, base }) => {
+      git("switch", "-q", "-c", "shared", base);
+      write("src/auth.ts", "export const strict = true;\n");
+      const shared = commitAll("shared tightening");
+      git("switch", "-q", "claude/feature-x");
+      git("merge", "-q", "--no-edit", "shared");
+      if (branchReverts) {
+        git("revert", "--no-edit", shared);
+        write("docs/manual/pr-note.md", "# PR note\n");
+        commitAll("pr note");
+      }
+      const head = git("rev-parse", "HEAD");
+      writeProof(head, buildCodexPushProof({ headSha: head, baseSha: base, verdict: "clean", reviewRef: STAGING }));
+      git("switch", "-q", "--detach", shared);
+      if (branchReverts) {
+        write("docs/manual/staging-note.md", "# Staging note\n");
+        commitAll("staging note");
+      } else {
+        git("revert", "--no-edit", "HEAD");
+      }
+      git("update-ref", "refs/remotes/origin/staging", git("rev-parse", "HEAD"));
+      git("switch", "-q", "claude/feature-x");
+      git("merge", "-q", "--no-edit", "origin/staging");
+      assert.equal(existsSync(file("src/auth.ts")), false, "shared-commit setup: the merged branch lacks the shared check");
+      const refused = carry("--dry-run");
+      assert.equal(refused.status, 1, `staging carry: a branch holding a later base commit is refused (branch reverts: ${branchReverts})`);
+      assert.match(refused.stderr, /common ancestor is not the reviewed base/, "staging carry: says why");
+    });
+  }
 
   // 5. An owner-accepted proof carries only through the focused check, which is shown each
   //    accepted finding (Sol HIGH 2); one that lost its list is refused.
@@ -2660,7 +2672,8 @@ not json
     // What a BLOCKERS run leaves, and Mason's two accept replies.
     const findings = parseSolFindings("SOL_FINDING 1 HIGH: src/sale.ts:1 - a sale before switch-on is not checked\nSOL_FINDING 2 BLOCKER: src/sale.ts:1 - x\nSOL_FINDING_COUNT 2\n").findings;
     mkdirSync(stateDir, { recursive: true });
-    writeFileSync(path.join(stateDir, blockersRecordName(reviewed)), JSON.stringify(buildBlockersRecord({ headSha: reviewed, baseSha: base, findings })));
+    // The shape saveBlockersRecord writes: the record plus the review kind (Sol round 2, 2026-11-22).
+    writeFileSync(path.join(stateDir, blockersRecordName(reviewed)), JSON.stringify({ ...buildBlockersRecord({ headSha: reviewed, baseSha: base, findings }), review_ref: GUARDED_BASE, release_rules: false }));
     const accept = (n, code, reason) => {
       const now = Date.now();
       writeApprovalRequest(stateDir, buildSolAcceptPayload({
@@ -2697,6 +2710,19 @@ not json
     assert.deepEqual(minted.owner_accepted.map((a) => a.pull_request_url), ["https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242", "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242"], "owner-accepted e2e: the proof names the PR's repository");
     assert.equal(proofValid(minted, logHead, Date.now(), base), true, "owner-accepted e2e: the gates accept it for the logged head");
     assert.equal(proofValid(minted, reviewed, Date.now(), base), false, "owner-accepted e2e: and for no other head");
+    assert.equal(minted.review_ref, GUARDED_BASE, "owner-accepted e2e: the proof keeps the review kind for a later carry");
+    {
+      // The real owner-accepted proof survives a later base merge, through the focused check only.
+      git("switch", "-q", "main");
+      write("docs/manual/notes.md", "# Notes\n");
+      git("update-ref", "refs/remotes/origin/main", commitAll("docs-only main PR"));
+      git("switch", "-q", "feature");
+      git("merge", "-q", "--no-edit", "origin/main");
+      const later = run(scriptPath, "--carry-forward", "--dry-run");
+      assert.equal(later.status, 0, `owner-accepted e2e: a later base merge is decided (${later.stderr})`);
+      assert.match(later.stdout, /collision check needed: .*owner-accepted, not fixed/, "owner-accepted e2e: never a free carry");
+      git("reset", "-q", "--hard", logHead);
+    }
 
     const refused = (label, mutate, why) => {
       git("reset", "-q", "--hard", logHead);

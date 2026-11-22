@@ -463,7 +463,7 @@ the RPCs, atomic create. Repair step 2 (To-Do 0.17), before the pre-season count
 (also refuses the same row twice on one count; concurrent claims serialized); a count's status only moves forward (in progress
 to completed or cancelled, completed to cancelled), so no count can be reopened or reversed twice; signed-in users lose direct UPDATE on `cycle_counts` and `cycle_count_items`, so a
 completed count cannot be marked cancelled without its reversal and a line's variance is only what the save RPC computed (a direct line insert may set only the four columns the app sends). **Still open here:** the three-request creation (a failed create leaves an empty open count, which
-now blocks a new count at that warehouse until it is cancelled from the Cycle Counts screen).
+now blocks a new count at that warehouse until it is cancelled from the Cycle Counts screen). **In progress (Lane E, 2026-11-22):** `create_cycle_count` (`20270209160000`) does the whole start in one step; the screen switch and removing the direct inserts follow.
 
 ### KI-163 — Small stock-history gaps
 

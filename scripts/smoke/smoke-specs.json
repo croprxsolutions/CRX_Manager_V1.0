@@ -1302,6 +1302,16 @@
         "inventory"
       ]
     },
+    "create_cycle_count": {
+      "chain": "smoke-create-cycle-count.sql",
+      "description": "KI-160 (20270209160000): one call saves the count and a line per stock row at the location (expected = on-hand); the same key replays the same count; a second start at that location is refused with COUNT_ALREADY_OPEN. Uses one active admin and [SMOKE] fixtures at a [SMOKE] location; terminal rollback.",
+      "covers": [
+        "create_cycle_count"
+      ],
+      "area": [
+        "inventory"
+      ]
+    },
     "complete_cycle_count": {
       "chain": "smoke-cycle-count-concurrency-guards.sql",
       "description": "Cycle-count complete/reverse chain: quantity changes 100->112->100, both replays are stable, lifecycle states advance correctly, and both wrappers retain inventory row locks.",

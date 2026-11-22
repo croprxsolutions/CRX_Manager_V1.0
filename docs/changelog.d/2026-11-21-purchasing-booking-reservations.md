@@ -10,4 +10,4 @@
 - Impossible stored values (Mason, 2026-11-22, "Skip and flag them"): a quantity that is not a finite number, or a date outside 2000-2099, is left out of the math and the record is listed in a new top-level `check_data` key (product reason `check_data`).
 - Kept from the old #1989 build: the safe draw guess, the draw lists and the timing-window fixes.
 - No screen calls `get_purchasing_plan` yet (#1980 adds the first).
-- Proof: `node scripts/smoke/prove-purchasing-plan-reservations-real-schema.mjs` with `smoke-purchasing-plan-reservations.sql` (C1-C23) and `smoke-purchasing-plan.sql`. Not yet verified on staging.
+- Proof: `node scripts/smoke/prove-purchasing-plan-reservations-real-schema.mjs` with `smoke-purchasing-plan-reservations.sql` (C1-C24) and `smoke-purchasing-plan.sql`. Not yet verified on staging.

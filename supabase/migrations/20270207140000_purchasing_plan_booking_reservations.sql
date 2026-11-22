@@ -230,18 +230,27 @@ BEGIN
   -- an order draw (quote_product_draws) never records a section. An active job whose line for
   -- the product cannot be converted (Check units, not counted) draws nothing here, so the
   -- booking's demand stays counted instead of vanishing into an uncounted job.
+  -- An active job with a line of the product holding an impossible quantity (skipped, flagged): its draw counts
+  -- only up to its valid lines of the product, so the booking never loses demand the job no longer carries.
   jd AS (
-    SELECT jpd.quote_id, jpd.product_id, s.id AS section_id, COALESCE(jpd.quantity_drawn, 0) AS qty
-      FROM job_product_draws jpd
-      JOIN eq ON eq.id = jpd.quote_id
-      JOIN jobs j ON j.id = jpd.job_id
-      LEFT JOIN quote_sections s ON s.id = j.quote_section_id AND s.quote_id = jpd.quote_id
-     WHERE NOT EXISTS (SELECT 1 FROM jcl WHERE jcl.job_id = jpd.job_id AND jcl.product_id = jpd.product_id AND jcl.unit_problem)
-       -- ...nor an active job whose line of the product holds an impossible quantity (skipped and flagged).
-       AND NOT EXISTS (SELECT 1 FROM job_chemicals jc WHERE jc.job_id = jpd.job_id AND jc.product_id = jpd.product_id
-                          AND j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')
-                          AND jc.customer_supplied IS NOT TRUE AND NOT abs(COALESCE(jc.quantity, 0)) < 'Infinity'::numeric)
-       AND abs(COALESCE(jpd.quantity_drawn, 0)) < 'Infinity'::numeric
+    SELECT x.quote_id, x.product_id, x.section_id,
+           CASE WHEN x.cap IS NULL THEN x.q
+                ELSE LEAST(x.q, GREATEST(0, x.cap - (SUM(x.q) OVER (PARTITION BY x.job_id, x.product_id
+                                                                   ORDER BY x.id ROWS UNBOUNDED PRECEDING) - x.q))) END AS qty
+      FROM (SELECT jpd.id, jpd.job_id, jpd.quote_id, jpd.product_id, s.id AS section_id,
+                   COALESCE(jpd.quantity_drawn, 0) AS q,
+                   CASE WHEN j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')
+                         AND EXISTS (SELECT 1 FROM job_chemicals jc WHERE jc.job_id = jpd.job_id AND jc.product_id = jpd.product_id
+                                        AND jc.customer_supplied IS NOT TRUE
+                                        AND NOT abs(COALESCE(jc.quantity, 0)) < 'Infinity'::numeric)
+                        THEN COALESCE((SELECT SUM(jcl.qty) FROM jcl
+                                        WHERE jcl.job_id = jpd.job_id AND jcl.product_id = jpd.product_id), 0) END AS cap
+              FROM job_product_draws jpd
+              JOIN eq ON eq.id = jpd.quote_id
+              JOIN jobs j ON j.id = jpd.job_id
+              LEFT JOIN quote_sections s ON s.id = j.quote_section_id AND s.quote_id = jpd.quote_id
+             WHERE NOT EXISTS (SELECT 1 FROM jcl WHERE jcl.job_id = jpd.job_id AND jcl.product_id = jpd.product_id AND jcl.unit_problem)
+               AND abs(COALESCE(jpd.quantity_drawn, 0)) < 'Infinity'::numeric) x
   ),
   alld AS (
     SELECT qpd.quote_id, qpd.product_id, NULL::uuid AS section_id, COALESCE(qpd.quantity_drawn, 0) AS qty
@@ -325,8 +334,9 @@ BEGIN
            END AS hold_use
       FROM inventory_holds ih
      WHERE ih.is_active = true AND ih.quantity > 0 AND ih.quantity < 'Infinity'::numeric  -- (also excludes NaN)
-       AND (ih.expires_at IS NULL OR ih.expires_at >= (SELECT today FROM prm))
-       AND (ih.expires_at IS NULL OR ih.expires_at BETWEEN (SELECT d_lo FROM prm) AND (SELECT d_hi FROM prm))  -- impossible expiry: skipped and flagged
+       -- An impossible expiry (outside 2000-2099) counts as no expiry, so the hold is never dropped (flagged).
+       AND (ih.expires_at IS NULL OR ih.expires_at >= (SELECT today FROM prm)
+            OR NOT ih.expires_at BETWEEN (SELECT d_lo FROM prm) AND (SELECT d_hi FROM prm))
        AND ih.hold_type IN ('manual', 'crop_program', 'job')
   ),
   po AS (
@@ -371,8 +381,7 @@ BEGIN
     SELECT ih.product_id, 'hold', ih.id FROM inventory_holds ih
      WHERE ih.is_active = true AND ih.hold_type IN ('manual', 'crop_program', 'job')
        AND (NOT ih.expires_at BETWEEN (SELECT d_lo FROM prm) AND (SELECT d_hi FROM prm)
-            OR ((ih.expires_at IS NULL OR ih.expires_at >= (SELECT today FROM prm))
-                AND NOT abs(COALESCE(ih.quantity, 0)) < 'Infinity'::numeric))
+            OR NOT abs(COALESCE(ih.quantity, 0)) < 'Infinity'::numeric)
     UNION ALL
     SELECT poi.product_id, 'po_line', poi.id
       FROM purchase_order_items poi JOIN purchase_orders p ON p.id = poi.purchase_order_id CROSS JOIN prm
@@ -417,11 +426,11 @@ BEGIN
            COALESCE((SELECT MIN(d.scheduled_date)
                        FROM delivery_items di JOIN deliveries d ON d.id = di.delivery_id
                       WHERE di.order_item_id = oi.id AND d.deleted_at IS NULL
-                        AND d.status IN ('scheduled', 'in_progress') AND d.scheduled_date IS NOT NULL
-                     -- any delivery with an impossible date or quantity: the order counts today (flagged)
-                     HAVING bool_and(d.scheduled_date BETWEEN (SELECT d_lo FROM prm) AND (SELECT d_hi FROM prm)
-                                     AND abs(COALESCE(di.quantity, 0)) < 'Infinity'::numeric)
-                        AND SUM(COALESCE(di.quantity, 0)) >= oi.quantity_remaining),
+                        AND d.status IN ('scheduled', 'in_progress')
+                        -- a delivery with an impossible date or quantity is left out (flagged); the rest still date the order
+                        AND d.scheduled_date BETWEEN (SELECT d_lo FROM prm) AND (SELECT d_hi FROM prm)
+                        AND abs(COALESCE(di.quantity, 0)) < 'Infinity'::numeric
+                     HAVING SUM(COALESCE(di.quantity, 0)) >= oi.quantity_remaining),
                     (SELECT today FROM prm)),
            oi.quantity_remaining, o.quote_id, o.id, NULL::uuid, NULL::uuid, NULL::text, false, false, o.customer_id, false, oi.id
       FROM order_items oi JOIN orders o ON o.id = oi.order_id
@@ -708,7 +717,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM 'd00303eb815aef5c5bd23d5fb0271cb4' THEN
+     IS DISTINCT FROM 'c1684a7ac1bb9d380f7b4e0e957f92fa' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

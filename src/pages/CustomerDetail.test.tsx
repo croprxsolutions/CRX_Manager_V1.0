@@ -1031,6 +1031,40 @@ describe('CustomerDetail stale whole-record save', () => {
     expect(mockToast).not.toHaveBeenCalledWith('success', expect.anything());
   });
 
+  it('a Reactivate confirmation keeps the version it opened on across a reload (#2197, Sol HIGH round 3)', async () => {
+    const inactive = { ...original, is_active: false } as unknown as typeof original;
+    const newerInactive = { ...newer, is_active: false } as unknown as typeof original;
+    expect(newerInactive.row_version).not.toBe(inactive.row_version);
+    let customerReads = 0;
+    const eqCalls: unknown[][] = [];
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'customers') return query({ data: [], error: null });
+      const chain = customerQuery(() => { customerReads += 1; return customerReads <= 2 ? inactive : newerInactive; });
+      const baseEq = chain.eq as (...args: unknown[]) => unknown;
+      chain.eq = (...args: unknown[]) => { eqCalls.push(args); return baseEq(...args); };
+      chain.update = () => {
+        chain.select = () => chain;
+        chain.then = (resolve: (value: QueryResult) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve);
+        return chain;
+      };
+      return chain;
+    });
+    mockRpc.mockResolvedValue({ data: null, error: { message: 'COMMISSION_SPLIT_CONFLICT: changed elsewhere' } });
+    renderDetail();
+    fireEvent.change(await screen.findByDisplayValue('Original Farm'), { target: { value: 'Edited Farm' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    const reload = await screen.findByRole('button', { name: 'Reload Customer' });
+    // Open Reactivate on the version shown now, then let a reload install a newer one.
+    fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
+    const dialog = await screen.findByRole('alertdialog', { name: /Reactivate customer/ });
+    fireEvent.click(reload);
+    await screen.findByDisplayValue('Newer Farm');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reactivate' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('changed by someone else')));
+    expect(eqCalls).toContainEqual(['row_version', inactive.row_version]);
+    expect(eqCalls).not.toContainEqual(['row_version', newerInactive.row_version]);
+  });
+
   it('locks the commission split editor while a save runs', async () => {
     mockFrom.mockImplementation((table: string) => {
       if (table === 'customers') return customerQuery(() => original);

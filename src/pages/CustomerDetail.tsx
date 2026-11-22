@@ -275,8 +275,9 @@ export default function CustomerDetail() {
   // null = not being edited (the field shows the saved rate).
   const [discountDraft, setDiscountDraft] = useState<string | null>(null);
   const [discountSaving, setDiscountSaving] = useState(false);
-  // The customer id the Reactivate dialog was opened for, so it never shows on another customer.
-  const [reactivateOpenFor, setReactivateOpenFor] = useState<string | null>(null);
+  // The customer and row version the Reactivate dialog was opened on: it never shows on another
+  // customer, and confirming applies only to the version shown when it opened (Sol HIGH, round 3).
+  const [reactivateOpenFor, setReactivateOpenFor] = useState<{ id: string; rowVersion: number | null } | null>(null);
   const [reactivating, setReactivating] = useState(false);
   useEffect(() => { setDiscountDraft(null); setReactivateOpenFor(null); }, [id]);
 
@@ -1341,10 +1342,12 @@ export default function CustomerDetail() {
   // Customers list uses to deactivate (RLS governs it). Admins and sales reps, as the database allows (Mason, 2026-11-22).
   const reactivateCustomer = async () => {
     if (!id || isNew || reactivating) return;
+    const opened = reactivateOpenFor;
     const visit = visitRef.current;
     setReactivating(true);
     try {
-      const previousRowVersion = customerRowVersionRef.current;
+      // The version from when the dialog opened, not whatever a later reload installed.
+      const previousRowVersion = opened?.id === id ? opened.rowVersion : null;
       const changedElsewhere = () => toast('warning', 'This customer was changed by someone else since you opened the page. Nothing was saved. Reload the page and try again.');
       if (previousRowVersion === null) { changedElsewhere(); return; }
       // Only the exact version this admin was shown: an old confirmation must not undo a newer deactivation.
@@ -1390,7 +1393,7 @@ export default function CustomerDetail() {
     } finally {
       setReactivating(false);
       // A late reply from a customer the admin has left must not close another customer's dialog.
-      setReactivateOpenFor((open) => (open === id ? null : open));
+      setReactivateOpenFor((open) => (open?.id === id ? null : open));
     }
   };
 
@@ -1433,7 +1436,7 @@ export default function CustomerDetail() {
         { label: isNew ? 'New Customer' : (customer.farm_name || 'Customer') },
       ]} />
       <ConfirmModal
-        open={!!id && reactivateOpenFor === id}
+        open={!!id && reactivateOpenFor?.id === id}
         onClose={() => { if (!reactivating) setReactivateOpenFor(null); }}
         onConfirm={() => void reactivateCustomer()}
         title="Reactivate customer"
@@ -1466,7 +1469,7 @@ export default function CustomerDetail() {
         </div>
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
           {!isNew && (isAdmin || profile?.role === 'sales_rep') && customer.is_active === false && (
-            <Button variant="primary" size="sm" icon={<RotateCcw className="w-4 h-4" />} showChevron={false} disabled={saving} onClick={() => setReactivateOpenFor(id ?? null)}>
+            <Button variant="primary" size="sm" icon={<RotateCcw className="w-4 h-4" />} showChevron={false} disabled={saving} onClick={() => setReactivateOpenFor(id ? { id, rowVersion: customerRowVersionRef.current } : null)}>
               Reactivate
             </Button>
           )}

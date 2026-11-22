@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2187: Mason owner-accepted 1 Sol finding(s) at `933aa4fe39a5`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2187 at `933aa4fe39a5` (base `f08df8ad6407`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270207120000_driver_farm_billing_address.sql:58`, text sha256 `deb6f2a254b48882` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 76f65aa0c473)
+
 ## 2026-11-21 — #2149: Mason owner-accepted 1 Sol finding(s) at `a8f491084ae1`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2149 at `a8f491084ae1` (base `dac995aac792`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

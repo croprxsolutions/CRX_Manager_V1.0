@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — Mason's release pass removed (supersedes the 2026-11-20 release-pass decision)
+
+**Decision (Mason, in chat, 2026-11-22: "Take it out").** Sol found 6 BLOCKER/HIGH in the release pass on release #2189 and 5 new ones in round 2 on the fixes, all in the same mechanism (the AGENTS.md three-round stop). Mason chose to remove the pass rather than keep patching. Taha or Mason again merges the release, hotfixes and the back-merge, and live applies wait for Taha's `Ready to merge:` comment. Kept from 2026-11-20: the plain `yes` (24 hours, surviving head moves) for a destructive migration, and a destructive migration may merge into `staging`. The unpushed fix branch `claude/release-pass-sol-fixes` is superseded and not landed.
+
 ## 2026-11-21 — #2165: Mason owner-accepted 1 Sol finding(s) at `2c95807df876`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2165 at `2c95807df876` (base `1b127b005e8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

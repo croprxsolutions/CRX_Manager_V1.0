@@ -86,12 +86,21 @@ BEGIN
   -- Spellings are folded the way job completion folds them (normalize_rate_unit: 'fl. oz', 'gallons', 'lbs' ...),
   -- except that a fluid-ounce spelling stays 'fl oz' (so a dry product never reads it as a dry ounce) and a per-area
   -- unit ('/ac', 'per acre': Sol round 3) is never a quantity.
-  IF NULLIF(btrim(p_job_unit), '') IS NOT NULL AND position('/' IN p_job_unit) = 0
-     AND lower(p_job_unit) !~ '\mper\M' AND v_sold IS NOT NULL THEN
+  IF NULLIF(btrim(p_job_unit), '') IS NOT NULL AND position('/' IN public.unit_fold_invisible(p_job_unit)) = 0
+     AND lower(public.unit_fold_invisible(p_job_unit)) !~ '\mper\M' AND v_sold IS NOT NULL THEN
     v_unit := CASE
       WHEN public.normalize_rate_unit(p_job_unit) = 'oz' AND lower(btrim(p_job_unit)) ~ '^(fl|fluid)' THEN 'fl oz'
       ELSE COALESCE(public.normalize_rate_unit(p_job_unit), btrim(p_job_unit)) END;
-    o_exact_qty := public.field_app_priced_quantity(p_quantity, v_unit, v_sold, v_form);
+    -- Sol round 5: a metric unit the catalog recognizes converts exactly to ounces (dry) or fluid ounces (liquid)
+    -- first (1 oz = 28.349523125 g; 1 fl oz = 29.5735295625 mL); a mass on a liquid or a volume on a dry product stays
+    -- unconvertible.
+    o_exact_qty := CASE
+      WHEN v_form = 'dry' AND v_unit IN ('g', 'kg', 'mg') THEN public.field_app_priced_quantity(
+        p_quantity * CASE v_unit WHEN 'kg' THEN 1000 WHEN 'mg' THEN 0.001 ELSE 1 END / 28.349523125, 'oz', v_sold, v_form)
+      WHEN COALESCE(v_form, 'liquid') <> 'dry' AND v_unit IN ('ml', 'l') THEN public.field_app_priced_quantity(
+        p_quantity * CASE v_unit WHEN 'l' THEN 1000 ELSE 1 END / 29.5735295625, 'fl oz', v_sold, v_form)
+      WHEN v_unit IN ('g', 'kg', 'mg', 'ml', 'l') THEN NULL
+      ELSE public.field_app_priced_quantity(p_quantity, v_unit, v_sold, v_form) END;
   END IF;
   -- Mason, 2026-11-22 ("Stop and name it").
   IF o_exact_qty IS NULL OR o_exact_qty <= 0 THEN
@@ -172,6 +181,7 @@ CREATE OR REPLACE FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
+  v_unsplit_fields text;
   v_job RECORD;
   v_invoice_id uuid;
   v_invoice_number text;
@@ -312,6 +322,17 @@ BEGIN
   -- field WITHOUT billing defaults falls back to the field's own customer at 100%
   -- (mirror of create_split_invoices_from_order).
   -- ==========================================================================
+  -- 20270222100000 (Mason, 2026-11-22: every field has a billing split, 100% or shared; each owner is billed the
+  -- acres of their own fields): a field with no billing split stops Create Invoice by name, never falling back to a
+  -- payer (Sol round 5: the fallback put every acre and the spraying fee on the one configured owner).
+  SELECT string_agg(f.field_name, ', ' ORDER BY f.field_name) INTO v_unsplit_fields
+    FROM job_fields jf JOIN fields f ON f.id = jf.field_id
+    WHERE jf.job_id = p_job_id
+      AND NOT EXISTS (SELECT 1 FROM field_billing_defaults fbd WHERE fbd.field_id = jf.field_id);
+  IF v_unsplit_fields IS NOT NULL THEN
+    RAISE EXCEPTION 'JOB_FIELD_NO_BILLING_SPLIT: % has no billing split. Nothing was invoiced; set who pays for it (100%% or a shared split) in Field Setup first.', v_unsplit_fields USING ERRCODE = 'P0001';
+  END IF;
+
   SELECT count(DISTINCT fbd.customer_id) INTO v_n_owners
     FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
     WHERE jf.job_id = p_job_id;
@@ -974,9 +995,9 @@ BEGIN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'ab519a8426fda48653f4aae887ce8c2f'
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'a5f215672d97ede9b9b5ba95a2676a0b'
      OR v_price IS NULL OR v_split IS NULL
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '0fdf9babeecaa206ddc6bd74905d435c'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '55166cc41ab404ee09ed7af08fa72550'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: a body is not the one this file installs';
   END IF;

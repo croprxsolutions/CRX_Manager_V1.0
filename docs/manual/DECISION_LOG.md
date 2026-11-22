@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — #2247: every field has a billing split; a job bills each owner the acres of their own fields
+
+**Decision (Mason, 2026-11-22, in chat).** "in field setup we always have the billing split set per field ... the total acres of John field is all billed to him and the field that is 50/50 is split accordingly on those acres." For #2247, Create Invoice refuses and names any job field with no billing split instead of guessing a payer (live check: 0 of 5 fields lack one). Requiring a split when a field is created is a separate Field Setup follow-up.
+
 ## 2026-11-22 — #2247: spray-job invoice lines book today's product cost; the grower's $0 line stays editable
 
 **Decision (Mason, 2026-11-22, "Today's product cost" and "Yes, same as custom lines").** For #2247, when a spray job becomes an invoice each chemical line books today's product cost per sold unit, as field-application invoices do (a job's saved cost can be per a different unit or $0; Sol rounds 3 and 4 flagged each choice in turn). A customer-supplied chemical stays a $0 information line with no product link; a priced edit to it in the invoice editor is accepted like any custom line (no restricted-use sales record, since CRX did not sell it). Sol round 5 on #2247 may run.

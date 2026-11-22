@@ -255,7 +255,7 @@ function refusedProbe(sql, pattern, uid) {
 }
 
 const id = (s) => `b5b5b5b5-2207-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), O = id('f3'), OS = id('f4'), N = id('f5'), X = id('f6'), SVC = id('e1');
+const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), O = id('f3'), OS = id('f4'), N = id('f5'), X = id('f6'), Y = id('f7'), SVC = id('e1');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const WALL = 'public._enforce_below_cost_line()';
@@ -290,13 +290,14 @@ function seed() {
       ('${G}', '${A}', '[PROVER] JBC field A', 100, true), ('${F}', '${A}', '[PROVER] JBC field A+B', 100, true),
       ('${O}', '${A}', '[PROVER] JBC field A per-acre', 100, true), ('${OS}', '${A}', '[PROVER] JBC field A+B per-acre', 100, true),
       ('${N}', '${A}', '[PROVER] JBC field A 99.99%', 100, true),
-      ('${X}', '${A}', '[PROVER] JBC field A, no billing defaults', 100, true);
+      ('${X}', '${A}', '[PROVER] JBC field A, no billing defaults', 100, true),
+      ('${Y}', '${A}', '[PROVER] JBC field A extra', 100, true);
     INSERT INTO public.application_services (id, name, is_active, default_rate_per_acre_cents, cost_per_acre_cents) VALUES
       ('${SVC}', '[PROVER] JBC spraying', true, 1000, 400);
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary, price_override_cents) VALUES
       ('${G}', '${A}', 100, true, NULL), ('${F}', '${A}', 60, true, NULL), ('${F}', '${B}', 40, false, NULL),
       ('${O}', '${A}', 100, true, 100), ('${OS}', '${A}', 60, true, 100), ('${OS}', '${B}', 40, false, 100),
-      ('${N}', '${A}', 99.99, true, NULL);`);
+      ('${N}', '${A}', 99.99, true, NULL), ('${Y}', '${A}', 100, true, NULL);`);
   // Test-only helpers (prover database only). jbc.job writes a completed job: 10 acres of the field and one chemical
   // line of p_qty p_unit at p_price (job cost p_cost) per p_unit; the stored job total is that line's total.
   psql(`CREATE SCHEMA jbc AUTHORIZATION supabase_admin;
@@ -315,13 +316,13 @@ function seed() {
               CASE WHEN p_supplied THEN 0 ELSE p_cost END, p_supplied);
       RETURN v_j;
     END $f$;
-    -- jbc.job plus the spraying service ($10/acre, $4 cost) and 90 more acres on a field with no billing defaults.
+    -- jbc.job plus the spraying service ($10/acre, $4 cost) and 90 more acres on another field of A's (A 100%).
     CREATE FUNCTION jbc.feejob(p_field uuid) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
       SET session_replication_role = replica AS $f$
     DECLARE v_j uuid := jbc.job('${A}', p_field, 'Gal', 10, 5000, 3000);
     BEGIN
       UPDATE jobs SET application_service_id = '${SVC}', total_acres = 100 WHERE id = v_j;
-      INSERT INTO job_fields (job_id, field_id, acres_to_treat) VALUES (v_j, '${X}', 90);
+      INSERT INTO job_fields (job_id, field_id, acres_to_treat) VALUES (v_j, '${Y}', 90);
       RETURN v_j;
     END $f$;
     -- A two-line job: the grower's own "JBC chem" (10 Gal) first, then 8 Qt of the quart chem at $10 ($8 cost).
@@ -423,6 +424,14 @@ const CASES = {
   perWordUnit: transfer(job('Gal per acre', 10, 5000)),
   // Luna round 5: a job line with no saved cost books today's catalog cost ($30/Gal), never $0.
   nullJobCost: transfer(job('Gal', 10, 5000, 'NULL')),
+  // Sol round 5 #1 (Mason, 2026-11-22: every field has a billing split): a field with none stops Create Invoice by name.
+  noSplitField: transfer(job('Gal', 10, 5000, 3000, X)),
+  // Sol round 5 #2: metric units convert (1,000 g of the $16/Lb dry product = 2.2046 Lb; 1,000 mL = 0.2642 Gal);
+  // a mass on a liquid product still stops. Sol round 5 MED: a soft hyphen cannot hide "per".
+  gramsDry: transfer(job('g', 1000, 4, 2, G, false, DRY)),
+  mlLiquid: transfer(job('mL', 1000, 15, 1, G)),
+  gramsOnLiquid: transfer(job('g', 100, 50)),
+  perSoftHyphen: transfer(job('Gal p­er acre', 10, 5000)),
   // Sol round 4 #1: a per-Gal job cost saved against "fl. oz", or a $0 job cost, still books the catalog cost.
   dottedGalCost: transfer(job('fl. oz', 3, 39, 3000)),
   zeroJobCost: transfer(job('Gal', 0.5, 3000, 0)),
@@ -547,6 +556,12 @@ async function main() {
   refusedProbe(CASES.eaUnit, /JOB_LINE_UNIT_UNCONVERTIBLE: \[PROVER\] JBC chem is recorded on this job in "Ea", which can't be converted to the unit it is sold in \("Gal"\)/);
   refusedProbe(CASES.perAcreUnit, /JOB_LINE_UNIT_UNCONVERTIBLE: \[PROVER\] JBC chem is recorded on this job in "Gal\/ac"/);
   console.log('[after] eaUnit, perAcreUnit: refused JOB_LINE_UNIT_UNCONVERTIBLE, naming the product and both units');
+  refusedProbe(CASES.noSplitField, /JOB_FIELD_NO_BILLING_SPLIT: \[PROVER\] JBC field A, no billing defaults has no billing split/);
+  console.log('[after] noSplitField: refused JOB_FIELD_NO_BILLING_SPLIT, naming the field');
+  for (const k of ['gramsOnLiquid', 'perSoftHyphen']) refusedProbe(CASES[k], /JOB_LINE_UNIT_UNCONVERTIBLE/);
+  console.log('[after] gramsOnLiquid, perSoftHyphen: refused JOB_LINE_UNIT_UNCONVERTIBLE');
+  after('gramsDry', 'A:3999:3999:3527:2.2046 Lb @1814=3999/c1600/product/manual', '1,000 g at 4c/g ($40) bills 2.2046 Lb (within 50c)');
+  after('mlLiquid', 'A:15002:15002:793:0.2642 Gal @56781=15002/c3000/product/manual', '1,000 mL at 15c/mL ($150) bills 0.2642 Gal (within 50c)');
   refusedProbe(CASES.noCost, /JOB_LINE_COST_MISSING: \[PROVER\] JBC grower chem has no cost recorded/);
   console.log('[after] noCost: refused JOB_LINE_COST_MISSING');
   refusedProbe(CASES.roundingBig, /JOB_LINE_ROUNDING: \[PROVER\] JBC chem can't be recorded to 4 decimals in Gal/);

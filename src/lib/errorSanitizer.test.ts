@@ -347,6 +347,8 @@ describe('sanitizeError', () => {
       .toBe('Roundup Pro is priced below its cost on this job. Nothing was invoiced; its price must be corrected before this job can be invoiced.');
     expect(sanitizeError('JOB_LINE_BELOW_COST')).toContain('priced below its cost');
     expect(sanitizeError('JOB_DELETED: this job was deleted')).toBe("This job was deleted, so it can't be invoiced. Nothing was invoiced.");
+    expect(sanitizeError('JOB_FIELD_NO_BILLING_SPLIT: North 40 has no billing split. Nothing was invoiced; set who pays for it (100% or a shared split) in Field Setup first.'))
+      .toBe('North 40 has no billing split. Nothing was invoiced; set who pays for it (100% or a shared split) in Field Setup first.');
     expect(sanitizeError('JOB_LINE_UNIT_UNCONVERTIBLE: Roundup is recorded on this job in "Ea", which can\'t be converted to the unit it is sold in ("Gal"). Nothing was invoiced; correct the unit on the job or the product first.'))
       .toBe('Roundup is recorded on this job in "Ea", which can\'t be converted to the unit it is sold in ("Gal"). Nothing was invoiced; correct the unit on the job or the product first.');
     expect(sanitizeError('JOB_LINE_ROUNDING: Round‮up can\'t be recorded to 4 decimals in Gal without its amount changing by more than $0.50.'))

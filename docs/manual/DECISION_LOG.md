@@ -9,6 +9,14 @@
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1980 at `e2225f84faab` (base `5f87729d2685`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
 - Finding 1 (HIGH) at `src/components/inventory/PurchasingTab.tsx:250`, text sha256 `472a69929a17b261` (the wording stays with the proof, not here)
   Mason's reason: this case cannot happen in our business (ref e8d08e3a7329)
+## 2026-11-22 — PR #2231 (#2193): Mason overrides Sol round 4's one HIGH; hand merge
+
+**Decision (Mason, 2026-11-22, relayed by the bug captain: "A").** Sol round 4 (head `d86e4eefc`) left one HIGH: the MCP apply door runs the guard code from the main checkout, so the new prerequisite check protects that door only once the main checkout is updated past this PR. Override reason: the check is active once installed, and the modes-of-action load is applied only at release, after this PR lands; the script door (the normal path) carries the check itself. The race Sol raised in rounds 1-3 is fixed (in-transaction re-count under the ingredient lock). The skip tool cannot accept findings on gate files, and the agent merge guard needs a clean Sol on them, so Mason or Taha merges PR #2231 by hand; agents do not land it. Sol's MED/LOW findings are tracked in #2230.
+
+## 2026-11-22 — #2193: hard block on the modes-of-action load until the live EPA batch fill has run
+
+**Decision (Mason, 2026-11-22, relayed by the bug captain: "go with a").** This replaces the 2026-11-18 "no in-migration readiness check, release step only" rule for the live apply. The migration itself stays unchanged (already applied on staging). The live-apply tooling refuses `20270205150000_ingredient_modes_of_action_load` (any stamp) until at least **90 of its 123 list rows** match an active ingredient on live, by the load's own rule (CAS decides; a unique name counts when one side has no CAS), and shows the count when it refuses. The script door reads the live count before it transmits (an early refusal, fails closed) and, at Mason's choice ("Yes, real fix (A)", relayed by the bug captain, after a Sol skip proved impossible on guard files), counts again inside the apply transaction under the ingredient lock, so an ingredient retired in between still stops the load; the MCP door refuses this load outright. **Why 90:** live read 99 of 123 on 2026-11-22, after the 2026-11-21 EPA batch fill; before the fill the app had few ingredients; some list rows are salts or chemicals CRX does not stock, so 123 is not expected. Change the number only with Mason. Release step: `.claude/commands/ship.md` › Staging.
+
 ## 2026-11-22 — #1989: Mason owner-accepted 1 Sol finding(s) at `52212b29d85a`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #1989 at `52212b29d85a` (base `9f791a20dcb3`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

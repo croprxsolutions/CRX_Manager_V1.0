@@ -69,6 +69,7 @@ import { findCodeRabbitSkip, skipStateDirs } from "../.claude/hooks/coderabbit-s
 import {
   assertOwnerTrustFilesReviewed,
   assertReplyAlone,
+  assertSkipShown,
   OWNER_TRUST_FILES,
   OWNER_TRUST_ROOT,
 } from "../.claude/hooks/owner-approval-lib.mjs";
@@ -3007,7 +3008,7 @@ function saveBlockersRecord(root, headSha, baseSha, stdout) {
   writeFileSync(file, `${JSON.stringify(buildBlockersRecord({ headSha, baseSha, findings: parsed.findings }), null, 2)}\n`, "utf8");
   process.stdout.write(
     `Sol's BLOCKER/HIGH findings, numbered for Mason:\n${parsed.findings.map((f) => `  ${f.n}. ${f.severity}: ${f.text}`).join("\n")}\n` +
-    "Fix them, or, for any Mason does not want fixed, ask him once: node scripts/owner-accept-sol-finding.mjs --all (or the numbers) (AGENTS.md › Sol).\n",
+    "Fix them; for ones Mason disagrees with (never a confirmed defect), ask him once: node scripts/owner-accept-sol-finding.mjs <numbers> (AGENTS.md › Sol).\n",
   );
 }
 
@@ -3038,7 +3039,7 @@ function runCarryOwnerAccepted(root, options) {
     (p) => [forkPoint && gitBlobUtf8(root, forkPoint, p), gitBlobUtf8(root, fromHead, p)]);
   if (gates.length) return refuse(`the pull request changes gate or approval files (${gates.slice(0, 5).join(", ")}), which a not-clean Sol review cannot vouch for`);
   const got = collectAcceptances({
-    record, readAcceptance: (n) => readJson(solAcceptFileName(fromHead, n)), readSkips: () => readSkipReceipts(stateDir, fromHead), checkReply: assertReplyAlone,
+    record, readAcceptance: (n) => readJson(solAcceptFileName(fromHead, n)), checkShown: assertSkipShown, readSkips: () => readSkipReceipts(stateDir, fromHead), checkReply: assertReplyAlone,
   });
   if (got.problem) return refuse(got.problem);
   let entries;

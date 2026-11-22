@@ -15,7 +15,7 @@ ONE message, the whole message being one of:
 
 | He types | Meaning |
 |---|---|
-| `skip` / `skip these` / `skip all` / `accept` / `accept all` / `don't fix` / `don't fix these` / `I don't want that` / `I don't want those` / `leave them` | decline every finding in the summary |
+| `skip` / `skip these` / `skip all` / `accept` / `accept all` / `don't fix` / `don't fix these` / `I don't want those` / `leave them` | decline every finding in the summary (`that` / `it` only when it lists one) |
 | `skip 1 3` / `accept 1 3` / `don't fix 2` | decline only those numbers; the rest stay open and get fixed |
 
 Case, a trailing `.` or `!`, and curly apostrophes don't matter. No code, no reason required. Anything else
@@ -27,7 +27,7 @@ Then the agent logs it, commits the log entry, mints the carried proof and keeps
 
 ## Sol findings (hard gate) — what changes
 
-1. `owner-accept-sol-finding.mjs --all` (or `<n> <n> ...`) builds ONE request for the listed findings of the current
+1. `owner-accept-sol-finding.mjs <n> <n> ...` (built: no `--all`; only findings he disagrees with) builds ONE request for the listed findings of the current
    Sol run, with a short reference number shown in the summary. The summary itself (printed by the script, not
    written by the agent) lists each finding number, severity and file, and ends with the reply options above.
    Its deadline is the EARLIER of 24 hours and the Sol review's own expiry.
@@ -66,7 +66,7 @@ New rule in `AGENTS.md` (stop rule) and `ship.md` (round cap):
 Built version (after the Sol gate review, round 1, BLOCKER): a finding the agent confirms is a real money, stock,
 data or security bug is fixed, never offered for skipping, as before. Skipping covers business calls and findings
 Mason and the agent judge not real. (The draft let Mason's word override even a confirmed bug; Sol blocked the
-merge on it. Mason can reopen this.)
+merge on it, and Mason chose disagreements only, 2026-11-21.)
 
 ## Unchanged
 

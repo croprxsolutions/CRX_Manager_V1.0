@@ -13,6 +13,7 @@ import { buildCarryForwardProof } from "../../scripts/write-codex-push-proof.mjs
 import { carriedSolProof, proofValid } from "./codex-push-lib.mjs";
 import {
   assertReplyAlone,
+  assertSkipShown,
   buildApprovalPayload,
   recordReplyApproval,
   resolvePlainReply,
@@ -121,6 +122,21 @@ function markFor(reply) {
   writeFileSync(transcript, `${JSON.stringify({ type: "user", message: { role: "user", content: reply } })}\n`);
   return () => ({ transcript, from: 0, written: true, words: reply.trim() });
 }
+// The agent's summary as its last message, then his reply, in this session's transcript.
+function skipMarkFor(shown, reply) {
+  const dir = path.join(root, `t-${codeSeq++}`);
+  mkdirSync(dir, { recursive: true });
+  const transcript = path.join(dir, `${SESSION}.jsonl`);
+  writeFileSync(transcript, `${[
+    { type: "user", message: { role: "user", content: "fix it" } },
+    { type: "assistant", message: { id: `m${codeSeq++}`, role: "assistant", content: [{ type: "text", text: shown }] } },
+    { type: "user", message: { role: "user", content: reply } },
+  ].map((o) => JSON.stringify(o)).join("\n")}\n`);
+  const from = readFileSync(transcript).length;
+  // The agent's answer after his reply, as in a real conversation by the time of the proof.
+  writeFileSync(transcript, `${JSON.stringify({ type: "assistant", message: { id: `m${codeSeq++}`, role: "assistant", content: [{ type: "text", text: "Noted." }] } })}\n`, { flag: "a" });
+  return () => ({ transcript, from, written: true, words: reply.trim() });
+}
 function reply(text, { sessionId = SESSION, now = NOW } = {}) {
   const a = acceptFromReply(text);
   return recordReplyApproval({
@@ -191,6 +207,8 @@ assert.equal(entry.includes(textHash(parsed.findings[0].text)), true, "log: the 
 assert.doesNotMatch(entry, /What this implies|proof covers|carries like|may land|reviewer|Sol review/i, "log: records the decision only, nothing addressed to reviewers (#1731 round 8)");
 assert.match(entry, /left unfixed\.\n- Finding 1/, "log: the decision line, then the findings");
 assert.equal(findingLocation("prose with no file"), "(location not stated)", "log: no location, none invented");
+assert.equal(findingLocation("buyer@example.com - leaked"), "(location not stated)", "log: an email address is never a location");
+assert.equal(findingLocation("node_modules/@types/x/index.d.ts:3 - y"), "`node_modules/@types/x/index.d.ts:3`", "log: a scoped package path still is");
 assert.deepEqual(gateFilesIn(["src/a.ts", ".claude/hooks/x.mjs", "scripts/write-codex-push-proof.mjs", "docs/a.md", "package.json"]),
   [".claude/hooks/x.mjs", "scripts/write-codex-push-proof.mjs", "package.json"], "gate files: hooks, the proof writer and package.json are refused");
 {
@@ -271,14 +289,16 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
     { n: 2, severity: "BLOCKER", text: "src/b.ts:2 - two" },
     { n: 3, severity: "HIGH", text: "src/c.ts:3 - three" },
   ], timestamp: iso(NOW - 60 * 60 * 1000) });
+  const shownFor = {};
   const skipReq = (numbers, code = String(codeSeq++), extra = {}) => {
     const text = buildSolSkipPayload({ record: rec3, numbers, pullRequest: 2200, issuedAt: iso(NOW - 1000),
       expiresAt: iso(skipDeadlineMs(rec3, NOW - 1000, 24 * 60 * 60 * 1000)), nonce: `skipnonce${code}`, code, sessionId: SESSION, ...extra });
     writeApprovalRequest(stateDir, text);
+    shownFor[code] = JSON.parse(text).summary.join("\n");
     return { code, payload: JSON.parse(text) };
   };
   const skipReply = (code, text, opts = {}) => recordReplyApproval({
-    code, dirs, reply: text, sessionId: opts.sessionId ?? SESSION, now: opts.now ?? NOW, readMark: markFor(text), form: "skip", skip: skipFromReply(text),
+    code, dirs, reply: text, sessionId: opts.sessionId ?? SESSION, now: opts.now ?? NOW, readMark: skipMarkFor(shownFor[code] ?? "", text), form: "skip", skip: skipFromReply(text),
   });
   const r1 = skipReq([1, 3]);
   assert.equal(Date.parse(r1.payload.expiresAt), Date.parse(rec3.timestamp) + 24 * 60 * 60 * 1000, "request: deadline never past the Sol run's own 24 hours");
@@ -303,7 +323,10 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   const receipts = readSkipReceipts(stateDir, H3);
   assert.equal(receipts.length, 1, "one receipt for the reply");
   assert.deepEqual(receipts[0].selected, [3]);
-  assert.equal(verifySolSkip({ approval: receipts[0], record: rec3, checkReply: assertReplyAlone }).ok, true, "verify: the receipt holds");
+  { const v = verifySolSkip({ approval: receipts[0], record: rec3, checkReply: assertReplyAlone, checkShown: assertSkipShown }); assert.equal(v.ok, true, `verify: the receipt holds (${v.reason})`); }
+  assert.match(verifySolSkip({ approval: receipts[0], record: rec3, checkReply: assertReplyAlone }).reason, /was not checked/, "verify: what he was shown must be checked");
+  assert.match(verifySolSkip({ approval: { ...receipts[0], replyMark: skipMarkFor("Another request's summary", "skip 3")() }, record: rec3, checkShown: assertSkipShown }).reason,
+    /not this request's summary/, "verify: a skip sent for another request never counts");
   assert.match(verifySolSkip({ approval: { ...receipts[0], selected: [1, 3] }, record: rec3 }).reason, /does not match/, "verify: an edited selection is refused");
   assert.match(verifySolSkip({ approval: { ...receipts[0], reply: "skip" }, record: rec3 }).reason, /does not match/, "verify: the reply must give the same selection");
   assert.match(verifySolSkip({ approval: receipts[0], record: { ...rec3, timestamp: iso(NOW - 1000) } }).reason, /earlier Sol run/, "verify: a re-run of Sol voids it");
@@ -321,7 +344,7 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   assert.equal(r2.payload.findings.length, 3, "request: --all lists every finding");
   assert.equal(skipReply(r2.code, "I don't want that").ok, false, "reply: 'that' on a list of three skips nothing");
   assert.equal(skipReply(r2.code, "I don't want those").ok, true, "reply: plain words skip them all");
-  const got3 = collectAcceptances({ record: rec3, readAcceptance: readNone, readSkips: () => readSkipReceipts(stateDir, H3), checkReply: assertReplyAlone });
+  const got3 = collectAcceptances({ record: rec3, readAcceptance: readNone, readSkips: () => readSkipReceipts(stateDir, H3), checkReply: assertReplyAlone, checkShown: assertSkipShown });
   assert.equal(got3.problem, undefined, `collect: all three skipped (${got3.problem})`);
   assert.deepEqual(got3.accepted.map((a) => [a.payload.finding.n, a.reason]), [[1, SKIP_REASON], [2, SKIP_REASON], [3, SKIP_REASON]]);
   const e3 = decisionLogEntry({ record: rec3, accepted: got3.accepted });

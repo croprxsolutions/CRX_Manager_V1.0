@@ -287,12 +287,12 @@ const isMasonMessage = (e) => e?.type === "user" && !e.isMeta && !e.isSidechain 
 const DAMAGED = Symbol("damaged transcript line");
 
 /** The transcript's size and the whole lines in its last `maxBytes` (a damaged line is DAMAGED). */
-function readTranscriptTail(transcriptPath, maxBytes) {
+function readTranscriptTail(transcriptPath, maxBytes, end = Infinity) {
   const fd = openSync(transcriptPath, "r");
   let raw;
   let size;
   try {
-    size = fstatSync(fd).size;
+    size = Math.min(fstatSync(fd).size, end); // `end`: read the transcript as it was at that byte
     // Read from one byte before the window, so a window that starts exactly at a
     // line keeps that line: everything through the first newline is dropped, and
     // that newline is the byte before the line (Luna LOW, round 4).
@@ -331,9 +331,9 @@ function readTranscriptTail(transcriptPath, maxBytes) {
  * read, when a damaged line lies in what is scanned, or when the start of that
  * message cannot be found in the part read (Luna rounds 1-2).
  */
-export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes = 32 * 1024 * 1024 } = {}) {
+export function lastAgentMessageText(transcriptPath, currentPrompt, { maxBytes = 32 * 1024 * 1024, end = Infinity } = {}) {
   if (typeof transcriptPath !== "string" || !transcriptPath) throw new Error("the message carried no transcript");
-  const { entries } = readTranscriptTail(transcriptPath, maxBytes);
+  const { entries } = readTranscriptTail(transcriptPath, maxBytes, end);
   const said = [];
   let messageId;
   let sawAgent = false;
@@ -482,6 +482,16 @@ export function requestShownIn(text, p) {
   const words = (lines) => lines.filter((l) => !/^\s*```[\w-]*\s*$/.test(l)).join(" ").replace(/\s+/g, " ").trim();
   const summary = words(p.purpose === OWNER_SOL_SKIP_PURPOSE ? solSkipSummary(p) : ownerApprovalSummary(p));
   return summary !== "" && words(String(text ?? "").split(/\r?\n/)) === summary;
+}
+
+/**
+ * At the proof: the agent's last message before Mason's skip reply (the transcript as it
+ * was when he replied, `mark.from`) was this request's summary, so a `skip` he sent for
+ * another request never counts for this one (Sol HIGH, gate round 2, 2026-11-21). Throws.
+ */
+export function assertSkipShown(mark, p) {
+  const shown = lastAgentMessageText(mark?.transcript, mark?.words, { end: mark?.from });
+  if (!requestShownIn(shown, p)) throw new Error("the agent's last message before his reply was not this request's summary");
 }
 
 /**

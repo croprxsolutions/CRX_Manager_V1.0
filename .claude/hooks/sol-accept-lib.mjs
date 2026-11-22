@@ -262,7 +262,7 @@ export const skipDeadlineMs = (record, nowMs, maxAgeMs) => Math.min(nowMs + maxA
  * run (head, base, review time) and to the findings exactly as shown.
  * @returns {{ok: true, payload: object, numbers: number[], approvedAt: string}|{ok: false, reason: string}}
  */
-export function verifySolSkip({ approval, record, checkReply }) {
+export function verifySolSkip({ approval, record, checkReply, checkShown }) {
   const no = (reason) => ({ ok: false, reason: `skip receipt: ${reason}` });
   if (!approval || approval.via !== OWNER_SOL_SKIP_VIA || typeof approval.payload !== "string") return no("not a skip receipt");
   let p;
@@ -291,6 +291,10 @@ export function verifySolSkip({ approval, record, checkReply }) {
   if (path.basename(String(mark.transcript ?? ""), ".jsonl") !== p.sessionId) return no("his reply is in a different conversation from the one that asked");
   try { checkReply?.(mark); }
   catch (e) { return no(`his reply could not be confirmed as his words alone (${e?.message || e})`); }
+  // Required: a plain `skip` names no request, so what he was shown is what binds it.
+  if (typeof checkShown !== "function") return no("what he was shown before his reply was not checked");
+  try { checkShown(mark, p); }
+  catch (e) { return no(`his reply could not be tied to this request (${e?.message || e})`); }
   return { ok: true, payload: p, numbers: sel.numbers, approvedAt: approval.approvedAt };
 }
 
@@ -402,7 +406,7 @@ export function decisionLogEntry({ record, accepted }) {
  */
 export function findingLocation(text) {
   const m = /^([\w./@+-]+(?::\d+(?:-\d+)?)?)(?=\s|$)/.exec(String(text ?? ""));
-  return m && /[./]/.test(m[1]) ? `\`${m[1]}\`` : "(location not stated)";
+  return m && /[./]/.test(m[1]) && !/[^@\s/]@[^@\s/]+\.[a-z]{2,}/i.test(m[1]) ? `\`${m[1]}\`` : "(location not stated)";
 }
 export const textHash = (text) => createHash("sha256").update(String(text), "utf8").digest("hex").slice(0, 16);
 
@@ -418,11 +422,11 @@ export function insertDecisionEntry(log, entry) {
  * `readAcceptance(n)` returns the parsed acceptance file or null.
  * @returns {{accepted: object[]}|{problem: string}}
  */
-export function collectAcceptances({ record, readAcceptance, readSkips = () => [], checkReply }) {
+export function collectAcceptances({ record, readAcceptance, readSkips = () => [], checkReply, checkShown }) {
   // Plain skip replies first (one receipt may cover several findings); the first valid one wins.
   const skipped = new Map();
   for (const s of [...readSkips()].sort((a, b) => String(a?.approvedAt).localeCompare(String(b?.approvedAt)))) {
-    const r = verifySolSkip({ approval: s, record, checkReply });
+    const r = verifySolSkip({ approval: s, record, checkReply, checkShown });
     if (!r.ok) continue; // a receipt from an earlier run on this head simply does not count
     for (const n of r.numbers) {
       if (!skipped.has(n)) {

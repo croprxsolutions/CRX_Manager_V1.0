@@ -2,7 +2,8 @@
 // Ask Mason whether to skip (leave unfixed) Sol BLOCKER/HIGH findings
 // (Mason, 2026-11-10; plain-word replies 2026-11-21; .claude/hooks/sol-accept-lib.mjs has the whole flow).
 //
-//   node scripts/owner-accept-sol-finding.mjs --all        (or: <n> [<n> ...])
+//   node scripts/owner-accept-sol-finding.mjs <n> [<n> ...]
+//     Only findings Mason disagrees with; one you confirm is a real defect is fixed, never listed.
 //     From the PR's checkout, at the head Sol reviewed, in the session Mason will reply
 //     in. Builds ONE request listing those findings of that Sol run and prints the summary
 //     to show him, exactly as printed, as the whole last message of your turn. He replies
@@ -22,6 +23,7 @@ import {
   OWNER_TRUST_ROOT,
   assertOwnerTrustFilesReviewed,
   assertReplyAlone,
+  assertSkipShown,
   hooklessSessionRefusal,
   newApprovalCode,
   promptHookSeen,
@@ -73,7 +75,7 @@ const argv = process.argv.slice(2);
 
 if (argv.length === 1 && argv[0] === "--log") {
   const got = collectAcceptances({
-    record, readAcceptance: (n) => readJson(solAcceptFileName(head, n)), readSkips: () => readSkipReceipts(stateDir, head), checkReply: assertReplyAlone,
+    record, readAcceptance: (n) => readJson(solAcceptFileName(head, n)), checkShown: assertSkipShown, readSkips: () => readSkipReceipts(stateDir, head), checkReply: assertReplyAlone,
   });
   if (got.problem) die(`${got.problem}. Every BLOCKER/HIGH of the run needs Mason's own skip reply first.`);
   const file = path.join(checkout, ...DECISION_LOG_PATH.split("/"));
@@ -87,10 +89,9 @@ if (argv.length === 1 && argv[0] === "--log") {
   process.exit(0);
 }
 
-const all = argv.length === 1 && argv[0] === "--all";
-const numbers = all ? record.findings.map((f) => f.n) : argv.map(Number);
+const numbers = argv.map(Number);
 if (!numbers.length || numbers.some((n) => !Number.isInteger(n) || n < 1 || n > record.findings.length) || new Set(numbers).size !== numbers.length) {
-  die(`give --all, or finding numbers from 1 to ${record.findings.length} each at most once (or --log).`);
+  die(`give the numbers (1 to ${record.findings.length}, each at most once) of the findings Mason disagrees with (or --log).`);
 }
 numbers.sort((a, b) => a - b);
 
@@ -137,7 +138,7 @@ for (let attempt = 0; attempt < 5 && !saved; attempt++) {
 }
 if (!saved) die("could not find a free code; try again.");
 
-console.log("Explain each finding to Mason in plain English BEFORE running this script (a finding you confirm is a real money, stock, " +
-  "data or security bug is fixed, never listed here). Your reply now must be only this, exactly as printed, as the whole last message of your turn:\n");
+console.log("Explain each finding to Mason in plain English BEFORE running this script (list only findings he disagrees with; one you " +
+  "confirm is a real defect is fixed, never listed here). Your reply now must be only this, exactly as printed, as the whole last message of your turn:\n");
 for (const line of solSkipSummary(saved)) console.log(`  ${line}`);
 console.log("\nThen wait for HIS reply (skip, or skip and numbers) in this session; never send or relay it for him.");

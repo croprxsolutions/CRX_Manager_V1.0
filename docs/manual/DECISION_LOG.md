@@ -9,6 +9,17 @@
 ## 2026-11-21 — #2185: a vendor change re-reads the product; vendor changes wait for unsaved Product edits
 
 **Decision (Mason, 2026-11-21, "Yes, block").** On the product page, vendor changes are off while the Product has unsaved edits, or is saving or loading ("Save or discard your Product changes before changing vendors."). After any vendor link, the page re-reads the whole Product instead of copying a vendor name from the Vendors section, and keeps Save, New product and Add a size off until that read lands; a failed read locks editing until Reload Product succeeds. This replaces patching the vendor name in place, which produced a new race in each of three review rounds (KI-170).
+## 2026-11-21 — #2187: Mason owner-accepted 1 Sol finding(s) at `4e4e44138acc`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2187 at `4e4e44138acc` (base `f3e880f9710f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270207120000_driver_farm_billing_address.sql:58`, text sha256 `d32afb9a280e90a6` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 2fb67adff345)
+
+## 2026-11-21 — #2187: Mason owner-accepted 1 Sol finding(s) at `933aa4fe39a5`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2187 at `933aa4fe39a5` (base `f08df8ad6407`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270207120000_driver_farm_billing_address.sql:58`, text sha256 `deb6f2a254b48882` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 76f65aa0c473)
 
 ## 2026-11-21 — #2151: Mason owner-accepted 1 Sol finding(s) at `1be1755e1188`
 

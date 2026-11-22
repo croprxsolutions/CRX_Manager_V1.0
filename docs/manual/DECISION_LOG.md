@@ -74,6 +74,7 @@
 ## 2026-11-22 — PR #2244 (KI-197): stale-screen PO cost check covers cost and product only (accepted risk)
 
 **Decision (Mason, relayed from his conversation with the bugs-triage session, 2026-11-22: "go with B"):** a purchase-order cost correction is refused when the line's cost or product changed after the screen loaded it. A PO vendor change or a product unit change in that window is NOT checked: an accepted risk, since only admins correct costs. Raised after Sol round 3 reached the AGENTS.md mechanism cap.
+
 ## 2026-11-22 — A PO cost correction is judged against what arrived (KI-151)
 
 **Decision (Mason, relayed by the Lane E bug captain 2026-11-22):** "if cost is edited it needs edited if only receive 8 of 10 should show owing 2. if edited quantity to 8 and we receive 8 then we shouldn't show anymore coming". Cost corrections on a purchase order are judged against what actually arrived, not what was ordered.

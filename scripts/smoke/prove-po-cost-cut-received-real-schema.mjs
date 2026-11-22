@@ -107,11 +107,17 @@ try {
   assert.equal(refused(PO1, [{ id: LA, unit_cost_cents: 0 }], 'free goods', LA), 'ok|PO_COST_BELOW_BILLED|1000');
   // 5. Raising a cost is never refused.
   assert.equal(saved(PO1, [{ id: LA, unit_cost_cents: 1200 }], 'price up'), 'ok|1');
+  // 5a. One call that cuts the received line and raises the one still to come: the ordered total goes up, but what
+  //     arrived drops from $80 to $56 under the $80 bill. Refused (security review LOW 3).
+  assert.equal(refused(PO1, [{ id: LA, unit_cost_cents: 700 }, { id: LB, unit_cost_cents: 3000 }], 'vendor credit', LA), 'ok|PO_COST_BELOW_BILLED|1000');
   console.log('[received] cut below what arrived refused; within 5% allowed; unreceived line free; $0 refused; raise allowed');
 
   // 6. Nothing arrived yet: judged against the ordered total, as before (bill $100).
   assert.equal(refused(PO2, [{ id: LC, unit_cost_cents: 900 }], null, LC), 'ok|PO_COST_BELOW_BILLED|1000');
   assert.equal(saved(PO2, [{ id: LC, unit_cost_cents: 960 }]), 'ok|1');
+  // 6a. The 5% line to the cent: $95.30 total x 1.05 = $100.065 covers the $100 bill; $95.20 x 1.05 = $99.96 does not.
+  assert.equal(saved(PO2, [{ id: LC, unit_cost_cents: 953 }]), 'ok|1');
+  assert.equal(refused(PO2, [{ id: LC, unit_cost_cents: 952 }], null, LC), 'ok|PO_COST_BELOW_BILLED|1000');
   console.log('[early bill] nothing arrived: ordered total rule unchanged ($90 refused, $96 allowed)');
 
   // 7. Billed in full up front, half arrived: cutting the line still to come to $0 would leave the $200 bill over the
@@ -122,11 +128,11 @@ try {
   assert.equal(saved(PO3, [{ id: LD, unit_cost_cents: 999 }], 'typo'), 'ok|1');
   console.log('[billed up front] cut that leaves the bill over the whole order refused; 1-cent fix while goods still coming allowed');
 
-  // 7. A voided bill does not count.
+  // 9. A voided bill does not count.
   assert.equal(attempt(USERS.admin, `SET LOCAL session_replication_role = replica;
     UPDATE public.vendor_bills SET status = 'voided' WHERE purchase_order_id = '${PO1}'; SET LOCAL session_replication_role = origin;
     ${asUser(`r := ${setCosts(PO1, [{ id: LA, unit_cost_cents: 0 }], 'free goods')};`)} v := r->>'lines_changed';`), 'ok|1');
-  // 8. Non-admins still refused; a stale screen (KI-197) still refused.
+  // 10. Non-admins still refused; a stale screen (KI-197) still refused.
   assert.match(attempt(USERS.rep, `${refuse(`r := ${setCosts(PO1, [{ id: LA, unit_cost_cents: 960 }], 'x')};`)} v := t;`), /admin/i);
   assert.equal(attempt(USERS.admin, `${refuse(`r := ${setCosts(PO1, [{ id: LA, unit_cost_cents: 960, expected_unit_cost_cents: 999, expected_product_id: PROD }], 'x')};`)} v := split_part(t, ':', 1);`),
     'ok|PO_COST_CHANGED_SINCE_LOADED');

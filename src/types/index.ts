@@ -4261,6 +4261,9 @@ export interface JobChemical {
   // from our inventory and NOT billed (a $0 informational invoice line). It still
   // appears in the application_records legal product_data (flagged customer_supplied).
   customer_supplied: boolean;
+  // Mason, 2026-11-21: staff typed this price by hand; Create Invoice bills it over a sent quote and warns.
+  // Optional until migration 20270207130000 is live everywhere.
+  price_typed?: boolean;
   sort_order: number;
   // F06 (2026-09-03): which field the operator TYPED on this line — 'rate' (quantity was
   // derived as rate × acres) or 'qty' (the total was typed and the rate back-solved).

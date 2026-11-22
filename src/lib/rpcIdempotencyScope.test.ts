@@ -246,6 +246,10 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // exact inventory reversal. Both layers deliberately share the one public
   // cancel_return cache namespace so retries cannot create divergent receipts.
   _cancel_return_intent_impl_20260812: ['cancel_return'],
+  // The public save_job wrapper's private step (EXECUTE postgres only); its body has used the wrapper's 'save_job'
+  // operation since 20260904185900 so a retry through either finds the same receipt. 20270207130000 re-emits it
+  // with only job_chemicals.price_typed added, which put the unchanged literal back on disk.
+  _save_job_cost_step2_impl: ['save_job'],
   // Same shape: 20260812130145 renamed these bodies behind their public wrappers, and the split-payer
   // returns migration 20261021155000 re-emits them (postgres-only EXECUTE). Each shares its public
   // wrapper's cache namespace, as installed live.

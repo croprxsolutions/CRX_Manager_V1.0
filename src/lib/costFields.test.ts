@@ -202,7 +202,8 @@ describe('column lists match the schema registry', () => {
 // to judgement: a column the screens never write is safer without them. Unless it is another cost field.
 const COLUMN_CARVED = [...COST_TABLES, 'quote_versions'];
 const LOCK_STAMP = '20261022101000';
-const NO_ANON = ['quote_items', 'quote_versions'];
+// job_chemicals: live grants anon nothing on it (checked 2026-11-21), so its new columns must not open it to anon.
+const NO_ANON = ['quote_items', 'quote_versions', 'job_chemicals'];
 
 function requiredGrants(table: string): Array<[privilege: string, role: string]> {
   const out: Array<[string, string]> = [['SELECT', 'authenticated']];

@@ -5,10 +5,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-const { mockFrom, mockRpc, mockToast } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, keyResets } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockRpc: vi.fn().mockImplementation(() => Promise.resolve({ data: null, error: null })),
   mockToast: vi.fn(),
+  keyResets: new Map<string, number>(),
 }));
 
 interface ChainResult {
@@ -115,7 +116,13 @@ vi.mock('../components/ui/Toast', () => ({
 }));
 
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn() }),
+  // Each reset mints a new key per operation, so a test can see whether a key was retired.
+  useIdempotencyKey: (op: string) => ({
+    getKey: () => `test-idem-key-${op}-${keyResets.get(op) ?? 0}`,
+    resetKey: () => { keyResets.set(op, (keyResets.get(op) ?? 0) + 1); },
+    getKeyFor: (scope: string) => `test-idem-key-${op}-${scope}`,
+    resetKeyFor: () => {},
+  }),
 }));
 
 vi.mock('../lib/statementPdf', () => ({
@@ -561,5 +568,47 @@ describe('MonthEndClose', () => {
     const before = summaryCalls;
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/figures changed since you reviewed them/)));
     await waitFor(() => expect(summaryCalls).toBeGreaterThan(before));
+  });
+
+  it('closes again with a fresh key after a lost close reply and a reopen (Sol r5)', async () => {
+    let juneStatus: 'open' | 'closed' = 'open';
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'orders') return buildChain({ data: [], count: 0, error: null });
+      if (table === 'accounting_periods') {
+        return buildChain({ data: juneStatus === 'open' ? [] : [{
+          id: 'period-june', period_start: '2026-06-01', period_end: '2026-06-30',
+          status: juneStatus, closed_at: '2026-07-10T12:00:00Z',
+        }], error: null });
+      }
+      return buildChain({ data: [], error: null });
+    });
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'get_monthly_summary') return Promise.resolve({ data: cleanSummary(), error: null });
+      if (name === 'close_accounting_period') {
+        // The close commits, but its reply is lost.
+        juneStatus = 'closed';
+        return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+      }
+      if (name === 'reopen_accounting_period') {
+        juneStatus = 'open';
+        return Promise.resolve({ data: { success: true }, error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+    await openCloseModal();
+    const reopenBtn = await screen.findByRole('button', { name: /^Reopen$/i });
+    fireEvent.click(reopenBtn);
+    fireEvent.change(await screen.findByPlaceholderText(/Explain why this period needs to be reopened/i), { target: { value: 'fix a payment' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Reopen Period$/i }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Reopen$/i })).not.toBeInTheDocument());
+    const rollBtn = await screen.findByRole('button', { name: /Roll the Month/i });
+    await waitFor(() => expect(rollBtn).not.toBeDisabled());
+    fireEvent.click(rollBtn);
+    fireEvent.click(await screen.findByRole('button', { name: /^Close Period$/i }));
+    await waitFor(() => expect(mockRpc.mock.calls.filter(([n]) => n === 'close_accounting_period')).toHaveLength(2));
+    const [first, second] = mockRpc.mock.calls
+      .filter(([n]) => n === 'close_accounting_period')
+      .map(([, args]) => (args as { p_idempotency_key: string }).p_idempotency_key);
+    expect(second).not.toBe(first);
   });
 });

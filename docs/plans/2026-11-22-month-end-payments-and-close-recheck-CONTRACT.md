@@ -170,3 +170,14 @@ passes before the apply; split not needed (memory rule exception for already-liv
 - **Decision (Mason, 2026-11-22, option A):** the re-check catches edits made while the admin reviews; an edit saved
   in the same instant as the Close click shows on the screen, not on the saved receipt, the same as an edit after the
   close. The prepay lock is removed (no deadlock); no writer is changed. DECISION_LOG 2026-11-22.
+
+## Sol round 5 (2026-11-22) and how each settled
+
+- HIGH (new mechanism, the close retry key): a close whose reply was lost kept its key; after a reopen, a second close
+  in the same tab replayed the old receipt and said "closed" while the month stayed open. Fixed: the screen retires
+  the close key whenever it sees the month closed (`MonthEndClose.tsx`), test "closes again with a fresh key after a
+  lost close reply and a reopen" (fails without the fix). Bug captain approved the fix.
+- MED rollback record: now drops the payment-date constraint and ships with a revert of this screen. Fixed.
+- MED legacy cents/NaN, untyped prepay rows, same-transaction checks, rush checklist; LOW e2e keys, number precision:
+  same as rounds 2-3 (legacy `payments` has 0 rows live; 0 untyped prepay rows; rush orders are screen-only;
+  e2e follow-up listed).

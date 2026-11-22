@@ -212,15 +212,17 @@ export default function MonthEndClose() {
   // A9 (Codex P2): each selected period is a distinct close intent. Reset the close
   // idempotency key whenever the period changes, so a lost response after a successful
   // server-side close can't replay that prior result onto a different month.
-  useEffect(() => {
-    closePeriodIdem.resetKey();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current.start, current.end]);
-
   const currentPeriodStatus = periods.find(
     (p) => p.period_start === current.start && p.period_end === current.end,
   );
   const isClosed = currentPeriodStatus?.status === 'closed';
+
+  // Seeing the month closed settles any close whose reply was lost, so its key retires too:
+  // otherwise a close after a reopen would replay the old receipt while the month stays open.
+  useEffect(() => {
+    closePeriodIdem.resetKey();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current.start, current.end, isClosed]);
 
   // Checklist items
   const checklist = summary

@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — 3 more Sol rounds approved for #1989 (to round 13)
+
+**Decision (Mason, in chat, 2026-11-22: "i approve up to 3x more rounds").** Sol rounds 8 and 9 on #1989 each found HIGHs about stored values that are not real stock (a year-300000 PO date; NaN or infinite quantities and dates). Round 9's fix closes that class in one place: the allocator and its inputs ignore any non-finite quantity or date. This entry approves up to 3 more Sol rounds on #1989 beyond the earlier 3, so up to round 13; it waives no finding. If the same mechanism returns a BLOCKER or HIGH again, stop and put the business trade-off to Mason.
+
 ## 2026-11-22 — Up to 3 Sol rounds approved for #1989 (booking-reservations redesign)
 
 **Decision (Mason, in chat, 2026-11-22: "Yes, approve Sol", then "approve up to 3 more sols").** #1989 was rebuilt from scratch to the 2026-11-21 redesign (the booking line is the reservation; contract `docs/plans/2026-11-21-booking-reservations-CONTRACT.md`), so it needs a fresh Sol review past the round-5 cap. This entry approves up to 3 more Sol rounds on #1989; it waives no finding.

@@ -65,13 +65,17 @@ BEGIN
   FOR i IN 1..n LOOP
     sd[i] := (p_supply->(i - 1)->>'d')::date;
     sq[i] := GREATEST(COALESCE((p_supply->(i - 1)->>'q')::numeric, 0), 0);
+    -- Not real stock: a NaN or infinite quantity (NaN sorts above Infinity), or a supply dated +/- infinity.
+    IF sq[i] >= 'Infinity'::numeric OR NOT COALESCE(isfinite(sd[i]), true) THEN sq[i] := 0; END IF;
     ss[i] := COALESCE((p_supply->(i - 1)->>'shelf')::boolean, false);
   END LOOP;
   FOR i IN 0..COALESCE(jsonb_array_length(p_demand), 0) - 1 LOOP
     dem := p_demand->i;
     need := (dem->>'d')::date; rnk := (dem->>'r')::int;
     rem := GREATEST(COALESCE((dem->>'q')::numeric, 0), 0); ontime := 0; late := 0; aw := '[]'::jsonb;
-    IF rnk = 1 THEN
+    IF rem >= 'Infinity'::numeric THEN
+      NULL;  -- a NaN or infinite need takes no supply, so it cannot drain cover from the needs after it
+    ELSIF rnk = 1 THEN
       -- Shelf-only holds take the shelf and nothing else.
       FOR j IN 1..n LOOP
         EXIT WHEN rem <= 0;
@@ -285,7 +289,9 @@ BEGIN
   ),
   onhand AS (
     SELECT i.product_id, SUM(COALESCE(i.quantity_available, 0)) AS qty
-      FROM inventory i WHERE i.location = 'Main Warehouse' GROUP BY i.product_id
+      FROM inventory i WHERE i.location = 'Main Warehouse'
+       AND abs(COALESCE(i.quantity_available, 0)) < 'Infinity'::numeric  -- not real stock: NaN or +/- infinity
+     GROUP BY i.product_id
   ),
   -- Live holds. An expired hold reserves nothing (as in the inventory position, 20261204100000).
   -- 'manual': committed, today. 'ignored': a crop-program hold whose booking is counted and has a line of the
@@ -323,6 +329,7 @@ BEGIN
      WHERE p.status IN ('draft', 'submitted', 'partially_received') AND poi.product_id IS NOT NULL
        AND poi.quantity_ordered - COALESCE(poi.quantity_received, 0) > 0
        AND poi.quantity_ordered - COALESCE(poi.quantity_received, 0) < 'Infinity'::numeric  -- (also excludes NaN)
+       AND (p.expected_delivery_date IS NULL OR isfinite(p.expected_delivery_date))  -- +/- infinity never arrives
   ),
   -- Every demand row, in stock units. A counted booking line (after draws) is its own reservation.
   dem AS (
@@ -631,7 +638,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM 'f0ff65780082f77cc3ef94cde1bf195b' THEN
+     IS DISTINCT FROM '14fdef01c579727fc116301a8a0efc4d' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

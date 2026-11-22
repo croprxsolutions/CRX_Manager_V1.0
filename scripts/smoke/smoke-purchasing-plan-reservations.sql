@@ -430,19 +430,41 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
-  -- C21: an open PO dated in year 300000 (a valid date, past the timestamp range) and one whose remaining quantity
-  -- is NaN must not break the plan or count as supply: product 1 still reads, and its months and buy are unchanged.
-  v_x := pg_temp.prod(get_purchasing_plan(12), v_p[1]);
-  PERFORM pg_temp.po(v_p[1], v_admin, 'SMKRS-C21A-' || v_suffix, 50, 0);
-  UPDATE purchase_orders SET expected_delivery_date = '300000-01-01' WHERE po_number = 'SMKRS-C21A-' || v_suffix;
-  PERFORM pg_temp.po(v_p[1], v_admin, 'SMKRS-C21B-' || v_suffix, 50, 5);
+  -- C21: values PostgreSQL stores but that are not real stock never count as cover. Product 7 has 10 to buy (C7).
+  -- Added: a NaN shelf balance, open POs dated infinity and -infinity, and a PO line whose remaining quantity is NaN.
+  -- Coverage, buying and months are unchanged.
+  v_x := pg_temp.prod(get_purchasing_plan(12), v_p[7]);
+  PERFORM pg_temp.shelf(v_p[7], 'NaN');
+  PERFORM pg_temp.po(v_p[7], v_admin, 'SMKRS-C21B-' || v_suffix, 10, 0);
+  UPDATE purchase_orders SET expected_delivery_date = 'infinity' WHERE po_number = 'SMKRS-C21B-' || v_suffix;
+  PERFORM pg_temp.po(v_p[7], v_admin, 'SMKRS-C21C-' || v_suffix, 10, 0);
+  UPDATE purchase_orders SET expected_delivery_date = '-infinity' WHERE po_number = 'SMKRS-C21C-' || v_suffix;
+  PERFORM pg_temp.po(v_p[7], v_admin, 'SMKRS-C21D-' || v_suffix, 10, 2);
   UPDATE purchase_order_items SET quantity_ordered = 'NaN'
-   WHERE purchase_order_id = (SELECT id FROM purchase_orders WHERE po_number = 'SMKRS-C21B-' || v_suffix);
+   WHERE purchase_order_id = (SELECT id FROM purchase_orders WHERE po_number = 'SMKRS-C21D-' || v_suffix);
   v_plan2 := get_purchasing_plan(12);
-  IF pg_temp.prod(v_plan2, v_p[1]) IS NULL
-     OR pg_temp.prod(v_plan2, v_p[1])->'months' IS DISTINCT FROM v_x->'months'
-     OR pg_temp.prod(v_plan2, v_p[1])->>'suggested' IS DISTINCT FROM v_x->>'suggested' THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (C21 far-future and NaN PO lines) % %', v_x, pg_temp.prod(v_plan2, v_p[1]);
+  IF pg_temp.prod(v_plan2, v_p[7]) IS NULL
+     OR pg_temp.prod(v_plan2, v_p[7])->'coverage' IS DISTINCT FROM v_x->'coverage'
+     OR pg_temp.prod(v_plan2, v_p[7])->'suggestions' IS DISTINCT FROM v_x->'suggestions'
+     OR pg_temp.prod(v_plan2, v_p[7])->'months' IS DISTINCT FROM v_x->'months'
+     OR (pg_temp.prod(v_plan2, v_p[7])->>'suggested')::numeric <> 10 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C21 non-finite stock, PO dates and PO quantities are not cover) % %', v_x, pg_temp.prod(v_plan2, v_p[7]);
+  END IF;
+  -- A PO dated in year 300000 is a real date past the timestamp range: the plan still reads (no crash), the PO is
+  -- late cover like any later PO (so nothing to buy, flagged), and the monthly rollup is unchanged.
+  PERFORM pg_temp.po(v_p[7], v_admin, 'SMKRS-C21A-' || v_suffix, 10, 0);
+  UPDATE purchase_orders SET expected_delivery_date = '300000-01-01' WHERE po_number = 'SMKRS-C21A-' || v_suffix;
+  v_plan2 := get_purchasing_plan(12);
+  IF pg_temp.prod(v_plan2, v_p[7]) IS NULL OR (pg_temp.prod(v_plan2, v_p[7])->>'suggested')::numeric <> 0
+     OR NOT (pg_temp.prod(v_plan2, v_p[7])->>'has_late_cover')::boolean
+     OR pg_temp.prod(v_plan2, v_p[7])->'months' IS DISTINCT FROM v_x->'months' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C21 a PO dated year 300000) %', pg_temp.prod(v_plan2, v_p[7]);
+  END IF;
+  -- The allocator itself: a NaN or infinite supply is no cover, and a NaN need takes nothing from the next one.
+  v_x := _purchasing_allocate('[{"d":null,"q":"NaN","shelf":true},{"d":null,"q":"Infinity","shelf":false},{"d":null,"q":5,"shelf":false}]',
+                              '[{"r":3,"d":"2030-01-01","q":"NaN"},{"r":3,"d":"2030-01-01","q":12}]');
+  IF (v_x->1->>'late')::numeric <> 5 OR (v_x->1->>'nc')::numeric <> 7 OR (v_x->1->>'on_time')::numeric <> 0 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C21 the allocator skips non-finite values) %', v_x;
   END IF;
   v_n := v_n + 1;
 

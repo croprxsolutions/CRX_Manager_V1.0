@@ -56,6 +56,12 @@ when there is no sent quote for it. Field application invoices are Mason's own w
   (computed from the written lines).
 - Who may act: unchanged (admin, sales_rep; actor bound to auth.uid()). Screen sends only the job id. Grants, owner,
   SECURITY DEFINER, `search_path = public, pg_temp`, idempotency key handling unchanged; preflight pins the live body md5.
+- Automatic record changes (plan-contract, #2153): (1) Create Invoice prices an untyped chemical line from the paying
+  grower's sent quote instead of the job line's price; the job itself is not changed, only the new invoice's lines,
+  header and shares (Mason, 2026-11-21, rules 1-4). (2) A job save that omits `price_typed` (an older open screen)
+  keeps an existing mark on the line with the same product, price and position instead of clearing it; it never sets a
+  new mark (Luna rounds 1-2; keeps rule 2's typed price from silently turning into a quote price). Nothing else
+  changes, moves or cancels a record automatically.
 
 ## State and failure
 

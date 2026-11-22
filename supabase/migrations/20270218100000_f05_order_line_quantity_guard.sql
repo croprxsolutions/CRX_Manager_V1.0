@@ -27,6 +27,13 @@ BEGIN
      OR to_regprocedure('public._order_line_within_deliveries()') IS NOT NULL THEN
     RAISE EXCEPTION 'F05_PREFLIGHT: already applied';
   END IF;
+  -- Sol r4: a NaN counter would make every comparison below skip the check; refuse until it is fixed by hand.
+  SELECT count(*), string_agg(oi.id::text, ', ' ORDER BY oi.id) INTO v_open_over, v_ids
+    FROM public.order_items oi
+   WHERE oi.quantity_delivered = 'NaN'::numeric OR oi.total_units_needed = 'NaN'::numeric;
+  IF v_open_over > 0 THEN
+    RAISE EXCEPTION 'F05_PREFLIGHT: % order line(s) have a non-numeric (NaN) ordered or delivered quantity: %. Fix them by hand first.', v_open_over, v_ids;
+  END IF;
   IF to_regprocedure('public._delivery_line_matches_order_line()') IS NULL THEN
     RAISE EXCEPTION 'F05_PREFLIGHT: #1940 (_delivery_line_matches_order_line) must land first';
   END IF;
@@ -234,9 +241,8 @@ BEGIN
     -- Drivers see this: no other load's number or quantity (they may not be allowed to read that load).
     -- No order-wide numbers either (Sol r3): a driver may see only their own load.
     -- Always "call the office" (Luna r10): never suggest recording less than was actually delivered.
-    RAISE EXCEPTION 'DELIVERY_EXCEEDS_ORDER: % — this would deliver more than was ordered%. Call the office before completing this delivery.',
-      COALESCE(NEW.product_name, 'this order line'),
-      CASE WHEN v_open > 0 THEN ' while another delivery for this order is still open' ELSE '' END
+    RAISE EXCEPTION 'DELIVERY_EXCEEDS_ORDER: % — this would deliver more than was ordered. Call the office before completing this delivery.',
+      COALESCE(NEW.product_name, 'this order line')
       USING ERRCODE = 'check_violation';
   END IF;
   RAISE EXCEPTION 'ORDER_LINE_BELOW_DELIVERIES: % cannot go below % (delivered %, on open deliveries %: %). %',

@@ -4,14 +4,9 @@ Read at `origin/staging` `9a1c5b2d9`. Source: staging audit 2026-11-21 (tracker 
 
 ## Facts (with source)
 
-- Staging, ORD-2026-0017: line ordered 2; DEL-00014 shipped 1; DEL-00015 (New Delivery screen) and DEL-00016 (Create Follow-up Delivery) each scheduled the last unit; both completed. Line now reads 2 ordered / 3 delivered; stock moved for the extra unit; a $0 draft was made.
-- Staging, ORD-2026-0014: line cut from 10 to 6 while DEL-00009 still had 10 scheduled; nothing refused or adjusted it.
-- `create_delivery_with_items` checks `quantity_remaining − other scheduled/in_progress lines` under `orders` + `order_items` locks (`20260518010000…:152-186`). It never reads `delivery_remainders`.
-- `create_followup_delivery` (`20261204100000…:3221`) copies `delivery_remainders.quantity_remaining` into a new delivery with no check of what is already scheduled; it locks only the original delivery and the remainders. So the two paths never see each other.
-- `edit_delivery` checks remaining minus other open lines (`20260611211058…:1554-1569`).
-- Completion core (`20270203120000…:523-525`) adds to `quantity_delivered` and clamps `quantity_remaining` at 0 with `GREATEST`; nothing checks delivered ≤ ordered.
-- `update_order_items` core (`20260617123503…:203-229`) sets the new ordered quantity without checking delivered or scheduled quantities.
-- No trigger or constraint enforces delivered ≤ ordered (`20260209200000…:24-25` only enforces ≥ 0).
+- Staging, ORD-2026-0017: an order line ended 2 ordered / 3 delivered; stock moved for the extra unit.
+- Staging, ORD-2026-0014: an order line was cut below what was still scheduled; nothing refused it.
+- Root cause: the "how much is left" check was not shared by every path that schedules, edits, completes or cuts an order line, and nothing in the database enforced delivered ≤ ordered. The exact paths and source lines stay in the private audit notes until the fix is live (public write-up rule).
 - Order lines and delivery lines are in the same unit (`_delivery_line_matches_order_line`, `20270126110000…:100`), which already locks the order line `FOR UPDATE` on every delivery-line insert or re-link.
 - Completion screens already cap the actual quantity at the scheduled quantity (`DeliveryDetail.tsx:664`, `FieldStop.tsx:323,708`), so a driver can only over-deliver when the schedule itself is already over the order.
 - "Remaining After" on a completed delivery subtracts this delivery twice (`DeliveryDetail.tsx:2636`: `ordered − prevDelivered − actual`, where `prevDelivered` already includes it).
@@ -114,6 +109,15 @@ The design above was revised; the migration implements the revision.
   - LOW contract said the scan runs before the locks — corrected.
 - **Luna r10 (after Mason's new approach):** HIGH (no-other-load refusal told the driver to record no more than ordered, which could understate a real delivery) — fixed: every completion refusal now says only "Call the office before completing this delivery." MED (a return received after the apply can still strand a legacy over line) — accepted under Mason's 2026-11-22 "drop it": such a line stays blocked and the office fixes it by hand (F05b); the apply-time refusal covers every line already stuck then.
 - **Luna r11 MED accepted (a return created during the apply, after the scan):** the same case as a return created after the apply (Luna r10 MED, accepted under Mason's "drop it"): the line stays blocked and the office fixes it by hand (F05b). Locking `returns` for the apply would only narrow a seconds-long window the accepted case already covers.
+- **Sol r4 (round 3 on this branch):**
+  - HIGH #1 (a return logged after the apply strands a legacy over line) — Mason's accepted case ("drop it", 2026-11-22): the office fixes it by hand (F05b). Goes to Mason as a Sol skip.
+  - MED preflight blocks on a return for an unrelated line — accepted: stricter than `cancel_delivery` (order-wide, not per load), so it can only ask for more hand cleanup, never strand a line.
+  - MED apply vs a live void deadlock — accepted: the apply has a 5s lock timeout, fails cleanly and is retried.
+  - MED restore vs Cancel Remaining — accepted as before (service-role only, no screen; Postgres cancels one).
+  - MED NaN delivered counter skips the check — fixed: the preflight refuses while any order line has a NaN ordered or delivered quantity.
+  - LOW driver learns another load is open — fixed: the completion refusal now names only the product.
+  - LOW retry probe, LOW race timing — accepted as in Sol r3.
+  - LOW contract published the unpatched paths — fixed: the Facts section now states the outcome and root cause only.
 - **Luna r8:** MED (other loads scanned before the table lock; counts only) — fixed: the lock comes first and the preflight lists the line ids (proof asserts it). LOW (changelog said every refusal names other loads) — fixed.
 - **Luna r9 MED refuted (direct delivery-line UPDATE vs completion deadlock):** not a new lock order. A row UPDATE locks the line before any BEFORE trigger runs, and the existing `enforce_delivery_items_parent_lock` (BEFORE INSERT OR UPDATE OR DELETE, `20260530121534…:87`) and `a2_delivery_line_matches_order_line` already lock the delivery header after that; zz adds the same order. No app path updates a delivery line's quantity or link in place (signed-in users have no UPDATE on `delivery_items`; `edit_delivery` deletes and re-inserts; the only in-place UPDATE is a one-shot data migration). If it ever happens Postgres cancels one and nothing is half-saved (Mason accepted, DECISION_LOG 2026-11-18 #1940).
 - **Luna r9 LOW refuted (own delivery listed as "another"):** a delivery can hold only one line per order line — `a2_delivery_line_matches_order_line` refuses `DELIVERY_LINE_DUPLICATE` before zz runs (`20270126110000…:146-150`), backed by the unique index `delivery_items_one_line_per_order_line` (`:183`) — and the check already leaves out the line being written, so the delivery being edited never appears in the list.

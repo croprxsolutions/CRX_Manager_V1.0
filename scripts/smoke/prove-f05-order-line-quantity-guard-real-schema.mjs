@@ -375,7 +375,7 @@ async function afterCases() {
   // 3. Legacy double schedule (two open loads of 1 for 1 ordered): neither completes while the other is open, the whole
   // call rolls back (no stock, line or draft change); once the office cancels the extra load, the other completes.
   refusedProbe(`${AS_ADMIN} ${completeLegacy(DLA, DLA1, 1, 'f05-3a')}`,
-    /DELIVERY_EXCEEDS_ORDER: \[PROVER\] F05 Product — this would deliver more than was ordered while another delivery for this order is still open\. Call the office before completing this delivery\.$/m);
+    /DELIVERY_EXCEEDS_ORDER: \[PROVER\] F05 Product — this would deliver more than was ordered\. Call the office before completing this delivery\.$/m);
   assert.equal(scalar(`SELECT quantity_available || '/' || quantity_prebooked FROM public.inventory WHERE id = '${INV}';`).replace(/\.0+/g, ''), '50/13');
   assert.equal(scalar(`SELECT quantity_delivered || '/' || (SELECT count(*) FROM public.invoices WHERE order_id = '${OL}') || '/' || (SELECT status FROM public.deliveries WHERE id = '${DLA}') FROM public.order_items WHERE id = '${LL}';`).replace(/\.0+/g, ''), '0/0/in_progress');
   assert.equal(Number(okProbe(`${AS_ADMIN}

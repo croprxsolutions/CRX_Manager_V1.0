@@ -290,6 +290,17 @@ describe('QuickDeliveryModal', () => {
     expect(await screen.findByText('Product 1004')).toBeInTheDocument();
   });
 
+  // KI-203: a product with no packaging size is saved in its stock unit, so the line shows that unit, not a dash.
+  it('shows the stock unit for a product with no packaging size', async () => {
+    productReply.rows = [{ ...product(1), inventory_unit: 'Gal' }];
+    await renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /add product/i }));
+    fireEvent.click(await screen.findByText('Product 0001'));
+    const row = (await screen.findAllByText('Product 0001')).map((el) => el.closest('tr')).find(Boolean)!;
+    expect(row).toHaveTextContent('Gal');
+    expect(row).not.toHaveTextContent('—');
+  });
+
   it('a failed product reload clears the earlier list and blocks adding items', async () => {
     productReply.rows = [product(1)];
     const { rerender } = await renderModal();

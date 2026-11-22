@@ -331,7 +331,8 @@ export default function QuickDeliveryModal({
           product_id: product.id,
           product_name: product.product_name,
           quantity: 1,
-          unit_size: product.unit_size || '',
+          // KI-203: with no packaging size the server saves the line in the stock unit; show that, not a dash.
+          unit_size: product.unit_size || product.inventory_unit || '',
           price_cents: getTierPrice(product),
         },
       ]);

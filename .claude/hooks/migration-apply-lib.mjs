@@ -39,6 +39,7 @@ import { sessionProofDirs, sessionCheckoutRoots, resolveSessionWorktree } from "
 import { checkMigrationOrdering } from "./migration-ordering-lib.mjs";
 import { checkPendingMigrations } from "./migration-pending-lib.mjs";
 import { evaluateLandingGate } from "./migration-landing-gate-lib.mjs";
+import { mcpPrerequisiteRefusal } from "./migration-prerequisite-lib.mjs";
 
 export const REQUIRED_CODEX_MODEL = "gpt-6.2-sol";
 export const REQUIRED_CODEX_EFFORT = "high";
@@ -388,6 +389,10 @@ export function evaluateMigrationApply({
   if (!migQuery.trim()) {
     return block("MIGRATION APPLY GUARD: transmitted SQL is missing or empty. Refusing an unbound migration apply.");
   }
+  // A migration with a live prerequisite (#2193) goes through the script door,
+  // which reads the live count right before it transmits; this door cannot.
+  const prerequisite = ownerApprovalDoor ? null : mcpPrerequisiteRefusal(migName);
+  if (prerequisite) return block(prerequisite);
   const currentHash = createHash("sha256").update(migQuery).digest("hex");
   const safeName = migName.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 80) || "unknown";
 

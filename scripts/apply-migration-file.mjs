@@ -71,6 +71,7 @@ import {
 } from "../.claude/hooks/migration-apply-lib.mjs";
 import { assertWrappable } from "../.claude/hooks/migration-wrappability-lib.mjs";
 import { checkLiveMigrationOrdering } from "../.claude/hooks/migration-ordering-lib.mjs";
+import { checkLivePrerequisite } from "../.claude/hooks/migration-prerequisite-lib.mjs";
 import { assertApprovalStillValid, ownerOnceGuardSql, recordUsedApproval } from "../.claude/hooks/owner-approval-lib.mjs";
 import { CREDENTIAL_TARGET, readCredentialToken } from "./lib/supabase-credential.mjs";
 import { withRestampHint } from "./lib/migration-restamp-hint.mjs";
@@ -472,6 +473,16 @@ if (!token) {
   const live = await checkLiveMigrationOrdering({ fetchImpl: fetch, projectId, token, name: migName, sql });
   if (!live.ok) die(2, withRestampHint(live.reason));
   console.log(`Live ordering re-check passed (${live.count} applied rows; newest stamp ${live.newestApplied || "n/a"}).`);
+}
+
+// ── LIVE PREREQUISITE (#2193) ──────────────────────────────────────────────
+// The modes-of-action load must follow the live EPA batch fill: count how many of
+// its list rows match an active ingredient now, and refuse below the threshold.
+// Fails closed. Every other migration has no prerequisite and passes untouched.
+{
+  const pre = await checkLivePrerequisite({ fetchImpl: fetch, projectId, token, name: migName, sql });
+  if (!pre.ok) die(2, pre.reason);
+  if (!pre.skipped) console.log(`Live prerequisite passed: ${pre.matched} of ${pre.listed} list rows match an active ingredient.`);
 }
 
 // ── LEDGER PARITY ──────────────────────────────────────────────────────────

@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — #2193: hard block on the modes-of-action load until the live EPA batch fill has run
+
+**Decision (Mason, 2026-11-22, relayed by the bug captain: "go with a").** This replaces the 2026-11-18 "no in-migration readiness check, release step only" rule for the live apply. The migration itself stays unchanged (already applied on staging). The live-apply tooling refuses `20270205150000_ingredient_modes_of_action_load` (any stamp) until at least **90 of its 123 list rows** match an active ingredient on live, by the load's own rule (CAS decides; a unique name counts when one side has no CAS), and shows the count when it refuses. The script door reads the live count right before it transmits and fails closed; the MCP door refuses this load outright. **Why 90:** live read 99 of 123 on 2026-11-22, after the 2026-11-21 EPA batch fill; before the fill the app had few ingredients; some list rows are salts or chemicals CRX does not stock, so 123 is not expected. Change the number only with Mason. Release step: `.claude/commands/ship.md` › Staging.
+
 ## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
 
 **Decision (Mason, in chat 2026-11-22, after Sol gate round 6 left 2 HIGH findings on the skip mechanism itself):** "then we will override SOL if we need to I don't want over complicated codes to type I want it to explicitly ask if I accept the risk and I say yes with reason and that's good enough". The skip request now asks plainly whether he accepts the risk of leaving the findings unfixed; `yes` and a reason is enough, and the reason is logged. Round 6's two findings (`.claude/hooks/sol-accept-lib.mjs:233`, `scripts/owner-accept-sol-finding.mjs:107`) are left unfixed as his business call: both concern how far a skip he gave can stretch, not money, stock, customer data or logins. This PR changes gate files, so the agent merge guard still requires a clean Sol; Mason or Taha merges it by hand.

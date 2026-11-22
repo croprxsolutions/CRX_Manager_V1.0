@@ -330,7 +330,8 @@ BEGIN
            s2.needed_by_date AS raw_date, s2.rem AS qty, s2.quote_id, NULL::uuid AS order_id, NULL::uuid AS job_id,
            s2.section_id, s2.confidence, (s2.rem < s2.rem1) AS estimated, false AS unit_problem,
            (SELECT eq.customer_id FROM eq WHERE eq.id = s2.quote_id) AS customer_id,
-           (s2.needed_by_date IS NOT NULL AND (SELECT today FROM prm) - 14 >= s2.needed_by_date) AS followup
+           (s2.needed_by_date IS NOT NULL AND (SELECT today FROM prm) - 14 >= s2.needed_by_date) AS followup,
+           s2.item_id AS src_id  -- the source row's id: the last tie-breaker wherever rows are listed
       FROM s2 WHERE s2.rem > 0
     UNION ALL
     -- Set-aside lines (unit does not match stock): Check units, in full; they reserve nothing.
@@ -339,7 +340,7 @@ BEGIN
            bla.needed_by_date, bla.qty, bla.quote_id, NULL::uuid, NULL::uuid,
            bla.section_id, bla.confidence, false, true,
            (SELECT eq.customer_id FROM eq WHERE eq.id = bla.quote_id),
-           (bla.needed_by_date IS NOT NULL AND (SELECT today FROM prm) - 14 >= bla.needed_by_date)
+           (bla.needed_by_date IS NOT NULL AND (SELECT today FROM prm) - 14 >= bla.needed_by_date), bla.item_id
       FROM bla WHERE bla.unit_problem AND bla.qty > 0
     UNION ALL
     -- Open orders: dated by the earliest scheduled, undelivered delivery of the line only when the
@@ -351,25 +352,25 @@ BEGIN
                         AND d.status IN ('scheduled', 'in_progress') AND d.scheduled_date IS NOT NULL
                      HAVING SUM(COALESCE(di.quantity, 0)) >= oi.quantity_remaining),
                     (SELECT today FROM prm)),
-           oi.quantity_remaining, o.quote_id, o.id, NULL::uuid, NULL::uuid, NULL::text, false, false, o.customer_id, false
+           oi.quantity_remaining, o.quote_id, o.id, NULL::uuid, NULL::uuid, NULL::text, false, false, o.customer_id, false, oi.id
       FROM order_items oi JOIN orders o ON o.id = oi.order_id
      WHERE o.deleted_at IS NULL AND o.status IN ('confirmed', 'partially_fulfilled')
        AND oi.product_id IS NOT NULL AND oi.quantity_remaining > 0
     UNION ALL
     -- Active jobs (a line that cannot be converted goes to Check units and reserves nothing).
     SELECT x.product_id, 'job', 'committed', x.job_date, x.qty, x.quote_id, NULL::uuid, x.job_id,
-           x.quote_section_id, NULL::text, false, x.unit_problem, x.customer_id, false
+           x.quote_section_id, NULL::text, false, x.unit_problem, x.customer_id, false, x.line_id
       FROM jcl x WHERE x.qty > 0
     UNION ALL
     -- Manual holds: committed today. Shelf-only holds: shelf stock only (class shelf_hold), never bought for.
     SELECT h.product_id, 'hold', CASE h.hold_use WHEN 'manual' THEN 'committed' ELSE 'shelf_hold' END,
            (SELECT today FROM prm), h.quantity, NULL::uuid, NULL::uuid, NULL::uuid,
-           NULL::uuid, NULL::text, false, false, h.customer_id, false
+           NULL::uuid, NULL::text, false, false, h.customer_id, false, h.hold_id
       FROM hraw h WHERE h.hold_use IN ('manual', 'shelf')
     UNION ALL
     -- Negative on hand: a committed stock deficit today (the shelf counts as 0).
     SELECT oh.product_id, 'deficit', 'committed', (SELECT today FROM prm), -oh.qty, NULL::uuid, NULL::uuid, NULL::uuid,
-           NULL::uuid, NULL::text, false, false, NULL::uuid, false
+           NULL::uuid, NULL::text, false, false, NULL::uuid, false, NULL::uuid
       FROM onhand oh WHERE oh.qty < 0
   ),
   demb AS (
@@ -486,7 +487,7 @@ BEGIN
                                substr(we.end_md, 1, 2)::int, substr(we.end_md, 4, 2)::int)
                 ELSE s2.needed_by_date END AS window_end,
            jsonb_agg(jsonb_build_object('product_id', s2.product_id, 'product_name', p.product_name, 'quantity', s2.rem)
-                     ORDER BY p.product_name) AS products
+                     ORDER BY p.product_name, s2.product_id, s2.item_id) AS products
       FROM s2
       JOIN products p ON p.id = s2.product_id
       LEFT JOIN win_end we ON we.timing = s2.timing
@@ -503,7 +504,7 @@ BEGIN
       SELECT jsonb_agg(jsonb_build_object(
                'quote_id', demb.quote_id, 'quote_number', eq.quote_number, 'customer_name', c.farm_name,
                'section_name', qs.section_name, 'product_id', demb.product_id, 'product_name', p.product_name,
-               'quantity', demb.qty) ORDER BY c.farm_name, eq.quote_number, qs.section_name, p.product_name, demb.qty)
+               'quantity', demb.qty) ORDER BY c.farm_name, eq.quote_number, qs.section_name, p.product_name, demb.qty, demb.src_id)
         FROM demb
         JOIN eq ON eq.id = demb.quote_id
         LEFT JOIN customers c ON c.id = eq.customer_id
@@ -514,7 +515,7 @@ BEGIN
       SELECT jsonb_agg(jsonb_build_object(
                'quote_id', dt.quote_id, 'quote_number', eq.quote_number, 'customer_name', c.farm_name,
                'product_id', dt.product_id, 'product_name', p.product_name, 'quantity', dt.total - COALESCE(ap1.applied, 0))
-               ORDER BY eq.quote_number, p.product_name)
+               ORDER BY eq.quote_number, p.product_name, dt.quote_id, dt.product_id)
         FROM dt JOIN eq ON eq.id = dt.quote_id
         -- Every draw not taken off its own job's section: an order's, and a job's beyond its section (Sol on #1989).
         LEFT JOIN ap1 ON ap1.quote_id = dt.quote_id AND ap1.product_id = dt.product_id
@@ -526,7 +527,7 @@ BEGIN
                'quote_id', rev.quote_id, 'quote_number', eq.quote_number, 'customer_name', c.farm_name,
                'section_id', rev.section_id, 'section_name', qs.section_name, 'timing', rev.timing,
                'confidence', rev.confidence, 'needed_by_date', rev.needed_by_date, 'window_end', rev.window_end,
-               'products', rev.products) ORDER BY rev.window_end, eq.quote_number, qs.section_name)
+               'products', rev.products) ORDER BY rev.window_end, eq.quote_number, qs.section_name, rev.quote_id, rev.section_id)
         FROM rev JOIN eq ON eq.id = rev.quote_id
         LEFT JOIN customers c ON c.id = eq.customer_id
         LEFT JOIN quote_sections qs ON qs.id = rev.section_id
@@ -597,7 +598,7 @@ BEGIN
                           'order_id', demb.order_id, 'order_number', o.order_number,
                           'job_id', demb.job_id, 'job_number', j.job_number,
                           'customer_name', c.farm_name, 'section_name', qs.section_name)
-                          ORDER BY demb.raw_date NULLS FIRST, demb.kind, c.farm_name, demb.qty, demb.quote_id, demb.order_id, demb.job_id, demb.section_id)
+                          ORDER BY demb.raw_date NULLS FIRST, demb.kind, c.farm_name, demb.qty, demb.quote_id, demb.order_id, demb.job_id, demb.section_id, demb.src_id)
                    FROM demb
                    LEFT JOIN quotes q ON q.id = demb.quote_id
                    LEFT JOIN orders o ON o.id = demb.order_id
@@ -628,7 +629,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '51f9717829dec71101ae6486c67124f6' THEN
+     IS DISTINCT FROM '399279025f1bc154837f7d2d849125b5' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

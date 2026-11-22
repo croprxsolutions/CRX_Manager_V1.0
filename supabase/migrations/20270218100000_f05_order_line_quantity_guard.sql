@@ -9,9 +9,15 @@
 -- The triggers only refuse; they never change a record. A write that does not grow the commitment (a reduction,
 -- cancel, void) is never checked, so an already-over legacy line can always be brought back within its order.
 
+-- Lock first (Luna r8): no write can slip in between the report scan below and the triggers. In completion's order
+-- (header, lines, order lines), so creating the triggers cannot deadlock with a live completion.
+SET LOCAL lock_timeout = '5s';
+LOCK TABLE public.deliveries, public.delivery_items, public.order_items IN SHARE ROW EXCLUSIVE MODE;
+
 DO $preflight$
 DECLARE
   v_open_over integer;
+  v_ids text;
 BEGIN
   IF to_regprocedure('public._order_line_committed(uuid, uuid, uuid)') IS NOT NULL
      OR to_regprocedure('public._order_line_open_loads(uuid, uuid, uuid)') IS NOT NULL
@@ -25,8 +31,8 @@ BEGIN
     RAISE EXCEPTION 'F05_PREFLIGHT: #1940 (_delivery_line_matches_order_line) must land first';
   END IF;
   -- Report (not block): open loads on lines already over their order. Each will be refused at completion until the
-  -- office cancels the extra load. Only a count here; the apply step lists the lines read-only before applying.
-  SELECT count(*) INTO v_open_over
+  -- office cancels the extra load. Listed by order line id for the F05b cleanup.
+  SELECT count(*), string_agg(oi.id::text, ', ' ORDER BY oi.id) INTO v_open_over, v_ids
     FROM public.order_items oi
    WHERE oi.quantity_delivered + (SELECT COALESCE(sum(di.quantity), 0) FROM public.delivery_items di
                                     JOIN public.deliveries d ON d.id = di.delivery_id
@@ -34,17 +40,13 @@ BEGIN
          > oi.total_units_needed
      AND EXISTS (SELECT 1 FROM public.delivery_items di JOIN public.deliveries d ON d.id = di.delivery_id
                   WHERE di.order_item_id = oi.id AND d.status IN ('scheduled', 'in_progress') AND d.deleted_at IS NULL);
-  RAISE NOTICE 'F05_PREFLIGHT: % order line(s) have open loads beyond what was ordered', v_open_over;
+  RAISE NOTICE 'F05_PREFLIGHT: % order line(s) have open loads beyond what was ordered: %', v_open_over, COALESCE(v_ids, 'none');
   -- Lines already delivered past their order (staging ORD-2026-0017): left as they are, listed for office cleanup (F05b).
-  SELECT count(*) INTO v_open_over FROM public.order_items oi WHERE oi.quantity_delivered > oi.total_units_needed;
-  RAISE NOTICE 'F05_PREFLIGHT: % order line(s) are already delivered beyond what was ordered', v_open_over;
+  SELECT count(*), string_agg(oi.id::text, ', ' ORDER BY oi.id) INTO v_open_over, v_ids
+    FROM public.order_items oi WHERE oi.quantity_delivered > oi.total_units_needed;
+  RAISE NOTICE 'F05_PREFLIGHT: % order line(s) are already delivered beyond what was ordered: %', v_open_over, COALESCE(v_ids, 'none');
 END
 $preflight$;
-
--- After the report scan, so the scan holds no write-blocking lock. In completion's order (header, lines, order lines),
--- so creating the triggers cannot deadlock with a live completion.
-SET LOCAL lock_timeout = '5s';
-LOCK TABLE public.deliveries, public.delivery_items, public.order_items IN SHARE ROW EXCLUSIVE MODE;
 
 -- What one order line has delivered plus on open loads, leaving out one delivery line and/or one whole delivery.
 -- VOLATILE: called right after the order line lock, it must read what a session it waited for just committed.

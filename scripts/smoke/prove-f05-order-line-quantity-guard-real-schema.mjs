@@ -339,6 +339,9 @@ async function afterCases() {
   stageText('candidate.sql', lf(CANDIDATE));
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
+  // Luna r8: the preflight lists the already-over lines by id (scanned under the table lock), for the F05b cleanup.
+  assert.match(first.output, new RegExp(`open loads beyond what was ordered: [^\\n]*${LL}`), first.output);
+  assert.match(first.output, /0 order line\(s\) are already delivered beyond what was ordered: none/, first.output);
   const again = apply('candidate.sql');
   assert.notEqual(again.status, 0, 'a second apply must refuse');
   assert.match(again.output, /F05_PREFLIGHT: already applied/, again.output);

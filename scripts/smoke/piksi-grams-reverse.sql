@@ -125,7 +125,7 @@ BEGIN
                                AND (SELECT o.status FROM public.orders o WHERE o.id = x.order_id) = r.status AND x.total_units_needed = r.qty)
      WHEN 'di' THEN EXISTS (SELECT 1 FROM public.delivery_items x WHERE x.id = r.id AND x.product_id = r.product_id
                                AND x.order_item_id = r.ref AND x.delivery_id = r.ref2 AND x.unit_size = 'g'
-                               AND (SELECT d.status FROM public.deliveries d WHERE d.id = x.delivery_id) = r.status AND x.quantity = r.qty)
+                               AND (SELECT d.status FROM public.deliveries d WHERE d.id = x.delivery_id AND NOT d.is_quick_delivery) = r.status AND x.quantity = r.qty)
      WHEN 'poi' THEN EXISTS (SELECT 1 FROM public.purchase_order_items x WHERE x.id = r.id AND x.product_id = r.product_id
                                AND x.purchase_order_id = r.ref AND x.unit_size = 'g'
                                AND (SELECT po.status FROM public.purchase_orders po WHERE po.id = x.purchase_order_id) = r.status AND x.quantity_ordered = r.qty

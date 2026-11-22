@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270214130000_po_vendor_link.sql (KI-144; contract
+ * Real-schema proof for 20270217130000_po_vendor_link.sql (KI-144; contract
  * docs/plans/2026-11-22-ki144-po-vendor-link-CONTRACT.md; Mason 2026-11-22: "Keep original name").
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, attempt, asUser, refuse, id, USERS, ROOT, NAME, docker, psql, scalar, claims } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270214130000_po_vendor_link.sql';
+const CANDIDATE = '20270217130000_po_vendor_link.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });

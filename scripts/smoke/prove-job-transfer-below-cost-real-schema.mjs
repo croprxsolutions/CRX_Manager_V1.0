@@ -412,6 +412,8 @@ const CASES = {
   feeMixedOverride: transfer(`jbc.feejob('${O}')`),
   // Sol round 3 MED: a rate written in words is not a quantity unit.
   perWordUnit: transfer(job('Gal per acre', 10, 5000)),
+  // Luna round 5: a job line with no saved cost books today's catalog cost ($30/Gal), never $0.
+  nullJobCost: transfer(job('Gal', 10, 5000, 'NULL')),
   // Sol round 2 #4: the editor's ordinary save keeps the lines, for an admin and a sales rep.
   resaveSmallAdmin: resave(job('fl oz', 3, 39, 23), ADMIN),
   resaveSmallRep: resave(job('fl oz', 3, 39, 23), REP),
@@ -513,6 +515,7 @@ async function main() {
     'two owners on a per-acre-priced field: no longer refused, each bills its lines');
   for (const k of ['feeMixed', 'feeMixedOverride']) after(k, 'A:150000:150000:70000:10.0000 Gal @5000=50000/c3000/product/manual,100.0000 acre @1000=100000/c40000/none/tier',
     'the spraying fee bills all 100 treated acres, with or without a per-acre price on the field');
+  after('nullJobCost', 'A:50000:50000:30000:10.0000 Gal @5000=50000/c3000/product/manual', 'a line with no saved job cost books the catalog cost');
   after('nearHundred', 'A:50000:50000:30000:10.0000 Gal @5000=50000/c3000/product/manual', 'a 99.99% split bills all $500.00 of its lines');
   for (const k of ['fullBelow', 'tenBelow', 'half64flozBelow', 'dottedBelow', 'spelledBelow']) {
     refusedProbe(CASES[k], /JOB_LINE_BELOW_COST: \[PROVER\] JBC chem is priced below its cost on this job\. Nothing was invoiced/);

@@ -6,7 +6,7 @@ DO $rev$
 BEGIN
   IF to_regprocedure('public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint, bigint)') IS NULL OR to_regprocedure('public._job_transfer_split_qty_20270207(numeric, numeric[])') IS NULL
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM 'c685e841177fd393addc61478a5599dd'
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint, bigint)')) IS DISTINCT FROM '83bf627f71685d3ff96b9352f48daaa1'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint, bigint)')) IS DISTINCT FROM '819d2c8b23140adcf7d8c2d0278ed1b2'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_split_qty_20270207(numeric, numeric[])')) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
     RAISE EXCEPTION 'JOB_TRANSFER_BELOW_COST_ROLLBACK_PREFLIGHT: the live bodies are not the ones 20270207125000 installed; nothing changed';
   END IF;

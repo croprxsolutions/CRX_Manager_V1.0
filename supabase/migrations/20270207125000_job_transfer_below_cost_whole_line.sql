@@ -105,8 +105,14 @@ BEGIN
   o_exact_cents := p_quantity * COALESCE(p_price_per_unit_cents, 0);
   -- Sol round 3: the line books the job's own saved cost (as before this change), per sold unit; only the below-cost
   -- check reads today's catalog cost, as the wall does.
-  o_exact_cost_cents := p_quantity * COALESCE(p_cost_per_unit_cents, 0);
-  o_cost_cents := round(o_exact_cost_cents / o_exact_qty)::bigint;
+  -- Luna round 5: a job line with no saved cost books today's catalog cost, never $0.
+  IF p_cost_per_unit_cents IS NULL THEN
+    o_exact_cost_cents := v_cost_cents * o_exact_qty;
+    o_cost_cents := v_cost_cents;
+  ELSE
+    o_exact_cost_cents := p_quantity * p_cost_per_unit_cents;
+    o_cost_cents := round(o_exact_cost_cents / o_exact_qty)::bigint;
+  END IF;
   -- Exact, before any rounding: the agreed amount must cover the cost of the whole quantity. Never states the cost
   -- (cost is admin-only, 2026-10-15). No override (Mason, 2026-11-21).
   IF o_exact_cents < v_cost_cents * o_exact_qty THEN
@@ -975,7 +981,7 @@ BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'c685e841177fd393addc61478a5599dd'
      OR v_price IS NULL OR v_split IS NULL
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '83bf627f71685d3ff96b9352f48daaa1'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '819d2c8b23140adcf7d8c2d0278ed1b2'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: a body is not the one this file installs';
   END IF;

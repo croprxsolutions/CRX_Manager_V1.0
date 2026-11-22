@@ -130,7 +130,7 @@ try {
       v := ${link(PO1)} || '|' || (SELECT vendor FROM public.purchase_orders WHERE id = '${PO1}');`),
   `ok|${VA}| ki144 ACME supply`, 'case/space-only edit after a rename keeps the link');
   // Re-spelt edit to another vendor's exact name moves the link even when the normalized text is the same (Sol round 1).
-  assert.equal(attempt(USERS.admin, `${RENAME_A} UPDATE public.vendors SET name = 'KI144 ACME SUPPLY' WHERE id = '${VB}';
+  assert.equal(attempt(USERS.admin, `${RENAME_A} SET LOCAL session_replication_role = replica; UPDATE public.vendors SET name = 'KI144 ACME SUPPLY' WHERE id = '${VB}'; SET LOCAL session_replication_role = origin;
       UPDATE public.purchase_orders SET vendor = 'KI144 ACME SUPPLY' WHERE id = '${PO2}'; v := ${link(PO2)};`), `ok|${VB}`,
   're-spelt edit naming another vendor moves the link');
   // A billed PO cannot be handed to another vendor while that bill is live; same vendor is fine; after a void it can.
@@ -143,11 +143,20 @@ try {
       SET LOCAL session_replication_role = replica; UPDATE public.vendor_bills SET status = 'voided' WHERE purchase_order_id = '${PO6}';
       SET LOCAL session_replication_role = origin;
       UPDATE public.purchase_orders SET vendor = 'KI144 Bolt Chem' WHERE id = '${PO6}'; v := ${link(PO6)};`), `ok|${VB}`);
-  assert.match(attempt(USERS.admin, `UPDATE public.purchase_orders SET vendor = 'KI144 Someone Else' WHERE id = '${PO9}'; v := 'NOT REFUSED';`),
+  assert.match(attempt(USERS.admin, `SET LOCAL session_replication_role = replica; UPDATE public.purchase_orders SET vendor_id = NULL WHERE id = '${PO9}'; SET LOCAL session_replication_role = origin; IF ${link(PO9)} <> 'NULL' THEN RAISE EXCEPTION 'fixture: PO9 must be unlinked'; END IF; UPDATE public.purchase_orders SET vendor = 'KI144 Someone Else' WHERE id = '${PO9}'; v := 'NOT REFUSED';`),
     /PO_VENDOR_HAS_BILLS/, 'an unlinked PO with a live bill cannot change vendor either');
   assert.equal(attempt(USERS.admin, `UPDATE public.purchase_orders SET vendor = 'KI144 Acme Supply' WHERE id = '${PO8}'; v := ${link(PO8)};`), `ok|${VA}`,
     'a deleted bill does not block a vendor correction');
   console.log('[sol-r1/r2] billed PO linked to its biller; re-spelt edit moves the link; vendor change refused while another vendor has a live bill, linked or not; deleted bills ignored; punctuation not folded');
+  // One name = one vendor (Mason, "go with a"): A's old name, printed on A's POs, cannot be taken by B (rename or new
+  // vendor); A itself may take it back; a name printed only on unowned POs is free.
+  assert.match(attempt(USERS.admin, `${RENAME_A} UPDATE public.vendors SET name = 'KI144 Acme Supply' WHERE id = '${VB}'; v := 'NOT REFUSED';`),
+    /VENDOR_NAME_ON_OTHER_VENDOR_POS: "KI144 Acme Supply" is already printed on another vendor's purchase orders/);
+  assert.match(attempt(USERS.admin, `${RENAME_A} INSERT INTO public.vendors (name) VALUES (' ki144 ACME supply'); v := 'NOT REFUSED';`),
+    /VENDOR_NAME_ON_OTHER_VENDOR_POS/);
+  assert.equal(attempt(USERS.admin, `${RENAME_A} UPDATE public.vendors SET name = 'KI144 Acme Supply' WHERE id = '${VA}';
+      INSERT INTO public.vendors (name) VALUES ('KI144-Acme Supply'); v := 'saved';`), 'ok|saved');
+  console.log('[one-name] a renamed vendor\'s old name cannot be taken by another vendor; the owner can take it back; unowned names are free');
   // A stale screen saving a renamed vendor's old name (now only B's alias) links nobody, not B (Luna round 1).
   assert.equal(attempt(USERS.admin, `${RENAME_A} INSERT INTO public.purchase_orders (po_number, vendor, status, created_by)
       VALUES ('KI144-PO-7', 'KI144 Acme Supply', 'draft', '${USERS.admin}') RETURNING coalesce(vendor_id::text, 'NULL') INTO v;`), 'ok|NULL',

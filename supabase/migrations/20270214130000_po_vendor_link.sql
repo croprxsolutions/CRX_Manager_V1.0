@@ -7,6 +7,9 @@
 --    closed-PO guard is switched off for that one UPDATE inside this transaction and checked back on in the postflight.
 -- 3. Only THEN the trigger that owns vendor_id: on insert, or when the text changes, it matches again (see step 3);
 --    on any other update it keeps the old link; it refuses moving a PO with another vendor's live bills. Whatever a writer puts in vendor_id is overwritten.
+-- 3b. One name = one vendor (Mason, 2026-11-22, "go with a"): creating, renaming or restoring a vendor to a name that is
+--    printed on purchase orders belonging to another vendor (linked to it, or billed by it) is refused, so a renamed
+--    vendor's old name can never be taken over (Sol round 3). POs that belong to no vendor do not block the name.
 -- 4. The vendor-bill check compares the bill's vendor with the PO's link when there is one; an unlinked PO keeps the
 --    name comparison. The rest of the bill function is the pinned body unchanged.
 --
@@ -35,7 +38,8 @@ BEGIN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: the closed-PO guard is not the 20270103180000 guard, or is not enabled';
   END IF;
   IF to_regprocedure('public._vendor_id_for_text(text)') IS NULL OR to_regprocedure('public.normalize_vendor_alias(text)') IS NULL
-     OR to_regprocedure('public._po_vendor_id_for_text(text)') IS NOT NULL OR to_regprocedure('public._po_stamp_vendor_id()') IS NOT NULL THEN
+     OR to_regprocedure('public._po_vendor_id_for_text(text)') IS NOT NULL OR to_regprocedure('public._po_stamp_vendor_id()') IS NOT NULL
+     OR to_regprocedure('public._vendor_name_not_on_other_vendor_pos()') IS NOT NULL THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: vendor matching helpers are not as expected';
   END IF;
 END;
@@ -147,6 +151,35 @@ REVOKE ALL ON FUNCTION public._po_stamp_vendor_id() FROM PUBLIC, anon, authentic
 CREATE TRIGGER trigger_00_po_vendor_id
   BEFORE INSERT OR UPDATE ON public.purchase_orders
   FOR EACH ROW EXECUTE FUNCTION public._po_stamp_vendor_id();
+
+-- 3b. One name = one vendor.
+CREATE FUNCTION public._vendor_name_not_on_other_vendor_pos()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+BEGIN
+  IF NEW.deleted_at IS NULL
+     AND (TG_OP = 'INSERT' OR lower(btrim(NEW.name)) IS DISTINCT FROM lower(btrim(OLD.name)) OR OLD.deleted_at IS NOT NULL)
+     AND EXISTS (
+       SELECT 1 FROM public.purchase_orders po
+        WHERE lower(btrim(po.vendor)) = lower(btrim(NEW.name))
+          AND (po.vendor_id IS DISTINCT FROM NEW.id AND po.vendor_id IS NOT NULL
+               OR EXISTS (SELECT 1 FROM public.vendor_bills vb
+                           WHERE vb.purchase_order_id = po.id AND vb.status <> 'voided' AND vb.deleted_at IS NULL
+                             AND vb.vendor_id <> NEW.id))) THEN
+    RAISE EXCEPTION 'VENDOR_NAME_ON_OTHER_VENDOR_POS: "%" is already printed on another vendor''s purchase orders; use a slightly different name (for example "% LLC")',
+      btrim(NEW.name), btrim(NEW.name) USING ERRCODE = '23505';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public._vendor_name_not_on_other_vendor_pos() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._vendor_name_not_on_other_vendor_pos() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER trigger_vendor_name_not_on_other_vendor_pos
+  BEFORE INSERT OR UPDATE OF name, deleted_at ON public.vendors
+  FOR EACH ROW EXECUTE FUNCTION public._vendor_name_not_on_other_vendor_pos();
 
 -- 4. The vendor-bill check.
 CREATE OR REPLACE FUNCTION public._section9_create_vendor_bill_intent_impl_20260826(p_vendor_id uuid, p_purchase_order_id uuid DEFAULT NULL::uuid, p_bill_number text DEFAULT ''::text, p_bill_date date DEFAULT CURRENT_DATE, p_due_date date DEFAULT NULL::date, p_payment_terms text DEFAULT NULL::text, p_subtotal_cents bigint DEFAULT 0, p_adjustment_cents bigint DEFAULT 0, p_notes text DEFAULT NULL::text, p_idempotency_key text DEFAULT NULL::text)
@@ -267,15 +300,16 @@ BEGIN
      OR has_function_privilege('service_role', v_oid, 'EXECUTE') THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: vendor-bill function security, body or grants are wrong';
   END IF;
-  IF EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid IN ('public._po_vendor_id_for_text(text)'::regprocedure, 'public._po_stamp_vendor_id()'::regprocedure)
+  IF EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid IN ('public._po_vendor_id_for_text(text)'::regprocedure, 'public._po_stamp_vendor_id()'::regprocedure, 'public._vendor_name_not_on_other_vendor_pos()'::regprocedure)
                AND (NOT p.prosecdef OR p.proowner <> 'postgres'::regrole OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
                     OR has_function_privilege('authenticated', p.oid, 'EXECUTE') OR has_function_privilege('anon', p.oid, 'EXECUTE')
                     OR has_function_privilege('service_role', p.oid, 'EXECUTE'))) THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: a new helper''s security or grants are wrong';
   END IF;
   IF (SELECT tgenabled FROM pg_trigger WHERE tgrelid = 'public.purchase_orders'::regclass AND tgname = 'trigger_0_guard_closed_po') IS DISTINCT FROM 'O'
-     OR (SELECT tgenabled FROM pg_trigger WHERE tgrelid = 'public.purchase_orders'::regclass AND tgname = 'trigger_00_po_vendor_id') IS DISTINCT FROM 'O' THEN
-    RAISE EXCEPTION 'POSTFLIGHT_FAIL: the closed-PO guard or the vendor-link trigger is not enabled';
+     OR (SELECT tgenabled FROM pg_trigger WHERE tgrelid = 'public.purchase_orders'::regclass AND tgname = 'trigger_00_po_vendor_id') IS DISTINCT FROM 'O'
+     OR (SELECT tgenabled FROM pg_trigger WHERE tgrelid = 'public.vendors'::regclass AND tgname = 'trigger_vendor_name_not_on_other_vendor_pos') IS DISTINCT FROM 'O' THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: the closed-PO guard, the vendor-link trigger or the vendor-name trigger is not enabled';
   END IF;
   IF EXISTS (SELECT 1 FROM public.purchase_orders po WHERE po.vendor_id IS DISTINCT FROM pg_temp.ki144_backfill_vendor_id(po.id, po.vendor)) THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: a PO''s vendor link does not match its bills or vendor text';

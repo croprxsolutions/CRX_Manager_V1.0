@@ -176,6 +176,8 @@ BEGIN
     IF NOT (public.is_admin() OR public.is_sales_rep() OR public.is_applicator()) THEN
       RAISE EXCEPTION 'Not authorized to complete this job';
     END IF;
+    -- The job row first, as the body and process_offline_action already take it, then the number lock.
+    PERFORM 1 FROM public.jobs j WHERE j.id = p_job_id FOR UPDATE;
     PERFORM pg_advisory_xact_lock(hashtext('next_application_record_number'));
   END IF;
   PERFORM set_config('crx.complete_job_rpc', p_job_id::text, true);
@@ -218,7 +220,7 @@ BEGIN
     INTO v_job
     FROM pg_proc p
    WHERE p.oid = to_regprocedure('public.complete_job(uuid, jsonb, uuid, text)');
-  IF v_job.oid IS NULL OR md5(replace(v_job.prosrc, chr(13), '')) IS DISTINCT FROM '77f826191eb137cbe03e1756220192d0'
+  IF v_job.oid IS NULL OR md5(replace(v_job.prosrc, chr(13), '')) IS DISTINCT FROM 'a24a546d75428042843d8a4e764e3b37'
      OR (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'complete_job') <> 1 THEN
     RAISE EXCEPTION 'JOB_STOCK_ROW_POSTFLIGHT: complete_job is not the reviewed single wrapper';
   END IF;

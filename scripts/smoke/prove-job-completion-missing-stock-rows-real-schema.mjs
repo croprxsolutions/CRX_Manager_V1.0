@@ -277,7 +277,8 @@ const J_BLEND_BEFORE = id('61'), J_BLEND_AFTER = id('62');
 const PX = id('ba');
 const INV_X = id('da');
 const PN = id('bc'), PNS = id('bd'); // never given a stock row by any case
-const J_DIRECT = id('42'), J_ORDER = id('63');
+const J_DIRECT = id('42'), J_ORDER = id('63'), J_OFFLINE = id('43');
+const PO = id('be'); // offline-versus-direct race product, fresh
 const PM = id('b0'); // sorts before PF: a completion that created PM before locking PF would deadlock with the writer
 
 function seed() {
@@ -299,6 +300,7 @@ function seed() {
       ('${PM}', '[PROVER] Mixed missing', 'JS-PM', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true),
       ('${PX}', '[PROVER] Blend race', 'JS-PX', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true),
       ('${PN}', '[PROVER] Direct update', 'JS-PN', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true),
+      ('${PO}', '[PROVER] Offline race', 'JS-PO', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true),
       ('${PNS}', '[PROVER] Not started', 'JS-PNS', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true);
     INSERT INTO public.products (product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
         rate_per_acre, current_cost, tier1_price, tier2_price, tier3_price, pricing_version, is_active)
@@ -331,6 +333,8 @@ function seed() {
     ${chem(J_RETRY, PE, 2, 1)}
     ${job(J_NOT_STARTED, 'JS-NS', 'scheduled')}
     ${chem(J_NOT_STARTED, PNS, 2, 1)}
+    ${job(J_OFFLINE, 'JS-OF', 'in_progress')}
+    ${chem(J_OFFLINE, PO, 1, 1)}
     ${job(J_DIRECT, 'JS-DU', 'in_progress')}
     ${chem(J_DIRECT, PN, 2, 1)}
     ${job(J_ORDER, 'JS-OR', 'in_progress')}
@@ -461,7 +465,7 @@ async function afterCases() {
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._lock_job_stock_rows_in_order()'::regprocedure;`),
     'e3344479412462cc3bdecee378f4d495');
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) || ',' || prosecdef::text || ',' || array_to_string(proconfig, ';') || ',' || has_function_privilege('authenticated', oid, 'EXECUTE') || ',' || has_function_privilege('service_role', oid, 'EXECUTE') || ',' || has_function_privilege('anon', oid, 'EXECUTE') FROM pg_proc WHERE oid = 'public.complete_job(uuid, jsonb, uuid, text)'::regprocedure;`),
-    '77f826191eb137cbe03e1756220192d0,true,search_path=public, pg_temp,true,true,false');
+    'a24a546d75428042843d8a4e764e3b37,true,search_path=public, pg_temp,true,true,false');
   assert.equal(scalar(`SELECT prosecdef::text || ',' || array_to_string(proconfig, ';') || ',' || has_function_privilege('authenticated', oid, 'EXECUTE') || ',' || has_function_privilege('anon', oid, 'EXECUTE') FROM pg_proc WHERE oid = 'public._lock_job_stock_rows_in_order()'::regprocedure;`),
     'true,search_path=public, pg_temp,false,false');
   console.log('[case] the migration applies once, a second apply refuses, the lock function stays private and complete_job keeps its grants');
@@ -486,6 +490,22 @@ async function afterCases() {
   assert.match(driverRun.out, /Not authorized to complete this job/, driverRun.out);
   assert.ok(!/statement timeout/i.test(driverRun.out), driverRun.out);
   console.log('[case] a signed-in driver is refused at once, without queueing on the number lock');
+
+  // Codex App (4f802aec9): process_offline_action locks the job row, then calls complete_job. A direct completion
+  // of the same job with another key must wait on the job row, not hold the number lock and deadlock.
+  const [offline, direct] = await Promise.all([
+    session(`BEGIN; ${STAMP('S')} ${claims} SELECT 1 FROM public.jobs WHERE id = '${J_OFFLINE}' FOR UPDATE; SELECT pg_sleep(2);
+      SELECT public.complete_job('${J_OFFLINE}', '{}'::jsonb, '${ADMIN}', 'job-stock-offline-a'); SELECT 'offline done'; ${STAMP('E')} ROLLBACK;`),
+    session(`BEGIN; ${STAMP('S')} ${claims} SELECT public.complete_job('${J_OFFLINE}', '{}'::jsonb, '${ADMIN}', 'job-stock-offline-b'); SELECT 'direct done'; ${STAMP('E')} ROLLBACK;`, 400),
+  ]);
+  const offlineOut = offline.out + direct.out;
+  assert.ok(!/deadlock detected/i.test(offlineOut), `no deadlock expected:\n${offlineOut}`);
+  assert.ok(at(direct.out, 'S') < at(offline.out, 'E'), `they must overlap:\n${offlineOut}`);
+  assert.equal(offline.code, 0, offline.out);
+  assert.equal(direct.code, 0, direct.out);
+  assert.match(offline.out, /offline done/, offline.out);
+  assert.match(direct.out, /direct done/, direct.out);
+  console.log('[case] an offline-style completion holding the job row and a direct completion of the same job both finish, no deadlock');
 
   const raced = await race(J_AFTER_A, J_AFTER_B);
   assert.ok(!raced.failed, `no collision expected:\n${raced.t1.out}\n${raced.t2.out}`);
@@ -563,7 +583,7 @@ async function rollbackCases() {
   assert.notEqual(refusedJob.status, 0, 'rollback must refuse a complete_job it did not install');
   assert.match(refusedJob.output, /ROLLBACK_REFUSED: complete_job/, refusedJob.output);
   putBack('job');
-  assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.complete_job(uuid, jsonb, uuid, text)'::regprocedure;`), '77f826191eb137cbe03e1756220192d0');
+  assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.complete_job(uuid, jsonb, uuid, text)'::regprocedure;`), 'a24a546d75428042843d8a4e764e3b37');
   psql('DROP TABLE public.zz_defs;');
   const rolled = apply('reverse.sql');
   assert.equal(rolled.status, 0, rolled.output);

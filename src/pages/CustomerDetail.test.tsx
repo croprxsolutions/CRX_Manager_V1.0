@@ -959,6 +959,44 @@ describe('CustomerDetail stale whole-record save', () => {
     expect(screen.queryByText(/only an admin can change the price tier, credit limit and standing discount/i)).not.toBeInTheDocument();
   });
 
+  it('an admin reactivates an inactive customer from the page; a later Save keeps it active; a rep gets no button (#2197)', async () => {
+    const inactive = { ...original, is_active: false } as unknown as typeof original;
+    let customerReads = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') {
+        return customerQuery(() => {
+          customerReads += 1;
+          return customerReads <= 2 ? inactive : ({ ...original, is_active: true, row_version: 5 } as unknown as typeof original);
+        });
+      }
+      return query({ data: [], error: null });
+    });
+    mockProfile.current = { id: 'rep-1', role: 'sales_rep', full_name: 'Rep One' };
+    try {
+      const { unmount } = renderDetail();
+      await screen.findByDisplayValue('Original Farm');
+      expect(screen.getByText('Inactive')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Reactivate' })).not.toBeInTheDocument();
+      unmount();
+    } finally {
+      mockProfile.current = { id: 'admin-1', role: 'admin', full_name: 'Admin' };
+    }
+    customerReads = 0;
+    mockRpc.mockResolvedValue({ data: { customer_id: 'customer-1', row_version: 6 }, error: null });
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reactivate' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Original Farm is active again.'));
+    expect(screen.queryByText('Inactive')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reactivate' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByDisplayValue('Original Farm'), { target: { value: 'Edited after reactivate' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_customer', expect.objectContaining({
+      p_customer_payload: expect.objectContaining({ is_active: true, row_version_expected: 5 }),
+    })));
+  });
+
   it('locks the commission split editor while a save runs', async () => {
     mockFrom.mockImplementation((table: string) => {
       if (table === 'customers') return customerQuery(() => original);

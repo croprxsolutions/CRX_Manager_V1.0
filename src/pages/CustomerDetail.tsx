@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, lazy, Suspense } from 'react';
 import { billingM4Enabled } from '../lib/billingFeatures';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall, User, Ruler, Sprout, Percent, StickyNote, ChevronDown, Users, Lightbulb, FolderOpen, History, Map, Package, Wallet, ShoppingBasket, Receipt, Lock } from 'lucide-react';
+import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall, User, Ruler, Sprout, Percent, StickyNote, ChevronDown, Users, Lightbulb, FolderOpen, History, Map, Package, Wallet, ShoppingBasket, Receipt, Lock, RotateCcw } from 'lucide-react';
 import type { InputHTMLAttributes, ReactNode } from 'react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -275,6 +275,8 @@ export default function CustomerDetail() {
   // null = not being edited (the field shows the saved rate).
   const [discountDraft, setDiscountDraft] = useState<string | null>(null);
   const [discountSaving, setDiscountSaving] = useState(false);
+  const [reactivateOpen, setReactivateOpen] = useState(false);
+  const [reactivating, setReactivating] = useState(false);
   useEffect(() => { setDiscountDraft(null); }, [id]);
 
   // Financials tab state
@@ -1334,6 +1336,51 @@ export default function CustomerDetail() {
     }
   };
 
+  // #2197: staff are told to reactivate an inactive customer before new work. Same direct update the
+  // Customers list uses to deactivate (RLS governs it); admin-only on screen.
+  const reactivateCustomer = async () => {
+    if (!id || isNew || reactivating) return;
+    setReactivating(true);
+    try {
+      const previousRowVersion = customerRowVersionRef.current;
+      const result = await supabase
+        .from('customers')
+        .update({ is_active: true })
+        .eq('id', id)
+        .eq('is_active', false)
+        .select('*');
+      checkMutationResult(result, 'reactivate customer');
+      if (currentIdRef.current !== id) return;
+      const nextRowVersion = (result.data as Array<{ row_version?: unknown }>)[0]?.row_version;
+      const rowVersionResult = resolveDirectMutationRowVersion(previousRowVersion, nextRowVersion);
+      customerRowVersionRef.current = rowVersionResult.rowVersion;
+      keepCleanAfterDiscountRef.current = !isDirty;
+      setCustomer((c) => ({ ...c, is_active: true }));
+      if (rowVersionResult.kind === 'recovery') {
+        staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
+        setStaleSaveOpen(true);
+        toast('warning', 'The customer was reactivated, but another customer edit may have completed at the same time. Your current edits were kept; reload before saving other customer changes.');
+      } else {
+        toast('success', `${customer.farm_name || 'Customer'} is active again.`);
+      }
+      if (profile?.id) {
+        void Promise.resolve(logActivity({
+          event: 'customer_updated',
+          description: 'Customer reactivated',
+          performedBy: profile.id,
+          entityType: 'customer',
+          customerId: id,
+        })).catch(() => {});
+      }
+    } catch (error: unknown) {
+      Sentry.captureException(toSentryError(error), { extra: { context: 'CustomerDetail.reactivateCustomer' } });
+      toast('error', sanitizeError(error));
+    } finally {
+      setReactivating(false);
+      setReactivateOpen(false);
+    }
+  };
+
   if (loading) {
     return <div className="animate-pulse"><div className="h-64 bg-gray-200 rounded" /></div>;
   }
@@ -1372,6 +1419,16 @@ export default function CustomerDetail() {
         { label: 'Customers', href: '/customers' },
         { label: isNew ? 'New Customer' : (customer.farm_name || 'Customer') },
       ]} />
+      <ConfirmModal
+        open={reactivateOpen}
+        onClose={() => { if (!reactivating) setReactivateOpen(false); }}
+        onConfirm={() => void reactivateCustomer()}
+        title="Reactivate customer"
+        message={`Reactivate ${customer.farm_name || 'this customer'}? Staff can then create orders, holds, deliveries and jobs for them again.`}
+        confirmLabel="Reactivate"
+        variant="info"
+        loading={reactivating}
+      />
       <RecordVersionConflictDialog
         open={staleSaveOpen}
         entityLabel="customer"
@@ -1392,8 +1449,14 @@ export default function CustomerDetail() {
           <h1 className="font-heading text-3xl font-bold leading-tight break-words text-nav-dark md:text-4xl">
             {isNew ? 'New Customer' : customer.farm_name}
           </h1>
+          {!isNew && customer.is_active === false && <Badge variant="default">Inactive</Badge>}
         </div>
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
+          {!isNew && isAdmin && customer.is_active === false && (
+            <Button variant="primary" size="sm" icon={<RotateCcw className="w-4 h-4" />} showChevron={false} onClick={() => setReactivateOpen(true)}>
+              Reactivate
+            </Button>
+          )}
           {!isNew && (
             <Button variant="secondary" size="sm" icon={<PhoneCall className="w-4 h-4" />} showChevron={false} onClick={() => setLogInteractionOpen(true)}>
               Log Call

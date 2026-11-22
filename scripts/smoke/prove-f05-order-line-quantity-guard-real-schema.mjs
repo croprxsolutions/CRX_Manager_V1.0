@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270209100000_f05_order_line_quantity_guard.sql (F05; contract
+ * Real-schema proof for 20270216100000_f05_order_line_quantity_guard.sql (F05; contract
  * docs/plans/2026-11-22-f05-delivery-remaining-qty-CONTRACT.md).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
@@ -26,7 +26,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270209100000_f05_order_line_quantity_guard.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270216100000_f05_order_line_quantity_guard.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'f05-order-line-quantity-guard-reverse.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);

@@ -52,7 +52,7 @@
 **What this forbids/implies:** KI-191, KI-198, KI-185 and #2075 are built to these rules; Transfer, office auto-draft and Split Billing must agree.
 ## 2026-11-22 — F05: two open loads holding the same units: neither completes until the office cancels one
 
-The staging audit (2026-11-21) found one order line scheduled twice (New Delivery and Create Follow-up Delivery each took the last unit), so 2 ordered ended 3 delivered. The fix (`20270209100000_f05_order_line_quantity_guard.sql`) refuses any write that would put delivered + open loads past what was ordered.
+The staging audit (2026-11-21) found one order line scheduled twice (New Delivery and Create Follow-up Delivery each took the last unit), so 2 ordered ended 3 delivered. The fix (`20270216100000_f05_order_line_quantity_guard.sql`) refuses any write that would put delivered + open loads past what was ordered.
 
 **Decision (Mason, in chat, 2026-11-22: "yes"):** where two open loads already hold the same units from before the fix, completing either is refused until the office cancels or reduces the extra load. The driver is told to call the office; stock never moves twice. Rejected: first load to complete wins (the second driver finds out only at the farm).
 

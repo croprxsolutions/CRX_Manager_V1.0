@@ -38,6 +38,12 @@ BEGIN
      OR NOT has_function_privilege('service_role', 'public.update_cycle_count_item(uuid,numeric,text,uuid,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'ROLLBACK_REFUSED: a function''s security, search_path or grants changed after #1942';
   END IF;
+  -- #2135 (20270213100000) removed the outer wrapper's short-stock check and relies on #1942's: undo #2135 first.
+  IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc
+       WHERE oid = to_regprocedure('public._complete_delivery_period_preflight_impl(uuid,text,uuid,jsonb,text,text,text,timestamptz)'))
+     = 'f13018d7449506ff80c69facfb51b000' THEN
+    RAISE EXCEPTION 'ROLLBACK_REFUSED: #2135 relies on this body; run scripts/smoke/single-short-stock-warning-reverse.sql first';
+  END IF;
 END;
 $refuse$;
 

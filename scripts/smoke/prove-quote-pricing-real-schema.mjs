@@ -46,6 +46,8 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const SMOKE = path.join(ROOT, 'scripts', 'smoke');
 const HISTORICAL_QUOTE_LOCK = path.join(SMOKE, 'fixtures', 'quote-sent-price-lock-candidate-era.sql');
+// #2173 moved the live chain onto governed product pricing (20261027050000, after this candidate); this proof runs it as it was before.
+const HISTORICAL_JOB_FROM_QUOTE = path.join(SMOKE, 'fixtures', 'job-from-quote-activity-feed-candidate-era.sql');
 const CANDIDATE = path.join(MIGRATIONS, '20261027040000_quote_sent_price_lock.sql');
 const CHAINS = {
   'smoke-convert-sent-quote-in-one-step.sql': 'SMOKE_FAIL: (5) an accepted save re-priced the sent quote',
@@ -158,6 +160,13 @@ const EXPECTED_SUFFIX_MATCHES = new Set([
   '20261204100000_ki18_batch1_chicago_today.sql',
   '20261204120000_job_lines_keep_epa_number.sql',
   '20270103140000_dry_product_fluid_ounce_guard.sql',
+  // Reviewed 2026-11-22 (#2117); none is replayed here, this proof stops before 20261027040000:
+  // re-emits the save body from 20261204100000 plus section-id rules (b,c,g,h,i); the sent-price lock lines are carried over unchanged.
+  '20270125110000_save_quote_keeps_section_ids.sql',
+  // re-emits that body again plus timing/confidence columns (d,e); same sent-price lock lines, no pricing change.
+  '20270127110000_booking_timing_purchasing_plan.sql',
+  // matches only by name in a comment about the job scheduler; adds triggers and re-creates auto_expire_quotes, not the save/convert/draw/restore bodies.
+  '20270127120000_booking_live_job_guard.sql',
 ]);
 const JOB_CASE_START = '-- BEGIN CHEMICAL-SALES-EXCLUDED: JOB SCHEDULING CASES F/G';
 const JOB_CASE_END = '-- END CHEMICAL-SALES-EXCLUDED: JOB SCHEDULING CASES F/G';
@@ -308,7 +317,8 @@ function seed() {
 // never-committed transaction. Returns the first error line psql printed.
 function runChain(file, prefix = '') {
   const name = `chain-${path.basename(file)}`;
-  const source = file === 'smoke-quote-sent-price-lock.sql' ? HISTORICAL_QUOTE_LOCK : path.join(SMOKE, file);
+  const source = file === 'smoke-quote-sent-price-lock.sql' ? HISTORICAL_QUOTE_LOCK
+    : file === 'smoke-job_from_quote_activity_feed_fix.sql' ? HISTORICAL_JOB_FROM_QUOTE : path.join(SMOKE, file);
   stageText(name, `${prefix}${scopedChain(file, lf(source))}`);
   const r = docker([...psqlArgs(), '-f', `/tmp/${name}`], { allowFailure: true });
   const output = `${r.stdout}\n${r.stderr}`;

@@ -2026,11 +2026,11 @@ BEGIN
   v_same_product_order_item_2 := gen_random_uuid();
   v_same_product_return_id := gen_random_uuid();
   SET LOCAL session_replication_role = replica;
-  INSERT INTO products (id, product_name, unit_size, inventory_unit)
+  INSERT INTO products (id, product_name, unit_size, inventory_unit, product_form)
   VALUES (
     v_same_product_product_id,
     '[SMOKE] same-product cancel aggregate ' || v_suffix,
-    'Gal', 'Gal'
+    'Gal', 'Gal', 'liquid'
   );
   INSERT INTO inventory (
     product_id, location, quantity_available, quantity_prebooked, unit_size

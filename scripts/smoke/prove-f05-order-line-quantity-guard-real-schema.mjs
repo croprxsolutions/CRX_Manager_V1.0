@@ -417,9 +417,10 @@ async function afterCases() {
     VALUES ('${O17}', '${P}', '[PROVER] F05 Product', 'Gal', 2, 3, 0, 10, 8);`, /DELIVERY_EXCEEDS_ORDER/);
   // Luna r12: NaN would sort above every number and switch the check off.
   refusedProbe(`INSERT INTO public.order_items (order_id, product_id, product_name, unit_size, total_units_needed, quantity_delivered, quantity_remaining, price_per_unit, cost_per_unit)
-    VALUES ('${O17}', '${P}', '[PROVER] F05 Product', 'Gal', 'NaN', 0, 0, 10, 8);`, /ORDER_LINE_QUANTITY_NOT_A_NUMBER/);
-  refusedProbe(`UPDATE public.order_items SET total_units_needed = 'NaN' WHERE id = '${L17}';`, /ORDER_LINE_QUANTITY_NOT_A_NUMBER/);
-  console.log('[case 3d] an order line written already over its order, or with a NaN quantity, is refused');
+    VALUES ('${O17}', '${P}', '[PROVER] F05 Product', 'Gal', 'NaN', 0, 0, 10, 8);`, /ORDER_LINE_QUANTITY_NOT_FINITE/);
+  refusedProbe(`UPDATE public.order_items SET total_units_needed = 'NaN' WHERE id = '${L17}';`, /ORDER_LINE_QUANTITY_NOT_FINITE/);
+  refusedProbe(`UPDATE public.order_items SET total_units_needed = 'Infinity' WHERE id = '${L17}';`, /ORDER_LINE_QUANTITY_NOT_FINITE/);
+  console.log('[case 3d] an order line written already over its order, or with a NaN or infinite quantity, is refused');
 
   // 3i (Luna r5, Sol r1). The check reads after the lock, which needs READ COMMITTED; a stricter level is refused.
   refusedProbe(`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;

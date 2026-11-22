@@ -27,12 +27,13 @@ BEGIN
      OR to_regprocedure('public._order_line_within_deliveries()') IS NOT NULL THEN
     RAISE EXCEPTION 'F05_PREFLIGHT: already applied';
   END IF;
-  -- Sol r4: a NaN counter would make every comparison below skip the check; refuse until it is fixed by hand.
+  -- Sol r4 / Luna r13: a NaN or infinite counter would switch the check off; refuse until it is fixed by hand.
   SELECT count(*), string_agg(oi.id::text, ', ' ORDER BY oi.id) INTO v_open_over, v_ids
     FROM public.order_items oi
-   WHERE oi.quantity_delivered = 'NaN'::numeric OR oi.total_units_needed = 'NaN'::numeric;
+   WHERE NOT (oi.quantity_delivered < 'Infinity'::numeric AND oi.quantity_delivered > '-Infinity'::numeric)
+      OR NOT (oi.total_units_needed < 'Infinity'::numeric AND oi.total_units_needed > '-Infinity'::numeric);
   IF v_open_over > 0 THEN
-    RAISE EXCEPTION 'F05_PREFLIGHT: % order line(s) have a non-numeric (NaN) ordered or delivered quantity: %. Fix them by hand first.', v_open_over, v_ids;
+    RAISE EXCEPTION 'F05_PREFLIGHT: % order line(s) have a non-finite (NaN or infinite) ordered or delivered quantity: %. Fix them by hand first.', v_open_over, v_ids;
   END IF;
   IF to_regprocedure('public._delivery_line_matches_order_line()') IS NULL THEN
     RAISE EXCEPTION 'F05_PREFLIGHT: #1940 (_delivery_line_matches_order_line) must land first';
@@ -224,9 +225,10 @@ DECLARE
   v_open numeric;
   v_more_delivered boolean;
 BEGIN
-  -- Luna r12: NaN sorts above every number, so it would switch the check off for this line.
-  IF NEW.total_units_needed = 'NaN'::numeric OR NEW.quantity_delivered = 'NaN'::numeric THEN
-    RAISE EXCEPTION 'ORDER_LINE_QUANTITY_NOT_A_NUMBER: % — ordered and delivered quantities must be numbers.',
+  -- Luna r12/r13: NaN and infinities would switch the check off for this line (NaN also fails "< Infinity").
+  IF NOT (NEW.total_units_needed < 'Infinity'::numeric AND NEW.total_units_needed > '-Infinity'::numeric)
+     OR NOT (NEW.quantity_delivered < 'Infinity'::numeric AND NEW.quantity_delivered > '-Infinity'::numeric) THEN
+    RAISE EXCEPTION 'ORDER_LINE_QUANTITY_NOT_FINITE: % — ordered and delivered quantities must be finite numbers.',
       COALESCE(NEW.product_name, 'this order line') USING ERRCODE = 'check_violation';
   END IF;
   v_more_delivered := TG_OP = 'INSERT' OR COALESCE(NEW.quantity_delivered, 0) > COALESCE(OLD.quantity_delivered, 0);

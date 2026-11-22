@@ -471,6 +471,8 @@ export default function QuoteBuilder() {
   const [saving, setSaving] = useState(false);
   // Kept locally rather than in generated DB types until post-apply regeneration.
   const quoteRowVersionRef = useRef<number | null>(null);
+  // KI-190: the booking version the open Partial Order dialog was prepared from, and its quote.
+  const drawSnapshotRef = useRef<{ quoteId: string; rowVersion: number | null } | null>(null);
   // Unlike the dialog's open/closed state, this latch survives "Keep Editing".
   // Only a complete, stable Quote reload may clear it.
   const quoteVersionRecoveryRequiredRef = useRef(false);
@@ -3751,6 +3753,12 @@ export default function QuoteBuilder() {
   };
 
 
+  // KI-190: when the Partial Order dialog opens, keep the booking version its balance and
+  // booked prices belong to; the draw sends that version.
+  useEffect(() => {
+    if (showDrawModal && id) drawSnapshotRef.current = { quoteId: id, rowVersion: quoteRowVersionRef.current };
+  }, [showDrawModal, id]);
+
   // Partial booking draw-down: open the modal with the per-product balance
   const openDrawDownModal = async () => {
     if (!id) return false;
@@ -3886,9 +3894,11 @@ export default function QuoteBuilder() {
         p_draws: drawPayload,
         p_performed_by: profile!.id,
         p_idempotency_key: drawKey,
-        // KI-190: the booking version this screen showed. A booking that another draw or an
-        // edit changed since is refused (QUOTE_STALE_WRITE), as Whole Convert does.
-        p_expected_row_version: quoteRowVersionRef.current,
+        // KI-190: the booking version the dialog was prepared from. A booking that another
+        // draw or an edit changed since is refused (QUOTE_STALE_WRITE), as Whole Convert does.
+        p_expected_row_version: drawSnapshotRef.current?.quoteId === id
+          ? drawSnapshotRef.current.rowVersion
+          : quoteRowVersionRef.current,
       }, reason)));
       if (error) throw error;
       const result = assertRpcResult<{ status: string; order_id?: string; order_number?: string; warnings?: string[]; fully_drawn?: boolean; extra_order_id?: string; extra_order_number?: string }>(data, 'draw_down_quote');
@@ -3987,6 +3997,8 @@ export default function QuoteBuilder() {
       // KI-190: the booking changed since this screen loaded it, and nothing was ordered.
       // Reload the whole quote (balance and booked prices) before another draw.
       if (hasRpcCode(error, RpcErrorCodes.QUOTE_STALE_WRITE)) {
+        // A late reply for a booking this screen no longer shows changes nothing here.
+        if (drawSnapshotRef.current?.quoteId !== drawScope) return;
         quoteVersionRecoveryRequiredRef.current = true;
         staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
         setShowDrawModal(false);

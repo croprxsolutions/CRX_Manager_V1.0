@@ -14,10 +14,13 @@
 -- not part of the request fingerprint: a resend of the same draw is the same intent.
 -- Body otherwise byte-identical to 20261106110000.
 --
--- Rollback: re-run the 20261106110000 function body after
---   DROP FUNCTION public.draw_down_quote(uuid,jsonb,uuid,text,text,bigint);
--- (the Partial Order screen then sends an extra argument the old body doesn't take,
--- so roll the screen back with it).
+-- Rollback: DROP FUNCTION public.draw_down_quote(uuid,jsonb,uuid,text,text,bigint);
+-- re-run the 20261106110000 function body; then
+--   ALTER FUNCTION public.draw_down_quote(uuid,jsonb,uuid,text,text) OWNER TO postgres;
+--   REVOKE ALL ON FUNCTION public.draw_down_quote(uuid,jsonb,uuid,text,text) FROM PUBLIC, anon, service_role;
+--   GRANT EXECUTE ON FUNCTION public.draw_down_quote(uuid,jsonb,uuid,text,text) TO authenticated;
+-- and check EXECUTE is exactly {authenticated, postgres}. Roll the screen back with it
+-- (it sends an argument the old body doesn't take).
 
 DO $preflight$
 DECLARE
@@ -27,10 +30,10 @@ BEGIN
   IF NOT FOUND
      OR (SELECT count(*) FROM pg_proc o
           WHERE o.pronamespace = 'public'::regnamespace AND o.proname = 'draw_down_quote') <> 1
-     OR position('BOOKING_QUANTITY_PRECISION' IN p.prosrc) = 0
-     OR position('DRAW_DOWN_INTENT_LIVE_QUOTE' IN p.prosrc) = 0
-     OR position('DRAW_DOWN_BOOKING_VERSION' IN p.prosrc) > 0 THEN
-    RAISE EXCEPTION 'PREFLIGHT: draw_down_quote is not the reviewed 20261106110000 body, or this migration already ran';
+     OR md5(p.prosrc) IS DISTINCT FROM 'f7b823a4f232f67c24a8c7383f7c56b9' THEN
+    -- md5 of the reviewed 20261106110000 body: any other body (a hotfix, or this
+    -- migration already applied) stops here rather than being dropped.
+    RAISE EXCEPTION 'PREFLIGHT: draw_down_quote is not the reviewed 20261106110000 body (md5 f7b823a4f232f67c24a8c7383f7c56b9), or this migration already ran';
   END IF;
 END
 $preflight$;
@@ -245,8 +248,12 @@ BEGIN
   -- that changed since is refused, exactly as Whole Convert does. Checked after
   -- the replay above (a retry of a committed draw still returns its order, even
   -- though that draw moved the version) and under the row lock.
-  IF p_expected_row_version IS NULL
-     OR v_row_version IS DISTINCT FROM p_expected_row_version THEN
+  IF p_expected_row_version IS NULL THEN
+    -- A screen from before this change (an old open tab) sends no version.
+    RAISE EXCEPTION
+      'QUOTE_STALE_WRITE: this screen is out of date. Nothing was ordered. Reload the booking, then try again.';
+  END IF;
+  IF v_row_version IS DISTINCT FROM p_expected_row_version THEN
     RAISE EXCEPTION
       'QUOTE_STALE_WRITE: this booking changed since you opened it (another order was drawn from it or it was edited). Nothing was ordered. Reload the booking to see what is left and the prices, then try again.';
   END IF;
@@ -301,6 +308,7 @@ BEGIN
           WHERE o.pronamespace = 'public'::regnamespace AND o.proname = 'draw_down_quote') <> 1
      OR position('BOOKING_QUANTITY_PRECISION' IN p.prosrc) = 0
      OR position('DRAW_DOWN_BOOKING_VERSION' IN p.prosrc) = 0
+     OR position('DRAW_DOWN_INTENT_REPLAY' IN p.prosrc) = 0
      OR position('DRAW_DOWN_INTENT_REPLAY' IN p.prosrc) > position('DRAW_DOWN_BOOKING_VERSION' IN p.prosrc)
      OR p.proowner <> 'postgres'::regrole
      OR NOT p.prosecdef

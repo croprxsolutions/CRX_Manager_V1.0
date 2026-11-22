@@ -1737,6 +1737,7 @@ describe('QuoteBuilder', () => {
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('changed since you opened it')));
       expect(mockToast).not.toHaveBeenCalledWith('success', expect.anything());
       await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Create order from booking' })).not.toBeInTheDocument());
+      expect(await screen.findByText('Reload this quote before saving?')).toBeInTheDocument();
     });
 
     it('sends the booked price when the rep picks it', async () => {

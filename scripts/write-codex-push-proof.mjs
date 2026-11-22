@@ -2390,7 +2390,7 @@ function resolveCarry(root, nowMs) {
   // A rename on one side moves the other side's edits to a new path (into a guard folder, onto a
   // union file), which the path-by-path checks here cannot see: refuse it.
   for (const [a, b, other] of [[fromBase, baseSha, prPaths], [fromBase, fromHead, mainPaths]]) {
-    const read = runTrustedGit(["diff", "--name-status", "-z", "-M", "-C", "--no-ext-diff", a, b], { cwd: root, timeout: 120_000 });
+    const read = runTrustedGit(["diff", "--name-status", "-z", "-M", "-C", "--find-copies-harder", "--no-ext-diff", a, b], { cwd: root, timeout: 120_000 });
     if (read.error || read.status !== 0) return { problem: "could not list renamed files" };
     const parts = (read.stdout || "").split("\0");
     for (let i = 0; i < parts.length && parts[i]; ) {
@@ -2506,6 +2506,16 @@ function runCarryForward(root, options) {
   } catch (error) {
     process.stderr.write(`Could not build or run the collision check: ${error.message}\n`);
     return 2;
+  }
+  // The delta goes to the reviewer: a removed line that looks like a credential must not, and a
+  // binary change the reviewer cannot compare is not checkable. Either one means the full review.
+  const removed = delta.split("\n").filter((line) => line.startsWith("-") && !line.startsWith("---"));
+  const unreadable = removed.some((line) => REVIEW_CAPTURE_SECRET_RE.test(line))
+    ? "a line the base removed looks like a credential"
+    : /^Binary files .* differ$/m.test(delta) ? "the base changed a file Git treats as binary" : null;
+  if (unreadable) {
+    process.stderr.write(`Carry-forward refused: ${unreadable}, so the collision check cannot be given it. No proof written — run the full review: node scripts/write-codex-push-proof.mjs\n`);
+    return 1;
   }
   const check = runFocusedSolCheck(root, options, {
     baseRef: facts.target,

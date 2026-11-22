@@ -677,7 +677,7 @@ function gateRequest(request) {
   // A proof of an earlier commit covers the commits after it unless those
   // touch the Sol list; same module, same budgeted gh. Exact-head proofs are tried first.
   const proof = firstAcceptedProof(proofs, headSha, (data, exactHead) =>
-    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits }) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead })
+    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits, baseRef: base }) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead })
       && (exactHead || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky));
   const valid = proof !== null;
   const carried = proof?.carried_forward === true ? proof.carry : null;

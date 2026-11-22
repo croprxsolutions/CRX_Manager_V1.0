@@ -1432,7 +1432,9 @@ function collisionPromptSkipsWork(prompt) {
     // The repo's real rule: GitHub ignores it, a local merge honours it.
     write(".gitattributes", "docs/manual/DECISION_LOG.md merge=union\n");
     write("src/a.ts", "export const a = 1;\n");
+    write("src/cfg.ts", 'export const cfg = { password: "x" };\n');
     write("docs/manual/DECISION_LOG.md", "# Decisions\n- old entry\n");
+    write("docs/manual/note.md", "# Note\nDo the safe thing.\n");
     const base = commitAll("base");
     git("update-ref", "refs/remotes/origin/main", base);
     git("update-ref", "refs/remotes/origin/staging", base);
@@ -1612,6 +1614,36 @@ function collisionPromptSkipsWork(prompt) {
     assert.equal(refused.status, 1, `staging carry: a base-side rename of a PR file is refused (${refused.stdout})`);
     assert.match(refused.stderr, /renamed or copied src\/a\.ts/, "staging carry: names the moved file");
   });
+
+  // 7. A copy of a file the base side left unchanged is still seen (Sol r5 HIGH 3).
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+    writeFileSync(file("docs/manual/note.md"), "# Note\nDo the safer thing.\n");
+    const head = commitAll("pr corrects the note");
+    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+    land("origin/staging", "staging copies the old note into a command", () => {
+      mkdirSync(file(".claude/commands"), { recursive: true });
+      writeFileSync(file(".claude/commands/x.md"), "# Note\nDo the safe thing.\n");
+    });
+    git("merge", "-q", "--no-edit", "origin/staging");
+    const refused = carry("--dry-run");
+    assert.equal(refused.status, 1, `staging carry: a copy of a PR-changed file is refused (${refused.stdout})`);
+    assert.match(refused.stderr, /renamed or copied docs\/manual\/note\.md/, "staging carry: names the copied file");
+  });
+
+  // 8. A base delta that removes a credential-shaped line, or changes a binary file, is never sent (Sol r5 HIGH 4, MED).
+  for (const [label, edit, why] of [
+    ["a removed credential", (file) => writeFileSync(file("src/cfg.ts"), "export const cfg = {};\n"), /looks like a credential/],
+    ["a binary change", (file) => writeFileSync(file("src/blob.bin"), Buffer.from([0, 1, 2, 0, 3])), /treats as binary/],
+  ]) {
+    withRepo(({ git, file, land, carry, readProof, reviewedHead }) => {
+      land("origin/staging", `staging: ${label}`, () => edit(file));
+      git("merge", "-q", "--no-edit", "origin/staging");
+      assert.ok(readProof(reviewedHead), "staging carry: the reviewed head has its proof");
+      const refused = carry();
+      assert.equal(refused.status, 1, `staging carry: ${label} is refused before any model call (${refused.stdout})`);
+      assert.match(refused.stderr, why, `staging carry: says why (${label})`);
+    });
+  }
   assert.match(buildCollisionCheckPrompt(), /BLOCKERS {2}— at least one blocker\/high-severity collision or other blocker\/high problem/, "collision prompt: any blocker counts in the verdict");
 }
 

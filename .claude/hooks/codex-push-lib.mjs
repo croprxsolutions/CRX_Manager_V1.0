@@ -1763,7 +1763,9 @@ export function carriedSolProof(data) {
     && (carry.mode === "restamp" || carry.mode === "post_apply" || carry.mode === "owner_accepted"
       ? carry.from_base === data.base_sha
         && (carry.mode !== "owner_accepted" || (Array.isArray(data.owner_accepted) && data.owner_accepted.length > 0))
-      : (carry.mode === "disjoint" || carry.mode === "collision_check") && carry.from_base !== data.base_sha)
+      // Owner-accepted findings never carry onto a newer base (Mason, 2026-11-22, #2226), whichever writer made the proof.
+      : (carry.mode === "disjoint" || carry.mode === "collision_check") && carry.from_base !== data.base_sha
+        && carry.root_review?.owner_accepted !== true && !("owner_accepted" in data))
     && CARRY_SHA_RE.test(String(carry.from_head || ""))
     && CARRY_SHA_RE.test(String(carry.from_base || ""))
     && carry.from_head !== data.head_sha;
@@ -1805,8 +1807,16 @@ export function proofValid(data, headSha, nowMs, expectedBaseSha, maxAgeMs = SOL
 // current base (#1913), not just any ancestor of that base, so the reviewed diff is
 // exactly the PR's own changes. `mergeBase(a, b)` returns that one commit, or null
 // when it cannot tell or there is more than one; a missing or null answer refuses.
-export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, mergeBase, prCommits = null }) {
+//
+// `baseRef` is the PR's base branch name. A proof that records its review kind
+// (`review_ref`, since 2026-11-22) counts only for a PR into that branch, and a
+// release review only for main; older proofs name no kind and are judged as before.
+export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, mergeBase, prCommits = null, baseRef = null }) {
   const SHA = /^[0-9a-f]{40}$/i;
+  if (baseRef !== null && data && "review_ref" in data) {
+    const ref = `origin/${String(baseRef).trim().toLowerCase()}`;
+    if (data.review_ref !== ref || (data.release_rules === true && ref !== "origin/main")) return false;
+  }
   const proofBase = String(data?.base_sha || "");
   const proofHead = String(data?.head_sha || "").toLowerCase();
   if (!SHA.test(proofBase) || !SHA.test(proofHead) || !SHA.test(String(headSha || "")) || !SHA.test(String(baseSha || ""))) return false;

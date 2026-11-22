@@ -300,6 +300,9 @@ decision only) immediately before the merge. It mints a carried proof for the ne
 - the proof is not owner-accepted: an owner-accepted proof (`--carry-owner-accepted`) never carries onto
   a new base, because whether new base code widens an accepted defect needs the full review (2026-11-22);
 - neither side renamed or copied a file the other side changed;
+- for the collision check, the base's changes hold no binary file and remove no credential-shaped line
+  (that text would be sent to the reviewer); a proof recording its review kind counts at merge only for
+  a PR into that branch;
 - the merge's one common ancestor is exactly the base the review used, so the reviewed diff is what the
   PR still changes (a branch that already held a commit the base gained later, or a revert of one, refuses);
 - the reviewed head's proof is a clean `gpt-6.2-sol`/`high` proof (full or itself carried) under 24 hours

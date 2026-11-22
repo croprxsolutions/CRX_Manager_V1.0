@@ -233,11 +233,10 @@ BEGIN
   IF v_more_delivered THEN
     -- Drivers see this: no other load's number or quantity (they may not be allowed to read that load).
     -- No order-wide numbers either (Sol r3): a driver may see only their own load.
-    RAISE EXCEPTION 'DELIVERY_EXCEEDS_ORDER: % — this would deliver more than was ordered%. %',
+    -- Always "call the office" (Luna r10): never suggest recording less than was actually delivered.
+    RAISE EXCEPTION 'DELIVERY_EXCEEDS_ORDER: % — this would deliver more than was ordered%. Call the office before completing this delivery.',
       COALESCE(NEW.product_name, 'this order line'),
-      CASE WHEN v_open > 0 THEN ' while another delivery for this order is still open' ELSE '' END,
-      CASE WHEN v_open > 0 THEN 'Call the office before completing this delivery.'
-           ELSE 'Record no more than what was ordered, or ask the office to raise the order.' END
+      CASE WHEN v_open > 0 THEN ' while another delivery for this order is still open' ELSE '' END
       USING ERRCODE = 'check_violation';
   END IF;
   RAISE EXCEPTION 'ORDER_LINE_BELOW_DELIVERIES: % cannot go below % (delivered %, on open deliveries %: %). %',

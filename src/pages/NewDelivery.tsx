@@ -567,7 +567,7 @@ export default function NewDelivery() {
                 onChange={(e) => { setIsDirty(true); setSelectedAddressId(e.target.value); }}
                 className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
               >
-                <option value="">Use billing address</option>
+                <option value="">Use farm address (shipping, else billing)</option>
                 {addresses.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.label} - {[a.address_line, a.city, a.state].filter(Boolean).join(', ')}

@@ -80,6 +80,9 @@ export default function CycleCounts() {
   // A count starts only from a location list that loaded; never while it loads or after it failed.
   const [locationsLoad, setLocationsLoad] = useState<'loading' | 'loaded' | 'failed'>('loading');
   const [newNotes, setNewNotes] = useState('');
+  // Each opening of the form is a new start; a retry inside it reuses the key (a lost reply replays, not repeats).
+  const [newAttempt, setNewAttempt] = useState(0);
+  const openNew = () => { setNewAttempt((a) => a + 1); setShowNew(true); };
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
 
@@ -271,8 +274,8 @@ export default function CycleCounts() {
     await runCriticalAction({
       action: async () => {
         // One server step: number, count and a line per stock row, or nothing (KI-160).
-        // Keyed per location + notes so a retry after a lost reply replays the same start.
-        const scope = JSON.stringify([newWarehouse, newNotes.trim()]);
+        // Keyed per form opening, location and notes so a retry after a lost reply replays the same start.
+        const scope = JSON.stringify([newAttempt, newWarehouse, newNotes.trim()]);
         const { data, error } = await supabase.rpc('create_cycle_count', {
           p_warehouse: newWarehouse,
           p_notes: newNotes.trim() || undefined,
@@ -1097,7 +1100,7 @@ export default function CycleCounts() {
           <HelpTip text="Verify physical inventory against system records. Create a count, enter actual quantities, then complete to auto-adjust inventory. Variances are logged in the transaction ledger for audit." className="ml-1" />
         </h2>
         {isAdmin && (
-          <Button icon={<Plus className="w-4 h-4" />} onClick={() => setShowNew(true)}>
+          <Button icon={<Plus className="w-4 h-4" />} onClick={openNew}>
             New Cycle Count
           </Button>
         )}
@@ -1116,7 +1119,7 @@ export default function CycleCounts() {
             emptyDescription="Start a cycle count to verify inventory quantities"
             emptyAction={
               isAdmin ? (
-                <Button icon={<Plus className="w-4 h-4" />} onClick={() => setShowNew(true)}>
+                <Button icon={<Plus className="w-4 h-4" />} onClick={openNew}>
                   New Cycle Count
                 </Button>
               ) : undefined
@@ -1163,6 +1166,7 @@ export default function CycleCounts() {
             label="Notes (Optional)"
             value={newNotes}
             onChange={(e) => setNewNotes(e.target.value)}
+            maxLength={2000}
             placeholder="e.g., Monthly count, end-of-season audit"
           />
           <p className="text-sm text-gray-500">

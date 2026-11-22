@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2185: Mason owner-accepted 1 Sol finding(s) at `d66cf2bff2ed`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2185 at `d66cf2bff2ed` (base `f08df8ad6407`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/components/products/ProductVendorsSection.tsx:221`, text sha256 `f5320b8720eb0a44` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 48c944edbcb7)
+
 ## 2026-11-21 — #2185: a vendor change re-reads the product; vendor changes wait for unsaved Product edits
 
 **Decision (Mason, 2026-11-21, "Yes, block").** On the product page, vendor changes are off while the Product has unsaved edits, or is saving or loading ("Save or discard your Product changes before changing vendors."). After any vendor link, the page re-reads the whole Product instead of copying a vendor name from the Vendors section, and keeps Save, New product and Add a size off until that read lands; a failed read locks editing until Reload Product succeeds. This replaces patching the vendor name in place, which produced a new race in each of three review rounds (KI-170).

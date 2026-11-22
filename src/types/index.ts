@@ -840,7 +840,14 @@ export interface QuoteSection {
   section_header_notes: string | null;
   needed_by_date: string | null;
   field_id: string | null;
+  /** 20270127110000; absent before that migration. */
+  timing?: BookingTiming | null;
+  confidence?: BookingConfidence | null;
 }
+
+/** A booking section's timing and confidence picks (quote_sections CHECKs, 20270127110000). */
+export type BookingTiming = 'pre_plant' | 'in_season' | 'late_summer';
+export type BookingConfidence = 'firm' | 'likely' | 'maybe';
 
 /** The last price charged to a customer for one product (get_last_charged_prices, To-Do 0.3). */
 export interface LastChargedPrice {

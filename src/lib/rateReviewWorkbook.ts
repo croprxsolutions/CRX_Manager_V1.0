@@ -12,6 +12,7 @@ import type {
   CommitRateReviewResult,
   ProductRateLabelCheck,
   ProductRateOutcome,
+  RateReviewParentChanged,
   RateReviewOutcomeRow,
   RateReviewRateRow,
   RateReviewResult,
@@ -102,6 +103,11 @@ export function labelCheckText(check: ProductRateLabelCheck | undefined): string
       + (check.reason_missing ? ' (needs a reason)' : '');
     default: return `label maximum not checked (${(check.why ?? '').replace(/_/g, ' ')})`;
   }
+}
+
+export function parentChangedText(change: RateReviewParentChanged | undefined, saved = false): string {
+  if (!change) return '';
+  return `Parent rate changed since this draft was made: was "${change.was}", now ${change.now === null ? 'none' : `"${change.now}"`}. ${saved ? 'Approved anyway.' : 'Approving still saves it.'}`;
 }
 
 const yesNo = (value: boolean) => (value ? 'yes' : 'no');

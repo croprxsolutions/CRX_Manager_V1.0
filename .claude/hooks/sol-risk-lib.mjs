@@ -267,12 +267,10 @@ export function stagingDestructiveProblem({ repo, gh, number, headSha, baseSha }
 }
 
 // null when an agent may merge this PR (its other gates still apply).
-// `releasePass`: Mason's `ship the release` / `go live #n` in this session covers this PR (release-pass-lib.mjs).
-export function agentMergeProblem(base, headRef, { releasePass = false } = {}) {
-  if (releasePass && (base === "main" || (base === "staging" && headRef === "main"))) return null;
+export function agentMergeProblem(base, headRef) {
   if (base === "main") {
     return "an agent never merges into main: only the weekly release PR (release/next) and hotfix/<name> PRs go there, " +
-      "and Taha or Mason merges them, or an agent whose session Mason told `ship the release` / `go live #<n>`. Feature PRs, migrations included, target staging (ship.md › Staging)";
+      "and Taha or Mason merges them. Feature PRs, migrations included, target staging (ship.md › Staging)";
   }
   if (base === "staging" && headRef === "main") {
     return "the back-merge (main into staging) is Taha's or Mason's to merge, with \"Create a merge commit\"";

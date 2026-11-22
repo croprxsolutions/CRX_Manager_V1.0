@@ -155,7 +155,7 @@ BEGIN
   PERFORM set_config('request.jwt.claims',
     json_build_object('sub', v_app1, 'role', 'authenticated')::text, true);
   BEGIN
-    PERFORM undispatch_job_locations(ARRAY[v_jf_a], v_app1, NULL);
+    PERFORM undispatch_job_locations(ARRAY[v_jf_a], v_app1, '[SMOKE] undisp-L158-' || v_sfx);
     RAISE EXCEPTION 'FAIL 6: applicator caller should be rejected';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'FAIL %' THEN RAISE; END IF;
@@ -166,7 +166,7 @@ BEGIN
 
   -- ============================================ 7) ACTOR GATE (forged actor)
   BEGIN
-    PERFORM undispatch_job_locations(ARRAY[v_jf_a], v_app2, NULL);  -- p_performed_by <> auth.uid()
+    PERFORM undispatch_job_locations(ARRAY[v_jf_a], v_app2, '[SMOKE] undisp-L169-' || v_sfx);  -- p_performed_by <> auth.uid()
     RAISE EXCEPTION 'FAIL 7: forged actor should raise ACTOR_MISMATCH';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'FAIL %' THEN RAISE; END IF;
@@ -178,7 +178,7 @@ BEGIN
   IF v_res2 <> v_res THEN RAISE EXCEPTION 'FAIL 8: idempotent replay differs % vs %', v_res2, v_res; END IF;
 
   -- ============================================ 9) NO-OP UNDISPATCH (never dispatched)
-  v_res := undispatch_job_locations(ARRAY[v_jf_orphan], v_admin, NULL);
+  v_res := undispatch_job_locations(ARRAY[v_jf_orphan], v_admin, '[SMOKE] undisp-L181-' || v_sfx);
   IF (v_res->>'undispatched')::int <> 0 THEN RAISE EXCEPTION 'FAIL 9: orphan undispatch should be 0 got %', v_res; END IF;
 
   -- ============================================ 10) ANON DENIED
@@ -220,6 +220,9 @@ BEGIN
   -- finished job's dispatch must NOT be cancellable (the server is the write boundary; the
   -- UI hiding the control is not enough). The dispatch row stays 'dispatched'.
   UPDATE jobs SET status = 'cancelled' WHERE id = v_job;  -- legal scheduled->cancelled
+  -- Cancelling the job closes its dispatches (trg_close_job_location_dispatch_on_job_terminal, 20260707020000);
+  -- put loc A back to dispatched so this call tests the RPC's own lifecycle gate, not the trigger.
+  UPDATE job_location_dispatches SET dispatch_status = 'dispatched' WHERE job_field_id = v_jf_a;
   v_res := undispatch_job_locations(ARRAY[v_jf_a], v_admin, '[SMOKE] undisp-finished-' || v_sfx);
   IF (v_res->>'undispatched')::int <> 0 THEN
     RAISE EXCEPTION 'FAIL 12: undispatch on a cancelled job should be a no-op got %', v_res;

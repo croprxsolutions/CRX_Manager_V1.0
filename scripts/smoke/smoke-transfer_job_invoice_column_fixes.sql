@@ -109,10 +109,52 @@ BEGIN
   INSERT INTO products (product_name, unit_size, epa_registration, product_form, inventory_unit)
   VALUES ('[SMOKE] Chem Alpha ' || v_sfx, 'Gal', '999999-99999', 'liquid', 'Gal')
   RETURNING id INTO v_prod_a;
-
   INSERT INTO products (product_name, unit_size, epa_registration, product_form, inventory_unit)
   VALUES ('[SMOKE] Chem Beta ' || v_sfx, 'Gal', '999999-99999', 'liquid', 'Gal')
   RETURNING id INTO v_prod_b;
+  -- Governed cost (a bare products insert has none, so billing refuses with COST_BASIS_REQUIRED).
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role','authenticated')::text, true);
+  DECLARE v_pricing jsonb;
+  BEGIN
+    v_pricing := preview_product_cost_basis_changes('product_page', NULL,
+      jsonb_build_array(jsonb_build_object(
+        'product_id', v_prod_b, 'row_version', (SELECT pricing_version FROM products WHERE id = v_prod_b),
+        'pricing_mode', 'price_driven', 'new_cost', '1.00',
+        'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00',
+        'change_reason', '[SMOKE] cost fixture', 'price_source', '[SMOKE]',
+        'basis_type', 'manual_override', 'basis_source', 'product_page',
+        'basis_reason', '[SMOKE] cost fixture', 'basis_selection', false)),
+      v_admin, '[SMOKE] tjb-price-preview-'||v_sfx);
+    PERFORM approve_pricing_change_set((v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint',
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('product_id', w->>'product_id', 'warning_codes', w->'warning_codes',
+                                                    'reason', '[SMOKE] acknowledged'))
+                  FROM jsonb_array_elements(v_pricing->'warnings') AS w), '[]'::jsonb),
+      NULL, v_admin, '[SMOKE] tjb-price-approve-'||v_sfx);
+    PERFORM apply_product_cost_basis_change_set((v_pricing->>'change_set_id')::uuid,
+      v_pricing->>'request_fingerprint', v_admin, '[SMOKE] tjb-price-apply-'||v_sfx);
+  END;
+  -- Governed cost (a bare products insert has none, so billing refuses with COST_BASIS_REQUIRED).
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role','authenticated')::text, true);
+  DECLARE v_pricing jsonb;
+  BEGIN
+    v_pricing := preview_product_cost_basis_changes('product_page', NULL,
+      jsonb_build_array(jsonb_build_object(
+        'product_id', v_prod_a, 'row_version', (SELECT pricing_version FROM products WHERE id = v_prod_a),
+        'pricing_mode', 'price_driven', 'new_cost', '1.00',
+        'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00',
+        'change_reason', '[SMOKE] cost fixture', 'price_source', '[SMOKE]',
+        'basis_type', 'manual_override', 'basis_source', 'product_page',
+        'basis_reason', '[SMOKE] cost fixture', 'basis_selection', false)),
+      v_admin, '[SMOKE] tja-price-preview-'||v_sfx);
+    PERFORM approve_pricing_change_set((v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint',
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('product_id', w->>'product_id', 'warning_codes', w->'warning_codes',
+                                                    'reason', '[SMOKE] acknowledged'))
+                  FROM jsonb_array_elements(v_pricing->'warnings') AS w), '[]'::jsonb),
+      NULL, v_admin, '[SMOKE] tja-price-approve-'||v_sfx);
+    PERFORM apply_product_cost_basis_change_set((v_pricing->>'change_set_id')::uuid,
+      v_pricing->>'request_fingerprint', v_admin, '[SMOKE] tja-price-apply-'||v_sfx);
+  END;
+
 
   INSERT INTO fields (customer_id, field_name, crop_type)
   VALUES (v_customer, '[SMOKE] North 40 ' || v_sfx, 'corn')

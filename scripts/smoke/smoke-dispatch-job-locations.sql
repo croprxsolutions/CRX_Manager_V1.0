@@ -141,7 +141,7 @@ BEGIN
   BEGIN
     PERFORM dispatch_job_locations(
       jsonb_build_array(jsonb_build_object('job_field_id', v_jf_c, 'applicator_id', v_app1, 'crew_id', v_crew)),
-      v_admin, NULL);
+      v_admin, '[SMOKE] disp-L144-' || v_sfx);
     RAISE EXCEPTION 'FAIL 4a: both-assignee should have been rejected';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'FAIL %' THEN RAISE; END IF;
@@ -150,7 +150,7 @@ BEGIN
   BEGIN
     PERFORM dispatch_job_locations(
       jsonb_build_array(jsonb_build_object('job_field_id', v_jf_c, 'applicator_id', NULL, 'crew_id', NULL)),
-      v_admin, NULL);
+      v_admin, '[SMOKE] disp-L153-' || v_sfx);
     RAISE EXCEPTION 'FAIL 4b: neither-assignee should have been rejected';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'FAIL %' THEN RAISE; END IF;
@@ -161,7 +161,7 @@ BEGIN
   BEGIN
     PERFORM dispatch_job_locations(
       jsonb_build_array(jsonb_build_object('job_field_id', v_jf_c, 'applicator_id', v_app1, 'crew_id', NULL)),
-      v_app2, NULL);  -- p_performed_by <> auth.uid()
+      v_app2, '[SMOKE] disp-L164-' || v_sfx);  -- p_performed_by <> auth.uid()
     RAISE EXCEPTION 'FAIL 6: forged actor should raise ACTOR_MISMATCH';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'FAIL %' THEN RAISE; END IF;
@@ -173,7 +173,7 @@ BEGIN
   BEGIN
     PERFORM dispatch_job_locations(
       jsonb_build_array(jsonb_build_object('job_field_id', v_jf_c, 'applicator_id', v_app1, 'crew_id', NULL)),
-      v_admin, NULL);
+      v_admin, '[SMOKE] disp-L176-' || v_sfx);
     RAISE EXCEPTION 'FAIL 7: cancelled-job dispatch should be rejected';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'FAIL %' THEN RAISE; END IF;
@@ -184,6 +184,9 @@ BEGIN
   PERFORM set_config('app.admin_override', 'true', true);
   UPDATE jobs SET status = 'scheduled' WHERE id = v_job;
   PERFORM set_config('app.admin_override', 'false', true);
+  -- Cancelling the job closed its dispatches (trg_close_job_location_dispatch_on_job_terminal, 20260707020000);
+  -- put them back as they were so the probes below still start from the dispatched state.
+  UPDATE job_location_dispatches SET dispatch_status = 'dispatched' WHERE job_id = v_job AND dispatch_status = 'cancelled';
 
   -- ============================================ 5) ROLE GATE (applicator caller)
   PERFORM set_config('request.jwt.claims',
@@ -191,7 +194,7 @@ BEGIN
   BEGIN
     PERFORM dispatch_job_locations(
       jsonb_build_array(jsonb_build_object('job_field_id', v_jf_b, 'applicator_id', v_app2, 'crew_id', NULL)),
-      v_app1, NULL);
+      v_app1, '[SMOKE] disp-L194-' || v_sfx);
     RAISE EXCEPTION 'FAIL 5: applicator caller should be rejected';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'FAIL %' THEN RAISE; END IF;
@@ -253,7 +256,7 @@ BEGIN
   BEGIN
     PERFORM dispatch_job_locations(
       jsonb_build_array(jsonb_build_object('job_field_id', v_jf_b, 'applicator_id', v_app2, 'crew_id', NULL)),
-      v_admin, NULL, false);
+      v_admin, '[SMOKE] disp-L256-' || v_sfx, false);
     RAISE EXCEPTION 'FAIL 11: expired-license dispatch should raise LICENSE_EXPIRED';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'FAIL %' THEN RAISE; END IF;
@@ -262,7 +265,7 @@ BEGIN
   -- admin override succeeds AND is recorded durably (Codex re-review P2)
   v_res := dispatch_job_locations(
     jsonb_build_array(jsonb_build_object('job_field_id', v_jf_b, 'applicator_id', v_app2, 'crew_id', NULL)),
-    v_admin, NULL, true);
+    v_admin, '[SMOKE] disp-L265-' || v_sfx, true);
   IF (v_res->>'dispatched')::int <> 1 THEN RAISE EXCEPTION 'FAIL 11: override should dispatch 1 got %', v_res; END IF;
   IF (v_res->>'license_overrides')::int <> 1 THEN RAISE EXCEPTION 'FAIL 11: override count should be 1 got %', v_res; END IF;
   PERFORM 1 FROM activity_feed
@@ -276,7 +279,7 @@ BEGIN
   -- AND the parent job (jobs_select_location_dispatchee).
   v_res := dispatch_job_locations(
     jsonb_build_array(jsonb_build_object('job_field_id', v_jf_c, 'applicator_id', NULL, 'crew_id', v_crew)),
-    v_admin, NULL, false);
+    v_admin, '[SMOKE] disp-L279-' || v_sfx, false);
   INSERT INTO ground_crew_members (crew_id, name, profile_id, is_active)
     VALUES (v_crew, 'Smoke Member', v_app1, true);
   PERFORM set_config('request.jwt.claims',
@@ -384,7 +387,7 @@ BEGIN
   BEGIN
     PERFORM dispatch_job_locations(
       jsonb_build_array(jsonb_build_object('job_field_id', v_jf_a, 'applicator_id', v_app1, 'crew_id', NULL)),
-      v_admin, NULL, false);
+      v_admin, '[SMOKE] disp-L387-' || v_sfx, false);
     RAISE EXCEPTION 'FAIL 18: soft-deleted job dispatch should be rejected';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'FAIL %' THEN RAISE; END IF;
@@ -401,7 +404,7 @@ BEGIN
       jsonb_build_array(
         jsonb_build_object('job_field_id', v_jf_a, 'applicator_id', v_app1, 'crew_id', NULL),
         jsonb_build_object('job_field_id', v_jf_a, 'applicator_id', v_app2, 'crew_id', NULL)
-      ), v_admin, NULL, false);
+      ), v_admin, '[SMOKE] disp-L404-' || v_sfx, false);
     RAISE EXCEPTION 'FAIL 20: duplicate job_field_id should be rejected';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM LIKE 'FAIL %' THEN RAISE; END IF;
@@ -418,7 +421,7 @@ BEGIN
     json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
   v_res := dispatch_job_locations(
     jsonb_build_array(jsonb_build_object('job_field_id', v_jf_a, 'applicator_id', NULL, 'crew_id', v_crew)),
-    v_admin, NULL, false);
+    v_admin, '[SMOKE] disp-L421-' || v_sfx, false);
   SELECT count(*) INTO v_seen FROM job_location_dispatches WHERE job_field_id = v_jf_a AND crew_id = v_crew;
   IF v_seen <> 1 THEN RAISE EXCEPTION 'FAIL 16: setup — v_jf_a not dispatched to v_crew (saw %)', v_seen; END IF;
   DELETE FROM ground_crews WHERE id = v_crew;  -- must cascade the dispatch row, not error on XOR

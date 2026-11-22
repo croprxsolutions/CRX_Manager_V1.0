@@ -471,7 +471,8 @@ describe('ProductDetail brands section', () => {
     H.optionLoadFailed = false;
     fireEvent.click(within(banner.parentElement!).getByRole('button', { name: 'Try again' }));
     expect(await screen.findByRole('checkbox', { name: 'Pre-Emerge Corn' })).toBeChecked();
-    expect(screen.queryByText(/Could not load/)).not.toBeInTheDocument();
+    // This fixture has no cost-basis workspace, so only the pick-list banner is checked.
+    expect(screen.queryByText(/Could not load use timings/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Manage crop and timing choices' })).toBeInTheDocument();
   });
 

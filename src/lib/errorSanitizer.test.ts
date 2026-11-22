@@ -519,6 +519,12 @@ describe('sanitizeError', () => {
     )).toBe('Invalid input format');
   });
 
+  it('explains a blank number instead of a generic format error (#2156)', () => {
+    expect(sanitizeError('invalid input syntax for type numeric: ""'))
+      .toBe('Nothing was saved. A quantity or amount was left blank; enter a number and try again');
+    expect(sanitizeError('invalid input syntax for type numeric: "abc"')).toBe('Invalid input format');
+  });
+
   it('sanitizes relation does not exist errors', () => {
     expect(sanitizeError(
       'relation "nonexistent_table" does not exist'

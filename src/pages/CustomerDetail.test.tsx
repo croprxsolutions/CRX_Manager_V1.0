@@ -959,6 +959,112 @@ describe('CustomerDetail stale whole-record save', () => {
     expect(screen.queryByText(/only an admin can change the price tier, credit limit and standing discount/i)).not.toBeInTheDocument();
   });
 
+  it('an admin reactivates an inactive customer from the page; a later Save keeps it active; a rep sees the button, a driver does not (#2197)', async () => {
+    const inactive = { ...original, is_active: false } as unknown as typeof original;
+    let customerReads = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') {
+        return customerQuery(() => {
+          customerReads += 1;
+          return customerReads <= 2 ? inactive : ({ ...original, is_active: true, row_version: 5 } as unknown as typeof original);
+        });
+      }
+      return query({ data: [], error: null });
+    });
+    try {
+      mockProfile.current = { id: 'driver-1', role: 'driver', full_name: 'Driver One' };
+      const driverView = renderDetail();
+      await screen.findByDisplayValue('Original Farm');
+      expect(screen.getByText('Inactive')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Reactivate' })).not.toBeInTheDocument();
+      driverView.unmount();
+      customerReads = 0;
+      mockProfile.current = { id: 'rep-1', role: 'sales_rep', full_name: 'Rep One' };
+      const repView = renderDetail();
+      await screen.findByDisplayValue('Original Farm');
+      expect(screen.getByRole('button', { name: 'Reactivate' })).toBeInTheDocument();
+      repView.unmount();
+    } finally {
+      mockProfile.current = { id: 'admin-1', role: 'admin', full_name: 'Admin' };
+    }
+    customerReads = 0;
+    mockRpc.mockResolvedValue({ data: { customer_id: 'customer-1', row_version: 6 }, error: null });
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reactivate' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Original Farm is active again.'));
+    expect(screen.queryByText('Inactive')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reactivate' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByDisplayValue('Original Farm'), { target: { value: 'Edited after reactivate' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_customer', expect.objectContaining({
+      p_customer_payload: expect.objectContaining({ is_active: true, row_version_expected: 5 }),
+    })));
+  });
+
+  it('a stale Reactivate confirmation changes nothing and says so (#2197, Sol HIGH)', async () => {
+    const inactive = { ...original, is_active: false } as unknown as typeof original;
+    let updatePayload: unknown;
+    const eqCalls: unknown[][] = [];
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'customers') return query({ data: [], error: null });
+      const chain = customerQuery(() => inactive);
+      const baseEq = chain.eq as (...args: unknown[]) => unknown;
+      chain.eq = (...args: unknown[]) => { eqCalls.push(args); return baseEq(...args); };
+      chain.update = (payload: unknown) => {
+        updatePayload = payload;
+        chain.select = () => chain;
+        chain.then = (resolve: (value: QueryResult) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve);
+        return chain;
+      };
+      return chain;
+    });
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reactivate' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('changed by someone else')));
+    expect(updatePayload).toEqual({ is_active: true });
+    expect(eqCalls).toContainEqual(['row_version', inactive.row_version]);
+    expect(screen.getByText('Inactive')).toBeInTheDocument();
+    expect(mockToast).not.toHaveBeenCalledWith('success', expect.anything());
+  });
+
+  it('a Reactivate confirmation keeps the version it opened on across a reload (#2197, Sol HIGH round 3)', async () => {
+    const inactive = { ...original, is_active: false } as unknown as typeof original;
+    const newerInactive = { ...newer, is_active: false } as unknown as typeof original;
+    expect(newerInactive.row_version).not.toBe(inactive.row_version);
+    let customerReads = 0;
+    const eqCalls: unknown[][] = [];
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'customers') return query({ data: [], error: null });
+      const chain = customerQuery(() => { customerReads += 1; return customerReads <= 2 ? inactive : newerInactive; });
+      const baseEq = chain.eq as (...args: unknown[]) => unknown;
+      chain.eq = (...args: unknown[]) => { eqCalls.push(args); return baseEq(...args); };
+      chain.update = () => {
+        chain.select = () => chain;
+        chain.then = (resolve: (value: QueryResult) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve);
+        return chain;
+      };
+      return chain;
+    });
+    mockRpc.mockResolvedValue({ data: null, error: { message: 'COMMISSION_SPLIT_CONFLICT: changed elsewhere' } });
+    renderDetail();
+    fireEvent.change(await screen.findByDisplayValue('Original Farm'), { target: { value: 'Edited Farm' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    const reload = await screen.findByRole('button', { name: 'Reload Customer' });
+    // Open Reactivate on the version shown now, then let a reload install a newer one.
+    fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
+    const dialog = await screen.findByRole('alertdialog', { name: /Reactivate customer/ });
+    fireEvent.click(reload);
+    await screen.findByDisplayValue('Newer Farm');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reactivate' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('changed by someone else')));
+    expect(eqCalls).toContainEqual(['row_version', inactive.row_version]);
+    expect(eqCalls).not.toContainEqual(['row_version', newerInactive.row_version]);
+  });
+
   it('locks the commission split editor while a save runs', async () => {
     mockFrom.mockImplementation((table: string) => {
       if (table === 'customers') return customerQuery(() => original);

@@ -1187,21 +1187,6 @@ export default function Returns() {
         loading={deleting}
       />
 
-      <ConfirmModal
-        open={!!confirmAction && (confirmAction.type === 'approve' || confirmAction.type === 'reject')}
-        onClose={() => setConfirmAction(null)}
-        onConfirm={async () => {
-          if (!confirmAction) return;
-          setConfirmAction(null);
-          if (confirmAction.type === 'approve') await handleApprove();
-          else if (confirmAction.type === 'reject') await handleReject();
-        }}
-        title={confirmAction?.title || ''}
-        message={confirmAction?.message || ''}
-        confirmLabel={confirmAction?.type === 'approve' ? 'Approve' : 'Reject'}
-        variant={confirmAction?.type === 'approve' ? 'info' : 'danger'}
-      />
-
       <ReasonModal
         open={cancelModalOpen}
         onClose={() => setCancelModalOpen(false)}
@@ -1222,6 +1207,8 @@ export default function Returns() {
       <Modal
         open={showDetail}
         onClose={closeDetail}
+        // Escape belongs to the Approve/Reject confirmation while it is open on top.
+        closeDisabled={!!confirmAction}
         title={activeReturn ? `Return: ${activeReturn.return_number}` : 'Return Detail'}
         size="large"
       >
@@ -1310,6 +1297,21 @@ export default function Returns() {
           </div>
         )}
       </Modal>
+
+      <ConfirmModal
+        open={!!confirmAction && (confirmAction.type === 'approve' || confirmAction.type === 'reject')}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={async () => {
+          if (!confirmAction) return;
+          setConfirmAction(null);
+          if (confirmAction.type === 'approve') await handleApprove();
+          else if (confirmAction.type === 'reject') await handleReject();
+        }}
+        title={confirmAction?.title || ''}
+        message={confirmAction?.message || ''}
+        confirmLabel={confirmAction?.type === 'approve' ? 'Approve' : 'Reject'}
+        variant={confirmAction?.type === 'approve' ? 'info' : 'danger'}
+      />
     </div>
   );
 }

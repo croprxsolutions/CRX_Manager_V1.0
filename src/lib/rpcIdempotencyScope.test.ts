@@ -258,6 +258,11 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // (20261019235000) re-emits the body only to retarget its keyless per-delivery cancel; changing
   // the literal would orphan the wrapper's receipt binding.
   _batch_cancel_deliveries_replay_impl_20261015: ['batch_cancel_deliveries'],
+  // Direct EXECUTE is revoked (postgres-only). 20260716202000 renamed the live complete_delivery body to this
+  // name with ALTER FUNCTION ... RENAME TO, so its replay lookup kept the public 'complete_delivery' literal and
+  // the public wrappers bind that same receipt. #2135 (20270213100000) re-emits it only to drop its duplicate
+  // short-stock warning; changing the literal would orphan existing receipts.
+  _complete_delivery_period_preflight_impl: ['complete_delivery'],
   // Direct EXECUTE is revoked (postgres-only). Replay-binding batch 4a (20261102180000) renamed the
   // live unpost_invoice_group body to this name and re-emits it only to unpost each member through
   // unpost_invoice's renamed body (no per-member key); it keeps the public operation literal so the
@@ -272,6 +277,10 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // kept the public literal the wrapper binds. 20261106230000 (KI-94) re-emits it only to restore exactly the
   // reservation completion took; changing the literal would orphan every existing receipt.
   _void_delivery_replay_impl_20261015: ['void_delivery'],
+  // Direct EXECUTE is revoked (postgres-only). Batch 3b renamed the live close_accounting_period body to this
+  // name, so it kept the public literal the wrapper binds. 20270206110000 (KI-125/129) re-emits it only to change
+  // the summary figures; changing the literal would orphan every existing receipt.
+  _close_accounting_period_replay_impl_20261015: ['close_accounting_period'],
   // Direct EXECUTE is revoked (postgres-only after batch 3b). Migration 20260714222000 renamed the
   // live void_order body to this name with ALTER FUNCTION ... RENAME TO, so it kept the public
   // void_order literal, and the public wrapper binds that same receipt. Batch 3b (20261019235000)

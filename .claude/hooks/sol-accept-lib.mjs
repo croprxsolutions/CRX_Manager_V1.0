@@ -14,10 +14,15 @@
 //   4. write-codex-push-proof.mjs --carry-owner-accepted checks that commit adds
 //      exactly that entry and writes a carried Sol proof (carry.mode
 //      "owner_accepted") bound to the new head, which the merge and apply gates accept.
+// Since 2026-11-21 (Mason: "I need to just be able to tell it I don't want that") step 2
+// builds ONE request for several findings and he answers in plain words, no code:
+// `skip`, `skip 1 3`, `I don't want that` (skipFromReply). The old per-finding
+// `accept <code> <reason>` reply still works for requests built before then.
 // The same trust boundary as Mason's migration approval (owner-approval-lib.mjs
 // header): it stops a mistaken or relayed acceptance, not an agent forging files.
 
 import { createHash } from "node:crypto";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 export const SOL_FINDING_TOKEN = "SOL_FINDING";
@@ -161,12 +166,190 @@ export function solAcceptSummary(p) {
   ];
 }
 
+// ── Skipping several findings in plain words (Mason, 2026-11-21) ──────────────
+export const OWNER_SOL_SKIP_PURPOSE = "crx-owner-sol-skip-v1";
+export const OWNER_SOL_SKIP_VIA = "chat-reply-skip";
+// What the log and the proof record for a skipped finding: fixed wording, so nothing
+// private he types can reach the public log (Sol plan review, 2026-11-21).
+export const SKIP_REASON = "chose to leave it unfixed";
+export const solSkipFileName = (head, code) => `owner-approval-sol-skip-${head}-${code}.json`;
+
+const SKIP_ALL_RES = [
+  /^(?:skip|accept|don't fix|do not fix)(?: (?:them|these|those|all|all of them|them all|it|that))?$/,
+  /^leave (?:them|these|those|it|that)(?: alone)?$/,
+  /^i (?:don't|do not) want (?:that|those|these|them|it)(?: fixed)?$/,
+  /^i disagree(?: with (?:that|those|these|them|it|all of them))?$/,
+];
+const SKIP_SOME_RE = /^(?:skip|accept|don't fix|do not fix) (?:findings? )?(\d{1,2}(?:(?:, ?| | and |, and )\d{1,2})*)$/;
+
+/**
+ * Mason's plain skip reply, the WHOLE message: { all: true } or { numbers: [...] }; else null.
+ * Case, curly apostrophes, spacing and a trailing . or ! do not matter. `yes, <reason>` skips them all
+ * (a bare `yes` parses but skipSelection refuses it for want of a reason). Questions, "ok",
+ * "move on", "merge it" and anything with other words are not a skip (Sol plan review: those
+ * too often mean "go on" or "merge after fixing"). `accept <6 digits> ...` is the old form and
+ * never reads as a skip (two-digit numbers at most).
+ */
+export function skipFromReply(prompt) {
+  const raw = String(prompt ?? "");
+  if (BREAK_RE.test(raw.trim())) return null;
+  const t = raw.toLowerCase().replace(/[‘’ʼ]/g, "'").replace(/\s*[.!]+\s*$/, "").replace(/[ \t]+/g, " ").trim();
+  if (!t) return null;
+  // `yes, <reason>` answers the request's "do you accept the risk?" for every finding it lists
+  // (Mason, 2026-11-22). A bare `yes` still parses so the hook can ask him for the reason.
+  const yes = /^yes\b[\s,:;.!\-–—]*(.*)$/i.exec(raw.trim());
+  // A question or a condition is not acceptance: "yes, can you explain first?" skips nothing (Codex P1, #2199).
+  if (yes) return /\?|\b(?:if|unless|but|after|first|once|when|explain|why|what|how)\b/i.test(yes[1]) ? null : { all: true, reason: yes[1].trim() };
+  // "that"/"it" name ONE finding: they skip only when the list has one (Luna, 2026-11-21).
+  if (SKIP_ALL_RES.some((re) => re.test(t))) return / (?:it|that)(?: alone| fixed)?$/.test(t) ? { all: true, single: true } : { all: true };
+  const m = SKIP_SOME_RE.exec(t);
+  return m ? { numbers: m[1].split(/\D+/).filter(Boolean).map(Number) } : null;
+}
+
+/**
+ * The finding numbers a skip covers, from the findings the request showed; or { problem }.
+ * @returns {{numbers: number[]}|{problem: string}}
+ */
+export function skipSelection(skip, shownFindings) {
+  const shown = (shownFindings || []).map((f) => f.n);
+  if (!skip) return { problem: "his reply is not a skip" };
+  if (skip.reason !== undefined) {
+    const bad = reasonProblem(skip.reason);
+    if (bad) return { problem: `he said yes, but ${bad}; ask him for the reason again` };
+  }
+  if (skip.all && skip.single && shown.length !== 1) return { problem: `his reply says "that" or "it" but the list has ${shown.length} findings; he replies skip (all of them) or skip and the numbers` };
+  if (skip.all) return shown.length ? { numbers: shown } : { problem: "the request shows no findings" };
+  const nums = skip.numbers || [];
+  if (!nums.length) return { problem: "his reply names no finding" };
+  if (new Set(nums).size !== nums.length) return { problem: "his reply names a finding twice" };
+  const missing = nums.filter((n) => !shown.includes(n));
+  if (missing.length) return { problem: `finding ${missing.join(", ")} was not in the list he was shown` };
+  return { numbers: [...nums].sort((a, b) => a - b) };
+}
+
+const PR_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d+)$/i;
+const normUrl = (u) => String(u ?? "").trim().replace(/\/+$/, "").toLowerCase();
+/** A GitHub pull request URL naming PR `number` (repository included), or null. */
+export const pullRequestUrlFor = (url, number) => {
+  const m = PR_URL_RE.exec(String(url ?? "").trim().replace(/\/+$/, ""));
+  return m && Number(m[1]) === number ? normUrl(url) : null;
+};
+/**
+ * Whether a Sol proof may count for this pull request (Sol gate rounds 3-5). A proof with no owner
+ * acceptances always may. One with acceptances counts only for the exact pull request (repository
+ * and number, by URL) they were given for, and only at the exact version reviewed: never across later
+ * commits. A carry that says it came from an owner-accepted review but lost its list never counts.
+ */
+export function ownerAcceptedForPr(proof, { number, url, exactHead } = {}) {
+  const acc = proof?.owner_accepted;
+  if (acc === undefined) return proof?.carry?.mode !== "owner_accepted" && proof?.carry?.root_review?.owner_accepted !== true;
+  const want = pullRequestUrlFor(url, number);
+  return exactHead === true && want !== null && Array.isArray(acc) && acc.length > 0
+    && acc.every((a) => a?.pull_request === number && normUrl(a?.pull_request_url) === want);
+}
+
+/** The lines Mason reads before he replies to a skip request. Derived only from payload fields. */
+export function solSkipSummary(p) {
+  const nums = (p.findings || []).map((f) => f.n);
+  return [
+    `${nums.length === 1 ? "This Sol finding gets fixed" : `These ${nums.length} Sol findings get fixed`} unless you skip ${nums.length === 1 ? "it" : "them"}. A skipped finding stays unfixed and the pull request may land with it.`,
+    "",
+    `Pull request: ${String(p.pullRequestUrl ?? "").replace(/^https:\/\/github\.com\//i, "").replace(/\/pull\//, "#")} (version ${String(p.prHead).slice(0, 12)})`,
+    ...(p.findings || []).map((f) => `Finding ${f.n} of ${p.findingCount} (${f.severity}): ${f.text}`),
+    "",
+    `Each skipped finding's file and line, and your reason, go in ${DECISION_LOG_PATH}, which is public; the finding's wording stays private.`,
+    "Every other finding and every other safety check still applies.",
+    "",
+    `Do you accept the risk of leaving ${nums.length === 1 ? "it" : "them"} unfixed? Reply yes and your reason (for example: yes, too small to ever affect the business).`,
+    ...(nums.length > 1 ? [`To skip only some, reply skip and their numbers (for example: skip ${nums[0]})`] : []),
+    `Skip, I disagree or don't fix also work. A bare yes with no reason, ok, or a question skips nothing. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
+  ];
+}
+
+/** One request covering findings `numbers` of `record` (all of them when omitted). Field order is fixed. */
+export function buildSolSkipPayload({ record, numbers, pullRequest, pullRequestUrl, issuedAt, expiresAt, nonce, code, sessionId }) {
+  const want = numbers?.length ? numbers : record.findings.map((f) => f.n);
+  const p = {
+    purpose: OWNER_SOL_SKIP_PURPOSE,
+    pullRequest,
+    pullRequestUrl,
+    prHead: record.head_sha,
+    baseSha: record.base_sha,
+    reviewedAt: record.timestamp,
+    findings: want.map((n) => record.findings[n - 1]).map(({ n, severity, text }) => ({ n, severity, text })),
+    findingCount: record.findings.length,
+    issuedAt,
+    expiresAt,
+    nonce,
+    code,
+    sessionId,
+  };
+  return JSON.stringify({ ...p, summary: solSkipSummary(p) }, null, 2);
+}
+
+/** A skip request's deadline: `maxAgeMs` from now, but never past the Sol run it answers (Sol plan review). */
+export const skipDeadlineMs = (record, nowMs, maxAgeMs) => Math.min(nowMs + maxAgeMs, Date.parse(record.timestamp) + SOL_BLOCKERS_MAX_AGE_MS);
+
+/**
+ * Check one skip receipt against the blockers record it must cover. Bound to that exact Sol
+ * run (head, base, review time) and to the findings exactly as shown.
+ * @returns {{ok: true, payload: object, numbers: number[], approvedAt: string}|{ok: false, reason: string}}
+ */
+export function verifySolSkip({ approval, record, checkReply, checkShown }) {
+  const no = (reason) => ({ ok: false, reason: `skip receipt: ${reason}` });
+  if (!approval || approval.via !== OWNER_SOL_SKIP_VIA || typeof approval.payload !== "string") return no("not a skip receipt");
+  let p;
+  try { p = JSON.parse(approval.payload); } catch { return no("unreadable"); }
+  if (p.purpose !== OWNER_SOL_SKIP_PURPOSE) return no("not a Sol skip request");
+  if (String(p.prHead).toLowerCase() !== String(record.head_sha).toLowerCase() || p.baseSha !== record.base_sha) {
+    return no("it was for a different version of the pull request");
+  }
+  if (p.reviewedAt !== record.timestamp) return no("it was from an earlier Sol run on this head");
+  if (p.findingCount !== record.findings.length || !Array.isArray(p.findings) || !p.findings.length) return no("it was shown a different set of findings");
+  for (const f of p.findings) {
+    const r = record.findings[f?.n - 1];
+    if (!r || f.n !== r.n || f.severity !== r.severity || f.text !== r.text) return no("it shows a finding this Sol run did not report");
+  }
+  if (!Number.isInteger(p.pullRequest) || p.pullRequest <= 0) return no("it names no pull request");
+  if (pullRequestUrlFor(p.pullRequestUrl, p.pullRequest) === null) return no("it does not name the pull request's repository");
+  if (JSON.stringify(p.summary) !== JSON.stringify(solSkipSummary(p))) return no("what Mason was shown does not match what it covers");
+  const said = skipFromReply(approval.reply);
+  const sel = skipSelection(said, p.findings);
+  if (sel.problem) return no(`the recorded reply does not hold (${sel.problem})`);
+  if (JSON.stringify(sel.numbers) !== JSON.stringify(approval.selected)) return no("the recorded reply does not match the findings recorded as skipped");
+  const issued = Date.parse(p.issuedAt);
+  const deadline = Date.parse(p.expiresAt);
+  const approved = Date.parse(approval.approvedAt);
+  if (![issued, deadline, approved].every(Number.isFinite) || approved < issued || approved > deadline) return no("it has no usable time window");
+  const mark = approval.replyMark;
+  if (!mark || mark.words !== String(approval.reply ?? "").trim()) return no("where his reply is in the conversation does not hold the recorded reply");
+  if (path.basename(String(mark.transcript ?? ""), ".jsonl") !== p.sessionId) return no("his reply is in a different conversation from the one that asked");
+  try { checkReply?.(mark); }
+  catch (e) { return no(`his reply could not be confirmed as his words alone (${e?.message || e})`); }
+  // Required: a plain `skip` names no request, so what he was shown is what binds it.
+  if (typeof checkShown !== "function") return no("what he was shown before his reply was not checked");
+  try { checkShown(mark, p); }
+  catch (e) { return no(`his reply could not be tied to this request (${e?.message || e})`); }
+  return { ok: true, payload: p, numbers: sel.numbers, reason: said.reason ?? SKIP_REASON, approvedAt: approval.approvedAt };
+}
+
+/** Every skip receipt saved for `head` in `stateDir`, parsed (unreadable ones are left out). */
+export function readSkipReceipts(stateDir, head) {
+  const prefix = `owner-approval-sol-skip-${head}-`;
+  let names;
+  try { names = readdirSync(stateDir); } catch { return []; }
+  return names.filter((n) => n.startsWith(prefix) && n.endsWith(".json")).sort().flatMap((n) => {
+    try { return [JSON.parse(readFileSync(path.join(stateDir, n), "utf8"))]; } catch { return []; }
+  });
+}
+
 /** The request for finding `n` of `record`. Field order is fixed. */
-export function buildSolAcceptPayload({ record, n, pullRequest, issuedAt, expiresAt, nonce, code, sessionId }) {
+export function buildSolAcceptPayload({ record, n, pullRequest, pullRequestUrl, issuedAt, expiresAt, nonce, code, sessionId }) {
   const f = record.findings[n - 1];
   const p = {
     purpose: OWNER_SOL_ACCEPT_PURPOSE,
     pullRequest,
+    ...(pullRequestUrl === undefined ? {} : { pullRequestUrl }),
     prHead: record.head_sha,
     baseSha: record.base_sha,
     reviewedAt: record.timestamp,
@@ -201,6 +384,7 @@ export function verifySolAcceptance({ approval, record, n, checkReply }) {
   if (!f || p.finding?.n !== f.n || p.finding?.severity !== f.severity || p.finding?.text !== f.text) return no("it accepts a different finding");
   if (p.findingCount !== record.findings.length) return no("it was shown a different number of findings");
   if (!Number.isInteger(p.pullRequest) || p.pullRequest <= 0) return no("it names no pull request");
+  if (p.pullRequestUrl !== undefined && pullRequestUrlFor(p.pullRequestUrl, p.pullRequest) === null) return no("it names an unusable pull request address");
   if (JSON.stringify(p.summary) !== JSON.stringify(solAcceptSummary(p))) return no("what Mason was shown does not match what the acceptance covers");
   const reason = String(approval.reason ?? "").trim();
   const bad = reasonProblem(reason);
@@ -231,13 +415,20 @@ export function decisionLogEntry({ record, accepted }) {
   return [
     `## ${day} — #${pr}: Mason owner-accepted ${accepted.length} Sol finding(s) at \`${head}\``,
     "",
-    `**Decision (Mason, owner-accepted by \`accept <code>\` reply, ${day}).** Sol's review of PR #${pr} at \`${head}\` ` +
-      `(base \`${String(record.base_sha).slice(0, 12)}\`) found ${record.findings.length} BLOCKER/HIGH finding(s). ` +
-      "Mason accepted each one as a business non-issue; they are left unfixed.",
+    // An entry made only from `accept <code>` replies keeps its exact old wording.
+    accepted.some((a) => a.skipped)
+      ? `**Decision (Mason, by chat reply, ${day}).** Sol's review of PR #${pr} at \`${head}\` ` +
+        `(base \`${String(record.base_sha).slice(0, 12)}\`) found ${record.findings.length} BLOCKER/HIGH finding(s). ` +
+        "Mason chose to leave each one unfixed."
+      : `**Decision (Mason, owner-accepted by \`accept <code>\` reply, ${day}).** Sol's review of PR #${pr} at \`${head}\` ` +
+        `(base \`${String(record.base_sha).slice(0, 12)}\`) found ${record.findings.length} BLOCKER/HIGH finding(s). ` +
+        "Mason accepted each one as a business non-issue; they are left unfixed.",
     ...accepted.flatMap((a) => [
       `- Finding ${a.payload.finding.n} (${a.payload.finding.severity}) at ${findingLocation(a.payload.finding.text)}, ` +
         `text sha256 \`${textHash(a.payload.finding.text)}\` (the wording stays with the proof, not here)`,
-      `  Mason's reason: ${a.reason} (ref ${String(a.payload.nonce).slice(0, 12)})`,
+      a.skipped && a.reason === SKIP_REASON
+        ? `  Mason ${SKIP_REASON} (plain reply, ref ${String(a.payload.nonce).slice(0, 12)})`
+        : `  Mason's reason: ${a.reason} (ref ${String(a.payload.nonce).slice(0, 12)})`,
     ]),
     // A record of his decision only: wording about what the proof covers or carries read as
     // reviewer steering, and a later full Sol run flagged it as prompt injection (#1731 round 8).
@@ -252,7 +443,7 @@ export function decisionLogEntry({ record, accepted }) {
  */
 export function findingLocation(text) {
   const m = /^([\w./@+-]+(?::\d+(?:-\d+)?)?)(?=\s|$)/.exec(String(text ?? ""));
-  return m && /[./]/.test(m[1]) ? `\`${m[1]}\`` : "(location not stated)";
+  return m && /[./]/.test(m[1]) && !/[^@\s/]@[^@\s/]+\.[a-z]{2,}/i.test(m[1]) ? `\`${m[1]}\`` : "(location not stated)";
 }
 export const textHash = (text) => createHash("sha256").update(String(text), "utf8").digest("hex").slice(0, 16);
 
@@ -268,14 +459,26 @@ export function insertDecisionEntry(log, entry) {
  * `readAcceptance(n)` returns the parsed acceptance file or null.
  * @returns {{accepted: object[]}|{problem: string}}
  */
-export function collectAcceptances({ record, readAcceptance, checkReply }) {
+export function collectAcceptances({ record, readAcceptance, readSkips = () => [], checkReply, checkShown }) {
+  // Plain skip replies first (one receipt may cover several findings); the first valid one wins.
+  const skipped = new Map();
+  for (const s of [...readSkips()].sort((a, b) => String(a?.approvedAt).localeCompare(String(b?.approvedAt)))) {
+    const r = verifySolSkip({ approval: s, record, checkReply, checkShown });
+    if (!r.ok) continue; // a receipt from an earlier run on this head simply does not count
+    for (const n of r.numbers) {
+      if (!skipped.has(n)) {
+        skipped.set(n, { ok: true, skipped: true, payload: { ...r.payload, finding: record.findings[n - 1] }, reason: r.reason, approvedAt: r.approvedAt });
+      }
+    }
+  }
   const accepted = [];
   for (const f of record.findings) {
+    if (skipped.has(f.n)) { accepted.push(skipped.get(f.n)); continue; }
     const r = verifySolAcceptance({ approval: readAcceptance(f.n), record, n: f.n, checkReply });
     if (!r.ok) return { problem: r.reason };
     accepted.push(r);
   }
-  if (new Set(accepted.map((a) => a.payload.pullRequest)).size !== 1) return { problem: "the acceptances name different pull requests" };
+  if (new Set(accepted.map((a) => `${a.payload.pullRequest} ${String(a.payload.pullRequestUrl ?? "").toLowerCase()}`)).size !== 1) return { problem: "the acceptances name different pull requests" };
   return { accepted };
 }
 

@@ -98,6 +98,30 @@ BEGIN
   VALUES ('[SMOKE] JobFromQuote Farm ' || v_suffix)
   RETURNING id INTO v_customer_id;
 
+  -- Seed a governed product (a fresh database has no catalog to borrow from).
+  INSERT INTO products (product_name, unit_size, product_form, inventory_unit)
+    VALUES ('[SMOKE] JFQ Prod '||v_suffix, 'GL', 'liquid', 'Gal') RETURNING id INTO v_product_id;
+  -- Governed cost (a bare products insert has none, so billing refuses with COST_BASIS_REQUIRED).
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role','authenticated')::text, true);
+  DECLARE v_pricing jsonb;
+  BEGIN
+    v_pricing := preview_product_cost_basis_changes('product_page', NULL,
+      jsonb_build_array(jsonb_build_object(
+        'product_id', v_product_id, 'row_version', (SELECT pricing_version FROM products WHERE id = v_product_id),
+        'pricing_mode', 'price_driven', 'new_cost', '1.00',
+        'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00',
+        'change_reason', '[SMOKE] cost fixture', 'price_source', '[SMOKE]',
+        'basis_type', 'manual_override', 'basis_source', 'product_page',
+        'basis_reason', '[SMOKE] cost fixture', 'basis_selection', false)),
+      v_admin, '[SMOKE] jfq-price-preview-'||v_suffix);
+    PERFORM approve_pricing_change_set((v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint',
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('product_id', w->>'product_id', 'warning_codes', w->'warning_codes',
+                                                    'reason', '[SMOKE] acknowledged'))
+                  FROM jsonb_array_elements(v_pricing->'warnings') AS w), '[]'::jsonb),
+      NULL, v_admin, '[SMOKE] jfq-price-approve-'||v_suffix);
+    PERFORM apply_product_cost_basis_change_set((v_pricing->>'change_set_id')::uuid,
+      v_pricing->>'request_fingerprint', v_admin, '[SMOKE] jfq-price-apply-'||v_suffix);
+  END;
   SELECT id, current_cost INTO v_product_id, v_product_cost
   FROM products
   WHERE is_active IS TRUE
@@ -125,7 +149,7 @@ BEGIN
   -- The quote trigger snapshots that same product cost into the line.
   INSERT INTO quote_items (quote_id, section_id, product_id, sort_order,
     price_per_unit, current_cost, total_units_needed, acres, actual_rate, rate_unit)
-  VALUES (v_quote_id, v_section_id, v_product_id, 0, 10, v_product_cost, 20, 40, 0.5, 'gal/acre');
+  VALUES (v_quote_id, v_section_id, v_product_id, 0, 10, v_product_cost, 20, 40, 0.5, 'Gal');
 
   -- --------------------------------------------------------------------
   -- (1) The RPC under test — pre-fix this aborted with 42P01 every time

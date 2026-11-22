@@ -35,6 +35,53 @@ BEGIN
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] A '||v_sfx) RETURNING id INTO v_cust;
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] B '||v_sfx) RETURNING id INTO v_cust2;
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] C '||v_sfx) RETURNING id INTO v_cust3;
+  -- Seed the two governed catalog products this chain borrows below (a fresh database has none).
+  INSERT INTO products (product_name, unit_size, product_form, inventory_unit)
+    VALUES ('[SMOKE] MF Prod A '||v_sfx, 'GL', 'liquid', 'Gal') RETURNING id INTO v_prodA;
+  INSERT INTO products (product_name, unit_size, product_form, inventory_unit)
+    VALUES ('[SMOKE] MF Prod B '||v_sfx, 'GL', 'liquid', 'Gal') RETURNING id INTO v_prodB;
+  -- Governed cost (a bare products insert has none, so billing refuses with COST_BASIS_REQUIRED).
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role','authenticated')::text, true);
+  DECLARE v_pricing jsonb;
+  BEGIN
+    v_pricing := preview_product_cost_basis_changes('product_page', NULL,
+      jsonb_build_array(jsonb_build_object(
+        'product_id', v_prodB, 'row_version', (SELECT pricing_version FROM products WHERE id = v_prodB),
+        'pricing_mode', 'price_driven', 'new_cost', '1.00',
+        'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00',
+        'change_reason', '[SMOKE] cost fixture', 'price_source', '[SMOKE]',
+        'basis_type', 'manual_override', 'basis_source', 'product_page',
+        'basis_reason', '[SMOKE] cost fixture', 'basis_selection', false)),
+      v_admin, '[SMOKE] mfb-price-preview-'||v_sfx);
+    PERFORM approve_pricing_change_set((v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint',
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('product_id', w->>'product_id', 'warning_codes', w->'warning_codes',
+                                                    'reason', '[SMOKE] acknowledged'))
+                  FROM jsonb_array_elements(v_pricing->'warnings') AS w), '[]'::jsonb),
+      NULL, v_admin, '[SMOKE] mfb-price-approve-'||v_sfx);
+    PERFORM apply_product_cost_basis_change_set((v_pricing->>'change_set_id')::uuid,
+      v_pricing->>'request_fingerprint', v_admin, '[SMOKE] mfb-price-apply-'||v_sfx);
+  END;
+  -- Governed cost (a bare products insert has none, so billing refuses with COST_BASIS_REQUIRED).
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role','authenticated')::text, true);
+  DECLARE v_pricing jsonb;
+  BEGIN
+    v_pricing := preview_product_cost_basis_changes('product_page', NULL,
+      jsonb_build_array(jsonb_build_object(
+        'product_id', v_prodA, 'row_version', (SELECT pricing_version FROM products WHERE id = v_prodA),
+        'pricing_mode', 'price_driven', 'new_cost', '1.00',
+        'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00',
+        'change_reason', '[SMOKE] cost fixture', 'price_source', '[SMOKE]',
+        'basis_type', 'manual_override', 'basis_source', 'product_page',
+        'basis_reason', '[SMOKE] cost fixture', 'basis_selection', false)),
+      v_admin, '[SMOKE] mfa-price-preview-'||v_sfx);
+    PERFORM approve_pricing_change_set((v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint',
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('product_id', w->>'product_id', 'warning_codes', w->'warning_codes',
+                                                    'reason', '[SMOKE] acknowledged'))
+                  FROM jsonb_array_elements(v_pricing->'warnings') AS w), '[]'::jsonb),
+      NULL, v_admin, '[SMOKE] mfa-price-approve-'||v_sfx);
+    PERFORM apply_product_cost_basis_change_set((v_pricing->>'change_set_id')::uuid,
+      v_pricing->>'request_fingerprint', v_admin, '[SMOKE] mfa-price-apply-'||v_sfx);
+  END;
   -- Product creation is intentionally pricing-free, while the live below-cost
   -- wall requires a positive governed catalog basis before an invoice item can
   -- be materialized. Reuse two active catalog products whose locked cost bases

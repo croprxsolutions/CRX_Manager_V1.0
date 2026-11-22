@@ -36,6 +36,7 @@ import BulkPOImport from '../components/purchase-orders/BulkPOImport';
 import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton';
 import type { PurchaseOrder } from '../types';
 import { PURCHASE_ORDER_COLUMNS, withAdminCosts } from '../lib/costFields';
+import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 
 const CANCELLABLE = ['draft', 'submitted'];
 
@@ -62,6 +63,7 @@ export default function PurchaseOrders() {
   const { role, profile } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const cancelIdem = useIdempotencyKey('cancel_purchase_order', profile?.id || '');
   // Purchase cost is admin-only (Mason, 2026-10-18).
   const isAdmin = role === 'admin';
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
@@ -505,13 +507,12 @@ export default function PurchaseOrders() {
     for (const po of selectedRows) {
       // A closed-short PO is final; the server refuses to cancel it.
       if (po.status !== 'cancelled' && po.status !== 'closed') {
-        // Bulk loop: deterministic per-PO key (NOT crypto.randomUUID()) so a
-        // retry of the same cancel batch reuses identical keys and the server
-        // dedupes already-cancelled POs instead of double-executing.
+        // KI-182: one random key per PO, kept while this page is open (a cancel is final), so any retry of
+        // the batch replays it; a key built from the user and PO could be guessed and used first elsewhere.
         const { data, error } = await supabase.rpc('cancel_purchase_order', {
           p_po_id: po.id,
           p_performed_by: profile?.id,
-          p_idempotency_key: `cancel_purchase_order:${profile?.id || 'anon'}:${po.id}`,
+          p_idempotency_key: cancelIdem.getKeyFor(po.id),
         });
         if (error) {
           toast('error', `Failed to cancel PO ${po.po_number}: ${error.message}`);

@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2165 (#2018): a delivery with no site goes to the farm's shipping address, else billing
+
+Sol round 6 found Field Mode and the office Navigate button used the billing address while the printed load sheet and slip used shipping first.
+
+**Decision (Mason, in chat, 2026-11-21: "Shipping first"):** every screen sends a no-site delivery to the shipping address, else billing; the office choice now reads "Use farm address (shipping, else billing)".
+
 ## 2026-11-21 — #2165 (#2018): Mason approved Sol round 5 on the driver screens
 
 **Decision (Mason, in chat, 2026-11-21: "Yes, run round 5").** Sol rounds 1-4 on #2165 each found a different screen-side problem, and each was fixed: address typing, a missing delivery site falling back to the farm's default address, a missing stop site, and a role refresh resetting entered quantities. Round 3 also raised the drivers' whole-row farm read; Mason accepted that for one release ("Yes, accept it"), the same as on #2161, and #2162 removes it. Smaller items are deferred to #2167. This entry names #2165 so Sol may run round 5 on it.

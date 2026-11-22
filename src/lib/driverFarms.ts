@@ -12,7 +12,7 @@ export interface DriverFarm {
   phone: string | null;
   email: string | null;
   address: string | null;
-  // A delivery with no site goes to the billing address, as on the office screens (#2018, Sol round 5 on #2165).
+  // A delivery with no site goes to the shipping address, else billing, as on the load sheet (#2018; Mason, 2026-11-21).
   billing_address?: string | null;
   shipping_address?: string | null;
 }

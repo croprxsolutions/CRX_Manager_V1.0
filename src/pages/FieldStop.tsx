@@ -86,9 +86,9 @@ async function withStopFarm(del: StopDelivery, isDriver: boolean): Promise<{ del
   if (!isDriver) return { del, address: '' };
   const farm = (await fetchDriverFarms([del.customer_id])).get(del.customer_id);
   const customer = farm ? { farm_name: farm.farm_name, email: farm.email, contact_name: null } : null;
-  // A stop with its own delivery address shows only that one, read later; otherwise the billing address, as the
-  // office's "Use billing address" means.
-  return { del: { ...del, customer }, address: del.delivery_address_id ? '' : farm?.billing_address ?? '' };
+  // A stop with its own delivery address shows only that one, read later; otherwise the farm's shipping address,
+  // else billing, like the printed load sheet (Mason, 2026-11-21).
+  return { del: { ...del, customer }, address: del.delivery_address_id ? '' : farm?.shipping_address?.trim() || farm?.billing_address?.trim() || '' };
 }
 
 interface StopDelivery {

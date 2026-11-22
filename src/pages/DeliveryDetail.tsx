@@ -1564,7 +1564,7 @@ export default function DeliveryDetail() {
 
   const addressText = address
     ? [address.address_line, address.city, address.state, address.zip].map((part) => part?.trim()).filter(Boolean).join(', ')
-    : customer?.billing_address?.trim() || '';
+    : customer?.shipping_address?.trim() || customer?.billing_address?.trim() || '';
   const fullAddress = addressText || 'No address on file';
 
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`;
@@ -2366,7 +2366,7 @@ export default function DeliveryDetail() {
                 onChange={(e) => setEditAddress(e.target.value)}
                 className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
               >
-                <option value="">Use billing address</option>
+                <option value="">Use farm address (shipping, else billing)</option>
                 {addresses.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.label} - {[a.address_line, a.city, a.state].filter(Boolean).join(', ')}

@@ -20,7 +20,7 @@ describe('fetchDriverFarms', () => {
 });
 
 describe('fetchDeliveryFarm (driver)', () => {
-  it('keeps billing and shipping apart, so "Use billing address" means billing', async () => {
+  it('keeps billing and shipping apart, so a no-site delivery can go shipping first', async () => {
     rpc.mockResolvedValue({ data: { rows: [{ id: 'f1', farm_name: 'F', phone: null, email: null, address: 'SHIP', billing_address: 'BILL', shipping_address: 'SHIP' }] }, error: null });
     const { data } = await fetchDeliveryFarm('f1', true);
     expect(data?.billing_address).toBe('BILL');

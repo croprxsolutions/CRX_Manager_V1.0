@@ -57,6 +57,39 @@ describe('PurchasingTab', () => {
     expect(screen.getByText(/Not complete: firm need without a date/)).toBeInTheDocument();
   });
 
+  it('shows cover, late POs, follow-ups, unbacked holds and Check data from the #1989 plan', async () => {
+    const p = PLAN.products[0];
+    mockRpc.mockResolvedValue({ data: {
+      ...PLAN,
+      check_data: [{ kind: 'po_line', id: 'pl1', product_id: 'p1', product_name: 'Herbicide X' }],
+      products: [{
+        ...p, has_late_cover: true, has_followup: true, hold_unbacked: 7,
+        rows: [{ ...p.rows[0], kind: 'booking', quote_number: 'Q-5', order_number: null, overdue_followup: true }],
+        coverage: [{ group: 'committed', booked: 160, on_time: 100, late: 20, not_covered: 40, from_shelf: 100,
+          pos: [{ po_id: 'po1', po_number: 'PO-7', qty: 20, expected_date: '2027-03-10', late: true, po_overdue: false, po_undated: false }] }],
+      }],
+    }, error: null });
+    render(<PurchasingTab />);
+    expect(await screen.findByText(/Check data: 1 record holds an impossible quantity or date/)).toBeInTheDocument();
+    expect(screen.getByText('PO line · Herbicide X')).toBeInTheDocument();
+    expect(screen.getByText('PO arrives late')).toBeInTheDocument();
+    expect(screen.getByText('follow up')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Show details for Herbicide X/ }));
+    expect(screen.getByText('Shelf 100; PO PO-7 20 (arrives late, Mar 10, 2027)')).toBeInTheDocument();
+    expect(screen.getByText(/Held but not on the shelf: 7/)).toBeInTheDocument();
+    expect(screen.getByText(/· follow up/)).toBeInTheDocument();
+  });
+
+  it('an older plan without the #1989 keys still renders', async () => {
+    mockRpc.mockResolvedValue({ data: PLAN, error: null });
+    render(<PurchasingTab />);
+    expect(await screen.findByText('Herbicide X')).toBeInTheDocument();
+    expect(screen.queryByText(/Check data:/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Show details for Herbicide X/ }));
+    expect(screen.queryByText('Covers')).not.toBeInTheDocument();
+  });
+
   it('a failed read shows Try again, not an empty plan', async () => {
     mockRpc.mockResolvedValue({ data: null, error: { message: 'Access denied', code: '42501' } });
     render(<PurchasingTab />);

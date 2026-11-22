@@ -8,23 +8,28 @@ import { useToast } from '../ui/Toast';
 import { supabase, assertRpcResult } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 
-// Read-only view of get_purchasing_plan (20270127110000). Quantities are in each product's stock unit.
+// Read-only view of get_purchasing_plan (20270216110000; the keys it added are optional so an older server still renders). Quantities are in each product's stock unit.
 type Qty = number | string;
 interface Suggestion { need_date: string; order_by: string; order_now: boolean; quantity: Qty }
-interface DemandRow { kind: 'booking' | 'order' | 'job' | 'hold'; class: 'committed' | 'could_add' | 'shown';
+interface DemandRow { kind: 'booking' | 'order' | 'job' | 'hold' | 'deficit'; class: 'committed' | 'could_add' | 'shown' | 'shelf_hold';
   bucket: string; need_date: string | null; overdue: boolean; raw_date: string | null; quantity: Qty; confidence: string | null;
   estimated: boolean | null; quote_number: string | null; order_number: string | null; job_number: string | null;
-  customer_name: string | null; section_name: string | null }
+  customer_name: string | null; section_name: string | null; overdue_followup?: boolean | null }
+interface CoverPo { po_id: string; po_number: string; qty: Qty; expected_date: string | null; late: boolean; po_overdue: boolean; po_undated: boolean }
+interface Coverage { group: string; booked: Qty; on_time: Qty; late: Qty; not_covered: Qty; from_shelf: Qty; pos: CoverPo[] }
 interface PlanPo { po_id: string; po_number: string; status: string; expected_date: string | null; flag: string; quantity: Qty }
 interface PlanProduct { product_id: string; product_name: string; stock_unit: string | null; on_hand: Qty;
   incoming: Qty; drafted: Qty; committed: Qty; suggested: Qty; could_add: Qty; over_drawn: Qty;
   not_complete: boolean; reasons: string[] | null; suggestions: Suggestion[]; rows: DemandRow[];
-  purchase_orders: PlanPo[] }
+  purchase_orders: PlanPo[]; hold_unbacked?: Qty; has_late_cover?: boolean; has_followup?: boolean; estimated?: boolean;
+  coverage?: Coverage[] }
 interface BookingRef { quote_number: string; customer_name: string | null; product_id?: string; product_name: string; quantity: Qty; section_name?: string | null }
 interface ReviewRow { quote_id: string; section_id: string; quote_number: string; customer_name: string;
   section_name: string; timing: string | null; confidence: string | null; needed_by_date: string | null; window_end: string }
+interface CheckData { kind: string; id: string; product_id: string | null; product_name: string | null }
 export interface PurchasingPlan { today: string; lead_days: number; months_ahead: number; horizon_end: string;
-  firm_needs_date: BookingRef[]; drawn_section_unknown: BookingRef[]; review: ReviewRow[]; products: PlanProduct[] }
+  firm_needs_date: BookingRef[]; drawn_section_unknown: BookingRef[]; review: ReviewRow[]; products: PlanProduct[];
+  check_data?: CheckData[] }
 
 const REASONS: Record<string, string> = {
   needs_date: 'firm need without a date',
@@ -33,9 +38,13 @@ const REASONS: Record<string, string> = {
   over_drawn: 'drawn more than booked',
   late_po: 'a PO is past its expected date',
   undated_po: 'a PO has no expected date',
+  check_data: 'a record holds an impossible value (see Check data)',
 };
 const TIMING: Record<string, string> = { pre_plant: 'Pre-plant', in_season: 'In season', late_summer: 'Late summer' };
-const CLASS: Record<string, string> = { committed: 'Committed', could_add: 'Could add', shown: 'Maybe (shown only)' };
+const CLASS: Record<string, string> = { committed: 'Committed', could_add: 'Could add', shown: 'Maybe (shown only)', shelf_hold: 'Held (shelf only)' };
+const GROUP: Record<string, string> = { shelf_hold: 'Held (shelf only)', deficit: 'Stock deficit', committed: 'Committed', could_add: 'Could add', shown: 'Maybe' };
+const CHECK_KIND: Record<string, string> = { booking_line: 'Booking line', job_line: 'Job line', draw: 'Draw', stock: 'Stock record',
+  hold: 'Stock hold', po_line: 'PO line', order_line: 'Order line', delivery: 'Delivery' };
 
 const num = (q: Qty) => Number(q);
 // A positive amount under the shown precision reads "<0.001", never "0".
@@ -55,7 +64,16 @@ function sourceOf(r: DemandRow): string {
   if (r.kind === 'order') return `Order ${r.order_number ?? ''}`;
   if (r.kind === 'job') return `Job ${r.job_number ?? ''}`;
   if (r.kind === 'hold') return 'Stock hold';
+  if (r.kind === 'deficit') return 'Stock deficit (on hand below zero)';
   return `Booking ${r.quote_number ?? ''}${r.section_name ? ` · ${r.section_name}` : ''}`;
+}
+
+// Where one demand group's cover comes from: the shelf, then each PO (late, past due or undated marked).
+function coverSources(c: Coverage): string {
+  const parts = c.pos.map((po) => `PO ${po.po_number} ${qty(po.qty)}${po.po_undated ? ' (no expected date)'
+    : po.late ? ` (arrives late, ${day(po.expected_date)})` : po.po_overdue ? ' (past due, counted today)' : ''}`);
+  if (num(c.from_shelf) > 0) parts.unshift(`Shelf ${qty(c.from_shelf)}`);
+  return parts.join('; ') || '—';
 }
 
 // The expanded row of one product: suggestions, notes, demand rows and its POs.
@@ -64,6 +82,29 @@ function ProductDetails({ p }: { p: PlanProduct }) {
     <>
       {p.suggestions.length > 0 && (
         <ul className="space-y-1">{p.suggestions.map((s, i) => <li key={i} className="font-medium text-red-700">{suggestionText(s, p.stock_unit)}</li>)}</ul>
+      )}
+      {p.estimated && <p className="text-secondary">Estimated: some draws do not record their section, so the plan guessed which lines they came from.</p>}
+      {num(p.hold_unbacked ?? 0) > 0 && <p className="text-amber-700">Held but not on the shelf: {qty(p.hold_unbacked ?? 0)} held for crop programs or jobs the plan does not count (not bought; check the holds).</p>}
+      {(p.coverage ?? []).length > 0 && (
+        <table className="w-full text-xs">
+          <thead><tr className="text-left text-secondary">
+            <th className="py-1 pr-3 font-medium">Covers</th><th className="py-1 pr-3 text-right font-medium">Needed</th>
+            <th className="py-1 pr-3 text-right font-medium">On time</th><th className="py-1 pr-3 text-right font-medium">Late</th>
+            <th className="py-1 pr-3 text-right font-medium">Not covered</th><th className="py-1 pr-3 font-medium">From</th>
+          </tr></thead>
+          <tbody>
+            {(p.coverage ?? []).map((c) => (
+              <tr key={c.group} className="border-t border-gray-200">
+                <td className="py-1 pr-3">{GROUP[c.group] ?? c.group}</td>
+                <td className="py-1 pr-3 text-right font-mono">{qty(c.booked)}</td>
+                <td className="py-1 pr-3 text-right font-mono">{qty(c.on_time)}</td>
+                <td className={`py-1 pr-3 text-right font-mono ${num(c.late) > 0 ? 'text-amber-700' : ''}`}>{qty(c.late)}</td>
+                <td className={`py-1 pr-3 text-right font-mono ${num(c.not_covered) > 0 ? 'text-red-600' : ''}`}>{qty(c.not_covered)}</td>
+                <td className="py-1 pr-3">{coverSources(c)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
       {num(p.drafted) > 0 && <p className="text-secondary">Drafted on unsent POs: {qty(p.drafted)} (not counted).</p>}
       {num(p.over_drawn) > 0 && <p className="text-amber-700">Over-drawn: {qty(p.over_drawn)} drawn beyond what was booked.</p>}
@@ -80,6 +121,7 @@ function ProductDetails({ p }: { p: PlanProduct }) {
               <tr key={i} className="border-t border-gray-200">
                 <td className="py-1 pr-3">
                   {r.bucket === 'needs_date' ? 'Needs date' : r.bucket === 'check_units' ? 'Check units' : r.bucket === 'later' ? `Later (${day(r.need_date)})` : r.overdue ? `${day(r.raw_date)} · overdue` : day(r.need_date)}
+                  {r.overdue_followup && <span className="text-amber-700"> · follow up</span>}
                 </td>
                 <td className="py-1 pr-3">{sourceOf(r)}{r.estimated && ' (estimated)'}</td>
                 <td className="py-1 pr-3">{r.customer_name ?? '—'}</td>
@@ -120,7 +162,8 @@ export default function PurchasingTab() {
       if (id !== requestId.current) return;
       if (error) throw error;
       const result = assertRpcResult<PurchasingPlan>(data, 'get_purchasing_plan');
-      if (!result || ![result.products, result.firm_needs_date, result.drawn_section_unknown, result.review].every(Array.isArray)) {
+      if (!result || ![result.products, result.firm_needs_date, result.drawn_section_unknown, result.review].every(Array.isArray)
+        || (result.check_data != null && !Array.isArray(result.check_data))) {
         throw new Error('get_purchasing_plan returned no plan');
       }
       setPlan(result);
@@ -173,6 +216,18 @@ export default function PurchasingTab() {
             {plan.firm_needs_date.map((r, i) => (
               <li key={i}>{[r.customer_name, `Booking ${r.quote_number}`, r.section_name, r.product_name].filter(Boolean).join(' · ')}: {[qty(r.quantity), plan.products.find((p) => p.product_id === r.product_id)?.stock_unit].filter(Boolean).join(' ')}</li>
             ))}
+          </ul>
+        </div>
+      )}
+
+      {(plan.check_data ?? []).length > 0 && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800" role="alert">
+          <p className="font-semibold">
+            <AlertTriangle className="w-4 h-4 inline mr-2" />
+            Check data: {(plan.check_data ?? []).length} {(plan.check_data ?? []).length === 1 ? 'record holds an impossible quantity or date and is' : 'records hold an impossible quantity or date and are'} left out of the plan until fixed.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {(plan.check_data ?? []).map((c) => <li key={`${c.kind}:${c.id}`}>{CHECK_KIND[c.kind] ?? c.kind} · {c.product_name ?? 'unknown product'}</li>)}
           </ul>
         </div>
       )}
@@ -246,6 +301,8 @@ export default function PurchasingTab() {
                           <span className="font-medium text-nav-dark">{p.product_name}</span>
                           {p.stock_unit && <span className="text-secondary"> ({p.stock_unit})</span>}
                           {p.not_complete && <Badge variant="warning" className="ml-2">not complete</Badge>}
+                          {p.has_late_cover && <Badge variant="warning" className="ml-2">PO arrives late</Badge>}
+                          {p.has_followup && <Badge variant="warning" className="ml-2">follow up</Badge>}
                         </td>
                         <td className="px-3 py-2 text-right font-mono">{qty(p.on_hand)}</td>
                         <td className="px-3 py-2 text-right font-mono">{qty(p.incoming)}</td>

@@ -3886,6 +3886,9 @@ export default function QuoteBuilder() {
         p_draws: drawPayload,
         p_performed_by: profile!.id,
         p_idempotency_key: drawKey,
+        // KI-190: the booking version this screen showed. A booking that another draw or an
+        // edit changed since is refused (QUOTE_STALE_WRITE), as Whole Convert does.
+        p_expected_row_version: quoteRowVersionRef.current,
       }, reason)));
       if (error) throw error;
       const result = assertRpcResult<{ status: string; order_id?: string; order_number?: string; warnings?: string[]; fully_drawn?: boolean; extra_order_id?: string; extra_order_number?: string }>(data, 'draw_down_quote');
@@ -3977,6 +3980,18 @@ export default function QuoteBuilder() {
         toast('warning', bindingRejection === 'actor'
           ? `That retry belongs to another signed-in user, so nothing new was drawn. ${recoveryStep}`
           : `The database could not confirm this retry outcome, so nothing was drawn now. ${recoveryStep}`);
+        setDrawing(false);
+        return;
+      }
+
+      // KI-190: the booking changed since this screen loaded it, and nothing was ordered.
+      // Reload the whole quote (balance and booked prices) before another draw.
+      if (hasRpcCode(error, RpcErrorCodes.QUOTE_STALE_WRITE)) {
+        quoteVersionRecoveryRequiredRef.current = true;
+        staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
+        setShowDrawModal(false);
+        setStaleSaveOpen(true);
+        toast('warning', 'This booking changed since you opened it (another order was drawn from it, or it was edited). Nothing was ordered. Reload to see what is left and the prices, then try again.');
         setDrawing(false);
         return;
       }

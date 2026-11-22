@@ -824,7 +824,7 @@ order's invoices or payments. Also unsettled: how partial deliveries, partial pa
 credits move a commission (returns are KI-13). Decided 2026-11-13 (DECISION_LOG): commission counts in profit when its sale
 is invoiced (by share billed, KI-125) and becomes payable only when the customer pays, a partial payment releasing the
 same share. Fix later: enforce the payable rule, per sale and per paid share, in the payout function.
-- **Commission basis ignores the standing discount (re-verified 2026-11-21, [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)).** Order commission is figured from `orders.total_profit` before the standing grower discount (`20270117130000_standing_discount_in_order_profit.sql` ~L21 says "commission after the discount is its own planned change"), while the invoice and profit reports subtract the discount. Not tracked elsewhere; latent on production while the billing switch is off. Separate from the payout gap above (payout checks pending status and balanced amounts but no customer-payment eligibility, `20261204100000` ~L1104-1207); To-Do 8.5 keeps commission basis and release-on-payment as distinct acceptance checks.
+- **Commission basis ignores the standing discount (re-verified 2026-11-21, [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)).** Order commission is figured from `orders.total_profit` before the standing grower discount (`20270117130000_standing_discount_in_order_profit.sql` ~L21 says "commission after the discount is its own planned change"), while the invoice and profit reports subtract the discount. Not tracked elsewhere; latent on production while the billing switch is off. Separate from the payout gap above (payout checks pending status ~L1154-1183 and header-to-items balance ~L744-761 in `20261204100000`, but no customer-payment eligibility). To-Do 8.5 needs two distinct acceptance checks: commission is figured on profit after the standing discount, and it is released in proportion to customer payments.
 
 ### KI-155 — The cut-over plan has two finish lines and no rules for opening-balance exceptions
 **MED · OPEN · launch/money · found 2026-11-11 ([business logic review](../audits/2026-11-11-business-logic-review.md) finding 6) · Mason + agents**
@@ -858,7 +858,7 @@ checking each payer's own acres and per-acre fee, the stock ledger in the invent
   per-line split invoices have no hand-off either. Staff can type it on the field invoice screen afterwards. Live
   2026-11-21: the one active job-linked invoice has no rate while its job has one.
 - Transfer stores each payer's whole chemical charge as quantity 1 at that price (~L585-590; single payer ~L818-822),
-  and the field-invoice PDF prints the applied total beside "$unit_price unit" (shared renderer ~L1178-1185; legacy ~L311-314), so
+  and the field-invoice PDF prints the applied total beside "$unit_price unit" (shared renderer ~L1173-1190; legacy ~L311-314), so
   12 gal can print as "$120.00 Gal". Single-grower jobs too.
 - The multi-owner Transfer confirmation (`JobDetail.tsx` ~L5387, counting field owners ~L1695-1704) says it creates
   ONE invoice, but when the job has more than one explicit billing-default customer the database creates an invoice
@@ -876,11 +876,13 @@ the order line (`_create_return_intent_impl_20260812`, `20261215110000` ~L2079-2
 price (`20261021155000` ~L963-988). A fictional order line at $100 billed at $90 can credit $100 a unit, and the cost
 reversal can lose its link. Discounted and taxed returns are NOT safe either: they find the billed line through the
 same `order_item_id` (`20270109100200` ~L557-616), so a repriced line falls back to the ordinary path or is refused.
-Split provenance does not save it: it selects the share path, but the billed-line lookup still needs the kept
-`order_item_id` (~L546-571), so a split return on a repriced line finds no billed quantity and is refused
-(`20261215110000` ~L2066-2081). Live (audit aggregate, not re-run): 0 of 6 eligible posted lines
+Split invoices are mostly protected: the regular save refuses editing a governed split invoice and refuses repricing
+a Bill Split draft's product lines (`20261215110000` ~L1682-1724). Where a split line has lost its link anyway (old
+data), the billed-line lookup (~L557-582) finds only the payer's other linked lines, and the return is refused
+(~L2066-2081) only when no billed quantity remains. Live (audit aggregate, not re-run): 0 of 6 eligible posted lines
 differ from their order price. Fix: credit from the billed line. Proof (rolled back): a price decrease and an increase,
-a discounted or taxed reprice, a split return with provenance on a repriced line, the linked cost reversal, and the intended delivered-but-unbilled return path
+a discounted or taxed reprice, the regular save still refusing a split reprice, a seeded split line with lost linkage (with and without another
+linked billed line), the linked cost reversal, and the intended delivered-but-unbilled return path
 (`20260827041100` ~L1281-1314) unchanged.
 
 ### KI-190 — Partial Order commits a booking's current terms, not the ones the rep reviewed
@@ -953,7 +955,10 @@ the live name on the report (~L179-194) is a separate question. DECISION_LOG (~L
 follow-up; it was never tracked. After a catalog correction a regenerated report can disagree with the job record.
 Live (audit aggregate, not re-run): the one eligible snapshot matches the catalog today. Fix: the report, WPS notice and
 sent proof print the saved value, and the applicator sheet gains an EPA column showing it. Proof for each of the four:
-a corrected catalog number keeps the saved one, an explicit unknown prints as unknown, and an unlocked job (which still uses the catalog, `20261204120000` ~L143-153). With KI-157 and KI-117.
+a corrected catalog number keeps the saved one, an explicit unknown prints as unknown, and an older job marked
+"not recorded" by the backfill (`20261204120000` ~L23-38, ~L326-339) prints as not recorded with no catalog fallback.
+The unlocked-job case applies only to outputs reachable before completion (the sent proof needs a completed job): an
+unlocked job (which still uses the catalog, `20261204120000` ~L143-153). With KI-157 and KI-117.
 
 ### KI-198 — Shared-field job billing: Transfer and per-line Split Billing price the same work differently
 **HIGH if Transfer is used for real billing · OPEN (needs Mason, To-Do decision 31) · field-app billing · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 7)**
@@ -1330,8 +1335,9 @@ whose follow-up was cancelled stays `scheduled`. Completion marks the follow-up'
 behavior) and void (`20261107120000` ~L272) never reverts it. The order still shows the quantity owed
 and reserved, but the pending queue (`DeliveryRemainders.tsx`, default filter `pending`) no longer lists it. Live
 (audit aggregate, not re-run): no remainder rows yet. Fix: return the row to `pending` when its follow-up is cancelled
-or voided and the order still owes product. Proof (rolled back): after each cancel and void, staff can schedule exactly
-one replacement for the owed quantity; include a partly completed follow-up and a case with nothing still owed.
+or voided and the order still owes product. Proof (rolled back): when product is still owed, the remainder returns to pending and staff can
+schedule exactly one replacement for the exact owed amount; when nothing is owed, no pending row appears and no
+replacement is created; for a partly completed follow-up, the successor remainder is not counted twice.
 
 ## Customers, purchasing and settings
 

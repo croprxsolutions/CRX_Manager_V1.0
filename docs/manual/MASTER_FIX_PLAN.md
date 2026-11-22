@@ -211,7 +211,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | Order | ID | Sev | Status | What goes wrong (plain English) | Source | GitHub | Owner |
 |---|---|---|---|---|---|---|---|
 | W2-34 | KI-77 | MED | Open | Remaining: list paging can miss concurrent changes; CRM gaps (no pre-quote pipeline, no duplicate detection in bulk import, no bulk rep import, no email logging); offline-recovery gaps; delivery-photo ownership edge cases. Fixed: customer-form duplicate warning; delivery-photo uploader check (`20261222100000`) | KNOWN_ISSUES | #381, #1663, #1698 | Agent (unassigned) |
-| W2-35 | #2197 | MED | Open | Staff are told to reactivate a customer before new orders, but the screen offers no way, so it must be done outside the app. | Sol round 1, release #2189 (GitHub) | #2197 | Agent (unassigned) |
+| W2-35 | #2197 | MED | Fixed (staging PR) | Staff are told to reactivate a customer before new orders, but the screen offers no way, so it must be done outside the app. | Sol round 1, release #2189 (GitHub) | #2197 | Agent (Lane D) |
 | W2-36 | #2089 | MED | Open | A customer could be deactivated while an invoice posts, leaving a balance on an inactive customer. | GitHub issue | #2089 | Taha (to 2026-12-15) |
 | W3-38 | #2016 | LOW | Open | "1,200" in an unquoted CSV can save as 1 corn acre and 200 soybean acres. | GitHub issue | #2016 | Agent (unassigned) |
 | D-03 | KI-155 | MED | Mason decision | Handover from the old billing system lacks one written procedure, so old balances/credits could be mishandled. | KNOWN_ISSUES |  | Mason decision |

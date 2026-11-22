@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — Sol round 5 on PR #2199: keep the skip simple
+
+**Decision (Mason, in chat 2026-11-21, after Sol gate round 4):** "i want to make sure we dont overcomplicate or overbuild this". The bug/judgment labels from round 3 are removed. He may skip any Sol finding he disagrees with: a business call, or a bug or gap so small or impractical it will never affect the business. The agent says plainly when a finding is a real money, stock, data or security bug. A skip counts only for the PR it was given for. Round 5 reviews that simpler design (entry below).
+
 ## 2026-11-21 — Mason skips review findings in plain words, no codes
 
 **Decision (Mason, 2026-11-21; PR #2199).** "I need to just be able to tell it I don't want that." Typing `accept <code> <reason>` once per Sol finding was too slow (nine codes on one release). Now one request lists every finding and he answers once: `skip` (all) or `skip 1 3` (only those), with no code and no reason. `ok`, `yes`, `move on` and `merge it` skip nothing, because they too often mean "go on" or "merge after fixing" (Sol plan review). He may skip any Sol finding he disagrees with: a business call, or a bug or gap so small or impractical it will never affect the business (Mason, 2026-11-21, after Sol gate round 4: "i want to make sure we dont overcomplicate or overbuild this"). The agent must say plainly when a finding is a real money, stock, data or security bug. A skip counts only for the PR it was given for. A plain-words decline for Luna, Astra, Codex and gauntlet findings was dropped from this change after the Sol gate review. Unchanged: PRs that change gate or approval files still cannot skip Sol findings; migration approvals; every check and merge gate. Plan: `docs/plans/2026-11-21-owner-decline-findings-PLAN.md`.

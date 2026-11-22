@@ -58,7 +58,7 @@ BEGIN
   IF (SELECT count(*) FROM pg_trigger t
        WHERE t.tgrelid = 'public.jobs'::regclass AND t.tgname = 'trg_zz_lock_job_stock_rows' AND NOT t.tgisinternal
          AND t.tgfoid = v_fn.oid AND t.tgenabled IN ('O', 'A')
-         AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER trg_zz_lock_job_stock_rows AFTER UPDATE OF status ON public.jobs FOR EACH ROW WHEN (((old.status = ANY (ARRAY[''scheduled''::text, ''in_progress''::text])) AND (new.status = ''completed''::text) AND (new.deleted_at IS NULL))) EXECUTE FUNCTION _lock_job_stock_rows_in_order()') <> 1 THEN
+         AND replace(pg_get_triggerdef(t.oid), 'EXECUTE FUNCTION public._lock_job', 'EXECUTE FUNCTION _lock_job') = 'CREATE TRIGGER trg_zz_lock_job_stock_rows AFTER UPDATE OF status ON public.jobs FOR EACH ROW WHEN (((old.status = ANY (ARRAY[''scheduled''::text, ''in_progress''::text])) AND (new.status = ''completed''::text) AND (new.deleted_at IS NULL))) EXECUTE FUNCTION _lock_job_stock_rows_in_order()') <> 1 THEN
     RAISE EXCEPTION 'JOB_STOCK_ROW_PREFLIGHT: trg_zz_lock_job_stock_rows is not the reviewed enabled trigger';
   END IF;
 
@@ -176,8 +176,10 @@ BEGIN
     IF NOT (public.is_admin() OR public.is_sales_rep() OR public.is_applicator()) THEN
       RAISE EXCEPTION 'Not authorized to complete this job';
     END IF;
-    -- The job row first, as the body and process_offline_action already take it, then the number lock.
-    PERFORM 1 FROM public.jobs j WHERE j.id = p_job_id FOR UPDATE;
+    -- The job row first, as the body and process_offline_action already take it, then the number lock. NO KEY
+    -- UPDATE still queues behind another completion of this job, but not a sibling completion's foreign-key
+    -- check on this row (its booking draw), which would otherwise wait on us while we wait on its number lock.
+    PERFORM 1 FROM public.jobs j WHERE j.id = p_job_id FOR NO KEY UPDATE;
     PERFORM pg_advisory_xact_lock(hashtext('next_application_record_number'));
   END IF;
   PERFORM set_config('crx.complete_job_rpc', p_job_id::text, true);
@@ -212,7 +214,7 @@ BEGIN
   IF (SELECT count(*) FROM pg_trigger t
        WHERE t.tgrelid = 'public.jobs'::regclass AND t.tgname = 'trg_zz_lock_job_stock_rows' AND NOT t.tgisinternal
          AND t.tgfoid = v_fn.oid AND t.tgenabled IN ('O', 'A')
-         AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER trg_zz_lock_job_stock_rows AFTER UPDATE OF status ON public.jobs FOR EACH ROW WHEN (((old.status = ANY (ARRAY[''scheduled''::text, ''in_progress''::text])) AND (new.status = ''completed''::text) AND (new.deleted_at IS NULL))) EXECUTE FUNCTION _lock_job_stock_rows_in_order()') <> 1 THEN
+         AND replace(pg_get_triggerdef(t.oid), 'EXECUTE FUNCTION public._lock_job', 'EXECUTE FUNCTION _lock_job') = 'CREATE TRIGGER trg_zz_lock_job_stock_rows AFTER UPDATE OF status ON public.jobs FOR EACH ROW WHEN (((old.status = ANY (ARRAY[''scheduled''::text, ''in_progress''::text])) AND (new.status = ''completed''::text) AND (new.deleted_at IS NULL))) EXECUTE FUNCTION _lock_job_stock_rows_in_order()') <> 1 THEN
     RAISE EXCEPTION 'JOB_STOCK_ROW_POSTFLIGHT: trg_zz_lock_job_stock_rows is not the reviewed enabled trigger';
   END IF;
 
@@ -220,7 +222,7 @@ BEGIN
     INTO v_job
     FROM pg_proc p
    WHERE p.oid = to_regprocedure('public.complete_job(uuid, jsonb, uuid, text)');
-  IF v_job.oid IS NULL OR md5(replace(v_job.prosrc, chr(13), '')) IS DISTINCT FROM 'a24a546d75428042843d8a4e764e3b37'
+  IF v_job.oid IS NULL OR md5(replace(v_job.prosrc, chr(13), '')) IS DISTINCT FROM '3ed5ba8cc239789d4e08373bcf2ceb3a'
      OR (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'complete_job') <> 1 THEN
     RAISE EXCEPTION 'JOB_STOCK_ROW_POSTFLIGHT: complete_job is not the reviewed single wrapper';
   END IF;

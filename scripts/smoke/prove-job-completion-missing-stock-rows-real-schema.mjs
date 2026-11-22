@@ -41,7 +41,7 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate or its follow-up creates or relies on.
-const TOUCHED = /(_lock_job_stock_rows_in_order|trg_zz_lock_job_stock_rows)/i;
+const TOUCHED = /(_lock_job_stock_rows_in_order|trg_zz_lock_job_stock_rows|FUNCTION\s+(public\.)?complete_job\b|FUNCTION\s+(public\.)?next_application_record_number\b)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -266,6 +266,7 @@ const id = (s) => `a3480000-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1');
 const CUST = id('c1');
 const DRIVER = id('a2');
+const APPLICATOR = id('a3'); // active applicator not assigned to any prover job
 // PA < PB < PC < PD < PE < PF by id. None of these start with a stock row except PF.
 const PA = id('b1'), PB = id('b2'), PC = id('b3'), PD = id('b4'), PE = id('b5'), PF = id('b6'), PG = id('b7');
 const INV_F = id('d6');
@@ -284,9 +285,11 @@ const PM = id('b0'); // sorts before PF: a completion that created PM before loc
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
     ('${ADMIN}', 'jobstock-admin@example.invalid', '{"full_name":"[PROVER] Job Stock Admin","role":"admin"}'::jsonb),
-    ('${DRIVER}', 'jobstock-driver@example.invalid', '{"full_name":"[PROVER] Job Stock Driver","role":"driver"}'::jsonb);`);
+    ('${DRIVER}', 'jobstock-driver@example.invalid', '{"full_name":"[PROVER] Job Stock Driver","role":"driver"}'::jsonb),
+    ('${APPLICATOR}', 'jobstock-applicator@example.invalid', '{"full_name":"[PROVER] Job Stock Applicator","role":"applicator"}'::jsonb);`);
   raw(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
     UPDATE public.profiles SET role = 'driver', is_active = true WHERE id = '${DRIVER}';
+    UPDATE public.profiles SET role = 'applicator', is_active = true WHERE id = '${APPLICATOR}';
     INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST}', '[PROVER] Job Stock Farm', true);
     INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
         rate_per_acre, current_cost, tier1_price, tier2_price, tier3_price, pricing_version, is_active) VALUES
@@ -465,7 +468,7 @@ async function afterCases() {
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._lock_job_stock_rows_in_order()'::regprocedure;`),
     'e3344479412462cc3bdecee378f4d495');
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) || ',' || prosecdef::text || ',' || array_to_string(proconfig, ';') || ',' || has_function_privilege('authenticated', oid, 'EXECUTE') || ',' || has_function_privilege('service_role', oid, 'EXECUTE') || ',' || has_function_privilege('anon', oid, 'EXECUTE') FROM pg_proc WHERE oid = 'public.complete_job(uuid, jsonb, uuid, text)'::regprocedure;`),
-    'a24a546d75428042843d8a4e764e3b37,true,search_path=public, pg_temp,true,true,false');
+    '3ed5ba8cc239789d4e08373bcf2ceb3a,true,search_path=public, pg_temp,true,true,false');
   assert.equal(scalar(`SELECT prosecdef::text || ',' || array_to_string(proconfig, ';') || ',' || has_function_privilege('authenticated', oid, 'EXECUTE') || ',' || has_function_privilege('anon', oid, 'EXECUTE') FROM pg_proc WHERE oid = 'public._lock_job_stock_rows_in_order()'::regprocedure;`),
     'true,search_path=public, pg_temp,false,false');
   console.log('[case] the migration applies once, a second apply refuses, the lock function stays private and complete_job keeps its grants');
@@ -506,6 +509,20 @@ async function afterCases() {
   assert.match(offline.out, /offline done/, offline.out);
   assert.match(direct.out, /direct done/, direct.out);
   console.log('[case] an offline-style completion holding the job row and a direct completion of the same job both finish, no deadlock');
+
+  // Sol r2 HIGH: while one completion holds the number lock, an applicator not assigned to sibling job J_OFFLINE
+  // calls complete_job on it; the holder then takes the foreign-key lock on that job (rebuilding a booking draw).
+  const [holderRun, sibling] = await Promise.all([
+    session(`BEGIN; ${STAMP('S')} SELECT pg_advisory_xact_lock(hashtext('next_application_record_number')); SELECT pg_sleep(2);
+      SELECT 1 FROM public.jobs WHERE id = '${J_OFFLINE}' FOR KEY SHARE; SELECT 'holder done'; ${STAMP('E')} ROLLBACK;`),
+    session(`SELECT set_config('request.jwt.claims', '{"sub":"${APPLICATOR}","role":"authenticated"}', false);
+      SET ROLE authenticated; SELECT public.complete_job('${J_OFFLINE}', '{}'::jsonb, '${APPLICATOR}', 'job-stock-sibling');`, 400),
+  ]);
+  assert.ok(!/deadlock detected/i.test(holderRun.out + sibling.out), `no deadlock expected:\n${holderRun.out}\n${sibling.out}`);
+  assert.equal(holderRun.code, 0, holderRun.out);
+  assert.match(holderRun.out, /holder done/, holderRun.out);
+  assert.match(sibling.out, /Not authorized to complete this job/, sibling.out);
+  console.log('[case] an unassigned applicator completing a sibling job does not block the foreign-key lock the number-lock holder needs');
 
   const raced = await race(J_AFTER_A, J_AFTER_B);
   assert.ok(!raced.failed, `no collision expected:\n${raced.t1.out}\n${raced.t2.out}`);
@@ -583,7 +600,7 @@ async function rollbackCases() {
   assert.notEqual(refusedJob.status, 0, 'rollback must refuse a complete_job it did not install');
   assert.match(refusedJob.output, /ROLLBACK_REFUSED: complete_job/, refusedJob.output);
   putBack('job');
-  assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.complete_job(uuid, jsonb, uuid, text)'::regprocedure;`), 'a24a546d75428042843d8a4e764e3b37');
+  assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.complete_job(uuid, jsonb, uuid, text)'::regprocedure;`), '3ed5ba8cc239789d4e08373bcf2ceb3a');
   psql('DROP TABLE public.zz_defs;');
   const rolled = apply('reverse.sql');
   assert.equal(rolled.status, 0, rolled.output);

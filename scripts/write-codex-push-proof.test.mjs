@@ -1402,7 +1402,9 @@ function collisionPromptSkipsWork(prompt) {
   const STAGING = "origin/staging";
   const PR_URL = "https://github.com/example/app/pull/77";
   // One throwaway repo: main and staging at one commit, a feature branch with one code change.
-  const setup = () => {
+  // A hotfix/ branch is reviewed against origin/main instead, where the collision check still runs.
+  const setup = (branch = "claude/feature-x") => {
+    const target = branch.startsWith("hotfix/") ? "origin/main" : STAGING;
     const repo = tempDir("crx-carry-staging-");
     const git = (...args) => execFileSync("git", ["-c", "user.name=Carry Test", "-c", "user.email=carry@example.invalid", ...args], {
       cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
@@ -1422,7 +1424,7 @@ function collisionPromptSkipsWork(prompt) {
       edit();
       const sha = commitAll(message);
       git("update-ref", `refs/remotes/${ref}`, sha);
-      git("switch", "-q", "claude/feature-x");
+      git("switch", "-q", branch);
       return sha;
     };
     const carry = (...extra) => spawnSync(process.execPath, [scriptPath, "--carry-forward", ...extra], { cwd: repo, encoding: "utf8" });
@@ -1438,13 +1440,13 @@ function collisionPromptSkipsWork(prompt) {
     const base = commitAll("base");
     git("update-ref", "refs/remotes/origin/main", base);
     git("update-ref", "refs/remotes/origin/staging", base);
-    git("switch", "-q", "-c", "claude/feature-x", STAGING);
+    git("switch", "-q", "-c", branch, target);
     write("src/a.ts", "export const a = 2;\n");
     const reviewedHead = commitAll("pr change");
-    writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: STAGING }));
+    writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: target }));
     return { repo, git, commitAll, file, write, readProof, writeProof, land, carry, base, reviewedHead };
   };
-  const withRepo = (fn) => { const ctx = setup(); try { fn(ctx); } finally { rmSync(ctx.repo, { recursive: true, force: true }); } };
+  const withRepo = (fn, branch) => { const ctx = setup(branch); try { fn(ctx); } finally { rmSync(ctx.repo, { recursive: true, force: true }); } };
   // A carried proof for `head` on the same base (a restamp-shaped carry needs no model call to fake).
   const sameBaseCarry = (head, source) => buildCarryForwardProof({ headSha: head, baseSha: source.base_sha, source, mode: "restamp" });
 
@@ -1488,20 +1490,28 @@ function collisionPromptSkipsWork(prompt) {
     assert.match(carry().stderr, /something else changed/, "staging carry: an edited staging merge is refused");
   });
 
-  // 2. Both sides add a DECISION_LOG entry (the #2185 case): the union merge is clean and the
-  //    shared file gets the focused check, never a refusal or a free carry.
-  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
-    const log = file("docs/manual/DECISION_LOG.md");
-    const append = (text) => writeFileSync(log, readFileSync(log, "utf8") + text);
-    append("- PR entry\n");
-    const head = commitAll("pr decision entry");
-    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
-    land("origin/staging", "another PR's decision entry", () => append("- staging entry\n"));
-    git("merge", "-q", "--no-edit", "origin/staging");
-    const dry = carry("--dry-run");
-    assert.equal(dry.status, 0, `staging carry: a union-merged DECISION_LOG is not "something else changed" (${dry.stderr})`);
-    assert.match(dry.stdout, /collision check needed: both sides changed 1 file/, "staging carry: a shared DECISION_LOG gets the focused check");
-  });
+  // 2. Both sides add a DECISION_LOG entry (the #2185 case): the union merge is clean, so the
+  //    shared file is not "something else changed". On a hotfix/ branch it gets the focused check;
+  //    a staging merge carries only for free, so it needs the full review (Mason, 2026-11-22).
+  for (const [branch, base, expect] of [["hotfix/x", "origin/main", "check"], ["claude/feature-x", "origin/staging", "refuse"]]) {
+    withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
+      const log = file("docs/manual/DECISION_LOG.md");
+      const append = (text) => writeFileSync(log, readFileSync(log, "utf8") + text);
+      append("- PR entry\n");
+      const head = commitAll("pr decision entry");
+      writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+      land(base, "another PR's decision entry", () => append("- base entry\n"));
+      git("merge", "-q", "--no-edit", base);
+      const dry = carry("--dry-run");
+      assert.match(dry.stdout, /collision check needed: both sides changed 1 file/, `${branch}: a shared DECISION_LOG needs a look (${dry.stderr})`);
+      if (expect === "check") {
+        assert.equal(dry.status, 0, `${branch}: a union-merged DECISION_LOG gets the focused check (${dry.stderr})`);
+      } else {
+        assert.equal(dry.status, 1, `${branch}: a staging merge that needs a look is refused`);
+        assert.match(dry.stderr, /carries only when nothing overlaps/, `${branch}: says why`);
+      }
+    }, branch);
+  }
 
   // 3. Both sides rewrite the same existing DECISION_LOG line: union keeps both, so refused (Sol MED 4).
   withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead }) => {
@@ -1635,14 +1645,15 @@ function collisionPromptSkipsWork(prompt) {
     ["a removed credential", (file) => writeFileSync(file("src/cfg.ts"), "export const cfg = {};\n"), /looks like a credential/],
     ["a binary change", (file) => writeFileSync(file("src/blob.bin"), Buffer.from([0, 1, 2, 0, 3])), /treats as binary/],
   ]) {
+    // On a hotfix/ branch, where the collision check still runs.
     withRepo(({ git, file, land, carry, readProof, reviewedHead }) => {
-      land("origin/staging", `staging: ${label}`, () => edit(file));
-      git("merge", "-q", "--no-edit", "origin/staging");
-      assert.ok(readProof(reviewedHead), "staging carry: the reviewed head has its proof");
+      land("origin/main", `main: ${label}`, () => edit(file));
+      git("merge", "-q", "--no-edit", "origin/main");
+      assert.ok(readProof(reviewedHead), "hotfix carry: the reviewed head has its proof");
       const refused = carry();
-      assert.equal(refused.status, 1, `staging carry: ${label} is refused before any model call (${refused.stdout})`);
-      assert.match(refused.stderr, why, `staging carry: says why (${label})`);
-    });
+      assert.equal(refused.status, 1, `hotfix carry: ${label} is refused before any model call (${refused.stdout})`);
+      assert.match(refused.stderr, why, `hotfix carry: says why (${label})`);
+    }, "hotfix/x");
   }
   assert.match(buildCollisionCheckPrompt(), /BLOCKERS {2}— at least one blocker\/high-severity collision or other blocker\/high problem/, "collision prompt: any blocker counts in the verdict");
 }

@@ -90,7 +90,8 @@
 > proof and never across a rename of a file the other side changed: with no model call
 > only when the PR's files and the base's new files do not overlap and one side is plain documentation (notes-folder `.md` files,
 > which excludes every rule file, in regular non-executable files only); otherwise, including any two code changes in different files, only
-> after a focused Sol collision check returns CLEAN. The check starts from the database, guard, CI, dependency and
+> after a focused Sol collision check returns CLEAN, and that check runs only for `hotfix/` and `release/`: a
+> staging merge that is not the free case needs the full review (Mason, 2026-11-22, #2226). The check starts from the database, guard, CI, dependency and
 > rule files (`CARRY_HOT_PATHS`) and counts any other blocker it sees. `proofValid()` in `codex-push-lib.mjs`
 > accepts that shape on the same exact-head, exact-base and 24-hour terms as a full proof (the 24 hours also bind the
 > original full review at the root of the chain), so both merge gates and the push gate honour it, and the migration

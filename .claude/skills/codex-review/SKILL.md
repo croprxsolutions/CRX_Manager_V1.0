@@ -312,7 +312,9 @@ decision only) immediately before the merge. It mints a carried proof for the ne
   call — OR a focused Sol collision check returns CLEAN. Two code or configuration changes always
   get the check, even in different files (Mason, 2026-10-21). The check centres on the interaction,
   starting from the database, guard, CI, dependency and rule files (`CARRY_HOT_PATHS`), and counts
-  any other blocker it sees.
+  any other blocker it sees. The collision check runs only on `hotfix/` and `release/` branches: a
+  staging merge carries only in the free case, and anything else needs the full review (Mason,
+  2026-11-22, #2226).
 
 Anything else refuses, and the full Step 3B review above is the answer. The carried proof states
 `codex_ran: false, carried_forward: true`, names the head and base it came from, and expires 24 hours

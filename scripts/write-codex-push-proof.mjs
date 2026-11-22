@@ -2449,6 +2449,12 @@ function runCarryForward(root, options) {
     `${facts.target}'s new files ${facts.mainFiles.length}; ` +
     (plan.mode === "disjoint" ? "no overlap — carries with no model call.\n" : `collision check needed: ${plan.reasons.join("; ")}.\n`),
   );
+  // A staging merge carries only for free; anything that needs a look gets the full review
+  // (Mason, 2026-11-22, #2226). The collision check stays for hotfix/ and release/ branches.
+  if (facts.target !== GUARDED_BASE && plan.mode !== "disjoint") {
+    process.stderr.write(`Carry-forward refused: a ${facts.target} merge carries only when nothing overlaps. No proof written — run the full review: node scripts/write-codex-push-proof.mjs\n`);
+    return 1;
+  }
   if (options.dryRun) {
     if (plan.overlap.length) process.stdout.write(`[dry-run] Overlapping files: ${plan.overlap.join(", ")}\n`);
     if (plan.hotFiles.length) process.stdout.write(`[dry-run] Database/guard files: ${plan.hotFiles.join(", ")}\n`);
@@ -3057,7 +3063,7 @@ function usage() {
     "                   origin/main for hotfix/ and release/) into an already-reviewed branch, keep that clean",
     "                   review instead of paying for a full one: carries with no model call only",
     "                   when nothing needs a look (--dry-run says which); shared files or code on",
-    "                   both sides run a focused Sol collision check. Owner-accepted findings never carry.",
+    "                   both sides run a focused Sol collision check (hotfix/ and release/ only: a staging merge then needs the full review). Owner-accepted findings never carry.",
     "                   Refuses (use the full review) when anything else changed. With --dry-run,",
     "                   prints the decision only.",
     "  --carry-restamp  When HEAD is one commit on top of a reviewed head that only gave one",

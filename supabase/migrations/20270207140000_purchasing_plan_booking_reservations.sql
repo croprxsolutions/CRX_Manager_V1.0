@@ -190,7 +190,8 @@ BEGIN
             -- #1990 Sol: a soft-deleted order no longer stands for the booking (as 20270128140000 counts it), unless
             -- product was drawn from the booking (a voided whole conversion keeps its draw: the booking stays converted).
             OR (q.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.quote_id = q.id
-                  AND (o.deleted_at IS NULL OR EXISTS (SELECT 1 FROM quote_product_draws d WHERE d.quote_id = q.id AND d.quantity_drawn > 0)))))
+                  AND (o.deleted_at IS NULL OR EXISTS (SELECT 1 FROM quote_product_draws d WHERE d.quote_id = q.id AND d.quantity_drawn > 0
+                                     AND d.quantity_drawn < 'Infinity'::numeric)))))
   ),
   bla AS (
     SELECT qi.id AS item_id, eq.id AS quote_id, qi.product_id, s.id AS section_id,
@@ -236,6 +237,10 @@ BEGIN
       JOIN jobs j ON j.id = jpd.job_id
       LEFT JOIN quote_sections s ON s.id = j.quote_section_id AND s.quote_id = jpd.quote_id
      WHERE NOT EXISTS (SELECT 1 FROM jcl WHERE jcl.job_id = jpd.job_id AND jcl.product_id = jpd.product_id AND jcl.unit_problem)
+       -- ...nor an active job whose line of the product holds an impossible quantity (skipped and flagged).
+       AND NOT EXISTS (SELECT 1 FROM job_chemicals jc WHERE jc.job_id = jpd.job_id AND jc.product_id = jpd.product_id
+                          AND j.deleted_at IS NULL AND j.status IN ('scheduled', 'in_progress')
+                          AND jc.customer_supplied IS NOT TRUE AND NOT abs(COALESCE(jc.quantity, 0)) < 'Infinity'::numeric)
        AND abs(COALESCE(jpd.quantity_drawn, 0)) < 'Infinity'::numeric
   ),
   alld AS (
@@ -321,6 +326,7 @@ BEGIN
       FROM inventory_holds ih
      WHERE ih.is_active = true AND ih.quantity > 0 AND ih.quantity < 'Infinity'::numeric  -- (also excludes NaN)
        AND (ih.expires_at IS NULL OR ih.expires_at >= (SELECT today FROM prm))
+       AND (ih.expires_at IS NULL OR ih.expires_at BETWEEN (SELECT d_lo FROM prm) AND (SELECT d_hi FROM prm))  -- impossible expiry: skipped and flagged
        AND ih.hold_type IN ('manual', 'crop_program', 'job')
   ),
   po AS (
@@ -364,12 +370,13 @@ BEGIN
     UNION ALL
     SELECT ih.product_id, 'hold', ih.id FROM inventory_holds ih
      WHERE ih.is_active = true AND ih.hold_type IN ('manual', 'crop_program', 'job')
-       AND (ih.expires_at IS NULL OR ih.expires_at >= (SELECT today FROM prm))
-       AND NOT abs(COALESCE(ih.quantity, 0)) < 'Infinity'::numeric
+       AND (NOT ih.expires_at BETWEEN (SELECT d_lo FROM prm) AND (SELECT d_hi FROM prm)
+            OR ((ih.expires_at IS NULL OR ih.expires_at >= (SELECT today FROM prm))
+                AND NOT abs(COALESCE(ih.quantity, 0)) < 'Infinity'::numeric))
     UNION ALL
     SELECT poi.product_id, 'po_line', poi.id
       FROM purchase_order_items poi JOIN purchase_orders p ON p.id = poi.purchase_order_id CROSS JOIN prm
-     WHERE p.status IN ('submitted', 'partially_received') AND poi.product_id IS NOT NULL
+     WHERE p.status IN ('draft', 'submitted', 'partially_received') AND poi.product_id IS NOT NULL
        AND (NOT abs(poi.quantity_ordered - COALESCE(poi.quantity_received, 0)) < 'Infinity'::numeric
             OR NOT p.expected_delivery_date BETWEEN prm.d_lo AND prm.d_hi)
     UNION ALL
@@ -410,9 +417,11 @@ BEGIN
            COALESCE((SELECT MIN(d.scheduled_date)
                        FROM delivery_items di JOIN deliveries d ON d.id = di.delivery_id
                       WHERE di.order_item_id = oi.id AND d.deleted_at IS NULL
-                        AND d.status IN ('scheduled', 'in_progress')
-                        AND d.scheduled_date BETWEEN (SELECT d_lo FROM prm) AND (SELECT d_hi FROM prm) AND abs(COALESCE(di.quantity, 0)) < 'Infinity'::numeric
-                     HAVING SUM(COALESCE(di.quantity, 0)) >= oi.quantity_remaining),
+                        AND d.status IN ('scheduled', 'in_progress') AND d.scheduled_date IS NOT NULL
+                     -- any delivery with an impossible date or quantity: the order counts today (flagged)
+                     HAVING bool_and(d.scheduled_date BETWEEN (SELECT d_lo FROM prm) AND (SELECT d_hi FROM prm)
+                                     AND abs(COALESCE(di.quantity, 0)) < 'Infinity'::numeric)
+                        AND SUM(COALESCE(di.quantity, 0)) >= oi.quantity_remaining),
                     (SELECT today FROM prm)),
            oi.quantity_remaining, o.quote_id, o.id, NULL::uuid, NULL::uuid, NULL::text, false, false, o.customer_id, false, oi.id
       FROM order_items oi JOIN orders o ON o.id = oi.order_id
@@ -699,7 +708,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM 'e576a27782adf38cc15be71635e7acfc' THEN
+     IS DISTINCT FROM 'd00303eb815aef5c5bd23d5fb0271cb4' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

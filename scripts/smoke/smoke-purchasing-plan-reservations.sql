@@ -35,14 +35,14 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
 
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] Reservations Farm ' || v_suffix) RETURNING id INTO v_customer;
-  FOR v_i IN 1..23 LOOP
+  FOR v_i IN 1..28 LOOP
     INSERT INTO products (product_name, unit_size, inventory_unit, product_form)
     VALUES ('[SMOKE] Reservations ' || lpad(v_i::text, 2, '0') || ' ' || v_suffix, 'Gal', 'Gal', 'liquid')
     RETURNING id INTO v_pid;
     v_p := v_p || v_pid;
   END LOOP;
   -- Every product is inserted before any is priced (pricing sets a transaction-wide mode).
-  FOR v_i IN 1..23 LOOP
+  FOR v_i IN 1..28 LOOP
     v_x := preview_product_pricing_changes('product_page', NULL,
       jsonb_build_array(jsonb_build_object(
         'product_id', v_p[v_i], 'row_version', (SELECT pricing_version FROM products WHERE id = v_p[v_i]),
@@ -520,6 +520,74 @@ BEGIN
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
                      WHERE (c->>'product_id')::uuid = v_p[23] AND c->>'kind' = 'delivery') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (C22C a delivery scheduled at infinity) %', v_x;
+  END IF;
+  v_n := v_n + 1;
+
+  -- C23: Sol round 11. Every value the plan reads follows the same rule.
+  -- A: Firm 100 at +30 (no supply); its active job's line is NaN with 60 drawn. The job is skipped, so is its draw: buy 100.
+  v_q := pg_temp.bk(v_p[24], v_customer, v_admin, 'C23A', 'sent', '[{"q":100,"d":30,"c":"firm"}]');
+  INSERT INTO jobs (job_number, customer_id, status, job_date, quote_id, created_by)
+  VALUES ('SMKRS-C23A-' || v_suffix, v_customer, 'scheduled', v_t + 20, v_q, v_admin) RETURNING id INTO v_pid;
+  INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order) VALUES (v_pid, v_p[24], 'NaN', 'Gal', 1);
+  DELETE FROM inventory_holds WHERE source_id = v_pid;
+  INSERT INTO job_product_draws (job_id, quote_id, product_id, quantity_drawn) VALUES (v_pid, v_q, v_p[24], 60);
+  -- B: an accepted Firm 100 whose only order is soft-deleted and whose only draw is NaN: still counted (buy 100), flagged.
+  v_q := pg_temp.bk(v_p[25], v_customer, v_admin, 'C23B', 'accepted', '[{"q":100,"d":30,"c":"firm"}]');
+  INSERT INTO orders (order_number, customer_id, order_date, status, salesman_id, quote_id, deleted_at)
+  VALUES ('SMKRS-C23B-' || v_suffix, v_customer, v_t, 'confirmed', v_admin, v_q, now());
+  INSERT INTO quote_product_draws (quote_id, product_id, quantity_drawn) VALUES (v_q, v_p[25], 'NaN');
+  -- C: a manual hold of 100 expiring in year 300000, no stock: skipped (nothing to buy), flagged.
+  INSERT INTO inventory_holds (product_id, customer_id, quantity, hold_type, source_id, created_by, is_active, expires_at)
+  VALUES (v_p[26], v_customer, 100, 'manual', v_q, v_admin, true, '300000-01-01');
+  -- D: 10 on the shelf; an order of 10 with one delivery at 'infinity' and one at +30 (10 each); Firm 10 at +5.
+  -- The bad delivery dates the order today: the order takes the shelf and the Firm line is bought.
+  PERFORM pg_temp.shelf(v_p[27], 10);
+  PERFORM pg_temp.ord(v_p[27], v_customer, v_admin, 'SMKRS-C23D-' || v_suffix, 10);
+  PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
+  FOR v_i IN 1..2 LOOP
+    INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+    SELECT 'SMKRS-C23D-' || v_i || '-' || v_suffix, o.id, v_customer, 'scheduled',
+           CASE v_i WHEN 1 THEN 'infinity'::date ELSE v_t + 30 END, v_admin
+      FROM orders o WHERE o.order_number = 'SMKRS-C23D-' || v_suffix RETURNING id INTO v_q2;
+    INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+    SELECT v_q2, oi.id, v_p[27], 10, 'Gal' FROM order_items oi JOIN orders o ON o.id = oi.order_id
+     WHERE o.order_number = 'SMKRS-C23D-' || v_suffix;
+  END LOOP;
+  PERFORM set_config('app.crx_below_cost_operation', '', true);
+  PERFORM pg_temp.bk(v_p[27], v_customer, v_admin, 'C23D', 'sent', '[{"q":10,"d":5,"c":"firm"}]');
+  -- E: a draft PO dated 2100: flagged.
+  INSERT INTO purchase_orders (po_number, vendor, status, expected_delivery_date, created_by)
+  VALUES ('SMKRS-C23E-' || v_suffix, '[SMOKE] Vendor', 'draft', '2100-01-01', v_admin) RETURNING id INTO v_q2;
+  INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity_ordered, quantity_received, unit_cost, unit_size)
+  VALUES (v_q2, v_p[28], 10, 0, 6, 'Gal');
+  v_plan2 := get_purchasing_plan(12);
+  v_x := pg_temp.prod(v_plan2, v_p[24]);
+  IF (v_x->>'suggested')::numeric IS DISTINCT FROM 100
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
+                     WHERE (c->>'product_id')::uuid = v_p[24] AND c->>'kind' = 'job_line') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C23A a NaN job line keeps its draw) %', v_x;
+  END IF;
+  v_x := pg_temp.prod(v_plan2, v_p[25]);
+  IF (v_x->>'suggested')::numeric IS DISTINCT FROM 100
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
+                     WHERE (c->>'product_id')::uuid = v_p[25] AND c->>'kind' = 'draw') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C23B a NaN draw converts a booking) %', v_x;
+  END IF;
+  v_x := pg_temp.prod(v_plan2, v_p[26]);
+  IF (v_x->>'suggested')::numeric IS DISTINCT FROM 0
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
+                     WHERE (c->>'product_id')::uuid = v_p[26] AND c->>'kind' = 'hold') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C23C a hold expiring in year 300000) %', v_x;
+  END IF;
+  v_x := pg_temp.prod(v_plan2, v_p[27]);
+  IF pg_temp.g(v_x, 'committed') <> '20/10/0/10' OR (v_x->>'suggested')::numeric <> 10
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r
+                     WHERE r->>'kind' = 'order' AND (r->>'need_date')::date = v_t) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C23D one bad delivery dates the order today) %', v_x;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
+                  WHERE (c->>'product_id')::uuid = v_p[28] AND c->>'kind' = 'po_line') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C23E a draft PO dated 2100 is flagged) %', v_plan2->'check_data';
   END IF;
   v_n := v_n + 1;
 

@@ -1,32 +1,32 @@
--- Job completion creates a missing Main Warehouse stock row the same way a delivery completion does.
+-- Job completion takes the application-record number lock first and creates a missing Main Warehouse
+-- stock row the same way a delivery completion does.
 --
--- Two jobs finishing together, both using a product that has never had a stock row at Main Warehouse,
--- used to collide: each tried to insert that row, and one failed (unique violation, or a deadlock when
--- the products were created in opposite line order). Nothing was half-saved; the failed job had to be
--- retried. Delivery completion already waits instead (#1942, _complete_delivery_authorized_impl): it
--- locks existing rows in product order, then creates each missing row in that same order and locks it.
--- Job completion locked existing rows (trg_zz_lock_job_stock_rows, KI-150) but still inserted a missing
--- row inside _complete_job_replay_impl_20261015, in chemical order, with no conflict handling.
--- Lock order is the application-record number lock, then stock rows. create_application_record_from_blend_ticket
--- takes that number lock first and the stock row after. This trigger used to take the stock row on the
--- status update, and complete_job only took the number lock later, so a job and a blend ticket could deadlock.
--- The trigger now takes pg_advisory_xact_lock(hashtext('next_application_record_number')) before any stock row
--- (existing or missing). complete_job takes the same lock again in next_application_record_number; a transaction
--- advisory lock stacks, so the second take returns at once and both release when the transaction ends.
+-- Lock order is the application-record number lock, then stock rows: create_application_record_from_blend_ticket
+-- takes that number lock first and the stock row after. complete_job used to take stock rows first (the hold
+-- sync, trg_release_job_holds_on_lifecycle, and trg_zz_lock_job_stock_rows, both on the status update) and the
+-- number lock only later (next_application_record_number), so a job and a blend ticket, or a quote-linked job
+-- and another job, could deadlock. complete_job now takes
+-- pg_advisory_xact_lock(hashtext('next_application_record_number')) right after its own idempotency-key check,
+-- before the body's status update. Every later take of that lock in the same transaction returns at once.
 --
--- This replaces only _lock_job_stock_rows_in_order. The trigger still runs after the hold sync and
--- before the deduction loop. It still locks existing rows first. Then, for each product the job will
--- deduct (quantity > 0, not customer-supplied), in product order, a missing row is inserted at zero
--- (the same columns the deduction insert uses, not the delivery "manufactured at delivery" flag) with
--- ON CONFLICT DO NOTHING, and the row is locked whether this pass created it or another completion
--- committed it after the first lock. The deduction loop then finds the row and subtracts, so the
--- on-hand, the job_applied ledger row and the short-stock flag end where they do today for one job.
--- A saved completion receipt returns before the status update, so a retry does not create a row.
+-- Job completion locked existing stock rows (trg_zz_lock_job_stock_rows, KI-150) but still inserted a
+-- missing row inside _complete_job_replay_impl_20261015, in chemical order, with no conflict handling.
+-- Delivery completion already waits instead (#1942): existing rows in product order, then each missing
+-- row created in that same order and locked. The trigger now does the same, but only when complete_job
+-- itself is completing this job: complete_job marks the job in a transaction-local setting
+-- (crx.complete_job_rpc). Any other status change to completed (a direct table update) keeps today's
+-- behaviour exactly: existing rows locked in product order, nothing created.
 --
--- idempotency-body-check: not applicable — this trigger has no idempotency key. complete_job's key
---   check is unchanged and still runs before the status update that fires this trigger.
--- caller-analysis: _lock_job_stock_rows_in_order :: trigger only; EXECUTE stays revoked from PUBLIC,
---   anon, authenticated and service_role. No screen calls it. The completion body is not re-emitted.
+-- A missing row is inserted at zero (the same columns the deduction insert uses) with ON CONFLICT DO
+-- NOTHING, then locked. The deduction loop then finds the row and subtracts, so the on-hand, the
+-- job_applied ledger row and the short-stock flag end where they do today for one job. A saved
+-- completion receipt returns before the status update, so a retry creates nothing.
+--
+-- idempotency-body-check: complete_job's key check, fingerprint and receipt binding are unchanged; the
+--   number lock and the completion mark come after check_idempotency_intent. The trigger has no key.
+-- caller-analysis: complete_job :: public RPC, same signature, grants unchanged (authenticated,
+--   service_role); callers: the field app and process_offline_action. _lock_job_stock_rows_in_order ::
+--   trigger only; EXECUTE stays revoked from PUBLIC, anon, authenticated and service_role.
 --
 -- ROLLBACK: scripts/smoke/job-completion-missing-stock-rows-reverse.sql
 --   (proven by scripts/smoke/prove-job-completion-missing-stock-rows-real-schema.mjs).
@@ -36,6 +36,7 @@ SET LOCAL lock_timeout = '5s';
 DO $preflight$
 DECLARE
   v_fn record;
+  v_job record;
 BEGIN
   SELECT p.oid, p.prosrc, p.prosecdef, p.proconfig
     INTO v_fn
@@ -51,16 +52,27 @@ BEGIN
      OR has_function_privilege('service_role', v_fn.oid, 'EXECUTE') THEN
     RAISE EXCEPTION 'JOB_STOCK_ROW_PREFLIGHT: the lock function''s security, search_path or grants changed';
   END IF;
-  IF NOT EXISTS (
-    SELECT 1
-      FROM pg_trigger t
-      JOIN pg_class c ON c.oid = t.tgrelid
-      JOIN pg_proc p ON p.oid = t.tgfoid
-     WHERE c.relname = 'jobs' AND t.tgname = 'trg_zz_lock_job_stock_rows' AND NOT t.tgisinternal
-       AND t.tgenabled IN ('O', 'A')
-       AND p.oid = v_fn.oid
-  ) THEN
-    RAISE EXCEPTION 'JOB_STOCK_ROW_PREFLIGHT: trg_zz_lock_job_stock_rows is not bound to the reviewed function or is disabled';
+  IF (SELECT count(*) FROM pg_trigger t
+       WHERE t.tgrelid = 'public.jobs'::regclass AND t.tgname = 'trg_zz_lock_job_stock_rows' AND NOT t.tgisinternal
+         AND t.tgfoid = v_fn.oid AND t.tgenabled IN ('O', 'A')
+         AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER trg_zz_lock_job_stock_rows AFTER UPDATE OF status ON public.jobs FOR EACH ROW WHEN (((old.status = ANY (ARRAY[''scheduled''::text, ''in_progress''::text])) AND (new.status = ''completed''::text) AND (new.deleted_at IS NULL))) EXECUTE FUNCTION _lock_job_stock_rows_in_order()') <> 1 THEN
+    RAISE EXCEPTION 'JOB_STOCK_ROW_PREFLIGHT: trg_zz_lock_job_stock_rows is not the reviewed enabled trigger';
+  END IF;
+
+  SELECT p.oid, p.prosrc, p.prosecdef, p.proconfig
+    INTO v_job
+    FROM pg_proc p
+   WHERE p.oid = to_regprocedure('public.complete_job(uuid, jsonb, uuid, text)');
+  IF v_job.oid IS NULL OR md5(replace(v_job.prosrc, chr(13), '')) IS DISTINCT FROM '6ec962c198bf326b4ef773fa8d8d5edc'
+     OR (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'complete_job') <> 1 THEN
+    RAISE EXCEPTION 'JOB_STOCK_ROW_PREFLIGHT: complete_job is not the reviewed single wrapper';
+  END IF;
+  IF NOT v_job.prosecdef OR v_job.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
+     OR has_function_privilege('public', v_job.oid, 'EXECUTE')
+     OR has_function_privilege('anon', v_job.oid, 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', v_job.oid, 'EXECUTE')
+     OR NOT has_function_privilege('service_role', v_job.oid, 'EXECUTE') THEN
+    RAISE EXCEPTION 'JOB_STOCK_ROW_PREFLIGHT: complete_job''s security, search_path or grants changed';
   END IF;
 END;
 $preflight$;
@@ -74,11 +86,6 @@ AS $function$
 DECLARE
   v_product record;
 BEGIN
-  -- Number lock first, then stock rows: the same order as create_application_record_from_blend_ticket.
-  -- Taking a stock row here and the number lock later deadlocks with that path. The same transaction
-  -- takes this lock again inside next_application_record_number; that second take does not wait.
-  PERFORM pg_advisory_xact_lock(hashtext('next_application_record_number'));
-
   -- KI-150: existing Main Warehouse rows first, in product order, after the hold sync and before the
   -- deduction loop. Creating a row before this lock can deadlock with a writer that already holds an
   -- existing row (the delivery completion's Sol r2 case).
@@ -88,6 +95,12 @@ BEGIN
                            WHERE jc.job_id = NEW.id AND jc.quantity > 0 AND jc.customer_supplied = false)
    ORDER BY i.product_id, i.id
      FOR UPDATE;
+
+  -- Only complete_job creates rows (it marked this job and already holds the number lock). A direct
+  -- status update deducts nothing, so it must not leave a zero row behind.
+  IF current_setting('crx.complete_job_rpc', true) IS DISTINCT FROM NEW.id::text THEN
+    RETURN NULL;
+  END IF;
 
   -- Then each product this completion deducts, in product order. A missing row is created at zero,
   -- exactly the columns the deduction insert fills (no manufactured-at-delivery flag). ON CONFLICT
@@ -121,15 +134,60 @@ $function$;
 -- caller-analysis: _lock_job_stock_rows_in_order :: trigger only; EXECUTE stays revoked from PUBLIC, anon, authenticated and service_role
 REVOKE ALL ON FUNCTION public._lock_job_stock_rows_in_order() FROM PUBLIC, anon, authenticated, service_role;
 
+CREATE OR REPLACE FUNCTION public.complete_job(p_job_id uuid, p_applied_info jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_actor uuid := auth.uid();
+  v_fingerprint text;
+  v_replay jsonb;
+  v_result jsonb;
+BEGIN
+  IF p_idempotency_key IS NULL THEN
+    RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: complete_job requires p_idempotency_key' USING ERRCODE = '22023';
+  END IF;
+  -- Same tests and messages as the renamed body, which is strict: the caller must name itself.
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+  IF p_performed_by IS DISTINCT FROM v_actor THEN
+    RAISE EXCEPTION 'p_performed_by does not match authenticated user';
+  END IF;
+  -- p_applied_info is fingerprinted as sent (jsonb normalizes key order; array order counts).
+  v_fingerprint := public._replay_fingerprint_20261015(jsonb_build_object(
+    'actor_id', v_actor,
+    'job_id', p_job_id,
+    'applied_info', p_applied_info
+  ));
+  v_replay := public.check_idempotency_intent(p_idempotency_key, 'complete_job', v_actor, v_fingerprint);
+  IF v_replay IS NOT NULL AND jsonb_typeof(v_replay -> 'result') IS DISTINCT FROM 'object' THEN
+    RAISE EXCEPTION 'IDEMPOTENCY_RESULT_INVALID';
+  END IF;
+  -- Number lock before any stock row (the hold sync and trg_zz_lock_job_stock_rows run on the body's status
+  -- update), the same order as create_application_record_from_blend_ticket. Then mark this job so the trigger
+  -- creates its missing stock rows; the mark ends with the transaction.
+  PERFORM pg_advisory_xact_lock(hashtext('next_application_record_number'));
+  PERFORM set_config('crx.complete_job_rpc', p_job_id::text, true);
+  v_result := public._complete_job_replay_impl_20261015(p_job_id, p_applied_info, p_performed_by, p_idempotency_key);
+  PERFORM set_config('crx.complete_job_rpc', '', true);
+  IF v_replay IS NULL THEN
+    PERFORM public._bind_replay_receipt_20261015(p_idempotency_key, 'complete_job', v_fingerprint);
+  END IF;
+  RETURN v_result;
+END;
+$function$;
+
 DO $postflight$
 DECLARE
   v_fn record;
+  v_job record;
 BEGIN
   SELECT p.oid, p.prosrc, p.prosecdef, p.proconfig
     INTO v_fn
     FROM pg_proc p
    WHERE p.oid = to_regprocedure('public._lock_job_stock_rows_in_order()');
-  IF v_fn.oid IS NULL OR md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM 'cf1dbb690d8249733e9db0e60e0528a7' THEN
+  IF v_fn.oid IS NULL OR md5(replace(v_fn.prosrc, chr(13), '')) IS DISTINCT FROM 'e3344479412462cc3bdecee378f4d495' THEN
     RAISE EXCEPTION 'JOB_STOCK_ROW_POSTFLIGHT: the lock function is not the reviewed body';
   END IF;
   IF NOT v_fn.prosecdef OR v_fn.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
@@ -139,16 +197,27 @@ BEGIN
      OR has_function_privilege('service_role', v_fn.oid, 'EXECUTE') THEN
     RAISE EXCEPTION 'JOB_STOCK_ROW_POSTFLIGHT: security, search_path or grants changed';
   END IF;
-  IF NOT EXISTS (
-    SELECT 1
-      FROM pg_trigger t
-      JOIN pg_class c ON c.oid = t.tgrelid
-      JOIN pg_proc p ON p.oid = t.tgfoid
-     WHERE c.relname = 'jobs' AND t.tgname = 'trg_zz_lock_job_stock_rows' AND NOT t.tgisinternal
-       AND t.tgenabled IN ('O', 'A')
-       AND p.oid = v_fn.oid
-  ) THEN
-    RAISE EXCEPTION 'JOB_STOCK_ROW_POSTFLIGHT: trg_zz_lock_job_stock_rows no longer calls the lock function or is disabled';
+  IF (SELECT count(*) FROM pg_trigger t
+       WHERE t.tgrelid = 'public.jobs'::regclass AND t.tgname = 'trg_zz_lock_job_stock_rows' AND NOT t.tgisinternal
+         AND t.tgfoid = v_fn.oid AND t.tgenabled IN ('O', 'A')
+         AND pg_get_triggerdef(t.oid) = 'CREATE TRIGGER trg_zz_lock_job_stock_rows AFTER UPDATE OF status ON public.jobs FOR EACH ROW WHEN (((old.status = ANY (ARRAY[''scheduled''::text, ''in_progress''::text])) AND (new.status = ''completed''::text) AND (new.deleted_at IS NULL))) EXECUTE FUNCTION _lock_job_stock_rows_in_order()') <> 1 THEN
+    RAISE EXCEPTION 'JOB_STOCK_ROW_POSTFLIGHT: trg_zz_lock_job_stock_rows is not the reviewed enabled trigger';
+  END IF;
+
+  SELECT p.oid, p.prosrc, p.prosecdef, p.proconfig
+    INTO v_job
+    FROM pg_proc p
+   WHERE p.oid = to_regprocedure('public.complete_job(uuid, jsonb, uuid, text)');
+  IF v_job.oid IS NULL OR md5(replace(v_job.prosrc, chr(13), '')) IS DISTINCT FROM 'cb32addd7999eae75282813e94962bba'
+     OR (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'complete_job') <> 1 THEN
+    RAISE EXCEPTION 'JOB_STOCK_ROW_POSTFLIGHT: complete_job is not the reviewed single wrapper';
+  END IF;
+  IF NOT v_job.prosecdef OR v_job.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']
+     OR has_function_privilege('public', v_job.oid, 'EXECUTE')
+     OR has_function_privilege('anon', v_job.oid, 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', v_job.oid, 'EXECUTE')
+     OR NOT has_function_privilege('service_role', v_job.oid, 'EXECUTE') THEN
+    RAISE EXCEPTION 'JOB_STOCK_ROW_POSTFLIGHT: complete_job''s security, search_path or grants changed';
   END IF;
 END;
 $postflight$;

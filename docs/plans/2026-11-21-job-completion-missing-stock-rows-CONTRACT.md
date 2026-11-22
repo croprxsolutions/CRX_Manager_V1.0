@@ -6,7 +6,7 @@ Read at `origin/staging` `66df4a9c1`. Live database was not readable from this s
 
 When two field jobs finish at the same time and both use a product that has never had a Main Warehouse stock row, both finish. Stock ends at the sum of what the two jobs used. One job no longer fails and has to be retried.
 
-The smallest change is the one delivery completion already uses (`_complete_delivery_authorized_impl` in `20270203120000_inventory_edge_cases_1942.sql`). Job completion already locks existing rows in product order, in `_lock_job_stock_rows_in_order`, after the hold sync and before the deduction. This change adds the missing-row step to that same function: take the application-record number lock first (the same lock a blend ticket takes before its stock row; taking it again later in the same completion does not wait), then create each missing row in product order, ignore a row the other job just created, and lock it. The deduction in `_complete_job_replay_impl_20261015` is not rewritten. It finds the row and subtracts, which is what it already does when the row exists.
+The smallest change is the one delivery completion already uses (`_complete_delivery_authorized_impl` in `20270203120000_inventory_edge_cases_1942.sql`). Job completion already locks existing rows in product order, in `_lock_job_stock_rows_in_order`, after the hold sync and before the deduction. This change (revised after Sol round 1, 2026-11-22) does two things. `complete_job` takes the application-record number lock right after its idempotency-key check, before the body's status update, so the hold sync (including a quote-linked job's) and every stock row come after it, the same order a blend ticket uses; taking it again later in the same completion does not wait. And it marks the job in a transaction-local setting (`crx.complete_job_rpc`); only then does the lock function, after locking existing rows, create each missing row in product order, ignore a row the other job just created, and lock it. The deduction in `_complete_job_replay_impl_20261015` is not rewritten. It finds the row and subtracts, which is what it already does when the row exists.
 
 No new table, queue, or screen. Who may complete a job is unchanged. The screen still sends the job id, the applied-info note, and the idempotency key. The database still decides the actor, the chemicals, and the quantities.
 
@@ -17,18 +17,21 @@ No new table, queue, or screen. Who may complete a job is unchanged. The screen 
 - Two jobs, same new product, or two new products in opposite chemical order: both complete. One row per product. On-hand is minus both jobs. A retry of a finished job with the same key returns the saved result and does not deduct again.
 - A job that is not in progress is still refused, and creates no row.
 - The whole completion is one database transaction. If it fails, the new row is not left behind.
+- A direct status update to completed (not through `complete_job`) behaves exactly as today: existing rows locked, nothing created, nothing deducted.
 - Old rows are untouched. The app already deployed keeps calling `complete_job` the same way.
 
 ## Delivery
 
-Database only. The screen does not change. Rollback restores the previous lock function (existing rows only). The deduction loop then inserts a missing row itself again, which is today's failure.
+Database only. The screen does not change. Rollback restores the previous lock function (existing rows only) and the previous `complete_job`, refusing if either was changed after this migration. The deduction loop then inserts a missing row itself again, which is today's failure.
 
 ## Proof
 
 - When two sessions insert a missing stock row the way the job body does, in opposite order, one fails (deadlock). Two job completions today both finish, because the application-record number is taken before that insert, and the on-hand is minus both jobs. After this change both jobs still finish with that same on-hand, and the creation itself waits in product order, including against a writer that already holds another stock row. Proof: `node scripts/smoke/prove-job-completion-missing-stock-rows-real-schema.mjs` on a local database, invented rows, rolled back or committed only inside that disposable database.
 - When one job uses a product that already has stock, and a customer-supplied chemical, then only the stocked product moves, by that job's quantity.
 - When the same completion key is sent again, on-hand does not move a second time.
-- When the rollback runs, the old function body is back and two overlapping completions fail again.
+- While `complete_job` waits on a stock row another session holds, it already holds the number lock (today it does not).
+- A direct status update creates no stock row.
+- When the rollback runs, both old bodies are back, a job still completes through them, and two overlapping inserts collide again.
 
 ## Open business decisions
 

@@ -3117,7 +3117,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   check_unpriced_orders: 'cron reminder sweep uses persisted reminder and escalation sent markers',
   mark_overdue_invoices: 'service-role maintenance updates only invoices currently eligible as overdue',
   _lock_job_stock_rows_in_order:
-    'AFTER row trigger on jobs (20270220120000): creates and locks a missing Main Warehouse stock row in product order inside complete_job, which checks its idempotency key before the status update that fires this trigger. Postgres refuses a direct call of a trigger function and every API-role EXECUTE is revoked',
+    'AFTER row trigger on jobs (20270220120000): locks existing Main Warehouse stock rows in product order; creates and locks a missing one only when complete_job marked this job (crx.complete_job_rpc), after complete_job checked its idempotency key and took the number lock. Postgres refuses a direct call of a trigger function and every API-role EXECUTE is revoked',
   recompute_job_applied_acres: 'trigger-only derived-total recomputation; direct client EXECUTE is revoked',
   // Pruned 2026-10-19: _enforce_below_cost_line, re-emitted by the cost-admin-only
   //   candidate 20261019010000, which is now in the applied-name snapshot (ledger

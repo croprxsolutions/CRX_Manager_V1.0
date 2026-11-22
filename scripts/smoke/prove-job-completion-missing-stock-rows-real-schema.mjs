@@ -275,6 +275,8 @@ const J_MIX = id('41');
 const J_BLEND_BEFORE = id('61'), J_BLEND_AFTER = id('62');
 const PX = id('ba');
 const INV_X = id('da');
+const PN = id('bc'), PNS = id('bd'); // never given a stock row by any case
+const J_DIRECT = id('42'), J_ORDER = id('63');
 const PM = id('b0'); // sorts before PF: a completion that created PM before locking PF would deadlock with the writer
 
 function seed() {
@@ -292,7 +294,9 @@ function seed() {
       ('${PF}', '[PROVER] On hand', 'JS-PF', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true),
       ('${PG}', '[PROVER] Grower supplied', 'JS-PG', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true),
       ('${PM}', '[PROVER] Mixed missing', 'JS-PM', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true),
-      ('${PX}', '[PROVER] Blend race', 'JS-PX', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true);
+      ('${PX}', '[PROVER] Blend race', 'JS-PX', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true),
+      ('${PN}', '[PROVER] Direct update', 'JS-PN', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true),
+      ('${PNS}', '[PROVER] Not started', 'JS-PNS', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, true);
     INSERT INTO public.products (product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
         rate_per_acre, current_cost, tier1_price, tier2_price, tier3_price, pricing_version, is_active)
       SELECT '[PROVER] Filler ' || g, 'JS-F' || g, 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 16, 24, 30, 30, 30, 1, false
@@ -323,7 +327,11 @@ function seed() {
     ${job(J_RETRY, 'JS-RT', 'in_progress')}
     ${chem(J_RETRY, PE, 2, 1)}
     ${job(J_NOT_STARTED, 'JS-NS', 'scheduled')}
-    ${chem(J_NOT_STARTED, PE, 2, 1)}
+    ${chem(J_NOT_STARTED, PNS, 2, 1)}
+    ${job(J_DIRECT, 'JS-DU', 'in_progress')}
+    ${chem(J_DIRECT, PN, 2, 1)}
+    ${job(J_ORDER, 'JS-OR', 'in_progress')}
+    ${chem(J_ORDER, PX, 1, 1)}
     ${job(J_MIX, 'JS-MX', 'in_progress')}
     ${chem(J_MIX, PM, 1, 1)}
     ${chem(J_MIX, PF, 1, 2)}
@@ -407,7 +415,24 @@ async function beforeCases() {
   const blend = await blendVersusJob(J_BLEND_BEFORE);
   assert.ok(/deadlock detected/i.test(blend.blend.out + blend.job.out), `a blend ticket and a job must deadlock before the number lock moves:\n${blend.blend.out}\n${blend.job.out}`);
   assert.ok(Number.isFinite(at(blend.blend.out, 'S')) && Number.isFinite(at(blend.job.out, 'S')), `both must start:\n${blend.blend.out}\n${blend.job.out}`);
+  assert.equal(await numberLockWhileWaiting(), 'Lock/false', 'today a job waits on a stock row without the number lock');
   console.log('[case] before: the plain stock insert collides in opposite order; two jobs still both finish because the record-number lock runs first; a blend ticket that holds that lock and then the stock row deadlocks with a job');
+}
+
+// Another session holds PX's stock row; complete_job(J_ORDER) must wait on it. Reports whether, while
+// waiting, the job already holds the application-record number lock (key hashtext, objsubid 1). Rolled back.
+async function numberLockWhileWaiting() {
+  const holder = session(`BEGIN; SELECT 1 FROM public.inventory WHERE id = '${INV_X}' FOR UPDATE; SELECT pg_sleep(3); ROLLBACK;`);
+  const job = session(`SET application_name = 'jsorder'; BEGIN; ${complete(J_ORDER)} SELECT 'order done'; ROLLBACK;`, 400);
+  await new Promise((r) => setTimeout(r, 1800));
+  const seen = scalar(`SELECT coalesce((SELECT wait_event_type FROM pg_stat_activity WHERE application_name = 'jsorder'), 'none') || '/' ||
+    coalesce((SELECT bool_or(l.granted) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+       WHERE a.application_name = 'jsorder' AND l.locktype = 'advisory' AND l.objsubid = 1
+         AND l.objid::bigint = (hashtext('next_application_record_number')::bigint & 4294967295)), false);`);
+  const [h, j] = await Promise.all([holder, job]);
+  assert.equal(h.code, 0, h.out);
+  assert.equal(j.code, 0, j.out);
+  return seen;
 }
 
 // Same order as create_application_record_from_blend_ticket: the application-record number lock, then the stock row.
@@ -431,10 +456,22 @@ async function afterCases() {
   assert.notEqual(again.status, 0, 'a second apply must refuse');
   assert.match(again.output, /JOB_STOCK_ROW_PREFLIGHT/, again.output);
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._lock_job_stock_rows_in_order()'::regprocedure;`),
-    'cf1dbb690d8249733e9db0e60e0528a7');
+    'e3344479412462cc3bdecee378f4d495');
+  assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) || ',' || prosecdef::text || ',' || array_to_string(proconfig, ';') || ',' || has_function_privilege('authenticated', oid, 'EXECUTE') || ',' || has_function_privilege('service_role', oid, 'EXECUTE') || ',' || has_function_privilege('anon', oid, 'EXECUTE') FROM pg_proc WHERE oid = 'public.complete_job(uuid, jsonb, uuid, text)'::regprocedure;`),
+    'cb32addd7999eae75282813e94962bba,true,search_path=public, pg_temp,true,true,false');
   assert.equal(scalar(`SELECT prosecdef::text || ',' || array_to_string(proconfig, ';') || ',' || has_function_privilege('authenticated', oid, 'EXECUTE') || ',' || has_function_privilege('anon', oid, 'EXECUTE') FROM pg_proc WHERE oid = 'public._lock_job_stock_rows_in_order()'::regprocedure;`),
     'true,search_path=public, pg_temp,false,false');
-  console.log('[case] the migration applies once, a second apply refuses, and the lock function stays private');
+  console.log('[case] the migration applies once, a second apply refuses, the lock function stays private and complete_job keeps its grants');
+
+  // Sol r1 #1: a completion that is not complete_job (a direct table update, or a mark naming another job) creates no row.
+  assert.equal(okProbe(`UPDATE public.jobs SET status = 'completed' WHERE id = '${J_DIRECT}'; SELECT (SELECT status FROM public.jobs WHERE id = '${J_DIRECT}') || '/' || ${rowCount(PN)};`), 'completed/0');
+  assert.equal(okProbe(`SELECT set_config('crx.complete_job_rpc', '${J_ORDER}', true); UPDATE public.jobs SET status = 'completed' WHERE id = '${J_DIRECT}'; SELECT ${rowCount(PN)};`), '0');
+  console.log('[case] a direct status update, or one marked for another job, completes the job and creates no stock row');
+
+  // Sol r1 #2/#6: the number lock is held before any stock row is waited on (the hold sync, quote-linked or not,
+  // and the stock-row trigger all run inside the body's status update, after the wrapper takes it).
+  assert.equal(await numberLockWhileWaiting(), 'Lock/true', 'complete_job must hold the number lock while it waits on a stock row');
+  console.log('[case] complete_job holds the application-record number lock while it waits on a stock row');
 
   const raced = await race(J_AFTER_A, J_AFTER_B);
   assert.ok(!raced.failed, `no collision expected:\n${raced.t1.out}\n${raced.t2.out}`);
@@ -477,7 +514,7 @@ async function afterCases() {
   assert.notEqual(refused.status, 0, refused.output);
   assert.match(refused.output, /in_progress/);
   assert.equal(scalar(`SELECT status FROM public.jobs WHERE id = '${J_NOT_STARTED}';`), 'scheduled');
-  assert.equal(scalar(`${rowCount(PE)}`), '1');
+  assert.equal(scalar(`${rowCount(PNS)}`), '0');
   console.log('[case] one job still deducts an existing row, skips a customer-supplied chemical, replays a saved key, and refuses a job that has not been started');
 
   const retook = psql(`BEGIN;
@@ -499,22 +536,28 @@ async function afterCases() {
 
 async function rollbackCases() {
   stageText('reverse.sql', lf(REVERSE));
+  psql(`CREATE TABLE public.zz_defs AS SELECT 'lock' AS k, pg_get_functiondef('public._lock_job_stock_rows_in_order()'::regprocedure) AS d
+    UNION ALL SELECT 'job', pg_get_functiondef('public.complete_job(uuid, jsonb, uuid, text)'::regprocedure);`);
+  const putBack = (k) => psql(`SELECT d FROM public.zz_defs WHERE k = '${k}' \\gexec`);
   psql(`CREATE OR REPLACE FUNCTION public._lock_job_stock_rows_in_order() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $fn$ BEGIN RETURN NULL; END $fn$;`);
   const refused = apply('reverse.sql');
-  assert.notEqual(refused.status, 0, 'rollback must refuse a body it did not install');
+  assert.notEqual(refused.status, 0, 'rollback must refuse a lock body it did not install');
   assert.match(refused.output, /ROLLBACK_REFUSED/, refused.output);
-  stageText('candidate.sql', lf(CANDIDATE));
-  const restored = apply('candidate.sql');
-  assert.notEqual(restored.status, 0, 'the candidate must refuse once the installed body was replaced');
-  const ki150 = lf(REVERSE).slice(lf(REVERSE).indexOf('CREATE OR REPLACE FUNCTION public._lock_job_stock_rows_in_order()'));
-  const ki150Fn = ki150.slice(0, ki150.indexOf('REVOKE ALL ON FUNCTION'));
-  psql(ki150Fn);
-  const again = apply('candidate.sql');
-  assert.equal(again.status, 0, again.output);
+  putBack('lock');
+  psql(`SELECT replace(d, 'v_result jsonb;', 'v_result jsonb; v_changed int;') FROM public.zz_defs WHERE k = 'job' \\gexec`);
+  const refusedJob = apply('reverse.sql');
+  assert.notEqual(refusedJob.status, 0, 'rollback must refuse a complete_job it did not install');
+  assert.match(refusedJob.output, /ROLLBACK_REFUSED: complete_job/, refusedJob.output);
+  putBack('job');
+  assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.complete_job(uuid, jsonb, uuid, text)'::regprocedure;`), 'cb32addd7999eae75282813e94962bba');
+  psql('DROP TABLE public.zz_defs;');
   const rolled = apply('reverse.sql');
   assert.equal(rolled.status, 0, rolled.output);
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._lock_job_stock_rows_in_order()'::regprocedure;`),
     '1db82a3124369cd6009643a3e6e4596f');
+  assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) || ',' || has_function_privilege('authenticated', oid, 'EXECUTE') || ',' || has_function_privilege('service_role', oid, 'EXECUTE') || ',' || has_function_privilege('anon', oid, 'EXECUTE') FROM pg_proc WHERE oid = 'public.complete_job(uuid, jsonb, uuid, text)'::regprocedure;`),
+    '6ec962c198bf326b4ef773fa8d8d5edc,true,true,false');
+  assert.equal(await numberLockWhileWaiting(), 'Lock/false', 'after rollback complete_job no longer takes the number lock first');
   const againReverse = apply('reverse.sql');
   assert.notEqual(againReverse.status, 0);
   assert.match(againReverse.output, /ROLLBACK_REFUSED/);
@@ -533,7 +576,9 @@ async function rollbackCases() {
       ('${JB}', '${PI}', 2, 'Gal', 2, false);`);
   const rawRace = await oppositeInserts(PI, PH, PH, PI);
   assert.ok(rawRace.failed, `after rollback the plain insert must collide again:\n${rawRace.t1.out}\n${rawRace.t2.out}`);
-  console.log('[case] rollback restores the old lock, refuses a second run, and opposite inserts collide again');
+  psql(complete(JA));
+  assert.equal(scalar(`(SELECT status FROM public.jobs WHERE id = '${JA}') || '/' || ${rowCount(PH)} || '/' || ${onHand(PH)} || '/' || ${onHand(PI)}`), 'completed/1/-2/-2');
+  console.log('[case] rollback refuses a changed lock body or complete_job, restores both, refuses a second run, the restored complete_job still completes a job, and opposite inserts collide again');
 }
 
 async function main() {

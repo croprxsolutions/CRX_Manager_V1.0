@@ -25,7 +25,6 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { findReleasePass, releasePassCovers } from "./release-pass-lib.mjs";
 import {
   headContainsBaseOnGitHub,
   proofSearchDirs,
@@ -275,14 +274,8 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
   }
   const hold = tahaHoldProblem(pr, now);
   if (hold) return refuse(`${number}: ${hold}`);
-  // Mason's release pass for this PR in this session stands in for Taha's go-ahead (release-pass-lib.mjs, 2026-11-20).
-  let passed = false;
-  try {
-    const pass = findReleasePass({ dirs: skipStateDirs([dir, process.env.CLAUDE_PROJECT_DIR, process.cwd()]), sessionId, now });
-    passed = releasePassCovers(pass, { base: "main", headRef, number: pr?.number });
-  } catch { passed = false; }
-  const ready = passed ? null : readyToMergeProblem({ comments: pr?.comments, head, now });
-  if (ready) return refuse(`${number}: ${ready} (Or Mason says \`ship the release\` / \`go live ${number}\` in this session.)`);
+  const ready = readyToMergeProblem({ comments: pr?.comments, head, now });
+  if (ready) return refuse(`${number}: ${ready}`);
   if (pullRequestReviewBlocked(pr)) return refuse(`${number} has an unresolved CHANGES_REQUESTED review.`);
   if (!pullRequestChecksGreen(pr)) {
     return refuse(`${number} is not merge-ready: mergeStateStatus must be CLEAN and the newest run of every check green.`);

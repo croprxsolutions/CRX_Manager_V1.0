@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2165: Mason owner-accepted 1 Sol finding(s) at `2c95807df876`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2165 at `2c95807df876` (base `1b127b005e8b`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/pages/Deliveries.tsx:902`, text sha256 `2c0b6c5b7684ea0d` (the wording stays with the proof, not here)
+  Mason's reason: cant happen (ref 168e652b8a1d)
+
 ## 2026-11-21 — #2165 (#2018): a delivery with no site goes to the farm's shipping address, else billing
 
 Sol round 6 found Field Mode and the office Navigate button used the billing address while the printed load sheet and slip used shipping first.

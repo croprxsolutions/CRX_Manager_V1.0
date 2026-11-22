@@ -15,6 +15,7 @@ import {
   assertReplyAlone,
   assertSkipShown,
   buildApprovalPayload,
+  ownerApprovalSummary,
   recordReplyApproval,
   resolvePlainReply,
   writeApprovalRequest,
@@ -419,6 +420,18 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   tx(r5.payload.summary.join("\n"));
   const outYes = hook("Yes, too small to ever affect the business");
   assert.match(outYes, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 3 of 3/, `hook: yes with a reason skips (${outYes})`);
+  // A skip request still waiting must not swallow a plain `yes` to the migration request he
+  // was just shown (Codex P2, #2199).
+  skipReq([1]);
+  const mig = buildApprovalPayload({
+    project: "rhyzpcqhnizqbxphqdkr", migration: "20260914101000_yes_with_skip_waiting", queryHash: "a".repeat(64), pullRequest: 2200,
+    prHead: H3, categories: [{ category: "changes-access", reason: "an ALTER FUNCTION on an existing function" }],
+    issuedAt: iso(Date.now() - 1000), expiresAt: iso(Date.now() + 20 * 60 * 1000), nonce: "migyesnonce0123456789abcdef012345", code: "771177", sessionId: SESSION,
+  });
+  writeApprovalRequest(stateDir, mig);
+  tx(ownerApprovalSummary(JSON.parse(mig)).join("\n"));
+  const outMig = hook("yes");
+  assert.match(outMig, /OWNER APPROVAL RECORDED/, `hook: a plain yes to the migration shown goes to the migration, not the waiting skip (${outMig})`);
 }
 
 console.log("sol-accept-lib.test.mjs: all assertions passed");

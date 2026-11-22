@@ -90,9 +90,10 @@ if (skip) {
   } catch (error) {
     res = { ok: false, reason: `the approval hook failed (${error?.message || error})` };
   }
-  // No skip request waiting: not ours. Fall through, so a plain `yes` still reaches the
-  // migration approval below (Codex P1, #2199).
-  if (res || !which?.silent) {
+  // No skip request waiting, or one waiting that his last-shown message was not (so nothing
+  // was recorded) while the reply is also a plain migration approval: not ours. Fall through,
+  // so a plain `yes` still reaches the migration approval below (Codex P1/P2, #2199).
+  if (res || (!which?.silent && !isPlainApprovalReply(reply))) {
   if (!res?.ok) {
     emit(`SOL FINDINGS NOT SKIPPED — Mason replied "${reply.trim().slice(0, 60)}", but ${res?.reason || which?.reason || "no skip request was found"}. ` +
       "Nothing was skipped. Tell him in one line; if he still wants to skip, run node scripts/owner-accept-sol-finding.mjs again " +

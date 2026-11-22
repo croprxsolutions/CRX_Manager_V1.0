@@ -23,7 +23,7 @@ const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });
 const PROD = id('b1');
 const [VA, VB, VD, VN] = ['e1', 'e2', 'e3', 'e4'].map(id);
-const [PO1, PO2, PO3, PO4, PO5, PO6] = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'].map(id);
+const [PO1, PO2, PO3, PO4, PO5, PO6, PO7, PO8, PO9] = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9'].map(id);
 let n = 0;
 const bill = (vendor, po, cents = 5000) =>
   `public.create_vendor_bill(p_vendor_id => '${vendor}'::uuid, p_purchase_order_id => '${po}'::uuid, p_bill_number => 'KI144-${(n += 1)}', p_subtotal_cents => ${cents}, p_idempotency_key => 'ki144-${n}')`;
@@ -54,7 +54,14 @@ try {
       ('${PO3}', 'KI144-PO-3', 'KI144 Old Co', 'submitted', CURRENT_DATE, '${USERS.admin}', NULL, NULL, NULL),
       ('${PO4}', 'KI144-PO-4', 'KI144 Nobody Inc', 'submitted', CURRENT_DATE, '${USERS.admin}', NULL, NULL, NULL),
       ('${PO5}', 'KI144-PO-5', 'KI144 Bolt Chem', 'closed', CURRENT_DATE, '${USERS.admin}', now(), '${USERS.admin}', 'short'),
-      ('${PO6}', 'KI144-PO-6B', 'KI144 Bolt Chem', 'submitted', CURRENT_DATE, '${USERS.admin}', NULL, NULL, NULL);
+      ('${PO6}', 'KI144-PO-6B', 'KI144 Bolt Chem', 'submitted', CURRENT_DATE, '${USERS.admin}', NULL, NULL, NULL),
+      ('${PO7}', 'KI144-PO-7P', 'KI144-Acme Supply', 'submitted', CURRENT_DATE, '${USERS.admin}', NULL, NULL, NULL),
+      ('${PO8}', 'KI144-PO-8D', 'KI144 Bolt Chem', 'submitted', CURRENT_DATE, '${USERS.admin}', NULL, NULL, NULL),
+      ('${PO9}', 'KI144-PO-9U', 'KI144 Nobody Inc', 'submitted', CURRENT_DATE, '${USERS.admin}', NULL, NULL, NULL);
+    -- PO8: only a soft-deleted bill from A (ignored); PO9: unlinked, billed by A by name (Sol round 2).
+    INSERT INTO public.vendor_bills (vendor_id, purchase_order_id, bill_number, bill_date, due_date, payment_terms, subtotal_cents, adjustment_cents, total_cents, paid_cents, status, created_by, deleted_at)
+      VALUES ('${VA}', '${PO8}', 'KI144-A-2', CURRENT_DATE, CURRENT_DATE + 30, 'Net 30', 2000, 0, 2000, 0, 'unpaid', '${USERS.admin}', now()),
+             ('${VA}', '${PO9}', 'KI144-A-3', CURRENT_DATE, CURRENT_DATE + 30, 'Net 30', 2000, 0, 2000, 0, 'unpaid', '${USERS.admin}', NULL);
     -- PO6: its text now names B, but A already billed it (Sol round 1): the bill decides the backfill link.
     INSERT INTO public.vendor_bills (vendor_id, purchase_order_id, bill_number, bill_date, due_date, payment_terms, subtotal_cents, adjustment_cents, total_cents, paid_cents, status, created_by)
       VALUES ('${VA}', '${PO6}', 'KI144-A-1', CURRENT_DATE, CURRENT_DATE + 30, 'Net 30', 2000, 0, 2000, 0, 'unpaid', '${USERS.admin}');
@@ -86,11 +93,12 @@ try {
   // Backfill: exact name beats B's alias; case/space noise links; deleted vendor and unknown text stay NULL; closed PO
   // linked with every other column, the guard and the activity feed unchanged.
   assert.equal(links(), [VA, VA, 'NULL', 'NULL', VB].join(','));
+  assert.equal(scalar(`SELECT ${link(PO7)} || ',' || ${link(PO8)};`), 'NULL,' + VB, 'punctuation is not folded; a deleted bill does not decide the link');
   assert.equal(scalar(`SELECT ${link(PO6)};`), VA, 'a billed PO is linked to the vendor that billed it, not the vendor its text names now');
   assert.equal(scalar(`SELECT (to_jsonb(po) - 'vendor_id')::text FROM public.purchase_orders po WHERE id = '${PO5}';`), po5Before, 'closed PO otherwise unchanged');
   assert.equal(scalar('SELECT count(*) FROM public.activity_feed;'), feedBefore, 'backfill wrote no activity');
   assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trigger_0_guard_closed_po';"), 'O');
-  console.log('[backfill] exact name wins over another vendor\'s alias; noisy text linked; deleted/unknown stay NULL; closed PO linked, guard back on');
+  console.log("[backfill] exact name only (no alias, no punctuation folding); billed PO follows its biller; deleted/unknown stay NULL; closed PO linked, guard back on");
 
   // Bills.
   assert.match(attempt(USERS.admin, `${RENAME_A} ${asUser(`u := ${bill(VA, PO1)};`)} v := (u IS NOT NULL)::text || '|' ||
@@ -118,9 +126,9 @@ try {
       UPDATE public.purchase_orders SET notes = 'x' WHERE id = '${PO1}'; v := v || ',' || ${link(PO1)};
       UPDATE public.purchase_orders SET vendor_id = '${VA}' WHERE id = '${PO1}'; v := v || ',' || ${link(PO1)};`),
   `ok|${VB},${VB},${VB}`, 'text change follows; other edit keeps; forged link overwritten');
-  assert.equal(attempt(USERS.admin, `${RENAME_A} UPDATE public.purchase_orders SET vendor = 'ki144 acme  SUPPLY' WHERE id = '${PO1}';
+  assert.equal(attempt(USERS.admin, `${RENAME_A} UPDATE public.purchase_orders SET vendor = ' ki144 ACME supply ' WHERE id = '${PO1}';
       v := ${link(PO1)} || '|' || (SELECT vendor FROM public.purchase_orders WHERE id = '${PO1}');`),
-  `ok|${VA}|ki144 acme  SUPPLY`, 'case/space-only edit after a rename keeps the link');
+  `ok|${VA}| ki144 ACME supply`, 'case/space-only edit after a rename keeps the link');
   // Re-spelt edit to another vendor's exact name moves the link even when the normalized text is the same (Sol round 1).
   assert.equal(attempt(USERS.admin, `${RENAME_A} UPDATE public.vendors SET name = 'KI144 ACME SUPPLY' WHERE id = '${VB}';
       UPDATE public.purchase_orders SET vendor = 'KI144 ACME SUPPLY' WHERE id = '${PO2}'; v := ${link(PO2)};`), `ok|${VB}`,
@@ -135,7 +143,11 @@ try {
       SET LOCAL session_replication_role = replica; UPDATE public.vendor_bills SET status = 'voided' WHERE purchase_order_id = '${PO6}';
       SET LOCAL session_replication_role = origin;
       UPDATE public.purchase_orders SET vendor = 'KI144 Bolt Chem' WHERE id = '${PO6}'; v := ${link(PO6)};`), `ok|${VB}`);
-  console.log('[sol-r1] billed PO linked to its biller; re-spelt edit moves the link; vendor change refused while another vendor has a live bill');
+  assert.match(attempt(USERS.admin, `UPDATE public.purchase_orders SET vendor = 'KI144 Someone Else' WHERE id = '${PO9}'; v := 'NOT REFUSED';`),
+    /PO_VENDOR_HAS_BILLS/, 'an unlinked PO with a live bill cannot change vendor either');
+  assert.equal(attempt(USERS.admin, `UPDATE public.purchase_orders SET vendor = 'KI144 Acme Supply' WHERE id = '${PO8}'; v := ${link(PO8)};`), `ok|${VA}`,
+    'a deleted bill does not block a vendor correction');
+  console.log('[sol-r1/r2] billed PO linked to its biller; re-spelt edit moves the link; vendor change refused while another vendor has a live bill, linked or not; deleted bills ignored; punctuation not folded');
   // A stale screen saving a renamed vendor's old name (now only B's alias) links nobody, not B (Luna round 1).
   assert.equal(attempt(USERS.admin, `${RENAME_A} INSERT INTO public.purchase_orders (po_number, vendor, status, created_by)
       VALUES ('KI144-PO-7', 'KI144 Acme Supply', 'draft', '${USERS.admin}') RETURNING coalesce(vendor_id::text, 'NULL') INTO v;`), 'ok|NULL',

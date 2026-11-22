@@ -36,6 +36,11 @@ written with; reports and bill checks find them by vendor id. (DECISION_LOG entr
   re-matches by exact name (case/space-only edit with no exact match keeps the link); a link change is refused while
   another vendor has a live bill on the PO (`PO_VENDOR_HAS_BILLS`). MED refuted: column read grant shows only exact-name
   links reps could infer from the printed text; the 40P01 deadlock is documented and retryable.
+- Sol round 2 (3 HIGH fixed, 1 refuted): matching is the bill check's own rule (case and outer spaces only, no
+  punctuation folding); soft-deleted bills are ignored like voided ones; a vendor-text change on an UNLINKED PO with a
+  live bill is refused too. Refuted: "psql -1 without -f fails" (the prover applies via stdin with -1 and prints
+  POSTFLIGHT_OK; run 2026-11-22). MEDs refuted: service_role direct bill writes are pre-existing; rep visibility is the
+  PO's own vendor; 40P01 documented. Bill-picker search by printed name: screen follow-up.
 - Matching (`_po_vendor_id_for_text`): an active vendor whose normalized name equals the text wins (names are unique
   among active vendors); otherwise NULL (no alias; see Sol round 1 above).
 - A BEFORE INSERT OR UPDATE trigger owns `vendor_id`: on insert, or when the NORMALIZED `vendor` text changes, it

@@ -3,7 +3,7 @@
 --
 -- 1. purchase_orders.vendor_id (nullable, references vendors). The vendor text stays as the name printed on the PO.
 -- 2. Backfill: a billed PO is linked to the one vendor that billed it; an unbilled PO to the active vendor whose
---    normalized name equals its text (no alias). Unmatched rows stay NULL (To-Do decision 23 is Mason's). The
+--    name equals its text ignoring case and outer spaces (no alias). Unmatched rows stay NULL (To-Do decision 23 is Mason's). The
 --    closed-PO guard is switched off for that one UPDATE inside this transaction and checked back on in the postflight.
 -- 3. Only THEN the trigger that owns vendor_id: on insert, or when the text changes, it matches again (see step 3);
 --    on any other update it keeps the old link; it refuses moving a PO with another vendor's live bills. Whatever a writer puts in vendor_id is overwritten.
@@ -59,8 +59,9 @@ GRANT SELECT (vendor_id) ON public.purchase_orders TO anon;
 COMMENT ON COLUMN public.purchase_orders.vendor_id IS
   'KI-144: the vendor this PO was written for. Set only by trigger_00_po_vendor_id from the vendor text when the PO is created or its vendor text changes; a vendor rename keeps it. NULL = the text matched no single active vendor. The vendor column keeps the printed name.';
 
--- One vendor for a PO's vendor text: the single active vendor whose normalized name equals it, else NULL. No alias or
--- legacy resolution (Sol round 1): a link is authoritative for billing, so only an exact current name makes one.
+-- One vendor for a PO's vendor text: the single active vendor whose name equals it ignoring case and outer spaces (the
+-- bill check's own rule), else NULL. No alias, legacy resolution (Sol round 1) or punctuation folding (Sol round 2): a
+-- link is authoritative for billing, so only what the name check already accepted makes one.
 CREATE FUNCTION public._po_vendor_id_for_text(p_text text)
 RETURNS uuid
 LANGUAGE sql
@@ -71,23 +72,23 @@ AS $function$
   SELECT CASE WHEN count(*) = 1 THEN min(v.id::text)::uuid END
     FROM public.vendors v
    WHERE v.deleted_at IS NULL
-     AND public.normalize_vendor_alias(v.name) = public.normalize_vendor_alias(NULLIF(btrim(p_text), ''));
+     AND lower(btrim(v.name)) = lower(NULLIF(btrim(p_text), ''));
 $function$;
 ALTER FUNCTION public._po_vendor_id_for_text(text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._po_vendor_id_for_text(text) FROM PUBLIC, anon, authenticated, service_role;
 
--- The backfill's link for an existing PO (session-only, dropped at commit): a PO already billed is linked to the one
+-- The backfill's link for an existing PO (a temp function, gone when this database session ends): a PO already billed is linked to the one
 -- vendor that billed it (those bills passed the name check when written), or left NULL if its bills disagree; an
--- unbilled PO is linked by its text. Voided bills do not count.
+-- unbilled PO is linked by its text. Voided or deleted bills do not count.
 CREATE FUNCTION pg_temp.ki144_backfill_vendor_id(p_po_id uuid, p_text text)
 RETURNS uuid
 LANGUAGE sql
 STABLE
 AS $function$
   SELECT CASE
-    WHEN EXISTS (SELECT 1 FROM public.vendor_bills vb WHERE vb.purchase_order_id = p_po_id AND vb.status <> 'voided')
+    WHEN EXISTS (SELECT 1 FROM public.vendor_bills vb WHERE vb.purchase_order_id = p_po_id AND vb.status <> 'voided' AND vb.deleted_at IS NULL)
       THEN (SELECT CASE WHEN count(DISTINCT vb.vendor_id) = 1 THEN min(vb.vendor_id::text)::uuid END
-              FROM public.vendor_bills vb WHERE vb.purchase_order_id = p_po_id AND vb.status <> 'voided')
+              FROM public.vendor_bills vb WHERE vb.purchase_order_id = p_po_id AND vb.status <> 'voided' AND vb.deleted_at IS NULL)
     ELSE public._po_vendor_id_for_text(p_text)
   END;
 $function$;
@@ -106,9 +107,9 @@ $backfill$;
 
 -- 3. The trigger that owns the link. Named to fire before trigger_0_guard_closed_po, so a closed PO's link is put back
 --    before the guard compares the row. Insert: link by exact name. A vendor-text edit: link by exact name (Sol round 1:
---    a re-spelt edit naming another vendor moves the link); if no vendor has that name and only case or spacing changed,
---    keep the link (the vendor may have been renamed). A link change on a PO that has live bills from another vendor is
---    refused (PO_VENDOR_HAS_BILLS), so a vendor edit cannot hand a billed PO to a new vendor. Other edits keep the link.
+--    a re-spelt edit naming another vendor moves the link); if no vendor has that name and only case or outer spaces changed,
+--    keep the link (the vendor may have been renamed). A vendor change (another link, or other text) on a PO with live
+--    bills from any other vendor is refused (PO_VENDOR_HAS_BILLS), linked or not (Sol round 2). Other edits keep the link.
 CREATE FUNCTION public._po_stamp_vendor_id()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -127,12 +128,13 @@ BEGIN
     RETURN NEW;
   END IF;
   v_id := public._po_vendor_id_for_text(NEW.vendor);
-  IF v_id IS NULL AND public.normalize_vendor_alias(NEW.vendor) IS NOT DISTINCT FROM public.normalize_vendor_alias(OLD.vendor) THEN
+  IF v_id IS NULL AND lower(btrim(NEW.vendor)) IS NOT DISTINCT FROM lower(btrim(OLD.vendor)) THEN
     v_id := OLD.vendor_id;
   END IF;
-  IF v_id IS DISTINCT FROM OLD.vendor_id AND EXISTS (
+  IF (v_id IS DISTINCT FROM OLD.vendor_id OR lower(btrim(NEW.vendor)) IS DISTINCT FROM lower(btrim(OLD.vendor))) AND EXISTS (
        SELECT 1 FROM public.vendor_bills vb
-        WHERE vb.purchase_order_id = NEW.id AND vb.status <> 'voided' AND vb.vendor_id IS DISTINCT FROM v_id) THEN
+        WHERE vb.purchase_order_id = NEW.id AND vb.status <> 'voided' AND vb.deleted_at IS NULL
+          AND vb.vendor_id IS DISTINCT FROM v_id) THEN
     RAISE EXCEPTION 'PO_VENDOR_HAS_BILLS: purchase order % has bills from another vendor; void them before changing its vendor', NEW.po_number
       USING ERRCODE = 'P0001';
   END IF;

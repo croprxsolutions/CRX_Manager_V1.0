@@ -2,11 +2,11 @@
 -- a purchase order keeps a link to the vendor it was written for, so renaming that vendor no longer breaks billing it.
 --
 -- 1. purchase_orders.vendor_id (nullable, references vendors). The vendor text stays as the name printed on the PO.
--- 2. Backfill: each existing PO is linked to the active vendor its text names (exact normalized name first, then an
---    approved alias or legacy resolution, unique only). Unmatched rows stay NULL (To-Do decision 23 is Mason's). The
+-- 2. Backfill: a billed PO is linked to the one vendor that billed it; an unbilled PO to the active vendor whose
+--    normalized name equals its text (no alias). Unmatched rows stay NULL (To-Do decision 23 is Mason's). The
 --    closed-PO guard is switched off for that one UPDATE inside this transaction and checked back on in the postflight.
--- 3. Only THEN the trigger that owns vendor_id: on insert, or when the normalized text changes, it matches again; on any
---    other update it keeps the old link. Whatever a writer puts in vendor_id is overwritten.
+-- 3. Only THEN the trigger that owns vendor_id: on insert, or when the text changes, it matches again (see step 3);
+--    on any other update it keeps the old link; it refuses moving a PO with another vendor's live bills. Whatever a writer puts in vendor_id is overwritten.
 -- 4. The vendor-bill check compares the bill's vendor with the PO's link when there is one; an unlinked PO keeps the
 --    name comparison. The rest of the bill function is the pinned body unchanged.
 --
@@ -59,8 +59,8 @@ GRANT SELECT (vendor_id) ON public.purchase_orders TO anon;
 COMMENT ON COLUMN public.purchase_orders.vendor_id IS
   'KI-144: the vendor this PO was written for. Set only by trigger_00_po_vendor_id from the vendor text when the PO is created or its vendor text changes; a vendor rename keeps it. NULL = the text matched no single active vendor. The vendor column keeps the printed name.';
 
--- One vendor for a PO's vendor text: an active vendor with exactly that (normalized) name wins, so a vendor picked by
--- name is never lost to another vendor's alias; otherwise an approved alias or legacy resolution (unique only).
+-- One vendor for a PO's vendor text: the single active vendor whose normalized name equals it, else NULL. No alias or
+-- legacy resolution (Sol round 1): a link is authoritative for billing, so only an exact current name makes one.
 CREATE FUNCTION public._po_vendor_id_for_text(p_text text)
 RETURNS uuid
 LANGUAGE sql
@@ -68,15 +68,29 @@ STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
-  SELECT COALESCE(
-    (SELECT CASE WHEN count(*) = 1 THEN min(v.id::text)::uuid END
-       FROM public.vendors v
-      WHERE v.deleted_at IS NULL
-        AND public.normalize_vendor_alias(v.name) = public.normalize_vendor_alias(NULLIF(btrim(p_text), ''))),
-    public._vendor_id_for_text(p_text));
+  SELECT CASE WHEN count(*) = 1 THEN min(v.id::text)::uuid END
+    FROM public.vendors v
+   WHERE v.deleted_at IS NULL
+     AND public.normalize_vendor_alias(v.name) = public.normalize_vendor_alias(NULLIF(btrim(p_text), ''));
 $function$;
 ALTER FUNCTION public._po_vendor_id_for_text(text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._po_vendor_id_for_text(text) FROM PUBLIC, anon, authenticated, service_role;
+
+-- The backfill's link for an existing PO (session-only, dropped at commit): a PO already billed is linked to the one
+-- vendor that billed it (those bills passed the name check when written), or left NULL if its bills disagree; an
+-- unbilled PO is linked by its text. Voided bills do not count.
+CREATE FUNCTION pg_temp.ki144_backfill_vendor_id(p_po_id uuid, p_text text)
+RETURNS uuid
+LANGUAGE sql
+STABLE
+AS $function$
+  SELECT CASE
+    WHEN EXISTS (SELECT 1 FROM public.vendor_bills vb WHERE vb.purchase_order_id = p_po_id AND vb.status <> 'voided')
+      THEN (SELECT CASE WHEN count(DISTINCT vb.vendor_id) = 1 THEN min(vb.vendor_id::text)::uuid END
+              FROM public.vendor_bills vb WHERE vb.purchase_order_id = p_po_id AND vb.status <> 'voided')
+    ELSE public._po_vendor_id_for_text(p_text)
+  END;
+$function$;
 
 -- 2. Backfill, before the trigger exists (it would keep the old NULL).
 -- One statement, so the guard cannot stay off even if this file were run statement by statement.
@@ -84,32 +98,45 @@ DO $backfill$
 BEGIN
   ALTER TABLE public.purchase_orders DISABLE TRIGGER trigger_0_guard_closed_po;
   UPDATE public.purchase_orders po
-     SET vendor_id = public._po_vendor_id_for_text(po.vendor)
-   WHERE public._po_vendor_id_for_text(po.vendor) IS NOT NULL;
+     SET vendor_id = pg_temp.ki144_backfill_vendor_id(po.id, po.vendor)
+   WHERE pg_temp.ki144_backfill_vendor_id(po.id, po.vendor) IS NOT NULL;
   ALTER TABLE public.purchase_orders ENABLE TRIGGER trigger_0_guard_closed_po;
 END
 $backfill$;
 
 -- 3. The trigger that owns the link. Named to fire before trigger_0_guard_closed_po, so a closed PO's link is put back
---    before the guard compares the row. A live save links only an active vendor's exact (normalized) name: a stale
---    screen re-sending a renamed vendor's old name must not link to another vendor holding that name as an alias
---    (Luna round 1); unmatched text stays NULL and keeps today's name rule. Aliases are used by the backfill only.
+--    before the guard compares the row. Insert: link by exact name. A vendor-text edit: link by exact name (Sol round 1:
+--    a re-spelt edit naming another vendor moves the link); if no vendor has that name and only case or spacing changed,
+--    keep the link (the vendor may have been renamed). A link change on a PO that has live bills from another vendor is
+--    refused (PO_VENDOR_HAS_BILLS), so a vendor edit cannot hand a billed PO to a new vendor. Other edits keep the link.
 CREATE FUNCTION public._po_stamp_vendor_id()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $function$
+DECLARE
+  v_id uuid;
 BEGIN
-  IF TG_OP = 'INSERT'
-     OR public.normalize_vendor_alias(NEW.vendor) IS DISTINCT FROM public.normalize_vendor_alias(OLD.vendor) THEN
-    SELECT CASE WHEN count(*) = 1 THEN min(v.id::text)::uuid END INTO NEW.vendor_id
-      FROM public.vendors v
-     WHERE v.deleted_at IS NULL
-       AND public.normalize_vendor_alias(v.name) = public.normalize_vendor_alias(NULLIF(btrim(NEW.vendor), ''));
-  ELSE
-    NEW.vendor_id := OLD.vendor_id;
+  IF TG_OP = 'INSERT' THEN
+    NEW.vendor_id := public._po_vendor_id_for_text(NEW.vendor);
+    RETURN NEW;
   END IF;
+  IF NEW.vendor IS NOT DISTINCT FROM OLD.vendor THEN
+    NEW.vendor_id := OLD.vendor_id;
+    RETURN NEW;
+  END IF;
+  v_id := public._po_vendor_id_for_text(NEW.vendor);
+  IF v_id IS NULL AND public.normalize_vendor_alias(NEW.vendor) IS NOT DISTINCT FROM public.normalize_vendor_alias(OLD.vendor) THEN
+    v_id := OLD.vendor_id;
+  END IF;
+  IF v_id IS DISTINCT FROM OLD.vendor_id AND EXISTS (
+       SELECT 1 FROM public.vendor_bills vb
+        WHERE vb.purchase_order_id = NEW.id AND vb.status <> 'voided' AND vb.vendor_id IS DISTINCT FROM v_id) THEN
+    RAISE EXCEPTION 'PO_VENDOR_HAS_BILLS: purchase order % has bills from another vendor; void them before changing its vendor', NEW.po_number
+      USING ERRCODE = 'P0001';
+  END IF;
+  NEW.vendor_id := v_id;
   RETURN NEW;
 END;
 $function$;
@@ -248,8 +275,8 @@ BEGIN
      OR (SELECT tgenabled FROM pg_trigger WHERE tgrelid = 'public.purchase_orders'::regclass AND tgname = 'trigger_00_po_vendor_id') IS DISTINCT FROM 'O' THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: the closed-PO guard or the vendor-link trigger is not enabled';
   END IF;
-  IF EXISTS (SELECT 1 FROM public.purchase_orders po WHERE po.vendor_id IS DISTINCT FROM public._po_vendor_id_for_text(po.vendor)) THEN
-    RAISE EXCEPTION 'POSTFLIGHT_FAIL: a PO''s vendor link does not match its vendor text';
+  IF EXISTS (SELECT 1 FROM public.purchase_orders po WHERE po.vendor_id IS DISTINCT FROM pg_temp.ki144_backfill_vendor_id(po.id, po.vendor)) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: a PO''s vendor link does not match its bills or vendor text';
   END IF;
   IF NOT has_column_privilege('authenticated', 'public.purchase_orders', 'vendor_id', 'SELECT')
      OR NOT has_column_privilege('authenticated', 'public.purchase_orders', 'vendor_id', 'REFERENCES')

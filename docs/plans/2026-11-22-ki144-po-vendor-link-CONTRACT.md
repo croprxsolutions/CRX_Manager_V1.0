@@ -31,12 +31,15 @@ written with; reports and bill checks find them by vendor id. (DECISION_LOG entr
 
 - New nullable column `purchase_orders.vendor_id uuid REFERENCES vendors(id)`, indexed. The `vendor` text stays as the
   name printed on the PO.
+- Sol round 1 (3 HIGH, fixed): matching is exact active name only, no alias or legacy resolution, for the backfill and
+  live saves; a billed PO is backfilled to the one vendor that billed it (bills disagree: NULL); any vendor-text edit
+  re-matches by exact name (case/space-only edit with no exact match keeps the link); a link change is refused while
+  another vendor has a live bill on the PO (`PO_VENDOR_HAS_BILLS`). MED refuted: column read grant shows only exact-name
+  links reps could infer from the printed text; the 40P01 deadlock is documented and retryable.
 - Matching (`_po_vendor_id_for_text`): an active vendor whose normalized name equals the text wins (names are unique
-  among active vendors); otherwise `_vendor_id_for_text` (approved alias or legacy resolution, unique or NULL). So a
-  vendor picked by its exact name is never lost to another vendor's alias.
+  among active vendors); otherwise NULL (no alias; see Sol round 1 above).
 - A BEFORE INSERT OR UPDATE trigger owns `vendor_id`: on insert, or when the NORMALIZED `vendor` text changes, it
-  matches again against active vendors' exact names only (no alias; Luna round 1: a stale renamed name that is another
-  vendor's alias stays NULL rather than linking that vendor; aliases are used by the backfill only); on any other update (including case or spacing edits) it keeps `OLD.vendor_id`. Whatever a writer
+  matches again by exact name (see Sol round 1 above); on any other update it keeps `OLD.vendor_id`. Whatever a writer
   puts in `vendor_id` is overwritten, so nothing the screen sends is trusted. No RPC signature changes; the deployed
   app keeps working unchanged.
 - Order inside the one migration transaction: add the column, backfill, THEN create the trigger (a trigger created
@@ -91,8 +94,8 @@ vendor-link readers).
 
 ## Proof cases (real-schema prover, local Docker)
 
-1. When a PO is saved with a vendor's exact name (or an approved alias), then `vendor_id` is that vendor; when that
-   exact name is also another vendor's approved alias, the exact-name vendor wins.
+1. When a PO is saved with a vendor's exact name, then `vendor_id` is that vendor; text that is only an approved
+   alias links nobody.
 2. When the vendor is renamed, then the old PO keeps its text and `vendor_id`, and a bill for that vendor on that PO is
    accepted (before the fix: `VENDOR_PO_MISMATCH`).
 3. When a bill names a different vendor than the PO's `vendor_id`, then `VENDOR_PO_MISMATCH`.

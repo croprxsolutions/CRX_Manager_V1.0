@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — PR #2242: Month-End close re-check accepts an edit saved in the same instant as the click
+
+**Decision (Mason, 2026-11-22, in the bug-captain session):** "A: accept the gap (Recommended)", confirmed in the Lane B session as "Yes, option A". The database close re-check (#2175) catches edits made while the admin reviews the month. An edit saved in the same instant as the Close click shows on the Month-End screen, not on the saved close receipt, the same as an edit made after the close. Why: Sol rounds 1, 3 and 4 kept finding writers that could land during the close itself (prepayment edits, invoice voids, delivery voids, commission payouts); blocking all of them would change other writers (some Taha's until 2026-12-15), and the table lock tried in round 3 could deadlock with an invoice void. PR #2242 removes that lock; no writer changes. This entry also opens Sol round 5 for PR #2242.
+
 ## 2026-11-22 — KI-129 / #2195: prepayment checks count as payments received
 
 **Decision (Mason, 2026-11-22, relayed by the bug-sprint captain):** "yes should count as payment received". Month-End payments received counts each Prepayment Manager check in the month it was entered, at its current amount (all buckets of one check are one payment); Record Payment checks count in full (an overpayment's prepay credit is not added again); voided payments and deleted old-style payments do not count. A later edit or delete of a prepayment check changes that month's screen figure, never a closed month's saved close receipt. Made in migration `20270208140000_month_close_payments_received_recheck.sql` (live only once applied) with the #2175 close re-check (the 2026-11-21 entry below asked for both together).

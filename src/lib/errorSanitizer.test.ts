@@ -346,6 +346,7 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ message: 'JOB_LINE_BELOW_COST: Roundup ‮Pro is priced below its cost on this job. Nothing was invoiced; its price must be corrected before this job can be invoiced.' }))
       .toBe('Roundup Pro is priced below its cost on this job. Nothing was invoiced; its price must be corrected before this job can be invoiced.');
     expect(sanitizeError('JOB_LINE_BELOW_COST')).toContain('priced below its cost');
+    expect(sanitizeError('JOB_DELETED: this job was deleted')).toBe("This job was deleted, so it can't be invoiced. Nothing was invoiced.");
     expect(sanitizeError('JOB_LINE_BELOW_COST: Round​up\nPro\u0007 is priced below its cost on this job.'))
       .toBe('Roundup Pro is priced below its cost on this job.');
     expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. \u202Esmraf\u202C\u061C still has open invoices. Settle them first'))

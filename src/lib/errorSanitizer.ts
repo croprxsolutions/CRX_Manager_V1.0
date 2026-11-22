@@ -367,11 +367,15 @@ export function sanitizeError(error: unknown): string {
     return detail ? `${detail.charAt(0).toUpperCase()}${detail.slice(1)}.`
       : 'This customer still has open work (orders, deliveries, holds, quotes, invoices, spray jobs, returns or prepay money). Finish, bill or settle it before deactivating it.';
   }
+  // 20270207125000 (Sol round 1 MED): Create Invoice on a job deleted since the screen opened.
+  if (/^JOB_DELETED(?::|$)/.test(message)) {
+    return "This job was deleted, so it can't be invoiced. Nothing was invoiced.";
+  }
   // 20270207125000: Create Invoice on a spray job names the chemical priced below its cost (never the cost).
   if (/^JOB_LINE_BELOW_COST(?::|$)/.test(message)) {
     // The product name is typed by users: fold line breaks and drop text-direction and invisible characters so it cannot split or reorder the sentence.
     return message.slice('JOB_LINE_BELOW_COST'.length).replace(/^:\s*/, '')
-      .replace(/[\u0000-\u001F\u007F]+/g, ' ').replace(/[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, '').replace(/\s+/g, ' ').trim()
+      .replace(/\p{Cc}+/gu, ' ').replace(/[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, '').replace(/\s+/g, ' ').trim()
       || 'A chemical on this job is priced below its cost. Nothing was invoiced; its price must be corrected before this job can be invoiced.';
   }
   // Rate lock (20261107060000), product parents (20261108120000), tote fill (20261117130000) and weights (20261207100000), chemistry (20261209100000), crop + timing choices (20261229120000): the server text after the token is the operator's answer.

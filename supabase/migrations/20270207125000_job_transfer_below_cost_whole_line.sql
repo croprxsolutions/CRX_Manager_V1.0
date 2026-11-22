@@ -53,8 +53,10 @@ BEGIN
     RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: already applied';
   END IF;
   IF to_regprocedure('public.field_app_priced_quantity(numeric,text,text,text)') IS NULL
-     OR to_regprocedure('public.safe_cents_qty(bigint,numeric)') IS NULL THEN
-    RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: field_app_priced_quantity or safe_cents_qty is missing';
+     OR to_regprocedure('public.safe_cents_qty(bigint,numeric)') IS NULL
+     OR to_regprocedure('public.normalize_rate_unit(text)') IS NULL
+     OR to_regprocedure('public._invoice_line_rup_facts(uuid,text)') IS NULL THEN
+    RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: field_app_priced_quantity, safe_cents_qty, normalize_rate_unit or _invoice_line_rup_facts is missing';
   END IF;
   PERFORM set_config('crx.jbc_xid', pg_current_xact_id()::text, true);
   PERFORM set_config('crx.jbc_wall_acl', (SELECT coalesce(proacl::text, '') FROM pg_proc WHERE oid = v_wall), true);
@@ -74,8 +76,15 @@ DECLARE
   v_stock_unit text;
   v_form text;
   v_stock_qty numeric;
+  v_unit text;
 BEGIN
   -- true: the line may be written under 'field_app_job_transfer'. false: not judged here; the wall judges it as before.
+  -- A restricted-use (or not yet known) product keeps today's path: the transfer writes the line as quantity 1 and
+  -- posting copies that quantity into the restricted-use sales register, so a newly accepted line would record the
+  -- wrong amount sold (Sol round 1).
+  IF COALESCE((SELECT f.rup_status FROM public._invoice_line_rup_facts(p_product_id, NULL::text) f), 'unknown') <> 'no' THEN
+    RETURN false;
+  END IF;
   IF p_customer_supplied THEN
     RETURN true;
   END IF;
@@ -92,7 +101,13 @@ BEGIN
      OR v_cost <= 0 OR v_cost <> round(v_cost, 2) OR NULLIF(btrim(v_stock_unit), '') IS NULL THEN
     RETURN false;
   END IF;
-  v_stock_qty := public.field_app_priced_quantity(p_quantity, p_job_unit, v_stock_unit, v_form);
+  -- Spellings are folded the way job completion folds them (normalize_rate_unit: 'fl. oz', 'gallons', 'lbs', a
+  -- '/ac' suffix ...; Sol round 1), except that a fluid-ounce spelling stays 'fl oz', so a dry product never reads it
+  -- as a dry ounce (normalize_rate_unit folds 'fl oz' to 'oz').
+  v_unit := CASE
+    WHEN public.normalize_rate_unit(p_job_unit) = 'oz' AND lower(btrim(p_job_unit)) ~ '^(fl|fluid)' THEN 'fl oz'
+    ELSE COALESCE(public.normalize_rate_unit(p_job_unit), p_job_unit) END;
+  v_stock_qty := public.field_app_priced_quantity(p_quantity, v_unit, v_stock_unit, v_form);
   IF v_stock_qty IS NULL THEN
     RETURN false;
   END IF;
@@ -195,6 +210,10 @@ BEGIN
 
   SELECT j.* INTO v_job FROM jobs j WHERE j.id = p_job_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Job not found: %', p_job_id; END IF;
+  -- 20270207125000 (Sol round 1 MED): a deleted job is never invoiced, even from a screen opened before it was deleted.
+  IF v_job.deleted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'JOB_DELETED: this job was deleted, so it can''t be invoiced. Nothing was invoiced.' USING ERRCODE = 'P0001';
+  END IF;
   IF v_job.status = 'invoiced' THEN RAISE EXCEPTION 'Job already invoiced'; END IF;
   IF v_job.status != 'completed' THEN RAISE EXCEPTION 'Job must be completed to invoice (status: %)', v_job.status; END IF;
 
@@ -211,7 +230,8 @@ BEGIN
     SELECT 1 FROM blend_tickets bt
     JOIN invoices i ON i.blend_ticket_id = bt.id
     WHERE bt.job_id = p_job_id
-      AND bt.deleted_at IS NULL  -- Codex R2 P2: a soft-deleted ticket must not block forever
+      -- 20270207125000 (Sol round 1): a soft-deleted ticket blocks too while its invoice is live; voiding that invoice
+      -- unblocks it (the Codex R2 P2 "block forever" case is the voided one).
       AND i.status NOT IN ('voided', 'cancelled')
       AND i.deleted_at IS NULL
   ) THEN
@@ -637,9 +657,13 @@ BEGIN
     -- Below-cost judged on the whole job line (20270207125000); a cleared line saves under its own wall context.
     -- No inherited product binding: a line this check does not clear can never meet the wall exemption.
     PERFORM set_config('crx.job_transfer_product', '', true);
-    v_cleared := public._job_transfer_line_clears_cost_20270207(
-      v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit,
-      v_chem.chem_price, v_chem.customer_supplied);
+    -- A job whose fields carry a per-acre price override bills that price, not these lines, so its lines keep today's
+    -- path (Sol round 1).
+    v_cleared := NOT EXISTS (SELECT 1 FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
+                              WHERE jf.job_id = p_job_id AND fbd.price_override_cents IS NOT NULL)
+      AND public._job_transfer_line_clears_cost_20270207(
+        v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit,
+        v_chem.chem_price, v_chem.customer_supplied);
     IF v_cleared THEN
       v_prev_ctx := current_setting('app.crx_below_cost_operation', true);
       PERFORM set_config('app.crx_below_cost_operation', 'field_app_job_transfer', true);
@@ -1250,11 +1274,11 @@ BEGIN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'f6faf385be7d5785b7d700582e28b449'
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'd209538774abe0da783a5cb9c4dfd5a8'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
           WHERE p.oid = 'public._enforce_below_cost_line()'::regprocedure) IS DISTINCT FROM '4fd1f1040d9b4dc436ae16b5a5698016'
      OR v_helper IS NULL
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_helper) IS DISTINCT FROM '9b0e6794781a83b2f2bcda5052a902c2' THEN
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_helper) IS DISTINCT FROM 'ef3f407181436ff5f7a8f089697e0dd7' THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: a body is not the one this file installs';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

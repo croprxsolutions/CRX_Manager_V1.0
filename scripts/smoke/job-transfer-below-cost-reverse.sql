@@ -4,9 +4,9 @@ BEGIN;
 DO $rev$
 BEGIN
   IF to_regprocedure('public._job_transfer_line_clears_cost_20270207(uuid, text, numeric, text, bigint, boolean)') IS NULL
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM 'f6faf385be7d5785b7d700582e28b449'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM 'd209538774abe0da783a5cb9c4dfd5a8'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._enforce_below_cost_line()'::regprocedure) IS DISTINCT FROM '4fd1f1040d9b4dc436ae16b5a5698016'
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_line_clears_cost_20270207(uuid, text, numeric, text, bigint, boolean)')) IS DISTINCT FROM '9b0e6794781a83b2f2bcda5052a902c2' THEN
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_line_clears_cost_20270207(uuid, text, numeric, text, bigint, boolean)')) IS DISTINCT FROM 'ef3f407181436ff5f7a8f089697e0dd7' THEN
     RAISE EXCEPTION 'JOB_TRANSFER_BELOW_COST_ROLLBACK_PREFLIGHT: the live bodies are not the ones 20270207125000 installed; nothing changed';
   END IF;
 END $rev$;

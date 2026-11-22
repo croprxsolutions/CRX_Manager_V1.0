@@ -41,6 +41,14 @@ normal line that is genuinely sold below cost must still be refused. Field appli
   - Unit not convertible (for example Ea on a Gal product), cost missing or invalid, blank unit, zero quantity or a
     negative price: exactly today's path (the wall judges the line as before). This is a deliberate exception: such
     lines can still be refused as today, and are billed by hand.
+  - Sol round 1 (Mason, 2026-11-22, "Fix all four"): these also keep exactly today's path: a restricted-use product
+    (or one whose restricted-use status is not yet known; the transfer writes quantity 1, which posting copies into the
+    restricted-use sales register), customer-supplied ones included; and every line of a job whose fields carry a
+    per-acre price override (the invoice bills that price, not the lines). A unit spelling is folded the way job
+    completion folds it (`normalize_rate_unit`: "fl. oz", "gallons", "lbs" ...), except that a fluid-ounce spelling
+    stays "fl oz", so a dry product never reads it as a dry ounce.
+  - Also refused now (Sol round 1): a job with a blend ticket that was deleted while its invoice is still live
+    (`BLEND_TICKET_ALREADY_BILLED`; voiding that invoice unblocks it), and a deleted job (`JOB_DELETED`).
 - Mechanism: the transfer declares a new context `field_app_job_transfer` and the product id (`crx.job_transfer_product`)
   only around the inserts of a line it has cleared, restoring the previous values right after. The wall treats that
   context as "no context" for every other check, and accepts an `invoice_items` INSERT under it only when it is a line
@@ -65,6 +73,9 @@ normal line that is genuinely sold below cost must still be refused. Field appli
   refused after (the hole closed).
 - Split two-owner job with a small line: billed, shares sum to the line.
 - Unconvertible unit (Ea line on a Gal product): behaves as before.
+- 1,280 fl. oz (10 Gal) below 10 Gal of cost: refused; 3 fl. oz above cost: billed. A restricted-use product's small or
+  customer-supplied line and a small line on a per-acre-priced field: refused as before. A deleted blend ticket with a
+  live invoice, and a deleted job: refused.
 - An order line and a normal invoice line below cost with no context: still refused; the new context outside a job
   line shape (a fee line, an order-linked line) gives no exemption.
 
@@ -72,10 +83,14 @@ normal line that is genuinely sold below cost must still be refused. Field appli
 
 - A cleared line's acceptance trusts the transfer's own check; only the transfer sets the context and browsers cannot
   insert lines. Mitigation: shape check in the wall, context scoped to the insert, prover cases above.
+- Restricted-use lines keep being refused when small (Sol round 1): the real fix, invoice lines carrying their real
+  quantity, changes the invoice line shape and is a follow-up.
+- Not fixed (Sol round 1 MED 7): the file's one-transaction check runs at its end; the apply tool runs a file as one
+  transaction, and a split run is caught there and undone by the reverse script.
 - Pre-existing, unchanged here: an admin's below-cost override and the invoice header checks behave as before (Astra
   1, 2); this change neither adds nor removes them.
 - A job unit spelled in a way the converter does not know (for example "gals") also takes today's path (security
-  review LOW 1). Not normalised here: `normalize_rate_unit` maps "fl oz" to "oz", which would price a fluid-ounce line
+  review LOW 1). Spellings are now folded as job completion folds them (Sol round 1), but never "fl oz" to "oz": `normalize_rate_unit` maps "fl oz" to "oz", which would price a fluid-ounce line
   on a dry product as weight. Without it, `field_app_priced_quantity` has no "fl oz" in its dry list, so a fluid-ounce
   line on a dry product does not convert and takes today's path. Same as before this change, never looser.
 - Cost basis is the product's current cost, as the wall already uses for every order and invoice line (and for a
@@ -83,6 +98,6 @@ normal line that is genuinely sold below cost must still be refused. Field appli
   the job, the check is stricter; if it fell, the line is judged as any invoice line written today would be.
 - Re-saving a transfer invoice later through the invoice screen (`save_invoice`) still judges a quantity-1 small line
   against one stock unit, so a rep is refused and an admin needs a reason. Named as a follow-up, not fixed here.
-- Overlap: Taha's open issue #2061 (job transfer re-billing a soft-deleted blend ticket's job) touches the same function
-  but no open PR re-emits it or the wall (checked 2026-11-21); whoever lands second re-pins the md5. The quote-price
+- Overlap: Taha's open issue #2061 (job transfer re-billing a soft-deleted blend ticket's job) touches the same function;
+  the Sol round 1 fix above closes the live-invoice case of it, and no open PR re-emits the function or the wall (checked 2026-11-21); whoever lands second re-pins the md5. The quote-price
   branch rebases onto this one.

@@ -253,7 +253,7 @@ function refusedProbe(sql, pattern, uid) {
 }
 
 const id = (s) => `b5b5b5b5-2207-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3');
+const ADMIN = id('a1'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), O = id('f3');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const WALL = 'public._enforce_below_cost_line()';
@@ -277,10 +277,15 @@ function seed() {
       ('${P}', '[PROVER] JBC chem', 'JBC-1', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 30, 50, 50, 50, true),
       ('${NC}', '[PROVER] JBC grower chem', 'JBC-2', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', NULL, 0, 0, 0, true),
       ('${DRY}', '[PROVER] JBC dry', 'JBC-3', 'dry', 'Lb', 'Lb', 'Lb', 'Lb', 16, 20, 20, 20, true);
+    INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
+        current_cost, tier1_price, tier2_price, tier3_price, is_active, is_rup) VALUES
+      ('${RUP}', '[PROVER] JBC restricted chem', 'JBC-4', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 30, 50, 50, 50, true, true);
     INSERT INTO public.fields (id, customer_id, field_name, total_acres, is_active) VALUES
-      ('${G}', '${A}', '[PROVER] JBC field A', 100, true), ('${F}', '${A}', '[PROVER] JBC field A+B', 100, true);
+      ('${G}', '${A}', '[PROVER] JBC field A', 100, true), ('${F}', '${A}', '[PROVER] JBC field A+B', 100, true),
+      ('${O}', '${A}', '[PROVER] JBC field A per-acre', 100, true);
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary, price_override_cents) VALUES
-      ('${G}', '${A}', 100, true, NULL), ('${F}', '${A}', 60, true, NULL), ('${F}', '${B}', 40, false, NULL);`);
+      ('${G}', '${A}', 100, true, NULL), ('${F}', '${A}', 60, true, NULL), ('${F}', '${B}', 40, false, NULL),
+      ('${O}', '${A}', 100, true, 100);`);
   // Test-only helpers (prover database only). jbc.job writes a completed job: 10 acres of the field and one chemical
   // line of p_qty p_unit at p_price (cost p_cost) per p_unit; the stored job total is that line's total.
   psql(`CREATE SCHEMA jbc AUTHORIZATION supabase_admin;
@@ -340,6 +345,34 @@ const CASES = {
   // Ea does not convert to Gal: judged by the wall exactly as before.
   eaLarge: transfer(job('Ea', 10, 5000)),
   eaSmall: transfer(job('Ea', 1, 100)),
+  // Sol round 1: a dotted fluid ounce is judged on its whole quantity (1,280 fl. oz = 10 Gal; $256 against $300).
+  dottedBelow: transfer(job('fl. oz', 1280, 20, 23)),
+  dottedSmall: transfer(job('fl. oz', 3, 39, 23)),
+  // Any spelling job completion folds is judged on its whole quantity too ('gallons': 10 Gal for $250 against $300).
+  spelledBelow: transfer(job('gallons', 10, 2500)),
+  // Sol round 1: a restricted-use product and a field with a per-acre price keep today's path.
+  rupSmall: transfer(job('fl oz', 3, 39, 23, G, false, RUP)),
+  rupSupplied: transfer(job('Gal', 10, 0, 0, G, true, RUP)),
+  overrideSmall: transfer(job('fl oz', 3, 39, 23, O)),
+  overrideNormal: transfer(job('Gal', 10, 5000, 3000, O)),
+  // Sol round 1: a soft-deleted blend ticket whose invoice is still live blocks; a deleted job is never invoiced.
+  deletedTicket: `${asAdmin}
+CREATE TEMP TABLE j AS SELECT ${job('Gal', 10, 5000)} AS id;
+RESET ROLE;
+SET LOCAL session_replication_role = replica;
+INSERT INTO blend_tickets (id, ticket_number, uploaded_by, customer_id, status, job_id, deleted_at)
+  SELECT '${id('b1')}', 'JBC-BT-1', '${ADMIN}', '${A}', 'completed', (SELECT id FROM j), now();
+INSERT INTO invoices (invoice_number, customer_id, invoice_type, status, invoice_date, due_date, total_amount_cents, created_by, blend_ticket_id, season)
+  VALUES ('JBC-BT-INV-1', '${A}', 'misc_charge', 'draft', CURRENT_DATE, CURRENT_DATE + 30, 117, '${ADMIN}', '${id('b1')}', 2027);
+SET LOCAL session_replication_role = origin;
+${asAdmin}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());`,
+  deletedJob: `${asAdmin}
+CREATE TEMP TABLE j AS SELECT ${job('Gal', 10, 5000)} AS id;
+RESET ROLE;
+SET LOCAL session_replication_role = replica;
+UPDATE jobs SET deleted_at = now() WHERE id = (SELECT id FROM j);
+SET LOCAL session_replication_role = origin;
+${asAdmin}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());`,
 };
 // The wall itself, outside the transfer: a below-cost line written straight into a transfer-made draft invoice.
 const directLine = (ctx, product, qty) => `${asAdmin}
@@ -368,9 +401,9 @@ async function main() {
   const refusedBefore = { small3floz: /BELOW_COST_CONTEXT_REQUIRED/, half64floz: /BELOW_COST_CONTEXT_REQUIRED/,
     halfGalAtCost: /BELOW_COST_CONTEXT_REQUIRED/, supplied: /BELOW_COST_CONTEXT_REQUIRED/, suppliedNoCost: /COST_BASIS_REQUIRED/,
     fullBelow: /BELOW_COST_CONTEXT_REQUIRED/, splitSmall: /BELOW_COST_CONTEXT_REQUIRED/, dryOk: /BELOW_COST_CONTEXT_REQUIRED/,
-    eaSmall: /BELOW_COST_CONTEXT_REQUIRED/ };
+    eaSmall: /BELOW_COST_CONTEXT_REQUIRED/, rupSmall: /BELOW_COST_CONTEXT_REQUIRED/, overrideSmall: /BELOW_COST_CONTEXT_REQUIRED/ };
   for (const [k, re] of Object.entries(refusedBefore)) { refusedProbe(CASES[k], re); console.log(`[before] ${k}: refused ${re.source}`); }
-  const before = Object.fromEntries(['tenBelow', 'normal', 'eaLarge'].map((k) => [k, okProbe(CASES[k])]));
+  const before = Object.fromEntries(['tenBelow', 'normal', 'eaLarge', 'dottedBelow', 'spelledBelow', 'overrideNormal', 'deletedTicket', 'deletedJob'].map((k) => [k, okProbe(CASES[k])]));
   for (const [k, v] of Object.entries(before)) console.log(`[before] ${k}: ${v}`);
   assert.equal(before.tenBelow, 'A:25000:25000:25000/30000/null | approvals=0 | invoiced', 'before: 10 Gal sold for $250 against $300 of cost passed the wall');
   refusedProbe(directLine('', '', 1), /BELOW_COST_CONTEXT_REQUIRED/);
@@ -414,6 +447,23 @@ async function main() {
   console.log('[after] dryBelow: refused JOB_LINE_BELOW_COST');
   refusedProbe(CASES.eaSmall, /BELOW_COST_CONTEXT_REQUIRED/);
   console.log('[after] eaSmall: refused BELOW_COST_CONTEXT_REQUIRED, as before');
+  // Sol round 1 #3: the dotted spelling.
+  refusedProbe(CASES.dottedBelow, /JOB_LINE_BELOW_COST: \[PROVER\] JBC chem/);
+  refusedProbe(CASES.spelledBelow, /JOB_LINE_BELOW_COST: \[PROVER\] JBC chem/);
+  console.log('[after] spelledBelow (10 "gallons" for $250 against $300): refused JOB_LINE_BELOW_COST');
+  after('dottedSmall', 'A:117:117:117/69/null', '3 fl. oz at $1.17 bills like 3 fl oz');
+  console.log('[after] dottedBelow (1,280 fl. oz for $256 against $300): refused JOB_LINE_BELOW_COST');
+  // Sol round 1 #1 and #2: restricted-use products and per-acre-priced fields are judged by the wall as before.
+  for (const k of ['rupSmall', 'rupSupplied', 'overrideSmall']) {
+    refusedProbe(CASES[k], /BELOW_COST_CONTEXT_REQUIRED/);
+    console.log(`[after] ${k}: refused BELOW_COST_CONTEXT_REQUIRED, as before`);
+  }
+  after('overrideNormal', before.overrideNormal.replace(ok, ''), 'a normal line on a per-acre-priced field: unchanged');
+  // Sol round 1 #4 and MED: a live invoice on a deleted blend ticket, and a deleted job.
+  refusedProbe(CASES.deletedTicket, /BLEND_TICKET_ALREADY_BILLED/);
+  console.log('[after] deletedTicket: a deleted blend ticket with a live invoice blocks (BLEND_TICKET_ALREADY_BILLED)');
+  refusedProbe(CASES.deletedJob, /JOB_DELETED/);
+  console.log('[after] deletedJob: refused JOB_DELETED');
   // Luna round 1 HIGH: a job-transfer context already set before Create Invoice gives an uncleared line no exemption.
   refusedProbe(`SELECT set_config('app.crx_below_cost_operation', 'field_app_job_transfer', true), set_config('crx.job_transfer_product', '${P}', true);
 ` + CASES.eaSmall, /BELOW_COST_CONTEXT_REQUIRED/);

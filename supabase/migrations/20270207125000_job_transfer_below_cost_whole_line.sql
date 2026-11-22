@@ -375,6 +375,8 @@ BEGIN
     LOOP
       v_item_order := v_item_order + 1;
       -- Below-cost judged on the whole job line (20270207125000); a cleared line saves under its own wall context.
+      -- No inherited product binding: a line this check does not clear can never meet the wall exemption.
+      PERFORM set_config('crx.job_transfer_product', '', true);
       v_cleared := public._job_transfer_line_clears_cost_20270207(
         v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit,
         v_chem.chem_price, v_chem.customer_supplied);
@@ -633,6 +635,8 @@ BEGIN
     SELECT * INTO v_conversion
       FROM convert_to_gl_lb(v_total_applied, v_chem.rate_unit, v_chem.product_form);
     -- Below-cost judged on the whole job line (20270207125000); a cleared line saves under its own wall context.
+    -- No inherited product binding: a line this check does not clear can never meet the wall exemption.
+    PERFORM set_config('crx.job_transfer_product', '', true);
     v_cleared := public._job_transfer_line_clears_cost_20270207(
       v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit,
       v_chem.chem_price, v_chem.customer_supplied);
@@ -1246,7 +1250,7 @@ BEGIN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '213b31bcca7bdbe5db75f6c29f14506b'
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'f6faf385be7d5785b7d700582e28b449'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
           WHERE p.oid = 'public._enforce_below_cost_line()'::regprocedure) IS DISTINCT FROM '4fd1f1040d9b4dc436ae16b5a5698016'
      OR v_helper IS NULL

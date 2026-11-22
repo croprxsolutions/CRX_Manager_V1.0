@@ -369,9 +369,9 @@ export function sanitizeError(error: unknown): string {
   }
   // 20270207125000: Create Invoice on a spray job names the chemical priced below its cost (never the cost).
   if (/^JOB_LINE_BELOW_COST(?::|$)/.test(message)) {
-    // The product name is typed by users: drop text-direction controls so it cannot reorder the sentence.
+    // The product name is typed by users: fold line breaks and drop text-direction and invisible characters so it cannot split or reorder the sentence.
     return message.slice('JOB_LINE_BELOW_COST'.length).replace(/^:\s*/, '')
-      .replace(/[؜‎‏‪-‮⁦-⁩]/g, '').trim()
+      .replace(/[\u0000-\u001F\u007F]+/g, ' ').replace(/[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, '').replace(/\s+/g, ' ').trim()
       || 'A chemical on this job is priced below its cost. Nothing was invoiced; its price must be corrected before this job can be invoiced.';
   }
   // Rate lock (20261107060000), product parents (20261108120000), tote fill (20261117130000) and weights (20261207100000), chemistry (20261209100000), crop + timing choices (20261229120000): the server text after the token is the operator's answer.

@@ -16,7 +16,7 @@ normal line that is genuinely sold below cost must still be refused. Field appli
   `save_job` (`20260904185900:1030-1077`); nothing ties that unit to the stock unit.
 - The wall `_enforce_below_cost_line` (newest `20270201180000:47`, body md5 pinned `:397`) compares an invoice product
   line's `unit_price_cents` with ONE stock unit of `products.current_cost` (`:194-195`, `:234-250`, `:275`) and, with
-  no context, raises `BELOW_COST_CONTEXT_REQUIRED` (`:361`). So today a 3 fl oz line ($0.98) against a $30/Gal cost and
+  no context, raises `BELOW_COST_CONTEXT_REQUIRED` (`:361`). So today a 3 fl oz line ($1.17) against a $30/Gal cost and
   every customer-supplied $0 line are refused, while 10 Gal sold for $250 total at $30/Gal cost ($300) passes. Browser
   roles have no INSERT on `invoice_items`; the only $0 exemption is the grower-share context (`:72-77`, `:279+`).
 - KNOWN_ISSUES:125 records that a job with a below-cost line cannot be auto-invoiced and is billed by hand.
@@ -74,6 +74,9 @@ normal line that is genuinely sold below cost must still be refused. Field appli
   insert lines. Mitigation: shape check in the wall, context scoped to the insert, prover cases above.
 - Pre-existing, unchanged here: an admin's below-cost override and the invoice header checks behave as before (Astra
   1, 2); this change neither adds nor removes them.
+- A job unit spelled in a way the converter does not know (for example "gals") also takes today's path (security
+  review LOW 1). Not normalised here: `normalize_rate_unit` maps "fl oz" to "oz", which would price a fluid-ounce line
+  on a dry product as weight. Same as before this change, never looser.
 - Re-saving a transfer invoice later through the invoice screen (`save_invoice`) still judges a quantity-1 small line
   against one stock unit, so a rep is refused and an admin needs a reason. Named as a follow-up, not fixed here.
 - Overlap: Taha's open issue #2061 (job transfer re-billing a soft-deleted blend ticket's job) touches the same function

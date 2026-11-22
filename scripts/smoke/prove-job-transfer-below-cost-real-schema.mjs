@@ -414,6 +414,10 @@ async function main() {
   console.log('[after] dryBelow: refused JOB_LINE_BELOW_COST');
   refusedProbe(CASES.eaSmall, /BELOW_COST_CONTEXT_REQUIRED/);
   console.log('[after] eaSmall: refused BELOW_COST_CONTEXT_REQUIRED, as before');
+  // Luna round 1 HIGH: a job-transfer context already set before Create Invoice gives an uncleared line no exemption.
+  refusedProbe(`SELECT set_config('app.crx_below_cost_operation', 'field_app_job_transfer', true), set_config('crx.job_transfer_product', '${P}', true);
+` + CASES.eaSmall, /BELOW_COST_CONTEXT_REQUIRED/);
+  console.log('[after] eaSmall with a job-transfer context set beforehand: still refused');
   // The new context gives nothing outside the transfer's own line: no context, a quantity-2 line, or another product.
   refusedProbe(directLine('', '', 1), /BELOW_COST_CONTEXT_REQUIRED/);
   refusedProbe(directLine('field_app_job_transfer', P, 2), /BELOW_COST_CONTEXT_REQUIRED/);

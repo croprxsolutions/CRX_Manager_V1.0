@@ -1,5 +1,15 @@
 -- Reverses 20270207125000_job_transfer_below_cost_whole_line.sql (run as ONE transaction).
 BEGIN;
+-- Only undo this migration's own bodies: stop if a later migration has re-emitted either function.
+DO $rev$
+BEGIN
+  IF to_regprocedure('public._job_transfer_line_clears_cost_20270207(uuid, text, numeric, text, bigint, boolean)') IS NULL
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM 'f6faf385be7d5785b7d700582e28b449'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._enforce_below_cost_line()'::regprocedure) IS DISTINCT FROM '4fd1f1040d9b4dc436ae16b5a5698016'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_line_clears_cost_20270207(uuid, text, numeric, text, bigint, boolean)')) IS DISTINCT FROM '9b0e6794781a83b2f2bcda5052a902c2' THEN
+    RAISE EXCEPTION 'JOB_TRANSFER_BELOW_COST_ROLLBACK_PREFLIGHT: the live bodies are not the ones 20270207125000 installed; nothing changed';
+  END IF;
+END $rev$;
 CREATE OR REPLACE FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(p_job_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -1067,4 +1077,14 @@ END;
 $function$;
 
 DROP FUNCTION public._job_transfer_line_clears_cost_20270207(uuid, text, numeric, text, bigint, boolean);
+
+-- The old bodies are back and the helper is gone.
+DO $rev$
+BEGIN
+  IF to_regprocedure('public._job_transfer_line_clears_cost_20270207(uuid, text, numeric, text, bigint, boolean)') IS NOT NULL
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM 'a54e3e6a3a2b920e9bcd1a350cd92423'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._enforce_below_cost_line()'::regprocedure) IS DISTINCT FROM '5fa0a5f975dc2a84b3c6599a84b8cc55' THEN
+    RAISE EXCEPTION 'JOB_TRANSFER_BELOW_COST_ROLLBACK_POSTFLIGHT: the old bodies were not restored';
+  END IF;
+END $rev$;
 COMMIT;

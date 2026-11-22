@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-21 — Mason skips review findings in plain words, no codes
+
+**Decision (Mason, 2026-11-21).** "I need to just be able to tell it I don't want that." Typing `accept <code> <reason>` once per Sol finding was too slow (nine codes on one release). Now one request lists every finding and he answers once: `skip` (all) or `skip 1 3` (only those), with no code and no reason. `ok`, `yes`, `move on` and `merge it` skip nothing, because they too often mean "go on" or "merge after fixing" (Sol plan review). The agent warns once if a finding looks like a real money, stock, data or security bug; his answer wins. Luna, Astra, Codex and gauntlet findings he declines in his own words are listed under `## Owner-declined` in the PR and the agent carries on. Unchanged: PRs that change gate or approval files still cannot skip Sol findings; migration approvals; every check and merge gate. Plan: `docs/plans/2026-11-21-owner-decline-findings-PLAN.md`.
+
 ## 2026-11-21 — #2187: Mason owner-accepted 1 Sol finding(s) at `4e4e44138acc`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2187 at `4e4e44138acc` (base `f3e880f9710f`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

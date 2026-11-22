@@ -1,0 +1,8 @@
+## 2026-11-21 — Mason skips Sol findings with one plain-word reply (no codes)
+
+- `scripts/owner-accept-sol-finding.mjs --all` (or finding numbers) builds ONE request for several Sol BLOCKER/HIGH findings; its deadline never runs past the Sol review's own 24 hours. Mason answers `skip` or `skip 1 3` (also `I don't want that`, `don't fix`, `accept`), with no code and no reason. `ok`, `yes`, `move on`, `merge it`, questions and mixed text skip nothing.
+- `.claude/hooks/sol-accept-lib.mjs`: `skipFromReply`, `skipSelection`, `solSkipSummary`, `buildSolSkipPayload`, `verifySolSkip`, `readSkipReceipts`; `collectAcceptances` takes skip receipts beside old per-finding acceptances; the `DECISION_LOG.md` entry uses fixed wording for skipped findings (an entry made only from old `accept <code>` replies keeps its old wording).
+- `.claude/hooks/owner-approval-lib.mjs`: `resolvePlainReply` takes `purposes`; `recordReplyApproval` gains the `skip` form and writes one receipt per reply. `.claude/hooks/owner-approval-prompt.mjs` routes the plain skip reply; an old `accept <6 digits>` reply still goes only down the old path.
+- `scripts/write-codex-push-proof.mjs --carry-owner-accepted` reads the skip receipts.
+- `ship.md`: the skip flow, and a rule that Mason may decline a Luna, Astra, Codex or gauntlet finding in his own words (listed under `## Owner-declined` in the PR). `AGENTS.md` points to it.
+- Tests: `.claude/hooks/sol-accept-lib.test.mjs` covers the phrases, selections, receipts, the log wording and the real reply hook end to end.

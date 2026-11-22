@@ -25,7 +25,7 @@ import {
   approvalAttemptIn, approvalCodeFromReply, isPlainApprovalReply, lastAgentMessageText, ownerRequestDirs, recordPromptHookSeen, recordReplyApproval, replyMark,
   replyWithoutReminders, resolvePlainReply,
 } from "./owner-approval-lib.mjs";
-import { acceptAttemptIn, acceptFromReply } from "./sol-accept-lib.mjs";
+import { OWNER_SOL_SKIP_PURPOSE, acceptAttemptIn, acceptFromReply, skipFromReply } from "./sol-accept-lib.mjs";
 
 function emit(extra) {
   if (extra) {
@@ -66,6 +66,41 @@ if (accept || acceptAttemptIn(reply)) {
     `(head ${String(p.prHead).slice(0, 12)}) with the reason "${accept.reason}". ` +
     "Once every BLOCKER/HIGH of that Sol run is accepted: node scripts/owner-accept-sol-finding.mjs --log, commit only docs/manual/DECISION_LOG.md, " +
     "then node scripts/write-codex-push-proof.mjs --carry-owner-accepted.");
+}
+
+// `skip` / `skip 1 3` / `I don't want that`: Mason skips the Sol findings the agent's last
+// message listed, in plain words with no code (Mason, 2026-11-21; sol-accept-lib.mjs).
+// With no skip request waiting in this session it is ordinary chat and stays silent.
+const skip = skipFromReply(reply);
+if (skip) {
+  let which;
+  let res;
+  try {
+    const dirs = ownerRequestDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]);
+    which = resolvePlainReply({
+      dirs, sessionId: payload?.session_id, purposes: [OWNER_SOL_SKIP_PURPOSE],
+      readShown: () => lastAgentMessageText(payload?.transcript_path, reply),
+    });
+    if (which.ok) {
+      res = recordReplyApproval({
+        code: which.code, dirs, reply, sessionId: payload?.session_id, form: "skip", skip,
+        readMark: () => replyMark(payload?.transcript_path, reply),
+      });
+    }
+  } catch (error) {
+    res = { ok: false, reason: `the approval hook failed (${error?.message || error})` };
+  }
+  if (!res && which?.silent) emit();
+  if (!res?.ok) {
+    emit(`SOL FINDINGS NOT SKIPPED — Mason replied "${reply.trim().slice(0, 60)}", but ${res?.reason || which?.reason || "no skip request was found"}. ` +
+      "Nothing was skipped. Tell him in one line; if he still wants to skip, run node scripts/owner-accept-sol-finding.mjs again " +
+      "and make its summary, exactly as printed, the whole last message of your turn.");
+  }
+  const p = res.payload;
+  emit(`SOL FINDINGS SKIPPED — Mason skipped finding(s) ${res.selected.join(", ")} of ${p.findingCount} on PR #${p.pullRequest} ` +
+    `(head ${String(p.prHead).slice(0, 12)}). Acknowledge it in one line and carry on without asking again. ` +
+    "Once every BLOCKER/HIGH of that Sol run is skipped or fixed: node scripts/owner-accept-sol-finding.mjs --log, commit only docs/manual/DECISION_LOG.md, " +
+    "then node scripts/write-codex-push-proof.mjs --carry-owner-accepted, then keep landing.");
 }
 let code = approvalCodeFromReply(reply);
 const plain = !code && isPlainApprovalReply(reply);

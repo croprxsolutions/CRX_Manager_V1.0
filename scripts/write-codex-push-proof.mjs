@@ -82,6 +82,7 @@ import {
   gateFilesIn,
   insertDecisionEntry,
   parseSolFindings,
+  readSkipReceipts,
   SOL_FINDING_COUNT_TOKEN,
   SOL_FINDING_TOKEN,
   solAcceptFileName,
@@ -2985,7 +2986,7 @@ function usage() {
     "                   model call, a registry or allowlist change after a focused Sol records check.",
     "                   Refuses (use the full review) when anything else changed.",
     "  --carry-owner-accepted  When Mason accepted every BLOCKER/HIGH finding of the reviewed head's",
-    "                   Sol run (`accept <code> <reason>`, scripts/owner-accept-sol-finding.mjs) and HEAD",
+    "                   Sol run (his `skip` reply, scripts/owner-accept-sol-finding.mjs) and HEAD",
     "                   is one commit on top of it that only adds the DECISION_LOG.md entry --log wrote,",
     "                   write a carried proof marked owner_accepted. Refuses anything else.",
   ].join("\n");
@@ -3006,7 +3007,7 @@ function saveBlockersRecord(root, headSha, baseSha, stdout) {
   writeFileSync(file, `${JSON.stringify(buildBlockersRecord({ headSha, baseSha, findings: parsed.findings }), null, 2)}\n`, "utf8");
   process.stdout.write(
     `Sol's BLOCKER/HIGH findings, numbered for Mason:\n${parsed.findings.map((f) => `  ${f.n}. ${f.severity}: ${f.text}`).join("\n")}\n` +
-    "Fix them, or, for one Mason judges a business non-issue, ask him: node scripts/owner-accept-sol-finding.mjs <n> (AGENTS.md › Sol).\n",
+    "Fix them, or, for any Mason does not want fixed, ask him once: node scripts/owner-accept-sol-finding.mjs --all (or the numbers) (AGENTS.md › Sol).\n",
   );
 }
 
@@ -3036,7 +3037,9 @@ function runCarryOwnerAccepted(root, options) {
   const gates = gateFilesIn(String(prFiles).split(/\r?\n/).filter(Boolean),
     (p) => [forkPoint && gitBlobUtf8(root, forkPoint, p), gitBlobUtf8(root, fromHead, p)]);
   if (gates.length) return refuse(`the pull request changes gate or approval files (${gates.slice(0, 5).join(", ")}), which a not-clean Sol review cannot vouch for`);
-  const got = collectAcceptances({ record, readAcceptance: (n) => readJson(solAcceptFileName(fromHead, n)), checkReply: assertReplyAlone });
+  const got = collectAcceptances({
+    record, readAcceptance: (n) => readJson(solAcceptFileName(fromHead, n)), readSkips: () => readSkipReceipts(stateDir, fromHead), checkReply: assertReplyAlone,
+  });
   if (got.problem) return refuse(got.problem);
   let entries;
   try { entries = gitChangedEntries(fromHead, headSha, root); } catch { return refuse("could not list the changed files"); }

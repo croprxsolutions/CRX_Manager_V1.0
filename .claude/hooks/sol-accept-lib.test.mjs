@@ -35,7 +35,17 @@ import {
   textHash,
   solAcceptFileName,
   verifySolAcceptance,
+  OWNER_SOL_SKIP_PURPOSE,
+  SKIP_REASON,
+  buildSolSkipPayload,
+  readSkipReceipts,
+  skipDeadlineMs,
+  skipFromReply,
+  skipSelection,
+  verifySolSkip,
 } from "./sol-accept-lib.mjs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const H1 = "a".repeat(40);
 const H2 = "b".repeat(40);
@@ -226,5 +236,116 @@ assert.equal(chained.carry.root_review.owner_accepted, true, "chain: the root re
 assert.deepEqual(chained.owner_accepted, proof.owner_accepted, "chain: the acceptances travel with the proof");
 assert.equal("owner_accepted" in buildCarryForwardProof({ headSha: H2, baseSha: BASE, source: { head_sha: H1, base_sha: BASE, timestamp: iso(NOW) }, mode: "restamp" }), false,
   "chain: an ordinary carry gains no acceptance");
+
+// ── Skipping in plain words: one request, one reply, no code (Mason, 2026-11-21) ──
+for (const yes of ["skip", "Skip.", "SKIP!", "skip all", "skip them", "skip these", "accept", "Accept all", "don't fix", "Don’t fix them",
+  "do not fix", "I don't want that", "I don’t want those", "i do not want them fixed", "leave them", "leave it alone", "  skip  "]) {
+  assert.deepEqual(skipFromReply(yes), { all: true }, `skip: "${yes}" skips everything shown`);
+}
+assert.deepEqual(skipFromReply("skip 1 3"), { numbers: [1, 3] }, "skip: numbers");
+assert.deepEqual(skipFromReply("skip 1, 3 and 4"), { numbers: [1, 3, 4] }, "skip: a list with commas and and");
+assert.deepEqual(skipFromReply("don't fix finding 2"), { numbers: [2] }, "skip: 'finding 2'");
+for (const no of ["ok", "yes", "Yes I approve", "I approve", "move on", "merge it", "no", "no, fix it", "skip?", "skip the explanation and fix it",
+  "I don't want that approach", "accept only if the totals reconcile", "accept all 1 3", "accept 123456", "accept 123456 fine by me",
+  "skip\nand merge", "please skip", "skip 123", ""]) {
+  assert.equal(skipFromReply(no), null, `skip: "${no}" is not a skip`);
+}
+const shownF = [{ n: 1 }, { n: 3 }];
+assert.deepEqual(skipSelection({ all: true }, shownF), { numbers: [1, 3] }, "selection: all = every finding shown");
+assert.deepEqual(skipSelection({ numbers: [3, 1] }, shownF), { numbers: [1, 3] }, "selection: sorted");
+assert.match(skipSelection({ numbers: [2] }, shownF).problem, /not in the list/, "selection: a number he was not shown skips nothing");
+assert.match(skipSelection({ numbers: [0] }, shownF).problem, /not in the list/, "selection: 0 skips nothing");
+assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selection: a repeat skips nothing");
+
+{
+  const H3 = "d".repeat(40);
+  const rec3 = buildBlockersRecord({ headSha: H3, baseSha: BASE, findings: [
+    { n: 1, severity: "HIGH", text: "src/a.ts:1 - one" },
+    { n: 2, severity: "BLOCKER", text: "src/b.ts:2 - two" },
+    { n: 3, severity: "HIGH", text: "src/c.ts:3 - three" },
+  ], timestamp: iso(NOW - 60 * 60 * 1000) });
+  const skipReq = (numbers, code = String(codeSeq++), extra = {}) => {
+    const text = buildSolSkipPayload({ record: rec3, numbers, pullRequest: 2200, issuedAt: iso(NOW - 1000),
+      expiresAt: iso(skipDeadlineMs(rec3, NOW - 1000, 24 * 60 * 60 * 1000)), nonce: `skipnonce${code}`, code, sessionId: SESSION, ...extra });
+    writeApprovalRequest(stateDir, text);
+    return { code, payload: JSON.parse(text) };
+  };
+  const skipReply = (code, text, opts = {}) => recordReplyApproval({
+    code, dirs, reply: text, sessionId: opts.sessionId ?? SESSION, now: opts.now ?? NOW, readMark: markFor(text), form: "skip", skip: skipFromReply(text),
+  });
+  const r1 = skipReq([1, 3]);
+  assert.equal(Date.parse(r1.payload.expiresAt), Date.parse(rec3.timestamp) + 24 * 60 * 60 * 1000, "request: deadline never past the Sol run's own 24 hours");
+  assert.match(r1.payload.summary.join("\n"), /Finding 1 of 3 \(HIGH\).*\nFinding 3 of 3 \(HIGH\)/, "request: lists only the findings asked about");
+  assert.match(r1.payload.summary.join("\n"), /To skip them all, reply: skip/, "request: tells him the one word");
+  assert.doesNotMatch(r1.payload.summary.join("\n"), /accept \d{6}/, "request: no code to type");
+  const shownText = r1.payload.summary.join("\n");
+  const resolveSkip = (shown, sessionId = SESSION) => resolvePlainReply({ dirs, sessionId, readShown: () => shown, purposes: [OWNER_SOL_SKIP_PURPOSE] });
+  assert.equal(resolveSkip(shownText).code, r1.code, "resolve: the summary shown alone picks its request");
+  assert.match(resolveSkip(`${shownText}\nAlso, want me to merge?`).reason, /did not show/, "resolve: summary plus other words picks nothing");
+  assert.equal(resolveSkip(shownText, "other-session-99").silent, true, "resolve: another conversation sees nothing waiting");
+  assert.notEqual(resolvePlainReply({ dirs, sessionId: SESSION, readShown: () => shownText }).code, r1.code, "resolve: 'I approve' never answers a skip request");
+  assert.match(recordReplyApproval({ code: r1.code, dirs, reply: `approve ${r1.code}`, sessionId: SESSION, readMark: markFor("x") }).reason, /answer it with: skip/, "approve never skips");
+  assert.match(recordReplyApproval({ code: r1.code, dirs, reply: `accept ${r1.code} fine by me`, sessionId: SESSION, readMark: markFor("x"), form: "accept", reason: "fine by me" }).reason,
+    /answer it with: skip/, "the old accept form never answers a skip request");
+  assert.match(skipReply(r1.code, "skip 2").reason, /not in the list/, "reply: a number not shown skips nothing");
+  assert.match(skipReply(r1.code, "skip", { sessionId: "other-session-99" }).reason, /different conversation/, "reply: another conversation skips nothing");
+  assert.match(skipReply(r1.code, "skip", { now: NOW + 25 * 60 * 60 * 1000 }).reason, /expired/, "reply: a stale request skips nothing");
+  const ok3 = skipReply(r1.code, "skip 3");
+  assert.equal(ok3.ok, true, `reply: skip 3 records (${ok3.reason})`);
+  assert.deepEqual(ok3.selected, [3], "reply: only finding 3");
+  const receipts = readSkipReceipts(stateDir, H3);
+  assert.equal(receipts.length, 1, "one receipt for the reply");
+  assert.deepEqual(receipts[0].selected, [3]);
+  assert.equal(verifySolSkip({ approval: receipts[0], record: rec3, checkReply: assertReplyAlone }).ok, true, "verify: the receipt holds");
+  assert.match(verifySolSkip({ approval: { ...receipts[0], selected: [1, 3] }, record: rec3 }).reason, /does not match/, "verify: an edited selection is refused");
+  assert.match(verifySolSkip({ approval: { ...receipts[0], reply: "skip" }, record: rec3 }).reason, /does not match/, "verify: the reply must give the same selection");
+  assert.match(verifySolSkip({ approval: receipts[0], record: { ...rec3, timestamp: iso(NOW - 1000) } }).reason, /earlier Sol run/, "verify: a re-run of Sol voids it");
+  assert.match(verifySolSkip({ approval: receipts[0], record: { ...rec3, head_sha: H2 } }).reason, /different version/, "verify: another head voids it");
+  assert.match(verifySolSkip({ approval: receipts[0], record: rec3, checkReply: () => { throw new Error("picture attached"); } }).reason, /words alone/, "verify: words alone");
+
+  const readNone = () => null;
+  assert.match(collectAcceptances({ record: rec3, readAcceptance: readNone, readSkips: () => readSkipReceipts(stateDir, H3) }).problem, /finding 1/,
+    "collect: findings 1 and 2 still open");
+  const r2 = skipReq(undefined);
+  assert.equal(r2.payload.findings.length, 3, "request: --all lists every finding");
+  assert.equal(skipReply(r2.code, "I don't want that").ok, true, "reply: plain words skip them all");
+  const got3 = collectAcceptances({ record: rec3, readAcceptance: readNone, readSkips: () => readSkipReceipts(stateDir, H3), checkReply: assertReplyAlone });
+  assert.equal(got3.problem, undefined, `collect: all three skipped (${got3.problem})`);
+  assert.deepEqual(got3.accepted.map((a) => [a.payload.finding.n, a.reason]), [[1, SKIP_REASON], [2, SKIP_REASON], [3, SKIP_REASON]]);
+  const e3 = decisionLogEntry({ record: rec3, accepted: got3.accepted });
+  assert.match(e3, /\*\*Decision \(Mason, by chat reply, .*Mason chose to leave each one unfixed\./, "log: plain-reply wording");
+  assert.match(e3, /Finding 2 \(BLOCKER\) at `src\/b\.ts:2`.*\n  Mason chose to leave it unfixed \(plain reply, ref /, "log: fixed wording per finding");
+  assert.equal(e3.includes(" - two"), false, "log: never the finding's wording");
+  assert.doesNotMatch(e3, /may land|reviewer|Sol review/i, "log: nothing addressed to reviewers");
+  assert.equal(entry.includes("accept <code>"), true, "log: an old accept-only entry keeps its old wording");
+
+  // The real reply hook, end to end: the summary as the agent's last message, then his one word.
+  const r4 = skipReq([1, 2]);
+  const transcript = path.join(root, "skip-transcript.jsonl");
+  const line = (o) => JSON.stringify(o);
+  const tx = (agentText) => writeFileSync(transcript, `${[
+    line({ type: "user", message: { role: "user", content: "fix it" } }),
+    line({ type: "assistant", message: { id: `m${codeSeq++}`, role: "assistant", content: [{ type: "text", text: agentText }] } }),
+  ].join("\n")}\n`);
+  const hook = (prompt, sessionId = SESSION) => {
+    const res = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), "owner-approval-prompt.mjs")], {
+      cwd: root, env: { ...process.env, CLAUDE_PROJECT_DIR: root }, encoding: "utf8", timeout: 30_000,
+      input: JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: sessionId, cwd: root, prompt, transcript_path: transcript }),
+    });
+    assert.equal(res.status, 0, res.stderr);
+    return res.stdout ? JSON.parse(res.stdout).hookSpecificOutput?.additionalContext || "" : "";
+  };
+  const shown4 = r4.payload.summary.join("\n");
+  tx(shown4);
+  assert.equal(hook("ok"), "", "hook: 'ok' is ordinary chat and skips nothing");
+  assert.doesNotMatch(hook("yes"), /SKIPPED —/, "hook: 'yes' skips nothing (it stays a migration-approval word only)");
+  tx(`Here is something else.\n${shown4}`);
+  assert.match(hook("skip"), /NOT SKIPPED.*did not show/, "hook: the summary must be the whole last message");
+  tx(shown4);
+  assert.equal(hook("skip", "other-session-99"), "", "hook: another conversation has nothing waiting, so it skips nothing");
+  const out = hook("skip");
+  assert.match(out, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 1, 2 of 3 on PR #2200/, `hook: one word skips both (${out})`);
+  assert.equal(hook("skip"), "", "hook: the same reply again skips nothing more (nothing is waiting, so it is ordinary chat)");
+}
 
 console.log("sol-accept-lib.test.mjs: all assertions passed");

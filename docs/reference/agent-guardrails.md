@@ -131,7 +131,15 @@
 > PR's migrations) returns CLEAN (`records_check` `sol`; Sol HIGH x2 on the PR that added this). `carriedSolProof()` accepts `post_apply` only with an unchanged base, so every gate that
 > accepts the other carries accepts it on the same head/base/24-hour terms.
 >
-> **Owner-accepted Sol findings (Mason, 2026-11-10).** When Sol answers BLOCKERS, the wrapper saves its numbered
+> **Owner-accepted Sol findings (Mason, 2026-11-10; plain-word skips 2026-11-21).** Since 2026-11-21 `owner-accept-sol-finding.mjs
+> --all` (or `<n> ...`) builds ONE request (`crx-owner-sol-skip-v1`) for several findings, its deadline never past the Sol
+> run's own 24 hours, and Mason answers in plain words with no code: the whole message `skip`, `skip 1 3`, `I don't want that`,
+> `don't fix`, `accept` and the like (`skipFromReply`; `ok`, `yes`, `move on`, `merge it`, questions and mixed text skip nothing).
+> The reply hook records it only when a skip request built in this session is waiting and the agent's last message is exactly
+> its summary (`resolvePlainReply` with `purposes`, the same check as the migration `I approve`), into one receipt per reply
+> (`owner-approval-sol-skip-<head>-<code>.json`, `selected` numbers), which `verifySolSkip` re-checks against the Sol run, the
+> findings shown and his reply read back from the transcript. The log records a fixed sentence, never free text. The older flow
+> below still verifies for requests built before then. When Sol answers BLOCKERS, the wrapper saves its numbered
 > `SOL_FINDING` list as `codex-review-blockers-<head>.json` (review-proof-guard protects it) only when Sol's
 > `SOL_FINDING_COUNT` line matches the list; any later run on that head deletes it. For a finding Mason judges a
 > business non-issue, `node scripts/owner-accept-sol-finding.mjs <n>` (clean checkout at that head, open PR into

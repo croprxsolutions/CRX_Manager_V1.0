@@ -19413,6 +19413,7 @@ export type Database = {
         )[]
       }
       get_ar_reminder_candidates: { Args: never; Returns: Json }
+      get_available_deliveries_for_driver: { Args: never; Returns: Json }
       get_batch_year_end_summaries: {
         Args: { p_customer_ids: string[]; p_season: number }
         Returns: Json
@@ -19662,6 +19663,10 @@ export type Database = {
       get_dispatched_list: {
         Args: { p_applicator_id?: string; p_crew_id?: string }
         Returns: Json[]
+      }
+      get_driver_customers: {
+        Args: { p_customer_ids: string[] }
+        Returns: Json
       }
       get_duplicate_product_parents: { Args: never; Returns: Json }
       get_epa_registrations: { Args: { p_numbers?: string[] }; Returns: Json }

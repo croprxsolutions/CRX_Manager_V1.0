@@ -16,7 +16,7 @@ async function addProduct(page: Page, name: string) {
     const { supabase } = await import(/* @vite-ignore */ path);
     const { data, error } = await supabase
       .from('products')
-      .insert({ product_name: productName, product_form: 'liquid', is_active: true })
+      .insert({ product_name: productName, product_form: 'liquid', inventory_unit: 'Gal', is_active: true })
       .select('id')
       .single();
     if (error) throw new Error(error.message);

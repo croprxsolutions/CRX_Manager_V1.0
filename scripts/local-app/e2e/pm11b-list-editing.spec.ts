@@ -20,7 +20,7 @@ async function addProducts(page: Page, prefix: string, count: number) {
     if (categoryError) throw new Error(categoryError.message);
     const rows = Array.from({ length: total }, (_, index) => ({
       product_name: `${namePrefix} ${String(index + 1).padStart(3, '0')}`,
-      product_form: 'liquid',
+      product_form: 'liquid', inventory_unit: 'Gal',
       sku: `${namePrefix}-${index + 1}`,
       category: namePrefix,
     }));

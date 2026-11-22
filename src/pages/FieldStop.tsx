@@ -112,6 +112,8 @@ export default function FieldStop() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const isDriver = profile?.role === 'driver';
+  // The load shape is fixed at first render: a role refresh must not reload and reset entered quantities (Sol #2165 r4).
+  const [loadAsDriver] = useState(isDriver);
   const { toast } = useToast();
   const isOnline = useOnlineStatus();
   const confirmIdem = useIdempotencyKey('confirm_delivery', profile?.id || '');
@@ -191,7 +193,7 @@ export default function FieldStop() {
     setLoading(true);
     const { data, error } = await supabase
       .from('deliveries')
-      .select(stopColumns(isDriver))
+      .select(stopColumns(loadAsDriver))
       .eq('id', id)
       .maybeSingle();
 
@@ -204,7 +206,7 @@ export default function FieldStop() {
     }
 
     // A driver reads the farm through get_driver_customers (#2018), not the customers table.
-    const stop = await withStopFarm(data as unknown as StopDelivery, isDriver).catch((farmErr: unknown) => {
+    const stop = await withStopFarm(data as unknown as StopDelivery, loadAsDriver).catch((farmErr: unknown) => {
       Sentry.captureException(farmErr, { tags: { source: 'fetch', page: 'field-stop' } });
       return null;
     });
@@ -259,7 +261,7 @@ export default function FieldStop() {
     }
     await fetchPhotos();
     setLoading(false);
-  }, [id, navigate, toast, fetchPhotos, isDriver]);
+  }, [id, navigate, toast, fetchPhotos, loadAsDriver]);
 
   useEffect(() => { activeStopIdRef.current = id; fetchStop(); }, [id, fetchStop]);
 

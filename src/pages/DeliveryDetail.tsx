@@ -308,6 +308,8 @@ export default function DeliveryDetail() {
   }, [id]);
 
   const isDriver = role === 'driver';
+  // The load shape is fixed at first render: a role refresh must not reload and reset entered quantities (Sol #2165 r4).
+  const [loadAsDriver] = useState(isDriver);
   const isAdmin = role === 'admin';
   const isAdminOrRep = role === 'admin' || role === 'sales_rep';
   const canEdit = isAdminOrRep && delivery?.status !== 'completed' && delivery?.status !== 'cancelled';
@@ -386,7 +388,7 @@ export default function DeliveryDetail() {
       try {
         const [custRes, itemsRes, addrRes, driverRes, photosRes] = await Promise.all([
           // A driver reads the farm through get_driver_customers (#2018): nothing financial.
-          fetchDeliveryFarm(del.customer_id, isDriver),
+          fetchDeliveryFarm(del.customer_id, loadAsDriver),
           supabase.from('delivery_items').select('*, product:products(id, product_name, sku, unit_size, packaging_variant, container_size, container_unit, inventory_unit, return_policy, is_full_tote_only, product_family:product_families(name))').eq('delivery_id', id!),
           del.delivery_address_id
             ? supabase.from('customer_addresses').select('*').eq('id', del.delivery_address_id).maybeSingle()
@@ -595,7 +597,7 @@ export default function DeliveryDetail() {
     }
     setLoadFailedId(null);
     setLoading(false);
-  }, [id, toast, isDriver]);
+  }, [id, toast, loadAsDriver]);
 
   useEffect(() => {
     if (id) fetchDelivery();

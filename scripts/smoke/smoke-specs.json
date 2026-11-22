@@ -1030,7 +1030,7 @@
     },
     "booking_planning_fields": {
       "chain": "smoke-booking-planning-fields.sql",
-      "container_prover": "prove-purchasing-plan-held-stock-real-schema.mjs",
+      "container_prover": "prove-purchasing-plan-reservations-real-schema.mjs",
       "description": "REQUIRES 20270127110000. Bookings Phase A PR 1b: a marked save writes section timing and confidence; an omitted key keeps the saved value, an explicit null clears it, a new section starts unset; an unmarked (old page) save of a booking with planning data is refused PLANNING_RELOAD_REQUIRED and changes nothing, while an unplanned booking still saves the old way; a value outside the lists is a check_violation. Terminal rollback.",
       "covers": [
         "save_quote"
@@ -1041,8 +1041,19 @@
     },
     "purchasing_plan": {
       "chain": "smoke-purchasing-plan.sql",
-      "container_prover": "prove-purchasing-plan-held-stock-real-schema.mjs",
-      "description": "REQUIRES 20270127110000 and 20270206130000. get_purchasing_plan nets bookings (by timing and confidence), open orders, active jobs, holds, stock and open POs per product: delivery dating, later POs, cancelled orders and completed jobs, least-sure latest-first draw allocation with the drawn part listed as section unknown, unshelved holds taking incoming PO stock first, over-drawn bookings, timing windows, firm needs without a date, mixed-unit lines (qt and Gal convert; a mismatched pack unit goes to Check units), lead days; held stock never reads as free (a hold backed by stock on the shelf counts today, Firm lines first, its rest beyond its lines held too; a job hold counts today; an unbacked hold buys nothing; a hold counted today is capped at the shelf, the rest at its need date; a hold claims only PO stock arriving by its expiry, a Maybe line's claim reserving the PO without committing it; a stale, set-aside or unconvertible hold reserves the shelf only); a window crossing New Year ends next year and an invalid start month-day falls back the whole window; an applicator or no signed-in user is refused 42501. Read-only; terminal rollback.",
+      "container_prover": "prove-purchasing-plan-reservations-real-schema.mjs",
+      "description": "REQUIRES 20270127110000 and 20270207140000. get_purchasing_plan nets bookings (by timing and confidence), open orders, active jobs, manual holds, stock and open POs per product: delivery dating, cancelled orders and completed jobs, least-sure latest-first draw allocation with the drawn part listed as section unknown, over-drawn bookings, timing windows, firm needs without a date, mixed-unit lines (qt and Gal convert; a mismatched pack unit goes to Check units), lead days; one allocation per product (Firm, orders, jobs and manual holds first, then Likely, then Maybe; a late PO is cover and never a second buy); a counted booking's or active job's holds are never read; a stale hold reserves the shelf only; a window crossing New Year ends next year and an invalid start month-day falls back the whole window; an applicator or no signed-in user is refused 42501. Read-only; terminal rollback.",
+      "covers": [
+        "get_purchasing_plan"
+      ],
+      "area": [
+        "inventory"
+      ]
+    },
+    "purchasing_plan_reservations": {
+      "chain": "smoke-purchasing-plan-reservations.sql",
+      "container_prover": "prove-purchasing-plan-reservations-real-schema.mjs",
+      "description": "REQUIRES 20270207140000. Contract cases C1-C19 of docs/plans/2026-11-21-booking-reservations-CONTRACT.md: the booking line is the reservation; shelf then POs by date; Firm, orders, jobs and manual holds choose first, then Likely, then Maybe; each need takes the latest supply by its date, then the earliest later supply (late cover, never bought); a stock deficit first; draft Planned bookings count like sent ones and their holds are never read; a stale hold takes the shelf only; overdue follow-up from 14 days past the need date; the horizon never changes the allocation; conservation and order independence; the allocator is not client-callable. Read-only; terminal rollback.",
       "covers": [
         "get_purchasing_plan"
       ],

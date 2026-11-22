@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270206130000_purchasing_plan_held_stock_never_free (contract
- * docs/plans/2026-11-18-purchasing-held-stock-CONTRACT.md). Container setup copied from
+ * Real-schema proof for 20270207140000_purchasing_plan_booking_reservations (#1989 redesign; contract
+ * docs/plans/2026-11-21-booking-reservations-CONTRACT.md). Container setup copied from
  * prove-booking-timing-purchasing-plan-real-schema.mjs: the checked-in production schema baseline in a
  * network-disabled Supabase PostgreSQL 17 container, every post-baseline migration before the candidate
  * replayed (release #1990's 20270129160000 included), then:
- *   1. BEFORE: smoke-purchasing-plan.sql fails at a held-stock group (P22-P35 need the candidate);
- *      smoke-booking-planning-fields.sql passes.
+ *   1. BEFORE: smoke-purchasing-plan.sql fails at a group rewritten for the redesign (P10, P12, P22-P33);
+ *      smoke-purchasing-plan-reservations.sql fails (the old body has no coverage); smoke-booking-planning-fields.sql passes.
  *   2. The candidate applies; a second apply is refused by its preflight (PREFLIGHT_PLAN_DRIFT).
- *   3. AFTER: both chains pass; the function stays SECURITY DEFINER, search_path pinned, anon refused, authenticated allowed.
+ *   3. AFTER: all three chains pass; get_purchasing_plan stays SECURITY DEFINER, search_path pinned, anon refused,
+ *      authenticated allowed; _purchasing_allocate is invoker-rights, search_path pinned, callable by neither.
  *
- * Run: node scripts/smoke/prove-purchasing-plan-held-stock-real-schema.mjs   (needs Docker)
- * Prints PURCHASING_PLAN_HELD_STOCK_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
+ * Run: node scripts/smoke/prove-purchasing-plan-reservations-real-schema.mjs   (needs Docker)
+ * Prints PURCHASING_PLAN_RESERVATIONS_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -29,7 +30,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270206130000_purchasing_plan_held_stock_never_free.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270207140000_purchasing_plan_booking_reservations.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([
@@ -47,7 +48,7 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate changes or relies on.
-const TOUCHED = /(_save_quote_below_cost_impl_20260810|get_purchasing_plan|booking_timing_windows|purchasing_lead_days|quote_sections_(timing|confidence))/i;
+const TOUCHED = /(_save_quote_below_cost_impl_20260810|get_purchasing_plan|_purchasing_allocate|booking_timing_windows|purchasing_lead_days|quote_sections_(timing|confidence))/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -282,10 +283,13 @@ async function main() {
   // 1. BEFORE
   const planBefore = chainOutcome('smoke-purchasing-plan.sql');
   assert.doesNotMatch(planBefore, /SMOKE_PASS_ROLLBACK/, 'smoke-purchasing-plan.sql must fail before the candidate');
-  // The old body fails at the first held-stock group (P25 today): a hold beside a set-aside line, or stock held
-  // for a Maybe booking (P26), read as free or bought.
-  assert.match(planBefore, /SMOKE_FAIL: \(P(2[2-9]|3[0-5])/, `the old plan must fail at a held-stock case: ${planBefore}`);
+  // The old body fails at the first group rewritten for the redesign (P10 today: a late PO now covers the Firm line).
+  assert.match(planBefore, /SMOKE_FAIL: \(P(10|12|2[2-9]|3[0-3])\b/, `the old plan must fail at a redesigned case: ${planBefore}`);
   console.log(`[case] BEFORE: smoke-purchasing-plan.sql: ${planBefore.slice(0, 120)}`);
+  const resBefore = chainOutcome('smoke-purchasing-plan-reservations.sql');
+  assert.doesNotMatch(resBefore, /SMOKE_PASS_ROLLBACK/, 'smoke-purchasing-plan-reservations.sql must fail before the candidate');
+  assert.match(resBefore, /SMOKE_FAIL: \(C\d+/, `the reservation chain must fail at a case, not in setup: ${resBefore}`);
+  console.log(`[case] BEFORE: smoke-purchasing-plan-reservations.sql: ${resBefore.slice(0, 120)}`);
   assert.match(chainOutcome('smoke-booking-planning-fields.sql'), /^SMOKE_PASS_ROLLBACK/);
 
   // 2. Apply, then a second apply is refused.
@@ -298,7 +302,7 @@ async function main() {
   console.log('[case] the candidate applies; a second apply stops at its preflight');
 
   // 3. AFTER
-  for (const c of ['smoke-purchasing-plan.sql', 'smoke-booking-planning-fields.sql']) {
+  for (const c of ['smoke-purchasing-plan.sql', 'smoke-purchasing-plan-reservations.sql', 'smoke-booking-planning-fields.sql']) {
     const o = chainOutcome(c);
     assert.match(o, /^SMOKE_PASS_ROLLBACK/, `${c}: ${o}`);
     console.log(`[case] AFTER: ${c}: ${o}`);
@@ -307,7 +311,11 @@ async function main() {
       AND NOT has_function_privilege('anon', p.oid, 'EXECUTE') AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
       FROM pg_proc p WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure;`), 't');
   console.log('[case] AFTER: SECURITY DEFINER, search_path pinned, anon refused, authenticated allowed');
-  console.log('PURCHASING_PLAN_HELD_STOCK_PROOF_PASS');
+  assert.equal(scalar(`SELECT NOT p.prosecdef AND p.proconfig = ARRAY['search_path=public, pg_temp'] AND p.provolatile = 'i'
+      AND NOT has_function_privilege('anon', p.oid, 'EXECUTE') AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      FROM pg_proc p WHERE p.oid = 'public._purchasing_allocate(jsonb, jsonb)'::regprocedure;`), 't');
+  console.log('[case] AFTER: _purchasing_allocate is invoker-rights, immutable, search_path pinned, refused to anon and authenticated');
+  console.log('PURCHASING_PLAN_RESERVATIONS_PROOF_PASS');
 }
 
 try { await main(); }

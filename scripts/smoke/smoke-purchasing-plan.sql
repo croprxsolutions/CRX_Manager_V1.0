@@ -1,19 +1,19 @@
 -- ============================================================================
 -- ROLLED-BACK smoke: the read-only Purchasing buy plan (bookings Phase A, PR 1b)
 -- ----------------------------------------------------------------------------
--- REQUIRES 20270127110000_booking_timing_purchasing_plan and 20270206130000 (P26-P35). Proof cases of
+-- REQUIRES 20270127110000_booking_timing_purchasing_plan and 20270207140000 (#1989 redesign: P10, P12, P22-P33
+-- rewritten to its rules; docs/plans/2026-11-21-booking-reservations-CONTRACT.md). Proof cases of
 -- docs/plans/2026-11-17-bookings-phase-a-CONTRACT.md (v4) and plan v3, against
 -- get_purchasing_plan(12). Dates are relative to today (Chicago) so the chain never ages.
 --   P9   on hand 100, Firm 80 at +100, an open order of 50 (no delivery: needed today),
 --        Firm 80 at +131: order 30 by +86, order 80 by +117, suggested 110
 --   P9b  an order line is dated by its earliest scheduled, undelivered delivery
---   P10  Firm 100 at +100, a PO of 100 due +126, Likely 100 at +130: one suggestion of
---        100, with no "expedite the later PO" alternative; could add 0
+--   P10  Firm 100 at +100, a PO of 100 due +126, Likely 100 at +130: the late PO covers the Firm line (flagged),
+--        nothing to buy; the Likely 100 is could-add
 --   P11  on hand -10 and nothing else: order 10 now
---   P23  a booking line saved in lb on a Gal product: Check units, not counted; it does not cover its
---        booking's crop-program hold (20), which reserves the shelf only (8 on hand)
---   P24  Firm 100 at +100 and a PO of only 10 due +126: buy 100, no PO offered instead
---   P12  a late PO counts today (flagged), an undated PO is listed not counted, a
+--   P23  a booking line saved in lb on a Gal product: Check units, not counted; its booking's hold is not read
+--   P24  Firm 100 at +100 and a PO of only 10 due +126: the PO is late cover, buy 90
+--   P12  a late PO counts today (flagged), an undated PO is late cover (20270207140000), a
 --        draft PO shows as drafted; the product is not complete
 --   P13  booking 100, order draw 60, job draw 40: 0 + 60 + 40 = 100; after the order is
 --        cancelled (draw returned) 60 + 40; after the job completes, what is still owed
@@ -30,30 +30,27 @@
 --   P20  job lines in qt and Gal convert; a '2.5 GL' line goes to Check units on a Gal product (also
 --        when the product is sized 2.5 GL: its stock unit is Gal, a product must have a sold unit)
 --   P21  a job's draw comes off its own (August) section: March still needs 100
---   P22  a counted booking's hold on a product it books (10) does not count; holds on a product the booking does not
---        book (20 + 5 of product 22, 10 on hand) reserve the shelf only (10, nothing to buy); an expired manual hold (7) does not
+--   P22  a counted booking's holds are never read (any product); a non-counted draft's hold of 20 is shelf-only
+--        (10 on hand: 10 held, 10 unbacked, nothing to buy); an expired manual hold (7) does not count
 --   P25  an active job whose line cannot be converted draws nothing from its booking (Firm 20 stays);
---        a hold beside a set-aside line of the product reserves shelf stock only (none here): Firm 30 stays;
+--        a counted booking's hold beside a set-aside line is not read: Firm 30 stays;
 --        an 'infinity' needed-by date counts as no date (P17) and does not fail the plan
---   P26  held stock never reads as free (Mason, 2026-11-18): a hold covering its booking's own line is
---        backed by stock on the shelf (after other holds) and counts today; an unbacked hold buys nothing;
---        a held undated Firm line stays on Firm needs a date; a hold larger than its lines keeps the rest held;
---        a job hold takes the shelf now; held stock backs a booking's Firm line before its Maybe line;
---        a booking line of 0 covers no hold
---   P28  Taha's cases on #1989 (Mason, 2026-11-18, "I agree cap it"): a draft booking's hold of 500 (Firm, +45)
---        with 13 on hand holds 13 today and 487 at +45, never "order 487 now"; a sent booking with Firm 100 at +45
---        and Maybe 100 at +120, 100 drawn by an order and 100 held, 13 on hand: the draw takes the less sure
---        Maybe line (the safe guess; Mason, 2026-11-19), so 13 held and 87 Firm to buy; an order naming the
---        Maybe line leaves the Firm line listed first needed
+--   P26  (#1989 redesign) a booking's own holds are never read; its lines are the reservation, orders and Firm
+--        first, then Maybe; a manual hold still takes the shelf; an active job's hold is not read either; a
+--        booking line of 0 needs nothing
+--   P28  Taha's cases on #1989: a draft Planned booking's Firm 500 at +45 with 13 on hand is bought (487) for +45,
+--        never "order now"; a sent booking with Firm 100 at +45 and Maybe 100 at +120, 100 drawn by an order,
+--        13 on hand: the draw takes the less sure Maybe line (the safe guess; Mason, 2026-11-19), so 87 Firm to
+--        buy; an order naming the Maybe line leaves the Firm line listed first needed
 --   P29  draws ignore line position: tied sections (product 43) still lose the Maybe line first; 100 drawn
 --        against Firm 100 + Maybe 50 leaves Firm 50 (product 44)
---   P30  Sol round 5 on #1989: a hold not on the shelf takes incoming PO stock first (Mason, 2026-11-19):
---        0 on hand, Maybe 100 held, PO 100 at +10, another booking's Firm 100 at +20: buy 100, not 0;
---        a held Firm 100 at +1 with a PO of 100 at +10 keeps its +1 date: buy 100 (product 46)
---   P31  (Sol on #1989, Nov 20; option B kept by Mason, 2026-11-21) a hold claims only PO stock arriving by its
---        expiry: of two Maybe holds, the one expiring before any PO claims nothing; a later PO stays free (product 47)
---   P32  a closed booking's hold reserves the shelf only: no PO claim, no buy (product 48)
---   P33  a job hold beside an unconvertible job line still reserves its stock (product 49)
+--   P30  (#1989 redesign: Firm always first) 0 on hand, Maybe 100 held, PO 100 at +10, another booking's Firm 100
+--        at +20: the PO covers the Firm line, nothing to buy; a Firm 100 at +1 with a PO of 100 at +10: late
+--        cover, flagged, nothing to buy (product 46)
+--   P31  holds and their expiry are not read: Firm 50 takes the latest PO by its date, the Maybe lines share the
+--        earlier PO (product 47)
+--   P32  a closed booking's hold reserves the shelf only: no PO claim, no buy, the rest unbacked (product 48)
+--   P33  an active job's hold is not read; its unconvertible line reserves nothing (product 49)
 --   P34  a draw against a line set aside for its unit is not over-drawn (product 50)
 --   P35  a job's draw beyond its own section is listed as drawn, section unknown (product 51)
 --   P27  a window crossing New Year ends next year; an invalid start month-day falls back the whole window
@@ -810,10 +807,10 @@ BEGIN
 
   -- P10
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[4];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100 OR (v_x->>'could_add')::numeric <> 0 OR (v_x->>'incoming')::numeric <> 100
-     OR jsonb_array_length(v_x->'suggestions') <> 1
-     OR (v_x->'suggestions'->0->>'need_date')::date <> v_t + 100 OR (v_x->'suggestions'->0->>'quantity')::numeric <> 100
-     OR v_x->'suggestions'->0 ? 'later_po' THEN
+  -- 20270207140000 (answer 4): the PO arriving at +126 is late cover for the Firm 100, never a second buy;
+  -- the Likely 100 then has nothing left and is could-add.
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR (v_x->>'could_add')::numeric <> 100 OR (v_x->>'incoming')::numeric <> 100
+     OR jsonb_array_length(v_x->'suggestions') <> 0 OR NOT (v_x->>'has_late_cover')::boolean THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P10) %', v_x;
   END IF;
   v_n := v_n + 1;
@@ -827,9 +824,12 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
-  -- P12: late 20 counts today; firm 50 at +30 leaves 30 short.
+  -- P12: late 20 counts today; the undated 30 is late cover for the rest of the Firm 50 at +30.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[6];
-  IF v_x IS NULL OR (v_x->>'incoming')::numeric <> 20 OR (v_x->>'drafted')::numeric <> 7 OR (v_x->>'suggested')::numeric <> 30
+  -- 20270207140000: the undated PO 30 now counts as late cover (after every dated PO), so nothing is bought.
+  IF v_x IS NULL OR (v_x->>'incoming')::numeric <> 50 OR (v_x->>'drafted')::numeric <> 7 OR (v_x->>'suggested')::numeric <> 0
+     OR (SELECT trim_scale((c->>'on_time')::numeric) || '/' || trim_scale((c->>'late')::numeric) FROM jsonb_array_elements(v_x->'coverage') c
+          WHERE c->>'group' = 'committed') <> '20/30'
      OR NOT (v_x->>'not_complete')::boolean
      OR NOT (v_x->'reasons' ? 'late_po') OR NOT (v_x->'reasons' ? 'undated_po')
      OR jsonb_array_length(v_x->'purchase_orders') <> 3 THEN
@@ -881,10 +881,14 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
-  -- P22: product 22. Holds on a product their bookings do not book reserve the 10 on the shelf only.
+  -- P22: product 22. A counted booking's own holds are ignored with no exception (#1989 redesign): the accepted
+  -- booking's hold of 5 is not read. The draft (not Planned) booking does not count, so its hold of 20 is shelf-only:
+  -- it takes the 10 on the shelf, 10 is unbacked, nothing to buy.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[22];
-  IF v_x IS NULL OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 10
-     OR (v_x->>'committed')::numeric <> 10 OR (v_x->>'suggested')::numeric <> 0 THEN
+  IF v_x IS NULL OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 20
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND r->>'class' <> 'shelf_hold')
+     OR (v_x->>'hold_unbacked')::numeric <> 10 OR (SELECT (c->>'on_time')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'shelf_hold') IS DISTINCT FROM 10
+     OR (v_x->>'committed')::numeric <> 0 OR (v_x->>'suggested')::numeric <> 0 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P22) %', v_x;
   END IF;
   v_n := v_n + 1;
@@ -909,19 +913,19 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
-  -- P23
+  -- P23: the booking's line in another unit is under Check units and reserves nothing; its own hold is ignored.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[23];
-  IF v_x IS NULL OR NOT (v_x->'reasons' ? 'check_units') OR (v_x->>'committed')::numeric <> 8 OR (v_x->>'suggested')::numeric <> 0
+  IF v_x IS NULL OR NOT (v_x->'reasons' ? 'check_units') OR (v_x->>'committed')::numeric <> 0 OR (v_x->>'suggested')::numeric <> 0
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'bucket' = 'check_units' AND (r->>'quantity')::numeric = 50)
-     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND (r->>'quantity')::numeric = 8) THEN
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P23 booking line in another unit) %', v_x;
   END IF;
   v_n := v_n + 1;
 
-  -- P24
+  -- P24: a PO of 10 arriving after the Firm 100's date is late cover (flagged), never bought twice: buy 90.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[24];
-  IF v_x IS NULL OR jsonb_array_length(v_x->'suggestions') <> 1 OR (v_x->'suggestions'->0->>'quantity')::numeric <> 100
-     OR v_x->'suggestions'->0 ? 'later_po' THEN
+  IF v_x IS NULL OR jsonb_array_length(v_x->'suggestions') <> 1 OR (v_x->'suggestions'->0->>'quantity')::numeric <> 90
+     OR v_x->'suggestions'->0 ? 'later_po' OR NOT (v_x->>'has_late_cover')::boolean OR (SELECT (c->>'late')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'committed') IS DISTINCT FROM 10 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P24 small later PO) %', v_x;
   END IF;
   v_n := v_n + 1;
@@ -990,113 +994,93 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
-  -- P26 (20270206130000): held stock never reads as free; a hold never makes the plan buy on its own.
+  -- P26 (rewritten for the #1989 redesign): the booking's own holds are never read; its lines are the reservation,
+  -- Firm (and orders, jobs) first, then Likely, then Maybe.
   SELECT quote_id INTO v_q FROM smk_pp_bookings WHERE tag = 'P26';
-  -- a: 100 on hand all held for the Maybe line, plus an order of 100 today: buy 100.
+  -- a: 100 on hand, a Maybe 100 and an order of 100 today: the order takes the shelf first; Maybe shown; nothing to buy.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[28];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100 OR (v_x->>'committed')::numeric <> 200
-     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND r->>'class' = 'committed'
-                     AND r->>'confidence' = 'maybe' AND (r->>'quote_id')::uuid = v_q AND (r->>'quantity')::numeric = 100
-                     AND (r->>'need_date')::date = v_t)
-     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking') THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P26a held Maybe stock is not free) %', v_x;
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR (v_x->>'committed')::numeric <> 100 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold')
+     OR (SELECT (c->>'on_time')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'committed') IS DISTINCT FROM 100 OR (SELECT (c->>'not_covered')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'shown') IS DISTINCT FROM 100 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P26a order before Maybe) %', v_x;
   END IF;
-  -- b: nothing on the shelf: the hold buys nothing; the Maybe 100 stays shown.
+  -- b: nothing on the shelf: the Maybe 100 stays shown, nothing to buy.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[29];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR (v_x->>'could_add')::numeric <> 0
-     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold')
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR (v_x->>'could_add')::numeric <> 0 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold')
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'class' = 'shown'
                      AND (r->>'quantity')::numeric = 100) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26b unbacked hold) %', v_x;
   END IF;
-  -- c: 60 on the shelf against a hold of 100: 60 held today, 40 Maybe shown, nothing to buy.
+  -- c: 60 on the shelf for the Maybe 100: 60 on time, 40 not covered, nothing to buy.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[30];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 60
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'class' = 'shown') <> 40 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P26c part-backed hold) %', v_x;
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold')
+     OR (SELECT (c->>'on_time')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'shown') IS DISTINCT FROM 60 OR (SELECT (c->>'not_covered')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'shown') IS DISTINCT FROM 40 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P26c part-covered Maybe) %', v_x;
   END IF;
-  -- d: a held Firm line beyond the horizon takes the stock now: the order of 100 today is bought.
+  -- d: a Firm line beyond the horizon: the order of 100 today takes the shelf; nothing to buy in the horizon.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[31];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100 OR v_x->'reasons' ? 'later'
-     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking')
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND r->>'confidence' = 'firm') <> 100 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P26d held later Firm) %', v_x;
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR NOT (v_x->'reasons' ? 'later') OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold')
+     OR (SELECT (c->>'on_time')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'committed') IS DISTINCT FROM 100 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P26d later Firm) %', v_x;
   END IF;
-  -- e: a held undated Firm line is still listed under Firm needs a date; nothing to buy.
+  -- e: an undated Firm line is listed under Firm needs a date; nothing to buy.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[32];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 50
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold')
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan->'firm_needs_date') f
                      WHERE (f->>'product_id')::uuid = v_p[32] AND (f->>'quantity')::numeric = 50) THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P26e held undated Firm) % %', v_x, v_plan->'firm_needs_date';
+    RAISE EXCEPTION 'SMOKE_FAIL: (P26e undated Firm) % %', v_x, v_plan->'firm_needs_date';
   END IF;
-  -- f: a manual hold already takes all 30 on hand: the booking's hold is backed by nothing.
+  -- f: a manual hold already takes all 30 on hand: the Maybe 20 is shown, not covered.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[33];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 30
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 30
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'class' = 'shown'
                      AND (r->>'quantity')::numeric = 20) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26f manual hold first) %', v_x;
   END IF;
-  -- g: a hold of 100 beside a Firm line of only 40: the other 60 stays held, so the order of 60 today is bought.
+  -- g: a hold of 100 beside a Firm line of only 40: the hold is not read; Firm 40 and the order of 60 share the 100.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[35];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 60
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 100
-     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking') THEN
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') OR (SELECT (c->>'on_time')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'committed') IS DISTINCT FROM 100 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26g hold larger than its lines) %', v_x;
   END IF;
-  -- h: a job hold takes the shelf now: the order of 100 today is bought today, not when the job runs.
+  -- h: the active job's hold is not read: the order today takes the shelf, the job's 100 is bought for its date.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[36];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100 OR (v_x->'suggestions'->0->>'need_date')::date <> v_t
-     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'job')
-     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND r->>'job_id' IS NOT NULL
-                     AND (r->>'quantity')::numeric = 100) THEN
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100 OR (v_x->'suggestions'->0->>'need_date')::date <> v_t + 5 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold')
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'job' AND (r->>'quantity')::numeric = 100) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26h job hold) %', v_x;
   END IF;
-  -- i: 50 held for one booking's Firm 50 (+30) and Maybe 50 (+10): the Firm line takes it; nothing to buy.
+  -- i: 50 on the shelf for one booking's Firm 50 (+30) and Maybe 50 (+10): Firm first; nothing to buy.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[37];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0
-     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND r->>'confidence' = 'firm'
-                     AND (r->>'quantity')::numeric = 50)
-     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'class' = 'shown'
-                     AND (r->>'quantity')::numeric = 50) THEN
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold')
+     OR (SELECT (c->>'on_time')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'committed') IS DISTINCT FROM 50 OR (SELECT (c->>'not_covered')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'shown') IS DISTINCT FROM 50 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26i Firm before Maybe) %', v_x;
   END IF;
-  -- j: a booking line of 0 is no line: its hold of 100 reserves the 60 on the shelf only and buys nothing (rule 10).
+  -- j: a booking line of 0 needs nothing, and its booking's hold is not read: the product is not listed.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[38];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 60 THEN
+  IF v_x IS NOT NULL THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P26j zero booking line) %', v_x;
   END IF;
   v_n := v_n + 1;
 
-  -- P28 (Taha on #1989). 39: the draft booking's hold of 500 with 13 on the shelf holds 13 today and the other 487 at
-  -- the booking's need date (+45): buy 487 by +31, never today.
+  -- P28 (Taha on #1989; rewritten for the redesign). 39: the draft Planned booking's Firm 500 at +45 with 13 on the
+  -- shelf: 13 on time, buy 487 for +45, never today. The booking's hold is not read.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[39];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 487
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 487 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold')
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'suggestions') g
                  WHERE (g->>'need_date')::date < v_t + 45 OR (g->>'order_now')::boolean)
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'hold' AND (r->>'need_date')::date = v_t) <> 13
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'hold' AND (r->>'need_date')::date = v_t + 45) <> 487
-     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking') THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P28 draft hold capped at the shelf) %', v_x;
+     OR (SELECT (c->>'on_time')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'committed') IS DISTINCT FROM 13 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P28 draft booking never buys now) %', v_x;
   END IF;
-  -- 40: the draw of 100 takes the less sure Maybe line; the hold backs 13 of the Firm line; buy the other 87.
+  -- 40: the draw of 100 takes the less sure Maybe line; the Firm 100 takes the 13 on the shelf; buy the other 87.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[40];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 87
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 87 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold')
      OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'hold' AND r->>'confidence' = 'firm') <> 13
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'booking' AND r->>'class' = 'committed' AND r->>'confidence' = 'firm') <> 87
+          WHERE r->>'kind' = 'booking' AND r->>'class' = 'committed' AND r->>'confidence' = 'firm') <> 100
+     OR (SELECT (c->>'on_time')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'committed') IS DISTINCT FROM 13
      OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P28 draw off the less sure line) %', v_x;
   END IF;
-  -- 41: a hold with an infinite expiry has no need date: it counts today, so its 50 is bought now.
+  -- 41: a hold with an infinite expiry is not read: the Firm 50 is bought for its own +45 date.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[41];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 50 OR (v_x->'suggestions'->0->>'need_date')::date <> v_t THEN
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 50 OR (v_x->'suggestions'->0->>'need_date')::date <> v_t + 45 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P28 infinite hold expiry) %', v_x;
   END IF;
   -- 42: the draw comes off the Maybe line, so the Firm 100 at +7 is still needed: buy 100, not 0.
@@ -1127,52 +1111,49 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
-  -- P30: the Maybe hold takes the PO's 100, so the other booking's Firm 100 at +20 is bought; the held part stays
-  -- Maybe at its own +60 date (Sol on #1989: never turned into committed demand on the PO's date).
+  -- P30 (rewritten for the redesign: Firm always first). 45: the PO's 100 at +10 covers the Firm 100 at +20 on time;
+  -- the Maybe 100 (its hold not read) is shown, not covered; nothing to buy.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[45];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100 OR (v_x->>'committed')::numeric <> 100
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'hold' AND r->>'class' = 'shown' AND r->>'confidence' = 'maybe' AND (r->>'raw_date')::date = v_t + 60) <> 100
-     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'booking' AND r->>'confidence' = 'maybe') THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P30 a hold takes incoming stock first) %', v_x;
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR (v_x->>'committed')::numeric <> 100 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold')
+     OR (SELECT (c->>'on_time')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'committed') IS DISTINCT FROM 100 OR (SELECT (c->>'not_covered')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'shown') IS DISTINCT FROM 100 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P30 Firm takes incoming stock first) %', v_x;
   END IF;
-  -- 46: the held Firm line is needed at +1, before the PO lands at +10: buy 100 for +1, not 0.
+  -- 46: the Firm line is needed at +1, before the PO lands at +10: the PO is late cover, flagged, never bought twice.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[46];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 100
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'hold' AND (r->>'raw_date')::date = v_t + 1) <> 100 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P30 a late PO keeps the earlier need date) %', v_x;
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR NOT (v_x->>'has_late_cover')::boolean
+     OR (SELECT (c->>'late')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'committed') IS DISTINCT FROM 100 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P30 a late PO is cover, not a second buy) %', v_x;
   END IF;
   v_n := v_n + 1;
 
-  -- P31: A's hold expires (+5) before any PO lands, so it claims nothing and its Maybe 50 stays a Maybe line;
-  -- B's hold claims the +10 PO, kept as Maybe at its own +60 date; the +30 PO stays free for Firm 50 at +40.
+  -- P31: holds and their expiry are not read. Firm 50 at +40 takes the latest PO by its date (+30); the two Maybe 50s
+  -- share the +10 PO's 50; nothing to buy.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[47];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'hold' AND r->>'class' = 'shown' AND (r->>'raw_date')::date = v_t + 60
-            AND (r->>'quote_id')::uuid = (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P31B')) <> 50
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r
-          WHERE r->>'kind' = 'booking' AND r->>'class' = 'shown'
-            AND (r->>'quote_id')::uuid = (SELECT quote_id FROM smk_pp_bookings WHERE tag = 'P31A')) <> 50
-     OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold' AND r->>'class' = 'committed') THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P31 a hold claims only stock arriving by its expiry) %', v_x;
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold')
+     OR (SELECT (c->>'on_time')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'committed') IS DISTINCT FROM 50
+     OR (SELECT (c->>'on_time')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'shown') IS DISTINCT FROM 50 OR (SELECT (c->>'not_covered')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'shown') IS DISTINCT FROM 50
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'coverage') c, jsonb_array_elements(c->'pos') o
+                     WHERE c->>'group' = 'committed' AND o->>'po_number' = 'SMK-PP31-2-' || v_suffix) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P31 Firm takes the latest PO by its date) %', v_x;
   END IF;
   v_n := v_n + 1;
 
-  -- P32: the closed booking's hold reserves the 5 on the shelf only; the +10 PO of 30 stays free; nothing to buy.
+  -- P32: the closed booking's hold is shelf-only: it takes the 5 on the shelf, 15 unbacked; the +10 PO of 30 stays free;
+  -- nothing to buy.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[48];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR (v_x->>'committed')::numeric <> 5
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 5 THEN
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR (v_x->>'committed')::numeric <> 0
+     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 20 OR (v_x->>'hold_unbacked')::numeric <> 15 OR (SELECT (c->>'on_time')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'shelf_hold') IS DISTINCT FROM 5
+     OR (v_x->>'incoming')::numeric <> 30 THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (P32 a closed booking''s hold reserves the shelf only) %', v_x;
   END IF;
   v_n := v_n + 1;
 
-  -- P33: the job hold beside an unconvertible line still reserves its 10; the other job's 10 at +3 is bought.
+  -- P33: the active job's hold is not read; its unconvertible line is under Check units and reserves nothing (contract
+  -- known limit). The other job's 10 at +3 takes the 10 on the shelf; nothing to buy.
   SELECT e INTO v_x FROM jsonb_array_elements(v_plan->'products') e WHERE (e->>'product_id')::uuid = v_p[49];
-  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 10 OR NOT (v_x->'reasons' ? 'check_units')
-     OR (SELECT COALESCE(SUM((r->>'quantity')::numeric), 0) FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold') <> 10 THEN
-    RAISE EXCEPTION 'SMOKE_FAIL: (P33 a job hold on an unconvertible line keeps its stock) %', v_x;
+  IF v_x IS NULL OR (v_x->>'suggested')::numeric <> 0 OR NOT (v_x->'reasons' ? 'check_units') OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r WHERE r->>'kind' = 'hold')
+     OR (SELECT (c->>'on_time')::numeric FROM jsonb_array_elements(v_x->'coverage') c WHERE c->>'group' = 'committed') IS DISTINCT FROM 10 THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (P33 a job hold on an unconvertible line is not read) %', v_x;
   END IF;
   v_n := v_n + 1;
 

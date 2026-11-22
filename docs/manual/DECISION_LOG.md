@@ -1,5 +1,14 @@
 # Decision Log
 
+## 2026-11-21 — #1989 redesign: the booking line is the reservation; Firm first; a late PO is cover, never a second buy
+
+**Decision (Mason, in chat, 2026-11-21: "Yes, build it"; first build "Per product").** After Sol raised a new HIGH on "which hold belongs to which line and PO" in rounds 5, 6, 7 and on Nov 20, Mason redesigned #1989 from the start. In `get_purchasing_plan` the open booking LINE is the reservation and the plan never reads a counted booking's or active job's own hold rows. One allocation per product, worked out fresh on every read, gives coverage and buying: shelf, then POs by date; orders, jobs, manual holds and Firm lines first, then Likely, then Maybe. A late PO counts as cover (flagged) and adds no buy. A reservation lasts while the booking is open; a line 14 days past its need date is flagged for follow-up. Stale holds take shelf stock only and never buy. A draft Planned booking counts like a sent one. Contract: `docs/plans/2026-11-21-booking-reservations-CONTRACT.md` (v4, replaces `2026-11-18-purchasing-held-stock-CONTRACT.md`); migration `20270207140000`.
+**Reverses:**
+- 2026-11-18 "held stock always counts as spoken for" (decision "1"): a Maybe booking's stock may now go to a Firm need elsewhere; the Maybe line then shows *not covered* and is not bought for.
+- 2026-11-18 "I agree cap it" (a draft booking's hold counted as must-buy, even for Maybe): a draft Planned booking now counts exactly like a sent one, by each line's own confidence and date.
+- Buying for a need whose only PO lands after it (`20270127110000`, #1971/#1990): a late PO keeps its claim and the plan never buys twice for it, for orders, jobs, manual holds and bookings alike.
+**Supersedes:** "2026-11-21 — #1989 rebuild: holds keep taking incoming stock (option B)" and "2026-11-19 — holds take incoming stock first" (the draw guess of that entry stays).
+
 ## 2026-11-21 — #1989 rebuild: holds keep taking incoming stock (option B); Mason takes #1989 back from Taha
 
 **Decision (Mason, in chat, 2026-11-21: "option B").** Sol's Nov 20 review of #1989 raised four HIGHs on the hold and PO-claim logic, so the round-cap rule put the trade-off to Mason: (A) holds count only stock on the shelf, or (B) keep "holds take incoming stock first" (2026-11-19) and fix the HIGHs inside it. He chose B. The rebuild on #1990's body: a hold claims only PO stock arriving by its own expiry (earliest-expiring first); a Maybe, Likely, unset or undated line's claimed part keeps its own class and date and only reserves its PO stock; a hold whose source is gone, closed or converted, or beside a set-aside line, or a job hold on an unconvertible line, reserves shelf stock only and never buys. Mason started this session on 2026-11-21 to fix and land #1989, taking it back from the 2026-11-19 handover to Taha. Contract: `docs/plans/2026-11-18-purchasing-held-stock-CONTRACT.md` rules 9-11.

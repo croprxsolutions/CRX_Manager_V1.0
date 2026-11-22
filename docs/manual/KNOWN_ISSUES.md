@@ -480,6 +480,9 @@ Repair step 5 (To-Do 0.17).
 
 ### KI-144 — A purchase order's vendor is free text, not a link to the vendor list
 
+> **Fix in review (Lane E, 2026-11-22):** database part `20270214130000_po_vendor_link.sql` (link column, backfill,
+> bill check by vendor id; Mason: "Keep original name"). Stays open until the screens and reports read the link.
+
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-10.
 
 **MED-LOW · OPEN · purchasing/vendors · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 2 #3) · unassigned**

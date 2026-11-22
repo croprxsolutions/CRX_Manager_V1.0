@@ -68,6 +68,14 @@
 
 **Decision (Mason, in chat, 2026-11-18: "1").** After Sol round 2 on PR #1980 found that stock held for a Maybe booking read as free, Mason chose: held stock is always spoken for in `get_purchasing_plan`, whatever the booking's confidence, but a hold never makes the plan buy on its own. A hold covering its booking's (or job's) own lines counts today only up to the stock on the shelf left after other holds, backing Firm lines first; the unbacked part stays as the booking line with its own date and confidence (a Maybe line stays shown only).
 **Supersedes:** rule (2) of "2026-11-18 — Purchasing plan: no 'expedite a later PO' alternative; a Maybe booking's held stock follows its confidence". Rule (1) stands.
+## 2026-11-22 — A purchase order keeps its original vendor name after a rename (KI-144)
+
+**Decision (Mason, relayed by the Lane E bug captain 2026-11-22):** "Keep original name." Renaming a vendor does not change the name on its old purchase orders; reports and bill checks find those POs by the vendor's id.
+
+**Why:** a PO is a document sent to a vendor; its printed name is history. Until now the PO stored only the name, so after a rename the vendor-bill check (and some reports) no longer matched the vendor's own old POs.
+
+**What this implies:** `purchase_orders.vendor_id` links each PO to its vendor (set by the server from the vendor name when the PO is written; never by the screen). A vendor bill on a linked PO must come from that vendor. POs whose name matches no single active vendor stay unlinked and keep the old name check; linking the 3 live ones is still To-Do decision 23.
+
 ## 2026-11-22 — #2197: sales reps may reactivate an inactive customer from its page
 
 **Decision (Mason, 2026-11-22, relayed by the bug captain: "Yes, reps too").** The customer page's Reactivate button shows for admins and sales reps, matching what the database already allows (`customers_update` policy: admin or sales rep) and the #2048 refusal text ("An admin or sales rep must reactivate"). Screen-only change; the database rule is unchanged. Drivers and applicators still get no button and are refused by the database.

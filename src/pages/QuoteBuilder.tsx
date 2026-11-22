@@ -3850,6 +3850,37 @@ export default function QuoteBuilder() {
     return loaded;
   };
 
+  // KI-190: close the draw dialog and ask for a reload of the whole booking.
+  const openDrawReloadPrompt = (message: string) => {
+    setShowDrawModal(false);
+    quoteVersionRecoveryRequiredRef.current = true;
+    staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
+    setStaleSaveOpen(true);
+    toast('warning', message);
+    setDrawing(false);
+  };
+
+  // KI-190: the server refused a draw because the booking is not at the version it carried.
+  // The receipt check runs first, so this send ordered nothing.
+  const handleDrawStaleWrite = (error: unknown, resend: boolean, drawScope: string) => {
+    if (resend) {
+      // The first send under this key may still be on its way: keep the note, flagged for a
+      // hand check that blocks new draws until the rep has looked.
+      markPendingRetryForCheck(drawPendingName);
+    } else {
+      clearDrawNotes();
+      drawDownIdem.resetKeyFor(drawScope);
+    }
+    // A late reply for a booking this screen no longer shows changes nothing else here.
+    if (currentQuoteIdRef.current !== drawScope) { setDrawing(false); return; }
+    const kept = loadPendingRetry(drawPendingName, isDrawRequest);
+    setPendingDraw(kept ? { ...kept, expired: resend } : null);
+    const detail = rpcCodeDetail(error, RpcErrorCodes.QUOTE_STALE_WRITE)?.replace(/^[:\s]+/, '') ?? '';
+    openDrawReloadPrompt(detail
+      ? detail.charAt(0).toUpperCase() + detail.slice(1)
+      : 'This booking changed since you opened it. Nothing was ordered. Reload to see what is left and the prices, then try again.');
+  };
+
   // `resume` re-sends a draw whose reply never came, exactly as it was sent and with its key, so the
   // server returns the order it already made or makes it once (S14).
   const handleDrawDown = async (resume?: PendingRetry<DrawRequestLine[]>) => {
@@ -3909,12 +3940,7 @@ export default function QuoteBuilder() {
     const drawVersion = drawSnapshot?.quoteId === id ? drawSnapshot.rowVersion : null;
     if (!resume && !earlierUnresolved
         && (drawVersion === null || drawVersion !== quoteRowVersionRef.current)) {
-      setShowDrawModal(false);
-      quoteVersionRecoveryRequiredRef.current = true;
-      staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
-      setStaleSaveOpen(true);
-      toast('warning', 'This booking changed since you opened it. Nothing was ordered. Reload to see what is left and the prices, then try again.');
-      setDrawing(false);
+      openDrawReloadPrompt('This booking changed since you opened it. Nothing was ordered. Reload to see what is left and the prices, then try again.');
       return;
     }
     // Without the note, a lost reply could not be finished after a reload, and a fresh key could draw twice.
@@ -4040,28 +4066,7 @@ export default function QuoteBuilder() {
       // KI-190: the booking changed since this screen loaded it, and nothing was ordered.
       // Reload the whole quote (balance and booked prices) before another draw.
       if (hasRpcCode(error, RpcErrorCodes.QUOTE_STALE_WRITE)) {
-        if (resume || earlierUnresolved) {
-          // A resend refused: the first send under this key may still be on its way, so keep
-          // the note, flagged for a hand check that blocks new draws until the rep has looked.
-          markPendingRetryForCheck(drawPendingName);
-        } else {
-          // A fresh draw refused before anything else used its key: nothing was ordered.
-          clearDrawNotes();
-          drawDownIdem.resetKeyFor(drawScope);
-        }
-        // A late reply for a booking this screen no longer shows changes nothing else here.
-        if (currentQuoteIdRef.current !== drawScope) { setDrawing(false); return; }
-        const keptAfterStale = loadPendingRetry(drawPendingName, isDrawRequest);
-        setPendingDraw(keptAfterStale ? { ...keptAfterStale, expired: Boolean(resume || earlierUnresolved) } : null);
-        quoteVersionRecoveryRequiredRef.current = true;
-        staleSaveConflictScopeRef.current = NON_SAVE_RECOVERY;
-        setShowDrawModal(false);
-        setStaleSaveOpen(true);
-        const staleDetail = rpcCodeDetail(error, RpcErrorCodes.QUOTE_STALE_WRITE)?.replace(/^[:\s]+/, '') ?? '';
-        toast('warning', staleDetail
-          ? staleDetail.charAt(0).toUpperCase() + staleDetail.slice(1)
-          : 'This booking changed since you opened it. Nothing was ordered. Reload to see what is left and the prices, then try again.');
-        setDrawing(false);
+        handleDrawStaleWrite(error, Boolean(resume || earlierUnresolved), drawScope);
         return;
       }
 

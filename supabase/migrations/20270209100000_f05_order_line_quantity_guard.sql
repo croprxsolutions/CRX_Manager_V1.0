@@ -39,6 +39,9 @@ BEGIN
      AND EXISTS (SELECT 1 FROM public.delivery_items di JOIN public.deliveries d ON d.id = di.delivery_id
                   WHERE di.order_item_id = oi.id AND d.status IN ('scheduled', 'in_progress'));
   RAISE NOTICE 'F05_PREFLIGHT: % order line(s) have open loads beyond what was ordered', v_open_over;
+  -- Lines already delivered past their order (staging ORD-2026-0017): left as they are, listed for office cleanup (F05b).
+  SELECT count(*) INTO v_open_over FROM public.order_items oi WHERE oi.quantity_delivered > oi.total_units_needed;
+  RAISE NOTICE 'F05_PREFLIGHT: % order line(s) are already delivered beyond what was ordered', v_open_over;
 END
 $preflight$;
 
@@ -198,14 +201,18 @@ BEGIN
     RETURN NEW;
   END IF;
   IF v_more_delivered THEN
-    RAISE EXCEPTION 'DELIVERY_EXCEEDS_ORDER: % — this would bring the line to % delivered with % more on open deliveries (%), but only % was ordered. Ask the office to cancel the extra delivery, then complete this one.',
+    RAISE EXCEPTION 'DELIVERY_EXCEEDS_ORDER: % — this would bring the line to % delivered with % more on open deliveries (%), but only % was ordered. %',
       COALESCE(NEW.product_name, 'this order line'), NEW.quantity_delivered, v_open,
-      public._order_line_open_loads(NEW.id, NULL, NULL), NEW.total_units_needed
+      public._order_line_open_loads(NEW.id, NULL, NULL), NEW.total_units_needed,
+      CASE WHEN v_open > 0 THEN 'Ask the office to cancel the extra delivery, then complete this one.'
+           ELSE 'Record no more than what was ordered, or ask the office to raise the order.' END
       USING ERRCODE = 'check_violation';
   END IF;
-  RAISE EXCEPTION 'ORDER_LINE_BELOW_DELIVERIES: % cannot go below % (delivered %, on open deliveries %: %). Cancel or reduce those deliveries first.',
+  RAISE EXCEPTION 'ORDER_LINE_BELOW_DELIVERIES: % cannot go below % (delivered %, on open deliveries %: %). %',
     COALESCE(NEW.product_name, 'this order line'), COALESCE(NEW.quantity_delivered, 0) + v_open,
-    COALESCE(NEW.quantity_delivered, 0), v_open, public._order_line_open_loads(NEW.id, NULL, NULL)
+    COALESCE(NEW.quantity_delivered, 0), v_open, public._order_line_open_loads(NEW.id, NULL, NULL),
+    CASE WHEN v_open > 0 THEN 'Cancel those deliveries, or reduce ones that have not started, first.'
+         ELSE 'That much has already been delivered.' END
     USING ERRCODE = 'check_violation';
 END;
 $function$;

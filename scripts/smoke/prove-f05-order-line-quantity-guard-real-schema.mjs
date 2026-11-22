@@ -364,7 +364,7 @@ async function afterCases() {
   // 3. Legacy double schedule (two open loads of 1 for 1 ordered): neither completes while the other is open, the whole
   // call rolls back (no stock, line or draft change); once the office cancels the extra load, the other completes.
   refusedProbe(`${AS_ADMIN} ${completeLegacy(DLA, DLA1, 1, 'f05-3a')}`,
-    /DELIVERY_EXCEEDS_ORDER: \[PROVER\] F05 Product — this would bring the line to 1(\.0+)? delivered with 1(\.0+)? more on open deliveries \(F05-DLB\), but only 1(\.0+)? was ordered/);
+    /DELIVERY_EXCEEDS_ORDER: \[PROVER\] F05 Product — this would bring the line to 1(\.0+)? delivered with 1(\.0+)? more on open deliveries \(F05-DLB\), but only 1(\.0+)? was ordered. Ask the office to cancel the extra delivery/);
   assert.equal(scalar(`SELECT quantity_available || '/' || quantity_prebooked FROM public.inventory WHERE id = '${INV}';`).replace(/\.0+/g, ''), '50/13');
   assert.equal(scalar(`SELECT quantity_delivered || '/' || (SELECT count(*) FROM public.invoices WHERE order_id = '${OL}') || '/' || (SELECT status FROM public.deliveries WHERE id = '${DLA}') FROM public.order_items WHERE id = '${LL}';`).replace(/\.0+/g, ''), '0/0/in_progress');
   assert.equal(Number(okProbe(`${AS_ADMIN}
@@ -422,7 +422,7 @@ async function afterCases() {
   refusedProbe(`${AS_ADMIN}
     ${schedule(O14, L14, 10, 'f05-5a', 'd1')}
     ${complete('d1', 6, 'f05-5b')}
-    UPDATE public.order_items SET total_units_needed = 5 WHERE id = '${L14}';`, /ORDER_LINE_BELOW_DELIVERIES: \[PROVER\] F05 Product cannot go below 6/);
+    UPDATE public.order_items SET total_units_needed = 5 WHERE id = '${L14}';`, /ORDER_LINE_BELOW_DELIVERIES: \[PROVER\] F05 Product cannot go below 6(\.0+)? .*That much has already been delivered\./);
   console.log('[case 5/6] partial 6 of 10 completes and its Follow-up for 4 is allowed; cutting the line below the 6 delivered is refused (written directly: the order edit RPC already refuses partly delivered orders)');
 
   // 7. edit_delivery: raising a load past the line is refused; lowering it is allowed.

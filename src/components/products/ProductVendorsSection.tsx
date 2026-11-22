@@ -32,6 +32,8 @@ interface ProductVendorsSectionProps {
    * page re-reads the product (KI-170: its Save waits for that read).
    */
   onVendorChanged: () => void;
+  /** A vendor change is saving: the page locks its form, since the re-read that follows replaces it. */
+  onVendorSaving: (saving: boolean) => void;
   /** Why vendor changes are off right now (e.g. unsaved product edits), or null when they are allowed. */
   lockedReason: string | null;
 }
@@ -164,7 +166,7 @@ function vendorControlsOff(busy: boolean, listUsable: boolean, lockedReason: str
  * The vendors a product can be bought from (WP-PM-15b). Exactly one is preferred, and the product's
  * vendor name is a copy of it: the database keeps that copy and refuses to drop the preferred vendor.
  */
-export default function ProductVendorsSection({ productId, productName, isAdmin, userId, onVendorChanged, lockedReason }: ProductVendorsSectionProps) {
+export default function ProductVendorsSection({ productId, productName, isAdmin, userId, onVendorChanged, onVendorSaving, lockedReason }: ProductVendorsSectionProps) {
   const { toast } = useToast();
   // Costs come back only for admins, so a role change is a different read.
   const linked = useLoad(`vendors:${productId}:${isAdmin}`, () => listProductVendors(productId), {
@@ -201,6 +203,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
     if (!userId) return;
     const scope = `${productId}:${vendorId}:${makePreferred}`;
     setBusyFor(productId);
+    onVendorSaving(true);
     try {
       await linkProductVendor(productId, vendorId, makePreferred, userId, linkKeys.getKeyFor(scope));
       linkKeys.resetKeyFor(scope);
@@ -224,6 +227,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
       onVendorChanged();
       void linked.reload();
     } finally {
+      onVendorSaving(false);
       setBusyFor((current) => (current === productId ? null : current));
     }
   };

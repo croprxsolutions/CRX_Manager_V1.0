@@ -106,7 +106,7 @@ function chainable(resolveWith: unknown) {
 }
 
 // The Vendors section has its own tests; these page tests only keep its callbacks (KI-170).
-type VendorSectionProps = { onVendorChanged: () => void; lockedReason: string | null };
+type VendorSectionProps = { onVendorChanged: () => void; onVendorSaving: (saving: boolean) => void; lockedReason: string | null };
 const vendorSection = vi.hoisted(() => ({ props: null as null | VendorSectionProps }));
 vi.mock('../components/products/ProductVendorsSection', () => ({
   default: (props: VendorSectionProps) => { vendorSection.props = props; return null; },
@@ -1177,6 +1177,19 @@ describe('ProductDetail governed pricing flow', () => {
     expect(screen.getByDisplayValue('New Vendor')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'New product' })).toBeEnabled();
     expect(vendorSection.props!.lockedReason).toBeNull();
+  });
+
+  it('KI-170: the form is locked while a vendor change is still saving (Sol r4)', async () => {
+    render(<ProductDetail />);
+    await screen.findByLabelText('Quoting Notes');
+    await waitFor(() => expect(vendorSection.props).not.toBeNull());
+    act(() => vendorSection.props!.onVendorSaving(true));
+    expect(screen.getByLabelText('Quoting Notes')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'New product' })).toBeDisabled();
+    act(() => vendorSection.props!.onVendorSaving(false));
+    expect(screen.getByLabelText('Quoting Notes')).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
   });
 
   it('KI-170: a failed product re-read after a vendor change keeps Save off until Reload Product', async () => {

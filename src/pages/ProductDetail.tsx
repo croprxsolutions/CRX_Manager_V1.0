@@ -437,7 +437,9 @@ export default function ProductDetail() {
   const reloadProduct = productRead.reload;
   // KI-170: a vendor change re-reads the product (the database copies the preferred vendor onto it); Save and
   // the copy actions wait for any product read in flight, so they never use an older vendor.
-  const productReading = productRead.status === 'loaded' && productRead.refreshing;
+  // A vendor change that is still saving counts too: its re-read will replace the form when it lands.
+  const [vendorSaving, setVendorSaving] = useState(false);
+  const productReading = vendorSaving || (productRead.status === 'loaded' && productRead.refreshing);
   // A failed refresh keeps the form on screen but locks editing until a fresh read lands.
   const productStale = productRead.status === 'loaded' && productRead.stale;
   const reloadRequired = pricingReloadRequired || productStale;
@@ -2081,6 +2083,7 @@ export default function ProductDetail() {
                 isAdmin={isAdmin}
                 userId={profile?.id ?? null}
                 onVendorChanged={() => void reloadProduct()}
+                onVendorSaving={setVendorSaving}
                 // The margin floor card keeps its own draft across a product re-read, so it does not count here.
                 lockedReason={vendorLockReason(saving || productReading, isDirty
                   || productDetailsChanged(product, persistedProduct) || pricingChanged(product, persistedProduct, pricingMoneyDrafts))}

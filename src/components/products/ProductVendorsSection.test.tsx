@@ -52,10 +52,11 @@ const spare = link({
   last_cost_cents: null, last_quoted_package_cost_cents: null, last_cost_as_of: null,
 });
 
+const onVendorSaving = vi.fn();
 function renderSection(isAdmin: boolean, lockedReason: string | null = null) {
   const onVendorChanged = vi.fn();
   render(<ProductVendorsSection productId="p1" productName="Test Product" isAdmin={isAdmin} userId="u1"
-    onVendorChanged={onVendorChanged} lockedReason={lockedReason} />);
+    onVendorChanged={onVendorChanged} onVendorSaving={onVendorSaving} lockedReason={lockedReason} />);
   return onVendorChanged;
 }
 
@@ -92,6 +93,9 @@ describe('ProductVendorsSection', () => {
     mocks.listProductVendors.mockResolvedValue([{ ...spare, is_preferred: true }, { ...preferred, is_preferred: false }]);
     fireEvent.click(button);
     await waitFor(() => expect(onVendorChanged).toHaveBeenCalledTimes(1));
+    // The page form is locked for the whole save, not only once the re-read starts (Sol r4).
+    expect(onVendorSaving.mock.calls).toEqual([[true], [false]]);
+    expect(onVendorSaving.mock.invocationCallOrder[0]).toBeLessThan(mocks.linkProductVendor.mock.invocationCallOrder[0]);
     expect(mocks.linkProductVendor).toHaveBeenCalledWith('p1', 'v2', true, 'u1', expect.any(String));
     expect(mocks.logActivity).toHaveBeenCalledWith(expect.objectContaining({ event: 'product_preferred_vendor_changed' }));
   });
@@ -207,7 +211,7 @@ describe('ProductVendorsSection', () => {
   });
 
   it('closes an open removal when the user is no longer an admin', async () => {
-    const props = { productId: 'p1', productName: 'Test Product', userId: 'u1', onVendorChanged: vi.fn(), lockedReason: null };
+    const props = { productId: 'p1', productName: 'Test Product', userId: 'u1', onVendorChanged: vi.fn(), lockedReason: null, onVendorSaving: vi.fn() };
     const view = render(<ProductVendorsSection {...props} isAdmin />);
     const rows = await screen.findAllByRole('listitem');
     fireEvent.click(within(rows[1]).getByRole('button', { name: 'Remove' }));
@@ -216,7 +220,7 @@ describe('ProductVendorsSection', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   });
   it('closes an open removal when the screen moves to another product', async () => {
-    const props = { productName: 'Test Product', userId: 'u1', onVendorChanged: vi.fn(), lockedReason: null, isAdmin: true };
+    const props = { productName: 'Test Product', userId: 'u1', onVendorChanged: vi.fn(), lockedReason: null, onVendorSaving: vi.fn(), isAdmin: true };
     const view = render(<ProductVendorsSection {...props} productId="p1" />);
     const rows = await screen.findAllByRole('listitem');
     fireEvent.click(within(rows[1]).getByRole('button', { name: 'Remove' }));
@@ -229,7 +233,7 @@ describe('ProductVendorsSection', () => {
 
   it('a link that finishes after the screen moved to another product reports nothing', async () => {
     const onVendorChanged = vi.fn();
-    const props = { productName: 'Test Product', userId: 'u1', onVendorChanged, lockedReason: null, isAdmin: true };
+    const props = { productName: 'Test Product', userId: 'u1', onVendorChanged, lockedReason: null, onVendorSaving: vi.fn(), isAdmin: true };
     const view = render(<ProductVendorsSection {...props} productId="p1" />);
     const button = await screen.findByRole('button', { name: 'Make preferred' });
     let finish!: () => void;
@@ -243,7 +247,7 @@ describe('ProductVendorsSection', () => {
   });
 
   it('a pick does not carry over to another product', async () => {
-    const props = { productName: 'Test Product', userId: 'u1', onVendorChanged: vi.fn(), lockedReason: null, isAdmin: true };
+    const props = { productName: 'Test Product', userId: 'u1', onVendorChanged: vi.fn(), lockedReason: null, onVendorSaving: vi.fn(), isAdmin: true };
     const view = render(<ProductVendorsSection {...props} productId="p1" />);
     const picker = await screen.findByLabelText('Add a vendor');
     await waitFor(() => expect(within(picker).getByRole('option', { name: 'Crop RX Solutions' })).toBeInTheDocument());
@@ -263,7 +267,7 @@ describe('ProductVendorsSection', () => {
     await waitFor(() => expect(screen.getByLabelText('Add a vendor')).toBeDisabled());
   });
   it('a save still running for another product does not lock this one', async () => {
-    const props = { productName: 'Test Product', userId: 'u1', onVendorChanged: vi.fn(), lockedReason: null, isAdmin: true };
+    const props = { productName: 'Test Product', userId: 'u1', onVendorChanged: vi.fn(), lockedReason: null, onVendorSaving: vi.fn(), isAdmin: true };
     const view = render(<ProductVendorsSection {...props} productId="p1" />);
     const button = await screen.findByRole('button', { name: 'Make preferred' });
     mocks.linkProductVendor.mockReturnValueOnce(new Promise(() => {}));
@@ -274,7 +278,7 @@ describe('ProductVendorsSection', () => {
   });
 
   it('a removal closed by a product switch does not reopen on switching back', async () => {
-    const props = { productName: 'Test Product', userId: 'u1', onVendorChanged: vi.fn(), lockedReason: null, isAdmin: true };
+    const props = { productName: 'Test Product', userId: 'u1', onVendorChanged: vi.fn(), lockedReason: null, onVendorSaving: vi.fn(), isAdmin: true };
     const view = render(<ProductVendorsSection {...props} productId="p1" />);
     const rows = await screen.findAllByRole('listitem');
     fireEvent.click(within(rows[1]).getByRole('button', { name: 'Remove' }));

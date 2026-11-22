@@ -534,6 +534,8 @@ running local test app.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-15.
 
+> **In progress (Lane E, 2026-11-22):** database part (expected cost check, migration `20270214100000`) in review; the screen sends it in a follow-up PR; the "Most recent received PO" label is its own small PR.
+
 **LOW · OPEN (source-confirmed) · purchasing · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 2) · unassigned**
 - `set_purchase_order_item_costs` (`20261021140000` ~L513, only definition) takes the line and new cost only
   (`PurchaseOrderDetail.tsx` ~L1370). Saves are serialized and logged in cost history, but a second admin working from

@@ -1313,6 +1313,16 @@
         "inventory"
       ]
     },
+    "po_cost_expected_cost": {
+      "chain": "smoke-po-cost-expected-cost.sql",
+      "description": "REQUIRES 20270214100000 (KI-197). An active admin corrects a [SMOKE] PO line with the cost they saw (saved), then from a stale screen (refused PO_COST_CHANGED_SINCE_LOADED, cost unchanged). Terminal rollback.",
+      "covers": [
+        "set_purchase_order_item_costs"
+      ],
+      "area": [
+        "regression"
+      ]
+    },
     "complete_cycle_count": {
       "chain": "smoke-cycle-count-concurrency-guards.sql",
       "description": "Cycle-count complete/reverse chain: quantity changes 100->112->100, both replays are stable, lifecycle states advance correctly, and both wrappers retain inventory row locks.",

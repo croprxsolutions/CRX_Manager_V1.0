@@ -49,7 +49,7 @@ export const RECEIPT_SENDING_NOW_MESSAGE = 'The server is emailing this receipt 
 // When this delivery's queue row was (re)queued, or null when it has none. Read right before the 'handled' close so a
 // receipt queued again during a hand send is never closed by it (Sol HIGH). shortcut: a client-side re-check, so a
 // re-queue in the milliseconds between this read and the close is not caught; closing it fully needs the RPC to take
-// the expected queued_at (a migration).
+// the expected queued_at (a migration, #2251).
 export async function receiptQueuedAt(deliveryId: string): Promise<string | null> {
   const { data, error } = await supabase.from('delivery_receipt_queue').select('created_at').eq('delivery_id', deliveryId).maybeSingle();
   if (error) throw error;

@@ -1473,7 +1473,10 @@ export default function DeliveryDetail() {
       receiptCloseIdem.resetKeyFor(scope);
       return paused;
     } catch (err: unknown) {
-      if (isReceiptSendingNow(err)) { toast('warning', RECEIPT_SENDING_NOW_MESSAGE); return null; }
+      if (isReceiptSendingNow(err)) {
+        if (signatureRouteIdRef.current === deliveryId) toast('warning', RECEIPT_SENDING_NOW_MESSAGE); // only on its own page (Luna LOW)
+        return null;
+      }
       throw err;
     }
   };

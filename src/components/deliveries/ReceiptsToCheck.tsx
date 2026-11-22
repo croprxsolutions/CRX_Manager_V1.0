@@ -97,7 +97,9 @@ export default function ReceiptsToCheck() {
       closeIdem.resetKeyFor(scope);
       toast('success', result.outcome === 'sent'
         ? 'The server had already emailed this receipt; nothing to close.'
-        : 'Receipt marked handled. The server will not email it.');
+        : result.outcome === 'none'
+          ? 'This receipt was already handled or removed; nothing changed.'
+          : 'Receipt marked handled. The server will not email it.');
       setHandling(null);
       setReload((n) => n + 1);
     } catch (err: unknown) {

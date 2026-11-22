@@ -507,8 +507,8 @@ export default function PurchaseOrders() {
     for (const po of selectedRows) {
       // A closed-short PO is final; the server refuses to cancel it.
       if (po.status !== 'cancelled' && po.status !== 'closed') {
-        // KI-182: one random key per PO, kept until that PO's cancel is confirmed, so a retry of the
-        // batch replays it; a key built from the user and PO could be guessed and used first elsewhere.
+        // KI-182: one random key per PO, kept while this page is open (a cancel is final), so any retry of
+        // the batch replays it; a key built from the user and PO could be guessed and used first elsewhere.
         const { data, error } = await supabase.rpc('cancel_purchase_order', {
           p_po_id: po.id,
           p_performed_by: profile?.id,
@@ -518,7 +518,6 @@ export default function PurchaseOrders() {
           toast('error', `Failed to cancel PO ${po.po_number}: ${error.message}`);
         } else {
           assertRpcResult(data, 'cancel_purchase_order');
-          cancelIdem.resetKeyFor(po.id);
           cancelledCount++;
         }
       }

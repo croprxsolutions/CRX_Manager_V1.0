@@ -346,13 +346,15 @@ async function main() {
     SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true); SET LOCAL ROLE authenticated; ${month(...NOV)}`));
   assert.deepEqual(edited.payments, { count: 5, total_cents: 214000 }, 'a check edited to a new amount counts at its current amount');
   const writer = JSON.parse(okProbe(`SELECT public.create_prepay_check_splits('${CUSTOMER}', '7000', '[{"label":"A","amount_cents":11100},{"label":"B","amount_cents":22200}]'::jsonb, '${ADMIN}', 'mc-writer')::text;
+    SELECT public.create_prepay_check_splits('${CUSTOMER}', '7001', '[{"label":"A","amount_cents":5000}]'::jsonb, '${ADMIN}', 'mc-writer-2')::text;
     SELECT json_build_object('times', (SELECT count(DISTINCT created_at) FROM public.prepay_credits WHERE reference_number = '7000'),
       'rows', (SELECT count(*) FROM public.prepay_credits WHERE reference_number = '7000'),
       'summary', ${THIS_MONTH})::text;`, ADMIN));
   assert.equal(writer.rows, 2);
   assert.equal(writer.times, 1, 'the real writer stamps both buckets of one check with one created_at');
-  assert.deepEqual(writer.summary.payments, { count: 1, total_cents: 33300 }, 'one check through the real writer is one payment');
-  console.log('[case] AFTER: an edited check counts at its new amount; the real Prepayment Manager writer gives a two-bucket check one created_at, so it is one payment');
+  assert.deepEqual(writer.summary.payments, { count: 2, total_cents: 38300 },
+    'one check through the real writer is one payment; a second check entered in the same transaction (same created_at) stays its own payment');
+  console.log('[case] AFTER: an edited check counts at its new amount; the real Prepayment Manager writer gives a two-bucket check one created_at, so it is one payment; a second check in the same transaction is a second payment');
 
   // 4. Close re-check (each probe is rolled back, so November stays open for the next).
   const ok = JSON.parse(okProbe(closeSql('mc-ok', tokenOf(...NOV)), ADMIN));

@@ -311,7 +311,7 @@ export default function MonthEndClose() {
         p_period_end: current.end,
         p_performed_by: profile.id,
         p_idempotency_key: closeKey,
-        p_reviewed_token: summary?.review_token ?? null,
+        p_reviewed_token: summary?.review_token,
         p_payments_reviewed: reviewedPayments,
         p_commissions_reviewed: reviewedCommissions,
       });
@@ -328,7 +328,6 @@ export default function MonthEndClose() {
       const bindingRejection = getIdempotencyBindingRejection(err);
       if (bindingRejection === 'intent' || bindingRejection === 'actor') {
         closePeriodIdem.resetKey();
-        fetchData();
       }
       const refusal = closeRefusal(err);
       if (refusal === 'changed') {
@@ -337,8 +336,7 @@ export default function MonthEndClose() {
         setReviewedCommissions(false);
         setReviewedNeedsPricing(false);
         setShowCloseModal(false);
-        fetchData();
-        toast('error', "This month's figures changed since you reviewed them. They have been reloaded; review them again before closing.");
+        toast('error', "This month's figures changed since you reviewed them. Review the updated figures, then close again.");
       } else if (refusal === 'reload') {
         toast('error', 'The app was updated. Reload this page, then review and close the month again.');
       } else if (refusal === 'review') {
@@ -347,6 +345,8 @@ export default function MonthEndClose() {
         Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'close_accounting_period' } });
         toast('error', sanitizeError(err));
       }
+      // Any refusal may mean the month changed (or closed elsewhere): always show current figures.
+      fetchData();
     }
     setClosing(false);
   };

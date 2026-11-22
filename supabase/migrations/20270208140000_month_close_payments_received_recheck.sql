@@ -91,29 +91,29 @@ SET search_path = public, pg_temp
 AS $function$
   WITH received AS (
     -- Record Payment: the whole check, including a part kept as prepay; a voided payment is inactive.
-    SELECT COALESCE(a.total_payment_cents, a.total_allocated_cents, 0)::bigint AS cents
+    SELECT COALESCE(a.total_payment_cents, a.total_allocated_cents, 0)::numeric AS cents
       FROM public.allocation_sets a
      WHERE a.entity_type = 'payment'
        AND a.is_active
        AND COALESCE(a.payment_date, (a.created_at AT TIME ZONE 'America/Chicago')::date) BETWEEN p_start AND p_end
     UNION ALL
-    -- Prepayment Manager checks at their current amount; the bucket splits of one check (one call, one created_at)
-    -- are one payment.
-    SELECT sum(pc.original_amount_cents)::bigint
+    -- Prepayment Manager checks at their current amount; the bucket splits of one check (one call: one created_at and
+    -- one source_reference, never edited) are one payment.
+    SELECT sum(pc.original_amount_cents)::numeric
       FROM public.prepay_credits pc
      WHERE pc.source_type = 'check'
        AND pc.allocation_set_id IS NULL
        AND pc.original_amount_cents > 0
        AND (pc.created_at AT TIME ZONE 'America/Chicago')::date BETWEEN p_start AND p_end
-     GROUP BY pc.customer_id, pc.created_at
+     GROUP BY pc.customer_id, pc.created_at, pc.source_reference
     UNION ALL
-    -- Legacy payments table (none live), not deleted.
-    SELECT (p.amount * 100)::bigint
+    -- Legacy payments table (none live), not deleted; dollars kept exact and rounded once on the total.
+    SELECT p.amount * 100
       FROM public.payments p
      WHERE p.deleted_at IS NULL
        AND p.payment_date BETWEEN p_start AND p_end
   )
-  SELECT count(*)::bigint, COALESCE(sum(cents), 0)::bigint FROM received;
+  SELECT count(*)::bigint, round(COALESCE(sum(cents), 0))::bigint FROM received;
 $function$;
 
 REVOKE ALL ON FUNCTION public._month_payments_received_20270208(date, date) FROM PUBLIC, anon, authenticated;

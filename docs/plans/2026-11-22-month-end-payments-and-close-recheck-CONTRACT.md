@@ -28,14 +28,14 @@ saving the figures current at the click") says the payments-received follow-up m
    - active `allocation_sets` `entity_type='payment'`, `COALESCE(payment_date, Chicago created_at date)` in the month:
      `total_payment_cents` (the whole check, including any overpayment part);
    - prepayment checks: `prepay_credits.source_type='check'`, Chicago `created_at` date in the month, current
-     `original_amount_cents` > 0; one check = distinct (customer, created_at): every split of one check is written by one call, so shares `created_at` (transaction time); the reference is left out because an edit can change it on one split;
-   - legacy `payments` with `deleted_at IS NULL`, `payment_date` in the month (unchanged rounding).
+     `original_amount_cents` > 0; one check = distinct (customer, created_at, source_reference): every split of one check is written by one call, so shares `created_at` (transaction time) and `source_reference` (set once from the check number, never edited; the editable `reference_number` is left out);
+   - legacy `payments` with `deleted_at IS NULL`, `payment_date` in the month (dollars summed exactly, rounded once to cents).
    Overpayment prepay credits are NOT added again (already inside their payment). Credit memos, prepay applications and
    write-offs are not money received.
 2. **Close re-check**: `get_monthly_summary` adds `review_token` = md5 of every period figure it shows except today's AR,
    plus the figures the close receipt saves. `close_accounting_period` gains `p_reviewed_token text`,
    `p_payments_reviewed boolean`, `p_commissions_reviewed boolean`. Under the month lock it recomputes the same figures once
-   and **refuses** (`CLOSE_FIGURES_CHANGED`) when the token differs or is missing; refuses (`CLOSE_REVIEW_REQUIRED`) when
+   and **refuses** with `CLOSE_FIGURES_CHANGED` when the token differs, or `CLOSE_REVIEW_REQUIRED` (reload) when it is missing; refuses (`CLOSE_REVIEW_REQUIRED`) when
    payments exist and `p_payments_reviewed` is not true, or commission is non-zero and `p_commissions_reviewed` is not true.
    The receipt is built from that same computed set, so what was compared is what is saved. The screen, on that refusal,
    reloads the figures, clears the ticks, and says the figures changed.
@@ -50,8 +50,8 @@ saving the figures current at the click") says the payments-received follow-up m
 
 - No automatic record changes. Close still writes only `accounting_periods` + the replay receipt.
 - Signature change: the 3-argument `close_accounting_period` and its impl are dropped and recreated with the 3 new
-  defaulted arguments (no overload left). The already-deployed screen calls with 3 arguments → gets `CLOSE_FIGURES_CHANGED`
-  (token missing) until the new screen deploys; month close is a once-a-month admin action, so this short window is
+  defaulted arguments (no overload left). The already-deployed screen calls with 3 arguments → gets `CLOSE_REVIEW_REQUIRED`
+  (token missing, "reload") until the new screen deploys; month close is a once-a-month admin action, so this short window is
   accepted (stated in the PR).
 - Replay: a retry with the same key returns the saved receipt without re-checking (the fingerprint stays actor + period
   end), so a timed-out successful close still replays even if figures moved after it.
@@ -116,3 +116,17 @@ passes before the apply; split not needed (memory rule exception for already-liv
   (`check_period_open`); prepay edits are not month-dated. #54/#55 smaller designs: the shipped design already uses one
   private figures function for summary and close; the audit-log-based prepay count needs its own historical proof and is
   not smaller.
+
+## Sol round 1 (gpt-6.2-sol high, 2026-11-22) and how each settled
+
+- **Fixed:** the screen sent `null` for a missing token (type error) → sends nothing; prepay checks group also by
+  `source_reference` (two checks entered in one transaction stay two payments; proof case); legacy dollars summed
+  before one rounding; the vendor-bill concurrency proof uses the 3-argument close before this migration exists; any
+  close refusal reloads the figures; the "figures changed" message no longer claims it already reloaded; contract wording.
+- **Refuted (evidence):** HIGH "an undated payment voided under another month": `allocate_payment` always stores
+  `payment_date` (defaults to Chicago today, line ~215 of `20261103220000`); live read-only 2026-11-22: 0 undated payment
+  sets of 1; the void writer is Taha's (to 2026-12-15) and unchanged here. HIGH "a prepay edit racing the close": the
+  edit either lands before the close's single read (and is in the saved figure) or after it (the same end state as an
+  edit made just after the close, which DECISION_LOG 2026-11-22 accepts: the screen figure moves, the saved receipt
+  does not); prepay writers are Taha's and take no month lock today. MED "cutover window": accepted above (State and
+  failure), stated in the PR.

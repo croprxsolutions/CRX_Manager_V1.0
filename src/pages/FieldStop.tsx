@@ -38,6 +38,7 @@ import { logActivity } from '../lib/activityLogger';
 import { notifyDeliveryCompleted, notifyDeliveryRemainder } from '../lib/notificationTriggers';
 import { RECEIPT_COMPLETED_BY_EARLIER_ATTEMPT_MESSAGE, RECEIPT_NO_EMAIL_ON_FILE_MESSAGE } from '../lib/deliveryCompletionEmail';
 import { Sentry } from '../lib/sentry';
+import { fetchDriverFarms } from '../lib/driverFarms';
 import PrivatePhoto from '../components/ui/PrivatePhoto';
 import { deliveryPhotoPath } from '../lib/privatePhotos';
 import { toSentryError } from '../lib/sentryError';
@@ -62,6 +63,34 @@ interface StopPhoto {
   uploaded_at?: string | null;
 }
 
+// The stop's own delivery address as one line ('' when missing or unreadable).
+async function readStopAddress(addressId: string): Promise<{ line: string; error: unknown }> {
+  const { data, error } = await supabase
+    .from('customer_addresses')
+    .select('address_line, city, state, zip')
+    .eq('id', addressId)
+    .maybeSingle();
+  const a = (data ?? {}) as { address_line?: string | null; city?: string | null; state?: string | null; zip?: string | null };
+  // A missing site row is a failure too: the driver must not start a stop with no verified destination.
+  return { line: [a.address_line, a.city, a.state, a.zip].filter(Boolean).join(', '), error: error ?? (data ? null : new Error('stop address not found')) };
+}
+
+// A driver's stop never asks the customers table for the farm: withStopFarm fills it from the driver lookup (#2018).
+function stopColumns(isDriver: boolean): string {
+  const base = 'id, delivery_number, status, updated_at, customer_id, order_id, created_by, delivery_address_id, delivery_notes, assigned_driver';
+  return isDriver ? base : `${base}, customer:customers(farm_name, email, contact_name)`;
+}
+
+// The stop with a driver's view of its farm (#2018); throws when the lookup fails. Others keep the joined farm.
+async function withStopFarm(del: StopDelivery, isDriver: boolean): Promise<{ del: StopDelivery; address: string }> {
+  if (!isDriver) return { del, address: '' };
+  const farm = (await fetchDriverFarms([del.customer_id])).get(del.customer_id);
+  const customer = farm ? { farm_name: farm.farm_name, email: farm.email, contact_name: null } : null;
+  // A stop with its own delivery address shows only that one, read later; otherwise the farm's shipping address,
+  // else billing, like the printed load sheet (Mason, 2026-11-21).
+  return { del: { ...del, customer }, address: del.delivery_address_id ? '' : farm?.shipping_address?.trim() || farm?.billing_address?.trim() || '' };
+}
+
 interface StopDelivery {
   id: string;
   delivery_number: string | null;
@@ -83,6 +112,9 @@ export default function FieldStop() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const isDriver = profile?.role === 'driver';
+  // The load shape is fixed at first render: a role refresh must not reload and reset entered quantities (Sol #2165 r4).
+  const [loadAsDriver] = useState(isDriver);
   const { toast } = useToast();
   const isOnline = useOnlineStatus();
   const confirmIdem = useIdempotencyKey('confirm_delivery', profile?.id || '');
@@ -162,7 +194,7 @@ export default function FieldStop() {
     setLoading(true);
     const { data, error } = await supabase
       .from('deliveries')
-      .select('id, delivery_number, status, updated_at, customer_id, order_id, created_by, delivery_address_id, delivery_notes, assigned_driver, customer:customers(farm_name, email, contact_name)')
+      .select(stopColumns(loadAsDriver))
       .eq('id', id)
       .maybeSingle();
 
@@ -174,8 +206,21 @@ export default function FieldStop() {
       return;
     }
 
-    const del = data as unknown as StopDelivery;
+    // A driver reads the farm through get_driver_customers (#2018), not the customers table.
+    const stop = await withStopFarm(data as unknown as StopDelivery, loadAsDriver).catch((farmErr: unknown) => {
+      Sentry.captureException(farmErr, { tags: { source: 'fetch', page: 'field-stop' } });
+      return null;
+    });
+    if (isStale()) return;
+    if (!stop) {
+      toast('error', 'Could not load this stop');
+      navigate('/my-route');
+      return;
+    }
+    const { del, address: farmAddress } = stop;
     setDelivery(del);
+    // A stop with its own delivery address shows only that one (read below); otherwise the farm's address.
+    setAddressLine(farmAddress);
     setReceiptRecipient(null);
     // Only an open stop sends a receipt on completion.
     if (!del.customer?.email && (del.status === 'scheduled' || del.status === 'in_progress')) {
@@ -207,20 +252,17 @@ export default function FieldStop() {
     setDeliveryQtys(initQtys);
 
     if (del.delivery_address_id) {
-      const { data: addr } = await supabase
-        .from('customer_addresses')
-        .select('address_line, city, state, zip')
-        .eq('id', del.delivery_address_id)
-        .maybeSingle();
+      const { line, error: addrErr } = await readStopAddress(del.delivery_address_id);
       if (isStale()) return;
-      if (addr) {
-        const a = addr as { address_line?: string | null; city?: string | null; state?: string | null; zip?: string | null };
-        setAddressLine([a.address_line, a.city, a.state, a.zip].filter(Boolean).join(', '));
+      if (addrErr) {
+        Sentry.captureException(addrErr, { tags: { source: 'fetch', page: 'field-stop-address' } });
+        toast('error', 'Could not load the stop address. Check the delivery before driving.');
       }
+      setAddressLine(line);
     }
     await fetchPhotos();
     setLoading(false);
-  }, [id, navigate, toast, fetchPhotos]);
+  }, [id, navigate, toast, fetchPhotos, loadAsDriver]);
 
   useEffect(() => { activeStopIdRef.current = id; fetchStop(); }, [id, fetchStop]);
 

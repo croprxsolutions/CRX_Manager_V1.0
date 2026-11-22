@@ -11,12 +11,17 @@
 --
 -- WHAT:
 --   1. _month_payments_received_20270208(start, end): money received in the dates, as (payment_count, total_cents):
---      - Record Payment: active allocation sets of type 'payment' (a voided one is inactive), dated by payment_date
---        (or the Chicago day it was recorded): the whole check, including any part kept as prepay (overpayment);
+--      - Record Payment: active allocation sets of type 'payment' (a voided one is inactive), dated by payment_date:
+--        the whole check, including any part kept as prepay (overpayment);
 --      - prepayment checks (Prepayment Manager, prepay_credits source 'check'), on the Chicago day entered, at the
 --        current amount (an edit changes it; a delete leaves only what was already applied); the bucket splits of
 --        one check are one payment. Overpayment credits are not added again (their cash is in their payment);
 --      - legacy payments rows that are not deleted (none live).
+--   0. allocation_sets_payment_has_date: a Record Payment set must carry its payment_date. Its only writer
+--      (allocate_payment) always stores one (live 2026-11-22: 0 undated). Then the payment's report month and the
+--      month void_payment checks (check_period_open(COALESCE(payment_date, today))) are always the same, so a void
+--      cannot take money out of a closed month's figure (Sol round 2 HIGH). No row changes; the apply stops if any
+--      undated payment set exists.
 --   2. _month_close_figures_20270208(start, end): every period figure Month-End Close shows (the get_monthly_summary
 --      body, except today's AR) plus the figures the close receipt saves (close_receipt), payments from (1).
 --   3. get_monthly_summary: those figures, plus today's AR and review_token = md5 of the figures.
@@ -75,12 +80,24 @@ BEGIN
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'MONTH_CLOSE_RECHECK_PREFLIGHT: drifted: %', v_bad;
   END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.allocation_sets'::regclass
+               AND conname = 'allocation_sets_payment_has_date') THEN
+    RAISE EXCEPTION 'MONTH_CLOSE_RECHECK_PREFLIGHT: allocation_sets_payment_has_date already exists';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.allocation_sets WHERE entity_type = 'payment' AND payment_date IS NULL) THEN
+    RAISE EXCEPTION 'MONTH_CLOSE_RECHECK_PREFLIGHT: % payment set(s) have no payment_date; date them in a reviewed change first',
+      (SELECT count(*) FROM public.allocation_sets WHERE entity_type = 'payment' AND payment_date IS NULL);
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_proc WHERE proname IN ('close_accounting_period', '_close_accounting_period_replay_impl_20261015')
                AND pronamespace = 'public'::regnamespace AND pronargs <> 3) THEN
     RAISE EXCEPTION 'MONTH_CLOSE_RECHECK_PREFLIGHT: an unexpected close_accounting_period overload exists';
   END IF;
 END
 $preflight$;
+
+-- 0. A Record Payment always has its date (see WHAT 0) ------------------------------------------------------------
+ALTER TABLE public.allocation_sets
+  ADD CONSTRAINT allocation_sets_payment_has_date CHECK (entity_type <> 'payment' OR payment_date IS NOT NULL);
 
 -- 1. Money received in the dates --------------------------------------------------------------------------------
 CREATE FUNCTION public._month_payments_received_20270208(p_start date, p_end date)
@@ -95,7 +112,7 @@ AS $function$
       FROM public.allocation_sets a
      WHERE a.entity_type = 'payment'
        AND a.is_active
-       AND COALESCE(a.payment_date, (a.created_at AT TIME ZONE 'America/Chicago')::date) BETWEEN p_start AND p_end
+       AND a.payment_date BETWEEN p_start AND p_end
     UNION ALL
     -- Prepayment Manager checks at their current amount; the bucket splits of one check (one call: one created_at and
     -- one source_reference, never edited) are one payment.
@@ -408,6 +425,8 @@ BEGIN
        IS DISTINCT FROM ARRAY['postgres=X/postgres', 'service_role=X/postgres']::aclitem[]
      OR (SELECT proacl FROM pg_proc WHERE oid = 'public._month_payments_received_20270208(date,date)'::regprocedure)
        IS DISTINCT FROM ARRAY['postgres=X/postgres', 'service_role=X/postgres']::aclitem[]
+     OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.allocation_sets'::regclass
+                      AND conname = 'allocation_sets_payment_has_date' AND contype = 'c' AND convalidated)
      OR (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace
           AND proname IN ('close_accounting_period', '_close_accounting_period_replay_impl_20261015')) <> 2
      OR EXISTS (SELECT 1 FROM pg_proc
@@ -420,7 +439,7 @@ BEGIN
                         OR proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
                         -- the summary, wrapper and impl run as definer; the two helpers as the caller
                         OR prosecdef IS DISTINCT FROM (proname NOT IN ('_month_close_figures_20270208', '_month_payments_received_20270208')))) THEN
-    RAISE EXCEPTION 'MONTH_CLOSE_RECHECK_POSTFLIGHT: grants, owner, overloads, security mode or search_path drifted';
+    RAISE EXCEPTION 'MONTH_CLOSE_RECHECK_POSTFLIGHT: grants, owner, overloads, security mode, search_path or the payment-date rule drifted';
   END IF;
 END
 $postflight$;

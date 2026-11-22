@@ -2,4 +2,5 @@
 
 - Month-End Close and its saved close receipt now total the money actually received in the month: Record Payment checks (voided ones left out), Prepayment Manager checks (counted in the month entered, at their current amount; a check split into buckets is one payment) and any live old-style payments. Before, they read only the old payments table (empty today), so they showed $0, and the receipt even counted deleted old payments.
 - Closing a month now re-checks, in the database, that the month's figures still match what the admin reviewed, and that payments and commission were confirmed. If anything changed, the close is refused, nothing is saved, and the screen reloads the figures to review again.
+- A Record Payment must now carry its payment date in the database (it always has), so voiding a payment always checks that payment's own month and can never change a closed month's figure.
 - Migration `20270208140000_month_close_payments_received_recheck.sql` (local candidate, not applied). Proof: `node scripts/smoke/prove-month-close-payments-recheck-real-schema.mjs`.

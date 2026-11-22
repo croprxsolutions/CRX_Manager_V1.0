@@ -274,13 +274,13 @@ function seed() {
       VALUES ('${FEE_INVOICE}', '[PROVER] fee', 100, 500, 50000, 20000, true);
     INSERT INTO public.commissions (customer_id, job_id, invoice_id, recipient, commission_amount, status, order_date)
       VALUES ('${CUSTOMER}', gen_random_uuid(), '${FEE_INVOICE}', '[PROVER] rep', 30, 'pending', DATE '2025-11-25');
-    -- Record Payment: a $1,500 check ($300 of it kept as prepay), a voided payment, one with no date recorded the
-    -- evening of Nov 30 Chicago (Dec 1 UTC), one with no date recorded the evening of Oct 31 Chicago (Nov 1 UTC).
+    -- Record Payment: a $1,500 check ($300 of it kept as prepay), a voided payment, one dated Nov 30 but recorded the
+    -- evening of Nov 30 Chicago (Dec 1 UTC), one dated Oct 31 recorded that evening (Nov 1 UTC): the date wins.
     INSERT INTO public.allocation_sets (entity_type, entity_id, customer_id, is_active, total_payment_cents, total_allocated_cents, payment_date, created_at) VALUES
       ('payment', gen_random_uuid(), '${CUSTOMER}', true, 150000, 120000, DATE '2025-11-10', '2025-11-10 15:00Z'),
       ('payment', gen_random_uuid(), '${CUSTOMER}', false, 99900, 99900, DATE '2025-11-12', '2025-11-12 15:00Z'),
-      ('payment', gen_random_uuid(), '${CUSTOMER}', true, 20000, 20000, NULL, '2025-12-01 03:00Z'),
-      ('payment', gen_random_uuid(), '${CUSTOMER}', true, 7000, 7000, NULL, '2025-11-01 04:00Z');
+      ('payment', gen_random_uuid(), '${CUSTOMER}', true, 20000, 20000, DATE '2025-11-30', '2025-12-01 03:00Z'),
+      ('payment', gen_random_uuid(), '${CUSTOMER}', true, 7000, 7000, DATE '2025-10-31', '2025-11-01 04:00Z');
     -- Legacy payments: one live $50.00, one deleted $77.00.
     INSERT INTO public.payments (order_id, customer_id, payment_date, amount, recorded_by, deleted_at) VALUES
       ('${ORDER}', '${CUSTOMER}', DATE '2025-11-15', 50.00, '${ADMIN}', NULL),
@@ -320,22 +320,32 @@ async function main() {
   assert.equal(before.review_token, undefined);
   console.log('[case] BEFORE: Month-End shows 1 payment / $50.00; the close receipt saves $127.00 (a deleted payment counted); Record Payment money missing');
 
-  // 2. Apply; a second apply is refused.
+  // 2. Apply; a second apply is refused. An undated payment set stops the apply (none live).
   stageText('candidate.sql', lf(CANDIDATE));
+  const UNDATED = `INSERT INTO public.allocation_sets (entity_type, entity_id, customer_id, is_active, total_payment_cents, total_allocated_cents, payment_date)
+    VALUES ('payment', gen_random_uuid(), '${CUSTOMER}', true, 1, 1, NULL);`;
+  raw(UNDATED);
+  const blocked = apply('candidate.sql');
+  assert.notEqual(blocked.status, 0);
+  assert.match(blocked.output, /MONTH_CLOSE_RECHECK_PREFLIGHT: 1 payment set\(s\) have no payment_date/);
+  raw(`DELETE FROM public.allocation_sets WHERE total_payment_cents = 1;`);
   const first = apply('candidate.sql');
   assert.equal(first.status, 0, first.output);
   const second = apply('candidate.sql');
   assert.notEqual(second.status, 0);
   assert.match(second.output, /MONTH_CLOSE_RECHECK_PREFLIGHT: already applied/);
-  console.log('[case] the candidate applies; a second apply stops at its preflight');
+  const undatedAfter = psql(`SET session_replication_role = replica; ${UNDATED}`, { user: 'supabase_admin', allowFailure: true });
+  assert.notEqual(undatedAfter.status, 0);
+  assert.match(undatedAfter.stderr, /allocation_sets_payment_has_date/);
+  console.log('[case] an undated payment set stops the apply; the candidate applies; a second apply stops at its preflight; afterwards a payment set without a date is refused (so a void always checks the month of the payment)');
 
-  // 3. Payments received (expected from the rule): $1,500 payment + $200 undated (Nov 30 Chicago) + $50 legacy
+  // 3. Payments received (expected from the rule): $1,500 payment + $200 dated Nov 30 + $50 legacy
   //    + check #5150 $300 (two buckets = one payment, even with a corrected reference) + $40 left of the deleted check.
   const after = JSON.parse(okProbe(month(...NOV), ADMIN));
   console.log('[after] Nov payments', JSON.stringify(after.payments));
   assert.deepEqual(after.payments, { count: 5, total_cents: 209000 });
   const oct = JSON.parse(okProbe(month('2025-10-01', '2025-10-31'), ADMIN));
-  assert.deepEqual(oct.payments, { count: 1, total_cents: 7000 }, 'the undated payment recorded Oct 31 evening Chicago is October');
+  assert.deepEqual(oct.payments, { count: 1, total_cents: 7000 }, 'the payment dated Oct 31 (recorded Nov 1 UTC) is October');
   for (const k of ['invoices', 'orders', 'deliveries', 'applications', 'commissions', 'ar_balance_cents', 'period_start', 'period_end']) {
     assert.deepEqual(after[k], before[k], `${k} unchanged`);
   }

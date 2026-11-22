@@ -335,7 +335,6 @@ export default function MonthEndClose() {
         setReviewedPayments(false);
         setReviewedCommissions(false);
         setReviewedNeedsPricing(false);
-        setShowCloseModal(false);
         toast('error', "This month's figures changed since you reviewed them. Review the updated figures, then close again.");
       } else if (refusal === 'reload') {
         toast('error', 'The app was updated. Reload this page, then review and close the month again.');
@@ -345,7 +344,8 @@ export default function MonthEndClose() {
         Sentry.captureException(toSentryError(err), { tags: { source: 'critical_action', action: 'close_accounting_period' } });
         toast('error', sanitizeError(err));
       }
-      // Any refusal may mean the month changed (or closed elsewhere): always show current figures.
+      // Any refusal may mean the month changed (or closed elsewhere): show current figures and the checklist.
+      setShowCloseModal(false);
       fetchData();
     }
     setClosing(false);

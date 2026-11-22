@@ -25,7 +25,7 @@ saving the figures current at the click") says the payments-received follow-up m
 
 1. **Payments received** (summary `payments.count/total_cents` and receipt `payments_received_cents`) = one helper
    `_month_payments_received_20270208(start, end)`:
-   - active `allocation_sets` `entity_type='payment'`, `COALESCE(payment_date, Chicago created_at date)` in the month:
+   - active `allocation_sets` `entity_type='payment'`, `payment_date` in the month (a new CHECK `allocation_sets_payment_has_date` makes it required for payment sets; Sol round 2):
      `total_payment_cents` (the whole check, including any overpayment part);
    - prepayment checks: `prepay_credits.source_type='check'`, Chicago `created_at` date in the month, current
      `original_amount_cents` > 0; one check = distinct (customer, created_at, source_reference): every split of one check is written by one call, so shares `created_at` (transaction time) and `source_reference` (set once from the check number, never edited; the editable `reference_number` is left out);
@@ -130,3 +130,19 @@ passes before the apply; split not needed (memory rule exception for already-liv
   edit made just after the close, which DECISION_LOG 2026-11-22 accepts: the screen figure moves, the saved receipt
   does not); prepay writers are Taha's and take no month lock today. MED "cutover window": accepted above (State and
   failure), stated in the PR.
+
+## Sol round 2 (2026-11-22) and how each settled
+
+- **Fixed:** HIGH (round 1 #2 again) "a void of an undated payment checks today's month": the migration adds CHECK
+  `allocation_sets_payment_has_date` (payment sets must carry `payment_date`; the apply stops if any is undated; live
+  0 of 1), and the report uses `payment_date` only, so the report month and the month `void_payment` locks are always
+  the same; a void in a closed month is refused. No writer function changed (`allocate_payment` already always sets
+  it). LOW: any failed close closes the confirmation dialog so the cleared checklist is visible.
+- **Refuted / accepted (evidence):** MED legacy rounding/NaN: `public.payments` is marked superseded with zero writers
+  (`20260809170700`), 0 rows live; round 1 asked for sum-first, round 2 for per-row: either way $0 today. MED two checks
+  with the same customer, check number and transaction: Prepayment Manager saves one check per call; the same check
+  number twice in one call is not a real entry. MED a prepay entry left uncommitted across midnight: same class as
+  round 1 HIGH #3 (prepay writers are Taha's and take no month lock; the saved receipt is not rewritten, the screen
+  figure moves, as DECISION_LOG 2026-11-22 accepts). MED rush-order count not in the token: screen-only checklist item,
+  declined above (#16-#19). MED cutover: accepted (State and failure). LOW number precision: needs a total above
+  $90 trillion.

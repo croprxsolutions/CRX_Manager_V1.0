@@ -1235,7 +1235,7 @@ try {
       `every listed protected file is protected by the regex too: ${file}`,
     );
   }
-  assert.equal(PROTECTED_HARNESS_FILES.length, 24, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
+  assert.equal(PROTECTED_HARNESS_FILES.length, 25, "the protected file list has one entry per alternative in PROTECTED_HARNESS_SOURCE");
   // session-context-reminder writes the rules every later Codex session starts from,
   // so Codex may not edit it either.
   for (const file of [".claude/hooks/session-context-reminder.mjs", ".claude\\hooks\\session-context-reminder.mjs", ".claude/hooks/../hooks/session-context-reminder.mjs"]) {

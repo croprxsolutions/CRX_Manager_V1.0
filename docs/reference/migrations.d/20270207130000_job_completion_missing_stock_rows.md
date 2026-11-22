@@ -1,3 +1,0 @@
-**LOCAL CANDIDATE — NOT APPLIED.** Job completion creates a missing Main Warehouse stock row in product order and locks it, the way a delivery completion does, so two jobs finishing together no longer collide: `20270207130000_job_completion_missing_stock_rows.sql` (SQL sha256: `a26e9b2c30f571fba94a6c4be1bbca49cde98fa39f6d46d01412ce4dde1fd8a0`). Replaces `_lock_job_stock_rows_in_order` only. The deduction, the receipt, and who may complete a job stay as they are. Contract: `docs/plans/2026-11-21-job-completion-missing-stock-rows-CONTRACT.md`. Rollback: `scripts/smoke/job-completion-missing-stock-rows-reverse.sql`.
-
-Not applied anywhere. Staging applies it after the merge.

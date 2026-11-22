@@ -131,7 +131,19 @@
 > PR's migrations) returns CLEAN (`records_check` `sol`; Sol HIGH x2 on the PR that added this). `carriedSolProof()` accepts `post_apply` only with an unchanged base, so every gate that
 > accepts the other carries accepts it on the same head/base/24-hour terms.
 >
-> **Owner-accepted Sol findings (Mason, 2026-11-10).** When Sol answers BLOCKERS, the wrapper saves its numbered
+> **Owner-accepted Sol findings (Mason, 2026-11-10; plain-word skips 2026-11-21).** Since 2026-11-21 `owner-accept-sol-finding.mjs
+> <n> ...` (any finding he disagrees with: a business call, or a bug or gap too small or impractical to affect the business; an owner-accepted proof counts only for its own PR, by number and repository address, at its exact head, at merge and migration apply, Codex merge guard included) builds ONE request (`crx-owner-sol-skip-v1`) for several findings, its deadline never past the Sol
+> run's own 24 hours, and Mason answers in plain words with no code: the whole message `yes, <reason>` to the summary's "do you accept the risk?"
+> (2026-11-22; the reason passes `reasonProblem` and is logged), or `skip`, `skip 1 3`, `I disagree`, `I don't want that`,
+> `don't fix`, `accept` and the like (`skipFromReply`; a bare `yes`, `ok`, `move on`, `merge it`, questions and mixed text skip nothing;
+> `that` or `it` skips only when the list holds one finding).
+> The reply hook records it only when a skip request built in this session is waiting and the agent's last message is exactly
+> its summary (`resolvePlainReply` with `purposes`, the same check as the migration `I approve`), into one receipt per reply
+> (`owner-approval-sol-skip-<head>-<code>.json`, `selected` numbers), which `verifySolSkip` re-checks against the Sol run, the
+> findings shown, his reply read back from the transcript, and the agent's last message before it being this request's
+> summary (`assertSkipShown`). The log records a fixed sentence, never free text. The older flow
+> below (one request per finding, `accept <code> <reason>`) only describes requests built before then (such a reply names no repository, so since 2026-11-22 the carry refuses it and Mason is asked again); the script
+> now always builds the skip request. When Sol answers BLOCKERS, the wrapper saves its numbered
 > `SOL_FINDING` list as `codex-review-blockers-<head>.json` (review-proof-guard protects it) only when Sol's
 > `SOL_FINDING_COUNT` line matches the list; any later run on that head deletes it. For a finding Mason judges a
 > business non-issue, `node scripts/owner-accept-sol-finding.mjs <n>` (clean checkout at that head, open PR into
@@ -353,7 +365,7 @@ These run when Mason submits a prompt, BEFORE Claude reads it. They inject extra
 |------|------------------|-----|
 | `ship-intent-reminder.mjs` | **Removed 2026-10-29 (Mason)** — unwired and deleted | Formerly reminded Claude to drive build/fix/ship messages through `/ship`; `AGENTS.md` routes that work instead |
 
-`release-pass-prompt.mjs` (Claude only, since 2026-11-20) records Mason's `ship the release` / `go live #<n>` as a 24-hour pass for that session (`release-pass-lib.mjs`); `pr-merge-guard.mjs` then lets that session merge the release or hotfix into `main` and the back-merge into `staging`, and `migration-landing-gate-lib.mjs` accepts it in place of Taha's `Ready to merge:` comment. `stop the release` withdraws it. Every other merge and apply gate still runs. The same day, `owner-approval-prompt.mjs` started accepting a plain `yes` (still only right after the request it names), approvals last 24 hours, and they survive the PR head moving (the SQL hash still binds); a destructive migration no longer blocks a `staging` merge.
+Mason's release pass (`ship the release` / `go live #<n>`, added 2026-11-20 by #2098) was removed on 2026-11-22 (Mason, after Sol kept finding new holes in it): `release-pass-prompt.mjs` is no longer routed, and `pr-merge-guard.mjs` and `migration-landing-gate-lib.mjs` again leave merging the release, hotfixes and the back-merge to Taha or Mason, and a live apply waits for Taha's own `Ready to merge:` comment. Kept from 2026-11-20: `owner-approval-prompt.mjs` started accepting a plain `yes` (still only right after the request it names), approvals last 24 hours, and they survive the PR head moving (the SQL hash still binds); a destructive migration no longer blocks a `staging` merge.
 
 `hold-latch-prompt.mjs` is also a UserPromptSubmit hook — see the Correction-mined guards table below for what it does.
 

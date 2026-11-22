@@ -17,7 +17,7 @@ test('saving an open product page keeps a newer Label Review commit', async ({ p
     const steps: Record<string, (a: never) => Promise<unknown>> = {
       insert: async (name: string) => {
         const { data, error } = await supabase.from('products').insert({
-          product_name: name, category: 'Herbicide', use_timings: [], epa_registration: '100-1',
+          product_name: name, product_form: 'liquid', inventory_unit: 'Gal', category: 'Herbicide', use_timings: [], epa_registration: '100-1',
           signal_word: 'Caution', rei_hours: 12, phi_days: 30, max_label_rate: 16, max_label_rate_unit: 'fl oz/acre',
         }).select('id').single();
         if (error || !data) throw new Error(error?.message ?? 'Product insert returned no row');

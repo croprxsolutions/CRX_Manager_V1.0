@@ -7257,3 +7257,20 @@ Original text:
 status or vendor; `NewVendorBill.tsx` fills the ordered total and keeps the previous vendor when the PO's vendor text
 matches none. A short shipment can be billed and paid in full. 0 of 6 live bills have a PO, so nothing has gone wrong
 yet. Fix: refuse cancelled POs and mismatched vendors; confirm when billed exceeds received value.
+
+### Closed 2026-11-21 — KI-99
+
+Fixed by PR #1883, migration `20270116100000_ki99_void_reverses_write_offs`, shipped in release #1990 and applied live (ledger `20261121055645`). Read-only check 2026-11-21: the installed `_void_invoice_split_provenance_impl_20260719` marks each active write-off reversed when its invoice is voided; production has 0 write-offs. Evidence: [2026-11-21 audit verification](../../audits/2026-11-21-quote-to-invoice-audit-verification.md).
+
+Original text:
+
+### KI-99 — Voiding an invoice leaves two money records out of step
+**MED · FIX IN REVIEW (not live) · money · found 2026-11-04 (Fix Delivery reviews, PR #1421) · Claude**
+Both are in the live `void_invoice`, so they affect the ordinary Void Invoice button, not only Fix Delivery.
+- **Write-off stays active.** Voiding a posted invoice that has a write-off sets the invoice's write-off amount to
+  zero but leaves its `write_offs` record active (not marked reversed), so the customer statement can still show it.
+  Until the fix is live, reverse the write-off before voiding. Fix Delivery refuses these invoices. Fix (Mason,
+  2026-11-14: auto-reverse): `20270116100000_ki99_void_reverses_write_offs.sql` marks each active write-off reversed
+  when its invoice is voided, after checking its Chicago month is open. Live had 0 write-offs (2026-11-14).
+- **Credit month read in UTC — FIXED LIVE 2026-11-07.** `20261206110000` (KI-18) checks each credit's Chicago
+  month; confirmed in the live body 2026-11-14.

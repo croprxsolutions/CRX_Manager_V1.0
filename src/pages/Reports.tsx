@@ -15,7 +15,7 @@ import { logActivity } from '../lib/activityLogger';
 import { unavailableReasonText } from '../lib/historicalBalanceReasons';
 import { exportToCSV, fmtCSV, fmtDateCSV, formatProductMoneyCSV } from '../lib/csvExport';
 import { formatCents, formatExactUSD, formatUSD } from '../lib/money';
-import { inventoryValueNote, summarizeInventoryValue } from '../lib/inventoryValue';
+import { inventoryRowLeftOut, inventoryValueNote, summarizeInventoryValue } from '../lib/inventoryValue';
 import { parseDollarsToCentsSigned } from '../lib/parseCents';
 import LogbookReport from '../components/reports/LogbookReport';
 import ProductSearchPicker from '../components/products/ProductSearchPicker';
@@ -54,6 +54,9 @@ type CustomerBalanceDatabaseRow = Database['public']['Functions']['get_customer_
 // reports to everyone else, so non-admins never see the tabs.
 const ADMIN_ONLY_FINANCIAL_TABS: ReadonlySet<FinancialTab> = new Set(['pnl', 'gross_sales', 'commission_balance']);
 const ADMIN_ONLY_OPERATIONAL_TABS: ReadonlySet<OperationalTab> = new Set(['inventory_cost', 'stale_costs']);
+// KI-133/KI-135: these reports are order-based (booked), not invoice-based like Bottom Line P&L.
+const BOOKED_SALES_NOTE = 'Booked sales: confirmed and fulfilled orders, including lines not yet delivered; credits are not subtracted. '
+  + 'Profit and margin use the saved pricing cost, not the supplier bill. Bottom Line P&L uses posted invoices.';
 // Profit by customer / product / month is profit; a rep keeps only their own commissions.
 const ADMIN_ONLY_PROFIT_TABS: ReadonlySet<ProfitTab> = new Set(['customer', 'product', 'revenue']);
 const NO_COMMISSIONS: CommissionRow[] = [];
@@ -1137,7 +1140,7 @@ export default function Reports() {
     if (profitTab === 'customer') {
       exportToCSV(customerData, [
         { key: 'farm_name', header: 'Customer' },
-        { key: 'total_revenue', header: 'Revenue', format: fmtCSV },
+        { key: 'total_revenue', header: 'Booked Sales', format: fmtCSV },
         { key: 'total_profit', header: 'Profit', format: fmtCSV },
         { key: 'margin_pct', header: 'Margin %', format: (v) => `${Number(v).toFixed(1)}%` },
         { key: 'order_count', header: 'Orders' },
@@ -1145,7 +1148,7 @@ export default function Reports() {
     } else if (profitTab === 'product') {
       exportToCSV(productData, [
         { key: 'product_name', header: 'Product' },
-        { key: 'total_revenue', header: 'Revenue', format: fmtCSV },
+        { key: 'total_revenue', header: 'Booked Sales', format: fmtCSV },
         { key: 'total_profit', header: 'Profit', format: fmtCSV },
         { key: 'units_sold', header: 'Units Sold' },
         { key: 'margin_pct', header: 'Margin %', format: (v) => `${Number(v).toFixed(1)}%` },
@@ -1163,7 +1166,7 @@ export default function Reports() {
     } else if (profitTab === 'revenue') {
       exportToCSV(revenueData, [
         { key: 'month', header: 'Month' },
-        { key: 'revenue', header: 'Revenue', format: fmtCSV },
+        { key: 'revenue', header: 'Booked Sales', format: fmtCSV },
         { key: 'profit', header: 'Profit', format: fmtCSV },
         { key: 'orders', header: 'Orders' },
       ], 'revenue_summary');
@@ -1183,7 +1186,7 @@ export default function Reports() {
     } else if (financialTab === 'gross_sales') {
       exportToCSV(grossSalesData as unknown as Record<string, unknown>[], [
         { key: 'group_name', header: grossSalesGroupBy.charAt(0).toUpperCase() + grossSalesGroupBy.slice(1) },
-        { key: 'total_revenue', header: 'Revenue', format: fmtCSV },
+        { key: 'total_revenue', header: 'Booked Sales', format: fmtCSV },
         { key: 'total_cost', header: 'COGS', format: fmtCSV },
         { key: 'gross_profit', header: 'Gross Profit', format: fmtCSV },
         { key: 'margin_pct', header: 'Margin %', format: (v) => `${Number(v).toFixed(1)}%` },
@@ -1238,13 +1241,18 @@ export default function Reports() {
         { key: 'total_amount', header: 'Total', format: (v) => (v == null ? '' : fmtCSV(v)) },
       ], 'chemical_history');
     } else if (operationalTab === 'inventory_cost') {
-      exportToCSV(inventoryCostData as unknown as Record<string, unknown>[], [
+      // Left-out rows carry no value, so the column sums to the total on screen (KI-135).
+      exportToCSV(inventoryCostData.map((r) => {
+        const leftOut = inventoryRowLeftOut(r.quantity_available, r.unit_cost);
+        return { ...r, total_cost_value: leftOut ? null : r.total_cost_value, in_total: leftOut ? `No - ${leftOut}` : 'Yes' };
+      }) as unknown as Record<string, unknown>[], [
         { key: 'product_name', header: 'Product' },
         { key: 'sku', header: 'SKU' },
         { key: 'category', header: 'Category' },
         { key: 'quantity_available', header: 'Qty Available' },
         { key: 'unit_cost', header: 'Unit Cost', format: fmtCSV },
-        { key: 'total_cost_value', header: 'Total Value', format: fmtCSV },
+        { key: 'total_cost_value', header: 'Total Value', format: (v) => (v == null ? '' : fmtCSV(v)) },
+        { key: 'in_total', header: 'In Total' },
         { key: 'below_reorder', header: 'Below Reorder', format: (v) => v ? 'Yes' : 'No' },
       ], 'inventory_cost');
     } else if (operationalTab === 'stale_costs') {
@@ -1302,7 +1310,7 @@ export default function Reports() {
   // ─── Column definitions ─────────────────────────────────────
   const customerCols: Column<CustomerProfit>[] = [
     { key: 'farm_name', header: 'Customer', sortable: true, render: (r) => <span className="font-medium text-nav-dark">{r.farm_name}</span> },
-    { key: 'total_revenue', header: 'Revenue', sortable: true, render: (r) => <span className="font-mono">{fmt(r.total_revenue)}</span> },
+    { key: 'total_revenue', header: 'Booked Sales', sortable: true, render: (r) => <span className="font-mono">{fmt(r.total_revenue)}</span> },
     { key: 'total_profit', header: 'Profit', sortable: true, render: (r) => <span className="font-mono text-crx-green">{fmt(r.total_profit)}</span> },
     { key: 'margin_pct', header: 'Margin', sortable: true, render: (r) => `${r.margin_pct.toFixed(1)}%` },
     { key: 'order_count', header: 'Orders', sortable: true },
@@ -1310,7 +1318,7 @@ export default function Reports() {
 
   const productCols: Column<ProductProfit>[] = [
     { key: 'product_name', header: 'Product', sortable: true, render: (r) => <span className="font-medium text-nav-dark">{r.product_name}</span> },
-    { key: 'total_revenue', header: 'Revenue', sortable: true, render: (r) => <span className="font-mono">{fmt(r.total_revenue)}</span> },
+    { key: 'total_revenue', header: 'Booked Sales', sortable: true, render: (r) => <span className="font-mono">{fmt(r.total_revenue)}</span> },
     { key: 'total_profit', header: 'Profit', sortable: true, render: (r) => <span className="font-mono text-crx-green">{fmt(r.total_profit)}</span> },
     { key: 'units_sold', header: 'Units Sold', sortable: true },
     { key: 'margin_pct', header: 'Margin', sortable: true, render: (r) => `${r.margin_pct.toFixed(1)}%` },
@@ -1337,7 +1345,7 @@ export default function Reports() {
 
   const revenueCols: Column<RevenueSummary>[] = [
     { key: 'month', header: 'Month', sortable: true },
-    { key: 'revenue', header: 'Revenue', sortable: true, render: (r) => <span className="font-mono">{fmt(r.revenue)}</span> },
+    { key: 'revenue', header: 'Booked Sales', sortable: true, render: (r) => <span className="font-mono">{fmt(r.revenue)}</span> },
     { key: 'profit', header: 'Profit', sortable: true, render: (r) => <span className="font-mono text-crx-green">{fmt(r.profit)}</span> },
     { key: 'orders', header: 'Orders', sortable: true },
   ];
@@ -1350,7 +1358,7 @@ export default function Reports() {
 
   const grossSalesCols: Column<GrossSalesRow>[] = [
     { key: 'group_name', header: grossSalesGroupBy.charAt(0).toUpperCase() + grossSalesGroupBy.slice(1), sortable: true, render: (r) => <span className="font-medium text-nav-dark">{r.group_name}</span> },
-    { key: 'total_revenue', header: 'Revenue', sortable: true, render: (r) => <span className="font-mono">{fmt(r.total_revenue)}</span> },
+    { key: 'total_revenue', header: 'Booked Sales', sortable: true, render: (r) => <span className="font-mono">{fmt(r.total_revenue)}</span> },
     { key: 'total_cost', header: 'COGS', sortable: true, render: (r) => <span className="font-mono">{fmt(r.total_cost)}</span> },
     { key: 'gross_profit', header: 'Gross Profit', sortable: true, render: (r) => <span className="font-mono text-crx-green">{fmt(r.gross_profit)}</span> },
     { key: 'margin_pct', header: 'Margin', sortable: true, render: (r) => `${r.margin_pct.toFixed(1)}%` },
@@ -1407,7 +1415,10 @@ export default function Reports() {
     { key: 'quantity_available', header: 'Qty', sortable: true },
     { key: 'net_available', header: 'Net Available', sortable: true, render: (r) => <span className="font-mono">{r.net_available}</span> },
     { key: 'unit_cost', header: 'Unit Cost', render: (r) => <span className="font-mono">{fmt(r.unit_cost)}</span> },
-    { key: 'total_cost_value', header: 'Total Value', sortable: true, render: (r) => <span className="font-mono font-medium">{fmt(r.total_cost_value)}</span> },
+    { key: 'total_cost_value', header: 'Total Value', sortable: true, render: (r) => {
+      const leftOut = inventoryRowLeftOut(r.quantity_available, r.unit_cost);
+      return leftOut ? <span className="text-xs text-secondary">{leftOut === 'below zero' ? 'Below zero, not counted' : 'No cost, value unknown'}</span> : <span className="font-mono font-medium">{fmt(r.total_cost_value)}</span>;
+    } },
     { key: 'below_reorder', header: 'Status', render: (r) => r.below_reorder ? <Badge variant="error">Low Stock</Badge> : <Badge variant="success">OK</Badge> },
   ];
 
@@ -1480,7 +1491,7 @@ export default function Reports() {
     { key: 'customer', label: 'By Customer' },
     { key: 'product', label: 'By Product' },
     { key: 'commission', label: 'Commissions' },
-    { key: 'revenue', label: 'Revenue Summary' },
+    { key: 'revenue', label: 'Booked Sales Summary' },
   ] as { key: ProfitTab; label: string }[]).filter((t) => isAdmin || !ADMIN_ONLY_PROFIT_TABS.has(t.key));
 
   const financialTabs = ([
@@ -1614,6 +1625,8 @@ export default function Reports() {
 
           {reportFailedBanner}
 
+          {profitTab !== 'commission' && <p className="text-xs text-secondary">{BOOKED_SALES_NOTE}</p>}
+
           {profitTab === 'commission' && (
             <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
               <div className="flex items-center gap-4">
@@ -1676,6 +1689,8 @@ export default function Reports() {
               {endDate > commissionAsOfDate && ' The selected range ends in the future, so this report is capped at today.'}
             </div>
           )}
+
+          {isAdmin && financialTab === 'gross_sales' && <p className="text-xs text-secondary">{BOOKED_SALES_NOTE}</p>}
 
           {isAdmin && financialTab === 'commission_balance' && commissionReportError && (
             <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
@@ -1778,7 +1793,7 @@ export default function Reports() {
             return (
             <div className="flex flex-wrap items-center gap-6 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
               <span className="text-sm text-blue-800">
-                <span className="font-semibold">Total Inventory Value:</span>{' '}
+                <span className="font-semibold">Inventory value at price-list cost:</span>{' '}
                 {formatCents(valuation.valueCents)}
                 {note && <span className="ml-2 text-xs">({note})</span>}
               </span>

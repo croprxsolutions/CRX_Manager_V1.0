@@ -1012,6 +1012,9 @@ has the real as-of figure. Fix: relabel "Current AR (today)" or reuse `get_ar_ag
 
 ### KI-133 — Profitability and Gross Sales report booked orders as "revenue" without saying so
 
+> **Fix in review (Lane E, 2026-11-22):** the reports say "Booked Sales" with a one-line basis note. Drafts need no
+> filter: the database refuses a draft order status (`orders_status_check`), so Gross Sales cannot include one.
+
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-26.
 
 **LOW · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 decision conflicts) · unassigned**
@@ -1035,6 +1038,9 @@ same share. Fix later: enforce the payable rule, per sale and per paid share, in
 - **Commission basis ignores the standing discount (re-verified 2026-11-21, [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)).** Order commission is figured from `orders.total_profit` before the standing grower discount (`20270117130000_standing_discount_in_order_profit.sql` ~L21 says "commission after the discount is its own planned change"), while the invoice and profit reports subtract the discount. Not tracked elsewhere; latent on production while the billing switch is off. Separate from the payout gap above (payout checks pending status ~L1154-1183 and header-to-items balance ~L744-761 in `20261204100000`, but no customer-payment eligibility). To-Do 8.5 needs two distinct acceptance checks: commission is figured on profit after the standing discount, and it is released in proportion to customer payments.
 
 ### KI-135 — "Inventory Value" label: relabel as pricing-basis value (D12 item 7)
+
+> **Fix in review (Lane E, 2026-11-22):** labels say "price-list cost"; the per-row report and CSV mark rows left out of
+> the total (CSV value blank, "In Total" column); profit and margin carry the saved-pricing-cost note.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-27.
 

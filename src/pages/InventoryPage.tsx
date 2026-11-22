@@ -1482,7 +1482,7 @@ export default function InventoryPage() {
     { label: 'Delivered YTD', value: totalDeliveredYTD, color: 'bg-gray-50 text-gray-600', icon: Package },
     // Valued at cost, so admin-only (cost is admin-only, Mason 2026-10-15; the server
     // no longer sends non-admins current_cost, which would show a false $0).
-    ...(showInventoryCost ? [{ label: 'Inventory Value', value: valuation.valueCents, color: 'bg-emerald-50 text-emerald-600', icon: Package, format: 'cents' as const, note: inventoryValueNote(valuation) }] : []),
+    ...(showInventoryCost ? [{ label: 'Inventory Value (price-list cost)', value: valuation.valueCents, color: 'bg-emerald-50 text-emerald-600', icon: Package, format: 'cents' as const, note: inventoryValueNote(valuation) }] : []),
   ];
 
   const filteredProducts = products.filter((p) =>

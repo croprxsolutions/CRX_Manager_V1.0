@@ -49,7 +49,7 @@ import { Sentry } from '../lib/sentry';
 import { fetchDeliveryFarm } from '../lib/driverFarms';
 import {
   RECEIPT_SENDING_NOW_MESSAGE, closeDeliveryReceipt, isReceiptSendingNow, receiptCloseScope, receiptMayAlreadyBeSent,
-  type ReceiptCloseResult,
+  receiptQueuedAt, sameReceipt, type ReceiptCloseResult,
 } from '../lib/receiptsToCheck';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
@@ -1479,20 +1479,19 @@ export default function DeliveryDetail() {
     setResendCopyCheck(null);
     setSendingEmail(true);
     try {
-      if (confirmedFor !== delivery.id) {
-        let paused: ReceiptCloseResult;
-        try {
-          const scope = receiptCloseScope(delivery.id, 'manual_send');
-          paused = await closeDeliveryReceipt(delivery.id, 'manual_send', receiptCloseIdem.getKeyFor(scope));
-          receiptCloseIdem.resetKeyFor(scope);
-        } catch (err: unknown) {
-          if (isReceiptSendingNow(err)) { toast('warning', RECEIPT_SENDING_NOW_MESSAGE); return; }
-          throw err;
-        }
-        // The office moved to another delivery while this answer was on its way: send nothing, show nothing.
-        if (signatureRouteIdRef.current !== delivery.id) return;
-        if (receiptMayAlreadyBeSent(paused)) { setResendCopyCheck(paused); return; }
+      // Always asked, a confirmed second copy too: the server refuses a delivery no longer completed (Sol HIGH).
+      let paused: ReceiptCloseResult;
+      try {
+        const scope = receiptCloseScope(delivery.id, 'manual_send');
+        paused = await closeDeliveryReceipt(delivery.id, 'manual_send', receiptCloseIdem.getKeyFor(scope));
+        receiptCloseIdem.resetKeyFor(scope);
+      } catch (err: unknown) {
+        if (isReceiptSendingNow(err)) { toast('warning', RECEIPT_SENDING_NOW_MESSAGE); return; }
+        throw err;
       }
+      // The office moved to another delivery while this answer was on its way: send nothing, show nothing.
+      if (signatureRouteIdRef.current !== delivery.id) return;
+      if (confirmedFor !== delivery.id && receiptMayAlreadyBeSent(paused)) { setResendCopyCheck(paused); return; }
       // The current picks, so a brand corrected after completion shows (Brand PR B-3).
       const brandInfo = await loadDeliveryBrandInfo(delivery.id);
       // Moved to another delivery during the lookup: send nothing; the paused receipt stays listed (Luna MED).
@@ -1524,6 +1523,11 @@ export default function DeliveryDetail() {
       });
       toast('success', `Confirmation email sent to ${customer.email}`);
       try {
+        // Only the receipt this send covered: one queued again since stays owed and listed (Sol HIGH).
+        if (!sameReceipt(await receiptQueuedAt(delivery.id), paused.queued_at)) {
+          toast('warning', 'A new receipt was queued for this delivery while the email was sending. It was left on "Customer receipts to check".');
+          return;
+        }
         const scope = receiptCloseScope(delivery.id, 'handled');
         await closeDeliveryReceipt(delivery.id, 'handled', receiptCloseIdem.getKeyFor(scope));
         receiptCloseIdem.resetKeyFor(scope);

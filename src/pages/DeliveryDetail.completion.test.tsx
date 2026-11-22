@@ -516,7 +516,7 @@ describe('Invoices on this sale card', () => {
 describe('Email Confirmation and the server receipt queue', () => {
   const COMPLETED = { ...OPEN_DELIVERY, status: 'completed', completed_at: '2026-10-21T15:00:00Z', signed_by: 'Pat' };
   const answer = (over: Record<string, unknown> = {}) => ({
-    data: { delivery_id: 'del-1', outcome: 'paused', previous_status: 'pending', sent_at: null, send_authorized_at: null, ...over },
+    data: { delivery_id: 'del-1', outcome: 'paused', previous_status: 'pending', sent_at: null, send_authorized_at: null, queued_at: null, ...over },
     error: null,
   });
   const closeCalls = () => mockRpc.mock.calls.filter(([name]) => name === 'close_delivery_receipt').map(([, args]) => args.p_reason);
@@ -553,7 +553,8 @@ describe('Email Confirmation and the server receipt queue', () => {
     expect(mockSendEmail).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Send another copy' }));
     await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
-    expect(closeCalls()).toEqual(['manual_send', 'handled']); // no second pause on the confirmed copy
+    // The confirmed copy is asked again (the server re-checks the delivery is still completed), without a second dialog.
+    await waitFor(() => expect(closeCalls()).toEqual(['manual_send', 'manual_send', 'handled']));
   });
 
   it('while the server is emailing it, says to try again in a minute and sends nothing', async () => {
@@ -563,6 +564,43 @@ describe('Email Confirmation and the server receipt queue', () => {
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', 'The server is emailing this receipt right now. Try again in a minute.'));
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
+  it('a confirmed second copy sends nothing when the delivery was voided meanwhile (Sol HIGH)', async () => {
+    let calls = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name !== 'close_delivery_receipt') return Promise.resolve({ data: null, error: null });
+      calls += 1;
+      return Promise.resolve(calls === 1
+        ? answer({ outcome: 'sent', previous_status: 'sent', sent_at: '2026-10-21T15:05:00Z' })
+        : { data: null, error: { message: 'DELIVERY_NOT_COMPLETED: this delivery is not completed any more; do not send its receipt' } });
+    });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send another copy' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/DELIVERY_NOT_COMPLETED/)));
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it('never closes a receipt queued again while the hand send went out (Sol HIGH)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ queued_at: '2026-10-21T15:00:00+00:00' })));
+    mockSendEmail.mockImplementation(() => {
+      tables.data.delivery_receipt_queue = [{ created_at: '2026-10-21T15:09:00+00:00' }];
+      return Promise.resolve({ success: true });
+    });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/A new receipt was queued/)));
+    expect(closeCalls()).toEqual(['manual_send']);
+  });
+
+  it('closes the same receipt when only the timestamp format differs', async () => {
+    tables.data.delivery_receipt_queue = [{ created_at: '2026-10-21T15:00:00+00:00' }];
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ queued_at: '2026-10-21T10:00:00-05:00' })));
+    mockSendEmail.mockResolvedValue({ success: true });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(closeCalls()).toEqual(['manual_send', 'handled']));
+  });
+
 });
 
 describe('Email Confirmation warning belongs to its own delivery', () => {
@@ -585,4 +623,5 @@ describe('Email Confirmation warning belongs to its own delivery', () => {
     expect(screen.queryByRole('button', { name: 'Send another copy' })).not.toBeInTheDocument();
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
+
 });

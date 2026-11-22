@@ -1,4 +1,4 @@
-import { supabaseUntyped, assertRpcResult } from './db';
+import { supabase, supabaseUntyped, assertRpcResult } from './db';
 
 // KI-25 office list: needs_check receipts, plus owed ones still waiting after an hour. No age cut-off: an unsent
 // receipt stays listed until it is sent or marked handled, so a long sender outage cannot hide one (Sol, PR #1647).
@@ -18,6 +18,7 @@ export interface ReceiptCloseResult {
   previous_status: string | null;
   sent_at: string | null;
   send_authorized_at: string | null;
+  queued_at: string | null; // which receipt the answer is about (NULL: none queued)
 }
 
 // The key comes from useIdempotencyKey, scoped by receiptCloseScope, and is reset only after a confirmed answer.
@@ -44,3 +45,17 @@ export function isReceiptSendingNow(error: unknown) {
 }
 
 export const RECEIPT_SENDING_NOW_MESSAGE = 'The server is emailing this receipt right now. Try again in a minute.';
+
+// When this delivery's queue row was (re)queued, or null when it has none. Read right before the 'handled' close so a
+// receipt queued again during a hand send is never closed by it (Sol HIGH). shortcut: a client-side re-check, so a
+// re-queue in the milliseconds between this read and the close is not caught; closing it fully needs the RPC to take
+// the expected queued_at (a migration).
+export async function receiptQueuedAt(deliveryId: string): Promise<string | null> {
+  const { data, error } = await supabase.from('delivery_receipt_queue').select('created_at').eq('delivery_id', deliveryId).maybeSingle();
+  if (error) throw error;
+  return data?.created_at ?? null;
+}
+
+export function sameReceipt(a: string | null, b: string | null) {
+  return a === b || (a !== null && b !== null && Date.parse(a) === Date.parse(b));
+}

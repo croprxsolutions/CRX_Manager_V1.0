@@ -11,7 +11,7 @@ import {
 } from './receiptsToCheck';
 
 const result = (over = {}) => ({
-  delivery_id: 'd1', outcome: 'paused' as const, previous_status: 'pending', sent_at: null, send_authorized_at: null, ...over,
+  delivery_id: 'd1', outcome: 'paused' as const, previous_status: 'pending', sent_at: null, send_authorized_at: null, queued_at: null, ...over,
 });
 
 describe('receiptsToCheckFilter', () => {

@@ -100,7 +100,7 @@ BEGIN
   END IF;
   v_open := public._order_line_committed(p_order_item_id, p_exclude_delivery_item_id, p_exclude_delivery_id);
   IF COALESCE(v_oi.quantity_delivered, 0) + v_open + COALESCE(p_adding, 0) > COALESCE(v_oi.total_units_needed, 0) THEN
-    RAISE EXCEPTION 'DELIVERY_OVER_ORDER: % — only % left to schedule (ordered %, delivered %, on other open deliveries %: %). Cancel or reduce another delivery for this order first.',
+    RAISE EXCEPTION 'DELIVERY_OVER_ORDER: % — only % left to schedule (ordered %, delivered %, on other open deliveries %: %). Cancel another delivery for this order, or reduce one that has not started, first.',
       COALESCE(v_oi.product_name, 'this order line'),
       GREATEST(COALESCE(v_oi.total_units_needed, 0) - COALESCE(v_oi.quantity_delivered, 0) - v_open, 0),
       v_oi.total_units_needed, COALESCE(v_oi.quantity_delivered, 0), v_open,

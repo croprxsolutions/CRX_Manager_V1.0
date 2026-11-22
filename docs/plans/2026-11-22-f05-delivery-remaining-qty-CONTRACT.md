@@ -20,7 +20,7 @@ Read at `origin/staging` `9a1c5b2d9`. Source: staging audit 2026-11-21 (tracker 
 
 **Outcome.** For every order line: delivered + still scheduled on open (scheduled / in-progress) deliveries never exceeds ordered. Any write that would break that is refused with a plain message naming the deliveries involved; nothing is moved, deducted or drafted.
 
-**Smallest change.** (Revised after the challenge below: three triggers sharing one check.) One migration with two database triggers, so every path (New Delivery, Quick Delivery, Follow-up, edit, completion, start-and-complete, order edit, and any future path) is covered in one place instead of patching six functions:
+**Smallest change.** One migration with three database triggers sharing one check (the third, for a cancelled load reopened, was added after the challenge below), so every path (New Delivery, Quick Delivery, Follow-up, edit, completion, start-and-complete, order edit, and any future path) is covered in one place instead of patching six functions:
 
 1. **Delivery line trigger** (`delivery_items`, before insert, or update of quantity / order line / delivery): when the parent delivery is scheduled or in progress and the line's scheduled quantity goes up (or the line is new or re-linked), lock the order line and refuse if `delivered + other open lines for this order line + this line > ordered`. Error `DELIVERY_OVER_ORDER`.
 2. **Order line trigger** (`order_items`, before update of delivered or ordered quantity):
@@ -50,7 +50,7 @@ Files: `supabase/migrations/<new>_f05_order_line_quantity_guard.sql`, `scripts/s
 - Order cut vs scheduling at the same time: the order edit holds the order line lock; the schedule waits, then sees the new ordered quantity.
 - Two completions of loads for one line: the order line update serializes them; the second is refused if it would pass ordered.
 - Retry with the same key after a refusal: the refusal is not saved as a success, so a retry re-checks and is refused again (or succeeds if staff fixed the cause). Same key after success replays as today.
-- Deadlock risk: scheduling and edits add no new lock order (same delivery → order line order as the line-match trigger). Two rare new pairs exist: restoring a cancelled load (service role only, no screen) against closing an order's remainder or a completion. Postgres cancels one side and nothing is half-saved; same class as the completion-vs-scheduling cross-order Mason accepted (DECISION_LOG 2026-11-18 #1940). The apply locks the three tables up front in completion's order with a 5-second wait limit.
+- Deadlock risk: scheduling and edits add no new lock order (same delivery → order line order as the line-match trigger). Rare new pairs exist: restoring a cancelled load (service role only, no screen) against closing an order's remainder, a completion, or a line change on that same load (Luna r1; a cancelled load's lines are already refused or fail at once by the parent-lock trigger's NOWAIT). Postgres cancels one side and nothing is half-saved; same class as the completion-vs-scheduling cross-order Mason accepted (DECISION_LOG 2026-11-18 #1940). The apply locks the three tables up front in completion's order with a 5-second wait limit.
 
 **Undo.** Cancel and void lower quantities, so they are never blocked by the new triggers.
 

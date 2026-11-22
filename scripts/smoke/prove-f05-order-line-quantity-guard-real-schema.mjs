@@ -457,15 +457,16 @@ async function race() {
     SELECT public.complete_delivery(p_delivery_id => :'d1'::uuid, p_signed_by => 'No proof — recorded by office', p_performed_by => '${ADMIN}', p_quantities => jsonb_build_object(:'d1_line', 1), p_idempotency_key => 'f05-rb', p_evidence => 'no_proof', p_evidence_ref => '[PROVER] F05 race setup');
     COMMIT;`);
   const d1 = scalar(`SELECT id FROM public.deliveries WHERE order_id = '${O17}' AND status = 'completed';`);
-  const a = session(`BEGIN; ${AS_ADMIN} ${schedule(O17, L17, 1, 'f05-rc', 'd2')}
+  const a = session(`BEGIN; ${AS_ADMIN} SET LOCAL ROLE authenticated;
+    ${schedule(O17, L17, 1, 'f05-rc', 'd2')}
     SELECT pg_sleep(1.5); COMMIT;`);
-  const b = session(`BEGIN; ${AS_ADMIN} SELECT public.create_followup_delivery('${d1}', current_date, '${ADMIN}', 'f05-rd'); COMMIT;`, 400);
+  const b = session(`BEGIN; ${AS_ADMIN} SET LOCAL ROLE authenticated; SELECT public.create_followup_delivery('${d1}', current_date, '${ADMIN}', 'f05-rd'); COMMIT;`, 400);
   const [ra, rb] = await Promise.all([a, b]);
   assert.equal(ra.code, 0, ra.out);
   assert.notEqual(rb.code, 0, `the second scheduler must be refused:\n${rb.out}`);
   assert.match(rb.out, /DELIVERY_OVER_ORDER/);
   assert.equal(Number(scalar(openScheduled(L17))), 1);
-  console.log('[case 9b] two sessions at once (New Delivery holds the line, Follow-up waits): the Follow-up is refused after the wait; exactly one load holds the last unit');
+  console.log('[case 9b] two signed-in sessions at once, as the authenticated role (New Delivery holds the line, Follow-up waits): the Follow-up is refused after the wait; exactly one load holds the last unit');
 }
 
 function rollbackCases() {

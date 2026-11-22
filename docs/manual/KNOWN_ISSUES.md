@@ -1817,7 +1817,7 @@ From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-i
 defect below was also confirmed in source on `origin/staging` `17a72d0ee` on 2026-11-22. Field-app invoicing was out of scope.
 
 ### KI-200 — Return approval: the confirmation opens underneath the return details
-**MED · OPEN (reproduced twice on staging; source-confirmed) · returns · found 2026-11-22 (rehearsal CRXN-01) · unassigned (a local, uncommitted fix sits in `C:\CRX_wt\return-dialog`)**
+**MED · OPEN (reproduced twice on staging; source-confirmed) · returns · found 2026-11-22 (rehearsal CRXN-01) · unassigned (a local, uncommitted fix sits in `C:\CRX_wt\return-dialog`) · GitHub #2205**
 Opening a requested return and clicking Approve shows the Approve/Reject `ConfirmModal`, but it is rendered before
 the return-details `Modal` (`Returns.tsx` ~L1190 vs ~L1222), so the details window covers it and a normal click
 cannot reach it. Keyboard (Enter) still works and approved exactly once, with the expected single stock and credit
@@ -1825,7 +1825,7 @@ events. Fix: render the confirmation above the details window. Proof: a fresh re
 click, correct focus and Escape, exactly one approval, Approved after reload.
 
 ### KI-201 — Quote Compare drops a line when the same product is on two sections
-**MED · OPEN (reproduced in two browsers; source-confirmed) · quotes · found 2026-11-22 (rehearsal CRXN-02) · unassigned (Taha's quote area until 2026-12-15)**
+**MED · OPEN (reproduced in two browsers; source-confirmed) · quotes · found 2026-11-22 (rehearsal CRXN-02) · unassigned (Taha's quote area until 2026-12-15) · GitHub #2206**
 Compare matches version lines by `product_id` only (`QuoteBuilder.tsx` ~L5861-5862), so the same product on two
 sections collapses into one row with no section label. Rehearsal: the unchanged $24.00 line vanished while the other
 showed $26.00 to $25.00. Saved versions, PDFs and totals ($50.00 and $49.00) were correct, so this is display only.
@@ -1833,7 +1833,7 @@ Fix: match on saved line identity and show section names. Proof: change either l
 and totals still reconcile.
 
 ### KI-202 — Payment History: expanding a payment's invoice allocation fails to load
-**MED · OPEN (reproduced on staging; source-confirmed) · payments/finance (display) · found 2026-11-22 (rehearsal CRXN-04) · unassigned (Taha's billing area)**
+**MED · OPEN (reproduced on staging; source-confirmed) · payments/finance (display) · found 2026-11-22 (rehearsal CRXN-04) · unassigned (Taha's billing area) · GitHub #2207**
 The allocation read embeds `invoices ( invoice_number )` from `invoice_line_allocations` without naming which link to
 use (`PaymentHistory.tsx` ~L134-139). The table has two links to `invoices`, so the request is ambiguous and returns
 HTTP 300; the detail shows nothing. The $300.00 allocation itself was saved correctly. Fix: name the intended
@@ -1841,7 +1841,7 @@ relationship in the embed. Proof: the exact fixture and one using the other link
 and saved amounts and the customer balance are unchanged.
 
 ### KI-203 — Quick Delivery shows a dash for the unit of a product stocked in Gal
-**LOW (clarity) · OPEN (reproduced on staging; source-confirmed) · deliveries · found 2026-11-22 (rehearsal CRXN-03) · unassigned**
+**LOW (clarity) · OPEN (reproduced on staging; source-confirmed) · deliveries · found 2026-11-22 (rehearsal CRXN-03) · unassigned · GitHub #2208**
 The unit column shows the product's optional package size or a dash (`QuickDeliveryModal.tsx` ~L633), not the unit
 the line is sold in. A two-Gal entry priced $10.00 and the saved delivery, order and invoice all used Gal correctly.
 Fix: show the selected or implied sales unit before submit. Proof: a pack size and a converted unit on test records,
@@ -1850,7 +1850,7 @@ with visible quantity, saved units, stock and invoice reconciled.
 ### KI-204 — Staging rehearsal: workflow and screen improvements awaiting a decision
 **LOW · OPEN (suggestions, not defects; some need a Mason rule) · several areas · found 2026-11-22 · Mason decision where noted**
 Each worked correctly in the rehearsal; the ask is clarity. Detail and evidence: the report's "Workflow and UX
-improvement candidates" table.
+improvement candidates" table. To-Do section 17; decisions 34 and 35.
 - New Customer: point at the missing commission recipient beside the split row before Save.
 - Returns: show each stage (requested, approved, received, restocked, credited) and where the credit can be used next.
 - Credit and prepay: show available credit, amounts applied and remaining balance together; **Mason decision:** which
@@ -1875,7 +1875,7 @@ old section/line rows on the inspected path); signed driver delivery and offline
 device); other staff roles; unit/pack conversions, warehouse-wide counts and product retirement fixtures; period
 close/reopen; larger load and multi-page reports. Test-runner lessons (setup checks, readiness waits, never treating a
 timeout as a failed write, sanitized auth output, closing every queued case) are in the report's runner section.
-Close each gap when a rehearsal case proves it or it moves to its own KI.
+Close each gap when a rehearsal case proves it or it moves to its own KI. To-Do 16.12.
 
 ---
 

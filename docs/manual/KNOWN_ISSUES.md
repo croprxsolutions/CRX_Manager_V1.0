@@ -44,7 +44,7 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 | Fixed on staging, waiting for the production release | 6 |
 | Accepted numbered entries in the area sections (the full accepted list is the "Accepted risks" table) | 10 |
 | Backlog or roadmap entries, not defects | 3 |
-| Open items tracked only as GitHub issues or parked fixes (tables at the end of each area) | 60 |
+| Open items tracked only as GitHub issues or parked fixes (tables at the end of each area) | 59 |
 | Closed as FIXED (closed list below; 40 added 2026-11-21) | 65 |
 
 Fix first: see "Top 5" in [MASTER_FIX_PLAN.md](MASTER_FIX_PLAN.md).
@@ -345,7 +345,7 @@ reopens it.
 
 | ID | Sev | Status | What goes wrong | Owner | Plan |
 |---|---|---|---|---|---|
-| #2018 | LOW | Open | Drivers see an empty card instead of open unassigned deliveries (or the card should go). Mason chose the two-step plan (#2161, then #2162). | Agent (unassigned) | W3-06 |
+| #2018 | LOW | On staging, not live | Drivers saw an empty Available deliveries card; the card now loads open deliveries through get_available_deliveries_for_driver (#2165, on staging). Issue closed. | Agent (unassigned) | R-16 |
 | #2097 | MED | Check first | Stock held for a grower could release early. The expiry job does skip quotes with quantity_drawn > 0, so the described gap was not reproduced. | Taha (to 2026-12-15) | W2-45 |
 | #2065 | MED | Mason decision | Closing short releases holds and purchasing demand; needs Mason's rule (booking's rep or admin only). Guard currently blocks reps only when a live job exists. | Mason decision | D-01 |
 | #1960 | LOW | Check first | An old retried save may not get section ids back. | Taha (to 2026-12-15) | W3-50 |

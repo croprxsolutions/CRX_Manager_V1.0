@@ -5,7 +5,7 @@
 --   A field's billing split could carry a per-acre price (field_billing_defaults.price_override_cents) and a pricing
 --   note. When set, invoices billed that payer one "$X/acre" line with the chemicals at $0, and stored the rate on the
 --   invoice's share row (invoice_shares.price_per_acre_cents / pricing_note). Live 2026-11-22 (read-only): 0 of 6
---   split rows and 0 of 3 invoice shares carry a per-acre price or a note; no invoice line was ever billed per acre.
+--   split rows and 0 of 3 invoice shares carry a per-acre price or a note; 0 invoice lines are "grower share" lines.
 --
 -- WHAT: both tables refuse a per-acre price and a pricing note (CHECK, validated):
 --   - field_billing_defaults: every per-acre billing path reads its price from here, so none can be reached again;
@@ -16,8 +16,10 @@
 -- NOT CHANGED: the columns (kept, always NULL), every function, policy, grant and row. Line-by-line billing and
 --   percent splits between payers are untouched.
 --
--- PREFLIGHT: locks both tables, then refuses a second apply (PER_ACRE_PRICING_PREFLIGHT) and refuses
---   (PER_ACRE_PRICING_IN_USE) while any row of either table still has a per-acre price or a note. It never clears one.
+-- PREFLIGHT: locks both tables in the mode the ALTERs need (no lock upgrade, so no deadlock with a save), then refuses
+--   a second apply (PER_ACRE_PRICING_PREFLIGHT) and refuses (PER_ACRE_PRICING_IN_USE) while any split or invoice share
+--   still has a per-acre price or a note, or any invoice line is a per-acre "grower share" line (the bundle line or its
+--   $0 "included in grower share" chemical line). It never clears or changes one; staff resolve them first.
 --
 -- ROLLBACK (its own reviewed migration): drop both constraints (scripts/smoke/retire-per-acre-pricing-reverse.sql).
 
@@ -27,9 +29,11 @@ DO $preflight$
 DECLARE
   v_splits bigint;
   v_shares bigint;
+  v_lines  bigint;
 BEGIN
-  -- Lock first so no save can add a per-acre price (or a second apply slip in) between these checks and the constraints.
-  LOCK TABLE public.field_billing_defaults, public.invoice_shares IN SHARE ROW EXCLUSIVE MODE;
+  -- Lock first, in the ALTERs' own mode, so nothing can add a per-acre price (or a second apply slip in) between these
+  -- checks and the constraints, and no later lock upgrade can deadlock with a save.
+  LOCK TABLE public.field_billing_defaults, public.invoice_shares IN ACCESS EXCLUSIVE MODE;
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE (conrelid = 'public.field_billing_defaults'::regclass
                      AND conname = 'field_billing_defaults_no_per_acre_price')
@@ -41,8 +45,10 @@ BEGIN
    WHERE price_override_cents IS NOT NULL OR pricing_note IS NOT NULL;
   SELECT count(*) INTO v_shares FROM public.invoice_shares
    WHERE price_per_acre_cents IS NOT NULL OR pricing_note IS NOT NULL;
-  IF v_splits > 0 OR v_shares > 0 THEN
-    RAISE EXCEPTION 'PER_ACRE_PRICING_IN_USE: % field billing split(s) and % invoice share(s) still have a per-acre price or pricing note; clear the splits in Field Setup and re-save or void those invoices first', v_splits, v_shares;
+  -- Both per-acre line kinds carry "grower share" in their description (the bundle line and the $0 chemical line).
+  SELECT count(*) INTO v_lines FROM public.invoice_items WHERE description LIKE '%grower share%';
+  IF v_splits > 0 OR v_shares > 0 OR v_lines > 0 THEN
+    RAISE EXCEPTION 'PER_ACRE_PRICING_IN_USE: % field billing split(s), % invoice share(s) and % invoice line(s) still carry per-acre pricing; this migration never changes billing, so resolve them by hand first', v_splits, v_shares, v_lines;
   END IF;
 END;
 $preflight$;

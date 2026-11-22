@@ -33,15 +33,15 @@ Read at `origin/staging` f8ee14ee8.
   - Behavior is identical with or without them once the constraint holds. Deleting them is an optional later cleanup.
 - **`src/components/ui/BelowCostApprovalModal.tsx` wording.** It is hands-off (Taha) and unreachable.
 - **`errorSanitizer.ts` `FIELD_APP_GROWER_SHARE_*` text.** Both sibling PRs edit that file; the text is unreachable.
-- **PDFs.** They print `invoice_shares.pricing_note` beside a payer's name only on per-acre shares, and live has 0 such rows. There is no "included in grower share" text in the PDFs; that wording lives only in the hands-off modal above.
+- **PDFs.** They print `invoice_shares.pricing_note` beside a payer's name whenever it is set; live has 0 such rows, and the new CHECK keeps it empty. There is no "included in grower share" text in the PDFs; that wording lives only in the hands-off modal above.
 
 ## State and failure
 
 - **Rule that always holds:** no `field_billing_defaults` row and no `invoice_shares` row has a per-acre price or pricing note. Both are enforced by validated CHECKs, so they hold in every transaction.
 - **Existing rows** (production, read-only, 2026-11-22):
   - `field_billing_defaults`: 6 rows; 0 with an override; 0 with a non-blank note.
-  - `invoice_shares`: 3 rows; 0 with `price_per_acre_cents`; 0 with a note. `invoice_items`: 0 "grower share @" lines.
-  - The migration's preflight locks both tables, re-counts both and refuses (`PER_ACRE_PRICING_IN_USE`, naming the count) if any row has either, so it never silently clears a price.
+  - `invoice_shares`: 3 rows; 0 with `price_per_acre_cents`; 0 with a note. `invoice_items`: 0 lines containing "grower share" (Sol r2: a legacy draft's lines carry the per-acre charge even if its share row were cleared).
+  - The migration's preflight locks both tables (ACCESS EXCLUSIVE, the ALTERs' own mode), re-counts splits, shares and "grower share" lines, and refuses (`PER_ACRE_PRICING_IN_USE`, naming the count) if any row has either, so it never silently clears a price.
   - It does not blank-coerce: an empty-string note also blocks the apply.
 - **Already-deployed app during rollout:**
   - The old Field Setup still shows the inputs. Saving a field with an override typed in is refused, and nothing is saved.

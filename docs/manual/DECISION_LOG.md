@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — #2185: Mason re-confirmed the vendor-change block and the accepted two-admins case
+
+**Decision (Mason, 2026-11-22, "Yes, re-confirm").** For #2185, vendor changes on the product page stay off while the Product has unsaved edits, or is saving or loading, and a vendor change re-reads the whole Product (the 2026-11-21 decision). The two-admins case accepted on 2026-11-21 (two admins changing the same product's preferred vendor within seconds, so a copy keeps the older vendor) stays accepted as a business non-issue.
+
 ## 2026-11-21 — #2185: Mason owner-accepted 1 Sol finding(s) at `d66cf2bff2ed`
 
 **Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2185 at `d66cf2bff2ed` (base `f08df8ad6407`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.

@@ -29,8 +29,11 @@ const [L1, L2, L3, L4, L5] = ['d1', 'd2', 'd3', 'd4', 'd5'].map(id);
 const ADMIN2 = id('a5');
 
 // One call of the function under test. `items`: JS array, serialized as the browser would.
+const LINE_PRODUCT = { [L1]: PROD, [L2]: PROD_B, [L3]: PROD, [L4]: PROD_B, [L5]: PROD };
+const withProduct = (items) => items.map((i) => ('expected_unit_cost_cents' in i && !('expected_product_id' in i) && !i.noProduct
+  ? { ...i, expected_product_id: LINE_PRODUCT[i.id] } : (({ noProduct, ...rest }) => rest)(i)));
 const setCosts = (po, items, key, reason = null) =>
-  `public.set_purchase_order_item_costs('${po}'::uuid, '${JSON.stringify(items)}'::jsonb, ${reason === null ? 'NULL' : `'${reason}'`}, NULL, '${key}')`;
+  `public.set_purchase_order_item_costs('${po}'::uuid, '${JSON.stringify(withProduct(items))}'::jsonb, ${reason === null ? 'NULL' : `'${reason}'`}, NULL, '${key}')`;
 const cents = (line) => `(SELECT unit_cost_cents FROM public.purchase_order_items WHERE id = '${line}')`;
 const flag = (line) => `(SELECT cost_needs_review FROM public.purchase_order_items WHERE id = '${line}')`;
 const total = (po) => `(SELECT total_cost_cents FROM public.purchase_orders WHERE id = '${po}')`;
@@ -88,14 +91,17 @@ try {
   const fnOf = (text, head) => text.slice(text.indexOf(head), text.indexOf('$function$;', text.indexOf(head)));
   const oldLines = fnOf(oldFile, 'CREATE FUNCTION public.set_purchase_order_item_costs(').split('\n').slice(1);
   const newLines = fnOf(candidate, 'CREATE OR REPLACE FUNCTION public.set_purchase_order_item_costs(').split('\n').slice(1);
-  const added = [...newLines];
   const OLD_SELECT = '    SELECT poi.id, poi.unit_cost_cents, poi.quantity_received, poi.cost_needs_review INTO v_line';
+  const kept = new Set();
+  let cursor = 0;
   for (const line of oldLines) {
-    const at = added.indexOf(line === OLD_SELECT ? `${OLD_SELECT.replace(' INTO v_line', '')}, poi.product_id INTO v_line` : line);
-    assert.ok(at >= 0, `old line missing from the new body: ${line}`);
-    added.splice(at, 1);
+    const at = newLines.indexOf(line === OLD_SELECT ? `${OLD_SELECT.replace(' INTO v_line', '')}, poi.product_id INTO v_line` : line, cursor);
+    assert.ok(at >= 0, `old line missing from the new body, or out of order: ${line}`);
+    kept.add(at);
+    cursor = at + 1;
   }
-  assert.ok(added.every((l) => l.trim() === '' || /expected|KI-197|SQL does not promise|follow-up makes|replace a newer cost|reads as 0|PO_COST_CHANGED|USING ERRCODE|END IF;|RAISE EXCEPTION 'PO_EXPECTED|v_line\.product_id|\[0-9a-f\]/.test(l)),
+  const added = newLines.filter((_, i) => !kept.has(i));
+  assert.ok(added.every((l) => l.trim() === '' || /expected|KI-197|SQL does not promise|follow-up makes|replace a newer cost|reads as 0|PO_COST_CHANGED|USING ERRCODE|END IF;|RAISE EXCEPTION 'PO_EXPECTED|v_line\.product_id|\[0-9a-f\]|Sol round 2|PO_EXPECTED_PAIR|IS NULL\) <> \(v_expected_product/.test(l)),
     `unexpected added lines:\n${added.filter((l) => l.trim()).join('\n')}`);
   console.log(`[body] new body = old body + ${added.filter((l) => l.trim()).length} KI-197 lines`);
 
@@ -154,7 +160,16 @@ try {
     ok(`${refuse(`r := ${sql};`)} v := t || '|' || ${cents(L1)};`,
       'PO_EXPECTED_PRODUCT_INVALID: expected_product_id must be a product id|1000', `expected_product_id ${bad} must be refused`);
   }
-  console.log('[swap] product swapped in place -> refused, cost unchanged; matching product saves; bad product ids refused');
+  const PAIR = 'PO_EXPECTED_PAIR_REQUIRED: send expected_unit_cost_cents and expected_product_id together';
+  ok(`SET LOCAL session_replication_role = replica;
+    UPDATE public.purchase_order_items SET product_id = '${PROD_B}' WHERE id = '${L1}';
+    SET LOCAL session_replication_role = origin;
+    ${refuse(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1200, expected_unit_cost_cents: 1000, noProduct: true }], 'k2h')};`)}
+    v := t || '|' || ${cents(L1)};
+    ${refuse(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1200, expected_product_id: PROD_B }], 'k2i')};`)}
+    v := v || '|' || t || '|' || ${cents(L1)};`,
+  `${PAIR}|1000|${PAIR}|1000`, 'an expected cost without the product (or the reverse) is refused; the swapped product keeps its cost');
+  console.log('[swap] product swapped in place -> refused, cost unchanged; matching product saves; bad product ids refused; cost without product refused');
 
   // 3. Another admin already set the requested cost: still refused (expected $10, requested $11, stored $11).
   ok(`${asUser(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1100 }], 'k3a')};`)}
@@ -181,7 +196,7 @@ try {
     const sql = `public.set_purchase_order_item_costs('${PO1}'::uuid, '[{"id":"${L1}","unit_cost_cents":1100,"expected_unit_cost_cents":${bad}}]'::jsonb, NULL, NULL, 'k6')`;
     ok(`${refuse(`r := ${sql};`)} v := t || '|' || ${cents(L1)};`, `${INVALID}|1000`, `expected ${bad} must be refused`);
   }
-  ok(`${asUser(`r := public.set_purchase_order_item_costs('${PO1}'::uuid, '[{"id":"${L1}","unit_cost_cents":1100,"expected_unit_cost_cents":1000.0}]'::jsonb, NULL, NULL, 'k6b');`)}
+  ok(`${asUser(`r := public.set_purchase_order_item_costs('${PO1}'::uuid, '[{"id":"${L1}","unit_cost_cents":1100,"expected_unit_cost_cents":1000.0,"expected_product_id":"${PROD}"}]'::jsonb, NULL, NULL, 'k6b');`)}
     v := ${cents(L1)};`, '1100', '1000.0 is accepted as 1000');
   console.log('[invalid] string, null, fraction, negative, too large, 1e400, boolean, array, object refused; 1000.0 accepted');
 
@@ -225,11 +240,13 @@ try {
   const raceFile = path.join(tmpdir(), `${NAME}-race-a.sql`);
   writeFileSync(raceFile, `BEGIN; ${claims(USERS.admin)} SET LOCAL ROLE authenticated;
     SELECT ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1500, expected_unit_cost_cents: 1000 }], `race-a-${Date.now()}`)};
-    RESET ROLE; SELECT pg_sleep(4); COMMIT;`, 'utf8');
+    RESET ROLE; SELECT pg_sleep(4); SELECT 'A_COMMIT_AT=' || to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'); COMMIT;`, 'utf8');
   try { docker(['cp', raceFile, `${NAME}:/tmp/race-a.sql`]); } finally { unlinkSync(raceFile); }
-  const sessionA = spawn('docker', [...PSQL, '-f', '/tmp/race-a.sql'], { cwd: ROOT, stdio: ['ignore', 'ignore', 'pipe'] });
+  const sessionA = spawn('docker', [...PSQL, '-f', '/tmp/race-a.sql'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
   let aErr = '';
+  let aOut = '';
   sessionA.stderr.on('data', (d) => { aErr += d; });
+  sessionA.stdout.on('data', (d) => { aOut += d; });
   const aDone = new Promise((resolve) => sessionA.on('close', resolve));
   // Wait until A holds the advisory lock, then start B.
   for (let i = 0; i < 100 && scalar("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = 73492009 AND granted;") !== '1'; i += 1) {
@@ -237,10 +254,14 @@ try {
   }
   assert.equal(scalar("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = 73492009 AND granted;"), '1', 'session A never took the lock');
   assert.equal(sessionA.exitCode, null, 'session A must still hold the lock when session B starts');
-  const b = attempt(ADMIN2, `${refuse(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1100, expected_unit_cost_cents: 1000 }], `race-b-${Date.now()}`)};`)} v := t || '|' || ${cents(L1)};`);
+  const b = attempt(ADMIN2, `v := to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US'); ${refuse(`r := ${setCosts(PO1, [{ id: L1, unit_cost_cents: 1100, expected_unit_cost_cents: 1000 }], `race-b-${Date.now()}`)};`)} v := v || '|' || t || '|' || ${cents(L1)};`);
   const aCode = await aDone;
   assert.equal(aCode, 0, `session A failed: ${aErr}`);
-  assert.equal(b, `ok|${STALE}|1500`, 'the waiting session reads the committed winner and is refused');
+  const aCommitAt = /A_COMMIT_AT=(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{6})/.exec(aOut)?.[1];
+  assert.ok(aCommitAt, `session A printed no commit time: ${aOut}`);
+  const [, bStartedAt, ...bRest] = /^ok\|([^|]+)\|(.*)$/.exec(b) ?? [];
+  assert.ok(bStartedAt && bStartedAt < aCommitAt, `session B must start before A commits (B ${bStartedAt}, A ${aCommitAt})`);
+  assert.equal(bRest.join('|'), `${STALE}|1500`, 'the waiting session reads the committed winner and is refused');
   assert.equal(scalar(`SELECT ${cents(L1)} || ':' || (SELECT count(*) FROM public.purchase_order_item_cost_changes WHERE purchase_order_item_id = '${L1}' AND changed_by = '${USERS.admin}' AND source = 'set_by_admin');`), '1500:1');
   console.log('[race] two real sessions: one winner (1500, one history row), the waiting one refused');
 

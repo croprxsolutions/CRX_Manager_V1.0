@@ -3,7 +3,8 @@
 -- expected_unit_cost_cents (the cost the admin saw); when present and the stored cost differs, the whole call is refused
 -- with PO_COST_CHANGED_SINCE_LOADED and nothing is saved. Absent = an older screen, unchanged until a follow-up requires it.
 -- An optional expected_product_id (the product the admin saw) is checked the same way: Edit Purchase Order can swap a
--- not-yet-received line's product in place, keeping the line id and possibly the cost (Sol round 1).
+-- not-yet-received line's product in place, keeping the line id and possibly the cost (Sol round 1). The two travel
+-- together: one without the other is refused with PO_EXPECTED_PAIR_REQUIRED (Sol round 2).
 -- Same signature, same grants; the body is the 20261021140000 body (md5-pinned below) plus validation and compare
 -- blocks. No data changes.
 --
@@ -178,6 +179,11 @@ BEGIN
       END IF;
       v_expected_product := (v_item->>'expected_product_id')::uuid;
     END IF;
+    -- Sol round 2: a cost check without the product would still reprice a product swapped in at the same cost.
+    IF (v_expected IS NULL) <> (v_expected_product IS NULL) THEN
+      RAISE EXCEPTION 'PO_EXPECTED_PAIR_REQUIRED: send expected_unit_cost_cents and expected_product_id together'
+        USING ERRCODE = '22023';
+    END IF;
 
     SELECT poi.id, poi.unit_cost_cents, poi.quantity_received, poi.cost_needs_review, poi.product_id INTO v_line
       FROM public.purchase_order_items poi
@@ -286,7 +292,7 @@ REVOKE ALL ON FUNCTION public.set_purchase_order_item_costs(uuid, jsonb, text, u
 GRANT EXECUTE ON FUNCTION public.set_purchase_order_item_costs(uuid, jsonb, text, uuid, text) TO authenticated;
 
 COMMENT ON FUNCTION public.set_purchase_order_item_costs(uuid, jsonb, text, uuid, text) IS
-  'Admin-only: set, correct or confirm purchase-order line unit cost (cents), received lines included (reason required). Optional per-line expected_unit_cost_cents and expected_product_id refuse a stale screen (PO_COST_CHANGED_SINCE_LOADED). Changes only cost and the PO total; never inventory or catalog cost. Key required, bound to caller + request.';
+  'Admin-only: set, correct or confirm purchase-order line unit cost (cents), received lines included (reason required). Optional per-line expected_unit_cost_cents and expected_product_id, sent together, refuse a stale screen (PO_COST_CHANGED_SINCE_LOADED). Changes only cost and the PO total; never inventory or catalog cost. Key required, bound to caller + request.';
 
 DO $postflight$
 DECLARE
@@ -299,7 +305,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = v_oid AND p.prosecdef
                    AND pg_get_userbyid(p.proowner) = 'postgres'
                    AND p.proconfig = ARRAY['search_path=public, pg_temp']
-                   AND p.prosrc LIKE '%PO_COST_CHANGED_SINCE_LOADED%' AND p.prosrc LIKE '%expected_product_id%') THEN
+                   AND p.prosrc LIKE '%PO_COST_CHANGED_SINCE_LOADED%' AND p.prosrc LIKE '%expected_product_id%' AND p.prosrc LIKE '%PO_EXPECTED_PAIR_REQUIRED%') THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: security definer, owner, search_path or body is wrong';
   END IF;
   IF has_function_privilege('anon', v_oid, 'EXECUTE') OR has_function_privilege('service_role', v_oid, 'EXECUTE')

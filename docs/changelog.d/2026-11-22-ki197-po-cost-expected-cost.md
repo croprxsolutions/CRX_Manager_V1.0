@@ -1,4 +1,4 @@
-## 2026-11-22 - KI-197: a stale screen can no longer overwrite a newer PO cost correction (database part)
+## 2026-11-22 - KI-197: the database can refuse a PO cost correction made from a stale screen (database part; the screen PR turns it on)
 
 - Migration `20270214100000_po_cost_expected_cost_check.sql`: `set_purchase_order_item_costs` accepts the cost the admin saw for each line and refuses the whole save (`PO_COST_CHANGED_SINCE_LOADED`) if someone changed that cost since. Before, a second admin working from an older screen silently replaced a newer correction.
 - No data changes. Older screens keep working as before; the screen PR sends the field after this is on the staging database, and a follow-up makes it required once every screen sends it.

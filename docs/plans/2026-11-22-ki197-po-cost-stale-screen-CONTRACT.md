@@ -29,6 +29,10 @@ Read at `origin/staging` 2132d7795 (2026-11-22). Lane E, bug sprint.
   maybe same cost), so a matching cost alone could reprice the replacement product. Each line may also carry
   `expected_product_id` (a uuid string; else `PO_EXPECTED_PRODUCT_INVALID`); if it differs from the line's product the
   whole call is refused with `PO_COST_CHANGED_SINCE_LOADED` (product wording). The screen PR sends both fields.
+- **Sol round 2 (HIGH, fixed):** a caller sending the expected cost without the product left that gap open. The two now
+  travel together: one without the other is refused with `PO_EXPECTED_PAIR_REQUIRED` (no caller sends either yet, so
+  nothing deployed changes). Allowlist MED refuted: entries are keyed to the post-apply chain in the migration PR by
+  convention (KI-142, KI-143); the live sweep flags it only between merge and apply.
 
 ## State and failure
 - Always true: a correction only replaces the cost the admin was looking at. Nothing else changes: same checks, same

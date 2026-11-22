@@ -249,7 +249,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-40 | KI-84 | LOW | Open | A safety test script is broken; the protection it proves is still live. No customer impact. | KNOWN_ISSUES | #1110 | Agent (unassigned) |
 | W3-41 | KI-96 | LOW | Partly open | Dead code and copy-pasted helpers make every change slower and riskier; no behavior bug. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-42 | KI-107 | LOW | Open | Agents get blocked on harmless cleanup commands; workaround is to run the delete alone. | KNOWN_ISSUES | #1536 (closed) | Agent (unassigned) |
-| W3-43 | KI-113 | LOW | Open | An old safety proof for private customer files no longer runs; live bucket was checked private by hand. | KNOWN_ISSUES | #1698, #1663, #635 | Agent (unassigned) |
+| W3-43 | KI-113 | LOW | Resolved (PR pending) | The private-customer-files proof runs again on today's schema and function (30/30), and still fails when a browser read policy is re-added. | KNOWN_ISSUES | #1698, #1663, #635 | Agent (unassigned) |
 | W3-44 | KI-115 | LOW | Partly open | Some error reports lose the real reason, so production problems are harder to diagnose. | KNOWN_ISSUES | #1748, #1751, #1771, #1730, #1764 | Agent (unassigned) |
 | W3-45 | KI-164 | LOW | Partly open | Some stock/pricing safety proofs were broken; repaired 2026-11-16; database sweep and regression tests still to do. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-46 | #2194 | LOW | Open | If the same grants are stored in a different order the migration aborts safely and stops the release apply until re-checked. Severity lowered from MED: fails safe, no data touched. | Sol round 1, release #2189 (GitHub) | #2194 | Agent (unassigned) |

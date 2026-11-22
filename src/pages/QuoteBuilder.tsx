@@ -3875,6 +3875,10 @@ export default function QuoteBuilder() {
     if (currentQuoteIdRef.current !== drawScope) { setDrawing(false); return; }
     const kept = loadPendingRetry(drawPendingName, isDrawRequest);
     setPendingDraw(kept ? { ...kept, expired: resend } : null);
+    if (resend) {
+      openDrawReloadPrompt('This retry was refused because the booking changed. The first attempt may still go through, so check the orders on this booking before drawing again.');
+      return;
+    }
     const detail = rpcCodeDetail(error, RpcErrorCodes.QUOTE_STALE_WRITE)?.replace(/^[:\s]+/, '') ?? '';
     openDrawReloadPrompt(detail
       ? detail.charAt(0).toUpperCase() + detail.slice(1)
@@ -3956,8 +3960,13 @@ export default function QuoteBuilder() {
     const sendVersion = resume || earlierUnresolved
       ? (keptVersion?.key === drawKey ? keptVersion.request : null)
       : drawVersion;
-    if (!resume && !earlierUnresolved && sendVersion !== null) {
-      savePendingRetry(drawVersionPendingName, drawKey, sendVersion);
+    if (!resume && !earlierUnresolved && sendVersion !== null
+        && !savePendingRetry(drawVersionPendingName, drawKey, sendVersion)) {
+      // Without it a lost reply could only be resent with no version: don't send.
+      clearDrawNotes();
+      setDrawing(false);
+      toast('error', 'This browser could not keep a safety note for the Partial Order, so it was not sent. Allow this site to store data, or use another browser, then try again.');
+      return;
     }
     try {
       const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('draw_down_quote', withBelowCostReason('draw_down_quote', {

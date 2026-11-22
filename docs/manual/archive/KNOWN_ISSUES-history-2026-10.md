@@ -7856,3 +7856,89 @@ no stock unit, in both the guard and `save_quote`.
 Sol round 7 (#1896, 2026-11-17) found the same root on stock: such a product also takes blank-unit PO lines and blank-unit
 stock. Mason owner-accepted both ("this case cannot happen in our business"): the product screen requires an inventory
 unit. Fix both at once by requiring a stock unit on every product in the database.
+
+
+---
+
+## Closed 2026-11-22 (triage)
+
+Closed 2026-11-22 (triage): KI-82, PR #1209 (merged to `main` 2026-10-30; `QuoteBuilder.tsx` `refreshSavedLineCosts`).
+
+### KI-82 — The open quote screen can show a stale cost for a line it just saved
+
+**LOW · FIX IN REVIEW (Taha, branch `taha/quote-saved-line-cost`; found 2026-10-27, Sol review of PR #1105) · money (display only)**
+After Save, `src/pages/QuoteBuilder.tsx` records a new line's saved id and stored price but does not load the
+cost the database recorded for that line (`quote_items.cost_at_quote_cents`). If the product's cost changed after
+the page loaded, the Cost, Profit and Margin shown to an admin can differ from the saved figures until the page is
+reloaded. Saved prices, costs and totals are correct; PDFs never show cost. Fix: refresh each saved line's recorded
+cost after a save, and prove it on the live screen.
+The fix re-reads each saved line's recorded cost (and, for a line whose cost moved, the product's cost
+today) through `get_admin_cost_fields` after an admin's save, without marking the quote changed; proven on a
+local replay's screen (a new line added after its product's cost rose shows the recorded cost after Save).
+
+Closed 2026-11-22 (triage): KI-16 bullet, Quote Builder line math, PRs #1430 (merged to `main` 2026-11-04) and #1892; `src/lib/quoteCalc.ts` `exactRound2` / `billedLine` / `pricedLine` use exact decimal arithmetic. Removed from the KI-16 entry:
+
+- Quote Builder's line math (`recalcItem`, `catalogPricePerAcre` in `src/lib/quoteCalc.ts`) multiplies and rounds
+  in dollars, not integer cents. Found by CodeRabbit on PR #1078 (2026-10-23) and deferred: moving it to cents
+  changes rounding on every quote line, so it needs its own money PR. LOW.
+
+Closed 2026-11-22 (triage): KI-73 bullets for parts A, B and C, live per the entry (PRs #1065, #1103, #1650). Removed from the KI-73 entry:
+
+- FIXED LIVE 2026-10-26 02:10 UTC (9:10 PM Central, 2026-10-25) by part A (PR #1065, history row 980, ledger `20261026021016`): `global_search` let any
+  signed-in user search customer names and contacts, order/invoice/delivery numbers and farm names, and
+  `get_notes_for_entity` let any signed-in user with a record ID read its team notes. Now search returns nothing
+  to field roles and notes follow the linked record (`get_notes_for_entity` runs as the caller, checked live). `team_notes` itself still admits every active profile, so the Team Board shows field roles every note;
+  Mason decided 2026-10-23 to keep that for now (To-Do row 11.11, `DECISION_LOG.md`).
+- FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B: drivers could read every customer's
+  billing splits and spray-record field/acres data through `field_billing_defaults` and
+  `application_record_fields` (MED); both now admit only office staff and applicators who can see the field.
+- Whole-job applicators keep access to completed, cancelled and soft-deleted jobs indefinitely, and dispatch access
+  can survive a job deletion; affected functions include `start_job` and `complete_job` (HIGH). FIXED LIVE 2026-11-09
+  05:29 UTC (11:29 PM Central, 2026-11-08) by part C (PR #1650, ledger `20261109052957`, `20261217100000`), which ends the whole-job applicator's access when
+  the job is cancelled, deleted, or completed/invoiced more than 7 days ago (new server-stamped `jobs.completed_at`), in
+  `jobs_select`, every policy that reaches the job through `jobs`, and eleven functions; dispatch access, including
+  the assignee's own `job_location_dispatches` row, ends on deletion or cancellation, or 7 days after the job's completion. Proven per role in a disposable
+  copy (`scripts/smoke/prove-job-access-ends-with-the-job-real-schema.mjs`). Taha's review (MED): it also hid the field
+  of an applicator's own spray record once the job's window ended (Record Book showed "-"); `20261220100000`
+  (live 2026-11-09, ledger `20261109123130`) gives `fields_select` and `arf_select` an own-record leg
+  (`scripts/smoke/prove-applicator-keeps-own-record-fields-real-schema.mjs`).
+- FIXED LIVE 2026-10-27 02:05 UTC (9:05 PM Central, 2026-10-26) by part B (PR #1103, history row 985, ledger
+  `20261027020546`): applicators read every `fields` row, and `field_polygons`, crop history, obstacles and
+  `field_app_locations` followed the same rule (HIGH; 5 of 5 rows live for the real applicator on 2026-10-25,
+  Central). After the apply the 1 active applicator sees 2 of 5 fields, drivers and entity recipients 0, admins
+  and sales reps 5 of 5 (computed read-only from the live policy rules, not a signed-in test). Part B also closed: the
+  `field_billing_defaults`/`application_record_fields` driver reads above; direct `field_polygons` writes by any
+  applicator (made office-only); `field_app_locations`/`_shares` reads (office-only); and
+  `get_job_billed_customers` letting any applicator through on a job with no whole-job applicator (NULL gate).
+  Mason decided 2026-10-25 that someone sent to a job sees the entire job (`DECISION_LOG.md`), so part B also
+  widens `_can_see_field`'s dispatch leg to every field of the dispatched job and keeps the job pages job-wide;
+  that resolves the split-job report mismatch a per-field view would have caused. Left after part B: anon reads
+  of `application_record_fields` now error instead of returning nothing (LOW, fails closed; three other field
+  tables already did); a crew member
+  whose role is driver keeps the crew job and its map but not the field tables (by design).
+- Opposite gap: dispatch-only applicators cannot read their assigned fields' shares, application records and
+  details, attachments, or job-attachment photos (LOW). Mason's 2026-10-25 decision (they see the entire job and
+  ticket) means these should be widened to the dispatch route too. Part C (live 2026-11-09 UTC, PR #1650)
+  gives them read-only access to those rows of the job they are dispatched to.
+
+
+Closed 2026-11-22 (triage): KI-74 parts, live 2026-11-02 (`20261102200000`) and 2026-10-23/25 (`20261022090000`, `20261022101000`, PR #1057). Removed from the KI-74 entry:
+
+~~`blend_recipe_items` and cost fields reachable through field-billing and dispatch paths remain readable (HIGH).~~
+**Settled by the 2026-11-02 audit (KI-02):** `blend_recipe_items` cost was closed by the column lock; field billing,
+delivery and offline sync give an applicator or driver no cost; the remaining dispatch path is covered by
+`20261102200000` (live 2026-11-02).
+The computed field `invoice_post_version` reads the whole invoice row, so revoking invoice columns can break
+posting: the cost-column lock must ship with a column-safe version design in the same change (MED). **Done in
+`20261022090000` (PR #1057, applied live 2026-10-23):** the version is a computed field, `invoice_postable_version`, on
+the `invoices_postable` view (every column but `total_cost_cents`), the seven screens read it there, and the cost lock
+(`20261022101000`, applied live 2026-10-25) dropped the `invoices` overload.
+
+Closed 2026-11-22 (triage): KI-76 bullets. The Chicago season and commission-date fallbacks are in `20261103120000` and `20261204100000` (live 2026-11-03 and 2026-11-07; `20270129171000` keeps the Chicago date); the customer-summary season is `20261204110000`; the whole-order quantity cap and the posted-invoice delivery void are PR #1174, `20261029160000` (live 2026-10-30; migration-history row 1002). Removed from the KI-76 entry:
+
+- `issue_return_credit` and the delivery-split functions can fall back to `current_season()`; from `20261103120000` (applied live 2026-11-03, ledger `20261103003731`) it reads the Chicago date, and the return-credit header dates its credit memo, due date and period check by the Chicago date too. The field-app split path still stamps its commission record with the UTC `CURRENT_DATE` (LOW).
+- `get_customer_summary` and `operational_dashboard_summary` season: FIXED by `20261204110000` (KI-18 batch 2,
+  applied live); both read the Chicago date (live bodies checked 2026-11-10).
+- Transfer Net 30 (KI-14): FIXED 2026-11-06 (PR #1556); see KI-14.
+- Whole-order invoice quantities and unit prices are not capped server-side (MED; quantities change when PR #1174 applies). Voiding a delivery whose invoice
+  is posted leaves the invoice active (MED; changes when PR #1174 applies: the delivery then cannot be voided until the invoice is voided). 

@@ -2,7 +2,7 @@
 
 **What this is.** One deduplicated list of every real bug, error and business-logic flaw that the recent audits and reviews found and that is still open, grouped by business area with a fix order. [KNOWN_ISSUES.md](KNOWN_ISSUES.md) stays the canonical list (full detail and evidence); this page is the plan. Documentation only: nothing here changes code or data.
 
-**How it was built.** Every open entry in KNOWN_ISSUES.md, the [2026-11-21 quote-to-invoice audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md) (KI-185 to KI-199, decisions 30-33), GitHub issues #2145 and #2190-#2197, Sol's round 1 on the closed release #2189, open GitHub issues that report real bugs, and the open findings in `docs/audits/` were each re-read against the code on `origin/staging` `3a9694685` (compared with `origin/main` `00003d8a2`, which is what production runs). Read-only live-ledger lookups confirmed which fixes are live. Nothing was run against a database.
+**How it was built.** Every open entry in KNOWN_ISSUES.md, the [2026-11-21 quote-to-invoice audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md) (KI-185 to KI-199, decisions 30-33), the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md) (KI-200 to KI-205, added 2026-11-22), GitHub issues #2145 and #2190-#2197, Sol's round 1 on the closed release #2189, open GitHub issues that report real bugs, and the open findings in `docs/audits/` were each re-read against the code on `origin/staging` `3a9694685` (compared with `origin/main` `00003d8a2`, which is what production runs). Read-only live-ledger lookups confirmed which fixes are live. Nothing was run against a database.
 
 **How to read a row.** *Sev*: BLOCKER / HIGH / MED / LOW. *Status*: Open; Partly open; Check first (a credible report that code reading could not settle; prove or close it before fixing); Mason decision (needs a business call first); On staging, not live (fixed, waits for the release); Fixed locally, parked (fix exists only on a local branch). *Owner*: Taha owns quotes, bookings, the office invoice screens and billing until 2026-12-15; field-application billing and blend tickets are Mason's own work (Mason, 2026-11-22); "Mason decision" waits on his call; "Agent (unassigned)" means nobody is on it. *Order*: R = ship what is already built (release), R2 = release-pass findings resolved by removing the pass (PR #2203), W1 = HIGH, W2 = MED, W3 = LOW, D = decisions; the number is the suggested sequence inside each wave. Taha's items keep their wave but start when Taha takes them or after 2026-12-15.
 
@@ -10,19 +10,19 @@
 
 | Area | BLOCKER | HIGH | MED | LOW | Open total | Built, awaiting release (R) |
 |---|---|---|---|---|---|---|
-| Quotes and bookings |  | 1 | 3 | 7 | 11 |  |
-| Orders and deliveries |  | 1 | 6 | 2 | 9 | 2 |
+| Quotes and bookings |  | 1 | 4 | 6 | 11 |  |
+| Orders and deliveries |  | 1 | 6 | 3 | 10 | 2 |
 | Inventory, purchasing and products |  | 1 | 6 | 12 | 19 | 2 |
-| Invoices, billing and returns |  |  | 9 | 8 | 17 |  |
-| Payments and receivables |  | 1 | 2 | 2 | 5 |  |
+| Invoices, billing and returns |  |  | 10 | 8 | 18 |  |
+| Payments and receivables |  | 1 | 3 | 2 | 6 |  |
 | Reports and commissions |  | 1 | 4 | 2 | 7 | 4 |
 | Field applications (jobs, blend tickets, field invoices) |  | 6 | 7 | 7 | 20 | 1 |
 | Permissions and security |  | 1 | 4 | 4 | 9 | 1 |
-| Customers, data and cut-over |  |  | 4 | 2 | 6 |  |
+| Customers, data and cut-over |  |  | 5 | 2 | 7 |  |
 | Guards, tooling and release process | 1 | 5 | 13 | 12 | 31 | 6 |
-| **Total** | **1** | **17** | **58** | **58** | **134** | **16** |
+| **Total** | **1** | **17** | **62** | **58** | **138** | **16** |
 
-"Open total" counts Open, Partly open, Check first and Mason decision. Not counted: 32 accepted risks and 3 backlog entries (listed at the end), and 40 entries this re-check found already fixed (dropped, listed at the end).
+"Open total" counts Open, Partly open, Check first and Mason decision. Not counted: 32 accepted risks and 4 backlog entries (listed at the end), and 41 entries found already fixed (40 in the 2026-11-21 re-check, KI-82 in the 2026-11-22 triage) (dropped, listed at the end).
 
 ## Top 5 to fix first
 
@@ -74,15 +74,15 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W2-01 | KI-192 | MED | Open | The remaining-dollars card on a booking can be off when lines have different prices (display only) | KNOWN_ISSUES (2026-11-21 audit) |  | Taha (to 2026-12-15) |
 | W2-02 | KI-193 | MED | Open | A copied quote can go to a grower at the old price. | KNOWN_ISSUES (2026-11-21 audit) | #2182 | Taha (to 2026-12-15) |
 | W2-03 | #2075 | MED | Open | A quote written before but sent after the job date can set an earlier job's price. | GitHub issue | #2075 | Taha (to 2026-12-15) |
-| W3-01 | KI-82 | LOW | Open | An admin may see an out-of-date Cost/Profit/Margin on a just-saved line until reload; saved numbers are right. | KNOWN_ISSUES |  | Taha (to 2026-12-15) |
 | W3-02 | KI-194 | LOW | Open | Rep may see "Sent" or a generic error when the email failed; re-downloaded PDFs show a new date. | KNOWN_ISSUES (2026-11-21 audit) |  | Taha (to 2026-12-15) |
 | W3-03 | KI-105 | LOW | Partly open | A quote can be priced at a tier other than the customer's; a screen warning exists but the database does not refuse it for reps. Screen warning is merged; only the database refusal is missing. | KNOWN_ISSUES |  | Taha (to 2026-12-15) |
 | W3-04 | KI-140 | LOW | Partly open | Unknown-unit fallback is fixed; a dry product rated in liquid ounces can still price wrongly. | KNOWN_ISSUES |  | Taha (to 2026-12-15) |
 | W3-47 | #2129 | LOW | Check first | One old saved retry record is oddly keyed; effect is cosmetic or a failed replay. Depends on a live data row. | GitHub issue | #2129 | Taha (to 2026-12-15) |
 | W3-48 | #2071 | LOW | Check first | A quote sent mid-save could price some lines of one invoice and not others. | GitHub issue | #2071 | Taha (to 2026-12-15) |
 | W3-49 | #1970 | LOW | Check first | Sections already refuse repeated keys (SECTION_ID_INVALID); items not confirmed. | GitHub issue | #1970 | Taha (to 2026-12-15) |
+| W2-52 | KI-201 | MED | Open | Quote Compare hides one line when the same product is on two sections (display only; saved quotes and PDFs are right). | KNOWN_ISSUES (2026-11-22 staging rehearsal) | #2206 | Taha (to 2026-12-15) |
 
-### Orders and deliveries (9)
+### Orders and deliveries (10)
 
 | Order | ID | Sev | Status | What goes wrong (plain English) | Source | GitHub | Owner |
 |---|---|---|---|---|---|---|---|
@@ -95,6 +95,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-05 | KI-152 | LOW | Open | No database rule stops a completion from reopening a cancelled order, but the app cannot reach it today. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-50 | #1960 | LOW | Check first | An old retried save may not get section ids back. | GitHub issue | #1960 | Taha (to 2026-12-15) |
 | D-01 | #2065 | MED | Mason decision | Closing short releases holds and purchasing demand; needs Mason's rule (booking's rep or admin only). Guard currently blocks reps only when a live job exists. | GitHub issue | #2065 | Mason decision |
+| W3-56 | KI-203 | LOW | Open | Quick Delivery shows a dash instead of the sales unit (e.g. Gal); saved records use the right unit. Fix in review: PR #2213. | KNOWN_ISSUES (2026-11-22 staging rehearsal) | #2208 | Agent (PR #2213) |
 
 ### Inventory, purchasing and products (19)
 
@@ -116,11 +117,11 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-14 | KI-196 | LOW | Open | The same chemical can be found by different words on different screens and be grouped or labelled differently. | KNOWN_ISSUES (2026-11-21 audit) |  | Agent (unassigned) |
 | W3-15 | KI-197 | LOW | Open | A second admin on a stale screen can silently replace a newer cost correction; one label may point at the wrong PO. | KNOWN_ISSUES (2026-11-21 audit) |  | Agent (unassigned) |
 | W3-16 | #2172 | LOW | Open | A very large batch (about 3,000 approvals) could make Confirm silently send nothing. Not reachable today (hundreds of rates). | GitHub issue | #2172 | Agent (unassigned) |
-| W3-17 | #2135 | LOW | Open | Staff see an inflated short-stock count and get two warnings and two notifications; stock math is right. | GitHub issue | #2135 | Agent (unassigned) |
+| W3-17 | #2135 | LOW | Fix in review (`20270213100000`) | Staff see an inflated short-stock count and get two warnings and two notifications; stock math is right. | GitHub issue | #2135 | Agent (unassigned) |
 | W3-51 | #1829 | LOW | Check first | A confirmed rate approval could be lost if the reply is dropped and the user leaves. | GitHub issue | #1829 | Agent (unassigned) |
 | D-04 | KI-29 | LOW | Mason decision | Several stuck deliveries, negative stock rows, flagged products and odd PO lines need Mason's yes/no before anyone changes real records. | KNOWN_ISSUES |  | Mason decision |
 
-### Invoices, billing and returns (17)
+### Invoices, billing and returns (18)
 
 | Order | ID | Sev | Status | What goes wrong (plain English) | Source | GitHub | Owner |
 |---|---|---|---|---|---|---|---|
@@ -141,8 +142,9 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-23 | #2104 | LOW | Partly open | Mostly done for the grower-share cost read; other product reads in the save not confirmed locked. | GitHub issue | #2104 | Taha (to 2026-12-15) |
 | W3-52 | #2073 | LOW | Check first | Invoice header may show the earlier customer. Live-unchanged per the issue; not traced. | GitHub issue | #2073 | Taha (to 2026-12-15) |
 | W3-53 | #2072 | LOW | Check first | During a staged apply a draft could briefly carry sales tax. Release-time concern, checkable only by a live post-apply query. | GitHub issue | #2072 | Taha (to 2026-12-15) |
+| W2-51 | KI-200 | MED | Open | Approving a return: the confirmation opens behind the return details, so a normal click can't approve (Enter works). Fix in review: PR #2210. | KNOWN_ISSUES (2026-11-22 staging rehearsal) | #2205 | Agent (PR #2210) |
 
-### Payments and receivables (5)
+### Payments and receivables (6)
 
 | Order | ID | Sev | Status | What goes wrong (plain English) | Source | GitHub | Owner |
 |---|---|---|---|---|---|---|---|
@@ -151,6 +153,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-24 | KI-132 | LOW | Open | Customers with unused credit can still get a reminder or finance charge. | KNOWN_ISSUES |  | Mason decision |
 | W3-25 | KI-147 | LOW | Open | A customer typed as "COD" is silently treated as Net 30 for due dates. | KNOWN_ISSUES |  | Agent (unassigned) |
 | D-02 | KI-20 | MED | Mason decision | Bulk prepay apply is switched off, earmark engine shelved, auto-draft invoice off; waiting on Mason's design calls. | KNOWN_ISSUES |  | Mason decision |
+| W2-53 | KI-202 | MED | Open | Payment History can't show which invoices a payment paid (the request is refused; the saved allocation is right). | KNOWN_ISSUES (2026-11-22 staging rehearsal) | #2207 | Taha (to 2026-12-15) |
 
 ### Reports and commissions (7)
 
@@ -203,16 +206,17 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W3-36 | KI-149 | LOW | Open | A rep's crop program or print-default changes are lost on Save with no explanation. | KNOWN_ISSUES |  | Mason decision |
 | W3-37 | KI-73 | LOW | Partly open | Most driver and applicator read holes are closed live. One small leftover: a retried job start or complete is answered before the access check runs (nothing new is written); fix by checking access first. Team notes and customer addresses visible to all roles were accepted. | KNOWN_ISSUES | #1065, #1103, #1650 | Mason decision |
 
-### Customers, data and cut-over (6)
+### Customers, data and cut-over (7)
 
 | Order | ID | Sev | Status | What goes wrong (plain English) | Source | GitHub | Owner |
 |---|---|---|---|---|---|---|---|
 | W2-34 | KI-77 | MED | Open | Remaining: list paging can miss concurrent changes; CRM gaps (no pre-quote pipeline, no duplicate detection in bulk import, no bulk rep import, no email logging); offline-recovery gaps; delivery-photo ownership edge cases. Fixed: customer-form duplicate warning; delivery-photo uploader check (`20261222100000`) | KNOWN_ISSUES | #381, #1663, #1698 | Agent (unassigned) |
-| W2-35 | #2197 | MED | Open | Staff are told to reactivate a customer before new orders, but the screen offers no way, so it must be done outside the app. | Sol round 1, release #2189 (GitHub) | #2197 | Agent (unassigned) |
+| W2-35 | #2197 | MED | Fixed (staging PR) | Staff are told to reactivate a customer before new orders, but the screen offers no way, so it must be done outside the app. | Sol round 1, release #2189 (GitHub) | #2197 | Agent (Lane D) |
 | W2-36 | #2089 | MED | Open | A customer could be deactivated while an invoice posts, leaving a balance on an inactive customer. | GitHub issue | #2089 | Taha (to 2026-12-15) |
 | W3-38 | #2016 | LOW | Open | "1,200" in an unquoted CSV can save as 1 corn acre and 200 soybean acres. | GitHub issue | #2016 | Agent (unassigned) |
 | D-03 | KI-155 | MED | Mason decision | Handover from the old billing system lacks one written procedure, so old balances/credits could be mishandled. | KNOWN_ISSUES |  | Mason decision |
 | D-05 | KI-30 | LOW | Mason decision | Wrong/missing label numbers, customers with no sales rep and some junk rows need Mason's choices before cleanup. | KNOWN_ISSUES |  | Mason decision |
+| W2-54 | KI-205 | MED | Check first | 26 rehearsal cases were blocked or only partly proven (refunds, credit/prepay un-apply, supplier returns, driver signing, other roles, unit fixtures, period close); prove them before the December rehearsal. | KNOWN_ISSUES (2026-11-22 staging rehearsal) |  | Agent (unassigned) |
 
 ### Guards, tooling and release process (31)
 
@@ -232,7 +236,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | R2-11 | SOL-18 | LOW | Resolved by removing the pass (PR #2203; closes when it merges) | An eleventh pass within 24 hours silently drops the oldest one early. | Sol round 2, guard branch (2026-11-22) |  | Agent (land #2203) |
 | R2-12 | SOL-19 | LOW | Resolved by removing the pass (PR #2203; closes when it merges) | The lookup for the open release reads only the first 100 open PRs. | Sol round 2, guard branch (2026-11-22) |  | Agent (land #2203) |
 | R2-13 | SOL-20 | LOW | Resolved by removing the pass (PR #2203; closes when it merges) | A slow GitHub answer can use up the prompt hook's whole time limit. | Sol round 2, guard branch (2026-11-22) |  | Agent (land #2203) |
-| W2-37 | KI-45 | MED | Open | An agent's own report in an odd text shape can be mistaken for Mason typing "hold", pausing work wrongly. | KNOWN_ISSUES | #1084 (shipped), #1152 (open) | Agent (unassigned) |
+| W2-37 | KI-45 | MED | Partly open | An agent's own report in an odd text shape can be mistaken for Mason typing "hold", pausing work wrongly. | KNOWN_ISSUES | #1084 (shipped), #1152 (merged 2026-10-28) | Agent (unassigned) |
 | W2-38 | KI-46 | MED | Open | One Windows-specific path to a saved review proof is not covered by the proof check; the check should cover it. | KNOWN_ISSUES |  | Mason decision |
 | W2-39 | KI-47 | MED | Open | A few risky command shapes are still auto-approved for agents instead of being stopped. | KNOWN_ISSUES | #530 (partial fix) | Agent (unassigned) |
 | W2-40 | KI-49 | MED | Open | A review run outside the standard wrapper can record a misleading result; the wrapper is the safe path. | KNOWN_ISSUES |  | Mason decision |
@@ -264,11 +268,13 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 
 ## Backlog, not defects
 
-KI-37 (Parked migration draft with fragile membership rule); KI-40 (CRM Phase 5 AI receptionist preconditions); KI-41 (Product roadmap items deliberately deferred).
+KI-37 (Parked migration draft with fragile membership rule); KI-40 (CRM Phase 5 AI receptionist preconditions); KI-41 (Product roadmap items deliberately deferred); KI-204 (screen and workflow clarity suggestions from the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md); To-Do section 17, decisions 34 and 35).
 
 ## Dropped as already fixed in this re-check
 
 These were still listed as open (or "in review") but are fixed in code that is live or on staging; each moved to the closed list in KNOWN_ISSUES.md with its evidence: KI-01 (Drivers/applicators could read all customer fields and money totals); KI-04 (Connector tools with no permission rule ran without a prompt); KI-06 (Audit log could point at hard-deleted records); KI-97 (Invoice email content built by app screen); KI-98 (Emailed PDFs drawn by sender's app); KI-121 (Last active admin could remove own admin role); KI-123 (Signed-out role keeps unneeded read grants); KI-124 (Public key hard-coded in 5 e2e test files); KI-11 (Screens drop/share retry key (double-apply risk)); KI-12 (Convert to Order could leave accepted quote with no order); KI-14 (Transfer-created field invoices always Net 30); KI-18 (Dates/seasons follow UTC or browser clock); KI-19 (Month close racing edits); KI-81 (Two invoice paths bill the quote's current price, not the sent price); KI-95 (Historical AR aging fails if one customer unrebuildable); KI-156 (Grower-share chemical cost booked in the wrong unit); KI-28 (Jobs for a non-applicator never reach dispatch board); KI-85 (Receiving offers warehouses that cannot ship); KI-93 (One blend ticket can deduct stock twice (ticket-to-order route)); KI-94 (Void delivery puts back more reserved stock than completion took); KI-100b (Spray job leaves booking remainder no Partial Order can take); KI-101 (Voiding a delivery on a cancelled order reopens the order (+ admin status grant)); KI-102 (Voiding an order then its delivery restores stock twice); KI-116 (Product Detail treats a non-product address as a load failure); KI-136 (Receiving adds typed number regardless of PO line unit); KI-137 (Two seed-treatment products stocked per Lb at per-jug money); KI-139 ("Reconcile negative inventory" can overwrite any row); KI-141 (Retiring an inventory row ignores open POs); KI-158 (Orders and deliveries move stock without unit checks); KI-159 (Cancelling a received return writes history row both stock checks misread); KI-161 (Delivery editing does not re-check line against order line); KI-162 (Receiving Log filters by UTC date); KI-145 (Bulk Customer Import fails for reps, misreads files); KI-146 (Farm groups can loop; grandchildren left out); KI-148 (Deactivating a customer ignores open work); KI-150 (Receipt reversal vs vendor bill lock order; completions lock stock in no order); KI-35 (Live ledger vs files on main checked only by noticing); KI-38 (Edge Function error alerting fails quiet); KI-83 (`idempotency_keys` has no TypeScript type); KI-166 (Quote for product with no stock unit priced as "each").
+
+KI-82 (open quote screen showed a stale cost after Save): PR #1209, merged to `main` 2026-10-30 (triage 2026-11-22).
 
 KI-100 was used for two different entries; the inventory one ("a spray job could leave a booking with a remainder no Partial Order can take") is the one closed here, and the product-page lock entry keeps KI-100.
 

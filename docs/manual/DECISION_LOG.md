@@ -1,5 +1,15 @@
 # Decision Log
 
+## 2026-11-22 — #2185: Mason owner-accepted 3 Sol finding(s) at `6e92876aa47e`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-22).** Sol's review of PR #2185 at `6e92876aa47e` (base `104ea5afe5bc`) found 3 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/components/products/ProductVendorsSection.tsx:221`, text sha256 `bbbd0728aecafee1` (the wording stays with the proof, not here)
+  Mason's reason: can’t hapone (ref b4db10190568)
+- Finding 2 (HIGH) at `src/pages/ProductDetail.tsx:441`, text sha256 `1e972ef0cb7168f8` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref f0d1b4bfc761)
+- Finding 3 (HIGH) at `src/components/products/ProductVendorsSection.tsx:227`, text sha256 `7e85905a56efea6d` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 4096755d03d7)
+
 ## 2026-11-22 — #2185: Mason re-confirmed the vendor-change block and the accepted two-admins case
 
 **Decision (Mason, 2026-11-22, "Yes, re-confirm").** For #2185, vendor changes on the product page stay off while the Product has unsaved edits, or is saving or loading, and a vendor change re-reads the whole Product (the 2026-11-21 decision). The two-admins case accepted on 2026-11-21 (two admins changing the same product's preferred vendor within seconds, so a copy keeps the older vendor) stays accepted as a business non-issue.

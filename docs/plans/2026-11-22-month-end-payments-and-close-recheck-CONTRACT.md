@@ -181,3 +181,16 @@ passes before the apply; split not needed (memory rule exception for already-liv
 - MED legacy cents/NaN, untyped prepay rows, same-transaction checks, rush checklist; LOW e2e keys, number precision:
   same as rounds 2-3 (legacy `payments` has 0 rows live; 0 untyped prepay rows; rush orders are screen-only;
   e2e follow-up listed).
+
+## Sol round 6 (2026-11-22) and Mason's decision
+
+- HIGH (same retry-key path as round 5): a close whose reply is lost, then a reopen from another tab before this tab
+  refreshes, leaves this tab's key alive; its next close replayed the old receipt while the month was open.
+  Both captains: stop and ask Mason. **Decision (Mason, 2026-11-22, Lane B session): "Database refuses it".** The
+  close impl now replays a saved receipt only while the month is still closed (checked under the month lock; the
+  pre-lock early replay is removed), else `CLOSE_REOPENED_SINCE`; the screen retires the key and asks to close again.
+  Proof case and screen test added. DECISION_LOG 2026-11-22.
+- MED `smoke-unpost-invoice.sql` / `smoke-unpost-invoice-group.sql` inserted undated payment sets, which the new
+  constraint refuses: both now set `payment_date`. Other provers that insert undated sets stop before this migration.
+- MED legacy cents/NaN, prepay grouping, split rollout; LOW e2e (#2245), number precision, private impl types: as
+  rounds 2-5.

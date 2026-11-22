@@ -52,9 +52,10 @@ interface MonthlySummary {
 }
 
 // #2175 (20270220110000): the server's close refusals, each with the operator's answer.
-function closeRefusal(err: unknown): 'changed' | 'review' | 'reload' | null {
+function closeRefusal(err: unknown): 'changed' | 'review' | 'reload' | 'reopened' | null {
   const message = String((err as { message?: unknown } | null)?.message ?? '');
   if (message.startsWith('CLOSE_FIGURES_CHANGED')) return 'changed';
+  if (message.startsWith('CLOSE_REOPENED_SINCE')) return 'reopened';
   if (message.startsWith('CLOSE_REVIEW_REQUIRED: reload')) return 'reload';
   if (message.startsWith('CLOSE_REVIEW_REQUIRED')) return 'review';
   return null;
@@ -338,6 +339,13 @@ export default function MonthEndClose() {
         setReviewedCommissions(false);
         setReviewedNeedsPricing(false);
         toast('error', "This month's figures changed since you reviewed them. Review the updated figures, then close again.");
+      } else if (refusal === 'reopened') {
+        // The key's receipt is for a close made before a reopen: retire it so the next close is a new one.
+        closePeriodIdem.resetKey();
+        setReviewedPayments(false);
+        setReviewedCommissions(false);
+        setReviewedNeedsPricing(false);
+        toast('error', 'This month was reopened since your last close attempt. Review the figures, then close again.');
       } else if (refusal === 'reload') {
         toast('error', 'The app was updated. Reload this page, then review and close the month again.');
       } else if (refusal === 'review') {

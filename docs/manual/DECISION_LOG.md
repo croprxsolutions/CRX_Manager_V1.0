@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — PR #2242: a retried close is refused once the month was reopened
+
+**Decision (Mason, 2026-11-22):** "Refuse and re-close (Recommended)" in the bug-captain session, and "Database refuses it" in the Lane B session. If a close went through but its reply was lost, and the month was reopened before that screen refreshed (for example from another tab), retrying the close no longer shows the old "Period closed" receipt: the database refuses it (`CLOSE_REOPENED_SINCE`), the month stays open, and the screen asks the admin to review and close again. Why: Sol rounds 5 and 6 showed that the old receipt could say "closed" while the month was open and still taking postings; a screen-only fix cannot see a reopen made elsewhere. The alternative was accepting that rare gap.
+
 ## 2026-11-22 — PR #2242: Month-End close re-check accepts an edit saved in the same instant as the click
 
 **Decision (Mason, 2026-11-22, in the bug-captain session):** "A: accept the gap (Recommended)", confirmed in the Lane B session as "Yes, option A". The database close re-check (#2175) catches edits made while the admin reviews the month. An edit saved in the same instant as the Close click shows on the Month-End screen, not on the saved close receipt, the same as an edit made after the close. Why: Sol rounds 1, 3 and 4 kept finding writers that could land during the close itself (prepayment edits, invoice voids, delivery voids, commission payouts); blocking all of them would change other writers (some Taha's until 2026-12-15), and the table lock tried in round 3 could deadlock with an invoice void. PR #2242 removes that lock; no writer changes. This entry also opens Sol round 5 for PR #2242.

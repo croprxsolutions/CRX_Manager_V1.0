@@ -611,4 +611,36 @@ describe('MonthEndClose', () => {
       .map(([, args]) => (args as { p_idempotency_key: string }).p_idempotency_key);
     expect(second).not.toBe(first);
   });
+
+  it('starts a fresh key and says to close again when the month was reopened elsewhere (Sol r6)', async () => {
+    let closeCalls = 0;
+    mockRpc.mockImplementation((name: string) => {
+      if (name === 'get_monthly_summary') return Promise.resolve({ data: cleanSummary(), error: null });
+      if (name === 'close_accounting_period') {
+        closeCalls += 1;
+        // 1: reply lost (another tab reopens before this tab refreshes); 2: the database refuses the old receipt.
+        if (closeCalls === 1) return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+        if (closeCalls === 2) return Promise.resolve({ data: null, error: { message: 'CLOSE_REOPENED_SINCE: this month was reopened after this close; review it and close again' } });
+        return Promise.resolve({ data: { success: true }, error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+    const closeOnce = async () => {
+      const rollBtn = await screen.findByRole('button', { name: /Roll the Month/i });
+      await waitFor(() => expect(rollBtn).not.toBeDisabled());
+      fireEvent.click(rollBtn);
+      fireEvent.click(await screen.findByRole('button', { name: /^Close Period$/i }));
+    };
+    await openCloseModal();
+    await waitFor(() => expect(closeCalls).toBe(1));
+    await closeOnce();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/reopened since your last close attempt/)));
+    await closeOnce();
+    await waitFor(() => expect(closeCalls).toBe(3));
+    const keys = mockRpc.mock.calls
+      .filter(([n]) => n === 'close_accounting_period')
+      .map(([, args]) => (args as { p_idempotency_key: string }).p_idempotency_key);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[1]);
+  });
 });

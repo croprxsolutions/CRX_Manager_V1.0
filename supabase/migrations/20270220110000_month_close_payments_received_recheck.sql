@@ -29,7 +29,8 @@
 --      the month lock the impl computes the figures once; it refuses CLOSE_REVIEW_REQUIRED when the token is missing,
 --      or payments exist and are not confirmed, or commission is not $0 and not confirmed; CLOSE_FIGURES_CHANGED when
 --      the token differs. The receipt is built from that same computation (payments received from (1)).
---      A retry with the same key still replays the saved receipt before any check.
+--      A retry with the same key replays the saved receipt before any check while the month is still closed;
+--      once the month was reopened it is refused (CLOSE_REOPENED_SINCE).
 --
 -- NOT CHANGED: who may call each function, the receipt's keys, every other summary figure, saved receipts, rows.
 -- ROLLOUT: the deployed screen calls close without a token and is refused (CLOSE_REVIEW_REQUIRED, "reload") until
@@ -275,11 +276,6 @@ BEGIN
     RAISE EXCEPTION 'Cannot close period ending %: the period has not ended yet', p_period_end;
   END IF;
 
-  IF p_idempotency_key IS NOT NULL THEN
-    v_existing := check_idempotency(p_idempotency_key, 'close_accounting_period');
-    IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
-  END IF;
-
   v_period_start :=
     pg_catalog.date_trunc(
       'month',
@@ -287,11 +283,23 @@ BEGIN
     )::date;
   PERFORM public._lock_accounting_months(ARRAY[v_period_start], true);
 
-  -- Redundant defense in depth: the canonical helper already serializes this
-  -- key at the first lookup, but retain a post-month-lock replay check.
+  -- A retry replays its saved receipt only while the month is still closed, checked under the month lock: once
+  -- the month was reopened, the old receipt would say "closed" while postings are allowed (Mason, DECISION_LOG
+  -- 2026-11-22). The screen then starts a new key and the admin reviews and closes again.
   IF p_idempotency_key IS NOT NULL THEN
     v_existing := check_idempotency(p_idempotency_key, 'close_accounting_period');
-    IF v_existing IS NOT NULL THEN RETURN v_existing; END IF;
+    IF v_existing IS NOT NULL THEN
+      IF NOT EXISTS (
+        SELECT 1
+          FROM public.accounting_periods
+         WHERE period_start = v_period_start
+           AND period_end = p_period_end
+           AND status = 'closed'
+      ) THEN
+        RAISE EXCEPTION 'CLOSE_REOPENED_SINCE: this month was reopened after this close; review it and close again';
+      END IF;
+      RETURN v_existing;
+    END IF;
   END IF;
 
   SELECT count(*)

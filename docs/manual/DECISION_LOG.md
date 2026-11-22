@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-22 — #1980: Mason owner-accepted 2 Sol finding(s) at `596e9a966c78`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #1980 at `596e9a966c78` (base `a7785529318b`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/QuoteBuilder.tsx:5788`, text sha256 `62289c837c8d5bff` (the wording stays with the proof, not here)
+  Mason's reason: I accept it is small chance (ref cae96f3067fd)
+- Finding 2 (HIGH) at `src/pages/QuoteBuilder.tsx:5436`, text sha256 `21fde77b4c797bc5` (the wording stays with the proof, not here)
+  Mason's reason: I accept it is small chance (ref cae96f3067fd)
+
 ## 2026-11-22 — #1980: Mason approves Sol round 6 now that #1989 has landed
 
 **Decision (Mason, in chat, 2026-11-22: "Yes, run Sol").** Sol round 5 on #1980 found that the Purchasing tab could count PO stock another booking had already claimed. On 2026-11-21 Mason chose to hold #1980 until #1989 (the booking line is the reservation) landed, rather than accept the finding. #1989 merged to staging on 2026-11-22 (`6e77a9e7a`), and #1980 now reads its coverage, late-PO, follow-up, unbacked-hold and Check data keys. Mason approved running Sol round 6 on #1980 at that state.

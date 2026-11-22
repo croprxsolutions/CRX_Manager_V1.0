@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — #2063: a job a blend ticket billed is not billed again by a split field invoice
+
+**Decision (Mason, 2026-11-22: "Yes, accept all four" in the Lane A session; "Accept all four (Recommended)" in the bug-captain session).** (1) A blend-ticket invoice counts as billing its job from creation, drafts included, until it is voided, cancelled or deleted (the rule Transfer to Invoice and the blend invoice already use). (2) A refused split save names the blend ticket and its invoice number, never the amount, and says to void that invoice first or ask an admin. (3) Bills entered without choosing the job are not caught; accepted gap. (4) A split set whose invoices were all voided keeps holding its job, unchanged; a possible follow-up. Lane A builds #2063 (supersedes the issue note naming Taha). Contract: `docs/plans/2026-11-22-job-double-bill-blend-CONTRACT.md`.
+
 ## 2026-11-22 — PR #2231 (#2193): Mason overrides Sol round 4's one HIGH; hand merge
 
 **Decision (Mason, 2026-11-22, relayed by the bug captain: "A").** Sol round 4 (head `d86e4eefc`) left one HIGH: the MCP apply door runs the guard code from the main checkout, so the new prerequisite check protects that door only once the main checkout is updated past this PR. Override reason: the check is active once installed, and the modes-of-action load is applied only at release, after this PR lands; the script door (the normal path) carries the check itself. The race Sol raised in rounds 1-3 is fixed (in-transaction re-count under the ingredient lock). The skip tool cannot accept findings on gate files, and the agent merge guard needs a clean Sol on them, so Mason or Taha merges PR #2231 by hand; agents do not land it. Sol's MED/LOW findings are tracked in #2230.

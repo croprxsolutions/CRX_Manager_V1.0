@@ -184,7 +184,8 @@ const SKIP_SOME_RE = /^(?:skip|accept|don't fix|do not fix) (?:findings? )?(\d{1
 
 /**
  * Mason's plain skip reply, the WHOLE message: { all: true } or { numbers: [...] }; else null.
- * Case, curly apostrophes, spacing and a trailing . or ! do not matter. Questions, "ok", "yes",
+ * Case, curly apostrophes, spacing and a trailing . or ! do not matter. `yes, <reason>` skips them all
+ * (a bare `yes` parses but skipSelection refuses it for want of a reason). Questions, "ok",
  * "move on", "merge it" and anything with other words are not a skip (Sol plan review: those
  * too often mean "go on" or "merge after fixing"). `accept <6 digits> ...` is the old form and
  * never reads as a skip (two-digit numbers at most).
@@ -194,6 +195,10 @@ export function skipFromReply(prompt) {
   if (BREAK_RE.test(raw.trim())) return null;
   const t = raw.toLowerCase().replace(/[‘’ʼ]/g, "'").replace(/\s*[.!]+\s*$/, "").replace(/[ \t]+/g, " ").trim();
   if (!t) return null;
+  // `yes, <reason>` answers the request's "do you accept the risk?" for every finding it lists
+  // (Mason, 2026-11-22). A bare `yes` still parses so the hook can ask him for the reason.
+  const yes = /^yes\b[\s,:;.!\-–—]*(.*)$/i.exec(raw.trim());
+  if (yes) return { all: true, reason: yes[1].trim() };
   // "that"/"it" name ONE finding: they skip only when the list has one (Luna, 2026-11-21).
   if (SKIP_ALL_RES.some((re) => re.test(t))) return / (?:it|that)(?: alone| fixed)?$/.test(t) ? { all: true, single: true } : { all: true };
   const m = SKIP_SOME_RE.exec(t);
@@ -207,6 +212,10 @@ export function skipFromReply(prompt) {
 export function skipSelection(skip, shownFindings) {
   const shown = (shownFindings || []).map((f) => f.n);
   if (!skip) return { problem: "his reply is not a skip" };
+  if (skip.reason !== undefined) {
+    const bad = reasonProblem(skip.reason);
+    if (bad) return { problem: `he said yes, but ${bad}; ask him for the reason again` };
+  }
   if (skip.all && skip.single && shown.length !== 1) return { problem: `his reply says "that" or "it" but the list has ${shown.length} findings; he replies skip (all of them) or skip and the numbers` };
   if (skip.all) return shown.length ? { numbers: shown } : { problem: "the request shows no findings" };
   const nums = skip.numbers || [];
@@ -247,12 +256,12 @@ export function solSkipSummary(p) {
     `Pull request: ${String(p.pullRequestUrl ?? "").replace(/^https:\/\/github\.com\//i, "").replace(/\/pull\//, "#")} (version ${String(p.prHead).slice(0, 12)})`,
     ...(p.findings || []).map((f) => `Finding ${f.n} of ${p.findingCount} (${f.severity}): ${f.text}`),
     "",
-    `Each skipped finding's file and line goes in ${DECISION_LOG_PATH}, which is public; the wording stays private.`,
+    `Each skipped finding's file and line, and your reason, go in ${DECISION_LOG_PATH}, which is public; the finding's wording stays private.`,
     "Every other finding and every other safety check still applies.",
     "",
-    `To skip ${nums.length === 1 ? "it" : "all of them"}, reply with only one of: skip, accept, don't fix, I disagree, ${nums.length === 1 ? "I don't want that, leave it" : "I don't want those, leave them"}.`,
-    ...(nums.length > 1 ? [`To skip only some, reply skip, accept or don't fix and their numbers (for example: skip ${nums[0]})`] : []),
-    `Any other reply (ok, yes, a question, or more words) skips nothing. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
+    `Do you accept the risk of leaving ${nums.length === 1 ? "it" : "them"} unfixed? Reply yes and your reason (for example: yes, too small to ever affect the business).`,
+    ...(nums.length > 1 ? [`To skip only some, reply skip and their numbers (for example: skip ${nums[0]})`] : []),
+    `Skip, I disagree or don't fix also work. A bare yes with no reason, ok, or a question skips nothing. Reference ${p.code}. Reply before ${new Date(p.expiresAt).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "medium", timeStyle: "short" })} Central.`,
   ];
 }
 
@@ -303,7 +312,8 @@ export function verifySolSkip({ approval, record, checkReply, checkShown }) {
   if (!Number.isInteger(p.pullRequest) || p.pullRequest <= 0) return no("it names no pull request");
   if (pullRequestUrlFor(p.pullRequestUrl, p.pullRequest) === null) return no("it does not name the pull request's repository");
   if (JSON.stringify(p.summary) !== JSON.stringify(solSkipSummary(p))) return no("what Mason was shown does not match what it covers");
-  const sel = skipSelection(skipFromReply(approval.reply), p.findings);
+  const said = skipFromReply(approval.reply);
+  const sel = skipSelection(said, p.findings);
   if (sel.problem) return no(`the recorded reply does not hold (${sel.problem})`);
   if (JSON.stringify(sel.numbers) !== JSON.stringify(approval.selected)) return no("the recorded reply does not match the findings recorded as skipped");
   const issued = Date.parse(p.issuedAt);
@@ -319,7 +329,7 @@ export function verifySolSkip({ approval, record, checkReply, checkShown }) {
   if (typeof checkShown !== "function") return no("what he was shown before his reply was not checked");
   try { checkShown(mark, p); }
   catch (e) { return no(`his reply could not be tied to this request (${e?.message || e})`); }
-  return { ok: true, payload: p, numbers: sel.numbers, approvedAt: approval.approvedAt };
+  return { ok: true, payload: p, numbers: sel.numbers, reason: said.reason ?? SKIP_REASON, approvedAt: approval.approvedAt };
 }
 
 /** Every skip receipt saved for `head` in `stateDir`, parsed (unreadable ones are left out). */
@@ -415,7 +425,7 @@ export function decisionLogEntry({ record, accepted }) {
     ...accepted.flatMap((a) => [
       `- Finding ${a.payload.finding.n} (${a.payload.finding.severity}) at ${findingLocation(a.payload.finding.text)}, ` +
         `text sha256 \`${textHash(a.payload.finding.text)}\` (the wording stays with the proof, not here)`,
-      a.skipped
+      a.skipped && a.reason === SKIP_REASON
         ? `  Mason ${SKIP_REASON} (plain reply, ref ${String(a.payload.nonce).slice(0, 12)})`
         : `  Mason's reason: ${a.reason} (ref ${String(a.payload.nonce).slice(0, 12)})`,
     ]),
@@ -456,7 +466,7 @@ export function collectAcceptances({ record, readAcceptance, readSkips = () => [
     if (!r.ok) continue; // a receipt from an earlier run on this head simply does not count
     for (const n of r.numbers) {
       if (!skipped.has(n)) {
-        skipped.set(n, { ok: true, skipped: true, payload: { ...r.payload, finding: record.findings[n - 1] }, reason: SKIP_REASON, approvedAt: r.approvedAt });
+        skipped.set(n, { ok: true, skipped: true, payload: { ...r.payload, finding: record.findings[n - 1] }, reason: r.reason, approvedAt: r.approvedAt });
       }
     }
   }

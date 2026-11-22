@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 6 left 2 HIGH findings on the skip mechanism itself):** "then we will override SOL if we need to I don't want over complicated codes to type I want it to explicitly ask if I accept the risk and I say yes with reason and that's good enough". The skip request now asks plainly whether he accepts the risk of leaving the findings unfixed; `yes` and a reason is enough, and the reason is logged. Round 6's two findings (`.claude/hooks/sol-accept-lib.mjs:233`, `scripts/owner-accept-sol-finding.mjs:107`) are left unfixed as his business call: both concern how far a skip he gave can stretch, not money, stock, customer data or logins. This PR changes gate files, so the agent merge guard still requires a clean Sol; Mason or Taha merges it by hand.
+
 ## 2026-11-22 — Sol round 5 on PR #2199: keep the skip simple
 
 **Decision (Mason, in chat 2026-11-21, after Sol gate round 4):** "i want to make sure we dont overcomplicate or overbuild this". The bug/judgment labels from round 3 are removed. He may skip any Sol finding he disagrees with: a business call, or a bug or gap so small or impractical it will never affect the business. The agent says plainly when a finding is a real money, stock, data or security bug. A skip counts only for the PR it was given for. Round 5 reviews that simpler design (entry below).

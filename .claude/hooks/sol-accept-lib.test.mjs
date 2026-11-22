@@ -291,7 +291,14 @@ assert.match(skipSelection(skipFromReply("I don't want that"), [{ n: 1 }, { n: 2
 assert.deepEqual(skipFromReply("skip 1 3"), { numbers: [1, 3] }, "skip: numbers");
 assert.deepEqual(skipFromReply("skip 1, 3 and 4"), { numbers: [1, 3, 4] }, "skip: a list with commas and and");
 assert.deepEqual(skipFromReply("don't fix finding 2"), { numbers: [2] }, "skip: 'finding 2'");
-for (const no of ["ok", "yes", "Yes I approve", "I approve", "move on", "merge it", "no", "no, fix it", "skip?", "skip the explanation and fix it",
+{
+  const shownF0 = [{ n: 1 }, { n: 3 }];
+  assert.deepEqual(skipFromReply("Yes, too small to ever matter."), { all: true, reason: "too small to ever matter." }, "skip: yes with a reason skips everything shown");
+  assert.deepEqual(skipSelection(skipFromReply("yes - we never sell before switch-on"), shownF0), { numbers: [1, 3] }, "selection: yes with a reason = every finding shown");
+  assert.match(skipSelection(skipFromReply("yes"), shownF0).problem, /reason/, "selection: a bare yes skips nothing and asks for the reason");
+  assert.match(skipSelection(skipFromReply("yes, costs $500"), shownF0).problem, /money/, "selection: a reason the public log cannot hold skips nothing");
+}
+for (const no of ["ok", "yesterday it worked", "yes\nand merge", "I approve", "move on", "merge it", "no", "no, fix it", "skip?", "skip the explanation and fix it",
   "I don't want that approach", "accept only if the totals reconcile", "accept all 1 3", "accept 123456", "accept 123456 fine by me",
   "skip\nand merge", "please skip", "skip 123", ""]) {
   assert.equal(skipFromReply(no), null, `skip: "${no}" is not a skip`);
@@ -324,8 +331,8 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   const r1 = skipReq([1, 3]);
   assert.equal(Date.parse(r1.payload.expiresAt), Date.parse(rec3.timestamp) + 24 * 60 * 60 * 1000, "request: deadline never past the Sol run's own 24 hours");
   assert.match(r1.payload.summary.join("\n"), /Finding 1 of 3 \(HIGH\).*\nFinding 3 of 3 \(HIGH\)/, "request: lists only the findings asked about");
-  assert.match(r1.payload.summary.join("\n"), /To skip all of them, reply with only one of: skip, accept, don't fix, I disagree, I don't want those, leave them\./, "request: lists every reply that skips");
-  assert.match(r1.payload.summary.join("\n"), /Any other reply \(ok, yes, a question, or more words\) skips nothing\./, "request: says what skips nothing");
+  assert.match(r1.payload.summary.join("\n"), /Do you accept the risk of leaving them unfixed\? Reply yes and your reason/, "request: asks plainly whether he accepts the risk");
+  assert.match(r1.payload.summary.join("\n"), /A bare yes with no reason, ok, or a question skips nothing\./, "request: says what skips nothing");
   assert.match(r1.payload.summary.join("\n"), /Pull request: croprxsolutions\/CRX_Manager_V1\.0#2200 /, "request: names the repository and PR");
   assert.doesNotMatch(r1.payload.summary.join("\n"), /accept \d{6}/, "request: no code to type");
   const shownText = r1.payload.summary.join("\n");
@@ -374,6 +381,8 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   assert.match(e3, /\*\*Decision \(Mason, by chat reply, .*Mason chose to leave each one unfixed\./, "log: plain-reply wording");
   assert.match(e3, /Finding 2 \(BLOCKER\) at `src\/b\.ts:2`.*\n  Mason chose to leave it unfixed \(plain reply, ref /, "log: fixed wording per finding");
   assert.equal(e3.includes(" - two"), false, "log: never the finding's wording");
+  const e3y = decisionLogEntry({ record: rec3, accepted: got3.accepted.map((a) => ({ ...a, reason: "too small to ever matter" })) });
+  assert.match(e3y, /Finding 2 \(BLOCKER\) at `src\/b\.ts:2`.*\n {2}Mason's reason: too small to ever matter \(ref /, "log: a yes reply's reason is logged");
   assert.doesNotMatch(e3, /may land|reviewer|Sol review/i, "log: nothing addressed to reviewers");
   assert.equal(entry.includes("accept <code>"), true, "log: an old accept-only entry keeps its old wording");
 
@@ -396,7 +405,7 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   const shown4 = r4.payload.summary.join("\n");
   tx(shown4);
   assert.equal(hook("ok"), "", "hook: 'ok' is ordinary chat and skips nothing");
-  assert.doesNotMatch(hook("yes"), /SKIPPED —/, "hook: 'yes' skips nothing (it stays a migration-approval word only)");
+  assert.match(hook("yes"), /NOT SKIPPED.*reason/, "hook: a bare 'yes' skips nothing and asks for the reason");
   tx(`Here is something else.\n${shown4}`);
   assert.match(hook("skip"), /NOT SKIPPED.*did not show/, "hook: the summary must be the whole last message");
   tx(shown4);
@@ -404,6 +413,11 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   const out = hook("skip");
   assert.match(out, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 1, 2 of 3 on PR #2200/, `hook: one word skips both (${out})`);
   assert.equal(hook("skip"), "", "hook: the same reply again skips nothing more (nothing is waiting, so it is ordinary chat)");
+  // "Do you accept the risk?" answered "yes, <reason>" (Mason, 2026-11-22).
+  const r5 = skipReq([3]);
+  tx(r5.payload.summary.join("\n"));
+  const outYes = hook("Yes, too small to ever affect the business");
+  assert.match(outYes, /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 3 of 3/, `hook: yes with a reason skips (${outYes})`);
 }
 
 console.log("sol-accept-lib.test.mjs: all assertions passed");

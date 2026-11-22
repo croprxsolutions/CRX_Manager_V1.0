@@ -3,26 +3,25 @@
 // Supabase stack (Postgres + Storage + Auth + the customer-document-files Edge
 // Function). It creates users and rows, so it refuses any non-local URL.
 //
-// Setup (a scratch project, never this repo's live project):
-//   1. supabase init; copy in a fixture for profiles/customers/customer_contacts/
-//      is_admin/is_sales_rep/update_updated_at, then
-//      supabase/migrations/20260717013415_crm_customer_documents.sql verbatim.
-//   2. supabase start; supabase functions serve customer-document-files
-//      (edge_runtime.secrets ALLOWED_ORIGIN set in config.toml).
-//   3. Export LOCAL_SUPABASE_URL, LOCAL_SUPABASE_ANON_KEY,
-//      LOCAL_SUPABASE_SERVICE_ROLE_KEY from `supabase status -o env`.
+// Setup (KI-113 rebuilt it on the real schema; the original hand-made fixture is gone):
+//   node scripts/local-app/doc-bytes.mjs rebuild      once; own Docker stack, loopback only, baseline + EVERY migration
+//   node scripts/smoke/run-customer-document-bytes-proof.mjs [--negative-control]
+//     serves today's customer-document-files function next to that stack and runs --phase=after
+//     (--negative-control also re-adds a browser read policy on the bucket and requires this proof to fail).
+//   node scripts/local-app/doc-bytes.mjs stop         when finished
+// To point it at another local stack by hand, export LOCAL_SUPABASE_URL (one origin that serves auth, rest,
+// storage and /functions/v1), LOCAL_SUPABASE_ANON_KEY, LOCAL_SUPABASE_SERVICE_ROLE_KEY and the seeded admin's
+// LOCAL_SUPABASE_ADMIN_EMAIL / LOCAL_SUPABASE_ADMIN_PASSWORD.
 //
-//   node scripts/smoke/prove-customer-document-bytes-server-only.mjs --phase=before
-//     Old policies: asserts the P1 hole is REAL (a rep's long-lived signed URL
-//     still serves bytes after soft delete). Proves the harness can see it.
-//   Empty the bucket through the Storage API (service role) — the migration's
-//   preflight refuses a non-empty bucket by design, and --phase=before leaves an
-//   object behind — then apply
-//   supabase/migrations/20260914100700_customer_document_bytes_server_only.sql, then
-//   node scripts/smoke/prove-customer-document-bytes-server-only.mjs --phase=after
-//     Asserts browser users cannot read or sign at all, the Edge Function upload/
-//     download flow works, a soft-deleted document stops downloading, and no
-//     look-alike path can be registered to reach its bytes.
+//   --phase=after   Asserts browser users cannot read or sign at all, the Edge Function upload/download flow
+//     works, a soft-deleted document stops downloading for reps (admins keep it, KI-07), and no look-alike path
+//     can be registered to reach its bytes. Runs on today's full chain. Three assertions follow later decisions:
+//     any active rep works any customer (2026-10-13, 20261013220000) and an admin may still download a removed
+//     document (KI-07, 20261222100000); the byte-boundary assertions are unchanged.
+//   --phase=before  HISTORICAL. It proved the pre-20260914100700 hole (a rep's one-year signed URL survives soft
+//     delete) and needs the chain stopped just before that migration with the old storage policies. Today's chain
+//     is already past that migration, so it is not wired to the runner and is not
+//     expected to pass on a full chain; it is kept as the record of how the hole was shown to be real.
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -60,12 +59,30 @@ const service = createClient(url, serviceKey, { auth: { persistSession: false } 
 const runId = Date.now().toString(36);
 const password = `Proof-${runId}-pw!`;
 
+// A seeded admin (scripts/local-app/doc-bytes.mjs rebuild creates one) who assigns roles to the proof's users.
+const adminEmail = process.env.LOCAL_SUPABASE_ADMIN_EMAIL;
+const adminPassword = process.env.LOCAL_SUPABASE_ADMIN_PASSWORD;
+if (!adminEmail || !adminPassword) {
+  console.error('Set LOCAL_SUPABASE_ADMIN_EMAIL and LOCAL_SUPABASE_ADMIN_PASSWORD (the seeded admin who assigns roles).');
+  process.exit(2);
+}
+const provisioner = { client: createClient(url, anonKey, { auth: { persistSession: false } }) };
+{
+  const { error } = await provisioner.client.auth.signInWithPassword({ email: adminEmail, password: adminPassword });
+  if (error) throw error;
+}
+
 async function makeUser(label, role) {
   const email = `${label}-${runId}@proof.local`;
+  // On the real schema Auth-created users arrive as inactive drivers and only an admin session may assign a
+  // role (handle_new_user + the profile role lock), so a seeded admin account promotes each new user, the way
+  // the create-user flow does in the app.
   const { data, error } = await service.auth.admin.createUser({ email, password, email_confirm: true });
   if (error) throw error;
-  const { error: profileError } = await service.from('profiles').insert({ id: data.user.id, role, is_active: true });
+  const { data: promoted, error: profileError } = await provisioner.client
+    .from('profiles').update({ role, is_active: true }).eq('id', data.user.id).select('role, is_active');
   if (profileError) throw profileError;
+  if (promoted?.[0]?.role !== role || !promoted[0].is_active) throw new Error(`could not make ${label} an active ${role}`);
   const client = createClient(url, anonKey, { auth: { persistSession: false } });
   const { error: signInError } = await client.auth.signInWithPassword({ email, password });
   if (signInError) throw signInError;
@@ -151,7 +168,8 @@ async function runAfter(admin, rep, otherRep, driver, customerA) {
   const refused = await invoke(otherRep, {
     action: 'prepare_upload', customer_id: customerA, filename: 'x.pdf', mime_type: 'application/pdf', size_bytes: 10,
   });
-  check('a rep not assigned to the customer cannot prepare an upload', refused.status === 403, `HTTP ${refused.status}`);
+  // Mason, 2026-10-13 (20261013220000): reps work any customer, so assignment no longer gates documents.
+  check('any active rep may prepare an upload for any customer (2026-10-13 decision)', refused.status === 200, `HTTP ${refused.status}`);
 
   const driverRefused = await invoke(driver, {
     action: 'prepare_upload', customer_id: customerA, filename: 'x.pdf', mime_type: 'application/pdf', size_bytes: 10,
@@ -196,7 +214,7 @@ async function runAfter(admin, rep, otherRep, driver, customerA) {
   check('admin downloads through the function', adminDownload.status === 200, `HTTP ${adminDownload.status}`);
 
   const otherDownload = await invoke(otherRep, { action: 'download', document_id: documentId });
-  check('an unassigned rep cannot download it', otherDownload.status === 404, `HTTP ${otherDownload.status}`);
+  check('any active rep downloads a live document of any customer through the function (2026-10-13 decision)', otherDownload.status === 200, `HTTP ${otherDownload.status}`);
 
   const overwrite = await rep.client.storage.from(BUCKET)
     .uploadToSignedUrl(path, prepared.data?.token, pdfBytes('overwrite'), { contentType: 'application/pdf', upsert: true });
@@ -227,7 +245,10 @@ async function runAfter(admin, rep, otherRep, driver, customerA) {
   const afterDeleteRep = await invoke(rep, { action: 'download', document_id: documentId });
   check('SOFT DELETE REVOKES: rep download is refused after delete', afterDeleteRep.status === 404, `HTTP ${afterDeleteRep.status}`);
   const afterDeleteAdmin = await invoke(admin, { action: 'download', document_id: documentId });
-  check('SOFT DELETE REVOKES: admin download is refused after delete', afterDeleteAdmin.status === 404, `HTTP ${afterDeleteAdmin.status}`);
+  // KI-07 (20261222100000): a removed document stays downloadable for admins only, so they can check it before restoring.
+  const afterDeleteAdminBytes = afterDeleteAdmin.data instanceof Blob ? new Uint8Array(await afterDeleteAdmin.data.arrayBuffer()) : null;
+  check('SOFT DELETE KEEPS ADMIN-ONLY ACCESS (KI-07): admin still downloads the exact bytes after delete',
+    afterDeleteAdmin.status === 200 && Boolean(afterDeleteAdminBytes) && Buffer.from(afterDeleteAdminBytes).equals(Buffer.from(bytes)), `HTTP ${afterDeleteAdmin.status}`);
 
   const stillStored = await service.storage.from(BUCKET).list(customerA, { search: path.split('/')[1] });
   check('the soft-deleted bytes remain in Storage as the record', (stillStored.data ?? []).length === 1, stillStored.error?.message);

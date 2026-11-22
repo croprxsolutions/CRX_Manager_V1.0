@@ -1767,17 +1767,17 @@ cases only. Workaround: run a delete or cleanup as its own command, not in one t
 
 ### KI-113 — The customer-document byte-boundary prover is out of date
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-43 · #1698, #1663, #635.
+> **Re-checked 2026-11-22 on staging `f8ee14ee8`:** Resolved (after phase) · LOW · plan W3-43 · #1698, #1663, #635.
 
-**LOW · OPEN · tooling-tests · source: #1698 (from #1663)**
-`scripts/smoke/prove-customer-document-bytes-server-only.mjs` (PR #635) builds a hand-made scratch project (a
-`profiles`/`customers` fixture plus `20260717013415`, then `20260914100700`) and serves today's
-`customer-document-files`. Its `--phase=after` fails on `profiles.email NOT NULL`, and today's function also relies on
-later migrations (`20261013220000`, `20261222100000`) its fixture lacks, so a one-line email fix would not make it
-pass. Not a customer risk today: live read-only 2026-11-09, the `customer-documents` bucket is private and no
-`storage.objects` policy names it or omits `bucket_id`, so browser users reach its files only through
-`customer-document-files`; the 2026-11-08 local click-through (KI-07) exercised that path. No other prover covers this
-boundary. Fix when next needed: rebuild it on the real-schema harness.
+**LOW · RESOLVED 2026-11-22 · tooling-tests**
+`scripts/smoke/prove-customer-document-bytes-server-only.mjs --phase=after` runs again on today's full migration
+chain and today's unmodified `customer-document-files` function: `node scripts/local-app/doc-bytes.mjs rebuild`
+(a third, separate local stack) then `node scripts/smoke/run-customer-document-bytes-proof.mjs` (30/30 checks;
+`--negative-control` re-adds a browser read policy on the bucket and 4 checks fail, so the boundary is still
+tested). Three assertions follow later decisions: any active rep may work any customer (20261013220000), and an
+admin can still download a removed document (KI-07); a rep is still refused after removal and a driver is refused.
+Still not covered: `--phase=before` (the original hole) needs the chain stopped before 20260914100700 and is kept
+as historical; the function runs under host Deno, not the Edge Runtime container.
 
 ### KI-115 — Many screens send database errors to Sentry as "[object Object]"
 

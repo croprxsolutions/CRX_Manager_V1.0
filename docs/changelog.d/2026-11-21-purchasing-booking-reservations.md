@@ -9,4 +9,4 @@
 - New product keys: `coverage` (per group: booked, on_time, late, not_covered, from_shelf, POs), `has_late_cover`, `has_followup`, `estimated`, `hold_unbacked`. A booking row gains `overdue_followup` (14+ days past its need date). The horizon only filters what is shown; POs are no longer cut at the horizon (no `later` PO flag).
 - Kept from the old #1989 build: the safe draw guess, the draw lists and the timing-window fixes.
 - No screen calls `get_purchasing_plan` yet (#1980 adds the first).
-- Proof: `node scripts/smoke/prove-purchasing-plan-reservations-real-schema.mjs` with `smoke-purchasing-plan-reservations.sql` (C1-C20) and `smoke-purchasing-plan.sql`. Not yet verified on staging.
+- Proof: `node scripts/smoke/prove-purchasing-plan-reservations-real-schema.mjs` with `smoke-purchasing-plan-reservations.sql` (C1-C21) and `smoke-purchasing-plan.sql`. Not yet verified on staging.

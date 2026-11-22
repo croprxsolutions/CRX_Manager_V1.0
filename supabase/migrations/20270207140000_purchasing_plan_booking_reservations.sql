@@ -322,6 +322,7 @@ BEGIN
       CROSS JOIN prm
      WHERE p.status IN ('draft', 'submitted', 'partially_received') AND poi.product_id IS NOT NULL
        AND poi.quantity_ordered - COALESCE(poi.quantity_received, 0) > 0
+       AND poi.quantity_ordered - COALESCE(poi.quantity_received, 0) < 'Infinity'::numeric  -- (also excludes NaN)
   ),
   -- Every demand row, in stock units. A counted booking line (after draws) is its own reservation.
   dem AS (
@@ -583,7 +584,8 @@ BEGIN
                           'committed', COALESCE((SELECT SUM(qty) FROM demb WHERE demb.product_id = mo.product_id AND demb.bucket = 'dated' AND demb.cls = 'committed' AND date_trunc('month', demb.need_date) = mo.m), 0),
                           'could_add', COALESCE((SELECT SUM(qty) FROM demb WHERE demb.product_id = mo.product_id AND demb.bucket = 'dated' AND demb.cls = 'could_add' AND date_trunc('month', demb.need_date) = mo.m), 0),
                           'maybe', COALESCE((SELECT SUM(qty) FROM demb WHERE demb.product_id = mo.product_id AND demb.bucket = 'dated' AND demb.cls = 'shown' AND date_trunc('month', demb.need_date) = mo.m), 0),
-                          'incoming', COALESCE((SELECT SUM(qty) FROM po WHERE po.product_id = mo.product_id AND po.flag IN ('counted', 'late') AND date_trunc('month', po.eff_date) = mo.m), 0))
+                          'incoming', COALESCE((SELECT SUM(qty) FROM po WHERE po.product_id = mo.product_id AND po.flag IN ('counted', 'late')
+                                             AND po.eff_date >= mo.m AND po.eff_date < (mo.m + interval '1 month')::date), 0))  -- date-only: a year-300000 PO is valid but past the timestamp range
                           ORDER BY mo.m)
                    FROM months mo WHERE mo.product_id = prod.product_id),
                'rows', COALESCE((
@@ -629,7 +631,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM 'b51afb97b4dd4659fb67dee22c8d4e9c' THEN
+     IS DISTINCT FROM 'f0ff65780082f77cc3ef94cde1bf195b' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

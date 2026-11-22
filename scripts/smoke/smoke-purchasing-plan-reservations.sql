@@ -430,6 +430,22 @@ BEGIN
   END IF;
   v_n := v_n + 1;
 
+  -- C21: an open PO dated in year 300000 (a valid date, past the timestamp range) and one whose remaining quantity
+  -- is NaN must not break the plan or count as supply: product 1 still reads, and its months and buy are unchanged.
+  v_x := pg_temp.prod(get_purchasing_plan(12), v_p[1]);
+  PERFORM pg_temp.po(v_p[1], v_admin, 'SMKRS-C21A-' || v_suffix, 50, 0);
+  UPDATE purchase_orders SET expected_delivery_date = '300000-01-01' WHERE po_number = 'SMKRS-C21A-' || v_suffix;
+  PERFORM pg_temp.po(v_p[1], v_admin, 'SMKRS-C21B-' || v_suffix, 50, 5);
+  UPDATE purchase_order_items SET quantity_ordered = 'NaN'
+   WHERE purchase_order_id = (SELECT id FROM purchase_orders WHERE po_number = 'SMKRS-C21B-' || v_suffix);
+  v_plan2 := get_purchasing_plan(12);
+  IF pg_temp.prod(v_plan2, v_p[1]) IS NULL
+     OR pg_temp.prod(v_plan2, v_p[1])->'months' IS DISTINCT FROM v_x->'months'
+     OR pg_temp.prod(v_plan2, v_p[1])->>'suggested' IS DISTINCT FROM v_x->>'suggested' THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C21 far-future and NaN PO lines) % %', v_x, pg_temp.prod(v_plan2, v_p[1]);
+  END IF;
+  v_n := v_n + 1;
+
   -- The allocator is not callable by clients.
   IF has_function_privilege('authenticated', 'public._purchasing_allocate(jsonb, jsonb)', 'EXECUTE')
      OR has_function_privilege('anon', 'public._purchasing_allocate(jsonb, jsonb)', 'EXECUTE') THEN

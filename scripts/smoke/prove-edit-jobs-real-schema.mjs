@@ -31,7 +31,8 @@ const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270203110000_job_writes_through_rpcs.sql');
 const FOLLOW_UPS = [];
 // These only call the idempotency helpers from their own new or changed functions; neither redefines anything the proof covers.
-const LATER_READ_ONLY = new Set(['20270203120000_inventory_edge_cases_1942.sql', '20270204120000_driver_available_deliveries.sql']);
+const LATER_READ_ONLY = new Set(['20270203120000_inventory_edge_cases_1942.sql', '20270204120000_driver_available_deliveries.sql',
+  '20270206110000_pnl_commission_share_billed.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -258,17 +259,12 @@ const APPL = 'e1100000-0000-4000-8000-0000000000d4';
 const CHAIN = 'smoke-edit-jobs.sql';
 const SIG = 'public.edit_jobs(uuid[],jsonb,text,uuid,text)';
 // Existing chains that write jobs; each must pass before and after the candidate.
-// Left out because their assertions describe old behaviour (checked 2026-11-21 in the replayed container; the
-// other seven of issue #2146's nine now pass and are listed below). Rewrite tracked in #2168:
-// - transfer-invoice-to-job: a two-owner job now bills one invoice per owner (U7 group path), so its "2 customer
-//   shares" check no longer holds; its cost setup is fixed, the assertion is stale.
-// - field-functions-require-field-access: expects an applicator dispatched to one field to see only that field;
-//   since row 11.4 part B (Mason, 2026-10-25) a dispatched applicator sees every field of the job.
+// transfer-invoice-to-job and field-functions-require-field-access were rewritten to current behaviour in #2168.
 const REGRESSION = ('smoke-booking-live-job-guard smoke-booking-guard-rep-and-delete smoke-field-invoice-loop '
   + 'smoke-ops-replay-binding-batch4e smoke-get-jobs-billed-customers smoke-offline-action-receipts '
   + 'smoke-billed-job-immutability smoke-transfer_job_invoice_column_fixes smoke-transfer_job_invoice_machine_fee '
   + 'smoke-dispatch-job-locations smoke-undispatch-job-locations smoke-job_from_quote_activity_feed_fix '
-  + 'smoke-delivery-job-replay-binding-batch3a')
+  + 'smoke-delivery-job-replay-binding-batch3a smoke-transfer-invoice-to-job smoke-field-functions-require-field-access')
   .split(' ').map((s) => `${s}.sql`);
 
 function seed() {

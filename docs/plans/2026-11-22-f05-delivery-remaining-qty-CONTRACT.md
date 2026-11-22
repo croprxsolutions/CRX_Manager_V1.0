@@ -54,6 +54,8 @@ Files: `supabase/migrations/<new>_f05_order_line_quantity_guard.sql`, `scripts/s
 
 **Undo.** Cancel and void lower quantities, so they are never blocked by the new triggers.
 
+**Order line deleted (Luna r3, refuted).** No delete trigger is needed: `delivery_items.order_item_id` is `NOT NULL REFERENCES order_items(id)` with no cascade (`20260206172436…:329`, never altered), so Postgres refuses to delete an order line any delivery line still points to.
+
 ## 3. Delivery
 
 Database PR first (target `staging`, Sol required: migration + inventory). Screen PR for "Remaining After" can go any time; it does not depend on the database change.

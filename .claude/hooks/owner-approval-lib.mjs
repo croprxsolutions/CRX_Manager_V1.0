@@ -801,6 +801,8 @@ export const OWNER_TRUST_FILES = Object.freeze([
   ".claude/hooks/migration-landing-gate-lib.mjs",
   ".claude/hooks/codex-push-lib.mjs",
   "scripts/apply-migration-file.mjs",
+  // Decides whether the #2193 live prerequisite passes (Sol HIGH).
+  ".claude/hooks/migration-prerequisite-lib.mjs",
   "scripts/owner-approve-migration.mjs",
   ".claude/hooks/sol-accept-lib.mjs",
   "scripts/owner-accept-sol-finding.mjs",

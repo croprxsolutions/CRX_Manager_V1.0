@@ -4,7 +4,8 @@
 -- else changes. To use it live, copy it into a new migration through the gates (without the BEGIN / COMMIT lines), so
 -- the migration ledger records the removal; never run it by hand against a live database.
 -- Removing it re-opens F05: more scheduled or delivered than ordered on a line, and order cuts below what is
--- scheduled. Pause scheduling extra loads and order quantity cuts while it is off.
+-- scheduled. Pause scheduling extra loads, order quantity cuts, and completing loads on the lines the forward
+-- migration's preflight listed while it is off.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 -- Same table order as completion and the forward migration (Sol r2), so dropping the triggers cannot deadlock with it.

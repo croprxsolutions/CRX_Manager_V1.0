@@ -122,7 +122,7 @@
 
 The staging audit (2026-11-21) found one order line scheduled past what was ordered, so 2 ordered ended 3 delivered. The fix (`20270218100000_f05_order_line_quantity_guard.sql`) refuses any write that would put delivered + open loads past what was ordered.
 
-**Decision (Mason, in chat, 2026-11-22: "yes"):** where two open loads already hold the same units from before the fix, completing either is refused until the office cancels or reduces the extra load. The driver is told to call the office; stock never moves twice. Rejected: first load to complete wins (the second driver finds out only at the farm).
+**Decision (Mason, in chat, 2026-11-22: "yes"):** where two open loads already hold the same units from before the fix, completing either in a way that would deliver more than was ordered is refused until the office cancels or reduces the extra load (a partial completion that still fits with the other open load is allowed). The driver is told to call the office; stock never moves twice. Rejected: first load to complete wins (the second driver finds out only at the farm).
 
 **Follow-up decision (Mason, in chat, 2026-11-22: "drop it"):** the refusal only tells the driver to call the office; no "complete the extra load with 0 delivered" tip (the delivery screens refuse an all-zero completion, Sol r2). A leftover double-booked line the office cannot cancel because a return is logged stays blocked until the F05b cleanup fixes it by hand; before the live apply, count those lines and fix each one. Rejected: letting the office cancel an undelivered load despite a return on the line (changes the return rule; bigger and riskier). Superseded: Mason's earlier "Reword the hint" (record 0 only if the extra load never went out).
 

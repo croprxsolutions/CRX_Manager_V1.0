@@ -41,6 +41,22 @@ BEGIN
      AND EXISTS (SELECT 1 FROM public.delivery_items di JOIN public.deliveries d ON d.id = di.delivery_id
                   WHERE di.order_item_id = oi.id AND d.status IN ('scheduled', 'in_progress') AND d.deleted_at IS NULL);
   RAISE NOTICE 'F05_PREFLIGHT: % order line(s) have open loads beyond what was ordered: %', v_open_over, COALESCE(v_ids, 'none');
+  -- Block (Sol r3; Mason 2026-11-22 "drop it": fixed by hand before the apply): an over line whose order has an active
+  -- return. Cancelling a load there is refused (DELIVERY_HAS_RECEIVED_RETURN), so the guard would leave it stuck.
+  SELECT count(*), string_agg(oi.id::text, ', ' ORDER BY oi.id) INTO v_open_over, v_ids
+    FROM public.order_items oi
+   WHERE oi.quantity_delivered + (SELECT COALESCE(sum(di.quantity), 0) FROM public.delivery_items di
+                                    JOIN public.deliveries d ON d.id = di.delivery_id
+                                   WHERE di.order_item_id = oi.id AND d.status IN ('scheduled', 'in_progress') AND d.deleted_at IS NULL)
+         > oi.total_units_needed
+     AND EXISTS (SELECT 1 FROM public.delivery_items di JOIN public.deliveries d ON d.id = di.delivery_id
+                  WHERE di.order_item_id = oi.id AND d.status IN ('scheduled', 'in_progress') AND d.deleted_at IS NULL)
+     AND EXISTS (SELECT 1 FROM public.returns r
+                  WHERE r.order_id = oi.order_id AND r.deleted_at IS NULL
+                    AND r.status IN ('requested', 'approved', 'received', 'credited'));
+  IF v_open_over > 0 THEN
+    RAISE EXCEPTION 'F05_PREFLIGHT: % order line(s) have open loads beyond what was ordered and a return on the order, so the extra load cannot be cancelled: %. Fix them by hand first (F05b).', v_open_over, v_ids;
+  END IF;
   -- Lines already delivered past their order (staging ORD-2026-0017): left as they are, listed for office cleanup (F05b).
   SELECT count(*), string_agg(oi.id::text, ', ' ORDER BY oi.id) INTO v_open_over, v_ids
     FROM public.order_items oi WHERE oi.quantity_delivered > oi.total_units_needed;
@@ -216,10 +232,11 @@ BEGIN
   END IF;
   IF v_more_delivered THEN
     -- Drivers see this: no other load's number or quantity (they may not be allowed to read that load).
-    RAISE EXCEPTION 'DELIVERY_EXCEEDS_ORDER: % — this would bring the line to % delivered, but only % was ordered%. %',
-      COALESCE(NEW.product_name, 'this order line'), NEW.quantity_delivered, NEW.total_units_needed,
-      CASE WHEN v_open > 0 THEN ' and another open delivery for this order still holds units' ELSE '' END,
-      CASE WHEN v_open > 0 THEN 'Call the office: the extra delivery must be cancelled before this one can be completed.'
+    -- No order-wide numbers either (Sol r3): a driver may see only their own load.
+    RAISE EXCEPTION 'DELIVERY_EXCEEDS_ORDER: % — this would deliver more than was ordered%. %',
+      COALESCE(NEW.product_name, 'this order line'),
+      CASE WHEN v_open > 0 THEN ' while another delivery for this order is still open' ELSE '' END,
+      CASE WHEN v_open > 0 THEN 'Call the office before completing this delivery.'
            ELSE 'Record no more than what was ordered, or ask the office to raise the order.' END
       USING ERRCODE = 'check_violation';
   END IF;

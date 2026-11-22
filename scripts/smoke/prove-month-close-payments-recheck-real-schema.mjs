@@ -412,21 +412,30 @@ async function main() {
   assert.equal(replay, 'replay-ok');
   console.log('[case] a retry with the same key replays the saved receipt, even after a figure moved');
   // Once the month was reopened, the old key's receipt is refused (it would say closed while postings are allowed);
-  // a new key closes it again; after that re-close the old key's receipt is true again and replays.
-  const reopened = okProbe(`${AS_ADMIN}
-    DO $$ DECLARE r1 jsonb; r2 jsonb; pid uuid; BEGIN
-      r1 := ${close('mc-reo', tokenOf(...NOV))};
-      SELECT id INTO pid FROM public.accounting_periods WHERE period_end = DATE '2025-11-30';
-      PERFORM public.reopen_accounting_period(pid, 'mc proof', '${ADMIN}', 'mc-reo-open');
-      BEGIN PERFORM public.close_accounting_period(DATE '2025-11-30', '${ADMIN}', 'mc-reo'); RAISE EXCEPTION 'REOPENED_REPLAYED';
+  // a new key closes it again with a new payment counted; the old key stays refused (its totals are superseded),
+  // while the new key replays its own receipt.
+  // Each step commits on its own (now() is fixed within one transaction, and a real reopen/re-close is separate);
+  // this is the last case that changes data.
+  const refusedOld = `DO $$ BEGIN
+      BEGIN PERFORM public.close_accounting_period(DATE '2025-11-30', '${ADMIN}', 'mc-reo'); RAISE EXCEPTION 'OLD_KEY_REPLAYED';
       EXCEPTION WHEN raise_exception THEN IF SQLERRM NOT LIKE 'CLOSE_REOPENED_SINCE:%' THEN RAISE; END IF; END;
-      IF EXISTS (SELECT 1 FROM public.accounting_periods WHERE period_end = DATE '2025-11-30' AND status = 'closed') THEN RAISE EXCEPTION 'CLOSED_BY_REPLAY'; END IF;
-      PERFORM ${close('mc-reo-2', tokenOf(...NOV))};
-      r2 := public.close_accounting_period(DATE '2025-11-30', '${ADMIN}', 'mc-reo');
-      IF r1 IS DISTINCT FROM r2 THEN RAISE EXCEPTION 'RECLOSED_REPLAY_DIFFERS % %', r1, r2; END IF;
-    END $$; SELECT 'reopen-ok';`);
+    END $$;`;
+  const reopened = scalar(`SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', false);
+    CREATE TEMP TABLE mc_r (k text PRIMARY KEY, r jsonb);
+    INSERT INTO mc_r SELECT 'r1', ${close('mc-reo', tokenOf(...NOV))};
+    SELECT public.reopen_accounting_period((SELECT id FROM public.accounting_periods WHERE period_end = DATE '2025-11-30'), 'mc proof', '${ADMIN}', 'mc-reo-open');
+    ${refusedOld}
+    DO $$ BEGIN IF EXISTS (SELECT 1 FROM public.accounting_periods WHERE period_end = DATE '2025-11-30' AND status = 'closed') THEN RAISE EXCEPTION 'CLOSED_BY_REPLAY'; END IF; END $$;
+    UPDATE public.allocation_sets SET total_payment_cents = total_payment_cents + 100 WHERE total_payment_cents = 150000;
+    INSERT INTO mc_r SELECT 'r2', ${close('mc-reo-2', tokenOf(...NOV))};
+    ${refusedOld}
+    DO $$ DECLARE r1 jsonb := (SELECT r FROM mc_r WHERE k = 'r1'); r2 jsonb := (SELECT r FROM mc_r WHERE k = 'r2'); BEGIN
+      IF (r2 ->> 'payments_received_cents')::bigint <> (r1 ->> 'payments_received_cents')::bigint + 100 THEN RAISE EXCEPTION 'RECLOSE_TOTAL % %', r1, r2; END IF;
+      IF public.close_accounting_period(DATE '2025-11-30', '${ADMIN}', 'mc-reo-2') IS DISTINCT FROM r2 THEN RAISE EXCEPTION 'NEW_KEY_REPLAY_DIFFERS'; END IF;
+    END $$;
+    SELECT 'reopen-ok';`);
   assert.equal(reopened, 'reopen-ok');
-  console.log('[case] after a reopen the old key is refused (CLOSE_REOPENED_SINCE) and the month stays open; a new key closes it');
+  console.log('[case] after a reopen the old key is refused (CLOSE_REOPENED_SINCE) and the month stays open; a new key closes it with the new payment; the old key stays refused, the new key replays');
 
   // 5. Who may call
   refusedProbe(month(...NOV), /admin/i, REP);

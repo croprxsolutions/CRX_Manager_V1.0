@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — PR #2242: a retried close replays only the month's current close
+
+**Decision (Mason, 2026-11-22, in the Lane B session):** "Refuse it". A retried close shows its saved receipt only if the month's current close is the one that retry made. If the month was reopened and closed again since, the retry is refused (`CLOSE_REOPENED_SINCE`) instead of showing the older, superseded totals; the screen asks the admin to check the month's status. Why: Sol round 7 showed an old retry could return a superseded receipt as success. The alternative was accepting that rare case.
+
 ## 2026-11-22 — PR #2242: a retried close is refused once the month was reopened
 
 **Decision (Mason, 2026-11-22):** "Refuse and re-close (Recommended)" in the bug-captain session, and "Database refuses it" in the Lane B session. If a close went through but its reply was lost, and the month was reopened before that screen refreshed (for example from another tab), retrying the close no longer shows the old "Period closed" receipt: the database refuses it (`CLOSE_REOPENED_SINCE`), the month stays open, and the screen asks the admin to review and close again. Why: Sol rounds 5 and 6 showed that the old receipt could say "closed" while the month was open and still taking postings; a screen-only fix cannot see a reopen made elsewhere. The alternative was accepting that rare gap.

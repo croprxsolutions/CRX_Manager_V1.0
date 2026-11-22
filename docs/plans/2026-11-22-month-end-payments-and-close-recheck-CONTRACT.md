@@ -197,3 +197,14 @@ passes before the apply; split not needed (memory rule exception for already-liv
 - Luna on ff8906222: MED "ticks survive a reopen" refuted (the page learns of a reopen only through `fetchData`, which
   clears every tick first, `MonthEndClose.tsx:149-153`); LOW legacy cents as before; LOW rpc-functions.md now names
   `CLOSE_REOPENED_SINCE`.
+
+## Sol round 7 (2026-11-22) and Mason's decision
+
+- HIGH (retry-key path, third round): after a reopen and a re-close with a new key, the old key replayed its
+  superseded receipt. Bug captain: stop, no patch. **Decision (Mason, 2026-11-22, Lane B session): "Refuse it".** A
+  replay now requires the month's current close to be the one that key made: the key's `idempotency_keys.created_at`
+  (saved in the close's own transaction) must equal the period's `closed_at`, read FOR SHARE under the month lock
+  (which also waits for an uncommitted reopen: the round-7 MED on lock order). Otherwise `CLOSE_REOPENED_SINCE`.
+  Proof: close, reopen, old key refused, new payment, re-close with a new key, old key still refused, new key replays.
+- MED rollback note: now drops the 6-argument functions first. Fixed.
+- MED untyped prepay rows, grouping, legacy cents, cutover; LOW precision, private impl types: as rounds 2-6.

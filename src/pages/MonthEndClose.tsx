@@ -345,7 +345,7 @@ export default function MonthEndClose() {
         setReviewedPayments(false);
         setReviewedCommissions(false);
         setReviewedNeedsPricing(false);
-        toast('error', 'This month was reopened since your last close attempt. Review the figures, then close again.');
+        toast('error', 'This month was reopened since your last close attempt. Check its status above; if it is open, review the figures and close again.');
       } else if (refusal === 'reload') {
         toast('error', 'The app was updated. Reload this page, then review and close the month again.');
       } else if (refusal === 'review') {

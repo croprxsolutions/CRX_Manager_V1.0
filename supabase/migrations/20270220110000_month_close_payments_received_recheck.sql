@@ -29,14 +29,15 @@
 --      the month lock the impl computes the figures once; it refuses CLOSE_REVIEW_REQUIRED when the token is missing,
 --      or payments exist and are not confirmed, or commission is not $0 and not confirmed; CLOSE_FIGURES_CHANGED when
 --      the token differs. The receipt is built from that same computation (payments received from (1)).
---      A retry with the same key replays the saved receipt before any check while the month is still closed;
---      once the month was reopened it is refused (CLOSE_REOPENED_SINCE).
+--      A retry with the same key replays the saved receipt before any check while the month's current close is the
+--      one that key made; once the month was reopened (even if closed again) it is refused (CLOSE_REOPENED_SINCE).
 --
 -- NOT CHANGED: who may call each function, the receipt's keys, every other summary figure, saved receipts, rows.
 -- ROLLOUT: the deployed screen calls close without a token and is refused (CLOSE_REVIEW_REQUIRED, "reload") until
 -- the screen in this PR is deployed.
 -- caller-analysis: close_accounting_period :: re-created with three added review arguments; the REVOKE is only from PUBLIC and anon, authenticated keeps EXECUTE; its one caller (src/pages/MonthEndClose.tsx) sends the review arguments in this same PR
--- ROLLBACK (its own reviewed migration): re-create get_monthly_summary and the close impl from
+-- ROLLBACK (its own reviewed migration): drop the 6-argument close_accounting_period and its 6-argument impl,
+-- re-create get_monthly_summary and the close impl from
 -- 20270206110000_pnl_commission_share_billed.sql and the 3-argument wrapper from
 -- 20261102180000_bind_money_replay_receipts_batch4a.sql, then drop the two helpers and the
 -- allocation_sets_payment_has_date constraint.
@@ -244,6 +245,8 @@ DECLARE
   v_period_id uuid;
   v_summary jsonb;
   v_existing jsonb;
+  v_status text;
+  v_closed_at timestamptz;
   v_figures jsonb;
 BEGIN
   v_actor := auth.uid();
@@ -283,20 +286,26 @@ BEGIN
     )::date;
   PERFORM public._lock_accounting_months(ARRAY[v_period_start], true);
 
-  -- A retry replays its saved receipt only while the month is still closed, checked under the month lock: once
-  -- the month was reopened, the old receipt would say "closed" while postings are allowed (Mason, DECISION_LOG
-  -- 2026-11-22). The screen then starts a new key and the admin reviews and closes again.
+  -- A retry replays its saved receipt only while the month's current close is the one this key made: the key's row
+  -- is saved in the close's own transaction, so its created_at equals that close's closed_at. Once the month was
+  -- reopened (and maybe closed again), the old receipt would say "closed" or show superseded totals, so it is refused
+  -- (Mason, DECISION_LOG 2026-11-22). The period row is read FOR SHARE, so a reopen still in progress is waited for.
   IF p_idempotency_key IS NOT NULL THEN
     v_existing := check_idempotency(p_idempotency_key, 'close_accounting_period');
     IF v_existing IS NOT NULL THEN
-      IF NOT EXISTS (
-        SELECT 1
-          FROM public.accounting_periods
-         WHERE period_start = v_period_start
-           AND period_end = p_period_end
-           AND status = 'closed'
-      ) THEN
-        RAISE EXCEPTION 'CLOSE_REOPENED_SINCE: this month was reopened after this close; review it and close again';
+      SELECT status, closed_at INTO v_status, v_closed_at
+        FROM public.accounting_periods
+       WHERE period_start = v_period_start
+         AND period_end = p_period_end
+       FOR SHARE;
+      IF v_status IS DISTINCT FROM 'closed'
+         OR v_closed_at IS DISTINCT FROM (
+           SELECT created_at
+             FROM public.idempotency_keys
+            WHERE idempotency_key = p_idempotency_key
+              AND operation = 'close_accounting_period'
+         ) THEN
+        RAISE EXCEPTION 'CLOSE_REOPENED_SINCE: this month was reopened after this close; reload to see its current status';
       END IF;
       RETURN v_existing;
     END IF;

@@ -393,6 +393,7 @@ const CASES = {
   dryBelow: transfer(job('oz', 8, 60, 100, G, false, DRY)),
   // A product sold by the quart, recorded in gallons: 2 Gal at $40 = 8 Qt at $10.
   galOnQt: transfer(job('Gal', 2, 4000, 3200, G, false, QT)),
+  galOnQtFraction: transfer(job('Gal', 40, 4150, 3200, G, false, QT)),
   // Units that can't be converted to the sold unit stop and name it (Mason, 2026-11-22).
   eaUnit: transfer(job('Ea', 10, 5000)),
   perAcreUnit: transfer(job('Gal/ac', 10, 5000)),
@@ -567,6 +568,8 @@ async function main() {
   refusedProbe(CASES.roundingBig, /JOB_LINE_ROUNDING: \[PROVER\] JBC chem can't be recorded to 4 decimals in Gal/);
   refusedProbe(CASES.roundingZero, /JOB_LINE_ROUNDING: \[PROVER\] JBC chem/);
   console.log('[after] roundingBig ($1.60 off), roundingZero (no quantity left): refused JOB_LINE_ROUNDING');
+  refusedProbe(CASES.galOnQtFraction, /JOB_LINE_PRICE_NOT_WHOLE_CENTS: \[PROVER\] JBC quart chem is priced per "Gal" on this job, which comes to a fraction of a cent per "Qt".*whole cents per "Qt" \(for example \$41\.52\)\./);
+  console.log('[after] galOnQtFraction (40 Gal at $41.50 = $10.375 per Qt): refused JOB_LINE_PRICE_NOT_WHOLE_CENTS, suggesting $41.52');
   for (const k of ['suppliedNaN', 'suppliedNaNSplit']) refusedProbe(CASES[k], /cannot convert NaN/);
   console.log('[after] suppliedNaN, suppliedNaNSplit: refused (NaN quantity), nothing billed');
   for (const [k, who] of [['resaveSmallAdmin', 'admin'], ['resaveSmallRep', 'sales rep']]) {

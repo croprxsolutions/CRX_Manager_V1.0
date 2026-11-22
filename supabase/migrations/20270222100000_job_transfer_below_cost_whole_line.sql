@@ -71,6 +71,7 @@ DECLARE
   v_sold text;
   v_form text;
   v_unit text;
+  v_suggest numeric;
 BEGIN
   -- Cost, sold unit and form from one locked product row: the same row the wall reads, unchanged until the line is
   -- written (FOR SHARE).
@@ -124,6 +125,16 @@ BEGIN
   o_unit_price_cents := round(o_exact_cents / o_exact_qty)::bigint;
   o_quantity := round(o_exact_qty, 4);
   o_unit := v_sold;
+  -- Taha's review: the quantity is exact, so only the job price, which comes to a fraction of a cent per sold unit,
+  -- moves the amount; name both units and, when it is whole cents, the nearest job price at or above this one.
+  IF o_quantity = o_exact_qty AND o_quantity < 100000000
+     AND abs(public.safe_cents_qty(o_unit_price_cents, o_quantity) - o_exact_cents) > 50 THEN
+    v_suggest := ceil(o_exact_cents / o_exact_qty) * o_exact_qty / p_quantity;
+    RAISE EXCEPTION 'JOB_LINE_PRICE_NOT_WHOLE_CENTS: % is priced per "%" on this job, which comes to a fraction of a cent per "%" (the unit it is sold in), and rounding that changes the line by more than $0.50. Nothing was invoiced; change the job price per "%" so it converts to whole cents per "%"%.',
+      v_name, btrim(p_job_unit), v_sold, btrim(p_job_unit), v_sold,
+      CASE WHEN v_suggest = round(v_suggest) THEN ' (for example $' || to_char(v_suggest / 100, 'FM999999999990.00') || ')' ELSE '' END
+      USING ERRCODE = 'P0001';
+  END IF;
   -- Mason, 2026-11-22 ("Allow up to 50c"): the line stores 4 decimals; refuse when that moves its amount or booked cost
   -- by more than 50 cents, bills a priced line at $0, or does not fit the column.
   IF o_quantity <= 0 OR o_quantity >= 100000000
@@ -997,7 +1008,7 @@ BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'a5f215672d97ede9b9b5ba95a2676a0b'
      OR v_price IS NULL OR v_split IS NULL
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '55166cc41ab404ee09ed7af08fa72550'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM 'af40ca5d0c28d9a060b86ce7ae3f16b6'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: a body is not the one this file installs';
   END IF;

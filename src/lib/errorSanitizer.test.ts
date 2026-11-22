@@ -349,6 +349,8 @@ describe('sanitizeError', () => {
     expect(sanitizeError('JOB_DELETED: this job was deleted')).toBe("This job was deleted, so it can't be invoiced. Nothing was invoiced.");
     expect(sanitizeError('JOB_FIELD_NO_BILLING_SPLIT: North 40 has no billing split. Nothing was invoiced; set who pays for it (100% or a shared split) in Field Setup first.'))
       .toBe('North 40 has no billing split. Nothing was invoiced; set who pays for it (100% or a shared split) in Field Setup first.');
+    expect(sanitizeError('JOB_LINE_PRICE_NOT_WHOLE_CENTS: Roundup is priced per "Gal" on this job, which comes to a fraction of a cent per "Qt" (the unit it is sold in), and rounding that changes the line by more than $0.50. Nothing was invoiced; change the job price per "Gal" so it converts to whole cents per "Qt" (for example $41.52).'))
+      .toBe('Roundup is priced per "Gal" on this job, which comes to a fraction of a cent per "Qt" (the unit it is sold in), and rounding that changes the line by more than $0.50. Nothing was invoiced; change the job price per "Gal" so it converts to whole cents per "Qt" (for example $41.52).');
     expect(sanitizeError('JOB_LINE_UNIT_UNCONVERTIBLE: Roundup is recorded on this job in "Ea", which can\'t be converted to the unit it is sold in ("Gal"). Nothing was invoiced; correct the unit on the job or the product first.'))
       .toBe('Roundup is recorded on this job in "Ea", which can\'t be converted to the unit it is sold in ("Gal"). Nothing was invoiced; correct the unit on the job or the product first.');
     expect(sanitizeError('JOB_LINE_ROUNDING: Round‮up can\'t be recorded to 4 decimals in Gal without its amount changing by more than $0.50.'))

@@ -411,6 +411,14 @@ async function afterCases() {
     VALUES ('${O17}', '${P}', '[PROVER] F05 Product', 'Gal', 2, 3, 0, 10, 8);`, /DELIVERY_EXCEEDS_ORDER/);
   console.log('[case 3d] an order line written already over its order is refused');
 
+  // 3i (Luna r5, Sol r1). The check reads after the lock, which needs READ COMMITTED; a stricter level is refused.
+  refusedProbe(`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+    ${AS_ADMIN}
+    ${schedule(O14, L14, 1, 'f05-3i', 'd1')}`, /ORDER_LINE_CHECK_ISOLATION/);
+  refusedProbe(`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+    UPDATE public.order_items SET total_units_needed = 9 WHERE id = '${L14}';`, /ORDER_LINE_CHECK_ISOLATION/);
+  console.log('[case 3i] a repeatable-read transaction cannot schedule or cut an order line (the check needs a fresh read after the lock)');
+
   // 3e (Sol r1 #2). A soft-deleted open load holds nothing: the line can be cut past it (as Cancel Remaining does), and
   // un-deleting it is refused once its units are taken.
   const deletedLoad = `${AS_ADMIN}

@@ -95,6 +95,11 @@ DECLARE
   v_oi record;
   v_open numeric;
 BEGIN
+  -- The check after the lock needs a fresh snapshot, which only READ COMMITTED (every app path) gives (Luna r5, Sol r1).
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'ORDER_LINE_CHECK_ISOLATION: delivery and order quantities can only change in a read-committed transaction.'
+      USING ERRCODE = 'check_violation';
+  END IF;
   -- Serializes every scheduler, reopen, order edit and completion on this order line.
   SELECT oi.total_units_needed, oi.quantity_delivered, oi.product_name INTO v_oi
     FROM public.order_items oi WHERE oi.id = p_order_item_id
@@ -198,6 +203,10 @@ BEGIN
   IF NOT v_more_delivered
      AND NOT (COALESCE(NEW.total_units_needed, 0) < COALESCE(OLD.total_units_needed, 0)) THEN
     RETURN NEW;
+  END IF;
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'ORDER_LINE_CHECK_ISOLATION: delivery and order quantities can only change in a read-committed transaction.'
+      USING ERRCODE = 'check_violation';
   END IF;
   v_open := CASE WHEN TG_OP = 'INSERT' THEN 0 ELSE public._order_line_committed(NEW.id, NULL, NULL) END;
   IF COALESCE(NEW.quantity_delivered, 0) + v_open <= COALESCE(NEW.total_units_needed, 0) THEN

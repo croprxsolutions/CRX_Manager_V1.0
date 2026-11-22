@@ -343,7 +343,8 @@ async function main() {
   assert.match(results.C1, /BLEND_TICKET_ALREADY_BILLED/, 'control: the existing guard must refuse C1, else the fixture is wrong');
   assert.match(results.C3, /^ACCEPTED \(\[/, 'C3: without the #2063 fix the split save bills the job again');
   // A zero-row update (row security filtering the ticket out) would print ACCEPTED with no 'true' row, so require the refusal.
-  assert.match(results.C4, /^REFUSED/, 'C4: a rep cannot soft-delete a billed blend ticket');
+  assert.match(results.C2, /^REFUSED \(BLEND_TICKET_SETTLED_LIFECYCLE_INVALID/, 'C2: the header lock refuses even an admin soft-delete of a billed ticket');
+  assert.match(results.C4, /^REFUSED \(BLEND_TICKET_SETTLED_LIFECYCLE_INVALID/, 'C4: the header lock refuses a rep soft-delete of a billed ticket');
   console.log('A2_PROBE_DONE');
 }
 

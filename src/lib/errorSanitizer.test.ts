@@ -656,3 +656,14 @@ describe('product setup and import refusals (20261107090000)', () => {
       .toBe("This sale is cancelled or voided, so its sales tax can't change");
   });
 });
+
+describe('sanitizeError #2063 blend-billed refusal', () => {
+  it('keeps the server sentence whole, even when the ticket number looks like a schema name', () => {
+    expect(sanitizeError('BLEND_TICKET_ALREADY_BILLED: blend ticket BT table "West" for this job is already billed (an invoice you cannot open); billing the job here too would double-bill the customer. Void every live invoice of that ticket first if you meant to bill the job here, or ask an admin if they are not yours.'))
+      .toBe('blend ticket BT table "West" for this job is already billed (an invoice you cannot open); billing the job here too would double-bill the customer. Void every live invoice of that ticket first if you meant to bill the job here, or ask an admin if they are not yours.');
+  });
+  it('drops text-direction controls from the quoted ticket number', () => {
+    expect(sanitizeError('BLEND_TICKET_ALREADY_BILLED: blend ticket ‮12-TB‬ for this job is already billed (invoice INV-1)'))
+      .toBe('blend ticket 12-TB for this job is already billed (invoice INV-1)');
+  });
+});

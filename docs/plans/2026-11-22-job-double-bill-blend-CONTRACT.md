@@ -42,7 +42,7 @@ Migration: `supabase/migrations/20270220100000_split_save_refuses_blend_billed_j
 - A split save that names a source job is refused with `BLEND_TICKET_ALREADY_BILLED` when any invoice that is not
   deleted and not voided/cancelled belongs to any blend ticket of that job, **deleted ticket or not** — the same
   "live bill" rule `create_invoice_from_blend_ticket` already uses for the other direction. The message names the
-  ticket, counts every live invoice, and names only the invoice numbers the caller may already read under
+  ticket and names only the invoice numbers the caller may already read under
   `invoices_select` (admin, creator or salesman; Sol round 1, so a rep never learns a hidden invoice's number), and
   says to void every one first or ask an admin. The whole save rolls back (new set row, re-save clearing).
 - A split save that names a source job is refused under REPEATABLE READ or SERIALIZABLE
@@ -71,13 +71,17 @@ non-replay request.
 - Rollback: a reviewed migration re-emitting the `20270129171000` body (md5 `d72ff554…`); it touches no transfer or
   spray code, so it cannot erase the pricing change.
 
-## Proof cases (disposable Docker Postgres, all post-baseline migrations; blend invoices created through
-`create_invoice_from_blend_ticket` with triggers on, except the one legacy fixture)
+## Proof cases (disposable Docker Postgres, post-baseline migrations; blend invoices for B1 and M3a created through
+`create_invoice_from_blend_ticket` with triggers on. Two fixtures are inserted with triggers off and are states the
+app does not make today: the L4 invoice on a soft-deleted ticket, and a second live invoice on M3a made by the second
+rep (standing in for a two-payer blend bill). The replay skips the few migrations the harness cannot run (storage and
+staff-photo policies; named in the prover), so a pass shows the split refusal on this schema, not every live trigger.)
 
 1. BEFORE: split save for job J billed by a live blend invoice → accepted (the bug, asserted).
 2. Candidate applies; a second apply is refused by the preflight.
-3. AFTER: same split save → refused `BLEND_TICKET_ALREADY_BILLED` naming ticket and invoice; no set row, no invoice,
-   job unchanged, no idempotency receipt; as an admin and as a second sales rep who did not make the blend invoice.
+3. AFTER: same split save → refused `BLEND_TICKET_ALREADY_BILLED` naming the ticket; no set row, no invoice, job
+   unchanged, no idempotency receipt; as an admin (sees the invoice number) and as a second sales rep who cannot read
+   the blend invoice (sees "an invoice you cannot open": neither its number nor a count).
 4. Void the blend invoice (`void_invoice`) → the split save for J succeeds (genuine re-bill).
 5. Negative controls: job J2 with the same customer, field type and date, its ticket unbilled → split succeeds;
    J3 with one billed and one unbilled ticket → refused; a jobless split → succeeds (documented limit, Q3).
@@ -160,3 +164,7 @@ All four recommendations below are Mason's decisions as of 2026-11-22 and are wh
 
 Transfer drops its latent deleted-ticket filter and refuses non-READ COMMITTED (#2061); align "live invoice" evidence
 (#6/#7); blend's wording (#26); transfer races and receipts (#16/#20/#21); lock-order unification (#14/#15).
+
+Sol round 2 HIGH (Mason, 2026-11-22, bug-captain session: "Ship with today's rule"): the general invoice save accepts a
+blend-ticket link from its caller, so a hand-made draft can wrongly hold a job (never a double bill). This PR keeps
+the live-bill rule Transfer and the blend invoice use; #2254 (owner Taha) closes the link in the general save.

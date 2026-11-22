@@ -9,7 +9,7 @@
 -- WHAT: a split save that names a source job
 --   1. is refused (BLEND_TICKET_ALREADY_BILLED) when any invoice that is not deleted, voided or cancelled belongs to any
 --      blend ticket of that job (deleted ticket or not), read under the existing job lock; the message names the ticket,
---      the invoices the caller may already read (others are only counted) and what to do. The whole save rolls back.
+--      the invoices the caller may already read (others are neither named nor counted) and what to do. The whole save rolls back.
 --   2. is refused under REPEATABLE READ or SERIALIZABLE (SPLIT_INVOICE_NEEDS_READ_COMMITTED), as the blend invoice is;
 --      PostgreSQL runs READ UNCOMMITTED as READ COMMITTED, so both pass.
 --   A jobless split and an idempotent replay (answered by the wrapper) are unchanged. Voiding the blend invoice
@@ -21,7 +21,7 @@
 -- ROLLBACK (its own reviewed migration): re-emit the body from
 --   20270129171000_field_app_refuses_product_without_sold_unit.sql (md5 d72ff5547170c6a4a90bce083b6d7084).
 --
--- ORDERING: after 20270129171000. Not re-runnable (preflight refuses). Postflight pins the new body md5 02fbe575a0e761a1ddfecb5c8af617a6.
+-- ORDERING: after 20270129171000. Not re-runnable (preflight refuses). Postflight pins the new body md5 3b09fd8289d53ccab0b44171530b64b9.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -470,10 +470,11 @@ BEGIN
        AND COALESCE(i.status, '') NOT IN ('voided', 'cancelled')
        AND i.deleted_at IS NULL;
     IF v_blend_invoice_count > 0 THEN
-      RAISE EXCEPTION 'BLEND_TICKET_ALREADY_BILLED: blend ticket % for this job is already billed on % live invoice(s) (%); billing the job here too would double-bill the customer. Void every one of them first if you meant to bill the job here, or ask an admin if they are not yours.',
-        COALESCE(v_blend_ticket_number, '(no number)'), v_blend_invoice_count,
-        concat_ws('; ', v_blend_invoice_number,
-          CASE WHEN v_blend_hidden_count > 0 THEN v_blend_hidden_count || ' you cannot open' END)
+      -- Hidden invoices are neither named nor counted (a count would still describe rows invoices_select hides).
+      RAISE EXCEPTION 'BLEND_TICKET_ALREADY_BILLED: blend ticket % for this job is already billed (%); billing the job here too would double-bill the customer. Void every live invoice of that ticket first if you meant to bill the job here, or ask an admin if they are not yours.',
+        COALESCE(v_blend_ticket_number, '(no number)'),
+        concat_ws('; ', 'invoice ' || v_blend_invoice_number,
+          CASE WHEN v_blend_hidden_count > 0 THEN 'an invoice you cannot open' END)
         USING ERRCODE = 'P0001';
     END IF;
     -- Must be completed (or already this set's) to bill — mirrors transfer_job_to_invoice.
@@ -1421,7 +1422,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._save_field_app_split_invoice_impl(uuid,uuid,jsonb,jsonb,jsonb,uuid,uuid,text,text)')
-                    AND md5(replace(p.prosrc, chr(13), '')) = '02fbe575a0e761a1ddfecb5c8af617a6'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '3b09fd8289d53ccab0b44171530b64b9'
                     AND p.proowner = 'postgres'::regrole AND p.prosecdef
                     AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]) THEN
     RAISE EXCEPTION 'SPLIT_BLEND_BILLED_POSTFLIGHT: body, owner, definer mode or search_path wrong';

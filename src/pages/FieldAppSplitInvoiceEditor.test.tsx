@@ -412,8 +412,8 @@ describe('FieldAppSplitInvoiceEditor field search picker', () => {
 
 describe('splitBackendError', () => {
   it('keeps a named refusal whose quoted ticket number contains "does not exist"', () => {
-    const msg = 'BLEND_TICKET_ALREADY_BILLED: blend ticket BT does not exist 7 for this job is already billed on 1 live invoice(s) (1 you cannot open); billing the job here too would double-bill the customer.';
-    expect(splitBackendError(new Error(msg))).toContain('BLEND_TICKET_ALREADY_BILLED');
+    const msg = 'BLEND_TICKET_ALREADY_BILLED: blend ticket BT does not exist 7 for this job is already billed (an invoice you cannot open); billing the job here too would double-bill the customer.';
+    expect(splitBackendError(new Error(msg))).toContain('would double-bill the customer');
   });
   it('still reports a missing backend function', () => {
     expect(splitBackendError(new Error('function public.save_field_app_split_invoice does not exist'))).toBe('Split billing backend not enabled yet.');

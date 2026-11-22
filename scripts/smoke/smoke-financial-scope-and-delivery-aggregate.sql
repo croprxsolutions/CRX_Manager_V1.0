@@ -289,10 +289,10 @@ BEGIN
   -- price the shell through the governed preview/apply path the app uses
   -- (the smoke-order-invoice-type-gate.sql pattern).
   INSERT INTO public.products (
-    product_name, unit_size, epa_registration, product_form
+    product_name, unit_size, epa_registration, product_form, inventory_unit
   ) VALUES (
     '[SMOKE] Aggregate Stock Product ' || v_suffix,
-    'GL', '999999-99999', 'liquid'
+    'Gal', '999999-99999', 'liquid', 'Gal'
   ) RETURNING id INTO v_product;
   v_result := public.preview_product_pricing_changes(
     'product_page',
@@ -321,7 +321,7 @@ BEGIN
 
   INSERT INTO public.inventory (
     product_id, location, quantity_available, quantity_prebooked, unit_size
-  ) VALUES (v_product, 'Main Warehouse', 10, 12, 'GL');
+  ) VALUES (v_product, 'Main Warehouse', 10, 12, 'Gal');
 
   INSERT INTO public.orders (
     order_number, customer_id, salesman_id, order_date, status, booking_draw
@@ -369,14 +369,14 @@ BEGIN
     delivery_id, order_item_id, product_id, quantity,
     quantity_delivered, unit_size
   ) VALUES (
-    v_delivery, v_order_item_a, v_product, 6, 0, 'GL'
+    v_delivery, v_order_item_a, v_product, 6, 0, 'Gal'
   ) RETURNING id INTO v_delivery_item_a;
 
   INSERT INTO public.delivery_items (
     delivery_id, order_item_id, product_id, quantity,
     quantity_delivered, unit_size
   ) VALUES (
-    v_delivery, v_order_item_b, v_product, 6, 0, 'GL'
+    v_delivery, v_order_item_b, v_product, 6, 0, 'Gal'
   ) RETURNING id INTO v_delivery_item_b;
 
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_delivery;

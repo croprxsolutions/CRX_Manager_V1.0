@@ -586,8 +586,8 @@ const gateRequestSource = guardSource.slice(
 ok(gateRequestSource.length > 0, "gateRequest() is present to inspect");
 eq(
   (gateRequestSource.match(/\bhardGateGh\(/g) || []).length,
-  1,
-  "gateRequest()'s one gh call — the PR resolve, which now also carries reviews — spends the shared budget " +
+  2,
+  "gateRequest()'s two direct gh calls — the PR resolve (which carries reviews) and a pass-backed main merge's file list (Codex P1, #2098) — spend the shared budget " +
   "(the two diff reads went away with the risky/non-risky split: every main merge needs the proof)",
 );
 eq(
@@ -603,8 +603,12 @@ ok(
   "the proof's ancestry checks run through the budgeted hardGateGh",
 );
 ok(
-  /proofValidForMerge\(\{\s*data,\s*headSha,\s*nowMs:\s*Date\.now\(\),\s*baseSha,\s*isAncestor:\s*isAncestorOnGitHub,\s*prCommits\s*\}\)/.test(gateRequestSource),
+  /proofValidForMerge\(\{\s*data,\s*headSha,\s*nowMs:\s*Date\.now\(\),\s*baseSha,\s*isAncestor:\s*isAncestorOnGitHub,\s*mergeBase:\s*mergeBaseOnGitHubOnce,\s*prCommits\s*\}\)/.test(gateRequestSource),
   "the proof scan binds the proof to this head, GitHub's base and GitHub's ancestry answers",
+);
+ok(
+  /mergeBaseOnGitHub\(\{\s*baseSha:\s*b,\s*headSha:\s*a,\s*repo:\s*request\.repo,\s*gh:\s*hardGateGh\s*\}\)/.test(gateRequestSource),
+  "the proof's merge-base check (#1913) runs through the budgeted hardGateGh",
 );
 ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base is no longer refused on that ground alone");
 
@@ -638,12 +642,18 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(/if \(!risk\.risky\) \{[\s\S]{0,400}?advisoryQueue\.push\(request\);\s*return;\s*\}/.test(gateRequestSource.slice(riskCall)),
     "the low-risk allow point is guarded by risk.risky");
   ok(/import \{ agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
-  ok(/if \(base === "staging"\) \{[\s\S]{0,300}mainCommitsInPrOnGitHub\(\{ stagingSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(backMerge\) deny\(/.test(gateRequestSource), "a PR into staging carrying main's unbacked-merged commits is refused");
+  ok(/if \(base === "staging"\) \{[\s\S]{0,400}headRef === "main" \? null : mainCommitsInPrOnGitHub\(\{ stagingSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(backMerge\) deny\(/.test(gateRequestSource), "a PR into staging carrying main's unbacked-merged commits is refused (the passed back-merge itself excepted)");
   // staging gets every main gate (Mason on #1363, 2026-11-04); staging-first: agents never merge into main
   // or the back-merge, and a migration may go into staging.
   ok(/if \(!GATED_MERGE_BASES\.includes\(base\)\) return;/.test(gateRequestSource), "only main and staging merges are gated, from the shared list");
-  ok(/const notAgents = agentMergeProblem\(base, String\(pr\.headRefName \|\| ""\)\);\s*if \(notAgents\) deny\(/.test(gateRequestSource),
-    "a merge into main, or of the back-merge, is refused for every agent");
+  ok(/const notAgents = agentMergeProblem\(base, headRef, \{ releasePass \}\);\s*if \(notAgents\) deny\(/.test(gateRequestSource),
+    "a merge into main, or of the back-merge, is refused unless Mason's release pass covers it");
+  ok(/releasePass = releasePassCovers\(pass, \{ base, headRef, number: pr\.number \}\);\s*\} catch \{ releasePass = false; \}/.test(gateRequestSource),
+    "the pass is checked for this exact PR, and an unreadable pass means none");
+  ok(/if \(base === "main"\) \{\s*const github = stagingDestructiveProblem\([\s\S]{0,300}\);\s*if \(github\) deny\(/.test(gateRequestSource),
+    "a release pass never lets an agent merge a .github/ change into main (Codex P1, PR #2098)");
+  ok(/folders\.map\(\(d\) => path\.join\(d, "\.claude", "session-state"\)\)[\s\S]{0,300}unappliedMigrationsProblem/.test(gateRequestSource),
+    "a release-pass merge into main reads the applying checkout's migration snapshot, not only the main checkout's (Codex P2, #2098)");
   ok(/headRefName,headRefOid/.test(gateRequestSource), "the guard reads the PR's head branch name to spot the back-merge");
   ok(gateRequestSource.indexOf("agentMergeProblem(") < gateRequestSource.indexOf("pullRequestReviewBlocked(pr)"),
     "the main and back-merge refusal runs before any allow point");
@@ -699,7 +709,12 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   });
   const edges = new Set([`${B0}>${H}`, `${B0}>${B1}`]);
   const isAncestor = (a, b) => edges.has(`${a}>${b}`);
-  const check = (data, over = {}) => proofValidForMerge({ data, headSha: H, nowMs: now, baseSha: B1, isAncestor, ...over });
+  // Every reviewed head here contains B0, so merge-base(head, base) is B0 when the base contains B0.
+  const check = (data, over = {}) => {
+    const graph = over.isAncestor ?? isAncestor;
+    const mergeBase = (_head, base) => (base === B0 || graph(B0, base) === true ? B0 : null);
+    return proofValidForMerge({ data, headSha: H, nowMs: now, baseSha: B1, isAncestor, mergeBase, ...over });
+  };
 
   ok(check(proof(), { baseSha: B0 }), "a proof bound to the base the merge lands on still counts");
   ok(check(proof()), "main moved forward after the review: the proof of the unchanged head still counts");
@@ -715,6 +730,17 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(!check(proof({ verdict: "blocked" })), "a non-clean verdict never counts");
   ok(!check(proof({ model: "gpt-6-luna" })), "a Luna review never counts");
   ok(!check(proof({ timestamp: new Date(now - 25 * 3600_000).toISOString() })), "a proof older than 24 hours never counts");
+
+  // #1913: the proof's base must BE merge-base(reviewed head, GitHub's base), not any ancestor of it.
+  // The head also contains a newer base commit B1, so the review against B0 saw base commits as the PR's own.
+  const newerInHead = (a, b) => edges.has(`${a}>${b}`) || (a === B1 && b === H);
+  ok(!check(proof(), { isAncestor: newerInHead, mergeBase: () => B1 }), "a base older than the merge-base is refused (#1913)");
+  ok(!check(proof(), { mergeBase: () => null }), "a merge-base GitHub cannot report refuses");
+  ok(!check(proof(), { mergeBase: () => { throw new Error("HTTP 500"); } }), "a failed merge-base lookup refuses");
+  ok(!check(proof(), { mergeBase: undefined }), "no merge-base lookup at all refuses (fail closed)");
+  ok(check(proof(), { mergeBase: () => B0.toUpperCase() }), "the merge-base comparison ignores SHA case");
+  ok(check(proof(), { baseSha: B0, mergeBase: () => { throw new Error("must not be asked"); } }),
+    "a proof bound to GitHub's own base needs no merge-base call");
 
   // Sol once before the PR opens (Mason, 2026-10-29): a proof of an earlier
   // commit on this PR's branch covers fixes pushed after it.
@@ -754,9 +780,10 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
     const budget = createHardGateBudget({ deadlineMs: 27_000, callTimeoutMs: 0, clock: () => t });
     const call = () => { if (!budget.admit()) throw new Error("budget spent"); calls++; t += 1000; };
     const isAncestor = (a, b) => { call(); return b === H || a === B; };  // older commits are not in main
+    const mergeBase = () => { call(); return B; };
     const solRisky = () => { call(); call(); return laterRisky; };
     const accept = (data, exactHead) =>
-      proofValidForMerge({ data, headSha: H, nowMs: now, baseSha: B, isAncestor, prCommits })
+      proofValidForMerge({ data, headSha: H, nowMs: now, baseSha: B, isAncestor, mergeBase, prCommits })
         && (exactHead || !solRisky());
     try { return { accepted: find(proofs, accept), calls }; } catch { return { spent: true, calls }; }
   };

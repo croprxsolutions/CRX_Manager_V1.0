@@ -29,6 +29,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import {
   headContainsBaseOnGitHub,
+  mergeBaseOnGitHub,
   createHardGateBudget,
   expandNestedCommands,
   ghApiMergeRequest,
@@ -46,6 +47,7 @@ import {
   proofValidForMerge,
   pullRequestChecksGreen,
   pullRequestReviewBlocked,
+  ghApiRepoPath,
 } from "./codex-push-lib.mjs";
 import {
   CODEX_THREADS_QUERY,
@@ -70,6 +72,7 @@ import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDest
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "./pr-claim-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
+import { findReleasePass, releasePassCovers, unappliedMigrationsProblem } from "./release-pass-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
 
@@ -529,11 +532,38 @@ function gateRequest(request) {
   }
   // Ordinary feature-branch merges are not production landings; staging is (sol-risk-lib.mjs).
   if (!GATED_MERGE_BASES.includes(base)) return;
-  // Staging-first: main takes only the release and hotfixes, merged by Taha or Mason (sol-risk-lib.mjs).
-  const notAgents = agentMergeProblem(base, String(pr.headRefName || ""));
+  // Staging-first: main takes only the release and hotfixes, merged by Taha or Mason, or by an agent
+  // under Mason's release pass for this PR in this session (sol-risk-lib.mjs, release-pass-lib.mjs).
+  const headRef = String(pr.headRefName || "");
+  let releasePass = false;
+  try {
+    const pass = findReleasePass({ dirs: skipStateDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]), sessionId: payload?.session_id ?? payload?.sessionId });
+    releasePass = releasePassCovers(pass, { base, headRef, number: pr.number });
+  } catch { releasePass = false; }
+  const notAgents = agentMergeProblem(base, headRef, { releasePass });
   if (notAgents) deny(`PR MERGE GATE: this merge is refused: ${notAgents}.`);
+  // A release pass never covers a .github/ change: Taha merges those (AGENTS.md; Codex P1, PR #2098).
+  if (base === "main") {
+    const github = stagingDestructiveProblem({ repo: request.repo, gh: hardGateGh, number: pr.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pr.headRefOid, baseSha: pr.baseRefOid });
+    if (github) deny(`PR MERGE GATE: this merge into main is refused: ${github}.`);
+    // ...and its migrations must already be live (Codex P1, PR #2098).
+    let live;
+    try {
+      const files = String(hardGateGh(["api", "--paginate", `${ghApiRepoPath(request.repo)}/pulls/${pr.number}/files?per_page=100`, "--jq", ".[] | [.status, .filename] | @tsv"]))
+        .split(/\r?\n/).filter(Boolean).map((l) => l.split("\t"));
+      // The apply refreshes the snapshot in the checkout it ran from (a worktree), so look there first, then the main checkout (Codex P2, #2098).
+      const folders = [payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()].filter(Boolean);
+      const snapFiles = [...new Set([...folders.map((d) => path.join(d, ".claude", "session-state")), ...skipStateDirs(folders)].map((d) => path.join(d, "applied-migrations.json")))].filter((f) => existsSync(f));
+      const results = snapFiles.length ? snapFiles.map((f) => unappliedMigrationsProblem({ files, snapshot: JSON.parse(readFileSync(f, "utf8")) })) : [unappliedMigrationsProblem({ files, snapshot: null })];
+      live = results.includes(null) ? null : results[0];
+    } catch (error) {
+      live = `its migrations could not be checked against the live ledger (${String(error?.message || error).split(/\r?\n/)[0]}) (fail closed)`;
+    }
+    if (live) deny(`PR MERGE GATE: this merge into main is refused: ${live}.`);
+  }
   if (base === "staging") {
-    const backMerge = mainCommitsInPrOnGitHub({ stagingSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });
+    // The back-merge itself (head main) is the one PR meant to bring main in; only a release pass reaches here with it.
+    const backMerge = headRef === "main" ? null : mainCommitsInPrOnGitHub({ stagingSha: pr.baseRefOid, headSha: pr.headRefOid, repo: request.repo, gh: hardGateGh });
     if (backMerge) deny(`PR MERGE GATE: this merge into staging is refused: ${backMerge}.`);
     const frozen = releaseFreezeProblem({ repo: request.repo, gh: hardGateGh });
     if (frozen) deny(`PR MERGE GATE: this merge into staging is refused: ${frozen}.`);
@@ -648,6 +678,17 @@ function gateRequest(request) {
     }
     return ancestry.get(key);
   };
+  // The proof's base must equal merge-base(reviewed head, GitHub's base) (#1913); null when GitHub cannot say.
+  const mergeBases = new Map();
+  const mergeBaseOnGitHubOnce = (a, b) => {
+    const key = `${a}...${b}`;
+    if (!mergeBases.has(key)) {
+      let sha = null;
+      try { sha = mergeBaseOnGitHub({ baseSha: b, headSha: a, repo: request.repo, gh: hardGateGh }); } catch { sha = null; }
+      mergeBases.set(key, sha);
+    }
+    return mergeBases.get(key);
+  };
 
   // The PR's own commits: a Sol proof of an earlier one counts, with no GitHub call per proof file.
   const prCommits = new Set((Array.isArray(pr.commits) ? pr.commits : []).map((c) => String(c?.oid || "").toLowerCase()));
@@ -664,7 +705,7 @@ function gateRequest(request) {
   // A proof of an earlier commit covers the commits after it unless those
   // touch the Sol list; same module, same budgeted gh. Exact-head proofs are tried first.
   const proof = firstAcceptedProof(proofs, headSha, (data, exactHead) =>
-    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, prCommits })
+    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits })
       && (exactHead || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky));
   const valid = proof !== null;
   const carried = proof?.carried_forward === true ? proof.carry : null;

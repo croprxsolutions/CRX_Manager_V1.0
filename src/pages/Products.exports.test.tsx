@@ -112,6 +112,7 @@ vi.mock('../components/customers/CustomerSearchPicker', async (importOriginal) =
     <button type="button" onClick={() => onSelect(mocks.customer)}>Pick customer</button>
   ),
 }));
+vi.mock('../lib/productParents', () => ({ getProductParents: async () => [], searchProductParents: async () => [] }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/csvExport', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/csvExport')>()),

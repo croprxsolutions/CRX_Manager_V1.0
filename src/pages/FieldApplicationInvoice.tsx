@@ -10,7 +10,7 @@ import Button from '../components/ui/Button';
 import Badge, { statusToBadgeVariant } from '../components/ui/Badge';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, sanitizeError, assertRpcResult, hasRpcCode, RpcErrorCodes } from '../lib/db';
+import { supabase, sanitizeError, assertRpcResult, hasRpcCode, rpcCodeDetail, RpcErrorCodes } from '../lib/db';
 import { asProductForm } from '../lib/units';
 import { assertInvoiceLifecycleSendable, assertInvoiceSendable } from '../lib/invoiceSendDisposition';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
@@ -176,6 +176,8 @@ type CreatedInvoiceCheck =
  */
 // KI-14: each owner of a split keeps its own payment terms. choice is a preset, a legacy text, '' (the
 // customer's terms, filled in by the database on save) or CUSTOM_DUE (a typed due date).
+// #2164: the refusal says this save stored nothing; an earlier Save from the page did make the draft.
+const EARLIER_SAVE_CREATED_NOTE = 'An earlier Save from this page already created this invoice, and it still exists.';
 const CUSTOM_DUE = 'Custom date…';
 const TERMS_PRESETS = ['Net 30', 'Net 15', 'Due on receipt'];
 type OwnerTerms = { choice: string; customText: string; dueDate: string };
@@ -301,6 +303,11 @@ export default function FieldApplicationInvoice() {
   const [saving, setSaving] = useState(false);
   const [posting, setPosting] = useState(false);
   const [dirty, setDirty] = useState(false);
+  // #2058: the server's explanation of why a save that would change the billed farm was refused. Kept on the page
+  // (a toast is gone in 4 seconds) until the next Save.
+  const [payerChangeRefusal, setPayerChangeRefusal] = useState<string | null>(null);
+  // A refusal belongs to the invoice it was raised on; drop it when the route opens another one.
+  useEffect(() => { setPayerChangeRefusal(null); }, [id]);
   const [showLocationsModal, setShowLocationsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   // #28: Post confirm + Unpost confirm/in-flight state.
@@ -538,6 +545,9 @@ export default function FieldApplicationInvoice() {
   // save failure), a repeat Save must update THIS invoice — sending p_invoice_id = null
   // again would create a duplicate invoice for the same application.
   const createdInvoiceIdRef = useRef<string | null>(null);
+  // #2164: an earlier Save from this page (its reply lost) created the invoice, and no save has written this
+  // page's values onto it since. A payer-change refusal then says that draft exists, not just "Nothing was saved".
+  const earlierSaveCreatedRef = useRef(false);
   const [searchParams] = useSearchParams();
   const createdIdInAddress = createdInvoiceIdFromAddress(searchParams);
   // Opened at /new?created=<id>: Save waits for the created-invoice check below.
@@ -1364,11 +1374,11 @@ export default function FieldApplicationInvoice() {
     const productIds = Array.from(
       new Set((items as Array<Record<string, unknown>>).map((it) => it.product_id as string | null).filter((x): x is string => !!x)),
     );
-    const labelByProduct = new Map<string, { max_label_rate: number | null; max_label_rate_unit: string | null; rei_hours: number | null; phi_days: number | null }>();
+    const labelByProduct = new Map<string, { max_label_rate: number | null; max_label_rate_unit: string | null; rei_hours: number | null; phi_days: number | null; inventory_unit: string | null }>();
     if (productIds.length > 0) {
       const { data: prodRows, error: prodError } = await supabase
         .from('products')
-        .select('id, max_label_rate, max_label_rate_unit, rei_hours, phi_days')
+        .select('id, max_label_rate, max_label_rate_unit, rei_hours, phi_days, inventory_unit')
         .in('id', productIds);
       if (!isCurrentLoad()) return;
       if (prodError) throw prodError;
@@ -1376,12 +1386,13 @@ export default function FieldApplicationInvoice() {
       // Every staff member reads every product, so a missing one is a bad read: its line would
       // look like it has no label maximum.
       if (prodRows.length < productIds.length) throw new Error('The product label read left out a product');
-      for (const p of prodRows as Array<{ id: string; max_label_rate: number | null; max_label_rate_unit: string | null; rei_hours: number | null; phi_days: number | null }>) {
+      for (const p of prodRows as Array<{ id: string; max_label_rate: number | null; max_label_rate_unit: string | null; rei_hours: number | null; phi_days: number | null; inventory_unit: string | null }>) {
         labelByProduct.set(p.id, {
           max_label_rate: p.max_label_rate,
           max_label_rate_unit: p.max_label_rate_unit,
           rei_hours: p.rei_hours,
           phi_days: p.phi_days,
+          inventory_unit: p.inventory_unit,
         });
       }
     }
@@ -1389,6 +1400,11 @@ export default function FieldApplicationInvoice() {
       (items as Array<Record<string, unknown>>).map((it, idx) => {
         const pid = it.product_id as string | null;
         const label = pid ? (labelByProduct.get(pid) ?? null) : null;
+        // #1983: a product line saved with no sold unit shows the product's sold unit (the unit its
+        // quantity and price are in), not 'oz'. The server prices product lines in that unit and ignores
+        // the one sent. The rate unit keeps its 'oz' fallback: reading a saved rate in any other unit
+        // would rebill the line on save and change the label check (Sol, two rounds).
+        const soldUnit = label ? (label.inventory_unit || '') : 'oz';
         return {
           id: (it.id as string) || `chem_${idx}`,
           product_id: it.product_id as string | null,
@@ -1396,9 +1412,9 @@ export default function FieldApplicationInvoice() {
           rate_per_acre: it.rate_per_acre as number | null,
           rate_unit: (it.rate_unit as string) || 'oz',
           quantity: (it.quantity as number) || 0,
-          unit: (it.unit_size as string) || 'oz',
+          unit: (it.unit_size as string) || soldUnit,
           unit_price_cents: (it.unit_price_cents as number) || 0,
-          price_unit: (it.unit_size as string) || 'oz',
+          price_unit: (it.unit_size as string) || soldUnit,
           extended_cents: (it.extended_cents as number) || 0,
           // Absent for non-admins; the server works out their cost on save.
           unit_cost_cents: (it.cost_cents as number) || 0,
@@ -1779,6 +1795,8 @@ export default function FieldApplicationInvoice() {
   // silent data corruption). 'cannot_compare' / 'no_label_max' never gate a save.
   const handleSave = async () => {
     if (!profile) return;
+    // A new Save attempt supersedes the last refusal, even if this one stops at local validation.
+    setPayerChangeRefusal(null);
     // Opened at /new?created=<id>: nothing is saved here until the check has settled and the
     // page is a plain new invoice again (see the created-invoice check).
     if (isNew && createdCheck.state !== 'none') {
@@ -2025,6 +2043,7 @@ export default function FieldApplicationInvoice() {
       }
       const replayedInvoiceId = targetInvoiceId || ids[0];
       if (retryMayReplayOldValues && replayedInvoiceId) {
+        if (creating) earlierSaveCreatedRef.current = true;
         const followUpKey = saveIdem.getKey();
         unansweredSaveRef.current = { key: followUpKey, fingerprints: [fingerprint] };
         const followUp = await supabase.rpc('save_field_app_invoice', {
@@ -2041,6 +2060,8 @@ export default function FieldApplicationInvoice() {
         unansweredSaveRef.current = null;
         ids = result.invoice_ids || [];
       }
+      // The draft now holds this page's values, so a later refusal needs no note about it.
+      earlierSaveCreatedRef.current = false;
       const groupNote = result.invoice_group_id ? ` (group of ${ids.length})` : '';
 
       // §5: the save RPC committed the invoice atomically — NOW (and only now) write the
@@ -2265,6 +2286,15 @@ export default function FieldApplicationInvoice() {
         await fetchInvoice();
       }
     } catch (err) {
+      const payerChange = rpcCodeDetail(err, RpcErrorCodes.FIELD_APP_PAYER_CHANGED);
+      if (payerChange) {
+        // The user already left this invoice: no late note or toast about it (#2164).
+        if (!pageActiveRef.current) return;
+        setPayerChangeRefusal(earlierSaveCreatedRef.current ? `${payerChange} ${EARLIER_SAVE_CREATED_NOTE}` : payerChange);
+        // An expected business refusal, explained in full at the top of the page.
+        toast('error', "Not saved: these fields no longer bill this invoice's farm. See the note at the top of the invoice.");
+        return;
+      }
       Sentry.captureException(err, { tags: { rpc: 'save_field_app_invoice' } });
       toast('error', `Save failed: ${fieldAppError(err)}`);
     } finally {
@@ -3158,6 +3188,14 @@ export default function FieldApplicationInvoice() {
           records warning from #23). Editing inputs are also disabled via canEdit.
           #29: a voided/cancelled invoice is TERMINAL — it can't be unposted, so show a
           distinct red banner instead of the amber "unpost to edit" copy. */}
+      {payerChangeRefusal && (
+        <Card>
+          <div role="alert" className="flex items-start gap-2 px-4 py-3 bg-amber-50 border-l-4 border-amber-400 rounded text-sm text-amber-800">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span>{payerChangeRefusal}</span>
+          </div>
+        </Card>
+      )}
       {isLocked && (status === 'voided' || status === 'cancelled') && (
         <Card>
           <div className="flex items-start gap-2 px-4 py-3 bg-red-50 border-l-4 border-red-400 rounded text-sm text-red-800">

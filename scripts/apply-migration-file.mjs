@@ -449,7 +449,7 @@ if (!confirm) {
     ? "whose PR's final Sol review is clean and whose CodeRabbit review Mason skipped"
     : "whose PR's final Sol and CodeRabbit reviews are clean";
   console.log(ownerApproval
-    ? "Gate passed with the recorded chat-reply approval. --confirm uses it up; it expires 30 minutes after the reply."
+    ? "Gate passed with the recorded chat-reply approval. --confirm uses it up; it expires 24 hours after the reply."
     : `Gate passed. Under Mason's 2026-09-26 landing rule this non-destructive migration, ${reviews}, may now be applied with --confirm.`);
   process.exit(0);
 }

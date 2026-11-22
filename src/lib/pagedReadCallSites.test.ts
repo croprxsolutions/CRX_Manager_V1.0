@@ -64,6 +64,7 @@ const COMPONENT_FILES = [
   'invoices/FinanceChargePreviewModal.tsx',
   'orders/BulkOrderImport.tsx',
   'products/NameBrandCheckSection.tsx',
+  'products/ProductVendorsSection.tsx',
   'prepay/PrepaymentManagerPanel.tsx',
   'prepay/PrepayWorkspacePanel.tsx',
   'purchase-orders/BulkPOImport.tsx',

@@ -45,14 +45,14 @@ const PO = id(0xe001);
 const RECEIPTS = { a: '2026-11-02 01:30:00+00', c: '2026-11-02 05:59:59+00', b: '2026-11-02 06:00:00+00' };
 
 function seed() {
-  const prods = Object.keys(ROWS).map((k) => `('${prod(k)}', '[SC] ${k}', true, 'liquid')`).join(', ');
+  const prods = Object.keys(ROWS).map((k) => `('${prod(k)}', '[SC] ${k}', true, 'liquid', 'Gal')`).join(', ');
   const rows = Object.keys(ROWS).map((k) => `('${inv(k)}', '${prod(k)}', 'Main Warehouse', ${ROWS[k][1]}, 0, ${ROWS[k][2]})`).join(', ');
   const recs = Object.entries(RECEIPTS).map(([k, at], i) =>
     `('${id(0xb001 + i)}', '${PO}', '${id(0xe002)}', '${prod('free')}', 1, '${at}', '${ADMIN}', '${k}')`).join(', ');
   // Triggers off for the seed only (replica role): fixtures need no PO lifecycle.
   const r = docker(['exec', '-i', NAME, 'psql', '-U', 'supabase_admin', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'], { allowFailure: true, input: `
 SET session_replication_role = replica;
-INSERT INTO public.products (id, product_name, is_active, product_form) VALUES ${prods};
+INSERT INTO public.products (id, product_name, is_active, product_form, inventory_unit) VALUES ${prods};
 INSERT INTO public.inventory (id, product_id, location, quantity_available, quantity_prebooked, quantity_on_order) VALUES ${rows};
 INSERT INTO public.purchase_orders (id, po_number, vendor, created_by) VALUES ('${PO}', 'SC-PO-1', '[SC] Vendor', '${ADMIN}');
 INSERT INTO public.receiving_records (id, purchase_order_id, po_item_id, product_id, quantity_received, received_at, received_by, notes) VALUES ${recs};

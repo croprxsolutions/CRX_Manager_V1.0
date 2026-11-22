@@ -44,7 +44,8 @@ interface MonthlySummary {
   orders: { count: number; total_cents: number };
   deliveries: { count: number; completed_count: number };
   applications: { count: number; total_acres: number };
-  commissions: { earned_cents: number; paid_count: number };
+  // basis 'billed_share': the database counts commission on the share of each sale billed (KI-125); absent before that is live
+  commissions: { earned_cents: number; paid_count: number; basis?: 'billed_share' };
   ar_balance_cents: number;
 }
 
@@ -240,8 +241,8 @@ export default function MonthEndClose() {
           done: summary.commissions.earned_cents === 0 || reviewedCommissions,
           detail: summary.commissions.earned_cents === 0
             ? 'No commissions this period'
-            : `${fmt(summary.commissions.earned_cents)} earned, ${summary.commissions.paid_count} paid — verify and check box to confirm`,
-          reviewKey: summary.commissions.earned_cents > 0 ? 'commissions' : undefined,
+            : `${fmt(summary.commissions.earned_cents)} ${summary.commissions.basis === 'billed_share' ? 'on sales billed this period' : 'earned'}, ${summary.commissions.paid_count} paid — verify and check box to confirm`,
+          reviewKey: summary.commissions.earned_cents !== 0 ? 'commissions' : undefined,
         },
         {
           label: 'Rush orders priced',
@@ -573,11 +574,12 @@ export default function MonthEndClose() {
               </div>
               <hr className="border-gray-100" />
               <div className="flex justify-between text-sm">
-                <span className="text-secondary">Commissions Earned</span>
+                <span className="text-secondary">{summary.commissions.basis === 'billed_share' ? 'Commissions on Sales Billed' : 'Commissions Earned'}</span>
                 <span className="font-medium">{fmt(summary.commissions.earned_cents)}</span>
               </div>
               <div className="flex justify-between text-sm font-semibold">
-                <span>AR Balance</span>
+                {/* KI-130: today's receivables, not as of the period end (AR Aging has the as-of figure) */}
+                <span>Current AR (today)</span>
                 <span className={summary.ar_balance_cents > 0 ? 'text-red-600' : 'text-crx-green'}>
                   {fmt(summary.ar_balance_cents)}
                 </span>

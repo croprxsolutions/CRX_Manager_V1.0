@@ -1,6 +1,6 @@
 import { supabaseUntyped } from './db';
 import { fetchAllRows, pageWithList } from './pagedRead';
-import { commitEpaProposal, fetchParentEpaState, normalizeEpaNumber, startEpaLookup, WRITABLE_CLASSES, type EpaDecision } from './epaProposals';
+import { commitEpaProposalBatch, fetchParentEpaState, normalizeEpaNumber, startEpaLookup, WRITABLE_CLASSES, type EpaDecision } from './epaProposals';
 import { runRecordedEpaLookup } from './epaLookupClient';
 import type { EpaChemistryProposal, EpaProposalItem } from '../types';
 
@@ -98,8 +98,22 @@ export function epaNameMatches(epaProductName: string | null | undefined, appNam
 
 const CAS_PATTERN = /^\d{2,7}-\d{2}-\d$/;
 
-// Percent in hundred-thousandths, so a sum is exact (EPA gives at most four decimals).
-const pctUnits = (value: number) => Math.round(value * 100_000);
+// A positive percent read exactly from its decimal text (exponent form too): digits / 10^scale. Summing these matches
+// the database's exact numeric sum; rounding each percent first refused some exact 100% splits (#2120).
+function exactDecimal(value: number): { digits: bigint; scale: number } {
+  const [, whole, fraction = '', exponent = '0'] = /^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/.exec(String(value))!;
+  const scale = fraction.length - Number(exponent);
+  const digits = BigInt(whole + fraction);
+  return scale >= 0 ? { digits, scale } : { digits: digits * 10n ** BigInt(-scale), scale: 0 };
+}
+
+/** True when the percents add up to more than 100, compared exactly. */
+function pctOver100(values: number[]): boolean {
+  const parts = values.map(exactDecimal);
+  const scale = Math.max(0, ...parts.map((p) => p.scale));
+  const total = parts.reduce((sum, p) => sum + p.digits * 10n ** BigInt(scale - p.scale), 0n);
+  return total > 100n * 10n ** BigInt(scale);
+}
 
 function labelBlocks(item: EpaProposalItem): string | null {
   // Status is never written (D-T) and is 'unknown' on every registration, so "EPA says active" is always a difference;
@@ -132,15 +146,15 @@ function recordBlocks(summary: Record<string, unknown>, appNames: string[]): str
 /** Every ingredient is a plain new one with a CAS number and a positive percent, and they sum to 100 or less. */
 function ingredientsBlock(ingredients: EpaProposalItem[]): string | null {
   if (ingredients.length === 0) return 'EPA lists no ingredients';
-  let total = 0;
+  const percents: number[] = [];
   for (const item of ingredients) {
     const change = item.change ?? {};
     const pct = change.strength_value;
     if (item.class !== 'add' || typeof change.cas !== 'string' || !CAS_PATTERN.test(change.cas)) return `Ingredient needs a person (${item.class})`;
     if (typeof pct !== 'number' || !Number.isFinite(pct) || pct <= 0) return 'Ingredient has no percent';
-    total += pctUnits(pct);
+    percents.push(pct);
   }
-  return total > pctUnits(100) ? 'Ingredient percents add up to more than 100' : null;
+  return pctOver100(percents) ? 'Ingredient percents add up to more than 100' : null;
 }
 
 /** Whether the batch may commit this proposal, and the explicit decisions it sends: ingredients yes, every label no. */
@@ -189,6 +203,7 @@ async function once<T>(call: () => Promise<T>): Promise<T> {
     return await withDeadline(call());
   } catch (error: unknown) {
     if (error instanceof BatchDeadlineError) throw error; // the first call may still be running
+    if (errorText(error).startsWith('EPA_BATCH_')) throw error; // the database's decision, not a lost reply
     return withDeadline(call());
   }
 }
@@ -263,7 +278,15 @@ export async function runBatchParent(runId: string, candidate: BatchCandidate & 
   if (changed) return { ...base, outcome: 'needs_person', detail: `${changed}; the proposal waits for a person` };
   const decision = batchDecision(proposal, appNames);
   if (!decision.commit) return { ...base, outcome: 'needs_person', detail: decision.reason };
-  const result = await once(() => commitEpaProposal(proposal.id, proposal.proposal_version, decision.decisions, `${key}:commit`));
+  let result;
+  try {
+    result = await once(() => commitEpaProposalBatch(proposal.id, proposal.proposal_version, decision.decisions, `${key}:commit`));
+  } catch (error: unknown) {
+    // The database's own check at save time (#1976): nothing was written and the proposal waits for a person.
+    const refusal = /^EPA_BATCH_NOT_ELIGIBLE: (.*)$/s.exec(errorText(error));
+    if (refusal) return { ...base, outcome: 'needs_person', detail: `Refused at save: ${refusal[1]}; the proposal waits for a person` };
+    throw error;
+  }
   if (result.status === 'held') return { ...base, outcome: 'needs_person', detail: `On hold (${result.hold_reason})` };
   const written = Object.entries(result.commit_result).filter(([id, r]) => r === 'written' && id.startsWith('ing:')).length;
   return { ...base, outcome: 'saved', detail: `${written} ingredient${written === 1 ? '' : 's'} saved` };

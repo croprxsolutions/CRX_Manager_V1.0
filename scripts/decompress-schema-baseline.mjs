@@ -40,5 +40,8 @@ if (process.argv.includes('--with-live-rows')) {
 -- Live's only warehouse since 20260213160000; KI-85 (20261102220000) requires it active.
 INSERT INTO public.warehouses (id, name, code, state, is_active, is_default, created_at)
 VALUES ('19f7ca09-310d-4d40-8c2f-ba46f333f065', 'Main Warehouse', 'MW', 'IL', true, true, '2026-02-13 05:56:31.323738+00');
+-- Live's gallon unit row: test products carry a liquid 'Gal' stock unit (inventory_unit is required).
+INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes)
+VALUES ('29d05e43-cb40-461b-a969-88ee299faca8', 'Gal', 128, 'liquid', '1 gallon = 128 fluid ounces');
 `);
 }

@@ -272,6 +272,10 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // kept the public literal the wrapper binds. 20261106230000 (KI-94) re-emits it only to restore exactly the
   // reservation completion took; changing the literal would orphan every existing receipt.
   _void_delivery_replay_impl_20261015: ['void_delivery'],
+  // Direct EXECUTE is revoked (postgres-only). Batch 3b renamed the live close_accounting_period body to this
+  // name, so it kept the public literal the wrapper binds. 20270206110000 (KI-125/129) re-emits it only to change
+  // the summary figures; changing the literal would orphan every existing receipt.
+  _close_accounting_period_replay_impl_20261015: ['close_accounting_period'],
   // Direct EXECUTE is revoked (postgres-only after batch 3b). Migration 20260714222000 renamed the
   // live void_order body to this name with ALTER FUNCTION ... RENAME TO, so it kept the public
   // void_order literal, and the public wrapper binds that same receipt. Batch 3b (20261019235000)
@@ -431,6 +435,9 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   // 20260817120000 is the first to CREATE the function under its post-rename
   // name (the rename itself defined no function body on disk).
   _complete_delivery_authorized_impl: ['complete_delivery'],
+  // The same completion body after 20270126110000 renamed it behind the authorizing wrapper; 20270203120000 (#1942)
+  // is the first to CREATE it under this name. It keeps the one 'complete_delivery' namespace for the same reason.
+  _complete_delivery_authorized_impl_20270122: ['complete_delivery'],
   // Direct EXECUTE is revoked from anon/authenticated/service_role (same
   // postflight). Implementation half of the public
   // create_invoice_for_unbilled_delivery RPC, which delegates to it

@@ -205,6 +205,33 @@ describe('ProductStockCard', () => {
     expect(mocks.rpc).toHaveBeenCalledTimes(2);
   });
 
+  it('a malformed stock answer shows the failure, never zero or "No stock recorded"', async () => {
+    mocks.rpc.mockResolvedValueOnce({ data: [{ product_id: 'product-a' }], error: null });
+    renderCard();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Stock could not be loaded');
+    expect(screen.queryByText(/No stock recorded|On hand:|As of/)).not.toBeInTheDocument();
+  });
+
+  it('after a Tote Fill the re-read card shows a failed read instead of the old counts', async () => {
+    mocks.rpc
+      .mockResolvedValueOnce({ data: [position({ quantity_available: 40 })], error: null })
+      .mockResolvedValueOnce({ data: null, error: new Error('network down') })
+      .mockResolvedValueOnce({ data: [position({ quantity_available: 39 })], error: null });
+    // ProductDetail re-keys the card after a fill (key `${id}-${stockReload}`).
+    const view = render(<MemoryRouter><ProductStockCard key="product-a-0" productId="product-a" isActive /></MemoryRouter>);
+    expect(await screen.findByText('40 GAL')).toBeInTheDocument();
+
+    view.rerender(<MemoryRouter><ProductStockCard key="product-a-1" productId="product-a" isActive /></MemoryRouter>);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Stock could not be loaded');
+    expect(screen.queryByText('40 GAL')).not.toBeInTheDocument();
+    expect(screen.queryByText(/As of/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('39 GAL')).toBeInTheDocument();
+    expect(screen.getByText(/As of/)).toBeInTheDocument();
+  });
+
   it('keeps the on-order row while ignoring rows for other products', async () => {
     mocks.rpc.mockResolvedValue({
       data: [

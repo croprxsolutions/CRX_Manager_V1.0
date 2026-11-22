@@ -88,6 +88,25 @@ try {
   r = runHook(dirD);
   ok(!additionalContextOf(r).includes("BEHIND"), "FIX1: schema-neutral migration not flagged regardless of name-list membership");
 
+  // ── #749: the keyword pre-filter must see CREATE OR REPLACE FUNCTION (the
+  // repo's usual function form) and triggers. Before the fix, these three
+  // real pending files were dropped from the warning (8 pending, 5 shown). ──
+  const dirOrReplace = path.join(tmpRoot, "or-replace");
+  const orReplaceFiles = {
+    "20260914100100_next_invoice_number_year_chicago.sql": "CREATE OR REPLACE FUNCTION public.f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;",
+    "20260914100300_refuse_stale_commission_payment.sql": "create   or\n  replace function public.g() returns void language sql as $$ $$;",
+    "20260914100900_repair_commission_history_label.sql": "CREATE OR REPLACE FUNCTION public.h() RETURNS void LANGUAGE sql AS $$ $$;",
+    "20260914101000_create_trigger_only.sql": "CREATE TRIGGER t AFTER INSERT ON widgets FOR EACH ROW EXECUTE FUNCTION public.f();",
+    "20260914101100_drop_trigger_only.sql": "DROP TRIGGER IF EXISTS invoice_guard ON invoices;",
+  };
+  scaffold(dirOrReplace, {
+    _meta: { migrations_high_water: "20260101000000", applied_migration_names: [] },
+  }, orReplaceFiles);
+  r = runHook(dirOrReplace);
+  for (const name of Object.keys(orReplaceFiles)) {
+    ok(additionalContextOf(r).includes(name), `#749: ${name} is listed as pending`);
+  }
+
   // ── FIX 1: migrations at/under the high-water mark are never candidates,
   // even if genuinely absent from the applied-name list (old pre-existing
   // drift is out of scope — see code comment) ─────────────────────────────
@@ -376,6 +395,39 @@ try {
 
     r = runHook(path.join(tmpRoot, "a"));
     ok(!additionalContextOf(r).includes("guards are NOT"), "HOOKSPATH: a folder outside git gives no warning");
+  }
+
+  // ── MAIN-BEHIND (2026-11-21): the main checkout, where hooks and merge gates
+  // run, lagged origin/main by 509 commits and refused valid Sol proofs. ──────
+  {
+    const mainRepo = path.join(tmpRoot, "behind-main");
+    const linked = path.join(tmpRoot, "behind-linked");
+    const git = (...args) => execFileSync("git", ["-C", mainRepo, ...args], { env: isolatedGitEnv, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    execFileSync("git", ["init", "-b", "main", mainRepo], { env: isolatedGitEnv, stdio: "ignore" });
+    git("config", "user.email", "session-staleness@example.com");
+    git("config", "user.name", "Session Staleness Test");
+    git("commit", "--allow-empty", "-m", "base");
+    // 51 commits on a fake origin/main, without moving the checkout's HEAD.
+    let tip = git("rev-parse", "HEAD");
+    for (let i = 0; i < 51; i++) tip = git("commit-tree", "HEAD^{tree}", "-p", tip, "-m", `upstream ${i}`);
+    git("update-ref", "refs/remotes/origin/main", tip);
+    git("worktree", "add", "--detach", linked);
+
+    r = runHook(linked);
+    eq(r.status, 0, "MAIN-BEHIND: exits 0");
+    const ctxBehind = additionalContextOf(r);
+    ok(ctxBehind.includes("51 commits behind origin/main"), "MAIN-BEHIND: a linked worktree warns that the main checkout is 51 behind");
+    ok(ctxBehind.includes("merge --ff-only origin/main"), "MAIN-BEHIND: warning names the fix");
+    ok(ctxBehind.includes("gpt-6.2-sol"), "MAIN-BEHIND: warning names the symptom");
+
+    git("merge", "--ff-only", "origin/main");
+    r = runHook(linked);
+    ok(!additionalContextOf(r).includes("behind origin/main"), "MAIN-BEHIND: an up-to-date main checkout gives no warning");
+
+    git("update-ref", "-d", "refs/remotes/origin/main");
+    r = runHook(linked);
+    eq(r.status, 0, "MAIN-BEHIND: no origin/main still exits 0");
+    ok(!additionalContextOf(r).includes("behind origin/main"), "MAIN-BEHIND: no origin/main stays silent");
   }
 
   console.log(`session-staleness: ${pass} assertions passed`);

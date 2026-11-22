@@ -83,8 +83,8 @@ BEGIN
   RETURNING id INTO v_field_b;
 
   -- A product is born pricing-free, so price it through the governed preview/apply path.
-  INSERT INTO public.products (product_name, unit_size, epa_registration, product_form)
-  VALUES ('[SMOKE] Split Void Product ' || v_suffix, 'GL', '999999-99999', 'liquid')
+  INSERT INTO public.products (product_name, unit_size, epa_registration, product_form, inventory_unit)
+  VALUES ('[SMOKE] Split Void Product ' || v_suffix, 'Gal', '999999-99999', 'liquid', 'Gal')
   RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes(
     'product_page', NULL,
@@ -100,7 +100,7 @@ BEGIN
     (v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint', v_admin, v_prefix || 'pricing-apply');
 
   INSERT INTO public.inventory (product_id, location, quantity_available, quantity_prebooked, unit_size)
-  VALUES (v_product, 'Main Warehouse', 100, 8, 'GL');
+  VALUES (v_product, 'Main Warehouse', 100, 8, 'Gal');
 
   -- Orders 1 and 2: one 4-unit line each, allocated across both fields, delivered in full, so each
   -- is fulfilled and its completion writes governed split drafts.
@@ -121,7 +121,7 @@ BEGIN
     VALUES ('[SMOKE] VOGS-DEL-' || v_i || '-' || v_suffix, v_id, v_customer, NULL, CURRENT_DATE, 'scheduled', v_admin)
     RETURNING id INTO v_id;
     INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size)
-    VALUES (v_id, v_oi, v_product, 4, 0, 'GL')
+    VALUES (v_id, v_oi, v_product, 4, 0, 'Gal')
     RETURNING id INTO v_di;
     UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_id;
     v_res := public.complete_delivery(v_id, 'No proof — recorded by office', v_admin, jsonb_build_object(v_di::text, 4),

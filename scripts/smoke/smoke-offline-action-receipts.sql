@@ -143,10 +143,10 @@ BEGIN
   -- shell through the governed preview/apply path the app uses (the smoke-return-credit-chain.sql
   -- pattern; repaired 2026-10-14).
   INSERT INTO public.products (
-    product_name, unit_size, epa_registration, product_form
+    product_name, unit_size, epa_registration, product_form, inventory_unit
   ) VALUES (
     '[SMOKE] Offline Receipt Product ' || v_suffix,
-    'GL', '999999-99999', 'liquid'
+    'Gal', '999999-99999', 'liquid', 'Gal'
   ) RETURNING id INTO v_product;
   v_pricing := public.preview_product_pricing_changes(
     'product_page',
@@ -174,7 +174,7 @@ BEGIN
 
   INSERT INTO public.inventory (
     product_id, location, quantity_available, quantity_prebooked, unit_size
-  ) VALUES (v_product, 'Main Warehouse', 100, 2, 'GL');
+  ) VALUES (v_product, 'Main Warehouse', 100, 2, 'Gal');
 
   INSERT INTO public.orders (
     order_number, customer_id, status, booking_draw
@@ -202,7 +202,7 @@ BEGIN
   INSERT INTO public.delivery_items (
     delivery_id, order_item_id, product_id, quantity,
     quantity_delivered, unit_size
-  ) VALUES (v_delivery, v_order_item, v_product, 2, 0, 'GL')
+  ) VALUES (v_delivery, v_order_item, v_product, 2, 0, 'Gal')
   RETURNING id INTO v_delivery_item;
 
   UPDATE public.deliveries SET status = 'in_progress' WHERE id = v_delivery;
@@ -225,7 +225,7 @@ BEGIN
   INSERT INTO public.job_chemicals (
     job_id, product_id, quantity, unit, rate_per_acre, rate_unit,
     cost_per_unit_cents, price_per_unit_cents, sort_order
-  ) VALUES (v_job, v_product, 1, 'GL', 0.05, 'GL', 12000, 20000, 1);
+  ) VALUES (v_job, v_product, 1, 'Gal', 0.05, 'Gal', 12000, 20000, 1);
 
   v_result := public.start_job(
     v_job, v_admin, '[SMOKE] offline-start-' || v_suffix

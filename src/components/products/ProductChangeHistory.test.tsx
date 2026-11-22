@@ -133,4 +133,51 @@ describe('ProductChangeHistory', () => {
     await screen.findByRole('listitem');
     expect(mocks.untypedFrom).not.toHaveBeenCalled();
   });
+
+  it('a failed refresh keeps the rows, says they may be out of date, and recovers', async () => {
+    returnRows([changed]);
+    const view = render(<ProductChangeHistory productId="p1" reloadToken={0} />);
+    await screen.findByRole('listitem');
+    returnRows(null, { message: 'down', code: '500' });
+    view.rerender(<ProductChangeHistory productId="p1" reloadToken={1} />);
+    expect(await screen.findByText('Could not refresh. This history may be out of date.')).toBeInTheDocument();
+    expect(screen.getByRole('listitem')).toHaveTextContent('Signal word: Caution → Warning');
+    returnRows([{ ...changed, new_value: 'Danger' }]);
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.getByRole('listitem')).toHaveTextContent('Signal word: Caution → Danger'));
+    expect(screen.queryByText(/may be out of date/)).not.toBeInTheDocument();
+  });
+
+  it('a read for a product the screen has left neither looks up parent names nor reports', async () => {
+    let release!: (value: { data: unknown; error: null }) => void;
+    const held = { select: vi.fn(), eq: vi.fn(), order: vi.fn(), limit: vi.fn() };
+    held.select.mockReturnValue(held); held.eq.mockReturnValue(held); held.order.mockReturnValue(held);
+    held.limit.mockReturnValue(new Promise((resolve) => { release = resolve; }));
+    mocks.from.mockReturnValueOnce(held);
+    const view = render(<ProductChangeHistory productId="p1" />);
+    returnRows([changed]);
+    view.rerender(<ProductChangeHistory productId="p2" />);
+    await screen.findByRole('listitem');
+    release({ data: [parentCopy], error: null });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.untypedFrom).not.toHaveBeenCalled();
+    expect(screen.getByRole('listitem')).not.toHaveTextContent('Changed on parent');
+  });
+
+  it('a parent-name failure for a product the screen has left is not reported', async () => {
+    returnRows([parentCopy]);
+    let fail!: (value: { data: null; error: { message: string; code: string } }) => void;
+    const events = { select: vi.fn(), in: vi.fn() };
+    events.select.mockReturnValue(events);
+    events.in.mockReturnValue(new Promise((resolve) => { fail = resolve; }));
+    mocks.untypedFrom.mockReturnValue(events);
+    const view = render(<ProductChangeHistory productId="p1" />);
+    await waitFor(() => expect(events.in).toHaveBeenCalled());
+    returnRows([changed]);
+    view.rerender(<ProductChangeHistory productId="p2" />);
+    await screen.findByRole('listitem');
+    fail({ data: null, error: { message: 'denied', code: '42501' } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.captureException).not.toHaveBeenCalled();
+  });
 });

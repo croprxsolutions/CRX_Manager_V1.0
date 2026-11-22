@@ -215,10 +215,14 @@ vi.mock('../components/products/ProductsMobileList', async () => {
     ),
   };
 });
-vi.mock('../lib/productParents', () => {
-  const empty = { parents: [], byProduct: new Map(), index: new Map() };
-  return { useProductParents: () => empty, searchProductParents: async () => [] };
-});
+vi.mock('../lib/productParents', () => ({ getProductParents: async () => [], searchProductParents: async () => [] }));
+vi.mock('../lib/productSetup', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/productSetup')>()),
+  listProductCategories: async () => [
+    { name: 'Herbicide', is_active: true, sort_order: 10 },
+    { name: 'Seed', is_active: true, sort_order: 20 },
+  ],
+}));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 
 import Products from './Products';

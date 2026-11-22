@@ -93,7 +93,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W2-04 | KI-128 | MED | Open | Voiding an order can leave its invoice alive in receivables, reminders and finance charges. | KNOWN_ISSUES |  | Taha (to 2026-12-15) |
 | W2-05 | KI-191 | MED | Open | Booking orders vanish from salesperson-filtered sales reports. | KNOWN_ISSUES (2026-11-21 audit) |  | Taha (to 2026-12-15) |
 | W2-06 | KI-25 | MED | Partly open | A delivery receipt that fails to send is queued and sent by a worker, but the office cannot mark one "handled", so handled ones stay on the check list and a customer may get a second copy. | KNOWN_ISSUES |  | Agent (unassigned) |
-| W2-07 | KI-188 | MED | Open | A remainder stays "scheduled" after its follow-up delivery is cancelled or voided, so the pending queue no longer shows product still owed. | KNOWN_ISSUES (2026-11-21 audit) | #2179 (open) | Agent (unassigned) |
+| W2-07 | KI-188 | MED | Parked behind #2190 (`20270213110000`) | A remainder stays "scheduled" after its follow-up delivery is cancelled or voided, so the pending queue no longer shows product still owed. | KNOWN_ISSUES (2026-11-21 audit) | #2179 (open) | Agent (unassigned) |
 | W2-45 | #2097 | MED | Check first | Stock held for a grower could release early. The expiry job does skip quotes with quantity_drawn > 0, so the described gap was not reproduced. | GitHub issue | #2097 | Taha (to 2026-12-15) |
 | W3-05 | KI-152 | LOW | Open | No database rule stops a completion from reopening a cancelled order, but the app cannot reach it today. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-50 | #1960 | LOW | Check first | An old retried save may not get section ids back. | GitHub issue | #1960 | Taha (to 2026-12-15) |

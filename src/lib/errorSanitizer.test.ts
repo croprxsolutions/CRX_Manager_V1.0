@@ -203,6 +203,8 @@ describe('sanitizeError', () => {
     expect(sanitizeError('DELIVERY_ORDER_BUSY_RETRY')).toMatch(/being updated elsewhere/);
     expect(sanitizeError('ORDER_VOIDED_DELIVERY_LOCKED: delivery DEL-1 belongs to a voided order'))
       .toMatch(/^Nothing was changed\. This delivery's order is voided/);
+    expect(sanitizeError('FOLLOWUP_STILL_OPEN: cancel or void the newer follow-up delivery DEL-2 first'))
+      .toMatch(/^Nothing was changed\. A newer follow-up delivery still carries items/);
   });
 
   it('tells the user a completed delivery is voided, not cancelled', () => {

@@ -213,6 +213,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   // void_delivery (20261107120000, KI-102): voiding the order already put this delivery's stock back.
   [/^ORDER_VOIDED_DELIVERY_LOCKED\b/,
    'Nothing was changed. This delivery\'s order is voided, which already put its stock back, so the delivery cannot be voided too. Fix its invoice from the invoice page if needed'],
+  // cancel_delivery / void_delivery (20270213110000, KI-188): a newer delivery in the follow-up chain is still live.
+  [/^FOLLOWUP_STILL_OPEN\b/,
+   'Nothing was changed. A newer follow-up delivery still carries items from this one. Cancel or void the newest delivery first, then try again'],
   // guard_invoice_terminal_order: an invoice made from an order must be for that order's customer
   // (since 20261021150000 a governed field split may bill another owner; KNOWN_ISSUES.md 2026-10-22).
   [/^INVOICE_ORDER_CUSTOMER_LINEAGE_INVALID\b/,

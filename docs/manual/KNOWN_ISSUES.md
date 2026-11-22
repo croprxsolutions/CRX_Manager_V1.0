@@ -294,7 +294,7 @@ rule stops it. Fix: in a new migration, leave a cancelled order's status alone (
 
 ### KI-188 — Cancelling or voiding a follow-up delivery hides the still-owed quantity from Delivery Remainders
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-07 · #2179 (open).
+> **Parked 2026-11-22 behind C3 (#2190), Mason:** migration `20270213110000` (branch `claude/lane-c1-followup-remainders`): cancel/void reopen the rows; undo newest first (Mason 2026-11-22). Was: Open · MED · plan W2-07 · #2179.
 
 **MED · OPEN (source-confirmed on main and staging; reproduced by the audit in an isolated database) · deliveries · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 5) · unassigned · GitHub #2179**
 Cancel (`20270126110000` ~L431) updates remainders only where the cancelled delivery is the original, so a remainder

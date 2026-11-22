@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — KI-188 (#2179): follow-up deliveries are undone newest first
+
+**Decision (Mason, 2026-11-22, via the bug captain: "Cancel newest first").** A delivery in a follow-up chain may be cancelled or voided only when no later delivery in that chain is still live (not cancelled, voided or deleted). The check walks the whole chain, not one level. The refusal tells staff to cancel or void the newer trip first. Remainder rows go back on the Delivery Remainders queue only in that clean case. Taken at the review-round cap (Astra round 3: 57 findings, 3 BLOCKER) instead of parking the issue; the next review counts as round 1 on this simpler mechanism.
+
 ## 2026-11-22 — #2197: sales reps may reactivate an inactive customer from its page
 
 **Decision (Mason, 2026-11-22, relayed by the bug captain: "Yes, reps too").** The customer page's Reactivate button shows for admins and sales reps, matching what the database already allows (`customers_update` policy: admin or sales rep) and the #2048 refusal text ("An admin or sales rep must reactivate"). Screen-only change; the database rule is unchanged. Drivers and applicators still get no button and are refused by the database.

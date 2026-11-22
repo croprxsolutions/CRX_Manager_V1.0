@@ -2,7 +2,7 @@
 /**
  * Real-schema proof for #2193: the live-apply prerequisite check for the
  * modes-of-action load runs its count query against the real schema (production
- * baseline plus every migration on disk, Docker, no network) and
+ * baseline plus the replayable migrations on disk, in Docker; the image may be pulled once) and
  *   - refuses while the EPA batch fill has not run (no active ingredients),
  *   - refuses one short of the threshold,
  *   - allows once enough of the list's ingredients exist.

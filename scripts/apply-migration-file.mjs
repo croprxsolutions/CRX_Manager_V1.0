@@ -71,7 +71,7 @@ import {
 } from "../.claude/hooks/migration-apply-lib.mjs";
 import { assertWrappable } from "../.claude/hooks/migration-wrappability-lib.mjs";
 import { checkLiveMigrationOrdering } from "../.claude/hooks/migration-ordering-lib.mjs";
-import { checkLivePrerequisite } from "../.claude/hooks/migration-prerequisite-lib.mjs";
+import { checkLivePrerequisite, prerequisiteFor } from "../.claude/hooks/migration-prerequisite-lib.mjs";
 import { assertApprovalStillValid, ownerOnceGuardSql, recordUsedApproval } from "../.claude/hooks/owner-approval-lib.mjs";
 import { CREDENTIAL_TARGET, readCredentialToken } from "./lib/supabase-credential.mjs";
 import { withRestampHint } from "./lib/migration-restamp-hint.mjs";
@@ -447,6 +447,7 @@ if (coderabbitSkip) {
 if (!confirm) {
   console.log("");
   console.log("DRY RUN — nothing was transmitted. Re-run with --confirm to apply for real.");
+  if (prerequisiteFor(migName, sql)) console.log("Live prerequisite (#2193) not checked in a dry run: --confirm reads the live count first and refuses below the threshold.");
   const reviews = coderabbitSkip
     ? "whose PR's final Sol review is clean and whose CodeRabbit review Mason skipped"
     : "whose PR's final Sol and CodeRabbit reviews are clean";

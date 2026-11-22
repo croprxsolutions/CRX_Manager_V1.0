@@ -34,6 +34,16 @@ assert.equal((q.match(/MOA-1 list v2, approved by Mason 2026-11-18'\)/g) || []).
 assert.match(q, /FROM public\.active_ingredients a WHERE a\.status = 'active'/);
 assert.throws(() => moaMatchCountQuery("SELECT 1;"), /could not find the load's list/);
 
+// Sol MED/LOW round 1: lowercase VALUES, a comment naming the list, inherited names.
+assert.equal((moaMatchCountQuery(SQL.replace(/(INSERT INTO moa1_list\s*\([^)]*\)\s*)VALUES/i, "$1values")).match(/MOA-1 list v2, approved by Mason 2026-11-18'\)/g) || []).length, 123);
+assert.equal(prerequisiteFor("20270208100000_other", "-- see moa1_list in the load\nSELECT 1;"), null);
+assert.equal(prerequisiteFor("20270208100000_constructor"), null);
+assert.equal(prerequisiteFor("20270208100000___proto__"), null);
+// Impossible or non-numeric counts fail closed.
+assert.match((await check(fakeFetch([{ listed: 123, matched: 124 }]))).reason, /unreadable/);
+assert.match((await check(fakeFetch([{ listed: 123, matched: [95] }]))).reason, /unreadable/);
+assert.match((await check(fakeFetch([{ listed: "123", matched: "95" }]))).reason, /unreadable/);
+
 // Refused below the threshold, with the count shown.
 let r = await check(fakeFetch([{ listed: 123, matched: 12 }]));
 assert.equal(r.ok, false);

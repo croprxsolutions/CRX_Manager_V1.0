@@ -255,7 +255,7 @@ function refusedProbe(sql, pattern, uid) {
 }
 
 const id = (s) => `b5b5b5b5-2207-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), O = id('f3');
+const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), O = id('f3'), OS = id('f4');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const WALL = 'public._enforce_below_cost_line()';
@@ -288,10 +288,10 @@ function seed() {
       ('${RUP}', '[PROVER] JBC restricted chem', 'JBC-4', 'liquid', 'Gal', 'Gal', 'Gal', 'Gal', 30, 50, 50, 50, true, true);
     INSERT INTO public.fields (id, customer_id, field_name, total_acres, is_active) VALUES
       ('${G}', '${A}', '[PROVER] JBC field A', 100, true), ('${F}', '${A}', '[PROVER] JBC field A+B', 100, true),
-      ('${O}', '${A}', '[PROVER] JBC field A per-acre', 100, true);
+      ('${O}', '${A}', '[PROVER] JBC field A per-acre', 100, true), ('${OS}', '${A}', '[PROVER] JBC field A+B per-acre', 100, true);
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary, price_override_cents) VALUES
       ('${G}', '${A}', 100, true, NULL), ('${F}', '${A}', 60, true, NULL), ('${F}', '${B}', 40, false, NULL),
-      ('${O}', '${A}', 100, true, 100);`);
+      ('${O}', '${A}', 100, true, 100), ('${OS}', '${A}', 60, true, 100), ('${OS}', '${B}', 40, false, 100);`);
   // Test-only helpers (prover database only). jbc.job writes a completed job: 10 acres of the field and one chemical
   // line of p_qty p_unit at p_price (job cost p_cost) per p_unit; the stored job total is that line's total.
   psql(`CREATE SCHEMA jbc AUTHORIZATION supabase_admin;
@@ -387,6 +387,7 @@ const CASES = {
   rupSupplied: transfer(job('Gal', 10, 0, 0, G, true, RUP)),
   overrideSmall: transfer(job('fl oz', 3, 39, 23, O)),
   overrideNormal: transfer(job('Gal', 10, 5000, 3000, O)),
+  overrideSplit: transfer(job('Gal', 10, 5000, 3000, OS)),
   // Sol round 2 #4: the editor's ordinary save keeps the lines, for an admin and a sales rep.
   resaveSmallAdmin: resave(job('fl oz', 3, 39, 23), ADMIN),
   resaveSmallRep: resave(job('fl oz', 3, 39, 23), REP),
@@ -435,7 +436,7 @@ async function main() {
   const refusedBefore = { small3floz: /BELOW_COST_CONTEXT_REQUIRED/, half64floz: /BELOW_COST_CONTEXT_REQUIRED/,
     halfGalAtCost: /BELOW_COST_CONTEXT_REQUIRED/, supplied: /BELOW_COST_CONTEXT_REQUIRED/, suppliedNoCost: /COST_BASIS_REQUIRED/,
     fullBelow: /BELOW_COST_CONTEXT_REQUIRED/, splitSmall: /BELOW_COST_CONTEXT_REQUIRED/, dryOk: /BELOW_COST_CONTEXT_REQUIRED/,
-    rupSmall: /BELOW_COST_CONTEXT_REQUIRED/, overrideSmall: /BELOW_COST_CONTEXT_REQUIRED/ };
+    rupSmall: /BELOW_COST_CONTEXT_REQUIRED/, overrideSmall: /BELOW_COST_CONTEXT_REQUIRED/, overrideSplit: /SPLIT_OVERRIDE_UNSUPPORTED/ };
   for (const [k, re] of Object.entries(refusedBefore)) { refusedProbe(CASES[k], re); console.log(`[before] ${k}: refused ${re.source}`); }
   const tenBefore = okProbe(CASES.tenBelow);
   console.log(`[before] tenBelow: ${tenBefore}`);
@@ -471,14 +472,16 @@ async function main() {
   after('dottedSmall', 'A:117:117:70:0.0234 Gal @4992=117/c3000/product/manual', '3 fl. oz books the cost of 3 fl oz (70c), not of 3 gallons');
   after('rupSmall', 'A:117:117:70:0.0234 Gal @4992=117/c3000/product/manual', 'a restricted-use line carries its real 0.0234 Gal');
   after('rupSupplied', 'A:0:0:0:10.0000 Gal @0=0/c0/none/manual', "the grower's own restricted-use product has no catalog link, so no sales record");
-  // The per-acre price bills the owner (header = share = $10.00), the chemical line keeps its real quantity.
-  after('overrideSmall', 'A:1000:1000:70:0.0234 Gal @4992=117/c3000/product/manual', 'a per-acre-priced field: the per-acre price bills, the line is real');
-  after('overrideNormal', 'A:1000:1000:30000:10.0000 Gal @5000=50000/c3000/product/manual', 'a per-acre-priced field with a normal line');
+  // Mason, 2026-11-22 ("we never bill flat per acre"): a field's per-acre price is not billed; the lines are.
+  after('overrideSmall', 'A:117:117:70:0.0234 Gal @4992=117/c3000/product/manual', 'a per-acre-priced field bills its lines, not $10/acre');
+  after('overrideNormal', 'A:50000:50000:30000:10.0000 Gal @5000=50000/c3000/product/manual', 'a per-acre-priced field with a normal line bills its lines');
   // Two owners (60/40): the quantity is allocated by acre share at one price; header = share = lines per owner.
   after('splitSmall', 'A:70:70:42:0.0140 Gal @4992=70/c3000/product/manual B:47:47:28:0.0094 Gal @4992=47/c3000/product/manual',
     'the owners split 0.0234 Gal 0.0140/0.0094, $0.70 + $0.47 = $1.17');
   after('splitNormal', 'A:30000:30000:18000:6.0000 Gal @5000=30000/c3000/product/manual B:20000:20000:12000:4.0000 Gal @5000=20000/c3000/product/manual',
     'the owners split 10 Gal 6/4');
+  after('overrideSplit', 'A:30000:30000:18000:6.0000 Gal @5000=30000/c3000/product/manual B:20000:20000:12000:4.0000 Gal @5000=20000/c3000/product/manual',
+    'two owners on a per-acre-priced field: no longer refused, each bills its lines');
   for (const k of ['fullBelow', 'tenBelow', 'half64flozBelow', 'dottedBelow', 'spelledBelow']) {
     refusedProbe(CASES[k], /JOB_LINE_BELOW_COST: \[PROVER\] JBC chem is priced below its cost on this job\. Nothing was invoiced/);
     assert.doesNotMatch(probe(CASES[k]).output, /\b(3000|1500|30\.00|15\.00)\b/, 'the refusal never states the cost');

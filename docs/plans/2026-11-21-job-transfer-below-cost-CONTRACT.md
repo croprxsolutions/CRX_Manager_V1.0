@@ -90,7 +90,10 @@ Mason chose to remove the placeholder. Customers will see real quantities (Mason
   invoice-group undo (55), the wall's later re-checks against a changed current cost or catalog unit on re-save (30,
   31) and the editor's submitted-cost handling (32, 33). Proof cases cover the touched paths only.
 - Business decisions (Mason, 2026-11-22, the recommended answer each time: "Allow up to 50¢", "$0 info line", "Stop and name it";
-  confirmed again in the parent session: "1 within 50 cents / 2.go with recommended / 3.go with recomnended"):
+  confirmed again in the parent session: "1 within 50 cents / 2.go with recommended / 3.go with recomnended"; and on
+  Luna's per-acre finding, "we never bill flat per acre it is always summary of chemical and sales lines", so Create
+  Invoice no longer bills a field's per-acre price override or refuses a multi-owner job over one; the per-acre
+  application fee then applies as on any field. The PDF unit label is a later PR (Mason, "Later, own PR")):
   1. Rounding (Astra 1, 7, 8, 21, 22): pricing per sold unit can move a line by a few cents from the job's Est. $.
      Recommend: bill within 50 cents per line (Mason's 2026-11-17 rule), refuse beyond, and refuse a positive line that
      would bill $0.

@@ -20,7 +20,8 @@
 --  3. _transfer_job_to_invoice_intent_impl_20260908 (re-emitted from 20261120100000) writes each line with (1); a
 --     multi-owner line gives each owner its allocated quantity at the same price, within 50 cents of its exact share.
 --     A customer-supplied product is a $0 information line with no catalog link. Header, member totals and
---     commissions read a line's booked cost as cost x quantity; a single invoice bills the sum of its lines. A deleted
+--     commissions read a line's booked cost as cost x quantity; a single invoice bills the sum of its lines
+--     (a field's per-acre price is not billed: Mason, 2026-11-22). A deleted
 --     job is refused (JOB_DELETED) and a deleted blend ticket with a live invoice blocks (Sol round 1).
 --  The below-cost wall is unchanged: a line priced per sold unit is judged by it exactly. Grants, owners, SECURITY
 --  DEFINER and search_path are unchanged. No stored row changes; old invoices keep their quantity-1 lines.
@@ -306,14 +307,8 @@ BEGIN
     WHERE jf.job_id = p_job_id;
 
   IF COALESCE(v_n_owners, 0) > 1 THEN
-    -- Scope guard: per-field $/acre overrides are not supported by the percentage/acre
-    -- split. Refuse rather than silently drop an override the single-invoice path honors.
-    IF EXISTS (
-      SELECT 1 FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
-      WHERE jf.job_id = p_job_id AND fbd.price_override_cents IS NOT NULL
-    ) THEN
-      RAISE EXCEPTION 'SPLIT_OVERRIDE_UNSUPPORTED: this multi-owner job has per-field $/acre price overrides. Percentage split billing does not support overrides — bill it as a single invoice, or price each owner in the field-application editor.';
-    END IF;
+    -- 20270207125000 (Mason, 2026-11-22: "we never bill flat per acre it is always summary of chemical and sales
+    -- lines"): a field's per-acre price is not used by Create Invoice, so it no longer refuses a multi-owner job.
 
     -- Validate every billed field's splits total 100 (mirror FIELD_SPLIT_NOT_100), so the
     -- owner acre shares sum to the job acres and calculate_billing_splits stays penny-exact.
@@ -425,6 +420,8 @@ BEGIN
              COALESCE(NULLIF(btrim(jc.rate_unit), ''), NULLIF(btrim(jc.unit), ''), p.unit_size) AS rate_unit
       FROM job_chemicals jc JOIN products p ON p.id = jc.product_id
       WHERE jc.job_id = p_job_id ORDER BY p.product_name
+      -- 20270207125000 (Luna): each product row stays as read (form, name, EPA number) until its line is written.
+      FOR SHARE OF p
     LOOP
       v_item_order := v_item_order + 1;
       -- 20270207125000 (Mason, 2026-11-22, "Redesign"): the line carries its real quantity in the product's sold unit,
@@ -691,6 +688,8 @@ BEGIN
            COALESCE(NULLIF(btrim(jc.rate_unit), ''), NULLIF(btrim(jc.unit), ''), p.unit_size) AS rate_unit
     FROM job_chemicals jc JOIN products p ON p.id = jc.product_id
     WHERE jc.job_id = p_job_id ORDER BY p.product_name
+      -- 20270207125000 (Luna): each product row stays as read (form, name, EPA number) until its line is written.
+      FOR SHARE OF p
   LOOP
     v_item_order := v_item_order + 1;
     -- U4<<< a grower-supplied product costs us nothing (we didn't buy it) — keep
@@ -773,13 +772,11 @@ BEGIN
     LOOP
       DECLARE v_amount bigint; v_ppa bigint;
       BEGIN
-        IF v_share.price_override_cents IS NOT NULL THEN
-          v_amount := safe_cents_qty(v_share.price_override_cents, v_share.share_acres);
-          v_ppa := v_share.price_override_cents;
-        ELSE
-          v_amount := ROUND(v_line_sum * v_share.avg_split_pct / 100.0)::bigint;
-          v_ppa := NULL;
-        END IF;
+        -- 20270207125000 (Mason, 2026-11-22: "we never bill flat per acre it is always summary of chemical and sales
+        -- lines"): each share is its part of the lines; a field's per-acre price is not billed, so the per-acre
+        -- application fee below applies as on any other field.
+        v_amount := ROUND(v_line_sum * v_share.avg_split_pct / 100.0)::bigint;
+        v_ppa := NULL;
         INSERT INTO invoice_shares (invoice_id, customer_id, customer_name, split_percentage, acres, amount_cents, is_primary, sort_order, price_per_acre_cents, pricing_note)
         VALUES (v_invoice_id, v_share.customer_id, v_share.farm_name, v_share.avg_split_pct, v_share.share_acres, v_amount, v_share.is_primary, v_share.sort_ord, v_ppa, v_share.pricing_note);
         v_share_total := v_share_total + v_amount;
@@ -949,7 +946,7 @@ BEGIN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '4000e7d36a701fb08e034f936255f346'
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '2a3e40900ba7702e998546d815eaf4b8'
      OR v_price IS NULL OR v_split IS NULL
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM 'c6a232b49bd296d9fc2dacb91e413bd0'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN

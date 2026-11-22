@@ -134,6 +134,7 @@ import type {
   JobStatus,
 } from '../types';
 import type { Json } from '../types/supabase';
+import { pairCompareLines } from '../lib/quoteCompare';
 
 interface LocalSection {
   _key: string;
@@ -5846,21 +5847,27 @@ export default function QuoteBuilder() {
               {/* Item-level comparison */}
               {(() => {
                 const versionItems = (selectedVersion.snapshot_data?.sections || []).flatMap(
-                  s => (s.items || []).map(i => ({ ...i, section: s.section_name }))
+                  s => (s.items || []).map(i => ({
+                    line_id: i.quote_item_id ?? null,
+                    product_id: i.product_id,
+                    product_name: i.product_name,
+                    price_per_unit: i.price_per_unit,
+                    total_price: i.total_price,
+                    section: s.section_name,
+                  }))
                 );
                 const currentItems = sections.flatMap(
                   s => s.items.filter(i => i.product_id).map(i => ({
+                    line_id: i.id ?? null,
                     product_id: i.product_id,
                     product_name: i.product?.product_name || '',
                     price_per_unit: i.price_per_unit,
                     total_price: i.total_price,
-                    total_units_needed: i.total_units_needed,
                     section: s.section_name,
                   }))
                 );
-                const vMap = new Map(versionItems.map(i => [i.product_id, i]));
-                const cMap = new Map(currentItems.map(i => [i.product_id, i]));
-                const allProductIds = new Set([...vMap.keys(), ...cMap.keys()]);
+                // KI-201: pair by the saved line, never by product alone.
+                const compareRows = pairCompareLines(versionItems, currentItems);
 
                 return (
                   <div className="overflow-x-auto">
@@ -5876,16 +5883,20 @@ export default function QuoteBuilder() {
                         </tr>
                       </thead>
                       <tbody>
-                        {Array.from(allProductIds).map((pid) => {
-                          const vItem = vMap.get(pid);
-                          const cItem = cMap.get(pid);
+                        {compareRows.map(({ key, version: vItem, current: cItem }) => {
                           const isAdded = !vItem && cItem;
                           const isRemoved = vItem && !cItem;
-                          const priceChanged = vItem && cItem && Math.abs(vItem.price_per_unit - cItem.price_per_unit) > 0.001;
+                          const priceChanged = vItem && cItem && (
+                            Math.abs(vItem.price_per_unit - cItem.price_per_unit) > 0.001
+                            || Math.abs(vItem.total_price - cItem.total_price) > 0.005
+                          );
                           const bgClass = isAdded ? 'bg-green-50' : isRemoved ? 'bg-red-50' : priceChanged ? 'bg-amber-50' : '';
                           return (
-                            <tr key={pid} className={`border-b border-gray-100 ${bgClass}`}>
-                              <td className="py-1 pr-2 text-nav-dark">{vItem?.product_name || cItem?.product_name || ''}</td>
+                            <tr key={key} className={`border-b border-gray-100 ${bgClass}`}>
+                              <td className="py-1 pr-2 text-nav-dark">
+                                {vItem?.product_name || cItem?.product_name || ''}
+                                <span className="block text-secondary">{cItem?.section || vItem?.section}</span>
+                              </td>
                               <td className="py-1 px-2 text-right text-secondary">{vItem ? fmt(vItem.price_per_unit) : '-'}</td>
                               <td className="py-1 px-2 text-right text-secondary">{cItem ? fmt(cItem.price_per_unit) : '-'}</td>
                               <td className="py-1 px-2 text-right text-secondary">{vItem ? fmt(vItem.total_price) : '-'}</td>

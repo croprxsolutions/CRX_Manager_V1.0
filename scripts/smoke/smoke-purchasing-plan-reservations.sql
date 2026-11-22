@@ -342,6 +342,16 @@ BEGIN
                     > GREATEST((pr->>'on_hand')::numeric, 0)) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (C15 the shelf awarded more than is on hand)';
   END IF;
+  -- Each supply entry (one per PO line) gives at most its own quantity: two lines of 5 on one PO, a need of 12.
+  v_x := _purchasing_allocate('[{"d":"2030-01-01","q":5,"shelf":false},{"d":"2030-01-01","q":5,"shelf":false}]'::jsonb,
+                              '[{"r":3,"d":"2030-01-02","q":12}]'::jsonb);
+  IF (v_x->0->>'on_time')::numeric <> 10 OR (v_x->0->>'nc')::numeric <> 2
+     OR (SELECT array_agg((a->>'k')::int || ':' || (a->>'q')::numeric ORDER BY (a->>'k')::int) FROM jsonb_array_elements(v_x->0->'aw') a)
+        IS DISTINCT FROM ARRAY['1:5', '2:5'] THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C15 a PO line awarded more than it brings) %', v_x;
+  END IF;
+  -- SQL has no input order but the order rows are read in: rewrite every source row (each moves to a new place
+  -- on disk), then the plan must be byte-identical; the plan itself orders by ids, never by read order.
   UPDATE purchase_order_items SET quantity_ordered = quantity_ordered WHERE product_id = ANY (v_p);
   UPDATE inventory_holds SET quantity = quantity WHERE product_id = ANY (v_p);
   UPDATE order_items SET quantity_remaining = quantity_remaining WHERE product_id = ANY (v_p);
@@ -401,6 +411,22 @@ BEGIN
   v_x := pg_temp.prod(get_purchasing_plan(12), v_p[17]);
   IF (v_x->>'suggested')::numeric <> 10 OR pg_temp.g(v_x, 'shelf_hold') <> '10/10/0/0' THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (C17 closed draft, hold still active) %', v_x;
+  END IF;
+  v_n := v_n + 1;
+
+  -- An undated Firm line saved in a unit that does not match stock: listed under both Check units and Firm needs
+  -- a date, with no need date on its row (product 13, the C11 booking now Firm).
+  v_q := (SELECT source_id FROM inventory_holds WHERE product_id = v_p[13] LIMIT 1);
+  UPDATE quote_items SET unit_size = 'lb' WHERE quote_id = v_q AND product_id = v_p[13];
+  UPDATE quote_sections SET needed_by_date = NULL WHERE quote_id = v_q;
+  v_plan2 := get_purchasing_plan(12);
+  v_x := pg_temp.prod(v_plan2, v_p[13]);
+  IF NOT (v_x->'reasons' ? 'check_units') OR (v_x->>'suggested')::numeric <> 0
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r
+                     WHERE r->>'bucket' = 'check_units' AND r->>'need_date' IS NULL AND (r->>'quantity')::numeric = 500)
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'firm_needs_date') f
+                     WHERE (f->>'product_id')::uuid = v_p[13] AND (f->>'quantity')::numeric = 500) THEN
+    RAISE EXCEPTION 'SMOKE_FAIL: (C20 undated Firm line in another unit) % %', v_x, v_plan2->'firm_needs_date';
   END IF;
   v_n := v_n + 1;
 

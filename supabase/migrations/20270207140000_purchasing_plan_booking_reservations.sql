@@ -498,17 +498,18 @@ BEGIN
     'horizon_end', prm.horizon_end,
     'months_ahead', prm.months,
     'lead_days', prm.lead_days,
+    -- Every undated Firm booking line, a set-aside (Check units) one included.
     'firm_needs_date', COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
-               'quote_id', s2.quote_id, 'quote_number', eq.quote_number, 'customer_name', c.farm_name,
-               'section_name', qs.section_name, 'product_id', s2.product_id, 'product_name', p.product_name,
-               'quantity', s2.rem) ORDER BY c.farm_name, eq.quote_number, qs.section_name, p.product_name)
-        FROM s2
-        JOIN eq ON eq.id = s2.quote_id
+               'quote_id', demb.quote_id, 'quote_number', eq.quote_number, 'customer_name', c.farm_name,
+               'section_name', qs.section_name, 'product_id', demb.product_id, 'product_name', p.product_name,
+               'quantity', demb.qty) ORDER BY c.farm_name, eq.quote_number, qs.section_name, p.product_name, demb.qty)
+        FROM demb
+        JOIN eq ON eq.id = demb.quote_id
         LEFT JOIN customers c ON c.id = eq.customer_id
-        LEFT JOIN quote_sections qs ON qs.id = s2.section_id
-        JOIN products p ON p.id = s2.product_id
-       WHERE s2.rem > 0 AND s2.confidence = 'firm' AND s2.needed_by_date IS NULL), '[]'::jsonb),
+        LEFT JOIN quote_sections qs ON qs.id = demb.section_id
+        JOIN products p ON p.id = demb.product_id
+       WHERE demb.kind = 'booking' AND demb.confidence = 'firm' AND demb.raw_date IS NULL AND demb.qty > 0), '[]'::jsonb),
     'drawn_section_unknown', COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
                'quote_id', dt.quote_id, 'quote_number', eq.quote_number, 'customer_name', c.farm_name,
@@ -587,7 +588,8 @@ BEGIN
                'rows', COALESCE((
                  SELECT jsonb_agg(jsonb_build_object(
                           'kind', demb.kind, 'class', demb.cls, 'bucket', demb.bucket,
-                          'need_date', CASE WHEN demb.bucket = 'needs_date' THEN NULL ELSE demb.need_date END,
+                          'need_date', CASE WHEN demb.bucket = 'needs_date' OR (demb.kind = 'booking' AND demb.raw_date IS NULL)
+                                            THEN NULL ELSE demb.need_date END,
                           'raw_date', demb.raw_date, 'overdue', COALESCE(demb.overdue, false),
                           'overdue_followup', demb.followup,
                           'quantity', demb.qty, 'confidence', demb.confidence, 'estimated', demb.estimated,
@@ -626,7 +628,7 @@ DO $postflight$
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
       WHERE p.oid = 'public.get_purchasing_plan(integer)'::regprocedure)
-     IS DISTINCT FROM '52e0532ca0d31f7abc410b9620ebc131' THEN
+     IS DISTINCT FROM '51f9717829dec71101ae6486c67124f6' THEN
     RAISE EXCEPTION 'POSTFLIGHT_PLAN: get_purchasing_plan did not install';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

@@ -36,6 +36,11 @@ BEGIN
      IS DISTINCT FROM 'a9f80dc25207eba595e9998409e9ceb9' THEN
     RAISE EXCEPTION 'SINGLE_SHORT_STOCK_BASELINE_DRIFT: the wrapper body is not the one this file replaces (already applied?)';
   END IF;
+  -- The warning this file keeps lives in the completion body (#1942): it must still check each product's total.
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regproc('public._complete_delivery_authorized_impl_20270122')
+                  AND prosrc LIKE '%quantity_available, 0) < v_need_total%') THEN
+    RAISE EXCEPTION 'SINGLE_SHORT_STOCK_BASELINE_DRIFT: the completion body no longer checks each product''s total';
+  END IF;
 END;
 $preflight$;
 

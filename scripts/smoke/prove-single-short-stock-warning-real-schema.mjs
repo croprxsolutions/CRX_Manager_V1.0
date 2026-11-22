@@ -145,6 +145,8 @@ try {
   assert.equal(back.status, 0, `${back.stdout}${back.stderr}`);
   assert.equal(wrapMd5(), before, 'reverse must restore the previous body byte for byte');
   assert.equal(scalar(`SELECT has_function_privilege('authenticated', '${WRAP}', 'EXECUTE');`), 'f', 'reverse keeps API roles out');
+  assert.match(`${run(reverse, ['-1']).stderr}`, /SINGLE_SHORT_STOCK_REVERSE_DRIFT/, 'reverse must refuse a body that is not the candidate');
+  assert.equal(wrapMd5(), before, 'a refused reverse changes nothing');
   const again = run(candidate, ['-1']);
   assert.match(`${again.stdout}${again.stderr}`, /POSTFLIGHT_OK/, 'candidate must re-apply after the reverse');
 

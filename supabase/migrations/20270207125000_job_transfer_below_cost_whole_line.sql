@@ -186,6 +186,7 @@ DECLARE
   v_qtys numeric[];
   v_line_sum bigint := 0;
   v_owner_ext bigint;
+  v_owners_ext bigint;
   v_share RECORD;
   v_share_total bigint := 0;
   v_has_price_override boolean := false;
@@ -439,6 +440,7 @@ BEGIN
           v_chem.product_id, v_chem.product_name, v_chem.quantity, v_chem.job_unit, v_chem.job_price);
         v_qtys := public._job_transfer_split_qty_20270207(v_line.o_quantity, v_acre_pcts);
       END IF;
+      v_owners_ext := 0;
 
       FOR v_oidx IN 1 .. array_length(v_owner_ids, 1) LOOP
         v_member_acres := v_owner_acres[v_oidx];
@@ -477,6 +479,7 @@ BEGIN
                       - v_line.o_cost_cents * v_line.o_exact_qty * v_acre_pcts[v_oidx] / 100) > 50) THEN
             RAISE EXCEPTION 'JOB_LINE_ROUNDING: % can''t be split between this job''s owners to 4 decimals in % without an owner''s amount changing by more than $0.50. Nothing was invoiced; record this product in a smaller sold unit, or invoice the owners from the field-application editor.', v_chem.product_name, v_line.o_unit USING ERRCODE = 'P0001';
           END IF;
+          v_owners_ext := v_owners_ext + v_owner_ext;
           CONTINUE WHEN v_qtys[v_oidx] <= 0;
           INSERT INTO invoice_items (
             invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents,
@@ -494,6 +497,10 @@ BEGIN
           );
         END IF;
       END LOOP;
+      -- Luna round 3: the owners' lines together also stay within 50 cents of the whole line (Mason, "Allow up to 50c").
+      IF NOT v_chem.customer_supplied AND abs(v_owners_ext - v_line.o_exact_cents) > 50 THEN
+        RAISE EXCEPTION 'JOB_LINE_ROUNDING: % can''t be split between this job''s owners to 4 decimals in % without the line''s total changing by more than $0.50. Nothing was invoiced; record this product in a smaller sold unit, or invoice the owners from the field-application editor.', v_chem.product_name, v_line.o_unit USING ERRCODE = 'P0001';
+      END IF;
     END LOOP;
 
     -- Per-owner totals, per-acre application fee, header flip, and per-member commission.
@@ -954,7 +961,7 @@ BEGIN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '2d78cd1251d44e11d68f400fe322156b'
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'e5b2c31f170e952175bdf651932e56e0'
      OR v_price IS NULL OR v_split IS NULL
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM 'c6a232b49bd296d9fc2dacb91e413bd0'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN

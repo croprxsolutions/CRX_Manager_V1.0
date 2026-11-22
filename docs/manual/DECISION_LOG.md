@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-21 — #2151: Mason owner-accepted 1 Sol finding(s) at `2e3a5b5e4ac0`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-21).** Sol's review of PR #2151 at `2e3a5b5e4ac0` (base `dac995aac792`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/lib/editJobs.ts:42`, text sha256 `a4571e5195c8fa0d` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref b25f05e9d3b8)
+
 ## 2026-11-21 — #2151 (job screens through edit_jobs, #1979 PR B): every job edit saves fresh
 
 **Decision (Mason, in chat, 2026-11-21: "Save fresh every click").**

@@ -586,8 +586,8 @@ const gateRequestSource = guardSource.slice(
 ok(gateRequestSource.length > 0, "gateRequest() is present to inspect");
 eq(
   (gateRequestSource.match(/\bhardGateGh\(/g) || []).length,
-  2,
-  "gateRequest()'s two direct gh calls — the PR resolve (which carries reviews) and a pass-backed main merge's file list (Codex P1, #2098) — spend the shared budget " +
+  1,
+  "gateRequest()'s one gh call — the PR resolve, which now also carries reviews — spends the shared budget " +
   "(the two diff reads went away with the risky/non-risky split: every main merge needs the proof)",
 );
 eq(
@@ -645,18 +645,12 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(/if \(!risk\.risky\) \{[\s\S]{0,400}?advisoryQueue\.push\(request\);\s*return;\s*\}/.test(gateRequestSource.slice(riskCall)),
     "the low-risk allow point is guarded by risk.risky");
   ok(/import \{ agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
-  ok(/if \(base === "staging"\) \{[\s\S]{0,400}headRef === "main" \? null : mainCommitsInPrOnGitHub\(\{ stagingSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(backMerge\) deny\(/.test(gateRequestSource), "a PR into staging carrying main's unbacked-merged commits is refused (the passed back-merge itself excepted)");
+  ok(/if \(base === "staging"\) \{[\s\S]{0,300}mainCommitsInPrOnGitHub\(\{ stagingSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(backMerge\) deny\(/.test(gateRequestSource), "a PR into staging carrying main's unbacked-merged commits is refused");
   // staging gets every main gate (Mason on #1363, 2026-11-04); staging-first: agents never merge into main
   // or the back-merge, and a migration may go into staging.
   ok(/if \(!GATED_MERGE_BASES\.includes\(base\)\) return;/.test(gateRequestSource), "only main and staging merges are gated, from the shared list");
-  ok(/const notAgents = agentMergeProblem\(base, headRef, \{ releasePass \}\);\s*if \(notAgents\) deny\(/.test(gateRequestSource),
-    "a merge into main, or of the back-merge, is refused unless Mason's release pass covers it");
-  ok(/releasePass = releasePassCovers\(pass, \{ base, headRef, number: pr\.number \}\);\s*\} catch \{ releasePass = false; \}/.test(gateRequestSource),
-    "the pass is checked for this exact PR, and an unreadable pass means none");
-  ok(/if \(base === "main"\) \{\s*const github = stagingDestructiveProblem\([\s\S]{0,300}\);\s*if \(github\) deny\(/.test(gateRequestSource),
-    "a release pass never lets an agent merge a .github/ change into main (Codex P1, PR #2098)");
-  ok(/folders\.map\(\(d\) => path\.join\(d, "\.claude", "session-state"\)\)[\s\S]{0,300}unappliedMigrationsProblem/.test(gateRequestSource),
-    "a release-pass merge into main reads the applying checkout's migration snapshot, not only the main checkout's (Codex P2, #2098)");
+  ok(/const notAgents = agentMergeProblem\(base, String\(pr\.headRefName \|\| ""\)\);\s*if \(notAgents\) deny\(/.test(gateRequestSource),
+    "a merge into main, or of the back-merge, is refused for every agent");
   ok(/headRefName,headRefOid/.test(gateRequestSource), "the guard reads the PR's head branch name to spot the back-merge");
   ok(gateRequestSource.indexOf("agentMergeProblem(") < gateRequestSource.indexOf("pullRequestReviewBlocked(pr)"),
     "the main and back-merge refusal runs before any allow point");

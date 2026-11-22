@@ -298,7 +298,8 @@ assert.deepEqual(skipFromReply("don't fix finding 2"), { numbers: [2] }, "skip: 
   assert.match(skipSelection(skipFromReply("yes"), shownF0).problem, /reason/, "selection: a bare yes skips nothing and asks for the reason");
   assert.match(skipSelection(skipFromReply("yes, costs $500"), shownF0).problem, /money/, "selection: a reason the public log cannot hold skips nothing");
 }
-for (const no of ["ok", "yesterday it worked", "yes\nand merge", "I approve", "move on", "merge it", "no", "no, fix it", "skip?", "skip the explanation and fix it",
+for (const no of ["ok", "yesterday it worked", "yes\nand merge", "Yes, can you explain this first?", "yes if Taha agrees",
+  "yes but fix finding 2", "yes, after the release", "Yes what does it mean", "I approve", "move on", "merge it", "no", "no, fix it", "skip?", "skip the explanation and fix it",
   "I don't want that approach", "accept only if the totals reconcile", "accept all 1 3", "accept 123456", "accept 123456 fine by me",
   "skip\nand merge", "please skip", "skip 123", ""]) {
   assert.equal(skipFromReply(no), null, `skip: "${no}" is not a skip`);

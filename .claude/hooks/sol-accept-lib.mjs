@@ -198,7 +198,8 @@ export function skipFromReply(prompt) {
   // `yes, <reason>` answers the request's "do you accept the risk?" for every finding it lists
   // (Mason, 2026-11-22). A bare `yes` still parses so the hook can ask him for the reason.
   const yes = /^yes\b[\s,:;.!\-–—]*(.*)$/i.exec(raw.trim());
-  if (yes) return { all: true, reason: yes[1].trim() };
+  // A question or a condition is not acceptance: "yes, can you explain first?" skips nothing (Codex P1, #2199).
+  if (yes) return /\?|\b(?:if|unless|but|after|first|once|when|explain|why|what|how)\b/i.test(yes[1]) ? null : { all: true, reason: yes[1].trim() };
   // "that"/"it" name ONE finding: they skip only when the list has one (Luna, 2026-11-21).
   if (SKIP_ALL_RES.some((re) => re.test(t))) return / (?:it|that)(?: alone| fixed)?$/.test(t) ? { all: true, single: true } : { all: true };
   const m = SKIP_SOME_RE.exec(t);

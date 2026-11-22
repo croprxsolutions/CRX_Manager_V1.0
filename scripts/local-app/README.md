@@ -7,6 +7,16 @@ production, and nothing outside this computer can reach it. The rules are in the
 
 ## Commands
 
+### Customer-document byte proof (separate test copy, KI-113)
+
+`node scripts/local-app/doc-bytes.mjs rebuild` (about 15 minutes), then
+`node scripts/smoke/run-customer-document-bytes-proof.mjs` (add `--negative-control` to show a re-added browser
+read policy is caught). Separate Docker project `crx-doc-bytes-proof`, loopback ports app 5219, API 54831,
+database gateway 54832; settings under `scripts/local-app/.state/doc-bytes/`. It applies the migrations with psql
+(one transaction per file, same ledger rows) instead of the Supabase CLI, and serves today's
+`customer-document-files` with host Deno, not the Edge Runtime container. Tear down with
+`docker compose -p crx-doc-bytes-proof -f scripts/local-app/compose.yaml --env-file scripts/local-app/.state/doc-bytes/local.env down -v`.
+
 ### Chemical sales gauntlet (separate test copy)
 
 Use `node scripts/local-app/sales.mjs rebuild`, then `node scripts/local-app/sales.mjs test` for the
@@ -59,7 +69,7 @@ line. `.state/build.json` holds the full migration list.
 
 When another session is using `127.0.0.1:5199`, check your branch's screens with
 `node scripts/local-app/app.mjs frontend --port 5201`. Any port from 1024 to 65535 works except 5199, 54721
-and 54722, or the sales copy's reserved 5209, 54821 and 54822. It uses the same test database and test user, and listens on `127.0.0.1` only. It runs every check
+and 54722, the sales copy's reserved 5209, 54821 and 54822, or the document-proof copy's 5219, 54831 and 54832. It uses the same test database and test user, and listens on `127.0.0.1` only. It runs every check
 the other commands run, the 5199 check included. The browser calls `/_sb` on that same port and the frontend
 passes the call on to the gateway, so the gateway still lets in only pages from 5199. Live updates do not
 pass through, which changes nothing because the test copy has none.

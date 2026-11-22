@@ -1,15 +1,17 @@
 -- KI-151 (Mason, 2026-11-22: corrections are judged against what actually arrived): set_purchase_order_item_costs refused
 -- a cost cut that would leave the PO's active vendor bills more than 5% over the ORDERED total. Since KI-143 (20270103110000)
 -- vendor bills are judged against what ARRIVED: once anything has arrived the limit is the smaller of the received value
--- and the ordered total, before that the ordered total. The cost check now uses that same limit: a correction that lowers
--- the limit is refused (PO_COST_BELOW_BILLED) when active bills would then be more than 5% over it, or when the limit
--- falls to zero with bills on the PO. A cut that leaves the limit where it was (e.g. an unreceived line on a partly
--- received PO) is no longer refused. received value = sum over lines of round(quantity_received * unit_cost_cents), the
+-- and the ordered total, before that the ordered total. The cost check now uses that same limit, and is refused
+-- (PO_COST_BELOW_BILLED) only when THIS cut puts the active bills more than 5% over a line they were within (Mason,
+-- 2026-11-22): the received-value limit (or zero with bills on the PO), or the ordered total, so a cut cannot leave bills
+-- over everything that can still arrive. A bill already over what arrived (billed up front, goods still coming) does not
+-- block a correction; a cut that leaves both lines where they were (e.g. an unreceived line on a partly received PO,
+-- bills within its new total) is no longer refused. received value = sum over lines of round(quantity_received * unit_cost_cents), the
 -- same per-line rounding as KI-143. Same signature and grants; the body is the 20270217120000 (KI-197) body (md5-pinned
 -- below) with only that block changed. No data changes (live 2026-11-22: no vendor bill is linked to a PO).
 --
--- Rollback: re-run the set_purchase_order_item_costs body from 20270217120000_po_cost_expected_cost_check.sql as
--- CREATE OR REPLACE.
+-- Rollback: a NEW forward migration restoring the set_purchase_order_item_costs body from
+-- 20270217120000_po_cost_expected_cost_check.sql (never re-run or edit an applied file).
 
 SET LOCAL lock_timeout = '10s';
 
@@ -281,8 +283,14 @@ BEGIN
     SELECT COALESCE(SUM(vb.total_cents), 0)::bigint INTO v_billed
       FROM public.vendor_bills vb
      WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided';
-    IF v_new_limit < v_old_limit AND v_billed > 0 AND (v_new_limit <= 0 OR v_billed * 100 > v_new_limit * 105) THEN
-      RAISE EXCEPTION 'PO_COST_BELOW_BILLED: this correction would leave the active vendor bills more than 5%% over what arrived on the purchase order (its ordered total before anything arrives); void or adjust the bill first'
+    -- Refused only when THIS cut puts the bills over a line they were within (Mason, 2026-11-22): a bill already over
+    -- what arrived (billed up front, goods still coming) does not block a correction. Two lines: what arrived (KI-143
+    -- limit), and the ordered total, so a cut cannot leave bills over everything that can still arrive.
+    IF v_billed > 0 AND (
+         (v_new_limit < v_old_limit AND v_old_limit > 0 AND v_billed * 100 <= v_old_limit * 105
+          AND (v_new_limit <= 0 OR v_billed * 100 > v_new_limit * 105))
+      OR (v_new_total < v_old_total AND v_billed * 100 <= v_old_total * 105 AND v_billed * 100 > v_new_total * 105)) THEN
+      RAISE EXCEPTION 'PO_COST_BELOW_BILLED: this correction would put the active vendor bills more than 5%% over what arrived on the purchase order or over its ordered total; void or adjust the bill first'
         USING ERRCODE = '22023',
               DETAIL = jsonb_build_object('po_total_cents', v_new_total, 'received_value_cents', v_received,
                                          'limit_cents', v_new_limit, 'active_billed_cents', v_billed)::text;
@@ -311,7 +319,7 @@ REVOKE ALL ON FUNCTION public.set_purchase_order_item_costs(uuid, jsonb, text, u
 GRANT EXECUTE ON FUNCTION public.set_purchase_order_item_costs(uuid, jsonb, text, uuid, text) TO authenticated;
 
 COMMENT ON FUNCTION public.set_purchase_order_item_costs(uuid, jsonb, text, uuid, text) IS
-  'Admin-only: set, correct or confirm purchase-order line unit cost (cents), received lines included (reason required). Optional per-line expected_unit_cost_cents refuses a stale screen (PO_COST_CHANGED_SINCE_LOADED). A cut that leaves active vendor bills over 105% of what arrived (KI-143 limit) is refused (PO_COST_BELOW_BILLED). Changes only cost and the PO total; never inventory or catalog cost. Key required, bound to caller + request.';
+  'Admin-only: set, correct or confirm purchase-order line unit cost (cents), received lines included (reason required). Optional per-line expected_unit_cost_cents and expected_product_id, sent together, refuse a stale screen (PO_COST_CHANGED_SINCE_LOADED). A cut that puts active vendor bills over 105% of what arrived (KI-143 limit) or of the ordered total, when they were within it, is refused (PO_COST_BELOW_BILLED). Changes only cost and the PO total; never inventory or catalog cost. Key required, bound to caller + request.';
 
 DO $postflight$
 DECLARE
@@ -324,7 +332,8 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = v_oid AND p.prosecdef
                    AND pg_get_userbyid(p.proowner) = 'postgres'
                    AND p.proconfig = ARRAY['search_path=public, pg_temp']
-                   AND p.prosrc LIKE '%PO_COST_CHANGED_SINCE_LOADED%' AND p.prosrc LIKE '%KI-151%') THEN
+                   AND p.prosrc LIKE '%PO_COST_CHANGED_SINCE_LOADED%' AND p.prosrc LIKE '%expected_product_id%'
+                   AND p.prosrc LIKE '%PO_EXPECTED_PAIR_REQUIRED%' AND p.prosrc LIKE '%KI-151%') THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: security definer, owner, search_path or body is wrong';
   END IF;
   IF has_function_privilege('anon', v_oid, 'EXECUTE') OR has_function_privilege('service_role', v_oid, 'EXECUTE')

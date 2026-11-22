@@ -80,7 +80,9 @@
 
 **Why:** since KI-143, vendor bills are already limited by what arrived (capped at the ordered total; the ordered total before anything arrives). The cost-correction check still used the ordered total, so a received line could be cut below what was billed for it.
 
-**What this implies:** a cost cut is refused when the PO's active vendor bills would end more than 5% over what arrived (or over the ordered total, before anything arrives); like the bill check, that limit is what arrived capped at the ordered total, so a cut on a line that has not arrived changes it only when more arrived than was ordered. Owed and still-coming quantities are unchanged: receiving 8 of 10 still shows 2 coming, and a line whose ordered quantity matches what arrived shows nothing coming. Raising a cost is never refused.
+**Follow-up decision (Mason, 2026-11-22, in the Lane E session, "Yes, that rule"):** a cost cut is refused only when that cut itself puts the bills over the line. A bill already over what arrived (for example billed in full up front, goods still coming) does not block a correction.
+
+**What this implies:** a cost cut is refused when it moves the PO's active vendor bills from within 5% to more than 5% over either line: what arrived (like the bill check, capped at the ordered total; the ordered total before anything arrives), or the ordered total, so a cut can never leave the bills over everything that can still arrive. Owed and still-coming quantities are unchanged: receiving 8 of 10 still shows 2 coming, and a line whose ordered quantity matches what arrived shows nothing coming. Raising a cost is never refused.
 
 ## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
 

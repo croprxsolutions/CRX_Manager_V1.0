@@ -41,10 +41,10 @@ written with; reports and bill checks find them by vendor id. (DECISION_LOG entr
   live bill is refused too. Refuted: "psql -1 without -f fails" (the prover applies via stdin with -1 and prints
   POSTFLIGHT_OK; run 2026-11-22). MEDs refuted: service_role direct bill writes are pre-existing; rep visibility is the
   PO's own vendor; 40P01 documented. Bill-picker search by printed name: screen follow-up.
-- Sol round 3 (mechanism cap; Mason decided 2026-11-22, "go with a"): ONE NAME = ONE VENDOR. Creating, renaming or
+- One name = one vendor (Mason, 2026-11-22, "go with a"). Creating, renaming or
   restoring a vendor to a name printed on another vendor's purchase orders (linked to it or billed by it) is refused with
-  `VENDOR_NAME_ON_OTHER_VENDOR_POS` and a suggestion ("<name> LLC"). This removes every name-reuse finding (backfill to
-  a reused name, case-only edit moving a PO, two vendors billing an unlinked PO). Name reuse that already happened
+  `VENDOR_NAME_ON_OTHER_VENDOR_POS` and a suggestion ("<name> LLC"). New name reuse is refused from this migration on.
+  Name reuse that already happened
   before this migration cannot be detected; live evidence shows no PO linked away from its name match.
 - Matching (`_po_vendor_id_for_text`): an active vendor whose normalized name equals the text wins (names are unique
   among active vendors); otherwise NULL (no alias; see Sol round 1 above).

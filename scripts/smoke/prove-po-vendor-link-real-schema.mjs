@@ -83,10 +83,10 @@ try {
   const auto = apply();
   assert.match(`${auto.stdout}${auto.stderr}`, /PREFLIGHT_FAIL: run this file as one transaction/, 'autocommit apply must refuse');
   assert.equal(scalar(`SELECT count(*) FROM pg_attribute WHERE attrelid = 'public.purchase_orders'::regclass AND attname = 'vendor_id';`), '0');
-  const once = apply(['-1']);
+  const once = apply(['-1', '-f', '-']);
   assert.equal(once.status, 0, `apply failed: ${once.stderr}`);
   assert.match(once.stderr, /POSTFLIGHT_OK/);
-  const again = apply(['-1']);
+  const again = apply(['-1', '-f', '-']);
   assert.match(`${again.stdout}${again.stderr}`, /PREFLIGHT_FAIL: purchase_orders.vendor_id already exists/, 're-apply must refuse');
   console.log('[apply] autocommit refused (nothing added), applied once with POSTFLIGHT_OK, re-apply refused');
 

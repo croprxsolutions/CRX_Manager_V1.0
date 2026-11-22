@@ -340,7 +340,7 @@ reopens it.
 
 ### KI-203 — Quick Delivery shows a dash for the unit of a product stocked in Gal
 
-> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Fix in review: PR #2212 (shows the stock unit; Luna and Sol clean; click-tested on staging data) · LOW · plan W3-56. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
+> **Re-checked 2026-11-22 on staging `17a72d0ee`:** Fix in review: PR #2213 (shows the stock unit; screen test fails without it) · LOW · plan W3-56. From the [2026-11-22 staging rehearsal](../audits/2026-11-22-staging-rehearsal-issues.md).
 
 **LOW (clarity) · OPEN (reproduced on staging; source-confirmed) · deliveries · found 2026-11-22 (rehearsal CRXN-03) · unassigned · GitHub #2208**
 The unit column shows the product's optional package size or a dash (`QuickDeliveryModal.tsx` ~L633), not the unit

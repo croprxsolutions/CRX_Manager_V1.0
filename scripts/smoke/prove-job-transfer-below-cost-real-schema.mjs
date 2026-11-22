@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270207125000_job_transfer_below_cost_whole_line (contract
+ * Real-schema proof for 20270222100000_job_transfer_below_cost_whole_line (contract
  * docs/plans/2026-11-21-job-transfer-below-cost-CONTRACT.md, "Redesign: real quantities"). Container setup and replay
  * copied from prove-field-app-refuses-payer-change-real-schema.mjs. Completed spray jobs go through
  * transfer_job_to_invoice as a signed-in admin, each case rolled back. A chemical stocked by the Gal costs $30:
@@ -34,11 +34,9 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270207125000_job_transfer_below_cost_whole_line.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270222100000_job_transfer_below_cost_whole_line.sql');
 const FOLLOW_UPS = [];
-// Later migrations that only CALL helpers this proof relies on (field_app_priced_quantity, normalize_rate_unit) and
-// redefine none of them (checked 2026-11-22).
-const LATER_READ_ONLY = new Set(['20270216110000_purchasing_plan_booking_reservations.sql']);
+const LATER_READ_ONLY = new Set([]);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

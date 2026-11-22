@@ -1,4 +1,4 @@
--- Reverses 20270207125000_job_transfer_below_cost_whole_line.sql (run as ONE transaction).
+-- Reverses 20270222100000_job_transfer_below_cost_whole_line.sql (run as ONE transaction).
 -- Invoices it already wrote keep their real quantities; only the transfer body is restored and the helpers dropped.
 BEGIN;
 -- Only undo this migration's own bodies: stop if a later migration has re-emitted any of them.
@@ -8,7 +8,7 @@ BEGIN
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM 'ab519a8426fda48653f4aae887ce8c2f'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint)')) IS DISTINCT FROM '0fdf9babeecaa206ddc6bd74905d435c'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_split_qty_20270207(numeric, numeric[])')) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
-    RAISE EXCEPTION 'JOB_TRANSFER_BELOW_COST_ROLLBACK_PREFLIGHT: the live bodies are not the ones 20270207125000 installed; nothing changed';
+    RAISE EXCEPTION 'JOB_TRANSFER_BELOW_COST_ROLLBACK_PREFLIGHT: the live bodies are not the ones 20270222100000 installed; nothing changed';
   END IF;
 END $rev$;
 CREATE OR REPLACE FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(p_job_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text)

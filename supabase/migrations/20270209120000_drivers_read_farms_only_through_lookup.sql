@@ -28,6 +28,10 @@
 -- Restoring it (the 20261013220000 customers_select) would reopen the credit, prepay, terms and notes exposure and
 -- needs Mason's explicit security decision first.
 
+-- The read-rule change takes a short exclusive lock on customers: give up rather than queue every farm read behind
+-- a long transaction.
+SET LOCAL lock_timeout = '5s';
+
 CREATE TEMP TABLE drivers_farm_read_2162_tx ON COMMIT DROP AS SELECT pg_current_xact_id()::text AS transaction_id;
 
 DO $preflight$
@@ -68,6 +72,9 @@ BEGIN
        WHERE oid = to_regprocedure('public.get_driver_customers(uuid[])')) IS DISTINCT FROM 'f49caaf5f387375c92be94c52c74e4ed' THEN
     RAISE EXCEPTION 'DRIVER_FARM_READ_BASELINE_DRIFT: get_driver_customers is not the 20270207120000 body';
   END IF;
+  IF NOT has_function_privilege('authenticated', 'public.get_driver_customers(uuid[])', 'EXECUTE') THEN
+    RAISE EXCEPTION 'DRIVER_FARM_READ_BASELINE_DRIFT: signed-in users cannot run get_driver_customers';
+  END IF;
   IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.customers'::regclass) THEN
     RAISE EXCEPTION 'DRIVER_FARM_READ_BASELINE_DRIFT: row level security is off on customers';
   END IF;
@@ -85,12 +92,12 @@ AS $function$
   WITH me AS (
     SELECT p.id, p.role, p.denied_pages FROM public.profiles p WHERE p.id = (SELECT auth.uid()) AND p.is_active
   ), shown AS (
-    -- Office: every delivery (del_select shows them all). A driver allowed the Deliveries page (the same check as
-    -- get_driver_available_deliveries): deliveries assigned to them.
+    -- Only a caller allowed the Deliveries page (the check get_available_deliveries_for_driver makes). Office: every
+    -- delivery (del_select shows them all). A driver: deliveries assigned to them.
     SELECT DISTINCT d.customer_id
       FROM public.deliveries d
-      JOIN me ON me.role IN ('admin', 'sales_rep')
-              OR (me.role = 'driver' AND NOT COALESCE('deliveries' = ANY (me.denied_pages), false) AND d.assigned_driver = me.id)
+      JOIN me ON NOT COALESCE('deliveries' = ANY (me.denied_pages), false)
+             AND (me.role IN ('admin', 'sales_rep') OR (me.role = 'driver' AND d.assigned_driver = me.id))
      WHERE d.customer_id IS NOT NULL
   )
   SELECT c.id, c.farm_name, pc.farm_name

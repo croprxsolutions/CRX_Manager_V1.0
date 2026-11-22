@@ -39,6 +39,7 @@ const [A, B, C, D, E, F, G, H] = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'
 const [JOB_G, JOB_H, FIELD_G, FIELD_H, JF_G, JF_H, CREW] = ['e1', 'e2', 'f1', 'f2', 'b1', 'b2', 'd1'].map(id);
 const DRIVER2 = id('a6');
 const OFF_DRIVER = id('a7');
+const DENIED_REP = id('a8');
 const SECRETS = ['987654321', '123456789', 'ZZTERMS2162', 'ZZNOTE2162'];
 // Every sort key both ways, two searches, a status filter and a short page: the office before/after comparison.
 const VARIANTS = ['NULL', "'delivery_number'", "'customer_name'", "'driver_name'", "'scheduled_date'", "'priority'", "'status'", "'item_count'"]
@@ -53,7 +54,8 @@ const driverList = (extra = '') => attempt(USERS.driver, `${asUser(`r := ${page(
   v := (SELECT string_agg((x->>'delivery_number') || '=' || (x->>'customer_name') || '/' || COALESCE(x->>'farm_group_name', '-'), ',' ORDER BY x->>'delivery_number')
           FROM jsonb_array_elements(r->'rows') x);`);
 // Calls every function authenticated may run (definer and invoker; every uuid argument = u, uuid[] = {u}, the rest
-// NULL), each as the signed-in user in its own step, and lists the ones whose result shows a secret.
+// NULL), each as the signed-in user in its own step, and lists the ones whose result shows a secret. A backstop only:
+// a call that errors on a NULL argument is skipped; the read rule itself is proved directly in step 1.
 const sweep = (u) => `SET LOCAL statement_timeout = '5s';
   n := 0; v := '';
   FOR f0, f1 IN
@@ -85,7 +87,8 @@ try {
   docker(PSQL, { input: `SET session_replication_role = replica;
     INSERT INTO public.profiles (id, email, full_name, role, is_active, denied_pages) VALUES
       ('${DRIVER2}', 'd2@example.invalid', 'Driver Two', 'driver', true, ARRAY['deliveries']),
-      ('${OFF_DRIVER}', 'd3@example.invalid', 'Driver Off', 'driver', false, '{}');
+      ('${OFF_DRIVER}', 'd3@example.invalid', 'Driver Off', 'driver', false, '{}'),
+      ('${DENIED_REP}', 'r2@example.invalid', 'Rep Denied', 'sales_rep', true, ARRAY['deliveries']);
     INSERT INTO public.customers (id, farm_name, parent_customer_id) VALUES
       ('${A}', 'Alpha Top Farms', NULL), ('${B}', 'Bravo Farms', '${A}'), ('${C}', 'Charlie Farms', '${B}'),
       ('${D}', 'Delta Farms', NULL), ('${E}', 'Echo Farms', NULL), ('${F}', 'Foxtrot Farms', NULL),
@@ -169,6 +172,7 @@ try {
   assert.equal(labels(USERS.applicator), 'ok|<null>', 'an applicator holding a delivery assignment: nothing');
   assert.equal(labels(OFF_DRIVER), 'ok|<null>', 'an inactive driver: nothing');
   assert.equal(labels(DRIVER2), 'ok|<null>', 'a driver denied the Deliveries page: nothing, though FR-04 is assigned to them');
+  assert.equal(labels(DENIED_REP), 'ok|<null>', 'a sales rep denied the Deliveries page: nothing');
   assert.match(attempt(USERS.driver, `SET LOCAL ROLE anon; BEGIN PERFORM public._delivery_list_customer_labels(); v := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN v := SQLERRM; END; RESET ROLE;`),
     /permission denied/, 'anon cannot run the helper');
   console.log('[labels] names only, for a driver\'s own deliveries; office all; others nothing; anon refused');

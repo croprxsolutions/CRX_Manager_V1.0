@@ -255,19 +255,17 @@ KI-126 and KI-130 (#2149) keep their own entries.
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · MED · Agent (unassigned) · plan W2-06.
+> **Re-checked 2026-11-22 on staging `a77855293`:** Partly open · MED · Agent (unassigned) · plan W2-06.
 
-**MED · OPEN (sender and app switch live; close action live in the database, not on a screen yet) · UI/database/Edge Function · Claude**
-The database half is live (`20261113140000`, PR #1495): a receipt asked for at completion is recorded in the same
-save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`, PR #1647) was deployed live on
-2026-11-08 with `verify_jwt` off, and the office "Customer receipts to check" card is on Deliveries. The app switch
-that asks for the server receipt (PR #1649) merged 2026-11-09. Not built: provider bounce handling (no email
-bounces are tracked today on any path). The database half of a "mark handled" action is live
-(`20261221100000_close_delivery_receipt`, ledger `20261109152447`, PR #1678), but no screen calls it yet (checked on
-`main` 2026-11-10), so the points below still hold. The office
-card lists every unsent receipt with no age cut-off, so one the office already handled stays listed, and a manual
-Email Confirmation does not pause a worker retry (Sol MED, PR #1647), so the customer can get a second copy. Mason
-chose (2026-11-08) to land the app switch first; the close action's screen is the remaining follow-up.
+**MED · PARTLY OPEN (retry, close action and its screens built; email bounces not tracked) · UI/database/Edge Function · Claude**
+A receipt asked for at completion is recorded in the same save in `delivery_receipt_queue` (`20261113140000`,
+PR #1495) and emailed with retries by the Edge Function `send-delivery-receipts` (PR #1647, live 2026-11-08); the app
+switch to the server receipt merged 2026-11-09 (PR #1649). The close action `close_delivery_receipt`
+(`20261221100000`, ledger `20261109152447`, PR #1678) now has its screens (2026-11-22): each row on "Customer receipts
+to check" (Deliveries) has **Mark handled**, so a handled receipt leaves the list and the server never emails it, and
+Email Confirmation pauses any receipt still queued before its hand send, then marks it handled once the email goes
+out (a failed hand send leaves it on the list). Still open: provider bounce handling (no email bounces are tracked
+on any path). The three rare duplicates Mason accepted on 2026-11-09 (DECISION_LOG) stay accepted.
 
 ### KI-26 — Delivery completion-evidence leftovers
 

@@ -47,6 +47,10 @@ import { formatCentsMinus } from '../lib/money';
 import { invoiceStatusBadge } from '../lib/statusLabel';
 import { Sentry } from '../lib/sentry';
 import { fetchDeliveryFarm } from '../lib/driverFarms';
+import {
+  RECEIPT_SENDING_NOW_MESSAGE, closeDeliveryReceipt, isReceiptSendingNow, receiptCloseScope, receiptMayAlreadyBeSent,
+  type ReceiptCloseResult,
+} from '../lib/receiptsToCheck';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
 import { fetchSplitBillingOrderIds, SPLIT_BILLING_BLOCK_REASON } from '../lib/deliverySplitBilling';
@@ -134,6 +138,7 @@ export default function DeliveryDetail() {
   const voidIdem = useIdempotencyKey('void_delivery', profile?.id || '');
   const reassignIdem = useIdempotencyKey('reassign_delivery', profile?.id || '');
   const createInvoiceIdem = useIdempotencyKey('create_invoice_for_unbilled_delivery', profile?.id || '');
+  const receiptCloseIdem = useIdempotencyKey('close_delivery_receipt', profile?.id || '');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const paperTicketInputRef = useRef<HTMLInputElement>(null);
 
@@ -183,6 +188,7 @@ export default function DeliveryDetail() {
   // Claimed synchronously at the start of a completion, so a second tap never starts a second attempt.
   const completeClaimRef = useRef(false);
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [resendCopyCheck, setResendCopyCheck] = useState<ReceiptCloseResult | null>(null);
   const [quickTaskOpen, setQuickTaskOpen] = useState(false);
   const [deliveryQtys, setDeliveryQtys] = useState<Record<string, number>>({});
   const [driverIssueType, setDriverIssueType] = useState<DeliveryIssueType>('none');
@@ -1458,13 +1464,33 @@ export default function DeliveryDetail() {
   };
 
   // ── Resend Delivery Confirmation Email ──────────────────────────────────
-  const handleResendEmail = async () => {
-    if (!delivery || !customer?.email) {
+  // KI-25: before the hand send, any receipt still queued for the server is paused on the office list, so the server
+  // cannot email a second copy afterwards; once this email goes out it is marked handled. A hand send that fails
+  // leaves it on "Customer receipts to check" instead of lost. confirmedFor: the delivery whose "already sent"
+  // warning the office confirmed; it skips the pause only for that same delivery (Luna HIGH: a late answer for
+  // another delivery must never stand in for this one's pause).
+  const handleResendEmail = async (confirmedFor?: string) => {
+    if (!delivery || !customer?.email || !profile) {
       toast('error', customer?.email ? 'Delivery not loaded' : 'No customer email on file');
       return;
     }
+    setResendCopyCheck(null);
     setSendingEmail(true);
     try {
+      if (confirmedFor !== delivery.id) {
+        let paused: ReceiptCloseResult;
+        try {
+          const scope = receiptCloseScope(delivery.id, 'manual_send');
+          paused = await closeDeliveryReceipt(delivery.id, 'manual_send', receiptCloseIdem.getKeyFor(scope));
+          receiptCloseIdem.resetKeyFor(scope);
+        } catch (err: unknown) {
+          if (isReceiptSendingNow(err)) { toast('warning', RECEIPT_SENDING_NOW_MESSAGE); return; }
+          throw err;
+        }
+        // The office moved to another delivery while this answer was on its way: send nothing, show nothing.
+        if (signatureRouteIdRef.current !== delivery.id) return;
+        if (receiptMayAlreadyBeSent(paused)) { setResendCopyCheck(paused); return; }
+      }
       // The current picks, so a brand corrected after completion shows (Brand PR B-3).
       const brandInfo = await loadDeliveryBrandInfo(delivery.id);
       const deliveredLines = items
@@ -1493,10 +1519,22 @@ export default function DeliveryDetail() {
         idempotency_key: `delivery-resend-${delivery.id}-${Date.now()}`,
       });
       toast('success', `Confirmation email sent to ${customer.email}`);
+      try {
+        const scope = receiptCloseScope(delivery.id, 'handled');
+        await closeDeliveryReceipt(delivery.id, 'handled', receiptCloseIdem.getKeyFor(scope));
+        receiptCloseIdem.resetKeyFor(scope);
+      } catch (err: unknown) {
+        // The email went out; the paused receipt just stays on the office list for someone to mark handled.
+        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+          level: 'warning', extra: { context: 'close_delivery_receipt after Email Confirmation', deliveryId: delivery.id },
+        });
+        toast('warning', 'The email went out, but its receipt is still on "Customer receipts to check". Mark it handled there.');
+      }
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
+    } finally {
+      setSendingEmail(false);
     }
-    setSendingEmail(false);
   };
 
   // U16a: office-visible twin of IntegrityCleanup's admin-only backfill (finding #78).
@@ -2194,12 +2232,24 @@ export default function DeliveryDetail() {
                 size="sm"
                 icon={<Mail className="w-4 h-4" />}
                 showChevron={false}
-                onClick={handleResendEmail}
+                onClick={() => { void handleResendEmail(); }}
                 loading={sendingEmail}
               >
                 Email Confirmation
               </Button>
             )}
+            <ConfirmModal
+              open={resendCopyCheck !== null && resendCopyCheck.delivery_id === delivery.id}
+              onClose={() => setResendCopyCheck(null)}
+              onConfirm={() => { void handleResendEmail(resendCopyCheck?.delivery_id); }}
+              title="Receipt may already be sent"
+              message={resendCopyCheck?.sent_at
+                ? `The server already emailed this receipt to the customer on ${new Date(resendCopyCheck.sent_at).toLocaleString()}. Send another copy?`
+                : 'The server may already have emailed this receipt to the customer. Send another copy?'}
+              confirmLabel="Send another copy"
+              variant="warning"
+              loading={sendingEmail}
+            />
             <Button
               variant="secondary"
               size="sm"

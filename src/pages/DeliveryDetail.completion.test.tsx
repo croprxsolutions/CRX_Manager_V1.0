@@ -62,7 +62,7 @@ vi.mock('../lib/db', () => ({
       }),
     },
   },
-  supabaseUntyped: { from: mockFrom },
+  supabaseUntyped: { from: mockFrom, rpc: mockRpc },
   sanitizeError: (e: unknown) => (e as Error)?.message || 'Error',
   checkMutationResult: vi.fn(),
   assertRpcResult: (d: unknown, op: string) => {
@@ -508,5 +508,81 @@ describe('Invoices on this sale card', () => {
     await completeAndConfirm();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringMatching(/Draft invoices CS-2026-0005-1, CS-2026-0005-2 created/)));
     expect(await screen.findByRole('link', { name: /CS-2026-0005-1/ })).toHaveAttribute('href', '/invoices/inv-1');
+  });
+});
+
+// KI-25 follow-up (20261221100000): Email Confirmation pauses a queued receipt before its hand send, so the server
+// cannot email a second copy afterwards, and marks it handled once the email went out.
+describe('Email Confirmation and the server receipt queue', () => {
+  const COMPLETED = { ...OPEN_DELIVERY, status: 'completed', completed_at: '2026-10-21T15:00:00Z', signed_by: 'Pat' };
+  const answer = (over: Record<string, unknown> = {}) => ({
+    data: { delivery_id: 'del-1', outcome: 'paused', previous_status: 'pending', sent_at: null, send_authorized_at: null, ...over },
+    error: null,
+  });
+  const closeCalls = () => mockRpc.mock.calls.filter(([name]) => name === 'close_delivery_receipt').map(([, args]) => args.p_reason);
+
+  beforeEach(() => { tables.data.deliveries = [{ ...COMPLETED }]; });
+
+  it('pauses the queued receipt before sending, then marks it handled', async () => {
+    const order: string[] = [];
+    mockRpc.mockImplementation((name: string, args: { p_reason?: string }) => {
+      if (name === 'close_delivery_receipt') order.push(`close:${args.p_reason}`);
+      return Promise.resolve(answer(args.p_reason === 'handled' ? { outcome: 'closed', previous_status: 'needs_check' } : {}));
+    });
+    mockSendEmail.mockImplementation(() => { order.push('send'); return Promise.resolve({ success: true }); });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(order).toEqual(['close:manual_send', 'send', 'close:handled']));
+    expect(mockToast).toHaveBeenCalledWith('success', 'Confirmation email sent to farmer@example.test');
+  });
+
+  it('a failed send leaves the receipt paused on the office list (never marked handled)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer()));
+    mockSendEmail.mockRejectedValue(new Error('provider down'));
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'provider down'));
+    expect(closeCalls()).toEqual(['manual_send']);
+  });
+
+  it('asks before sending another copy when the server already emailed it, and sends only on yes', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'sent', previous_status: 'sent', sent_at: '2026-10-21T15:05:00Z', send_authorized_at: '2026-10-21T15:04:00Z' })));
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    expect(await screen.findByText(/The server already emailed this receipt/)).toBeInTheDocument();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Send another copy' }));
+    await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
+    expect(closeCalls()).toEqual(['manual_send', 'handled']); // no second pause on the confirmed copy
+  });
+
+  it('while the server is emailing it, says to try again in a minute and sends nothing', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve({ data: null, error: { message: 'DELIVERY_RECEIPT_SENDING: this delivery receipt is being emailed right now' } }));
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', 'The server is emailing this receipt right now. Try again in a minute.'));
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe('Email Confirmation warning belongs to its own delivery', () => {
+  it('a late "already sent" answer for delivery A never opens the warning on delivery B', async () => {
+    tables.data.deliveries = [{ ...OPEN_DELIVERY, status: 'completed', completed_at: '2026-10-21T15:00:00Z', signed_by: 'Pat' }];
+    let finishA: (v: unknown) => void = () => {};
+    mockRpc.mockImplementation((name: string) => name === 'close_delivery_receipt'
+      ? new Promise((resolve) => { finishA = resolve; })
+      : Promise.resolve({ data: null, error: null }));
+    const view = render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }, { timeout: 3000 }));
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('close_delivery_receipt', expect.anything()));
+    // The office moves to delivery B before A's answer arrives.
+    route.id = 'del-2';
+    tables.data.deliveries = [{ ...OPEN_DELIVERY, id: 'del-2', delivery_number: 'DEL-2', status: 'completed', completed_at: '2026-10-21T15:00:00Z', signed_by: 'Pat' }];
+    view.rerender(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    await screen.findAllByText('DEL-2', undefined, { timeout: 3000 });
+    finishA({ data: { delivery_id: 'del-1', outcome: 'sent', previous_status: 'sent', sent_at: '2026-10-21T15:05:00Z', send_authorized_at: null }, error: null });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole('button', { name: 'Send another copy' })).not.toBeInTheDocument();
+    expect(mockSendEmail).not.toHaveBeenCalled();
   });
 });

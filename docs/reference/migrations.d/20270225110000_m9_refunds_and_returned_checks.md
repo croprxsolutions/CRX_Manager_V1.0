@@ -1,6 +1,6 @@
-**LOCAL CANDIDATE — NOT APPLIED.** M9, refunds paid outside CRX + prepay balance check + returned (bounced) checks (Mason's decision 18): `20270225110000_m9_refunds_and_returned_checks.sql` (SQL sha256: `ddab40c491889043d2d600c84ec904aad2f3e5ddd90385ef8a80a10582161d48`). It must apply after `20270224120000_month_close_payments_received_recheck` (its preflight requires `_month_close_figures_20270208`).
+**LOCAL CANDIDATE — NOT APPLIED.** M9, refunds paid outside CRX + prepay balance check + returned (bounced) checks (Mason's decision 18): `20270225110000_m9_refunds_and_returned_checks.sql` (SQL sha256: `17d7c0d44229aa627475bdd3ce7c4b5395416bff053e7082f0773bc182465835`). It must apply after `20270224120000_month_close_payments_received_recheck` (its preflight requires `_month_close_figures_20270208`).
 
-**Preflight** pins nine function bodies (md5 of prosrc without CR). For each it also pins the owner, SECURITY DEFINER, search_path, grants, number of defaults, volatility, and an md5 of the argument list with default expressions and result. The bodies:
+**Preflight** pins nine function bodies (md5 of prosrc without CR). For each it also pins the owner, SECURITY DEFINER, search_path, grants (compared as a set), number of defaults, volatility, and an md5 of the argument list with default expressions and result. The bodies:
 - `_recompute_prepay_credit_balance` `62822c67…`
 - `_void_payment_replay_impl_20261015` `249d13c9…`
 - `_edit_prepay_credit_replay_impl_20261015` `366db16a…`
@@ -18,19 +18,19 @@ It also refuses an extra overload, pins `financial_audit_log_operation_type_chec
 - `money_reversal_lines`: what was taken per credit, invoice payment or prepay application. The FK to the application has no cascade.
 - Both are append-only by trigger, RLS on, SELECT for active admins and reps, no API-role writes.
 
-**New internal helpers** (no API role may call them): `_prepay_credit_reversed_20270225` and `_prepay_credit_computed_balance_20270225`.
+**New internal helpers** (no API role may call them): `_prepay_credit_reversed_20270225`, `_prepay_credit_computed_balance_20270225` and the statement-level line trigger function `_recompute_prepay_credits_from_lines_20270225`. API roles also lose EXECUTE on `_recompute_prepay_credit_balance` (a trigger fires without it; service_role keeps it).
 
 **Replaced bodies** are each the pinned body plus inserted M9 blocks only, proven byte for byte by the postflight:
-- The recompute adds reversed applications back and takes lines off, and also runs AFTER INSERT on lines.
-- void_payment refuses a returned payment and one whose prepay was refunded.
+- The recompute adds reversed applications back and takes lines off. A statement-level trigger (`trg_recompute_prepay_credits_m9`) recomputes each credit that new lines name, once per INSERT.
+- void_payment refuses a returned payment and one whose prepay was refunded, and locks its invoices in one id-ordered pass.
 - Edit refuses a balance change, and delete refuses, for any credit a reversal names.
-- void_invoice refuses `INVOICE_HAS_RETURNED_PAYMENT`.
+- void_invoice refuses `INVOICE_HAS_RETURNED_PAYMENT`, for an active admin only; anyone else gets the void's own refusal.
 - Month-End nets returned checks out of payments received (not counted as payments; other rows counted as before) and adds the `refunds` / `returned_checks` figures plus the `refunds_paid_cents` / `returned_checks_cents` receipt keys.
-- The A/R tripwire learns returned checks.
+- The A/R tripwire learns returned checks, and only for invoices the return touched.
 - The statement adds a "Returned check" row and a $0 "Refund paid (outside CRX)" row, each with its amount in the description.
 
 **New RPCs** (active admin only; EXECUTE for authenticated and service_role):
-- `record_outside_refund(uuid,bigint,date,text,text,uuid,uuid,text)` and `record_returned_check(uuid,date,text,uuid,text,uuid)`: key required, using `check_idempotency_intent` + `save_idempotency` + `_bind_replay_receipt_20261015`.
+- `record_outside_refund(uuid,bigint,date,text,text,uuid,uuid,text,boolean)` (the last argument confirms a second refund with the same reference and amount) and `record_returned_check(uuid,date,text,uuid,text,uuid)`: key required, using `check_idempotency_intent` + `save_idempotency` + `_bind_replay_receipt_20261015`.
 - `get_prepay_balance_check(uuid)`: read-only.
 
 The audit CHECK gains `prepay_refunded_outside` and `payment_returned`. A second apply stops at `M9_PREFLIGHT: already applied`. No existing row changes.
@@ -60,8 +60,34 @@ The audit CHECK gains `prepay_refunded_outside` and `payment_returned`. A second
   These match every existing money RPC.
   - L26: the legacy `payments` table's whole-cent invariant. It predates M9, and M9 does not change that arm.
 
-**Proof:** `node scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` prints M9_REFUNDS_RETURNED_CHECKS_PROOF_PASS. It runs 11 cases, including the recompute on apply, batch apply, invoice void and void_payment, and a two-session return/void race. The prover applies M9 on its own to a snapshot of the chain just before it.
+**Sol round 2** (28 findings on 0ed3d7c9d):
+- HIGH 1–4 fixed:
+  - A return refuses a drifted credit.
+  - A return refuses when invoice-payment lines plus credit lines differ from the face value (`RETURNED_CHECK_DOES_NOT_ADD_UP`). Application lines are not added again: a credit's removal line already holds its applied part.
+  - The recompute trigger function loses API-role EXECUTE.
+  - The prover's reuse mode refuses an unlabelled container, or one without the snapshot, before it drops anything.
+- MED fixed:
+  - M5: an undated payment is refused.
+  - M6: the void guard applies only for an active admin.
+  - M7: void_payment locks its invoices in one id-ordered pass.
+  - M8: a Prepayment Manager check is the buckets of its one writer call (its `prepay_credit_created` audit row). Without exactly one such row the return is refused (`CHECK_BUCKETS_UNKNOWN`).
+  - M9: a duplicate refund needs `p_allow_duplicate_reference`.
+  - M10: an overpayment credit is eligible from its payment date.
+  - M11: a backdated refund is refused if a drawn credit was edited after that date.
+  - M12: only drawn credits are drift-checked.
+  - M13: the tripwire flags only invoices the return touched.
+  - M15: reconciliation ignores allocations of inactive payment sets.
+  - M17: the fallback applies only to error codes 42P01 / PGRST205.
+  - M18: one aggregated pass and one statement for application lines.
+- LOW fixed: L23 (grants compared as a set), L24 (the prover replays up to M9 only), L25 (the three skip lists pin this file's sha256), L26 (fixed dates in the date cases), L27 (the two-session proof polls lock waits) and L28 (changelog wording).
+- **Accepted in round 2:**
+  - M14: invoice void stays refused while the returned payment is on the invoice (Taha's default 5).
+  - M16: reconciliation runs its reads separately, as it does today, so a return committing between them can show a passing discrepancy.
+  - L19–L22: the same accepted bigint and legacy-cents limits as round 1.
+
+**Proof:** `node scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` prints M9_REFUNDS_RETURNED_CHECKS_PROOF_PASS. It runs 12 cases, including the recompute on apply, batch apply, invoice void and void_payment, and a two-session return/void race. The prover applies M9 on its own to a snapshot of the chain just before it.
 
 **Rollback:** a follow-up migration, valid only while `money_reversals` is empty.
 - Re-create the nine bodies pinned above and restore the audit list.
-- Drop the three RPCs, the three helpers (including `_money_reversals_append_only_20270225`), the trigger `trg_recompute_prepay_credit_balance_m9`, and both tables.
+- Restore the recompute's EXECUTE grants.
+- Drop the three RPCs, the four helpers (including `_money_reversals_append_only_20270225`), the trigger `trg_recompute_prepay_credits_m9`, and both tables.

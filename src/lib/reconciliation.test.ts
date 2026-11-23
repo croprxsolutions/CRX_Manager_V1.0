@@ -3,6 +3,7 @@ import {
   checkOrderTotals,
   checkInventoryLedger,
   checkInvoicePayments,
+  isMissingReversalTable,
   checkInvoiceBalances,
   checkCommissionSplits,
   checkQuoteHoldParity,
@@ -473,6 +474,27 @@ describe('checkInvoicePayments', () => {
 
     expect(checkInvoicePayments(invoices, allocations)).toEqual([]);
   });
+  it('treats only a missing returned-check table as "no returned checks" (M9)', () => {
+    expect(isMissingReversalTable({ code: '42P01' })).toBe(true);
+    expect(isMissingReversalTable({ code: 'PGRST205' })).toBe(true);
+    expect(isMissingReversalTable({ code: '42703' })).toBe(false);   // a missing column still fails the check
+    expect(isMissingReversalTable({ code: 'PGRST301' })).toBe(false);
+    expect(isMissingReversalTable(null)).toBe(false);
+  });
+
+  it('ignores allocations of a voided payment (its set is inactive; the rows stay)', () => {
+    const invoices: InvoiceRow[] = [
+      { id: 'i1', invoice_number: 'INV-001', invoice_type: 'chemical_sale', order_id: 'ord1', paid_amount_cents: 2500, prepay_applied_cents: 0, write_off_cents: 0, credit_applied_cents: 0, total_amount_cents: 10000, balance_cents: 7500 },
+    ];
+    const allocations: InvoiceLineAllocationRow[] = [
+      { invoice_id: 'i1', amount_cents: 10000, allocation_set_id: 'voided' },
+      { invoice_id: 'i1', amount_cents: 2500, allocation_set_id: 'live' },
+    ];
+
+    expect(checkInvoicePayments(invoices, allocations, [], new Set(['voided']))).toEqual([]);
+    expect(checkInvoicePayments(invoices, allocations).map((d) => d.expected)).toEqual([12500]);
+  });
+
   it('subtracts a returned check (M9): the allocation stays, the paid amount went back down', () => {
     const invoices: InvoiceRow[] = [
       { id: 'i1', invoice_number: 'INV-001', invoice_type: 'chemical_sale', order_id: 'ord1', paid_amount_cents: 0, prepay_applied_cents: 0, write_off_cents: 0, credit_applied_cents: 0, total_amount_cents: 123700, balance_cents: 123700 },

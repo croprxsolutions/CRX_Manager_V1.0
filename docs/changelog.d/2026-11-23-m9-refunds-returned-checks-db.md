@@ -7,7 +7,7 @@
 - `record_returned_check` records a bounced check, either a Record Payment or a Prepayment Manager check (Mason's decision 18).
   - The entry is dated in the open month.
   - The invoices the check paid, directly or through its prepay, are unpaid again, and its prepay comes off.
-  - The closed month stays closed and its rows are not rewritten.
+  - The closed month stays closed. Its payment and prepay-application rows are kept as they were, but the invoices that check paid (even ones dated in the closed month) owe money again, so their status and balance change on the day the bounce is recorded.
 - `get_prepay_balance_check` compares each customer's prepay (received − applied − refunded − returned) with the stored balance and the credits. It is read-only and fixes nothing.
 - Month-End: a returned check comes off "payments received" in the month it is recorded. Refunds and returned checks are new figures on the summary and the close receipt.
 - Statement: the statement shows "Returned check" and "Refund paid (outside CRX)" rows.
@@ -23,3 +23,8 @@
   - The balance check names each mismatched credit.
   - An invoice a returned check paid gets a clear refusal on void.
   - Reconciliation (Integrity report) subtracts returned checks.
+- Sol round 2 fixes (same migration, still a local candidate):
+  - A second refund with the same reference and amount needs the admin to confirm it.
+  - A refund can draw a payment's prepay from the payment's date, is refused if a drawn credit was edited after the refund date, and checks only the credits it draws.
+  - A return refuses a drifted credit, a payment whose records don't add up to the check, an undated payment, and a Prepayment Manager check whose buckets can't be identified.
+  - The Integrity report stops counting voided payments' allocations.

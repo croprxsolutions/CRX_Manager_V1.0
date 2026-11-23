@@ -61,8 +61,13 @@ Both functions can only date an entry in an open month, under the month lock tha
 
 ## 7. Sol round 1 rules (built)
 1. Only a Record Payment with `payment_method='check'` can be returned.
-2. A Prepayment Manager check is every bucket sharing the customer, `created_at` and `source_reference`, the same grouping Month-End uses. Its face value is the buckets' total. It is refused if any bucket was edited (`prepay_edited` changing the original amount), deleted, refunded or already returned.
-3. `p_returned_date` is the bank's date: ≥ the day the check was received (an undated payment uses its Chicago creation day) and may be in a closed month. The entry is dated today, in an open month.
+2. A Prepayment Manager check is every bucket its one Prepayment Manager call wrote (the call's `prepay_credit_created` audit row lists them; round 2). Its face value is the buckets' total. It is refused if any bucket was edited (`prepay_edited` changing the original amount), deleted, refunded or already returned.
+3. `p_returned_date` is the bank's date: ≥ the day the check was received and may be in a closed month. An undated payment is refused (round 2). The entry is dated today, in an open month.
 4. Lock order matches void_payment: payment → credits → month → invoices (one sorted pass) → customer. A refund locks credits → month → customer.
 5. A refund draws only credits received on or before its date. It is refused when a drawn credit's stored balance differs from its rows.
 6. A reopened invoice goes overdue when its due date is before today in Chicago, the same rule as reverse_write_off. Only paid → owing counts as reopened.
+
+## 8. Sol round 2 rules (built)
+1. A return must add up: invoice-payment lines + credit lines = face value. Each credit line already holds its applied part once that part is counted back. Otherwise the return is refused and handled by hand.
+2. A refund's credits are eligible from their receipt date: the payment date for a Record Payment's prepay, the entry day for a Prepayment Manager check. A second refund with the same reference (any case) and amount needs `p_allow_duplicate_reference`.
+3. Reconciliation counts only allocations of active payment sets. Its returned-check ledger is treated as empty only when the table is missing (42P01 / PGRST205).

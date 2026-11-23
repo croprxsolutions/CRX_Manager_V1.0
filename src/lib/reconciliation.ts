@@ -273,6 +273,7 @@ export interface InvoiceRow {
 export interface InvoiceLineAllocationRow {
   invoice_id: string;
   amount_cents: number;
+  allocation_set_id?: string;
 }
 
 /**
@@ -284,14 +285,26 @@ export interface InvoicePaymentReversalRow {
   amount_cents: number;
 }
 
+/**
+ * Before the M9 migration is applied, `money_reversal_lines` does not exist: that alone means "no returned checks".
+ * Only a missing table counts (Postgres 42P01, or PostgREST's PGRST205 "table not in the schema cache"); any other
+ * error, such as a missing column, must still fail the check.
+ */
+export function isMissingReversalTable(error: { code?: string } | null | undefined): boolean {
+  return error?.code === '42P01' || error?.code === 'PGRST205';
+}
+
 export function checkInvoicePayments(
   invoices: InvoiceRow[],
   allocations: InvoiceLineAllocationRow[],
   reversals: InvoicePaymentReversalRow[] = [],
+  inactiveSetIds: ReadonlySet<string> = new Set(),
 ): Discrepancy[] {
-  // Sum allocation cents per invoice_id (source of truth from allocate_payment), less returned checks
+  // Sum allocation cents per invoice_id (source of truth from allocate_payment), less returned checks. A voided
+  // payment's set is inactive and its allocation rows stay: they no longer count.
   const allocatedByInvoice = new Map<string, number>();
   for (const a of allocations) {
+    if (a.allocation_set_id && inactiveSetIds.has(a.allocation_set_id)) continue;
     const current = allocatedByInvoice.get(a.invoice_id) ?? 0;
     allocatedByInvoice.set(a.invoice_id, current + a.amount_cents);
   }
@@ -808,7 +821,7 @@ export async function runReconciliationChecks(): Promise<ReconciliationReport> {
 
   // ── Check 3 & 4: Invoice payments + balance formula ────────────
   try {
-    const [invoiceRes, allocRes, reversalRes] = await Promise.all([
+    const [invoiceRes, allocRes, reversalRes, inactiveRes] = await Promise.all([
       fetchAllRows((from, to) => supabase
         .from('invoices')
         .select('id, invoice_number, order_id, invoice_type, status, paid_amount_cents, prepay_applied_cents, write_off_cents, credit_applied_cents, total_amount_cents, balance_cents', { count: 'exact' })
@@ -818,7 +831,7 @@ export async function runReconciliationChecks(): Promise<ReconciliationReport> {
         .range(from, to)),
       fetchAllRows((from, to) => supabase
         .from('invoice_line_allocations')
-        .select('id, invoice_id, amount_cents', { count: 'exact' })
+        .select('id, invoice_id, amount_cents, allocation_set_id', { count: 'exact' })
         .order('id')
         .range(from, to)),
       // M9 (migration 20270225110000; not in the generated types yet): payments taken back by a returned check.
@@ -828,25 +841,31 @@ export async function runReconciliationChecks(): Promise<ReconciliationReport> {
         .eq('line_kind', 'invoice_payment')
         .order('id')
         .range(from, to)),
+      fetchAllRows((from, to) => supabase
+        .from('allocation_sets')
+        .select('id', { count: 'exact' })
+        .eq('is_active', false)
+        .order('id')
+        .range(from, to)),
     ]);
 
     if (invoiceRes.error) throw new Error(`Invoices query failed: ${invoiceRes.error.message}`);
     if (allocRes.error) throw new Error(`Allocations query failed: ${allocRes.error.message}`);
-    // Before the M9 migration is applied the table does not exist: no returned checks.
-    const reversalError = reversalRes.error?.message ?? '';
-    const reversalTableMissing = /money_reversal_lines/.test(reversalError) && /does not exist|schema cache|could not find/i.test(reversalError);
+    if (inactiveRes.error) throw new Error(`Payment sets query failed: ${inactiveRes.error.message}`);
+    const reversalTableMissing = isMissingReversalTable(reversalRes.error as { code?: string } | null);
     if (reversalRes.error && !reversalTableMissing) throw new Error(`Returned-check reversals query failed: ${reversalRes.error.message}`);
     const reversals = (reversalRes.error ? [] : reversalRes.data ?? []) as InvoicePaymentReversalRow[];
+    const inactiveSetIds = new Set(((inactiveRes.data ?? []) as Array<{ id: string }>).map((r) => r.id));
     const invoices = (invoiceRes.data ?? []) as Array<InvoiceRow & { status: string }>;
     const allocations = (allocRes.data ?? []) as InvoiceLineAllocationRow[];
     // A posted invoice moves on to 'paid' or 'overdue', so filtering on 'posted'
     // alone skipped every invoice that had money against it.
     const financialInvoices = invoices.filter((inv) => FINANCIAL_INVOICE_STATUSES.has(inv.status));
 
-    const payDisc = checkInvoicePayments(financialInvoices, allocations, reversals);
+    const payDisc = checkInvoicePayments(financialInvoices, allocations, reversals, inactiveSetIds);
     checks.push({
       name: 'Invoice Payments',
-      description: 'Invoice paid_amount_cents matches SUM of invoice_line_allocations.amount_cents (source of truth from allocate_payment), less returned checks',
+      description: 'Invoice paid_amount_cents matches SUM of invoice_line_allocations.amount_cents of active payments (source of truth from allocate_payment), less returned checks',
       passed: payDisc.length === 0,
       discrepancies: payDisc,
       entitiesChecked: financialInvoices.length,

@@ -14,6 +14,7 @@
  * Run: node scripts/smoke/prove-split-save-refuses-blend-billed-job-real-schema.mjs   (needs Docker)
  * Prints SPLIT_SAVE_REFUSES_BLEND_BILLED_JOB_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
  */
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,7 +35,9 @@ const CANDIDATE = path.join(MIGRATIONS, '20270224130000_split_save_refuses_blend
 const TOUCHED = /(_save_field_app_split_invoice_impl|save_field_app_split_invoice|create_invoice_from_blend_ticket|enforce_linked_blend_ticket_header_lock|FUNCTION (public\.)?void_invoice\()/i;
 // M9 re-emits the void_invoice wrapper with one refusal that fires only for an invoice a returned check paid
 // (money_reversal_lines); this proof's voids have none.
-const LATER_READ_ONLY = new Set(['20270225110000_m9_refunds_and_returned_checks.sql']);
+// Pinned to the reviewed bytes: an edited M9 trips this proof's guard again.
+const LATER_READ_ONLY = new Map([['20270225110000_m9_refunds_and_returned_checks.sql', '17d7c0d44229aa627475bdd3ce7c4b5395416bff053e7082f0773bc182465835']]);
+const laterReadOnly = (file) => LATER_READ_ONLY.get(path.basename(file)) === createHash('sha256').update(readFileSync(file)).digest('hex');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',
@@ -152,7 +155,7 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  for (const file of all.slice(at + 1).filter((f) => !LATER_READ_ONLY.has(path.basename(f)))) {
+  for (const file of all.slice(at + 1).filter((f) => !laterReadOnly(f))) {
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);

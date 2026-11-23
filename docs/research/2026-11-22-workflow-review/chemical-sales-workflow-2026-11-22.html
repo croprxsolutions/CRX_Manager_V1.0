@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>CRX — Chemical Sales Workflow (inventory + money) — 2026-11-22</title>
+<style>
+:root{--ink:#1f2937;--mute:#6b7280;--line:#d1d5db;--g:#15803d;--gb:#f0fdf4;--b:#1d4ed8;--bb:#eff6ff;--r:#b91c1c;--rb:#fef2f2;--a:#b45309;--ab:#fffbeb;--p:#6d28d9;--pb:#f5f3ff}
+*{box-sizing:border-box}body{font:14px/1.45 system-ui,Segoe UI,Arial,sans-serif;color:var(--ink);margin:24px;max-width:1500px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 10px;border-bottom:2px solid var(--line);padding-bottom:4px}
+.sub{color:var(--mute);margin-bottom:14px}
+.legend span{display:inline-block;margin-right:14px;font-size:12px}.dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.flow{display:grid;grid-template-columns:repeat(6,minmax(230px,1fr));gap:0;align-items:stretch;overflow-x:auto;padding-bottom:6px}
+.stage{border:1px solid var(--line);border-radius:8px;padding:10px;margin-right:22px;position:relative;background:#fff}
+.stage:not(:last-child)::after{content:"➜";position:absolute;right:-20px;top:40%;font-size:18px;color:var(--mute)}
+.stage h3{margin:0 0 2px;font-size:15px}.stage .scr{font-size:11px;color:var(--mute);margin-bottom:6px}
+.box{border-radius:6px;padding:6px 8px;margin:6px 0;font-size:12.5px}
+.do{background:#f9fafb;border-left:4px solid #9ca3af}
+.stock{background:var(--bb);border-left:4px solid var(--b)}
+.money{background:var(--gb);border-left:4px solid var(--g)}
+.gap{background:var(--rb);border-left:4px solid var(--r)}
+.box>b:first-child{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+.stock>b:first-child{color:var(--b)}.money>b:first-child{color:var(--g)}.gap>b:first-child{color:var(--r)}.do>b:first-child{color:#4b5563}
+ul{margin:2px 0 0 16px;padding:0}li{margin:1px 0}
+.ladder{display:flex;overflow-x:auto;gap:0;align-items:stretch;margin:6px 0}
+.rung{flex:1 0 170px;padding:10px;border:1px solid var(--line);margin-right:18px;border-radius:8px;position:relative;font-size:12.5px}
+.rung:not(:last-child)::after{content:"➜";position:absolute;right:-16px;top:40%;color:var(--mute)}
+.rung h4{margin:0 0 4px;font-size:13.5px}
+.c0{background:#f3f4f6}.c1{background:var(--ab)}.c2{background:#fef9c3}.c3{background:var(--bb)}.c4{background:var(--pb)}.c5{background:var(--gb)}
+.tag{display:inline-block;font-size:11px;font-weight:600;padding:1px 6px;border-radius:10px;margin-left:4px}
+.t-live{background:#dcfce7;color:#166534}.t-stg{background:#fef3c7;color:#92400e}.t-none{background:#fee2e2;color:#991b1b}
+table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{background:#f9fafb}
+.H{color:var(--r);font-weight:700}.M{color:var(--a);font-weight:700}.L{color:var(--mute);font-weight:700}
+.side{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.card{border:1px dashed var(--line);border-radius:8px;padding:10px;font-size:12.5px}.card h4{margin:0 0 4px}
+.idea{border:2px solid var(--p);background:var(--pb);border-radius:8px;padding:12px 14px}
+.foot{color:var(--mute);font-size:12px;margin-top:20px}
+</style></head><body>
+
+<h1>Chemical Sales — how a booking becomes stock, a delivery, an invoice and money</h1>
+<div class="sub">Read from the newest code (staging, 2026-11-22, commit 3f1ca8933). Some of it is <b>not live yet</b> — tags show where each piece stands. Read-only review: nothing was changed.</div>
+<div class="legend">
+<span><i class="dot" style="background:#9ca3af"></i>What you do</span>
+<span><i class="dot" style="background:var(--b)"></i>Stock effect</span>
+<span><i class="dot" style="background:var(--g)"></i>Money effect</span>
+<span><i class="dot" style="background:var(--r)"></i>Gap / risk</span>
+<span class="tag t-live">LIVE</span><span class="tag t-stg">STAGING ONLY</span><span class="tag t-none">NOT BUILT</span>
+</div>
+
+<h2>1. The main path</h2>
+<div class="flow">
+
+<div class="stage"><h3>① Quote / Booking</h3><div class="scr">Quotes → Quote Builder</div>
+<div class="box do"><b>Do</b>Build sections (field, products, rate, acres, price). Per section pick <b>Needed-by</b>, <b>Timing</b> (Pre-plant / In season / Late summer) and <b>Confidence</b> (Firm / Likely / Maybe) <span class="tag t-stg">STAGING</span>. Optional "Planned program" switch. Send it.</div>
+<div class="box stock"><b>Stock</b><ul><li>Draft (not Planned): counts <u>nowhere</u>.</li><li>Sent: shows on the Purchasing tab only (advice, nothing reserved).</li><li>Only the old <b>Planned</b> switch puts a real hold on shelf stock — and it ignores Firm/Likely/Maybe.</li></ul></div>
+<div class="box money"><b>Money</b>Sending locks the price until expiry (season end). Raising a price later needs "Grower agreed".</div>
+<div class="box gap"><b>Gaps</b><ul><li>Holds still follow "Planned", not "Firm".</li><li>Hold quietly ends 14 days after Needed-by.</li><li>Duplicate / Roll over drop fields, dates, timing, confidence.</li></ul></div>
+</div>
+
+<div class="stage"><h3>② Purchasing</h3><div class="scr">Inventory → Purchasing tab <span class="tag t-stg">STAGING</span> · Purchase Orders</div>
+<div class="box do"><b>Do</b>Read "To buy" and "Order X by &lt;date&gt;" per product, then create a PO by hand.</div>
+<div class="box stock"><b>Stock</b><ul><li>Shelf + POs by arrival date are matched to needs in date order, with a running balance (not month by month).</li><li><b>To buy</b> = Firm + orders + jobs + holds. <b>Could add</b> = Likely. Maybe shown, never bought.</li><li>Receiving a PO adds on-hand stock.</li></ul></div>
+<div class="box money"><b>Money</b>Receiving does <u>not</u> change product cost; cost comes from the catalog price list.</div>
+<div class="box gap"><b>Gaps</b><ul><li>No "70% of Likely" setting — Likely is all or nothing.</li><li>No "make a PO from this" button.</li><li>Old Forecast view still compares each month to the whole warehouse.</li></ul></div>
+</div>
+
+<div class="stage"><h3>③ Order</h3><div class="scr">Convert / Partial Order / New Order</div>
+<div class="box do"><b>Do</b>Convert the whole booking, or take Partial Orders as the grower calls. Extra beyond the booking can be priced today's or booked price.</div>
+<div class="box stock"><b>Stock</b><ul><li>Order quantity becomes <b>"committed"</b> (prebooked). Shelf count unchanged.</li><li>Booking holds shrink unit for unit as product is drawn.</li><li>Shortage = warning only.</li></ul></div>
+<div class="box money"><b>Money</b><ul><li>Order line keeps the booked price and the cost from quote time.</li><li><b>Commission is created now</b>, on planned profit.</li></ul></div>
+<div class="box gap"><b>Gaps</b><ul><li>Order warnings ignore stock held for <u>another grower's</u> booking.</li><li>Editing an order line re-stamps today's cost (profit &amp; commission shift).</li><li>Close-Short ignores open partial orders.</li></ul></div>
+</div>
+
+<div class="stage"><h3>④ Delivery</h3><div class="scr">New Delivery → Confirm → Complete</div>
+<div class="box do"><b>Do</b>Schedule, driver confirms (starts), driver completes. Short loads leave a remainder for a follow-up.</div>
+<div class="box stock"><b>Stock</b><ul><li><b>Complete is the only step that takes stock off the shelf</b> and clears the matching "committed".</li><li>Negative stock allowed (flagged for review).</li><li>Void (admin) puts it back — blocked once invoice is posted.</li></ul></div>
+<div class="box money"><b>Money</b>Completing makes a <b>draft invoice</b> automatically, at the order-line price.</div>
+<div class="box gap"><b>Gaps</b><ul><li>An order line can be cut below what's on an open delivery.</li><li>Returns restock but never reduce commission.</li></ul></div>
+</div>
+
+<div class="stage"><h3>⑤ Invoice</h3><div class="scr">Invoices → Invoice Detail</div>
+<div class="box do"><b>Do</b>Review the draft, add freight/misc lines, Post.</div>
+<div class="box stock"><b>Stock</b>None. Can't bill more than was delivered (database cap).</div>
+<div class="box money"><b>Money</b><ul><li>Posting locks amounts, starts the due date (Net 30) and AR.</li><li>Closed months refuse changes.</li><li>Sales tax + standing discount lines <span class="tag t-stg">STAGING, switched off</span>.</li></ul></div>
+<div class="box gap"><b>Gaps</b><ul><li>Void + re-bill leaves the rep's commission cancelled for good.</li><li>Draft price can be edited; nothing re-checks it against the sent quote.</li></ul></div>
+</div>
+
+<div class="stage"><h3>⑥ Payment &amp; Commission</h3><div class="scr">Payments · Prepay · Commission Payments · Month-End</div>
+<div class="box do"><b>Do</b>Record payment against posted invoices; apply prepay; pay reps; close the month.</div>
+<div class="box stock"><b>Stock</b>None.</div>
+<div class="box money"><b>Money</b><ul><li>Payment lowers invoice balance; overpay becomes a prepay credit.</li><li>Prepay can pay any posted invoice of that customer.</li></ul></div>
+<div class="box gap"><b>Gaps</b><ul><li><b>Commission can be paid before the sale is invoiced or paid.</b></li><li>Prepay is not tied to a booking and doesn't lock price.</li><li>Live Month-End "payments received" reads an old table (fix is on staging).</li></ul></div>
+</div>
+</div>
+
+<h2>2. Your "planned vs firm" idea — where each kind of quote counts</h2>
+<div class="ladder">
+<div class="rung c0"><h4>Draft quote</h4>Counts <b>nothing</b>.<br>(Exception: a draft with "Planned" on still holds stock.) <span class="tag t-live">LIVE</span></div>
+<div class="rung c1"><h4>Sent · Maybe</h4>Shown on Purchasing.<br><b>Never</b> bought for, never held. <span class="tag t-stg">STAGING</span></div>
+<div class="rung c2"><h4>Sent · Likely</h4>"Could add" column — the <b>full</b> amount, no % factor. Not held. <span class="tag t-stg">STAGING</span></div>
+<div class="rung c3"><h4>Sent · Firm</h4>"To buy" column, with "Order X by date". <b>Not yet held on the shelf</b> (still needs Planned switch). <span class="tag t-stg">STAGING</span></div>
+<div class="rung c4"><h4>Order</h4>"Committed" — real reservation. Counts in To buy. <span class="tag t-live">LIVE</span></div>
+<div class="rung c5"><h4>Delivered</h4>Leaves the shelf. Invoice drafted. <span class="tag t-live">LIVE</span></div>
+</div>
+<div class="idea"><b>Your 70% idea:</b> <span class="tag t-none">NOT BUILT</span> Today Purchasing shows "To buy" (Firm) and "Could add" (all of Likely). Adding a setting like <b>"buy for 70% of Likely"</b> would be a small, display-only change on the Purchasing tab — it never touches stock or money. It also fits your rule that quotes don't count until you're confident: Maybe = 0%, Likely = your %, Firm = 100%, Order = 100% and reserved.</div>
+
+<h2>3. Side doors (other ways stock and money move)</h2>
+<div class="side">
+<div class="card"><h4>Quick Delivery</h4>Skips the quote: makes order + delivery + draft invoice at once, at the customer's tier price and today's cost. Stock comes off at Complete.</div>
+<div class="card"><h4>New Order (direct)</h4>No booking. Commits stock, uses today's cost. Same delivery → invoice path.</div>
+<div class="card"><h4>Returns</h4>Unopened product goes back on the shelf; a credit memo reverses the sale. Commission is <b>not</b> reduced.</div>
+<div class="card"><h4>Purchase Orders</h4>Create → submit → receive (adds stock). Over-receiving needs an admin. Cost is not updated from the vendor price.</div>
+</div>
+
+<h2>4. Gaps ranked (inventory + money)</h2>
+<table>
+<tr><th>#</th><th>Sev</th><th>What can go wrong</th><th>Example</th><th>Status</th></tr>
+<tr><td>1</td><td class="H">HIGH</td><td>Commission can be paid as soon as the order exists — before delivery, invoice or payment — and is based on planned, not billed, profit.</td><td>Rep is paid on 500 gal; grower takes 300 and pays late.</td><td>Open</td></tr>
+<tr><td>2</td><td class="H">HIGH</td><td>Orders don't warn when they take stock held for another grower's booking.</td><td>100 gal held for Grower A; Grower B's order takes it with no warning.</td><td>Open (you chose "warn but allow" on 11-17; not built)</td></tr>
+<tr><td>3</td><td class="H">HIGH</td><td>Shelf holds follow the old "Planned" switch, not Firm, and end 14 days after Needed-by.</td><td>Firm booking holds nothing; a late spray loses its product.</td><td>Open (designed, not built)</td></tr>
+<tr><td>4</td><td class="H">HIGH</td><td>Prepay isn't tied to a booking and doesn't lock price.</td><td>Spring prepay gets used on a fall invoice.</td><td>Open — your brainstorm</td></tr>
+<tr><td>5</td><td class="M">MED</td><td>Editing an order line re-stamps it with today's cost.</td><td>Booked at last fall's cost; an edit in May shifts profit and commission.</td><td>Open (staging code)</td></tr>
+<tr><td>6</td><td class="M">MED</td><td>Void an invoice and re-bill → rep's commission stays cancelled forever.</td><td>Fixing a typo on an invoice costs the rep his commission.</td><td>Open</td></tr>
+<tr><td>7</td><td class="M">MED</td><td>Returns never reduce commission.</td><td>Product comes back, credit issued, rep keeps full commission.</td><td>Open</td></tr>
+<tr><td>8</td><td class="M">MED</td><td>Close-Short on a booking ignores open partial orders.</td><td>"Grower walked away" but an order still holds stock.</td><td>Open</td></tr>
+<tr><td>9</td><td class="M">MED</td><td>An order line can be cut below what's already on an open delivery.</td><td>Driver delivers more than the order now says; another order's reservation is eaten.</td><td>Open</td></tr>
+<tr><td>10</td><td class="M">MED</td><td>No partial-confidence buying (your 70%); no PO-from-plan button.</td><td>You eyeball Likely and guess.</td><td>Not built</td></tr>
+<tr><td>11</td><td class="M">MED</td><td>Duplicate / Roll over drop field, dates, timing, confidence.</td><td>Next year's plan is invisible to purchasing until re-entered.</td><td>Open</td></tr>
+<tr><td>12</td><td class="L">LOW</td><td>Live Month-End shows ~$0 payments received.</td><td>—</td><td>Fixed on staging, not live</td></tr>
+</table>
+
+<div class="foot">Sources: code + database functions on staging 3f1ca8933; prior audit docs/research/2026-11-17-bookings-flow-audit. Not tested against a database; findings come from reading code. Several staging changes are not live yet. Field application side is covered in a separate review.</div>
+</body></html>

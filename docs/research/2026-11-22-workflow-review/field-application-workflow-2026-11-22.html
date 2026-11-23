@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Field Application Workflow — Job to Sprayed to Billed (2026-11-22)</title>
+<style>
+  :root { --ink:#1f2937; --muted:#6b7280; --line:#d1d5db; --green:#166534; --greenbg:#ecfdf5;
+          --stock:#1d4ed8; --stockbg:#eff6ff; --money:#92400e; --moneybg:#fffbeb; --red:#b91c1c; --redbg:#fef2f2; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:#f9fafb; }
+  header { padding:20px 24px 8px; }
+  h1 { margin:0 0 4px; font-size:22px; color:var(--green); }
+  .sub { color:var(--muted); font-size:13px; }
+  .legend { display:flex; flex-wrap:wrap; gap:14px; margin:12px 0 0; font-size:12px; }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .sw { width:14px; height:14px; border-radius:3px; display:inline-block; border:1px solid var(--line); }
+  .wrap { overflow-x:auto; padding:12px 24px 24px; }
+  .grid { display:grid; grid-template-columns:120px repeat(7, minmax(165px,1fr)); min-width:1300px;
+          border:1px solid var(--line); background:#fff; border-radius:8px; }
+  .cell { border-right:1px solid var(--line); border-bottom:1px solid var(--line); padding:8px 9px; font-size:12.5px; }
+  .lane { font-weight:600; background:#f3f4f6; font-size:12px; color:#374151; position:sticky; left:0; z-index:1; }
+  .stage { background:var(--green); color:#fff; font-weight:600; font-size:13px; position:relative; }
+  .stage small { display:block; font-weight:400; opacity:1; font-size:12px; }
+  .stage:not(:last-child)::after { content:"▶"; position:absolute; right:-9px; top:50%; transform:translateY(-50%);
+          color:var(--green); font-size:14px; z-index:2; text-shadow:0 0 2px #fff; }
+  .status { font-family:ui-monospace,Consolas,monospace; font-size:12px; background:#f9fafb; }
+  .pill { display:inline-block; border-radius:999px; padding:1px 8px; background:#e5e7eb; font-weight:600; }
+  .stock { background:var(--stockbg); color:var(--stock); }
+  .money { background:var(--moneybg); color:var(--money); }
+  .big { font-weight:700; }
+  .none { color:#4b5563; }
+  .gap { display:inline-block; margin-top:5px; background:var(--redbg); color:var(--red); border:1px solid #fecaca;
+         border-radius:5px; padding:2px 6px; font-size:12px; font-weight:600; }
+  .code { overflow-wrap:anywhere; font-family:ui-monospace,Consolas,monospace; font-size:12px; color:#4b5563; }
+  section { padding:0 24px 24px; }
+  h2 { font-size:16px; margin:18px 0 8px; color:var(--green); }
+  .side { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:12.5px; }
+  .card.red { border-color:#fca5a5; background:var(--redbg); }
+  table { border-collapse:collapse; width:100%; background:#fff; font-size:12.5px; }
+  th, td { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+  th { background:#f3f4f6; }
+  td.sev { font-weight:700; white-space:nowrap; }
+  .HIGH { color:var(--red); } .MED { color:#b45309; } .LOW { color:#4b5563; }
+  .tag { font-size:12px; padding:1px 6px; border-radius:4px; background:#e5e7eb; white-space:nowrap; }
+  .tag.new { background:var(--red); color:#fff; }
+  footer { color:var(--muted); font-size:12px; padding:0 24px 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Field Application: Job → Sprayed → Billed</h1>
+  <div class="sub">CRX Manager, read-only review of <code>origin/staging</code> @ 3f1ca8933 on 2026-11-22. Companion write-up: <code>field-application-workflow-2026-11-22.md</code> (all file:line evidence is there).</div>
+  <div class="legend">
+    <span><i class="sw" style="background:var(--green)"></i>Stage (left → right)</span>
+    <span><i class="sw" style="background:var(--stockbg)"></i>Stock effect</span>
+    <span><i class="sw" style="background:var(--moneybg)"></i>Money effect</span>
+    <span><i class="sw" style="background:var(--redbg);border-color:#fca5a5"></i>Gap / risk (red)</span>
+  </div>
+</header>
+
+<div class="wrap">
+<div class="grid">
+  <!-- Row: stages -->
+  <div class="cell lane">Stage</div>
+  <div class="cell stage">1. Create job<small>from booking or standalone</small></div>
+  <div class="cell stage">2. Assign &amp; dispatch<small>applicator / crew</small></div>
+  <div class="cell stage">3. Start<small>applicator in field</small></div>
+  <div class="cell stage">4. Complete<small>sprayed: weather, acres</small></div>
+  <div class="cell stage">5. Bill<small>Transfer / Split Billing</small></div>
+  <div class="cell stage">6. Post<small>becomes a real bill</small></div>
+  <div class="cell stage">7. Paid<small>AR payment</small></div>
+
+  <!-- Row: who / screen -->
+  <div class="cell lane">Who &amp; screen</div>
+  <div class="cell">Office (admin / rep)<br>Quote Builder “Schedule Job” or Jobs → New Job<br><span class="code">create_job_from_quote_section · save_job</span></div>
+  <div class="cell">Office<br>Job Detail, Dispatch Board<br><span class="code">assign_job_applicator · dispatch_job_locations</span></div>
+  <div class="cell">Applicator (Field View) or office<br><span class="code">start_job</span></div>
+  <div class="cell">Applicator (Field View) or office<br><span class="code">complete_job</span></div>
+  <div class="cell">Office<br>Field Invoices → Unbilled Applications, Job Detail, Split Billing editor<br><span class="code">transfer_job_to_invoice · save_field_app_split_invoice</span></div>
+  <div class="cell">Office<br>Field App Invoice editor → Post<br><span class="code">post_invoice · post_invoice_group</span></div>
+  <div class="cell">Office<br>Accounts Receivable<br><span class="code">(shared with chemical sales)</span></div>
+
+  <!-- Row: job status -->
+  <div class="cell lane">Job status</div>
+  <div class="cell status"><span class="pill">scheduled</span></div>
+  <div class="cell status"><span class="pill">scheduled</span></div>
+  <div class="cell status"><span class="pill">in_progress</span></div>
+  <div class="cell status"><span class="pill">completed</span><br>+ spray record (EPA log)</div>
+  <div class="cell status"><span class="pill">invoiced</span><br>invoice <span class="pill">unposted</span></div>
+  <div class="cell status">invoice <span class="pill">posted</span></div>
+  <div class="cell status">invoice <span class="pill">paid</span></div>
+
+  <!-- Row: stock -->
+  <div class="cell lane stock">Stock</div>
+  <div class="cell stock"><span class="big">RESERVED</span>: a “job hold” for the planned qty. Lowers Today’s Free; on-hand unchanged. Booking jobs draw down the booking hold instead.</div>
+  <div class="cell stock">No change. Dispatch shows shortages (warning only).</div>
+  <div class="cell stock none">No change (hold stays).</div>
+  <div class="cell stock"><span class="big">ON-HAND GOES DOWN</span> by the <u>planned</u> qty (stock ledger <code>job_applied</code>). Hold released. Customer-supplied product skipped.
+    <br><span class="gap">KI-185: planned, not sprayed acres</span>
+    <span class="gap">Can go below zero, flag only</span>
+    <span class="gap">KI-187: blend ticket + job = deducted twice</span></div>
+  <div class="cell stock none">No change.</div>
+  <div class="cell stock none">No change.</div>
+  <div class="cell stock none">No change.</div>
+
+  <!-- Row: money -->
+  <div class="cell lane money">Money</div>
+  <div class="cell money">Nothing billed. Job stores its chemical total (price × qty, worked out by the database).</div>
+  <div class="cell money none">None.</div>
+  <div class="cell money none">None.</div>
+  <div class="cell money">None, unless the auto-draft setting is ON (default OFF) and the office completed it.
+    <br><span class="gap">Applicator completion never auto-drafts</span></div>
+  <div class="cell money"><span class="big">INVOICE CREATED (unposted)</span>: chemicals at the job price × planned qty, plus an application fee of $/acre × planned acres. Shared fields → one invoice per grower. Commissions recorded as pending.
+    <br><span class="gap">KI-198: Transfer vs Split Billing totals differ</span>
+    <span class="gap">#2063: Split Billing skips the blend-billed check</span></div>
+  <div class="cell money"><span class="big">CUSTOMER OWES IT</span> (receivable). Due date from the customer’s terms. Month must be open.</div>
+  <div class="cell money">Balance goes down → <b>paid</b>.</div>
+</div>
+</div>
+
+<section>
+  <h2>Side doors and undo paths</h2>
+  <div class="side">
+    <div class="card red"><b>Direct “Field App Invoice”</b> (New menu → Field App Invoice): bills chemicals with <b>no job</b>.<br>
+      Stock: <b>never deducted</b>. Spray record: <b>none</b>. Money: unposted → posted → paid.<br>
+      <span class="gap">N1 (NEW): needs Mason’s rule on what this screen is for</span></div>
+    <div class="card"><b>Blend ticket</b>: approve → Create App Record deducts stock and writes a spray record; Create Invoice bills it. Can be linked to a job.<br>
+      <span class="gap">KI-187 / #2063 double stock / double bill with a job</span></div>
+    <div class="card"><b>Void a posted job invoice</b>: the job goes back to <code>completed</code> and shows in Unbilled again. Stock is not returned (correct; it was sprayed).<br>
+      <b>Delete an unposted invoice</b>: same, plus pending commissions removed.</div>
+    <div class="card red"><b>Edit or delete after completion</b>: the database still lets <code>save_job</code> change a completed job (only the screen blocks it), so the bill can drift from what was deducted. An admin can delete a completed job: stock stays out and the job drops off Unbilled.<br>
+      <span class="gap">Gap 6 / Gap 7 (#2196)</span></div>
+    <div class="card"><b>Cancel a job</b> (scheduled / in progress): hold released, nothing billed. <b>A completion has no undo</b>; only an admin stock adjustment fixes on-hand.</div>
+  </div>
+
+  <h2>Gaps, ranked</h2>
+  <table>
+    <tr><th>#</th><th>Severity</th><th>Status</th><th>What can go wrong</th></tr>
+    <tr><td>N1</td><td class="sev HIGH">HIGH*</td><td><span class="tag new">NEW</span></td><td>Direct Field App Invoice bills our chemical but never takes it out of stock and writes no spray (EPA) record. *Depends on what the screen is used for.</td></tr>
+    <tr><td>1</td><td class="sev HIGH">HIGH</td><td><span class="tag">KI-185</span></td><td>Planned acres, not sprayed acres, drive both the stock deduction and the bill.</td></tr>
+    <tr><td>2</td><td class="sev HIGH">HIGH</td><td><span class="tag">KI-198</span></td><td>A shared-field job bills different totals by route (Transfer vs Split Billing).</td></tr>
+    <tr><td>3</td><td class="sev HIGH">HIGH (latent)</td><td><span class="tag">KI-187</span></td><td>Blend ticket + linked job can each deduct stock for the same spray (no live tickets yet).</td></tr>
+    <tr><td>4</td><td class="sev HIGH">HIGH</td><td><span class="tag">#2063</span> source supports</td><td>Bill the blend ticket, then the job through Split Billing: billed twice (Split Billing has no blend check).</td></tr>
+    <tr><td>5</td><td class="sev HIGH">HIGH?</td><td><span class="tag">#2061</span></td><td>A job could be billed a second time (not traced here).</td></tr>
+    <tr><td>6</td><td class="sev MED">MED</td><td><span class="tag">Known</span></td><td>A completed job is still editable in the database; the bill can stop matching the stock deducted.</td></tr>
+    <tr><td>7</td><td class="sev MED">MED</td><td><span class="tag">#2196</span> + note</td><td>Deleting a completed job drops billable work off Unbilled Jobs with no warning; stock stays deducted.</td></tr>
+    <tr><td>8</td><td class="sev MED">MED</td><td><span class="tag new">NEW</span></td><td>Applicator completions and failed auto-drafts only write to the activity feed; nothing alerts that a job still needs billing.</td></tr>
+    <tr><td>9</td><td class="sev MED">MED</td><td><span class="tag new">NEW</span></td><td>Completion can push on-hand below zero (flagged for review, never refused).</td></tr>
+    <tr><td>10</td><td class="sev LOW">LOW</td><td><span class="tag new">NEW</span></td><td>Commissions are recorded when the draft is made, not when it is posted (reversed on delete/void).</td></tr>
+    <tr><td>11–13</td><td class="sev LOW">LOW–MED</td><td><span class="tag">#2141 #1933 #1926 #2105 KI-81</span></td><td>Cancelled group draft left on the job; unit-conversion edges; $0 tiny applications; editors read the current quote price.</td></tr>
+  </table>
+
+  <h2>Recommended order</h2>
+  <ol>
+    <li><b>Mason decides</b> what the direct Field App Invoice is for (N1).</li>
+    <li>Bill and deduct from the <b>sprayed</b> acres (KI-185); this also keeps stock and the bill in step.</li>
+    <li>Lock a completed job’s chemicals and acres in the database (gap 6).</li>
+    <li>One shared “already billed?” check used by every billing route (gaps 4–5).</li>
+    <li>Fix KI-187 before blend tickets go live.</li>
+    <li>Alert on completed jobs left unbilled; warn before deleting one (gaps 7–8).</li>
+  </ol>
+</section>
+<footer>Read-only research. No code, data or live database was changed. Payments, posting internals and blend-invoice internals are shared with chemical sales and were not traced here.</footer>
+</body>
+</html>

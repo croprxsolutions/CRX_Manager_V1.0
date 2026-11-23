@@ -635,7 +635,8 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(/firstAcceptedProof\(proofs, headSha, \(data, exactHead\) =>\s*proofValidForMerge\(\{ data, headSha[^\n]*\)\s*&& \(exactHead \|\| !solRiskOnGitHub\(\{ baseSha: data\.head_sha, headSha, repo: request\.repo, gh: hardGateGh \}\)\.risky\)\);/.test(gateRequestSource),
     "an earlier Sol proof is accepted only when the commits after it are low risk; exact-head proofs are tried first");
   // Owner acceptances count only for the PR they were given for (Sol gate round 3, 2026-11-21).
-  ok(/prCommits, baseRef: base \}\) && ownerAcceptedForPr\(data, \{ number: pr\.number, url: pr\.url, exactHead, proofs \}\)\r?\n/.test(gateRequestSource), "an owner-accepted proof counts only for its own pull request, at its exact version; a carried skip is traced through every local proof");
+  ok(/prCommits, baseRef: base \}\) && ownerAcceptedForPr\(data, \{ number: pr\.number, url: pr\.url, exactHead, proofs: rootProofs \}\)\r?\n/.test(gateRequestSource), "an owner-accepted proof counts only for its own pull request, at its exact version; a carried skip is traced only through untracked local proofs");
+  ok(/if \(tracked && !tracked\.has\(f\)\) rootProofs\.push\(data\);/.test(gateRequestSource), "a proof git tracks never stands for Mason's skip");
   ok(/"--json", "number,url,baseRefName/.test(gateRequestSource), "the merge gate reads the pull request's address");
   ok(/const valid = proof !== null;/.test(gateRequestSource), "only an accepted proof opens the Sol allow point");
   ok(/const risk = solRiskOnGitHub\(\{\s*baseSha,\s*headSha,\s*repo:\s*request\.repo,\s*gh:\s*hardGateGh\s*\}\);/.test(gateRequestSource),

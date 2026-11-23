@@ -71,7 +71,7 @@ import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDest
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "./pr-claim-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
-import { ownerAcceptedForPr } from "./sol-accept-lib.mjs";
+import { ownerAcceptedForPr, trackedNamesIn } from "./sol-accept-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
 
@@ -665,19 +665,26 @@ function gateRequest(request) {
   // The PR's own commits: a Sol proof of an earlier one counts, with no GitHub call per proof file.
   const prCommits = new Set((Array.isArray(pr.commits) ? pr.commits : []).map((c) => String(c?.oid || "").toLowerCase()));
   const proofs = [];
+  // Only untracked proofs can stand for Mason's own skip behind a carried one (Sol, 2026-11-23).
+  const rootProofs = [];
   for (const stateDir of proofSearchDirs(projectDir, listWorktreesFromProjectDir)) {
     try {
       if (!existsSync(stateDir)) continue;
+      const tracked = trackedNamesIn(stateDir);
       for (const f of readdirSync(stateDir)) {
         if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(f)) continue;
-        try { proofs.push(JSON.parse(readFileSync(path.join(stateDir, f), "utf8"))); } catch { continue; }
+        try {
+          const data = JSON.parse(readFileSync(path.join(stateDir, f), "utf8"));
+          proofs.push(data);
+          if (tracked && !tracked.has(f)) rootProofs.push(data);
+        } catch { continue; }
       }
     } catch { /* unreadable directory means no proof HERE — keep looking */ }
   }
   // A proof of an earlier commit covers the commits after it unless those
   // touch the Sol list; same module, same budgeted gh. Exact-head proofs are tried first.
   const proof = firstAcceptedProof(proofs, headSha, (data, exactHead) =>
-    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits, baseRef: base }) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead, proofs })
+    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits, baseRef: base }) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead, proofs: rootProofs })
       && (exactHead || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky));
   const valid = proof !== null;
   const carried = proof?.carried_forward === true ? proof.carry : null;

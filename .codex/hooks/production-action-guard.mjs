@@ -71,7 +71,7 @@ import { followUpsDenial, followUpsProblem } from "../../.claude/hooks/followups
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "../../.claude/hooks/pr-claim-lib.mjs";
-import { ownerAcceptedForPr } from "../../.claude/hooks/sol-accept-lib.mjs";
+import { ownerAcceptedForPr, trackedNamesIn } from "../../.claude/hooks/sol-accept-lib.mjs";
 
 // Sol HIGH finding (2026-08-14, write-scope review): with the Supabase connector
 // write-enabled, ANY mutating Supabase tool Codex can reach is a route to
@@ -551,8 +551,9 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
   // Every proof here, so a carried skip can trace back to Mason's own acceptance (Sol, 2026-11-22).
   const proofs = [];
   try {
+    const tracked = trackedNamesIn(stateDir) ?? new Set(readdirSync(stateDir)); // git silent: none counts
     for (const f of readdirSync(stateDir)) {
-      if (!/^codex-review-[0-9a-f]{40}\.json$/i.test(f)) continue;
+      if (!/^codex-review-[0-9a-f]{40}\.json$/i.test(f) || tracked.has(f)) continue;
       try { proofs.push(JSON.parse(readFileSync(path.join(stateDir, f), "utf8"))); } catch { /* unreadable: not a proof */ }
     }
   } catch { /* no state directory: no proofs */ }

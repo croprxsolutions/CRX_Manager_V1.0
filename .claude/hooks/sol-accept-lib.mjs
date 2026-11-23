@@ -21,6 +21,7 @@
 // The same trust boundary as Mason's migration approval (owner-approval-lib.mjs
 // header): it stops a mistaken or relayed acceptance, not an agent forging files.
 
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
@@ -577,6 +578,23 @@ export const stateDirOf = (root) => path.join(root, ".claude", "session-state");
 // (no new question). Anything else goes to Mason as before. Accepted risk (Mason): Sol could call a
 // new issue "same"; the file, PR-change and severity checks limit it.
 export const OWNER_ACCEPTED_CARRIED = "owner_accepted_carried";
+
+/** True when a proof leans on a carried repeat skip in any form (its mode, or any entry carried from a root). */
+export function usesCarriedSkip(proof) {
+  return proof?.carry?.mode === OWNER_ACCEPTED_CARRIED
+    || (Array.isArray(proof?.owner_accepted) && proof.owner_accepted.some((e) => e?.carried_from !== undefined));
+}
+
+/**
+ * The proof file names in `dir` that git tracks there, or null when git cannot say. A tracked proof is
+ * repository content anyone could commit, never evidence of Mason's skip (Sol, 2026-11-23).
+ */
+export function trackedNamesIn(dir) {
+  try {
+    const out = execFileSync("git", ["-C", dir, "ls-files", "-z", "--", "."], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] });
+    return new Set(String(out).split("\0").filter(Boolean));
+  } catch { return null; }
+}
 export const CARRY_ACCEPT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const CARRIED_REASON = "Sol marked it the same as a finding Mason already skipped on this pull request";
 const SEVERITY_RANK = { HIGH: 1, BLOCKER: 2 };

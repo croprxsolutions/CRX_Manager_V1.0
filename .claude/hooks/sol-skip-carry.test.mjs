@@ -25,6 +25,8 @@ import {
   OWNER_ACCEPTED_CARRIED,
   parseSolFindings,
   priorAcceptances,
+  trackedNamesIn,
+  usesCarriedSkip,
 } from "./sol-accept-lib.mjs";
 
 const URL = "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/77";
@@ -70,6 +72,9 @@ try {
   write("src.ts", "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n");
   write("other.ts", "a\n");
   const base1 = commit("base");
+  // A proof file git tracks is repository content, never evidence of Mason's skip.
+  assert.equal(trackedNamesIn(root).has("other.ts"), true);
+  assert.equal(trackedNamesIn(path.join(root, "no-such-dir")), null, "git cannot say: callers count no proof");
   git("checkout", "-q", "-b", "feature");
   write("src.ts", "line1\nline2\nline3\nline4\nCHANGED\nline6\nline7\nline8\nline9\nline10\n");
   const reviewed = commit("pr change");                // R: the head Sol reviewed and Mason skipped at
@@ -124,7 +129,11 @@ try {
   assert.equal(proof.owner_accepted[0].accepted_at, acceptedAt, "Mason's 7-day clock is never refreshed");
   assert.ok(carriedSolProof(proof));
   assert.ok(proofValid(proof, proof.head_sha, Date.now(), base2));
-  assert.ok(ownerAcceptedForPr(proof, { number: PR, url: URL, exactHead: true, proofs, nowMs: now }), "the merge/apply gate accepts it");
+  assert.ok(ownerAcceptedForPr(proof, { number: PR, url: URL, exactHead: true, proofs, nowMs: now }), "the staging merge gate's PR check accepts it");
+  // The live-apply gate refuses any proof leaning on a carried skip, whatever its outer mode (a restamp keeps the entries).
+  assert.equal(usesCarriedSkip(proof), true);
+  assert.equal(usesCarriedSkip({ ...proof, carry: { ...proof.carry, mode: "restamp" } }), true, "a restamped carried proof still counts as carried");
+  assert.equal(usesCarriedSkip(rootProof), false, "Mason's own skip proof is not a carried one");
   // The gates refuse it when Mason's own acceptance is not on this machine, is too old, or the proof is altered.
   assert.equal(ownerAcceptedForPr(proof, { number: PR, url: URL, exactHead: true, proofs: [], nowMs: now }), false);
   assert.equal(ownerAcceptedForPr(proof, { number: PR, url: URL, exactHead: true, nowMs: now }), false);

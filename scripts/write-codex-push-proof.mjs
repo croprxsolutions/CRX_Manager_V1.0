@@ -89,6 +89,7 @@ import {
   OWNER_ACCEPTED_CARRIED,
   parseSolFindings,
   priorAcceptances,
+  trackedNamesIn,
   prOwnChange,
   readSkipReceipts,
   SOL_FINDING_COUNT_TOKEN,
@@ -3138,8 +3139,10 @@ export function readLocalProofs(root) {
   for (const dir of proofSearchDirs(root, () => runGit(["worktree", "list", "--porcelain"], { cwd: root }))) {
     let names;
     try { names = readdirSync(dir); } catch { continue; }
+    // A proof git tracks is repository content, never Mason's skip (Sol, 2026-11-23); git silent: none counts.
+    const tracked = trackedNamesIn(dir) ?? new Set(names);
     for (const n of names.sort()) {
-      if (!/^codex-review-[0-9a-f]{40}\.json$/i.test(n)) continue;
+      if (!/^codex-review-[0-9a-f]{40}\.json$/i.test(n) || tracked.has(n)) continue;
       try { proofs.push(JSON.parse(readFileSync(path.join(dir, n), "utf8"))); } catch { /* unreadable: no proof */ }
     }
   }

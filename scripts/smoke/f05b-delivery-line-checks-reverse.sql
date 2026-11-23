@@ -1,4 +1,4 @@
--- Rollback for 20270224190000_f05b_delivery_line_checks.sql (F05b #2274, #2275), proven by
+-- Rollback for 20270225180000_f05b_delivery_line_checks.sql (F05b #2274, #2275), proven by
 -- scripts/smoke/prove-f05b-delivery-line-checks-real-schema.mjs.
 -- Restores the 20270203120000 completion wrapper and drops the finite-quantity check, all or nothing. The forward
 -- migration wrote no data. To use it live, copy it into a new migration through the gates (without BEGIN / COMMIT);

@@ -1,6 +1,6 @@
 # F05b — Delivery line checks (#2274, #2275): behavior contract
 
-Read at `origin/staging` 728f700a3 (2026-11-22). Follow-up to F05 (#2264, `20270224100000`). Migration `20270224190000_f05b_delivery_line_checks.sql` (stamp from the merge captain).
+Read at `origin/staging` 728f700a3 (2026-11-22). Follow-up to F05 (#2264, `20270224100000`). Migration `20270225180000_f05b_delivery_line_checks.sql` (stamp from the merge captain).
 
 ## Outcome and authority
 

@@ -114,9 +114,14 @@ BEGIN
                  COALESCE(ila.invoice_item_id IN (SELECT ii.id FROM invoice_items ii WHERE ii.invoice_id = p_invoice_id), false) AS on_line,
                  EXISTS (SELECT 1 FROM allocation_sets hist WHERE hist.id = ila.allocation_set_id
                            AND hist.entity_type = 'payment' AND hist.is_active = false) AS voided
-            FROM invoice_line_allocations ila
-           WHERE ila.invoice_id = p_invoice_id
-              OR ila.invoice_item_id IN (SELECT ii.id FROM invoice_items ii WHERE ii.invoice_id = p_invoice_id)) h;
+            -- A UNION of two index lookups (invoice_id, then invoice_item_id through this invoice's lines):
+            -- an OR with an IN-subquery here makes the planner scan the whole table.
+            FROM (SELECT a.id, a.invoice_id, a.invoice_item_id, a.allocation_set_id
+                    FROM invoice_line_allocations a WHERE a.invoice_id = p_invoice_id
+                  UNION
+                  SELECT a.id, a.invoice_id, a.invoice_item_id, a.allocation_set_id
+                    FROM invoice_line_allocations a JOIN invoice_items ii ON ii.id = a.invoice_item_id
+                   WHERE ii.invoice_id = p_invoice_id) ila) h;
   SELECT count(*) INTO v_prepay_count FROM prepay_applications     WHERE invoice_id = p_invoice_id;
   -- CREDIT-APPLY: active applications where this invoice is the memo OR the target.
   SELECT count(*) INTO v_credit_app_count FROM credit_memo_applications
@@ -261,7 +266,7 @@ $create$;
   -- Postflight: the new body, still one overload, owner, mode, search_path and EXECUTE grants.
   SELECT * INTO p FROM pg_proc WHERE oid = to_regprocedure('public._unpost_invoice_replay_impl_20261015(uuid,uuid,text)');
   IF p.oid IS NULL
-     OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '5dbf08047772d875bfbe66ec8b63cbfd'
+     OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM 'a9d2d95b50a1624076ad0dd09a12c764'
      OR (SELECT count(*) FROM pg_proc o
           WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_unpost_invoice_replay_impl_20261015') <> 1
      OR p.proowner <> 'postgres'::regrole

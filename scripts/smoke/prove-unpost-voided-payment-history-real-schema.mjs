@@ -60,7 +60,7 @@ const implMd5 = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_p
 // Re-issue the impl with a body computed from its current one (expr over prosrc): owner and grants are kept.
 const setImplSrc = (expr) => docker([...PSQL], { input: `DO $d$ BEGIN EXECUTE format('CREATE OR REPLACE FUNCTION public._unpost_invoice_replay_impl_20261015(p_invoice_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path TO ''public'', ''pg_temp'' AS %L', (SELECT ${expr} FROM pg_proc WHERE oid = ${IMPL})); END $d$;` });
 const PINNED_MD5 = '161f18c3ccd6126a6fb683c5160f82dc';
-const NEW_MD5 = '5dbf08047772d875bfbe66ec8b63cbfd';
+const NEW_MD5 = 'a9d2d95b50a1624076ad0dd09a12c764';
 // Puts an exact body back (as a dollar-quoted literal) and checks its md5: used in a finally after each swap.
 const restoreImpl = (body, md5) => { setImplSrc(`$body$${body}$body$::text`); assert.equal(implMd5(), md5, 'body restored'); };
 const ADMIN = USERS.admin;
@@ -71,22 +71,22 @@ const GRP = randomUUID();
 const line = (desc, cents, type) => `jsonb_build_object('description', '${desc}', 'quantity', 1, 'unit_price_cents', ${cents}, 'charge_type', '${type}')`;
 const TWO_LINES = `jsonb_build_array(${line('Service', 60000, 'service')}, ${line('Freight', 40000, 'freight')})`;
 const draft = (k) => asUser(`u := public.save_invoice(jsonb_build_object('customer_id', '${CUST}', 'invoice_type', 'misc_charge',
-  'invoice_date', current_date::text, 'status', 'draft'), ${TWO_LINES}, '${k}');`);
-const post = (k, inv = 'u') => `t := public._invoice_post_version(${inv}); ${asUser(`PERFORM public.post_invoice(${inv}, t, '${k}');`)}`;
+  'invoice_date', current_date::text, 'status', 'draft'), ${TWO_LINES}, '${k}-${RUN}');`);
+const post = (k, inv = 'u') => `t := public._invoice_post_version(${inv}); ${asUser(`PERFORM public.post_invoice(${inv}, t, '${k}-${RUN}');`)}`;
 const pay = (k, cents, into = 'r', inv = 'u') => asUser(`${into} := public.allocate_payment('${CUST}', ${cents}, 'check', 'P2265', NULL, CURRENT_DATE, 'prover',
-  jsonb_build_array(jsonb_build_object('invoice_id', ${inv}, 'amount_cents', ${cents})), '${ADMIN}', '${k}');`);
-const voidPay = (k, from = 'r') => asUser(`PERFORM public.void_payment((${from}->>'allocation_set_id')::uuid, 'prover void', '${ADMIN}', '${k}');`);
+  jsonb_build_array(jsonb_build_object('invoice_id', ${inv}, 'amount_cents', ${cents})), '${ADMIN}', '${k}-${RUN}');`);
+const voidPay = (k, from = 'r') => asUser(`PERFORM public.void_payment((${from}->>'allocation_set_id')::uuid, 'prover void', '${ADMIN}', '${k}-${RUN}');`);
 // allocate_payment before 2026-03-15 (20260213100000) also named the invoice line; 20260315200001 backfilled invoice_id.
 // Make the voided payment's rows look like one of those, so the line link is there to break the draft save.
 const legacyLink = (from = 'r', inv = 'u') => `UPDATE public.invoice_line_allocations
   SET invoice_item_id = (SELECT id FROM public.invoice_items WHERE invoice_id = ${inv} ORDER BY sort_order, id LIMIT 1)
   WHERE allocation_set_id = (${from}->>'allocation_set_id')::uuid;`;
-const unpost = (k) => asUser(`r2 := public.unpost_invoice(u, '${ADMIN}', '${k}');`);
+const unpost = (k) => asUser(`r2 := public.unpost_invoice(u, '${ADMIN}', '${k}-${RUN}');`);
 // The editor saves the whole draft back: header plus every line (save deletes and re-adds the lines).
 const saveBack = (k, inv = 'u') => `r3 := (SELECT jsonb_agg(jsonb_build_object('id', id, 'description', description, 'quantity', quantity,
     'unit_price_cents', unit_price_cents, 'charge_type', charge_type) ORDER BY sort_order, id) FROM public.invoice_items WHERE invoice_id = ${inv});
   ${asUser(`PERFORM public.save_invoice(jsonb_build_object('id', ${inv}, 'customer_id', '${CUST}', 'invoice_type', 'misc_charge',
-    'invoice_date', current_date::text, 'status', 'unposted'), r3, '${k}');`)}`;
+    'invoice_date', current_date::text, 'status', 'unposted'), r3, '${k}-${RUN}');`)}`;
 const history = (inv = 'u') => `(SELECT count(*) || '/' || count(*) FILTER (WHERE a.invoice_item_id IS NULL) || '/' || coalesce(sum(a.amount_cents), 0)
   FROM public.invoice_line_allocations a JOIN public.allocation_sets s ON s.id = a.allocation_set_id
   WHERE a.invoice_id = ${inv} AND s.entity_type = 'payment' AND NOT s.is_active)`;
@@ -151,8 +151,8 @@ const caseE = (entity, active, lineOnly = false) => { const set = randomUUID(); 
 let G1;
 let G2;
 const postGroup = (k) => `r3 := (SELECT jsonb_object_agg(id, public._invoice_post_version(id)) FROM public.invoices WHERE invoice_group_id = '${GRP}');
-  ${asUser(`PERFORM public.post_invoice_group('${GRP}', '${ADMIN}', r3, '${k}');`)}`;
-const unpostGroup = (k) => asUser(`r2 := public.unpost_invoice_group('${GRP}', '${ADMIN}', '${k}');`);
+  ${asUser(`PERFORM public.post_invoice_group('${GRP}', '${ADMIN}', r3, '${k}-${RUN}');`)}`;
+const unpostGroup = (k) => asUser(`r2 := public.unpost_invoice_group('${GRP}', '${ADMIN}', '${k}-${RUN}');`);
 const caseD = () => `u := ${G1}; ${postGroup('d-pg1')} ${pay('d-pay', 60000)} ${voidPay('d-void')} ${legacyLink()} ${linkedLine}
   ${unpostGroup('d-ug')} v := ${status(G1)} || ',' || ${status(G2)} || '|' || ${history()} || '|audit ' || coalesce(${auditKeepsLine(60000)}, '-');
   ${saveBack('d-s2', G1)} ${postGroup('d-pg2')} v := v || '|' || ${status(G1)} || ',' || ${status(G2)} || '|' || ${history()};`;
@@ -257,6 +257,11 @@ try {
     assert.match(attempt(ADMIN, caseD()), /^P0001\|Cannot unpost invoice \S+ — it has payments/, 'old group refusal not reproduced');
     console.log('[before] a posted invoice whose only payment was voided is refused by unpost and by group unpost');
 
+    // The probes below re-issue the impl with fixed settings, so first prove the starting function is exactly what the
+    // preflight accepts (pinned body, owner, mode, settings, grants); a reused container with other drift stops here.
+    assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) || '|' || proowner::regrole || '|' || prosecdef || '|' || proconfig::text
+      || '|' || coalesce(proacl::text, '') FROM pg_proc WHERE oid = ${IMPL};`),
+      `${PINNED_MD5}|postgres|true|{"search_path=public, pg_temp"}|{postgres=X/postgres}`, 'starting function is not the pinned one');
     // A drifted body: plain psql -f keeps going after an error, yet the file changes nothing (one statement writes).
     const pinnedBody = JSON.parse(scalar(`SELECT to_json(prosrc)::text FROM pg_proc WHERE oid = ${IMPL};`));
     try {

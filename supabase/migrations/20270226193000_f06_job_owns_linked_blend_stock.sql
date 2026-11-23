@@ -97,8 +97,10 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $fn$
 BEGIN
-  -- Every ticket save names job_id and customer_id; only a real change is checked.
-  IF TG_OP = 'UPDATE' AND NEW.job_id IS NOT DISTINCT FROM OLD.job_id AND NEW.customer_id IS NOT DISTINCT FROM OLD.customer_id THEN
+  -- Every ticket save names job_id and customer_id; only a real change is checked. A restore (deleted_at cleared) is
+  -- checked too, as the job-side guard skips deleted tickets (Sol round 3).
+  IF TG_OP = 'UPDATE' AND NEW.job_id IS NOT DISTINCT FROM OLD.job_id AND NEW.customer_id IS NOT DISTINCT FROM OLD.customer_id
+     AND NEW.deleted_at IS NOT DISTINCT FROM OLD.deleted_at THEN
     RETURN NEW;
   END IF;
   -- Old and new job locked in one statement in id order, so two tickets swapping jobs cannot deadlock; the checks
@@ -106,7 +108,7 @@ BEGIN
   PERFORM 1 FROM public.jobs j
    WHERE j.id IN (CASE WHEN TG_OP = 'UPDATE' THEN OLD.job_id END, NEW.job_id)
    ORDER BY j.id FOR NO KEY UPDATE;
-  IF NEW.job_id IS NOT NULL
+  IF NEW.job_id IS NOT NULL AND NEW.deleted_at IS NULL
      AND NOT EXISTS (SELECT 1 FROM public.jobs j
                       WHERE j.id = NEW.job_id AND j.customer_id IS NOT DISTINCT FROM NEW.customer_id) THEN
     RAISE EXCEPTION 'BLEND_TICKET_JOB_OTHER_CUSTOMER: a blend ticket can only be linked to a spray job for the same customer.'
@@ -134,7 +136,7 @@ $fn$;
 ALTER FUNCTION public._f06_blend_ticket_link_keeps_stock_once() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._f06_blend_ticket_link_keeps_stock_once() FROM PUBLIC, anon, authenticated, service_role;
 CREATE TRIGGER blend_ticket_link_keeps_stock_once_f06
-  BEFORE INSERT OR UPDATE OF job_id, customer_id ON public.blend_tickets
+  BEFORE INSERT OR UPDATE OF job_id, customer_id, deleted_at ON public.blend_tickets
   FOR EACH ROW EXECUTE FUNCTION public._f06_blend_ticket_link_keeps_stock_once();
 
 CREATE FUNCTION public._f06_job_customer_keeps_linked_tickets()
@@ -152,7 +154,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public.blend_tickets bt
               WHERE bt.job_id = NEW.id AND bt.deleted_at IS NULL
                 AND bt.customer_id IS DISTINCT FROM NEW.customer_id) THEN
-    RAISE EXCEPTION 'BLEND_TICKET_JOB_OTHER_CUSTOMER: this spray job has a blend ticket linked to it for its current customer, so the job''s customer can''t change. Unlink the ticket first.'
+    RAISE EXCEPTION 'BLEND_TICKET_JOB_OTHER_CUSTOMER: this spray job has a blend ticket linked to it for its current customer, so the job''s customer can''t change. Unlink the ticket first; once the job is completed, neither can change.'
       USING ERRCODE = 'P0001';
   END IF;
   RETURN NEW;

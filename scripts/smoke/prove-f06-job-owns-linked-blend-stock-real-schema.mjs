@@ -43,7 +43,7 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate or its follow-up creates or relies on.
-const TOUCHED = /(_f06_application_record_one_deduction|_f06_blend_ticket_link_keeps_stock_once|FUNCTION public\.(_complete_job_replay_impl_20261015|_create_app_record_from_bt_replay_impl_20261015|reverse_application_record)\(|ON public\.application_records)/i;
+const TOUCHED = /(_f06_application_record_one_deduction|_f06_blend_ticket_link_keeps_stock_once|_f06_job_customer_keeps_linked_tickets|job_customer_keeps_linked_tickets_f06|blend_ticket_link_keeps_stock_once_f06|application_record_one_deduction_f06|FUNCTION public\.(_complete_job_replay_impl_20261015|_create_app_record_from_bt_replay_impl_20261015|reverse_application_record)\(|ON public\.application_records)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -422,6 +422,11 @@ UPDATE public.jobs SET status = 'cancelled' WHERE id = '${JOB(3)}';\nSET LOCAL s
   assert.equal(ok(`${link(4, JOB(4))}\nUPDATE public.jobs SET customer_id = '${CUST}' WHERE id = '${JOB(4)}';\nSELECT 'kept';`), 'kept', 'case 9 job save keeping its customer');
   assert.equal(ok(`UPDATE public.jobs SET customer_id = '${CUST2}' WHERE id = '${JOB(6)}';\nSELECT customer_id FROM public.jobs WHERE id = '${JOB(6)}';`), CUST2, 'case 9 unlinked job customer change');
   console.log("[case 9] changing linked J4's customer: refused; a save keeping it, or changing unlinked J6's customer: saved");
+  // Sol round 3: a deleted linked ticket does not block the job's customer change, but restoring it afterwards is refused.
+  const softDelete = (when) => `UPDATE public.blend_tickets SET deleted_at = ${when} WHERE id = '${TICKET(4)}';`;
+  refused(`${link(4, JOB(4))}\n${softDelete('now()')}\nUPDATE public.jobs SET customer_id = '${CUST2}' WHERE id = '${JOB(4)}';\n${softDelete('NULL')}`,
+    /BLEND_TICKET_JOB_OTHER_CUSTOMER/, 'case 9 restore');
+  console.log("[case 9] T4 linked to J4 is deleted, J4 moves to another customer (allowed), then restoring T4: refused");
   await races();
 }
 

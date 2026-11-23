@@ -34,7 +34,7 @@ Who may act is unchanged: both RPCs keep their role checks; triggers only add re
 ## State and failure
 
 - **No automatic record changes.** Refuse only.
-- **Locking:** ticket path locks only the ticket; job path locks only the job; a link change holds the ticket row, then locks the old job. Nothing locks a ticket after a job, so no lock cycle. Each check runs in its own statement after its lock, so under READ COMMITTED it sees the other side's committed record.
+- **Locking:** ticket path locks the ticket, then tries its job without waiting (a job being changed refuses the ticket, to be retried); job path locks only the job; a link change holds the ticket row, then locks the old and new job in one statement in id order; a job customer change holds the job row. Nothing locks a ticket after a job, so no lock cycle. Each check runs in its own statement after its lock, so under READ COMMITTED it sees the other side's committed record.
 - **Two tickets on one job:** neither records on its own; the job's completion takes the stock once.
 - **Existing rows:** triggers fire only on new inserts/updates. Production has no blend tickets (read-only check, 2026-11-23); staging keeps its synthetic doubled pair.
 - **Retry:** a refused call writes nothing; the idempotency receipt is bound only after success, so a retry is refused again the same way.
@@ -91,3 +91,7 @@ Luna round 6 HIGH (a job customer change and a link racing past each other) is r
 ## Sol round 2
 
 HIGH (Create App Record on a linked ticket could deadlock with that job's completion through the record-number lock) is fixed: the ticket path tries the job lock without waiting and, if the job is being changed, refuses the ticket to be retried (prover race E). MEDs: a deleted ticket no longer blocks a job customer correction; the migration and rollback lock jobs, blend_tickets and application_records first, in completion's order. Refuted: a REPEATABLE READ job edit (the app's API runs READ COMMITTED). LOWs: the old-rows wording now names a deleted-then-restored job; the race tests' fixed delays are accepted (each asserts the wait it needs and fails loudly, never passes wrongly).
+
+## Sol round 3
+
+Third round in a row with new HIGHs in the exceptions, so Mason was asked (2026-11-23: "Fix 3, skip 1 and 2"). HIGH 3 fixed: restoring a deleted ticket runs the same-customer check. HIGH 1 (a deleted job completed from a stale page takes its own list) is an older `complete_job` gap (deleted jobs can still complete), left for its own fix. HIGH 2 (a job forced to completed with no record blocks its ticket) has a remedy: unlink the ticket, then record it. MEDs: the job customer refusal says when neither can change; the rollback has a lock timeout; the prover's later-migration matcher names every F06 trigger and function; this lock description is corrected. Refuted: a REPEATABLE READ job edit (the API runs READ COMMITTED); a service-role edit of an application record's source (service role is server-only and no path does it).

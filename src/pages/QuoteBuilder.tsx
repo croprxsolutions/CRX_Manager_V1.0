@@ -87,7 +87,8 @@ import { sendOrderConfirmedEmail } from '../lib/orderConfirmedEmail';
 import { trackBusinessEvent } from '../lib/metrics';
 import { localDatePlusDays, localToday, parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
 import { computeSeason, seasonEndDate } from '../utils/season';
-import { loadQuoteValidDays, pickedExpiryStart } from '../lib/appSettingDefaults';
+import { loadQuoteValidDays, pickedExpiryStart, loadTimingWindows, timingWindowStart, type BookingTiming, type BookingConfidence, type TimingWindows } from '../lib/appSettingDefaults';
+import Select from '../components/ui/Select';
 import { downloadQuotePdf, generateQuotePdf } from '../lib/quotePdf';
 import { sendEmail, pdfToBase64, buildEmailHtml } from '../lib/emailService';
 import { escapeHtml } from '../lib/proofNotification';
@@ -145,8 +146,21 @@ interface LocalSection {
   section_header_notes: string | null;
   needed_by_date: string | null;
   field_id: string | null;
+  timing?: BookingTiming | null;
+  confidence?: BookingConfidence | null;
   items: LocalItem[];
 }
+
+const TIMING_OPTIONS = [
+  { value: 'pre_plant', label: 'Pre-plant' },
+  { value: 'in_season', label: 'In season' },
+  { value: 'late_summer', label: 'Late summer' },
+];
+const CONFIDENCE_OPTIONS = [
+  { value: 'firm', label: 'Firm' },
+  { value: 'likely', label: 'Likely' },
+  { value: 'maybe', label: 'Maybe' },
+];
 
 type CalcMode = 'rate_acres' | 'units_direct';
 
@@ -569,6 +583,16 @@ export default function QuoteBuilder() {
         setChosenExpiryDate((current) => (current === null ? null : pickedExpiryStart(todayInBusinessTz(), days, seasonEndDate(computeSeason(parseLocalDate(todayInBusinessTz()))))));
       }
     });
+    return () => { cancelled = true; };
+  }, []);
+  // Booking timing windows: picking a timing fills an empty needed-by date (A-R1).
+  // null until the saved windows arrive; the Timing pick waits so it never fills a date from the defaults.
+  const [timingWindows, setTimingWindows] = useState<TimingWindows | null>(null);
+  // Section key -> the needed-by date a Timing pick filled this session, so it still counts as auto-filled on a later day.
+  const autoFilledNeededBy = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    void loadTimingWindows().then((w) => { if (!cancelled) setTimingWindows(w); });
     return () => { cancelled = true; };
   }, []);
   const [headerNotes, setHeaderNotes] = useState('');
@@ -1435,6 +1459,8 @@ export default function QuoteBuilder() {
       section_header_notes: s.section_header_notes,
       needed_by_date: s.needed_by_date || null,
       field_id: s.field_id || null,
+      timing: s.timing ?? null,
+      confidence: s.confidence ?? null,
       items: dbItems
         .filter((item) => item.section_id === s.id)
         .map((item) => {
@@ -2132,6 +2158,23 @@ export default function QuoteBuilder() {
     );
   };
 
+  const setSectionTiming = (key: string, timing: BookingTiming | null) => {
+    // Read before the updater so a replayed updater sees the same values (it must stay pure).
+    const priorAutoFilled = autoFilledNeededBy.current.get(key);
+    const filled = timing && timingWindows ? timingWindowStart(timingWindows, timing, todayInBusinessTz()) : null;
+    setSections((prev) => prev.map((s) => {
+      if (s._key !== key) return s;
+      // A live job's section keeps its needed-by date (save_quote refuses SECTION_HAS_JOB_LOCKED).
+      const jobLocked = Boolean(s.id && sectionJobs[s.id] && sectionJobs[s.id].status !== 'cancelled');
+      if (jobLocked || !filled) return { ...s, timing };
+      // Only a date this screen's Timing pick filled follows the new timing; any other date (typed, or saved earlier) stays.
+      const autoFilled = Boolean(s.needed_by_date && priorAutoFilled === s.needed_by_date);
+      if (s.needed_by_date && !autoFilled) return { ...s, timing };
+      autoFilledNeededBy.current.set(key, filled);
+      return { ...s, timing, needed_by_date: filled };
+    }));
+  };
+
   const updateSectionField = (key: string, field: keyof LocalSection, value: string | null) => {
     setSections((prev) =>
       prev.map((s) => (s._key === key ? { ...s, [field]: value } : s))
@@ -2535,6 +2578,8 @@ export default function QuoteBuilder() {
       section_header_notes: sec.section_header_notes || null,
       needed_by_date: sec.needed_by_date || null,
       field_id: sec.field_id || null,
+      timing: sec.timing ?? null,
+      confidence: sec.confidence ?? null,
       items: sec.items
         .filter((item) => item.product_id)
         .map((item) => {
@@ -4353,14 +4398,17 @@ export default function QuoteBuilder() {
     );
   }
 
-  // The quote cannot be edited while a save or order creation runs: an edit made then
+  // The quote cannot be edited while a save, mark-presented or order creation runs: an edit made then
   // would not be in what was written, and the page usually moves on afterwards.
-  const formLocked = saving || converting || drawing;
+  const formLocked = saving || converting || drawing || markingPresented || bookingAsOrder;
   // A saved quote whose status can't be edited (sent, accepted, closed...) shows its values but takes no
   // edits: none could be saved, and each one only raised "Unsaved changes". Tabs, History, collapse,
   // the job link and Schedule job still work.
   const readOnly = isEditing && !canEdit;
   const editLocked = formLocked || readOnly;
+  // Another rep's booking: its save may change prices only (QUOTE_PRICE_ONLY_FOR_OTHER_REPS).
+  const planningLocked = editLocked || (isEditing && !isAdmin
+    && (!profile?.id || loadedQuoteOwner?.quoteId !== id || loadedQuoteOwner?.createdBy !== profile.id));
 
   // Header actions (spec "Actions by state"). Each action keeps today's show and enable
   // conditions and handler; only where it sits changes.
@@ -5351,45 +5399,69 @@ export default function QuoteBuilder() {
                   Job {sectionJobs[sec.id].job_number} was scheduled from this section. Its products, quantities, prices, needed-by date and field stay as booked; a new name or notes here does not change the job, so change those on the job too.
                 </p>
               )}
-              {isPlanned && (
-                <div className="order-last w-full flex flex-wrap items-start gap-x-6 gap-y-1">
-                  <div className="w-full sm:w-52">
-                    <div className="mb-1 flex items-center gap-1 text-sm font-medium text-secondary">
-                      Needed by
-                      <HelpTip text="When the customer needs the product, not when the quote expires. Used for inventory forecasting and delivery scheduling." />
-                    </div>
-                    <DatePicker
-                      aria-label="Needed by"
-                      value={sec.needed_by_date || null}
-                      onChange={(value) => updateSectionField(sec._key, 'needed_by_date', value || null)}
-                      disabled={editLocked || Boolean(sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled')}
+              {/* Planning picks feed the purchasing plan on every booking; only a Planned booking holds stock. */}
+              <div className="order-last w-full flex flex-wrap items-start gap-x-6 gap-y-1">
+                <div className="w-full sm:w-52">
+                  <div className="mb-1 flex items-center gap-1 text-sm font-medium text-secondary">
+                    Needed by
+                    <HelpTip text="When the customer needs the product, not when the quote expires. Used for inventory forecasting and delivery scheduling." />
+                  </div>
+                  <DatePicker
+                    aria-label="Needed by"
+                    value={sec.needed_by_date || null}
+                    onChange={(value) => { autoFilledNeededBy.current.delete(sec._key); updateSectionField(sec._key, 'needed_by_date', value || null); }}
+                    disabled={planningLocked || Boolean(sec.id && sectionJobs[sec.id] && sectionJobs[sec.id].status !== 'cancelled')}
+                  />
+                </div>
+                <div className="w-full sm:w-40">
+                  <Select
+                    id={`section-timing-${sec._key}`}
+                    label="Timing"
+                    placeholder="Not set"
+                    options={TIMING_OPTIONS}
+                    value={sec.timing ?? ''}
+                    onChange={(e) => setSectionTiming(sec._key, (e.target.value || null) as BookingTiming | null)}
+                    disabled={planningLocked || !timingWindows}
+                  />
+                </div>
+                {/* Internal rating: hidden in Customer view, like costs. */}
+                {!customerView && (
+                  <div className="w-full sm:w-40">
+                    <Select
+                      id={`section-confidence-${sec._key}`}
+                      label="Confidence"
+                      placeholder="Not set"
+                      options={CONFIDENCE_OPTIONS}
+                      value={sec.confidence ?? ''}
+                      onChange={(e) => updateSectionField(sec._key, 'confidence', e.target.value || null)}
+                      disabled={planningLocked}
                     />
                   </div>
-                  {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}
-                  {quoteId && activePlannedHolds.length > 0 && (
-                    <div className="sm:pt-8 flex flex-col items-start gap-0.5 text-xs text-secondary">
-                      {Array.from(new Set(sec.items.map((item) => item.product_id).filter(Boolean))).map((productId) => {
-                        const holds = activePlannedHolds.filter((candidate) => candidate.product_id === productId);
-                        if (holds.length === 0) return null;
-                        const heldQuantity = holds.reduce((sum, hold) => sum + hold.quantity, 0);
-                        const earliestExpiry = holds.reduce<string | null>((earliest, hold) => {
-                          if (hold.expires_at == null) return earliest;
-                          return earliest == null || hold.expires_at < earliest ? hold.expires_at : earliest;
-                        }, null);
-                        const unit = products.find((product) => product.id === productId)?.inventory_unit;
-                        const isLapsed = earliestExpiry != null && earliestExpiry.slice(0, 10) <= localToday();
-                        return (
-                          <span key={productId}>
-                            Held: {heldQuantity}{unit ? ` ${unit}` : ''} &middot; {earliestExpiry ? (
-                              <>expires <span className={isLapsed ? 'text-red-600 font-medium' : undefined}>{parseLocalDate(earliestExpiry.slice(0, 10)).toLocaleDateString()}{isLapsed ? ' (lapsed)' : ''}</span></>
-                            ) : 'no expiry (no needed-by date)'}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
+                )}
+                {/* Holds have one row per quote item; this per-section view aggregates the quote's matching rows for each product. */}
+                {isPlanned && quoteId && activePlannedHolds.length > 0 && (
+                  <div className="sm:pt-8 flex flex-col items-start gap-0.5 text-xs text-secondary">
+                    {Array.from(new Set(sec.items.map((item) => item.product_id).filter(Boolean))).map((productId) => {
+                      const holds = activePlannedHolds.filter((candidate) => candidate.product_id === productId);
+                      if (holds.length === 0) return null;
+                      const heldQuantity = holds.reduce((sum, hold) => sum + hold.quantity, 0);
+                      const earliestExpiry = holds.reduce<string | null>((earliest, hold) => {
+                        if (hold.expires_at == null) return earliest;
+                        return earliest == null || hold.expires_at < earliest ? hold.expires_at : earliest;
+                      }, null);
+                      const unit = products.find((product) => product.id === productId)?.inventory_unit;
+                      const isLapsed = earliestExpiry != null && earliestExpiry.slice(0, 10) <= localToday();
+                      return (
+                        <span key={productId}>
+                          Held: {heldQuantity}{unit ? ` ${unit}` : ''} &middot; {earliestExpiry ? (
+                            <>expires <span className={isLapsed ? 'text-red-600 font-medium' : undefined}>{parseLocalDate(earliestExpiry.slice(0, 10)).toLocaleDateString()}{isLapsed ? ' (lapsed)' : ''}</span></>
+                          ) : 'no expiry (no needed-by date)'}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
 
             {!isCollapsed && (
@@ -5714,7 +5786,7 @@ export default function QuoteBuilder() {
                     <>
                       {confirmRestore === selectedVersion.id ? (
                         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1">
-                          <span className="text-sm text-amber-800">Restore V{selectedVersion.version_number}?</span>
+                          <span className="text-sm text-amber-800">Restore V{selectedVersion.version_number}? Timing and Confidence will be cleared.</span>
                           <Button
                             size="sm"
                             icon={<CheckCircle className="w-3.5 h-3.5" />}
@@ -6356,7 +6428,7 @@ export default function QuoteBuilder() {
             await handleRestoreVersion(lastSentVersion.id, lastSentVersion.version_number);
           }}
           title={`Rewind to version ${lastSentVersion.version_number}?`}
-          message={`Put this quote back to version ${lastSentVersion.version_number}, the version last sent to the customer? Changes made since then, saved or not, are discarded.`}
+          message={`Put this quote back to version ${lastSentVersion.version_number}, the version last sent to the customer? Changes made since then, saved or not, are discarded, and every section's Timing and Confidence are cleared.`}
           confirmLabel={`Rewind to version ${lastSentVersion.version_number}`}
           variant="info"
           icon={RotateCcw}

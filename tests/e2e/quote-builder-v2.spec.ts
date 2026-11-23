@@ -671,14 +671,14 @@ test.describe.serial('Quote Builder V2 (12 Sprints)', () => {
     const inventoryTab = page.locator('button:has-text("Inventory")').first();
     await expect(inventoryTab).toBeVisible({ timeout: 5000 });
 
-    // Click Forecast tab
-    const forecastTab = page.locator('button:has-text("Forecast")').first();
+    // Click the old Forecast tab, now "Reservations (old view)" (#1980)
+    const forecastTab = page.locator('button:has-text("Reservations (old view)")').first();
     await expect(forecastTab).toBeVisible({ timeout: 5000 });
     await forecastTab.click();
     await waitStable(page, 2000);
 
-    // Should show "Planned Demand Forecast" heading
-    await expect(page.locator('text=Planned Demand Forecast')).toBeVisible({ timeout: 5000 });
+    // Should show the "Reservations (old view)" heading
+    await expect(page.getByRole('heading', { name: 'Reservations (old view)' })).toBeVisible({ timeout: 5000 });
 
     // Refresh button should exist
     const refreshBtn = page.getByRole('button', { name: /Refresh/i }).first();

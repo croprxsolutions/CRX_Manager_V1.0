@@ -39,6 +39,25 @@
 **Decision (Mason, 2026-11-23, after Luna round 5 found a job's customer could still change under a linked ticket: "Add the job-side check (Recommended)").** A spray job's customer cannot change while a blend ticket of another customer is linked to it; unlink the ticket first. Closes the same-customer rule on both sides. Rejected: accepting the gap.
 
 **Decision (Mason, 2026-11-23, after Luna round 4 found new holes in the no-chemicals rule: "Job's list always counts (Recommended)").** Supersedes the no-chemicals refusal above. The job takes exactly what is on its own chemical list, even when it is empty or short; a linked ticket still does not record on its own. Accepted risk: a job completed without its chemicals entered leaves stock too high for that spray. The other fixes stay (cancelled jobs, same customer, now also checked on new tickets).
+## 2026-11-23 — #2337: Mason owner-accepted 3 Sol finding(s) at `4c8c43249b67`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2337 at `4c8c43249b67` (base `2a4b17f13baa`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:2918`, text sha256 `b08949ec6eff6613` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 40bd26e7f564)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:5513`, text sha256 `789804598375ae0a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 40bd26e7f564)
+- Finding 3 (HIGH) at `src/pages/JobDetail.tsx:2935`, text sha256 `4d4729381240b9b8` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 40bd26e7f564)
+
+## 2026-11-23 — #2337: Mason owner-accepted 3 Sol finding(s) at `cd5f79b8e0e2`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2337 at `cd5f79b8e0e2` (base `e499bdbe9450`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:2896`, text sha256 `5bde7b41dd16c020` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d6dcdbb4e90e)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:5459`, text sha256 `81c2c4e9e10c21a1` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d6dcdbb4e90e)
+- Finding 3 (HIGH) at `src/pages/JobDetail.tsx:2903`, text sha256 `fca1b8826d90146d` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d6dcdbb4e90e)
 
 ## 2026-11-23 — #2358: Mason owner-accepted 8 Sol finding(s) at `d5b0cb8da2bd`
 

@@ -69,6 +69,7 @@ import { useDeliveryBrands } from '../components/deliveries/useDeliveryBrands';
 import { DeliveryBrandsPanel } from '../components/deliveries/DeliveryBrandPicker';
 import CorrectBrandsModal from '../components/deliveries/CorrectBrandsModal';
 import { brandWarnings } from '../lib/deliveryBrands';
+import { deliveryLineFigures } from '../lib/deliveryLineRemaining';
 import type {
   Delivery, DeliveryItem, DeliveryPhoto, DeliveryRemainder,
   Customer, CustomerAddress, Profile, OrderItem, DeliveryIssueType, DeliveryCompletionEvidence, ReceiptRecipient,
@@ -277,7 +278,7 @@ export default function DeliveryDetail() {
   const [confirming, setConfirming] = useState(false);
 
   // Order context for items display
-  const [orderItemContext, setOrderItemContext] = useState<Record<string, { ordered: number; delivered: number; remaining: number }>>({});
+  const [orderItemContext, setOrderItemContext] = useState<Record<string, { ordered: number; delivered: number; remaining: number; otherOpen: number }>>({});
 
   // Parent order for cross-link
   const [parentOrder, setParentOrder] = useState<{ id: string; order_number: string } | null>(null);
@@ -451,11 +452,19 @@ export default function DeliveryDetail() {
           // same question. `order_item_field_allocations` is admin/sales_rep
           // readable (RLS `oifa_select`); a driver never sees the button anyway.
           const orderIdForSplitCheck = del.order_id;
-          const [oiRes, orderRes, invRes, splitRes, externalBillingRes] = await Promise.all([
+          const [oiRes, otherOpenRes, orderRes, invRes, splitRes, externalBillingRes] = await Promise.all([
             supabase
               .from('order_items')
               .select('id, total_units_needed, quantity_delivered, quantity_remaining')
               .eq('order_id', del.order_id),
+            // Units the order's other open loads hold (F05): "Remaining After" leaves them out too.
+            // shortcut: a reader whose RLS hides other loads sees them as 0, as before this read existed.
+            supabase
+              .from('delivery_items')
+              .select('order_item_id, quantity, delivery:deliveries!inner(order_id, status)')
+              .eq('delivery.order_id', del.order_id)
+              .in('delivery.status', ['scheduled', 'in_progress'])
+              .neq('delivery_id', del.id),
             supabase
               .from('orders')
               .select('id, order_number, quote_id')
@@ -509,15 +518,23 @@ export default function DeliveryDetail() {
           } else {
             setOrderNeedsSplitBilling(splitRes.data?.has(orderIdForSplitCheck) ?? false);
           }
+          if (otherOpenRes.error) {
+            Sentry.captureException(otherOpenRes.error, { extra: { context: 'load_delivery_other_open_loads', deliveryId: del.id } });
+          }
           if (oiRes.error) {
             toast('error', sanitizeError(oiRes.error));
           } else if (oiRes.data) {
-            const ctx: Record<string, { ordered: number; delivered: number; remaining: number }> = {};
+            const otherOpen: Record<string, number> = {};
+            (otherOpenRes.data ?? []).forEach((di: { order_item_id: string | null; quantity: number }) => {
+              if (di.order_item_id) otherOpen[di.order_item_id] = (otherOpen[di.order_item_id] ?? 0) + Number(di.quantity ?? 0);
+            });
+            const ctx: Record<string, { ordered: number; delivered: number; remaining: number; otherOpen: number }> = {};
             oiRes.data.forEach((oi: { id: string; total_units_needed: number; quantity_delivered: number; quantity_remaining: number }) => {
               ctx[oi.id] = {
                 ordered: oi.total_units_needed,
                 delivered: oi.quantity_delivered,
                 remaining: oi.quantity_remaining,
+                otherOpen: otherOpen[oi.id] ?? 0,
               };
             });
             setOrderItemContext(ctx);
@@ -2709,7 +2726,7 @@ export default function DeliveryDetail() {
                   {delivery.status === 'completed' && (
                     <th className="px-4 py-3 text-right font-medium text-secondary">Actual</th>
                   )}
-                  <th className="px-4 py-3 text-right font-medium text-secondary">Remaining After</th>
+                  <th className="px-4 py-3 text-right font-medium text-secondary" title="Ordered, less what is delivered and what is on open deliveries">Remaining After</th>
                   <th className="px-4 py-3 text-left font-medium text-secondary">Unit</th>
                   {items.some((i) => i.tote_number) && (
                     <th className="px-4 py-3 text-left font-medium text-secondary">Tote #</th>
@@ -2720,10 +2737,15 @@ export default function DeliveryDetail() {
                 {items.map((item) => {
                   const ctx = orderItemContext[item.order_item_id];
                   const ordered = ctx?.ordered ?? item.quantity;
-                  const prevDelivered = ctx?.delivered ?? 0;
                   const thisDelivery = item.quantity;
-                  const actualDelivered = delivery.status === 'completed' ? item.quantity_delivered : thisDelivery;
-                  const remainingAfter = Math.max(0, ordered - prevDelivered - actualDelivered);
+                  const { prevDelivered, remainingAfter } = deliveryLineFigures({
+                    status: delivery.status,
+                    ordered,
+                    orderDelivered: ctx?.delivered ?? 0,
+                    otherOpen: ctx?.otherOpen ?? 0,
+                    scheduled: thisDelivery,
+                    actual: item.quantity_delivered ?? 0,
+                  });
                   return (
                     <tr key={item.id} className="border-b border-gray-50">
                       <td className="px-4 py-3 font-medium text-nav-dark">

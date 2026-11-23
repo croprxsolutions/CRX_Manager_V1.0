@@ -88,6 +88,12 @@ describe('sanitizeError', () => {
   ])('explains an order-quantity refusal %s (F05) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
   });
+  it('explains the older New Delivery cross-load refusal in words, without the raw token or line id', () => {
+    const message = 'ITEM_OVER_REMAINING_INCL_ACTIVE: order_item_id 2b680d4a-7765-4f02-b9a4-b5cef819709b has 2 units on other active deliveries; only 0 available (2 remaining on order minus 2 active)';
+    const shown = sanitizeError({ code: 'P0001', message });
+    expect(shown).toBe('Nothing was saved. Other open deliveries for this order already hold 2 of this product, so only 0 more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.');
+    expect(shown).not.toMatch(/ITEM_OVER|2b680d4a/);
+  });
   it('explains a completion past the order (F05) without the raw token', () => {
     const sentence = 'Atrazine 4L — this would deliver more than was ordered. Call the office before completing this delivery.';
     expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);

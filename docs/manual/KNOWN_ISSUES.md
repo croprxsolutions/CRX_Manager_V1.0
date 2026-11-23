@@ -487,6 +487,9 @@ Fix: add `vendor_id` set by `save_purchase_order`, keep the text as a snapshot; 
 
 ### KI-151 — Changing PO line costs is still checked against the ordered value
 
+> **Fix in review (Lane E, 2026-11-22):** Mason chose "judge against what arrived" (DECISION_LOG 2026-11-22). Migration
+> `20270223100000_po_cost_cut_judged_against_received.sql` uses the KI-143 limit; applies after the KI-197 migration.
+
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-12.
 
 **LOW · OPEN · purchasing/payables · found 2026-11-11 (PR #1769 review) · unassigned**

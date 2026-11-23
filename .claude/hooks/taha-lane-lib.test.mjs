@@ -110,6 +110,10 @@ const mig = (filename, sql) => ({ filename, status: "added", sql });
 ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270226213000_refuse_impossible_quantities_and_dates.sql", "ALTER TABLE public.order_items ADD CHECK (q > 0);")], now: NOW }),
   "a neutral-named migration that changes order lines is refused");
 eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270227000000_driver.sql", "UPDATE deliveries SET x = 1;")], now: NOW }), null, "a neutral migration on deliveries passes");
+// Mason, 2026-11-23: field billing stays his even when its SQL writes the shared invoice tables (#2260).
+eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270224130000_split_save_refuses_blend_billed_job.sql", "INSERT INTO invoices (id) VALUES (1);")], now: NOW }), null, "a field-billing migration writing invoices stays Mason's");
+eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270224130000_field_invoice_fix.sql", null)], now: NOW }), null, "a field-billing migration needs no SQL read");
+ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270224130000_release_hold_reject_job.sql", "SELECT 1;")], now: NOW }), "a hold word still wins over a job word");
 eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270227000000_driver.sql", null)], now: NOW })?.files, ["supabase/migrations/20270227000000_driver.sql (its SQL could not be read)"], "unreadable SQL refuses, and says why");
 
 // Reading the SQL from GitHub at the PR's commit.

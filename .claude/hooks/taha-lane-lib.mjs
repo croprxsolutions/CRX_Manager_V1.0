@@ -73,9 +73,14 @@ export function isTahaLanePath(name) {
   return isLaneName(file);
 }
 
-function isLaneName(name) {
+function isFieldBillingName(name) {
   const words = wordsOf(name);
-  if (isFieldBilling(words) && !words.some((w) => STRONG_LANE_WORDS.has(w))) return false;
+  return isFieldBilling(words) && !words.some((w) => STRONG_LANE_WORDS.has(w));
+}
+
+function isLaneName(name) {
+  if (isFieldBillingName(name)) return false;
+  const words = wordsOf(name);
   return isBill(words) || words.some((w) => LANE_WORDS.has(w));
 }
 
@@ -163,7 +168,8 @@ export function tahaLaneProblem({ files, now = Date.now() }) {
       if (typeof name === "string" && isTahaLanePath(name) && !hits.includes(name)) hits.push(name);
     }
     const name = entry?.filename;
-    if (entry && "sql" in entry && typeof name === "string" && !hits.includes(name) && isTahaLaneSql(entry.sql)) {
+    // A migration named for field billing stays Mason's even when it writes the shared invoice tables (Mason, 2026-11-23).
+    if (entry && "sql" in entry && typeof name === "string" && !hits.includes(name) && !isFieldBillingName(name) && isTahaLaneSql(entry.sql)) {
       hits.push(entry.sql === null ? `${name} (its SQL could not be read)` : name);
     }
   }

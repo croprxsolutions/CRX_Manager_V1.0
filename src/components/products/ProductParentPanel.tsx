@@ -206,13 +206,16 @@ export default function ProductParentPanel({
 }) {
   const [open, setOpen] = useState<null | 'edit' | 'rates' | 'cutover' | 'identity' | { move: string }>(null);
   // RT-4a: which rate the group uses; null while loading or when the read failed (the switch then waits).
-  const [rateSource, setRateSource] = useState<RateSource | null>(null);
+  const [rateSource, setRateSource] = useState<RateSource | 'failed' | null>(null);
   useEffect(() => {
     let cancelled = false;
     setRateSource(null);
     getParentRateSource(parent.id)
       .then((source) => { if (!cancelled) setRateSource(source); })
-      .catch((error: unknown) => Sentry.captureException(error, { extra: { context: 'product_parent_rate_source' } }));
+      .catch((error: unknown) => {
+        Sentry.captureException(error, { extra: { context: 'product_parent_rate_source' } });
+        if (!cancelled) setRateSource('failed');
+      });
     return () => { cancelled = true; };
   }, [parent.id, parent.parent_version]);
   const seedOrEach = parent.product_form === 'seed' || parent.product_form === 'each';
@@ -221,7 +224,7 @@ export default function ProductParentPanel({
   const blocked = busy ? 'Save or discard your other changes first' : undefined;
 
   const rows = parentRows(parent, seedOrEach, timingOptions);
-  rows.splice(3, 0, ['Rate in use', rateSource === null ? 'Checking…' : rateSource === 'approved' ? 'Approved rate (from the rate review)' : 'Old rate']);
+  rows.splice(3, 0, ['Rate in use', rateSource === null ? 'Checking…' : rateSource === 'failed' ? "Couldn't check; reload the page" : rateSource === 'approved' ? 'Approved rate (from the rate review)' : 'Old rate']);
 
   return (
     <Card>
@@ -242,7 +245,7 @@ export default function ProductParentPanel({
               onClick={() => setOpen('rates')}>
               {ratesLocked ? 'Correct parent rates' : 'Parent rates'}
             </Button>
-            <Button size="sm" variant="secondary" showChevron={false} disabled={busy || rateSource === null} title={blocked}
+            <Button size="sm" variant="secondary" showChevron={false} disabled={busy || rateSource === null || rateSource === 'failed'} title={blocked}
               onClick={() => setOpen('cutover')}>
               {rateSource === 'approved' ? 'Switch back to old rate' : 'Switch to approved rate'}
             </Button>
@@ -267,7 +270,7 @@ export default function ProductParentPanel({
         <ParentRatesModal parent={parent} profileId={profileId} ratesLocked={ratesLocked} unitOptions={rateUnitOptions}
           onClose={close} onSaved={saved} />
       )}
-      {open === 'cutover' && rateSource !== null && (
+      {open === 'cutover' && (rateSource === 'legacy' || rateSource === 'approved') && (
         <ParentRateCutoverModal parent={parent} profileId={profileId} rateSource={rateSource} onClose={close} onSaved={saved} />
       )}
       {open === 'identity' && <ParentIdentityModal parent={parent} profileId={profileId} onClose={close} onSaved={saved} />}

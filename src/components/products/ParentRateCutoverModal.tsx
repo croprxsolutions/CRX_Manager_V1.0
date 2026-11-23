@@ -14,19 +14,30 @@ import { OpenWorkList } from './ParentRatesModal';
 
 type Eligible = Extract<RateCutoverPreview, { eligible: true }>;
 
+const isServerRefusal = (error: unknown) => {
+  const message = error instanceof Error ? error.message
+    : typeof error === 'object' && error !== null && 'message' in error ? String((error as { message: unknown }).message) : '';
+  return /^[A-Z][A-Z0-9_]{5,}(?::|$)/.test(message);
+};
+
 const TIERS = [1, 2, 3] as const;
 const perAcre = (value: number | null | undefined) => (value == null ? 'none' : formatExactUSD(value));
 const rateText = (rate: string | null, unit: string | null) => (rate == null ? 'none' : `${rate} ${unit ?? ''}`.trim());
 const text = (value: string | null) => (value?.trim() ? value : 'none');
 
-// Every new per-acre price reads as an exact dollar amount, so the admin switches to what they saw.
+// A switch that changes no rate writes no prices (the server skips the rate write), so the saved prices stay.
+const afterPrices = (plan: Eligible, size: Eligible['expected']['sizes'][number]) => (plan.changes ? size.prices : size.before_prices);
+// Every new per-acre price reads as an exact dollar amount (or none), so the admin switches to what they saw.
 const allShownExactly = (plan: Eligible) => plan.expected.sizes.every((size) =>
-  TIERS.every((tier) => perAcre(size.prices[`tier${tier}_price_per_acre`]) !== 'Invalid amount'));
+  TIERS.every((tier) => perAcre(afterPrices(plan, size)[`tier${tier}_price_per_acre`]) !== 'Invalid amount'));
 
 function CutoverTable({ plan, seedOrEach }: { plan: Eligible; seedOrEach: boolean }) {
   return (
     <div className="space-y-3">
-      {!plan.changes && <p className="text-sm text-secondary">The approved rate is the same as today&apos;s, so no rate or price changes; only the record of which rate is in use does.</p>}
+      {!plan.changes && <p className="text-sm text-secondary">The rate is the same either way, so no rate or price changes; only the record of which rate is in use does.</p>}
+      {plan.changes && plan.direction === 'promote' && plan.target.rate_per_acre == null && (
+        <p className="text-sm text-secondary">The rate review decided this group has no per-acre rate, so its rate and per-acre prices become blank.</p>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm" data-testid="rate-cutover-table">
           <thead>
@@ -48,7 +59,7 @@ function CutoverTable({ plan, seedOrEach }: { plan: Eligible; seedOrEach: boolea
                 <td className="pr-2">{text(size.suggested_rate)} → <span className="font-medium text-nav-dark">{text(plan.target.suggested_rate)}</span></td>
                 {TIERS.map((tier) => (
                   <td key={tier} className="pr-2">
-                    {perAcre(size.before_prices[`tier${tier}_price_per_acre`])} → <span className="font-medium text-nav-dark">{perAcre(size.prices[`tier${tier}_price_per_acre`])}</span>
+                    {perAcre(size.before_prices[`tier${tier}_price_per_acre`])} → <span className="font-medium text-nav-dark">{perAcre(afterPrices(plan, size)[`tier${tier}_price_per_acre`])}</span>
                   </td>
                 ))}
               </tr>
@@ -104,8 +115,9 @@ export default function ParentRateCutoverModal({ parent, profileId, rateSource, 
       onSaved();
     } catch (error) {
       toast('error', sanitizeError(error));
-      // Changed since the preview: preview again. Already switched (another admin or a lost reply): reload.
-      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_PARENT_CUTOVER_STALE)) setPreview(null);
+      // A database refusal retires the preview: preview again. Only a lost reply (no refusal code) keeps it, so
+      // Switch resends the same key and payload. Already switched (another admin or a lost reply): reload.
+      if (isServerRefusal(error)) setPreview(null);
       if (hasRpcCode(error, RpcErrorCodes.PRODUCT_PARENT_CUTOVER_ALREADY_APPROVED)
         || hasRpcCode(error, RpcErrorCodes.PRODUCT_PARENT_CUTOVER_ALREADY_LEGACY)) onSaved();
     } finally {

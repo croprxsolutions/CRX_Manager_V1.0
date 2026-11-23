@@ -259,7 +259,9 @@ export interface RateCutoverReceipt {
 export async function getParentRateSource(parentId: string): Promise<RateSource> {
   const { data, error } = await supabase.from('product_parents').select('rate_source').eq('id', parentId).single();
   if (error) throw error;
-  return data.rate_source === 'approved' ? 'approved' : 'legacy';
+  // Never guess: an unknown value leaves the switch unavailable rather than offering a direction.
+  if (data.rate_source !== 'legacy' && data.rate_source !== 'approved') throw new Error(`Unknown rate source ${String(data.rate_source)}`);
+  return data.rate_source;
 }
 
 export const previewParentRateCutover = async (parentId: string, direction: CutoverDirection) => {

@@ -20,8 +20,9 @@ so the pilot is his own click instead of an API call in the browser pane. The da
   `GRANT SELECT TO authenticated` and a select policy, so `rate_source` is readable without a database change.
 - **Who may act.** Active admins. The button shows only when `isAdmin`; the server refuses everyone else.
 - **What the screen sends.** `parent_id` and `direction` are locators. `p_expected` is the preview's `expected`
-  object sent back unchanged; the server rebuilds the plan under its locks and refuses unless it is equal
-  (`PRODUCT_PARENT_CUTOVER_STALE`). The screen sends no rate, unit, price or text: the server derives every value.
+  object (versions and each size's snapshot and prices) sent back unchanged; the server rebuilds the plan under its
+  locks and refuses unless it is equal (`PRODUCT_PARENT_CUTOVER_STALE`). The screen supplies no target rate, unit,
+  price or text of its own: the server derives every written value from its plan.
   The reason is typed by the admin; the server trims, requires and bounds it.
 
 ## 2. State and failure
@@ -49,7 +50,9 @@ so the pilot is his own click instead of an API call in the browser pane. The da
     were asked for; a reload closes the modal.
 - **Undo and history.** Switching back is the undo (server restores the snapshot in the `rates_promoted` event;
   `rates_restored` records the actor and reason). Repeating either direction is refused by the server.
-- **Existing rows.** Every parent is `legacy` today; the screen treats any value other than `approved` as old.
+- **Existing rows.** `rate_source` is `NOT NULL` with `CHECK (rate_source IN ('legacy','approved'))` (migration line
+  49). The screen accepts exactly those two values; a failed read or any other value shows "Couldn't check" and
+  offers no switch.
 
 ## 3. Delivery
 
@@ -70,6 +73,29 @@ Run in the local test app on invented data (a throwaway copy), as the invented a
   the server's reason and Switch stays off; nothing changes.
 - **C5 (unit).** A lost commit reply retried sends the same key and payload; a stale refusal clears the preview;
   a non-admin sees no button.
+
+## Cold challenge (Astra, gpt-6.2-astra high, 2026-11-23): 49 findings, settled
+
+- **Corrected in the screen:** (1) a switch with `changes = false` writes no prices, so the table shows the saved
+  prices as the outcome, not the recomputed ones; (2) a promote to "no per-acre default" says the rate and per-acre
+  prices become blank; (11) only `legacy`/`approved` are accepted, a failed read offers no direction; (22) any
+  database refusal on commit retires the preview (only a lost reply, which carries no refusal code, keeps it for the
+  same-key retry); (9) the contract wording on what the screen sends.
+- **Disproved by source:** (12) the select policy is `is_active_profile()` for every parent, the same audience as
+  `get_product_parents`; (17, 18) `rate_source`, `status`, `basis_confirmed` are `NOT NULL`; (6) seed/each sizes show
+  their own unit; (15) the button respects `busy`; (14, 25) the source read is keyed on parent ID and version and
+  discards late replies, and the modal holds one preview request at a time; (5) the field mapping is per size:
+  before = the size's own rate, unit and text in `expected.sizes`, after = `target`.
+- **Safe by the server, documented:** (27, 29, 31) a double send or a changed reason after a timeout cannot apply
+  twice: the second call either replays the first receipt or is refused `ALREADY_*`, and the screen then reloads
+  the true source; (28, 32) closing the modal after a lost reply loses the local key, and reopening reads the true
+  source, which is the same as every other modal in the app; (8) JSON round-trip of `expected` is the path
+  `correct_parent_rates` already uses live, and the local proof sends it back for real; (10) the written unit's
+  spelling comes from `product_rate_units`, which no app screen edits.
+- **Settled earlier (RT-4a contract, prover P1–P9):** server freezes, restore scope and blend checks (33–41), who
+  may act (44: admins only, unchanged), and rollback (45: switch back first; the RPCs stay callable without the screen).
+- **Told to Mason with the pilot:** (38) while any group is on its approved rate, the rate lock cannot be turned off
+  (decision 3, 2026-11-17).
 
 ## Open business decisions
 

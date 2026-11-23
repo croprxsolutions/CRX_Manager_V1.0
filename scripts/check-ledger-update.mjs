@@ -263,8 +263,8 @@ if (isMain) {
   console.error("Fix: stage at least ONE ledger update in the same commit —");
   console.error("  • docs/changelog.d/<date>-<slug>.md   (PREFERRED — one file per change, no merge conflicts)");
   console.error("  • docs/CHANGELOG.md            (what changed, for shipped work)");
-  console.error("  • docs/manual/DECISION_LOG.md  (a settled decision)");
-  console.error("  • docs/manual/KNOWN_ISSUES.md  (a finding / parked item)");
+  console.error("  • docs/manual/decision-log.d/<date>-<slug>.md  (a settled decision)");
+  console.error("  • docs/manual/known-issues.d/<date>-<slug>.md  (a finding / parked item)");
   console.error("  • any other docs/manual/*.md, docs/reference/agent-guardrails.md, or a docs/loops/ ledger");
   console.error("");
   console.error("Do NOT write a throwaway line to satisfy the guard — record what actually changed and why.");

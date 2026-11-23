@@ -1971,12 +1971,15 @@ export function futureDecisionLogDates(diffText, today) {
 // DECISION_LOG.md. Every reader takes the big file AND every fragment.
 export const DECISION_LOG_DIR = "docs/manual/decision-log.d";
 
-// DECISION_LOG.md plus every decision-log.d/*.md (README excepted) at `ref`, one text per file.
+// Only direct, dated children count, as the README and the ledger guards name them (Taha LOW, #2277).
+const DECISION_FRAGMENT_RE = /^docs\/manual\/decision-log\.d\/\d{4}-\d{2}-\d{2}-[^/]+\.md$/;
+
+// DECISION_LOG.md plus every dated decision-log.d/<date>-<slug>.md at `ref`, one text per file.
 // A file that cannot be read is left out, which can only make the round-5 stop refuse.
 export function decisionLogAt(root, ref) {
   // -z: raw names (no core.quotePath escaping of non-ASCII); a name with a newline cannot go to --batch.
   const fragments = runGit(["ls-tree", "-r", "-z", "--name-only", ref, "--", `${DECISION_LOG_DIR}/`], { cwd: root })
-    .split("\0").filter((p) => p.endsWith(".md") && !p.includes("\n") && path.posix.basename(p) !== "README.md");
+    .split("\0").filter((p) => DECISION_FRAGMENT_RE.test(p) && !p.includes("\n"));
   const result = runTrustedGit(["cat-file", "--batch"], {
     cwd: root, encoding: "buffer", timeout: 60_000,
     input: Buffer.from([DECISION_LOG_PATH, ...fragments].map((p) => `${ref}:${p}\n`).join(""), "utf8"),
@@ -2810,6 +2813,7 @@ function mintSingleCommitCarry(root, options, facts, mode, carryExtra = {}) {
 // focused Sol check of that one commit returns CLEAN (Sol HIGH x2 on this PR).
 const POST_APPLY_EDITABLE_RE = /^(?:docs\/reference\/migrations\.d\/[^/]+\.md|docs\/changelog\.d\/[^/]+\.md|docs\/manual\/KNOWN_ISSUES\.md|docs\/manual\/known-issues\.d\/\d{4}-\d{2}-\d{2}-[^/]+\.md|\.claude\/schema-registry\.json)$/;
 const POST_APPLY_ADDABLE_RE = /^docs\/(?:(?:reference\/migrations\.d|changelog\.d)\/[^/]+|manual\/known-issues\.d\/\d{4}-\d{2}-\d{2}-[^/]+)\.md$/;
+const KNOWN_ISSUE_FRAGMENT_RE = /^docs\/manual\/known-issues\.d\/\d{4}-\d{2}-\d{2}-[^/]+\.md$/;
 const POST_APPLY_ALLOWLIST = "scripts/db-invariant-sweeps/allowlist.json";
 const POST_APPLY_CONTRACTS = "src/lib/rpcContracts.test.ts";
 const AWAITING_REGEN_OPEN = "const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([";
@@ -2909,7 +2913,9 @@ export function postApplyProblem({ entries, readFile, prMigrations = [] }) {
       return `${file} is not the record of a migration this PR adds`;
     }
     const added = oldMode === ABSENT_MODE && newMode === "100644";
-    if (!(oldMode === "100644" && newMode === "100644") && !(added && POST_APPLY_ADDABLE_RE.test(file))) {
+    // A known issue the live apply fixed is closed by deleting its dated file (Taha LOW, #2277).
+    const closed = oldMode === "100644" && newMode === ABSENT_MODE && KNOWN_ISSUE_FRAGMENT_RE.test(file);
+    if (!(oldMode === "100644" && newMode === "100644") && !(added && POST_APPLY_ADDABLE_RE.test(file)) && !closed) {
       return `${file} was ${newMode === ABSENT_MODE ? "deleted" : "added or changed type or mode"}`;
     }
     if (file === POST_APPLY_ALLOWLIST) {

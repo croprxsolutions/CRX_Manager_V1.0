@@ -2000,6 +2000,9 @@ function collisionPromptSkipsWork(prompt) {
   assert.equal(one("docs/manual/known-issues.d/2026-11-22-x.md", "000000", "100644"), null, "post-apply: a new known-issues entry is paperwork");
   assert.match(one("docs/manual/known-issues.d/README.md"), /instruction file|not post-apply paperwork/, "post-apply: the known-issues README is not paperwork");
   assert.match(one("docs/manual/known-issues.d/notes.md", "000000", "100644"), /was added|not post-apply paperwork/, "post-apply: an undated known-issues file is not paperwork");
+  assert.equal(one("docs/manual/known-issues.d/2026-11-22-x.md", "100644", "000000"), null, "post-apply: a fixed known-issues entry may be deleted");
+  assert.match(one("docs/manual/known-issues.d/notes.md", "100644", "000000"), /deleted/, "post-apply: only dated known-issues files may be deleted");
+  assert.match(one("docs/changelog.d/x.md", "100644", "000000"), /deleted/, "post-apply: other paperwork may not be deleted");
   assert.match(one("docs/changelog.d/sub/x.md"), /not post-apply paperwork/, "post-apply: no nested folders");
   assert.match(one("docs/manual/known_issues.md"), /not post-apply paperwork/, "post-apply: paths match exactly");
   assert.match(postApplyProblem({ entries: [], readFile: read }), /changes nothing/, "post-apply: an empty commit is refused");
@@ -2887,6 +2890,12 @@ not json
     git("config", "core.quotePath", "true");
     write(`${DECISION_LOG_DIR}/2026-11-22-mason’s-decision.md`, "## 2026-11-22 — Mason’s call on #2270\n\n**Decision (Mason, in chat).** Keep it.\n");
     assert.equal(gate(commit()).refuse, false, "fragments: a non-ASCII fragment name unlocks round 5");
+    // Only direct, dated children are entries (Taha LOW, #2277).
+    branchFrom("odd", base);
+    const entry = "## 2026-11-22 — Call on #2270\n\n**Decision (Mason, in chat).** Keep it.\n";
+    write(`${DECISION_LOG_DIR}/notes.md`, entry);
+    write(`${DECISION_LOG_DIR}/old/2026-11-22-nested.md`, entry);
+    assert.equal(gate(commit()).refuse, true, "fragments: undated and nested files are not entries");
     // Text in one file never joins another file's entry.
     branchFrom("glue", base);
     write(`${DECISION_LOG_DIR}/2026-11-22-a.md`, "## 2026-11-22 — Unrelated, no newline at the end");

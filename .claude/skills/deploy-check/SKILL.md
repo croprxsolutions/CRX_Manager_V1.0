@@ -24,7 +24,7 @@ A checklist. It changes no tracked file and lands nothing (`git fetch` and `npm 
 ```
 DEPLOY CHECK — <branch>
 Behind base: X   Clean tree: YES/NO   Last commit: <hash> <msg>
-Lint/Typecheck/Build: PASS   Tests: X/Y   Secrets: no hits in scanned paths   Largest chunk: XXX KB
+Lint/Typecheck/Build: <PASS / FAIL>   Tests: X/Y   Secrets: <no hits in scanned paths / hits: file list / NOT RUN>   Largest chunk: XXX KB
 Migrations: <none | N, staging job | N, live apply before merge>
 Sol: <needed / not needed>   Taha hold: <yes until HH:MM / no>
 Verdict: READY FOR PR / BLOCKED (<each issue>)

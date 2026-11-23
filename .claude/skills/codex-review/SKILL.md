@@ -35,7 +35,7 @@ Never hard-code the version-hash path.
 | Uncommitted changes | `--uncommitted` |
 | One commit | `--commit <sha>` (substitute a real hash; `<`/`>` are shell redirections) |
 
-Run `git fetch origin` first, and set `SCOPE` in the same shell as Step 3A (`SCOPE=""`, `SCOPE="--uncommitted"` or `SCOPE="--commit 12cb424"`). The default base is `solTargetRef` in `scripts/write-codex-push-proof.mjs`: `origin/staging` for a feature branch; `origin/main` for `hotfix/`, `release/`, `main`, `staging`, a detached HEAD, or no `origin/staging`. An explicit `--base <ref>` round is allowed for exploration but never clears the change.
+Unsure which, or the branch has both commits and uncommitted edits: commit first, then use the empty scope so nothing is missed. Run `git fetch origin` first, and set `SCOPE` in the same shell as Step 3A (`SCOPE=""`, `SCOPE="--uncommitted"` or `SCOPE="--commit 12cb424"`). The default base is `solTargetRef` in `scripts/write-codex-push-proof.mjs`: `origin/staging` for a feature branch; `origin/main` for `hotfix/`, `release/`, `main`, `staging`, a detached HEAD, or no `origin/staging`. An explicit `--base <ref>` round is allowed for exploration but never clears the change.
 
 ## Step 2: Live evidence first (DB-touching changes)
 

@@ -822,10 +822,9 @@ export default function DeliveryDetail() {
       return;
     }
 
+    setSavingEdit(true); // locks Save and Cancel before the driver check, so the form cannot change under it
     const stale = await staleDriverClear(id!, editDriver, editDriverAtOpen);
-    if (stale) { toast('error', stale); return; }
-
-    setSavingEdit(true);
+    if (stale) { toast('error', stale); setSavingEdit(false); return; }
 
     const itemsPayload = editItemsPayload(isScheduled, activeEditItems);
 
@@ -2610,7 +2609,7 @@ export default function DeliveryDetail() {
             </div>
 
             <div className="flex justify-end gap-3 pt-2">
-              <Button variant="secondary" onClick={() => setEditing(false)}>Cancel</Button>
+              <Button variant="secondary" onClick={() => setEditing(false)} disabled={savingEdit}>Cancel</Button>
               <Button onClick={saveEdit} loading={savingEdit}>Save Changes</Button>
             </div>
           </div>

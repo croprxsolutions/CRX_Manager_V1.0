@@ -41,7 +41,10 @@ function latestBody(fn: string): string {
 /** The newest create of a trigger or index on a table comes after its newest drop. */
 function stillCreated(kind: 'TRIGGER' | 'UNIQUE INDEX', name: string, table: string): void {
   const created = lastMatch(new RegExp(`CREATE\\s+${kind.replace(' ', '\\s+')}\\s+${name}\\b[\\s\\S]{0,200}?\\bON\\s+(?:public\\.)?${table}\\b`));
-  const dropped = lastMatch(new RegExp(`DROP\\s+${kind === 'TRIGGER' ? 'TRIGGER' : 'INDEX'}\\s+(?:IF\\s+EXISTS\\s+)?(?:public\\.)?${name}\\b`));
+  // A trigger drop names its table (one name can sit on several tables); an index name is unique per schema.
+  const dropped = lastMatch(new RegExp(kind === 'TRIGGER'
+    ? `DROP\\s+TRIGGER\\s+(?:IF\\s+EXISTS\\s+)?${name}\\s+ON\\s+(?:public\\.)?${table}\\b`
+    : `DROP\\s+INDEX\\s+(?:CONCURRENTLY\\s+)?(?:IF\\s+EXISTS\\s+)?(?:public\\.)?${name}\\b`));
   expect(created, `${kind} ${name} on ${table} is never created`).toBeGreaterThan(-1);
   expect(dropped, `${kind} ${name} is dropped after it was created`).toBeLessThan(created);
 }

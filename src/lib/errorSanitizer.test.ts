@@ -300,8 +300,8 @@ describe('sanitizeError', () => {
       .toBe('Say why the cost of a received line is changing');
     expect(sanitizeError('PO_CANCELLED: cannot change cost on a cancelled purchase order'))
       .toBe('This purchase order is cancelled, so its cost cannot change');
-    expect(sanitizeError('PO_COST_BELOW_BILLED: this correction would leave the active vendor bills more than 5% over the purchase order total; void or adjust the bill first'))
-      .toBe('This would put the purchase order more than 5% below its vendor bills. Void or adjust the bill first');
+    expect(sanitizeError('PO_COST_BELOW_BILLED: this correction would put the active vendor bills more than 5% over what arrived on the purchase order or over its ordered total; void or adjust the bill first'))
+      .toBe('This would put the vendor bills more than 5% over what has arrived on the purchase order, or over its ordered total. Void or adjust the bill first');
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can change a customer\'s default commission split'))
       .toBe("Only an admin can set or change a customer's default commission split");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can set a customer\'s default commission split'))

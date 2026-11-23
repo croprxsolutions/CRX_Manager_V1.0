@@ -165,7 +165,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W2-22 | KI-184 | MED | Open | A returned sale keeps its commission cost in profit reports, so profit looks too low. | KNOWN_ISSUES | #2149 (follow-up) | Taha (to 2026-12-15) |
 | W2-23 | KI-154 | MED | Open | A salesperson could be paid commission on a sale the customer has not paid for; basis also ignores the standing discount. | KNOWN_ISSUES |  | Mason decision |
 | W2-24 | #2175 | MED | Open | Numbers can change between the admin's review and the click, and the close saves the new ones; the commission "reviewed" box is screen-only. Fix in a PR with W1-01: the close refuses changed figures and unconfirmed payments/commission (migration `20270224120000`). | GitHub issue | #2175 | Lane B agent |
-| W3-26 | KI-133 | LOW | Open | Reports count undelivered orders as revenue without saying "booked"; people may misread profit. | KNOWN_ISSUES |  | Agent (unassigned) |
+| W3-26 | KI-133 | LOW | Closed (staging PR #2259, 2026-11-23) | Reports count undelivered orders as revenue without saying "booked"; people may misread profit. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-27 | KI-135 | LOW | Closed (staging PR #2259, 2026-11-23) | The Inventory value total is labelled as if it were an accounting value, but it is priced at price-list cost. | KNOWN_ISSUES |  | Agent (unassigned) |
 
 ### Field applications (jobs, blend tickets, field invoices) (20)

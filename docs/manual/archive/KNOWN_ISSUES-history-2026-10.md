@@ -7960,3 +7960,18 @@ necessarily what the supplier bill said ([business logic review](../audits/2026-
 Also (2026-11-13 [Product Master review](../audits/2026-11-13-product-master-review.md) C-10): the per-row Inventory Cost
 report and its CSV (`_get_inventory_cost_report_cost_impl_20261019`, `Reports.tsx`) still list negative and $0-cost
 rows, so summing the CSV reproduces the old wrong total. Fix: match the rows to the summary's exclusions, or mark them.
+
+<!-- KI-133 closed 2026-11-23 (PR #2259); text as it stood in KNOWN_ISSUES -->
+
+### KI-133 — Profitability and Gross Sales report booked orders as "revenue" without saying so
+
+> **Fix in review (Lane E, 2026-11-22):** the reports say "Booked Sales" with a one-line basis note. Drafts need no
+> filter: the database refuses a draft order status (`orders_status_check`), so Gross Sales cannot include one.
+
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-26.
+
+**LOW · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 decision conflicts) · unassigned**
+Both sum confirmed and partly fulfilled order lines, so undelivered value counts as revenue and profit and credits are
+not subtracted, while Bottom Line P&L uses posted invoices. The order basis is recorded intent (sales-reports build
+sheet, "roadmap area 2"), but the screens don't say "booked". The two also differ on drafts (Gross Sales includes
+them; none exist today). Fix: label as booked sales and align the draft filter.

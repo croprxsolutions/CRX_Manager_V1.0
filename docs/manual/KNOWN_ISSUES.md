@@ -1025,19 +1025,6 @@ Where: `get_monthly_summary` and `_close_accounting_period_replay_impl_20261015`
 `get_monthly_summary.ar_balance_cents` has no date filter, so a past month shows today's receivables. The AR Aging tab
 has the real as-of figure. Fix: relabel "Current AR (today)" or reuse `get_ar_aging(p_period_end)`.
 
-### KI-133 — Profitability and Gross Sales report booked orders as "revenue" without saying so
-
-> **Fix in review (Lane E, 2026-11-22):** the reports say "Booked Sales" with a one-line basis note. Drafts need no
-> filter: the database refuses a draft order status (`orders_status_check`), so Gross Sales cannot include one.
-
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-26.
-
-**LOW · OPEN · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 decision conflicts) · unassigned**
-Both sum confirmed and partly fulfilled order lines, so undelivered value counts as revenue and profit and credits are
-not subtracted, while Bottom Line P&L uses posted invoices. The order basis is recorded intent (sales-reports build
-sheet, "roadmap area 2"), but the screens don't say "booked". The two also differ on drafts (Gross Sales includes
-them; none exist today). Fix: label as booked sales and align the draft filter.
-
 ### KI-154 — A commission can be paid out before the customer has paid
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Mason decision · plan W2-23.
@@ -2047,6 +2034,7 @@ Entries 1–6 were closed during the original rewrite; their older proof records
 65. **KI-166 — A quote for a product with no stock unit is priced as if sold by the each** — closed 2026-11-21 by the [master-plan re-check](MASTER_FIX_PLAN.md): `20270129171000_field_app_refuses_product_without_sold_unit.sql:40` `inventory_unit SET NOT NULL` + alnum CHECK (also on origin/main). The `COALESCE(...,'Ea')` fallback remains but is unreachable (`20270121110000:210`, `20270125110000:725`). This is the entry's own proposed fix Closed: every product now must have a stock unit (20270129171000, live).
 66. **KI-82 — The open quote screen can show a stale cost for a line it just saved** — closed 2026-11-22 (triage): PR #1209 merged to `main` 2026-10-30 (`QuoteBuilder.tsx` `refreshSavedLineCosts` re-reads the saved cost after an admin save). Original text appended to the archive. Fixed parts also removed in this triage and appended to the archive: KI-16 (Quote Builder line math in exact cents, PRs #1430 and #1892), KI-73 (parts A, B, C), KI-74 (cost paths, `invoice_post_version`), KI-76 (season fallbacks, the whole-order quantity cap and the posted-invoice delivery void: PR #1174, `20261029160000`, live 2026-10-30).
 67. **KI-135 (D12 item 7), "Inventory Value" read like a book value** — closed 2026-11-23 by PR #2259 (labels only, merged to staging 2026-11-23): the Inventory page card reads "Inventory Value (price-list cost)", the Reports total "Inventory value at price-list cost", and profit and margin carry a "saved pricing cost" note. The per-row Inventory Cost table marks rows left out of the total, and its CSV leaves their value blank with an "In Total" column, so the column sums to the total. Label seen on the local test copy 2026-11-23. Original text appended to the archive.
+68. **KI-133, Profitability and Gross Sales called booked orders "revenue"** — closed 2026-11-23 by PR #2259 (labels only, merged to staging 2026-11-23): both reports and their CSVs say "Booked Sales", the "Revenue Summary" tab is "Booked Sales Summary", and one line under them says they are order-based, credits are not subtracted, and Bottom Line P&L uses posted invoices. The draft-filter half needs no change: `orders_status_check` refuses a draft order status, so Gross Sales cannot include one. Note and tab seen on the local test copy 2026-11-23. Original text appended to the archive.
 
 Also closed inside the old file's own headings before this rewrite (no new proof needed, see archive): the
 Deliveries list scheduled-delivery gap (PR #964), smoke chains rotted by the PO cost lock, the regular invoice

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270225230000_ki167_relabel_completed_lines_stock_unit.sql (KI-167).
+ * Real-schema proof for 20270226220000_ki167_relabel_completed_lines_stock_unit.sql (KI-167).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs). Seeds three invented orders shaped like the three live
@@ -36,7 +36,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, attempt, asUser, refuse, claims, scalar, docker, USERS, ROOT, NAME } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270225230000_ki167_relabel_completed_lines_stock_unit.sql';
+const CANDIDATE = '20270226220000_ki167_relabel_completed_lines_stock_unit.sql';
 const RAW = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const flag = (name) => ['1', 'true'].includes(String(process.env[name] ?? '').trim().toLowerCase());
 const REUSE = flag('KI167_REUSE');
@@ -165,9 +165,10 @@ const refused = (label, r, pattern) => {
   console.log(`[c ${label}] ${r.stderr.match(/KI167_[A-Z_]+[^\n]*/)[0].slice(0, 230)}`);
 };
 
+let built = false; // only remove a container this run built (a failed build may have hit another run's name)
 try {
   if (REUSE) console.log(`[prover] reusing ${NAME}`);
-  else { buildContainer({ stopBefore: CANDIDATE }); seedUsers(); }
+  else { buildContainer({ stopBefore: CANDIDATE }); built = true; seedUsers(); }
   seed();
   const seeded = lineState();
   const remaindersSeeded = remainders();
@@ -252,15 +253,20 @@ try {
   refused('second-apply', docker([...PSQL('postgres'), '-1'], { input: candidate, allowFailure: true }), /KI167_ROW_MOVED/);
   // The relabelled open remainder cannot ship extra while its line is fully delivered.
   const extra = attempt(ADMIN, `${refuse(followUpSql(DIRECT, 'ki167-b-extra'))} v := t;`);
-  assert.doesNotMatch(extra, /NOT REFUSED|LINE_UNIT_NOT_STOCK_UNIT/, extra);
+  assert.match(extra, /DELIVERY_OVER_ORDER/, `the over-delivery guard, not another error, must refuse: ${extra}`);
   console.log(`[b apply] a follow-up from the open remainder while ${DIRECT.order} is fully delivered is still refused: ${extra.slice(3, 140)}`);
 
   // (b) After: each step committed through the app's signed-in actions.
   for (const [i, l] of LINES.entries()) {
     const step = (body) => { const res = attempt(ADMIN, body, { commit: true }); assert.match(res, /^ok\|/, `${l.order}: ${res}`); return res.slice(3); };
     const s0 = stock(l);
+    const voided = l.D2 ?? l.D;
     const afterVoid = step(`${asUser(voidSql(l, `ki167-b-void-${i}`))} v := ${reopened(l)};`);
     const s1 = stock(l);
+    // The voided delivery is voided, and none of its invoices is left open to bill (draft, posted or unposted).
+    assert.equal(scalar(`SELECT status || '|' || (SELECT count(*) FROM public.invoices WHERE delivery_id = '${voided}'
+      AND status NOT IN ('voided', 'cancelled')) FROM public.deliveries WHERE id = '${voided}';`),
+      'voided|0', `${l.order}: the voided delivery and its invoices are closed`);
     if (l === FOLLOW) assert.equal(remainders().split(',')[1], `${FOLLOW.order}:fulfilled:${FOLLOW.old}:5`, 'voiding a follow-up does not reopen its parent remainder');
     const before = new Set(scalar(`SELECT string_agg(id::text, ',') FROM public.deliveries WHERE order_id = '${l.O}';`).split(','));
     step(asUser(replacementSql(l, `ki167-b-new-${i}`)));
@@ -275,6 +281,7 @@ try {
     const [a1, , t1] = s1.split('/').map(Number);
     assert.equal(unit, `${l.stock} x ${lastQty(l)}`, `${l.order}: the replacement is in the stock unit for the voided quantity`);
     assert.equal(end, `fulfilled:${l.qty}/0`, `${l.order}: ends fulfilled`);
+    assert.equal(scalar(`SELECT status FROM public.deliveries WHERE id = '${D[0]}';`), 'completed', `${l.order}: the replacement is completed`);
     assert.equal(a1, a0 + lastQty(l), `${l.order}: the void puts ${lastQty(l)} back on hand (${s0} -> ${s1})`);
     assert.equal(t1, t0 + lastQty(l), `${l.order}: the void records +${lastQty(l)} (${s0} -> ${s1})`);
     assert.equal(s2, stockBefore[i], `${l.order}: on hand, reserved and net movements end where they were before the migration (${stockBefore[i]} -> ${s1} -> ${s2})`);
@@ -287,5 +294,5 @@ try {
 
   console.log('\nKI167_RELABEL_PROOF_PASS');
 } finally {
-  if (!REUSE && !KEEP) removeContainer();
+  if (built && !KEEP) removeContainer();
 }

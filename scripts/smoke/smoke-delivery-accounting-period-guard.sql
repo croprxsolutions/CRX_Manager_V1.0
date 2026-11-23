@@ -60,19 +60,19 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_SETUP: active non-delivery profile required';
   END IF;
 
-  -- Fixed, historical, disposable months prevent the proof from drifting as
+  -- Fixed, historical, disposable months (inside the 2000-2099 date window, #2237) prevent the proof from drifting as
   -- the calendar advances. Refuse to touch them if real historical data uses
   -- any one of the three months; the terminal exception rolls every fixture
   -- back, including the two smoke-only closed rows created below.
-  v_closed_date := DATE '1990-01-15';
-  v_open_date := DATE '1990-02-15';
-  v_second_open_date := DATE '1990-03-15';
+  v_closed_date := DATE '2000-01-15';
+  v_open_date := DATE '2000-02-15';
+  v_second_open_date := DATE '2000-03-15';
 
   IF EXISTS (
     SELECT 1
     FROM public.accounting_periods AS ap
-    WHERE ap.period_start <= DATE '1990-03-31'
-      AND ap.period_end >= DATE '1990-01-01'
+    WHERE ap.period_start <= DATE '2000-03-31'
+      AND ap.period_end >= DATE '2000-01-01'
   ) THEN
     RAISE EXCEPTION 'SMOKE_SETUP: fixed historical delivery-proof months are not isolated';
   END IF;

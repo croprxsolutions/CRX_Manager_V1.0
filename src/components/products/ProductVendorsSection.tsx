@@ -27,8 +27,15 @@ interface ProductVendorsSectionProps {
   isAdmin: boolean;
   /** The signed-in user's profile id; only needed for admin edits. */
   userId: string | null;
-  /** Called with the new preferred vendor's name; the database has already copied it onto the product. */
-  onPreferredChanged: (vendorName: string) => void;
+  /**
+   * A vendor was linked: the database may have copied a new preferred vendor's name onto the product, so the
+   * page re-reads the product (KI-170: its Save waits for that read).
+   */
+  onVendorChanged: () => void;
+  /** A vendor change is saving: the page locks its form, since the re-read that follows replaces it. */
+  onVendorSaving: (saving: boolean) => void;
+  /** Why vendor changes are off right now (e.g. unsaved product edits), or null when they are allowed. */
+  lockedReason: string | null;
 }
 
 /** Every vendor an admin can add, page by page: one read stops silently at 1,000 rows. */
@@ -117,10 +124,12 @@ interface AddVendorBarProps {
   pick: string;
   onPick: (vendorId: string) => void;
   disabled: boolean;
+  /** Why vendor changes are off, shown under the bar. */
+  lockedReason: string | null;
   onAdd: () => void;
 }
 
-function AddVendorBar({ picker, addable, pick, onPick, disabled, onAdd }: AddVendorBarProps) {
+function AddVendorBar({ picker, addable, pick, onPick, disabled, lockedReason, onAdd }: AddVendorBarProps) {
   return (
     <div className="mt-3 flex flex-wrap items-end gap-2">
       <div className="min-w-[14rem] flex-1">
@@ -136,6 +145,7 @@ function AddVendorBar({ picker, addable, pick, onPick, disabled, onAdd }: AddVen
       <Button size="sm" disabled={disabled || !pick} onClick={onAdd}>
         Add vendor
       </Button>
+      {lockedReason && <p className="w-full text-sm text-amber-800">{lockedReason}</p>}
       {picker.status === 'loading' && <p className="w-full text-sm text-gray-500">Loading the vendor list…</p>}
       {picker.status === 'failed' && (
         <div role="alert" className="flex w-full flex-wrap items-center gap-2 text-sm text-red-700">
@@ -147,11 +157,16 @@ function AddVendorBar({ picker, addable, pick, onPick, disabled, onAdd }: AddVen
   );
 }
 
+/** Vendor changes wait for a running change, a usable list, and the page's go-ahead. */
+function vendorControlsOff(busy: boolean, listUsable: boolean, lockedReason: string | null): boolean {
+  return busy || !listUsable || lockedReason !== null;
+}
+
 /**
  * The vendors a product can be bought from (WP-PM-15b). Exactly one is preferred, and the product's
  * vendor name is a copy of it: the database keeps that copy and refuses to drop the preferred vendor.
  */
-export default function ProductVendorsSection({ productId, productName, isAdmin, userId, onPreferredChanged }: ProductVendorsSectionProps) {
+export default function ProductVendorsSection({ productId, productName, isAdmin, userId, onVendorChanged, onVendorSaving, lockedReason }: ProductVendorsSectionProps) {
   const { toast } = useToast();
   // Costs come back only for admins, so a role change is a different read.
   const linked = useLoad(`vendors:${productId}:${isAdmin}`, () => listProductVendors(productId), {
@@ -188,6 +203,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
     if (!userId) return;
     const scope = `${productId}:${vendorId}:${makePreferred}`;
     setBusyFor(productId);
+    onVendorSaving(true);
     try {
       await linkProductVendor(productId, vendorId, makePreferred, userId, linkKeys.getKeyFor(scope));
       linkKeys.resetKeyFor(scope);
@@ -201,17 +217,17 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
       });
       setPickedVendorId('');
       if (productRef.current !== productId) return; // the screen moved to another product; its own read is running
-      // A first vendor becomes preferred even when not asked, so report whichever vendor now is.
-      // If the re-read fails, a vendor just made preferred (or the first one, preferred by default) is still the one to show.
-      const wasFirst = !vendors?.some((v) => v.is_preferred);
-      const fresh = await linked.reload();
-      if (fresh.status === 'skipped') return; // a newer read owns the list; guess nothing
-      const preferred = (fresh.status === 'applied' ? fresh.data.find((v) => v.is_preferred)?.vendor_name : undefined)
-        ?? (makePreferred || wasFirst ? name : null);
-      if (preferred) onPreferredChanged(preferred);
+      // The product's vendor name may have changed (a first vendor becomes preferred even when not asked).
+      onVendorChanged();
+      await linked.reload();
     } catch (error) {
       toast('error', productVendorErrorMessage(error));
+      // An unclear failure may still have committed, so the product is read again either way (re-reading the
+      // page's current product is harmless even if the screen moved on).
+      onVendorChanged();
+      void linked.reload();
     } finally {
+      onVendorSaving(false);
       setBusyFor((current) => (current === productId ? null : current));
     }
   };
@@ -239,6 +255,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
     }
   };
 
+  const controlsOff = vendorControlsOff(busy, listUsable, lockedReason);
   const linkedIds = new Set((vendors ?? []).map((v) => v.vendor_id));
   const addable = allVendors.filter((v) => !linkedIds.has(v.id));
   // A pick that is no longer offered (list reloaded, failed, or vendor now linked) is no pick.
@@ -251,7 +268,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
       {vendors !== null && vendors.length > 0 && (
         <ul className="divide-y divide-gray-100">
           {vendors.map((v, i) => (
-            <VendorRow key={v.link_id} vendor={v} isAdmin={isAdmin} disabled={busy || !listUsable}
+            <VendorRow key={v.link_id} vendor={v} isAdmin={isAdmin} disabled={controlsOff}
               // One action per vendor: the server makes that vendor's best link preferred.
               canMakePreferred={!vendors.some((o, j) => o.vendor_id === v.vendor_id && (o.is_preferred || j < i))}
               onMakePreferred={() => void link(v.vendor_id, true)} onRemove={() => setRemoving(v)} />
@@ -260,7 +277,7 @@ export default function ProductVendorsSection({ productId, productName, isAdmin,
       )}
       {isAdmin && vendors !== null && (
         <AddVendorBar picker={picker} addable={addable} pick={pick} onPick={setPickedVendorId}
-          disabled={busy || !listUsable} onAdd={() => void link(pick, false)} />
+          disabled={controlsOff} lockedReason={lockedReason} onAdd={() => void link(pick, false)} />
       )}
       <ConfirmModal
         open={removable}

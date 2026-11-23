@@ -75,6 +75,15 @@ interface DeliveryRow extends Delivery {
   farm_group_name: string | null;
 }
 
+/* An open delivery a driver may take: the five fields get_available_deliveries_for_driver returns. */
+interface AvailableDelivery {
+  id: string;
+  delivery_number: string;
+  scheduled_date: string;
+  customer_name: string;
+  farm_group_name: string | null;
+}
+
 /* ─── Helpers ─── */
 // A completion an admin recorded without customer proof (completion_evidence = 'no_proof').
 const NoProofLabel = () => (
@@ -387,8 +396,8 @@ export default function Deliveries() {
   // True until a stock check finishes: until then, no badge does not yet mean enough stock.
   const [shortageChecking, setShortageChecking] = useState(true);
 
-  /* Driver-specific: unassigned deliveries they can claim */
-  const [unassigned, setUnassigned] = useState<DeliveryRow[]>([]);
+  /* Driver-specific: unassigned deliveries they can claim (get_available_deliveries_for_driver, #2018) */
+  const [unassigned, setUnassigned] = useState<AvailableDelivery[]>([]);
   const [listSearch, setListSearch] = useState('');
   // The search the database runs: settles 300 ms after the last keystroke, so typing sends one read.
   const [searchTerm, setSearchTerm] = useState('');
@@ -883,43 +892,28 @@ export default function Deliveries() {
     fetchRemainderCount();
   }, [loadShortages, fetchDrivers, fetchCustomers, fetchRemainderCount]);
 
-  // Fetch unassigned deliveries for driver dashboard
+  // Open deliveries a driver may take. The read rule shows a driver only their own deliveries, so the database
+  // returns these through get_available_deliveries_for_driver (#2018). A failed read clears the card and says so,
+  // so an old list never stays clickable and a failure never looks like "nothing available".
+  // Only the newest read may set the card, so a slow older answer never brings back a delivery just taken.
+  const availableSeqRef = useRef(0);
+  const loadAvailable = useCallback(async () => {
+    const seq = ++availableSeqRef.current;
+    const { data, error: availableErr } = await supabase.rpc('get_available_deliveries_for_driver');
+    if (seq !== availableSeqRef.current) return;
+    try {
+      if (availableErr) throw availableErr;
+      setUnassigned(assertRpcResult<{ rows: AvailableDelivery[] }>(data, 'get_available_deliveries_for_driver').rows ?? []);
+    } catch (loadErr) {
+      // A failed or malformed answer clears the card, so an old list never stays clickable.
+      setUnassigned([]);
+      toast('error', `Could not load available deliveries: ${sanitizeError(loadErr)}`);
+      Sentry.captureException(loadErr, { tags: { source: 'fetch', page: 'deliveries' } });
+    }
+  }, [toast]);
   useEffect(() => {
-    if (!isDriver) return;
-    (async () => {
-      const { data, error: unassignedErr } = await supabase
-        .from('deliveries')
-        .select('*, customer:customers(farm_name, parent_customer_id)')
-        .is('assigned_driver', null)
-        .in('status', ['scheduled'])
-        .order('scheduled_date')
-        .limit(20);
-      if (unassignedErr) {
-        Sentry.captureException(unassignedErr, { tags: { source: 'fetch', page: 'deliveries' } });
-        return;
-      }
-      const pIds = [...new Set(
-        (data || []).map((d: Record<string, unknown>) => (d.customer as { parent_customer_id?: string })?.parent_customer_id).filter(Boolean) as string[]
-      )];
-      const pMap: Record<string, string> = {};
-      if (pIds.length > 0) {
-        const { data: parents, error: pErr } = await supabase.from('customers').select('id, farm_name').in('id', pIds);
-        if (pErr) Sentry.captureException(pErr, { tags: { source: 'fetch', page: 'deliveries' } });
-        (parents || []).forEach((p) => { pMap[p.id] = p.farm_name; });
-      }
-      const rows = (data || []).map((d) => {
-        const cust = d.customer as { farm_name?: string; parent_customer_id?: string } | null;
-        return {
-          ...d,
-          customer_name: cust?.farm_name || 'Unknown',
-          driver_name: 'Unassigned',
-          item_count: 0,
-          farm_group_name: cust?.parent_customer_id ? pMap[cust.parent_customer_id] || null : null,
-        };
-      });
-      setUnassigned(rows as DeliveryRow[]);
-    })();
-  }, [isDriver]);
+    if (isDriver) void loadAvailable();
+  }, [isDriver, loadAvailable]);
 
   /* ─── Summary stats and 7-day strip: every visible delivery that is not cancelled or voided,
      whatever the list's search and filters, counted by the database ─── */
@@ -1269,7 +1263,8 @@ export default function Deliveries() {
   if (isDriver) {
     // Completed, cancelled and voided deliveries are finished; only these two are still to do.
     const isOpen = (d: DeliveryRow) => d.status === 'scheduled' || d.status === 'in_progress';
-    const myToday = deliveries.filter((d) => d.scheduled_date === todayStr && isOpen(d));
+    // Overdue open deliveries stay under Today, so a late one a driver just took is never hidden.
+    const myToday = deliveries.filter((d) => d.scheduled_date <= todayStr && isOpen(d));
     const myUpcoming = deliveries.filter((d) => d.scheduled_date > todayStr && isOpen(d));
     const myCompleted = deliveries.filter((d) => d.status === 'completed').slice(0, 10);
 
@@ -1297,8 +1292,10 @@ export default function Deliveries() {
         toast,
         successMessage: 'Delivery assigned to you',
         sentryTag: 'take_delivery',
-        onSuccess: () => fetchDeliveries(),
       });
+      // Taken (by this driver or another), changed, or a lost reply: both lists must reflect the database now.
+      void fetchDeliveries();
+      void loadAvailable();
     };
 
     const DriverRow = ({ d }: { d: DeliveryRow }) => {

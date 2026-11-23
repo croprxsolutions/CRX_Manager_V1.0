@@ -88,6 +88,14 @@ vi.mock('../components/products/ProductsMobileList', async () => {
   );
   return { ...actual, default: () => null };
 });
+vi.mock('../lib/productParents', () => ({ getProductParents: async () => [], searchProductParents: async () => [] }));
+vi.mock('../lib/productSetup', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/productSetup')>()),
+  listProductCategories: async () => [
+    { name: 'Herbicide', is_active: true, sort_order: 10 },
+    { name: 'Seed', is_active: true, sort_order: 20 },
+  ],
+}));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 
 import Products from './Products';
@@ -185,6 +193,8 @@ describe('Products list margin floors', () => {
     mocks.fetchMarginFloors.mockResolvedValue(new Map([[product.id, 0.15], [otherProduct.id, 0.2]]));
     const input = await openFloorEditor();
     mocks.productsError = new Error('offline');
+    // The floors read after the save returns the saved floor.
+    mocks.fetchMarginFloors.mockResolvedValue(new Map([[product.id, 0.16], [otherProduct.id, 0.2]]));
     fireEvent.change(input, { target: { value: '16' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save (1)' }));
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(
@@ -192,7 +202,13 @@ describe('Products list margin floors', () => {
     expect(await screen.findByText('16%')).toBeInTheDocument();
     expect(screen.getByText('20%')).toBeInTheDocument();
     expect(screen.queryByTitle('Margin floors could not be loaded')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+    // The old rows stay on screen, but editing waits for a fresh list.
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load the latest product list.');
+    expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
+    mocks.productsError = null;
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^edit$/i }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect((screen.getByLabelText('Margin floor percent for Floor Product') as HTMLInputElement).value).toBe('16');
     expect((screen.getByLabelText('Margin floor percent for Other Product') as HTMLInputElement).value).toBe('20');
   });
@@ -201,9 +217,21 @@ describe('Products list margin floors', () => {
     mocks.fetchMarginFloors.mockRejectedValue(new Error('offline'));
     render(<Products />);
     expect(await screen.findByText('Floor Product')).toBeInTheDocument();
-    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('warning', expect.stringMatching(/could not be loaded/)));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load margin floors.');
     fireEvent.click(screen.getByRole('button', { name: /margins/i }));
+    expect(screen.getByTitle('Margin floors could not be loaded')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
     expect(screen.queryByLabelText('Margin floor percent for Floor Product')).not.toBeInTheDocument();
+  });
+
+  it('loads the floors on Try again after they failed, and the floor becomes editable', async () => {
+    mocks.fetchMarginFloors.mockRejectedValueOnce(new Error('offline'));
+    render(<Products />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /margins/i }));
+    expect(screen.getByText('15%')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+    expect((screen.getByLabelText('Margin floor percent for Floor Product') as HTMLInputElement).value).toBe('15');
   });
 });

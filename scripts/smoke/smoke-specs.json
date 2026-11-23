@@ -1046,7 +1046,7 @@
     },
     "booking_planning_fields": {
       "chain": "smoke-booking-planning-fields.sql",
-      "container_prover": "prove-booking-timing-purchasing-plan-real-schema.mjs",
+      "container_prover": "prove-purchasing-plan-reservations-real-schema.mjs",
       "description": "REQUIRES 20270127110000. Bookings Phase A PR 1b: a marked save writes section timing and confidence; an omitted key keeps the saved value, an explicit null clears it, a new section starts unset; an unmarked (old page) save of a booking with planning data is refused PLANNING_RELOAD_REQUIRED and changes nothing, while an unplanned booking still saves the old way; a value outside the lists is a check_violation. Terminal rollback.",
       "covers": [
         "save_quote"
@@ -1057,8 +1057,19 @@
     },
     "purchasing_plan": {
       "chain": "smoke-purchasing-plan.sql",
-      "container_prover": "prove-booking-timing-purchasing-plan-real-schema.mjs",
-      "description": "REQUIRES 20270127110000. get_purchasing_plan nets bookings (by timing and confidence), open orders, active jobs, holds, stock and open POs per product: delivery dating, later POs, cancelled orders and completed jobs, latest-first draw allocation with the drawn part listed as section unknown, over-drawn bookings, timing windows, firm needs without a date, mixed-unit lines (qt and Gal convert; a mismatched pack unit goes to Check units), lead days; an applicator or no signed-in user is refused 42501. Read-only; terminal rollback.",
+      "container_prover": "prove-purchasing-plan-reservations-real-schema.mjs",
+      "description": "REQUIRES 20270127110000 and 20270216110000. get_purchasing_plan nets bookings (by timing and confidence), open orders, active jobs, manual holds, stock and open POs per product: delivery dating, cancelled orders and completed jobs, least-sure latest-first draw allocation with the drawn part listed as section unknown, over-drawn bookings, timing windows, firm needs without a date, mixed-unit lines (qt and Gal convert; a mismatched pack unit goes to Check units), lead days; one allocation per product (Firm, orders, jobs and manual holds first, then Likely, then Maybe; a late PO is cover and never a second buy); a counted booking's or active job's holds are never read; a stale hold reserves the shelf only; a window crossing New Year ends next year and an invalid start month-day falls back the whole window; an applicator or no signed-in user is refused 42501. Read-only; terminal rollback.",
+      "covers": [
+        "get_purchasing_plan"
+      ],
+      "area": [
+        "inventory"
+      ]
+    },
+    "purchasing_plan_reservations": {
+      "chain": "smoke-purchasing-plan-reservations.sql",
+      "container_prover": "prove-purchasing-plan-reservations-real-schema.mjs",
+      "description": "REQUIRES 20270216110000. Contract cases C1-C19 of docs/plans/2026-11-21-booking-reservations-CONTRACT.md: the booking line is the reservation; shelf then POs by date; Firm, orders, jobs and manual holds choose first, then Likely, then Maybe; each need takes the latest supply by its date, then the earliest later supply (late cover, never bought); a stock deficit first; draft Planned bookings count like sent ones and their holds are never read; a stale hold takes the shelf only; overdue follow-up from 14 days past the need date; the horizon never changes the allocation; conservation and order independence; the allocator is not client-callable. Read-only; terminal rollback.",
       "covers": [
         "get_purchasing_plan"
       ],
@@ -1313,6 +1324,26 @@
       "covers": [
         "update_cycle_count_item",
         "complete_cycle_count"
+      ],
+      "area": [
+        "inventory"
+      ]
+    },
+    "po_cost_expected_cost": {
+      "chain": "smoke-po-cost-expected-cost.sql",
+      "description": "REQUIRES 20270217120000 (KI-197). An active admin corrects a [SMOKE] PO line with the cost they saw (saved), then from a stale screen (refused PO_COST_CHANGED_SINCE_LOADED, cost unchanged). Terminal rollback.",
+      "covers": [
+        "set_purchase_order_item_costs"
+      ],
+      "area": [
+        "regression"
+      ]
+    },
+    "create_cycle_count": {
+      "chain": "smoke-create-cycle-count.sql",
+      "description": "KI-160 (20270209160000): one call saves the count and a line per stock row at the location (expected = on-hand); the same key replays the same count; a second start at that location is refused with COUNT_ALREADY_OPEN. Uses one active admin and [SMOKE] fixtures at a [SMOKE] location; terminal rollback.",
+      "covers": [
+        "create_cycle_count"
       ],
       "area": [
         "inventory"
@@ -1659,6 +1690,19 @@
       ],
       "area": [
         "security"
+      ]
+    },
+    "edit_jobs": {
+      "chain": "smoke-edit-jobs.sql",
+      "container_only": true,
+      "container_prover": "prove-edit-jobs-real-schema.mjs",
+      "description": "#1979 PR A (REQUIRES 20270203110000): edit_jobs, the one server function for spray job planning edits, cancel and soft delete. Auth probes (no user, anon, applicator, forged actor, inactive rep) refused with nothing written; mixed-status cancel with skips and hold release; same-key replay and refusal of other ids or another action; delete skips invoiced; every refused shape and value, also on an all-skipped selection; patch meaning (absent keys untouched, null clears); license rule unchanged; billed jobs skipped as invoiced for a rep and an admin, including one billed through a deleted blend ticket; changes + cancel in one call; a refused patch aborts the combined cancel; 500 jobs in one call (timed). Ends in SMOKE_PASS_ROLLBACK.",
+      "covers": [
+        "edit_jobs"
+      ],
+      "area": [
+        "lifecycle",
+        "inventory"
       ]
     },
     "enforce_billed_job_immutability": {

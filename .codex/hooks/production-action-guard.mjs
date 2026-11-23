@@ -71,6 +71,7 @@ import { followUpsDenial, followUpsProblem } from "../../.claude/hooks/followups
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "../../.claude/hooks/pr-claim-lib.mjs";
+import { ownerAcceptedForPr } from "../../.claude/hooks/sol-accept-lib.mjs";
 
 // Sol HIGH finding (2026-08-14, write-scope review): with the Supabase connector
 // write-enabled, ANY mutating Supabase tool Codex can reach is a route to
@@ -127,7 +128,7 @@ const NODE_REPL_TOOL = /(?:^|__)node[_-]?repl(?:__|$)/i;
 // rules every later Codex session starts from.
 // `pr-claim-lib` and the `registry-freshness-lib` it imports joined 2026-11-19
 // (#1948): imported at startup, and the claim decides whether a push or merge is refused.
-const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-risk-lib|coderabbit-skip-lib|teammate-comments-lib|followups-lib|read-only-search-lib|app-repo-identity|session-context-reminder|pr-claim-lib|registry-freshness-lib)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
+const PROTECTED_HARNESS_SOURCE = String.raw`(?:\.claude[\\/]hooks[\\/](?:codex-push-(?:guard|lib)|codex-bot-review-lib|review-proof-guard|live-testdata-lib|sol-risk-lib|coderabbit-skip-lib|sol-accept-lib|teammate-comments-lib|followups-lib|read-only-search-lib|app-repo-identity|session-context-reminder|pr-claim-lib|registry-freshness-lib)\.mjs|\.codex[\\/]hooks[\\/](?:production-action-guard|codex-hook-adapter)\.mjs|scripts[\\/](?:run-claude-review|write-codex-push-proof|write-apply-proofs|overnight-codex-gate|apply-live-testdata-maintenance-20260812)\.mjs|package\.json|\.claude[\\/]settings\.json|\.codex[\\/]hooks\.json)`;
 const PROTECTED_HARNESS_PATH_RE = new RegExp(String.raw`(?:^|[\\/])${PROTECTED_HARNESS_SOURCE}$`, "i");
 const PROTECTED_HARNESS_FRAGMENT_RE = new RegExp(`(?<![\\w.-])${PROTECTED_HARNESS_SOURCE}(?![\\w.-])`, "i");
 // The same set, spelled out, for the glob matcher below: a wildcard token has
@@ -143,6 +144,7 @@ export const PROTECTED_HARNESS_FILES = Object.freeze([
   ".claude/hooks/live-testdata-lib.mjs",
   ".claude/hooks/sol-risk-lib.mjs",
   ".claude/hooks/coderabbit-skip-lib.mjs",
+  ".claude/hooks/sol-accept-lib.mjs", // owner-accepted Sol proofs: which PR they count for (2026-11-22)
   ".claude/hooks/teammate-comments-lib.mjs",
   ".claude/hooks/followups-lib.mjs",
   ".claude/hooks/read-only-search-lib.mjs",
@@ -425,7 +427,7 @@ function proofRequirement(headSha, riskDescription, detail, baseSha) {
 // 2026-09-26): every merge needs the exact-SHA Sol proof, whether or not the diff
 // is classified risky. The classification still runs so the denial can say what
 // is risky, but it no longer opens an allow path of its own.
-function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authoritativeBaseSha, requireProof = false, laterChangesLowRisk = null }) {
+function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authoritativeBaseSha, requireProof = false, laterChangesLowRisk = null, pullRequest = null }) {
   let headSha = sourceSha || "";
   let baseSha = "";
   try {
@@ -557,7 +559,8 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
           try {
             const data = JSON.parse(readFileSync(p, "utf8"));
             // The commits after the reviewed one must be notes only (Sol, 2026-10-29).
-            return proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor: isAncestorLocally, mergeBase: mergeBaseLocally })
+            return proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor: isAncestorLocally, mergeBase: mergeBaseLocally, baseRef: pullRequest?.baseRefName ?? null })
+              && ownerAcceptedForPr(data, { number: pullRequest?.number, url: pullRequest?.url, exactHead: false })
               && typeof laterChangesLowRisk === "function" && laterChangesLowRisk(String(data.head_sha).toLowerCase(), headSha) === true;
           } catch {
             return false;
@@ -579,9 +582,11 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
   // A PR merge may land a head that is behind main (Mason, 2026-10-26;
   // proofValidForMerge): the proof's own base must be in the head and behind
   // GitHub's base. A direct push to main keeps the exact-base binding.
-  const proven = authoritativeBaseSha
-    ? proofValidForMerge({ data: proof, headSha, nowMs, baseSha, isAncestor: isAncestorLocally, mergeBase: mergeBaseLocally })
-    : proofValid(proof, headSha, nowMs, baseSha);
+  // Owner-accepted findings count only for their own pull request at its exact version (Sol gate round 5).
+  const ownerOk = ownerAcceptedForPr(proof, { number: pullRequest?.number, url: pullRequest?.url, exactHead: String(proof?.head_sha).toLowerCase() === String(headSha).toLowerCase() });
+  const proven = ownerOk && (authoritativeBaseSha
+    ? proofValidForMerge({ data: proof, headSha, nowMs, baseSha, isAncestor: isAncestorLocally, mergeBase: mergeBaseLocally, baseRef: pullRequest?.baseRefName ?? null })
+    : proofValid(proof, headSha, nowMs, baseSha));
   if (!proven) {
     return proofRequirement(
       headSha,
@@ -662,7 +667,7 @@ function resolvePullRequest({ request, repoDir, runGh }) {
   // baseRefOid is GitHub's CURRENT tip of the base branch — the commit the merge
   // will actually land on. Without it the gate falls back to local origin/main,
   // which can be stale (Codex P1, 2026-07-25).
-  args.push("--json", "number,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,body,author");
+  args.push("--json", "number,url,baseRefName,baseRefOid,headRefName,headRefOid,mergeStateStatus,reviewDecision,reviews,statusCheckRollup,autoMergeRequest,body,author");
   if (request.repo) args.push("--repo", request.repo);
   const data = JSON.parse(runGh(args, repoDir));
   // baseRefOid is required only for main-bound merges; gatePullRequestMerge
@@ -793,6 +798,7 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh, claim = 
     nowMs,
     runGit,
     requireProof: true,
+    pullRequest,
     laterChangesLowRisk: (proofHead, head) =>
       !solRiskOnGitHub({ baseSha: proofHead, headSha: head, repo: request.repo, gh: (args) => runGh(args, repoDir) }).risky,
   });

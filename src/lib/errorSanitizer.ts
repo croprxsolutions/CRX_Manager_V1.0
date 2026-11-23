@@ -112,7 +112,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^PO_CANCELLED\b/i,
    'This purchase order is cancelled, so its cost cannot change'],
   [/^PO_COST_BELOW_BILLED\b/i,
-   'This would put the purchase order more than 5% below its vendor bills. Void or adjust the bill first'],
+   'This would put the vendor bills more than 5% over what has arrived on the purchase order, or over its ordered total. Void or adjust the bill first'],
   [/^PREPAY_BALANCE_SERVER_ONLY\b/i,
    'A prepay balance changes only through prepayments and payments'],
   [/^RETURN_NOT_FOUND\b/i,
@@ -276,6 +276,9 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
    'A required field is missing'],
   [/value too long for type character varying\(\d+\)/i,
    'The provided value is too long'],
+  // #2156: a blank quantity or amount reaches Postgres as '' and fails the numeric cast (22P02).
+  [/invalid input syntax for type numeric: ""/i,
+   'Nothing was saved. A quantity or amount was left blank; enter a number and try again'],
   [/invalid input syntax for type [^:]+:/i,
    'Invalid input format'],
   [/relation "[^"]+" does not exist/i,
@@ -378,7 +381,8 @@ export function sanitizeError(error: unknown): string {
     return `Nothing was saved. ${setupRefusal.charAt(0).toUpperCase()}${setupRefusal.slice(1)}`;
   }
   // Grower-share line too small to record (20270120150000, Mason 2026-11-17): the server text names the product.
-  const growerShareRounding = message.match(/^FIELD_APP_GROWER_SHARE_ROUNDING:\s*(.+)$/s)?.[1];
+  // A rep's per-acre price below the chemicals' cost (20270201180000, Mason 2026-11-20): the server text says what to do.
+  const growerShareRounding = message.match(/^FIELD_APP_GROWER_SHARE_(?:ROUNDING|BELOW_COST):\s*(.+)$/s)?.[1];
   if (growerShareRounding) {
     return `Nothing was saved. ${growerShareRounding.charAt(0).toUpperCase()}${growerShareRounding.slice(1)}`;
   }
@@ -473,15 +477,26 @@ export function sanitizeError(error: unknown): string {
   // Unit rules (20270121110000): the server sentence names the unit and what to do, so it is kept.
   const unitRule = message.match(/^(?:LINE_UNIT_NOT_STOCK_UNIT|PRODUCT_UNIT_HAS_OPEN_LINES|PRODUCT_UNIT_HAS_STOCK|PRODUCT_UNIT_HAS_HISTORY|STOCK_ROW_UNIT_NOT_STOCK_UNIT|PRODUCT_STOCK_UNIT_UNKNOWN|QUOTE_RATE_UNIT_UNKNOWN|QUOTE_STOCK_UNIT_UNKNOWN):\s*(.+)$/s);
   if (unitRule) return `Nothing was saved. ${unitRule[1].trim()}`;
-  // Delivery lines match their order lines (20270126110000, KI-161): the server sentence says what is wrong.
-  const deliveryLineRule = message.match(/^(?:DELIVERY_LINE_NOT_ON_ORDER|DELIVERY_LINE_PRODUCT_MISMATCH|DELIVERY_LINE_UNIT_MISMATCH|DELIVERY_LINE_DUPLICATE|DELIVERY_ORDER_LOCKED):\s*(.+)$/s);
+  // Delivery lines match their order lines (20270126110000, KI-161) and fit what was ordered (F05,
+  // 20270224100000): the server sentence says what is wrong.
+  const deliveryLineRule = message.match(/^(?:DELIVERY_LINE_NOT_ON_ORDER|DELIVERY_LINE_PRODUCT_MISMATCH|DELIVERY_LINE_UNIT_MISMATCH|DELIVERY_LINE_DUPLICATE|DELIVERY_ORDER_LOCKED|DELIVERY_OVER_ORDER|ORDER_LINE_BELOW_DELIVERIES|ORDER_LINE_QUANTITY_NOT_FINITE|ORDER_LINE_CHECK_ISOLATION):\s*(.+)$/s);
   if (deliveryLineRule) return `Nothing was saved. ${deliveryLineRule[1].trim()}`;
+  // Partial completion figures (20270203120000, #1942) and completing past the order (F05): the server sentence says what to do.
+  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER):\s*(.+)$/s);
+  if (deliveryQuantities) return `The delivery was not completed. ${deliveryQuantities[1].trim()}`;
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.
   const countRule = message.match(/^(?:CYCLE_COUNT_ROW_ALREADY_OPEN|CYCLE_COUNT_ROW_WRONG_PLACE|CYCLE_COUNT_REOPEN_FORBIDDEN|CYCLE_COUNT_REVERSE_BLOCKED|CYCLE_COUNT_QTY_INVALID):\s*(.+)$/s);
   if (countRule) return `Nothing was saved. ${countRule[1].trim()}`;
   // Sale-line triggers (20261105190000, WP-PM-6b): the same rule on quote, order and tier-priced invoice lines.
   const salePriceMissing = message.match(/^(?:QUOTE|ORDER|INVOICE)_PRICE_MISSING:\s*(.+)$/s);
   if (salePriceMissing) return `Nothing was saved. ${salePriceMissing[1].trim()}`;
+  // Customer receipt refusals (close_delivery_receipt, KI-25): plain words, no database code.
+  if (/^DELIVERY_NOT_COMPLETED:.*receipt/s.test(message)) {
+    return 'Nothing was sent. This delivery is not completed any more, so its receipt must not be sent.';
+  }
+  if (/^DELIVERY_RECEIPT_CHANGED(?::|$)/.test(message)) {
+    return 'Nothing was changed. This delivery\'s receipt was queued again since. Reload the page.';
+  }
   if (/^INVOICE_POSTED_LOCKED(?::|$)/.test(message)) {
     return 'This invoice was posted, so its lines, billing shares and field locations cannot change. Unpost it first, then edit.';
   }

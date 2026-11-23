@@ -63,6 +63,27 @@ BEGIN
   INSERT INTO customers (farm_name) VALUES ('[SMOKE] IMMUT '||v_sfx) RETURNING id INTO v_cust;
   INSERT INTO products (product_name, unit_size, epa_registration, product_form, inventory_unit)
     VALUES ('[SMOKE] IMMUT Prod '||v_sfx,'Gal','999999-99999','liquid', 'Gal') RETURNING id INTO v_prodA;
+  -- Governed cost (a bare products insert has none, so billing refuses with COST_BASIS_REQUIRED).
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role','authenticated')::text, true);
+  DECLARE v_pricing jsonb;
+  BEGIN
+    v_pricing := preview_product_cost_basis_changes('product_page', NULL,
+      jsonb_build_array(jsonb_build_object(
+        'product_id', v_prodA, 'row_version', (SELECT pricing_version FROM products WHERE id = v_prodA),
+        'pricing_mode', 'price_driven', 'new_cost', '1.00',
+        'tier1_price', '10.00', 'tier2_price', '10.00', 'tier3_price', '10.00',
+        'change_reason', '[SMOKE] cost fixture', 'price_source', '[SMOKE]',
+        'basis_type', 'manual_override', 'basis_source', 'product_page',
+        'basis_reason', '[SMOKE] cost fixture', 'basis_selection', false)),
+      v_admin, '[SMOKE] im-price-preview-'||v_sfx);
+    PERFORM approve_pricing_change_set((v_pricing->>'change_set_id')::uuid, v_pricing->>'request_fingerprint',
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('product_id', w->>'product_id', 'warning_codes', w->'warning_codes',
+                                                    'reason', '[SMOKE] acknowledged'))
+                  FROM jsonb_array_elements(v_pricing->'warnings') AS w), '[]'::jsonb),
+      NULL, v_admin, '[SMOKE] im-price-approve-'||v_sfx);
+    PERFORM apply_product_cost_basis_change_set((v_pricing->>'change_set_id')::uuid,
+      v_pricing->>'request_fingerprint', v_admin, '[SMOKE] im-price-apply-'||v_sfx);
+  END;
   INSERT INTO fields (customer_id, field_name, crop_type)
     VALUES (v_cust,'[SMOKE] IMMUT F1 '||v_sfx,'corn') RETURNING id INTO v_field;
 
@@ -151,7 +172,7 @@ BEGIN
   END;
 
   -- Sanity: nothing above mutated the row (still invoiced, linked, original price).
-  SELECT * INTO v_jobR FROM jobs WHERE id=v_job;
+  SELECT status, invoice_id, total_price_cents, deleted_at INTO v_jobR.status, v_jobR.invoice_id, v_jobR.total_price_cents, v_jobR.deleted_at FROM jobs WHERE id=v_job;
   IF v_jobR.status<>'invoiced' OR v_jobR.invoice_id<>v_inv
      OR v_jobR.total_price_cents<>50000 OR v_jobR.deleted_at IS NOT NULL THEN
     RESET ROLE; RAISE EXCEPTION 'SMOKE_FAIL: a blocked path leaked a mutation (% / % / % / %)',

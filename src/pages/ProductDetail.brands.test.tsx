@@ -14,6 +14,7 @@ const H = vi.hoisted(() => ({
   brandSection: vi.fn(),
   savedPayload: null as Record<string, unknown> | null,
   optionLoadFailed: false,
+  unitsFailed: false,
   created: null as { parent: Record<string, unknown>; size: Record<string, unknown> } | null,
 }));
 
@@ -92,9 +93,14 @@ vi.mock('../lib/db', async () => {
     return builder;
   }
 
-  const from = vi.fn((table: string) => table === 'products'
-    ? chainable({ data: H.product ? [H.product] : [], error: null })
-    : chainable({ data: [], error: null }));
+  const from = vi.fn((table: string) => {
+    if (table === 'products') return chainable({ data: H.product ? [H.product] : [], error: null });
+    if (table === 'unit_conversions') {
+      return chainable(H.unitsFailed ? { data: null, error: { message: 'units unavailable' } }
+        : { data: [{ id: 'u-gal', unit: 'gal', factor_oz: 128, unit_type: 'volume', notes: null }, { id: 'gal', unit: 'Gal', factor_oz: 128, unit_type: 'liquid', notes: null }], error: null });
+    }
+    return chainable({ data: [], error: null });
+  });
 
   const updateProduct = vi.fn((payload: Record<string, unknown>) => {
     H.savedPayload = payload;
@@ -187,6 +193,7 @@ vi.mock('../lib/productSetup', async (importOriginal) => ({
 
 vi.mock('../lib/productUseTimings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/productUseTimings')>()),
+  listProductCropOptions: async () => [],
   listProductUseTimingOptions: async () => {
     if (H.optionLoadFailed) throw new Error('options unavailable');
     return [
@@ -223,6 +230,7 @@ describe('ProductDetail brands section', () => {
     H.savedPayload = null;
     H.created = null;
     H.optionLoadFailed = false;
+    H.unitsFailed = false;
   });
 
   it('names a brand on a cancelled registration in the page banner', async () => {
@@ -397,6 +405,9 @@ describe('ProductDetail brands section', () => {
     render(<ProductDetail />);
     fireEvent.change(screen.getByRole('textbox', { name: /Product Name/ }), { target: { value: 'New Herbicide' } });
     fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
+    const unit = screen.getByLabelText('Inventory Unit');
+    await within(unit).findByRole('option', { name: 'Gal' });
+    fireEvent.change(unit, { target: { value: 'Gal' } });
     fireEvent.change(await screen.findByRole('combobox', { name: 'Vendor' }), { target: { value: 'New Vendor' } });
     await screen.findByRole('option', { name: 'Herbicide' });
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Herbicide' } });
@@ -410,6 +421,9 @@ describe('ProductDetail brands section', () => {
     const created = render(<ProductDetail />);
     fireEvent.change(screen.getByRole('textbox', { name: /Product Name/ }), { target: { value: 'New Herbicide' } });
     fireEvent.change(screen.getByLabelText('Product Form'), { target: { value: 'liquid' } });
+    const unit = screen.getByLabelText('Inventory Unit');
+    await within(unit).findByRole('option', { name: 'Gal' });
+    fireEvent.change(unit, { target: { value: 'Gal' } });
     await screen.findByRole('option', { name: 'Herbicide' });
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'Herbicide' } });
     const group = await screen.findByRole('group', { name: 'Use Timing' });
@@ -434,6 +448,44 @@ describe('ProductDetail brands section', () => {
     expect(await screen.findByText('Use timings could not be loaded. Refresh before changing them.')).toBeInTheDocument();
     expect(screen.getByText('Pre-Emerge Corn; Post-Emerge Soybeans')).toBeInTheDocument();
     expect(within(screen.getByRole('group', { name: 'Use Timing' })).queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
+  it('shows saved timing codes when options fail to load and the old text is blank', async () => {
+    H.product = baseProduct({ use_timings: ['pre_emerge_corn'], use_timing: null });
+    H.optionLoadFailed = true;
+    render(<ProductDetail />);
+    expect(await screen.findByText('pre_emerge_corn')).toBeInTheDocument();
+  });
+
+  it('refuses a category change it cannot check while timings are unloaded, and Try again recovers', async () => {
+    H.product = baseProduct({ use_timings: ['pre_emerge_corn'] });
+    H.optionLoadFailed = true;
+    render(<ProductDetail />);
+    const banner = await screen.findByText(/Could not load use timings\./);
+    await parentChecked();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Category' }), { target: { value: 'Foliar Fertilizer' } });
+    expect(H.toast).toHaveBeenCalledWith('error', 'Use timings have not loaded. Use Try again before changing the category.');
+    expect(screen.queryByText('This product has use timings. Changing the category clears them.')).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Category' })).toHaveValue('Herbicide');
+    expect(screen.queryByRole('button', { name: 'Manage crop and timing choices' })).not.toBeInTheDocument();
+    H.optionLoadFailed = false;
+    fireEvent.click(within(banner.parentElement!).getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByRole('checkbox', { name: 'Pre-Emerge Corn' })).toBeChecked();
+    // This fixture has no cost-basis workspace, so only the pick-list banner is checked.
+    expect(screen.queryByText(/Could not load use timings/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Manage crop and timing choices' })).toBeInTheDocument();
+  });
+
+  it('keeps Product Form off while units are unloaded, and Try again turns it on', async () => {
+    H.routeId = 'new';
+    H.unitsFailed = true;
+    render(<ProductDetail />);
+    const banner = await screen.findByText(/Could not load units\./);
+    expect(screen.getByLabelText('Product Form')).toBeDisabled();
+    H.unitsFailed = false;
+    fireEvent.click(within(banner.parentElement!).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.getByLabelText('Product Form')).toBeEnabled());
+    expect(screen.queryByText(/Could not load/)).not.toBeInTheDocument();
   });
 
   it('cancels or confirms clearing timings on a category change', async () => {

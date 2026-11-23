@@ -5,6 +5,7 @@ import Input from '../ui/Input';
 import Modal from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
+import { useLoad } from '../../hooks/useLoad';
 import { hasRpcCode, RpcErrorCodes, sanitizeError } from '../../lib/db';
 import { isDefinitiveRpcRejection } from '../../lib/idempotency';
 import { formatCents } from '../../lib/money';
@@ -70,6 +71,36 @@ function PreviewDetails({ shown }: { shown: ToteFillPreview }) {
   );
 }
 
+/** The preview the admin asked for (null = none), through useLoad. */
+function useTotePreview(toteProductId: string, requested: number | null) {
+  // A refusal (e.g. wrong stock unit) is shown in the window, so not reported to Sentry.
+  const read = useLoad(
+    requested === null ? null : `${toteProductId}:${requested}`,
+    () => previewToteFill(toteProductId, requested as number),
+    { report: false },
+  );
+  const loaded = read.status === 'loaded' ? read : null;
+  return {
+    reload: read.reload,
+    // A failed or running re-preview never leaves the old counts confirmable.
+    preview: loaded && !loaded.stale && !loaded.refreshing ? loaded.data : null,
+    // true = a refresh failed after a preview had loaded (useLoad keeps no error for that case).
+    previewFailed: read.status === 'failed' ? read.error : loaded?.stale && !loaded.refreshing ? true : null,
+    previewing: read.status === 'loading' || Boolean(loaded?.refreshing),
+  };
+}
+
+function PreviewFailed({ error, onRetry, disabled }: { error: unknown; onRetry: () => void; disabled: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded border-l-4 border-red-500 bg-red-50 p-3 text-sm text-red-800" role="alert">
+      <span>
+        {error === true ? 'The preview could not be refreshed. Nothing was filled; try again before filling.' : `Preview could not be loaded: ${sanitizeError(error)}`}
+      </span>
+      <Button size="sm" variant="secondary" showChevron={false} onClick={onRetry} disabled={disabled}>Try again</Button>
+    </div>
+  );
+}
+
 /**
  * Fill whole totes from the tote's Bulk (admins only). The admin previews first; the fill sends that
  * preview back and the database refuses it if stock, units, source or catalog cost changed since.
@@ -83,27 +114,23 @@ export default function ToteFillModal({ toteProductId, toteName, profileId, onCl
 }) {
   const { toast } = useToast();
   const [totes, setTotes] = useState('1');
-  const [preview, setPreview] = useState<ToteFillPreview | null>(null);
+  // The tote count the admin asked to preview; null until Preview, and again after the count changes.
+  const [requested, setRequested] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   // A fill whose answer was lost: it may have saved. Only the same preview and key may be resent,
   // so the database returns the first result instead of filling twice.
   const [unsure, setUnsure] = useState(false);
+  const previewRead = useTotePreview(toteProductId, requested);
+  const { preview, previewFailed, previewing } = previewRead;
   const { getKey, resetKey } = useIdempotencyKey('fill_tote_from_bulk', profileId, JSON.stringify(preview));
 
   const toteCount = /^\d{1,4}$/.test(totes.trim()) ? Number(totes.trim()) : NaN;
   const totesValid = Number.isInteger(toteCount) && toteCount >= 1;
   const shown = preview?.totes === toteCount ? preview : null;
 
-  const loadPreview = async () => {
-    setBusy(true);
-    try {
-      setPreview(await previewToteFill(toteProductId, toteCount));
-    } catch (error) {
-      setPreview(null);
-      toast('error', sanitizeError(error));
-    } finally {
-      setBusy(false);
-    }
+  const loadPreview = () => {
+    if (requested === toteCount) void previewRead.reload();
+    else setRequested(toteCount);
   };
 
   const confirm = async () => {
@@ -127,8 +154,7 @@ export default function ToteFillModal({ toteProductId, toteName, profileId, onCl
       toast('error', sanitizeError(error));
       if (hasRpcCode(error, RpcErrorCodes.TOTE_FILL_PREVIEW_CHANGED)) {
         // Show what would be recorded now; the admin confirms again only after seeing it.
-        setBusy(false);
-        await loadPreview();
+        void previewRead.reload();
         return;
       }
     } finally {
@@ -151,19 +177,22 @@ export default function ToteFillModal({ toteProductId, toteName, profileId, onCl
             step={1}
             value={totes}
             disabled={busy || unsure}
-            onChange={(e) => { setTotes(e.target.value); setPreview(null); }}
+            onChange={(e) => { setTotes(e.target.value); setRequested(null); }}
             error={totes.trim() !== '' && !totesValid ? 'Whole totes only, 1 or more' : undefined}
           />
-          <Button variant="secondary" onClick={loadPreview} loading={busy && !shown} disabled={!totesValid || busy || unsure}>
+          <Button variant="secondary" onClick={loadPreview} loading={previewing} disabled={!totesValid || busy || unsure || previewing}>
             Preview
           </Button>
         </div>
 
+        {previewFailed !== null && (
+          <PreviewFailed error={previewFailed} onRetry={() => { void previewRead.reload(); }} disabled={busy || unsure} />
+        )}
         {shown && <PreviewDetails shown={shown} />}
 
         <div className="flex justify-end gap-2">
           <Button variant="secondary" showChevron={false} onClick={close} disabled={busy}>Cancel</Button>
-          <Button onClick={confirm} loading={busy && Boolean(shown)} disabled={!shown || busy}>
+          <Button onClick={confirm} loading={busy} disabled={!shown || busy}>
             {unsure ? 'Try Again' : shown && shown.shortfall > 0 ? 'Fill Anyway' : 'Fill Tote'}
           </Button>
         </div>

@@ -43,8 +43,14 @@ vi.mock('../lib/db', () => ({
     ACTOR_MISMATCH: 'ACTOR_MISMATCH',
     INVOICE_SEASON_DATE_CHANGE_NOT_ALLOWED: 'INVOICE_SEASON_DATE_CHANGE_NOT_ALLOWED',
     INVOICE_FILED_SEASON_CHANGE_NOT_ALLOWED: 'INVOICE_FILED_SEASON_CHANGE_NOT_ALLOWED',
+    FIELD_APP_PAYER_CHANGED: 'FIELD_APP_PAYER_CHANGED',
   },
   hasRpcCode: () => false,
+  // Same reading as the real helper: "CODE: sentence" gives the sentence (#2164 tests).
+  rpcCodeDetail: (err: unknown, code: string) => {
+    const m = String((err as { message?: string } | null)?.message ?? '');
+    return m.startsWith(`${code}:`) ? m.slice(code.length + 1).trim() : null;
+  },
 }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn().mockResolvedValue(undefined) }));
@@ -352,6 +358,72 @@ describe('FieldApplicationInvoice — first Save of a new invoice', () => {
     expect(saveKey(2)).not.toBe(saveKey(0));
     expect((saveCalls()[2][1] as { p_invoice: { header_notes: string } }).p_invoice.header_notes).toBe('Spray south field instead');
     await waitFor(() => expect(router.state.location.pathname).toBe(`/invoices/field-app/${CREATED_ID}`));
+  });
+
+  // #2164: the reply to the first create was lost, then the fields changed farm. The follow-up
+  // write onto the invoice that create made is refused, and the note says that draft exists.
+  const PAYER_WHY = 'Nothing was saved. These fields bill Beta Farms, which does not match the one farm this invoice bills, and an invoice cannot change which farm it bills.';
+  function mockLostCreateThenPayerRefusal(followUp: () => Promise<unknown>) {
+    let createCalls = 0;
+    mockRpc.mockImplementation((name: string, args: { p_invoice_id: string | null }) => {
+      if (name === 'save_field_app_invoice') {
+        createCalls += 1;
+        if (createCalls === 1) return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
+        // The retry changed fields under the unanswered key: the database refuses it and hands back the first receipt.
+        if (createCalls === 2) return Promise.resolve({ data: null, error: { message: 'IDEMPOTENCY_INTENT_MISMATCH',
+          details: JSON.stringify({ operation: 'save_field_app_invoice', result: { invoice_ids: [args.p_invoice_id ?? CREATED_ID], invoice_group_id: null } }) } });
+        return followUp();
+      }
+      return Promise.resolve({ data: { success: true }, error: null });
+    });
+  }
+
+  it('#2164: a farm-change refusal after a lost create says the earlier Save did make the draft', async () => {
+    mockLostCreateThenPayerRefusal(() => Promise.resolve({ data: null, error: { message: `FIELD_APP_PAYER_CHANGED: ${PAYER_WHY}` } }));
+    const router = await renderAt();
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Save failed')));
+    editHeaderNotes('Spray south field instead');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(PAYER_WHY);
+    const note = 'An earlier Save from this page already created this invoice, and it still exists.';
+    expect(alert).toHaveTextContent(note);
+    expect(savedInvoiceId(2)).toBe(CREATED_ID);
+    expect(addressParam(router, 'created')).toBe(CREATED_ID);
+
+    // Save again with the same fields: refused again, and the note stays (the draft still holds the first values).
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(4));
+    expect(savedInvoiceId(3)).toBe(CREATED_ID);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(note));
+  });
+
+  it('#2164: a farm-change refusal that answers after the user left shows nothing', async () => {
+    let refuse: () => void = () => {};
+    mockLostCreateThenPayerRefusal(() => new Promise((resolve) => {
+      refuse = () => resolve({ data: null, error: { message: `FIELD_APP_PAYER_CHANGED: ${PAYER_WHY}` } });
+    }));
+    const router = await renderAt();
+    editHeaderNotes('Spray north field');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringContaining('Save failed')));
+    editHeaderNotes('Spray south field instead');
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(saveCalls()).toHaveLength(3));
+
+    await act(async () => {
+      await router.navigate(NEW_PATH);
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+    await waitFor(() => expect(router.state.location.search).toBe(''));
+    mockToast.mockClear();
+    await act(async () => refuse());
+
+    expect(mockToast).not.toHaveBeenCalled();
+    expect(screen.queryByText(new RegExp(PAYER_WHY.slice(0, 30)))).toBeNull();
+    expect(headerNotes().value).toBe('');
   });
 
   it('values A, then B, then A again, all under one unanswered key: the last retry still writes A', async () => {

@@ -13,6 +13,7 @@ import {
   commitRateReview,
   generateRateReviewWorkbook,
   labelCheckText,
+  parentChangedText,
   loadRateReviewWorkbook,
   parseRateReviewWorkbook,
   previewRateReview,
@@ -44,17 +45,20 @@ const isStoredOutcome = (value: unknown) => {
     && versionNumber(value.expected_outcome_version) && nullableText(value.note)
     && (value.outcome === null || value.outcome === 'approved_default' || value.outcome === 'no_per_acre_default' || value.outcome === 'needs_label_data');
 };
+const isLabelCheck = (value: unknown) => isRecord(value) && typeof value.status === 'string'
+  && (value.status !== 'above' || (Array.isArray(value.above) && value.above.every(isRecord)))
+  && (value.why == null || typeof value.why === 'string');
+// The server sends NULLIF(btrim(..), '') text: never empty, but it may hold a tab, so no .trim() here (Sol r1).
+const filledText = (value: unknown) => typeof value === 'string' && value !== '';
+const isParentChanged = (value: unknown) => isRecord(value) && filledText(value.was) && (value.now === null || filledText(value.now));
 const isStoredPreviewRow = (value: unknown, count: number) => {
   if (!isRecord(value)) return false;
   if (typeof value.index !== 'number' || !Number.isInteger(value.index) || value.index < 0 || value.index >= count
       || typeof value.status !== 'string') return false;
   if (['rate_id', 'parent_id', 'name', 'outcome', 'note', 'problem'].some((field) => value[field] !== undefined && !nullableText(value[field]))) return false;
   if (value.actions != null && (!Array.isArray(value.actions) || !value.actions.every((action: unknown) => typeof action === 'string'))) return false;
-  if (value.label_check != null) {
-    if (!isRecord(value.label_check) || typeof value.label_check.status !== 'string') return false;
-    if (value.label_check.status === 'above' && (!Array.isArray(value.label_check.above) || !value.label_check.above.every(isRecord))) return false;
-    if (value.label_check.why != null && typeof value.label_check.why !== 'string') return false;
-  }
+  if (value.label_check != null && !isLabelCheck(value.label_check)) return false;
+  if (value.parent_changed !== undefined && !isParentChanged(value.parent_changed)) return false;
   return true;
 };
 const isPendingRateReview = (value: unknown): value is PendingRateReview => {
@@ -223,7 +227,7 @@ function previewRows(upload: ParsedRateReview, preview: RateReviewResult) {
 type Shown = ReturnType<typeof previewRows>;
 
 /** Problems, the changes Confirm will save (with each rate's values), and outcomes the save will clear. */
-function PreviewDetail({ shown, upload }: { shown: Shown; upload: ParsedRateReview }) {
+function PreviewDetail({ shown, upload, saved }: { shown: Shown; upload: ParsedRateReview; saved: boolean }) {
   return (
     <>
       {shown.problems.length > 0 && (
@@ -249,7 +253,8 @@ function PreviewDetail({ shown, upload }: { shown: Shown; upload: ParsedRateRevi
                   <td>Draft Rates {r.sheetRow}</td><td>{r.label}</td>
                   <td>{(r.actions ?? []).map((a) => (r.isNew && a === 'save' ? 'add' : ACTION_WORDS[a] ?? a)).join(', ')}</td>
                   <td>{rateValueText(upload.rates[r.index])}</td>
-                  <td className={r.label_check?.status === 'above' || r.label_check?.status === 'not_checked' ? 'text-amber-800' : ''}>{labelCheckText(r.label_check)}</td>
+                  <td className={r.label_check?.status === 'above' || r.label_check?.status === 'not_checked' ? 'text-amber-800' : ''}>{labelCheckText(r.label_check)}
+                    {r.parent_changed && !saved && <span className="block whitespace-pre-wrap text-amber-800">{parentChangedText(r.parent_changed)}</span>}</td>
                 </tr>
               ))}
               {shown.outcomes.filter((o) => o.status === 'change').map((o) => (
@@ -297,12 +302,15 @@ function ReviewPreview({ upload, preview, saved, pending, busy, commitInFlight, 
       {pending && !saved && !commitInFlight && (
         <p className="text-amber-800">Your earlier Confirm got no reply. This preview may no longer describe the current database. {pending.needsCheck ? 'The saved retry cannot be used safely. Download a fresh workbook and check these rows before clearing this reminder.' : pending.expired ? 'The retry window has passed. Download a fresh workbook and check these rows before clearing this reminder.' : `This preview is from ${new Date(pending.sentAt).toLocaleString()}. Confirm again to request the original result with the same key.`}</p>
       )}
-      {shown && <PreviewDetail shown={shown} upload={upload} />}
+      {shown && <PreviewDetail shown={shown} upload={upload} saved={!!saved} />}
       {shown && shown.changes.length === 0 && shown.problems.length === 0 && (
         <p className="text-secondary">Everything in this file already matches the database. Nothing to save.</p>
       )}
       {saved
-        ? <p className="text-green-700">Saved {count(saved.rates_changed, 'rate', 'rates')} and {count(saved.outcomes_changed, 'outcome', 'outcomes')}. Download a fresh workbook to continue.</p>
+        ? <><p className="text-green-700">Saved {count(saved.rates_changed, 'rate', 'rates')} and {count(saved.outcomes_changed, 'outcome', 'outcomes')}. Download a fresh workbook to continue.</p>
+          {saved.rates.filter((r) => r.parent_changed).map((r) => (
+            <p key={`changed-${r.index}`} className="whitespace-pre-wrap text-amber-800">Draft Rates {upload.rates[r.index]?.sheetRow ?? '?'} ({r.name ?? upload.rates[r.index]?.parent_name ?? 'unknown parent'}): {parentChangedText(r.parent_changed, true)}</p>
+          ))}</>
         : shown && <Button onClick={onConfirm} loading={busy} disabled={busy || shown.blocked || !!pending?.expired || !profileId}>
           Confirm rate review ({count(shown.changes.length, 'change', 'changes')})
         </Button>}

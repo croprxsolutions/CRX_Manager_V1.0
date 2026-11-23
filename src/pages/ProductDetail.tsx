@@ -48,6 +48,7 @@ import { Sentry } from '../lib/sentry';
 import { unitOptionsForForm, rateUnitOptionsForProduct, isKnownUnit, PRODUCT_FORM_OPTIONS } from '../lib/units';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
+import { useLoad } from '../hooks/useLoad';
 import { usePhoneSections } from '../hooks/usePhoneSections';
 import type { CostHistory, EpaLookupResult, Product, ProductBrand, ProductRateLock, UnitConversion } from '../types';
 import {
@@ -149,6 +150,12 @@ function pricingChanged(
   return PRODUCT_PRICING_FIELDS.some((field) => product[field] !== persisted[field]);
 }
 
+/** Why vendor changes are off (they re-read the whole product, which would replace unsaved edits). */
+function vendorLockReason(loading: boolean, unsaved: boolean): string | null {
+  if (loading) return 'Vendor changes wait until this Product finishes saving or loading.';
+  return unsaved ? 'Save or discard your Product changes before changing vendors.' : null;
+}
+
 function productDetailsChanged(product: Partial<Product>, persisted: Product | null): boolean {
   if (!persisted) return false;
   return PRODUCT_NONPRICING_FIELDS.some((field) => field === 'use_timings'
@@ -244,6 +251,26 @@ function ParentOwnedHint({ parentName, identity = false }: { parentName?: string
         : 'Read-only until the parent loads.'}
     </p>
   );
+}
+
+const NO_ROWS: never[] = [];
+
+async function readUnitConversions(): Promise<UnitConversion[]> {
+  const { data, error } = await supabase.from('unit_conversions').select('*').order('unit');
+  if (error) throw error;
+  // Every product form needs units; an empty answer would unlock Product Form with nothing to pick.
+  if (!Array.isArray(data) || data.length === 0) throw new Error('The unit list came back empty.');
+  return data as UnitConversion[];
+}
+
+// Vendor and manufacturer stay free text; these are only suggestions and near-match warnings.
+async function readVendorManufacturerChoices(): Promise<{ vendors: string[]; manufacturers: string[] }> {
+  // Every product's choices, page by page (Goal 4): one read stops silently at 1000 rows.
+  const { data, error } = await fetchAllRows((from, to) => pageWithList(supabase.from('products').select('id, vendor, manufacturer', { count: 'exact' }).order('id').range(from, to)));
+  if (error) throw error;
+  if (!data) throw new Error('The vendor and manufacturer list came back empty.');
+  const distinct = (values: Array<string | null>) => [...new Set(values.filter(Boolean) as string[])].sort();
+  return { vendors: distinct(data.map((p) => p.vendor)), manufacturers: distinct(data.map((p) => p.manufacturer)) };
 }
 
 export default function ProductDetail() {
@@ -346,21 +373,33 @@ export default function ProductDetail() {
       epa_registration: addSizeTo.generic_epa_registration ?? '',
     } : {}),
   }));
-  const [costHistory, setCostHistory] = useState<CostHistory[]>([]);
-  const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
-  const [categoryOptions, setCategoryOptions] = useState<ProductCategory[]>([]);
-  const [timingOptions, setTimingOptions] = useState<UseTimingOption[]>([]);
-  const [cropOptions, setCropOptions] = useState<CropOption[]>([]);
+  // The page's pick lists. An action that needs a list stays off until it has loaded; a failed one shows Try again.
+  const unitsRead = useLoad('unit-conversions', readUnitConversions, { report: { tags: { source: 'fetch', action: 'load_unit_conversions' } } });
+  const categoriesRead = useLoad<ProductCategory[]>('product-categories', listProductCategories, { report: {} });
+  const timingsRead = useLoad<UseTimingOption[]>('product-use-timings', listProductUseTimingOptions, { report: false });
+  // Crop names only label the picker's groups; without them each group shows its crop code.
+  const cropsRead = useLoad<CropOption[]>('product-crops', listProductCropOptions, { report: false });
+  const choicesRead = useLoad('product-vendor-manufacturer-choices', readVendorManufacturerChoices, { report: { tags: { source: 'fetch', action: 'load_product_options' } } });
+  const unitsReady = unitsRead.status === 'loaded';
+  const categoriesReady = categoriesRead.status === 'loaded';
+  const timingsReady = timingsRead.status === 'loaded';
+  const cropsReady = cropsRead.status === 'loaded';
+  const unitConversions = unitsReady ? unitsRead.data : NO_ROWS;
+  const categoryOptions = categoriesReady ? categoriesRead.data : NO_ROWS;
+  const timingOptions = timingsReady ? timingsRead.data : NO_ROWS;
+  const cropOptions = cropsReady ? cropsRead.data : NO_ROWS;
+  const vendorOptions = choicesRead.status === 'loaded' ? choicesRead.data.vendors : NO_ROWS;
+  const manufacturerOptions = choicesRead.status === 'loaded' ? choicesRead.data.manufacturers : NO_ROWS;
+  const failedLists = ([
+    [unitsRead, 'units'], [categoriesRead, 'categories'], [timingsRead, 'use timings'],
+    [cropsRead, 'crop names'], [choicesRead, 'vendor and manufacturer suggestions'],
+  ] as const).filter(([read]) => read.status === 'failed');
   const [timingChoicesOpen, setTimingChoicesOpen] = useState(false);
-  const [timingLoadFailed, setTimingLoadFailed] = useState(false);
   const [pendingCategory, setPendingCategory] = useState<string | null | undefined>(undefined);
-  const [categoryLoadFailed, setCategoryLoadFailed] = useState(false);
   const [nameRequired, setNameRequired] = useState(false);
+  const [unitRequired, setUnitRequired] = useState(false);
   const [reiDraft, setReiDraft] = useState('');
   const [phiDraft, setPhiDraft] = useState('');
-  const [vendorOptions, setVendorOptions] = useState<string[]>([]);
-  const [manufacturerOptions, setManufacturerOptions] = useState<string[]>([]);
-  const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
   const [costModal, setCostModal] = useState(false);
   const [newCost, setNewCost] = useState('');
@@ -378,21 +417,59 @@ export default function ProductDetail() {
   const [applyingPricing, setApplyingPricing] = useState(false);
   const [pricingReloadRequired, setPricingReloadRequired] = useState(false);
   const [pricingReloading, setPricingReloading] = useState(false);
-  const [costBasisWorkspace, setCostBasisWorkspace] = useState<ProductCostBasisWorkspace | null>(null);
-  const [costBasisLoading, setCostBasisLoading] = useState(false);
-  const [costBasisLoadFailed, setCostBasisLoadFailed] = useState(false);
   const [costBasisBusy, setCostBasisBusy] = useState(false);
   const [costBasisReason, setCostBasisReason] = useState('');
   const [manualBasisCost, setManualBasisCost] = useState('');
   const [costBasisPricingBehavior, setCostBasisPricingBehavior] = useState<CostBasisPricingBehavior>('keep_sell_prices');
   const [priceHistoryReloadToken, setPriceHistoryReloadToken] = useState(0);
-  const [costHistoryLoaded, setCostHistoryLoaded] = useState(false);
-  const [costHistoryLoadFailed, setCostHistoryLoadFailed] = useState(false);
   const pricingPreviewIntentRef = useRef<string | null>(null);
-  const costBasisWorkspaceRequestRef = useRef(0);
   const pricingPreviewRequestRef = useRef(0);
   // Committed product id, read after awaits to drop results for a product the user has left.
   const productIdRef = useLatestRef(id);
+  // The product itself. Cost is admin-only (Mason, 2026-10-15), so a role change is a different read.
+  // product null = no such product. A failed first read shows Try again, never an empty form.
+  // Wrapped so every successful read is a new object, even when the client hands back the same row.
+  const productRead = useLoad<{ product: Product | null }>(isNew || !id ? null : `product:${id}:${isAdmin}`, async () => {
+    const { data, error } = await supabase.from('products').select(PRODUCT_COLUMNS).eq('id', id!).maybeSingle();
+    if (error) throw error;
+    return { product: await withAdminCost('products', data as Product | null, isAdmin) };
+  }, { report: { tags: { read: 'product_detail_product' } } });
+  const reloadProduct = productRead.reload;
+  // KI-170: a vendor change re-reads the product (the database copies the preferred vendor onto it); Save and
+  // the copy actions wait for any product read in flight, so they never use an older vendor.
+  // A vendor change that is still saving counts too: its re-read will replace the form when it lands.
+  const [vendorSaving, setVendorSaving] = useState(false);
+  const productReading = vendorSaving || (productRead.status === 'loaded' && productRead.refreshing);
+  // A failed refresh keeps the form on screen but locks editing until a fresh read lands.
+  const productStale = productRead.status === 'loaded' && productRead.stale;
+  const reloadRequired = pricingReloadRequired || productStale;
+  // cost_history is admin-only under RLS (the panel only renders for admins).
+  const costHistoryRead = useLoad<CostHistory[]>(isAdmin && !isNew && id ? `cost-history:${id}` : null, async () => {
+    const { data, error } = await supabase
+      .from('cost_history')
+      .select('*')
+      .eq('product_id', id!)
+      // The starting snapshot (20261026140000) records no change; the Sell Price History card shows it.
+      .neq('change_source', 'starting_snapshot')
+      .order('changed_at', { ascending: false })
+      .limit(20);
+    if (error) throw error;
+    if (!Array.isArray(data)) throw new Error('cost history read returned no list');
+    return data as CostHistory[];
+  }, { report: { tags: { read: 'product_detail_cost_history' } } });
+  const reloadCostHistory = costHistoryRead.reload;
+  const costHistory = costHistoryRead.status === 'loaded' ? costHistoryRead.data : NO_ROWS;
+  const costBasisRead = useLoad<ProductCostBasisWorkspace>(isAdmin && !isNew && id ? `cost-basis:${id}` : null, async () => {
+    const workspace = await getProductCostBasisWorkspace(id!);
+    if (workspace.product.id !== id) throw new Error('Cost-basis workspace returned the wrong Product.');
+    return workspace;
+  }, { report: { tags: { read: 'product_detail_cost_basis' } } });
+  const reloadCostBasis = costBasisRead.reload;
+  const costBasisWorkspace = costBasisRead.status === 'loaded' ? costBasisRead.data : null;
+  const costBasisLoading = costBasisRead.status === 'loading';
+  const costBasisLoadFailed = costBasisRead.status === 'failed';
+  // Refreshing or out of date: the options shown may be from before a pricing change, so no selection.
+  const costBasisUnsure = costBasisRead.status === 'loaded' && (costBasisRead.refreshing || costBasisRead.stale);
   const [persistedLabelFields, setPersistedLabelFields] = useState<{
     signalWord: Product['signal_word'];
     epaRegistration: string | null;
@@ -423,6 +500,25 @@ export default function ProductDetail() {
   // Lets the navigate() right after a successful save past the prompt (see useUnsavedChanges).
   const skipUnsavedPromptRef = useRef(false);
   const blocker = useUnsavedChanges(isDirty || marginFloorDirty, skipUnsavedPromptRef);
+
+  // Each fresh product read replaces the form (adjusted during render, so the old form never shows with it).
+  const [installedRead, setInstalledRead] = useState<{ product: Product | null } | null>(null);
+  const freshRead = productRead.status === 'loaded' ? productRead.data : null;
+  const freshProduct = freshRead?.product;
+  if (freshRead && freshProduct && freshRead !== installedRead) {
+    setInstalledRead(freshRead);
+    setProduct(freshProduct);
+    setNameRequired(false);
+    setReiDraft(freshProduct.rei_hours == null ? '' : String(freshProduct.rei_hours));
+    setPhiDraft(freshProduct.phi_days == null ? '' : String(freshProduct.phi_days));
+    setPersistedProduct(freshProduct);
+    setPricingMode(defaultPricingMode(freshProduct));
+    setPricingMoneyDrafts({});
+    setPricingMarginDrafts({});
+    setPricingReloadRequired(false);
+    setIsDirty(false);
+    setPersistedLabelFields({ signalWord: freshProduct.signal_word, epaRegistration: freshProduct.epa_registration });
+  }
   // On phones the page folds. Pricing opens first; someone with no pricing to edit starts on the details.
   const { sectionProps, reveal: revealPhoneSection } = usePhoneSections(
     isNew || !isAdmin ? ['information', 'pricing'] : ['pricing'],
@@ -464,105 +560,14 @@ export default function ProductDetail() {
     registrationStatus.lookup,
   );
 
-  const fetchProduct = useCallback(async (reportError = true): Promise<boolean> => {
-    const { data, error } = await supabase.from('products').select(PRODUCT_COLUMNS).eq('id', id!).maybeSingle();
-    if (error) {
-      Sentry.captureException(error);
-      if (reportError) toast('error', 'Failed to load product');
-      setLoading(false);
-      return false;
-    }
-    // Cost is admin-only (Mason, 2026-10-15).
-    let withCost: Product | null;
-    try {
-      withCost = await withAdminCost('products', data as Product | null, isAdmin);
-    } catch (costError) {
-      Sentry.captureException(costError);
-      if (reportError) toast('error', 'Failed to load product');
-      setLoading(false);
-      return false;
-    }
-    // The admin cost read is a second await: an older load must not install its product.
-    if (productIdRef.current !== id) return false;
-    if (withCost) {
-      const loadedProduct = withCost;
-      setProduct(loadedProduct);
-      setNameRequired(false);
-      setReiDraft(loadedProduct.rei_hours == null ? '' : String(loadedProduct.rei_hours));
-      setPhiDraft(loadedProduct.phi_days == null ? '' : String(loadedProduct.phi_days));
-      setPersistedProduct(loadedProduct);
-      setPricingMode(defaultPricingMode(loadedProduct));
-      setPricingMoneyDrafts({});
-      setPricingMarginDrafts({});
-      setPricingReloadRequired(false);
-      setIsDirty(false);
-      setPersistedLabelFields({
-        signalWord: loadedProduct.signal_word,
-        epaRegistration: loadedProduct.epa_registration,
-      });
-    }
-    setLoading(false);
-    return data !== null;
-  }, [id, isAdmin, productIdRef, toast]);
-
-  const fetchCostHistory = useCallback(async (reportError = true): Promise<boolean> => {
-    // cost_history is admin-only under RLS; a non-admin fetch would just be a
-    // denied round-trip (the history panel below only renders for admins).
-    if (!isAdmin) return true;
-    setCostHistoryLoaded(false);
-    setCostHistoryLoadFailed(false);
-    const { data, error } = await supabase
-      .from('cost_history')
-      .select('*')
-      .eq('product_id', id!)
-      // The starting snapshot (20261026140000) records no change; the Sell Price History card shows it.
-      .neq('change_source', 'starting_snapshot')
-      .order('changed_at', { ascending: false })
-      .limit(20);
-    if (error) {
-      Sentry.captureException(error);
-      setCostHistoryLoadFailed(true);
-      if (reportError) toast('error', 'Failed to load pricing history');
-      return false;
-    }
-    setCostHistory((data || []) as CostHistory[]);
-    setCostHistoryLoaded(true);
-    return true;
-  }, [id, isAdmin, toast]);
-
-  const fetchCostBasisWorkspace = useCallback(async (reportError = true): Promise<boolean> => {
-    const requestId = ++costBasisWorkspaceRequestRef.current;
-    if (!isAdmin || !id || isNew) return true;
-    setCostBasisWorkspace(null);
-    setCostBasisLoadFailed(false);
-    setCostBasisLoading(true);
-    try {
-      const workspace = await getProductCostBasisWorkspace(id);
-      if (costBasisWorkspaceRequestRef.current !== requestId) return false;
-      if (workspace.product.id !== id) {
-        throw new Error('Cost-basis workspace returned the wrong Product.');
-      }
-      setCostBasisWorkspace(workspace);
-      return true;
-    } catch (error) {
-      if (costBasisWorkspaceRequestRef.current !== requestId) return false;
-      setCostBasisWorkspace(null);
-      setCostBasisLoadFailed(true);
-      Sentry.captureException(error);
-      if (reportError) toast('error', 'Failed to load governed cost-basis options');
-      return false;
-    } finally {
-      if (costBasisWorkspaceRequestRef.current === requestId) setCostBasisLoading(false);
-    }
-  }, [id, isAdmin, isNew, toast]);
-
-  useEffect(() => {
-    if (!isNew && id) {
-      void fetchProduct();
-      void fetchCostHistory();
-      void fetchCostBasisWorkspace();
-    }
-  }, [id, isNew, fetchProduct, fetchCostHistory, fetchCostBasisWorkspace]);
+  // A failed refresh keeps the shown product (stale); `fetch*` report whether a fresh read landed.
+  const fetchProduct = useCallback(async (): Promise<boolean> => {
+    const result = await reloadProduct();
+    return result.status === 'applied' && result.data.product !== null;
+  }, [reloadProduct]);
+  // Skipped (not an admin, or a newer read took over) is not a failure.
+  const fetchCostHistory = useCallback(async () => (await reloadCostHistory()).status !== 'failed', [reloadCostHistory]);
+  const fetchCostBasisWorkspace = useCallback(async () => (await reloadCostBasis()).status !== 'failed', [reloadCostBasis]);
 
   useEffect(() => {
     pricingPreviewRequestRef.current += 1;
@@ -575,34 +580,6 @@ export default function ProductDetail() {
     setCostBasisPricingBehavior('keep_sell_prices');
     pricingPreviewIntentRef.current = null;
   }, [id, resetApplyPricingKey, resetPreviewPricingKey]);
-
-  useEffect(() => {
-    supabase.from('unit_conversions').select('*').order('unit').then(({ data, error }) => {
-      if (error) { Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_unit_conversions' } }); return; }
-      setUnitConversions((data || []) as UnitConversion[]);
-    });
-    listProductCategories().then(setCategoryOptions).catch((error: unknown) => {
-      Sentry.captureException(error);
-      setCategoryLoadFailed(true);
-      toast('error', 'Could not load product categories. Refresh before saving a category.');
-    });
-    listProductUseTimingOptions().then(setTimingOptions).catch(() => {
-      setTimingLoadFailed(true);
-      toast('error', 'Could not load use timings. Refresh before changing them.');
-    });
-    // Crop names only label the picker's groups; without them each group shows its crop code.
-    listProductCropOptions().then(setCropOptions).catch(() => undefined);
-    // Vendor and manufacturer remain free-text choices.
-    // Every product's choices, page by page (Goal 4): one read stops silently at 1000 rows.
-    void fetchAllRows((from, to) => pageWithList(supabase.from('products').select('id, vendor, manufacturer', { count: 'exact' }).order('id').range(from, to))).then(({ data, error }) => {
-      if (error) { Sentry.captureException(error, { tags: { source: 'fetch', action: 'load_product_options' } }); return; }
-      if (!data) return;
-      const vends = [...new Set(data.map((p) => p.vendor).filter(Boolean) as string[])].sort();
-      const mfrs = [...new Set(data.map((p) => p.manufacturer).filter(Boolean) as string[])].sort();
-      setVendorOptions(vends);
-      setManufacturerOptions(mfrs);
-    });
-  }, [toast]);
 
   const saveExistingProductDetails = async () => {
     const validation = productSetupValidationMessage(product, reiDraft, phiDraft, persistedProduct);
@@ -633,7 +610,7 @@ export default function ProductDetail() {
 
   // The preview row for this page's pricing change; throws the first thing that blocks a review.
   const buildPricingReviewRow = (note: PricingSourceReason, costOverride?: string) => {
-    if (pricingReloadRequired) {
+    if (reloadRequired) {
       throw new Error('Reload this Product before making another change.');
     }
     if (!profile || !persistedProduct) throw new Error('Reload this Product before changing pricing.');
@@ -727,7 +704,7 @@ export default function ProductDetail() {
     if (!costBasisWorkspace?.enabled) {
       throw new Error('Choosing a cost basis is turned off for now.');
     }
-    if (pricingReloadRequired) throw new Error('Reload this Product before making another change.');
+    if (reloadRequired) throw new Error('Reload this Product before making another change.');
     if (!id || costBasisWorkspace.product.id !== id || persistedProduct?.id !== id) {
       throw new Error('Reload this Product before selecting a cost basis.');
     }
@@ -794,8 +771,12 @@ export default function ProductDetail() {
   };
 
   const handleSave = async () => {
-    if (pricingReloadRequired) {
+    if (reloadRequired) {
       toast('error', 'Reload this Product before making another change.');
+      return;
+    }
+    if (productReading) {
+      toast('error', 'Wait for this Product to finish loading before saving.');
       return;
     }
     for (const [field, label] of [
@@ -838,8 +819,8 @@ export default function ProductDetail() {
       revealPhoneSection('information');
       return;
     }
-    if (categoryLoadFailed && Boolean(product.category) && product.category !== persistedProduct?.category) {
-      toast('error', 'Could not load product categories. Refresh before saving a category.');
+    if (!categoriesReady && Boolean(product.category) && product.category !== persistedProduct?.category) {
+      toast('error', 'Product categories have not loaded. Use Try again before saving a category.');
       revealPhoneSection('information');
       return;
     }
@@ -854,6 +835,13 @@ export default function ProductDetail() {
     // A new parent needs its form; a new size takes its parent's form.
     if (isNew && !addSizeTo && !product.product_form) {
       toast('error', 'Choose a product form (liquid, dry, seed or each) before saving.');
+      revealPhoneSection('information');
+      return;
+    }
+    // The database refuses a product with no sold unit (products.inventory_unit NOT NULL, #2050).
+    if (isNew && !/[\p{L}\p{N}]/u.test(product.inventory_unit ?? '')) {
+      setUnitRequired(true);
+      toast('error', 'Choose an Inventory Unit (the unit this product is sold and stocked in) before saving.');
       revealPhoneSection('information');
       return;
     }
@@ -954,7 +942,7 @@ export default function ProductDetail() {
   };
 
   const handleCostUpdate = () => {
-    if (pricingReloadRequired) {
+    if (reloadRequired) {
       toast('error', 'Reload this Product before making another change.');
       return;
     }
@@ -1029,12 +1017,13 @@ export default function ProductDetail() {
       setCostBasisReason('');
       setManualBasisCost('');
       setCostBasisPricingBehavior('keep_sell_prices');
-      const [productReloaded, historyReloaded, basisReloaded] = await Promise.all([
-        fetchProduct(false),
-        fetchCostHistory(false),
-        fetchCostBasisWorkspace(false),
-      ]);
+      // The history cards turn their Select actions off now, not after the slowest read (Sol r2 #29).
       setPriceHistoryReloadToken((current) => current + 1);
+      const [productReloaded, historyReloaded, basisReloaded] = await Promise.all([
+        fetchProduct(),
+        fetchCostHistory(),
+        fetchCostBasisWorkspace(),
+      ]);
       const basisAppliedCount = result.cost_basis_rows?.length ?? 0;
       const pricingAppliedCount = result.applied_count;
       const successMessage = basisAppliedCount > 0 && pricingAppliedCount > 0
@@ -1068,12 +1057,12 @@ export default function ProductDetail() {
 
   const handlePricingReload = async () => {
     setPricingReloading(true);
-    const [productReloaded, historyReloaded, basisReloaded] = await Promise.all([
-      fetchProduct(false),
-      fetchCostHistory(false),
-      fetchCostBasisWorkspace(false),
-    ]);
     setPriceHistoryReloadToken((current) => current + 1);
+    const [productReloaded, historyReloaded, basisReloaded] = await Promise.all([
+      fetchProduct(),
+      fetchCostHistory(),
+      fetchCostBasisWorkspace(),
+    ]);
     if (productReloaded) {
       toast(
         historyReloaded && basisReloaded ? 'success' : 'warning',
@@ -1214,7 +1203,7 @@ export default function ProductDetail() {
   };
 
   const update = (field: string, value: unknown) => {
-    if (pricingReloadRequired) return;
+    if (reloadRequired) return;
     if (field === 'product_name') setNameRequired(false);
     setProduct((p) => ({ ...p, [field]: value }));
     setIsDirty(true);
@@ -1226,6 +1215,12 @@ export default function ProductDetail() {
   };
 
   const changeCategory = (next: string | null) => {
+    // Without the timing list the page cannot tell which saved timings the new category keeps.
+    if (next !== product.category && (product.use_timings?.length ?? 0) > 0 && !timingsReady
+      && (next === 'Herbicide' || next === 'Foliar Fertilizer')) {
+      toast('error', 'Use timings have not loaded. Use Try again before changing the category.');
+      return;
+    }
     if (next !== product.category && (product.use_timings?.length ?? 0) > 0
       && (next !== 'Herbicide' && next !== 'Foliar Fertilizer'
         || (product.use_timings ?? []).some((code) => timingOptions.find((option) => option.code === code)?.category !== next))) {
@@ -1237,13 +1232,13 @@ export default function ProductDetail() {
 
 
   const updatePricingMargin = (field: ProductPricingMarginField, text: string) => {
-    if (pricingReloadRequired) return;
+    if (reloadRequired) return;
     setPricingMarginDrafts((drafts) => ({ ...drafts, [field]: text }));
     update(field, text ? parseFloat(text) / 100 : null);
   };
 
   const updatePricingMoney = (field: ProductPricingMoneyField, value: string) => {
-    if (pricingReloadRequired) return;
+    if (reloadRequired) return;
     const persistedValue = persistedProduct?.[field] ?? product[field];
     const original = persistedValue == null ? '' : String(persistedValue);
     setPricingMoneyDrafts((drafts) => {
@@ -1272,13 +1267,32 @@ export default function ProductDetail() {
     setPricingMode(mode);
   };
 
-  if (loading) {
-    return <div className="animate-pulse space-y-4"><div className="h-8 bg-gray-200 rounded w-1/3" /><div className="h-64 bg-gray-200 rounded" /></div>;
+  // A role change re-reads the product, so these screens can follow unsaved edits: leaving still asks first.
+  const unsavedModal = (
+    <UnsavedChangesModal open={blocker.state === 'blocked'} onStay={() => blocker.reset?.()} onLeave={() => blocker.proceed?.()} />
+  );
+
+  if (productRead.status === 'loading') {
+    return <>{unsavedModal}<div className="animate-pulse space-y-4"><div className="h-8 bg-gray-200 rounded w-1/3" /><div className="h-64 bg-gray-200 rounded" /></div></>;
   }
 
-  if (!isNew && !product.id) {
+  if (productRead.status === 'failed') {
+    return (
+      <div role="alert" className="flex flex-col items-center justify-center py-16 space-y-4">
+        {unsavedModal}
+        <p className="text-secondary text-lg">Could not load this product.</p>
+        <div className="flex gap-2">
+          <Button onClick={() => void reloadProduct()}>Try again</Button>
+          <Button variant="secondary" onClick={() => navigate('/products')}>Back to Products</Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (productRead.status === 'loaded' && productRead.data.product === null) {
     return (
       <div className="flex flex-col items-center justify-center py-16 space-y-4">
+        {unsavedModal}
         <p className="text-secondary text-lg">Product not found</p>
         <Button variant="secondary" onClick={() => navigate('/products')}>Back to Products</Button>
       </div>
@@ -1326,7 +1340,7 @@ export default function ProductDetail() {
               size="sm"
               icon={<Plus className="w-4 h-4" />}
               showChevron={false}
-              disabled={pricingReloadRequired || !parent || !parent.is_active}
+              disabled={reloadRequired || productReading || !parent || !parent.is_active}
               title={parent === null ? 'This product has no parent yet, so it has no sizes to add to. Use New product.' : undefined}
               onClick={() => parent && navigate('/products/new', { state: { duplicateFrom: duplicateProductSource(persistedProduct!), addSizeTo: parent } })}
             >
@@ -1337,7 +1351,7 @@ export default function ProductDetail() {
               size="sm"
               icon={<Copy className="w-4 h-4" />}
               showChevron={false}
-              disabled={pricingReloadRequired}
+              disabled={reloadRequired || productReading}
               onClick={() => navigate('/products/new', { state: { duplicateFrom: duplicateProductSource(persistedProduct!) } })}
             >
               New product
@@ -1373,10 +1387,12 @@ export default function ProductDetail() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
-          {pricingReloadRequired && (
+          {reloadRequired && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4" role="alert">
               <p className="text-sm text-amber-900">
-                Pricing was applied, but the saved Product could not be reloaded. Editing is locked until the latest values load.
+                {pricingReloadRequired
+                  ? 'Pricing was applied, but the saved Product could not be reloaded. Editing is locked until the latest values load.'
+                  : 'This Product could not be refreshed, so what is shown may be out of date. Editing is locked until the latest values load.'}
               </p>
               <Button
                 type="button"
@@ -1386,6 +1402,12 @@ export default function ProductDetail() {
               >
                 Reload Product
               </Button>
+            </div>
+          )}
+          {failedLists.length > 0 && (
+            <div role="alert" className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <span>Could not load {failedLists.map(([, name]) => name).join(', ')}. Changes that need them stay off until they load.</span>
+              <Button size="sm" variant="secondary" onClick={() => failedLists.forEach(([read]) => void read.reload())}>Try again</Button>
             </div>
           )}
           {/* PAR-1: the parent this size belongs to, or the parent a new product creates. */}
@@ -1400,7 +1422,8 @@ export default function ProductDetail() {
               timingOptions={timingOptions}
               cropOptions={cropOptions}
               rateUnitOptions={rateUnitOptionsForProduct(unitConversions, parent.product_form, product.inventory_unit).map((uc) => uc.unit)}
-              busy={isDirty || pricingReloadRequired || saving}
+              // Its edit windows offer these pick lists, so they wait for them too.
+              busy={isDirty || reloadRequired || saving || !unitsReady || !categoriesReady || !timingsReady || !cropsReady}
               onChanged={() => {
                 setParentReload((current) => current + 1);
                 loadRateLock();
@@ -1415,7 +1438,7 @@ export default function ProductDetail() {
               productId={id!}
               isAdmin={isAdmin}
               profileId={profile.id}
-              busy={isDirty || pricingReloadRequired || saving}
+              busy={isDirty || reloadRequired || saving}
               reloadKey={JSON.stringify([persistedProduct.updated_at, persistedProduct.product_form, persistedProduct.inventory_unit,
                 persistedProduct.container_size, persistedProduct.container_unit, persistedProduct.container_type, persistedProduct.unit_size,
                 parent?.id ?? null, parent?.parent_version ?? null])}
@@ -1430,7 +1453,7 @@ export default function ProductDetail() {
               refreshKey={JSON.stringify([persistedProduct?.updated_at ?? null, persistedProduct?.pricing_version ?? null, weightSaves])}
               isAdmin={isAdmin}
               profileId={profile.id}
-              busy={isDirty || pricingReloadRequired || saving}
+              busy={isDirty || reloadRequired || saving}
             />
           )}
           {!isNew && parent === null && (
@@ -1477,9 +1500,10 @@ export default function ProductDetail() {
               </fieldset>
             </Card>
           )}
-          <fieldset disabled={pricingReloadRequired || (isNew && saving)} className="contents">
+          {/* A product read in flight would replace whatever is typed meanwhile, so the form waits for it. */}
+          <fieldset disabled={reloadRequired || productReading || (isNew && saving)} className="contents">
           {/* The fieldset disables these toggles too, so a locked page keeps every section open. */}
-          <PhoneSection title="Product Information" {...sectionProps('information', pricingReloadRequired)}>
+          <PhoneSection title="Product Information" {...sectionProps('information', reloadRequired)}>
           <Card>
             <CardHeader title="Product" accent="Information" />
 
@@ -1491,7 +1515,7 @@ export default function ProductDetail() {
                 <label htmlFor="product-category" className="block text-sm font-medium text-secondary mb-1">Category</label>
                 <select id="product-category" value={product.category || ''}
                   onChange={(e) => changeCategory(e.target.value || null)}
-                  disabled={!isAdmin || categoryLoadFailed || parentOwned}
+                  disabled={!isAdmin || !categoriesReady || parentOwned}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white text-nav-dark focus-visible:ring-2 focus-visible:ring-crx-green disabled:opacity-50">
                   <option value="">-- Select --</option>
                   {visibleProductCategories(categoryOptions, product.category).map((item) => (
@@ -1501,14 +1525,14 @@ export default function ProductDetail() {
                 {parentOwned && <ParentOwnedHint parentName={shownParent?.name} />}
               </div>
               {(product.category === 'Herbicide' || product.category === 'Foliar Fertilizer'
-                || (timingLoadFailed && ((product.use_timings?.length ?? 0) > 0 || Boolean(product.use_timing)))) && (
+                || (timingsRead.status === 'failed' && ((product.use_timings?.length ?? 0) > 0 || Boolean(product.use_timing)))) && (
                 <fieldset>
                   <legend className="mb-1 text-sm font-medium text-secondary">Use Timing</legend>
                   <div className="rounded-lg border border-gray-200 bg-white p-2 space-y-1">
-                    {timingLoadFailed ? (
+                    {timingsRead.status === 'failed' ? (
                       <>
                         <p className="px-2 text-sm text-secondary">Use timings could not be loaded. Refresh before changing them.</p>
-                        <p className="px-2 text-sm text-nav-dark">{product.use_timing || 'No saved use timings'}</p>
+                        <p className="px-2 text-sm text-nav-dark">{product.use_timing || product.use_timings?.join(', ') || 'No saved use timings'}</p>
                       </>
                     ) : (
                       <UseTimingPicker
@@ -1521,9 +1545,9 @@ export default function ProductDetail() {
                         onChange={(next) => update('use_timings', next)}
                       />
                     )}
-                    {!timingLoadFailed && timingOptions.length === 0 && <p className="px-2 text-sm text-secondary">Loading use timings...</p>}
+                    {timingsRead.status === 'loading' && <p className="px-2 text-sm text-secondary">Loading use timings...</p>}
                   </div>
-                  {isAdmin && !timingLoadFailed && (
+                  {isAdmin && timingsReady && cropsReady && (
                     <button type="button" onClick={() => setTimingChoicesOpen(true)}
                       className="mt-1 min-h-8 text-sm font-medium text-crx-green hover:underline focus-visible:ring-2 focus-visible:ring-crx-green">
                       Manage crop and timing choices
@@ -1619,7 +1643,7 @@ export default function ProductDetail() {
                 step={1}
                 value={reiDraft}
                 onChange={(e) => {
-                  if (pricingReloadRequired) return;
+                  if (reloadRequired) return;
                   setReiDraft(e.target.value);
                   update('rei_hours', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
                 }}
@@ -1633,7 +1657,7 @@ export default function ProductDetail() {
                 step={1}
                 value={phiDraft}
                 onChange={(e) => {
-                  if (pricingReloadRequired) return;
+                  if (reloadRequired) return;
                   setPhiDraft(e.target.value);
                   update('phi_days', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
                 }}
@@ -1804,7 +1828,7 @@ export default function ProductDetail() {
                   value={product.product_form || ''}
                   onChange={(e) => {
                     const form = (e.target.value || null) as Product['product_form'];
-                    if (pricingReloadRequired) return;
+                    if (reloadRequired) return;
                     setProduct((current) => {
                       const inventoryUnit = current.inventory_unit === persistedProduct?.inventory_unit || isKnownUnit(unitConversions, form, current.inventory_unit)
                         ? current.inventory_unit : null;
@@ -1820,7 +1844,8 @@ export default function ProductDetail() {
                     });
                     setIsDirty(true);
                   }}
-                  disabled={!isAdmin || Boolean(persistedProduct?.product_form)}
+                  // A form change drops units the form does not offer, so it waits for the unit list.
+                  disabled={!isAdmin || Boolean(persistedProduct?.product_form) || !unitsReady}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
                 >
                   <option value="">-- Select --</option>
@@ -1893,7 +1918,7 @@ export default function ProductDetail() {
                   value={product.inventory_unit || ''}
                   onChange={(e) => {
                     const inventoryUnit = e.target.value || null;
-                    if (pricingReloadRequired) return;
+                    if (reloadRequired) return;
                     setProduct((current) => ({
                       ...current,
                       inventory_unit: inventoryUnit,
@@ -1903,9 +1928,12 @@ export default function ProductDetail() {
                         ? '' : current.rate_unit,
                     }));
                     setIsDirty(true);
+                    if (inventoryUnit) setUnitRequired(false);
                   }}
                   disabled={!isAdmin || Boolean(persistedProduct?.inventory_unit)}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50"
+                  aria-invalid={unitRequired || undefined}
+                  aria-describedby={unitRequired ? 'product-inventory-unit-error' : undefined}
+                  className={`w-full px-3 py-2 text-sm border ${unitRequired ? 'border-red-500' : 'border-gray-200'} rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green disabled:opacity-50 disabled:bg-gray-50`}
                 >
                   <option value="">-- Select --</option>
                   {/* WaveB: grandfather a legacy value the form filter would otherwise hide, so a save can't blank it */}
@@ -1916,6 +1944,7 @@ export default function ProductDetail() {
                     <option key={uc.id} value={uc.unit}>{uc.unit}</option>
                   ))}
                 </select>
+                {unitRequired && <p id="product-inventory-unit-error" className="mt-1 text-xs text-red-600">Choose the unit this product is sold and stocked in.</p>}
               </div>
             </div>
 
@@ -1933,7 +1962,7 @@ export default function ProductDetail() {
                 <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-secondary" data-testid="product-rates-locked">
                   <span>Rates are locked. {rateLockSummary(rateLock)}</span>
                   {isAdmin && !isNew && persistedProduct && parent === null && (
-                    <Button size="sm" variant="secondary" onClick={() => setCorrectingRates(true)} disabled={isDirty}
+                    <Button size="sm" variant="secondary" onClick={() => setCorrectingRates(true)} disabled={isDirty || !unitsReady}
                       title={isDirty ? 'Save or discard your other changes first' : undefined}>
                       Correct rates
                     </Button>
@@ -2046,24 +2075,24 @@ export default function ProductDetail() {
           </PhoneSection>
 
           {!isNew && id && persistedProduct?.id === id && (isAdmin || role === 'sales_rep') && (
-            <PhoneSection title="Vendors" {...sectionProps('vendors', pricingReloadRequired)}>
+            <PhoneSection title="Vendors" {...sectionProps('vendors', reloadRequired)}>
               <ProductVendorsSection
                 key={id}
                 productId={id}
                 productName={persistedProduct.product_name}
                 isAdmin={isAdmin}
                 userId={profile?.id ?? null}
-                // The database copied the name onto the product; mirror it so a later save does not resend the old one.
-                onPreferredChanged={(vendorName) => {
-                  setProduct((p) => ({ ...p, vendor: vendorName }));
-                  setPersistedProduct((p) => (p ? { ...p, vendor: vendorName } : p));
-                }}
+                onVendorChanged={() => void reloadProduct()}
+                onVendorSaving={setVendorSaving}
+                // The margin floor card keeps its own draft across a product re-read, so it does not count here.
+                lockedReason={vendorLockReason(saving || productReading, isDirty
+                  || productDetailsChanged(product, persistedProduct) || pricingChanged(product, persistedProduct, pricingMoneyDrafts))}
               />
             </PhoneSection>
           )}
 
           {!isNew && id && persistedProduct?.id === id && (
-            <PhoneSection title="Brands" {...sectionProps('brands', pricingReloadRequired)}>
+            <PhoneSection title="Brands" {...sectionProps('brands', reloadRequired)}>
               <ProductBrandsSection
                 // Shown only once this page's own product has loaded, and remounted for each product, so one
                 // product's name, brands, open form or copy picker never reach (or get saved onto) the next.
@@ -2083,7 +2112,7 @@ export default function ProductDetail() {
           )}
 
           {isAdmin && (
-            <PhoneSection title="Pricing & Margins" {...sectionProps('pricing', pricingReloadRequired)}>
+            <PhoneSection title="Pricing & Margins" {...sectionProps('pricing', reloadRequired)}>
             <Card>
               <CardHeader title="Pricing" accent="& Margins" />
               {justCreated && persistedProduct?.tier1_price == null && persistedProduct?.tier2_price == null && persistedProduct?.tier3_price == null && (
@@ -2211,7 +2240,10 @@ export default function ProductDetail() {
               data-testid="product-save-bar"
               className="flex justify-end max-md:fixed max-md:inset-x-0 max-md:bottom-[calc(2.75rem+env(safe-area-inset-bottom))] max-md:z-20 max-md:border-t max-md:border-gray-200 max-md:bg-white max-md:px-4 max-md:py-2"
             >
-              <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving} className="max-md:w-full">
+              {productReading && !saving && (
+                <p role="status" className="mr-3 self-center text-sm text-secondary">Loading the latest Product values…</p>
+              )}
+              <Button icon={<Save className="w-4 h-4" />} onClick={handleSave} loading={saving} disabled={productReading} className="max-md:w-full">
                 {isNew ? 'Create Product' : 'Save Changes'}
               </Button>
             </div>
@@ -2224,7 +2256,7 @@ export default function ProductDetail() {
             // Keyed by product: moving to another product starts a fresh card, so nothing from the
             // last product's floor, history or in-flight save carries over. Prefixed so it never
             // shares a key with ProductBrandsSection, its sibling in this fieldset.
-            <PhoneSection title="Margin Floor" {...sectionProps('floor', pricingReloadRequired)}>
+            <PhoneSection title="Margin Floor" {...sectionProps('floor', reloadRequired)}>
               <ProductMarginFloorCard
                 key={`margin-floor-${id}`}
                 productId={id}
@@ -2257,8 +2289,23 @@ export default function ProductDetail() {
               <PhoneSection title="Cost Basis" {...sectionProps('basis')}>
               <Card>
                 <CardHeader title="Select" accent="Cost Basis" />
+                {costBasisUnsure && (
+                  <div role="alert" className="mb-2 flex flex-wrap items-center gap-2 text-sm text-amber-800">
+                    <span>{costBasisRead.status === 'loaded' && costBasisRead.stale
+                      ? 'Could not refresh the cost-basis options. They may be out of date; selection is off until they load.'
+                      : 'Refreshing the cost-basis options…'}</span>
+                    {costBasisRead.status === 'loaded' && costBasisRead.stale && (
+                      <Button size="sm" variant="secondary" disabled={costBasisRead.refreshing} onClick={() => void reloadCostBasis()}>Try again</Button>
+                    )}
+                  </div>
+                )}
                 {costBasisLoading ? (
                   <p className="text-sm text-secondary">Loading governed cost-basis options…</p>
+                ) : costBasisLoadFailed ? (
+                  <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-red-700">
+                    <span>Could not load the governed cost-basis options.</span>
+                    <Button size="sm" variant="secondary" onClick={() => void reloadCostBasis()}>Try again</Button>
+                  </div>
                 ) : costBasisWorkspace ? (
                   <div className="space-y-4">
                     <div className="grid gap-3 rounded-lg border border-gray-200 p-4 sm:grid-cols-3">
@@ -2293,7 +2340,7 @@ export default function ProductDetail() {
                           id="cost-basis-pricing-behavior"
                           value={costBasisPricingBehavior}
                           onChange={(event) => setCostBasisPricingBehavior(event.target.value as CostBasisPricingBehavior)}
-                          disabled={!costBasisWorkspace.enabled || costBasisBusy || pricingReloadRequired}
+                          disabled={!costBasisWorkspace.enabled || costBasisBusy || costBasisUnsure || reloadRequired}
                           className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-crx-green focus:outline-none focus:ring-2 focus:ring-crx-green/20"
                         >
                           <option value="keep_sell_prices">Keep current sell prices; recalculate margins</option>
@@ -2305,7 +2352,7 @@ export default function ProductDetail() {
                         value={costBasisReason}
                         onChange={(event) => setCostBasisReason(event.target.value)}
                         placeholder="Why this evidence is the right basis"
-                        disabled={!costBasisWorkspace.enabled || costBasisBusy || pricingReloadRequired}
+                        disabled={!costBasisWorkspace.enabled || costBasisBusy || costBasisUnsure || reloadRequired}
                       />
                     </div>
                     <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
@@ -2317,11 +2364,11 @@ export default function ProductDetail() {
                         value={manualBasisCost}
                         onChange={(event) => setManualBasisCost(event.target.value)}
                         placeholder="0.00"
-                        disabled={!costBasisWorkspace.enabled || costBasisBusy || pricingReloadRequired}
+                        disabled={!costBasisWorkspace.enabled || costBasisBusy || costBasisUnsure || reloadRequired}
                       />
                       <Button
                         type="button"
-                        disabled={!costBasisWorkspace.enabled || costBasisBusy || pricingReloadRequired}
+                        disabled={!costBasisWorkspace.enabled || costBasisBusy || costBasisUnsure || reloadRequired}
                         onClick={() => void handleManualBasisSelection()}
                       >
                         Preview manual basis
@@ -2342,7 +2389,7 @@ export default function ProductDetail() {
               <ProductPriceHistory
                 productId={id}
                 costBasisWorkspace={costBasisWorkspace}
-                costBasisBusy={costBasisBusy}
+                costBasisBusy={costBasisBusy || costBasisUnsure || reloadRequired}
                 reloadToken={priceHistoryReloadToken}
                 onSelectSupplierBasis={(candidate) => void handleSupplierBasisSelection(candidate)}
                 onSelectPurchaseBasis={(candidate) => void handlePurchaseBasisSelection(candidate)}
@@ -2351,10 +2398,19 @@ export default function ProductDetail() {
               <ProductSellPriceHistory productId={id} reloadToken={priceHistoryReloadToken} />
               <Card>
                 <CardHeader title="Cost" accent="History" />
-                {!costHistoryLoaded && !costHistoryLoadFailed ? (
+                {costHistoryRead.status === 'loaded' && costHistoryRead.stale && (
+                  <div role="alert" className="mb-2 flex flex-wrap items-center gap-2 text-sm text-amber-800">
+                    <span>Could not refresh the cost history. It may be out of date.</span>
+                    <Button size="sm" variant="secondary" disabled={costHistoryRead.refreshing} onClick={() => void reloadCostHistory()}>Try again</Button>
+                  </div>
+                )}
+                {costHistoryRead.status === 'loading' ? (
                   <p className="text-sm text-secondary">Loading cost history…</p>
-                ) : costHistoryLoadFailed ? (
-                  <p className="text-sm text-secondary">Cost history could not be loaded. Reload to try again.</p>
+                ) : costHistoryRead.status === 'failed' ? (
+                  <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-red-700">
+                    <span>Cost history could not be loaded.</span>
+                    <Button size="sm" variant="secondary" onClick={() => void reloadCostHistory()}>Try again</Button>
+                  </div>
                 ) : costHistory.length > 0 ? (
                   <div className="space-y-3">
                     {costHistory.map((ch) => (
@@ -2398,7 +2454,7 @@ export default function ProductDetail() {
                         </p>
                       )
                     ) : costBasisLoadFailed ? (
-                      <p>Current governed cost-basis details could not be loaded. Reload to try again.</p>
+                      <p>Current governed cost-basis details could not be loaded. Try again in Cost Basis above.</p>
                     ) : product.current_cost != null ? (
                       <p>
                         This Product has a current cost, but no current governed cost-basis record is available.
@@ -2419,14 +2475,14 @@ export default function ProductDetail() {
           <p className="text-sm text-secondary">
             Current cost: <strong>{product.current_cost == null ? 'N/A' : formatExactUSD(product.current_cost)}</strong>
           </p>
-          <Input label="New Cost" type="number" value={newCost} onChange={(e) => setNewCost(e.target.value)} placeholder="0.00" disabled={pricingReloadRequired} />
+          <Input label="New Cost" type="number" value={newCost} onChange={(e) => setNewCost(e.target.value)} placeholder="0.00" disabled={reloadRequired} />
           <div>
             <label htmlFor="cost-update-pricing-mode" className="block text-sm font-medium text-secondary mb-1">Pricing mode</label>
             <select
               id="cost-update-pricing-mode"
               value={pricingMode}
               onChange={(event) => changePricingMode(event.target.value as PricingMode | '')}
-              disabled={pricingReloadRequired}
+              disabled={reloadRequired}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
             >
               <option value="">Choose a mode</option>
@@ -2436,7 +2492,7 @@ export default function ProductDetail() {
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" showChevron={false} onClick={() => setCostModal(false)}>Cancel</Button>
-            <Button onClick={handleCostUpdate} disabled={pricingReloadRequired}>Review Cost Change</Button>
+            <Button onClick={handleCostUpdate} disabled={reloadRequired}>Review Cost Change</Button>
           </div>
         </div>
       </Modal>
@@ -2479,11 +2535,7 @@ export default function ProductDetail() {
           }}
         />
       )}
-      <UnsavedChangesModal
-        open={blocker.state === 'blocked'}
-        onStay={() => blocker.reset?.()}
-        onLeave={() => blocker.proceed?.()}
-      />
+      {unsavedModal}
       <ConfirmModal
         open={pendingCategory !== undefined}
         title="Clear use timings?"
@@ -2504,9 +2556,11 @@ export default function ProductDetail() {
           defaultCategory={product.category}
           profileId={profile.id}
           onReload={async () => {
-            const fresh = await listProductUseTimingOptions();
-            setTimingOptions(fresh);
-            return fresh;
+            const result = await timingsRead.reload();
+            if (result.status === 'applied') return result.data;
+            if (result.status === 'failed') throw result.error;
+            // A newer read owns the page's list; the window still needs a fresh answer to check its add against.
+            return listProductUseTimingOptions();
           }}
           onClose={() => setTimingChoicesOpen(false)}
         />

@@ -1,6 +1,6 @@
 # Coding Guidelines
 
-Search `docs/manual/DECISION_LOG.md` by keyword before reopening a settled design choice, and `docs/manual/KNOWN_ISSUES.md` before claiming a problem is new. Both are long running logs: search them for the area you are touching; never read them whole.
+Search `docs/manual/DECISION_LOG.md` and `docs/manual/decision-log.d/` by keyword before reopening a settled design choice, and `docs/manual/KNOWN_ISSUES.md` and `docs/manual/known-issues.d/` before claiming a problem is new. Write a new entry as a new file in the `.d/` folder (its `README.md`), never into the big file. Both are long running logs: search them for the area you are touching; never read them whole.
 
 Read this for every code change. `AGENTS.md` carries the short always-loaded version; this file explains how to apply it.
 

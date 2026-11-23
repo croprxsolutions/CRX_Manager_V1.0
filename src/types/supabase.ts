@@ -12050,6 +12050,7 @@ export type Database = {
       }
       quote_sections: {
         Row: {
+          confidence: string | null
           field_id: string | null
           id: string
           needed_by_date: string | null
@@ -12058,8 +12059,10 @@ export type Database = {
           section_name: string
           section_notes: string | null
           sort_order: number
+          timing: string | null
         }
         Insert: {
+          confidence?: string | null
           field_id?: string | null
           id?: string
           needed_by_date?: string | null
@@ -12068,8 +12071,10 @@ export type Database = {
           section_name?: string
           section_notes?: string | null
           sort_order?: number
+          timing?: string | null
         }
         Update: {
+          confidence?: string | null
           field_id?: string | null
           id?: string
           needed_by_date?: string | null
@@ -12078,6 +12083,7 @@ export type Database = {
           section_name?: string
           section_notes?: string | null
           sort_order?: number
+          timing?: string | null
         }
         Relationships: [
           {
@@ -19265,6 +19271,16 @@ export type Database = {
         }
         Returns: Json
       }
+      edit_jobs: {
+        Args: {
+          p_action?: string
+          p_changes?: Json
+          p_idempotency_key?: string
+          p_job_ids: string[]
+          p_performed_by?: string
+        }
+        Returns: Json
+      }
       edit_prepay_credit: {
         Args: {
           p_bucket_label?: string
@@ -19403,6 +19419,7 @@ export type Database = {
         )[]
       }
       get_ar_reminder_candidates: { Args: never; Returns: Json }
+      get_available_deliveries_for_driver: { Args: never; Returns: Json }
       get_batch_year_end_summaries: {
         Args: { p_customer_ids: string[]; p_season: number }
         Returns: Json
@@ -19652,6 +19669,10 @@ export type Database = {
       get_dispatched_list: {
         Args: { p_applicator_id?: string; p_crew_id?: string }
         Returns: Json[]
+      }
+      get_driver_customers: {
+        Args: { p_customer_ids: string[] }
+        Returns: Json
       }
       get_duplicate_product_parents: { Args: never; Returns: Json }
       get_epa_registrations: { Args: { p_numbers?: string[] }; Returns: Json }
@@ -20091,6 +20112,7 @@ export type Database = {
         }[]
       }
       get_program_completion: { Args: { p_season?: number }; Returns: Json }
+      get_purchasing_plan: { Args: { p_months_ahead?: number }; Returns: Json }
       get_quote_cost_alerts: {
         Args: { p_quote_id: string }
         Returns: {

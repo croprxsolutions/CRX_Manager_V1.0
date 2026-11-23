@@ -8,5 +8,5 @@
   - line-by-line billing of every chemical and fee for each payer;
   - quoted prices.
 - Live 2026-11-22 (read-only): 0 of 6 split rows and 0 of 3 invoice shares had a per-acre price or a note, and no invoice was ever billed per acre.
-- Until the screen PR lands, typing a per-acre price in Field Setup is refused, and nothing is saved. The screen PR removes the box, the note and the related banners.
+- The same PR removes the Field Setup per-acre box, the note and the related banners, so both ship in one merge.
 - Proof: `node scripts/smoke/prove-retire-per-acre-pricing-real-schema.mjs`. Not yet verified on staging.

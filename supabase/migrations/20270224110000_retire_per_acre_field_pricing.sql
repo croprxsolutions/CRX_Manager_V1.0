@@ -12,7 +12,7 @@
 -- WHAT: both tables refuse a per-acre price and a pricing note (CHECK, validated):
 --   - field_billing_defaults: every per-acre billing path reads its price from here, so none can be reached again;
 --   - invoice_shares: no saved draft can carry (or be edited to carry) a per-acre rate into posting or the PDF.
---   This is the database step; a separate screen PR, built on this one, removes the Field Setup inputs and banners.
+--   The same PR removes the Field Setup inputs and banners, so both ship in one merge.
 --   Contract: docs/plans/2026-11-22-retire-per-acre-grower-share-pricing-CONTRACT.md.
 --
 -- NOT CHANGED: the columns (kept, always NULL), every function, policy, grant and row. Line-by-line billing and

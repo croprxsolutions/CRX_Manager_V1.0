@@ -267,7 +267,7 @@ function session(sql, delayMs = 0) {
 const id = (s) => `af060000-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1'), CUST = id('c1'), CUST2 = id('c2'), P = id('b1'), INV = id('d1'), FIELD = id('f1');
 const JOB = (k) => id(`10${k}`), TICKET = (k) => id(`20${k}`);
-const KEYS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+const KEYS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -475,6 +475,19 @@ async function races() {
   assert.match(rh.out, /BLEND_TICKET_JOB_OTHER_CUSTOMER/);
   assert.equal(scalar(`SELECT customer_id FROM public.jobs WHERE id = '${JOB(13)}';`), CUST);
   console.log("[race D] two sessions: T13 is linked to J13 while the office changes J13's customer; the change waits on the job, then is refused");
+  // Race E (Sol round 2 HIGH): completion order is job row, then the record-number lock. A completion holding J14 that
+  // then needs the number lock must not deadlock with Create App Record on linked T14, which takes the number lock first.
+  psql(`BEGIN;\n${signedIn(link(14, JOB(14)))}\nCOMMIT;`);
+  const numberLock = "SELECT pg_advisory_xact_lock(hashtext('next_application_record_number'));";
+  const [ri, rj] = await Promise.all([
+    session(`BEGIN;\nSELECT 1 FROM public.jobs WHERE id = '${JOB(14)}' FOR NO KEY UPDATE;\nSELECT pg_sleep(2);\n${numberLock}\nCOMMIT;`),
+    session(`BEGIN;\n${signedIn(record(14))}\nCOMMIT;`, 1000),
+  ]);
+  assert.equal(ri.code, 0, `race E: the completion side must finish, not deadlock:\n${ri.out}`);
+  assert.doesNotMatch(`${ri.out}\n${rj.out}`, /deadlock/i);
+  assert.notEqual(rj.code, 0, `race E: the ticket must be refused:\n${rj.out}`);
+  assert.match(rj.out, /BLEND_TICKET_JOB_RECORDS: this blend ticket's spray job is being changed right now/);
+  console.log('[race E] two sessions: a completion holds J14 and then takes the record-number lock while Create App Record runs on linked T14; the ticket is refused at once ("being changed right now"), no deadlock');
 }
 
 function mutation() {

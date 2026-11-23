@@ -7,7 +7,7 @@
 --   * The job takes exactly what is on its own chemical list, even when that list is empty or short (Mason,
 --     2026-11-23, after Luna round 4: "Job's list always counts"; supersedes the no-chemicals refusal).
 --   * A job whose linked ticket already has its own record cannot record again (JOB_BLEND_TICKET_ALREADY_RECORDED);
---     only old rows can reach this, as the link rules below stop new ones.
+--     old rows can reach this (or a job deleted and restored after its ticket recorded), as the link rules below stop new ones.
 --   * A ticket with its own record cannot be linked to a job (BLEND_TICKET_RECORDED_NO_JOB).
 --   * A ticket cannot leave a job that already recorded the spray (BLEND_TICKET_COMPLETED_JOB_KEEPS_TICKET), so it
 --     cannot be unlinked and then recorded a second time.
@@ -20,12 +20,15 @@
 -- blend_tickets directly. Old rows are not touched: production has no blend tickets (read-only, 2026-11-23); staging
 -- keeps its synthetic doubled pair. Accepted gap (as KI-93; Mason, 2026-11-23): a ticket never linked to its job, or
 -- unlinked before the job completed, is invisible here.
--- Locks: ticket path locks the ticket, then its job; job path locks only the job; a link change holds the ticket row,
+-- Locks: ticket path locks the ticket, then tries its job without waiting; job path locks only the job; a link change holds the ticket row,
 -- then locks old and new job in one statement in id order (NO KEY UPDATE, so a foreign-key check never waits on it).
 -- Nothing locks a ticket after a job, so no lock cycle. Each check is its own statement after its lock, so under
 -- READ COMMITTED it sees the other side's committed rows.
 
 SET LOCAL lock_timeout = '5s';
+-- Every table this migration puts a trigger on, locked first in the order job completion uses (job, then its record),
+-- so a live completion finishes first and the apply never holds one while waiting on another (Sol round 2 MED).
+LOCK TABLE public.jobs, public.blend_tickets, public.application_records IN SHARE ROW EXCLUSIVE MODE;
 
 DO $preflight$
 BEGIN
@@ -50,8 +53,15 @@ BEGIN
     -- Create App Record already holds this lock; it also serializes with a link change on the same ticket.
     SELECT bt.job_id INTO v_job FROM public.blend_tickets bt WHERE bt.id = NEW.source_id FOR UPDATE;
     IF v_job IS NOT NULL THEN
-      -- Ticket, then job: the same order as a link change. Cancelling a job waits here, so the status read next is current.
-      PERFORM 1 FROM public.jobs j WHERE j.id = v_job FOR NO KEY UPDATE;
+      -- Ticket, then job: the same order as a link change. Create App Record already holds the record-number lock that
+      -- job completion takes after locking its job, so this never waits on the job (Sol round 2 HIGH): a job being
+      -- changed right now refuses the ticket, to be retried. Once locked, the status read next is current.
+      BEGIN
+        PERFORM 1 FROM public.jobs j WHERE j.id = v_job FOR NO KEY UPDATE NOWAIT;
+      EXCEPTION WHEN lock_not_available THEN
+        RAISE EXCEPTION 'BLEND_TICKET_JOB_RECORDS: this blend ticket''s spray job is being changed right now. Wait a moment and try again.'
+          USING ERRCODE = 'P0001';
+      END;
       -- A job counts while it can still complete, or once it has recorded (even if cancelled or deleted later).
       IF EXISTS (SELECT 1 FROM public.jobs j
                   WHERE j.id = v_job AND j.deleted_at IS NULL AND j.status <> 'cancelled')
@@ -140,7 +150,8 @@ BEGIN
   -- The UPDATE already holds this job row, so a link change on a ticket (which locks the job) waits for it and then
   -- sees the new customer; a link committed first is seen here.
   IF EXISTS (SELECT 1 FROM public.blend_tickets bt
-              WHERE bt.job_id = NEW.id AND bt.customer_id IS DISTINCT FROM NEW.customer_id) THEN
+              WHERE bt.job_id = NEW.id AND bt.deleted_at IS NULL
+                AND bt.customer_id IS DISTINCT FROM NEW.customer_id) THEN
     RAISE EXCEPTION 'BLEND_TICKET_JOB_OTHER_CUSTOMER: this spray job has a blend ticket linked to it for its current customer, so the job''s customer can''t change. Unlink the ticket first.'
       USING ERRCODE = 'P0001';
   END IF;

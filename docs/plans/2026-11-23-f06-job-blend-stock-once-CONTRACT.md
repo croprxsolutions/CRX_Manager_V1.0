@@ -21,7 +21,7 @@ Smallest change: one new migration (`20270226193000_f06_job_owns_linked_blend_st
 
 1. `BEFORE INSERT` trigger on `application_records` (definer function):
    - `blend_ticket` record whose ticket (locked `FOR UPDATE`) is linked to a live job (job then locked; not cancelled, not deleted) → refuse `BLEND_TICKET_JOB_RECORDS`. A cancelled or deleted job cannot complete, so its ticket records as before (Sol round 1, HIGH 1).
-   - `job` record: lock the job row, then (next statement) refuse `JOB_BLEND_TICKET_ALREADY_RECORDED` if a ticket linked to this job has its own record. Only old rows can reach this; the link rules stop new ones.
+   - `job` record: lock the job row, then (next statement) refuse `JOB_BLEND_TICKET_ALREADY_RECORDED` if a ticket linked to this job has its own record. Old rows can reach this, or a job deleted and restored after its ticket recorded; the link rules stop new ones.
    - (Removed after Luna round 4, decision 5: the job takes exactly its own chemical list, even an empty one; no `JOB_BLEND_TICKET_NEEDS_CHEMICALS` refusal.)
 2. `BEFORE INSERT OR UPDATE OF job_id, customer_id` trigger on `blend_tickets` (definer function), returning at once on an update that changes neither:
    - linking a ticket that has its own record → refuse `BLEND_TICKET_RECORDED_NO_JOB`;
@@ -87,3 +87,7 @@ HIGH 1 (cancelled job strands a billed ticket), HIGH 2 (job with no chemicals; M
 6. **Luna round 5 (a job's customer could change under a linked ticket; third round on the same-customer rule):** Mason, 2026-11-23: **add the job-side check** — `BEFORE UPDATE OF customer_id ON jobs` refuses the change while a ticket of another customer is linked (`BLEND_TICKET_JOB_OTHER_CUSTOMER`).
 
 Luna round 6 HIGH (a job customer change and a link racing past each other) is refuted: both take the job row's NO KEY UPDATE lock, which conflicts with itself, so they serialize; prover races C and D show each order waits and is then refused.
+
+## Sol round 2
+
+HIGH (Create App Record on a linked ticket could deadlock with that job's completion through the record-number lock) is fixed: the ticket path tries the job lock without waiting and, if the job is being changed, refuses the ticket to be retried (prover race E). MEDs: a deleted ticket no longer blocks a job customer correction; the migration and rollback lock jobs, blend_tickets and application_records first, in completion's order. Refuted: a REPEATABLE READ job edit (the app's API runs READ COMMITTED). LOWs: the old-rows wording now names a deleted-then-restored job; the race tests' fixed delays are accepted (each asserts the wait it needs and fails loudly, never passes wrongly).

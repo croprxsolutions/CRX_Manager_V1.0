@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-21 for the live ledger only (latest live row `20261121061349`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates. Triage 2026-11-22: see changelog.d.
+**Last verified:** 2026-11-23 for the live ledger only (latest live row `20261121061349`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates. Triage 2026-11-22: see changelog.d.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -1826,14 +1826,21 @@ messages and data are never sent, for errors and performance samples alike (chec
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · LOW · Agent (unassigned) · plan W3-45.
 
-**LOW (proof) · PARTLY FIXED · tooling · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md), Codex audit) · unassigned**
+**LOW (proof) · FIXED 2026-11-23 · tooling · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md), Codex audit) · unassigned**
 **2026-11-16 (repair step 6):**
 - All four proofs below run to PASS again: the undo prover replays the whole chain, the three provers refuse only a
   later file that redefines what they rely on, and the pricing proof uses the current cost-change form.
 - The 5 `cost-exposure-review` hashes were re-keyed after a live re-read. The only changed function their chains
   reach is `_enqueue_delivery_receipt`, which reads no cost.
 
-Still open: the KI-159 database sweep and each repair step's regression test.
+**2026-11-23 (repair step 6 finished):**
+- The KI-159 sweep (`scripts/db-invariant-sweeps/predicates/stock-matches-history.sql`, PR #1897) ran read-only on
+  production: PASS, 0 rows.
+- `src/lib/productMasterRepairGuards.test.ts` pins each fixed step in its newest migration (KI-156, KI-158, KI-160,
+  KI-161, KI-162) and checks that the sweep and the browser check read every history type the same way (KI-159).
+  Each case was shown failing with its fix undone. KI-157 is still open, so it has none.
+- Not part of this item: the same live run flags `cost-exposure-review` (31), `actor-forgery` (5) and
+  `actor-forgery-fin-audit` (1) on functions changed since their review keys were taken.
 
 Several proofs did not complete on 2026-11-13, so those workflows are not certified:
 - The full undo prover stops rebuilding at `20261217100000_job_access_ends_with_the_job.sql` (`JOB_ACCESS_BASELINE_DRIFT`).
@@ -1844,7 +1851,7 @@ The live `cost-exposure-review` predicate fails on 5 changed signatures (`comple
 `start_and_complete_delivery`, `create_invoice_from_order`, `create_split_invoices_from_order`,
 `process_offline_action`). A manual check by both reviewers found no cost leak; the review hashes are stale.
 Stock-vs-history is checked only in the browser integrity report and a one-off script, not by the database sweep
-(KI-159). No tests cover KI-156 to KI-162. Fix: repair the fixtures alongside each repair step, refresh the review
+(KI-159). No tests covered KI-156 to KI-162 (2026-11-13). Fix: repair the fixtures alongside each repair step, refresh the review
 hashes, and add each step's regression test. Repair step 6 (To-Do 0.17).
 
 ### KI-78 — Tooling and guard details (extends KI-04, KI-46, KI-47, KI-48, KI-49, KI-50, KI-65, KI-68)

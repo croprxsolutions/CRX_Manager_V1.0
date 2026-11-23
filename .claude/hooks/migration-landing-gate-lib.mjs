@@ -440,8 +440,11 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
         if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(file)) continue;
         let data;
         try { data = JSON.parse(readFileSync(path.join(stateDir, file), "utf8")); } catch { continue; }
-        // A review run under the release-only rules counts only for the release PR, never a hotfix (Sol r8, #2226).
-        if (data?.release_rules === true && headRef !== "release/next") continue;
+        // A proof counts only for the review it records: a main review, under the release-only rules only for the
+        // release PR. A proof that records no review kind is refused (Sol r8 on #2226; Sol r1 HIGH 3 and LOW).
+        const reviewFits = data?.review_ref === "origin/main"
+          && (data?.release_rules === false || (data?.release_rules === true && headRef === "release/next"));
+        if (!reviewFits) continue;
         if (proofValid(data, head, now, baseSha, APPLY_SOL_PROOF_MAX_AGE_MS) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead: String(data.head_sha).toLowerCase() === String(head).toLowerCase() })) { proven = true; break; }
       }
     } catch { /* an unreadable directory holds no proof — keep looking */ }

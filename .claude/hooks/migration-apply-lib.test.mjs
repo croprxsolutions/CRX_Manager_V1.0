@@ -1632,7 +1632,7 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   const gateDir = tempDir("crx-landing-gate-");
   mkdirSync(path.join(gateDir, ".claude", "session-state"), { recursive: true });
   const goodProof = { codex_ran: true, verdict: "clean", model: "gpt-6.2-sol", reasoning_effort: "high",
-    head_sha: HEAD_SHA, base_sha: BASE_SHA, timestamp: new Date().toISOString() };
+    head_sha: HEAD_SHA, base_sha: BASE_SHA, timestamp: new Date().toISOString(), review_ref: "origin/main", release_rules: false };
   writeFileSync(path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`), JSON.stringify(goodProof));
   const readyPr = {
     number: 900, url: "https://github.com/masonwells1/CRX_Manager_V1.0/pull/900",
@@ -1877,6 +1877,13 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
       ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "a release-rules proof still proves the release PR");
       writeFileSync(proofFile, JSON.stringify({ ...goodProof, review_ref: "origin/main", release_rules: false }));
       ok(gate().ok === true, "a hotfix's own main review still proves it");
+      // Nor a proof that records no review kind, or a staging review (Sol r1 HIGH 3 and LOW on the follow-up).
+      const { review_ref: _ref, release_rules: _rules, ...unkinded } = goodProof;
+      for (const [proof, why] of [[unkinded, "a proof with no review kind"], [{ ...goodProof, review_ref: "origin/staging" }, "a staging review"]]) {
+        writeFileSync(proofFile, JSON.stringify(proof));
+        refused(gate(), "no fresh gpt-6.2-sol/high proof", `${why} does not prove a hotfix`);
+        refused(gate({ pr: { headRefName: "release/next" } }), "no fresh gpt-6.2-sol/high proof", `${why} does not prove the release`);
+      }
     } finally {
       writeFileSync(proofFile, JSON.stringify(goodProof));
     }

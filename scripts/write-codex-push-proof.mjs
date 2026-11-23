@@ -2108,8 +2108,6 @@ export function carrySourceProofProblem(data, { headSha, nowMs = Date.now() } = 
 // (Sol HIGH, PR #1002; the same rule as the documentation-only exemption). A
 // bare path with no modes is never documentation: fail closed.
 const REGULAR_OR_ABSENT_MODES = new Set(["100644", "000000"]);
-// Git's own merge rules (`git check-attr` values); any other value names a configurable driver.
-const BUILTIN_MERGE_RULES = new Set(["unspecified", "set", "unset", "text", "binary", "union"]);
 function changedEntry(file) {
   return typeof file === "string" ? { path: file, oldMode: null, newMode: null } : file;
 }
@@ -2368,6 +2366,14 @@ function resolveCarry(root, nowMs) {
   if (forks.length !== 1 || forks[0] !== fromBase) {
     return { problem: `the merge's common ancestor is not the reviewed base (the branch already held commits ${target} gained since)` };
   }
+  // merge-tree runs any configured merge driver (a built-in name can be redefined) or merge.default, and
+  // such a driver can write anything, so none may be set before it runs (Taha #2226 LOW 1; Sol r1 HIGH 1-2).
+  const drivers = runTrustedGit(["config", "--get-regexp", "^merge\\..*\\.driver$|^merge\\.default$"], { cwd: root, timeout: 10_000 });
+  if (drivers.error || (drivers.status !== 0 && drivers.status !== 1)) return { problem: "could not read the git merge-driver settings" };
+  const driverKey = String(drivers.stdout || "").trim().split(/\s/)[0];
+  if (driverKey) {
+    return { problem: `a custom git merge driver is configured (${driverKey}); merge by hand and run the full review` };
+  }
   // HEAD's own parent order: a union-merged file (DECISION_LOG.md) lists "ours" first,
   // so the reversed order rebuilds a different tree from the same clean merge.
   const merged = runTrustedGit(["merge-tree", "--write-tree", "--no-messages", parents[0], parents[1]], {
@@ -2413,10 +2419,6 @@ function resolveCarry(root, nowMs) {
     // The rule as each side of the merge had it, not as the merged tree has it.
     const attrs = [fromBase, fromHead, baseSha].map((sha) => runGit(["check-attr", "--source", sha, "merge", "--", file], { cwd: root }));
     if (attrs.some((attr) => !attr.startsWith(`${file}: merge: `))) return { problem: `could not read the merge rule for ${file}` };
-    // A custom merge driver (local config + attributes) can write anything, and merge-tree runs it too (Taha, #2226 LOW 1).
-    if (attrs.some((attr) => !BUILTIN_MERGE_RULES.has(attr.slice(`${file}: merge: `.length)))) {
-      return { problem: `both sides changed ${file}, which uses a custom merge driver; resolve it by hand and run the full review` };
-    }
     if (!attrs.some((attr) => attr.endsWith(": merge: union"))) continue;
     for (const [a, b] of [[fromBase, fromHead], [fromBase, baseSha]]) {
       // No converters or helpers (they could run repo code and rewrite the counts); the path is literal.

@@ -843,8 +843,7 @@ export default function DeliveryDetail() {
       p_delivery_notes: editNotes || undefined,
       p_priority: editPriority,
       p_items: itemsPayload,
-      // The server keeps a driver it is not given, so "Unassigned" on a delivery with a driver asks it to clear one.
-      ...(!editDriver && delivery.assigned_driver ? { p_clear_driver: true } : {}),
+      ...clearDriverArg(editDriver, delivery.assigned_driver),
     };
     // One key per delivery and exact edit: an exact retry reuses it, a different edit gets its own.
     const editScope = fingerprintIntentPayload([editArgs]);
@@ -3297,6 +3296,11 @@ async function fetchInvoicesByDelivery(deliveryId: string): Promise<Record<strin
 }
 
 /** The order's invoices plus those linked by delivery_id, one row per invoice id, newest first. */
+// The server keeps a driver it is not given, so "Unassigned" on a delivery with a driver asks it to clear one.
+function clearDriverArg(chosen: string, current: string | null | undefined): { p_clear_driver?: true } {
+  return !chosen && current ? { p_clear_driver: true } : {};
+}
+
 function mergeRelatedInvoices(byOrder: Record<string, unknown>[], byDelivery: Record<string, unknown>[]): RelatedInvoice[] {
   const byId = new Map<string, RelatedInvoice>();
   for (const row of [...byOrder, ...byDelivery]) {

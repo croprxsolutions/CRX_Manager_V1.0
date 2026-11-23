@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270224210000_drop_inert_delivery_short_stock_trigger.sql (#2225).
+ * Real-schema proof for 20270225140000_drop_inert_delivery_short_stock_trigger.sql (#2225).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate (so #2135 is applied) in a
  * network-disabled PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), seeds invented rows and completes
@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, seed, attempt, asUser, USERS, ROOT, NAME, docker, scalar } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270224210000_drop_inert_delivery_short_stock_trigger.sql';
+const CANDIDATE = '20270225140000_drop_inert_delivery_short_stock_trigger.sql';
 const lf = (f) => readFileSync(f, 'utf8').replaceAll('\r\n', '\n');
 const candidate = lf(path.join(ROOT, 'supabase', 'migrations', CANDIDATE));
 const reverse = lf(path.join(ROOT, 'scripts', 'smoke', 'drop-inert-delivery-short-stock-trigger-reverse.sql'));

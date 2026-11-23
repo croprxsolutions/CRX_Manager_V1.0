@@ -11,7 +11,8 @@
 --      a started (in_progress) delivery is refused (DRIVER_CLEAR_STARTED; the whole edit rolls back): the completion
 --      checks compare the caller with assigned_driver, so a started delivery may move to another driver but must
 --      never be left with none;
---      a non-admin with the Deliveries page turned off (profiles.denied_pages) is refused too (PAGE_DENIED);
+--      the caller is re-read at that point: only an active admin, or an active sales rep whose Deliveries page is on,
+--      may clear (INSUFFICIENT_ROLE / PAGE_DENIED); a soft-deleted delivery is not found;
 --   3. on a scheduled delivery the driver is set to none and the driver who had it gets a "Delivery Unassigned"
 --      notification;
 --   4. the replay fingerprint gains clear_driver only when true, so every other request keeps its fingerprint; an
@@ -29,7 +30,7 @@
 -- idempotency-body-check: exempt -- the wrapper checks the key (check_idempotency_intent) and the impl records it;
 --   the wrapper only rewrites the stored result and binds the receipt, as the 20270104120000 wrapper did.
 --
--- ORDERING: after 20270104120000. Not re-runnable (preflight refuses). Postflight pins the new body md5 c2510b70aa41e7f92ba880491d6127f5.
+-- ORDERING: after 20270104120000. Not re-runnable (preflight refuses). Postflight pins the new body md5 91af27dc514f68daa407db7f83d2d077.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -95,6 +96,9 @@ DECLARE
   v_cleared_from uuid; -- 20270225170000
   v_number text;       -- 20270225170000
   v_status text;       -- 20270225170000
+  v_deleted timestamptz; -- 20270225170000
+  v_role text;         -- 20270225170000
+  v_denied text[];     -- 20270225170000
 BEGIN
   IF p_idempotency_key IS NULL THEN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: edit_delivery requires p_idempotency_key' USING ERRCODE = '22023';
@@ -143,11 +147,20 @@ BEGIN
   -- 20270225170000: the body keeps the driver when none is named; Unassigned clears it here, under the delivery lock
   -- taken above and after the body's status check, and tells the driver who had it. A replay changes nothing.
   IF v_replay IS NULL AND p_clear_driver IS TRUE THEN
-    SELECT d.assigned_driver, d.delivery_number, d.status INTO v_cleared_from, v_number, v_status
+    SELECT d.assigned_driver, d.delivery_number, d.status, d.deleted_at INTO v_cleared_from, v_number, v_status, v_deleted
       FROM public.deliveries d WHERE d.id = p_delivery_id;
-    -- Clearing releases the delivery to the driver pickup list, so a non-admin denied the Deliveries page may not.
-    IF EXISTS (SELECT 1 FROM public.profiles pr WHERE pr.id = v_actor AND pr.role <> 'admin'
-                AND 'deliveries' = ANY (pr.denied_pages)) THEN
+    IF v_deleted IS NOT NULL THEN
+      RAISE EXCEPTION 'Delivery not found' USING ERRCODE = 'P0002';
+    END IF;
+    -- Clearing releases the delivery to the driver pickup list. The caller is re-read here, FOR SHARE, so a role change
+    -- or deactivation made while this save waited is seen and any later one waits for it: only an active admin, or an
+    -- active sales rep whose Deliveries page is on, may clear.
+    SELECT pr.role, pr.denied_pages INTO v_role, v_denied
+      FROM public.profiles pr WHERE pr.id = v_actor AND pr.is_active = true FOR SHARE;
+    IF v_role IS DISTINCT FROM 'admin' AND v_role IS DISTINCT FROM 'sales_rep' THEN
+      RAISE EXCEPTION 'INSUFFICIENT_ROLE: only an active admin or sales rep can unassign a driver' USING ERRCODE = '42501';
+    END IF;
+    IF v_role = 'sales_rep' AND 'deliveries' = ANY (COALESCE(v_denied, '{}'::text[])) THEN
       RAISE EXCEPTION 'PAGE_DENIED: the Deliveries page is turned off for this user' USING ERRCODE = '42501';
     END IF;
     -- Completion checks compare the caller with assigned_driver; a started delivery must never be left with none.
@@ -233,16 +246,17 @@ DECLARE
 BEGIN
   IF v_oid IS NULL
      OR (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'edit_delivery') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_oid) IS DISTINCT FROM 'c2510b70aa41e7f92ba880491d6127f5'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_oid) IS DISTINCT FROM '91af27dc514f68daa407db7f83d2d077'
      OR NOT (SELECT prosecdef FROM pg_proc WHERE oid = v_oid)
      OR (SELECT proconfig FROM pg_proc WHERE oid = v_oid) IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[] THEN
     RAISE EXCEPTION 'EDIT_DELIVERY_UNASSIGN_POSTFLIGHT: edit_delivery is not one reviewed SECURITY DEFINER signature';
   END IF;
-  IF NOT has_function_privilege('authenticated', v_oid, 'EXECUTE')
-     OR NOT has_function_privilege('service_role', v_oid, 'EXECUTE')
-     OR has_function_privilege('anon', v_oid, 'EXECUTE')
-     OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
-                 WHERE p.oid = v_oid AND a.grantee = 0 AND a.privilege_type = 'EXECUTE') THEN
+  IF (SELECT array_agg(g.who ORDER BY g.who) FROM (
+          SELECT DISTINCT CASE WHEN a.grantee = p.proowner THEN 'owner' WHEN a.grantee = 0 THEN 'PUBLIC'
+                               ELSE a.grantee::regrole::text END AS who
+            FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+           WHERE p.oid = v_oid AND a.privilege_type = 'EXECUTE') g)
+     IS DISTINCT FROM ARRAY['authenticated', 'owner', 'service_role']::text[] THEN
     RAISE EXCEPTION 'EDIT_DELIVERY_UNASSIGN_POSTFLIGHT: edit_delivery grants are not authenticated and service_role only';
   END IF;
 END;

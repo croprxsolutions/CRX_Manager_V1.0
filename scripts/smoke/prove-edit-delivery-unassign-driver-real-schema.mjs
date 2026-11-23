@@ -250,7 +250,7 @@ function refusedProbe(sql, pattern, uid) {
 
 const id = (s) => `a0a55000-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1'), REP = id('a2'), DRV1 = id('d1'), DRV2 = id('d2'), CUST = id('c1'), ORD = id('e1');
-const DEL = id('f1'), DONE = id('f2'), OPEN = id('f3'), STARTED = id('f4');
+const DEL = id('f1'), DONE = id('f2'), OPEN = id('f3'), STARTED = id('f4'), GONE = id('f5');
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -267,7 +267,9 @@ function seed() {
       ('${DEL}', 'UNASSIGN-D1', '${ORD}', '${CUST}', '${ADMIN}', 'scheduled', false, '${DRV1}', current_date),
       ('${DONE}', 'UNASSIGN-D2', '${ORD}', '${CUST}', '${ADMIN}', 'completed', false, '${DRV1}', current_date),
       ('${OPEN}', 'UNASSIGN-D3', '${ORD}', '${CUST}', '${ADMIN}', 'scheduled', false, NULL, current_date),
-      ('${STARTED}', 'UNASSIGN-D4', '${ORD}', '${CUST}', '${ADMIN}', 'in_progress', false, '${DRV1}', current_date);`);
+      ('${STARTED}', 'UNASSIGN-D4', '${ORD}', '${CUST}', '${ADMIN}', 'in_progress', false, '${DRV1}', current_date),
+      ('${GONE}', 'UNASSIGN-D5', '${ORD}', '${CUST}', '${ADMIN}', 'scheduled', false, '${DRV1}', current_date);
+    UPDATE public.deliveries SET deleted_at = now() WHERE id = '${GONE}';`);
   console.log('[prover] seeded an office admin, two drivers, a scheduled delivery with Driver One, a completed one, an unassigned one and a started one with Driver One');
 }
 
@@ -342,6 +344,17 @@ function afterCases() {
   refusedProbe(edit(OPEN, 'u-10', ', p_clear_driver => true', REP), /PAGE_DENIED/, REP);
   okProbe(edit(OPEN, 'u-10b', '', REP), REP);
   console.log('[case 10] a rep with the Deliveries page turned off is refused Unassigned; their other edits behave as before');
+
+  // 11. A rep demoted to driver is refused (the clear re-reads the caller FOR SHARE, so a demotion that lands while a
+  //     save waits is seen too; one session cannot interleave that, so this checks the outcome); a soft-deleted delivery
+  //     is not cleared.
+  refusedProbe(`RESET ROLE; SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
+    UPDATE public.profiles SET role = 'driver', denied_pages = '{}' WHERE id = '${REP}';
+    SELECT set_config('request.jwt.claims', '{"sub":"${REP}","role":"authenticated"}', true);
+    SET LOCAL ROLE authenticated; ${edit(OPEN, 'u-11', ', p_clear_driver => true', REP)}`, /INSUFFICIENT_ROLE/, REP);
+  refusedProbe(edit(GONE, 'u-11b', ', p_clear_driver => true'), /not found/i, ADMIN);
+  assert.equal(scalar(`SELECT ${driverOf(GONE)};`), DRV1);
+  console.log('[case 11] a caller no longer office staff, and a soft-deleted delivery, are refused');
   console.log('[case 9] a started delivery is refused Unassigned (nothing saved) and can still move to Driver Two');
 }
 

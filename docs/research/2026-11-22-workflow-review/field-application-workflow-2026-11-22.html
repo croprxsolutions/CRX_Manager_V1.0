@@ -148,7 +148,7 @@
     <tr><td>7</td><td class="sev MED">MED</td><td><span class="tag">#2196</span> + note</td><td>Deleting a completed job drops billable work off Unbilled Jobs with no warning; stock stays deducted.</td></tr>
     <tr><td>8</td><td class="sev MED">MED</td><td><span class="tag new">NEW</span></td><td>Applicator completions and failed auto-drafts only write to the activity feed; nothing alerts that a job still needs billing.</td></tr>
     <tr><td>9</td><td class="sev MED">MED</td><td><span class="tag new">NEW</span></td><td>Completion can push on-hand below zero (flagged for review, never refused).</td></tr>
-    <tr><td>10</td><td class="sev LOW">LOW</td><td><span class="tag new">NEW</span></td><td>Commissions are recorded when the draft is made, not when it is posted (reversed on delete/void).</td></tr>
+    <tr><td>10</td><td class="sev MED">MED</td><td><span class="tag new">NEW</span></td><td>Commissions are recorded when the draft is made, and can be paid out before the bill is sent or collected: the payout screen and payout functions never check the invoice. Same gap as chemical sales; decisions 1 and 13 (pay only on cash received) cover field invoices too.</td></tr>
     <tr><td>11–13</td><td class="sev LOW">LOW–MED</td><td><span class="tag">#2141 #1933 #1926 #2105 KI-81</span></td><td>Cancelled group draft left on the job; unit-conversion edges; $0 tiny applications; editors read the current quote price.</td></tr>
   </table>
 

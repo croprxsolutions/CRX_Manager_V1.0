@@ -649,6 +649,17 @@ describe('Email Confirmation and the server receipt queue', () => {
     expect(closeCalls()).toEqual(['manual_send']);
   });
 
+  it('says the server emailed it too when a receipt queued meanwhile was already sent (Sol MED, #2291)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
+    mockSendEmail.mockImplementation(async () => {
+      tables.data.delivery_receipt_queue = [{ status: 'sent' }];
+      return { success: true };
+    });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/server has emailed it too/)));
+  });
+
   it('does not warn about a receipt queued meanwhile that someone already marked handled (#2291)', async () => {
     mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
     mockSendEmail.mockImplementation(async () => {

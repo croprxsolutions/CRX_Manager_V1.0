@@ -95,6 +95,7 @@ describe('ReceiptsToCheck', () => {
     await waitFor(() => expect(rpc).toHaveBeenCalledTimes(2));
     const keys = rpc.mock.calls.map(([, args]) => (args as { p_idempotency_key: string }).p_idempotency_key);
     expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBeTruthy();
     expect(keys[1]).not.toBe(keys[0]);
   });
 

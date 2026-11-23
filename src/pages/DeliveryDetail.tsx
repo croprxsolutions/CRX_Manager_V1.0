@@ -49,7 +49,7 @@ import { Sentry } from '../lib/sentry';
 import { fetchDeliveryFarm } from '../lib/driverFarms';
 import {
   RECEIPT_SENDING_NOW_MESSAGE, closeDeliveryReceipt, isReceiptChanged, isReceiptSendingNow, receiptCloseScope,
-  receiptMayAlreadyBeSent, receiptServerMaySend, type ReceiptCloseResult,
+  receiptMayAlreadyBeSent, receiptQueueStatus, type ReceiptCloseResult,
 } from '../lib/receiptsToCheck';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
@@ -1488,11 +1488,15 @@ export default function DeliveryDetail() {
   const closeSentReceipt = async (deliveryId: string, queuedAt: string | null) => {
     if (!queuedAt) {
       // None was queued when the send started, so none is closed; one queued meanwhile may still be emailed (Sol LOW).
-      // Only a receipt still waiting for the server counts, and a failed read says so rather than staying silent (#2291).
-      const maySend = await receiptServerMaySend(deliveryId).catch(() => null);
-      if (maySend === null) {
-        toast('warning', 'The email went out, but the app could not check whether a new receipt was queued meanwhile. Check "Customer receipts to check".');
-      } else if (maySend) {
+      // Only one someone already marked handled (cancelled) is quiet; a failed read says so rather than staying silent (#2291).
+      const queued = await receiptQueueStatus(deliveryId).then((s) => ({ s }), () => null);
+      if (!queued) {
+        toast('warning', 'The email went out, but the app could not check whether a new receipt was queued meanwhile. The server may email the customer a second receipt.');
+      } else if (queued.s === 'sent') {
+        toast('warning', 'A new receipt was queued for this delivery while the email was sending, and the server has emailed it too. The customer may have two receipts.');
+      } else if (queued.s === 'needs_check') {
+        toast('warning', 'A new receipt was queued for this delivery while the email was sending. It is on "Customer receipts to check": check it there, as the server may already have emailed it.');
+      } else if (queued.s && queued.s !== 'cancelled') {
         toast('warning', 'A new receipt was queued for this delivery while the email was sending. The server may email it too.');
       }
       return;

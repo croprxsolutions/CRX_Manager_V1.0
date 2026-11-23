@@ -20,6 +20,7 @@
 --
 -- PIN QUERY (read-only; run on live; paste its one value, as a quoted jsonb literal, into c_live):
 -- PIN QUERY BEGIN
+-- SET TIME ZONE 'UTC';
 -- SELECT jsonb_build_object(
 --   'system_identifier', (SELECT system_identifier FROM pg_control_system()),
 --   'admin_profile_id', (SELECT id FROM public.profiles WHERE role = 'admin' ORDER BY created_at, id LIMIT 1),
@@ -38,7 +39,8 @@
 -- )::text AS live_reset_pins;
 -- PIN QUERY END
 --
--- PREFLIGHT (on live; refuses with an exception and changes nothing): the backup schema already exists
+-- PREFLIGHT (on live; refuses with an exception and changes nothing): not a read committed transaction with
+-- session_replication_role = origin (LIVE_RESET_SESSION); the backup schema already exists
 -- (LIVE_RESET_ALREADY_APPLIED); c_live is malformed (LIVE_RESET_PINS_MISSING); the public table set differs from the
 -- pinned one or from the set this file classified (c_table_set_md5), or a foreign key outside public points at a table
 -- it deletes from (LIVE_RESET_SCHEMA_DRIFT); any public table's row count or content differs from its pin
@@ -178,9 +180,13 @@ BEGIN
   END IF;
 
   -- ===== Preflight =====
-  IF (c_live->>'pinned_at') IS NULL OR now() > (c_live->>'pinned_at')::timestamptz + interval '6 hours' THEN
-    RAISE EXCEPTION 'LIVE_RESET_PIN_EXPIRED: the pins were read at %, more than 6 hours ago; re-pin. Nothing was changed.', c_live->>'pinned_at';
+  IF current_setting('transaction_isolation') <> 'read committed' OR current_setting('session_replication_role') <> 'origin' THEN
+    RAISE EXCEPTION 'LIVE_RESET_SESSION: run it in a read committed transaction with session_replication_role = origin (now % / %). Nothing was changed.',
+      current_setting('transaction_isolation'), current_setting('session_replication_role');
   END IF;
+  -- The pin digests were read in UTC; to_jsonb renders timestamps in the session time zone.
+  PERFORM set_config('TimeZone', 'UTC', true);
+  PERFORM set_config('DateStyle', 'ISO, MDY', true);
   IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = c_backup) THEN
     RAISE EXCEPTION 'LIVE_RESET_ALREADY_APPLIED: schema % exists; the reset ran already. Nothing was changed.', c_backup;
   END IF;
@@ -195,6 +201,19 @@ BEGIN
   FOREACH v_t IN ARRAY v_tables LOOP
     EXECUTE format('LOCK TABLE public.%I IN EXCLUSIVE MODE', v_t);
   END LOOP;
+  -- Checked after the locks, on the wall clock: a pin older than 6 hours (or from the future) refuses.
+  IF (c_live->>'pinned_at') IS NULL OR clock_timestamp() > (c_live->>'pinned_at')::timestamptz + interval '6 hours'
+     OR (c_live->>'pinned_at')::timestamptz > clock_timestamp() + interval '5 minutes' THEN
+    RAISE EXCEPTION 'LIVE_RESET_PIN_EXPIRED: the pins were read at %, not within the last 6 hours; re-pin. Nothing was changed.', c_live->>'pinned_at';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'p')
+     OR EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhparent IN (SELECT format('public.%I', x)::regclass FROM unnest(v_tables) x)) THEN
+    RAISE EXCEPTION 'LIVE_RESET_SCHEMA_DRIFT: a public table is partitioned or has child tables. Nothing was changed.';
+  END IF;
+  SELECT string_agg(x, ', ') INTO v_bad FROM unnest(c_seqs) x WHERE to_regclass(format('public.%I', x)) IS NULL;
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'LIVE_RESET_SCHEMA_DRIFT: number sequences missing (%). Nothing was changed.', v_bad;
+  END IF;
 
   SELECT string_agg(x, ', ') INTO v_bad FROM (
     (SELECT unnest(v_tables) EXCEPT SELECT jsonb_object_keys(v_counts)) UNION ALL
@@ -214,9 +233,9 @@ BEGIN
   SELECT string_agg(k.conrelid::regclass::text || ' -> ' || k.confrelid::regclass::text, ', ') INTO v_bad
     FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace
    WHERE k.contype = 'f' AND n.nspname <> 'public'
-     AND k.confrelid IN (SELECT format('public.%I', x)::regclass FROM unnest(v_tables) x);
+     AND k.confrelid IN (SELECT format('public.%I', x)::regclass FROM unnest(v_core) x);
   IF v_bad IS NOT NULL THEN
-    RAISE EXCEPTION 'LIVE_RESET_SCHEMA_DRIFT: a table outside public references a public table (%). Nothing was changed.', v_bad;
+    RAISE EXCEPTION 'LIVE_RESET_SCHEMA_DRIFT: a table outside public references a table this deletes from (%). Nothing was changed.', v_bad;
   END IF;
 
   v_bad := NULL;
@@ -254,17 +273,17 @@ BEGIN
   END LOOP;
 
   -- Ids of every cleared row (the uuid id column of each core table), for the section filters.
-  CREATE TEMP TABLE reset_ids (id uuid PRIMARY KEY) ON COMMIT DROP;
+  CREATE TEMP TABLE reset_ids (id uuid PRIMARY KEY) ON COMMIT DROP; -- always read as pg_temp.reset_ids
   FOR r IN SELECT table_name FROM information_schema.columns
             WHERE table_schema = c_backup AND column_name = 'id' AND data_type = 'uuid' ORDER BY table_name LOOP
-    EXECUTE format('INSERT INTO reset_ids SELECT id FROM %I.%I WHERE id IS NOT NULL ON CONFLICT DO NOTHING', c_backup, r.table_name);
+    EXECUTE format('INSERT INTO pg_temp.reset_ids SELECT id FROM %I.%I WHERE id IS NOT NULL ON CONFLICT DO NOTHING', c_backup, r.table_name);
   END LOOP;
 
   IF c_clear_logs THEN
     v_plan := v_plan || jsonb_build_array(
-      jsonb_build_object('t', 'activity_feed', 'w', format('related_entity_type = ANY (%L::text[]) OR related_entity_id IN (SELECT id FROM reset_ids)', c_cleared_types)),
-      jsonb_build_object('t', 'notifications', 'w', format('related_entity_type = ANY (%L::text[]) OR related_entity_id IN (SELECT id FROM reset_ids)', c_cleared_types)),
-      jsonb_build_object('t', 'financial_audit_log', 'w', format('entity_type = ANY (%L::text[]) OR entity_id IN (SELECT id FROM reset_ids)', c_cleared_types)),
+      jsonb_build_object('t', 'activity_feed', 'w', format('related_entity_type = ANY (%L::text[]) OR related_entity_id IN (SELECT id FROM pg_temp.reset_ids)', c_cleared_types)),
+      jsonb_build_object('t', 'notifications', 'w', format('related_entity_type = ANY (%L::text[]) OR related_entity_id IN (SELECT id FROM pg_temp.reset_ids)', c_cleared_types)),
+      jsonb_build_object('t', 'financial_audit_log', 'w', format('entity_type = ANY (%L::text[]) OR entity_id IN (SELECT id FROM pg_temp.reset_ids)', c_cleared_types)),
       jsonb_build_object('t', 'email_log', 'w', 'true'),
       jsonb_build_object('t', 'integrity_alerts', 'w', 'true'),
       jsonb_build_object('t', 'failed_notifications', 'w', 'true'),
@@ -278,13 +297,13 @@ BEGIN
       jsonb_build_object('t', 'retired_uncertain_requests', 'w', 'true'));
   END IF;
   IF c_clear_team_notes_on_cleared THEN
-    v_where := 'note_id IN (SELECT id FROM public.team_notes WHERE linked_entity_id IN (SELECT id FROM reset_ids))';
+    v_where := 'note_id IN (SELECT id FROM public.team_notes WHERE linked_entity_id IN (SELECT id FROM pg_temp.reset_ids))';
     v_plan := v_plan || jsonb_build_array(
       jsonb_build_object('t', 'note_activity_log', 'w', v_where),
       jsonb_build_object('t', 'team_note_tags', 'w', v_where),
       jsonb_build_object('t', 'team_note_attachments', 'w', v_where),
       jsonb_build_object('t', 'team_note_comments', 'w', v_where),
-      jsonb_build_object('t', 'team_notes', 'w', 'linked_entity_id IN (SELECT id FROM reset_ids)'));
+      jsonb_build_object('t', 'team_notes', 'w', 'linked_entity_id IN (SELECT id FROM pg_temp.reset_ids)'));
   END IF;
   IF c_clear_backup_snapshots THEN
     v_plan := v_plan || jsonb_build_array(jsonb_build_object('t', 'backup_snapshots', 'w', format('table_name = ANY (%L::text[])', v_core)));

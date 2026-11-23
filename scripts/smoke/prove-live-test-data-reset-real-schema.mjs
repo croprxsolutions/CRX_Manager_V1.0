@@ -239,7 +239,8 @@ const tableMd5 = (schema, t, excl = []) => scalar(`SELECT md5(coalesce(string_ag
   SELECT md5((to_jsonb(x) - '{${excl.join(',')}}'::text[])::text) h FROM ${schema}.${t} x) s;`);
 const EXCL = { customers: ['prepay_balance_cents', 'row_version', 'updated_at'],
   inventory: ['quantity_available', 'quantity_prebooked', 'quantity_on_order', 'last_counted_at', 'updated_at'] };
-const apply = (sql) => docker([...PSQL('postgres'), '-1'], { input: sql, allowFailure: true });
+// -1 with -f - : one transaction around the whole file, as a migration runner applies it.
+const apply = (sql) => docker([...PSQL('postgres'), '-1', '-f', '-'], { input: sql, allowFailure: true });
 const refused = (label, r, pattern) => {
   assert.notEqual(r.status, 0, `${label}: must refuse`);
   assert.match(r.stderr, pattern, `${label}: ${r.stderr}`);
@@ -252,6 +253,8 @@ try {
     // Only a network-less container this harness could have built: never a shared or development database.
     const net = docker(['inspect', '-f', '{{.HostConfig.NetworkMode}} {{.Config.Image}}', NAME]).stdout.trim();
     assert.match(net, /^none public\.ecr\.aws\/supabase\/postgres:/, `refusing to reuse ${NAME} (${net}): not a harness container`);
+    assert.match(NAME, /^crx-(undo-paths|reset)-/, `refusing to reuse ${NAME}: only a crx-undo-paths-* or crx-reset-* proof container`);
+    assert.equal(docker(['inspect', '-f', '{{len .Mounts}}', NAME]).stdout.trim(), '0', `refusing to reuse ${NAME}: it has a mounted volume`);
     console.log(`[prover] reusing ${NAME}`);
   }
   else { buildContainer({ stopBefore: CANDIDATE }); built = true; seedUsers(); }

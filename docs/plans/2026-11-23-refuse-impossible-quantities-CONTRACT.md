@@ -40,9 +40,9 @@ Database only, one migration, compatible with the deployed app. Test fixtures th
 
 None (the date window is Mason's 2026-11-22 rule; Taha's tables are left to Taha).
 
-## Status: PARKED (2026-11-23 overnight)
+## Status: BUILT (2026-11-23 overnight), not ready to merge
 
-- Astra cold challenge (gpt-6.2-astra high): 19 findings. Taken into the draft migration: lock all six tables up front in the order completions take them (no deadlock with a live completion, and no writer can add a bad row between the count and the constraints). Unconstrained `numeric` on every target column confirmed (no `22003` path).
-- Why parked: `scripts/smoke/smoke-purchasing-plan-reservations.sql` (runnable against live, terminal rollback) stores NaN/infinity on purpose in exactly these columns in cases C21, C22B, C22C, C23A, C23D, C24A and C24B, to prove the plan's skip-and-flag guard. Each case must become "the table refuses it" (with the old path kept until the migration is live); that is a sizable rewrite of a Sol-hardened test and is better done in daylight.
-- Question for Mason (Astra BLOCKER): the 2000-2099 window was set for what the purchasing plan reads. Should the database refuse any job date or delivery date outside 2000-2099 everywhere? Recommended: yes (production has none; a typo year is caught at save instead of silently skipped later).
+- Mason answered the date question 2026-11-23: "Yes, refuse them" (job and delivery dates outside 2000-2099 are refused everywhere).
+- Astra cold challenge (gpt-6.2-astra high): 19 findings; taken into the migration: lock all six tables up front in the order completions take them, so the count and the constraints see the same rows and no live completion deadlocks. Unconstrained `numeric` on every target column confirmed (no `22003` path).
+- `scripts/smoke/smoke-purchasing-plan-reservations.sql` cases C21, C21D, C22B, C22C, C23A, C23D, C24A and C24B now assert the table refuses the value when the constraints exist (inline blocks; the old cases still run where they do not). Note: on current staging (without this migration) that smoke already fails at C23D, because `20270224100000_f05_order_line_quantity_guard` refuses its second delivery of the same 10; with this migration C23D makes only the good delivery, so the smoke passes again.
 - Out of scope until Taha's lanes reopen (2026-12-15): quote_items, quote_sections, quote_product_draws, job_product_draws, inventory_holds, purchase_orders, purchase_order_items (all 0 bad values on production 2026-11-23).

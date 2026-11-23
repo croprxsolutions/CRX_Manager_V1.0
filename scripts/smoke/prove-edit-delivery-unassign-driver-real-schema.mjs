@@ -241,6 +241,19 @@ function probe(sql, uid = null) {
   const r = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `BEGIN;\n${claims}\n${sql}\nROLLBACK;\n` });
   return { status: r.status, output: `${r.stdout}\n${r.stderr}`, last: r.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? '' };
 }
+// Like probe, but commits: for a retry that arrives after the first save has committed (a lost response).
+function committed(sql, uid) {
+  const claims = `SELECT set_config('request.jwt.claims', '{"sub":"${uid}","role":"authenticated"}', true);
+SET LOCAL ROLE authenticated;`;
+  const c = docker([...psqlArgs(), '-A', '-t'], { allowFailure: true, input: `BEGIN;
+${claims}
+${sql}
+COMMIT;
+` });
+  assert.equal(c.status, 0, `${c.stdout}
+${c.stderr}`);
+  return c.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? '';
+}
 function okProbe(sql, uid) { const r = probe(sql, uid); assert.equal(r.status, 0, r.output); return r.last; }
 function refusedProbe(sql, pattern, uid) {
   const r = probe(sql, uid);
@@ -250,7 +263,7 @@ function refusedProbe(sql, pattern, uid) {
 
 const id = (s) => `a0a55000-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1'), REP = id('a2'), DRV1 = id('d1'), DRV2 = id('d2'), CUST = id('c1'), ORD = id('e1');
-const DEL = id('f1'), DONE = id('f2'), OPEN = id('f3'), STARTED = id('f4'), GONE = id('f5');
+const DEL = id('f1'), DONE = id('f2'), OPEN = id('f3'), STARTED = id('f4'), GONE = id('f5'), LATE = id('f6');
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -268,6 +281,7 @@ function seed() {
       ('${DONE}', 'UNASSIGN-D2', '${ORD}', '${CUST}', '${ADMIN}', 'completed', false, '${DRV1}', current_date),
       ('${OPEN}', 'UNASSIGN-D3', '${ORD}', '${CUST}', '${ADMIN}', 'scheduled', false, NULL, current_date),
       ('${STARTED}', 'UNASSIGN-D4', '${ORD}', '${CUST}', '${ADMIN}', 'in_progress', false, '${DRV1}', current_date),
+      ('${LATE}', 'UNASSIGN-D6', '${ORD}', '${CUST}', '${ADMIN}', 'scheduled', false, '${DRV1}', current_date),
       ('${GONE}', 'UNASSIGN-D5', '${ORD}', '${CUST}', '${ADMIN}', 'scheduled', false, '${DRV1}', current_date);
     UPDATE public.deliveries SET deleted_at = now() WHERE id = '${GONE}';`);
   console.log('[prover] seeded an office admin, two drivers, a scheduled delivery with Driver One, a completed one, an unassigned one and a started one with Driver One');
@@ -355,6 +369,13 @@ function afterCases() {
   refusedProbe(edit(GONE, 'u-11b', ', p_clear_driver => true'), /not found/i, ADMIN);
   assert.equal(scalar(`SELECT ${driverOf(GONE)};`), DRV1);
   console.log('[case 11] a caller no longer office staff, and a soft-deleted delivery, are refused');
+
+  // 12. A retry after the first save committed (its response lost) returns the saved answer and changes nothing.
+  const first = committed(edit(LATE, 'u-12', ', p_clear_driver => true'), ADMIN);
+  const again = committed(edit(LATE, 'u-12', ', p_clear_driver => true'), ADMIN);
+  assert.equal(again, first, 'the committed retry returns the first answer');
+  assert.equal(scalar(`SELECT ${driverOf(LATE)} || '|' || ${notes(LATE, 'Delivery Unassigned')} || '|' || ${events(LATE)};`), 'none|1|1');
+  console.log('[case 12] a retry after the save committed returns the saved answer, with one notice and one edit event');
   console.log('[case 9] a started delivery is refused Unassigned (nothing saved) and can still move to Driver Two');
 }
 

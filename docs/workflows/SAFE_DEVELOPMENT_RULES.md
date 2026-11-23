@@ -11,7 +11,7 @@ These are the detailed engineering rules behind the concise contract in `AGENTS.
 ### 1. Read the context first
 - Read `AGENTS.md`, then only the workflow and reference documents its routing table names for this task.
 - Read the source files you plan to change.
-- Search `docs/manual/DECISION_LOG.md` by keyword before reopening a settled design question, and `docs/manual/KNOWN_ISSUES.md` before claiming a problem is new; never read either log whole.
+- Search `docs/manual/DECISION_LOG.md` and `docs/manual/decision-log.d/` by keyword before reopening a settled design question, and `docs/manual/KNOWN_ISSUES.md` and `docs/manual/known-issues.d/` before claiming a problem is new; never read either log whole. New entries go one file each in those `.d/` folders.
 
 ### 2. Research before coding
 - Search for the closest existing pattern before writing new code.

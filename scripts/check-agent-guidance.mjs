@@ -62,7 +62,7 @@ const requiredRouteRows = [
   ["Frontend/UI", ["docs/workflows/UI_PATTERNS.md"]],
   ["Delegation, agent collaboration, or agent-surface changes", ["docs/workflows/AGENT_COLLABORATION.md", "docs/reference/agent-guardrails.md"]],
   ["Push, PR finalization, merge, or release", [".claude/commands/ship.md"]],
-  ["Settled decisions, known problems, or current status", ["docs/manual/DECISION_LOG.md", "docs/manual/KNOWN_ISSUES.md", "docs/manual/CURRENT_STATE.md"]],
+  ["Settled decisions, known problems, or current status", ["docs/manual/DECISION_LOG.md", "decision-log.d/", "docs/manual/KNOWN_ISSUES.md", "known-issues.d/", "docs/manual/CURRENT_STATE.md"]],
   ["Mason asks how the system or agent process works", ["docs/manual/OWNER_PLAYBOOK.md"]],
 ];
 const routingRows = new Map(

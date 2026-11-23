@@ -47,10 +47,15 @@ const wordsOf = (name) => String(name)
   .split(/[^a-z0-9]+/)
   .filter(Boolean);
 
+// Screens that run chemical-sale billing without a billing word in their name (Codex P1, #2303).
+// shortcut: names, not code, decide the lane; add a file here when review finds another billing entry point.
+const LANE_FILE_PREFIXES = ["src/pages/OrderDetail."];
+
 /** True when this changed file is app or database code in Taha's lane (and not field billing). */
 export function isTahaLanePath(name) {
   const file = String(name ?? "").replace(/\\/g, "/");
   if (!/^(?:src|supabase)\//i.test(file)) return false;
+  if (LANE_FILE_PREFIXES.some((p) => file.startsWith(p))) return true;
   const words = wordsOf(file);
   if (isFieldBilling(words)) return false;
   return isBill(words) || words.some((w) => LANE_WORDS.has(w));

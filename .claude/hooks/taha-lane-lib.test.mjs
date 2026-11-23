@@ -28,7 +28,7 @@ for (const p of [
   "supabase/migrations/20270224120000_month_close_payments_received_recheck.sql", "src/lib/billingFeatures.ts",
   "src/pages/CommissionPayments.tsx", "src/lib/creditLimit.ts",
   // Codex P1/P2 on #2303: bill splits are billing; data "fields" are not field billing.
-  "src/lib/billSplitLock.ts", "src/components/orders/LineBillSplit.tsx", "src/lib/invoiceRowPdfFields.ts",
+  "src/pages/OrderDetail.tsx", "src/pages/OrderDetail.billing.test.tsx", "src/lib/billSplitLock.ts","src/components/orders/LineBillSplit.tsx", "src/lib/invoiceRowPdfFields.ts",
   "supabase/migrations/20270129180000_ki81_quote_line_sent_field.sql", "supabase/migrations/20260702131000_a3_save_quote_restore_dropped_fields.sql",
 ]) ok(isTahaLanePath(p), `${p} is Taha's`);
 for (const p of [

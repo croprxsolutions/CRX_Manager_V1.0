@@ -640,7 +640,7 @@ describe('Email Confirmation and the server receipt queue', () => {
   it('with none queued at the start, warns when one was queued during the send and closes nothing (Sol LOW, #2251)', async () => {
     mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
     mockSendEmail.mockImplementation(async () => {
-      tables.data.delivery_receipt_queue = [{ status: 'pending' }];
+      tables.data.delivery_receipt_queue = [{ status: 'pending', sent_at: null, send_authorized_at: null }];
       return { success: true };
     });
     await renderPage();
@@ -652,18 +652,18 @@ describe('Email Confirmation and the server receipt queue', () => {
   it('says the server emailed it too when a receipt queued meanwhile was already sent (Sol MED, #2291)', async () => {
     mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
     mockSendEmail.mockImplementation(async () => {
-      tables.data.delivery_receipt_queue = [{ status: 'sent' }];
+      tables.data.delivery_receipt_queue = [{ status: 'sent', sent_at: '2026-10-21T15:11:00Z', send_authorized_at: '2026-10-21T15:10:30Z' }];
       return { success: true };
     });
     await renderPage();
     fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/server has emailed it too/)));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/server has emailed it or may have/)));
   });
 
   it('does not warn about a receipt queued meanwhile that someone already marked handled (#2291)', async () => {
     mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
     mockSendEmail.mockImplementation(async () => {
-      tables.data.delivery_receipt_queue = [{ status: 'cancelled' }];
+      tables.data.delivery_receipt_queue = [{ status: 'cancelled', sent_at: null, send_authorized_at: null }];
       return { success: true };
     });
     await renderPage();

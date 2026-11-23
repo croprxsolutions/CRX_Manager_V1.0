@@ -49,7 +49,7 @@ import { Sentry } from '../lib/sentry';
 import { fetchDeliveryFarm } from '../lib/driverFarms';
 import {
   RECEIPT_SENDING_NOW_MESSAGE, closeDeliveryReceipt, isReceiptChanged, isReceiptSendingNow, receiptCloseScope,
-  receiptMayAlreadyBeSent, receiptQueueStatus, type ReceiptCloseResult,
+  receiptMayAlreadyBeSent, readQueuedReceipt, queuedMeanwhileWarning, type ReceiptCloseResult,
 } from '../lib/receiptsToCheck';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
@@ -1485,20 +1485,13 @@ export default function DeliveryDetail() {
   };
 
   // After the hand send: mark the paused receipt handled. A failure only leaves it on the office list.
-  const closeSentReceipt = async (deliveryId: string, queuedAt: string | null) => {
+  const closeSentReceipt = async (deliveryId: string, queuedAt: string | null, deliveryNumber: string) => {
     if (!queuedAt) {
       // None was queued when the send started, so none is closed; one queued meanwhile may still be emailed (Sol LOW).
-      // Only one someone already marked handled (cancelled) is quiet; a failed read says so rather than staying silent (#2291).
-      const queued = await receiptQueueStatus(deliveryId).then((s) => ({ s }), () => null);
-      if (!queued) {
-        toast('warning', 'The email went out, but the app could not check whether a new receipt was queued meanwhile. The server may email the customer a second receipt.');
-      } else if (queued.s === 'sent') {
-        toast('warning', 'A new receipt was queued for this delivery while the email was sending, and the server has emailed it too. The customer may have two receipts.');
-      } else if (queued.s === 'needs_check') {
-        toast('warning', 'A new receipt was queued for this delivery while the email was sending. It is on "Customer receipts to check": check it there, as the server may already have emailed it.');
-      } else if (queued.s && queued.s !== 'cancelled') {
-        toast('warning', 'A new receipt was queued for this delivery while the email was sending. The server may email it too.');
-      }
+      // A failed read says so rather than staying silent; each warning names its delivery, as the page may have moved on (#2291).
+      const warning = await readQueuedReceipt(deliveryId).then(queuedMeanwhileWarning,
+        () => 'The email went out, but the app could not check whether a new receipt was queued meanwhile. The server may email the customer a second receipt.');
+      if (warning) toast('warning', `Delivery ${deliveryNumber}: ${warning}`);
       return;
     }
     // Only the receipt this send covered: the server refuses if it was queued again since (#2251).
@@ -1579,7 +1572,7 @@ export default function DeliveryDetail() {
       });
       heldNotSent = false;
       toast('success', `Confirmation email sent to ${customer.email}`);
-      await closeSentReceipt(delivery.id, paused.queued_at);
+      await closeSentReceipt(delivery.id, paused.queued_at, delivery.delivery_number);
     } catch (err: unknown) {
       toast('error', sanitizeError(err));
       // No answer came back: the email may have gone out, so never say it did not (Codex P2).

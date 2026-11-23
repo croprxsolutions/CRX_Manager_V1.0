@@ -245,8 +245,6 @@ export type RateCutoverPreview =
     current: { rate_per_acre: string | null; rate_unit: string | null };
     target: RateValues;
     expected: Record<string, unknown> & { sizes: ParentRatePreviewSize[] };
-    /** promote only: the old values a switch back puts back. */
-    snapshot: { legacy: { rate_per_acre: string | null; rate_unit: string | null; suggested_rate: string | null } } | null;
   };
 
 export interface RateCutoverReceipt {

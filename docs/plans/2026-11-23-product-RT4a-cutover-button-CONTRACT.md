@@ -100,3 +100,7 @@ Run in the local test app on invented data (a throwaway copy), as the invented a
 ## Open business decisions
 
 None. Authority, refusals, undo and the freeze were settled in the RT-4a contract (Mason, 2026-11-17/18).
+
+## Amendment (2026-11-23, Sol round 2; Mason: "DB fix")
+
+- A promote that changes the rate or unit is refused by the database when the old values would fail the switch back's checks (`PRODUCT_PARENT_CUTOVER_NOT_RESTORABLE`) or field-app invoicing cannot convert the approved unit to a size's sold unit (`PRODUCT_PARENT_CUTOVER_UNIT_NOT_INVOICEABLE`). Migration `20270227100000_rate_cutover_refuses_unrestorable.sql`. The screen keeps no copy of these checks; it shows the refusal.

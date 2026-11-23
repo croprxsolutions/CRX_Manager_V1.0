@@ -36,23 +36,11 @@ const afterPrices = (plan: Eligible, size: Eligible['expected']['sizes'][number]
 const allShownExactly = (plan: Eligible) => plan.expected.sizes.every((size) => TIERS.every((tier) =>
   [size.before_prices, afterPrices(plan, size)].every((prices) => perAcre(prices[`tier${tier}_price_per_acre`]) !== 'Invalid amount')));
 
-// Switching back re-saves the old values through the rate save's checks (_apply_parent_rates, _product_rate_value_ok).
-// Old values that fail them could never be put back, leaving the group stuck on its approved rate, so promote waits.
-function restoreProblem(plan: Eligible, seedOrEach: boolean): string | null {
-  const old = plan.snapshot?.legacy;
-  if (plan.direction !== 'promote' || !plan.changes || !old) return null;
-  if (!/^([0-9]{1,12}(\.[0-9]{1,6})?)?$/.test((old.rate_per_acre ?? '').trim())) return 'its old rate per acre has more than 6 decimals';
-  if (!seedOrEach && (old.rate_unit ?? '').trim().length > 40) return 'its old rate unit is longer than 40 characters';
-  if ((old.suggested_rate ?? '').trim().length > 200) return 'its old suggested rate is longer than 200 characters';
-  return null;
-}
-
-// Why Switch stays off (shown in the warning box), or null when the preview may be switched.
-function cutoverWarning(preview: RateCutoverPreview | null, seedOrEach: boolean): string | null {
+// Why Switch stays off (shown in the warning box), or null when the preview may be switched. Old values a switch
+// back could not re-save, and approved units field-app invoicing cannot convert, are refused by the database.
+function cutoverWarning(preview: RateCutoverPreview | null): string | null {
   if (!preview) return null;
   if (!preview.eligible) return `Can't switch. ${refusalText({ message: preview.refusal })}`;
-  const back = restoreProblem(preview, seedOrEach);
-  if (back) return `Can't switch yet: ${back}, so it could not be switched back. Fix it with Correct parent rates first.`;
   // Not a box of its own: an inexact price already reads "Invalid amount" in the table.
   return allShownExactly(preview) ? null : '';
 }
@@ -118,7 +106,7 @@ export default function ParentRateCutoverModal({ parent, profileId, rateSource, 
   // A preview counts only for the group and direction on screen now; otherwise preview again.
   const preview = heldPreview?.parent_id === parent.id && heldPreview.direction === direction ? heldPreview : null;
   const plan = preview?.eligible ? preview : null;
-  const warning = cutoverWarning(preview, seedOrEach);
+  const warning = cutoverWarning(preview);
   const { getKey, resetKey } = useIdempotencyKey('commit_parent_rate_cutover', profileId,
     JSON.stringify([parent.id, direction, plan?.expected ?? null, reason.trim()]));
 

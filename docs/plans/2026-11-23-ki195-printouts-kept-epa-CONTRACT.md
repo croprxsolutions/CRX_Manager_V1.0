@@ -118,3 +118,20 @@ this read-only change; 37 has no case (new jobs have no locks).
 - MED cost-exposure allowlist key: a post-apply step in the migration record (the key is computed from the live chain).
 - LOW prover export read as the applicator after the window: fixed (exports the rep's read).
 - LOW rollout wording in this contract: fixed above.
+
+## Luna round 3 and Sol round 2 (2026-11-23)
+
+- Luna MED kept-row read could be cut by the API row cap: refuted. At most one row per printed product (primary key
+  job_id + product_id), and the label read of the same product list has the same shape and aborts on any gap.
+- Sol HIGH WPS pairs the kept number with catalog REI/PHI: fixed. The WPS notice now takes REI/PHI from the job line
+  first (filled from the label when the product is picked), then the product, the rule the report, applicator sheet
+  and `get_job_proof_data` already use. A line left blank still falls back to the product, as everywhere today.
+- Sol MED access removed and restored between the two visibility checks: refuted as needing two opposite access changes
+  within one print's milliseconds; each single change is caught.
+- Sol MED proof retry across the migration: refuted as in round 1.
+- Sol MED the send endpoint does not re-check the rendered EPA text: pre-existing design (the office sender composes
+  the body; the endpoint checks the notice and HTML shape); out of scope for KI-195.
+- Sol LOW no automated test drives the WPS handler: it is a page handler; the shared `applyKeptEpa` is unit-tested and
+  the browser check on staging is owed after merge (Mason signs in).
+- Sol LOW three short reads per printed job: accepted; the bulk loop already makes several reads per job.
+- Sol LOW KNOWN_ISSUES KI-195 description reads as current: fixed (status line says the description is pre-fix).

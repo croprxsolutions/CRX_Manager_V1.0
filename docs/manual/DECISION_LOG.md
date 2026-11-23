@@ -3,7 +3,6 @@
 ## 2026-11-23 — #2372: Mason owner-accepted 4 Sol finding(s) at `99b9e9ba7e0e`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2372 at `99b9e9ba7e0e` (base `2a4b17f13baa`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
-Pilot only until #2379 is fixed (Mason: "Accept, pilot only"). Follow-ups: #2367 (findings 2 and 3), #2379 (label maximum), #2380 (conversion factors).
 - Finding 1 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:51`, text sha256 `3d60ebdec0dcb4ec` (the wording stays with the proof, not here)
   Mason chose to leave it unfixed (plain reply, ref 3949b4d093b4)
 - Finding 2 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:96`, text sha256 `a44329d5a48b94b3` (the wording stays with the proof, not here)

@@ -259,6 +259,26 @@ describe('DeliveryDetail edit: Unassigned from a stale form (Sol r3 HIGH 1)', ()
     expect((screen.getByRole('option', { name: 'Unassigned' }).closest('select') as HTMLSelectElement).disabled).toBe(false);
   });
 
+  it('re-picking the original driver after an unconfirmed Unassigned sends that driver (Sol r7 HIGH 4)', async () => {
+    tables.data.profile_public_view = [{ id: 'user-1', full_name: 'Dana Driver', role: 'driver', is_active: true }];
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'edit_delivery'
+      ? { data: null, error: null }
+      : { data: { success: true }, error: null }));
+    render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 }));
+    await screen.findByRole('option', { name: /Dana Driver/ });
+    const select = () => screen.getByRole('option', { name: 'Unassigned' }).closest('select')!;
+    fireEvent.change(select(), { target: { value: '' } });
+    fireEvent.click(await screen.findByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/returned no result/)));
+    // The clear may have landed: picking the driver back must send it, not trust the at-open value.
+    fireEvent.change(select(), { target: { value: 'user-1' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(editCalls()).toHaveLength(2));
+    expect(editCalls()[1][1]).toMatchObject({ p_assigned_driver: 'user-1' });
+    expect(editCalls()[1][1]).not.toHaveProperty('p_clear_driver');
+  });
+
   it('locks the driver list while the save is in flight, so it cannot show a pick the save ignores', async () => {
     tables.data.profile_public_view = [{ id: 'user-1', full_name: 'Dana Driver', role: 'driver', is_active: true }];
     mockRpc.mockImplementation((name: string) => (name === 'edit_delivery'

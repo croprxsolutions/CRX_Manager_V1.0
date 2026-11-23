@@ -122,6 +122,8 @@ export default function DeliveryDetail() {
   // Only the latest attempt keeps its retry key: going back to an older edit applies it again instead of
   // replaying a result that a later edit may have replaced.
   const lastEditScopeRef = useRef<string | null>(null);
+  // An Unassigned save with no confirmed reply may have cleared the driver (Sol r7 HIGH 4, #2364).
+  const clearUnconfirmedRef = useRef(false);
   const cancelIdem = useIdempotencyKey('cancel_delivery', profile?.id || '');
   // F1: create_followup_delivery is the ONLY retained key on this page, and it is
   // scoped by the route id. Its payload is exactly (p_original_delivery_id,
@@ -689,6 +691,7 @@ export default function DeliveryDetail() {
     if (!delivery || !customer) return;
     setEditDriver(delivery.assigned_driver || '');
     setEditDriverAtOpen(delivery.assigned_driver || '');
+    clearUnconfirmedRef.current = false;
     setEditDate(delivery.scheduled_date);
     setEditTime(delivery.scheduled_time || '');
     setEditWindowStart(delivery.delivery_window_start || '');
@@ -828,7 +831,7 @@ export default function DeliveryDetail() {
 
     const editArgs = {
       p_delivery_id: id!,
-      p_assigned_driver: pickedDriverArg(editDriver, editDriverAtOpen),
+      p_assigned_driver: pickedDriverArg(editDriver, editDriverAtOpen, clearUnconfirmedRef.current),
       p_scheduled_date: editDate,
       p_scheduled_time: editTime || undefined,
       p_delivery_window_start: editWindowStart || undefined,
@@ -861,6 +864,7 @@ export default function DeliveryDetail() {
     } catch (err) {
       // An unconfirmed reply keeps the key, so Save again replays the server's answer.
       toast('error', sanitizeError(err));
+      if (editArgs.p_clear_driver) clearUnconfirmedRef.current = true;
     } finally {
       setSavingEdit(false);
     }
@@ -3319,8 +3323,9 @@ function isStaleEditFormError(error: { message?: string }): boolean {
 
 // Send a driver only when the user changed it: an untouched list keeps whatever driver the delivery has now,
 // so a stale form saving other fields never puts back a driver dispatch replaced (Taha, #2364).
-function pickedDriverArg(chosen: string, atOpen: string): string | undefined {
-  return chosen && chosen !== atOpen ? chosen : undefined;
+// After an unconfirmed Unassigned the delivery may have no driver, so a picked driver is always sent.
+function pickedDriverArg(chosen: string, atOpen: string, clearUnconfirmed: boolean): string | undefined {
+  return chosen && (chosen !== atOpen || clearUnconfirmed) ? chosen : undefined;
 }
 
 function clearDriverArg(chosen: string, atOpen: string): { p_clear_driver?: true; p_expected_driver?: string } {

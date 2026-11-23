@@ -172,9 +172,9 @@ ROLLBACK;` });
   }
   // 4b. An unexpired receipt under a key the new rule refuses (here 'abc' + newline) stops the apply before anything
   //     changes; an expired one does not. Run on the already-applied database, so the receipt check must come first.
-  for (const [label, expiry, want] of [['unexpired', "now() + interval '1 hour'", /IDEM_KEY_PRINTABLE_1912_WEAK_RECEIPT/], ['no-expiry', 'NULL', /IDEM_KEY_PRINTABLE_1912_WEAK_RECEIPT/], ['expired', "now() - interval '1 hour'", /IDEM_KEY_PRINTABLE_1912_BASELINE_DRIFT/]]) {
+  for (const [label, expiry, want, op] of [['unexpired', "now() + interval '1 hour'", /IDEM_KEY_PRINTABLE_1912_WEAK_RECEIPT/, 'reject_return'], ['no-expiry', 'NULL', /IDEM_KEY_PRINTABLE_1912_WEAK_RECEIPT/, 'reject_return'], ['expired', "now() - interval '1 hour'", /IDEM_KEY_PRINTABLE_1912_BASELINE_DRIFT/, 'reject_return'], ['unrelated-operation', 'NULL', /IDEM_KEY_PRINTABLE_1912_BASELINE_DRIFT/, 'create_quick_delivery']]) {
     const weak = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'],
-      { input: `INSERT INTO public.idempotency_keys (idempotency_key, operation, result, expires_at) VALUES ('abc' || E'\n', 'proof_1912', '{}'::jsonb, ${expiry});
+      { input: `INSERT INTO public.idempotency_keys (idempotency_key, operation, result, expires_at) VALUES ('abc' || E'\n', '${op}', '{}'::jsonb, ${expiry});
 ${follow}`, allowFailure: true });
     assert.notEqual(weak.status, 0, `${label} weak receipt case must stop at a preflight`);
     assert.match(weak.stderr, want, `${label} weak receipt case`);

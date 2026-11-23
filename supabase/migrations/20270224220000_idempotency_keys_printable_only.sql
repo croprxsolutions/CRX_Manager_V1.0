@@ -70,14 +70,15 @@ DECLARE
 BEGIN
   -- A saved answer is replayed only after the key check, so a stored receipt under a key the new rule refuses could
   -- never be replayed: the caller's retry would be refused, and a retry under a new key could repeat the write.
-  -- Receipts last 24 hours (a NULL expiry never expires), so apply only when no live receipt holds such a key.
+  -- Receipts last 24 hours (a NULL expiry never expires), so apply only when no live receipt of these 19 functions
+  -- (their operation names) holds such a key; receipts of other operations keep replaying and never block the apply.
   -- The lock waits for every in-flight write that is saving a receipt and holds new ones back until this commits,
   -- so no old-code write can save a bad-key receipt between the scan below and the new bodies going live.
   SET LOCAL lock_timeout = '15s';
   LOCK TABLE public.idempotency_keys IN SHARE ROW EXCLUSIVE MODE;
-  IF EXISTS (SELECT 1 FROM public.idempotency_keys WHERE (expires_at IS NULL OR expires_at >= now()) AND idempotency_key COLLATE "C" ~ '[^!-~]') THEN
+  IF EXISTS (SELECT 1 FROM public.idempotency_keys WHERE (expires_at IS NULL OR expires_at >= now()) AND operation IN ('approve_return', 'cancel_return', 'create_commission_payment', 'create_inventory_hold', 'create_return', 'create_vendor_bill', 'issue_return_credit', 'post_commission_payment', 'receive_po_items', 'receive_return', 'record_vendor_payment', 'reject_return', 'reverse_receiving_record', 'soft_delete_customer_document', 'update_vendor_bill', 'void_commission_payment', 'void_vendor_bill', 'void_vendor_payment') AND idempotency_key COLLATE "C" ~ '[^!-~]') THEN
     RAISE EXCEPTION 'IDEM_KEY_PRINTABLE_1912_WEAK_RECEIPT: % unexpired receipt(s) hold a key with a non-printable character; apply after they expire (24 hours)',
-      (SELECT count(*) FROM public.idempotency_keys WHERE (expires_at IS NULL OR expires_at >= now()) AND idempotency_key COLLATE "C" ~ '[^!-~]');
+      (SELECT count(*) FROM public.idempotency_keys WHERE (expires_at IS NULL OR expires_at >= now()) AND operation IN ('approve_return', 'cancel_return', 'create_commission_payment', 'create_inventory_hold', 'create_return', 'create_vendor_bill', 'issue_return_credit', 'post_commission_payment', 'receive_po_items', 'receive_return', 'record_vendor_payment', 'reject_return', 'reverse_receiving_record', 'soft_delete_customer_document', 'update_vendor_bill', 'void_commission_payment', 'void_vendor_bill', 'void_vendor_payment') AND idempotency_key COLLATE "C" ~ '[^!-~]');
   END IF;
   IF (SELECT count(*) FROM pg_temp.idem_key_printable_1912_attrs) <> 19 THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: expected 19 functions, found %', (SELECT count(*) FROM pg_temp.idem_key_printable_1912_attrs);

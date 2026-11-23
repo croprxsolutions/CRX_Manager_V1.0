@@ -93,6 +93,10 @@ for (const [sql, why] of [
   ["CREATE TABLE IF NOT EXISTS public.invoice_items (id int);", "CREATE TABLE of a lane table"],
   ["SELECT * INTO quotes FROM other;", "SELECT INTO a lane table"],
   ["DO $$ BEGIN EXECUTE 'UPDATE invoices SET x = 1'; END $$;", "dynamic SQL in a string"],
+  // Luna round 2 (2026-11-23).
+  ['SELECT 1 AS "x--y"; UPDATE public.invoices SET status = \'x\';', "a -- inside a quoted identifier is not a comment"],
+  ["DO $$ BEGIN EXECUTE 'UPDATE ' || 'invoices SET status = ''x'''; END $$;", "dynamic SQL built from pieces"],
+  ["ALTER TABLE public.bookings ADD COLUMN source text;", "a bookings table"],
 ]) ok(isTahaLaneSql(sql), `Taha's: ${why}`);
 for (const [sql, why] of [
   ["UPDATE deliveries SET driver_id = NULL; INSERT INTO activity_feed (x) VALUES (1);", "deliveries only"],

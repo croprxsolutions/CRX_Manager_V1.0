@@ -84,7 +84,8 @@ function isLaneName(name) {
 // and #2338 had neutral file names; #2338 rebuilt the delivery step that writes invoices).
 // Reading a table does not count; a row lock (FOR UPDATE / FOR SHARE) does.
 export const TAHA_LANE_TABLES = [
-  "quotes", "quote_items", "quote_sections", "quote_versions", "quote_price_changes", "quote_product_draws",
+  // No "bookings" table exists today (a booking is a quote, then an order); listed so a future one counts.
+  "bookings", "quotes", "quote_items", "quote_sections", "quote_versions", "quote_price_changes", "quote_product_draws",
   "quote_templates", "quote_pdf_templates",
   "orders", "order_items", "order_shares", "order_item_shares", "order_line_allocations", "order_item_field_allocations",
   "inventory_holds",
@@ -112,12 +113,13 @@ const FUNCTION_RE = /\b(?:create(?:\s+or\s+replace)?|alter|drop)\s+(?:function|p
 function withoutComments(sql) {
   let out = "";
   for (let i = 0; i < sql.length;) {
-    if (sql[i] === "'") {
-      const escapes = /[eE]/.test(sql[i - 1] ?? "") && !/[\w$]/.test(sql[i - 2] ?? "");
+    if (sql[i] === "'" || sql[i] === '"') {
+      const q = sql[i]; // '…' strings and "…" identifiers: a doubled quote stays inside.
+      const escapes = q === "'" && /[eE]/.test(sql[i - 1] ?? "") && !/[\w$]/.test(sql[i - 2] ?? "");
       let j = i + 1;
       for (; j < sql.length; j++) {
         if (escapes && sql[j] === "\\") { j++; continue; }
-        if (sql[j] === "'") { if (sql[j + 1] === "'") { j++; continue; } break; }
+        if (sql[j] === q) { if (sql[j + 1] === q) { j++; continue; } break; }
       }
       out += sql.slice(i, j + 1);
       i = j + 1;
@@ -139,7 +141,8 @@ function withoutComments(sql) {
 export function isTahaLaneSql(sql) {
   if (typeof sql !== "string") return true;
   const text = withoutComments(sql);
-  if (WRITE_RE.test(text)) return true;
+  // Second pass joins string pieces ('UPDATE ' || 'invoices …'), so dynamic SQL built in parts still counts.
+  if (WRITE_RE.test(text) || WRITE_RE.test(text.replace(/'\s*\|\|\s*'/g, ""))) return true;
   // Deliberately broad (Luna MED, 2026-11-23): any row lock plus any read of his tables counts; a wrong refusal costs one override code.
   if (ROW_LOCK_RE.test(text) && READ_RE.test(text)) return true;
   return [...text.matchAll(FUNCTION_RE)].some((m) => isLaneName(m[1]));

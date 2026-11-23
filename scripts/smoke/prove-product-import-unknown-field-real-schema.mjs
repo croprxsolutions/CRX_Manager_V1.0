@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270214110000_product_import_preview_refuses_unknown_fields.sql (KI-103).
+ * Real-schema proof for 20270224200000_product_import_preview_refuses_unknown_fields.sql (KI-103).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), shows the old preview passed (status ok) for a row the save
@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, attempt, asUser, refuse, USERS, ROOT, NAME, docker, scalar } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270214110000_product_import_preview_refuses_unknown_fields.sql';
+const CANDIDATE = '20270224200000_product_import_preview_refuses_unknown_fields.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });

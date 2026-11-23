@@ -4,6 +4,8 @@
 -- Proven by scripts/smoke/prove-refuse-impossible-quantities-and-dates-real-schema.mjs.
 
 SET LOCAL lock_timeout = '5s';
+-- The expected definitions below are rendered in ISO dates (Sol r1).
+SET LOCAL datestyle = 'ISO, MDY';
 
 CREATE TEMP TABLE refuse_impossible_2237_reverse_tx ON COMMIT DROP AS SELECT pg_current_xact_id()::text AS transaction_id;
 
@@ -40,8 +42,9 @@ BEGIN
   IF (SELECT transaction_id FROM pg_temp.refuse_impossible_2237_reverse_tx) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'ROLLBACK_REFUSED: run this file as one transaction (psql -1 or the apply script)';
   END IF;
+  -- NOWAIT: refuse at once if any table is in use, so the rollback never waits and cannot deadlock a live edit (Sol r1).
   LOCK TABLE public.deliveries, public.delivery_items, public.order_items, public.jobs, public.job_chemicals,
-    public.inventory IN ACCESS EXCLUSIVE MODE;
+    public.inventory IN ACCESS EXCLUSIVE MODE NOWAIT;
   FOR r IN SELECT * FROM pg_temp.refuse_impossible_2237_reverse_expected LOOP
     IF (SELECT count(*) FROM pg_constraint c
         WHERE c.conrelid = format('public.%I', r.tbl)::regclass AND c.conname = r.conname AND c.contype = 'c'

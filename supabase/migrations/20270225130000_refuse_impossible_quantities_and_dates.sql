@@ -41,12 +41,11 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: already applied (a #2237 constraint exists)';
   END IF;
-  -- Lock every table first so no writer can add a bad row between the count below and the constraints. Completions
-  -- take deliveries (or jobs) before the others, as this order does, so they wait rather than deadlock; a writer that
-  -- takes these tables in another order may be aborted by deadlock detection and retried. Each wait is capped by
-  -- lock_timeout; the locks are held until commit, so apply at a quiet time.
+  -- Lock every table first so no writer can add a bad row between the count below and the constraints. NOWAIT: if any
+  -- table is in use the apply refuses at once and changes nothing, so it never waits and can never deadlock a live
+  -- order edit or completion (Sol r1). The locks are held until commit, so apply at a quiet time; retry if busy.
   LOCK TABLE public.deliveries, public.delivery_items, public.order_items, public.jobs, public.job_chemicals,
-    public.inventory IN ACCESS EXCLUSIVE MODE;
+    public.inventory IN ACCESS EXCLUSIVE MODE NOWAIT;
   -- Count rows that would break each rule; refuse rather than fix them silently (fixing needs Mason).
   FOR r IN
     SELECT * FROM (VALUES

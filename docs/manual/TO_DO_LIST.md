@@ -414,9 +414,9 @@ Recommended answers first. Reply with the number and "yes", or say what to chang
 
 **From the 2026-11-13 Product Master review** ([combined review](../audits/2026-11-13-product-master-review.md); fixes are To-Do 0.17).
 
-27. **Catalog gaps (KI-138).** 3 products have Tier 2 priced above Tier 3; 3 active products have no cost, 4 have no Tier 1 price, 12 have no container size. Intended, or should they be filled or fixed? Recommend: fix the tier order and fill cost/price before those products are quoted.
-28. **Per-ounce job prices.** Job lines priced per rate unit in whole cents force rounding when a per-gallon price doesn't divide evenly ($40/gal = 31.25¢/oz). Accept the rounding, or store a sell-unit price? Recommend: accept for now (sub-cent per ounce), revisit if a customer questions a bill.
-29. **Freight on closed-short POs.** Under the 2026-11-11 no-override rule, freight or tax on a PO closed short must be billed without linking the PO. Is that the intended workflow?
+27. **Catalog gaps (KI-138).** ANSWERED 2026-11-23 (Mason: "Intended, leave them"): no fix for the tier order or the missing cost, price and container sizes; recorded in `decision-log.d/`. 3 products have Tier 2 priced above Tier 3; 3 active products have no cost, 4 have no Tier 1 price, 12 have no container size. Intended, or should they be filled or fixed? Recommend: fix the tier order and fill cost/price before those products are quoted.
+28. **Per-ounce job prices.** ANSWERED 2026-11-23 (Mason: "Accept rounding"): revisit only if a customer questions a bill; recorded in `decision-log.d/`. Job lines priced per rate unit in whole cents force rounding when a per-gallon price doesn't divide evenly ($40/gal = 31.25¢/oz). Accept the rounding, or store a sell-unit price? Recommend: accept for now (sub-cent per ounce), revisit if a customer questions a bill.
+29. **Freight on closed-short POs.** ANSWERED 2026-11-23 (Mason: "Yes, that's fine"): freight and tax on a short-closed PO are billed without linking the PO; recorded in `decision-log.d/`. Under the 2026-11-11 no-override rule, freight or tax on a PO closed short must be billed without linking the PO. Is that the intended workflow?
 
 **From the [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md).** Recommended answers first.
 

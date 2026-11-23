@@ -109,3 +109,7 @@ None. Authority, refusals, undo and the freeze were settled in the RT-4a contrac
 ## Amendment (2026-11-23, Sol round 2; Mason: "DB fix")
 
 - A promote that changes the rate or unit is refused by the database when the old values would fail the switch back's checks (`PRODUCT_PARENT_CUTOVER_NOT_RESTORABLE`) or field-app invoicing cannot convert the approved unit to a size's sold unit (`PRODUCT_PARENT_CUTOVER_UNIT_NOT_INVOICEABLE`). Migration `20270227100000_rate_cutover_refuses_unrestorable.sql`. The screen keeps no copy of these checks; it shows the refusal.
+
+## Amendment (2026-11-23, Sol round 3; Mason: "Fix in this PR")
+
+- A size added or moved into a group, or a rate or unit correction, is refused by the database when field-app invoicing could no longer convert the product's rate unit to its sold unit (trigger `trg_products_field_app_unit_guard`, same migration, `PRODUCT_RATE_UNIT_INVALID`), for every group, old or approved rate. A product already unpriceable is not made to fail its other edits. New standalone products (INSERT) are not checked: follow-up.

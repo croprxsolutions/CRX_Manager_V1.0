@@ -43,7 +43,9 @@
 --   and no active payment puts $0 or less on an invoice a return touches. Round 8: every Prepayment Manager entry
 --   naming a check credit of the customer is one whole receipt of this customer (its buckets, reference, one entry
 --   time, its recorded total, no sibling outside it), for refunds too (CHECK_ENTRY_MISMATCH); a refund or return on
---   any bucket freezes the amounts of all its siblings (edit / delete guard). A return also refuses a draft, void, cancelled or deleted invoice
+--   any bucket freezes the amounts of all its siblings (edit / delete guard). Round 9: an entry is matched only as an
+--   array of distinct ids (CHECK_ENTRY_MALFORMED otherwise), and a refund locks every credit of the customer first.
+--   A return also refuses a draft, void, cancelled or deleted invoice
 --   (RETURN_INVOICE_NOT_OPEN).
 --   5. get_prepay_balance_check(customer?): read-only; received - applied - refunded - returned = expected, against
 --      the stored balance and the credits' balances, plus each credit against its own rows (credit_mismatches);
@@ -269,7 +271,7 @@ AS $function$
                    CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END) b(id)
                   WHERE fal.operation_type = 'prepay_credit_created'
                     AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array'
-                    AND fal.new_values -> 'credit_ids' ? p_credit_id::text
+                    AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' AND fal.new_values -> 'credit_ids' @> jsonb_build_array(p_credit_id::text)
                     AND (EXISTS (SELECT 1 FROM public.money_reversal_lines l WHERE l.prepay_credit_id::text = b.id)
                          OR EXISTS (SELECT 1 FROM public.money_reversals r WHERE r.prepay_credit_id::text = b.id)))
 $function$;
@@ -345,19 +347,19 @@ BEGIN
                    WHERE pc.id = ANY (p_bucket_ids)) <> 1
               -- the entry is this customer's, for this check's reference
               OR EXISTS (SELECT 1 FROM public.financial_audit_log fal JOIN public.prepay_credits pc ON pc.id = p_bucket_ids[1]
-                          WHERE fal.operation_type = 'prepay_credit_created' AND fal.new_values -> 'credit_ids' ? pc.id::text
+                          WHERE fal.operation_type = 'prepay_credit_created' AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' AND fal.new_values -> 'credit_ids' @> jsonb_build_array(pc.id::text)
                             AND (fal.entity_id IS DISTINCT FROM p_customer_id
                                  OR (fal.new_values ->> 'reference_number') IS DISTINCT FROM pc.source_reference))
               -- each bucket is in exactly one entry
               OR EXISTS (SELECT 1 FROM unnest(p_bucket_ids) b(id)
                           WHERE (SELECT count(*) FROM public.financial_audit_log fal
-                                  WHERE fal.operation_type = 'prepay_credit_created' AND fal.new_values -> 'credit_ids' ? b.id::text) <> 1)
+                                  WHERE fal.operation_type = 'prepay_credit_created' AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' AND fal.new_values -> 'credit_ids' @> jsonb_build_array(b.id::text)) <> 1)
               -- no check bucket entered with them (same customer, reference and entry time) is missing from every entry
               OR EXISTS (SELECT 1 FROM public.prepay_credits o JOIN public.prepay_credits b ON b.id = ANY (p_bucket_ids)
                           WHERE o.customer_id = p_customer_id AND o.source_type = 'check' AND o.allocation_set_id IS NULL
                             AND o.created_at = b.created_at AND o.source_reference IS NOT DISTINCT FROM b.source_reference
                             AND NOT EXISTS (SELECT 1 FROM public.financial_audit_log fal
-                                             WHERE fal.operation_type = 'prepay_credit_created' AND fal.new_values -> 'credit_ids' ? o.id::text)))
+                                             WHERE fal.operation_type = 'prepay_credit_created' AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' AND fal.new_values -> 'credit_ids' @> jsonb_build_array(o.id::text))))
       THEN 'CHECK_BUCKETS'
     WHEN EXISTS (SELECT 1 FROM public.financial_audit_log fal
                   WHERE fal.operation_type = 'prepay_deleted' AND fal.entity_id = ANY (p_credit_ids))
@@ -369,7 +371,7 @@ BEGIN
     -- the check's face value (its buckets' amounts) is the total its entry recorded
     WHEN p_bucket_ids IS NOT NULL
          AND (SELECT fal.new_values -> 'total_cents' FROM public.financial_audit_log fal
-               WHERE fal.operation_type = 'prepay_credit_created' AND fal.new_values -> 'credit_ids' ? p_bucket_ids[1]::text)
+               WHERE fal.operation_type = 'prepay_credit_created' AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' AND fal.new_values -> 'credit_ids' @> jsonb_build_array(p_bucket_ids[1]::text))
              IS DISTINCT FROM (SELECT to_jsonb(sum(pc.original_amount_cents)) FROM public.prepay_credits pc WHERE pc.id = ANY (p_bucket_ids))
       THEN 'CHECK_FACE_VALUE'
     -- a Record Payment: its allocated total is its invoice allocation rows, and those plus its prepay are the check
@@ -421,7 +423,7 @@ BEGIN
                                  -- a Prepayment Manager check is proven by exactly one creation entry
                                  AND (SELECT count(*) FROM public.financial_audit_log fal
                                        WHERE fal.operation_type = 'prepay_credit_created'
-                                         AND fal.new_values -> 'credit_ids' ? pc.id::text) = 1)))
+                                         AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' AND fal.new_values -> 'credit_ids' @> jsonb_build_array(pc.id::text)) = 1)))
       THEN 'CREDIT_SOURCE_UNKNOWN'
     -- every Prepayment Manager entry naming one of the customer's check credits is one whole receipt of this
     -- customer: its buckets are all this customer's unlinked checks with the entry's reference and one entry time,
@@ -434,6 +436,9 @@ BEGIN
                        JOIN public.prepay_credits pc ON pc.id::text = b.id
                       WHERE pc.customer_id = p_customer_id AND pc.source_type = 'check' AND pc.allocation_set_id IS NULL)
          AND (fal.entity_id IS DISTINCT FROM p_customer_id
+              -- each bucket listed once
+              OR jsonb_array_length(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END)
+                 <> (SELECT count(DISTINCT b.id) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END) b(id))
               OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END) b(id)
                            LEFT JOIN public.prepay_credits pc ON pc.id::text = b.id
                           WHERE pc.id IS NULL OR pc.customer_id IS DISTINCT FROM p_customer_id
@@ -449,8 +454,16 @@ BEGIN
                            JOIN public.prepay_credits o ON o.customer_id = pc.customer_id AND o.source_type = 'check'
                                 AND o.allocation_set_id IS NULL AND o.created_at = pc.created_at
                                 AND o.source_reference IS NOT DISTINCT FROM pc.source_reference
-                          WHERE NOT (fal.new_values -> 'credit_ids' ? o.id::text))))
+                          WHERE NOT (jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' AND fal.new_values -> 'credit_ids' @> jsonb_build_array(o.id::text)))))
       THEN 'CHECK_ENTRY_MISMATCH'
+    -- a Prepayment Manager entry recorded for this customer lists its buckets as an array of distinct ids
+    WHEN EXISTS (SELECT 1 FROM public.financial_audit_log fal
+                  WHERE fal.operation_type = 'prepay_credit_created' AND fal.entity_type = 'prepay_credit'
+                    AND fal.entity_id = p_customer_id AND fal.new_values ? 'credit_ids'
+                    AND (jsonb_typeof(fal.new_values -> 'credit_ids') IS DISTINCT FROM 'array'
+                         OR jsonb_array_length(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END)
+                            <> (SELECT count(DISTINCT b.id) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END) b(id))))
+      THEN 'CHECK_ENTRY_MALFORMED'
     -- every active payment behind the customer's credits adds up (its invoice rows plus its prepay are the check)
     WHEN EXISTS (SELECT 1 FROM public.allocation_sets a
                   WHERE a.is_active
@@ -1420,15 +1433,19 @@ BEGIN
     RAISE EXCEPTION 'CREDIT_NOT_FOUND: that prepay credit is not this customer''s';
   END IF;
 
-  -- Lock order (void_payment's): credits, then the month, then the customer. The credits are read and locked in one
-  -- statement, so the set drawn below is the set counted.
+  -- Lock order (void_payment's): credits, then the month, then the customer. EVERY credit of the customer is locked,
+  -- in id order, in one statement (Sol r8): an edit or delete of a sibling bucket of the drawn one locks its credit
+  -- before its guard, so it waits here and then sees this refund; an apply or void that would restore an older credit
+  -- waits too, so the set drawn below is the set counted.
   FOR v_credit IN
     SELECT id, balance_cents FROM public.prepay_credits
-     WHERE customer_id = p_customer_id AND (p_credit_id IS NULL OR id = p_credit_id) AND balance_cents > 0
+     WHERE customer_id = p_customer_id
      ORDER BY id FOR UPDATE
   LOOP
-    v_ids := v_ids || v_credit.id;
-    v_available := v_available + v_credit.balance_cents;
+    IF v_credit.balance_cents > 0 AND (p_credit_id IS NULL OR v_credit.id = p_credit_id) THEN
+      v_ids := v_ids || v_credit.id;
+      v_available := v_available + v_credit.balance_cents;
+    END IF;
   END LOOP;
   PERFORM public.check_period_open(v_today);
   SELECT farm_name INTO v_farm FROM public.customers WHERE id = p_customer_id FOR UPDATE;
@@ -1603,13 +1620,13 @@ BEGIN
     -- A Prepayment Manager check is every bucket its one entry wrote: the entry's audit row lists them (a check
     -- number or entry time alone can repeat). The gate refuses a missing, foreign or changed bucket.
     IF (SELECT count(*) FROM public.financial_audit_log fal
-         WHERE fal.operation_type = 'prepay_credit_created' AND fal.new_values -> 'credit_ids' ? p_credit_id::text) <> 1 THEN
+         WHERE fal.operation_type = 'prepay_credit_created' AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' AND fal.new_values -> 'credit_ids' @> jsonb_build_array(p_credit_id::text)) <> 1 THEN
       RAISE EXCEPTION 'RECORD_NEEDS_HAND_CHECK: CHECK_BUCKETS (this prepayment check''s entry cannot be identified; record it by hand)';
     END IF;
     SELECT array_agg(b.id::uuid ORDER BY b.id::uuid) INTO v_bucket_ids
       FROM public.financial_audit_log fal
-      CROSS JOIN LATERAL jsonb_array_elements_text(fal.new_values -> 'credit_ids') AS b(id)
-     WHERE fal.operation_type = 'prepay_credit_created' AND fal.new_values -> 'credit_ids' ? p_credit_id::text;
+      CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END) AS b(id)
+     WHERE fal.operation_type = 'prepay_credit_created' AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' AND fal.new_values -> 'credit_ids' @> jsonb_build_array(p_credit_id::text);
     v_credit_ids := v_bucket_ids;
     SELECT customer_id, COALESCE(NULLIF(source_reference, ''), NULLIF(reference_number, ''))
       INTO v_customer, v_reference FROM public.prepay_credits WHERE id = p_credit_id;

@@ -42,3 +42,4 @@
   - Round 5: a prepay credit with no known source, or one its payment never funded, blocks refunds and returns for that customer until it is checked by hand; a Prepayment Manager entry that mixes two checks is refused.
   - Round 6: a Prepayment Manager credit with no record of its entry, or one whose entry belongs to another customer, is refused; a returned check is refused if another payment put a negative amount on the same invoice.
   - Round 8: a refund or returned check is refused unless every Prepayment Manager check of the customer matches its entry (its buckets, reference and total); refunding part of a split check locks the amounts of its other buckets too. Migration now `20270227140000`.
+  - Round 9: a refund locks all of the customer's prepay while it runs, so editing another bucket of the same check waits and is then refused; malformed legacy check records are refused.

@@ -51,6 +51,9 @@
  *  16) Sol round 8: every Prepayment Manager entry naming a check credit of the customer must be one whole receipt of
  *      this customer, for refunds too (a $500 credit whose entry records $50; one split check recorded as two entries);
  *      refunding one bucket freezes its siblings' amounts (edit / delete refused).
+ *  17) Sol round 8 (fixed in round 9): an entry matches its credits only as an array of distinct ids (an object-key
+ *      entry, a bucket listed twice and a non-list entry are refused); a refund locks every credit of the customer, so
+ *      an edit of a sibling bucket waits for it and is then refused (two sessions, committed).
  *
  * Run: node scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs   (needs Docker)
  * Prints M9_REFUNDS_RETURNED_CHECKS_PROOF_PASS when every case passes; otherwise lists each failing case and why and
@@ -701,34 +704,36 @@ kase('10) Sol round 1: check-only returns, edited/deleted credits, blank referen
   assert.equal(o.stored9, 5000, "the ACH payment's $50 prepay is untouched");
 });
 
+// Two psql sessions in a forced order (see case 11): returns each session's output.
+const until = (sql, label) => {
+  for (let i = 0; i < 300; i += 1) { if (scalar(sql) === '1') return; wait(100); }
+  throw new Error(`timed out waiting for ${label}`);
+};
+const waiting = (app, event) => `SELECT count(*) FROM pg_stat_activity WHERE application_name = '${app}' AND wait_event_type = 'Lock'${event ? ` AND wait_event = '${event}'` : " AND wait_event <> 'advisory'"};`;
+const both = (first, second) => {
+  stageText('blk.sql', 'SELECT pg_advisory_lock(4242);\nSELECT pg_sleep(120);\n');
+  stageText('s1.sql', `BEGIN;\n${as(ADMIN)}\n${first}\nSELECT pg_advisory_lock(4242);\nCOMMIT;\n`);
+  stageText('s2.sql', `BEGIN;\n${as(ADMIN)}\n${second}\nCOMMIT;\n`);
+  docker(['exec', NAME, 'rm', '-f', '/tmp/blk.done', '/tmp/s1.done', '/tmp/s2.done']);
+  const start = (f) => docker(['exec', '-d', '-e', `PGAPPNAME=m9${f}`, NAME, 'sh', '-c',
+    `psql -U postgres -d ${DB} -X -q -A -t -v ON_ERROR_STOP=1 -f /tmp/${f}.sql > /tmp/${f}.out 2>&1; touch /tmp/${f}.done`]);
+  start('blk');
+  until("SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE a.application_name = 'm9blk' AND l.locktype = 'advisory' AND l.granted;", 'the blocker');
+  start('s1');
+  until(waiting('m9s1', 'advisory'), 'session 1 to hold its locks');
+  start('s2');
+  until(waiting('m9s2'), 'session 2 to wait on a row lock');
+  psql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'm9blk';");
+  until("SELECT CASE WHEN count(*) = 0 THEN 1 ELSE 0 END FROM pg_stat_activity WHERE application_name IN ('m9s1', 'm9s2');", 'both sessions to finish');
+  for (let i = 0; i < 100 && docker(['exec', NAME, 'sh', '-c', 'test -f /tmp/s1.done && test -f /tmp/s2.done'], { allowFailure: true }).status !== 0; i += 1) wait(100);
+  const read = (f) => docker(['exec', NAME, 'cat', `/tmp/${f}.out`]).stdout;
+  return { a: read('s1'), b: read('s2') };
+};
+
 kase('11) two sessions: return and void of the same payment wait for each other; the second is refused', () => {
   // Deterministic order: a blocker session holds an advisory lock; session 1 makes its call (taking the payment's locks)
   // and then waits on that advisory lock; session 2 starts only once session 1 is seen waiting, and the blocker is
   // released only once session 2 is seen waiting on a row lock. No sleeps decide the order.
-  const until = (sql, label) => {
-    for (let i = 0; i < 300; i += 1) { if (scalar(sql) === '1') return; wait(100); }
-    throw new Error(`timed out waiting for ${label}`);
-  };
-  const waiting = (app, event) => `SELECT count(*) FROM pg_stat_activity WHERE application_name = '${app}' AND wait_event_type = 'Lock'${event ? ` AND wait_event = '${event}'` : " AND wait_event <> 'advisory'"};`;
-  const both = (first, second) => {
-    stageText('blk.sql', 'SELECT pg_advisory_lock(4242);\nSELECT pg_sleep(120);\n');
-    stageText('s1.sql', `BEGIN;\n${as(ADMIN)}\n${first}\nSELECT pg_advisory_lock(4242);\nCOMMIT;\n`);
-    stageText('s2.sql', `BEGIN;\n${as(ADMIN)}\n${second}\nCOMMIT;\n`);
-    docker(['exec', NAME, 'rm', '-f', '/tmp/blk.done', '/tmp/s1.done', '/tmp/s2.done']);
-    const start = (f) => docker(['exec', '-d', '-e', `PGAPPNAME=m9${f}`, NAME, 'sh', '-c',
-      `psql -U postgres -d ${DB} -X -q -A -t -v ON_ERROR_STOP=1 -f /tmp/${f}.sql > /tmp/${f}.out 2>&1; touch /tmp/${f}.done`]);
-    start('blk');
-    until("SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE a.application_name = 'm9blk' AND l.locktype = 'advisory' AND l.granted;", 'the blocker');
-    start('s1');
-    until(waiting('m9s1', 'advisory'), 'session 1 to hold its locks');
-    start('s2');
-    until(waiting('m9s2'), 'session 2 to wait on a row lock');
-    psql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'm9blk';");
-    until("SELECT CASE WHEN count(*) = 0 THEN 1 ELSE 0 END FROM pg_stat_activity WHERE application_name IN ('m9s1', 'm9s2');", 'both sessions to finish');
-    for (let i = 0; i < 100 && docker(['exec', NAME, 'sh', '-c', 'test -f /tmp/s1.done && test -f /tmp/s2.done'], { allowFailure: true }).status !== 0; i += 1) wait(100);
-    const read = (f) => docker(['exec', NAME, 'cat', `/tmp/${f}.out`]).stdout;
-    return { a: read('s1'), b: read('s2') };
-  };
   const ret = (num) => `SELECT ${returned(pay10(num), `m9-c11-ret-${num}`)}::text;`;
   const voidp = (num) => `SELECT public.void_payment(${pay10(num)}, 'entered twice', '${ADMIN}', 'm9-c11-void-${num}')::text;`;
   const one = both(ret('5001'), voidp('5001'));
@@ -1015,6 +1020,46 @@ kase('16) Sol round 8: every check entry of the customer is one whole receipt (r
   assert.equal(o.r7.amount_cents, 1000, 'the refund from a clean split check is recorded');
   assert.equal(o.c7b, '20000:20000', 'the untouched sibling keeps its amount');
   assert.equal(o.c10, 0, 'no refund was recorded from the unproven check');
+});
+
+kase('17) Sol round 8: entries match only as arrays of distinct ids; a refund holds every credit, so a sibling edit waits and is refused', () => {
+  const r = ran(session(`${OWNER}
+    -- c10: a $500 check credit whose only entry lists it as an object key, recording $50.
+    INSERT INTO public.prepay_credits (customer_id, original_amount_cents, balance_cents, source_type, source_reference, bucket_label)
+      VALUES ('${C.c10}', 50000, 50000, 'check', 'OBJ-17', 'A');
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 50000 WHERE id = '${C.c10}';
+    INSERT INTO public.financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, new_values, total_impact_cents, description)
+      VALUES ('prepay_credit_created', 'prepay_credit', '${C.c10}', '${ADMIN}', jsonb_build_object('reference_number', 'OBJ-17',
+              'credit_ids', jsonb_build_object((SELECT id FROM public.prepay_credits WHERE source_reference = 'OBJ-17')::text, true), 'total_cents', 5000), 5000, 'legacy');
+    -- c9: a $250 check credit whose entry lists it twice and records $500.
+    INSERT INTO public.prepay_credits (customer_id, original_amount_cents, balance_cents, source_type, source_reference, bucket_label)
+      VALUES ('${C.c9}', 25000, 25000, 'check', 'TWICE-17', 'A');
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 25000 WHERE id = '${C.c9}';
+    INSERT INTO public.financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, new_values, total_impact_cents, description)
+      SELECT 'prepay_credit_created', 'prepay_credit', '${C.c9}', '${ADMIN}', jsonb_build_object('reference_number', 'TWICE-17',
+             'credit_ids', jsonb_build_array(id, id), 'total_cents', 50000), 50000, 'legacy'
+        FROM public.prepay_credits WHERE source_reference = 'TWICE-17';
+    -- c3: a clean $500 check, plus an entry recorded for c3 whose bucket list is not an array.
+    INSERT INTO public.financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, new_values, total_impact_cents, description)
+      VALUES ('prepay_credit_created', 'prepay_credit', '${C.c3}', '${ADMIN}', jsonb_build_object('reference_number', 'BAD-17',
+              'credit_ids', 'not-a-list', 'total_cents', 0), 0, 'legacy');
+    ${as(ADMIN)}
+    ${refusal(refund(C.c10, 30000, 'm9-c17-object', { ref: 'QB 1701' }))}
+    ${refusal(refund(C.c9, 1000, 'm9-c17-twice', { ref: 'QB 1702' }))}
+    ${refusal(refund(C.c3, 1000, 'm9-c17-bad', { ref: 'QB 1703' }))}
+    ${OWNER} SELECT 'done';`));
+  assert.deepEqual(r.refused.map((m) => /RECORD_NEEDS_HAND_CHECK: ([A-Z_]+)/.exec(m)?.[1] ?? m),
+    ['CREDIT_SOURCE_UNKNOWN', 'CHECK_ENTRY_MISMATCH', 'CHECK_ENTRY_MALFORMED'],
+    `an entry naming the credit only as an object key; an entry listing one bucket twice; an entry for the customer that is not a list: ${JSON.stringify(r.refused)}`);
+  // The race: a refund from c7's bucket A holds its locks; an edit of sibling bucket B waits, then is refused.
+  const refundA = `SELECT ${refund(C.c7, 1000, 'm9-c17-race-refund', { credit: CHECK7A, ref: 'QB 1704' })}::text;`;
+  const editB = `SELECT public.edit_prepay_credit(${CHECK7B}, 10000, NULL, NULL, 'shrink the sibling', '${ADMIN}', 'm9-c17-race-edit')::text;`;
+  const race = both(refundA, editB);
+  assert.doesNotMatch(race.a + race.b, /deadlock/i);
+  assert.doesNotMatch(race.a, /ERROR/, `the refund commits: ${race.a}`);
+  assert.match(race.b, /PREPAY_CREDIT_HAS_REVERSALS/, `the sibling edit waits, then is refused: ${race.b}`);
+  assert.equal(scalar(`SELECT original_amount_cents || ':' || balance_cents FROM public.prepay_credits WHERE id = ${CHECK7B};`), '20000:20000',
+    'the sibling keeps its amount');
 });
 
 const admin = (sql) => psql(sql, { user: 'supabase_admin', db: 'template1' });

@@ -44,7 +44,7 @@ const TOUCHED = /financial_audit_log_operation_type_check|_snapshot_financial_ha
 // M9 re-adds financial_audit_log_operation_type_check as a superset (every existing type kept, plus
 // 'prepay_refunded_outside' and 'payment_returned'), so every audit row this proof writes is still accepted.
 // Pinned to the reviewed bytes: an edited M9 trips this proof's guard again.
-const LATER_READ_ONLY = new Map([['20270227140000_m9_refunds_and_returned_checks.sql', '730708ec33d94add2867c11a42ab61bee50d1e6ba9b236e0aed61823e5333cdd']]);
+const LATER_READ_ONLY = new Map([['20270227140000_m9_refunds_and_returned_checks.sql', '3233f1ef1dfe39d2d12b6b0e06b28ce0b9196e72b938168b9affcd5d9b59c2bc']]);
 const laterReadOnly = (file) => LATER_READ_ONLY.get(path.basename(file)) === createHash('sha256').update(readFileSync(file)).digest('hex');
 // The image's auth.uid() reads only request.jwt.claim.sub; live's falls back to
 // request.jwt.claims ->> 'sub'. Install live's exact body.

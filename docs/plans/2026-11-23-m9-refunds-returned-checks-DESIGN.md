@@ -1,6 +1,6 @@
 # M9 design: refunds paid outside CRX, prepay balance check, returned checks (stage 1)
 
-Migration: `supabase/migrations/20270227140000_m9_refunds_and_returned_checks.sql`. Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` (written first; 16 cases now).
+Migration: `supabase/migrations/20270227140000_m9_refunds_and_returned_checks.sql`. Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` (written first; 17 cases now).
 
 **Sections 1–6 are the stage-1 design. Sections 7–10 (Sol rounds) override them where they differ: for example a refund is dated today with an optional `p_paid_on`, not `p_refund_date`.**
 `B:` = baseline `supabase/baselines/20260727174805_public_schema.sql.br` (decompressed line). Other refs are `supabase/migrations/`.
@@ -90,5 +90,6 @@ A read-only live count found 1 customer with prepay, 1 credit, 1 payment set and
 7. Round 5 (whole branch after round 4): every credit has a known source (`CREDIT_SOURCE_UNKNOWN`) and every active payment behind the customer's credits adds up (`SOURCE_PAYMENT_TOTALS`); an entry's buckets are one receipt (one reference, one entry time); an allocation row of $0 or less is refused; the preflight pins the recompute trigger's shape; a payment dated `-infinity` is undated.
 8. Round 6 (last advisory round): an unlinked check credit needs exactly one creation entry, and that entry must be the customer's and carry the check's reference; a source payment's credits must all be its customer's; a return refuses when an active payment puts $0 or less on an invoice it touches (`INVOICE_NEGATIVE_ALLOCATION`).
 9. Round 8 (Taha's option A for round 7's two HIGHs): every Prepayment Manager entry naming a check credit of the customer must be one whole receipt of this customer: its buckets are this customer's unlinked checks with its reference and one entry time, they add up to its recorded total, and no check credit of that receipt sits outside it (`CHECK_ENTRY_MISMATCH`, refunds and returns). Refunding or returning any bucket freezes the amounts of all its siblings (edit / delete guard).
-10. Stamp moved to `20270227140000` (after staging's `20270227110000`).
+10. Round 9 (Sol r8's HIGHs): an entry names a credit only as an element of an array of distinct ids (`CHECK_ENTRY_MALFORMED` for an entry of the customer that is not one); a refund locks every credit of the customer first, so a sibling edit or delete waits and then sees it. Accepted: two same-reference entries in one transaction, and credits edited before M9, block that customer (Mason's live reset clears prepay; new checks are written in the right shape).
+11. Stamp moved to `20270227140000` (after staging's `20270227110000`).
 

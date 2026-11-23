@@ -64,7 +64,7 @@ Everything else is your call. Mason would rather hear "here's what I did and how
 3. **Open a pull request.** Write the description in plain English: what changes for the business, what could go wrong, and how you proved it works.
 4. **Required checks must be green.** Changes that touch money, invoices, payments, inventory or cost get extra review. The full landing procedure is in `.claude/commands/ship.md` and `AGENTS.md`.
 5. **Database changes go in a new migration file.** Never edit one that's already been applied. See [[workflows/DATABASE_CHANGE_CHECKLIST|Database Change Checklist]].
-6. **Record what shipped.** Add a dated file in `changelog.d/`, and update [[manual/CURRENT_STATE|Current State]] or [[manual/KNOWN_ISSUES|Known Issues]] if they changed.
+6. **Record what shipped.** Add a dated file in `changelog.d/`, and update [[manual/CURRENT_STATE|Current State]] or [[manual/KNOWN_ISSUES|Known Issues]] if they changed (a new known issue is a new file in `manual/known-issues.d/`).
 
 ## Talking to Mason
 
@@ -72,7 +72,7 @@ Everything else is your call. Mason would rather hear "here's what I did and how
 - **Give one recommendation,** not a menu, unless it's truly his decision.
 - **"Done" means you ran it and saw it work,** on the real screen or the real data path. Passing tests alone don't count.
 - **Say what isn't verified yet** and what the risk is.
-- **Decisions get written down.** When Mason decides something, add it to the [[manual/DECISION_LOG|Decision Log]] so nobody has to ask twice.
+- **Decisions get written down.** When Mason decides something, add it to the [[manual/DECISION_LOG|Decision Log]] as a new file in `manual/decision-log.d/` so nobody has to ask twice.
 
 ## Your first week
 

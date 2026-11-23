@@ -80,6 +80,18 @@ describe('sanitizeError', () => {
   ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
   });
+  it.each([
+    ['DELIVERY_OVER_ORDER', 'Atrazine 4L — only 0 left to schedule (ordered 10, delivered 10, on other open deliveries 0: none). Cancel another delivery for this order, or reduce one that has not started, first.'],
+    ['ORDER_LINE_BELOW_DELIVERIES', 'Atrazine 4L cannot go below 10 (delivered 0, on open deliveries 10: DEL-1 (10)). Cancel those deliveries, or reduce ones that have not started, first.'],
+    ['ORDER_LINE_QUANTITY_NOT_FINITE', 'Atrazine 4L — ordered and delivered quantities must be finite numbers.'],
+    ['ORDER_LINE_CHECK_ISOLATION', 'delivery and order quantities can only change in a read-committed transaction.'],
+  ])('explains an order-quantity refusal %s (F05) without the raw token', (token, sentence) => {
+    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
+  });
+  it('explains a completion past the order (F05) without the raw token', () => {
+    const sentence = 'Atrazine 4L — this would deliver more than was ordered. Call the office before completing this delivery.';
+    expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
+  });
   it('explains a not-a-number count (20270126110000)', () => {
     expect(sanitizeError({ code: '23514', message: 'CYCLE_COUNT_QTY_INVALID: the counted quantity must be a number.' }))
       .toBe('Nothing was saved. the counted quantity must be a number.');

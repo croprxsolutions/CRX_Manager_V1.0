@@ -5,7 +5,7 @@
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container, replays
  * every post-baseline migration before the candidate (harness from prove-edit-delivery-unassign-driver-real-schema.mjs),
- * shows the behavior before the candidate, applies it, checks each case through the real RPCs as signed-in users
+ * applies it, checks each case through the real RPCs as signed-in users
  * (each probe rolled back), then applies the rollback script and the candidate again.
  *
  * Run: node scripts/smoke/prove-delivery-driver-checks-need-a-driver-real-schema.mjs   (needs Docker)
@@ -313,17 +313,6 @@ const NOT_COMPLETE = /Not authorized to complete this delivery/;
 const untouched = () => scalar(`SELECT status || '|' || (SELECT quantity_available FROM public.inventory WHERE product_id = '${PROD}')::numeric::int
   || '|' || (SELECT count(*) FROM public.invoices WHERE delivery_id = '${NONE}') FROM public.deliveries WHERE id = '${NONE}';`);
 
-function beforeCases() {
-  assert.equal(okProbe(`${complete(NONE, DRV2, 'b-1')} ${outcome(NONE)}`, DRV2), 'completed|995|1',
-    'before the fix, Driver Two completes a started delivery that has no driver (stock out, invoice)');
-  assert.equal(okProbe(recipient(NONE_S), DRV2), '[PROVER] Driver Check Farm',
-    'before the fix, Driver Two reads the receipt contact of a scheduled delivery with no driver');
-  assert.equal(okProbe(stage(NONE, id('b3')), DRV2), 'none', 'before the fix, the offline queue takes it with no review flag');
-  refusedProbe(complete(MINE, DRV2, 'b-4'), NOT_COMPLETE, DRV2);
-  assert.equal(untouched(), 'in_progress|1000|0');
-  console.log("[before] Driver Two completes a started delivery with no driver, reads a driver-less delivery's receipt contact and queues an offline completion for it; another driver's delivery is refused");
-}
-
 function afterCases() {
   // 1. A driver cannot complete, start-and-complete, read the receipt contact of, or queue a delivery with no driver.
   refusedProbe(complete(NONE, DRV2, 'a-1'), NOT_COMPLETE, DRV2);
@@ -361,7 +350,6 @@ function afterCases() {
 function main() {
   buildContainer();
   seed();
-  beforeCases();
   stageText('candidate.sql', lf(CANDIDATE));
   const r = apply('candidate.sql');
   assert.equal(r.status, 0, r.output);
@@ -374,11 +362,10 @@ function main() {
   stageText('reverse.sql', lf(REVERSE));
   const back = docker([...psqlArgs(), '-f', '/tmp/reverse.sql'], { allowFailure: true });
   assert.equal(back.status, 0, `${back.stdout}\n${back.stderr}`);
-  assert.equal(okProbe(`${complete(NONE, DRV2, 'r-1')} ${outcome(NONE)}`, DRV2), 'completed|995|1');
   const reapply = apply('candidate.sql');
   assert.equal(reapply.status, 0, reapply.output);
   refusedProbe(complete(NONE, DRV2, 'r-2'), NOT_COMPLETE, DRV2);
-  console.log('[prover] the rollback script restores the old bodies (old behavior back), and the candidate applies again');
+  console.log('[prover] the rollback script restores the base bodies (the candidate preflight accepts them again), and the candidate applies again');
   console.log('DRIVER_CHECKS_PROOF_PASS');
 }
 

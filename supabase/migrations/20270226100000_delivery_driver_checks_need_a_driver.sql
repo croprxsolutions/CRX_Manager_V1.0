@@ -31,8 +31,8 @@
 --   _complete_delivery_authorized_impl_20270122 (20270203120000) and _complete_delivery_period_preflight_impl
 --   (20270213100000), that is also live production's body (read-only, 2026-11-23).
 --
--- ROLLBACK (its own reviewed migration): re-create each function from the base body above (the same CREATE OR REPLACE
---   with the one line restored); scripts/smoke/delivery-driver-checks-need-a-driver-reverse.sql does exactly that.
+-- ROLLBACK: a reviewed forward migration that KEEPS the driver check; never restore the base bodies above in
+--   production. scripts/smoke/delivery-driver-checks-need-a-driver-reverse.sql is proof-only (disposable container).
 --
 -- idempotency-body-check: exempt -- no new mutating entry point; each body keeps its idempotency handling unchanged.
 --

@@ -93,7 +93,7 @@ try {
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].key, "d240b31a7419/1");
   assert.equal(candidates[0].from_head, reviewed, "the code comparison uses the reviewed head, not the log commit");
-  assert.ok(carryPromptLines(candidates).some((l) => l.includes("d240b31a7419/1 (HIGH): src.ts:5")));
+  assert.ok(carryPromptLines(candidates).some((l) => l.includes("d240b31a7419/1 (HIGH): \"src.ts:5")));
   assert.deepEqual(priorAcceptances(proofs, { prNumber: 78, prUrl: URL.replace("77", "78"), nowMs: now }), [], "another PR sees nothing");
   assert.deepEqual(priorAcceptances(proofs, { prNumber: PR, prUrl: URL, nowMs: now + 6 * DAY }), [], "older than 7 days: nothing");
 

@@ -97,18 +97,50 @@ export const TAHA_LANE_TABLES = [
   "commission_earned_state_ledger", "commission_history_cutover",
 ];
 const TABLE = String.raw`(?:"?public"?\s*\.\s*)?"?(?:${TAHA_LANE_TABLES.join("|")})"?(?![\w$]|\s*\.)`;
-// "ON" covers triggers, policies, indexes and grants; TABLE / ONLY / IF EXISTS are optional fillers.
-const WRITE_RE = new RegExp(String.raw`\b(?:insert\s+into|merge\s+into|update|delete\s+from|truncate|alter|drop|lock|on)(?:\s+(?:table|only|if\s+exists))*\s+` + TABLE, "i");
+// "INTO" covers INSERT, MERGE and SELECT INTO; "ON" covers triggers, policies, indexes, grants and comments;
+// TABLE / ONLY / IF [NOT] EXISTS are optional fillers.
+const WRITE_RE = new RegExp(String.raw`\b(?:into|update|delete\s+from|truncate|alter|drop|lock|copy|create(?:\s+unlogged)?\s+table|on)(?:\s+(?:table|only|if\s+(?:not\s+)?exists))*\s+` + TABLE, "i");
 const READ_RE = new RegExp(String.raw`\b(?:from|join)(?:\s+only)?\s+` + TABLE, "i");
 const ROW_LOCK_RE = /\bfor\s+(?:no\s+key\s+)?update\b|\bfor\s+(?:key\s+)?share\b/i;
 const FUNCTION_RE = /\b(?:create(?:\s+or\s+replace)?|alter|drop)\s+(?:function|procedure)\s+(?:if\s+exists\s+)?(?:"?public"?\s*\.\s*)?"?([\w$]+)/gi;
 
+/**
+ * The SQL with its comments blanked. Quoted strings are kept (dynamic SQL in EXECUTE '…' still counts)
+ * and a "--" or "/*" inside one is not a comment. Dollar-quoted bodies are scanned as SQL. A stray
+ * quote can only make it keep more text, so a mistake here errs towards refusing.
+ */
+function withoutComments(sql) {
+  let out = "";
+  for (let i = 0; i < sql.length;) {
+    if (sql[i] === "'") {
+      const escapes = /[eE]/.test(sql[i - 1] ?? "") && !/[\w$]/.test(sql[i - 2] ?? "");
+      let j = i + 1;
+      for (; j < sql.length; j++) {
+        if (escapes && sql[j] === "\\") { j++; continue; }
+        if (sql[j] === "'") { if (sql[j + 1] === "'") { j++; continue; } break; }
+      }
+      out += sql.slice(i, j + 1);
+      i = j + 1;
+    } else if (sql.startsWith("--", i)) {
+      while (i < sql.length && sql[i] !== "\n") i++;
+      out += " ";
+    } else if (sql.startsWith("/*", i)) {
+      let depth = 0; // Postgres block comments nest.
+      while (i < sql.length) {
+        if (sql.startsWith("/*", i)) { depth++; i += 2; } else if (sql.startsWith("*/", i)) { depth--; i += 2; if (!depth) break; } else i++;
+      }
+      out += " ";
+    } else out += sql[i++];
+  }
+  return out;
+}
+
 /** True when this migration SQL touches Taha's lane; unreadable SQL (null) counts, so the block fails closed. */
 export function isTahaLaneSql(sql) {
   if (typeof sql !== "string") return true;
-  // shortcut: a "--" inside a string literal hides the rest of that line; upgrade to a tokenizer if one ever slips past.
-  const text = sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
+  const text = withoutComments(sql);
   if (WRITE_RE.test(text)) return true;
+  // Deliberately broad (Luna MED, 2026-11-23): any row lock plus any read of his tables counts; a wrong refusal costs one override code.
   if (ROW_LOCK_RE.test(text) && READ_RE.test(text)) return true;
   return [...text.matchAll(FUNCTION_RE)].some((m) => isLaneName(m[1]));
 }

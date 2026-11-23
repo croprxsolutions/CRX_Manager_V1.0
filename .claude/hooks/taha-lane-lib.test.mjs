@@ -84,6 +84,15 @@ for (const [sql, why] of [
   ["CREATE FUNCTION public.post_invoice_v2() RETURNS void AS $$ SELECT 1 $$;", "a function named for invoices"],
   ["DROP FUNCTION IF EXISTS public.release_hold(uuid);", "dropping a hold function"],
   [null, "SQL that could not be read"],
+  // Luna round 1 (2026-11-23).
+  ["SELECT '--' AS note; UPDATE public.invoices SET x = 1;", "a -- inside a string is not a comment"],
+  ["SELECT '/*' AS a; UPDATE invoices SET x = 1; SELECT '*/';", "a /* inside a string is not a comment"],
+  ["SELECT E'it\\'s -- here'; DELETE FROM payments;", "an escaped quote in an E'' string"],
+  ["/* outer /* inner */ still a comment */ UPDATE orders SET x = 1;", "nested block comments end in the right place"],
+  ["COPY public.invoices FROM STDIN;", "COPY into a lane table"],
+  ["CREATE TABLE IF NOT EXISTS public.invoice_items (id int);", "CREATE TABLE of a lane table"],
+  ["SELECT * INTO quotes FROM other;", "SELECT INTO a lane table"],
+  ["DO $$ BEGIN EXECUTE 'UPDATE invoices SET x = 1'; END $$;", "dynamic SQL in a string"],
 ]) ok(isTahaLaneSql(sql), `Taha's: ${why}`);
 for (const [sql, why] of [
   ["UPDATE deliveries SET driver_id = NULL; INSERT INTO activity_feed (x) VALUES (1);", "deliveries only"],

@@ -1,3 +1,6 @@
+import { supabase } from './db';
+import { Sentry } from './sentry';
+
 /**
  * Figures for one line of the delivery page's Products table (F05).
  *
@@ -20,4 +23,27 @@ export function deliveryLineFigures(input: {
     prevDelivered: Math.max(0, orderDelivered - countedDelivered),
     remainingAfter: Math.max(0, ordered - orderDelivered - otherOpen - stillHeld),
   };
+}
+
+/**
+ * Units each order line has on the order's OTHER scheduled or in-progress loads (F05).
+ * shortcut: a reader whose RLS hides other loads sees them as 0, as before this read existed.
+ */
+export async function fetchOtherOpenByOrderLine(
+  orderId: string,
+  deliveryId: string,
+): Promise<Record<string, number>> {
+  const { data, error } = await supabase
+    .from('delivery_items')
+    .select('order_item_id, quantity, delivery:deliveries!inner(order_id, status)')
+    .eq('delivery.order_id', orderId)
+    .in('delivery.status', ['scheduled', 'in_progress'])
+    .neq('delivery_id', deliveryId);
+  const byOrderLine: Record<string, number> = {};
+  for (const di of (data ?? []) as Array<{ order_item_id: string | null; quantity: number | null }>) {
+    if (di.order_item_id) byOrderLine[di.order_item_id] = (byOrderLine[di.order_item_id] ?? 0) + Number(di.quantity ?? 0);
+  }
+  // Fail open: the column falls back to the old figure; the server still enforces the rule.
+  if (error) Sentry.captureException(error, { extra: { context: 'load_delivery_other_open_loads', deliveryId } });
+  return byOrderLine;
 }

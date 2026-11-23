@@ -69,7 +69,7 @@ import { useDeliveryBrands } from '../components/deliveries/useDeliveryBrands';
 import { DeliveryBrandsPanel } from '../components/deliveries/DeliveryBrandPicker';
 import CorrectBrandsModal from '../components/deliveries/CorrectBrandsModal';
 import { brandWarnings } from '../lib/deliveryBrands';
-import { deliveryLineFigures } from '../lib/deliveryLineRemaining';
+import { deliveryLineFigures, fetchOtherOpenByOrderLine } from '../lib/deliveryLineRemaining';
 import type {
   Delivery, DeliveryItem, DeliveryPhoto, DeliveryRemainder,
   Customer, CustomerAddress, Profile, OrderItem, DeliveryIssueType, DeliveryCompletionEvidence, ReceiptRecipient,
@@ -457,14 +457,7 @@ export default function DeliveryDetail() {
               .from('order_items')
               .select('id, total_units_needed, quantity_delivered, quantity_remaining')
               .eq('order_id', del.order_id),
-            // Units the order's other open loads hold (F05): "Remaining After" leaves them out too.
-            // shortcut: a reader whose RLS hides other loads sees them as 0, as before this read existed.
-            supabase
-              .from('delivery_items')
-              .select('order_item_id, quantity, delivery:deliveries!inner(order_id, status)')
-              .eq('delivery.order_id', del.order_id)
-              .in('delivery.status', ['scheduled', 'in_progress'])
-              .neq('delivery_id', del.id),
+            fetchOtherOpenByOrderLine(del.order_id, del.id),
             supabase
               .from('orders')
               .select('id, order_number, quote_id')
@@ -518,23 +511,16 @@ export default function DeliveryDetail() {
           } else {
             setOrderNeedsSplitBilling(splitRes.data?.has(orderIdForSplitCheck) ?? false);
           }
-          if (otherOpenRes.error) {
-            Sentry.captureException(otherOpenRes.error, { extra: { context: 'load_delivery_other_open_loads', deliveryId: del.id } });
-          }
           if (oiRes.error) {
             toast('error', sanitizeError(oiRes.error));
           } else if (oiRes.data) {
-            const otherOpen: Record<string, number> = {};
-            (otherOpenRes.data ?? []).forEach((di: { order_item_id: string | null; quantity: number }) => {
-              if (di.order_item_id) otherOpen[di.order_item_id] = (otherOpen[di.order_item_id] ?? 0) + Number(di.quantity ?? 0);
-            });
             const ctx: Record<string, { ordered: number; delivered: number; remaining: number; otherOpen: number }> = {};
             oiRes.data.forEach((oi: { id: string; total_units_needed: number; quantity_delivered: number; quantity_remaining: number }) => {
               ctx[oi.id] = {
                 ordered: oi.total_units_needed,
                 delivered: oi.quantity_delivered,
                 remaining: oi.quantity_remaining,
-                otherOpen: otherOpen[oi.id] ?? 0,
+                otherOpen: otherOpenRes[oi.id] ?? 0,
               };
             });
             setOrderItemContext(ctx);

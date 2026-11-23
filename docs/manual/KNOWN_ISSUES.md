@@ -1115,7 +1115,7 @@ Fix it together with KI-157, where every invoice PDF reads the live product name
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · HIGH · Mason (field-app billing) · plan W1-03 · #2176.
 
-> **MUST DO (Mason, 2026-11-22).** Sol round 9 on #2247 re-found this on the transfer's saved-split path (`job_field_shares` x `acres_to_treat`, `20270224160000` ~L415). Mason skipped it for #2247 on the condition that this known issue (KI-185, GitHub #2176) is fixed next, in its own PR after #2247; it is no longer CAN-WAIT (To-Do 5.7). #2247 itself still bills planned acres.
+> **MUST DO (Mason, 2026-11-22).** Sol round 9 on #2247 re-found this on the transfer's saved-split path (`job_field_shares` x `acres_to_treat`, `20270225160000` ~L415). Mason skipped it for #2247 on the condition that this known issue (KI-185, GitHub #2176) is fixed next, in its own PR after #2247; it is no longer CAN-WAIT (To-Do 5.7). #2247 itself still bills planned acres.
 
 **HIGH · OPEN (source-confirmed on main and staging; not reproduced end to end) · field-app billing/stock · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 6) · Mason (field-app billing) · GitHub #2176**
 Job completion stores the actual acres per field on the application record (`_complete_job_replay_impl_20261015`,
@@ -1346,7 +1346,7 @@ The [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) (sweep 3 #9) re-confirm
 logged here, not as a new KI.
 The 2026-11-02 cost audit noted more functions in this same ownership and role-check area (not cost); the list is in
 Mason's private notes until the scoping work is built. It also noted that an admin's automatic draft invoice for a job
-with a below-cost line always fails, so that job is billed by hand; candidate 20270224160000 (not yet live) writes each job line's
+with a below-cost line always fails, so that job is billed by hand; candidate 20270225160000 (not yet live) writes each job line's
 real quantity in the sold unit, so the ordinary check judges it exactly; a unit that can't convert stops Create Invoice by name.
 
 ### KI-07 — Other small security gaps

@@ -1,5 +1,21 @@
 # Decision Log
 
+## 2026-11-23 — #2247: Mason owner-accepted 6 Sol finding(s) at `3f0ff8fb7e3c`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2247 at `3f0ff8fb7e3c` (base `3bae6de0f2aa`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:298`, text sha256 `5dcd88b221a38594` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 2 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:215`, text sha256 `365719c8277f40b9` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 3 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:423`, text sha256 `ecd4a78e359ce89a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 4 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:382`, text sha256 `77ee4da304cf4f67` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 5 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:775`, text sha256 `bbdef6769b9abdd7` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 6 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:325`, text sha256 `b8e753c1a019819f` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+
 ## 2026-11-23 — #2247: Mason owner-accepted 6 Sol finding(s) at `e50b0e90a218`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2247 at `e50b0e90a218` (base `02629ac33259`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

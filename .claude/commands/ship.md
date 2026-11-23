@@ -37,7 +37,7 @@ Never work on `main` or `staging`: `git fetch origin && git switch -c ship/<slug
 
 ## Step 0.5 — Size, then plan
 
-- **Trivial** (one file; no SQL, money, inventory, RLS, auth, permission or lifecycle change): skip Step 3 and Step 5; do Step 2, 2.5, then Step 7. Say you are taking the light path.
+- **Trivial** (one file; no SQL, Edge Function, money, inventory, RLS, auth, permission, lifecycle or other business-critical change): skip Step 3 and Step 5; do Step 2, 2.5, then Step 7. Say you are taking the light path.
 - **Substantial** (everything else): the full pipeline.
 
 **Know whether Sol applies.** Check every file you will touch: `node --input-type=module -e "import {solRiskPathProblem as p} from './.claude/hooks/sol-risk-lib.mjs'; for (const f of process.argv.slice(1)) console.log(f, '->', p(f) ?? 'off the list')" <file> ...`. One edit to a listed file pulls the whole PR into Sol; keep cosmetic edits to listed files out of an off-list PR. Once the PR exists, `npm run sol-needed -- <n>` gives the merge gate's own answer.
@@ -76,7 +76,7 @@ If you cannot run it, say so; do not call it done.
 |---|---|
 | `supabase/migrations/*.sql` | `rls-security-reviewer` + `migration-drift-reviewer` |
 | `src/types/index.ts` or a migration | `typescript-types-drift-reviewer` |
-| `src/` importing `jspdf` | `pdf-output-reviewer` |
+| `src/` importing `jspdf` or `jspdf-autotable` | `pdf-output-reviewer` |
 | any `src/`, `supabase/functions/` or migration | `compliance-reviewer` |
 | workflow / lifecycle / page↔RPC logic | `/review-workflow` |
 
@@ -191,5 +191,5 @@ Production broke after a change: `.claude/commands/rollback.md` (promote the las
 - NEVER report the gate clean with a confirmed BLOCKER/HIGH open.
 - NEVER skip the review fan-out except on the Trivial path.
 - NEVER `--no-verify`, `@ts-ignore` or `any` (except `reportPdf.ts` columnStyles), force-push without Mason's yes, or push to `main`.
-- Edge Function deploys, data deletion and destructive migrations always wait for Mason's explicit yes.
+- Edge Function deploys, data deletion and live applies of destructive migrations always wait for Mason's explicit yes (merging one into `staging` does not; Staging, above).
 - A required safety gate that cannot run means STOP and hand off.

@@ -11,11 +11,11 @@ A read-only checklist. It lands nothing. Where anything here differs from `.clau
 
 ## Checklist
 
-1. **Branch:** `git status --short --branch`, then `git fetch origin && git rev-list --left-right --count origin/staging...HEAD` (a hotfix: `origin/main`). On `main` or `staging` → branch first. Uncommitted changes → WARN.
-2. **Code:** `npm run lint && npm run typecheck && npm run check:code-health && npm run build && npm run test` (plus `npm run test:agent-workflows` for agent-surface changes). Any failure → BLOCKED.
-3. **Secrets:** `git ls-files | grep -i "\.env"` and `grep -rlE "service_role|sk_live|sk_test|SUPABASE_SERVICE" src/ --include="*.ts" --include="*.tsx"`. Any hit → BLOCKED.
+1. **Branch:** `git status --short --branch`, then `git fetch origin && git rev-list --left-right --count origin/staging...HEAD` (`hotfix/` and `release/` branches: `origin/main`). On `main` or `staging` → branch first. Uncommitted changes → WARN.
+2. **Code:** `npm run lint && npm run typecheck && npm run check:code-health && npm run build && npm run test` (plus `npm run test:agent-workflows` for agent-surface changes, and `node scripts/verify-deps.mjs` when `package.json` or `package-lock.json` changed). Any failure → BLOCKED.
+3. **Secrets:** `git ls-files | grep -iE '(^|/)\.env($|\.)' | grep -v '\.example$'` and `grep -rlE "service_role|sk_live|sk_test|SUPABASE_SERVICE" src/ supabase/functions/ scripts/`. Read each hit: a real credential → BLOCKED; a name or placeholder is fine.
 4. **Bundle:** `ls -lh dist/assets/*.js | head -5`; WARN on any chunk over 500 KB.
-5. **Migrations:** list the branch's new `supabase/migrations/*.sql`. A feature PR's migration is applied to the staging database by the `Database` workflow after merge, never by hand. A hotfix or release migration is applied live before the merge through `scripts/apply-migration-file.mjs` (ship.md Step 5, Step 8 item 5). Destructive ones need Mason's approval of that exact file. Never `supabase db push`.
+5. **Migrations:** list the branch's new `supabase/migrations/*.sql`. A feature PR's migration is applied to the staging database by the `Database` workflow after merge, never by hand. A hotfix or release migration is applied live before the merge through `scripts/apply-migration-file.mjs` (ship.md Step 5, Step 8 item 5). A destructive one may merge into `staging`, but its live apply needs Mason's approval of that exact file. Never `supabase db push`.
 6. **Sol:** `npm run sol-needed -- <n>` (or the Step 0.5 check in ship.md before a PR exists). On the list → a clean Sol proof on the head is required.
 7. **Taha:** a PR touching his hold list waits 4 hours (ship.md Step 8 item 4a); never push to his branches.
 

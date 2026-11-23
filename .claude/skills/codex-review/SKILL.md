@@ -35,12 +35,12 @@ Never hard-code the version-hash path.
 | Uncommitted changes | `--uncommitted` |
 | One commit | `--commit <sha>` (substitute a real hash; `<`/`>` are shell redirections) |
 
-Run `git fetch origin` first. The default base is `solTargetRef` in `scripts/write-codex-push-proof.mjs`: `origin/staging` for a feature branch; `origin/main` for `hotfix/`, `release/`, `main`, `staging`, a detached HEAD, or no `origin/staging`. An explicit `--base <ref>` round is allowed for exploration but never clears the change.
+Run `git fetch origin` first, and set `SCOPE` in the same shell as Step 3A (`SCOPE=""`, `SCOPE="--uncommitted"` or `SCOPE="--commit 12cb424"`). The default base is `solTargetRef` in `scripts/write-codex-push-proof.mjs`: `origin/staging` for a feature branch; `origin/main` for `hotfix/`, `release/`, `main`, `staging`, a detached HEAD, or no `origin/staging`. An explicit `--base <ref>` round is allowed for exploration but never clears the change.
 
 ## Step 2: Live evidence first (DB-touching changes)
 
 1. `npm run db-sweeps:live` runs every predicate read-only against live, byte-exact, saves each `sweep_result` packet to a private capture and adjudicates the full set. Without it (cloud, no Credential Manager), run `npm run db-sweeps`, execute each printed block read-only via Supabase MCP `execute_sql`, capture each packet (`predicate`, `rows`, `function_contracts`) as a private local JSON array, then run `node scripts/db-invariant-sweeps/run-sweeps.mjs --adjudicate <capture.json>`. Do not compare violation keys alone: the adjudicator applies the same parameter and function/dependency contract matcher as linked execution, and missing, duplicate, unknown or drifting packets fail. Any violation it leaves is a real finding.
-2. Each touched RPC that already exists live passes its smoke chain (`node scripts/smoke/run-smoke.mjs --spec <rpc>`, `SMOKE_PASS_ROLLBACK`). An RPC whose migration is not live yet gets its chain written now and run at apply time (ship.md Step 2.5).
+2. Each touched RPC that already exists live passes its smoke chain (`npm run smoke:live -- --spec <rpc>`, `SMOKE_PASS_ROLLBACK`). An RPC whose migration is not live yet gets its chain written now and run at apply time (ship.md Step 2.5).
 
 Skip for frontend-only or docs-only diffs.
 
@@ -71,7 +71,7 @@ Run it in the background (up to 30 minutes). It pins `gpt-6-luna`/`xhigh` (`LUNA
 
 ## Step 3B: Sol — the one gate proof
 
-Only after Step 3A is clean and only for a change touching a file on `docs/reference/sol-required-paths.md`. Run it once, on the committed, clean head, before the PR opens. Run it bare from the repo root (the maintenance guard rejects `cd &&` chains and wrappers):
+Only after Step 3A leaves no BLOCKER or HIGH (deferred MED/LOW are fine) and only for a change touching a file on `docs/reference/sol-required-paths.md`. Run it once, on the committed, clean head, before the PR opens. Run it bare from the repo root (the maintenance guard rejects `cd &&` chains and wrappers):
 
 ```bash
 node scripts/write-codex-push-proof.mjs

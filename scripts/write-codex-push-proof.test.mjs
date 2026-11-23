@@ -1826,6 +1826,7 @@ function collisionPromptSkipsWork(prompt) {
     write(`docs/reference/migrations.d/${MIG}.md`, `# ${MIG}\n\nStatus: APPLIED LIVE 2026-11-04 (ledger 20261104220928).\n`);
     write("docs/changelog.d/2026-11-04-void.md", "- Void fix. Applied live 2026-11-04.\n");
     write("docs/manual/KNOWN_ISSUES.md", "# Known issues\n\nKI-94: fixed live 2026-11-04.\n");
+    write("docs/manual/known-issues.d/2026-11-04-void-follow-up.md", "## 2026-11-04 — Void follow-up\n\nFound while applying.\n");
   };
   const paperwork = () => {
     notes();
@@ -2013,6 +2014,12 @@ function collisionPromptSkipsWork(prompt) {
   assert.match(one("docs/changelog.d/x.md", "120000", "120000"), /changed type or mode/, "post-apply: a symlink is refused");
   assert.match(one("docs/changelog.d/x.md", "100644", "100755"), /changed type or mode/, "post-apply: an executable bit is refused");
   assert.match(one("docs/manual/KNOWN_ISSUES.md", "000000", "100644"), /was added/, "post-apply: only notes may be added");
+  assert.equal(one("docs/manual/known-issues.d/2026-11-22-x.md", "000000", "100644"), null, "post-apply: a new known-issues entry is paperwork");
+  assert.match(one("docs/manual/known-issues.d/README.md"), /instruction file|not post-apply paperwork/, "post-apply: the known-issues README is not paperwork");
+  assert.match(one("docs/manual/known-issues.d/notes.md", "000000", "100644"), /was added|not post-apply paperwork/, "post-apply: an undated known-issues file is not paperwork");
+  assert.equal(one("docs/manual/known-issues.d/2026-11-22-x.md", "100644", "000000"), null, "post-apply: a fixed known-issues entry may be deleted");
+  assert.match(one("docs/manual/known-issues.d/notes.md", "100644", "000000"), /deleted/, "post-apply: only dated known-issues files may be deleted");
+  assert.match(one("docs/changelog.d/x.md", "100644", "000000"), /deleted/, "post-apply: other paperwork may not be deleted");
   assert.match(one("docs/changelog.d/sub/x.md"), /not post-apply paperwork/, "post-apply: no nested folders");
   assert.match(one("docs/manual/known_issues.md"), /not post-apply paperwork/, "post-apply: paths match exactly");
   assert.match(postApplyProblem({ entries: [], readFile: read }), /changes nothing/, "post-apply: an empty commit is refused");
@@ -2144,7 +2151,7 @@ not json
     const named = logWith("2026-11-09 — Rounding stays per line on #1653", "**Decision (Mason):** keep it.");
     const r5 = solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-11-09 — Something else", "No PR here."), today });
     assert.equal(r5.refuse, true, "round stop: round 5 without a decision entry refuses");
-    assert.match(r5.message, /Sol round 5 on PR #1653.*no Sol tokens were spent.*ask Mason the business trade-off.*AGENTS\.md, Operating Contract.*DECISION_LOG\.md.*names #1653.*re-run/, "round stop: says round, ask Mason, record #n, rerun");
+    assert.match(r5.message, /Sol round 5 on PR #1653.*no Sol tokens were spent.*ask Mason the business trade-off.*AGENTS\.md, Operating Contract.*new file in docs\/manual\/decision-log\.d\/.*names #1653.*re-run/, "round stop: says round, ask Mason, record #n, rerun");
     assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: named, today }).refuse, false, "round stop: round 5 with today's entry naming #1653 proceeds");
     assert.equal(solRoundGate({ round: 8, prNumber: 1653, decisionLog: logWith("2026-11-09 — Trade-off", "**Decision (Mason):** loss over duplicate for PR #1653."), today }).refuse, false, "round stop: 'PR #n' in the body counts");
     assert.equal(solRoundGate({ round: 5, prNumber: 1653, decisionLog: logWith("2026-10-13 (recorded 2026-11-09) — late record", "**Decision:** Mason keeps #1653 as is."), today }).refuse, false, "round stop: a recorded-today date counts");
@@ -2170,7 +2177,7 @@ not json
       assert.equal(Number(status.match(/would be round (\d+) on PR #1916/)?.[1]), round, "round line: prints the round the stop uses");
       assert.equal(Number(gate.message.match(/Sol round (\d+) on PR #1916/)?.[1]), round, "round line: the stop names the same round");
       assert.equal(round, 5, "round line: pre-PR runs count");
-      assert.match(status, /rounds 1-4 run freely; from round 5 a DECISION_LOG\.md entry dated 2026-11-09 or later must name this PR: none yet/, "round line: says the cap and what unlocks it");
+      assert.match(status, /rounds 1-4 run freely; from round 5 a decision-log entry dated 2026-11-09 or later must name this PR: none yet/, "round line: says the cap and what unlocks it");
       assert.match(solRoundStatusLine({ round, prNumber: 1916, decisionLog: logWith("2026-11-09 — X", "**Decision (Mason):** #1916"), today }), /: found\)\.$/, "round line: says when the unlock is present");
       assert.match(solRoundStatusLine({ round: 1, prNumber: null, decisionLog: "", today }), /round 1 on this branch \(no PR yet\)/, "round line: no PR yet");
     }
@@ -2181,7 +2188,7 @@ not json
       assert.equal(futureDecisionLogDates(diff("+## 2026-11-08 — Yesterday"), today), null, "future date: the past passes");
       assert.equal(futureDecisionLogDates("", today), null, "future date: no decision-log change passes");
       const late = futureDecisionLogDates(diff("+## 2026-11-10 — Rounds for #1916", "+**Decision (Mason):** up to 7."), today);
-      assert.match(late, /SOL PRE-FLIGHT: docs\/manual\/DECISION_LOG\.md gains an entry dated after today \(2026-11-09, Central time\), so no Sol tokens were spent\.\n  - ## 2026-11-10 — Rounds for #1916\nRe-date it/, "future date: a future heading refuses and names the line");
+      assert.match(late, /SOL PRE-FLIGHT: the decision log \(docs\/manual\/DECISION_LOG\.md or docs\/manual\/decision-log\.d\/\) gains an entry dated after today \(2026-11-09, Central time\), so no Sol tokens were spent\.\n  - ## 2026-11-10 — Rounds for #1916\nRe-date it/, "future date: a future heading refuses and names the line");
       assert.match(futureDecisionLogDates(diff("+## 2026-11-09 — Today", "+**Decision (Mason, 2026-11-10 night):** yes."), today), /- \*\*Decision \(Mason, 2026-11-10 night\)/, "future date: a future date in the Decision line refuses");
       assert.match(futureDecisionLogDates(diff("+## 2026-10-13 (recorded 2026-11-10) — late"), today), /recorded 2026-11-10/, "future date: a future recorded date refuses");
       assert.equal(futureDecisionLogDates(diff("+## 2026-11-09 — Plan due 2026-12-01"), today), null, "future date: a date after the heading's dash is not the entry date");
@@ -2867,6 +2874,59 @@ not json
   } finally {
     rmSync(repo, { recursive: true, force: true, maxRetries: 5 });
     rmSync(transcripts, { recursive: true, force: true, maxRetries: 5 });
+  }
+}
+
+// ── Decision-log fragments (Mason, 2026-11-22): an entry written ONLY in decision-log.d/ ──
+// must unlock the round-5 stop and be date-checked, exactly like one in DECISION_LOG.md.
+{
+  const { decisionLogAt, DECISION_LOG_DIR } = await import("./write-codex-push-proof.mjs");
+  const repo = tempDir("crx-decision-fragments-");
+  const git = (...args) => execFileSync("git", ["-c", "user.name=Fragment Test", "-c", "user.email=fragment@example.invalid", ...args], {
+    cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  const write = (rel, text) => { const f = path.join(repo, ...rel.split("/")); mkdirSync(path.dirname(f), { recursive: true }); writeFileSync(f, text); };
+  const commit = () => { git("add", "-A"); git("commit", "-qm", "x"); return git("rev-parse", "HEAD"); };
+  const branchFrom = (name, ref) => git("switch", "-q", "-c", name, ref);
+  const today = "2026-11-22";
+  const gate = (ref) => solRoundGate({ round: 5, prNumber: 2270, decisionLog: decisionLogAt(repo, ref), today });
+  try {
+    git("init", "-q", "-b", "main");
+    git("config", "core.autocrlf", "false");
+    write("docs/manual/DECISION_LOG.md", "# Decision Log\n\n## 2026-11-01 — older\n\n**Decision (Mason):** #2270 old.\n");
+    write(`${DECISION_LOG_DIR}/README.md`, "## 2026-11-22 — README is not an entry\n\n**Decision (Mason):** #2270\n");
+    const base = commit();
+    assert.equal(gate(base).refuse, true, "fragments: no fragment and an old entry refuse round 5 (README is not read)");
+    write(`${DECISION_LOG_DIR}/2026-11-22-pr2270-trade-off.md`, "## 2026-11-22 — Trade-off for #2270\n\n**Decision (Mason, in chat, 2026-11-22).** Keep it.\n");
+    const named = commit();
+    assert.equal(gate(named).refuse, false, "fragments: an entry ONLY in decision-log.d/ unlocks round 5");
+    assert.match(solRoundStatusLine({ round: 5, prNumber: 2270, decisionLog: decisionLogAt(repo, named), today }), /: found\)\.$/, "fragments: the status line finds it");
+    assert.equal(gate(base).refuse, true, "fragments: the head without the fragment still refuses");
+    // A non-ASCII name is read too (git quotes it in ls-tree output without -z; Codex App P2).
+    branchFrom("curly", base);
+    git("config", "core.quotePath", "true");
+    write(`${DECISION_LOG_DIR}/2026-11-22-mason’s-decision.md`, "## 2026-11-22 — Mason’s call on #2270\n\n**Decision (Mason, in chat).** Keep it.\n");
+    assert.equal(gate(commit()).refuse, false, "fragments: a non-ASCII fragment name unlocks round 5");
+    // Only direct, dated children are entries (Taha LOW, #2277).
+    branchFrom("odd", base);
+    const entry = "## 2026-11-22 — Call on #2270\n\n**Decision (Mason, in chat).** Keep it.\n";
+    write(`${DECISION_LOG_DIR}/notes.md`, entry);
+    write(`${DECISION_LOG_DIR}/old/2026-11-22-nested.md`, entry);
+    assert.equal(gate(commit()).refuse, true, "fragments: undated and nested files are not entries");
+    // Text in one file never joins another file's entry.
+    branchFrom("glue", base);
+    write(`${DECISION_LOG_DIR}/2026-11-22-a.md`, "## 2026-11-22 — Unrelated, no newline at the end");
+    write(`${DECISION_LOG_DIR}/2026-11-22-b.md`, "**Decision (Mason):** #2270 with no heading of its own.\n");
+    assert.equal(gate(commit()).refuse, true, "fragments: a headless fragment cannot borrow another fragment's date");
+    // The future-date pre-flight reads the folder too.
+    branchFrom("late", base);
+    write(`${DECISION_LOG_DIR}/2026-11-23-late.md`, "## 2026-11-23 — Tomorrow\n\n**Decision (Mason):** #2270\n");
+    const late = commit();
+    const diff = git("diff", "-U0", base, late, "--", "docs/manual/DECISION_LOG.md", `${DECISION_LOG_DIR}/`);
+    assert.match(futureDecisionLogDates(diff, today), /- ## 2026-11-23 — Tomorrow/, "fragments: a future-dated fragment refuses before Sol");
+    assert.deepEqual(decisionLogAt(repo, "no-such-ref"), [], "fragments: an unreadable head reads as nothing, so round 5 refuses");
+  } finally {
+    rmSync(repo, { recursive: true, force: true, maxRetries: 5 });
   }
 }
 

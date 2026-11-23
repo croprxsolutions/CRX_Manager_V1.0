@@ -9,6 +9,19 @@
 ## 2026-11-22 — KI-114 (#1958): Piksi Dust is grams everywhere, same prices
 
 **Decision (Mason, 2026-11-22, in the bug-captain session: "Yes, grams (Recommended)"; and in the Lane C session: "piksi dust is in grams we billed like mg but it is grams and all mg need changed to gram price is same as grams etc").** This supersedes the 2026-11-13 "MG means milligrams" decision. Every Piksi `MG` label (products, groups, stock, order, delivery and PO lines, receipts) becomes `g` with no quantity or price changed; the four older Plus delivery lines that still say "Dry oz" become `g` too ("all"). This replaces the 2026-11-13 reading ("MG means milligrams") used by `20270121100000` and the 2026-11-17 "keep both on today's values" choice. Migration `20270221100000_piksi_mg_to_grams`; contract `docs/plans/2026-11-22-ki114-piksi-grams-CONTRACT.md`. Releasing Piksi from the rate cut-over hold list stays a separate step.
+## 2026-11-22 — PR #2226: staging merges never carry a Sol proof; skipped Sol findings never carry onto a newer base
+
+**Final rule:** a feature branch that merges `origin/staging` always needs a new full Sol review; `--carry-forward` is only for `hotfix/` and `release/` branches merging `origin/main` (round 7 decision below). The earlier decisions are kept as history.
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 4: "Yes, full review").** *(Its first sentence was replaced by the round 7 decision.)* `--carry-forward` now works after merging `origin/staging` into a feature branch, as it already did after merging `origin/main`. A proof whose BLOCKER/HIGH findings Mason skipped (owner-accepted) never carries onto a newer base: once the branch merges its base again, it needs a full Sol review. This is stricter than before, when an owner-accepted main-bound proof could carry. Sol rounds 1-4 each found a new way the carried owner-accepted form could cover a defect that new base code had widened, so that path was removed rather than patched.
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 5: "Yes, free carry only").** A staging merge keeps an earlier Sol review only in the free case: the PR's files and staging's new files do not overlap and one side is notes only. Any other staging merge, including both sides adding to `DECISION_LOG.md`, gets a full Sol review. The focused collision check stays only for `hotfix/` and `release/` branches merging `main`.
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 6: "Keep 10-30 rule").** Sol round 6 pointed out that the merge gates can still accept a Sol review of an earlier commit after a staging merge that "free carry only" would send to a full review. That is the 2026-10-30 rule (a later commit that touches no Sol-list file needs no new Sol), and Mason kept it: a staging merge that touches no Sol-list file keeps the earlier review, like any other harmless later commit, and one that touches the list is still refused at merge. The round's other two findings were fixed: the credential check on a collision delta now reads removed lines that start with `--`, and any copied file refuses the carry.
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 7: "Yes, drop it").** Sol found a new HIGH in the staging carry in each of 7 rounds, so it is removed rather than patched again. A feature branch that merges `origin/staging` always needs a new full Sol review, and the gates refuse any proof carried onto a staging base, including one minted earlier. Mason's reason: everything on staging is fully reviewed again before it is released to the live app. The carry stays for `hotfix/` and `release/` branches merging `origin/main`, and its collision check now runs only when main's changes add lines and remove or edit none (a removed line may be a credential, and no pattern catches every format). This replaces the "free carry only" decision above.
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 8: "Fix #1, then I merge").** Round 8 found 4 HIGHs. #1 (an older carried proof that records no review kind could still count at a staging merge) is fixed: only a proof carried onto `origin/main` counts. Mason overrides the other three and merges this PR by hand, with no further Sol round: #3 (`.claude/hooks/pr-merge-guard.mjs:681`, an earlier proof still counts after a staging merge that touches no Sol-list file) is his round-6 "keep the 10-30 rule" decision; #2 (`.claude/hooks/codex-push-lib.mjs:1763`, how far a restamp or post-apply carry can stretch an older owner acceptance) and #4 (`scripts/write-codex-push-proof.mjs:3314`, a release-rules review reused by the live migration gate for a hotfix) are gaps in older gate features this PR did not add, left to their own follow-up. None is a money, stock or customer-data bug.
 
 ## 2026-11-22 — #2256: Mason owner-accepted 3 Sol finding(s) at `591e6a34de34`
 
@@ -125,6 +138,16 @@
 ## 2026-11-22 — PR #2244 (KI-197): stale-screen PO cost check covers cost and product only (accepted risk)
 
 **Decision (Mason, relayed from his conversation with the bugs-triage session, 2026-11-22: "go with B"):** a purchase-order cost correction is refused when the line's cost or product changed after the screen loaded it. A PO vendor change or a product unit change in that window is NOT checked: an accepted risk, since only admins correct costs. Raised after Sol round 3 reached the AGENTS.md mechanism cap.
+
+## 2026-11-22 — A PO cost correction is judged against what arrived (KI-151)
+
+**Decision (Mason, relayed by the Lane E bug captain 2026-11-22):** "if cost is edited it needs edited if only receive 8 of 10 should show owing 2. if edited quantity to 8 and we receive 8 then we shouldn't show anymore coming". Cost corrections on a purchase order are judged against what actually arrived, not what was ordered.
+
+**Why:** since KI-143, vendor bills are already limited by what arrived (capped at the ordered total; the ordered total before anything arrives). The cost-correction check still used the ordered total, so a received line could be cut below what was billed for it.
+
+**Follow-up decision (Mason, 2026-11-22, in the Lane E session, "Yes, that rule"):** a cost cut is refused only when that cut itself puts the bills over the line. A bill already over what arrived (for example billed in full up front, goods still coming) does not block a correction.
+
+**What this implies:** a cost cut is refused when it moves the PO's active vendor bills from within 5% to more than 5% over what arrived (like the bill check, capped at the ordered total; the ordered total before anything arrives). Separately, as before KI-151, no cut may leave the bills more than 5% over the ordered total, even when a bill was already confirmed over it (Sol round 2, 2026-11-22: else a $110 bill on a $100 order lets the order be cut to $0). Owed and still-coming quantities are unchanged: receiving 8 of 10 still shows 2 coming, and a line whose ordered quantity matches what arrived shows nothing coming. Raising a cost is never refused.
 
 ## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
 

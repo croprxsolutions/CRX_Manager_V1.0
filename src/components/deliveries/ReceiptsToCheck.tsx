@@ -92,9 +92,9 @@ export default function ReceiptsToCheck() {
     if (!handling || !profile || savingRef.current) return;
     savingRef.current = true; // a second click before the re-render cannot send a second call
     setSaving(true);
+    // Only the receipt this row showed: the server refuses one queued again since (#2251).
+    const scope = receiptCloseScope(handling.delivery_id, 'handled', handling.created_at);
     try {
-      // Only the receipt this row showed: the server refuses one queued again since (#2251).
-      const scope = receiptCloseScope(handling.delivery_id, 'handled', handling.created_at);
       const result = await closeDeliveryReceipt(handling.delivery_id, 'handled', closeIdem.getKeyFor(scope), handling.created_at);
       closeIdem.resetKeyFor(scope);
       toast('success', result.outcome === 'sent'
@@ -108,6 +108,7 @@ export default function ReceiptsToCheck() {
       if (isReceiptSendingNow(err)) {
         toast('warning', RECEIPT_SENDING_NOW_MESSAGE);
       } else if (isReceiptChanged(err)) {
+        closeIdem.resetKeyFor(scope); // a refusal is final for this receipt: never keep its key (#2291)
         toast('warning', "This delivery's receipt changed since the list loaded. Nothing was closed; reloading the list.");
         setHandling(null);
         setReload((n) => n + 1);

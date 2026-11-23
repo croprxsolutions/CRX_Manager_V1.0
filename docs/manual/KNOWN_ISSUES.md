@@ -54,7 +54,8 @@ Fix first: see "Top 5" in [MASTER_FIX_PLAN.md](MASTER_FIX_PLAN.md).
 There are 28 items: 2 BLOCKER and 26 HIGH (statuses re-checked against PRs merged to staging).
 - 11 (SOL-1 to SOL-6, SOL-8 to SOL-12) are resolved: Mason chose to remove the staging-only release pass, and PR #2203 merged to staging 2026-11-22.
 - 7 are fixed on staging but not live yet (SOL-7, KI-129 payments part, KI-125, #2196, #2063, KI-199, KI-119).
-- 10 are open, partly open or check-first.
+- 1 is resolved as disproved (KI-75, 2026-11-23).
+- 9 are open, partly open or check-first.
 
 Each item's full entry is in its area section below. "Severity unsure" marks a rating that needs more checking. "Check first" means a credible report that reading the code could not settle.
 
@@ -85,7 +86,7 @@ Each item's full entry is in its area section below. "Severity unsure" marks a r
 | Quotes and bookings | KI-190 | HIGH | Open | Two reps drawing from one booking can order at quantities or prices that neither of them saw. | Taha |
 | Orders and deliveries | KI-167 | HIGH (severity unsure) | Open | The office must fix a line's unit by hand before it can be re-delivered. No amounts change. | Taha |
 | Inventory | KI-168 | HIGH (severity unsure) | Open | That purchase cannot be used as an actual-cost basis. Nothing reads it yet because costing is parked. | Agent (unassigned) |
-| Payments | KI-75 | HIGH (severity unsure) | Check first | Applying a credit memo could clash with another action happening at the same moment. | Taha |
+| Payments | KI-75 | HIGH (severity unsure) | Resolved: disproved 2026-11-23 (two-session test; the key lock serializes it) | Applying a credit memo could clash with another action happening at the same moment. | None (closed) |
 | Permissions | KI-169 | HIGH | Open | Hiding Invoices or Record Payments from a person still lets them reach those actions in the database. | Taha |
 | Permissions | KI-119 | HIGH | Fixed on staging, not live | A person with Reports hidden can still pull report data. | Agent (release) |
 
@@ -919,6 +920,14 @@ days)", and have `save_customer` refuse terms the parser would default.
 
 ### KI-75 — Retry-key detail (extends KI-10, KI-11)
 
+> **Closed 2026-11-23 (disproved), Taha:** the credit-memo apply race cannot happen. `check_idempotency` takes
+> `pg_advisory_xact_lock('crx:idempotency:' || key)` before it reads (`20260714230000_gauntlet_core_guards`,
+> `20260716160000_fix_idempotency_committed_replay_guard`), so every call with one key waits for the first to commit.
+> Two-session test on a synthetic local database, session A holding its transaction open 6 s: the same key and same
+> arguments → B waits, then returns A's application id (one application, memo debited once); the same key with
+> another target → B is refused with `IDEMPOTENCY_ARGUMENT_MISMATCH` and the second invoice is untouched. Nothing
+> else in this entry is open.
+
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Check first · HIGH · Taha (to 2026-12-15) · plan W1-13. The credit-memo apply race after the lock was not re-proven in this pass.
 
 **HIGH on money paths · OPEN · money**
@@ -1154,7 +1163,7 @@ total, billed unit and unit price, unchanged charge, both grouping configuration
 
 ### KI-195 — The Chemical Application Report prints today's EPA number, not the job's saved one
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Mason (field-app billing) · plan W2-26 · #2183.
+> **2026-11-23:** Fix in review (PR to staging; migration `20270225193000` not yet applied) · MED · plan W2-26 · #2183. The four printouts read `job_product_epa`; REI/PHI sources are unchanged; see `docs/changelog.d/2026-11-23-ki195-printouts-kept-epa.md`. The description below is the state before this fix.
 
 **MED · OPEN (source-confirmed) · restricted-use/regulatory records · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 1) · unassigned · GitHub #2183**
 Sprayed jobs keep their EPA number in `job_product_epa` (`20261204120000` ~L143-152), including an explicit unknown,

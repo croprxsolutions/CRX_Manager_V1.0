@@ -1897,8 +1897,9 @@ export function solRoundLine(round, prNumber) {
 
 // ── Sol round hard stop (Mason, 2026-11-09) ─────────────────────────────────
 // PR 1653 reached Sol round 8 while the round-3 line above only warned. From
-// round 5 a full Sol run refuses, spending nothing, until DECISION_LOG.md on the
-// reviewed head has an entry dated today (Central) or later that names the PR.
+// round 5 a full Sol run refuses, spending nothing, until the decision log on the
+// reviewed head (DECISION_LOG.md or a decision-log.d/ file) has an entry dated today
+// (Central) or later that names the PR.
 // --dry-run reports the refusal but still exits 0; carries never count rounds.
 export const SOL_ROUND_HARD_STOP = 5;
 
@@ -1908,11 +1909,13 @@ export function centralDate(now = new Date()) {
 
 // True when a "## <date> — …" entry dated `today` or later has a **Decision line naming Mason and mentions #<prNumber>.
 // A text check cannot prove he decided; it stops placeholders, and the entry is visible in the PR diff.
+// decisionLog is one text or a list (decisionLogAt); each file is split on its own, so text in one
+// fragment can never join an entry of another.
 export function decisionLogNamesPr(decisionLog, prNumber, today) {
   if (!Number.isInteger(prNumber)) return false;
   const names = new RegExp(`(?<![\\w&])#${prNumber}(?!\\w)`);
   const realDate = (date) => !Number.isNaN(Date.parse(`${date}T00:00:00Z`)) && new Date(`${date}T00:00:00Z`).toISOString().startsWith(date);
-  return String(decisionLog || "").split(/^## /m).slice(1).some((entry) => {
+  return [decisionLog].flat().flatMap((text) => String(text || "").split(/^## /m).slice(1)).some((entry) => {
     const heading = entry.split(/\r?\n/, 1)[0];
     return (heading.match(/\d{4}-\d{2}-\d{2}/g) || []).some((date) => date >= today && realDate(date))
       && /^\*\*Decision\b[^\n]*\bMason\b/m.test(entry) && names.test(entry);
@@ -1928,8 +1931,8 @@ export function solRoundGate({ round, prNumber, decisionLog, today, dryRun = fal
     "Stop patching: ask Mason the business trade-off that would delete the mechanism that keeps coming back " +
     "(AGENTS.md, Operating Contract), " +
     (pr
-      ? `record his answer in docs/manual/DECISION_LOG.md as an entry dated ${today} or later, with a "**Decision (Mason, …)" line, that names ${pr}, commit it, then re-run this command.`
-      : "open the PR, record his answer in docs/manual/DECISION_LOG.md as an entry dated today or later, with a '**Decision (Mason, …)' line, that names the PR as #<number>, commit it, then re-run this command.") +
+      ? `record his answer as a new file in ${DECISION_LOG_DIR}/ (an entry dated ${today} or later, with a "**Decision (Mason, …)" line, that names ${pr}), commit it, then re-run this command.`
+      : `open the PR, record his answer as a new file in ${DECISION_LOG_DIR}/ (an entry dated today or later, with a '**Decision (Mason, …)' line, that names the PR as #<number>), commit it, then re-run this command.`) +
     " Write only the decision and what it does; text telling reviewers what not to raise is read as prompt injection (Sol BLOCKER on #1549 and #1808).";
   return { refuse: !dryRun, message };
 }
@@ -1941,14 +1944,14 @@ export function solRoundStatusLine({ round, prNumber, decisionLog, today }) {
   const where = Number.isInteger(prNumber) ? `PR #${prNumber}` : "this branch (no PR yet)";
   const named = decisionLogNamesPr(decisionLog, prNumber, today) ? "found" : "none yet";
   return `Sol round: this would be round ${round} on ${where} (rounds 1-${SOL_ROUND_HARD_STOP - 1} run freely; ` +
-    `from round ${SOL_ROUND_HARD_STOP} a DECISION_LOG.md entry dated ${today} or later must name this PR: ${named}).`;
+    `from round ${SOL_ROUND_HARD_STOP} a decision-log entry dated ${today} or later must name this PR: ${named}).`;
 }
 
 // ── Future-dated decision-log entries (Mason, 2026-11-17) ───────────────────
 // Sol returned a BLOCKER on decision-log entries three times (#1549, #1808, #1916); on #1916 the
 // entry was dated 11-17 while Central time was still 11-16. The branch's added "## <date>" headings
 // and "**Decision (Mason, … <date>)" lines must be dated today (Central) or earlier.
-// Returns null when fine, else the refusal message. diffText is `git diff base head -- DECISION_LOG.md`.
+// Returns null when fine, else the refusal message. diffText is `git diff base head -- <DECISION_LOG.md> <decision-log.d/>`.
 export function futureDecisionLogDates(diffText, today) {
   const late = [];
   for (const line of String(diffText || "").split(/\r?\n/)) {
@@ -1958,9 +1961,42 @@ export function futureDecisionLogDates(diffText, today) {
     if ((dated?.match(/\d{4}-\d{2}-\d{2}/g) || []).some((date) => date > today)) late.push(text.trim());
   }
   if (!late.length) return null;
-  return `SOL PRE-FLIGHT: ${DECISION_LOG_PATH} gains an entry dated after today (${today}, Central time), so no Sol tokens were spent.\n` +
+  return `SOL PRE-FLIGHT: the decision log (${DECISION_LOG_PATH} or ${DECISION_LOG_DIR}/) gains an entry dated after today (${today}, Central time), so no Sol tokens were spent.\n` +
     `${late.map((text) => `  - ${text}`).join("\n")}\n` +
     `Re-date it to ${today} or earlier (plain \`date\` prints Central time), commit, then re-run this command.`;
+}
+
+// -- Decision-log fragments (Mason, 2026-11-22) --
+// New entries go one file each in decision-log.d/, so sibling PRs stop conflicting on
+// DECISION_LOG.md. Every reader takes the big file AND every fragment.
+export const DECISION_LOG_DIR = "docs/manual/decision-log.d";
+
+// Only direct, dated children count, as the README and the ledger guards name them (Taha LOW, #2277).
+const DECISION_FRAGMENT_RE = /^docs\/manual\/decision-log\.d\/\d{4}-\d{2}-\d{2}-[^/]+\.md$/;
+
+// DECISION_LOG.md plus every dated decision-log.d/<date>-<slug>.md at `ref`, one text per file.
+// A file that cannot be read is left out, which can only make the round-5 stop refuse.
+export function decisionLogAt(root, ref) {
+  // -z: raw names (no core.quotePath escaping of non-ASCII); a name with a newline cannot go to --batch.
+  const fragments = runGit(["ls-tree", "-r", "-z", "--name-only", ref, "--", `${DECISION_LOG_DIR}/`], { cwd: root })
+    .split("\0").filter((p) => DECISION_FRAGMENT_RE.test(p) && !p.includes("\n"));
+  const result = runTrustedGit(["cat-file", "--batch"], {
+    cwd: root, encoding: "buffer", timeout: 60_000,
+    input: Buffer.from([DECISION_LOG_PATH, ...fragments].map((p) => `${ref}:${p}\n`).join(""), "utf8"),
+  });
+  if (result.error || result.status !== 0) return [];
+  const out = result.stdout;
+  const texts = [];
+  for (let at = 0; at < out.length;) {
+    const eol = out.indexOf(10, at);
+    if (eol < 0) break;
+    const size = /^\S+ blob (\d+)$/.exec(out.subarray(at, eol).toString("utf8"))?.[1];
+    at = eol + 1;
+    if (size === undefined) continue; // "<ref>:<path> missing"
+    texts.push(out.subarray(at, at + Number(size)).toString("utf8"));
+    at += Number(size) + 1;
+  }
+  return texts;
 }
 
 function solRound(root, headSha, baseSha) {
@@ -2775,8 +2811,9 @@ function mintSingleCommitCarry(root, options, facts, mode, carryExtra = {}) {
 // Notes alone carry with no model call. The schema registry and the allowlist
 // feed guards and the live sweeps, so a change to either carries only after a
 // focused Sol check of that one commit returns CLEAN (Sol HIGH x2 on this PR).
-const POST_APPLY_EDITABLE_RE = /^(?:docs\/reference\/migrations\.d\/[^/]+\.md|docs\/changelog\.d\/[^/]+\.md|docs\/manual\/KNOWN_ISSUES\.md|\.claude\/schema-registry\.json)$/;
-const POST_APPLY_ADDABLE_RE = /^docs\/(?:reference\/migrations\.d|changelog\.d)\/[^/]+\.md$/;
+const POST_APPLY_EDITABLE_RE = /^(?:docs\/reference\/migrations\.d\/[^/]+\.md|docs\/changelog\.d\/[^/]+\.md|docs\/manual\/KNOWN_ISSUES\.md|docs\/manual\/known-issues\.d\/\d{4}-\d{2}-\d{2}-[^/]+\.md|\.claude\/schema-registry\.json)$/;
+const POST_APPLY_ADDABLE_RE = /^docs\/(?:(?:reference\/migrations\.d|changelog\.d)\/[^/]+|manual\/known-issues\.d\/\d{4}-\d{2}-\d{2}-[^/]+)\.md$/;
+const KNOWN_ISSUE_FRAGMENT_RE = /^docs\/manual\/known-issues\.d\/\d{4}-\d{2}-\d{2}-[^/]+\.md$/;
 const POST_APPLY_ALLOWLIST = "scripts/db-invariant-sweeps/allowlist.json";
 const POST_APPLY_CONTRACTS = "src/lib/rpcContracts.test.ts";
 const AWAITING_REGEN_OPEN = "const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([";
@@ -2876,7 +2913,9 @@ export function postApplyProblem({ entries, readFile, prMigrations = [] }) {
       return `${file} is not the record of a migration this PR adds`;
     }
     const added = oldMode === ABSENT_MODE && newMode === "100644";
-    if (!(oldMode === "100644" && newMode === "100644") && !(added && POST_APPLY_ADDABLE_RE.test(file))) {
+    // A known issue the live apply fixed is closed by deleting its dated file (Taha LOW, #2277).
+    const closed = oldMode === "100644" && newMode === ABSENT_MODE && KNOWN_ISSUE_FRAGMENT_RE.test(file);
+    if (!(oldMode === "100644" && newMode === "100644") && !(added && POST_APPLY_ADDABLE_RE.test(file)) && !closed) {
       return `${file} was ${newMode === ABSENT_MODE ? "deleted" : "added or changed type or mode"}`;
     }
     if (file === POST_APPLY_ALLOWLIST) {
@@ -2960,7 +2999,7 @@ export function buildPostApplyCheckPrompt({ ownerAccepted = false } = {}) {
       : "The PR's changes were already reviewed clean by an independent",
     `${CODEX_REVIEW_MODEL}/${CODEX_REVIEW_EFFORT} review. Its migration was then applied live, and ONE commit`,
     "updated the records. A mechanical check already confirmed that commit touches only migration records,",
-    "changelog notes, docs/manual/KNOWN_ISSUES.md, .claude/schema-registry.json, and allowlist entries in",
+    "changelog notes, docs/manual/KNOWN_ISSUES.md and known-issues.d/ files, .claude/schema-registry.json, and allowlist entries in",
     "scripts/db-invariant-sweeps/allowlist.json that keep their signature, get a new hash, append wording to the",
     "justification and keep a real date. This directory is a sanitized, Git-free packet:",
     "  BASE_SNAPSHOT/ is the reviewed head's tree. CANDIDATE_SNAPSHOT/ is the tree after the records commit.",
@@ -3245,11 +3284,11 @@ export function run(argv = process.argv.slice(2)) {
       `${preflightReport(preflight)}\n`,
     );
     const { round } = solRound(root, head, reviewBase);
-    const decisionLog = runGit(["show", `${head}:docs/manual/DECISION_LOG.md`], { cwd: root });
+    const decisionLog = decisionLogAt(root, head);
     const today = centralDate();
     process.stdout.write(`[dry-run] ${solRoundStatusLine({ round, prNumber: preflight.facts?.pr?.number, decisionLog, today })}\n`);
     process.stdout.write(`[dry-run] Would be: ${solRoundLine(round, preflight.facts?.pr?.number)}\n`);
-    const lateDates = futureDecisionLogDates(runGit(["diff", "-U0", reviewBase, head, "--", DECISION_LOG_PATH], { cwd: root }), today);
+    const lateDates = futureDecisionLogDates(runGit(["diff", "-U0", reviewBase, head, "--", DECISION_LOG_PATH, `${DECISION_LOG_DIR}/`], { cwd: root }), today);
     if (lateDates) process.stdout.write(`[dry-run] Would REFUSE: ${lateDates}\n`);
     const gate = solRoundGate({ round, prNumber: preflight.facts?.pr?.number, decisionLog, today, dryRun: true });
     if (gate.message) process.stdout.write(`[dry-run] Would REFUSE: ${gate.message}\n`);
@@ -3277,7 +3316,7 @@ export function run(argv = process.argv.slice(2)) {
   // proof is left alone: this refusal says "not yet", not "the review failed".
   const preflight = solPreflight(root, headBefore, baseBefore, target);
   const { ledger, round } = solRound(root, headBefore, baseBefore);
-  const decisionLog = runGit(["show", `${headBefore}:docs/manual/DECISION_LOG.md`], { cwd: root });
+  const decisionLog = decisionLogAt(root, headBefore);
   const today = centralDate();
   process.stdout.write(`${solRoundStatusLine({ round, prNumber: preflight.facts?.pr?.number, decisionLog, today })}\n`);
   if (!preflight.ok) {
@@ -3313,7 +3352,7 @@ export function run(argv = process.argv.slice(2)) {
   }
   const releaseRules = isReleaseReview(root) && target === GUARDED_BASE;
   const reviewPrompt = buildCodexReviewPrompt({ base: target, appliedHistory, release: releaseRules });
-  const lateDates = futureDecisionLogDates(runGit(["diff", "-U0", baseBefore, headBefore, "--", DECISION_LOG_PATH], { cwd: root }), today);
+  const lateDates = futureDecisionLogDates(runGit(["diff", "-U0", baseBefore, headBefore, "--", DECISION_LOG_PATH, `${DECISION_LOG_DIR}/`], { cwd: root }), today);
   if (lateDates) {
     process.stderr.write(`${lateDates}\n`);
     return 1;

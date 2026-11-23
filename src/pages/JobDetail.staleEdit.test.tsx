@@ -105,6 +105,8 @@ describe('JobDetail stale-edit refusal', () => {
     ['crew', { ground_crew_id: 'crew-2' }],
     // A billing split change leaves every job total as it was.
     ['billing split', { job_field_shares: [{ field_id: 'f1', customer_id: 'cust-2', split_pct: 50, is_primary: false }] }],
+    // Reassigning one field's applicator leaves the job row as it was.
+    ['field dispatch', { job_location_dispatches: [{ job_field_id: 'jf1', applicator_id: 'a2', crew_id: null, dispatch_status: 'assigned' }] }],
   ])('refuses the save when someone else changed the %s after the page loaded', async (_label, change) => {
     serveJob({ ...JOB, ...change });
     await openAndSave();
@@ -113,23 +115,47 @@ describe('JobDetail stale-edit refusal', () => {
     expect(eqCalls).toContainEqual(['id', 'job-a']);
   });
 
-  it('lets the exact retry of a save whose reply was lost reach save_job, even though it committed', async () => {
-    // The first save commits but its reply is lost, so the re-read now sees this user's own change. Refusing the
-    // retry would strand the edit unconfirmed; save_job's idempotent replay must answer it instead.
+  it('refuses the retry of a save whose reply was lost once that save committed', async () => {
+    // Accepted trade-off (Mason, 2026-11-23): the re-read cannot tell an own lost save from someone else's, so it
+    // refuses and asks for a reload rather than risk writing over another person's change.
     serveJob(JOB, { ...JOB, notes: 'committed by the lost save' });
     let saves = 0;
     mockRpc.mockImplementation((fn: string) => {
       if (fn !== 'save_job') return Promise.resolve({ data: null, error: null });
       saves += 1;
-      return Promise.resolve(saves === 1
-        ? { data: null, error: { message: 'Failed to fetch' } }
-        : { data: { job_id: 'job-a' }, error: null });
+      return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
     });
     await openAndSave();
     await waitFor(() => expect(saves).toBe(1));
     await clickSave();
-    await waitFor(() => expect(saves).toBe(2));
-    expect(mockToast).not.toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE));
+    expect(saves).toBe(1);
+  });
+
+  it("refuses an admin's save when someone else changed a product's cost after the page loaded", async () => {
+    const chem = { id: 'jc1', product_id: 'p1', quantity: 10, unit: 'oz', rate_per_acre: 2, rate_unit: 'oz', sort_order: 0 };
+    const withChem = { ...JOB, job_chemicals: [chem] };
+    let jobsCalls = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'jobs') { jobsCalls += 1; return buildChain({ data: withChem, error: null }); }
+      return buildChain({ data: [], error: null });
+    });
+    let costReads = 0;
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn === 'get_admin_cost_fields') {
+        costReads += 1;
+        return Promise.resolve({ data: { jc1: { cost_per_unit_cents: costReads === 1 ? 1000 : 1250 } }, error: null });
+      }
+      return Promise.resolve(fn === 'save_job' ? { data: { job_id: 'job-a' }, error: null } : { data: [], error: null });
+    });
+    await openAndSave();
+    // A mix with products saves only once the label-rate policy has loaded; retry the click until it does.
+    await waitFor(async () => {
+      if (jobsCalls < 2) await clickSave();
+      expect(jobsCalls).toBe(2);
+    });
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE));
+    expect(mockRpc).not.toHaveBeenCalledWith('save_job', expect.anything());
   });
 
   it('saves normally when nothing changed underneath', async () => {
@@ -148,20 +174,5 @@ describe('JobDetail stale-edit refusal', () => {
     await clickSave();
     await waitFor(() => expect(mockRpc.mock.calls.filter(([fn]) => fn === 'save_job')).toHaveLength(2));
     expect(mockToast).not.toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
-  });
-
-  it('checks again on a retry after the database refused the save (nothing committed)', async () => {
-    serveJob(JOB, { ...JOB, applicator_id: 'other-applicator' });
-    let saves = 0;
-    mockRpc.mockImplementation((fn: string) => {
-      if (fn !== 'save_job') return Promise.resolve({ data: null, error: null });
-      saves += 1;
-      return Promise.resolve({ data: null, error: { code: 'P0001', message: 'SHARE_NOT_100' } });
-    });
-    await openAndSave();
-    await waitFor(() => expect(saves).toBe(1));
-    await clickSave();
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE));
-    expect(saves).toBe(1);
   });
 });

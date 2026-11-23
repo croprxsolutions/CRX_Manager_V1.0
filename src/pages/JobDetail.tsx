@@ -315,8 +315,6 @@ export default function JobDetail() {
   const savedLoaderRef = useRef({ groundCrewId: '', carrier: '', capacity: '' });
   // The job as last loaded: Save is refused if someone else changed it since (applicator, date, crew, ...).
   const loadedJobSnapshotRef = useRef<JobStaleSnapshot | null>(null);
-  // The edit last sent to save_job with no confirmed reply yet (a retry of it skips the stale check).
-  const unconfirmedJobSaveScopeRef = useRef<string | null>(null);
   const isNew = id === 'new';
   const isEditable = role === 'admin' || role === 'sales_rep';
   // Cost is admin-only (Mason, 2026-10-15): the server works it out for everyone else's saves.
@@ -1899,6 +1897,7 @@ export default function JobDetail() {
         job_fields(*, field:fields(field_name)),
         job_chemicals(${JOB_CHEMICAL_COLUMNS}, product:products(product_name)),
         job_field_shares(*),
+        job_location_dispatches(job_field_id, applicator_id, crew_id, dispatch_status),
         applied_info:job_applied_info(*)
       `)
       .eq('id', id!)
@@ -2769,6 +2768,7 @@ export default function JobDetail() {
   const performSave = async (licenseOverride: boolean, overrideReasonForAudit?: string) => {
     // Crew/loader values as loaded when Save was clicked: a reload during the save must not make an untouched value look edited.
     const loaderBaseAtSave = isNew ? { groundCrewId: '', carrier: '', capacity: '' } : { ...savedLoaderRef.current };
+    const snapshotAtSave = isNew ? null : loadedJobSnapshotRef.current;
     // Bound to the route this save STARTED on — see captureRouteEpoch. Captured here
     // rather than in handleSave because the expired-license override path calls
     // performSave directly, and this is where the save actually begins. The job row is
@@ -2888,12 +2888,12 @@ export default function JobDetail() {
       // lost reply is refused with the committed job, which the catch below opens; an edit to an existing job gets a
       // key per exact payload, since re-applying an edit to the same job is harmless.
       const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, payload, fieldsPayload, chemsPayload]);
-      // Refuse a save over someone else's newer change instead of silently replacing it. Skipped when this exact
-      // edit was already sent without a confirmed reply: it may have committed, and save_job's replay must answer.
-      if (!isNew && loadedJobSnapshotRef.current && unconfirmedJobSaveScopeRef.current !== saveScope) {
+      // Refuse a save over a newer change instead of silently replacing it. Compared with the job as it was when
+      // Save was clicked, so a refetch during the save cannot move the baseline under this payload.
+      if (!isNew && snapshotAtSave) {
         let changed: string[];
         try {
-          changed = await jobChangedSinceLoaded(id!, loadedJobSnapshotRef.current);
+          changed = await jobChangedSinceLoaded(id!, snapshotAtSave, isAdmin);
         } catch (readErr) {
           Sentry.captureException(toSentryError(readErr), { extra: { context: 'job_stale_edit_check' } });
           if (stillOnThisJob()) toast('error', sanitizeError(readErr));
@@ -2905,8 +2905,12 @@ export default function JobDetail() {
           setSaving(false);
           return;
         }
+        // The operator left (or discarded) this job while the check ran: write nothing.
+        if (!stillOnThisJob()) {
+          setSaving(false);
+          return;
+        }
       }
-      unconfirmedJobSaveScopeRef.current = saveScope;
       if (lastJobSaveScopeRef.current && lastJobSaveScopeRef.current !== saveScope) saveJobIdem.resetKeyFor(lastJobSaveScopeRef.current);
       lastJobSaveScopeRef.current = saveScope;
       const { data, error } = await supabase.rpc('save_job', {
@@ -2918,9 +2922,6 @@ export default function JobDetail() {
         p_idempotency_key: saveJobIdem.getKeyFor(saveScope),
       });
 
-      // A database refusal (it carries a code) committed nothing, so a retry gets the stale check again; only a
-      // reply that never arrived leaves the outcome unknown.
-      if (error && (error as { code?: string }).code) unconfirmedJobSaveScopeRef.current = null;
       if (error) throw error;
       if (isWholeJobApplicatorReassign && !licenseOverride) {
         displacementCommitted = true;
@@ -2928,7 +2929,6 @@ export default function JobDetail() {
       }
       const result = assertRpcResult<SaveJobResult>(data, 'save_job');
       saveJobIdem.resetKeyFor(saveScope);
-      unconfirmedJobSaveScopeRef.current = null;
       const savedJobIdForNotify = isNew ? result.job_id : (id as string);
 
       // Fires HERE — at the commit point — not on the success path further down, because two

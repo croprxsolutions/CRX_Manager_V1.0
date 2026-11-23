@@ -6,7 +6,17 @@
 -- nothing delivered, and a delivery line can store NaN or Infinity.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
-LOCK TABLE public.deliveries, public.delivery_items IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE public.delivery_items IN ACCESS EXCLUSIVE MODE;  -- one lock, first, never upgraded (see the forward migration)
+DO $installed$
+BEGIN
+  -- Restore only over the reviewed F05b body, so a later change to this function is never silently undone (Sol r1 MED).
+  IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
+       WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
+     IS DISTINCT FROM '2a7d8883d3767f93e2571a429898d683' THEN
+    RAISE EXCEPTION 'F05B_REVERSE: _complete_delivery_authorized_impl is not the F05b body; re-plan the rollback';
+  END IF;
+END
+$installed$;
 ALTER TABLE public.delivery_items DROP CONSTRAINT IF EXISTS delivery_items_quantities_finite;
 CREATE OR REPLACE FUNCTION public._complete_delivery_authorized_impl(
   p_delivery_id uuid,

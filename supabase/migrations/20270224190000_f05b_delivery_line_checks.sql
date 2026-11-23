@@ -8,10 +8,15 @@
 --   * #2275: delivery line quantities must be finite numbers (no NaN or +/-Infinity), as order lines are since F05.
 -- Nothing is rewritten. Completed deliveries that already have nothing delivered (five line-less loads from March 2026
 -- on production) stay as they are: the rule is checked only when a delivery is being completed.
+-- actor-binding-check: exempt -- internal _impl, EXECUTE revoked from every client role; its only caller,
+-- _complete_delivery_aggregate_impl, binds p_performed_by to auth.uid() (ACTOR_MISMATCH) before calling it.
 
 SET LOCAL lock_timeout = '5s';
--- Completion's table order (header, then lines), so this cannot deadlock with a live completion.
-LOCK TABLE public.deliveries, public.delivery_items IN SHARE ROW EXCLUSIVE MODE;
+-- One lock, taken first and never upgraded: the ACCESS EXCLUSIVE lock the new check constraint needs anyway. A
+-- completion already reading the lines finishes first (its own later line writes still go through, as it already holds
+-- a lock there), and the migration then waits for nothing else, so it cannot deadlock with one (Sol r1 HIGH). The
+-- deliveries table is not locked: replacing the function needs no table lock, and a later completion waits on the lines.
+LOCK TABLE public.delivery_items IN ACCESS EXCLUSIVE MODE;
 
 DO $preflight$
 DECLARE
@@ -92,10 +97,10 @@ BEGIN
   -- F05b #2274: nothing delivered is not a completion. The screens already refuse it (DeliveryDetail hasAnyQty,
   -- FieldStop); this is the server rule. Same figure per line as the body: the clamped figure sent for that line,
   -- or the full scheduled quantity when no figures were sent. A delivery with no lines is refused too. Raised here,
-  -- after the delivery row lock and before the order-line or stock locks and any write, inside the call, so
-  -- offline sync records it for the office (23514 -> needs review); a replay (v_status 'replay') is never checked.
-  -- The lines are locked first: a direct line write does not lock the delivery, so one already in flight (say, a
-  -- line deleted while the load was still scheduled) must finish before the check reads them (Luna r2 HIGH).
+  -- after the delivery row lock and before this function's order-line and stock locks and any write (the caller may
+  -- already hold its stock locks; the refusal rolls the whole call back). A replay (v_status 'replay') is never checked.
+  -- The lines are locked too. Today a direct line write already locks the delivery row first (the parent-lock
+  -- trigger), so the row lock above waits for one in flight; the line lock keeps that true if the trigger changes.
   IF v_status = 'in_progress' THEN
     PERFORM 1 FROM public.delivery_items di WHERE di.delivery_id = p_delivery_id ORDER BY di.id FOR UPDATE;
   END IF;
@@ -155,7 +160,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-                    AND md5(replace(p.prosrc, chr(13), '')) = 'a017451765aa3adf6fdeeaa0b246e0ba'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '2a7d8883d3767f93e2571a429898d683'
                     AND p.prosecdef
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')

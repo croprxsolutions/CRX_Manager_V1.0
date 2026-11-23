@@ -42,7 +42,7 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate or its follow-up creates or relies on.
-const TOUCHED = /(_complete_delivery_authorized_impl\b|delivery_items_quantities_finite)/i;
+const TOUCHED = /(_complete_delivery_authorized_impl\w*|delivery_items_quantities_finite)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -265,9 +265,11 @@ function session(sql, delayMs = 0) {
 const id = (s) => `af05b000-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1'), CUST = id('c1'), P = id('b1'), INV = id('d1'), ORD = id('e1'), OI = id('e11'), OI2 = id('e12');
 // D1 all-zero target; D2 mixed (two lines); D3 scheduled, for start-and-complete; D4 in progress with no lines;
-// DL legacy completed with no lines (the March 2026 shape); D5 offline target; D6 completes, then replays its key.
+// DL legacy completed with no lines (the March 2026 shape); D5 offline target; D6 completes, then replays its key;
+// D7 scheduled, for the line-delete race; D8 completes while the migration is being applied.
 const D1 = id('f1'), D1A = id('f11'), D2 = id('f2'), D2A = id('f21'), D2B = id('f22'), D3 = id('f3'), D3A = id('f31');
 const D4 = id('f4'), DL = id('f9'), D5 = id('f5'), D5A = id('f51'), D6 = id('f6'), D6A = id('f61'), D7 = id('f7'), D7A = id('f71');
+const D8 = id('f8'), D8A = id('f81');
 const OFF = id('ab1'), OFF_KEY = 'f05b-offline-1';
 
 function seed() {
@@ -293,7 +295,8 @@ function seed() {
       ('${D4}', 'F05B-D4', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
       ('${D5}', 'F05B-D5', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
       ('${D6}', 'F05B-D6', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
-      ('${D7}', 'F05B-D7', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'scheduled', false);
+      ('${D7}', 'F05B-D7', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'scheduled', false),
+      ('${D8}', 'F05B-D8', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false);
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, status, is_quick_delivery, completed_at, signed_by) VALUES
       ('${DL}', 'F05B-DL', '${ORD}', '${CUST}', '${ADMIN}', 'completed', false, '2026-03-20', 'Legacy');
     INSERT INTO public.delivery_items (id, delivery_id, order_item_id, product_id, quantity, unit_size) VALUES
@@ -302,8 +305,9 @@ function seed() {
       ('${D3A}', '${D3}', '${OI}', '${P}', 1, 'Gal'),
       ('${D5A}', '${D5}', '${OI}', '${P}', 1, 'Gal'),
       ('${D6A}', '${D6}', '${OI}', '${P}', 1, 'Gal'),
-      ('${D7A}', '${D7}', '${OI}', '${P}', 1, 'Gal');`);
-  console.log('[prover] seeded one order (10 and 5 units) with six open loads and one line-less legacy completed load');
+      ('${D7A}', '${D7}', '${OI}', '${P}', 1, 'Gal'),
+      ('${D8A}', '${D8}', '${OI}', '${P}', 1, 'Gal');`);
+  console.log('[prover] seeded one order (10 and 5 units) with eight open loads and one line-less legacy completed load');
 }
 
 const AS_ADMIN = `SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true); SET LOCAL ROLE authenticated;`;
@@ -336,7 +340,7 @@ function beforeCases() {
   console.log('[before] reproduced: an all-zero completion completes the load, and a delivery line accepts NaN and Infinity');
 }
 
-function applyCandidate() {
+async function applyCandidate() {
   stageText('candidate.sql', lf(CANDIDATE));
   // A non-finite line already present blocks the apply and is named.
   raw(`UPDATE public.delivery_items SET quantity = 'Infinity' WHERE id = '${D6A}';`);
@@ -344,9 +348,22 @@ function applyCandidate() {
   assert.notEqual(stuck.status, 0, 'a non-finite delivery line must block the apply');
   assert.match(stuck.output, new RegExp(`F05B_PREFLIGHT[^\\n]*${D6A}`), stuck.output);
   raw(`UPDATE public.delivery_items SET quantity = 1 WHERE id = '${D6A}';`);
-  const r = apply('candidate.sql');
-  assert.equal(r.status, 0, r.output);
-  console.log('[apply] a non-finite line blocks the apply and is named; once fixed, the migration applies (pre- and postflight pass)');
+  // Once fixed, apply it while a live completion is half done (Sol r1 HIGH): the completion has read D8's lines and
+  // not yet written them when the migration starts. Both must finish (no deadlock); the migration waits its turn.
+  const mark = (name) => `SELECT '${name}=' || extract(epoch FROM clock_timestamp());`;
+  const completer = session(`BEGIN;\nSELECT count(*) FROM public.delivery_items WHERE delivery_id = '${D8}';\n${mark('read')}\n`
+    + `SELECT pg_sleep(3);\n${AS_ADMIN}\n${completeCall(D8, null, 'f05b-apply-load')};\nCOMMIT;\n${mark('committed')}\n`);
+  const applier = session(`${mark('applying')}\nBEGIN;\n\\i /tmp/candidate.sql\nCOMMIT;\n${mark('applied')}\n`, 1000);
+  const [c, a] = await Promise.all([completer, applier]);
+  assert.equal(c.code, 0, `the completion must not be lost to the apply:\n${c.out}`);
+  assert.equal(a.code, 0, `the apply must not fail beside a live completion:\n${a.out}`);
+  const at = (out, name) => Number(out.match(new RegExp(`${name}=([0-9.]+)`))?.[1]);
+  const [read, applying, committedAt, applied] = [at(c.out, 'read'), at(a.out, 'applying'), at(c.out, 'committed'), at(a.out, 'applied')];
+  assert.ok(read < applying && applying < committedAt && committedAt <= applied,
+    `the apply did not overlap the completion: read ${read}, applying ${applying}, committed ${committedAt}, applied ${applied}`);
+  assert.equal(state(D8), 'completed|1|0');
+  console.log('[apply] a non-finite line blocks the apply and is named; once fixed, the migration applies (pre- and postflight pass)'
+    + ' beside a half-done completion, which finishes first: no deadlock, nothing lost');
 }
 
 function afterCases() {
@@ -413,9 +430,9 @@ function afterCases() {
   assert.equal(state(D6), 'completed|1|0');
   console.log('[case 6] a retry of a saved completion returns the same saved receipt (not refused, not re-run)');
 
-  // 7. Offline sync of an all-zero completion: the refusal is recorded for office review, committed, attempt counted.
-  //    (Offline completions carry no proof, so they already went to review before this change; this shows the new
-  //    refusal does not abort the sync call and lose that record.)
+  // 7. Offline sync of an all-zero completion still goes to office review, committed, attempt counted. Offline
+  //    completions carry no proof, so the proof check refuses them before the new rule is reached (Sol r1 MED): this
+  //    shows only that nothing changed for offline sync, not the new rule.
   raw(`INSERT INTO public.offline_action_receipts (client_action_id, actor_id, operation, entity_id, schema_version, client_created_at,
       entity_snapshot_at, request_payload, idempotency_key)
     VALUES ('${OFF}', '${ADMIN}', 'complete_delivery', '${D5}', 1, now(), (SELECT updated_at FROM public.deliveries WHERE id = '${D5}'),
@@ -425,7 +442,7 @@ function afterCases() {
   const rec = scalar(`SELECT status || '|' || coalesce(failure_code, '') || '|' || attempt_count FROM public.offline_action_receipts WHERE client_action_id = '${OFF}';`);
   assert.match(rec, /^needs_review\|[A-Z_]+\|1$/);
   assert.equal(state(D5), 'in_progress|0|0');
-  console.log(`[case 7] offline sync of an all-zero completion: committed for office review (${rec}); the load stays in progress`);
+  console.log(`[case 7] offline sync unchanged: an all-zero completion still goes to office review (${rec}); the load stays in progress`);
 
   // 8. Non-finite quantities are refused by the table check alone (other triggers off, so nothing else can refuse),
   //    on insert and update, for both columns; finite values, fractions and a NULL delivered still save.
@@ -463,6 +480,8 @@ function rollbackCases() {
 
 // 10. Race (Luna r2 HIGH): a direct line delete that began while the load was scheduled is still open when
 //     start-and-complete runs. The check must wait for it and see the load has no lines left, not complete it empty.
+//     Today the parent-lock trigger makes the delete lock the delivery row, so the completion waits there; the new
+//     line lock is a second guard this case does not separately exercise (Sol r1 LOW).
 async function raceCase() {
   // Each side prints clock_timestamp() marks, so the proof shows the two really overlapped: the delete was made,
   // then the completion began, and only then did the delete commit.
@@ -484,7 +503,7 @@ async function main() {
   buildContainer();
   seed();
   beforeCases();
-  applyCandidate();
+  await applyCandidate();
   afterCases();
   await raceCase();
   rollbackCases();

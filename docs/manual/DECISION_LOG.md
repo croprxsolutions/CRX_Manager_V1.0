@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-22 — #2242: Mason owner-accepted 2 Sol finding(s) at `ee1201f695d0`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2242 at `ee1201f695d0` (base `a21539cca47c`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224120000_month_close_payments_received_recheck.sql:302`, text sha256 `fac90885cb488954` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 532bce79b230)
+- Finding 2 (HIGH) at `supabase/migrations/20270224120000_month_close_payments_received_recheck.sql:420`, text sha256 `62b1a947d098fdc1` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 532bce79b230)
+
 ## 2026-11-22 — #2242: Mason owner-accepted 4 Sol finding(s) at `6e88570402f7`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2242 at `6e88570402f7` (base `9c77cd3a5d22`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

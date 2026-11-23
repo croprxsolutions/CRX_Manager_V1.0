@@ -118,7 +118,22 @@ try {
   refused("a migration already on staging", () => {
     git("update-ref", "refs/remotes/origin/staging", reviewed);
     return reviewed;
-  }, /already on origin\/staging/);
+  }, /origin\/staging already has supabase\/migrations\/20270226100000_/);
+  git("update-ref", "refs/remotes/origin/staging", base);
+  refused("the same migration landed under another stamp", () => {
+    git("switch", "-q", "staging");
+    write(`supabase/migrations/20270225000000_${STEM}.sql`, "SELECT 4;\n");
+    git("update-ref", "refs/remotes/origin/staging", commit("same name, other stamp"));
+    git("switch", "-q", "feature");
+    return reviewed;
+  }, /already has supabase\/migrations\/20270225000000_/);
+  git("update-ref", "refs/remotes/origin/staging", base);
+  refused("a missing record", () => {
+    rmSync(path.join(repo, "docs", "reference", "migrations.d", `${OLD}_${STEM}.md`));
+    return commit("drop record");
+  }, /is missing; every migration needs its record/);
+  const bareTo = run(OLD, "--to");
+  assert.equal(bareTo.status, 2, "restamp command: --to with no value is a usage error, not a generated stamp");
   git("update-ref", "refs/remotes/origin/staging", base);
   refused("staging itself", () => { git("switch", "-q", "staging"); return git("rev-parse", "HEAD"); }, /not a feature branch/);
 } finally {

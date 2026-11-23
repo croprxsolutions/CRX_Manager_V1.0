@@ -34,7 +34,7 @@ const realStamp = (s) => {
 const args = process.argv.slice(2);
 const oldStamp = args.shift();
 const flags = Object.create(null);
-for (let i = 0; i < args.length; i += 2) flags[args[i]] = args[i + 1];
+for (let i = 0; i < args.length; i += 2) flags[args[i]] = args[i + 1] ?? "";
 if (!/^\d{14}$/.test(oldStamp ?? "") || Object.keys(flags).some((k) => k !== "--to") || (flags["--to"] !== undefined && !/^\d{14}$/.test(flags["--to"]))) {
   console.error("usage: node scripts/restamp-migration.mjs <old-stamp> [--to <new-stamp>]");
   process.exit(2);
@@ -44,14 +44,18 @@ process.chdir(git("rev-parse", "--show-toplevel"));
 const branch = tryGit("symbolic-ref", "--quiet", "--short", "HEAD").stdout.trim();
 if (!branch || /^(main|staging|release\/|hotfix\/)/.test(branch)) fail(`"${branch || "detached HEAD"}" is not a feature branch into staging`);
 if (git("status", "--porcelain")) fail("the worktree is not clean; commit or set aside your changes first");
-// Best effort: offline, the local copies of the bases are used.
-spawnSync("git", ["fetch", "--quiet", "origin", "+refs/heads/main:refs/remotes/origin/main", "+refs/heads/staging:refs/remotes/origin/staging"], { stdio: "ignore" });
+// Offline, the local copies of the bases are used; the PR's stamp check still runs against the real base.
+const fetched = spawnSync("git", ["fetch", "--quiet", "origin", "+refs/heads/main:refs/remotes/origin/main", "+refs/heads/staging:refs/remotes/origin/staging"], { stdio: "ignore" });
+if (fetched.status !== 0) console.error(`WARNING: could not fetch origin; checking against the local ${BASE} and origin/main, which may be behind.`);
 
 const sqls = git("ls-files", "supabase/migrations").split("\n").filter((f) => f.startsWith(`supabase/migrations/${oldStamp}_`) && f.endsWith(".sql"));
 if (sqls.length !== 1) fail(`expected one supabase/migrations/${oldStamp}_*.sql, found ${sqls.length}`);
 const [oldSql] = sqls;
+const nameAfterStamp = oldSql.slice(`supabase/migrations/${oldStamp}`.length);
 for (const ref of [BASE, "origin/main"]) {
-  if (tryGit("cat-file", "-e", `${ref}:${oldSql}`).status === 0) fail(`${oldSql} is already on ${ref}; an applied migration keeps its bytes (ship.md, restamp after a live apply)`);
+  // The same name under any stamp: already landed (an applied migration keeps its bytes), or a copy that would run twice.
+  const same = git("ls-tree", "-r", "--name-only", ref, "supabase/migrations/").split("\n").find((p) => /^supabase\/migrations\/\d{14}_/.test(p) && p.endsWith(nameAfterStamp) && p.length === oldSql.length);
+  if (same) fail(`${ref} already has ${same}; check whether this migration already landed under that name`);
 }
 const owned = git("diff", "--name-only", "--no-renames", `${BASE}...HEAD`).split("\n").filter(Boolean);
 if (!owned.includes(oldSql)) fail(`${oldSql} is not a migration this branch adds against ${BASE}`);
@@ -76,6 +80,7 @@ const newStem = swap(oldStem);
 const newSql = `supabase/migrations/${newStem}.sql`;
 const oldRecord = `docs/reference/migrations.d/${oldStem}.md`;
 const newRecord = `docs/reference/migrations.d/${newStem}.md`;
+if (!existsSync(oldRecord)) fail(`${oldRecord} is missing; every migration needs its record (docs/reference/migrations.d/README.md)`);
 for (const dest of [newSql, newRecord]) if (existsSync(dest)) fail(`${dest} already exists`);
 const reviewed = git("rev-parse", "HEAD");
 if (!existsSync(codexPushProofPath(process.cwd(), reviewed))) console.error(`note: no Sol proof for ${reviewed.slice(0, 12)} in this worktree; the restamp commits, but nothing will carry.`);
@@ -91,11 +96,9 @@ const [oldPin, newPin] = [pin(sha(sqlText)), pin(sha(newSqlText))];
 git("mv", oldSql, newSql);
 writeFileSync(newSql, newSqlText, "latin1");
 const edits = [newSql];
-if (existsSync(oldRecord)) {
-  git("mv", oldRecord, newRecord);
-  writeFileSync(newRecord, swap(readFileSync(newRecord, "latin1")).split(oldPin).join(newPin), "latin1");
-  edits.push(newRecord);
-}
+git("mv", oldRecord, newRecord);
+writeFileSync(newRecord, swap(readFileSync(newRecord, "latin1")).split(oldPin).join(newPin), "latin1");
+edits.push(newRecord);
 for (const file of owned) {
   // Other database files are not this command's to change; the carry would refuse them anyway.
   if (file.startsWith("supabase/") || file === oldRecord || !existsSync(file)) continue;

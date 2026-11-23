@@ -418,9 +418,9 @@ export default function JobDetail() {
   const [status, setStatus] = useState<JobStatus>('scheduled');
   // #2188: a job removed with Delete Jobs (soft delete) opens read-only, marked deleted.
   const [deletedAt, setDeletedAt] = useState<string | null>(null);
-  // #2174: the last Cancel click failed without a reply, so it may have committed unlogged.
-  // The job whose last Cancel may have committed with its reply lost (#2174).
-  const cancelReplyLostRef = useRef<string | null>(null);
+  // #2174: jobs whose last Cancel may have committed with its reply lost; kept per job so one
+  // job's late reply cannot clear another's (Luna r4).
+  const cancelReplyLostRef = useRef(new Set<string>());
   // #23: pre-fill the customer when arriving from a customer page
   // (/jobs/new?customer_id=…). Only for a NEW job; existing jobs load their own
   // customer in fetchJob. A stale/bogus id simply renders as no selection.
@@ -3351,8 +3351,7 @@ export default function JobDetail() {
       const result = await editJobs({
         jobIds: [id!], action: 'cancel', performedBy: profile!.id,
       });
-      const replyWasLost = cancelReplyLostRef.current === id;
-      cancelReplyLostRef.current = null;
+      const replyWasLost = !!id && cancelReplyLostRef.current.delete(id);
       if (result.cancelled.length === 0) {
         const skip = result.skipped.find((s) => s.id === id);
         if (replyWasLost && skip?.reason === 'status' && skip.status === 'cancelled') await logLostCancel();
@@ -3377,7 +3376,10 @@ export default function JobDetail() {
       const cancelMsg = editJobsErrorMessage(err);
       // Unless the server plainly refused, the cancel may have committed with the reply lost;
       // the next click's "already cancelled" then logs it.
-      cancelReplyLostRef.current = cancelMsg.startsWith('Nothing was saved.') ? null : (id ?? null);
+      if (id) {
+        if (cancelMsg.startsWith('Nothing was saved.')) cancelReplyLostRef.current.delete(id);
+        else cancelReplyLostRef.current.add(id);
+      }
       Sentry.captureException(toSentryError(err), { extra: { context: 'cancel_job' } });
       toast('error', cancelMsg);
     }

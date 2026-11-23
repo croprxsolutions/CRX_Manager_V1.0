@@ -46,6 +46,47 @@
 
 **Decision (Mason, 2026-11-22, relayed by the bug-sprint captain):** "yes should count as payment received". Month-End payments received counts each Prepayment Manager check in the month it was entered, at its current amount (all buckets of one check are one payment); Record Payment checks count in full (an overpayment's prepay credit is not added again); voided payments and deleted old-style payments do not count. A later edit or delete of a prepayment check changes that month's screen figure, never a closed month's saved close receipt. Made in migration `20270224120000_month_close_payments_received_recheck.sql` (live only once applied) with the #2175 close re-check (the 2026-11-21 entry below asked for both together).
 
+
+## 2026-11-22 — #2240: Mason owner-accepted 2 Sol finding(s) at `54ce44b595c3`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2240 at `54ce44b595c3` (base `6aceb0747958`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/FieldSetup.tsx:609`, text sha256 `f3d5374444ac05ca` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 57355198d609)
+- Finding 2 (HIGH) at `supabase/migrations/20270224110000_retire_per_acre_field_pricing.sql:48`, text sha256 `755eccadb5dcb531` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 57355198d609)
+
+## 2026-11-22 — PR #2240: per-acre pricing screens ship with #2239
+
+**Decision (Mason, in chat 2026-11-22, before Sol round 7 on PR #2240):** "Yes, it covers 2240". His "Yes, simplify" decision for #2239 also covers #2240. #2240 removes the Field Setup "Price Override ($/ac)" and "Pricing Note" boxes and the grower-share banners. It merges right after #2239, so no release is cut between the two.
+
+## 2026-11-22 — #2239: Mason owner-accepted 2 Sol finding(s) at `77ebcbce17ae`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2239 at `77ebcbce17ae` (base `9c77cd3a5d22`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270219100000_retire_per_acre_field_pricing.sql:48`, text sha256 `186bf85a11f94915` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a440a2d5e289)
+- Finding 2 (HIGH) at `supabase/migrations/20270219100000_retire_per_acre_field_pricing.sql:38`, text sha256 `36e6de0ebddd6969` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a440a2d5e289)
+
+## 2026-11-22 — #2239: Mason owner-accepted 1 Sol finding(s) at `edee8e99ff41`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2239 at `edee8e99ff41` (base `a7785529318b`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270219100000_retire_per_acre_field_pricing.sql:48`, text sha256 `27e1ec0e7015ca3a` (the wording stays with the proof, not here)
+  Mason's reason: doesn’t apply to us (ref 021e0aa1ad04)
+
+## 2026-11-22 — PR #2239: per-acre field pricing retired with two constraints only
+
+**Decision (Mason, in chat 2026-11-22, after Sol gate round 3 on PR #2239):** "Yes, simplify". Per-acre field pricing was never used (live, read-only: 0 of 6 field billing splits and 0 of 3 invoice shares carry a per-acre price or note; 0 invoice lines carry per-acre wording). The migration adds the two CHECK constraints (`field_billing_defaults_no_per_acre_price`, `invoice_shares_no_per_acre_price`) and does not search invoice history for per-acre invoices. Line-by-line billing, percent splits between payers and quoted prices are unchanged.
+## 2026-11-22 — #2264: Mason owner-accepted 1 Sol finding(s) at `11f3f026b9ef`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2264 at `11f3f026b9ef` (base `bdd733f9b071`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224100000_f05_order_line_quantity_guard.sql:64`, text sha256 `e23b6d9637ecd6bd` (the wording stays with the proof, not here)
+  Mason's reason: too small to effect buisness (ref d240b31a7419)
+
+## 2026-11-22 — #2264: Mason owner-accepted 1 Sol finding(s) at `fdf75b56929b`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2264 at `fdf75b56929b` (base `f9750a8a4b66`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270218100000_f05_order_line_quantity_guard.sql:62`, text sha256 `a0571bb37993f57e` (the wording stays with the proof, not here)
+  Mason's reason: old double-booked orders get fixed by hand in F05b (ref cfb23a2ce43d)
 ## 2026-11-22 — PR #2226: staging merges never carry a Sol proof; skipped Sol findings never carry onto a newer base
 
 **Final rule:** a feature branch that merges `origin/staging` always needs a new full Sol review; `--carry-forward` is only for `hotfix/` and `release/` branches merging `origin/main` (round 7 decision below). The earlier decisions are kept as history.
@@ -232,6 +273,13 @@
 (33, "yes always bill if actual sprayed acres") a finished job always bills, splits payer shares and takes stock for the acres actually sprayed, not the planned acres.
 **Why:** the commission and booking already belong to the booking's rep; each grower should pay the price they were quoted; and customers pay for what was applied.
 **What this forbids/implies:** KI-191, KI-198, KI-185 and #2075 are built to these rules; Transfer, office auto-draft and Split Billing must agree.
+## 2026-11-22 — F05: two open loads holding the same units: neither completes until the office cancels one
+
+The staging audit (2026-11-21) found one order line scheduled past what was ordered, so 2 ordered ended 3 delivered. The fix (`20270218100000_f05_order_line_quantity_guard.sql`) refuses any write that would put delivered + open loads past what was ordered.
+
+**Decision (Mason, in chat, 2026-11-22: "yes"):** where two open loads already hold the same units from before the fix, completing either in a way that would deliver more than was ordered is refused until the office cancels or reduces the extra load (a partial completion that still fits with the other open load is allowed). The driver is told to call the office; stock never moves twice. Rejected: first load to complete wins (the second driver finds out only at the farm).
+
+**Follow-up decision (Mason, in chat, 2026-11-22: "drop it"):** the refusal only tells the driver to call the office; no "complete the extra load with 0 delivered" tip (the delivery screens refuse an all-zero completion, Sol r2). A leftover double-booked line the office cannot cancel because a return is logged stays blocked until the F05b cleanup fixes it by hand; before the live apply, count those lines and fix each one. Rejected: letting the office cancel an undelivered load despite a return on the line (changes the return rule; bigger and riskier). Superseded: Mason's earlier "Reword the hint" (record 0 only if the extra load never went out).
 
 ## 2026-11-21 — #2165: Mason owner-accepted 1 Sol finding(s) at `2c95807df876`
 
@@ -1119,7 +1167,7 @@ Later the same day Mason settled the 14 held: today's rate kept on the 9 that di
 **Operative rule.** Active readiness totals and live-rate readers retain their existing scope. The new download explicitly requests inactive history; old no-argument downloads remain active-only. PostgreSQL checks current group activity under the existing locks. Proposal: `docs/plans/2026-11-14-inactive-rate-review-CONTRACT.md`, issue #1814. Candidate only; no apply, merge or deployment.
 
 Last verified: 2026-10-29. Adding an entry does not change this date.
-Update triggers: append when an architectural/policy/business decision is made or reversed.
+Update triggers: when an architectural/policy/business decision is made or reversed, add a NEW file in `docs/manual/decision-log.d/` (one per entry; see its README), not here (2026-11-22). This file stays as the history; the owner-accept `--log` entry is the one thing still written here.
 
 An ADR-style ("Architecture Decision Record") running log so future agents don't re-litigate
 settled calls. Newest first, roughly — a few entries from the same week sit slightly out of date

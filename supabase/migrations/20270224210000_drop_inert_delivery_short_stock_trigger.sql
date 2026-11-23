@@ -39,6 +39,8 @@ BEGIN
     WHERE tgname = 'trg_mark_delivery_aggregate_short_stock' AND tgrelid = 'public.inventory_transactions'::regclass
       AND tgfoid = 'public._mark_delivery_aggregate_short_stock()'::regprocedure AND NOT tgisinternal
       AND tgenabled = 'O'  -- enabled, as the rollback re-creates it (Luna r1)
+      -- BEFORE INSERT FOR EACH ROW (tgtype 7), no WHEN, no column list: the shape the rollback re-creates
+      AND tgtype = 7 AND tgqual IS NULL AND cardinality(tgattr::int2[]) = 0
   ) THEN
     RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_BASELINE_DRIFT: trg_mark_delivery_aggregate_short_stock is not on inventory_transactions';
   END IF;
@@ -58,6 +60,8 @@ BEGIN
 END;
 $preflight$;
 
+-- Fail fast rather than queue every ledger write behind a long reader of inventory_transactions.
+SET LOCAL lock_timeout = '5s';
 DROP TRIGGER trg_mark_delivery_aggregate_short_stock ON public.inventory_transactions;
 DROP FUNCTION public._mark_delivery_aggregate_short_stock();
 

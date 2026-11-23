@@ -67,9 +67,13 @@ BEGIN
      OR has_function_privilege('anon', 'public._mark_delivery_aggregate_short_stock()', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public._mark_delivery_aggregate_short_stock()', 'EXECUTE')
      OR has_function_privilege('service_role', 'public._mark_delivery_aggregate_short_stock()', 'EXECUTE')
-     OR (SELECT proowner FROM pg_proc WHERE oid = 'public._mark_delivery_aggregate_short_stock()'::regprocedure) IS DISTINCT FROM 'postgres'::regrole
+     OR (SELECT pg_get_userbyid(proowner) || '|' || coalesce(proacl::text, '') || '|' || prosecdef::text || '|' || coalesce(array_to_string(proconfig, ';'), '')
+         FROM pg_proc WHERE oid = 'public._mark_delivery_aggregate_short_stock()'::regprocedure)
+        IS DISTINCT FROM 'postgres|{postgres=X/postgres}|true|search_path=public, pg_temp'
      OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mark_delivery_aggregate_short_stock'
-                      AND tgrelid = 'public.inventory_transactions'::regclass) THEN
+                      AND tgrelid = 'public.inventory_transactions'::regclass
+                      AND tgfoid = 'public._mark_delivery_aggregate_short_stock()'::regprocedure AND NOT tgisinternal
+                      AND tgenabled = 'O' AND tgtype = 7 AND tgqual IS NULL AND cardinality(tgattr::int2[]) = 0) THEN
     RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_REVERSE_POSTFLIGHT: body, owner, grants or trigger are not the 20260716191000 ones (run as postgres)';
   END IF;
 END;

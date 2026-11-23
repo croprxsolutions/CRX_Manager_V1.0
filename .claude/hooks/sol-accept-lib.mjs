@@ -186,10 +186,11 @@ const SKIP_SOME_RE = /^(?:skip|accept|don't fix|do not fix) (?:findings? )?(\d{1
 // word ("none", "reject 2", "the jargon", "until") skips nothing (security review, 2026-11-22).
 // Numbers stay with SKIP_SOME_RE's exact shape; a question mark never counts.
 const LOOSE_WORDS = new Set(["skip", "accept", "i", "agree", "ok", "okay", "yes", "yeah", "yep", "sure", "fine", "please", "go", "ahead",
-  "just", "and", "the", "risk", "all", "them", "these", "those", "it", "that"]);
+  "just", "and", "all", "them", "these", "those", "it", "that"]);
 function looseSkip(t) {
   if (/\?/.test(t)) return null;
-  const words = t.split(/[\s,;:.!]+/).filter(Boolean);
+  // "the risk" only as "accept the risk" (the summary's own question); "skip the risk" skips nothing (Luna round 2).
+  const words = t.replace(/\baccept the risk\b/g, "accept").split(/[\s,;:.!]+/).filter(Boolean);
   if (!words.some((w) => w === "skip" || w === "accept") || !words.every((w) => LOOSE_WORDS.has(w))) return null;
   // "that"/"it" only when EVERY skip/accept points at it ("Skip I agree skip it" = all of them).
   const single = words.every((w, i) => (w !== "skip" && w !== "accept") || words[i + 1] === "it" || words[i + 1] === "that");

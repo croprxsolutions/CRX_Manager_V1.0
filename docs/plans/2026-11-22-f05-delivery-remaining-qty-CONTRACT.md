@@ -1,0 +1,138 @@
+# F05 — An order line can never be scheduled or delivered past what was ordered (behavior contract)
+
+Read at `origin/staging` `9a1c5b2d9`. Source: staging audit 2026-11-21 (tracker `2026-11-22-quote-to-cash-remediation-TRACKER.md`).
+
+## Facts (with source)
+
+- Staging, ORD-2026-0017: an order line ended 2 ordered / 3 delivered; stock moved for the extra unit.
+- Staging, ORD-2026-0014: an order line was cut below what was still scheduled; nothing refused it.
+- Root cause: the "how much is left" check was not shared by every path that schedules, edits, completes or cuts an order line, and nothing in the database enforced delivered ≤ ordered. The exact paths and source lines stay in the private audit notes until the fix is live (public write-up rule).
+- Order lines and delivery lines are in the same unit (`_delivery_line_matches_order_line`, `20270126110000…:100`), which already locks the order line `FOR UPDATE` on every delivery-line insert or re-link.
+- Completion screens already cap the actual quantity at the scheduled quantity (`DeliveryDetail.tsx:664`, `FieldStop.tsx:323,708`), so a driver can only over-deliver when the schedule itself is already over the order.
+- "Remaining After" on a completed delivery subtracts this delivery twice (`DeliveryDetail.tsx:2636`: `ordered − prevDelivered − actual`, where `prevDelivered` already includes it).
+
+## 1. Outcome and authority
+
+**Outcome.** For every order line: delivered + still scheduled on open (scheduled / in-progress) deliveries never exceeds ordered. Any write that would break that is refused with a plain message naming the deliveries involved; nothing is moved, deducted or drafted.
+
+**Smallest change.** One migration with three database triggers sharing one check (the third, for a cancelled load reopened, was added after the challenge below), so every path (New Delivery, Quick Delivery, Follow-up, edit, completion, start-and-complete, order edit, and any future path) is covered in one place instead of patching six functions:
+
+1. **Delivery line trigger** (`delivery_items`, before insert, or update of quantity / order line / delivery): when the parent delivery is scheduled or in progress and the line's scheduled quantity goes up (or the line is new or re-linked), lock the order line and refuse if `delivered + other open lines for this order line + this line > ordered`. Error `DELIVERY_OVER_ORDER`.
+2. **Order line trigger** (`order_items`, before update of delivered or ordered quantity):
+   - delivered goes up and delivered + other open loads ends above ordered → refuse `DELIVERY_EXCEEDS_ORDER` (completion is rolled back whole: no stock move, no draft). Revised after the challenge (#1) and Mason's 2026-11-22 "yes": checking delivered alone let one load use units another open load held.
+   - ordered goes down and ends below `delivered + open scheduled` → refuse `ORDER_LINE_BELOW_DELIVERIES`, naming the open deliveries to edit or cancel first.
+
+Screen PR (separate, no database dependency): fix "Remaining After" on completed deliveries; show the new refusals in plain words where the screens already show RPC errors.
+
+Files: `supabase/migrations/<new>_f05_order_line_quantity_guard.sql`, `scripts/smoke/prove-f05-order-line-quantity-guard-real-schema.mjs`, reverse script, changelog + migration ledger docs, `src/lib/rpcContracts.test.ts` if error codes are listed there; screen PR: `src/pages/DeliveryDetail.tsx`.
+
+**Authority.** Unchanged. Triggers add a refusal only; who may schedule, edit, complete or change orders stays with the existing RPCs. Triggers are `SECURITY DEFINER`, `search_path = public, pg_temp`, EXECUTE revoked from everyone (trigger-only).
+
+**Screen values.** None new. Quantities and order-line links are checked against the database rows, not the screen.
+
+## 2. State and failure
+
+**Automatic record changes.** None. The app stops and explains; staff edit or cancel the extra delivery, or raise the order line, then retry. Stopping is the recommended rule because staff keep a safe way to finish (edit delivery, cancel delivery, Create Follow-up after the other load is cancelled).
+
+**Rules that always hold.** Each refusal is a `RAISE` inside the same transaction as the write, so stock, remainders, invoice drafts and history roll back with it. Receipt emails are queued in that transaction (`delivery_receipt_queue`), so they roll back too.
+
+**Existing rows.** Triggers fire only when a quantity goes up (delivery line) or when delivered rises / ordered falls (order line). Already-over rows (staging ORD-2026-0017) are left as they are and can still be reduced, cancelled or voided. Readers are unchanged.
+- Before live apply, read-only checks (run by the apply step, not now): count order lines with `quantity_delivered > total_units_needed`, and order lines where `quantity_delivered + open scheduled > total_units_needed`. The second set are open loads that will be refused at completion until the office trims them; that list goes to Mason with the apply.
+- The already-deployed app keeps working: it calls the same RPCs; only the refusal is new.
+
+**Timing.**
+- Standard schedule vs follow-up at the same time (the F05 race): both lock the same order line row (existing line-match trigger, plus the new trigger), so the second waits, then sees the first's committed line and is refused.
+- Order cut vs scheduling at the same time: the order edit holds the order line lock; the schedule waits, then sees the new ordered quantity.
+- Two completions of loads for one line: the order line update serializes them; the second is refused if it would pass ordered.
+- Retry with the same key after a refusal: the refusal is not saved as a success, so a retry re-checks and is refused again (or succeeds if staff fixed the cause). Same key after success replays as today.
+- Deadlock risk: scheduling and edits add no new lock order (same delivery → order line order as the line-match trigger). Rare new pairs exist: restoring a cancelled load (service role only, no screen) against closing an order's remainder, a completion, or a line change on that same load (Luna r1; a cancelled load's lines are already refused or fail at once by the parent-lock trigger's NOWAIT). Postgres cancels one side and nothing is half-saved; same class as the completion-vs-scheduling cross-order Mason accepted (DECISION_LOG 2026-11-18 #1940). The apply locks the three tables up front in completion's order with a 5-second wait limit.
+
+**Undo.** Cancel and void lower quantities, so they are never blocked by the new triggers.
+
+**Order line deleted (Luna r3, refuted).** No delete trigger is needed: `delivery_items.order_item_id` is `NOT NULL REFERENCES order_items(id)` with no cascade (`20260206172436…:329`, never altered), so Postgres refuses to delete an order line any delivery line still points to.
+
+## 3. Delivery
+
+Database PR first (target `staging`, Sol required: migration + inventory). Screen PR for "Remaining After" can go any time; it does not depend on the database change.
+
+## 4. Proof cases (disposable Postgres via the real-schema prover; then staging app)
+
+1. The audit's over-scheduling case (staging ORD-2026-0017): a second load for an order line's last unit is refused `DELIVERY_OVER_ORDER`; nothing created. (Exact steps stay in the private audit notes until the fix is live.)
+2. Reverse order (follow-up first, then New Delivery) → New Delivery refused (existing check), follow-up stands.
+3. Legacy double schedule already present (two open loads for one unit, created with the trigger disabled): completing either → refused `DELIVERY_EXCEEDS_ORDER`, naming the other load (Mason, 2026-11-22); nothing kept by the refused call; after the office cancels one, the other completes. An in-progress load cannot be edited, so the message says cancel, not reduce (rls-security-reviewer M1).
+4. Order cut 10 → 6 while 10 scheduled → refused `ORDER_LINE_BELOW_DELIVERIES`; after editing the delivery to 6, the cut succeeds.
+5. Order cut below delivered (no open loads) → refused.
+6. Partial completion (schedule 10, deliver 6) → allowed; remainder 4 created; follow-up for 4 allowed.
+7. `edit_delivery` raising a line past what is left → refused; lowering → allowed.
+8. Quick Delivery and start-and-complete still succeed on normal inputs.
+9. Same idempotency key retried after a refusal → refused again, no receipt saved; distinct keys from two sessions at once → exactly one succeeds (two psql sessions).
+10. Cancel and void of an already-over legacy delivery → allowed.
+11. Staging app (synthetic QA fixture, after staging apply): case 1 through the screens; the second load shows the refusal; database unchanged.
+
+## Challenge (Astra `gpt-6.2-astra` high, 2026-11-22, 43 findings) and settlement
+
+The design above was revised; the migration implements the revision.
+
+- **#1 BLOCKER (fixed):** a delivered rise was checked only against ordered, so it could use units held by another open load. Now one rule everywhere: `delivered + open loads ≤ ordered`, checked when delivered rises (completion marks its own load completed first, `20270203120000…:505-525`, so it is not counted twice). Case 3b.
+- **#2 BLOCKER (fixed):** `restore_cancelled_delivery` (`20260714220000…`, service role only, no screen) and any later path can reopen a cancelled load. New header trigger checks the reopened load's lines. Case 3c.
+- **#3 (fixed):** order-line check also runs on insert. Case 3d.
+- **#4 DECISION → settled by the stop rule:** two open loads already holding the same unit: neither completes until the office cancels the extra one (cancel is allowed for scheduled and in-progress loads by admin/sales rep). Chosen because it never moves stock twice and staff keep a safe action. Listed for Mason below.
+- **#9 (corrected):** Follow-up does take the order-line lock (through the line-match trigger) but never checks capacity after it; New Delivery does see a committed Follow-up. The fix is the capacity check after the lock.
+- **#11, #12, #35 (fixed):** messages name the product, the numbers and the other open loads, tell the driver to ask the office, and no longer suggest raising the order.
+- **#19 (fixed):** helpers are `VOLATILE` and read after the lock in a separate statement; the two-session race (case 9b) proves the waiting session sees the first commit.
+- **#40 (fixed in part):** the migration prints how many lines already have open loads past their order; the apply step reports that list before live apply.
+- **Declined / out of scope, with reason:**
+  - #7, #8 (which counter is authoritative; stored `quantity_remaining` vs ordered − delivered): existing drift, not changed here; New Delivery and Edit keep their own earlier check, the trigger is the backstop.
+  - #10 (Edit Delivery cannot shrink a load that is still over): existing Edit behaviour; staff cancel the extra load instead.
+  - #13, #14 (voiding a legacy over-delivery leaves the wrong remaining; whether the extra unit really left): legacy cleanup, staging only so far; tracked as follow-up F05b with the live count.
+  - #15–#18 (stale pending remainders, Follow-up order-status check, partial Follow-up): existing remainder lifecycle; F05b.
+  - #21, #23 (deadlock between completion and order edit): no new lock order; Postgres cancels one and nothing is half-saved (Mason accepted, DECISION_LOG 2026-11-18 #1940).
+  - #28 (driver sees other delivery numbers): only loads of the same order and customer; acceptable.
+  - #32, #33 ("Remaining After" meaning): screen PR shows remaining as of now on completed loads; handled there.
+
+## Sol round 1 (2026-11-22) settlement
+
+- **HIGH #1 (superseded after Sol r2, see below):** two legacy loads on a line whose order has a return: the return guard refuses cancelling either (`20270126110000…:316-333`) and Cancel Remaining refuses on a received/credited return (`20260721152604…:126-133`). Recording 0 delivered on the extra load does not raise delivered, so it completes; the real load then completes. The refusal now says so. Case 3p. Luna r6 (HIGH: the hint could hide a real shipment) → Mason chose to reword: record 0 only if the extra load never went out; otherwise call the office (F05b fixes real double deliveries).
+- **Luna r7 MED refuted (deadlock, line added or re-linked during completion):** the line is never locked order-line-first. On insert or re-link, `a2_delivery_line_matches_order_line` share-locks the delivery (`20270126110000…:119`) before it locks the order line (`:123`), so the completion and the line edit queue on the delivery, not in a cycle; `zz_delivery_line_within_order` re-takes a share lock it already holds. On a quantity-only raise (a2 does not fire), zz share-locks the delivery (`20270224100000…:143`) before `_assert_order_line_fits` locks the order line. Same order everywhere: delivery, then order line.
+- **Sol r2 HIGH (the 0-delivered way out is not reachable from the app):** confirmed — `src/pages/DeliveryDetail.tsx:1140` and `src/pages/FieldStop.tsx:411` refuse a completion with no quantity above zero. Fourth BLOCKER/HIGH on the same way-out mechanism, so patching stopped and Mason chose (2026-11-22, "drop it"): the refusal says only "Call the office"; leftover double-booked lines blocked by a return are counted before the live apply and fixed by hand in F05b. Rejected: relaxing the return guard on cancel.
+- **Sol r2 MEDs/LOW:** (a) 0-delivered leaves a pending remainder and a $0 draft — moot: that way out is no longer offered. (b) New Delivery still counts a soft-deleted load: existing `create_delivery_with_items` behaviour, stricter not looser, unchanged by F05; deferred to the F05b cleanup (owner: this F05 thread). (c) Race test could pass without a real wait — fixed: case 9b now sees the Follow-up waiting on a lock while New Delivery is open. (d) Rollback lock order — fixed: the reverse script locks deliveries, delivery_items, order_items first, the same order as completion. (e) Reproduction steps in public docs — removed from this contract, the changelog, the decision log and the reverse script. (f) Reference note said every refusal names other loads — corrected.
+- **Sol r3 (round 2 on this branch):**
+  - HIGH #1 refuted (directly written delivered counter): neither `authenticated` (admins included) nor `service_role` holds UPDATE on `order_items.quantity_delivered` or `total_units_needed` (checked with `has_column_privilege` on the replayed schema); only the SECURITY DEFINER delivery functions write it.
+  - HIGH #2 fixed: the preflight now refuses the apply while any over line's order has an active return (its extra load cannot be cancelled), listing the lines; they are fixed by hand first (Mason, "drop it"). Proof asserts the refusal and the clean apply after.
+  - MED driver sees order-wide numbers, LOW "cancel the other" when that cannot help — fixed: the completion refusal names only the product and says to call the office.
+  - MED restore vs Cancel Remaining deadlock — accepted as before: restore is service-role only with no screen; Postgres cancels one, nothing half-saved.
+  - MED rollback vs Cancel Remaining deadlock — accepted: rollback is an emergency step with a 5s lock timeout, so it fails cleanly and is retried.
+  - MED rollback leaves completion open — fixed in the reverse script's instructions (pause completing loads on the lines the preflight listed).
+  - MED race test accepts any lock — accepted: the test proves the outcome under real concurrency; the reopen path it does not race is service-role only.
+  - MED decision log vs partial completion — fixed: the entry now says a completion that still fits with the other open load is allowed.
+  - LOW retry test in an aborted transaction — refuted: the receipt is written in the same transaction as the refusal, so Postgres drops it on rollback; the test checks exactly that.
+  - LOW contract said the scan runs before the locks — corrected.
+- **Luna r10 (after Mason's new approach):** HIGH (no-other-load refusal told the driver to record no more than ordered, which could understate a real delivery) — fixed: every completion refusal now says only "Call the office before completing this delivery." MED (a return received after the apply can still strand a legacy over line) — accepted under Mason's 2026-11-22 "drop it": such a line stays blocked and the office fixes it by hand (F05b); the apply-time refusal covers every line already stuck then.
+- **Luna r11 MED accepted (a return created during the apply, after the scan):** the same case as a return created after the apply (Luna r10 MED, accepted under Mason's "drop it"): the line stays blocked and the office fixes it by hand (F05b). Locking `returns` for the apply would only narrow a seconds-long window the accepted case already covers.
+- **Sol r4 (round 3 on this branch):**
+  - HIGH #1 (a return logged after the apply strands a legacy over line) — Mason's accepted case ("drop it", 2026-11-22): the office fixes it by hand (F05b). Goes to Mason as a Sol skip.
+  - MED preflight blocks on a return for an unrelated line — accepted: stricter than `cancel_delivery` (order-wide, not per load), so it can only ask for more hand cleanup, never strand a line.
+  - MED apply vs a live void deadlock — accepted: the apply has a 5s lock timeout, fails cleanly and is retried.
+  - MED restore vs Cancel Remaining — accepted as before (service-role only, no screen; Postgres cancels one).
+  - MED NaN delivered counter skips the check — fixed: the preflight refuses while any order line has a NaN ordered or delivered quantity.
+  - LOW driver learns another load is open — fixed: the completion refusal now names only the product.
+  - LOW retry probe, LOW race timing — accepted as in Sol r3.
+  - LOW contract published the unpatched paths — fixed: the Facts section now states the outcome and root cause only.
+- **Luna r12:** HIGH (an order line written with NaN ordered disables the check) — fixed: the order-line trigger refuses NaN ordered or delivered (`ORDER_LINE_QUANTITY_NOT_A_NUMBER`), proven on insert and update (case 3d). MED (a return after the apply) — Mason's accepted case, as above. LOW (prover cleanup could remove a same-named container) — accepted: the name carries a random suffix per run.
+- **Luna r13 MED (infinite quantities pass the check) — fixed:** the trigger and the preflight refuse NaN and ±Infinity (`ORDER_LINE_QUANTITY_NOT_FINITE`); proof covers NaN insert, NaN update and Infinity update.
+- **Luna r14:** MED (a return after the apply) — Mason's accepted case ("drop it"; F05b hand cleanup). LOW (scheduling and order-cut refusals name other open loads) — accepted: only office staff schedule, edit deliveries or change order quantities, and they work from the order's full delivery list; drivers only complete, and the completion refusal names no other load.
+- **Luna r8:** MED (other loads scanned before the table lock; counts only) — fixed: the lock comes first and the preflight lists the line ids (proof asserts it). LOW (changelog said every refusal names other loads) — fixed.
+- **Luna r9 MED refuted (direct delivery-line UPDATE vs completion deadlock):** not a new lock order. A row UPDATE locks the line before any BEFORE trigger runs, and the existing `enforce_delivery_items_parent_lock` (BEFORE INSERT OR UPDATE OR DELETE, `20260530121534…:87`) and `a2_delivery_line_matches_order_line` already lock the delivery header after that; zz adds the same order. No app path updates a delivery line's quantity or link in place (signed-in users have no UPDATE on `delivery_items`; `edit_delivery` deletes and re-inserts; the only in-place UPDATE is a one-shot data migration). If it ever happens Postgres cancels one and nothing is half-saved (Mason accepted, DECISION_LOG 2026-11-18 #1940).
+- **Luna r9 LOW refuted (own delivery listed as "another"):** a delivery can hold only one line per order line — `a2_delivery_line_matches_order_line` refuses `DELIVERY_LINE_DUPLICATE` before zz runs (`20270126110000…:146-150`), backed by the unique index `delivery_items_one_line_per_order_line` (`:183`) — and the check already leaves out the line being written, so the delivery being edited never appears in the list.
+- **HIGH #2 (fixed):** soft-deleted loads no longer count (`deleted_at IS NULL`, as Cancel Remaining already does); un-deleting an open load is checked like a reopen. Case 3e.
+- **MED driver sees another load (fixed):** the completion refusal no longer names the other load or its quantity.
+- **MED REPEATABLE READ stale read (fixed after Luna r5 raised it as HIGH):** every app caller runs in READ COMMITTED, and the check now refuses any stricter level (`ORDER_LINE_CHECK_ISOLATION`), as `20270119130000…:81` does. Case 3i.
+- **MED restore vs order edit lock order (accepted, documented under Timing):** restore is service role only with no screen; Postgres cancels one side cleanly.
+- **MED race probe (fixed):** wider timing; the claim now says Follow-up waits on either shared lock, then re-checks.
+- **MED proof coverage (fixed in part):** signed-in public completion refusal and the 0-delivered way out added (case 3p). Quick Delivery and start-and-complete are left to the staging-app proof (case 11); neither raises a line above its order (Quick Delivery inserts the order line first; start-and-complete runs the same completion body).
+- **MED rollback (fixed):** all-or-nothing, and live use goes through a new migration so the ledger records it.
+- **LOW retry test:** it proves a refused call saves no receipt under its key (the retry re-checks); a second identical persisted call is not needed for that. **LOW rollback warning:** now names order cuts too. **LOW scan under lock:** superseded by Luna r8 — the table locks now come first and are held through the scan (a short read of order lines with open loads).
+
+## Open business decisions
+
+1. **Answered — Mason, in chat, 2026-11-22: "yes".** (#4) When two open loads already hold the same units from before this fix, should completing either one be refused until the office cancels the extra load? **Recommended: yes.** Effect: a driver with such a load is told to call the office; no stock moves twice. (Alternative: first load to complete wins and the other is refused — the driver of the second load finds out only at the farm.)

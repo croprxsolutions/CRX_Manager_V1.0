@@ -13,7 +13,9 @@
 --   * A ticket cannot leave a job that already recorded the spray (BLEND_TICKET_COMPLETED_JOB_KEEPS_TICKET), so it
 --     cannot be unlinked and then recorded a second time.
 --   * A ticket can only be linked to a job of its own customer (BLEND_TICKET_JOB_OTHER_CUSTOMER), as save_blend_ticket
---     already requires; this also covers direct office table updates.
+--     already requires; this also covers direct office table updates and a later customer change.
+--   * A cancelled or deleted job that already recorded still owns the stock; only chemicals from our stock
+--     (not customer-supplied) count as "chemicals entered" (Luna round 3; Mason, 2026-11-23: fix, then Sol).
 -- Both posting functions (job completion, Create App Record) are unchanged: application_records has no write policy
 -- (only these definer functions insert it), and the link is guarded on the table because office users may update
 -- blend_tickets directly. Old rows are not touched: production has no blend tickets (read-only, 2026-11-23); staging
@@ -49,8 +51,11 @@ BEGIN
     IF v_job IS NOT NULL THEN
       -- Ticket, then job: the same order as a link change. Cancelling a job waits here, so the status read next is current.
       PERFORM 1 FROM public.jobs j WHERE j.id = v_job FOR NO KEY UPDATE;
+      -- A job counts while it can still complete, or once it has recorded (even if cancelled or deleted later).
       IF EXISTS (SELECT 1 FROM public.jobs j
-                  WHERE j.id = v_job AND j.deleted_at IS NULL AND j.status <> 'cancelled') THEN
+                  WHERE j.id = v_job AND j.deleted_at IS NULL AND j.status <> 'cancelled')
+         OR EXISTS (SELECT 1 FROM public.application_records ar
+                     WHERE ar.source_type = 'job' AND ar.source_id = v_job) THEN
         RAISE EXCEPTION 'BLEND_TICKET_JOB_RECORDS: this blend ticket is linked to a spray job. Completing the job records the spray and takes the stock, so the ticket does not make its own application record. If that job will not be done, cancel it or unlink the ticket from it first.'
           USING ERRCODE = 'P0001';
       END IF;
@@ -67,8 +72,9 @@ BEGIN
     IF EXISTS (SELECT 1 FROM public.blend_tickets bt
                  JOIN public.blend_ticket_products btp ON btp.blend_ticket_id = bt.id
                 WHERE bt.job_id = NEW.source_id)
-       AND NOT EXISTS (SELECT 1 FROM public.job_chemicals jc WHERE jc.job_id = NEW.source_id) THEN
-      RAISE EXCEPTION 'JOB_BLEND_TICKET_NEEDS_CHEMICALS: this job has a blend ticket linked to it but no chemicals entered, so completing it would take nothing out of stock. Add the chemicals from the blend ticket to the job, then complete it.'
+       AND NOT EXISTS (SELECT 1 FROM public.job_chemicals jc
+                        WHERE jc.job_id = NEW.source_id AND jc.customer_supplied IS NOT TRUE) THEN
+      RAISE EXCEPTION 'JOB_BLEND_TICKET_NEEDS_CHEMICALS: this job has a blend ticket linked to it but no chemicals from our stock entered, so completing it would take nothing out of stock. Add the chemicals from the blend ticket to the job, then complete it.'
         USING ERRCODE = 'P0001';
     END IF;
   END IF;
@@ -88,7 +94,16 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $fn$
 BEGIN
-  -- Every ticket save names job_id; only a real change is checked.
+  -- Every ticket save names job_id and customer_id; only a real change is checked.
+  IF NEW.job_id IS NOT DISTINCT FROM OLD.job_id AND NEW.customer_id IS NOT DISTINCT FROM OLD.customer_id THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.job_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM public.jobs j
+                      WHERE j.id = NEW.job_id AND j.customer_id IS NOT DISTINCT FROM NEW.customer_id) THEN
+    RAISE EXCEPTION 'BLEND_TICKET_JOB_OTHER_CUSTOMER: a blend ticket can only be linked to a spray job for the same customer.'
+      USING ERRCODE = 'P0001';
+  END IF;
   IF NEW.job_id IS NOT DISTINCT FROM OLD.job_id THEN
     RETURN NEW;
   END IF;
@@ -96,12 +111,6 @@ BEGIN
      AND EXISTS (SELECT 1 FROM public.application_records ar
                   WHERE ar.source_type = 'blend_ticket' AND ar.source_id = NEW.id) THEN
     RAISE EXCEPTION 'BLEND_TICKET_RECORDED_NO_JOB: this blend ticket already has its own application record and took the stock, so it can''t be linked to a spray job. Ask an admin to reverse the ticket''s record first.'
-      USING ERRCODE = 'P0001';
-  END IF;
-  IF NEW.job_id IS NOT NULL
-     AND NOT EXISTS (SELECT 1 FROM public.jobs j
-                      WHERE j.id = NEW.job_id AND j.customer_id IS NOT DISTINCT FROM NEW.customer_id) THEN
-    RAISE EXCEPTION 'BLEND_TICKET_JOB_OTHER_CUSTOMER: a blend ticket can only be linked to a spray job for the same customer.'
       USING ERRCODE = 'P0001';
   END IF;
   -- Old and new job locked in one statement in id order, so two tickets swapping jobs cannot deadlock.
@@ -116,9 +125,10 @@ BEGIN
   IF NEW.job_id IS NOT NULL
      AND EXISTS (SELECT 1 FROM public.application_records ar
                   WHERE ar.source_type = 'job' AND ar.source_id = NEW.job_id)
-     AND NOT EXISTS (SELECT 1 FROM public.job_chemicals jc WHERE jc.job_id = NEW.job_id)
+     AND NOT EXISTS (SELECT 1 FROM public.job_chemicals jc
+                      WHERE jc.job_id = NEW.job_id AND jc.customer_supplied IS NOT TRUE)
      AND EXISTS (SELECT 1 FROM public.blend_ticket_products btp WHERE btp.blend_ticket_id = NEW.id) THEN
-    RAISE EXCEPTION 'BLEND_TICKET_JOB_NEEDS_CHEMICALS: that spray job was completed with no chemicals entered, so it took nothing out of stock and can''t take this blend ticket''s products. Leave the ticket unlinked and use Create App Record on it.'
+    RAISE EXCEPTION 'BLEND_TICKET_JOB_NEEDS_CHEMICALS: that spray job was completed with no chemicals from our stock, so it took nothing out of stock and can''t take this blend ticket''s products. Leave the ticket unlinked and use Create App Record on it.'
       USING ERRCODE = 'P0001';
   END IF;
   RETURN NEW;
@@ -127,7 +137,7 @@ $fn$;
 ALTER FUNCTION public._f06_blend_ticket_link_keeps_stock_once() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._f06_blend_ticket_link_keeps_stock_once() FROM PUBLIC, anon, authenticated, service_role;
 CREATE TRIGGER blend_ticket_link_keeps_stock_once_f06
-  BEFORE UPDATE OF job_id ON public.blend_tickets
+  BEFORE UPDATE OF job_id, customer_id ON public.blend_tickets
   FOR EACH ROW EXECUTE FUNCTION public._f06_blend_ticket_link_keeps_stock_once();
 
 DO $postflight$

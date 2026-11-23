@@ -406,6 +406,18 @@ async function afterCases() {
   // 8. A cancelled job cannot complete, so its linked ticket records as before.
   assert.equal(Number(ok(`${record(10)}\n${ON_HAND}`)), base - 10, 'case 8: a ticket on a cancelled job must record and take its stock');
   console.log('[case 8] T10 is linked to cancelled J10: Create App Record works and takes 10 Gal');
+  // Luna round 3: a job that already recorded, then was cancelled, still owns the stock.
+  refusedAfter(`${link(3, JOB(3))}\n${complete(3)}\nRESET ROLE;\nSET LOCAL session_replication_role = replica;
+UPDATE public.jobs SET status = 'cancelled' WHERE id = '${JOB(3)}';\nSET LOCAL session_replication_role = origin;\nSET LOCAL ROLE authenticated;`,
+    record(3), /BLEND_TICKET_JOB_RECORDS/, 'case 8 recorded then cancelled');
+  console.log('[case 8] J3 completed (10 Gal out), then cancelled: Create App Record on its linked T3 is still refused');
+  // Luna round 3: only chemicals from our stock count; a job with only a customer-supplied line cannot complete with a linked ticket.
+  refusedAfter(`RESET ROLE;\nINSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order)
+    VALUES ('${JOB(9)}', '${P}', 10, 'Gal', 0, true, 1);\nSET LOCAL ROLE authenticated;\n${link(9, JOB(9))}`, complete(9), /JOB_BLEND_TICKET_NEEDS_CHEMICALS/, 'case 7 customer-supplied only');
+  console.log('[case 7] J9 with only a customer-supplied chemical line and T9 linked: completion refused');
+  // Luna round 3: changing a linked ticket's customer is checked too.
+  refused(`${link(4, JOB(4))}\nUPDATE public.blend_tickets SET customer_id = '${CUST2}' WHERE id = '${TICKET(4)}';`, /BLEND_TICKET_JOB_OTHER_CUSTOMER/, 'case 9 customer change');
+  console.log("[case 9] changing linked T4's customer away from its job's customer: refused");
   // 9. A ticket cannot be linked to another customer's job, even by a direct table update.
   refused(link(6, JOB(11)), /BLEND_TICKET_JOB_OTHER_CUSTOMER/, 'case 9');
   console.log("[case 9] linking T6 to J11 (another customer's job) by a direct table update: refused");

@@ -1,5 +1,21 @@
 # Decision Log
 
+## 2026-11-23 — #2247: Mason owner-accepted 6 Sol finding(s) at `e50b0e90a218`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2247 at `e50b0e90a218` (base `02629ac33259`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:298`, text sha256 `e051e2f85744d456` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 2 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:215`, text sha256 `98649a0e735db722` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 3 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:423`, text sha256 `fd4216074a0d0c98` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 4 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:382`, text sha256 `1c7cf745428d65cc` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 5 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:775`, text sha256 `7c71ed52feec47a6` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 6 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:1098`, text sha256 `775dfd0879355bf8` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+
 ## 2026-11-22 — #2247 / #2283: a completed job's chemicals can't be changed
 
 **Decision (Mason, 2026-11-22, in chat: "Refuse now, build later").** He first chose "Edit + stock follows" (with the spray record "Update it too"); the plan's challenge and its re-check found that design did not settle (lot numbers, lot amounts, legacy units, missing spray records, races with completion). So #2247 makes `save_job` refuse any change to a completed job's chemical lines (product, quantity, unit, grower-supplied), naming why, and the edit-with-stock-following feature becomes its own follow-up PR. The job screen already hid Save on completed jobs, so office work is unchanged. This replaces the "accepted as pre-existing" stock gap in the entry below.

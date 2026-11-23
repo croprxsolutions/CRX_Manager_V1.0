@@ -65,14 +65,16 @@
 --   c_clear_logs     (default on)  activity_feed, notifications and financial_audit_log rows about cleared records (their
 --                                  entity type is in c_cleared_types or their entity id is a cleared row's id), and all of
 --                                  email_log, integrity_alerts, failed_notifications, watchdog_flags (+ dismissals).
---   c_clear_receipts (default on)  idempotency_keys, offline_action_receipts, retired_uncertain_requests (all).
+--   c_clear_receipts (default OFF, Taha 2026-11-24) idempotency_keys, offline_action_receipts, retired_uncertain_requests
+--                                  (all). Kept so a request whose response was lost before the reset cannot run again
+--                                  after it as a new one; a kept receipt only replays its old answer.
 --   c_clear_team_notes_on_cleared (default OFF) team notes linked to a cleared record, with their comments,
 --                                  attachments, tags and note_activity_log. Off: every note stays (its link dangles).
 --   c_clear_backup_snapshots (default OFF) backup_snapshots rows of cleared tables. backup_runs always stay.
 -- Then: inventory quantity_available / quantity_prebooked / quantity_on_order to 0 and last_counted_at to NULL (rows
 -- kept); customers.prepay_balance_cents to 0; the six number sequences restarted so the next number is 0001.
 -- NUMBERING: ORD (order_number_seq), Q (quote_number_seq), INV / CS / MC / CM (invoice_number_seq, cs_, mc_,
--- cm_invoice_number_seq) restart with setval(seq, 1, false). RC (rebate_claim_counters) restarts because the counter
+-- cm_invoice_number_seq) restart with ALTER SEQUENCE ... RESTART WITH 1, which a rollback undoes. RC (rebate_claim_counters) restarts because the counter
 -- table is emptied. DEL, JOB, PO, RMA, CC, CP, BT and APP numbers are max+1 over their own (now empty) tables. The
 -- customer account number sequence is kept (customers are kept).
 --
@@ -97,7 +99,7 @@ DECLARE
 
   -- Sections: flip to change what is cleared (see the header).
   c_clear_logs constant boolean := true;
-  c_clear_receipts constant boolean := true;
+  c_clear_receipts constant boolean := false;
   c_clear_team_notes_on_cleared constant boolean := false;
   c_clear_backup_snapshots constant boolean := false;
 
@@ -384,6 +386,15 @@ BEGIN
       OR quantity_on_order IS DISTINCT FROM 0 OR last_counted_at IS NOT NULL;
   -- row_version is bumped by customers_bump_row_version, so an open customer screen refuses a stale save.
   UPDATE public.customers SET prepay_balance_cents = 0, updated_at = now() WHERE prepay_balance_cents IS DISTINCT FROM 0;
+  -- ALTER SEQUENCE ... RESTART is transactional (a new sequence relfilenode): if anything later fails, including the
+  -- runner's own ledger insert after this block, the rollback puts every sequence back. (setval is not undone.)
+  FOREACH v_t IN ARRAY c_seqs LOOP
+    EXECUTE format('ALTER SEQUENCE public.%I RESTART WITH 1', v_t);
+    EXECUTE format('SELECT last_value = 1 AND NOT is_called FROM public.%I', v_t) INTO v_ok;
+    IF v_ok IS NOT TRUE THEN
+      RAISE EXCEPTION 'LIVE_RESET_POSTFLIGHT: % would not give 0001 next.', v_t;
+    END IF;
+  END LOOP;
 
   -- ===== Postflight =====
   SELECT string_agg(c.relname || '.' || t.tgname || '=' || t.tgenabled::text, ',' ORDER BY c.relname, t.tgname) INTO v_trig_after
@@ -450,15 +461,6 @@ BEGIN
                  WHERE n.nspname = c_backup AND a.grantee <> c.relowner) THEN
     RAISE EXCEPTION 'LIVE_RESET_POSTFLIGHT: a role other than the owner can still reach the backup schema.';
   END IF;
-
-  -- Numbering last: setval is not undone by a rollback, so nothing that can still fail comes after it.
-  FOREACH v_t IN ARRAY c_seqs LOOP
-    PERFORM setval(format('public.%I', v_t)::regclass, 1, false);
-    EXECUTE format('SELECT last_value = 1 AND NOT is_called FROM public.%I', v_t) INTO v_ok;
-    IF v_ok IS NOT TRUE THEN
-      RAISE EXCEPTION 'LIVE_RESET_POSTFLIGHT: % would not give 0001 next.', v_t;
-    END IF;
-  END LOOP;
 
   EXECUTE format('SELECT sum(rows_deleted) FROM %I._manifest', c_backup) INTO v_n;
   RAISE NOTICE 'LIVE_RESET_DONE: % rows deleted from % tables (all backed up in %); % delete triggers were off and are back on; stock 0, prepay 0, numbering restarts at 0001.',

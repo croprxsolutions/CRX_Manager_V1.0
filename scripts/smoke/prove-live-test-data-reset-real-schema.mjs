@@ -53,8 +53,17 @@ const arrayConst = (name) => {
 const CORE = arrayConst('c_core').flatMap((x) => x.split(','));
 const SEQS = arrayConst('c_seqs');
 const TYPES = arrayConst('c_cleared_types');
+const boolConst = (name) => {
+  const m = new RegExp(`${name} constant boolean := (true|false);`).exec(RAW);
+  assert.ok(m, `${name} not found in the candidate`);
+  return m[1] === 'true';
+};
+assert.equal(boolConst('c_clear_logs'), true, 'this proof covers the default sections (logs on)');
+assert.equal(boolConst('c_clear_team_notes_on_cleared'), false, 'this proof covers the default sections (team notes kept)');
+assert.equal(boolConst('c_clear_backup_snapshots'), false, 'this proof covers the default sections (backup snapshots kept)');
+const RECEIPTS = ['idempotency_keys', 'offline_action_receipts', 'retired_uncertain_requests'];
 const LOGS_ALL = ['email_log', 'integrity_alerts', 'failed_notifications', 'watchdog_flag_dismissals', 'watchdog_flags',
-  'idempotency_keys', 'offline_action_receipts', 'retired_uncertain_requests'];
+  ...(boolConst('c_clear_receipts') ? RECEIPTS : [])];
 const LOGS_FILTERED = { activity_feed: 'related_entity', notifications: 'related_entity', financial_audit_log: 'entity' };
 const PIN_QUERY = (/-- PIN QUERY BEGIN\n([\s\S]*?)-- PIN QUERY END/.exec(RAW)?.[1] ?? '').split('\n').map((l) => l.replace(/^-- ?/, '')).join('\n');
 assert.match(PIN_QUERY, /pg_control_system/, 'the PIN QUERY block is missing');
@@ -216,6 +225,8 @@ function seedAll() {
     INSERT INTO public.notifications (user_id, title, message, notification_type, related_entity_type, related_entity_id)
       VALUES ('${ADMIN}', 'kept', '[PROVER] about a customer', 'info', 'customer', '${SALE_CUSTOMER}');
     COMMIT;`, 'supabase_admin'));
+  // Every number sequence in use (MC, CM and INV are not issued by the flows above), so a restart and its undo show.
+  ok(run(`SELECT nextval(format('public.%I', s)::regclass) FROM unnest('{${SEQS.join(',')}}'::text[]) s, generate_series(1, 3);`));
   const empty = CORE.filter((t) => scalar(`SELECT count(*) FROM public.${t};`) === '0');
   assert.deepEqual(empty, [], `every cleared table must hold a row before the reset (empty: ${empty.join(', ')})`);
   const keptEmpty = json(`SELECT coalesce(jsonb_agg(c.relname ORDER BY c.relname), '[]') FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -303,6 +314,18 @@ try {
   refused('cost basis on a PO line', apply(pinned(pins())), /LIVE_RESET_COST_BASIS_FROM_PO: 1 kept cost basis row/);
   ok(run("SET session_replication_role = replica; DELETE FROM public.product_cost_basis WHERE reason = '[PROVER] from a PO line';", 'supabase_admin'));
   assert.equal(dbState(), start, 'a refusal changed something');
+
+  // A failure after the reset (standing in for the runner's ledger insert) undoes everything, the sequences included.
+  const seqState = () => scalar(`SELECT string_agg(s || '=' || (xpath('/row/v/text()', query_to_xml(format('SELECT last_value || ''/'' || is_called AS v FROM public.%I', s), false, true, '')))[1]::text, ' ' ORDER BY s) FROM unnest('{${SEQS.join(',')}}'::text[]) s;`);
+  const seqsBefore = seqState();
+  assert.ok(seqsBefore.split(' ').every((x) => x.endsWith('/true')), `the seed must have used every sequence: ${seqsBefore}`);
+  const aborted = docker(PSQL('postgres'), { input: `BEGIN;\n${pinned(live)}\nINSERT INTO public.not_the_ledger VALUES (1);\nCOMMIT;`, allowFailure: true });
+  assert.notEqual(aborted.status, 0, 'the forced failure must abort');
+  assert.match(aborted.stderr, /LIVE_RESET_DONE/, 'the reset itself ran before the forced failure');
+  assert.match(aborted.stderr, /relation "public\.not_the_ledger" does not exist/);
+  assert.equal(seqState(), seqsBefore, 'an aborted reset must leave every number sequence where it was');
+  assert.equal(dbState(), start, 'an aborted reset must leave every row, trigger and sequence as it was');
+  console.log(`[rollback] reset then a failing statement in the same transaction: aborted; sequences still ${seqsBefore}; every row and trigger unchanged`);
 
   // (b) Apply on "live".
   const before = { counts: pins().counts };

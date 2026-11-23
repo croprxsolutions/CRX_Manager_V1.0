@@ -250,7 +250,7 @@ function refusedProbe(sql, pattern, uid) {
 
 const id = (s) => `a0a55000-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1'), DRV1 = id('d1'), DRV2 = id('d2'), CUST = id('c1'), ORD = id('e1');
-const DEL = id('f1'), DONE = id('f2'), OPEN = id('f3');
+const DEL = id('f1'), DONE = id('f2'), OPEN = id('f3'), STARTED = id('f4');
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -264,15 +264,18 @@ function seed() {
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, status, is_quick_delivery, assigned_driver, scheduled_date) VALUES
       ('${DEL}', 'UNASSIGN-D1', '${ORD}', '${CUST}', '${ADMIN}', 'scheduled', false, '${DRV1}', current_date),
       ('${DONE}', 'UNASSIGN-D2', '${ORD}', '${CUST}', '${ADMIN}', 'completed', false, '${DRV1}', current_date),
-      ('${OPEN}', 'UNASSIGN-D3', '${ORD}', '${CUST}', '${ADMIN}', 'scheduled', false, NULL, current_date);`);
-  console.log('[prover] seeded an office admin, two drivers, a scheduled delivery with Driver One, a completed one, and an unassigned one');
+      ('${OPEN}', 'UNASSIGN-D3', '${ORD}', '${CUST}', '${ADMIN}', 'scheduled', false, NULL, current_date),
+      ('${STARTED}', 'UNASSIGN-D4', '${ORD}', '${CUST}', '${ADMIN}', 'in_progress', false, '${DRV1}', current_date);`);
+  console.log('[prover] seeded an office admin, two drivers, a scheduled delivery with Driver One, a completed one, an unassigned one and a started one with Driver One');
 }
 
 const driverOf = (d) => `(SELECT coalesce(assigned_driver::text, 'none') FROM public.deliveries WHERE id = '${d}')`;
 // Notifications are read past row security (the office cannot see a driver's notifications).
 const notes = (d, title) => `(SELECT count(*) FROM public.notifications WHERE related_entity_id = '${d}'${title ? ` AND title = '${title}' AND user_id = '${DRV1}'` : ''})`;
 // What the Delivery page sends: named arguments, the driver left out when "Unassigned" is picked.
-const edit = (d, key, extra = '', actor = ADMIN) => `SELECT public.edit_delivery(p_delivery_id => '${d}', p_scheduled_date => current_date + 2, p_delivery_notes => 'prover note', p_performed_by => '${actor}', p_idempotency_key => '${key}'${extra})::text;`;
+const call = (d, key, extra = '', actor = ADMIN) => `public.edit_delivery(p_delivery_id => '${d}', p_scheduled_date => current_date + 2, p_delivery_notes => 'prover note', p_performed_by => '${actor}', p_idempotency_key => '${key}'${extra})::text`;
+const edit = (d, key, extra = '', actor = ADMIN) => `SELECT ${call(d, key, extra, actor)};`;
+const events = (d) => `(SELECT count(*) FROM public.activity_feed WHERE related_entity_id = '${d}')`;
 
 function beforeCases() {
   assert.equal(okProbe(`${edit(DEL, 'u-b1')} SELECT ${driverOf(DEL)};`, ADMIN), DRV1,
@@ -283,12 +286,15 @@ function beforeCases() {
 
 function afterCases() {
   // 1. Unassigned clears the driver, saves the other edits, tells Driver One once; an exact replay changes nothing.
-  const one = okProbe(`${edit(DEL, 'u-1', ', p_clear_driver => true')}
-    ${edit(DEL, 'u-1', ', p_clear_driver => true')}
+  // The retry returns the first answer word for word and writes no second edit event.
+  const one = okProbe(`SELECT ${events(DEL)} AS ev0 \\gset
+    SELECT ${call(DEL, 'u-1', ', p_clear_driver => true')} AS r1 \\gset
+    SELECT ${call(DEL, 'u-1', ', p_clear_driver => true')} AS r2 \\gset
     RESET ROLE;
     SELECT ${driverOf(DEL)} || '|' || (SELECT scheduled_date - current_date FROM public.deliveries WHERE id = '${DEL}')
-      || '|' || (SELECT delivery_notes FROM public.deliveries WHERE id = '${DEL}') || '|' || ${notes(DEL, 'Delivery Unassigned')};`, ADMIN);
-  assert.equal(one, 'none|2|prover note|1');
+      || '|' || (SELECT delivery_notes FROM public.deliveries WHERE id = '${DEL}') || '|' || ${notes(DEL, 'Delivery Unassigned')}
+      || '|' || (:'r1' = :'r2')::text || '|' || (${events(DEL)} - :ev0) || '|' || (:'r1'::jsonb ->> 'status');`, ADMIN);
+  assert.equal(one, 'none|2|prover note|1|true|1|updated');
   console.log('[case 1] Unassigned clears the driver, keeps the other edits, notifies the old driver once; an exact retry changes nothing');
 
   // 2. The same key for a different request is refused (the clear is part of the fingerprint).
@@ -325,6 +331,12 @@ function afterCases() {
   assert.equal(scalar(`SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'edit_delivery';`), '1');
   assert.equal(scalar(`SELECT has_function_privilege('anon', 'public.edit_delivery(uuid,uuid,date,text,text,text,uuid,text,text,jsonb,uuid,text,boolean)', 'EXECUTE')::text;`), 'false');
   console.log('[case 8] one edit_delivery signature; anon cannot execute it');
+
+  // 9. A started delivery cannot be left with no driver (the whole edit rolls back) but can move to another driver.
+  refusedProbe(edit(STARTED, 'u-9', ', p_clear_driver => true'), /DRIVER_CLEAR_STARTED/, ADMIN);
+  assert.equal(scalar(`SELECT ${driverOf(STARTED)} || '|' || coalesce((SELECT delivery_notes FROM public.deliveries WHERE id = '${STARTED}'), '') || '|' || ${notes(STARTED)} || '|' || ${events(STARTED)};`), `${DRV1}||0|0`);
+  assert.equal(okProbe(`${edit(STARTED, 'u-9b', `, p_assigned_driver => '${DRV2}'`)} SELECT ${driverOf(STARTED)};`, ADMIN), DRV2);
+  console.log('[case 9] a started delivery is refused Unassigned (nothing saved) and can still move to Driver Two');
 }
 
 function main() {

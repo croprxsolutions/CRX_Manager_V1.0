@@ -8,8 +8,12 @@
 -- WHAT: public.edit_delivery gains p_clear_driver boolean DEFAULT false (last argument). When true:
 --   1. naming a driver too is refused (DRIVER_CONFLICT); otherwise
 --   2. after the unchanged body runs (same role, status and lock rules: admin or sales rep, scheduled or in progress),
---      the driver is set to none and the driver who had it gets a "Delivery Unassigned" notification;
---   3. the replay fingerprint gains clear_driver only when true, so every other request keeps its fingerprint; an
+--      a started (in_progress) delivery is refused (DRIVER_CLEAR_STARTED; the whole edit rolls back): the completion
+--      checks compare the caller with assigned_driver, so a started delivery may move to another driver but must
+--      never be left with none;
+--   3. on a scheduled delivery the driver is set to none and the driver who had it gets a "Delivery Unassigned"
+--      notification;
+--   4. the replay fingerprint gains clear_driver only when true, so every other request keeps its fingerprint; an
 --      exact replay returns the first answer and changes nothing.
 --   Without p_clear_driver every call (the current screen, positional 12-argument calls) behaves exactly as before.
 --   A new argument means a new signature, so the old wrapper is dropped and the new one created in the same
@@ -21,7 +25,10 @@
 --   20270104120000_delivery_brands.sql (body md5 3d033929e3b7cf8d7a609e18099818c8) with the same grants. A screen
 --   already sending p_clear_driver would then fail its save, so roll back the screen first.
 --
--- ORDERING: after 20270104120000. Not re-runnable (preflight refuses). Postflight pins the new body md5 aca6ef9d8fd3064823e0b575c3732dbe.
+-- idempotency-body-check: exempt -- the wrapper checks the key (check_idempotency_intent) and the impl records it;
+--   the wrapper only rewrites the stored result and binds the receipt, as the 20270104120000 wrapper did.
+--
+-- ORDERING: after 20270104120000. Not re-runnable (preflight refuses). Postflight pins the new body md5 2b9a2d2caf0bf3997d5627501e61518e.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -35,6 +42,15 @@ BEGIN
           WHERE p.oid = to_regprocedure('public._edit_delivery_replay_impl_20261015(uuid,uuid,date,text,text,text,uuid,text,text,jsonb,uuid,text)'))
         IS DISTINCT FROM '942011a2bf15b83269e74830fa057377' THEN
     RAISE EXCEPTION 'EDIT_DELIVERY_UNASSIGN_PREFLIGHT: edit_delivery or its body is not the reviewed one (missing, drifted or already replaced)';
+  END IF;
+  -- The new signature re-grants the reviewed access; refuse if live access drifted rather than silently reset it.
+  IF NOT has_function_privilege('authenticated', 'public.edit_delivery(uuid,uuid,date,text,text,text,uuid,text,text,jsonb,uuid,text)', 'EXECUTE')
+     OR NOT has_function_privilege('service_role', 'public.edit_delivery(uuid,uuid,date,text,text,text,uuid,text,text,jsonb,uuid,text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.edit_delivery(uuid,uuid,date,text,text,text,uuid,text,text,jsonb,uuid,text)', 'EXECUTE')
+     OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+                 WHERE p.oid = 'public.edit_delivery(uuid,uuid,date,text,text,text,uuid,text,text,jsonb,uuid,text)'::regprocedure
+                   AND a.grantee = 0 AND a.privilege_type = 'EXECUTE') THEN
+    RAISE EXCEPTION 'EDIT_DELIVERY_UNASSIGN_PREFLIGHT: edit_delivery grants are not the reviewed ones (authenticated and service_role only)';
   END IF;
 END;
 $preflight$;
@@ -75,6 +91,7 @@ DECLARE
   v_seq bigint;        -- 20270104120000
   v_cleared_from uuid; -- 20270225170000
   v_number text;       -- 20270225170000
+  v_status text;       -- 20270225170000
 BEGIN
   IF p_idempotency_key IS NULL THEN
     RAISE EXCEPTION 'IDEMPOTENCY_KEY_REQUIRED: edit_delivery requires p_idempotency_key' USING ERRCODE = '22023';
@@ -123,8 +140,13 @@ BEGIN
   -- 20270225170000: the body keeps the driver when none is named; Unassigned clears it here, under the delivery lock
   -- taken above and after the body's status check, and tells the driver who had it. A replay changes nothing.
   IF v_replay IS NULL AND p_clear_driver IS TRUE THEN
-    SELECT d.assigned_driver, d.delivery_number INTO v_cleared_from, v_number
+    SELECT d.assigned_driver, d.delivery_number, d.status INTO v_cleared_from, v_number, v_status
       FROM public.deliveries d WHERE d.id = p_delivery_id;
+    -- Completion checks compare the caller with assigned_driver; a started delivery must never be left with none.
+    IF v_status = 'in_progress' THEN
+      RAISE EXCEPTION 'DRIVER_CLEAR_STARTED: a started delivery cannot be unassigned; assign another driver instead'
+        USING ERRCODE = '22023';
+    END IF;
     IF v_cleared_from IS NOT NULL THEN
       UPDATE public.deliveries SET assigned_driver = NULL WHERE id = p_delivery_id;
       INSERT INTO public.notifications (user_id, title, message, notification_type, related_entity_type, related_entity_id)
@@ -193,6 +215,7 @@ BEGIN
 END;
 $function$;
 
+-- caller-analysis: edit_delivery :: only caller is src/pages/DeliveryDetail.tsx (signed-in staff, authenticated); authenticated and service_role keep EXECUTE, only PUBLIC and anon are revoked, as on the old signature
 REVOKE ALL ON FUNCTION public.edit_delivery(uuid, uuid, date, text, text, text, uuid, text, text, jsonb, uuid, text, boolean) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.edit_delivery(uuid, uuid, date, text, text, text, uuid, text, text, jsonb, uuid, text, boolean) TO authenticated, service_role;
 
@@ -202,7 +225,7 @@ DECLARE
 BEGIN
   IF v_oid IS NULL
      OR (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'edit_delivery') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_oid) IS DISTINCT FROM 'aca6ef9d8fd3064823e0b575c3732dbe'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_oid) IS DISTINCT FROM '2b9a2d2caf0bf3997d5627501e61518e'
      OR NOT (SELECT prosecdef FROM pg_proc WHERE oid = v_oid)
      OR (SELECT proconfig FROM pg_proc WHERE oid = v_oid) IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[] THEN
     RAISE EXCEPTION 'EDIT_DELIVERY_UNASSIGN_POSTFLIGHT: edit_delivery is not one reviewed SECURITY DEFINER signature';

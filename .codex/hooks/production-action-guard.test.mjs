@@ -11,7 +11,7 @@ import { buildSweepQuery } from "../../scripts/db-invariant-sweeps/allowlist-mat
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import { claimOrRefuse } from "../../.claude/hooks/pr-claim-lib.mjs";
 import { skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
-import { recordTahaLaneOverride } from "../../.claude/hooks/taha-lane-lib.mjs";
+import { recordTahaLaneOverride, TAHA_LANE_UNTIL_MS } from "../../.claude/hooks/taha-lane-lib.mjs";
 
 // Since 2026-10-19 (Luna round 3) the merge gate FAILS CLOSED when it cannot
 // read the PR's review threads, because unresolved CodeRabbit threads block a
@@ -612,18 +612,24 @@ try {
   // Taha lane block (#2303): the same staging merge, but the PR changes a quote screen.
   const quoteFiles = "modified\tsrc/pages/QuoteBuilder.tsx\t";
   mkdirSync(path.join(ordinary.repo, ".claude"), { recursive: true }); // the code is saved under .claude, as in a real checkout
+  const laneNow = TAHA_LANE_UNTIL_MS - 24 * 3600e3; // frozen before the cutoff so this test still runs after Dec 15
+  const afterCutoff = evaluateProductionAction({
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
+    nowMs: TAHA_LANE_UNTIL_MS + 1, runGh: () => ordinaryPrJson, prFiles: quoteFiles,
+  });
+  assert.doesNotMatch(afterCutoff.reason ?? "", /TAHA LANE/, "after Dec 15 the lane block is off");
   const laneMerge = evaluateProductionAction({
     toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo,
-    nowMs: Date.now(), runGh: () => ordinaryPrJson, prFiles: quoteFiles,
+    nowMs: laneNow, runGh: () => ordinaryPrJson, prFiles: quoteFiles,
   });
   assert.equal(laneMerge.blocked, true, "a staging merge in Taha's areas is refused");
   assert.match(laneMerge.reason, /TAHA LANE BLOCK — #5 is refused because it changes Taha's areas \(src\/pages\/QuoteBuilder\.tsx\)/, "and names the file");
   const laneCode = /taha override #5 (\d{6})/.exec(laneMerge.reason)?.[1];
   assert.ok(laneCode, "and gives Mason the exact line to send");
-  assert.equal(recordTahaLaneOverride({ dirs: skipStateDirs([ordinary.repo]), pullRequest: 5, code: laneCode }).ok, true, "Mason's line records the override");
+  assert.equal(recordTahaLaneOverride({ dirs: skipStateDirs([ordinary.repo]), pullRequest: 5, code: laneCode, now: laneNow }).ok, true, "Mason's line records the override");
   const posted = [];
   const overridden = evaluateProductionAction({
-    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo, nowMs: Date.now(), prFiles: quoteFiles,
+    toolName: "PowerShell", toolInput: { command: ordinaryPinned }, repoDir: ordinary.repo, nowMs: laneNow + 60e3, prFiles: quoteFiles,
     runGh: (args) => (args[0] === "api" && args.includes("POST") ? (posted.push(args), "987") : ordinaryPrJson),
   });
   assert.doesNotMatch(overridden.reason ?? "", /TAHA LANE/, "with the override the lane block lets it on to the next gate");

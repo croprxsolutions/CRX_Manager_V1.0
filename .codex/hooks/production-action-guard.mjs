@@ -758,6 +758,7 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh, claim = 
       tellTaha: (body) => tellTahaOnGitHub({ repo: request.repo, gh: (args) => runGh(args, repoDir), pullRequest: lanePr, body }),
       files: prFilesOnGitHub({ repo: request.repo, gh: (args) => runGh(args, repoDir), number: lanePr }),
       dirs: skipStateDirs([repoDir]),
+      now: nowMs, // undefined → the lib's own Date.now() default
       notice: (text) => process.stderr.write(text),
     });
     if (lane) return denied(lane);

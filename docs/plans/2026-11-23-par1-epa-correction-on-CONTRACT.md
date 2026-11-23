@@ -73,8 +73,12 @@ Smallest change:
   rather than any number; a blank invoice line for a size that had no number shows the new number (Mason accepted,
   record map follow-up 4); invoices and RUP records made after the correction take the new number. A deleted draft
   invoice restored after a correction behaves as any draft: saving it fills its lines from the trigger.
-- Clearing: an admin may clear the number (the server allows null); the preview shows "→ (none)" for the parent and
-  every size, and old records still keep their copies.
+- Clearing: refused (Mason, 2026-11-23, Sol r1 #1): this file re-emits `_product_parent_identity_after` with one added
+  check, so save and preview refuse a blank number (`PRODUCT_PARENT_INVALID`).
+- Records made or rebuilt after a correction take the corrected number (record map rule, Mason accepted again
+  2026-11-23, option B over fixing the writers): a job sprayed before but completed after writes the new number into its
+  logbook record; a split field invoice unposted and reposted after takes the new number; a return credit after takes
+  the new number, so the year-end summary shows the sale and its credit under two numbers (Sol r1 #2, #4, #5).
 
 ## Proof cases (real migrated database in the local prover container; never production)
 
@@ -126,3 +130,13 @@ fix plus switch, rollback switch-only).
 Atrazine 4L only (Mason's call in the parent session, not this file): #39 (the label shows 100-497-37686 for each size),
 #40 (atrazine is usually restricted-use; live says `is_rup` false), #41 (the yes covers the three sizes, not the
 1381-158 brand).
+
+## Sol settlement (round 1, 2026-11-23, head 1608068b8)
+
+- #1 HIGH (clearing suppresses RUP records): fixed, clearing refused.
+- #2, #4, #5 HIGH: Mason chose option B (switch on sooner; records made after a correction take the corrected
+  number). Logged as Mason-accepted.
+- #3 HIGH (old app while the switch goes live): the PR is held until KI-195's screens are live in production; the
+  migration header and record say so.
+- #6 MED (report shows the line's generic number where the invoice printed brand numbers): follow-up.
+- #7 MED, #8-#10 LOW: fixed (`af325011a`).

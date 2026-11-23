@@ -121,6 +121,12 @@ try {
   assert.equal(receipt.sizes.length, 2);
   assert.equal(scalar(`SELECT event_type FROM public.product_parent_events WHERE id = ${receipt.event_id};`), 'identity_corrected');
   console.log('[PAR1-ON] AFTER: a rep is refused; the admin\'s correction wrote the parent and both sizes in one logged event');
+  refused(USERS.admin, `SELECT public.correct_product_parent_identity('${PARENT}', ${version()},
+    '{"generic_epa_registration": null}'::jsonb, 'clear it', 'none', 'k-clear');`, /an EPA number cannot be cleared/);
+  refused(USERS.admin, `SELECT public.preview_product_parent_identity_correction('${PARENT}', '{"generic_epa_registration": ""}'::jsonb);`,
+    /an EPA number cannot be cleared/);
+  assert.equal(productEpa(S1), NEW);
+  console.log('[PAR1-ON] AFTER: clearing the EPA number is refused (save and preview)');
 
   assert.equal(fingerprint(), before, 'an old record (invoice line, invoice, RUP record, delivery pick, kept job number, application record, job line or brand) changed');
   assert.equal(proofEpa(J_DONE), OLD, 'the completed job\'s spray proof keeps 524-475');

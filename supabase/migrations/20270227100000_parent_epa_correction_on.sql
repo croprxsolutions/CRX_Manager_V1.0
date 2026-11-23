@@ -15,10 +15,12 @@
 --      product-usage rows show and group by the invoice line's own EPA copy (_epa_norm), the product's only for a line
 --      with none (a correction is refused while a live line for a size that has a number has none, 20261207113000).
 --      get_batch_year_end_summaries only calls it and is unchanged.
+--   1b. _product_parent_identity_after re-emitted from 20261207113000 with one change: clearing a parent's EPA
+--      number is refused (PRODUCT_PARENT_INVALID; Mason 2026-11-23, Sol r1 #1).
 --   2. _product_parent_epa_correction_enabled() returns true: an admin can correct a parent's EPA number with reason
 --      and evidence (the live correct_product_parent_identity, unchanged).
 --
--- NOT CHANGED: correct_product_parent_identity and its checks, grants, every writer, invoices, jobs, prices, stock.
+-- NOT CHANGED: correct_product_parent_identity and its other checks, grants, every writer, invoices, jobs, prices, stock.
 --
 -- ORDERING: after 20270201100000_page_access_locks_reports and 20270225193000_job_proof_kept_epa (the preflight
 --   refuses otherwise). Deploy KI-195's app (#2330) to production before applying: until then a sprayed job printed
@@ -61,6 +63,13 @@ BEGIN
                  WHERE NOT EXISTS (SELECT 1 FROM public.job_product_epa l
                                     WHERE l.job_id = jc.job_id AND l.product_id = jc.product_id)) THEN
     RAISE EXCEPTION 'PARENT_EPA_CORRECTION_ON_PREFLIGHT: a sprayed or finished job is missing a kept EPA number';
+  END IF;
+  -- The identity check this file re-emits is exactly 20261207113000's (owner-only, no grants).
+  IF NOT EXISTS (SELECT 1 FROM pg_proc p
+                  WHERE p.oid = to_regprocedure('public._product_parent_identity_after(public.product_parents,jsonb)')
+                    AND md5(replace(p.prosrc, chr(13), '')) = '0adf80976cebf56021579d30bc5a8e06'
+                    AND p.proowner = 'postgres'::regrole) THEN
+    RAISE EXCEPTION 'PARENT_EPA_CORRECTION_ON_PREFLIGHT: _product_parent_identity_after is not the 20261207113000 body';
   END IF;
   -- The year-end body this file re-emits is exactly 20270201100000's.
   IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'get_customer_year_end_summary') <> 1
@@ -207,6 +216,53 @@ BEGIN
 END;
 $function$;
 
+-- Re-emitted from 20261207113000 with one change: clearing the EPA number is refused (Mason, 2026-11-23).
+CREATE OR REPLACE FUNCTION public._product_parent_identity_after(p_parent public.product_parents, p_changes jsonb) RETURNS jsonb
+LANGUAGE plpgsql STABLE SET search_path = public, pg_temp AS $function$
+DECLARE
+  v_epa text := p_parent.generic_epa_registration;
+  v_unsaved text;
+BEGIN
+  IF p_changes IS NULL OR jsonb_typeof(p_changes) <> 'object' OR NOT EXISTS (SELECT 1 FROM jsonb_object_keys(p_changes))
+     OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_changes) k WHERE k NOT IN ('formulation_type', 'safener', 'generic_epa_registration'))
+     OR EXISTS (SELECT 1 FROM jsonb_each(p_changes) e WHERE jsonb_typeof(e.value) NOT IN ('string', 'null')) THEN
+    RAISE EXCEPTION 'PRODUCT_PARENT_INVALID: the identity correction takes formulation_type, safener and generic_epa_registration';
+  END IF;
+  IF p_changes ? 'generic_epa_registration'
+     AND public._normalize_epa_registration(p_changes->>'generic_epa_registration') IS DISTINCT FROM p_parent.generic_epa_registration THEN
+    IF NOT public._product_parent_epa_correction_enabled() THEN
+      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_CORRECTION_OFF: EPA number correction is switched off until the screens that keep old records'' EPA numbers are live';
+    END IF;
+    v_epa := public._normalize_epa_registration(p_changes->>'generic_epa_registration');
+    -- PAR-1 7.7 (Mason, 2026-11-23, Sol r1 #1): a number is corrected, never cleared; a cleared number would also
+    -- stop restricted-use sales of a size flagged only through it from being recorded.
+    IF v_epa IS NULL THEN
+      RAISE EXCEPTION 'PRODUCT_PARENT_INVALID: an EPA number cannot be cleared; type the correct number';
+    END IF;
+    -- The same rule every product's EPA number follows (guard_product_setup_fields).
+    IF v_epa IS NOT NULL AND v_epa !~ '^[1-9][0-9]{0,5}-[1-9][0-9]{0,4}(-[1-9][0-9]{0,5})?$' THEN
+      RAISE EXCEPTION 'PRODUCT_PARENT_INVALID: "%" is not an EPA number (for example 524-475 or 100-1070-12345)', v_epa;
+    END IF;
+    SELECT string_agg(DISTINCT COALESCE(i.invoice_number, i.id::text) || ' (' || i.status || ')', ', ')
+      INTO v_unsaved
+      FROM public.invoice_items ii
+      JOIN public.invoices i ON i.id = ii.invoice_id
+      JOIN public.product_parent_members m ON m.product_id = ii.product_id
+      JOIN public.products p ON p.id = ii.product_id
+     WHERE m.parent_id = p_parent.id AND i.deleted_at IS NULL AND public._epa_norm(ii.epa_registration) IS NULL
+       AND public._epa_norm(p.epa_registration) IS NOT NULL
+       AND public._epa_norm(p.epa_registration) IS DISTINCT FROM v_epa;
+    IF v_unsaved IS NOT NULL THEN
+      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_RECORD_UNSAVED: invoice % has a line for this product with no saved EPA number, so it would change too. Open and save a draft invoice to give it one; a posted one must be unposted, saved and posted again', v_unsaved;
+    END IF;
+  END IF;
+  RETURN jsonb_build_object(
+    'formulation_type', CASE WHEN p_changes ? 'formulation_type' THEN NULLIF(btrim(p_changes->>'formulation_type'), '') ELSE p_parent.formulation_type END,
+    'safener', CASE WHEN p_changes ? 'safener' THEN NULLIF(btrim(p_changes->>'safener'), '') ELSE p_parent.safener END,
+    'generic_epa_registration', v_epa);
+END;
+$function$;
+
 CREATE OR REPLACE FUNCTION public._product_parent_epa_correction_enabled() RETURNS boolean
 LANGUAGE sql STABLE SET search_path = public, pg_temp AS $function$ SELECT true $function$;
 
@@ -216,6 +272,15 @@ BEGIN
      OR (SELECT proacl FROM pg_proc WHERE oid = 'public._product_parent_epa_correction_enabled()'::regprocedure)
           IS DISTINCT FROM ARRAY['postgres=X/postgres']::aclitem[] THEN
     RAISE EXCEPTION 'PARENT_EPA_CORRECTION_ON_POSTFLIGHT: the switch is not on, or its grants changed';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_proc p
+                  WHERE p.oid = 'public._product_parent_identity_after(public.product_parents,jsonb)'::regprocedure
+                    AND md5(replace(p.prosrc, chr(13), '')) = 'b734bf0030abd302f9b95b72c5e2d515'
+                    AND p.proowner = 'postgres'::regrole AND NOT p.prosecdef
+                    AND p.proconfig = ARRAY['search_path=public, pg_temp']
+                    AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
+                    AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')) THEN
+    RAISE EXCEPTION 'PARENT_EPA_CORRECTION_ON_POSTFLIGHT: the identity check is not the clearing-refused body, or its grants changed';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public.get_customer_year_end_summary(uuid,integer)'::regprocedure

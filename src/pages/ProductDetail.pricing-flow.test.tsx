@@ -1012,6 +1012,24 @@ describe('ProductDetail governed pricing flow', () => {
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('could not be reloaded'));
   });
 
+  it('#2308: a side read that settles after leaving the Product reports nothing', async () => {
+    const { unmount } = render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    let settleBasis: (value: unknown) => void = () => {};
+    mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise((resolve) => { settleBasis = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Reload Product' })).toBeNull());
+    mockToast.mockClear();
+    unmount();
+    settleBasis(await mockGetCostBasisWorkspace.getMockImplementation()?.());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockToast.mock.calls.filter(([, message]) => String(message).startsWith('Product reloaded'))).toEqual([]);
+  });
+
   it('opens the folded section that holds a refused field', async () => {
     render(<ProductDetail />);
     await screen.findByText('Grower Description');

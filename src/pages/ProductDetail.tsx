@@ -425,6 +425,8 @@ export default function ProductDetail() {
   const pricingPreviewIntentRef = useRef<string | null>(null);
   const pricingPreviewRequestRef = useRef(0);
   const pricingReloadRequestRef = useRef(0);
+  // Leaving this Product (or the page) ends any pending Reload Product's report (#2308, Luna r1 MED).
+  useEffect(() => () => { pricingReloadRequestRef.current += 1; }, [id]);
   // Committed product id, read after awaits to drop results for a product the user has left.
   const productIdRef = useLatestRef(id);
   // The product itself. Cost is admin-only (Mason, 2026-10-15), so a role change is a different read.

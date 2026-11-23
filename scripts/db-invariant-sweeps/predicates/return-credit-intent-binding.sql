@@ -3,7 +3,7 @@
 -- wrappers from 20260812130145. Their renamed business implementations and
 -- the existing check_idempotency_intent helper must remain browser-inaccessible.
 -- The shared credit reversal helper must be the exact due-date-aware wrapper.
--- #1912 (20270224180000): each wrapper may hold EITHER the body from before that migration (pre_1912_body_sha256) or the
+-- #1912 (20270224220000): each wrapper may hold EITHER the body from before that migration (pre_1912_body_sha256) or the
 -- one after it (body_sha256); they differ only in the idempotency-key check. Drop the pre-1912 column once the
 -- migration is live everywhere.
 -- Contract: EXPECT ZERO rows.

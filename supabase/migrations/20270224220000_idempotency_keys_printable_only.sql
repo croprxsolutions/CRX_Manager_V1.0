@@ -68,6 +68,13 @@ DECLARE
     'void_vendor_payment(uuid,text,text)', '82c69e11f8403612b0d3b56b7314cbb0');
   v_row record;
 BEGIN
+  -- A saved answer is replayed only after the key check, so a stored receipt under a key the new rule refuses could
+  -- never be replayed: the caller's retry would be refused, and a retry under a new key could repeat the write.
+  -- Receipts last 24 hours, so apply only when no unexpired receipt holds such a key.
+  IF EXISTS (SELECT 1 FROM public.idempotency_keys WHERE expires_at > now() AND idempotency_key COLLATE "C" ~ '[^!-~]') THEN
+    RAISE EXCEPTION 'IDEM_KEY_PRINTABLE_1912_WEAK_RECEIPT: % unexpired receipt(s) hold a key with a non-printable character; apply after they expire (24 hours)',
+      (SELECT count(*) FROM public.idempotency_keys WHERE expires_at > now() AND idempotency_key COLLATE "C" ~ '[^!-~]');
+  END IF;
   IF (SELECT count(*) FROM pg_temp.idem_key_printable_1912_attrs) <> 19 THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: expected 19 functions, found %', (SELECT count(*) FROM pg_temp.idem_key_printable_1912_attrs);
   END IF;

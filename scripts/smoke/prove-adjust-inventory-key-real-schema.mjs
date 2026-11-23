@@ -8,7 +8,7 @@
  *      adjust stock; a same-key retry returns the first answer and writes nothing more;
  *   2. keys with a newline, tab, control character, space or non-ASCII letter, a blank key and NULL are refused
  *      with IDEMPOTENCY_KEY_REQUIRED, and nothing changes (no stock, ledger or receipt row);
- *   3. follow-up 20270224180000: no public function keeps the weak check, and each of the 20 functions with the
+ *   3. follow-up 20270224220000: no public function keeps the weak check, and each of the 20 functions with the
  *      strict check refuses a newline key, while a normal key gets past the key check (rolled back);
  *   4. a second apply of either migration is refused by its preflight;
  *   5. the registered full adjust_inventory chain passes on the new body, and a sales rep removes a customer document
@@ -24,7 +24,7 @@ import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, scalar, attempt, asUser, refuse, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
 const CANDIDATE = '20270201140000_adjust_inventory_key_printable_only.sql';
-const FOLLOW_UP = '20270224180000_idempotency_keys_printable_only.sql';
+const FOLLOW_UP = '20270224220000_idempotency_keys_printable_only.sql';
 const EXPECTED_STRICT_FUNCTIONS = [
   '_section9_create_vendor_bill_cumulative_impl',
   '_section9_receive_po_items_intent_impl_20260831',
@@ -109,7 +109,7 @@ INSERT INTO public.customers (id, farm_name, assigned_sales_rep, is_active) VALU
     assert.equal(got, 'ok|IDEMPOTENCY_KEY_REQUIRED: adjust_inventory requires p_idempotency_key|unchanged=true', label);
   }
 
-  // 3. Follow-up (20270224180000): no public function keeps the weak check, and each of the 20 functions with the
+  // 3. Follow-up (20270224220000): no public function keeps the weak check, and each of the 20 functions with the
   //    strict check refuses 'abc' + newline with IDEMPOTENCY_KEY_REQUIRED, while the same call with a normal key
   //    gets past the key check (it fails later on the dummy arguments, or not at all). Every other argument is
   //    NULL except: the actor arguments (signed-in admin), a reason, and hold type 'manual', so earlier checks pass.
@@ -169,6 +169,16 @@ ROLLBACK;` });
     assert.notEqual(again.status, 0, `a second apply of ${file} must be refused`);
     assert.match(again.stderr, marker);
     console.log(`[adjust-key] second apply of ${file} refused by the preflight`);
+  }
+  // 4b. An unexpired receipt under a key the new rule refuses (here 'abc' + newline) stops the apply before anything
+  //     changes; an expired one does not. Run on the already-applied database, so the receipt check must come first.
+  for (const [label, expiry, want] of [['unexpired', "now() + interval '1 hour'", /IDEM_KEY_PRINTABLE_1912_WEAK_RECEIPT/], ['expired', "now() - interval '1 hour'", /IDEM_KEY_PRINTABLE_1912_BASELINE_DRIFT/]]) {
+    const weak = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-1'],
+      { input: `INSERT INTO public.idempotency_keys (idempotency_key, operation, result, expires_at) VALUES ('abc' || E'\n', 'proof_1912', '{}'::jsonb, ${expiry});
+${follow}`, allowFailure: true });
+    assert.notEqual(weak.status, 0, `${label} weak receipt case must stop at a preflight`);
+    assert.match(weak.stderr, want, `${label} weak receipt case`);
+    console.log(`[adjust-key] ${label} weak-key receipt: ${want.source.slice(0, 40)}`);
   }
   // 5a. The full adjust_inventory business chain (its own prover replays only up to 20260911120000) runs unchanged
   //     on the candidate body and must end in SMOKE_PASS_ROLLBACK, so nothing it plants persists.

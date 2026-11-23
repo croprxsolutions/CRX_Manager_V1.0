@@ -99,7 +99,7 @@ import { JobChemicalProductPicker } from '../components/jobs/JobChemicalProductP
 import JobLabelCorrectionsNotice from '../components/jobs/JobLabelCorrectionsNotice';
 import { buildJobChemicalsPayload } from '../lib/jobChemicalPayload';
 import { JOB_CHEMICAL_COLUMNS, JOB_COLUMNS, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
-import { JOB_CHANGED_SINCE_LOADED_MESSAGE, jobChangedSinceLoaded, pickJobStaleSnapshot, type JobStaleSnapshot } from '../lib/jobStaleEdit';
+import { JOB_CHANGED_SINCE_LOADED_MESSAGE, jobChangedSinceLoaded, pickJobStaleSnapshot, withFreshDispatches, type JobStaleSnapshot } from '../lib/jobStaleEdit';
 import { sendEmail } from '../lib/emailService';
 import {
   parsePreNotificationTemplate,
@@ -5450,7 +5450,16 @@ export default function JobDetail() {
         crews={groundCrews}
         performedBy={profile?.id || ''}
         isAdmin={role === 'admin'}
-        onDispatched={() => setDispatchWizardOpen(false)}
+        onDispatched={() => {
+          setDispatchWizardOpen(false);
+          // Our own dispatch is not someone else's change: move just the dispatch lines of the baseline forward.
+          // A failed read leaves the old baseline, so the next Save asks for a reload (the safe side).
+          const snap = loadedJobSnapshotRef.current;
+          if (!snap || !id) return;
+          withFreshDispatches(id, snap)
+            .then((next) => { if (loadedJobSnapshotRef.current === snap) loadedJobSnapshotRef.current = next; })
+            .catch((err: unknown) => Sentry.captureException(toSentryError(err), { extra: { context: 'job_stale_dispatch_refresh' } }));
+        }}
       />
     </div>
   );

@@ -8,11 +8,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { mockFrom, mockRpc, mockToast, eqCalls } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, eqCalls, selectCalls } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockRpc: vi.fn(),
   mockToast: vi.fn(),
   eqCalls: [] as unknown[][],
+  selectCalls: [] as unknown[],
 }));
 
 const CHAIN_METHODS = ['select', 'insert', 'update', 'upsert', 'delete', 'eq', 'neq',
@@ -25,6 +26,7 @@ function buildChain(result: { data: unknown; error: unknown }): Record<string, u
   const self: Record<string, unknown> = {};
   for (const m of CHAIN_METHODS) self[m] = () => self;
   self.eq = (...args: unknown[]) => { eqCalls.push(args); return self; };
+  self.select = (cols: unknown) => { selectCalls.push(cols); return self; };
   const promise = Promise.resolve(result);
   self.then = promise.then.bind(promise);
   self.catch = promise.catch.bind(promise);
@@ -93,6 +95,7 @@ async function openAndSave() {
 beforeEach(() => {
   vi.clearAllMocks();
   eqCalls.length = 0;
+  selectCalls.length = 0;
   mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'save_job'
     ? { data: { job_id: 'job-a' }, error: null }
     : { data: null, error: null }));
@@ -106,13 +109,17 @@ describe('JobDetail stale-edit refusal', () => {
     // A billing split change leaves every job total as it was.
     ['billing split', { job_field_shares: [{ field_id: 'f1', customer_id: 'cust-2', split_pct: 50, is_primary: false }] }],
     // Reassigning one field's applicator leaves the job row as it was.
-    ['field dispatch', { job_location_dispatches: [{ job_field_id: 'jf1', applicator_id: 'a2', crew_id: null, dispatch_status: 'assigned' }] }],
+    ['tags', { tags: ['urgent'] }],
+    ['field dispatch', { job_location_dispatches: [{ job_field_id: 'jf1', applicator_id: 'a2', crew_id: null, dispatch_status: 'dispatched' }] }],
   ])('refuses the save when someone else changed the %s after the page loaded', async (_label, change) => {
     serveJob({ ...JOB, ...change });
     await openAndSave();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE));
     expect(mockRpc).not.toHaveBeenCalledWith('save_job', expect.anything());
     expect(eqCalls).toContainEqual(['id', 'job-a']);
+    // The re-read itself asks for every compared line table (the mock would supply them regardless).
+    const reRead = String(selectCalls.filter((c) => typeof c === 'string' && c.includes('job_fields(') && !c.includes('job_number')).at(-1));
+    for (const t of ['job_fields(', 'job_field_shares(', 'job_chemicals(', 'job_location_dispatches(', 'tags']) expect(reRead).toContain(t);
   });
 
   it('refuses the retry of a save whose reply was lost once that save committed', async () => {

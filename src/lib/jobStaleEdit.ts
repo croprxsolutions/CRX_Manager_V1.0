@@ -14,7 +14,7 @@ const JOB_STALE_CHECK_COLUMNS = [
   'application_service_id', 'notes', 'batch_id', 'total_acres', 'total_price_cents', 'call_date',
   'date_proposed', 'time_proposed', 'schedule_date', 'date_expires', 'consultant_id', 'loader_comment',
   'additional_info', 'internal_memo', 'ground_crew_id', 'carrier_rate_gpa', 'loader_tank_capacity',
-  'invoice_id', 'deleted_at',
+  'invoice_id', 'deleted_at', 'tags',
 ];
 const JOB_STALE_CHECK_LINES: Record<string, string[]> = {
   job_fields: ['field_id', 'acres_to_treat', 'planted_acres', 'crop', 'strip', 'pests', 'sort_order'],
@@ -65,4 +65,13 @@ export async function jobChangedSinceLoaded(jobId: string, loaded: JobStaleSnaps
   row.job_chemicals = await withAdminCosts('job_chemicals', chems, isAdmin);
   const current = pickJobStaleSnapshot(row);
   return Object.keys(current).filter((k) => current[k] !== loaded[k]);
+}
+
+/** The snapshot with its dispatch lines re-read, after this page's own Dispatch wizard changed them. */
+export async function withFreshDispatches(jobId: string, snapshot: JobStaleSnapshot): Promise<JobStaleSnapshot> {
+  const { data, error } = await supabase
+    .from('job_location_dispatches').select(LINE_SELECT.job_location_dispatches).eq('job_id', jobId);
+  if (error) throw error;
+  const fresh = pickJobStaleSnapshot({ job_location_dispatches: data ?? [] });
+  return { ...snapshot, job_location_dispatches: fresh.job_location_dispatches };
 }

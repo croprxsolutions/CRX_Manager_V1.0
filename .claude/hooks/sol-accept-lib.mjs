@@ -656,18 +656,22 @@ export function priorAcceptances(proofs, { prNumber, prUrl, nowMs = Date.now(), 
 }
 
 /**
- * The PR's own diff of `file` at `head` (from its merge-base with `base`), with hunk positions and
- * blob ids dropped, so a catch-up merge that only moves base code elsewhere compares equal.
- * `git(args)` returns stdout and throws on failure. null when the file is missing at `head` or git fails.
+ * The PR's own diff of `file` at `head` (from its merge-base with `base`), whole, plus
+ * the file's blob id at `head`, so any change to the file's bytes, by the PR or its base, compares unequal.
+ * `git(args)` returns stdout and throws on failure. null when the file is missing at `head`, unchanged
+ * by the PR, or git fails.
  */
 export function prOwnChange(git, base, head, file) {
   try {
     git(["cat-file", "-e", `${head}:${file}`]);
     const fork = String(git(["merge-base", base, head])).trim();
     // Whole patch, hunk positions and blob ids included: an edit moved elsewhere in the file is a new change.
-    const out = String(git(["diff", "--no-color", "--no-renames", "--no-ext-diff", fork, head, "--", file]));
+    // --no-textconv: no configured converter program runs; the file's own bytes are named too, so a
+    // mode-only patch never hides a content change.
+    const out = String(git(["diff", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv", fork, head, "--", file]));
     // A file the PR does not change: its exposure may have widened through other files, so nothing carries.
-    return out.trim() ? out.replace(/\r\n/g, "\n") : null;
+    if (!out.trim()) return null;
+    return `${out.replace(/\r\n/g, "\n")}\nblob ${String(git(["rev-parse", `${head}:${file}`])).trim()}`;
   } catch { return null; }
 }
 
@@ -686,6 +690,7 @@ export function carriedAcceptances({ record, prNumber, prUrl, proofs, nowMs = Da
   for (const f of record.findings) {
     if (!("same_as" in f)) return { problem: `Sol gave finding ${f.n} no ${SAME_AS_ACCEPTED_TOKEN} or NEW label` };
     if (f.same_as === null) return { problem: `Sol marked finding ${f.n} NEW` };
+    if (!/\s[-–—]\s+\S/.test(f.text)) return { problem: `Sol gave finding ${f.n} no summary to compare with the skipped one` };
     const c = shown.get(f.same_as);
     if (!c || c.key !== carryKeyOf(c.root ?? {})) return { problem: `finding ${f.n} names ${f.same_as}, which Sol was not shown as a skipped finding of this pull request` };
     if (used.has(c.key)) return { problem: `two findings name the same skipped finding (${c.key})` };

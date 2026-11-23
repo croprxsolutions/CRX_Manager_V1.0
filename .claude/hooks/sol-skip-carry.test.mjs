@@ -167,6 +167,7 @@ try {
 
   // Other refusals.
   assert.match(carry(recordOf(["SOL_FINDING 1 HIGH: src.ts:6 - x", "SOL_FINDING_COUNT 1"])).problem, /no SAME_AS_ACCEPTED or NEW label/);
+  assert.match(carry(recordOf(["SOL_FINDING 1 HIGH: src.ts:6 SAME_AS_ACCEPTED d240b31a7419/1", "SOL_FINDING_COUNT 1"])).problem, /no summary/, "a label with no summary never carries");
   assert.match(carry(recordOf(["SOL_FINDING 1 HIGH: other.ts:1 - x SAME_AS_ACCEPTED d240b31a7419/1", "SOL_FINDING_COUNT 1"])).problem, /same file/);
   assert.match(carry(recordOf(["SOL_FINDING 1 BLOCKER: src.ts:6 - x SAME_AS_ACCEPTED d240b31a7419/1", "SOL_FINDING_COUNT 1"])).problem, /rose from HIGH to BLOCKER/);
   assert.match(carry(recordOf(["SOL_FINDING 1 HIGH: src.ts:6 - x SAME_AS_ACCEPTED 0123456789ab/1", "SOL_FINDING_COUNT 1"])).problem, /was not shown/);

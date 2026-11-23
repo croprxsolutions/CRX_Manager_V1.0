@@ -71,7 +71,7 @@ import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDest
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "./pr-claim-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
-import { ownerAcceptedForPr, trackedNamesIn } from "./sol-accept-lib.mjs";
+import { ownerAcceptedForPr, trackedNamesIn, usesCarriedSkip } from "./sol-accept-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
 
@@ -665,22 +665,28 @@ function gateRequest(request) {
   // The PR's own commits: a Sol proof of an earlier one counts, with no GitHub call per proof file.
   const prCommits = new Set((Array.isArray(pr.commits) ? pr.commits : []).map((c) => String(c?.oid || "").toLowerCase()));
   const proofs = [];
-  // Only untracked proofs can stand for Mason's own skip behind a carried one (Sol, 2026-11-23).
-  const rootProofs = [];
+  const found = [];
   for (const stateDir of proofSearchDirs(projectDir, listWorktreesFromProjectDir)) {
     try {
       if (!existsSync(stateDir)) continue;
-      const tracked = trackedNamesIn(stateDir);
       for (const f of readdirSync(stateDir)) {
         if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(f)) continue;
         try {
           const data = JSON.parse(readFileSync(path.join(stateDir, f), "utf8"));
           proofs.push(data);
-          if (tracked && !tracked.has(f)) rootProofs.push(data);
+          found.push({ data, stateDir, f });
         } catch { continue; }
       }
     } catch { /* unreadable directory means no proof HERE — keep looking */ }
   }
+  // Only untracked proofs can stand for Mason's own skip behind a carried one (Sol, 2026-11-23); git is
+  // asked only when a carried proof is present, so ordinary merges spend nothing on it.
+  const trackedByDir = new Map();
+  const rootProofs = proofs.some(usesCarriedSkip) ? found.filter(({ stateDir, f }) => {
+    if (!trackedByDir.has(stateDir)) trackedByDir.set(stateDir, trackedNamesIn(stateDir));
+    const tracked = trackedByDir.get(stateDir);
+    return tracked !== null && !tracked.has(f);
+  }).map(({ data }) => data) : [];
   // A proof of an earlier commit covers the commits after it unless those
   // touch the Sol list; same module, same budgeted gh. Exact-head proofs are tried first.
   const proof = firstAcceptedProof(proofs, headSha, (data, exactHead) =>

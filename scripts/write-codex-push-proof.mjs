@@ -49,7 +49,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -3161,6 +3161,16 @@ function solCarryCandidates(root, headSha, pr, { target, releaseRules }) {
   });
 }
 
+// The newest full Sol run on a head owns its findings record; an older overlapping run never overwrites it.
+const runOwnerFile = (root, headSha) => path.join(root, ".claude", "session-state", `codex-review-run-${headSha}.txt`);
+function writeRunOwner(root, headSha, token) {
+  mkdirSync(path.dirname(runOwnerFile(root, headSha)), { recursive: true });
+  writeFileSync(runOwnerFile(root, headSha), token, "utf8");
+}
+function readRunOwner(root, headSha) {
+  try { return readFileSync(runOwnerFile(root, headSha), "utf8").trim(); } catch { return null; }
+}
+
 // A BLOCKERS run with well-formed SOL_FINDING lines leaves its BLOCKER/HIGH list,
 // bound to the reviewed head and base, so Mason can accept a finding by name.
 function saveBlockersRecord(root, headSha, baseSha, stdout, { reviewRef, releaseRules, carryCandidates = [] }) {
@@ -3432,6 +3442,11 @@ export function run(argv = process.argv.slice(2)) {
       return 1;
     }
   }
+  const runToken = randomBytes(16).toString("hex");
+  try { writeRunOwner(root, headBefore, runToken); } catch (err) {
+    process.stderr.write(`Could not mark this Sol run as the newest on this head (${err?.code || err}); run again.\n`);
+    return 1;
+  }
   process.stdout.write(`${solRoundLine(round, preflight.facts?.pr?.number)}\n`);
   recordSolRound(ledger, headBefore, preflight.facts?.pr?.number);
   let reviewWorkspace;
@@ -3519,6 +3534,11 @@ export function run(argv = process.argv.slice(2)) {
     return 0;
   }
 
+  if (readRunOwner(root, headBefore) !== runToken) {
+    // A newer full run on this head started after this one: its result, not this older one, decides (Sol, 2026-11-23).
+    process.stderr.write("A newer Sol run on this head started after this one; this run's result is discarded.\n");
+    return 1;
+  }
   clearCodexPushProof({ root, headSha: headBefore });
   if (!verdict && proofBase && codexReviewIsBlockers({ status: result.status, stdout: result.stdout })) {
     saveBlockersRecord(root, headAfter, proofBase, result.stdout, { reviewRef: target, releaseRules, carryCandidates });

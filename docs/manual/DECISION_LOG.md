@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-22 — #2264: Mason owner-accepted 1 Sol finding(s) at `fdf75b56929b`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2264 at `fdf75b56929b` (base `f9750a8a4b66`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270218100000_f05_order_line_quantity_guard.sql:62`, text sha256 `a0571bb37993f57e` (the wording stays with the proof, not here)
+  Mason's reason: old double-booked orders get fixed by hand in F05b (ref cfb23a2ce43d)
+
 ## 2026-11-22 — PR #2231 (#2193): Mason overrides Sol round 4's one HIGH; hand merge
 
 **Decision (Mason, 2026-11-22, relayed by the bug captain: "A").** Sol round 4 (head `d86e4eefc`) left one HIGH: the MCP apply door runs the guard code from the main checkout, so the new prerequisite check protects that door only once the main checkout is updated past this PR. Override reason: the check is active once installed, and the modes-of-action load is applied only at release, after this PR lands; the script door (the normal path) carries the check itself. The race Sol raised in rounds 1-3 is fixed (in-transaction re-count under the ingredient lock). The skip tool cannot accept findings on gate files, and the agent merge guard needs a clean Sol on them, so Mason or Taha merges PR #2231 by hand; agents do not land it. Sol's MED/LOW findings are tracked in #2230.

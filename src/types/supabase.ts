@@ -18589,6 +18589,7 @@ export type Database = {
       close_delivery_receipt: {
         Args: {
           p_delivery_id: string
+          p_expected_queued_at?: string
           p_idempotency_key?: string
           p_reason: string
         }

@@ -224,8 +224,8 @@ function ungrantedNewColumns(sql: string, anonReads = true): string[] {
     for (const add of m[2].matchAll(/ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?([a-z_][a-z0-9_]*)"?/gi)) {
       const column = add[1].toLowerCase();
       if (['constraint', 'primary', 'unique', 'foreign', 'check', 'exclude'].includes(column)) continue;
-      // Checked before the cost-column skip; PUBLIC counts because anon inherits it.
-      if (!anonReads && new RegExp(`GRANT[^;]*\\(([^)]*\\b${column}\\b[^)]*)\\)[^;]*\\bON\\s+(?:TABLE\\s+)?(?:public\\.)?"?${table}"?\\s+TO\\s+[^;]*\\b(?:anon|public)\\b`, 'i').test(text)) {
+      // Checked before the cost-column skip; PUBLIC counts because anon inherits it; a table-wide grant counts too.
+      if (!anonReads && new RegExp(`GRANT\\s[^;(]*(?:\\(([^)]*\\b${column}\\b[^)]*)\\)[^;(]*)?\\bON\\s+(?:TABLE\\s+)?(?:public\\.)?"?${table}"?\\s+TO\\s+[^;]*\\b(?:anon|public)\\b`, 'i').test(text)) {
         missing.push(`${table}.${column}: anon must not be granted (KI-123)`);
       }
       if ((COST_COLUMNS[table as CostTable] as readonly string[] | undefined)?.includes(column)) continue;
@@ -263,6 +263,8 @@ describe('new columns on the column-carved cost tables ship with their grants', 
     const SIGNED_IN = 'ALTER TABLE public.invoices ADD COLUMN zz_new text;\nGRANT SELECT (zz_new) ON public.invoices TO authenticated;\nGRANT REFERENCES (zz_new) ON public.invoices TO authenticated;';
     expect(ungrantedNewColumns(SIGNED_IN, false)).toEqual([]);
     expect(ungrantedNewColumns(`${SIGNED_IN}\nGRANT SELECT (zz_new) ON public.invoices TO anon;`, false)).toEqual(['invoices.zz_new: anon must not be granted (KI-123)']);
+    expect(ungrantedNewColumns(`${SIGNED_IN}\nGRANT SELECT ON public.invoices TO anon;`, false)).toEqual(['invoices.zz_new: anon must not be granted (KI-123)']);
+    expect(ungrantedNewColumns(`${SIGNED_IN}\nGRANT SELECT (zz_other) ON public.invoices TO anon;`, false)).toEqual([]);
     expect(ungrantedNewColumns(`${SIGNED_IN}\nGRANT SELECT (zz_new) ON public.invoices TO PUBLIC;`, false)).toEqual(['invoices.zz_new: anon must not be granted (KI-123)']);
     expect(ungrantedNewColumns('ALTER TABLE public.invoices ADD COLUMN total_cost_cents bigint;\nGRANT SELECT (total_cost_cents) ON public.invoices TO anon;', false)).toEqual(['invoices.total_cost_cents: anon must not be granted (KI-123)']);
     expect(ungrantedNewColumns('ALTER TABLE ONLY quotes ADD COLUMN IF NOT EXISTS zz_a int, ADD zz_b int;')).toEqual([...ALL_READS('quotes', 'zz_a'), ...ALL_READS('quotes', 'zz_b')]);

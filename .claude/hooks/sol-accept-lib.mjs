@@ -59,7 +59,8 @@ const COUNT_RE = new RegExp(`^${SOL_FINDING_COUNT_TOKEN}:?\\s+(\\d{1,2})$`);
 // A markdown list mark, bold or code span Sol may wrap a line in.
 const unwrap = (line) => line.replace(/^(?:[-*]\s+)?(?:\*\*|`)?/, "").replace(/(?:\*\*|`)$/, "").trim();
 
-export function parseSolFindings(stdout) {
+// `labels`: Sol was shown earlier skips and asked to label each finding; otherwise no label is split off.
+export function parseSolFindings(stdout, { labels = false } = {}) {
   const lines = String(stdout || "").split(/\r?\n/).map((l) => unwrap(l.trim())).filter((l) => l.includes(SOL_FINDING_TOKEN));
   const findings = [];
   const counts = [];
@@ -69,7 +70,7 @@ export function parseSolFindings(stdout) {
     const m = FINDING_RE.exec(line);
     if (!m) return { problem: `a ${SOL_FINDING_TOKEN} line is not in the required form: ${line.slice(0, 80)}` };
     // Sol's own "same as an accepted finding" label (Mason, 2026-11-22), split off the wording.
-    const lab = LABEL_RE.exec(m[3].trim());
+    const lab = labels ? LABEL_RE.exec(m[3].trim()) : null;
     const text = (lab ? m[3].trim().slice(0, lab.index) : m[3]).trim();
     if (text.length > MAX_TEXT) return { problem: `finding ${m[1]} is longer than ${MAX_TEXT} characters` };
     if (BREAK_RE.test(text)) return { problem: `finding ${m[1]} contains a line break` };
@@ -518,9 +519,7 @@ export function insertDecisionEntry(log, entry) {
 export function collectAcceptances({ record, readAcceptance, readSkips = () => [], checkReply, checkShown }) {
   // Plain skip replies first (one receipt may cover several findings); the first valid one wins.
   const skipped = new Map();
-  const skips = [...readSkips()];
-  let anyReceipt = skips.length > 0;
-  for (const s of skips.sort((a, b) => String(a?.approvedAt).localeCompare(String(b?.approvedAt)))) {
+  for (const s of [...readSkips()].sort((a, b) => String(a?.approvedAt).localeCompare(String(b?.approvedAt)))) {
     const r = verifySolSkip({ approval: s, record, checkReply, checkShown });
     if (!r.ok) continue; // a receipt from an earlier run on this head simply does not count
     // A number his reply named but was not shown counts only if an earlier receipt skipped it.
@@ -532,18 +531,12 @@ export function collectAcceptances({ record, readAcceptance, readSkips = () => [
     }
   }
   const accepted = [];
-  let problem = null;
   for (const f of record.findings) {
     if (skipped.has(f.n)) { accepted.push(skipped.get(f.n)); continue; }
-    const approval = readAcceptance(f.n);
-    if (approval != null) anyReceipt = true;
-    const r = verifySolAcceptance({ approval, record, n: f.n, checkReply });
-    if (!r.ok) { problem ??= r.reason; continue; }
+    const r = verifySolAcceptance({ approval: readAcceptance(f.n), record, n: f.n, checkReply });
+    if (!r.ok) return { problem: r.reason };
     accepted.push(r);
   }
-  // `anyReceipt`: a stored reply of Mason's exists for this head, even a partial or refused one, so his
-  // reply decides and no earlier skip carries over it.
-  if (problem) return { problem, anyReceipt };
   if (new Set(accepted.map((a) => `${a.payload.pullRequest} ${String(a.payload.pullRequestUrl ?? "").toLowerCase()}`)).size !== 1) return { problem: "the acceptances name different pull requests" };
   return { accepted };
 }
@@ -650,8 +643,10 @@ export function prOwnChange(git, base, head, file) {
   try {
     git(["cat-file", "-e", `${head}:${file}`]);
     const fork = String(git(["merge-base", base, head])).trim();
-    return String(git(["diff", "--no-color", "--no-renames", "--no-ext-diff", fork, head, "--", file])).split(/\r?\n/)
-      .filter((l) => !/^(?:@@|index )/.test(l)).join("\n");
+    // Whole patch, hunk positions and blob ids included: an edit moved elsewhere in the file is a new change.
+    const out = String(git(["diff", "--no-color", "--no-renames", "--no-ext-diff", fork, head, "--", file]));
+    // A file the PR does not change: its exposure may have widened through other files, so nothing carries.
+    return out.trim() ? out.replace(/\r\n/g, "\n") : null;
   } catch { return null; }
 }
 

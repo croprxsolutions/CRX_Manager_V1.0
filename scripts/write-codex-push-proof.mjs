@@ -3151,7 +3151,8 @@ export function readLocalProofs(root) {
 // its reviewed head in this branch.
 function solCarryCandidates(root, headSha, pr, { target, releaseRules }) {
   if (target !== STAGING_BASE || releaseRules || pr?.baseRef !== "staging" || !Number.isInteger(pr?.number)) return [];
-  return priorAcceptances(readLocalProofs(root), {
+  // This run deletes the proof bound to this head, so a skip recorded there cannot be a root here.
+  return priorAcceptances(readLocalProofs(root).filter((p) => String(p?.head_sha).toLowerCase() !== headSha.toLowerCase()), {
     prNumber: pr.number, prUrl: pr.url,
     onBranch: (sha) => gitOk(["merge-base", "--is-ancestor", sha, headSha], root) === true,
   });
@@ -3161,7 +3162,7 @@ function solCarryCandidates(root, headSha, pr, { target, releaseRules }) {
 // bound to the reviewed head and base, so Mason can accept a finding by name.
 function saveBlockersRecord(root, headSha, baseSha, stdout, { reviewRef, releaseRules, carryCandidates = [] }) {
   const file = path.join(root, ".claude", "session-state", blockersRecordName(headSha));
-  const parsed = parseSolFindings(stdout);
+  const parsed = parseSolFindings(stdout, { labels: carryCandidates.length > 0 });
   if (parsed.problem) {
     try { unlinkSync(file); } catch { /* none saved */ }
     process.stderr.write(`Sol's findings cannot be owner-accepted (${parsed.problem}); fix them or re-run.\n`);
@@ -3212,17 +3213,18 @@ function runCarryOwnerAccepted(root, options) {
   let got = collectAcceptances({
     record, readAcceptance: (n) => readJson(solAcceptFileName(fromHead, n)), checkShown: assertSkipShown, readSkips: () => readSkipReceipts(stateDir, fromHead), checkReply: assertReplyAlone,
   });
-  // No reply of Mason's for this run: every finding may instead be one Sol marked the same as a
-  // finding he already skipped on this PR (Mason, 2026-11-22; sol-accept-lib.mjs carryForRecord).
-  const carried = Boolean(got.problem) && !got.anyReceipt && record.findings.every((f) => typeof f.same_as === "string");
+  // Every finding Sol marked the same as one Mason already skipped on this PR: such a run is never put to
+  // him (Mason, 2026-11-22), so it carries first; a carry that fails falls back to his own replies.
+  let carried = record.findings.every((f) => typeof f.same_as === "string");
   if (carried) {
     const shown = Array.isArray(record.carry_candidates) ? record.carry_candidates[0] : null;
     const c = carryForRecord({
       record, proofs: readLocalProofs(root), prNumber: shown?.pull_request, prUrl: shown?.pull_request_url,
       git: (args) => { const out = runGit(args, { cwd: root, fallback: null }); if (out === null) throw new Error("git failed"); return out; },
     });
-    if (c.problem) return refuse(`${c.problem}; Mason's earlier skip does not carry, so ask him: node scripts/owner-accept-sol-finding.mjs <numbers>`);
-    got = c;
+    if (!c.problem) got = c;
+    else if (got.problem) return refuse(`${c.problem}; Mason's earlier skip does not carry, so ask him: node scripts/owner-accept-sol-finding.mjs <numbers>`);
+    else carried = false;
   }
   if (got.problem) return refuse(got.problem);
   let entries;
@@ -3422,7 +3424,12 @@ export function run(argv = process.argv.slice(2)) {
   process.stdout.write(`${solRoundLine(round, preflight.facts?.pr?.number)}\n`);
   recordSolRound(ledger, headBefore, preflight.facts?.pr?.number);
   // A record from an earlier run on this head must never be used after this one (Astra, 2026-11-22).
-  try { unlinkSync(path.join(root, ".claude", "session-state", blockersRecordName(headBefore))); } catch { /* none */ }
+  try { unlinkSync(path.join(root, ".claude", "session-state", blockersRecordName(headBefore))); } catch (err) {
+    if (err?.code !== "ENOENT") {
+      process.stderr.write(`Could not remove the earlier Sol findings record for this head (${err?.code || err}); close whatever holds it and run again.\n`);
+      return 1;
+    }
+  }
   let reviewWorkspace;
   let result;
   let codexRun = { codexBin, fallbackUsed: false, primaryResult: null };

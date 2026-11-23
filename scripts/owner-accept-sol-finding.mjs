@@ -95,6 +95,16 @@ function openPullRequest() {
   return found;
 }
 
+// Sol marked every finding the same as one Mason already skipped on this PR (Mason, 2026-11-22): such a run
+// is never put to him, so no reply of his can be misread; it carries, or it is asked like any other run.
+const allSame = record.findings.every((f) => typeof f.same_as === "string");
+function carryNow(pr) {
+  if (!allSame || pr.baseRefName !== "staging") return null;
+  const c = carryForRecord({ record, proofs: readLocalProofs(checkout), git, prNumber: pr.number, prUrl: pr.url });
+  return c.problem ? null : c;
+}
+const NO_QUESTION = "Sol marked every finding a repeat of a skip Mason already gave on this pull request, so it carries: do not ask him. Run node scripts/owner-accept-sol-finding.mjs --log, commit docs/manual/DECISION_LOG.md alone, then node scripts/write-codex-push-proof.mjs --carry-owner-accepted";
+
 const argv = process.argv.slice(2);
 
 if (argv.length === 1 && argv[0] === "--log") {
@@ -102,15 +112,10 @@ if (argv.length === 1 && argv[0] === "--log") {
     record, readAcceptance: (n) => readJson(solAcceptFileName(head, n)), checkShown: assertSkipShown, readSkips: () => readSkipReceipts(stateDir, head), checkReply: assertReplyAlone,
   });
   let entry;
-  if (!got.problem) entry = decisionLogEntry({ record, accepted: got.accepted });
-  else if (!got.anyReceipt && record.findings.every((f) => typeof f.same_as === "string")) {
-    // Sol marked every finding the same as one Mason already skipped on this PR (Mason, 2026-11-22): no new question.
-    const pr = openPullRequest();
-    if (pr.baseRefName !== "staging") die("only a pull request into staging can carry Mason's earlier skip; ask him: node scripts/owner-accept-sol-finding.mjs <numbers>");
-    const carried = carryForRecord({ record, proofs: readLocalProofs(checkout), git, prNumber: pr.number, prUrl: pr.url });
-    if (carried.problem) die(`${carried.problem}; Mason's earlier skip does not carry, so ask him: node scripts/owner-accept-sol-finding.mjs <numbers>`);
-    entry = carriedDecisionLogEntry({ record, accepted: carried.accepted });
-  } else die(`${got.problem}. Every BLOCKER/HIGH of the run needs Mason's own skip reply first.`);
+  const carried = allSame ? carryNow(openPullRequest()) : null;
+  if (carried) entry = carriedDecisionLogEntry({ record, accepted: carried.accepted });
+  else if (!got.problem) entry = decisionLogEntry({ record, accepted: got.accepted });
+  else die(`${got.problem}. Every BLOCKER/HIGH of the run needs Mason's own skip reply first.`);
   const file = path.join(checkout, ...DECISION_LOG_PATH.split("/"));
   // Untrimmed: the proof writer rebuilds this file from the committed bytes exactly.
   const committed = String(execFileSync("git", ["show", `HEAD:${DECISION_LOG_PATH}`], {
@@ -133,6 +138,7 @@ if (!/^[0-9A-Za-z_-]{8,128}$/.test(String(sessionId || ""))) die("run this insid
 if (!promptHookSeen({ dirs: [stateDir], sessionId })) die(hooklessSessionRefusal({ checkout, sessionId }));
 
 const pr = openPullRequest();
+if (carryNow(pr)) die(NO_QUESTION);
 // The code running now must be the bytes committed at this head (in this checkout).
 try {
   assertOwnerTrustFilesReviewed({

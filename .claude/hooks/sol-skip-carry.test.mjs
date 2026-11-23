@@ -39,7 +39,7 @@ const DAY = 24 * 60 * 60 * 1000;
     "SOL_FINDING 2 BLOCKER: x.sql:9 - worse NEW",
     "SOL_FINDING 3 HIGH: y.ts:1 - plain",
     "SOL_FINDING_COUNT 3",
-  ].join("\n"));
+  ].join("\n"), { labels: true });
   assert.deepEqual(p.findings, [
     { n: 1, severity: "HIGH", text: "src/a.ts:3 - bad", same_as: "d240b31a7419/1" },
     { n: 2, severity: "BLOCKER", text: "x.sql:9 - worse", same_as: null },
@@ -48,8 +48,11 @@ const DAY = 24 * 60 * 60 * 1000;
   // The label never counts toward the 400-character limit, and never enters the wording.
   const long = `src/a.ts:3 - ${"x".repeat(386)}`;
   assert.equal(long.length, 399);
-  const q = parseSolFindings(`SOL_FINDING 1 HIGH: ${long} SAME_AS_ACCEPTED d240b31a7419/1\nSOL_FINDING_COUNT 1`);
+  const q = parseSolFindings(`SOL_FINDING 1 HIGH: ${long} SAME_AS_ACCEPTED d240b31a7419/1\nSOL_FINDING_COUNT 1`, { labels: true });
   assert.equal(q.findings[0].text, long);
+  // No earlier skips shown: nothing is a label, so a finding ending in NEW keeps its wording.
+  const plain = parseSolFindings("SOL_FINDING 1 HIGH: src/a.ts:3 - reads unchecked NEW\nSOL_FINDING_COUNT 1");
+  assert.deepEqual(plain.findings[0], { n: 1, severity: "HIGH", text: "src/a.ts:3 - reads unchecked NEW" });
   // A malformed label stays in the wording (no carry), and the finding is still there for Mason.
   const r = parseSolFindings("SOL_FINDING 1 HIGH: src/a.ts:3 - bad SAME_AS_ACCEPTED zz\nSOL_FINDING_COUNT 1");
   assert.equal("same_as" in r.findings[0], false);
@@ -98,7 +101,7 @@ try {
   assert.deepEqual(priorAcceptances(proofs, { prNumber: PR, prUrl: URL, nowMs: now + 6 * DAY }), [], "older than 7 days: nothing");
 
   const recordOf = (lines, head = newHead, base = base2) => ({
-    ...buildBlockersRecord({ headSha: head, baseSha: base, findings: parseSolFindings(lines.join("\n")).findings, carryCandidates: candidates }),
+    ...buildBlockersRecord({ headSha: head, baseSha: base, findings: parseSolFindings(lines.join("\n"), { labels: true }).findings, carryCandidates: candidates }),
     review_ref: "origin/staging", release_rules: false,
   });
   const carry = (record, extra = {}) => carryForRecord({ record, proofs, git: gitFn, prNumber: PR, prUrl: URL, nowMs: now, ...extra });

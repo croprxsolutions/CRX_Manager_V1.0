@@ -41,7 +41,7 @@ import {
   collectCodexThreads,
 } from "./codex-bot-review-lib.mjs";
 import { findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
-import { ownerAcceptedForPr } from "./sol-accept-lib.mjs";
+import { OWNER_ACCEPTED_CARRIED, ownerAcceptedForPr } from "./sol-accept-lib.mjs";
 import { readTeammateComments, teammateCommentsDenial, READY_TO_MERGE_LINE } from "./teammate-comments-lib.mjs";
 
 const PROTECTED_BRANCH_RE = /^(?:main|master|production)$/i;
@@ -443,7 +443,9 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
       }
     } catch { /* an unreadable directory holds no proof — keep looking */ }
   }
+  // A carried repeat skip is for staging PRs only, never a live apply (Sol, 2026-11-22).
   const proven = proofs.some((data) => proofValid(data, head, now, baseSha, APPLY_SOL_PROOF_MAX_AGE_MS)
+    && data?.carry?.mode !== OWNER_ACCEPTED_CARRIED
     && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead: String(data.head_sha).toLowerCase() === String(head).toLowerCase(), proofs, nowMs: now }));
   if (!proven) {
     return refuse(`no fresh gpt-6.2-sol/high proof is bound to ${number}'s head ${head.slice(0, 12)} and base ${baseSha.slice(0, 12)}.`);

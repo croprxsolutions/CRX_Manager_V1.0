@@ -1124,6 +1124,8 @@ Fix it together with KI-157, where every invoice PDF reads the live product name
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · HIGH · Mason (field-app billing) · plan W1-03 · #2176.
 
+> **MUST DO (Mason, 2026-11-22).** Sol round 9 on #2247 re-found this on the transfer's saved-split path (`job_field_shares` x `acres_to_treat`, `20270226150000` ~L415). Mason skipped it for #2247 on the condition that this known issue (KI-185, GitHub #2176) is fixed next, in its own PR after #2247; it is no longer CAN-WAIT (To-Do 5.7). #2247 itself still bills planned acres.
+
 **HIGH · OPEN (source-confirmed on main and staging; not reproduced end to end) · field-app billing/stock · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 6) · Mason (field-app billing) · GitHub #2176**
 Job completion stores the actual acres per field on the application record (`_complete_job_replay_impl_20261015`,
 `20261217100000` ~L783-813; with no acres supplied it falls back to the plan) but never updates `job_fields` or `job_chemicals`. Transfer to Invoice
@@ -1161,7 +1163,7 @@ total, billed unit and unit price, unchanged charge, both grouping configuration
 
 ### KI-195 — The Chemical Application Report prints today's EPA number, not the job's saved one
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Mason (field-app billing) · plan W2-26 · #2183.
+> **2026-11-23:** Fix in review (PR to staging; migration `20270225193000` not yet applied) · MED · plan W2-26 · #2183. The four printouts read `job_product_epa`; REI/PHI sources are unchanged; see `docs/changelog.d/2026-11-23-ki195-printouts-kept-epa.md`. The description below is the state before this fix.
 
 **MED · OPEN (source-confirmed) · restricted-use/regulatory records · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 1) · unassigned · GitHub #2183**
 Sprayed jobs keep their EPA number in `job_product_epa` (`20261204120000` ~L143-152), including an explicit unknown,
@@ -1355,7 +1357,8 @@ The [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) (sweep 3 #9) re-confirm
 logged here, not as a new KI.
 The 2026-11-02 cost audit noted more functions in this same ownership and role-check area (not cost); the list is in
 Mason's private notes until the scoping work is built. It also noted that an admin's automatic draft invoice for a job
-with a below-cost line always fails, so that job is billed by hand.
+with a below-cost line always fails, so that job is billed by hand; candidate 20270226150000 (not yet live) writes each job line's
+real quantity in the sold unit, so the ordinary check judges it exactly; a unit that can't convert stops Create Invoice by name.
 
 ### KI-07 — Other small security gaps
 
@@ -1423,6 +1426,8 @@ get their own lock. Exploit-level detail is held privately until the fix is live
 Mason decided 2026-11-19 that Page Access also locks money actions, but the Invoices and Record Payments actions wait
 for Taha after 2026-12-15 (billing is his area until then). Reuse `public._require_page_access` from KI-119's
 migration, adding those page keys to it.
+Also in scope (Sol round 9 on #2247, 2026-11-22; Mason skipped it there as pre-existing): Create Invoice from a job
+(`transfer_job_to_invoice`) checks only for an active admin or sales rep, not the rep's denied Job Schedule and Field Invoices pages.
 
 ### KI-122 — An admin password reset leaves the user's existing sign-ins open and is not audited
 

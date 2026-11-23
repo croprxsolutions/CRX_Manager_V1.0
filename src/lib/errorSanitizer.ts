@@ -367,6 +367,20 @@ export function sanitizeError(error: unknown): string {
     return detail ? `${detail.charAt(0).toUpperCase()}${detail.slice(1)}.`
       : 'This customer still has open work (orders, deliveries, holds, quotes, invoices, spray jobs, returns or prepay money). Finish, bill or settle it before deactivating it.';
   }
+  // 20270226150000 (Sol round 1 MED): Create Invoice on a job deleted since the screen opened.
+  if (/^JOB_DELETED(?::|$)/.test(message)) {
+    return "This job was deleted, so it can't be invoiced. Nothing was invoiced.";
+  }
+  // 20270226150000: Create Invoice on a spray job names the chemical it can't invoice and why (never the cost).
+  const jobLine = /^(JOB_LINE_(?:BELOW_COST|UNIT_UNCONVERTIBLE|COST_MISSING|ROUNDING|QUANTITY_INVALID|PRICE_NOT_WHOLE_CENTS)|JOB_FIELD_NO_BILLING_SPLIT|JOB_INVOICED_LOCKED|JOB_COMPLETED_CHEMICALS_LOCKED)(?::|$)/.exec(message)?.[1];
+  if (jobLine) {
+    // Product names and units are typed by users: fold line breaks and drop text-direction and invisible characters so they cannot split or reorder the sentence.
+    return message.slice(jobLine.length).replace(/^:\s*/, '')
+      .replace(/\p{Cc}+/gu, ' ').replace(/[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, '').replace(/\s+/g, ' ').trim()
+      || (jobLine === 'JOB_LINE_BELOW_COST'
+        ? 'A chemical on this job is priced below its cost. Nothing was invoiced; its price must be corrected before this job can be invoiced.'
+        : "A chemical on this job can't be invoiced as recorded. Nothing was invoiced; check its quantity, unit and cost.");
+  }
   // #2063 (20270224130000): the server names only invoices the caller may read and what to do; keep it whole.
   if (/^BLEND_TICKET_ALREADY_BILLED:/.test(message)) {
     return message.slice('BLEND_TICKET_ALREADY_BILLED:'.length)

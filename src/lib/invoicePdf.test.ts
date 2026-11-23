@@ -1237,10 +1237,21 @@ describe('review #1873: the printed amounts agree and add up', () => {
   });
 
   it('a field application unit price prints from whole cents', async () => {
-    await generateInvoicePdf(makeInvoiceData({ items: [makeItem({ unit_price_cents: 1005, gl_lb_unit: 'GL' })] }));
+    await generateInvoicePdf(makeInvoiceData({ items: [makeItem({ unit_price_cents: 1005, unit_size: 'GL', gl_lb_unit: 'GL' })] }));
     const products = vi.mocked((await import('jspdf-autotable')).default).mock.calls
       .map(([, o]) => o as { head: string[][]; body: string[][] }).find((o) => o.head[0][0] === 'Product')!;
     expect(products.body[0]).toContain('$10.05 GL');
+  });
+
+  // Spray-job Sol round 3: a line priced per its sold unit prints that unit, not the applied amount's GL/LB unit
+  // (2 Gal of a quart product bills as 8 Qt at $10.00 per Qt, not "per GL").
+  it('a field application unit price names the unit it is priced in', async () => {
+    await generateInvoicePdf(makeInvoiceData({ items: [makeItem({ quantity: 8, unit_size: 'Qt', unit_price_cents: 1000,
+      extended_cents: 8000, gl_lb_unit: 'GL' })] }));
+    const products = vi.mocked((await import('jspdf-autotable')).default).mock.calls
+      .map(([, o]) => o as { head: string[][]; body: string[][] }).find((o) => o.head[0][0] === 'Product')!;
+    expect(products.body[0]).toContain('$10.00 Qt');
+    expect(products.body[0]).not.toContain('$10.00 GL');
   });
 
   // LOW: a forwarded void must not look live.

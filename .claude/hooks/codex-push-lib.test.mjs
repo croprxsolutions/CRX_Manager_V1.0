@@ -934,6 +934,7 @@ assert.equal(
     ...codexProof,
     codex_ran: false,
     carried_forward: true,
+    review_ref: "origin/main",
     carry: {
       mode: "disjoint",
       from_head: "d".repeat(40),

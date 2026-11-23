@@ -559,7 +559,7 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
           try {
             const data = JSON.parse(readFileSync(p, "utf8"));
             // The commits after the reviewed one must be notes only (Sol, 2026-10-29).
-            return proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor: isAncestorLocally, mergeBase: mergeBaseLocally })
+            return proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor: isAncestorLocally, mergeBase: mergeBaseLocally, baseRef: pullRequest?.baseRefName ?? null })
               && ownerAcceptedForPr(data, { number: pullRequest?.number, url: pullRequest?.url, exactHead: false })
               && typeof laterChangesLowRisk === "function" && laterChangesLowRisk(String(data.head_sha).toLowerCase(), headSha) === true;
           } catch {
@@ -585,7 +585,7 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
   // Owner-accepted findings count only for their own pull request at its exact version (Sol gate round 5).
   const ownerOk = ownerAcceptedForPr(proof, { number: pullRequest?.number, url: pullRequest?.url, exactHead: String(proof?.head_sha).toLowerCase() === String(headSha).toLowerCase() });
   const proven = ownerOk && (authoritativeBaseSha
-    ? proofValidForMerge({ data: proof, headSha, nowMs, baseSha, isAncestor: isAncestorLocally, mergeBase: mergeBaseLocally })
+    ? proofValidForMerge({ data: proof, headSha, nowMs, baseSha, isAncestor: isAncestorLocally, mergeBase: mergeBaseLocally, baseRef: pullRequest?.baseRefName ?? null })
     : proofValid(proof, headSha, nowMs, baseSha));
   if (!proven) {
     return proofRequirement(

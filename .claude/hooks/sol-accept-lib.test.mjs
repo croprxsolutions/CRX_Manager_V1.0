@@ -250,6 +250,21 @@ assert.equal(proofValid(proof, H1, NOW, BASE), false, "gate: not for the reviewe
 assert.equal(proofValid(proof, H2, NOW, "d".repeat(40)), false, "gate: not for another base");
 assert.equal(proofValid({ ...proof, owner_accepted: [] }, H2, NOW, BASE), false, "gate: no acceptances, no proof");
 assert.equal(proofValid({ ...proof, carry: { ...proof.carry, from_base: "d".repeat(40) } }, H2, NOW, BASE), false, "gate: the base cannot move");
+// A base-merge carry of an owner-accepted review, from any writer, never counts (Mason, 2026-11-22, #2226).
+{
+  const moved = "d".repeat(40);
+  const later = buildCarryForwardProof({ headSha: "e".repeat(40), baseSha: moved, source: proof, mode: "collision_check", timestamp: iso(NOW) });
+  assert.equal(carriedSolProof(later), false, "gate: an owner-accepted review carried onto a newer base is not a proof");
+  const { owner_accepted: _dropped, ...unlisted } = later;
+  assert.equal(carriedSolProof(unlisted), false, "gate: nor when the carry dropped the acceptance list");
+  const clean = buildCarryForwardProof({ headSha: "e".repeat(40), baseSha: moved, source: { head_sha: H1, base_sha: BASE, timestamp: record.timestamp }, mode: "collision_check", timestamp: iso(NOW) });
+  assert.equal(carriedSolProof(clean), false, "gate: a carry that records no review kind is not a proof (Sol r8 HIGH 1)");
+  clean.review_ref = "origin/main";
+  assert.equal(carriedSolProof(clean), true, "gate: a clean main review still carries onto a newer base");
+  // A staging merge never carries, even a proof minted before that rule (Mason, 2026-11-22, Sol r7 HIGH 1).
+  assert.equal(carriedSolProof({ ...clean, review_ref: "origin/staging" }), false, "gate: a staging-carried proof is not a proof");
+  assert.equal(carriedSolProof({ ...clean, carry: { ...clean.carry, mode: "disjoint" }, review_ref: "origin/staging" }), false, "gate: nor a free staging carry");
+}
 assert.equal(proofValid(proof, H2, NOW + 24 * 60 * 60 * 1000, BASE), false, "gate: expires with the Sol run it came from");
 
 // A later carry (a main merge, a restamp, post-apply records) keeps the acceptance on record.

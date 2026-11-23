@@ -35,8 +35,9 @@ export async function fetchOtherOpenByOrderLine(
 ): Promise<Record<string, number>> {
   const { data, error } = await supabase
     .from('delivery_items')
-    .select('order_item_id, quantity, delivery:deliveries!inner(order_id, status)')
+    .select('order_item_id, quantity, delivery:deliveries!inner(order_id, status, deleted_at)')
     .eq('delivery.order_id', orderId)
+    .is('delivery.deleted_at', null)
     .in('delivery.status', ['scheduled', 'in_progress'])
     .neq('delivery_id', deliveryId);
   const byOrderLine: Record<string, number> = {};

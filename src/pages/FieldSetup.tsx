@@ -28,7 +28,6 @@ import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { fingerprintIntentPayload } from '../lib/idempotency';
 import { Sentry } from '../lib/sentry';
 import { computeBounds } from '../hooks/useFitBounds';
-import { MONEY_PRECISION_MESSAGE, parseDollarsToCents } from '../lib/parseCents';
 import {
   buildBoundaryGeometry,
   billableAcres,
@@ -56,8 +55,6 @@ interface BillingSplit {
   split_pct: number;
   is_primary: boolean;
   notes: string;
-  price_override_cents: number | null;
-  pricing_note: string;
 }
 
 const FIELD_CONTEXT_OVERLAY_STORAGE_KEY = 'crx.fieldSetup.showOtherFieldBoundaries';
@@ -408,14 +405,12 @@ function FieldSetupPage() {
       if (defaults && defaults.length > 0) setBillingOpen(true);
       // Always replace the splits, even with none: Save sends this whole list, so splits left over
       // from another field (or an earlier read) must never stay on screen.
-      const loadedSplits: BillingSplit[] = (defaults ?? []).map((d: { customer_id: string; customer?: { farm_name: string | null } | null; split_pct: number; is_primary: boolean; notes?: string | null; price_override_cents?: number | null; pricing_note?: string | null }) => ({
+      const loadedSplits: BillingSplit[] = (defaults ?? []).map((d: { customer_id: string; customer?: { farm_name: string | null } | null; split_pct: number; is_primary: boolean; notes?: string | null }) => ({
           customer_id: d.customer_id,
           customer_name: d.customer?.farm_name || 'Unknown',
           split_pct: Number(d.split_pct),
           is_primary: d.is_primary,
           notes: d.notes || '',
-          price_override_cents: d.price_override_cents ?? null,
-          pricing_note: d.pricing_note || '',
         }));
       loadedSplitsRef.current = loadedSplits;
       setBillingSplits(loadedSplits);
@@ -540,7 +535,7 @@ function FieldSetupPage() {
     }
     setBillingSplits((prev) => [
       ...prev,
-      { customer_id: customerId, customer_name: customerName, split_pct: 0, is_primary: prev.length === 0, notes: '', price_override_cents: null, pricing_note: '' },
+      { customer_id: customerId, customer_name: customerName, split_pct: 0, is_primary: prev.length === 0, notes: '' },
     ]);
     setSplitPickerKey((k) => k + 1);
   };
@@ -616,8 +611,6 @@ function FieldSetupPage() {
         split_pct: s.split_pct,
         is_primary: s.is_primary,
         notes: s.notes || null,
-        price_override_cents: s.price_override_cents || null,
-        pricing_note: s.pricing_note || null,
       }));
 
       // save_field checks only the key. A new field keeps one key until confirmed, so an edited retry after a lost
@@ -656,12 +649,12 @@ function FieldSetupPage() {
           const sent: Record<string, unknown> = { ...fieldPayload };
           const { data: savedSplits, error: splitsError } = await supabase
             .from('field_billing_defaults')
-            .select('customer_id, split_pct, is_primary, notes, price_override_cents, pricing_note')
+            .select('customer_id, split_pct, is_primary, notes')
             .eq('field_id', savedFieldId as string);
           // Unreadable splits cannot prove this save created the field, so the screen takes the safe warning path.
           if (splitsError) Sentry.captureException(splitsError, { tags: { source: 'fetch', action: 'verify_new_field_billing' } });
-          const splitKey = (rows: Array<{ customer_id: string; split_pct: number; is_primary: boolean; notes: string | null; price_override_cents: number | null; pricing_note: string | null }>) =>
-            JSON.stringify(rows.map((r) => [r.customer_id, Number(r.split_pct), r.is_primary, r.notes ?? null, r.price_override_cents ?? null, r.pricing_note ?? null]).sort());
+          const splitKey = (rows: Array<{ customer_id: string; split_pct: number; is_primary: boolean; notes: string | null }>) =>
+            JSON.stringify(rows.map((r) => [r.customer_id, Number(r.split_pct), r.is_primary, r.notes ?? null]).sort());
           createdBySave = !!saved && Object.entries(saved).every(([k, v]) => (v ?? null) === (sent[k] ?? null))
             && !splitsError && Array.isArray(savedSplits) && splitKey(savedSplits) === splitKey(billingPayload);
         }
@@ -1357,41 +1350,6 @@ function FieldSetupPage() {
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
-                        </div>
-                        <div className="flex items-center gap-3 pl-1">
-                          <div className="w-36">
-                            <label className="block text-xs text-secondary mb-0.5">Price Override ($/ac)</label>
-                            <div className="relative">
-                              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-secondary">$</span>
-                              <input
-                                type="number"
-                                value={split.price_override_cents != null ? (split.price_override_cents / 100).toFixed(2) : ''}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  const cents = val ? parseDollarsToCents(val) : null;
-                                  // A refused (excess-precision) price must not become null here:
-                                  // null means "no override" and would silently CLEAR the price
-                                  // override on save. Refuse the keystroke instead.
-                                  if (val && cents === null) { toast('error', MONEY_PRECISION_MESSAGE); return; }
-                                  updateSplit(idx, 'price_override_cents', cents);
-                                }}
-                                min={0}
-                                step={0.01}
-                                placeholder="—"
-                                className="w-full pl-5 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                              />
-                            </div>
-                          </div>
-                          <div className="flex-1">
-                            <label className="block text-xs text-secondary mb-0.5">Pricing Note</label>
-                            <input
-                              type="text"
-                              value={split.pricing_note}
-                              onChange={(e) => updateSplit(idx, 'pricing_note', e.target.value)}
-                              placeholder="e.g. Prepaid rate, Landlord rate"
-                              className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
-                            />
-                          </div>
                         </div>
                       </div>
                     ))}

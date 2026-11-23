@@ -156,3 +156,22 @@ describe('DeliveryDetail edit: the driver choice (Mason 2026-11-23: the office m
     expect(args).not.toHaveProperty('p_clear_driver');
   });
 });
+
+describe('DeliveryDetail edit: a driver taken while the form is open (Sol r2 HIGH 1)', () => {
+  it('saving the form after Take Delivery keeps the driver just taken', async () => {
+    tables.data.deliveries = [{ ...(tables.data.deliveries[0] as object), assigned_driver: null }];
+    tables.data.profile_public_view = [{ id: 'user-1', full_name: 'Dana Driver', role: 'driver', is_active: true }];
+    render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 }));
+    await screen.findByRole('option', { name: /Dana Driver/ });
+    // Take Delivery: the server assigns user-1, and the page re-reads the delivery.
+    tables.data.deliveries = [{ ...(tables.data.deliveries[0] as object), assigned_driver: 'user-1' }];
+    fireEvent.click(screen.getByRole('button', { name: /Take Delivery/ }));
+    fireEvent.click((await screen.findAllByRole('button', { name: /Take Delivery/ })).at(-1)!);
+    await waitFor(() => expect(mockRpc.mock.calls.some(([n]) => n === 'reassign_delivery')).toBe(true));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Take Delivery/ })).toBeNull());
+    fireEvent.click(await screen.findByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(editCalls()).toHaveLength(1));
+    expect(editCalls()[0][1]).not.toHaveProperty('p_clear_driver');
+  });
+});

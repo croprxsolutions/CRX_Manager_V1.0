@@ -205,6 +205,7 @@ export default function DeliveryDetail() {
   // Edit mode state
   const [editing, setEditing] = useState(false);
   const [editDriver, setEditDriver] = useState('');
+  const [editDriverAtOpen, setEditDriverAtOpen] = useState('');
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
   const [editWindowStart, setEditWindowStart] = useState('');
@@ -687,6 +688,7 @@ export default function DeliveryDetail() {
   const startEditing = async () => {
     if (!delivery || !customer) return;
     setEditDriver(delivery.assigned_driver || '');
+    setEditDriverAtOpen(delivery.assigned_driver || '');
     setEditDate(delivery.scheduled_date);
     setEditTime(delivery.scheduled_time || '');
     setEditWindowStart(delivery.delivery_window_start || '');
@@ -843,7 +845,7 @@ export default function DeliveryDetail() {
       p_delivery_notes: editNotes || undefined,
       p_priority: editPriority,
       p_items: itemsPayload,
-      ...clearDriverArg(editDriver, delivery.assigned_driver),
+      ...clearDriverArg(editDriver, editDriverAtOpen),
     };
     // One key per delivery and exact edit: an exact retry reuses it, a different edit gets its own.
     const editScope = fingerprintIntentPayload([editArgs]);
@@ -2416,7 +2418,11 @@ export default function DeliveryDetail() {
                   onChange={(e) => setEditDriver(e.target.value)}
                   className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
-                  <option value="">Unassigned</option>
+                  {/* The server refuses to unassign a started delivery; assign another driver instead. */}
+                  <option value="" disabled={!!editDriverAtOpen && delivery.status === 'in_progress'}>Unassigned</option>
+                  {editDriver && !drivers.some((d) => d.id === editDriver) && (
+                    <option value={editDriver}>Current driver (not in list)</option>
+                  )}
                   {drivers.map((d) => (
                     <option key={d.id} value={d.id}>{d.full_name} ({d.role})</option>
                   ))}
@@ -3295,12 +3301,13 @@ async function fetchInvoicesByDelivery(deliveryId: string): Promise<Record<strin
   return data as unknown as Record<string, unknown>[];
 }
 
-/** The order's invoices plus those linked by delivery_id, one row per invoice id, newest first. */
-// The server keeps a driver it is not given, so "Unassigned" on a delivery with a driver asks it to clear one.
-function clearDriverArg(chosen: string, current: string | null | undefined): { p_clear_driver?: true } {
-  return !chosen && current ? { p_clear_driver: true } : {};
+// The server keeps a driver it is not given, so picking "Unassigned" over the driver the form opened with asks it
+// to clear one. A form that opened with no driver never clears (a Take Delivery since then must survive its save).
+function clearDriverArg(chosen: string, atOpen: string): { p_clear_driver?: true } {
+  return !chosen && atOpen ? { p_clear_driver: true } : {};
 }
 
+/** The order's invoices plus those linked by delivery_id, one row per invoice id, newest first. */
 function mergeRelatedInvoices(byOrder: Record<string, unknown>[], byDelivery: Record<string, unknown>[]): RelatedInvoice[] {
   const byId = new Map<string, RelatedInvoice>();
   for (const row of [...byOrder, ...byDelivery]) {

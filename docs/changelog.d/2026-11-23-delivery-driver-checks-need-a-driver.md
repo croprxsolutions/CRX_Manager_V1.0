@@ -1,0 +1,4 @@
+## 2026-11-23 - Delivery checks: a delivery with no driver belongs to the office
+
+- Migration `20270226100000_delivery_driver_checks_need_a_driver` (not applied): in the delivery completion steps, the receipt-contact lookup and the offline completion queue, the driver part of each permission check now also needs the delivery to have a driver. A delivery with no driver is completed by an admin or sales rep, or by a driver once they take it. Admins, sales reps and assigned drivers keep their access. One line per function; nothing else changes. Mason approved this 2026-11-23.
+- Proof: `scripts/smoke/prove-delivery-driver-checks-need-a-driver-real-schema.mjs` (before and after, then the rollback script `scripts/smoke/delivery-driver-checks-need-a-driver-reverse.sql` and a re-apply). Record: `docs/reference/migrations.d/20270226100000_delivery_driver_checks_need_a_driver.md`.

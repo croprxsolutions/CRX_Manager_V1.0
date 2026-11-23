@@ -300,7 +300,7 @@ function seed() {
       ('${SVC}', '[PROVER] JBC spraying', true, 1000, 400);
     INSERT INTO public.field_billing_defaults (field_id, customer_id, split_pct, is_primary, price_override_cents) VALUES
       ('${G}', '${A}', 100, true, NULL), ('${F}', '${A}', 60, true, NULL), ('${F}', '${B}', 40, false, NULL),
-      ('${O}', '${A}', 100, true, 100), ('${OS}', '${A}', 60, true, 100), ('${OS}', '${B}', 40, false, 100),
+      ('${O}', '${A}', 100, true, NULL), ('${OS}', '${A}', 60, true, NULL), ('${OS}', '${B}', 40, false, NULL), -- 20270224110000 (#2240) forbids a per-acre price; these fields keep their names and cases
       ('${N}', '${A}', 99.99, true, NULL), ('${Y}', '${A}', 100, true, NULL),
       ('${Z}', '${B}', 100, true, NULL);`);
   // Test-only helpers (prover database only). jbc.job writes a completed job: 10 acres of the field and one chemical
@@ -585,7 +585,7 @@ async function main() {
   const refusedBefore = { small3floz: /BELOW_COST_CONTEXT_REQUIRED/, half64floz: /BELOW_COST_CONTEXT_REQUIRED/,
     halfGalAtCost: /BELOW_COST_CONTEXT_REQUIRED/, supplied: /BELOW_COST_CONTEXT_REQUIRED/, suppliedNoCost: /COST_BASIS_REQUIRED/,
     fullBelow: /BELOW_COST_CONTEXT_REQUIRED/, splitSmall: /BELOW_COST_CONTEXT_REQUIRED/, dryOk: /BELOW_COST_CONTEXT_REQUIRED/,
-    rupSmall: /BELOW_COST_CONTEXT_REQUIRED/, overrideSmall: /BELOW_COST_CONTEXT_REQUIRED/, overrideSplit: /SPLIT_OVERRIDE_UNSUPPORTED/ };
+    rupSmall: /BELOW_COST_CONTEXT_REQUIRED/, overrideSmall: /BELOW_COST_CONTEXT_REQUIRED/ }; // overrideSplit's old refusal needs a per-acre price, which 20270224110000 (#2240) forbids
   for (const [k, re] of Object.entries(refusedBefore)) { refusedProbe(CASES[k], re); console.log(`[before] ${k}: refused ${re.source}`); }
   const tenBefore = okProbe(CASES.tenBelow);
   console.log(`[before] tenBelow: ${tenBefore}`);

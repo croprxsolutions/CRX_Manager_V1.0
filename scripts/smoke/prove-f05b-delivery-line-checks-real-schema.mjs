@@ -464,16 +464,17 @@ function rollbackCases() {
 // 10. Race (Luna r2 HIGH): a direct line delete that began while the load was scheduled is still open when
 //     start-and-complete runs. The check must wait for it and see the load has no lines left, not complete it empty.
 async function raceCase() {
-  const deleter = session(`BEGIN; DELETE FROM public.delivery_items WHERE id = '${D7A}'; SELECT pg_sleep(3); COMMIT;`);
-  const completer = session(`BEGIN;
-${AS_ADMIN}
-${startComplete(D7, null, 'f05b-10')};
-COMMIT;
-`, 1000);
+  // Each side prints clock_timestamp() marks, so the proof shows the two really overlapped: the delete was made,
+  // then the completion began, and only then did the delete commit.
+  const mark = (name) => `SELECT '${name}=' || extract(epoch FROM clock_timestamp());`;
+  const deleter = session(`BEGIN; DELETE FROM public.delivery_items WHERE id = '${D7A}'; ${mark('deleted')} SELECT pg_sleep(8); ${mark('committing')} COMMIT;`);
+  const completer = session(`${mark('started')}\nBEGIN;\n${AS_ADMIN}\n${startComplete(D7, null, 'f05b-10')};\nCOMMIT;\n`, 4000);
   const [d, c] = await Promise.all([deleter, completer]);
   assert.equal(d.code, 0, d.out);
-  assert.notEqual(c.code, 0, `start-and-complete must be refused once the in-flight delete lands:
-${c.out}`);
+  const at = (out, name) => Number(out.match(new RegExp(`${name}=([0-9.]+)`))?.[1]);
+  const [deleted, committing, started] = [at(d.out, 'deleted'), at(d.out, 'committing'), at(c.out, 'started')];
+  assert.ok(deleted < started && started < committing, `the race did not overlap: deleted ${deleted}, started ${started}, committing ${committing}`);
+  assert.notEqual(c.code, 0, `start-and-complete must be refused once the in-flight delete lands:\n${c.out}`);
   assert.match(c.out, /DELIVERY_NOTHING_DELIVERED/);
   assert.equal(state(D7), 'scheduled||0');
   console.log('[case 10] race: a line delete in flight when start-and-complete runs is waited for; the now-empty load is refused and stays scheduled');

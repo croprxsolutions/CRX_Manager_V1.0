@@ -2277,7 +2277,8 @@ export default function DeliveryDetail() {
             <ConfirmModal
               open={resendCopyCheck !== null && resendCopyCheck.delivery_id === delivery.id}
               onClose={() => {
-                if (resendCopyCheck?.outcome === 'paused') warnHeldNotSent(delivery.delivery_number);
+                // The server may already have sent it: never say it did not go out (Taha LOW).
+                if (resendCopyCheck?.outcome === 'paused') toast('warning', `Delivery ${delivery.delivery_number}: the server may already have emailed this receipt. It is on "Customer receipts to check" and the server will not send it again. Check with the customer before sending, then mark it handled.`);
                 setResendCopyCheck(null);
               }}
               onConfirm={() => { void handleResendEmail(resendCopyCheck?.delivery_id); }}

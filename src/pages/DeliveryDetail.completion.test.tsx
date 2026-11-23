@@ -558,12 +558,13 @@ describe('Email Confirmation and the server receipt queue', () => {
     expect(closeCalls()).toEqual(['manual_send']);
   });
 
-  it('cancelling the second-copy question says the held receipt was not sent', async () => {
+  it('cancelling the second-copy question says the server may already have sent it (Taha LOW)', async () => {
     mockRpc.mockImplementation(() => Promise.resolve(answer({ send_authorized_at: '2026-10-21T15:04:00Z' })));
     await renderPage();
     fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/did not go out/)));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/may already have emailed.*Check with the customer before sending/)));
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringMatching(/did not go out/));
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 

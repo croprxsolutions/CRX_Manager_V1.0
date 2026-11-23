@@ -15,7 +15,7 @@ Follow-up to PR #2337 (screen-only check). Decision: `docs/manual/decision-log.d
 
 ## 1. Outcome and authority
 
-- **Outcome:** a job Save is refused, with nothing written, when what it compares changed after the page read it. The check runs inside `save_job`, under the job row lock, after the replay lookup. Closes #2337's gaps: (1) two saves at once, (2) a retry after a lost reply gets the stored result, (3) the page's own Dispatch wizard no longer absorbs someone else's change.
+- **Outcome:** a job Save is refused, with nothing written, when what it compares changed after the page read it. The check runs inside `save_job`, under the job row lock, after the replay lookup. Closes #2337's gaps: (1) two saves at once, (2) a retry after a lost reply gets the stored result (except a sales rep's retry after a server price change, which the existing replay check already refuses: Challenge #24), (3) the page's own Dispatch wizard no longer absorbs someone else's change.
 - **Smallest change (DB PR):** one migration, `20270226160000_save_job_refuses_changed_job.sql`:
   - `_job_edit_version(p_job_id) returns jsonb` (internal, no API grants): `{core: md5 of the job's edited columns + its field, share and chemical lines (with line ids, without cost), dispatches: sorted "job_field_id|applicator_id|crew_id|dispatch_status" strings}`. Columns are #2337's list (`src/lib/jobStaleEdit.ts`). Left out, as in #2337: `updated_at`, `printed_at`, applied/remaining acres, cost.
   - `job_edit_version(p_job_id) returns jsonb`: the RPC the page calls. Returns the version for an active admin or sales rep; refuses anyone else.

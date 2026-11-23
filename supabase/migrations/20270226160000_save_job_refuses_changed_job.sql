@@ -132,8 +132,10 @@ BEGIN
   END IF;
   IF v_expected IS NOT NULL AND (
        jsonb_typeof(v_expected) <> 'object' OR jsonb_typeof(v_expected -> 'core') IS DISTINCT FROM 'string'
-       OR jsonb_typeof(v_expected -> 'dispatches') IS DISTINCT FROM 'array'
-       OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_expected -> 'dispatches') e WHERE jsonb_typeof(e) <> 'string')) THEN
+       -- CASE fixes the order: the elements are read only once dispatches is known to be an array.
+       OR CASE WHEN jsonb_typeof(v_expected -> 'dispatches') = 'array'
+               THEN EXISTS (SELECT 1 FROM jsonb_array_elements(v_expected -> 'dispatches') e WHERE jsonb_typeof(e) <> 'string')
+               ELSE true END) THEN
     RAISE EXCEPTION 'EXPECTED_VERSION_INVALID: expected_version must be what job_edit_version returned' USING ERRCODE = 'P0001';
   END IF;
   IF jsonb_typeof(p_chemicals) = 'array' THEN
@@ -149,7 +151,7 @@ BEGIN
       -- lost reply gets its stored result. FOR SHARE holds the receipt until commit: an expired-key sweep
       -- elsewhere cannot delete it in between and turn the impl's lookup into an unchecked first call.
       IF v_expected IS NOT NULL THEN
-        PERFORM 1 FROM public.idempotency_keys WHERE idempotency_key = p_idempotency_key AND expires_at >= now() FOR SHARE;
+        PERFORM 1 FROM public.idempotency_keys WHERE idempotency_key = p_idempotency_key AND (expires_at IS NULL OR expires_at >= now()) FOR SHARE;
         v_replay := FOUND;
       END IF;
     END IF;
@@ -208,9 +210,15 @@ BEGIN
      OR has_function_privilege('anon', 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'JOB_VERSION_POSTFLIGHT: grants are not as reviewed';
   END IF;
+  IF (SELECT count(*) FROM pg_proc p
+       WHERE p.oid IN ('public._job_edit_version(uuid)'::regprocedure, 'public.job_edit_version(uuid)'::regprocedure)
+         AND p.prosecdef AND p.proowner = 'postgres'::regrole
+         AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]) <> 2 THEN
+    RAISE EXCEPTION 'JOB_VERSION_POSTFLIGHT: a job edit version function is not SECURITY DEFINER, owned by postgres, with search_path public, pg_temp';
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = 'd199976b5fe5851918cbdfbec6f2bdff'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '055a2d03f6272c7a4726a3725e975d23'
                     AND p.prosecdef AND p.proowner = 'postgres'::regrole
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]) THEN
     RAISE EXCEPTION 'JOB_VERSION_POSTFLIGHT: save_job is not the body, owner or settings this file installs';

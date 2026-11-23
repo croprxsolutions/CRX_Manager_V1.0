@@ -187,6 +187,7 @@ try {
 
   // 8. A malformed version is refused.
   assert.match(show('8 malformed', attempt(ADMIN, `${refuse(`r := ${save('[JV] bad', `'"x"'::jsonb`)};`)} v := t;`)), /^ok\|EXPECTED_VERSION_INVALID/);
+  assert.match(show('8 dispatches not an array', attempt(ADMIN, `${refuse(`r := ${save('[JV] bad', `'{"core":"x","dispatches":{}}'::jsonb`)};`)} v := t;`)), /^ok\|EXPECTED_VERSION_INVALID/);
   // A non-editor carrying a (stale) version gets the role refusal, not a version answer.
   assert.match(show('8 driver save', attempt(DRIVER, `${refuse(`r := ${save('[JV] driver', V('c1'), null, DRIVER)};`)} v := t;`)), /^ok\|INSUFFICIENT_ROLE/);
 
@@ -197,7 +198,7 @@ try {
     ${refuse(`r := ${save('[JV] completed', V('c9'), 'jv-completed', ADMIN, 'completed')};`)}
     v := t || '|unchanged=' || (f0 = public._job_edit_version(${JOB})::text);`)), /^ok\|JOB_COMPLETED_CHEMICALS_LOCKED.*\|unchanged=true$/);
   assert.equal(scalar("SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure;"),
-    'd199976b5fe5851918cbdfbec6f2bdff', 'the installed save_job must be the body the postflight pins');
+    '055a2d03f6272c7a4726a3725e975d23', 'the installed save_job must be the body the postflight pins');
 
   console.log('\nJOB_SAVE_VERSION_PROOF_PASS');
 } finally {

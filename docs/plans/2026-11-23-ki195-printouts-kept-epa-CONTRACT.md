@@ -92,8 +92,10 @@ Disproved or out of scope, with evidence:
   unsprayed job) is unchanged by this change; an unsprayed job's proof shows the catalog number, the settled rule.
 - 26, 27, 28, 29, 30, 31: recording rules were settled and proven in `20261204120000` (its prover covers moves, re-adds,
   late adds); this change only reads them. Live coverage was checked by that migration's postflight.
-- 36: every throw lands in an existing catch before any download, stamp or log (JobDetail WPS/sheet/report, Jobs.tsx
-  single and bulk paths), shown by the code read; no partial file is produced.
+- 36: every throw lands in an existing catch before that job's download, stamp or log (JobDetail WPS/sheet/report,
+  Jobs.tsx single path); no partial file is produced. The bulk sheet path catches per job: the failed job gets no file
+  or stamp and is named in the failure toast, while the other selected jobs still print and stamp (retry only the
+  named jobs).
 - 42: `get_job_proof_data` has one caller (`FieldApplicationInvoice.tsx`); the normalized catalog value is trimmed only.
 - 43: the lock migration is APPLIED LIVE (ledger `20261107131813`); the candidate's preflight pins the live body md5.
 - 47 (one RPC for all prints): declined; a new RPC is a bigger change than two small reads behind the same RLS.
@@ -153,3 +155,13 @@ this read-only change; 37 has no case (new jobs have no locks).
 - MED access removed and restored between the two visibility checks; MED proof retry across the migration: refuted as
   in round 2.
 - LOW pilot log overstated WPS test coverage: fixed (names what is unit-tested and that the WPS handler is not).
+
+## Sol round 4 (2026-11-23): stopped for Mason
+
+- HIGH a kept EPA number beside today's label REI/PHI: the same safety-interval mechanism as rounds 2 and 3, a third
+  round in a row, so per AGENTS.md this stops for **NEEDS MASON - DECISION REQUIRED** (question above, round 3).
+  No interval code is changed by this PR; the gap is that intervals are not kept at spray time.
+- MED retry across rollout; MED access flip between checks: refuted as in rounds 1-3.
+- LOW prover export not consumed by a rendering test: accepted; the WPS handler's browser check on staging is owed.
+- LOW applicator-sheet test skipped the Custom format: fixed (loops Original, Enhanced and Custom).
+- LOW item 36 overstated the bulk path: fixed (the bulk path skips only the failed job and names it).

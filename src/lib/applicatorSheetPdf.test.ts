@@ -206,7 +206,7 @@ describe('generateApplicatorSheetPdf EPA column (KI-195)', () => {
       product_form: null, rei_hours: 12, phi_days: 30, epa_registration: epa,
     });
     const autoTable = (await import('jspdf-autotable')).default as unknown as ReturnType<typeof vi.fn>;
-    for (const format of ['original', 'enhanced'] as const) {
+    for (const format of ['original', 'enhanced', 'custom'] as const) {
       autoTable.mockClear();
       await generateApplicatorSheetPdf(makeSheetData({ products: [
         product('Kept', '100-1'), product('NoNumber', 'Unknown'), product('Old', 'Not recorded'), product('Blank', null),

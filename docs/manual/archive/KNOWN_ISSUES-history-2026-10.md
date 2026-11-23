@@ -7942,3 +7942,21 @@ Closed 2026-11-22 (triage): KI-76 bullets. The Chicago season and commission-dat
 - Transfer Net 30 (KI-14): FIXED 2026-11-06 (PR #1556); see KI-14.
 - Whole-order invoice quantities and unit prices are not capped server-side (MED; quantities change when PR #1174 applies). Voiding a delivery whose invoice
   is posted leaves the invoice active (MED; changes when PR #1174 applies: the delivery then cannot be voided until the invoice is voided). 
+
+<!-- KI-135 closed 2026-11-23 (PR #2259); text as it stood in KNOWN_ISSUES -->
+
+### KI-135 — "Inventory Value" label: relabel as pricing-basis value (D12 item 7)
+
+> **Fix in review (Lane E, 2026-11-22):** labels say "price-list cost"; the per-row report and CSV mark rows left out of
+> the total (CSV value blank, "In Total" column); profit and margin carry the saved-pricing-cost note.
+
+> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-27.
+
+**LOW · OPEN · inventory/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #3) · unassigned**
+The value bug itself is fixed (closed list, item 21). What remains is D12 item 7: label the Inventory page card and the
+Reports Inventory Cost total as a value at price-list cost, not a book or accounting value. The same applies to margin
+and profit figures built on the saved pricing cost: label them "margin at saved pricing cost", since that cost is not
+necessarily what the supplier bill said ([business logic review](../audits/2026-11-11-business-logic-review.md) finding 7).
+Also (2026-11-13 [Product Master review](../audits/2026-11-13-product-master-review.md) C-10): the per-row Inventory Cost
+report and its CSV (`_get_inventory_cost_report_cost_impl_20261019`, `Reports.tsx`) still list negative and $0-cost
+rows, so summing the CSV reproduces the old wrong total. Fix: match the rows to the summary's exclusions, or mark them.

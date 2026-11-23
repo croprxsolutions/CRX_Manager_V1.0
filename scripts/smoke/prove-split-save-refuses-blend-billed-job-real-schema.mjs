@@ -303,13 +303,14 @@ function chainOutcome(file) {
 }
 const REGRESSION = ('smoke-per-line-split-billing smoke-field-invoice-loop smoke-backfill-refuse-split-billing '
   + 'smoke-split-invoice-cross-customer-lineage smoke-order-invoice-refuses-field-split smoke-transfer-invoice-to-job '
-  + 'smoke-transfer_job_invoice_column_fixes smoke-transfer_job_invoice_machine_fee').split(' ').map((f) => `${f}.sql`);
+  + 'smoke-transfer_job_invoice_column_fixes').split(' ').map((f) => `${f}.sql`);
 // shortcut: these chains already fail during their own setup on today's schema (fixture drift: pricing source, rate units,
 // product form, missing fixtures), before any split or blend-invoice step; the prover only checks the candidate leaves
-// their outcome unchanged. Move them to REGRESSION once their fixtures are refreshed.
+// their outcome unchanged. Move them to REGRESSION once their fixtures are refreshed. machine_fee joined after #2240
+// (20270224110000) forbade the per-acre price override its case D inserts.
 const STALE = ('smoke-save-invoice-field-app smoke-field-app-split-penny-exact smoke-blend-ticket-pricing-guards '
   + 'smoke-gauntlet-core-blend-guards smoke-blend-invoice-approval-binding smoke-blend-invoice-binding-lows '
-  + 'smoke-blend_invoice_app_service_guard').split(' ').map((f) => `${f}.sql`);
+  + 'smoke-blend_invoice_app_service_guard smoke-transfer_job_invoice_machine_fee').split(' ').map((f) => `${f}.sql`);
 const JOBS = ['B1', 'U2', 'M3', 'L4', 'R5', 'X6', 'X7', 'X8', 'S9', 'I10'];
 const jobId = (n) => `(SELECT id FROM jobs WHERE job_number = 'J-PRV-A2-${n}')`;
 const ticketId = (t) => `(SELECT id FROM blend_tickets WHERE ticket_number = 'BT-PRV-A2-${t}')`;

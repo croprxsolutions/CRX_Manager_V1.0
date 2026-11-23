@@ -48,9 +48,10 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM pg_proc
     WHERE oid <> 'public._mark_delivery_aggregate_short_stock()'::regprocedure
-      AND (prosrc LIKE '%delivery\_aggregate\_short\_%'
+      -- the settings' prefix or stem, so a name built by concatenation is caught too (Luna r3)
+      AND (prosrc ~ 'app\.delivery_aggregate|delivery_aggregate_short'
            -- a SQL-standard body lives in prosqlbody, not prosrc (Luna r1)
-           OR (prosqlbody IS NOT NULL AND pg_get_function_sqlbody(oid) LIKE '%delivery\_aggregate\_short\_%'))
+           OR (prosqlbody IS NOT NULL AND pg_get_function_sqlbody(oid) ~ 'app\.delivery_aggregate|delivery_aggregate_short'))
   ) THEN
     RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_BASELINE_DRIFT: a function still uses the trigger''s settings (apply 20270213100000 first)';
   END IF;
@@ -68,7 +69,8 @@ DROP FUNCTION public._mark_delivery_aggregate_short_stock();
 DO $postflight$
 BEGIN
   IF to_regprocedure('public._mark_delivery_aggregate_short_stock()') IS NOT NULL
-     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mark_delivery_aggregate_short_stock') THEN
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mark_delivery_aggregate_short_stock'
+                  AND tgrelid = 'public.inventory_transactions'::regclass) THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: the trigger or its function is still there';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK: inert short-stock ledger trigger dropped';

@@ -1335,7 +1335,6 @@ export default function JobDetail() {
   // Sub-collections
   const [fieldRows, setFieldRows] = useState<FieldRow[]>([]);
   const [fieldPickerOpen, setFieldPickerOpen] = useState(false);
-  const [growerShareFieldNames, setGrowerShareFieldNames] = useState<string[]>([]);
   // Field-app parity #5: index of the field row currently being dragged to set
   // the applicator route order (null when no drag is in progress).
   const [dragFieldIndex, setDragFieldIndex] = useState<number | null>(null);
@@ -1949,33 +1948,6 @@ export default function JobDetail() {
     // The last isCurrentLoad() check is therefore the real commit point. (Codex PR thread
     // at JobDetail.tsx:1813, original_commit_id 9cee23cc7.)
     //
-    // U16b: best-effort advisory before transfer. The transfer RPC remains the
-    // pricing authority; a failed read simply leaves the banner hidden.
-    const jobFields = j.job_fields || [];
-    const jobFieldIds = Array.from(new Set(jobFields.map((field) => field.field_id).filter(Boolean)));
-    let growerShareNames: string[] = [];
-    if (jobFieldIds.length > 0) {
-      const { data: growerShareRows, error: growerShareError } = await supabase
-        .from('field_billing_defaults')
-        .select('field_id')
-        .in('field_id', jobFieldIds)
-        .not('price_override_cents', 'is', null);
-      if (!isCurrentLoad()) return false;
-      if (growerShareError) {
-        Sentry.captureException(growerShareError, { tags: { source: 'fetch', page: 'job-detail', context: 'grower_share_banner' } });
-      } else {
-        const overrideIds = new Set(
-          ((growerShareRows || []) as Array<{ field_id: string }>).map((row) => row.field_id),
-        );
-        growerShareNames = Array.from(new Set(
-          jobFields
-            .filter((field) => overrideIds.has(field.field_id))
-            .map((field) => field.field?.field_name || '')
-            .filter(Boolean),
-        ));
-      }
-    }
-
     // Load saved shares; then SEED defaults for any field that has no saved
     // shares (existing jobs created before this migration, or a field never
     // touched), so the list/#26 split don't collapse to the primary customer
@@ -2078,7 +2050,6 @@ export default function JobDetail() {
           sort_order: f.sort_order,
         }))
     );
-    setGrowerShareFieldNames(growerShareNames);
     setShareRows(savedShares);
 
     // F06 (2026-09-03): the stored `driver` comes back with the row, so a reloaded line
@@ -2230,7 +2201,7 @@ export default function JobDetail() {
       // Lookups are record-independent, so landing them late is harmless — but
       // everything past this point is specific to ONE job, so a superseded run
       // must stop here. Without this, the cancelled /jobs/new run would go on to
-      // clear the grower-share names, vessel and tank capacity of the job that is
+      // clear the vessel and tank capacity of the job that is
       // now on screen.
       if (!isCurrentLoad()) return;
       if (!isNew && id) {
@@ -2241,7 +2212,6 @@ export default function JobDetail() {
         // have cleared it now bails. A new job is never loading; say so explicitly
         // or the page sits on its skeleton forever. No-op on a direct /jobs/new.
         setLoading(false);
-        setGrowerShareFieldNames([]);
         setLoaderVesselId(ASSIGNED_VEHICLE_VESSEL_VALUE);
         setTankCapacity('');
         // The previewed job number is the only thing standing between the operator
@@ -4030,11 +4000,6 @@ export default function JobDetail() {
               
               Complete Job
             </Button>
-          )}
-          {canTransfer && growerShareFieldNames.length > 0 && (
-            <div className="max-w-sm px-3 py-1.5 rounded-lg bg-blue-50 text-xs text-blue-800">
-              Grower-share override active on <strong>{growerShareFieldNames.join(', ')}</strong> — the invoice will bill those growers at the override rate.
-            </div>
           )}
           {canTransfer && (
             <Button icon={<FileText className="w-4 h-4" />}

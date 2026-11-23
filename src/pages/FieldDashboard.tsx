@@ -495,14 +495,6 @@ function BillingTab({
               </div>
               <span className="font-heading text-xl font-bold text-crx-green tabular-nums">{bd.split_pct}%</span>
             </div>
-            {(bd.price_override_cents || bd.pricing_note) && (
-              <div className="mt-0.5 pl-5 text-xs text-secondary space-x-4">
-                {bd.price_override_cents && (
-                  <span>${(bd.price_override_cents / 100).toFixed(2)}/ac override</span>
-                )}
-                {bd.pricing_note && <span>{bd.pricing_note}</span>}
-              </div>
-            )}
           </li>
         ))}
       </ul>

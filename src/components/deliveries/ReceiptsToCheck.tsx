@@ -8,7 +8,8 @@ import ConfirmModal from '../ui/ConfirmModal';
 import { useToast } from '../ui/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import {
-  RECEIPTS_TO_CHECK_PAGE, RECEIPT_SENDING_NOW_MESSAGE, closeDeliveryReceipt, isReceiptSendingNow, receiptCloseScope,
+  RECEIPTS_TO_CHECK_PAGE, RECEIPT_SENDING_NOW_MESSAGE, closeDeliveryReceipt, isReceiptChanged, isReceiptSendingNow,
+  receiptCloseScope,
   receiptsToCheckFilter,
 } from '../../lib/receiptsToCheck';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
@@ -92,8 +93,9 @@ export default function ReceiptsToCheck() {
     savingRef.current = true; // a second click before the re-render cannot send a second call
     setSaving(true);
     try {
-      const scope = receiptCloseScope(handling.delivery_id, 'handled');
-      const result = await closeDeliveryReceipt(handling.delivery_id, 'handled', closeIdem.getKeyFor(scope));
+      // Only the receipt this row showed: the server refuses one queued again since (#2251).
+      const scope = receiptCloseScope(handling.delivery_id, 'handled', handling.created_at);
+      const result = await closeDeliveryReceipt(handling.delivery_id, 'handled', closeIdem.getKeyFor(scope), handling.created_at);
       closeIdem.resetKeyFor(scope);
       toast('success', result.outcome === 'sent'
         ? 'The server had already emailed this receipt; nothing to close.'
@@ -105,6 +107,10 @@ export default function ReceiptsToCheck() {
     } catch (err: unknown) {
       if (isReceiptSendingNow(err)) {
         toast('warning', RECEIPT_SENDING_NOW_MESSAGE);
+      } else if (isReceiptChanged(err)) {
+        toast('warning', "This delivery's receipt changed since the list loaded. Nothing was closed; reloading the list.");
+        setHandling(null);
+        setReload((n) => n + 1);
       } else {
         Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
           extra: { context: 'close_delivery_receipt handled', deliveryId: handling.delivery_id },

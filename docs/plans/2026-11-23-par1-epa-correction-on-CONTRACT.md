@@ -168,7 +168,7 @@ Atrazine 4L only (Mason's call in the parent session, not this file): #39 (the l
 
 - #1 HIGH (a job sprayed before a correction and completed after writes the new number in its logbook record) and #4
   HIGH (a split field invoice reposted after a correction takes the new number): repeats of r1 #2 and #4, Mason's
-  option B. Need Mason's skip in this session.
+  option B. Mason skipped them after round 4 (DECISION_LOG, PR #2381).
 - #2 HIGH (an app tab opened before KI-195's deploy): third round for one cause (r1 #3, r2 #2, r3 #2). Stopped patching;
   put to Mason as a business decision.
 - #3 HIGH (a registration edit racing a correction): fixed; the identity check takes the shared registration lock

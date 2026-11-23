@@ -163,13 +163,16 @@ function hasExcessPrecision(raw: string): boolean {
 
 /** A missing-function / schema-cache error means the split-billing migrations are not
  *  applied yet — surface a plain, non-alarming message instead of a raw Postgres error. */
-function splitBackendError(err: unknown): string {
+// eslint-disable-next-line react-refresh/only-export-components -- exported for its unit test
+export function splitBackendError(err: unknown): string {
   let msg = '';
   if (err instanceof Error) msg = err.message;
   else if (err && typeof err === 'object' && typeof (err as { message?: unknown }).message === 'string') {
     msg = (err as { message: string }).message;
   } else msg = String(err ?? '');
-  if (/does not exist|schema cache|could not find|PGRST202|42883|find the function/i.test(msg)) {
+  // A named refusal can quote user text (a blend ticket number), so it never reads as a missing backend.
+  if (!/BLEND_TICKET_ALREADY_BILLED|SPLIT_INVOICE_NEEDS_READ_COMMITTED/.test(msg)
+    && /does not exist|schema cache|could not find|PGRST202|42883|find the function/i.test(msg)) {
     return 'Split billing backend not enabled yet.';
   }
   return sanitizeError(err);

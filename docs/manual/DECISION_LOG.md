@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-22 — #2240: Mason owner-accepted 2 Sol finding(s) at `54ce44b595c3`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2240 at `54ce44b595c3` (base `6aceb0747958`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/FieldSetup.tsx:609`, text sha256 `f3d5374444ac05ca` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 57355198d609)
+- Finding 2 (HIGH) at `supabase/migrations/20270224110000_retire_per_acre_field_pricing.sql:48`, text sha256 `755eccadb5dcb531` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 57355198d609)
+
 ## 2026-11-22 — PR #2240: per-acre pricing screens ship with #2239
 
 **Decision (Mason, in chat 2026-11-22, before Sol round 7 on PR #2240):** "Yes, it covers 2240". His "Yes, simplify" decision for #2239 also covers #2240. #2240 removes the Field Setup "Price Override ($/ac)" and "Pricing Note" boxes and the grower-share banners. It merges right after #2239, so no release is cut between the two.

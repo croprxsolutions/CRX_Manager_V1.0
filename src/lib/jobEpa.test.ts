@@ -5,6 +5,7 @@ const db = vi.hoisted(() => ({
   job: { data: { id: 'job-1' } as unknown, error: null as unknown },
   kept: { data: [] as unknown[] | null, error: null as unknown },
   keptFilter: [] as unknown[],
+  afterKept: () => {},
 }));
 vi.mock('./db', () => ({
   supabase: {
@@ -15,7 +16,9 @@ vi.mock('./db', () => ({
           eq: () => ({
             in: async (_column: string, ids: unknown[]) => {
               db.keptFilter = ids;
-              return db.kept;
+              const answer = db.kept;
+              db.afterKept();
+              return answer;
             },
           }),
         }),
@@ -64,6 +67,17 @@ describe('applyKeptEpa', () => {
     await applyKeptEpa('job-1', m);
     expect([...m.values()].map((l) => l.epa_registration)).toEqual(['100-1', 'Unknown', 'Not recorded', '400-4']);
     expect(db.keptFilter).toEqual(['p-corrected', 'p-none', 'p-old', 'p-open']);
+  });
+
+  it('aborts when the job stops being visible during the kept read (the read may have come back empty)', async () => {
+    const m = labels();
+    const visible = [{ data: { id: 'job-1' }, error: null }, { data: null, error: null }];
+    db.job = { get data() { return visible[0].data; }, error: null } as never;
+    db.kept = { data: [], error: null };
+    db.afterKept = () => { visible.shift(); };
+    await expect(applyKeptEpa('job-1', m)).rejects.toThrow(/no longer be opened/);
+    expect([...m.values()].map((l) => l.epa_registration)).toEqual(['100-9', '200-2', '300-9', '400-4']);
+    db.afterKept = () => {};
   });
 
   it('aborts (never prints the catalog) when the job is no longer visible or the kept rows cannot be read', async () => {

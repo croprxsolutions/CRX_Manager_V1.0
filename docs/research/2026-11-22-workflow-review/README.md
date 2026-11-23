@@ -7,7 +7,7 @@
 
 | File | What it is |
 |---|---|
-| `chemical-sales-workflow-2026-11-22.html` | Diagram sheet for chemical sales: each stage's stock and money effects, how planned and firm bookings count toward purchasing, the side paths, and 12 ranked gaps |
+| `chemical-sales-workflow-2026-11-22.html` | Diagram sheet for chemical sales: each stage's stock and money effects, how planned and firm bookings count toward purchasing, the side paths, and 15 ranked gaps with your rule for each |
 | `field-application-workflow-2026-11-22.md` | Field application write-up: each stage, statuses, stock and money effects, gaps with file:line evidence, and recommendations |
 | `field-application-workflow-2026-11-22.html` | Diagram sheet for field application |
 | `workflow-review-decisions-2026-11-22.md` | Mason's business rules decided during the review (1-12) (commission timing, field invoice scope, billing by tank quantity, booked cost on order edits, and more; the Likely % idea was dropped) |

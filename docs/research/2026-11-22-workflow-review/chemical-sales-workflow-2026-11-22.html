@@ -94,7 +94,7 @@ table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{border:1px soli
 <div class="ladder">
 <div class="rung c0"><h4>Draft quote</h4>Counts <b>nothing</b>.<br>(Exception: a draft with "Planned" on still holds stock.) <span class="tag t-live">LIVE</span></div>
 <div class="rung c1"><h4>Sent · Maybe</h4>Shown on Purchasing.<br><b>Never</b> bought for, never held. <span class="tag t-stg">STAGING</span></div>
-<div class="rung c2"><h4>Sent · Likely</h4>"Could add" column — the <b>full</b> amount, no % factor. Not held. <span class="tag t-stg">STAGING</span></div>
+<div class="rung c2"><h4>Sent · Likely</h4>"Could add" column — the full amount; you judge how much to buy. Not held. <span class="tag t-stg">STAGING</span></div>
 <div class="rung c3"><h4>Sent · Firm</h4>"To buy" column, with "Order X by date". <b>Not yet held on the shelf</b> (still needs Planned switch). <span class="tag t-stg">STAGING</span></div>
 <div class="rung c4"><h4>Order</h4>"Committed" — real reservation. Counts in To buy. <span class="tag t-live">LIVE</span></div>
 <div class="rung c5"><h4>Delivered</h4>Leaves the shelf. Invoice drafted. <span class="tag t-live">LIVE</span></div>
@@ -109,22 +109,25 @@ table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{border:1px soli
 <div class="card"><h4>Purchase Orders</h4>Create → submit → receive (adds stock). Over-receiving needs an admin. Cost is not updated from the vendor price.</div>
 </div>
 
-<h2>4. Gaps ranked (inventory + money)</h2>
+<h2>4. Gaps ranked (inventory + money) and your rule for each</h2>
 <table>
-<tr><th>#</th><th>Sev</th><th>What can go wrong</th><th>Example</th><th>Status</th></tr>
-<tr><td>1</td><td class="H">HIGH</td><td>Commission can be paid as soon as the order exists — before delivery, invoice or payment — and is based on planned, not billed, profit.</td><td>Rep is paid on 500 gal; grower takes 300 and pays late.</td><td>Open</td></tr>
-<tr><td>2</td><td class="H">HIGH</td><td>Orders don't warn when they take stock held for another grower's booking.</td><td>100 gal held for Grower A; Grower B's order takes it with no warning.</td><td>Open (you chose "warn but allow" on 11-17; not built)</td></tr>
-<tr><td>3</td><td class="H">HIGH</td><td>Shelf holds follow the old "Planned" switch, not Firm, and end 14 days after Needed-by.</td><td>Firm booking holds nothing; a late spray loses its product.</td><td>Open (designed, not built)</td></tr>
-<tr><td>4</td><td class="H">HIGH</td><td>Prepay isn't tied to a booking and doesn't lock price.</td><td>Spring prepay gets used on a fall invoice.</td><td>Open — your brainstorm</td></tr>
-<tr><td>5</td><td class="M">MED</td><td>Editing an order line re-stamps it with today's cost.</td><td>Booked at last fall's cost; an edit in May shifts profit and commission.</td><td>Open (staging code)</td></tr>
-<tr><td>6</td><td class="M">MED</td><td>Void an invoice and re-bill → rep's commission stays cancelled forever.</td><td>Fixing a typo on an invoice costs the rep his commission.</td><td>Open</td></tr>
-<tr><td>7</td><td class="M">MED</td><td>Returns never reduce commission.</td><td>Product comes back, credit issued, rep keeps full commission.</td><td>Open</td></tr>
-<tr><td>8</td><td class="M">MED</td><td>Close-Short on a booking ignores open partial orders.</td><td>"Grower walked away" but an order still holds stock.</td><td>Open</td></tr>
-<tr><td>9</td><td class="M">MED</td><td>An order line can be cut below what's already on an open delivery.</td><td>Driver delivers more than the order now says; another order's reservation is eaten.</td><td>Open</td></tr>
-<tr><td>10</td><td class="L">LOW</td><td>No "make a PO from this" button on Purchasing.</td><td>You retype the To-buy numbers into a new PO.</td><td>Not built</td></tr>
-<tr><td>11</td><td class="M">MED</td><td>Duplicate / Roll over drop field, dates, timing, confidence.</td><td>Next year's plan is invisible to purchasing until re-entered.</td><td>Open</td></tr>
-<tr><td>12</td><td class="L">LOW</td><td>Live Month-End shows ~$0 payments received.</td><td>—</td><td>Fixed on staging, not live</td></tr>
+<tr><th>#</th><th>Sev</th><th>What can go wrong</th><th>Example</th><th>Your rule</th></tr>
+<tr><td>1</td><td class="H">HIGH</td><td>Commission can be paid as soon as the order exists — before delivery, invoice or payment — and is based on planned, not billed, profit.</td><td>Rep is paid on 500 gal; grower takes 300 and pays late.</td><td>Payable only after the customer pays, on what was billed (decision 1).</td></tr>
+<tr><td>2</td><td class="H">HIGH</td><td>Orders don't warn when they take stock held for another grower's booking.</td><td>100 gal held for Grower A; Grower B's order takes it with no warning.</td><td>Warn, naming the grower and booking, then allow (11-17).</td></tr>
+<tr><td>3</td><td class="H">HIGH</td><td>Shelf holds follow the old "Planned" switch, not Firm, and end 14 days after Needed-by.</td><td>Firm booking holds nothing; a late spray loses its product.</td><td>Only Firm holds stock, until delivered or closed (11-17 design).</td></tr>
+<tr><td>4</td><td class="H">HIGH</td><td>Prepay isn't tied to a booking and doesn't lock price.</td><td>Spring prepay gets used on a fall invoice.</td><td>Open — your brainstorm.</td></tr>
+<tr><td>5</td><td class="M">MED</td><td>Editing an order line re-stamps it with today's cost.</td><td>Booked at last fall's cost; an edit in May shifts profit and commission.</td><td>Existing lines keep the booked cost; only new lines take today's (decision 6).</td></tr>
+<tr><td>6</td><td class="M">MED</td><td>Void an invoice and re-bill → rep's commission stays cancelled forever.</td><td>Fixing a typo on an invoice costs the rep his commission.</td><td>Commission follows the money: re-bill restores it (decision 2).</td></tr>
+<tr><td>7</td><td class="M">MED</td><td>Returns never reduce commission.</td><td>Product comes back, credit issued, rep keeps full commission.</td><td>A return lowers commission (decision 2).</td></tr>
+<tr><td>8</td><td class="M">MED</td><td>Close-Short on a booking ignores open partial orders.</td><td>"Grower walked away" but an order still holds stock.</td><td>Block the close and list each open order + unused prepay; deliver or cancel the rest first (decision 7).</td></tr>
+<tr><td>9</td><td class="M">MED</td><td>A draft invoice price can be changed with no check against the booked price and no reason.</td><td>Booked at $40, someone types $38 and posts it.</td><td>Allowed, booked price shown beside it, reason required and logged (decision 8).</td></tr>
+<tr><td>10</td><td class="M">MED</td><td>Quick Delivery sells booked products at tier price without touching the booking.</td><td>Booked 300 at $40; counter sale of 50 at $44; booking still says 300 open.</td><td>Flag booked products per line: draw from booking or sell separately (decision 9).</td></tr>
+<tr><td>11</td><td class="M">MED</td><td>An order line can be cut below what's already on an open delivery.</td><td>Driver delivers more than the order now says; another order's reservation is eaten.</td><td>Technical fix (block it); no business call needed.</td></tr>
+<tr><td>12</td><td class="M">MED</td><td>Roll over / Duplicate don't match how you renew a plan (and roll over can leave last year's booking open).</td><td>Next year's plan needs re-entry.</td><td>Copy products, sections, rates per acre and program notes only — never fields, acres, dates, timing or confidence (decision 12). Closing last year's booking: not decided.</td></tr>
+<tr><td>13</td><td class="L">LOW</td><td>Delivery completes even when the shelf shows short (stock goes negative).</td><td>App says 30 gal, delivery is 50 → shows -20.</td><td>Keep: allow, flag for admin to fix the count (decision 10).</td></tr>
+<tr><td>14</td><td class="L">LOW</td><td>No "make a PO from this" button on Purchasing.</td><td>You retype the To-buy numbers into a new PO.</td><td>Not decided; you buy by judgment (Likely % idea dropped).</td></tr>
+<tr><td>15</td><td class="L">LOW</td><td>Live Month-End shows ~$0 payments received.</td><td>—</td><td>Fixed on staging, not live yet.</td></tr>
 </table>
 
-<div class="foot">Sources: code + database functions on staging 3f1ca8933; prior audit docs/research/2026-11-17-bookings-flow-audit. Not tested against a database; findings come from reading code. Several staging changes are not live yet. Field application side is covered in a separate review.</div>
+<div class="foot">Rules: decision numbers refer to <code>workflow-review-decisions-2026-11-22.md</code> in this folder (Mason, 2026-11-22); "11-17" refers to the bookings audit design. Sources: code + database functions on staging 3f1ca8933; prior audit docs/research/2026-11-17-bookings-flow-audit. Not tested against a database; findings come from reading code. Several staging changes are not live yet. Field application side is covered in a separate review.</div>
 </body></html>

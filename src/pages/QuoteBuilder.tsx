@@ -3793,7 +3793,7 @@ export default function QuoteBuilder() {
     try {
       // KI-190: read the booking's version BEFORE its balance. A draw that lands in between
       // makes the server refuse (safe); the draw sends this version.
-      const versionRes = await supabase.from('quotes').select('row_version').eq('id', id).maybeSingle();
+      const versionRes = await supabase.from('quotes').select('id, row_version').eq('id', id).maybeSingle();
       if (versionRes.error) throw versionRes.error;
       const loadedRowVersion = readRowVersion((versionRes.data as { row_version?: unknown } | null)?.row_version);
       if (loadedRowVersion === null) throw new Error('The booking version could not be read');

@@ -3214,7 +3214,7 @@ function runCarryOwnerAccepted(root, options) {
   });
   // No reply of Mason's for this run: every finding may instead be one Sol marked the same as a
   // finding he already skipped on this PR (Mason, 2026-11-22; sol-accept-lib.mjs carryForRecord).
-  const carried = Boolean(got.problem) && record.findings.every((f) => typeof f.same_as === "string");
+  const carried = Boolean(got.problem) && !got.anyReceipt && record.findings.every((f) => typeof f.same_as === "string");
   if (carried) {
     const shown = Array.isArray(record.carry_candidates) ? record.carry_candidates[0] : null;
     const c = carryForRecord({

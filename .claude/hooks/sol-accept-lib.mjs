@@ -530,12 +530,15 @@ export function collectAcceptances({ record, readAcceptance, readSkips = () => [
     }
   }
   const accepted = [];
+  let problem = null;
   for (const f of record.findings) {
     if (skipped.has(f.n)) { accepted.push(skipped.get(f.n)); continue; }
     const r = verifySolAcceptance({ approval: readAcceptance(f.n), record, n: f.n, checkReply });
-    if (!r.ok) return { problem: r.reason };
+    if (!r.ok) { problem ??= r.reason; continue; }
     accepted.push(r);
   }
+  // `anyReceipt`: Mason replied for this run, even partly, so his reply decides and no earlier skip carries.
+  if (problem) return { problem, anyReceipt: accepted.length > 0 };
   if (new Set(accepted.map((a) => `${a.payload.pullRequest} ${String(a.payload.pullRequestUrl ?? "").toLowerCase()}`)).size !== 1) return { problem: "the acceptances name different pull requests" };
   return { accepted };
 }

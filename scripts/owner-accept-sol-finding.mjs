@@ -103,7 +103,7 @@ if (argv.length === 1 && argv[0] === "--log") {
   });
   let entry;
   if (!got.problem) entry = decisionLogEntry({ record, accepted: got.accepted });
-  else if (record.findings.every((f) => typeof f.same_as === "string")) {
+  else if (!got.anyReceipt && record.findings.every((f) => typeof f.same_as === "string")) {
     // Sol marked every finding the same as one Mason already skipped on this PR (Mason, 2026-11-22): no new question.
     const pr = openPullRequest();
     if (pr.baseRefName !== "staging") die("only a pull request into staging can carry Mason's earlier skip; ask him: node scripts/owner-accept-sol-finding.mjs <numbers>");

@@ -173,6 +173,7 @@ eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "git status" }
   eq(targets("git -C C:/a push && git -C C:/b push").join(" "), "a@null b@null", "two repositories in one command: both checked");
   eq(targets("git push origin topic:release").join(" "), "cwd@release", "a refspec push asks for its destination branch");
   eq(targets("git push origin HEAD").join(" "), "cwd@null", "HEAD means the folder's current branch");
+  eq(targets("git push origin HEAD other").join(" "), "cwd@null cwd@other", "HEAD beside another refspec still checks the current branch");
   eq(targets("git status").join(" "), "", "no push, nothing to check");
   eq(targets("git push origin HEAD:123").join(" "), "", "an all-digit branch is not mistaken for a PR number");
   eq(targets("git push origin a b c d").length, 3, "at most three pushes are asked about");

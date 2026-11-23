@@ -34,7 +34,8 @@ export function pushTargets(command, cwd) {
     if (!isGitPush(segment)) continue;
     const dir = pushDir(segment, cwd);
     let branches = [];
-    try { branches = pushDestinationBranches(segment, null); } catch { /* unreadable: current branch */ }
+    // "HEAD" marks the current branch, so `git push origin HEAD other` still checks it (Taha LOW, #2307).
+    try { branches = pushDestinationBranches(segment, "HEAD").map((b) => (b === "HEAD" ? null : b)); } catch { /* unreadable: current branch */ }
     // An all-digit branch would be read by `gh pr view` as a PR number, so it is skipped (Luna r1 LOW).
     for (const branch of (branches.length ? branches : [null]).filter((name) => !/^\d+$/.test(name ?? ""))) seen.set(`${dir}\0${branch}`, { dir, branch });
   }

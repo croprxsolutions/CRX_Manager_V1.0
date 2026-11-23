@@ -11,6 +11,61 @@
 ## 2026-11-22 — #2247: spray-job invoice lines book today's product cost; the grower's $0 line stays editable
 
 **Decision (Mason, 2026-11-22, "Today's product cost" and "Yes, same as custom lines").** For #2247, when a spray job becomes an invoice each chemical line books today's product cost per sold unit, as field-application invoices do (a job's saved cost can be per a different unit or $0; Sol rounds 3 and 4 flagged each choice in turn). A customer-supplied chemical stays a $0 information line with no product link; a priced edit to it in the invoice editor is accepted like any custom line (no restricted-use sales record, since CRX did not sell it). Sol round 5 on #2247 may run.
+## 2026-11-22 — #2242: Mason owner-accepted 2 Sol finding(s) at `89407911738d`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2242 at `89407911738d` (base `a7a12c782afc`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224120000_month_close_payments_received_recheck.sql:302`, text sha256 `59670961b0754f02` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref de195cfaecbc)
+- Finding 2 (HIGH) at `supabase/migrations/20270224120000_month_close_payments_received_recheck.sql:420`, text sha256 `bd0b32c47999ddba` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref de195cfaecbc)
+
+## 2026-11-22 — #2242: Mason owner-accepted 2 Sol finding(s) at `ee1201f695d0`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2242 at `ee1201f695d0` (base `a21539cca47c`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224120000_month_close_payments_received_recheck.sql:302`, text sha256 `fac90885cb488954` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 532bce79b230)
+- Finding 2 (HIGH) at `supabase/migrations/20270224120000_month_close_payments_received_recheck.sql:420`, text sha256 `62b1a947d098fdc1` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 532bce79b230)
+
+## 2026-11-22 — #2242: Mason owner-accepted 4 Sol finding(s) at `6e88570402f7`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2242 at `6e88570402f7` (base `9c77cd3a5d22`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:225`, text sha256 `f4a1f06ce1ba3fd1` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 475344108573)
+- Finding 2 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:301`, text sha256 `fb251f884cab2521` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 475344108573)
+- Finding 3 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:342`, text sha256 `2b39642bfbd5683c` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 475344108573)
+- Finding 4 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:420`, text sha256 `febe7dad3ff40142` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 475344108573)
+
+## 2026-11-22 — #2242: Mason owner-accepted 3 Sol finding(s) at `45ea58992506`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2242 at `45ea58992506` (base `a7785529318b`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:225`, text sha256 `41e6f35169a9d380` (the wording stays with the proof, not here)
+  Mason's reason: I accept the risk small (ref 2446394212b1)
+- Finding 2 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:342`, text sha256 `c042e4fd26071826` (the wording stays with the proof, not here)
+  Mason's reason: I accept the risk small (ref 2446394212b1)
+- Finding 3 (HIGH) at `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql:301`, text sha256 `1e38154081a33ee1` (the wording stays with the proof, not here)
+  Mason's reason: I accept the risk small (ref 2446394212b1)
+
+## 2026-11-22 — PR #2242: a retried close replays only the month's current close
+
+**Decision (Mason, 2026-11-22, in the Lane B session):** "Refuse it". A retried close shows its saved receipt only if the month's current close is the one that retry made. If the month was reopened and closed again since, the retry is refused (`CLOSE_REOPENED_SINCE`) instead of showing the older, superseded totals; the screen asks the admin to check the month's status. Why: Sol round 7 showed an old retry could return a superseded receipt as success. The alternative was accepting that rare case.
+
+## 2026-11-22 — PR #2242: a retried close is refused once the month was reopened
+
+**Decision (Mason, 2026-11-22):** "Refuse and re-close (Recommended)" in the bug-captain session, and "Database refuses it" in the Lane B session. If a close went through but its reply was lost, and the month was reopened before that screen refreshed (for example from another tab), retrying the close no longer shows the old "Period closed" receipt: the database refuses it (`CLOSE_REOPENED_SINCE`), the month stays open, and the screen asks the admin to review and close again. Why: Sol rounds 5 and 6 showed that the old receipt could say "closed" while the month was open and still taking postings; a screen-only fix cannot see a reopen made elsewhere. The alternative was accepting that rare gap.
+
+## 2026-11-22 — PR #2242: Month-End close re-check accepts an edit saved in the same instant as the click
+
+**Decision (Mason, 2026-11-22, in the bug-captain session):** "A: accept the gap (Recommended)", confirmed in the Lane B session as "Yes, option A". The database close re-check (#2175) catches edits made while the admin reviews the month. An edit saved in the same instant as the Close click shows on the Month-End screen, not on the saved close receipt, the same as an edit made after the close. Why: Sol rounds 1, 3 and 4 kept finding writers that could land during the close itself (prepayment edits, invoice voids, delivery voids, commission payouts); blocking all of them would change other writers (some Taha's until 2026-12-15), and the table lock tried in round 3 could deadlock with an invoice void. PR #2242 removes that lock; no writer changes. This entry also opens Sol round 5 for PR #2242.
+
+## 2026-11-22 — KI-129 / #2195: prepayment checks count as payments received
+
+**Decision (Mason, 2026-11-22, relayed by the bug-sprint captain):** "yes should count as payment received". Month-End payments received counts each Prepayment Manager check in the month it was entered, at its current amount (all buckets of one check are one payment); Record Payment checks count in full (an overpayment's prepay credit is not added again); voided payments and deleted old-style payments do not count. A later edit or delete of a prepayment check changes that month's screen figure, never a closed month's saved close receipt. Made in migration `20270224120000_month_close_payments_received_recheck.sql` (live only once applied) with the #2175 close re-check (the 2026-11-21 entry below asked for both together).
+
+
 ## 2026-11-22 — #2240: Mason owner-accepted 2 Sol finding(s) at `54ce44b595c3`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2240 at `54ce44b595c3` (base `6aceb0747958`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
@@ -49,7 +104,7 @@
 ## 2026-11-22 — #2264: Mason owner-accepted 1 Sol finding(s) at `fdf75b56929b`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2264 at `fdf75b56929b` (base `f9750a8a4b66`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
-- Finding 1 (HIGH) at `supabase/migrations/20270218100000_f05_order_line_quantity_guard.sql:62`, text sha256 `a0571bb37993f57e` (the wording stays with the proof, not here)
+- Finding 1 (HIGH) at `supabase/migrations/20270218100000_f05_order_line_quantity_guard.sql:62` (the file's name when Sol reviewed it; since restamped to `20270224100000`), text sha256 `a0571bb37993f57e` (the wording stays with the proof, not here)
   Mason's reason: old double-booked orders get fixed by hand in F05b (ref cfb23a2ce43d)
 ## 2026-11-22 — PR #2226: staging merges never carry a Sol proof; skipped Sol findings never carry onto a newer base
 
@@ -239,7 +294,7 @@
 **What this forbids/implies:** KI-191, KI-198, KI-185 and #2075 are built to these rules; Transfer, office auto-draft and Split Billing must agree.
 ## 2026-11-22 — F05: two open loads holding the same units: neither completes until the office cancels one
 
-The staging audit (2026-11-21) found one order line scheduled past what was ordered, so 2 ordered ended 3 delivered. The fix (`20270218100000_f05_order_line_quantity_guard.sql`) refuses any write that would put delivered + open loads past what was ordered.
+The staging audit (2026-11-21) found one order line scheduled past what was ordered, so 2 ordered ended 3 delivered. The fix (`20270224100000_f05_order_line_quantity_guard.sql`, first drafted as `20270218100000`) refuses any write that would put delivered + open loads past what was ordered.
 
 **Decision (Mason, in chat, 2026-11-22: "yes"):** where two open loads already hold the same units from before the fix, completing either in a way that would deliver more than was ordered is refused until the office cancels or reduces the extra load (a partial completion that still fits with the other open load is allowed). The driver is told to call the office; stock never moves twice. Rejected: first load to complete wins (the second driver finds out only at the farm).
 

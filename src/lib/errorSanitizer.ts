@@ -495,6 +495,11 @@ export function sanitizeError(error: unknown): string {
   // 20270224100000): the server sentence says what is wrong.
   const deliveryLineRule = message.match(/^(?:DELIVERY_LINE_NOT_ON_ORDER|DELIVERY_LINE_PRODUCT_MISMATCH|DELIVERY_LINE_UNIT_MISMATCH|DELIVERY_LINE_DUPLICATE|DELIVERY_ORDER_LOCKED|DELIVERY_OVER_ORDER|ORDER_LINE_BELOW_DELIVERIES|ORDER_LINE_QUANTITY_NOT_FINITE|ORDER_LINE_CHECK_ISOLATION):\s*(.+)$/s);
   if (deliveryLineRule) return `Nothing was saved. ${deliveryLineRule[1].trim()}`;
+  // New Delivery's older cross-load check (20260518010000): its text carries a raw line id, so say it in words.
+  const overActive = message.match(/^ITEM_OVER_REMAINING_INCL_ACTIVE:.*? has (\S+) units on other active deliveries; only (\S+) available/s);
+  if (overActive) {
+    return `Nothing was saved. Other open deliveries for this order already hold ${overActive[1]} of this product, so only ${overActive[2]} more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.`;
+  }
   // Partial completion figures (20270203120000, #1942) and completing past the order (F05): the server sentence says what to do.
   const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER):\s*(.+)$/s);
   if (deliveryQuantities) return `The delivery was not completed. ${deliveryQuantities[1].trim()}`;

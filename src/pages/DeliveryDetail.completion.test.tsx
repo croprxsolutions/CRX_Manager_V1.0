@@ -15,7 +15,7 @@
  *     and it fills without a reload.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const SIGNATURE_DATA_URL = `data:image/png;base64,iVBORw0KGgo${'A'.repeat(669)}`;
@@ -516,7 +516,7 @@ describe('Invoices on this sale card', () => {
 describe('Email Confirmation and the server receipt queue', () => {
   const COMPLETED = { ...OPEN_DELIVERY, status: 'completed', completed_at: '2026-10-21T15:00:00Z', signed_by: 'Pat' };
   const answer = (over: Record<string, unknown> = {}) => ({
-    data: { delivery_id: 'del-1', outcome: 'paused', previous_status: 'pending', sent_at: null, send_authorized_at: null, queued_at: null, ...over },
+    data: { delivery_id: 'del-1', outcome: 'paused', previous_status: 'pending', sent_at: null, send_authorized_at: null, queued_at: '2026-10-21T15:00:00.123456+00:00', ...over },
     error: null,
   });
   const closeCalls = () => mockRpc.mock.calls.filter(([name]) => name === 'close_delivery_receipt').map(([, args]) => args.p_reason);
@@ -603,25 +603,60 @@ describe('Email Confirmation and the server receipt queue', () => {
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
-  it('never closes a receipt queued again while the hand send went out (Sol HIGH)', async () => {
-    mockRpc.mockImplementation(() => Promise.resolve(answer({ queued_at: '2026-10-21T15:00:00+00:00' })));
-    mockSendEmail.mockImplementation(() => {
-      tables.data.delivery_receipt_queue = [{ created_at: '2026-10-21T15:09:00+00:00' }];
-      return Promise.resolve({ success: true });
-    });
-    await renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/A new receipt was queued/)));
-    expect(closeCalls()).toEqual(['manual_send']);
-  });
-
-  it('closes the same receipt when only the timestamp format differs', async () => {
-    tables.data.delivery_receipt_queue = [{ created_at: '2026-10-21T15:00:00+00:00' }];
-    mockRpc.mockImplementation(() => Promise.resolve(answer({ queued_at: '2026-10-21T10:00:00-05:00' })));
+  it('closes only the receipt it paused: the pause answer queued_at goes back unchanged (#2251)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer()));
     mockSendEmail.mockResolvedValue({ success: true });
     await renderPage();
     fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
     await waitFor(() => expect(closeCalls()).toEqual(['manual_send', 'handled']));
+    const calls = mockRpc.mock.calls.filter(([name]) => name === 'close_delivery_receipt').map(([, args]) => args);
+    expect(calls[0]).not.toHaveProperty('p_expected_queued_at'); // the pause takes whatever receipt is queued (Mason, 2026-11-22)
+    expect(calls[1].p_expected_queued_at).toBe('2026-10-21T15:00:00.123456+00:00'); // to the microsecond, never through Date
+  });
+
+  it('when the server says the receipt changed during the send, leaves it and never says to mark it handled (#2251)', async () => {
+    mockRpc.mockImplementation((_name: string, args: { p_reason?: string }) => Promise.resolve(args.p_reason === 'handled'
+      ? { data: null, error: { message: "DELIVERY_RECEIPT_CHANGED: this delivery's receipt was queued again since; reload the page" } }
+      : answer()));
+    mockSendEmail.mockResolvedValue({ success: true });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/receipt changed while it was sending, so it was left as it is/)));
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringMatching(/Mark it handled there/));
+  });
+
+  it('when the close cannot be confirmed, never says to mark it handled (Sol HIGH, #2251)', async () => {
+    mockRpc.mockImplementation((_name: string, args: { p_reason?: string }) => Promise.resolve(args.p_reason === 'handled'
+      ? { data: null, error: { message: 'Failed to fetch' } }
+      : answer()));
+    mockSendEmail.mockResolvedValue({ success: true });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/could not confirm its receipt was closed.*before marking anything handled/)));
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringMatching(/Mark it handled there/));
+  });
+
+  it('with none queued at the start, warns when one was queued during the send and closes nothing (Sol LOW, #2251)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
+    mockSendEmail.mockImplementation(async () => {
+      tables.data.delivery_receipt_queue = [{ created_at: '2026-10-21T15:10:00.000001+00:00' }];
+      return { success: true };
+    });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/new receipt was queued .* while the email was sending/)));
+    expect(closeCalls()).toEqual(['manual_send']);
+  });
+
+  it('with no receipt queued when the send started, closes nothing afterwards (#2251)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
+    mockSendEmail.mockResolvedValue({ success: true });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    // The follow-up runs to its end (the queue read is its last step) before the check (Sol LOW).
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('delivery_receipt_queue'));
+    await act(async () => { await Promise.resolve(); });
+    expect(closeCalls()).toEqual(['manual_send']);
   });
 
 });

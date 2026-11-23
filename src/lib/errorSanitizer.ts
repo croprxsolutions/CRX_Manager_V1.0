@@ -48,7 +48,7 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^IDEMPOTENCY_(?:RESULT_INVALID|RECEIPT_MISSING)\b/,
    'Nothing was changed now: the outcome of this request could not be confirmed. Refresh the page before trying again'],
   // Delivery edit "Unassigned" (20270225170000, 20270226163000): the whole edit rolled back.
-  [/^DRIVER_CHANGED\b/, 'Nothing was saved. The driver was changed since you opened this form. Cancel, then edit again'],
+  [/^DRIVER_CHANGED\b/, 'Nothing was saved. The driver was changed since you opened this form. The page now shows the current driver; edit again if needed'],
   [/^DRIVER_CLEAR_STARTED\b/, 'Nothing was saved. A started delivery cannot be unassigned; pick another driver instead'],
   // A completion retried under a fresh key after an earlier attempt already completed the record.
   [/^Delivery must be in_progress to complete \(current status: completed\)/,

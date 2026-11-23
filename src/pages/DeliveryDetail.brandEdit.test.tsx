@@ -187,13 +187,31 @@ describe('DeliveryDetail edit: Unassigned from a stale form (Sol r3 HIGH 1)', ()
     fireEvent.click(await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 }));
     await screen.findByRole('option', { name: /Dana Driver/ });
     fireEvent.change(screen.getByRole('option', { name: 'Unassigned' }).closest('select')!, { target: { value: '' } });
+    const deliveryLoads = () => mockFrom.mock.calls.filter(([t]) => t === 'deliveries').length;
+    const loadsBefore = deliveryLoads();
     fireEvent.click(await screen.findByRole('button', { name: /Save Changes/ }));
     await waitFor(() => expect(editCalls()).toHaveLength(1));
     expect(editCalls()[0][1]).toMatchObject({ p_clear_driver: true, p_expected_driver: 'user-1' });
     // sanitizeError is stubbed here; errorSanitizer.test.ts checks the plain wording.
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/driver was changed/)));
+    // Sol r4 HIGH 1: the stale form closes and the delivery reloads, so the next edit shows the current driver.
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Save Changes/ })).toBeNull());
+    await waitFor(() => expect(deliveryLoads()).toBeGreaterThan(loadsBefore));
+  });
+
+  it('unlocks the form after an unconfirmed (empty) reply, so Save can retry', async () => {
+    tables.data.profile_public_view = [{ id: 'user-1', full_name: 'Dana Driver', role: 'driver', is_active: true }];
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'edit_delivery'
+      ? { data: null, error: null }
+      : { data: { success: true }, error: null }));
+    render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 }));
+    await screen.findByRole('option', { name: /Dana Driver/ });
+    fireEvent.change(screen.getByRole('option', { name: 'Unassigned' }).closest('select')!, { target: { value: '' } });
+    fireEvent.click(await screen.findByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/returned no result/)));
+    expect((screen.getByRole('button', { name: /Save Changes/ }) as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByRole('option', { name: 'Unassigned' }).closest('select') as HTMLSelectElement).disabled).toBe(false);
-    expect(screen.getByRole('button', { name: /Save Changes/ })).toBeTruthy();
   });
 
   it('locks the driver list while the save is in flight, so it cannot show a pick the save ignores', async () => {

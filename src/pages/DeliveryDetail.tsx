@@ -843,28 +843,41 @@ export default function DeliveryDetail() {
     const editScope = fingerprintIntentPayload([editArgs]);
     if (lastEditScopeRef.current && lastEditScopeRef.current !== editScope) editIdem.resetKeyFor(lastEditScopeRef.current);
     lastEditScopeRef.current = editScope;
-    const { data, error } = await supabase.rpc('edit_delivery', {
-      ...editArgs,
-      p_performed_by: profile.id,
-      p_idempotency_key: editIdem.getKeyFor(editScope),
-    });
+    // finally: an empty reply (assertRpcResult throws) must not leave Save, Cancel and the driver list locked.
+    try {
+      const { data, error } = await supabase.rpc('edit_delivery', {
+        ...editArgs,
+        p_performed_by: profile.id,
+        p_idempotency_key: editIdem.getKeyFor(editScope),
+      });
 
-    if (error) {
-      toast('error', sanitizeError(error));
-    } else {
-      const edited = assertRpcResult<{ brand_lines_dropped?: { old_delivery_item_id: string; product_id: string | null }[] }>(data, 'edit_delivery');
-      editIdem.resetKeyFor(editScope);
-      // A changed or removed line loses its brand picks (20270104120000); say which, so they are picked again.
-      const dropped = (edited.brand_lines_dropped ?? []).map((d) => (
-        (items.find((i) => i.product_id === d.product_id)?.product as { product_name?: string } | undefined)?.product_name || 'a product'));
-      if (dropped.length > 0) toast('warning', `Brand picks were cleared for ${[...new Set(dropped)].join(', ')}. Pick the brands again.`);
-      // Unsaved choices on those lines described the old line, so they are dropped too, never re-saved.
-      void brandState.reload({ discard: (edited.brand_lines_dropped ?? []).map((d) => d.old_delivery_item_id) });
-      toast('success', isScheduled ? 'Delivery and items updated' : 'Delivery updated');
-      setEditing(false);
-      fetchDelivery();
+      if (error) {
+        toast('error', sanitizeError(error));
+        // The form is stale: close it and reload, so the next edit starts from the current driver.
+        if (isDriverChangedError(error)) { setEditing(false); fetchDelivery(); }
+      } else {
+        applyEditSaved(data, editScope, isScheduled);
+      }
+    } catch (err) {
+      // An unconfirmed reply keeps the key, so Save again replays the server's answer.
+      toast('error', sanitizeError(err));
+    } finally {
+      setSavingEdit(false);
     }
-    setSavingEdit(false);
+  };
+
+  const applyEditSaved = (data: unknown, editScope: string, isScheduled: boolean) => {
+    const edited = assertRpcResult<{ brand_lines_dropped?: { old_delivery_item_id: string; product_id: string | null }[] }>(data, 'edit_delivery');
+    editIdem.resetKeyFor(editScope);
+    // A changed or removed line loses its brand picks (20270104120000); say which, so they are picked again.
+    const dropped = (edited.brand_lines_dropped ?? []).map((d) => (
+      (items.find((i) => i.product_id === d.product_id)?.product as { product_name?: string } | undefined)?.product_name || 'a product'));
+    if (dropped.length > 0) toast('warning', `Brand picks were cleared for ${[...new Set(dropped)].join(', ')}. Pick the brands again.`);
+    // Unsaved choices on those lines described the old line, so they are dropped too, never re-saved.
+    void brandState.reload({ discard: (edited.brand_lines_dropped ?? []).map((d) => d.old_delivery_item_id) });
+    toast('success', isScheduled ? 'Delivery and items updated' : 'Delivery updated');
+    setEditing(false);
+    fetchDelivery();
   };
 
   // ── Cancel Delivery ────────────────────────────────────────────────────
@@ -3297,6 +3310,10 @@ async function fetchInvoicesByDelivery(deliveryId: string): Promise<Record<strin
 // The server keeps a driver it is not given, so picking "Unassigned" over the driver the form opened with asks it
 // to clear that driver; it refuses (DRIVER_CHANGED) if the delivery has another driver by then (20270226163000).
 // A form that opened with no driver never clears (a Take Delivery since then must survive its save).
+function isDriverChangedError(error: { message?: string }): boolean {
+  return /^DRIVER_CHANGED\b/.test(error.message ?? '');
+}
+
 function clearDriverArg(chosen: string, atOpen: string): { p_clear_driver?: true; p_expected_driver?: string } {
   return !chosen && atOpen ? { p_clear_driver: true, p_expected_driver: atOpen } : {};
 }

@@ -987,6 +987,31 @@ describe('ProductDetail governed pricing flow', () => {
     expect(screen.getByRole('button', { name: 'Reload Product' })).toBeInTheDocument();
   });
 
+  it('#2308: the rate-correction window closes once the Product reloads, even while Cost Basis hangs', async () => {
+    mockLoadRateLock.mockResolvedValue({ ...ratesOpen, is_locked: true, changed_by_name: 'Other Admin', reason: 'season' });
+    render(<ProductDetail />);
+    const banner = await screen.findByTestId('product-rates-locked');
+    fireEvent.click(await within(banner).findByRole('button', { name: 'Correct rates' }));
+    mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Finish correction' })).toBeNull());
+    expect(screen.queryByText(/Editing is locked until the latest values load/i)).toBeNull();
+  });
+
+  it('#2308: leaving the Product during Reload Product shows no failure toast', async () => {
+    const { unmount } = render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    mockToast.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockToast).not.toHaveBeenCalledWith('error', expect.stringContaining('could not be reloaded'));
+  });
+
   it('opens the folded section that holds a refused field', async () => {
     render(<ProductDetail />);
     await screen.findByText('Grower Description');

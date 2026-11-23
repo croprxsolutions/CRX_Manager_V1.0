@@ -221,7 +221,8 @@ describe('JobDetail cross-record binding', () => {
     mockFrom.mockImplementation((table: string) => {
       if (table === 'jobs') {
         jobsCalls += 1;
-        return jobsCalls === 1
+        // Calls 1-2: job A's load and Save's re-read of job A (the stale-edit check); then job B.
+        return jobsCalls <= 2
           ? buildChain({ data: JOB_A, error: null })
           : buildChain({ data: JOB_B, error: null });
       }
@@ -261,7 +262,8 @@ describe('JobDetail cross-record binding', () => {
     mockFrom.mockImplementation((table: string) => {
       if (table === 'jobs') {
         jobsCalls += 1;
-        return jobsCalls === 1
+        // Calls 1-2: job A's load and Save's re-read of job A (the stale-edit check); then job B.
+        return jobsCalls <= 2
           ? buildChain({ data: JOB_A, error: null })
           : buildChain({ data: JOB_B, error: null });
       }

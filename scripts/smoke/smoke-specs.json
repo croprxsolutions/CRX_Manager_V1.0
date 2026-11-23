@@ -771,8 +771,7 @@
       "covers": [
         "save_invoice",
         "get_customer_statement",
-        "complete_delivery",
-        "_mark_delivery_aggregate_short_stock"
+        "complete_delivery"
       ],
       "area": [
         "billing",

@@ -893,10 +893,10 @@ export default function Deliveries() {
   useEffect(() => {
     void loadShortages();
     fetchDrivers();
-    // Only the office list has the customer filter (#2167).
-    if (!isDriver) fetchCustomers();
+    // Only the office list has the customer filter; wait for the role so a driver never reads it (#2167).
+    if (role && !isDriver) fetchCustomers();
     fetchRemainderCount();
-  }, [loadShortages, fetchDrivers, fetchCustomers, fetchRemainderCount, isDriver]);
+  }, [loadShortages, fetchDrivers, fetchCustomers, fetchRemainderCount, isDriver, role]);
 
   // Open deliveries a driver may take. The read rule shows a driver only their own deliveries, so the database
   // returns these through get_available_deliveries_for_driver (#2018). A failed read clears the card and says so,
@@ -911,7 +911,7 @@ export default function Deliveries() {
       if (availableErr) throw availableErr;
       const rows = assertRpcResult<{ rows: unknown }>(data, 'get_available_deliveries_for_driver').rows;
       // A malformed answer such as {} is a failure, not "nothing available" (#2167).
-      if (!Array.isArray(rows)) throw new Error('get_available_deliveries_for_driver returned an unexpected result');
+      if (!Array.isArray(rows) || !rows.every((r) => typeof (r as { id?: unknown } | null)?.id === 'string')) throw new Error('get_available_deliveries_for_driver returned an unexpected result');
       setUnassigned(rows as AvailableDelivery[]);
       setAvailableLoadFailed(false);
     } catch (loadErr) {
@@ -1287,28 +1287,32 @@ export default function Deliveries() {
       if (takingRef.current) return;
       takingRef.current = true;
       setTakingId(deliveryId);
-      await runCriticalAction({
-        action: async () => {
-          // One key per delivery: reassign_delivery does not bind its request, so a shared key would
-          // replay delivery A's result for delivery B after a lost reply.
-          const reassignKey = reassignIdem.getKeyFor(deliveryId);
-          const { data, error } = await supabase.rpc('reassign_delivery', {
-            p_delivery_id: deliveryId,
-            p_new_driver: profile.id,
-            p_performed_by: profile.id,
-            p_idempotency_key: reassignKey,
-          });
-          if (error) throw error;
-          assertRpcResult(data, 'reassign_delivery');
-          reassignIdem.resetKeyFor(deliveryId);
-          logActivity({ event: 'reassign_delivery', description: `Took delivery ${deliveryId}`, performedBy: profile.id, entityType: 'delivery', entityId: deliveryId });
-        },
-        toast,
-        successMessage: 'Delivery assigned to you',
-        sentryTag: 'take_delivery',
-      });
-      takingRef.current = false;
-      setTakingId(null);
+      try {
+        await runCriticalAction({
+          action: async () => {
+            // One key per delivery: reassign_delivery does not bind its request, so a shared key would
+            // replay delivery A's result for delivery B after a lost reply.
+            const reassignKey = reassignIdem.getKeyFor(deliveryId);
+            const { data, error } = await supabase.rpc('reassign_delivery', {
+              p_delivery_id: deliveryId,
+              p_new_driver: profile.id,
+              p_performed_by: profile.id,
+              p_idempotency_key: reassignKey,
+            });
+            if (error) throw error;
+            assertRpcResult(data, 'reassign_delivery');
+            reassignIdem.resetKeyFor(deliveryId);
+            logActivity({ event: 'reassign_delivery', description: `Took delivery ${deliveryId}`, performedBy: profile.id, entityType: 'delivery', entityId: deliveryId });
+          },
+          toast,
+          successMessage: 'Delivery assigned to you',
+          sentryTag: 'take_delivery',
+        });
+      } finally {
+        // A thrown take must not leave every Take button locked.
+        takingRef.current = false;
+        setTakingId(null);
+      }
       // Taken (by this driver or another), changed, or a lost reply: both lists must reflect the database now.
       void fetchDeliveries();
       void loadAvailable();

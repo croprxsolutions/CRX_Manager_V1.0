@@ -479,6 +479,20 @@ describe('Driver Available deliveries (#2167)', () => {
     expect(await screen.findByText('Available deliveries could not be loaded.')).toBeInTheDocument();
   });
 
+  it('reports a list holding a broken entry instead of crashing', async () => {
+    H.availableAnswers = [{ data: { rows: [OPEN, null] }, error: null }];
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    expect(await screen.findByText('Available deliveries could not be loaded.')).toBeInTheDocument();
+  });
+
+  it('does not read the customer list while the role is still loading', async () => {
+    H.auth.role = null as unknown as string;
+    H.auth.profile = null as unknown as { id: string; role: string };
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await waitFor(() => expect(H.tableReads.length).toBeGreaterThan(0));
+    expect(H.tableReads).not.toContain('customers');
+  });
+
   it('takes a delivery once for a double tap', async () => {
     let release = () => {};
     H.holdReassign = new Promise<void>((r) => { release = r; });

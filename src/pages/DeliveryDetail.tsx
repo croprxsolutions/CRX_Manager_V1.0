@@ -49,7 +49,7 @@ import { Sentry } from '../lib/sentry';
 import { fetchDeliveryFarm } from '../lib/driverFarms';
 import {
   RECEIPT_SENDING_NOW_MESSAGE, closeDeliveryReceipt, isReceiptChanged, isReceiptSendingNow, receiptCloseScope,
-  receiptMayAlreadyBeSent, type ReceiptCloseResult,
+  receiptMayAlreadyBeSent, receiptQueuedAt, type ReceiptCloseResult,
 } from '../lib/receiptsToCheck';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
@@ -1483,8 +1483,14 @@ export default function DeliveryDetail() {
 
   // After the hand send: mark the paused receipt handled. A failure only leaves it on the office list.
   const closeSentReceipt = async (deliveryId: string, queuedAt: string | null) => {
-    if (!queuedAt) return; // no receipt was queued when the send started, so none was paused and none is closed
     try {
+      if (!queuedAt) {
+        // None was queued when the send started, so none is closed; one queued meanwhile may still be emailed (Sol LOW).
+        if (await receiptQueuedAt(deliveryId)) {
+          toast('warning', 'A new receipt was queued for this delivery while the email was sending. The server may email it too.');
+        }
+        return;
+      }
       // Only the receipt this send covered: the server refuses if it was queued again since (#2251).
       const scope = receiptCloseScope(deliveryId, 'handled', queuedAt);
       await closeDeliveryReceipt(deliveryId, 'handled', receiptCloseIdem.getKeyFor(scope), queuedAt);
@@ -1498,7 +1504,8 @@ export default function DeliveryDetail() {
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
         level: 'warning', extra: { context: 'close_delivery_receipt after Email Confirmation', deliveryId },
       });
-      toast('warning', 'The email went out, but its receipt is still on "Customer receipts to check". Mark it handled there.');
+      // Not "mark it handled": the close may have failed because a newer receipt the customer is owed replaced it (Sol HIGH).
+      toast('warning', 'The email went out, but the app could not confirm its receipt was closed. Check "Customer receipts to check" before marking anything handled: a receipt queued after this email still needs to go out.');
     }
   };
 

@@ -625,6 +625,29 @@ describe('Email Confirmation and the server receipt queue', () => {
     expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringMatching(/Mark it handled there/));
   });
 
+  it('when the close cannot be confirmed, never says to mark it handled (Sol HIGH, #2251)', async () => {
+    mockRpc.mockImplementation((_name: string, args: { p_reason?: string }) => Promise.resolve(args.p_reason === 'handled'
+      ? { data: null, error: { message: 'Failed to fetch' } }
+      : answer()));
+    mockSendEmail.mockResolvedValue({ success: true });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/could not confirm its receipt was closed.*before marking anything handled/)));
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringMatching(/Mark it handled there/));
+  });
+
+  it('with none queued at the start, warns when one was queued during the send and closes nothing (Sol LOW, #2251)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
+    mockSendEmail.mockImplementation(async () => {
+      tables.data.delivery_receipt_queue = [{ created_at: '2026-10-21T15:10:00.000001+00:00' }];
+      return { success: true };
+    });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/new receipt was queued .* while the email was sending/)));
+    expect(closeCalls()).toEqual(['manual_send']);
+  });
+
   it('with no receipt queued when the send started, closes nothing afterwards (#2251)', async () => {
     mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
     mockSendEmail.mockResolvedValue({ success: true });

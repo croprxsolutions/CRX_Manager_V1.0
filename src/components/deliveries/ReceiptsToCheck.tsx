@@ -108,7 +108,7 @@ export default function ReceiptsToCheck() {
       if (isReceiptSendingNow(err)) {
         toast('warning', RECEIPT_SENDING_NOW_MESSAGE);
       } else if (isReceiptChanged(err)) {
-        toast('warning', "This delivery's receipt changed since the list loaded. Nothing was closed; the list has been refreshed.");
+        toast('warning', "This delivery's receipt changed since the list loaded. Nothing was closed; reloading the list.");
         setHandling(null);
         setReload((n) => n + 1);
       } else {

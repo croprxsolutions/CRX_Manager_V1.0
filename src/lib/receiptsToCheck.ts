@@ -1,4 +1,4 @@
-import { supabaseUntyped, assertRpcResult } from './db';
+import { supabase, supabaseUntyped, assertRpcResult } from './db';
 
 // KI-25 office list: needs_check receipts, plus owed ones still waiting after an hour. No age cut-off: an unsent
 // receipt stays listed until it is sent or marked handled, so a long sender outage cannot hide one (Sol, PR #1647).
@@ -51,6 +51,14 @@ export function isReceiptSendingNow(error: unknown) {
 }
 
 export const RECEIPT_SENDING_NOW_MESSAGE = 'The server is emailing this receipt right now. Try again in a minute.';
+
+// When this delivery's queue row was (re)queued, or null when it has none. Used only after a hand send that started
+// with no receipt queued, to warn that one was queued meanwhile (the server binding needs a receipt to name).
+export async function receiptQueuedAt(deliveryId: string): Promise<string | null> {
+  const { data, error } = await supabase.from('delivery_receipt_queue').select('created_at').eq('delivery_id', deliveryId).maybeSingle();
+  if (error) throw error;
+  return data?.created_at ?? null;
+}
 
 // The server refused because the delivery's receipt is not the one the screen named (queued again, or gone).
 export function isReceiptChanged(error: unknown) {

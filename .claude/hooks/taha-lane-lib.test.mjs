@@ -27,12 +27,18 @@ for (const p of [
   "supabase/migrations/20270216110000_purchasing_plan_booking_reservations.sql",
   "supabase/migrations/20270224120000_month_close_payments_received_recheck.sql", "src/lib/billingFeatures.ts",
   "src/pages/CommissionPayments.tsx", "src/lib/creditLimit.ts",
+  // Codex P1/P2 on #2303: bill splits are billing; data "fields" are not field billing.
+  "src/lib/billSplitLock.ts", "src/components/orders/LineBillSplit.tsx", "src/lib/invoiceRowPdfFields.ts",
+  "supabase/migrations/20270129180000_ki81_quote_line_sent_field.sql", "supabase/migrations/20260702131000_a3_save_quote_restore_dropped_fields.sql",
 ]) ok(isTahaLanePath(p), `${p} is Taha's`);
 for (const p of [
   "src/pages/FieldApplicationInvoice.tsx", "src/components/field-invoices/Row.tsx", "src/pages/FieldInvoices.tsx",
   "supabase/migrations/20270224110000_retire_per_acre_field_pricing.sql", "src/pages/JobDetail.tsx", "src/pages/BlendTickets.tsx",
   "src/pages/Deliveries.tsx", "src/pages/InventoryPage.tsx", "src/lib/threshold.ts", "docs/workflows/QUOTE_TO_DELIVERY.md",
   ".claude/hooks/taha-lane-lib.mjs", "scripts/quote-report.mjs",
+  "src/lib/fieldAppNewInvoiceAddress.ts", "src/pages/FieldStop.billing.test.tsx", "src/pages/FieldAppSplitInvoiceEditor.tsx",
+  "src/components/field-invoices/UnbilledApplicationsPanel.tsx", "src/pages/VendorBillDetail.tsx",
+  "supabase/migrations/20261022021000_order_invoice_refuses_field_split.sql",
 ]) ok(!isTahaLanePath(p), `${p} is not Taha's`);
 
 // ── the problem ─────────────────────────────────────────────────────────────

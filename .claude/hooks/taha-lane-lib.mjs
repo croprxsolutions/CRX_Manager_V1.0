@@ -32,7 +32,13 @@ const LANE_WORDS = new Set([
   "credit", "credits", "statement", "statements", "billing", "commission", "commissions",
   "month", "receivable", "tax", "discount",
 ]);
-const FIELD_WORDS = new Set(["field", "fields", "spray", "blend", "application", "applicator", "job", "jobs"]);
+// Field billing is Mason's. "field" counts only when it names that work (field app, field invoice…):
+// "Fields" alone means data fields (invoiceRowPdfFields) and stays in the lane (Codex P2, #2303).
+const FIELD_WORDS = new Set(["spray", "blend", "application", "applications", "applicator", "job", "jobs"]);
+const AFTER_FIELD = new Set(["app", "application", "applications", "invoice", "invoices", "billing", "split", "splits", "stop", "job", "jobs"]);
+const isFieldBilling = (words) => words.some((w, i) => FIELD_WORDS.has(w) || (w === "field" && AFTER_FIELD.has(words[i + 1])));
+// Chemical-sale bill splits (billSplitLock, LineBillSplit) are billing too; vendor bills are not (Codex P1, #2303).
+const isBill = (words) => words.includes("bill") && !words.includes("vendor");
 
 const wordsOf = (name) => String(name)
   .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -46,8 +52,8 @@ export function isTahaLanePath(name) {
   const file = String(name ?? "").replace(/\\/g, "/");
   if (!/^(?:src|supabase)\//i.test(file)) return false;
   const words = wordsOf(file);
-  if (words.some((w) => FIELD_WORDS.has(w))) return false;
-  return words.some((w) => LANE_WORDS.has(w));
+  if (isFieldBilling(words)) return false;
+  return isBill(words) || words.some((w) => LANE_WORDS.has(w));
 }
 
 /**

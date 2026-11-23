@@ -169,7 +169,7 @@ const LOADER_NUMBER_MIN = '0.001';
 const LOADER_NUMBER_MAX = '1000000';
 
 /** Compares two unsigned plain decimal strings exactly; the sign of the result is the sign of a - b. */
-export function compareDecimalText(a: string, b: string): number {
+function compareDecimalText(a: string, b: string): number {
   const parts = (x: string) => {
     const [i = '', f = ''] = x.split('.');
     return [i.replace(/^0+/, ''), f.replace(/0+$/, '')];

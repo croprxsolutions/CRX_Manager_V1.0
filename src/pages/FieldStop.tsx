@@ -75,6 +75,9 @@ async function readStopAddress(addressId: string): Promise<{ line: string; error
   return { line: [a.address_line, a.city, a.state, a.zip].filter(Boolean).join(', '), error: error ?? (data ? null : new Error('stop address not found')) };
 }
 
+// An email of only spaces is no email, so the missing-email warning still shows (#2167).
+const hasEmail = (email: string | null | undefined): boolean => !!email?.trim();
+
 // A driver's stop never asks the customers table for the farm: withStopFarm fills it from the driver lookup (#2018).
 function stopColumns(isDriver: boolean): string {
   const base = 'id, delivery_number, status, updated_at, customer_id, order_id, created_by, delivery_address_id, delivery_notes, assigned_driver';
@@ -227,7 +230,7 @@ export default function FieldStop() {
     setAddressLine(farmAddress);
     setReceiptRecipient(null);
     // Only an open stop sends a receipt on completion.
-    if (!del.customer?.email?.trim() && (del.status === 'scheduled' || del.status === 'in_progress')) {
+    if (!hasEmail(del.customer?.email) && (del.status === 'scheduled' || del.status === 'in_progress')) {
       void fetchReceiptRecipient(del.id).then((recipient) => { if (!isStale()) setReceiptRecipient(recipient); });
     }
     if (del.status === 'scheduled') setStep('arrive');

@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-23 — #2258: Mason's earlier skip carried to 2 repeat Sol finding(s) at `a092bca8b71c`
+
+**Carried automatically (2026-11-23).** Sol's full review of PR #2258 at `a092bca8b71c` (base `ac09b76f9877`) found 2 BLOCKER/HIGH finding(s); Sol marked each the same as one Mason skipped on this pull request.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:278`, text sha256 `dc59d01a4a69202a`: carried from ref 85379a983ed7 at `ede225b742c3` to `a092bca8b71c`; Sol marked it the same
+- Finding 2 (HIGH) at `src/pages/CycleCounts.tsx:279`, text sha256 `1cffde4ab865ba7c`: carried from ref ac3f23505870 at `975d42607513` to `a092bca8b71c`; Sol marked it the same
+
 ## 2026-11-22 — #2258: Mason owner-accepted 1 Sol finding(s) at `bc3a7201ea7b`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2258 at `bc3a7201ea7b` (base `6aceb0747958`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

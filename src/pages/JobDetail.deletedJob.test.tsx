@@ -111,11 +111,20 @@ function deferred() {
   return { promise, release };
 }
 
+// jobsCalls counts page loads; the one-row read of a refused job (who last wrote it, when deleted) is answered by `stamp`.
 let jobsCalls = 0;
-function serveJob(job: Record<string, unknown>) {
+function serveJob(job: Record<string, unknown>, stamp: Record<string, unknown> | null = null) {
   jobsCalls = 0;
   mockFrom.mockImplementation((table: string) => {
-    if (table === 'jobs') { jobsCalls += 1; return buildChain({ data: job, error: null }); }
+    if (table === 'jobs') {
+      const chain = chainShell();
+      chain.select = (cols: string) => {
+        if (cols === 'updated_by, deleted_at') return buildChain({ data: stamp, error: null });
+        jobsCalls += 1;
+        return buildChain({ data: job, error: null });
+      };
+      return chain;
+    }
     if (table === 'ground_crews') return buildChain({ data: [{ id: 'crew-1', name: 'Crew One' }], error: null });
     return buildChain({ data: [], error: null });
   });
@@ -175,20 +184,20 @@ describe('JobDetail — refused cancel (#2174)', () => {
     expect(logActivity).not.toHaveBeenCalled();
   });
 
-  it('shows a job deleted meanwhile as deleted', async () => {
-    serveJob(makeJob({}));
+  it('shows a job deleted meanwhile as deleted, on the day it was deleted', async () => {
+    serveJob(makeJob({}), { updated_by: 'user-2', deleted_at: '2026-11-02T15:00:00Z' });
     mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'
       ? editJobsReply([{ id: 'job-x', reason: 'deleted' }])
       : { data: null, error: null }));
     mountAt('/jobs/job-x');
     await screen.findByRole('heading', { name: 'J-0001' });
     await confirmCancel();
-    expect(await screen.findByText(/This job was deleted/)).toBeTruthy();
+    expect(await screen.findByText(new RegExp(`deleted on ${new Date('2026-11-02T15:00:00Z').toLocaleDateString()}`))).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Save Changes/ })).toBeNull();
   });
 
   it('logs job_cancelled when a retry finds the cancel a lost reply committed', async () => {
-    serveJob(makeJob({}));
+    serveJob(makeJob({}), { updated_by: 'user-1', deleted_at: null });
     let calls = 0;
     mockRpc.mockImplementation((fn: string) => {
       if (fn !== 'edit_jobs') return Promise.resolve({ data: null, error: null });
@@ -207,6 +216,25 @@ describe('JobDetail — refused cancel (#2174)', () => {
     expect(logActivity).toHaveBeenCalledWith(expect.objectContaining({ event: 'job_cancelled' }));
   });
 
+  it('does not log a lost-reply retry when someone else cancelled the job meanwhile', async () => {
+    serveJob(makeJob({}), { updated_by: 'user-2', deleted_at: null });
+    let calls = 0;
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn !== 'edit_jobs') return Promise.resolve({ data: null, error: null });
+      calls += 1;
+      return calls === 1
+        ? Promise.reject(new Error('Failed to fetch'))
+        : Promise.resolve(editJobsReply([{ id: 'job-x', reason: 'status', status: 'cancelled' }]));
+    });
+    mountAt('/jobs/job-x');
+    await screen.findByRole('heading', { name: 'J-0001' });
+    await confirmCancel();
+    await waitFor(() => expect(calls).toBe(1));
+    await confirmCancel();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringMatching(/already cancelled/)));
+    expect(logActivity).not.toHaveBeenCalled();
+  });
+
   it('does not log a cancel when the job was already cancelled by someone else', async () => {
     serveJob(makeJob({}));
     mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'
@@ -222,7 +250,7 @@ describe('JobDetail — refused cancel (#2174)', () => {
 
 describe('JobDetail — crew/loader refusal after save (#2174)', () => {
   it('keeps text typed during the save instead of reloading over it', async () => {
-    serveJob(makeJob({}));
+    serveJob(makeJob({}), { updated_by: 'user-2', deleted_at: '2026-11-02T15:00:00Z' });
     const saveGate = deferred();
     mockRpc.mockImplementation((fn: string) => {
       if (fn === 'save_job') return saveGate.promise.then(() => ({ data: { job_id: 'job-x' }, error: null }));

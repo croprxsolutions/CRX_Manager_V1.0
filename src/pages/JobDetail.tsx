@@ -417,7 +417,8 @@ export default function JobDetail() {
   // #2188: a job removed with Delete Jobs (soft delete) opens read-only, marked deleted.
   const [deletedAt, setDeletedAt] = useState<string | null>(null);
   // #2174: the last Cancel click failed without a reply, so it may have committed unlogged.
-  const cancelReplyLostRef = useRef(false);
+  // The job whose last Cancel may have committed with its reply lost (#2174).
+  const cancelReplyLostRef = useRef<string | null>(null);
   // #23: pre-fill the customer when arriving from a customer page
   // (/jobs/new?customer_id=…). Only for a NEW job; existing jobs load their own
   // customer in fetchJob. A stale/bogus id simply renders as no selection.
@@ -1720,9 +1721,10 @@ export default function JobDetail() {
   // clean baseline (but only once the load has settled, so we don't adopt a half-
   // populated form); thereafter compare. fetchJob / the new-job init reset the
   // baseline to null so a fresh load (or a post-save refetch) re-adopts cleanly.
+  // A layout effect runs as the typing is committed, before any save reply can be handled (Luna HIGH, #2174).
+  useLayoutEffect(() => { latestSnapshotRef.current = formSnapshot(); }, [formSnapshot]);
   useEffect(() => {
     const snap = formSnapshot();
-    latestSnapshotRef.current = snap;
     if (baselineRef.current === null) {
       // Don't adopt while a refetch is still settling — a render fired between
       // fetchJob nulling the baseline and its state landing would otherwise
@@ -3010,8 +3012,7 @@ export default function JobDetail() {
               // Record what save_job did commit, and lock editing if the job was deleted or moved on.
               setSavedApplicatorId(payload.applicator_id);
               setSavedJobDate(jobDate);
-              if (crewSkip?.reason === 'deleted') setDeletedAt((d) => d ?? new Date().toISOString());
-              else if (crewSkip?.reason === 'status' && crewSkip.status) setStatus(crewSkip.status);
+              await showRefusedJob(crewSkip, stillOnThisJob);
             }
           }
           setSaving(false);
@@ -3305,6 +3306,32 @@ export default function JobDetail() {
     setCompleting(false);
   };
 
+  // Who last wrote a job the server refused, and when it was deleted: shown and logged truthfully (#2174).
+  const readRefusedJob = async (jobId: string) => {
+    const { data, error } = await supabase.from('jobs').select('updated_by, deleted_at').eq('id', jobId).maybeSingle();
+    if (error) Sentry.captureException(toSentryError(error), { extra: { context: 'read_refused_job' } });
+    return (data as { updated_by: string | null; deleted_at: string | null } | null) ?? null;
+  };
+
+  // Show what the server reported for a refused write, which locks editing without reloading over typing (#2174).
+  const showRefusedJob = async (skip: EditJobsSkip | undefined, stillOnThisJob: () => boolean) => {
+    if (skip?.reason === 'deleted') {
+      const stamp = await readRefusedJob(id!);
+      if (stillOnThisJob()) setDeletedAt((d) => d ?? stamp?.deleted_at ?? new Date().toISOString());
+    } else if (skip?.reason === 'status' && skip.status && stillOnThisJob()) {
+      setStatus(skip.status);
+    }
+  };
+
+  // #2174: an earlier Cancel whose reply was lost cancelled the job if the job names this user as its last
+  // writer (edit_jobs stamps updated_by on cancel); log that cancel now, once. Another user's cancel is not logged.
+  const logLostCancel = async () => {
+    const stamp = await readRefusedJob(id!);
+    if (profile && stamp?.updated_by === profile.id) {
+      logActivity({ event: 'job_cancelled', description: `Job ${jobNumber} cancelled`, performedBy: profile.id });
+    }
+  };
+
   const handleCancelJob = async () => {
     const stillOnThisJob = captureRouteEpoch();
     if (status !== 'scheduled' && status !== 'in_progress') {
@@ -3317,19 +3344,14 @@ export default function JobDetail() {
       const result = await editJobs({
         jobIds: [id!], action: 'cancel', performedBy: profile!.id,
       });
-      const replyWasLost = cancelReplyLostRef.current;
-      cancelReplyLostRef.current = false;
+      const replyWasLost = cancelReplyLostRef.current === id;
+      cancelReplyLostRef.current = null;
       if (result.cancelled.length === 0) {
         const skip = result.skipped.find((s) => s.id === id);
-        // #2174: an earlier click whose reply was lost did cancel it; log that cancel now, once.
-        if (replyWasLost && skip?.reason === 'status' && skip.status === 'cancelled' && profile) {
-          logActivity({ event: 'job_cancelled', description: `Job ${jobNumber} cancelled`, performedBy: profile.id });
-        }
+        if (replyWasLost && skip?.reason === 'status' && skip.status === 'cancelled') await logLostCancel();
+        // No reload, so unsaved typing stays on screen; nobody can save over a job already cancelled, completed or deleted.
+        await showRefusedJob(skip, stillOnThisJob);
         if (stillOnThisJob()) {
-          // No reload, so unsaved typing stays on screen; but show what the server reported, which
-          // locks editing, so nobody saves over a job already cancelled, completed or deleted (#2174).
-          if (skip?.reason === 'deleted') setDeletedAt((d) => d ?? new Date().toISOString());
-          else if (skip?.reason === 'status' && skip.status) setStatus(skip.status);
           toast('info', `Job not cancelled: ${summarizeEditJobs(result)} Refresh to see the job as saved.`);
         }
         setCancelling(false);
@@ -3348,7 +3370,7 @@ export default function JobDetail() {
       const cancelMsg = editJobsErrorMessage(err);
       // Unless the server plainly refused, the cancel may have committed with the reply lost;
       // the next click's "already cancelled" then logs it.
-      cancelReplyLostRef.current = !cancelMsg.startsWith('Nothing was saved.');
+      cancelReplyLostRef.current = cancelMsg.startsWith('Nothing was saved.') ? null : (id ?? null);
       Sentry.captureException(toSentryError(err), { extra: { context: 'cancel_job' } });
       toast('error', cancelMsg);
     }

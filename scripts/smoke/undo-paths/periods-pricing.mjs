@@ -21,7 +21,8 @@ const lineFp = (line) => `(SELECT row(oi.price_per_unit, oi.cost_per_unit, oi.to
   FROM public.order_items oi WHERE oi.id = '${line}')`;
 
 function seedPeriodsPricing() {
-  seed('periods-pricing', `SELECT public.close_accounting_period('${PERIOD_END}', '${ADMIN}', 'undo-seed-close-period');
+  seed('periods-pricing', `SELECT public.close_accounting_period('${PERIOD_END}', '${ADMIN}', 'undo-seed-close-period',
+    public.get_monthly_summary(date_trunc('month', DATE '${PERIOD_END}')::date, DATE '${PERIOD_END}') ->> 'review_token', true, true);
     INSERT INTO public.customers (id, farm_name, account_number) VALUES ('${CUST}', '[UNDO] Pricing Farm', '[UNDO]-PRC-1');
     INSERT INTO public.products (id, product_name, unit_size, epa_registration, product_form, inventory_unit)
       VALUES ('${PROD}', '[UNDO] Pricing Product', 'Gal', '999999-99996', 'liquid', 'Gal');

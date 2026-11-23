@@ -398,6 +398,11 @@ export default function Deliveries() {
 
   /* Driver-specific: unassigned deliveries they can claim (get_available_deliveries_for_driver, #2018) */
   const [unassigned, setUnassigned] = useState<AvailableDelivery[]>([]);
+  // #2167: a failed Available read keeps the card with a Retry instead of hiding it.
+  const [availableLoadFailed, setAvailableLoadFailed] = useState(false);
+  // #2167: the delivery whose Take is in flight; a second tap waits for it (the ref catches a same-tick double tap).
+  const [takingId, setTakingId] = useState<string | null>(null);
+  const takingRef = useRef(false);
   const [listSearch, setListSearch] = useState('');
   // The search the database runs: settles 300 ms after the last keystroke, so typing sends one read.
   const [searchTerm, setSearchTerm] = useState('');
@@ -888,9 +893,10 @@ export default function Deliveries() {
   useEffect(() => {
     void loadShortages();
     fetchDrivers();
-    fetchCustomers();
+    // Only the office list has the customer filter (#2167).
+    if (!isDriver) fetchCustomers();
     fetchRemainderCount();
-  }, [loadShortages, fetchDrivers, fetchCustomers, fetchRemainderCount]);
+  }, [loadShortages, fetchDrivers, fetchCustomers, fetchRemainderCount, isDriver]);
 
   // Open deliveries a driver may take. The read rule shows a driver only their own deliveries, so the database
   // returns these through get_available_deliveries_for_driver (#2018). A failed read clears the card and says so,
@@ -903,10 +909,15 @@ export default function Deliveries() {
     if (seq !== availableSeqRef.current) return;
     try {
       if (availableErr) throw availableErr;
-      setUnassigned(assertRpcResult<{ rows: AvailableDelivery[] }>(data, 'get_available_deliveries_for_driver').rows ?? []);
+      const rows = assertRpcResult<{ rows: unknown }>(data, 'get_available_deliveries_for_driver').rows;
+      // A malformed answer such as {} is a failure, not "nothing available" (#2167).
+      if (!Array.isArray(rows)) throw new Error('get_available_deliveries_for_driver returned an unexpected result');
+      setUnassigned(rows as AvailableDelivery[]);
+      setAvailableLoadFailed(false);
     } catch (loadErr) {
       // A failed or malformed answer clears the card, so an old list never stays clickable.
       setUnassigned([]);
+      setAvailableLoadFailed(true);
       toast('error', `Could not load available deliveries: ${sanitizeError(loadErr)}`);
       Sentry.captureException(loadErr, { tags: { source: 'fetch', page: 'deliveries' } });
     }
@@ -1273,6 +1284,9 @@ export default function Deliveries() {
         toast('error', 'Cannot take delivery — profile not loaded. Please refresh.');
         return;
       }
+      if (takingRef.current) return;
+      takingRef.current = true;
+      setTakingId(deliveryId);
       await runCriticalAction({
         action: async () => {
           // One key per delivery: reassign_delivery does not bind its request, so a shared key would
@@ -1293,6 +1307,8 @@ export default function Deliveries() {
         successMessage: 'Delivery assigned to you',
         sentryTag: 'take_delivery',
       });
+      takingRef.current = false;
+      setTakingId(null);
       // Taken (by this driver or another), changed, or a lost reply: both lists must reflect the database now.
       void fetchDeliveries();
       void loadAvailable();
@@ -1471,9 +1487,15 @@ export default function Deliveries() {
           )}
 
           {/* Available (unassigned) */}
-          {unassigned.length > 0 && (
+          {(unassigned.length > 0 || availableLoadFailed) && (
             <section id="my-available" className="scroll-mt-32">
               <h2 className={DRIVER_SECTION_TITLE}>Available Deliveries</h2>
+              {availableLoadFailed && (
+                <div role="alert" className="flex items-center justify-between gap-3 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                  <span>Available deliveries could not be loaded.</span>
+                  <Button size="sm" variant="secondary" onClick={() => { void loadAvailable(); }}>Retry</Button>
+                </div>
+              )}
               <ul className={DRIVER_LIST}>
                 {unassigned.map((d) => (
                   <li key={d.id} className="space-y-1 px-4 py-3">
@@ -1495,6 +1517,8 @@ export default function Deliveries() {
                     <Button
                       onClick={(e) => { e.stopPropagation(); handleTakeDelivery(d.id); }}
                       className="w-full mt-2"
+                      loading={takingId === d.id}
+                      disabled={takingId !== null}
                     >
                       Take This Delivery
                     </Button>

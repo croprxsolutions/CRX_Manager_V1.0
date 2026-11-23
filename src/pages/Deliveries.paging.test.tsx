@@ -37,6 +37,10 @@ const H = vi.hoisted(() => ({
   // While set, get_deliveries_page answers only once this settles, so a test can look at the screen mid-read.
   holdPageCalls: null as Promise<void> | null,
   failTable: null as string | null,
+  // get_available_deliveries_for_driver answers in order from this list (the last one repeats) (#2167).
+  availableAnswers: [] as Array<{ data: unknown; error: unknown }>,
+  // While set, reassign_delivery answers only once this settles (#2167).
+  holdReassign: null as Promise<void> | null,
   // While set, reads of delivery_items answer only once this settles (the stock check stays pending).
   holdStockCheck: null as Promise<void> | null,
   // Every table the screen reads, in order (the stock check reads inventory).
@@ -120,6 +124,13 @@ vi.mock('../lib/db', () => ({
   supabase: {
     from: (table: string) => { H.tableReads.push(table); return serverQuery(table); },
     rpc: vi.fn((name: string, args: PageArgs) => {
+      if (name === 'get_available_deliveries_for_driver') {
+        const next = H.availableAnswers.length > 1 ? H.availableAnswers.shift()! : H.availableAnswers[0];
+        return Promise.resolve(next ?? { data: { rows: [] }, error: null });
+      }
+      if (name === 'reassign_delivery') {
+        return (H.holdReassign ?? Promise.resolve()).then(() => ({ data: { success: true }, error: null }));
+      }
       if (name !== 'get_deliveries_keyset_page') return Promise.resolve({ data: null, error: null });
       H.pageCalls.push(args);
       if (H.failPageFromCall !== null && H.pageCalls.length >= H.failPageFromCall) {
@@ -151,7 +162,7 @@ vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 vi.mock('../lib/notificationTriggers', () => ({ notifyDeliveryCompleted: vi.fn() }));
 vi.mock('../lib/csvExport', () => ({ exportToCSV: H.exportToCSV, fmtDateCSV: vi.fn() }));
 vi.mock('../hooks/useIdempotencyKey', () => ({
-  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn() }),
+  useIdempotencyKey: () => ({ getKey: () => 'test-idem-key', resetKey: vi.fn(), getKeyFor: () => 'test-idem-key', resetKeyFor: vi.fn() }),
 }));
 vi.mock('../components/deliveries/BatchCancelModal', () => ({ default: () => null }));
 vi.mock('../components/deliveries/QuickDeliveryModal', () => ({ default: () => null }));
@@ -185,6 +196,8 @@ beforeEach(() => {
   H.refuseBookmarks = false;
   H.omitNextCursor = false;
   H.failTable = null;
+  H.availableAnswers = [];
+  H.holdReassign = null;
   H.holdStockCheck = null;
   H.tableReads = [];
   H.pageCalls = [];
@@ -441,6 +454,49 @@ describe('Deliveries list pages in the database', () => {
     expect(H.pageCalls.every((c) => c.p_limit === 500 && c.p_driver_id === 'driver-1')).toBe(true);
     // Two pages, read twice: a list read in more than one page is kept only when a second read matches it.
     expect(H.pageCalls.map((c) => c.p_after_id)).toEqual([FIRST_ID, 'del-0999', FIRST_ID, 'del-0999']);
+  });
+});
+
+describe('Driver Available deliveries (#2167)', () => {
+  const OPEN = { id: 'av-1', delivery_number: 'DEL-AV1', customer_name: 'Open Farm', farm_group_name: null, scheduled_date: localToday() };
+  beforeEach(() => {
+    H.auth.role = 'driver';
+    H.auth.profile = { id: 'driver-1', role: 'driver' };
+  });
+
+  it('keeps the card with a Retry when the first read fails, and Retry loads it', async () => {
+    H.availableAnswers = [{ data: null, error: { message: 'connection reset' } }, { data: { rows: [OPEN] }, error: null }];
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    expect(await screen.findByText('Available deliveries could not be loaded.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Open Farm')).toBeInTheDocument();
+    expect(screen.queryByText('Available deliveries could not be loaded.')).not.toBeInTheDocument();
+  });
+
+  it('reports a malformed answer instead of showing nothing available', async () => {
+    H.availableAnswers = [{ data: { rows: 'invalid' }, error: null }];
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    expect(await screen.findByText('Available deliveries could not be loaded.')).toBeInTheDocument();
+  });
+
+  it('takes a delivery once for a double tap', async () => {
+    let release = () => {};
+    H.holdReassign = new Promise<void>((r) => { release = r; });
+    H.availableAnswers = [{ data: { rows: [OPEN] }, error: null }];
+    const { supabase } = await import('../lib/db');
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    const take = await screen.findByRole('button', { name: /Take This Delivery/ });
+    fireEvent.click(take);
+    fireEvent.click(take);
+    await act(async () => { release(); await H.holdReassign; });
+    const takes = (supabase.rpc as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(([n]) => n === 'reassign_delivery');
+    expect(takes).toHaveLength(1);
+  });
+
+  it('does not read the office customer filter list for a driver', async () => {
+    render(<MemoryRouter><Deliveries /></MemoryRouter>);
+    await waitFor(() => expect(H.pageCalls.length).toBeGreaterThan(0));
+    expect(H.tableReads).not.toContain('customers');
   });
 });
 

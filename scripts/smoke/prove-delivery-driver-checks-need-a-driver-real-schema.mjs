@@ -23,6 +23,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const NAME = `crx-driverchk-${process.pid}-${Date.now().toString(36)}`;
 const DB = 'postgres';
 const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
+let created = false; // only remove a container this run started (Sol r1 LOW)
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
@@ -171,6 +172,7 @@ function installLiveAuthUid() {
 }
 function buildContainer() {
   docker(['run', '-d', '--name', NAME, '--network', 'none', '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m', '-e', 'POSTGRES_PASSWORD=postgres', IMAGE]);
+  created = true;
   ready();
   wait(1500);
   for (const name of ['20260727174805_extensions.sql', '20260727174805_acl_lockdown.sql', '20260727174805_platform_overlay.sql', '20260727174805_cron_jobs.sql', '20260727174805_migration_history.sql']) docker(['cp', path.join(BASELINE, name), `${NAME}:/tmp/${name}`]);
@@ -297,7 +299,7 @@ const complete = (d, actor, key) => `SELECT public.complete_delivery(p_delivery_
   p_performed_by => '${actor}', p_quantities => ${J({ [LINE(d)]: 5 })}, p_idempotency_key => '${key}',
   p_evidence => 'left_at_site', p_evidence_ref => '${PHOTO(d)}')::text;`;
 const startComplete = (d, actor, key) => `SELECT public.start_and_complete_delivery(p_delivery_id => '${d}', p_signed_by => 'No one present — left at site',
-  p_delivered_on => current_date, p_performed_by => '${actor}', p_quantities => ${J({ [LINE(d)]: 5 })}, p_idempotency_key => '${key}',
+  p_delivered_on => (now() AT TIME ZONE 'America/Chicago')::date, p_performed_by => '${actor}', p_quantities => ${J({ [LINE(d)]: 5 })}, p_idempotency_key => '${key}',
   p_evidence => 'left_at_site', p_evidence_ref => '${PHOTO(d)}')::text;`;
 // The result of a completion, read past row security: status, stock left, invoices for the delivery.
 const outcome = (d) => `RESET ROLE; SELECT (SELECT status FROM public.deliveries WHERE id = '${d}')
@@ -381,4 +383,4 @@ function main() {
 }
 
 try { main(); }
-finally { if (!KEEP) docker(['rm', '-f', NAME], { allowFailure: true }); }
+finally { if (!KEEP && created) docker(['rm', '-f', NAME], { allowFailure: true }); }

@@ -1,5 +1,6 @@
--- Rollback for 20270226100000_delivery_driver_checks_need_a_driver.sql (generated with it). Ship it as its own
--- reviewed migration. Restores each function's base body; grants, owners and comments are kept by CREATE OR REPLACE.
+-- Proof-only reverse of 20270226100000_delivery_driver_checks_need_a_driver.sql (generated with it). It restores the
+-- OLD bodies, so it brings the old driver check back: use it only in the disposable proof container, never as a
+-- production recovery. If the fix misbehaves live, ship a reviewed forward migration that keeps the driver check.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 DO $pre$

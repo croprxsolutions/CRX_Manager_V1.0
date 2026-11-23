@@ -7,6 +7,25 @@
 ## 2026-11-22 — #2247: spray-job invoice lines book today's product cost; the grower's $0 line stays editable
 
 **Decision (Mason, 2026-11-22, "Today's product cost" and "Yes, same as custom lines").** For #2247, when a spray job becomes an invoice each chemical line books today's product cost per sold unit, as field-application invoices do (a job's saved cost can be per a different unit or $0; Sol rounds 3 and 4 flagged each choice in turn). A customer-supplied chemical stays a $0 information line with no product link; a priced edit to it in the invoice editor is accepted like any custom line (no restricted-use sales record, since CRX did not sell it). Sol round 5 on #2247 may run.
+## 2026-11-22 — #2256: Mason owner-accepted 3 Sol finding(s) at `591e6a34de34`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2256 at `591e6a34de34` (base `9c77cd3a5d22`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/components/deliveries/ReceiptsToCheck.tsx:96`, text sha256 `8fa2f87a2f18aafb` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 1ba4939db9f5)
+- Finding 2 (HIGH) at `src/pages/DeliveryDetail.tsx:1493`, text sha256 `e1351c2ce5dcdaec` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 1ba4939db9f5)
+- Finding 3 (HIGH) at `src/pages/DeliveryDetail.tsx:1550`, text sha256 `cf5fc817743fe50a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 56304b763489)
+
+## 2026-11-22 — #2256: Mason owner-accepted 3 Sol finding(s) at `f218cd0a6cb3`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2256 at `f218cd0a6cb3` (base `d069dc004e94`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/DeliveryDetail.tsx:1493`, text sha256 `cc1e48c10a3de110` (the wording stays with the proof, not here)
+  Mason's reason: I accept not big chance (ref b9bbd42731de)
+- Finding 2 (HIGH) at `src/components/deliveries/ReceiptsToCheck.tsx:96`, text sha256 `7066242aa819f205` (the wording stays with the proof, not here)
+  Mason's reason: I accept not big chance (ref b9bbd42731de)
+- Finding 3 (HIGH) at `src/pages/DeliveryDetail.tsx:1562`, text sha256 `4e2720e2b1b9e457` (the wording stays with the proof, not here)
+  Mason's reason: I accept not big chance (ref b9bbd42731de)
 
 ## 2026-11-22 — #1980: Mason owner-accepted 2 Sol finding(s) at `596e9a966c78`
 

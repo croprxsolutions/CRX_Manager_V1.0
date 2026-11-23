@@ -503,6 +503,13 @@ export function sanitizeError(error: unknown): string {
   // Sale-line triggers (20261105190000, WP-PM-6b): the same rule on quote, order and tier-priced invoice lines.
   const salePriceMissing = message.match(/^(?:QUOTE|ORDER|INVOICE)_PRICE_MISSING:\s*(.+)$/s);
   if (salePriceMissing) return `Nothing was saved. ${salePriceMissing[1].trim()}`;
+  // Customer receipt refusals (close_delivery_receipt, KI-25): plain words, no database code.
+  if (/^DELIVERY_NOT_COMPLETED:.*receipt/s.test(message)) {
+    return 'Nothing was sent. This delivery is not completed any more, so its receipt must not be sent.';
+  }
+  if (/^DELIVERY_RECEIPT_CHANGED(?::|$)/.test(message)) {
+    return 'Nothing was changed. This delivery\'s receipt was queued again since. Reload the page.';
+  }
   if (/^INVOICE_POSTED_LOCKED(?::|$)/.test(message)) {
     return 'This invoice was posted, so its lines, billing shares and field locations cannot change. Unpost it first, then edit.';
   }

@@ -53,7 +53,9 @@ const latin1 = (text) => Buffer.from(text, "utf8").toString("latin1");
   assert.match(judge({ newSql: goodSql.replace(`as ${OLD}`, `as ${NEW}`) }), /the migration's SQL changed/, "restamp rule: the stamp swapped in the body is refused");
   assert.match(judge({ newSql: header(NEW).replace("Written", `Written ${NEW}`) + body }), /the migration's SQL changed/, "restamp rule: any other header edit is refused");
   assert.match(judge({ branchAdded: [`supabase/migrations/20270227000000_other.sql`] }), /sits between the old and new stamps/, "restamp rule: a branch migration between the stamps is refused");
-  assert.equal(judge({ branchAdded: [`supabase/migrations/20270101000000_other.sql`] }), null, "restamp rule: a branch migration below both stamps is fine");
+  assert.equal(judge({ branchAdded: [`supabase/migrations/20270101000000_other.sql`, `supabase/migrations/${OLD}_${STEM}.sql`] }), null, "restamp rule: a branch migration below both stamps is fine");
+  assert.match(judge({ branchAdded: [`supabase/migrations/${OLD}_zz.sql`] }), /sits between/, "restamp rule: another branch migration sharing the old stamp is refused");
+  assert.match(judge({ branchAdded: [`supabase/migrations/${NEW}_zz.sql`] }), /sits between/, "restamp rule: another branch migration on the new stamp is refused");
 }
 
 // The command, end to end.

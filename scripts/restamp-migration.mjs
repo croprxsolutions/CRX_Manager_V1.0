@@ -113,7 +113,11 @@ for (const file of owned) {
   if (swap(before) !== before) { writeFileSync(file, swap(before), "latin1"); edits.push(file); }
 }
 git("add", "--", ...edits); // the renames are already staged by git mv
-git("commit", "-q", "-m", `chore(migrations): restamp ${oldStem} to ${newStamp}`);
+const committed = tryGit("commit", "-q", "-m", `chore(migrations): restamp ${oldStem} to ${newStamp}`);
+if (committed.status !== 0) {
+  console.error(`The commit was refused:\n${(committed.stderr || committed.stdout).trim()}\nThe restamp edits are staged but NOT committed. Fix the complaint and commit them, or discard them with: git reset --hard HEAD`);
+  process.exit(1);
+}
 const head = git("rev-parse", "HEAD");
 console.log(`Restamped ${oldStamp} -> ${newStamp} in commit ${head}: ${edits.join(", ")}`);
 const leftover = tryGit("grep", "-l", oldStem, "HEAD", "--").stdout.trim();

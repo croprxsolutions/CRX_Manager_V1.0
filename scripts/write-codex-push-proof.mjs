@@ -2692,7 +2692,7 @@ export function restampProblem({ entries, readFile, branchAdded = [] }) {
   const [toPath, newStamp, toRest] = migTo[0];
   if (fromRest !== toRest || oldStamp === newStamp) return "the migration's name changed beyond its timestamp";
   const [low, high] = [oldStamp, newStamp].sort();
-  const between = branchAdded.map((p) => RESTAMP_MIGRATION_RE.exec(p)?.[1]).find((s) => s && s > low && s < high);
+  const between = branchAdded.filter((p) => p !== fromPath).map((p) => RESTAMP_MIGRATION_RE.exec(p)?.[1]).find((s) => s && s >= low && s <= high);
   if (between) return `the branch's migration ${between} sits between the old and new stamps, so the apply order would change`;
   const restamp = (text) => text.split(oldStamp).join(newStamp);
   const lf = (text) => text.replace(/\r\n/g, "\n");

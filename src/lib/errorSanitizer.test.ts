@@ -371,6 +371,26 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ message: 'CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. Smith Farms still has 2 open order(s), 1 open quote(s). Finish or cancel that work, bill it, credit its returns and use up or refund its prepay first' }))
       .toBe('Nothing was deactivated. Smith Farms still has 2 open order(s), 1 open quote(s). Finish or cancel that work, bill it, credit its returns and use up or refund its prepay first.');
     expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK')).toContain('spray jobs, returns or prepay money). Finish, bill or settle it before deactivating it.');
+    expect(sanitizeError({ message: 'JOB_LINE_BELOW_COST: Roundup ‮Pro is priced below its cost on this job. Nothing was invoiced; its price must be corrected before this job can be invoiced.' }))
+      .toBe('Roundup Pro is priced below its cost on this job. Nothing was invoiced; its price must be corrected before this job can be invoiced.');
+    expect(sanitizeError('JOB_LINE_BELOW_COST')).toContain('priced below its cost');
+    expect(sanitizeError('JOB_DELETED: this job was deleted')).toBe("This job was deleted, so it can't be invoiced. Nothing was invoiced.");
+    expect(sanitizeError('JOB_FIELD_NO_BILLING_SPLIT: North 40 has no billing split. Nothing was invoiced; set who pays for it (100% or a shared split) in Field Setup first.'))
+      .toBe('North 40 has no billing split. Nothing was invoiced; set who pays for it (100% or a shared split) in Field Setup first.');
+    expect(sanitizeError('JOB_LINE_PRICE_NOT_WHOLE_CENTS: Roundup is priced per "Gal" on this job, which comes to a fraction of a cent per "Qt" (the unit it is sold in), and rounding that changes the line by more than $0.50. Nothing was invoiced; change the job price per "Gal" so it converts to whole cents per "Qt" (for example $41.52).'))
+      .toBe('Roundup is priced per "Gal" on this job, which comes to a fraction of a cent per "Qt" (the unit it is sold in), and rounding that changes the line by more than $0.50. Nothing was invoiced; change the job price per "Gal" so it converts to whole cents per "Qt" (for example $41.52).');
+    expect(sanitizeError('JOB_LINE_UNIT_UNCONVERTIBLE: Roundup is recorded on this job in "Ea", which can\'t be converted to the unit it is sold in ("Gal"). Nothing was invoiced; correct the unit on the job or the product first.'))
+      .toBe('Roundup is recorded on this job in "Ea", which can\'t be converted to the unit it is sold in ("Gal"). Nothing was invoiced; correct the unit on the job or the product first.');
+    expect(sanitizeError('JOB_LINE_ROUNDING: Round‮up can\'t be recorded to 4 decimals in Gal without its amount changing by more than $0.50.'))
+      .toBe("Roundup can't be recorded to 4 decimals in Gal without its amount changing by more than $0.50.");
+    expect(sanitizeError('JOB_LINE_COST_MISSING: Roundup has no cost recorded.')).toBe('Roundup has no cost recorded.');
+    expect(sanitizeError('JOB_LINE_QUANTITY_INVALID')).toContain('check its quantity, unit and cost');
+    expect(sanitizeError("JOB_INVOICED_LOCKED: This job has been invoiced, so its chemicals, fields and billing split can't be changed. Nothing was saved; void the job's invoice first to change them."))
+      .toBe("This job has been invoiced, so its chemicals, fields and billing split can't be changed. Nothing was saved; void the job's invoice first to change them.");
+    expect(sanitizeError("JOB_COMPLETED_CHEMICALS_LOCKED: This job is complete, so its chemicals can't be changed: completion already took them from stock. Nothing was saved."))
+      .toBe("This job is complete, so its chemicals can't be changed: completion already took them from stock. Nothing was saved.");
+    expect(sanitizeError('JOB_LINE_BELOW_COST: Round​up\nPro\u0007 is priced below its cost on this job.'))
+      .toBe('Roundup Pro is priced below its cost on this job.');
     expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. \u202Esmraf\u202C\u061C still has open invoices. Settle them first'))
       .toBe('Nothing was deactivated. smraf still has open invoices. Settle them first.');
     expect(sanitizeError({ message: 'CUSTOMER_INACTIVE_NEW_WORK: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added' }))

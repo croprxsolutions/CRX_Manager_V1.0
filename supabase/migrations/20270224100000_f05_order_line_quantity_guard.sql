@@ -265,3 +265,40 @@ REVOKE ALL ON FUNCTION public._order_line_within_deliveries() FROM PUBLIC, anon,
 CREATE TRIGGER zz_order_line_within_deliveries
   BEFORE INSERT OR UPDATE OF quantity_delivered, total_units_needed ON public.order_items
   FOR EACH ROW EXECUTE FUNCTION public._order_line_within_deliveries();
+
+-- Postflight (Taha's review): pin the state this migration claims on the day of the apply.
+DO $postflight$
+DECLARE
+  v_bad text;
+BEGIN
+  SELECT string_agg(t.name, ', ') INTO v_bad
+    FROM (VALUES ('deliveries', 'zz_delivery_reopen_within_order'),
+                 ('delivery_items', 'zz_delivery_line_within_order'),
+                 ('order_items', 'zz_order_line_within_deliveries')) AS t(tbl, name)
+   WHERE NOT EXISTS (SELECT 1 FROM pg_trigger g
+                      WHERE g.tgrelid = ('public.' || t.tbl)::regclass AND g.tgname = t.name
+                        AND g.tgenabled = 'O' AND NOT g.tgisinternal);
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'F05_POSTFLIGHT: trigger(s) missing or not enabled: %', v_bad;
+  END IF;
+  SELECT string_agg(p.proname, ', ') INTO v_bad
+    FROM pg_proc p
+   WHERE p.pronamespace = 'public'::regnamespace
+     AND p.proname IN ('_order_line_committed', '_order_line_open_loads', '_assert_order_line_fits',
+                       '_delivery_line_within_order', '_delivery_reopen_within_order', '_order_line_within_deliveries')
+     AND (NOT p.prosecdef
+          OR p.proowner <> 'postgres'::regrole
+          OR NOT COALESCE(p.proconfig, '{}'::text[]) @> ARRAY['search_path=public, pg_temp']
+          OR has_function_privilege('anon', p.oid, 'EXECUTE')
+          OR has_function_privilege('authenticated', p.oid, 'EXECUTE')
+          OR has_function_privilege('service_role', p.oid, 'EXECUTE'));
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'F05_POSTFLIGHT: function(s) not definer-owned-locked as expected: %', v_bad;
+  END IF;
+  IF (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+        AND p.proname IN ('_order_line_committed', '_order_line_open_loads', '_assert_order_line_fits',
+                          '_delivery_line_within_order', '_delivery_reopen_within_order', '_order_line_within_deliveries')) <> 6 THEN
+    RAISE EXCEPTION 'F05_POSTFLIGHT: expected exactly six F05 functions';
+  END IF;
+END
+$postflight$;

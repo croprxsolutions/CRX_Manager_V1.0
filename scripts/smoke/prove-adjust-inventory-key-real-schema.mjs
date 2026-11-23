@@ -25,6 +25,28 @@ import { buildContainer, removeContainer, seedUsers, scalar, attempt, asUser, re
 
 const CANDIDATE = '20270201140000_adjust_inventory_key_printable_only.sql';
 const FOLLOW_UP = '20270224180000_idempotency_keys_printable_only.sql';
+const EXPECTED_STRICT_FUNCTIONS = [
+  '_section9_create_vendor_bill_cumulative_impl',
+  '_section9_receive_po_items_intent_impl_20260831',
+  '_section9_record_vendor_payment_intent_impl_20260831',
+  '_section9_update_vendor_bill_intent_impl_20260831',
+  '_section9_void_vendor_bill_intent_impl_20260831',
+  'adjust_inventory',
+  'approve_return',
+  'cancel_return',
+  'create_commission_payment',
+  'create_inventory_hold',
+  'create_return',
+  'create_vendor_bill',
+  'issue_return_credit',
+  'post_commission_payment',
+  'receive_return',
+  'reject_return',
+  'reverse_receiving_record',
+  'soft_delete_customer_document',
+  'void_commission_payment',
+  'void_vendor_payment',
+];
 const reuse = process.env.ADJUST_KEY_PROOF_REUSE === '1';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PROD = '7c7a0000-0000-4000-8000-000019120001';
@@ -97,7 +119,7 @@ INSERT INTO public.customers (id, farm_name, assigned_sales_rep, is_active) VALU
   const probe = docker(['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { input: `BEGIN;
 SELECT set_config('request.jwt.claims', '{"sub":"${ADMIN}","role":"authenticated"}', true);
 DO $p$
-DECLARE f record; v_args text; v_out text; v_bad text; k text;
+DECLARE f record; v_args text; v_out text; v_bad text; k text; v_state text; v_bad_state text;
 BEGIN
   FOR f IN SELECT p.oid::regprocedure::text AS sig, p.proname, p.proargnames, p.pronargs, p.proargtypes::oid[] AS types
              FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosrc LIKE '%COLLATE "C" ~ ''[^!-~]''%' ORDER BY 1
@@ -110,13 +132,18 @@ BEGIN
           WHEN f.proargnames[i] = 'p_hold_type' THEN '''manual'''
           ELSE 'NULL::' || format_type(f.types[i - 1], NULL) END, ', ' ORDER BY i)
         INTO v_args FROM generate_series(1, f.pronargs) i;
+      v_state := NULL;
       BEGIN
         EXECUTE format('SELECT public.%I(%s)', f.proname, v_args);
         v_out := 'returned';
-      EXCEPTION WHEN OTHERS THEN v_out := SQLERRM;
+      EXCEPTION WHEN OTHERS THEN v_out := SQLERRM; v_state := SQLSTATE;
       END;
       IF v_bad IS NULL THEN v_bad := v_out; ELSE
-        RAISE NOTICE 'PROBE|%|%|%', f.sig, v_bad LIKE 'IDEMPOTENCY_KEY_REQUIRED%', v_out NOT LIKE 'IDEMPOTENCY_KEY_REQUIRED%';
+        -- A normal key passes only when it gets past the key check AND does not die of a structural error
+        -- (class 42 syntax/undefined object, XX internal), which a broken body would raise.
+        RAISE NOTICE 'PROBE|%|%|%', f.sig, v_bad LIKE 'IDEMPOTENCY_KEY_REQUIRED%',
+          (v_out NOT LIKE 'IDEMPOTENCY_KEY_REQUIRED%' AND coalesce(v_state, '00000') !~ '^(42|XX)');
+        RAISE NOTICE 'OUTCOME|%|%|%', f.sig, coalesce(v_state, 'returned'), left(v_out, 80);
         v_bad := NULL;
       END IF;
     END LOOP;
@@ -125,7 +152,9 @@ END $p$;
 ROLLBACK;` });
   const probes = [...probe.stderr.matchAll(/PROBE\|([^|]+)\|(\w+)\|(\w+)/g)].map((m) => [m[1], m[2], m[3]]);
   for (const [sig, bad, good] of probes) console.log(`[adjust-key] ${sig}: newline key refused=${bad}, normal key passes key check=${good}`);
+  for (const m of probe.stderr.matchAll(/OUTCOME\|([^|]+)\|([^|]*)\|(.*)/g)) console.log(`[adjust-key] ${m[1]}: normal-key outcome ${m[2]} ${m[3]}`);
   assert.equal(probes.length, 20, 'expected 20 functions with the strict check (adjust_inventory + 19)');
+  assert.deepEqual(probes.map(([sig]) => sig.replace(/\(.*$/, '').replace('public.', '')).sort(), EXPECTED_STRICT_FUNCTIONS, 'the set of functions with the strict check must be exactly the 20 named');
   assert.deepEqual(probes.filter(([, bad, good]) => bad !== 't' || good !== 't'), [], 'every function must refuse only the bad key');
 
   // 3b. The return sweep pins each return wrapper's exact body; its re-pinned hashes match the new bodies.

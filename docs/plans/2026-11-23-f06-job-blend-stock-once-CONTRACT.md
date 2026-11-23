@@ -13,59 +13,62 @@ Read at `origin/staging` `c2a85624e` (2026-11-23). Issue #2178. Tracker row F06.
 - Production, read-only 2026-11-23: 0 blend tickets, 0 linked tickets, 0 ticket records, 1 job record, 0 jobs recorded both ways. Staging has the audit's doubled pair JOB-2026-0010 / BT-2026-0002 (synthetic).
 - Precedent: #2063 (DECISION_LOG 2026-11-22) — when a job and its blend ticket could both bill, the first bill wins and the second is refused with plain words.
 
-## Outcome and authority
+## Outcome and authority (Mason, 2026-11-23: "The job (A)")
 
-**Rule:** for any one job, stock for the spray is taken either by the job's own completion record or by its linked tickets' records — never both. Whichever is recorded first wins; the second is refused and says why and what to do. No stock, record, invoice or job status changes on a refusal.
+**Rule:** when a spray job has a blend ticket linked to it, the **job** takes the chemicals out of stock (its completion records the spray, as today). The linked ticket never takes them a second time. Every refusal says why and what to do; no stock, record, invoice or job status changes on a refusal.
 
-Smallest change: one new migration, no change to either big function (avoids colliding with open #2170, which rewrites job completion):
+Smallest change: one new migration (`20270225200000_f06_job_owns_linked_blend_stock.sql`), no change to either posting function (avoids colliding with open #2170, which rewrites job completion):
 
-1. `BEFORE INSERT` trigger on `application_records`:
-   - `blend_ticket` record whose ticket has a `job_id`: lock that job row (`FOR UPDATE`); refuse `BLEND_TICKET_JOB_ALREADY_RECORDED` if a `job` record exists for it.
-   - `job` record: (job row is already locked by completion; lock again is harmless) refuse `JOB_BLEND_TICKET_ALREADY_RECORDED` if any ticket with `job_id` = this job has a `blend_ticket` record.
-2. Extend link guarding with a new `BEFORE UPDATE OF job_id` trigger on `blend_tickets`: when the ticket has a record, refuse `BLEND_TICKET_RECORDED_KEEPS_JOB` if (a) it is being moved off a job or to another job, or (b) it is being linked to a job that already has a `job` record. Linking a recorded, unlinked ticket to a job that has no record yet is allowed (completion of that job will then be refused).
-3. Plain-words messages for all three codes in `src/lib/errorSanitizer.ts`.
+1. `BEFORE INSERT` trigger on `application_records` (definer function):
+   - `blend_ticket` record whose ticket (locked `FOR UPDATE`) has a `job_id` → refuse `BLEND_TICKET_JOB_RECORDS`.
+   - `job` record: lock the job row, then (next statement) refuse `JOB_BLEND_TICKET_ALREADY_RECORDED` if a ticket linked to this job has its own record. Only old rows can reach this; the link rules stop new ones.
+2. `BEFORE UPDATE OF job_id` trigger on `blend_tickets` (definer function), returning at once when `job_id` did not change:
+   - linking a ticket that has its own record → refuse `BLEND_TICKET_RECORDED_NO_JOB`;
+   - moving or unlinking a ticket whose old job is already recorded (old job locked first) → refuse `BLEND_TICKET_COMPLETED_JOB_KEEPS_TICKET`.
+3. Plain-words messages for all four codes in `src/lib/errorSanitizer.ts` (server sentence shown after "Nothing was saved.").
 
-Who may act is unchanged: both RPCs keep their role checks; triggers only add refusals. Triggers run as the table owner inside the caller's transaction; they trust nothing the screen sends (they read ticket, job and records from the database).
+Who may act is unchanged: both RPCs keep their role checks; triggers only add refusals. `application_records` has only a SELECT policy (checked live, read-only), so only the definer posting functions insert it; the link is guarded on the table because office users update `blend_tickets` directly. Guard functions are `SECURITY DEFINER`, owned by postgres, `search_path = public, pg_temp`, EXECUTE revoked from every app role; the postflight pins this.
 
 ## State and failure
 
 - **No automatic record changes.** Refuse only.
-- **Locking:** every check locks the job row first. Completion: job → (trigger) job. Ticket record: ticket → job. Link change: ticket (row update) → job. No path locks a ticket after a job, so no lock cycle. Under READ COMMITTED the check query after the lock sees the other side's committed record.
-- **Two tickets on one job:** both may record (two loads); the job then cannot complete-with-stock.
-- **Existing rows:** triggers fire only on new inserts/updates; the staging pair stays as is (synthetic). Production has none.
+- **Locking:** ticket path locks only the ticket; job path locks only the job; a link change holds the ticket row, then locks the old job. Nothing locks a ticket after a job, so no lock cycle. Each check runs in its own statement after its lock, so under READ COMMITTED it sees the other side's committed record.
+- **Two tickets on one job:** neither records on its own; the job's completion takes the stock once.
+- **Existing rows:** triggers fire only on new inserts/updates. Production has no blend tickets (read-only check, 2026-11-23); staging keeps its synthetic doubled pair.
 - **Retry:** a refused call writes nothing; the idempotency receipt is bound only after success, so a retry is refused again the same way.
-- **Undo:** admin reverses the ticket record (stock back, record deleted) → job completion is then allowed. A job record can't be undone, so a ticket of a completed job stays refused.
-- **Accepted gap (as KI-93):** a ticket never linked to its job (job number typed as text only) is invisible to the database.
+- **Undo for an old doubled pair:** an admin reverses the ticket record (stock back), then the job completes.
+- **Accepted gap (as KI-93):** a ticket never linked to its job, or unlinked before the job completed, is invisible to the database.
+- **Consequences Mason accepted with (A):** stock comes out at the job's chemical amounts, not the ticket's measured amounts; ticket lot numbers are not copied onto the spray record; a ticket linked to the wrong completed job needs an admin to fix by hand.
 
 ## Delivery
 
-One database PR to `staging` (migration + sanitizer messages + ledger + docs). The screens already show RPC errors through the sanitizer; no screen depends on new database shape.
+One database PR to `staging` (migration + sanitizer messages + ledger + docs). The screens already show RPC errors through the sanitizer; no screen depends on new database shape. Re-run the prover after #2170 merges (it redefines job completion).
 
-## Proof cases (disposable Postgres prover, real migrations)
+## Proof cases (`scripts/smoke/prove-f06-job-owns-linked-blend-stock-real-schema.mjs`)
 
-1. Linked ticket, job completed first → Create App Record refused `BLEND_TICKET_JOB_ALREADY_RECORDED`; ledger and on-hand unchanged.
-2. Linked ticket recorded first → job completion refused `JOB_BLEND_TICKET_ALREADY_RECORDED`; job stays `in_progress`; ledger unchanged.
-3. Case 2, then admin reverses the ticket record → completion succeeds; exactly one set of `job_applied` rows net.
-4. Recorded ticket: unlink or move to another job → refused; unrecorded ticket can still move.
-5. Recorded unlinked ticket linked to a completed job → refused; to an uncompleted job → allowed.
-6. Unlinked ticket and unrelated job → both record and deduct as today.
-7. Two sessions at once (ticket record vs job completion, same job) → one succeeds, the other refused; no deadlock.
-8. Staging browser check: the refusal reads in plain words on Blend Ticket Detail.
+0. Before the candidate: linked job and ticket both deduct (the bug).
+1. Linked ticket, job completed first → Create App Record refused; on-hand unchanged.
+2. Linked ticket, record before the job completes → refused; the job then completes and takes the stock once.
+3. Legacy pair (ticket recorded, then linked) → completion refused; status, stock, ledger, records unchanged; after an admin reverses the ticket, completion nets one deduction.
+4. Completed job: unlink or move its ticket → refused; an edit that keeps the job saves; before completion the link can still change.
+5. Recorded ticket → linking refused; unrelated ticket and job each record as before.
+6. The internal ticket-record body is guarded too (trigger on the table).
+7. Two-session races: completion vs unlink (unlink waits on the lock, then refused); record vs link (link refused).
+8. Mutation: drop the link guard → the unlink goes through. Rollback script restores the old behaviour.
+9. Staging browser check after merge: the refusal reads in plain words on Blend Ticket Detail.
 
 ## Cold challenge (Astra gpt-6.2-astra high, 2026-11-23): FINDINGS 61
 
-The draft "first record wins" design does not converge. Settled so far:
-- DEFECT 1 (BLOCKER): complete the job, unlink the unrecorded ticket, record the ticket: two deductions. Any design must stop a ticket leaving a job that already recorded.
-- DEFECT 15: trigger functions run as the caller; RLS can hide the conflicting row. The guard functions must be `SECURITY DEFINER`, owned by postgres, `search_path = public, pg_temp`, EXECUTE revoked.
-- DEFECT 27: lock the job in its own statement, then check in a later statement (fresh READ COMMITTED snapshot).
-- DEFECT 24: the link guard returns at once when `job_id` did not change (ordinary saves name the column).
-- DEFECT 5: a ticket record with no stock lines must not count as "took the stock".
-- DECISIONs 3, 4, 6-11: which record owns the stock decides field closeout, quantities, grower-supplied products, lots and weather on the logbook record, holds and invoicing. Sent to Mason as one combined question below.
-The rest are re-checked against the design Mason picks (full output kept outside the repo, in the session scratchpad).
+The first-wins design did not converge. Settled and carried into design A:
+- DEFECT 1 (BLOCKER, unlink-then-record double): fixed by `BLEND_TICKET_COMPLETED_JOB_KEEPS_TICKET` (case 4, race A, mutation).
+- DEFECT 15: guard functions are definer functions (postflight).
+- DEFECT 27: lock and check are separate statements.
+- DEFECT 24: no-change return when `job_id` is unchanged.
+- DEFECT 5: not applicable (a linked ticket never records under A).
+- Findings 17-18 disproved: `application_records` has only a SELECT policy (live, read-only).
+- DECISIONs 3, 4, 6-11: answered by Mason's (A) below.
+Full output kept outside the repo, in the session scratchpad.
 
-## Open business decisions
+## Business decisions
 
-1. **When a spray job has a blend ticket linked to it, which one takes the chemicals out of stock?**
-   - **(A, recommended) The job.** Closing the job in the field always works and takes the stock, as today. "Create App Record" on a ticket linked to a job is refused ("completing the job records this spray"). A ticket cannot leave a job once the job is completed, and a ticket that already has its own record cannot be linked to a job. The ticket stays the blend paperwork and its billing source (#2063). Consequence: stock comes out at the job's chemical amounts, not the ticket's measured amounts; the ticket's lot numbers are not copied onto the spray record; a ticket linked to the wrong completed job needs an admin to fix by hand (production has no tickets yet).
-   - **(B) The ticket.** The job still closes but takes no stock when a linked ticket was recorded. Consequence: rewrites job completion (collides with open #2170), larger review, and the spray record must say which ticket took the stock.
-   - **(C) Whichever is recorded first.** Consequence: if the office records the ticket first, the applicator cannot close the job in the field until an admin undoes the ticket record.
+1. **When a spray job has a blend ticket linked to it, which one takes the chemicals out of stock?** Mason, 2026-11-23: **(A) the job.** (Rejected: (B) the ticket, which rewrites job completion; (C) whichever is recorded first, which can block the applicator from closing the job.)

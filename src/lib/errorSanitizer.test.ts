@@ -688,6 +688,16 @@ describe('sanitizeError #2063 blend-billed refusal', () => {
   });
 });
 
+describe('one spray takes stock once (F06)', () => {
+  it('drops the code and capitalises the server sentence', () => {
+    expect(sanitizeError(new Error('BLEND_TICKET_JOB_RECORDS: this blend ticket is linked to a spray job. Completing the job records the spray.')))
+      .toBe('Nothing was saved. This blend ticket is linked to a spray job. Completing the job records the spray.');
+    for (const code of ['JOB_BLEND_TICKET_ALREADY_RECORDED', 'BLEND_TICKET_RECORDED_NO_JOB', 'BLEND_TICKET_COMPLETED_JOB_KEEPS_TICKET']) {
+      expect(sanitizeError(`${code}: a reason.`)).toBe('Nothing was saved. A reason.');
+    }
+  });
+});
+
 describe('customer receipt refusals (KI-25)', () => {
   it('drops the database code and keeps plain words', () => {
     expect(sanitizeError(new Error('DELIVERY_NOT_COMPLETED: this delivery is not completed any more; do not send its receipt')))

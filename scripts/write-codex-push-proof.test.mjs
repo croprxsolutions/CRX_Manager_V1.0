@@ -2580,9 +2580,10 @@ not json
         return { result, state };
       };
 
-      const found = factsWith(() => [[mine(1167, { draft: true })]]);
+      const prUrl = "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/1167";
+      const found = factsWith(() => [[mine(1167, { draft: true, html_url: prUrl, base: { ref: "staging", repo: { full_name: `${OWNER}/${NAME}` } } })]]);
       assert.equal(found.result.unreadable, undefined, "facts: a PR found through the list is readable");
-      assert.deepEqual(found.result.pr, { number: 1167, draft: true }, "facts: the head resolves to its PR");
+      assert.deepEqual(found.result.pr, { number: 1167, draft: true, url: prUrl, baseRef: "staging" }, "facts: the head resolves to its PR, its address and its base");
       assert.equal(found.state.lookups, 2, "facts: the same list lookup serves the first read and the final re-read");
 
       assert.equal(factsWith(() => [[]]).result.pr, null, "facts: no PR at this head is reported as none");

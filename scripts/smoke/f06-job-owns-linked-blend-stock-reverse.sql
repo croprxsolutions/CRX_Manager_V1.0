@@ -1,4 +1,4 @@
--- Rollback for 20270225200000_f06_job_owns_linked_blend_stock.sql: removes both guards. No data changes. One transaction, so the guards go together.
+-- Rollback for 20270226193000_f06_job_owns_linked_blend_stock.sql: removes both guards. No data changes. One transaction, so the guards go together.
 BEGIN;
 DROP TRIGGER IF EXISTS application_record_one_deduction_f06 ON public.application_records;
 DROP TRIGGER IF EXISTS blend_ticket_link_keeps_stock_once_f06 ON public.blend_tickets;

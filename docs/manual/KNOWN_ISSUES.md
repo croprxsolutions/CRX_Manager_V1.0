@@ -81,7 +81,7 @@ Each item's full entry is in its area section below. "Severity unsure" marks a r
 | Field applications | KI-198 | HIGH | Open | The same shared-field job can bill different totals depending on which billing screen is used. | Mason (field-app billing) |
 | Field applications | #2061 | HIGH (severity unsure) | Check first | A job could be billed twice. | Mason (field-app billing) |
 | Field applications | #2063 | HIGH (severity unsure) | Fixed on staging (#2260, merged 2026-11-23 UTC), not live | A job could be billed twice: once on a blend invoice, then again on a split field invoice. | Mason (field-app billing) |
-| Field applications | KI-187 | HIGH | Open | One spray recorded through both a blend ticket and its job could deduct stock twice. Production has no blend tickets yet. Fix in review: `20270225200000` (the job takes the stock). | Mason (field-app billing) |
+| Field applications | KI-187 | HIGH | Open | One spray recorded through both a blend ticket and its job could deduct stock twice. Production has no blend tickets yet. Fix in review: `20270226193000` (the job takes the stock). | Mason (field-app billing) |
 | Orders and deliveries | KI-199 | HIGH | Fixed on staging, not live | Partial deliveries are overstated, and field drafts can go to the wrong grower. | Mason (field-app billing) |
 | Quotes and bookings | KI-190 | HIGH | Open | Two reps drawing from one booking can order at quantities or prices that neither of them saw. | Taha |
 | Orders and deliveries | KI-167 | HIGH (severity unsure) | Open | The office must fix a line's unit by hand before it can be re-delivered. No amounts change. | Taha |
@@ -1225,7 +1225,7 @@ route. Live (audit aggregate, not re-run): no blend tickets in production yet. B
 one shared check so a linked ticket and job record one application and one deduction; prove with a fictional linked
 job and ticket, reading the stock ledger after each step.
 
-**Fix in review (2026-11-23):** `20270225200000_f06_job_owns_linked_blend_stock.sql` — Mason chose that the job takes the stock; table guards refuse the ticket's own record while linked and any link change that would let both record. Proof: `scripts/smoke/prove-f06-job-owns-linked-blend-stock-real-schema.mjs`. Accepted gap (Mason, 2026-11-23): a ticket never linked, or unlinked before its job completes, can still take stock alongside the job. Close when applied on production.
+**Fix in review (2026-11-23):** `20270226193000_f06_job_owns_linked_blend_stock.sql` — Mason chose that the job takes the stock; table guards refuse the ticket's own record while linked and any link change that would let both record. Proof: `scripts/smoke/prove-f06-job-owns-linked-blend-stock-real-schema.mjs`. Accepted gap (Mason, 2026-11-23): a ticket never linked, or unlinked before its job completes, can still take stock alongside the job. Close when applied on production.
 
 ### KI-177 — Changing a completed job's date can change which quote prices its invoice
 

@@ -221,7 +221,8 @@ function nameSameNamedProducts<T extends { product_name: string; unit: string | 
     if ((counts.get(k) ?? 0) < 2) return t;
     const n = (seen.get(k) ?? 0) + 1;
     seen.set(k, n);
-    const epa = epaOf(t)?.trim();
+    // Only a real number tells products apart; "Unknown" / "Not recorded" (KI-195) is a state, not an identity.
+    const epa = epaOf(t)?.trim().match(/^\d.*/)?.[0];
     return { ...t, product_name: `${t.product_name} (${epa ? `EPA ${epa}` : `product ${n}`})` };
   });
 }

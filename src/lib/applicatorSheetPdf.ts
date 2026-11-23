@@ -236,7 +236,8 @@ function drawSheet(
   doc.text('Tank Mix / Chemicals', margin, y);
   y += 6;
 
-  const chemHead: string[] = ['Product', 'Rate / Acre'];
+  // KI-195: the EPA number the job kept (regulatory, so always printed).
+  const chemHead: string[] = ['Product', 'EPA Reg. No.', 'Rate / Acre'];
   if (theme.enhanced && theme.columns.total_applied) chemHead.push('Total Applied');
   if (theme.enhanced && theme.columns.gl_lb) chemHead.push('gal/lb Equiv.');
   if (theme.enhanced && theme.columns.rei) chemHead.push('REI');
@@ -248,7 +249,7 @@ function drawSheet(
     head: [chemHead],
     body: data.products.map((p) => {
       const rate = p.rate_per_acre != null ? `${fmtNum(p.rate_per_acre)} ${p.rate_unit || ''}/ac`.trim() : '—';
-      const row: string[] = [p.product_name, rate];
+      const row: string[] = [p.product_name, p.epa_registration?.trim() || '—', rate];
       if (theme.enhanced && theme.columns.total_applied) {
         // Label the Total Applied magnitude with its OWN measure unit (total_unit),
         // not the per-acre rate_unit — matches the in-page preview / loader worksheet.

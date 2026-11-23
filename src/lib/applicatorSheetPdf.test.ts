@@ -192,3 +192,32 @@ describe('generateApplicatorSheetPdf map pages', () => {
     expect(mockDoc.rect).not.toHaveBeenCalled();
   });
 });
+
+describe('generateApplicatorSheetPdf EPA column (KI-195)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pageCount = 1;
+    mockDoc.lastAutoTable = { finalY: 300 };
+  });
+
+  it('prints the EPA Reg. No. the sheet data carries in every format, and a dash when there is none', async () => {
+    const product = (name: string, epa: string | null) => ({
+      product_name: name, rate_per_acre: 1, rate_unit: 'pt', total_applied: 40, total_unit: 'pt', total_gl_lb: '5 gal',
+      product_form: null, rei_hours: 12, phi_days: 30, epa_registration: epa,
+    });
+    const autoTable = (await import('jspdf-autotable')).default as unknown as ReturnType<typeof vi.fn>;
+    for (const format of ['original', 'enhanced'] as const) {
+      autoTable.mockClear();
+      await generateApplicatorSheetPdf(makeSheetData({ products: [
+        product('Kept', '100-1'), product('NoNumber', 'Unknown'), product('Old', 'Not recorded'), product('Blank', null),
+      ] }), format, null);
+      const chem = autoTable.mock.calls
+        .map((c) => c[1] as { head: string[][]; body: string[][] })
+        .find((o) => o.head?.[0]?.includes('Rate / Acre'));
+      expect(chem).toBeDefined();
+      expect(chem!.head[0].slice(0, 3)).toEqual(['Product', 'EPA Reg. No.', 'Rate / Acre']);
+      expect(chem!.body.map((r) => r[1])).toEqual(['100-1', 'Unknown', 'Not recorded', '—']);
+      expect(chem!.body.every((r) => r.length === chem!.head[0].length)).toBe(true);
+    }
+  });
+});

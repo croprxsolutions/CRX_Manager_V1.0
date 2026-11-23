@@ -28,6 +28,7 @@
 import { buildEmailHtml, type SendEmailParams } from './emailService';
 import { escapeHtml } from '../../supabase/functions/_shared/deliveryReceiptHtml.ts';
 import { formatRei, formatPhi, phiHarvestWarning } from './labelGuardrails';
+import { jobEpaText } from './jobEpa';
 
 // ── The proof-data shape (mirrors get_job_proof_data's jsonb return) ─────────
 
@@ -55,7 +56,12 @@ export interface ProofProduct {
   rei_hours: number | null;
   phi_days: number | null;
   signal_word: string | null;
+  /** The job's kept number when `epa_kept`, else the catalog's (KI-195). */
   epa_registration: string | null;
+  /** True when the job kept a number (or none) for this product. Absent from a database before 20270225110000. */
+  epa_kept?: boolean;
+  /** True when the kept row is "Not recorded" (a job sprayed before numbers were kept). */
+  epa_not_recorded?: boolean;
   sort_order: number | null;
 }
 
@@ -266,6 +272,8 @@ export interface ProofDraftFieldLine {
 export interface ProofDraftProductLine {
   label: string; // "Headline Fungicide @ 1 oz/ac"
   signalWord: string | null;
+  /** EPA Reg. No. as printed: the kept number, "Unknown", "Not recorded", or null when there is none. */
+  epa: string | null;
   safeTiming: string | null;
 }
 
@@ -335,6 +343,12 @@ export function buildProofDraft(data: JobProofData): ProofDraft {
   const products: ProofDraftProductLine[] = data.products.map((p) => ({
     label: formatProductLine(p),
     signalWord: p.signal_word && p.signal_word.trim() ? p.signal_word.trim() : null,
+    // A database before 20270225110000 sends no epa_kept: its number may be the catalog's for a job that kept another,
+    // so no EPA line is printed then (as before KI-195).
+    epa: p.epa_kept === undefined ? null : jobEpaText(
+      p.epa_kept ? { epa_registration: p.epa_registration, not_recorded: p.epa_not_recorded === true } : undefined,
+      p.epa_registration?.trim() || null,
+    ),
     safeTiming: safeTimingLine(p, appDate || null, harvestDate),
   }));
 
@@ -435,10 +449,11 @@ export function renderProofHtml(input: ProofRenderInput): string {
         draft.products
           .map((p) => {
             const sig = p.signalWord ? ` <span style="color:#92400e;">(${escapeHtml(p.signalWord)})</span>` : '';
+            const epa = p.epa ? `<div style="color:#6b7280;font-size:13px;margin-top:2px;">EPA Reg. No. ${escapeHtml(p.epa)}</div>` : '';
             const timing = p.safeTiming
               ? `<div style="color:#6b7280;font-size:13px;margin-top:2px;">${escapeHtml(p.safeTiming)}</div>`
               : '';
-            return `<tr><td style="padding:6px 0;color:#374151;font-size:14px;border-bottom:1px solid #f3f4f6;"><strong>${escapeHtml(p.label)}</strong>${sig}${timing}</td></tr>`;
+            return `<tr><td style="padding:6px 0;color:#374151;font-size:14px;border-bottom:1px solid #f3f4f6;"><strong>${escapeHtml(p.label)}</strong>${sig}${epa}${timing}</td></tr>`;
           })
           .join('') +
         `</table>`,
@@ -483,6 +498,7 @@ export function renderProofText(input: ProofRenderInput): string {
     for (const p of draft.products) {
       const sig = p.signalWord ? ` (${p.signalWord})` : '';
       lines.push(`  • ${p.label}${sig}`);
+      if (p.epa) lines.push(`    EPA Reg. No. ${p.epa}`);
       if (p.safeTiming) lines.push(`    ${p.safeTiming}`);
     }
   }

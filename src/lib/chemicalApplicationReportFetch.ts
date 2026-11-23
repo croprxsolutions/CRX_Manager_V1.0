@@ -17,7 +17,8 @@
  * Product compliance fields (REI/PHI/EPA reg/product_form) are read from a direct
  * `products` lookup by id (NOT a job_chemicals→products embed), so a since-
  * DEACTIVATED product still contributes its label data — mirroring JobDetail's
- * label fetch and the WPS-notice path.
+ * label fetch and the WPS-notice path. The EPA number is then replaced by the one the
+ * job kept (`applyKeptEpa`, KI-195).
  *
  * Billed CUSTOMERS are resolved via the SECURITY DEFINER RPC get_job_billed_customers
  * (resolveBilledCustomers), NOT a customers embed: on a split-billed job an
@@ -29,6 +30,7 @@ import { supabase } from './db';
 import { asProductForm } from './units';
 import type { ProductForm } from '../types';
 import { resolveBilledCustomers } from './billedCustomersResolver';
+import { applyKeptEpa } from './jobEpa';
 import {
   buildApplicatorSheetData,
   type ApplicatorSheetData,
@@ -139,6 +141,9 @@ export async function fetchChemicalApplicationReportData(
     // compliance PDF. Abort if any requested product didn't come back (Codex P2).
     const missingLabel = pids.filter((pid) => !labelById.has(pid));
     if (missingLabel.length > 0) throw new Error('Some products on this job have no label data on file — the chemical report cannot be completed.');
+
+    // KI-195: a sprayed job prints the EPA number it kept, never the catalog's later one.
+    await applyKeptEpa(jobId, labelById);
   }
 
   // Billed customers via the SECURITY DEFINER RPC (saved job_field_shares →

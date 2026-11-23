@@ -5,3 +5,5 @@
 - Proof: `node scripts/smoke/prove-adjust-inventory-key-real-schema.mjs` (local container, test data): all 20 functions refuse the bad key and accept a normal one. Not verified on staging or live.
 
 Last verified stamps in CURRENT_STATE.md and KNOWN_ISSUES.md bumped to 2026-11-23 after a read-only live ledger read that day: latest live row still `20261121061349`.
+
+Apply requirement: run the migration in a quiet window with no app traffic (Mason, 2026-11-23); the in-flight-at-cutover leftover risk is accepted. See the migration record.

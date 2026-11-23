@@ -51,7 +51,7 @@ const NAMES = COLS.map((c) => `'${c[4]}'`).join(', ');
 const present = () => scalar(`SELECT count(*) FROM pg_constraint WHERE connamespace = 'public'::regnamespace AND conname IN (${NAMES});`);
 const where = (tbl, key) => (key ? `id = '${key}'` : `product_id = '${R.prod}'`);
 const BAD = { n: ["'NaN'", "'Infinity'", "'-Infinity'"], d: ["'1999-12-31'", "'2100-01-01'", "'infinity'", "'-infinity'"] };
-const GOOD = { n: ['0', '123.45', '-0.5'], d: ["'2000-01-01'", "'2099-12-31'"] };
+const GOOD = { n: ['1', '123.45', '99999999.99'], d: ["'2000-01-01'", "'2099-12-31'"] };
 // One rolled-back write; replica mode skips every trigger, so only the CHECK can refuse.
 const write = (tbl, key, col, val, replica) => run(`BEGIN; ${replica ? 'SET LOCAL session_replication_role = replica;' : ''}
   UPDATE public.${tbl} SET ${col} = ${val} WHERE ${where(tbl, key)}; ROLLBACK;`);
@@ -119,7 +119,9 @@ try {
       for (const replica of [true, false]) {
         const r = write(tbl, key, col, val, replica);
         assert.notEqual(r.status, 0, `${tbl}.${col} = ${val} (replica=${replica}) must be refused`);
-        if (replica) assert.match(out(r), new RegExp(`violates check constraint "${con}"`), `${tbl}.${col} = ${val}: ${out(r)}`);
+        // -Infinity may meet an older non-negative rule (chk_*) first; NaN and Infinity pass those, so only ours refuses them.
+        const by = val === "'-Infinity'" ? `(${con}|chk_[a-z_]+)` : con;
+        if (replica) assert.match(out(r), new RegExp(`violates check constraint "${by}"`), `${tbl}.${col} = ${val}: ${out(r)}`);
       }
     }
     for (const val of GOOD[kind]) {

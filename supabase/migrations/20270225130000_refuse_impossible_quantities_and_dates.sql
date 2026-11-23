@@ -41,9 +41,10 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: already applied (a #2237 constraint exists)';
   END IF;
-  -- Lock every table first, in the order completions take them (delivery: deliveries, delivery_items, order_items,
-  -- inventory; job: jobs, job_chemicals, inventory), so the migration cannot deadlock a live completion, and no
-  -- writer can add a bad row between the count below and the constraints. Each wait is capped by lock_timeout.
+  -- Lock every table first so no writer can add a bad row between the count below and the constraints. Completions
+  -- take deliveries (or jobs) before the others, as this order does, so they wait rather than deadlock; a writer that
+  -- takes these tables in another order may be aborted by deadlock detection and retried. Each wait is capped by
+  -- lock_timeout; the locks are held until commit, so apply at a quiet time.
   LOCK TABLE public.deliveries, public.delivery_items, public.order_items, public.jobs, public.job_chemicals,
     public.inventory IN ACCESS EXCLUSIVE MODE;
   -- Count rows that would break each rule; refuse rather than fix them silently (fixing needs Mason).

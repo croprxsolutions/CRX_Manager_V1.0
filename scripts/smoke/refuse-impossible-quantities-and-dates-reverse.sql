@@ -7,6 +7,15 @@ SET LOCAL lock_timeout = '5s';
 
 CREATE TEMP TABLE refuse_impossible_2237_reverse_tx ON COMMIT DROP AS SELECT pg_current_xact_id()::text AS transaction_id;
 
+-- Under autocommit the marker is already gone here: refuse before anything else runs.
+DO $tx$
+BEGIN
+  IF to_regclass('pg_temp.refuse_impossible_2237_reverse_tx') IS NULL THEN
+    RAISE EXCEPTION 'ROLLBACK_REFUSED: run this file as one transaction (psql -1 or the apply script)';
+  END IF;
+END;
+$tx$;
+
 CREATE TEMP TABLE refuse_impossible_2237_reverse_expected (tbl text, conname text, def text) ON COMMIT DROP;
 INSERT INTO pg_temp.refuse_impossible_2237_reverse_expected VALUES
   ('job_chemicals', 'job_chemicals_quantity_finite_chk', 'CHECK (((quantity > ''-Infinity''::numeric) AND (quantity < ''Infinity''::numeric)))'),

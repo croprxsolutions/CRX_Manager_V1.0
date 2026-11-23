@@ -19,14 +19,14 @@ Read at `origin/staging` 42039d705 (2026-11-23).
 ## 2. State and failure
 
 - **Existing rows.** None change. Production read-only check 2026-11-23: 0 rows break any of these rules. The migration counts breakers first and refuses to apply (naming table, column and count) if any exist, so nothing is fixed silently; fixing them would need Mason.
-- **New writes.** A write with such a value fails with a check violation (`23514`) and the whole transaction rolls back. No screen can produce these values today (inputs parse to finite numbers; existing RPC guards refuse NaN/infinity on stock moves), so no user-visible change is expected.
+- **New writes.** A write with such a value fails with a check violation (`23514`) and the whole transaction rolls back. No screen can produce these values today (inputs parse to finite numbers; existing RPC guards refuse NaN/infinity on stock moves), so no quantity change is visible. A job or delivery date with a mistyped year (for example 0026 or 20266) used to save and is now refused with the generic "value is not valid" message (Mason's 2026-11-23 rule); a clearer date message is a possible follow-up.
 - **Existing guards keep their messages.** The F05 order-line trigger (`ORDER_LINE_QUANTITY_NOT_FINITE`) runs before the CHECK and still raises first; RPC input guards still refuse first.
-- **Timing.** `ADD CONSTRAINT` scans each table once under a brief exclusive lock; `lock_timeout` 5s so a busy table makes the apply fail cleanly rather than queue the app.
+- **Timing.** `ADD CONSTRAINT` scans each table once under a brief exclusive lock; `lock_timeout` 5s caps each lock wait (six tables, so up to about 30s in the worst case), and the locks are held until commit, so reads of these tables queue briefly behind the apply. Apply at a quiet time; a failed lock rolls everything back.
 - **Undo.** Rollback script drops exactly these constraints.
 
 ## 3. Delivery
 
-Database only, one migration, compatible with the deployed app. Test fixtures that deliberately stored NaN/infinity in these tables to exercise the plan's second line of defence are updated: they lift the constraint inside their own rolled-back transaction and also prove the database now refuses the value.
+Database only, one migration, compatible with the deployed app. Test fixtures that deliberately stored NaN/infinity in these tables to exercise the plan's second line of defence are updated: when the constraints exist, each impossible-value case asserts the table refuses the write, and the plan assertions that needed the stored value are skipped (the plan's skip-and-flag guards are then no longer exercised by that smoke on such a database; they stay proven on databases without the constraints, and by the #1989 prover).
 
 ## 4. Proof cases (real migrated database, Docker; never live)
 

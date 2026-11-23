@@ -1,4 +1,4 @@
--- 20270221100000: Partial Order refuses a booking that changed since the rep opened it (KI-190, #2181).
+-- 20270225100000: Partial Order refuses a booking that changed since the rep opened it (KI-190, #2181).
 --
 -- Whole Convert already checks p_expected_row_version; draw_down_quote did not, so a
 -- stale Partial Order drew against the booking's current balance and prices, not the
@@ -248,7 +248,7 @@ BEGIN
   END IF;
   -- >>>DRAW_DOWN_INTENT_LIVE_QUOTE
 
-  -- DRAW_DOWN_BOOKING_VERSION<<< (20270221100000, KI-190 / #2181)
+  -- DRAW_DOWN_BOOKING_VERSION<<< (20270225100000, KI-190 / #2181)
   -- A Partial Order draws against the booking the rep reviewed: its remaining
   -- quantities and its booked prices. Every draw and every booking edit bumps
   -- quotes.row_version, so the screen sends the version it showed and a booking

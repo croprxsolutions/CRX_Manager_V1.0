@@ -461,9 +461,15 @@ export default function QuoteBuilder() {
   // KI-190: the booking version a kept draw was sent with, under the same key, so a resend
   // carries exactly the version the rep approved.
   const drawVersionPendingName = JSON.stringify(['draw_down_quote_version', profile?.id || '', id || '']);
-  const clearDrawNotes = () => {
-    clearPendingRetry(drawPendingName);
-    clearPendingRetry(drawVersionPendingName);
+  // With a key, clear only notes that still belong to that key: a late reply for an earlier
+  // send must not wipe a newer draw's note. Without one (the rep's own "forget"), clear both.
+  const clearDrawNotes = (key?: string) => {
+    if (key === undefined || loadPendingRetry(drawPendingName, isDrawRequest)?.key === key) {
+      clearPendingRetry(drawPendingName);
+    }
+    if (key === undefined || loadPendingRetry(drawVersionPendingName, isRowVersionNote)?.key === key) {
+      clearPendingRetry(drawVersionPendingName);
+    }
   };
   // Booking settlement (roadmap #6c): read-only booked/drawn/remaining + prepay
   // position for an open booking (sent/revised quote), via get_booking_settlement.
@@ -3862,13 +3868,13 @@ export default function QuoteBuilder() {
 
   // KI-190: the server refused a draw because the booking is not at the version it carried.
   // The receipt check runs first, so this send ordered nothing.
-  const handleDrawStaleWrite = (error: unknown, resend: boolean, drawScope: string) => {
+  const handleDrawStaleWrite = (error: unknown, resend: boolean, drawScope: string, drawKey: string) => {
     if (resend) {
       // The first send under this key may still be on its way: keep the note, flagged for a
       // hand check that blocks new draws until the rep has looked.
       markPendingRetryForCheck(drawPendingName);
     } else {
-      clearDrawNotes();
+      clearDrawNotes(drawKey);
       drawDownIdem.resetKeyFor(drawScope);
     }
     // A late reply for a booking this screen no longer shows changes nothing else here.
@@ -3963,7 +3969,7 @@ export default function QuoteBuilder() {
     if (!resume && !earlierUnresolved && sendVersion !== null
         && !savePendingRetry(drawVersionPendingName, drawKey, sendVersion)) {
       // Without it a lost reply could only be resent with no version: don't send.
-      clearDrawNotes();
+      clearDrawNotes(drawKey);
       setDrawing(false);
       toast('error', 'This browser could not keep a safety note for the Partial Order, so it was not sent. Allow this site to store data, or use another browser, then try again.');
       return;
@@ -3981,7 +3987,7 @@ export default function QuoteBuilder() {
       if (error) throw error;
       const result = assertRpcResult<{ status: string; order_id?: string; order_number?: string; warnings?: string[]; fully_drawn?: boolean; extra_order_id?: string; extra_order_number?: string }>(data, 'draw_down_quote');
       drawDownIdem.resetKeyFor(drawScope);
-      clearDrawNotes();
+      clearDrawNotes(drawKey);
       setPendingDraw(null);
       toast('success', `Order ${result.order_number || ''} created${result.fully_drawn ? '. Booking fully drawn' : '. Booking stays open'}`
         + (result.extra_order_number ? `. The amount over the booking is order ${result.extra_order_number}.` : ''));
@@ -4004,7 +4010,7 @@ export default function QuoteBuilder() {
       // so does an earlier lost reply: some refusals (cutover, sign-in) come before the receipt
       // check, so refusing this send says nothing about whether that earlier one made the order.
       if ((isBelowCostApprovalHandledError(error) || isDefinitiveRpcRejection(error)) && !earlierUnresolved) {
-        clearDrawNotes();
+        clearDrawNotes(drawKey);
         setPendingDraw(null);
       }
       if (isBelowCostApprovalHandledError(error)) {
@@ -4024,7 +4030,7 @@ export default function QuoteBuilder() {
         // earlier send may have made an order: keep the note, flagged for a hand check, which blocks
         // new draws until the rep confirms. Another user's key says nothing was made here.
         if (bindingRejection === 'actor') {
-          clearDrawNotes();
+          clearDrawNotes(drawKey);
         } else {
           markPendingRetryForCheck(drawPendingName);
         }
@@ -4041,7 +4047,7 @@ export default function QuoteBuilder() {
           : null;
 
         if (committedOrderId) {
-          clearDrawNotes();
+          clearDrawNotes(drawKey);
           setPendingDraw(null);
           setShowDrawModal(false);
           toast('warning', 'An earlier attempt with this retry already created an order. No new draw was made. Opening that order now.');
@@ -4075,7 +4081,7 @@ export default function QuoteBuilder() {
       // KI-190: the booking changed since this screen loaded it, and nothing was ordered.
       // Reload the whole quote (balance and booked prices) before another draw.
       if (hasRpcCode(error, RpcErrorCodes.QUOTE_STALE_WRITE)) {
-        handleDrawStaleWrite(error, Boolean(resume || earlierUnresolved), drawScope);
+        handleDrawStaleWrite(error, Boolean(resume || earlierUnresolved), drawScope, drawKey);
         return;
       }
 

@@ -334,6 +334,8 @@ export default function JobDetail() {
   const latestSnapshotRef = useRef<string | null>(null);
   useEffect(() => { isDirtyRef.current = isDirty; }, [isDirty]);
   const baselineRef = useRef<string | null>(null);
+  // A baseline no form snapshot equals: keeps the page dirty until a reload (#2174).
+  const UNSAVED_AFTER_PARTIAL_SAVE = '#unsaved-after-partial-save#';
   // Post-save refetch race guard: fetchJob nulls the baseline BEFORE its network
   // read resolves, and loading stays false on refetches — so any render in that
   // window (the save handler's own state sets, for one) would adopt the STALE
@@ -3012,6 +3014,10 @@ export default function JobDetail() {
               // Record what save_job did commit, and lock editing if the job was deleted or moved on.
               setSavedApplicatorId(payload.applicator_id);
               setSavedJobDate(jobDate);
+              // The crew/loader part is unsaved, and no snapshot matches what the server now holds, so the page
+              // stays dirty (leave warning on) until the next reload re-adopts a baseline (Luna HIGH, #2174).
+              baselineRef.current = UNSAVED_AFTER_PARTIAL_SAVE;
+              setIsDirty(true);
               await showRefusedJob(crewSkip, stillOnThisJob);
             }
           }
@@ -3317,7 +3323,8 @@ export default function JobDetail() {
   const showRefusedJob = async (skip: EditJobsSkip | undefined, stillOnThisJob: () => boolean) => {
     if (skip?.reason === 'deleted') {
       const stamp = await readRefusedJob(id!);
-      if (stillOnThisJob()) setDeletedAt((d) => d ?? stamp?.deleted_at ?? new Date().toISOString());
+      // An unreadable date shows no date rather than today (Luna LOW).
+      if (stillOnThisJob()) setDeletedAt((d) => d ?? stamp?.deleted_at ?? '');
     } else if (skip?.reason === 'status' && skip.status && stillOnThisJob()) {
       setStatus(skip.status);
     }

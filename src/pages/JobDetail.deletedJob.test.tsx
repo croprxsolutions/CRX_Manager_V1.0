@@ -5,7 +5,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { mockFrom, mockRpc, mockToast, mockNavigate } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, mockNavigate, dirty } = vi.hoisted(() => ({
+  dirty: { value: false },
   mockFrom: vi.fn(),
   mockRpc: vi.fn(),
   mockToast: vi.fn(),
@@ -57,7 +58,7 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
 }));
 vi.mock('../hooks/usePageMeta', () => ({ usePageMeta: () => {} }));
 vi.mock('../hooks/useUnsavedChanges', () => ({
-  useUnsavedChanges: () => ({ state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }),
+  useUnsavedChanges: (isDirty: boolean) => { dirty.value = isDirty; return { state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }; },
 }));
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: vi.fn(), addBreadcrumb: vi.fn() } }));
 vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
@@ -268,6 +269,31 @@ describe('JobDetail — crew/loader refusal after save (#2174)', () => {
     expect(screen.getByDisplayValue('typed during save')).toBeTruthy();
     expect(jobsCalls).toBe(1);
     expect(await screen.findByText(/This job was deleted/)).toBeTruthy();
+  });
+
+  it('stays dirty when the form is typed back to its pre-save values after a partial save (Luna HIGH)', async () => {
+    serveJob(makeJob({}));
+    const saveGate = deferred();
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn === 'save_job') return saveGate.promise.then(() => ({ data: { job_id: 'job-x' }, error: null }));
+      if (fn === 'edit_jobs') return Promise.reject(new Error('Failed to fetch'));
+      return Promise.resolve({ data: null, error: null });
+    });
+    mountAt('/jobs/job-x');
+    await screen.findByRole('heading', { name: 'J-0001' });
+    fireEvent.change(screen.getByDisplayValue('saved notes'), { target: { value: 'notes B' } });
+    fireEvent.change(screen.getByLabelText('Ground crew'), { target: { value: 'crew-1' } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Save Changes/ })); });
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_job', expect.anything()));
+    fireEvent.change(screen.getByDisplayValue('notes B'), { target: { value: 'notes C' } });
+    await act(async () => { saveGate.release(); await saveGate.promise; });
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/crew\/loader settings did not save/)));
+    // Back to the values from before the save: the server now holds "notes B", so this is still unsaved.
+    fireEvent.change(screen.getByDisplayValue('notes C'), { target: { value: 'saved notes' } });
+    fireEvent.change(screen.getByLabelText('Ground crew'), { target: { value: '' } });
+    await act(async () => { await Promise.resolve(); });
+    expect(dirty.value).toBe(true);
+    expect(jobsCalls).toBe(1);
   });
 
   it('reloads as before when nothing was typed during the save', async () => {

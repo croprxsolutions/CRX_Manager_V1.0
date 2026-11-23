@@ -432,19 +432,19 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
       return refuse(`${number}'s head ${head.slice(0, 12)} does not contain staging's tip ${stagingTip.slice(0, 12) || "(unreadable)"}: staging moved after the release guard ran. Wait for the bot to refresh release/next (no staging merges during the release), then re-run the checks and Sol.`);
     }
   }
-  let proven = false;
+  // Every proof is read first, so a carried skip can find Mason's own acceptance in any folder (2026-11-22).
+  const proofs = [];
   for (const stateDir of proofSearchDirs(dir, listWorktrees || (() => git(["worktree", "list", "--porcelain"])))) {
     try {
       if (!existsSync(stateDir)) continue;
       for (const file of readdirSync(stateDir)) {
         if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(file)) continue;
-        let data;
-        try { data = JSON.parse(readFileSync(path.join(stateDir, file), "utf8")); } catch { continue; }
-        if (proofValid(data, head, now, baseSha, APPLY_SOL_PROOF_MAX_AGE_MS) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead: String(data.head_sha).toLowerCase() === String(head).toLowerCase() })) { proven = true; break; }
+        try { proofs.push(JSON.parse(readFileSync(path.join(stateDir, file), "utf8"))); } catch { continue; }
       }
     } catch { /* an unreadable directory holds no proof — keep looking */ }
-    if (proven) break;
   }
+  const proven = proofs.some((data) => proofValid(data, head, now, baseSha, APPLY_SOL_PROOF_MAX_AGE_MS)
+    && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead: String(data.head_sha).toLowerCase() === String(head).toLowerCase(), proofs, nowMs: now }));
   if (!proven) {
     return refuse(`no fresh gpt-6.2-sol/high proof is bound to ${number}'s head ${head.slice(0, 12)} and base ${baseSha.slice(0, 12)}.`);
   }

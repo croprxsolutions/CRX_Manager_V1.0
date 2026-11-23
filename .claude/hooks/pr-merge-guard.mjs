@@ -677,7 +677,7 @@ function gateRequest(request) {
   // A proof of an earlier commit covers the commits after it unless those
   // touch the Sol list; same module, same budgeted gh. Exact-head proofs are tried first.
   const proof = firstAcceptedProof(proofs, headSha, (data, exactHead) =>
-    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits, baseRef: base }) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead })
+    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits, baseRef: base }) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead, proofs })
       && (exactHead || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky));
   const valid = proof !== null;
   const carried = proof?.carried_forward === true ? proof.carry : null;
@@ -694,8 +694,9 @@ function gateRequest(request) {
           restamp: "one commit that only restamped a migration; Mason, 2026-11-04",
           post_apply: "one commit that only updated the records after a live apply; Mason, 2026-11-04",
           owner_accepted: "Mason accepted every BLOCKER/HIGH finding by name, logged in DECISION_LOG.md; Mason, 2026-11-10",
+          owner_accepted_carried: "Sol marked every BLOCKER/HIGH finding the same as one Mason skipped on this pull request in the last 7 days, logged in DECISION_LOG.md; Mason, 2026-11-22",
         }[carried.mode]})` +
-        `${carried.mode !== "owner_accepted" && carried.root_review?.owner_accepted === true ? "; the original review's BLOCKER/HIGH findings were owner-accepted by Mason, not fixed" : ""}.\n`,
+        `${!String(carried.mode).startsWith("owner_accepted") && carried.root_review?.owner_accepted === true ? "; the original review's BLOCKER/HIGH findings were owner-accepted by Mason, not fixed" : ""}.\n`,
       );
     }
     advisoryQueue.push(request);

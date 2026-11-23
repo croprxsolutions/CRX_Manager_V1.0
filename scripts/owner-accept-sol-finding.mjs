@@ -11,7 +11,9 @@
 //     No code, no reason. Never send or relay the reply yourself.
 //
 //   node scripts/owner-accept-sol-finding.mjs --log
-//     Once every BLOCKER/HIGH of that run is skipped: writes the DECISION_LOG.md entry.
+//     Once every BLOCKER/HIGH of that run is skipped: writes the DECISION_LOG.md entry. With no reply,
+//     when Sol marked EVERY finding the same as one Mason skipped on this staging PR in the last 7 days,
+//     writes the carried entry instead (Mason, 2026-11-22; sol-accept-lib.mjs carryForRecord).
 //     Commit that file alone, then: node scripts/write-codex-push-proof.mjs --carry-owner-accepted
 
 import { execFileSync } from "node:child_process";
@@ -29,11 +31,14 @@ import {
   promptHookSeen,
   writeApprovalRequest,
 } from "../.claude/hooks/owner-approval-lib.mjs";
+import { readLocalProofs } from "./write-codex-push-proof.mjs";
 import { pullRequestUrlFor,
   DECISION_LOG_PATH,
   blockersRecordName,
   blockersRecordProblem,
   buildSolSkipPayload,
+  carriedDecisionLogEntry,
+  carryForRecord,
   collectAcceptances,
   decisionLogEntry,
   gateFilesIn,
@@ -71,19 +76,47 @@ const gates = gateFilesIn(git(["diff", "--name-only", "--no-renames", `${record.
   (p) => [showAt(forkPoint, p), showAt(head, p)]);
 if (gates.length) die(`this pull request changes gate or approval files (${gates.slice(0, 5).join(", ")}); a Sol review that was not clean cannot vouch for them, so its findings must be fixed, not accepted.`);
 
+// The pull request the acceptance names: this branch, open against main or (staging-first, #1363) staging,
+// at this exact head.
+function openPullRequest() {
+  const ACCEPT_BASES = new Set(["main", "staging"]);
+  let found;
+  try {
+    found = JSON.parse(String(execFileSync("gh", ["pr", "view", git(["rev-parse", "--abbrev-ref", "HEAD"]), "--json", "number,url,state,headRefOid,baseRefName"], {
+      cwd: checkout, encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"],
+    })));
+  } catch (err) {
+    die(`could not find this branch's open pull request (${err?.message || err}).`);
+  }
+  if (pullRequestUrlFor(found?.url, found?.number) === null) die(`GitHub gave no usable address for pull request #${found?.number ?? "?"}.`);
+  if (String(found?.state).toUpperCase() !== "OPEN" || !ACCEPT_BASES.has(found?.baseRefName) || String(found?.headRefOid).toLowerCase() !== head.toLowerCase()) {
+    die(`pull request #${found?.number ?? "?"} must be open against main or staging with head ${head.slice(0, 12)}; push first.`);
+  }
+  return found;
+}
+
 const argv = process.argv.slice(2);
 
 if (argv.length === 1 && argv[0] === "--log") {
   const got = collectAcceptances({
     record, readAcceptance: (n) => readJson(solAcceptFileName(head, n)), checkShown: assertSkipShown, readSkips: () => readSkipReceipts(stateDir, head), checkReply: assertReplyAlone,
   });
-  if (got.problem) die(`${got.problem}. Every BLOCKER/HIGH of the run needs Mason's own skip reply first.`);
+  let entry;
+  if (!got.problem) entry = decisionLogEntry({ record, accepted: got.accepted });
+  else if (record.findings.every((f) => typeof f.same_as === "string")) {
+    // Sol marked every finding the same as one Mason already skipped on this PR (Mason, 2026-11-22): no new question.
+    const pr = openPullRequest();
+    if (pr.baseRefName !== "staging") die("only a pull request into staging can carry Mason's earlier skip; ask him: node scripts/owner-accept-sol-finding.mjs <numbers>");
+    const carried = carryForRecord({ record, proofs: readLocalProofs(checkout), git, prNumber: pr.number, prUrl: pr.url });
+    if (carried.problem) die(`${carried.problem}; Mason's earlier skip does not carry, so ask him: node scripts/owner-accept-sol-finding.mjs <numbers>`);
+    entry = carriedDecisionLogEntry({ record, accepted: carried.accepted });
+  } else die(`${got.problem}. Every BLOCKER/HIGH of the run needs Mason's own skip reply first.`);
   const file = path.join(checkout, ...DECISION_LOG_PATH.split("/"));
   // Untrimmed: the proof writer rebuilds this file from the committed bytes exactly.
   const committed = String(execFileSync("git", ["show", `HEAD:${DECISION_LOG_PATH}`], {
     cwd: checkout, encoding: "utf8", timeout: 15_000, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024,
   }));
-  writeFileSync(file, insertDecisionEntry(committed, decisionLogEntry({ record, accepted: got.accepted })), "utf8");
+  writeFileSync(file, insertDecisionEntry(committed, entry), "utf8");
   console.log(`Wrote the entry to ${DECISION_LOG_PATH}. Commit that file alone, then run:`);
   console.log("  node scripts/write-codex-push-proof.mjs --carry-owner-accepted");
   process.exit(0);
@@ -99,21 +132,7 @@ const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
 if (!/^[0-9A-Za-z_-]{8,128}$/.test(String(sessionId || ""))) die("run this inside the Claude Code session Mason will reply in (CLAUDE_CODE_SESSION_ID is not set).");
 if (!promptHookSeen({ dirs: [stateDir], sessionId })) die(hooklessSessionRefusal({ checkout, sessionId }));
 
-// The pull request the acceptance names: this branch, open against main or (staging-first, #1363) staging,
-// at this exact head.
-const ACCEPT_BASES = new Set(["main", "staging"]);
-let pr;
-try {
-  pr = JSON.parse(String(execFileSync("gh", ["pr", "view", git(["rev-parse", "--abbrev-ref", "HEAD"]), "--json", "number,url,state,headRefOid,baseRefName"], {
-    cwd: checkout, encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"],
-  })));
-} catch (err) {
-  die(`could not find this branch's open pull request (${err?.message || err}).`);
-}
-if (pullRequestUrlFor(pr?.url, pr?.number) === null) die(`GitHub gave no usable address for pull request #${pr?.number ?? "?"}.`);
-if (String(pr?.state).toUpperCase() !== "OPEN" || !ACCEPT_BASES.has(pr?.baseRefName) || String(pr?.headRefOid).toLowerCase() !== head.toLowerCase()) {
-  die(`pull request #${pr?.number ?? "?"} must be open against main or staging with head ${head.slice(0, 12)}; push first.`);
-}
+const pr = openPullRequest();
 // The code running now must be the bytes committed at this head (in this checkout).
 try {
   assertOwnerTrustFilesReviewed({

@@ -58,7 +58,7 @@ table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{border:1px soli
 <div class="box do"><b>Do</b>Read "To buy" and "Order X by &lt;date&gt;" per product, then create a PO by hand.</div>
 <div class="box stock"><b>Stock</b><ul><li>Shelf + POs by arrival date are matched to needs in date order, with a running balance (not month by month).</li><li><b>To buy</b> = Firm + orders + jobs + holds. <b>Could add</b> = Likely. Maybe shown, never bought.</li><li>Receiving a PO adds on-hand stock.</li></ul></div>
 <div class="box money"><b>Money</b>Receiving does <u>not</u> change product cost; cost comes from the catalog price list.</div>
-<div class="box gap"><b>Gaps</b><ul><li>No "70% of Likely" setting — Likely is all or nothing.</li><li>No "make a PO from this" button.</li><li>Old Forecast view still compares each month to the whole warehouse.</li></ul></div>
+<div class="box gap"><b>Gaps</b><ul><li>No "make a PO from this" button.</li><li>Old Forecast view still compares each month to the whole warehouse.</li></ul></div>
 </div>
 
 <div class="stage"><h3>③ Order</h3><div class="scr">Convert / Partial Order / New Order</div>
@@ -99,7 +99,7 @@ table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{border:1px soli
 <div class="rung c4"><h4>Order</h4>"Committed" — real reservation. Counts in To buy. <span class="tag t-live">LIVE</span></div>
 <div class="rung c5"><h4>Delivered</h4>Leaves the shelf. Invoice drafted. <span class="tag t-live">LIVE</span></div>
 </div>
-<div class="idea"><b>Your 70% idea:</b> <span class="tag t-none">NOT BUILT</span> Today Purchasing shows "To buy" (Firm) and "Could add" (all of Likely). Adding a setting like <b>"buy for 70% of Likely"</b> would be a small, display-only change on the Purchasing tab — it never touches stock or money. It also fits your rule that quotes don't count until you're confident: Maybe = 0%, Likely = your %, Firm = 100%, Order = 100% and reserved.</div>
+<div class="idea"><b>How you use it:</b> Purchasing shows "To buy" (Firm + orders) and "Could add" (all of Likely). You decide by judgment how much of Likely to buy; no percentage setting is planned (Mason, 2026-11-22).</div>
 
 <h2>3. Side doors (other ways stock and money move)</h2>
 <div class="side">
@@ -121,7 +121,7 @@ table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{border:1px soli
 <tr><td>7</td><td class="M">MED</td><td>Returns never reduce commission.</td><td>Product comes back, credit issued, rep keeps full commission.</td><td>Open</td></tr>
 <tr><td>8</td><td class="M">MED</td><td>Close-Short on a booking ignores open partial orders.</td><td>"Grower walked away" but an order still holds stock.</td><td>Open</td></tr>
 <tr><td>9</td><td class="M">MED</td><td>An order line can be cut below what's already on an open delivery.</td><td>Driver delivers more than the order now says; another order's reservation is eaten.</td><td>Open</td></tr>
-<tr><td>10</td><td class="M">MED</td><td>No partial-confidence buying (your 70%); no PO-from-plan button.</td><td>You eyeball Likely and guess.</td><td>Not built</td></tr>
+<tr><td>10</td><td class="L">LOW</td><td>No "make a PO from this" button on Purchasing.</td><td>You retype the To-buy numbers into a new PO.</td><td>Not built</td></tr>
 <tr><td>11</td><td class="M">MED</td><td>Duplicate / Roll over drop field, dates, timing, confidence.</td><td>Next year's plan is invisible to purchasing until re-entered.</td><td>Open</td></tr>
 <tr><td>12</td><td class="L">LOW</td><td>Live Month-End shows ~$0 payments received.</td><td>—</td><td>Fixed on staging, not live</td></tr>
 </table>

@@ -10,7 +10,7 @@
 | `chemical-sales-workflow-2026-11-22.html` | Diagram sheet for chemical sales: each stage's stock and money effects, how planned and firm bookings count toward purchasing, the side paths, and 12 ranked gaps |
 | `field-application-workflow-2026-11-22.md` | Field application write-up: each stage, statuses, stock and money effects, gaps with file:line evidence, and recommendations |
 | `field-application-workflow-2026-11-22.html` | Diagram sheet for field application |
-| `workflow-review-decisions-2026-11-22.md` | Mason's six business rules decided during the review (commission timing, field invoice scope, billing by tank quantity, Likely %, booked cost on order edits) |
+| `workflow-review-decisions-2026-11-22.md` | Mason's six business rules decided during the review (commission timing, field invoice scope, billing by tank quantity, booked cost on order edits, and more; the Likely % idea was dropped) |
 
 **Earlier work this builds on:** `docs/research/2026-11-17-bookings-flow-audit/` (bookings, prepay and inventory timing audit) and its booking timing/confidence design.
 

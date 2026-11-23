@@ -3042,8 +3042,7 @@ export default function JobDetail() {
               navigate(`/jobs/${result.job_id}`);
             } else {
               // #2174: reload at once; anything typed after Save is kept in the Not-saved box.
-              if (crewSkip?.reason === 'deleted') setDeletedAt((d) => d ?? '');
-              await reloadKeepingTyping(snapAtSave);
+              await reloadKeepingTyping(snapAtSave, crewSkip?.reason === 'deleted');
             }
           }
           setSaving(false);
@@ -3340,7 +3339,9 @@ export default function JobDetail() {
 
   // #2174 (Mason, 2026-11-23): reload the job as saved, keeping text typed since `from` in the Not-saved box.
   // The notice log is reloaded too, so a notice sent elsewhere meanwhile counts as sent (Sol r2 MED).
-  const reloadKeepingTyping = async (from: string | null) => {
+  // A job refused as deleted locks at once, before the reload lands (Luna r5).
+  const reloadKeepingTyping = async (from: string | null, refusedAsDeleted = false) => {
+    if (refusedAsDeleted) setDeletedAt((d) => d ?? '');
     keepTypingFromRef.current = from;
     setIsDirty(false);
     void loadJobNotifications();
@@ -3362,10 +3363,8 @@ export default function JobDetail() {
       if (result.cancelled.length === 0) {
         const skip = result.skipped.find((s) => s.id === id);
         if (stillOnThisJob()) {
-          // A deleted job locks at once, before the reload lands (Luna r5).
-          if (skip?.reason === 'deleted') setDeletedAt((d) => d ?? '');
           toast('info', `Job not cancelled: ${summarizeEditJobs(result)} The job has been reloaded as saved.`);
-          await reloadKeepingTyping(baselineRef.current);
+          await reloadKeepingTyping(baselineRef.current, skip?.reason === 'deleted');
         }
         setCancelling(false);
         return;

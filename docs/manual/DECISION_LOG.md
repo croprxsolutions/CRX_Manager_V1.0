@@ -10,6 +10,53 @@
 - Finding 3 (HIGH) at `src/pages/JobDetail.tsx:1847`, text sha256 `01aa2c1e83be718f` (the wording stays with the proof, not here)
   Mason chose to leave it unfixed (plain reply, ref 6cc24030ac43)
 
+## 2026-11-23 — #2247: Mason owner-accepted 6 Sol finding(s) at `3f0ff8fb7e3c`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2247 at `3f0ff8fb7e3c` (base `3bae6de0f2aa`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:298`, text sha256 `5dcd88b221a38594` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 2 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:215`, text sha256 `365719c8277f40b9` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 3 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:423`, text sha256 `ecd4a78e359ce89a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 4 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:382`, text sha256 `77ee4da304cf4f67` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 5 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:775`, text sha256 `bbdef6769b9abdd7` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+- Finding 6 (HIGH) at `supabase/migrations/20270226150000_job_transfer_below_cost_whole_line.sql:325`, text sha256 `b8e753c1a019819f` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 8c2e7922ebd7)
+
+## 2026-11-23 — #2247: Mason owner-accepted 6 Sol finding(s) at `e50b0e90a218`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2247 at `e50b0e90a218` (base `02629ac33259`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:298`, text sha256 `e051e2f85744d456` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 2 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:215`, text sha256 `98649a0e735db722` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 3 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:423`, text sha256 `fd4216074a0d0c98` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 4 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:382`, text sha256 `1c7cf745428d65cc` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 5 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:775`, text sha256 `7c71ed52feec47a6` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+- Finding 6 (HIGH) at `supabase/migrations/20270225160000_job_transfer_below_cost_whole_line.sql:1098`, text sha256 `775dfd0879355bf8` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 71330df18626)
+
+## 2026-11-22 — #2247 / #2283: a completed job's chemicals can't be changed
+
+**Decision (Mason, 2026-11-22, in chat: "Refuse now, build later").** He first chose "Edit + stock follows" (with the spray record "Update it too"); the plan's challenge and its re-check found that design did not settle (lot numbers, lot amounts, legacy units, missing spray records, races with completion). So #2247 makes `save_job` refuse any change to a completed job's chemical lines (product, quantity, unit, grower-supplied), naming why, and the edit-with-stock-following feature becomes its own follow-up PR. The job screen already hid Save on completed jobs, so office work is unchanged. This replaces the "accepted as pre-existing" stock gap in the entry below.
+
+## 2026-11-22 — #2247: a job stays editable until invoiced; invoices bill the payer saved on the job
+
+**Decision (Mason, 2026-11-22, in chat, after Sol round 8 hit the stop rule).** Office staff must keep editing a spray job after the applicator marks it complete, so it does not lock at completion. "Lock it when rep or admin says it is posted": once a rep or admin creates its invoice, the job's chemicals, fields and billing split can't change until that invoice is voided. Create Invoice bills what is on the job at that moment, to the billing split saved on the job (the one the job screen shows); only a field with no saved split falls back to its Field Setup split, as the job screen does. The round-7 refusal of a grower-supplied line that took company stock is withdrawn (Sol round 8 found it could refuse a valid job). Accepted as pre-existing, pending a follow-up: editing a completed job's chemicals does not adjust the stock that completion already took, so stock can disagree with the invoice.
+
+## 2026-11-22 — #2247: every field has a billing split; a job bills each owner the acres of their own fields
+
+**Decision (Mason, 2026-11-22, in chat).** "in field setup we always have the billing split set per field ... the total acres of John field is all billed to him and the field that is 50/50 is split accordingly on those acres." For #2247, Create Invoice refuses and names any job field with no billing split instead of guessing a payer (live check: 0 of 5 fields lack one). Requiring a split when a field is created is a separate Field Setup follow-up.
+
+## 2026-11-22 — #2247: spray-job invoice lines book today's product cost; the grower's $0 line stays editable
+
+**Decision (Mason, 2026-11-22, "Today's product cost" and "Yes, same as custom lines").** For #2247, when a spray job becomes an invoice each chemical line books today's product cost per sold unit, as field-application invoices do (a job's saved cost can be per a different unit or $0; Sol rounds 3 and 4 flagged each choice in turn). A customer-supplied chemical stays a $0 information line with no product link; a priced edit to it in the invoice editor is accepted like any custom line (no restricted-use sales record, since CRX did not sell it). Sol round 5 on #2247 may run.
 ## 2026-11-23 — #2330: Mason owner-accepted 2 Sol finding(s) at `f497bf5e6801`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2330 at `f497bf5e6801` (base `de5387c0b4b6`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

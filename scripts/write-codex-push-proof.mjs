@@ -2720,8 +2720,8 @@ function mintSingleCommitCarry(root, options, facts, mode, carryExtra = {}) {
 // Notes alone carry with no model call. The schema registry and the allowlist
 // feed guards and the live sweeps, so a change to either carries only after a
 // focused Sol check of that one commit returns CLEAN (Sol HIGH x2 on this PR).
-const POST_APPLY_EDITABLE_RE = /^(?:docs\/reference\/migrations\.d\/[^/]+\.md|docs\/changelog\.d\/[^/]+\.md|docs\/manual\/KNOWN_ISSUES\.md|docs\/manual\/known-issues\.d\/[^/]+\.md|\.claude\/schema-registry\.json)$/;
-const POST_APPLY_ADDABLE_RE = /^docs\/(?:reference\/migrations\.d|changelog\.d|manual\/known-issues\.d)\/[^/]+\.md$/;
+const POST_APPLY_EDITABLE_RE = /^(?:docs\/reference\/migrations\.d\/[^/]+\.md|docs\/changelog\.d\/[^/]+\.md|docs\/manual\/KNOWN_ISSUES\.md|docs\/manual\/known-issues\.d\/\d{4}-\d{2}-\d{2}-[^/]+\.md|\.claude\/schema-registry\.json)$/;
+const POST_APPLY_ADDABLE_RE = /^docs\/(?:(?:reference\/migrations\.d|changelog\.d)\/[^/]+|manual\/known-issues\.d\/\d{4}-\d{2}-\d{2}-[^/]+)\.md$/;
 const POST_APPLY_ALLOWLIST = "scripts/db-invariant-sweeps/allowlist.json";
 const POST_APPLY_CONTRACTS = "src/lib/rpcContracts.test.ts";
 const AWAITING_REGEN_OPEN = "const MIGRATIONS_AWAITING_TYPE_REGENERATION = new Set<string>([";

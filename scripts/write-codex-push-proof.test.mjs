@@ -1721,6 +1721,9 @@ function collisionPromptSkipsWork(prompt) {
   assert.match(one("docs/changelog.d/x.md", "120000", "120000"), /changed type or mode/, "post-apply: a symlink is refused");
   assert.match(one("docs/changelog.d/x.md", "100644", "100755"), /changed type or mode/, "post-apply: an executable bit is refused");
   assert.match(one("docs/manual/KNOWN_ISSUES.md", "000000", "100644"), /was added/, "post-apply: only notes may be added");
+  assert.equal(one("docs/manual/known-issues.d/2026-11-22-x.md", "000000", "100644"), null, "post-apply: a new known-issues entry is paperwork");
+  assert.match(one("docs/manual/known-issues.d/README.md"), /instruction file|not post-apply paperwork/, "post-apply: the known-issues README is not paperwork");
+  assert.match(one("docs/manual/known-issues.d/notes.md", "000000", "100644"), /was added|not post-apply paperwork/, "post-apply: an undated known-issues file is not paperwork");
   assert.match(one("docs/changelog.d/sub/x.md"), /not post-apply paperwork/, "post-apply: no nested folders");
   assert.match(one("docs/manual/known_issues.md"), /not post-apply paperwork/, "post-apply: paths match exactly");
   assert.match(postApplyProblem({ entries: [], readFile: read }), /changes nothing/, "post-apply: an empty commit is refused");

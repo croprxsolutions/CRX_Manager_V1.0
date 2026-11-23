@@ -32,7 +32,7 @@ const LANE_WORDS = new Set([
   "quote", "quotes", "booking", "bookings", "hold", "holds", "purchasing",
   "invoice", "invoices", "invoicing", "payment", "payments", "prepay", "prepayment", "prepayments",
   "credit", "credits", "statement", "statements", "billing", "commission", "commissions",
-  "month", "receivable", "tax", "discount",
+  "month", "receivable", "tax", "discount", "booked", "aging",
 ]);
 // Field billing is Mason's. "field" counts only when it names that work (field app, field invoice…):
 // "Fields" alone means data fields (invoiceRowPdfFields) and stays in the lane (Codex P2, #2303).
@@ -51,7 +51,15 @@ const wordsOf = (name) => String(name)
 
 // Screens that run chemical-sale billing without a billing word in their name (Codex P1, #2303).
 // shortcut: names, not code, decide the lane; add a file here when review finds another billing entry point.
-const LANE_FILE_PREFIXES = ["src/pages/OrderDetail."];
+// Taha's review of #2303 named the chemical-side screens below; Mason chose this short list over refuse-by-default (2026-11-22).
+const LANE_FILE_PREFIXES = [
+  "src/pages/OrderDetail.", "src/pages/NewOrder.", "src/pages/Orders.", "src/pages/CustomerDetail.",
+  "src/pages/CustomerTransactionReview.", "src/pages/ARaging.", "src/lib/arAging.", "src/lib/reconciliation.",
+  "src/pages/Reports.", "src/pages/SalesReports.", "src/pages/FinancialDashboard.", "src/components/reports/",
+  "src/components/orders/SaleMoneySummary.", "src/components/orders/WhoPaysCard.",
+];
+// Quote, hold, prepay and booking words win over a field word (prepay_application_rpcs, release_hold_reject_job).
+const STRONG_LANE_WORDS = new Set(["quote", "quotes", "hold", "holds", "prepay", "prepayment", "prepayments", "booking", "bookings", "booked"]);
 
 // The block's own wiring: a PR that edits or unhooks it needs Mason's code too (Taha's review of #2303).
 const BLOCK_FILES_RE = /^(?:\.claude\/hooks\/(?:taha-lane-[\w.-]+|pr-merge-guard|merge-guard-launcher|prompt-router)\.mjs|\.codex\/hooks\/production-action-guard\.mjs|\.claude\/settings\.json|\.codex\/hooks\.json)$/i;
@@ -63,7 +71,7 @@ export function isTahaLanePath(name) {
   if (!/^(?:src|supabase)\//i.test(file)) return false;
   if (LANE_FILE_PREFIXES.some((p) => file.startsWith(p))) return true;
   const words = wordsOf(file);
-  if (isFieldBilling(words)) return false;
+  if (isFieldBilling(words) && !words.some((w) => STRONG_LANE_WORDS.has(w))) return false;
   return isBill(words) || words.some((w) => LANE_WORDS.has(w));
 }
 

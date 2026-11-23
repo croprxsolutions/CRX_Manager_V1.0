@@ -30,6 +30,13 @@ for (const p of [
   // Codex P1/P2 on #2303: bill splits are billing; data "fields" are not field billing.
   "src/pages/OrderDetail.tsx", "src/pages/OrderDetail.billing.test.tsx", "src/lib/billSplitLock.ts","src/components/orders/LineBillSplit.tsx", "src/lib/invoiceRowPdfFields.ts",
   "supabase/migrations/20270129180000_ki81_quote_line_sent_field.sql", "supabase/migrations/20260702131000_a3_save_quote_restore_dropped_fields.sql",
+  // Taha's review of #2303: the chemical-side screens he named (Mason chose this list, not refuse-by-default).
+  "src/pages/ARaging.tsx", "src/lib/arAging.ts", "src/lib/reconciliation.ts", "src/pages/Reports.tsx", "src/pages/SalesReports.tsx",
+  "src/pages/FinancialDashboard.tsx", "src/components/reports/X.tsx", "src/pages/NewOrder.tsx", "src/pages/Orders.tsx",
+  "src/components/orders/SaleMoneySummary.tsx", "src/components/orders/WhoPaysCard.tsx", "src/pages/CustomerDetail.tsx",
+  "src/pages/CustomerTransactionReview.tsx", "supabase/migrations/20270101000000_any_rep_changes_booked_prices.sql",
+  "supabase/migrations/20260301200001_prepay_application_rpcs.sql", "supabase/migrations/20260702182000_layer2_release_hold_reject_job.sql",
+  "supabase/migrations/20260702172500_layer2_convert_quote_to_order_job_aware.sql",
   // Taha's review of #2303: the block's own wiring needs Mason's code too.
   ".claude/hooks/taha-lane-lib.mjs", ".claude/hooks/taha-lane-prompt.mjs", ".claude/hooks/pr-merge-guard.mjs",
   ".claude/hooks/prompt-router.mjs", ".codex/hooks/production-action-guard.mjs", ".claude/settings.json", ".codex/hooks.json",

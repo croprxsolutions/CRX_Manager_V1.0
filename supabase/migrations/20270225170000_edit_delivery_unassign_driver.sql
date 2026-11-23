@@ -43,13 +43,15 @@ BEGIN
         IS DISTINCT FROM '942011a2bf15b83269e74830fa057377' THEN
     RAISE EXCEPTION 'EDIT_DELIVERY_UNASSIGN_PREFLIGHT: edit_delivery or its body is not the reviewed one (missing, drifted or already replaced)';
   END IF;
-  -- The new signature re-grants the reviewed access; refuse if live access drifted rather than silently reset it.
-  IF NOT has_function_privilege('authenticated', 'public.edit_delivery(uuid,uuid,date,text,text,text,uuid,text,text,jsonb,uuid,text)', 'EXECUTE')
-     OR NOT has_function_privilege('service_role', 'public.edit_delivery(uuid,uuid,date,text,text,text,uuid,text,text,jsonb,uuid,text)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.edit_delivery(uuid,uuid,date,text,text,text,uuid,text,text,jsonb,uuid,text)', 'EXECUTE')
-     OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
-                 WHERE p.oid = 'public.edit_delivery(uuid,uuid,date,text,text,text,uuid,text,text,jsonb,uuid,text)'::regprocedure
-                   AND a.grantee = 0 AND a.privilege_type = 'EXECUTE') THEN
+  -- The new signature re-grants the reviewed access; refuse if live access drifted rather than silently reset it:
+  -- EXECUTE for exactly the owner, authenticated and service_role (live, read-only, 2026-11-23).
+  IF (SELECT array_agg(g.who ORDER BY g.who) FROM (
+          SELECT DISTINCT CASE WHEN a.grantee = p.proowner THEN 'owner' WHEN a.grantee = 0 THEN 'PUBLIC'
+                               ELSE a.grantee::regrole::text END AS who
+            FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+           WHERE p.oid = 'public.edit_delivery(uuid,uuid,date,text,text,text,uuid,text,text,jsonb,uuid,text)'::regprocedure
+             AND a.privilege_type = 'EXECUTE') g)
+     IS DISTINCT FROM ARRAY['authenticated', 'owner', 'service_role']::text[] THEN
     RAISE EXCEPTION 'EDIT_DELIVERY_UNASSIGN_PREFLIGHT: edit_delivery grants are not the reviewed ones (authenticated and service_role only)';
   END IF;
 END;

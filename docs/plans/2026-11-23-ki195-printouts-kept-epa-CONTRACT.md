@@ -33,7 +33,7 @@ No write path changes; nobody gains or loses access. Smallest change:
   signature, gate, grants and body except the products block: LEFT JOIN the lock row; `epa_registration` = the kept number
   when locked, else `_epa_norm(catalog)`; two new keys `epa_kept`, `epa_not_recorded`. Read-only, so no idempotency key.
 - `proofNotification.ts` prints `EPA Reg. No. <text>` on each product line (HTML and text). Old database (keys absent)
-  reads as unlocked, so the screen works before and after the apply. The email is built in the browser and sent through
+  prints no EPA line (today's behavior), so the screen works before and after the apply. The email is built in the browser and sent through
   the existing `send-email` type: no Edge Function deploy.
 
 Batch reports (Master Mix, Chemical Summary, Projected Use) keep the catalog number and do not read the kept rows

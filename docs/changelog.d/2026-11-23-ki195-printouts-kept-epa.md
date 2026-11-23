@@ -5,4 +5,4 @@
 - Re-entry (REI) and pre-harvest (PHI) intervals are unchanged: the WPS notice still prints the product label's, and the report, applicator sheet and proof still take the job line's first, then the product's.
 - If the saved numbers cannot be read, the report, sheet and WPS notice stop with the existing error instead of printing the catalog number.
 - The batch reports (Master Mix, Chemical Summary, Projected Use) are loading and usage sheets, not per-job records: they keep the catalog number, unchanged.
-- Migration `20270225110000_job_proof_kept_epa` (proof data function, read-only). Proof: unit tests and the real-schema prover `npm run proof:ki195-kept-epa`. Its `cost-exposure-review` allowlist entry carries the post-apply key `d4ee3cbf4e79` (computed read-only on live), so it shows until the apply.
+- Migration `20270225110000_job_proof_kept_epa` (proof data function, read-only). Proof: unit tests and the real-schema prover `node scripts/smoke/prove-ki195-kept-epa-real-schema.mjs`. Its `cost-exposure-review` allowlist entry carries the post-apply key `d4ee3cbf4e79` (computed read-only on live), so it shows until the apply.

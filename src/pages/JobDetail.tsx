@@ -1006,9 +1006,8 @@ export default function JobDetail() {
               product_name: p?.product_name || c.product_name || 'Product',
               epa_registration: p?.epa_registration || null,
               signal_word: p?.signal_word || null,
-              // The job line's own REI/PHI first, as the report, sheet and proof do (Sol r2, KI-195).
-              rei_hours: c.rei_hours !== '' ? parseFloat(c.rei_hours) : (p?.rei_hours ?? null),
-              phi_days: c.phi_days !== '' ? parseFloat(c.phi_days) : (p?.phi_days ?? null),
+              rei_hours: p?.rei_hours ?? null,
+              phi_days: p?.phi_days ?? null,
               rate_per_acre: parseFloat(c.rate_per_acre) || null,
               rate_unit: c.rate_unit || null,
             };

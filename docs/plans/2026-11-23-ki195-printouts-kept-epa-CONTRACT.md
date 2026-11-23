@@ -123,7 +123,7 @@ this read-only change; 37 has no case (new jobs have no locks).
 
 - Luna MED kept-row read could be cut by the API row cap: refuted. At most one row per printed product (primary key
   job_id + product_id), and the label read of the same product list has the same shape and aborts on any gap.
-- Sol HIGH WPS pairs the kept number with catalog REI/PHI: fixed. The WPS notice now takes REI/PHI from the job line
+- Sol HIGH WPS pairs the kept number with catalog REI/PHI: fixed in round 2, then reverted in round 3 (below). It took REI/PHI from the job line
   first (filled from the label when the product is picked), then the product, the rule the report, applicator sheet
   and `get_job_proof_data` already use. A line left blank still falls back to the product, as everywhere today.
 - Sol MED access removed and restored between the two visibility checks: refuted as needing two opposite access changes
@@ -135,3 +135,21 @@ this read-only change; 37 has no case (new jobs have no locks).
   the browser check on staging is owed after merge (Mason signs in).
 - Sol LOW three short reads per printed job: accepted; the bulk loop already makes several reads per job.
 - Sol LOW KNOWN_ISSUES KI-195 description reads as current: fixed (status line says the description is pre-fix).
+
+## Sol round 3 (2026-11-23)
+
+- HIGH cost-exposure allowlist key deferred to after the apply: fixed. The post-apply key `d4ee3cbf4e79` is computed
+  read-only on live with the new body swapped in (the method reproduced today's key `3a3abcd3a1cd`) and carried in
+  `scripts/db-invariant-sweeps/allowlist.json`, as `ship.md` Step 5 asks.
+- HIGH the WPS notice prints editable job-line REI/PHI (round 2's fix): fixed by reverting it. The WPS notice prints the
+  label's REI/PHI again, exactly as on staging. The round-2 HIGH it answered is the next item.
+- HIGH a reprint can pair the kept EPA number with today's label intervals (WPS; report, sheet and proof when the job
+  line is blank): **NEEDS MASON - DECISION REQUIRED.** The job keeps its EPA number at spray time but not the REI/PHI,
+  so no printout can show the intervals that went with that number; it only matters when the catalog's registration
+  and intervals changed after the spray. This is the same safety-interval question as Sol round 2 (second round). Two
+  answers: (a) ship KI-195 as is (numbers fixed; intervals behave exactly as today) and open a follow-up to keep REI/PHI
+  with the EPA number at spray time; (b) hold KI-195 until the intervals are kept too. Recommended: (a), because this
+  PR changes no interval and holding it keeps the wrong EPA number on every corrected product's printouts.
+- MED access removed and restored between the two visibility checks; MED proof retry across the migration: refuted as
+  in round 2.
+- LOW pilot log overstated WPS test coverage: fixed (names what is unit-tested and that the WPS handler is not).

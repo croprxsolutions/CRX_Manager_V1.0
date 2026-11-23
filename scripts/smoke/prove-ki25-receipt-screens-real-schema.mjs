@@ -118,7 +118,7 @@ try {
 
   // R1: the list showed receipt A; it was handled, and a new completion re-queued B on the same row before the click.
   const a5 = queuedAt(D(5)); const id5 = rowId(D(5));
-  assert.match(a5, /\.\d{6}/, 'the screen gets created_at to the microsecond');
+  assert.match(a5, /\.\d{1,6}(?:[+-]|Z)/, 'the screen gets created_at with its fractional seconds (Postgres trims trailing zeros)');
   assert.equal(JSON.parse(close(USERS.admin, D(5), 'handled', 'ki25s-r1-a')).outcome, 'closed');
   psql(requeue(D(5)));
   const b5 = queuedAt(D(5));

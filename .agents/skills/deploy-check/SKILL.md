@@ -17,7 +17,7 @@ A checklist. It changes no tracked file and lands nothing (`git fetch` and `npm 
 4. **Bundle:** `ls -lhS dist/assets/*.js | head -5` (largest first); WARN on any chunk over 500 KB.
 5. **Migrations:** list the branch's new `supabase/migrations/*.sql`. A feature PR's migration is applied to the staging database by the `Database` workflow after merge, never by hand. A hotfix or release migration is applied live before the merge through `scripts/apply-migration-file.mjs` (ship.md Step 5, Step 8 item 5). A destructive one may merge into `staging`, but its live apply needs Mason's approval of that exact file. Never `supabase db push`.
 6. **Sol:** `npm run sol-needed -- <n>` (or the Step 0.5 check in ship.md before a PR exists). On the list → a clean Sol proof on the head is required.
-7. **Taha:** a PR touching his hold list waits 4 hours (ship.md Step 8 item 4a); never push to his branches.
+7. **Taha:** a PR touching his hold list waits 4 hours before merge, except an emergency rollback (ship.md Step 8 item 4a); never push to his branches.
 
 ## Report
 

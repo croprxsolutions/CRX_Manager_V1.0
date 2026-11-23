@@ -424,6 +424,7 @@ export default function ProductDetail() {
   const [priceHistoryReloadToken, setPriceHistoryReloadToken] = useState(0);
   const pricingPreviewIntentRef = useRef<string | null>(null);
   const pricingPreviewRequestRef = useRef(0);
+  const pricingReloadRequestRef = useRef(0);
   // Committed product id, read after awaits to drop results for a product the user has left.
   const productIdRef = useLatestRef(id);
   // The product itself. Cost is admin-only (Mason, 2026-10-15), so a role change is a different read.
@@ -1048,6 +1049,7 @@ export default function ProductDetail() {
   };
 
   const handlePricingReload = async () => {
+    const reloadRequest = ++pricingReloadRequestRef.current;
     setPricingReloading(true);
     setPriceHistoryReloadToken((current) => current + 1);
     const sideReads = Promise.all([fetchCostHistory(), fetchCostBasisWorkspace()]);
@@ -1059,6 +1061,8 @@ export default function ProductDetail() {
       return;
     }
     const [historyReloaded, basisReloaded] = await sideReads;
+    // A newer Reload Product took over the side reads; only that one reports them.
+    if (reloadRequest !== pricingReloadRequestRef.current) return;
     toast(
       historyReloaded && basisReloaded ? 'success' : 'warning',
       historyReloaded && basisReloaded

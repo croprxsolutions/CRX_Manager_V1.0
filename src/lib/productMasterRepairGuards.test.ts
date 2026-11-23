@@ -29,16 +29,18 @@ function lastMatch(re: RegExp): number {
 
 /** The newest body of a function; fails if no migration creates it or a newer one drops it. */
 function latestBody(fn: string): string {
-  const created = lastMatch(new RegExp(`CREATE\\s+(?:OR\\s+REPLACE\\s+)?FUNCTION\\s+public\\.${fn}\\s*\\(`));
+  // Schema optional: older migrations create some functions unqualified.
+  const created = lastMatch(new RegExp(`CREATE\\s+(?:OR\\s+REPLACE\\s+)?FUNCTION\\s+(?:public\\.)?"?${fn}"?\\s*\\(`));
   expect(created, `${fn} is not created by any migration`).toBeGreaterThan(-1);
-  expect(lastMatch(new RegExp(`DROP\\s+FUNCTION\\s+(?:IF\\s+EXISTS\\s+)?public\\.${fn}\\b`)), `${fn} is dropped later`).toBeLessThan(created);
+  const dropped = lastMatch(new RegExp(`DROP\\s+FUNCTION\\s+(?:IF\\s+EXISTS\\s+)?(?:public\\.)?"?${fn}"?(?![A-Za-z0-9_])`));
+  expect(dropped, `${fn} is dropped later`).toBeLessThan(created);
   const body = ALL.slice(created).match(/AS\s+\$([A-Za-z_]*)\$([\s\S]*?)\$\1\$/);
   return body ? body[2] : '';
 }
 
 /** The newest create of a trigger or index on a table comes after its newest drop. */
 function stillCreated(kind: 'TRIGGER' | 'UNIQUE INDEX', name: string, table: string): void {
-  const created = lastMatch(new RegExp(`CREATE\\s+${kind.replace(' ', '\\s+')}\\s+${name}\\b[\\s\\S]{0,200}?\\bON\\s+public\\.${table}\\b`));
+  const created = lastMatch(new RegExp(`CREATE\\s+${kind.replace(' ', '\\s+')}\\s+${name}\\b[\\s\\S]{0,200}?\\bON\\s+(?:public\\.)?${table}\\b`));
   const dropped = lastMatch(new RegExp(`DROP\\s+${kind === 'TRIGGER' ? 'TRIGGER' : 'INDEX'}\\s+(?:IF\\s+EXISTS\\s+)?(?:public\\.)?${name}\\b`));
   expect(created, `${kind} ${name} on ${table} is never created`).toBeGreaterThan(-1);
   expect(dropped, `${kind} ${name} is dropped after it was created`).toBeLessThan(created);
@@ -76,14 +78,21 @@ describe('Product Master repair fixes stay in place', () => {
       'cancelled_delivery_reversal', 'void_delivery_reversal', 'prebooked', 'released', 'prebook_reconciliation',
       'tote_fill_out', 'tote_fill_in',
     ];
+    // Both signs: with only -5, "signed" and "subtract" look the same.
     for (const type of types) {
-      const sqlDelta = add.has(type) ? 5 : subtract.has(type) ? -5 : signed.has(type) ? -5 : 0;
-      const issues = checkInventoryLedger(
-        [{ id: 'i', product_id: 'p', product_name: 'P', quantity_available: 1000 }],
-        [{ product_id: 'p', transaction_type: type, quantity: -5 }],
-      );
-      expect(issues[0]?.expected ?? 1000, `${type}: sweep and browser check disagree`).toBe(sqlDelta);
+      for (const quantity of [5, -5]) {
+        const sqlDelta = add.has(type) ? Math.abs(quantity)
+          : subtract.has(type) ? -Math.abs(quantity)
+          : signed.has(type) ? quantity : 0;
+        const issues = checkInventoryLedger(
+          [{ id: 'i', product_id: 'p', product_name: 'P', quantity_available: 1000 }],
+          [{ product_id: 'p', transaction_type: type, quantity }],
+        );
+        expect(issues[0]?.expected ?? 1000, `${type} ${quantity}: sweep and browser check disagree`).toBe(sqlDelta);
+      }
     }
+    // Pins the SQL side alone too (the docker prover is not in npm test).
+    expect(signed).toEqual(new Set(['adjusted', 'transferred', 'returned', 'tote_fill_out', 'tote_fill_in']));
     for (const id of PREBOOK_ONLY_ADJUSTMENT_TX_IDS) expect(sql).toContain(`'${id}'::uuid`);
   });
 

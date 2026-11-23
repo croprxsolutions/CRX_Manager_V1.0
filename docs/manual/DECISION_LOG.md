@@ -1,5 +1,15 @@
 # Decision Log
 
+## 2026-11-22 — #2267: Mason owner-accepted 3 Sol finding(s) at `7e90626998c0`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2267 at `7e90626998c0` (base `6aceb0747958`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224140000_piksi_mg_to_grams.sql:262`, text sha256 `bcfd6d2c4680adba` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref b09ed7a3e8c1)
+- Finding 2 (HIGH) at `scripts/smoke/piksi-grams-reverse.sql:191`, text sha256 `6e910988df185ccd` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref b09ed7a3e8c1)
+- Finding 3 (HIGH) at `supabase/baselines/one-shot-migrations.json:30`, text sha256 `0d413581cc1ff016` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref b09ed7a3e8c1)
+
 ## 2026-11-22 — #2267: Mason owner-accepted 1 Sol finding(s) at `b1be0affc85a`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2267 at `b1be0affc85a` (base `a7785529318b`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

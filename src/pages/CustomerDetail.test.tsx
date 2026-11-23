@@ -111,7 +111,7 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
   }),
 }));
 vi.mock('../hooks/useUnsavedChanges', () => ({ useUnsavedChanges: (dirty: boolean) => { dirtyStates.push(dirty); return { state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }; } }));
-vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
+vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn(async () => true) }));
 // KI-77's duplicate check: finds nothing unless a test holds it open.
 const duplicateCheck = vi.hoisted(() => ({ find: vi.fn(async (..._args: unknown[]) => [] as unknown[]) }));
 vi.mock('../lib/customerDuplicates', () => ({ findLikelyDuplicateCustomers: (...args: unknown[]) => duplicateCheck.find(...args) }));
@@ -1046,6 +1046,7 @@ describe('CustomerDetail stale whole-record save', () => {
     });
     renderDetail();
     await screen.findByDisplayValue('Original Farm');
+    eqCalls.length = 0; // only the update's filters from here (Sol MED)
     fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reactivate' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Reload the page to check')));

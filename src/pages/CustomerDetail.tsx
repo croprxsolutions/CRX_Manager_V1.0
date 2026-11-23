@@ -848,7 +848,8 @@ export default function CustomerDetail() {
         // Guarded before the toast: a superseded timeline read must not report
         // its failure over the customer the operator is looking at now.
         if (isStale()) return;
-        if (tlError) toast('error', 'Failed to load timeline');
+        // A failed read keeps the entries already shown, not a false "No activity" (#2227 Sol MED).
+        if (tlError) { toast('error', 'Failed to load timeline'); return; }
 
         // PR-07 follow-up: resolve performer names via profile_public_view (safe
         // columns only) so non-admin users still see actor names after
@@ -1375,7 +1376,7 @@ export default function CustomerDetail() {
           customerId: id,
         }))
           // An open Timeline shows the new entry (#2227); fetchTabData ignores a customer the admin has left.
-          .then(() => { if (openSectionsRef.current.has('timeline')) void fetchTabData('timeline'); })
+          .then((logged) => { if (logged && openSectionsRef.current.has('timeline')) void fetchTabData('timeline'); })
           .catch(() => {});
       }
       if (currentIdRef.current !== id || visitRef.current !== visit) return;

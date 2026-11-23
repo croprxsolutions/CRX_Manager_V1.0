@@ -9,7 +9,7 @@
 // are refused: their stamps follow next-migration-stamp --hotfix and the live high-water.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { codexPushProofPath } from "./write-codex-push-proof.mjs";
@@ -42,13 +42,13 @@ if (!/^\d{14}$/.test(oldStamp ?? "") || Object.keys(flags).some((k) => k !== "--
 
 process.chdir(git("rev-parse", "--show-toplevel"));
 const branch = tryGit("symbolic-ref", "--quiet", "--short", "HEAD").stdout.trim();
-if (!branch || /^(main|staging|release\/|hotfix\/)/.test(branch)) fail(`"${branch || "detached HEAD"}" is not a feature branch into staging`);
+if (!branch || /^(main|staging)$|^(release|hotfix)\//.test(branch)) fail(`"${branch || "detached HEAD"}" is not a feature branch into staging`);
 if (git("status", "--porcelain")) fail("the worktree is not clean; commit or set aside your changes first");
 // Stale bases could miss a landed copy or a newer stamp, so no fetch, no restamp.
 const fetched = spawnSync("git", ["fetch", "--quiet", "origin", "+refs/heads/main:refs/remotes/origin/main", "+refs/heads/staging:refs/remotes/origin/staging"], { stdio: "ignore" });
 if (fetched.status !== 0) fail("could not fetch origin main and staging");
 
-const sqls = git("ls-files", "supabase/migrations").split("\n").filter((f) => f.startsWith(`supabase/migrations/${oldStamp}_`) && f.endsWith(".sql"));
+const sqls = git("ls-files", "supabase/migrations").split("\n").filter((f) => f.startsWith(`supabase/migrations/${oldStamp}_`) && /^supabase\/migrations\/[^/]+\.sql$/.test(f));
 if (sqls.length !== 1) fail(`expected one supabase/migrations/${oldStamp}_*.sql, found ${sqls.length}`);
 const [oldSql] = sqls;
 const nameAfterStamp = oldSql.slice(`supabase/migrations/${oldStamp}`.length);
@@ -81,7 +81,10 @@ const newStem = swap(oldStem);
 const newSql = `supabase/migrations/${newStem}.sql`;
 const oldRecord = `docs/reference/migrations.d/${oldStem}.md`;
 const newRecord = `docs/reference/migrations.d/${newStem}.md`;
-if (!existsSync(oldRecord)) fail(`${oldRecord} is missing; every migration needs its record (docs/reference/migrations.d/README.md)`);
+// Only ordinary files: a symlink would let the writes below land outside the repository.
+const regular = (file) => existsSync(file) && lstatSync(file).isFile();
+if (!regular(oldSql)) fail(`${oldSql} is not an ordinary file`);
+if (!regular(oldRecord)) fail(`${oldRecord} is missing; every migration needs its record (docs/reference/migrations.d/README.md)`);
 for (const dest of [newSql, newRecord]) if (existsSync(dest)) fail(`${dest} already exists`);
 const reviewed = git("rev-parse", "HEAD");
 if (!existsSync(codexPushProofPath(process.cwd(), reviewed))) console.error(`note: no Sol proof for ${reviewed.slice(0, 12)} in this worktree; the restamp commits, but nothing will carry.`);
@@ -105,7 +108,7 @@ writeFileSync(newRecord, swap(readFileSync(newRecord, "latin1")).split(oldPin).j
 edits.push(newRecord);
 for (const file of owned) {
   // Other database files are not this command's to change; the carry would refuse them anyway.
-  if (file.startsWith("supabase/") || file === oldRecord || !existsSync(file)) continue;
+  if (file.startsWith("supabase/") || file === oldRecord || !regular(file)) continue;
   const before = readFileSync(file, "latin1");
   if (swap(before) !== before) { writeFileSync(file, swap(before), "latin1"); edits.push(file); }
 }

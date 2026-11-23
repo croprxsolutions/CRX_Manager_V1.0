@@ -381,6 +381,11 @@ export function sanitizeError(error: unknown): string {
         ? 'A chemical on this job is priced below its cost. Nothing was invoiced; its price must be corrected before this job can be invoiced.'
         : "A chemical on this job can't be invoiced as recorded. Nothing was invoiced; check its quantity, unit and cost.");
   }
+  // #2063 (20270224130000): the server names only invoices the caller may read and what to do; keep it whole.
+  if (/^BLEND_TICKET_ALREADY_BILLED:/.test(message)) {
+    return message.slice('BLEND_TICKET_ALREADY_BILLED:'.length)
+      .replace(/[؜‎‏‪-‮⁦-⁩]/g, '').trim();
+  }
   // Rate lock (20261107060000), product parents (20261108120000), tote fill (20261117130000) and weights (20261207100000), chemistry (20261209100000), crop + timing choices (20261229120000): the server text after the token is the operator's answer.
   const rateRefusal = message.match(/^(?:PRODUCT_RATES_LOCKED|PRODUCT_RATES_STALE|PRODUCT_RATE_INVALID|PRODUCT_RATE_DUPLICATE_PRODUCT|PRODUCT_RATE_LOCK_UNCHANGED|PRODUCT_RATE_CORRECTION_NO_CHANGE|PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATES_NOT_LOCKED|PRODUCT_RATE_PREVIEW_CHANGED|PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK|REASON_TOO_LONG|PRODUCT_PARENT_[A-Z_]+|WORKBOOK_(?:WEIGHTS|INGREDIENTS)_REFUSED|WORKBOOK_NOTHING_TO_SAVE|TOTE_FILL_[A-Z_]+|PRODUCT_WEIGHT_[A-Z_]+|CHEMISTRY_[A-Z_]+|INGREDIENT_[A-Z_]+|COST_REFERENCE_[A-Z_]+|USE_TIMING_[A-Z_]+|REASON_REQUIRED|EVIDENCE_REQUIRED|EVIDENCE_TOO_LONG):\s*(.+)$/s)?.[1];
   if (rateRefusal) {

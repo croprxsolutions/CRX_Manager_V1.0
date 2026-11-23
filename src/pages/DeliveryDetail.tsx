@@ -2408,6 +2408,7 @@ export default function DeliveryDetail() {
                 <select
                   value={editDriver}
                   onChange={(e) => setEditDriver(e.target.value)}
+                  disabled={savingEdit}
                   className="w-full px-3 py-2 text-sm text-nav-dark bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green"
                 >
                   {/* The server refuses to unassign a started delivery; assign another driver instead. */}

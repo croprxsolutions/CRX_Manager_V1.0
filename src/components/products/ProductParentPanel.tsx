@@ -193,18 +193,20 @@ const RATE_SOURCE_LABELS = {
 
 // RT-4a: which rate the group uses; null while loading, 'failed' when the read failed (no switch is offered).
 function useParentRateSource(parent: ProductParent) {
-  const [rateSource, setRateSource] = useState<RateSource | 'failed' | null>(null);
+  // Read for one parent and version; a read held for another counts as still loading, so no stale action shows.
+  const key = `${parent.id}:${parent.parent_version}`;
+  const [read, setRead] = useState<{ key: string; source: RateSource | 'failed' } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    setRateSource(null);
     getParentRateSource(parent.id)
-      .then((source) => { if (!cancelled) setRateSource(source); })
+      .then((source) => { if (!cancelled) setRead({ key, source }); })
       .catch((error: unknown) => {
         Sentry.captureException(error, { extra: { context: 'product_parent_rate_source' } });
-        if (!cancelled) setRateSource('failed');
+        if (!cancelled) setRead({ key, source: 'failed' });
       });
     return () => { cancelled = true; };
-  }, [parent.id, parent.parent_version]);
+  }, [key, parent.id]);
+  const rateSource = read?.key === key ? read.source : null;
   const canSwitch = rateSource === 'legacy' || rateSource === 'approved';
   return {
     rateSource: canSwitch ? rateSource : null,

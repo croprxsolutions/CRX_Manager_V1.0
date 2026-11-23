@@ -56,8 +56,11 @@ so the pilot is his own click instead of an API call in the browser pane. The da
 
 ## 3. Delivery
 
-Screen-only PR to `staging`; the database is already live, so there is no ordering risk. No live call: the pilot
-is Mason's own click after release.
+PR to `staging` carrying the button and migration `20270227100000_rate_cutover_refuses_unrestorable.sql` together
+(amendment below). Ordering: the migration must be live before the button reaches production, so the two ship in
+the same release and the release's migration is applied before its merge (`ship.md`). The rate-switch functions
+already live (20270125100000) stay callable meanwhile, but nothing calls them until the button ships. No live call:
+the pilot is Mason's own click after release.
 
 ## 4. Proof cases
 

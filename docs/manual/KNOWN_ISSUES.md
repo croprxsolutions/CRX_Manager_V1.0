@@ -1114,7 +1114,7 @@ Fix it together with KI-157, where every invoice PDF reads the live product name
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · HIGH · Mason (field-app billing) · plan W1-03 · #2176.
 
-> **MUST DO (Mason, 2026-11-22).** Sol round 9 on #2247 re-found this on the transfer's saved-split path (`job_field_shares` x `acres_to_treat`, `20270224160000` ~L415). Mason skipped it for #2247 only on the condition that it is fixed here; it is no longer CAN-WAIT (To-Do 5.7).
+> **MUST DO (Mason, 2026-11-22).** Sol round 9 on #2247 re-found this on the transfer's saved-split path (`job_field_shares` x `acres_to_treat`, `20270224160000` ~L415). Mason skipped it for #2247 on the condition that this known issue (KI-185, GitHub #2176) is fixed next, in its own PR after #2247; it is no longer CAN-WAIT (To-Do 5.7). #2247 itself still bills planned acres.
 
 **HIGH · OPEN (source-confirmed on main and staging; not reproduced end to end) · field-app billing/stock · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 6) · Mason (field-app billing) · GitHub #2176**
 Job completion stores the actual acres per field on the application record (`_complete_job_replay_impl_20261015`,

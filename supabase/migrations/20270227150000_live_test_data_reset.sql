@@ -35,7 +35,11 @@
 --                 'SELECT md5(coalesce(string_agg(md5(to_jsonb(x)::text), '''' ORDER BY md5(to_jsonb(x)::text)), '''')) AS h FROM public.%I x',
 --                 c.relname), false, true, '')))[1]::text)
 --                FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
---               WHERE n.nspname = 'public' AND c.relkind = 'r')
+--               WHERE n.nspname = 'public' AND c.relkind = 'r'),
+--   'delete_triggers', (SELECT coalesce(jsonb_object_agg(s.relname, s.g), '{}') FROM (
+--                 SELECT c.relname, jsonb_agg(t.tgname ORDER BY t.tgname) AS g
+--                   FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+--                  WHERE n.nspname = 'public' AND NOT t.tgisinternal AND (t.tgtype & 8) <> 0 GROUP BY c.relname) s)
 -- )::text AS live_reset_pins;
 -- PIN QUERY END
 --
@@ -45,7 +49,9 @@
 -- pinned one or from the set this file classified (c_table_set_md5), or a foreign key outside public points at a table
 -- it deletes from (LIVE_RESET_SCHEMA_DRIFT); any public table's row count or content differs from its pin
 -- (LIVE_RESET_COUNT_DRIFT / LIVE_RESET_CONTENT_DRIFT: someone used the app after the read, re-pin); a kept cost basis row points at a
--- PO line (LIVE_RESET_COST_BASIS_FROM_PO: product_cost_basis keeps its history, so that needs a decision); a trigger
+-- PO line (LIVE_RESET_COST_BASIS_FROM_PO: product_cost_basis keeps its history, so that needs a decision); the DELETE
+-- triggers on a table it deletes from are not exactly the pinned names (LIVE_RESET_TRIGGER_DRIFT: a guard added after
+-- the pin is never switched off unreviewed); a trigger
 -- that must be switched off is not in its normal on state (LIVE_RESET_GUARD_STATE). Every public table is locked
 -- IN EXCLUSIVE MODE (reads go on, writes wait) before the counts, with a 10-second lock_timeout.
 --
@@ -90,7 +96,8 @@
 --
 -- ROLLBACK: reversible from reset_backup_20261123 (a new reviewed migration: INSERT each table back from its backup in
 -- reverse delete order, generated columns left out, with the same triggers off; inventory and customers columns
--- restored from their pre-images; setval each sequence from _sequences). Drop the schema only once Mason confirms.
+-- restored from their pre-images; each sequence put back with ALTER SEQUENCE ... RESTART WITH <n> from _sequences,
+-- never setval, which a rollback does not undo). Drop the schema only once Mason confirms.
 
 DO $live_reset$
 DECLARE
@@ -193,8 +200,9 @@ BEGIN
     RAISE EXCEPTION 'LIVE_RESET_ALREADY_APPLIED: schema % exists; the reset ran already. Nothing was changed.', c_backup;
   END IF;
   v_counts := c_live->'counts';
-  IF jsonb_typeof(v_counts) IS DISTINCT FROM 'object' OR jsonb_typeof(c_live->'digests') IS DISTINCT FROM 'object' THEN
-    RAISE EXCEPTION 'LIVE_RESET_PINS_MISSING: c_live has no counts or digests object. Nothing was changed.';
+  IF jsonb_typeof(v_counts) IS DISTINCT FROM 'object' OR jsonb_typeof(c_live->'digests') IS DISTINCT FROM 'object'
+     OR jsonb_typeof(c_live->'delete_triggers') IS DISTINCT FROM 'object' THEN
+    RAISE EXCEPTION 'LIVE_RESET_PINS_MISSING: c_live has no counts, digests or delete_triggers object. Nothing was changed.';
   END IF;
 
   PERFORM set_config('lock_timeout', '10s', true);
@@ -231,13 +239,6 @@ BEGIN
   SELECT string_agg(x, ', ') INTO v_bad FROM unnest(v_core) x WHERE x <> ALL (v_tables);
   IF v_bad IS NOT NULL OR (SELECT count(DISTINCT x) FROM unnest(v_core) x) <> cardinality(v_core) THEN
     RAISE EXCEPTION 'LIVE_RESET_SCHEMA_DRIFT: the delete list names missing or repeated tables (%). Nothing was changed.', v_bad;
-  END IF;
-  SELECT string_agg(k.conrelid::regclass::text || ' -> ' || k.confrelid::regclass::text, ', ') INTO v_bad
-    FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE k.contype = 'f' AND n.nspname <> 'public'
-     AND k.confrelid IN (SELECT format('public.%I', x)::regclass FROM unnest(v_core) x);
-  IF v_bad IS NOT NULL THEN
-    RAISE EXCEPTION 'LIVE_RESET_SCHEMA_DRIFT: a table outside public references a table this deletes from (%). Nothing was changed.', v_bad;
   END IF;
 
   v_bad := NULL;
@@ -325,6 +326,24 @@ BEGIN
 
   v_deleting := v_core || ARRAY(SELECT e->>'t' FROM jsonb_array_elements(v_plan) e);
   v_kept := ARRAY(SELECT x FROM unnest(v_tables) x WHERE x <> ALL (v_deleting) ORDER BY x);
+
+  -- Every table it deletes from (core and section tables): no foreign key from outside public may point at it (a
+  -- cascade there would delete rows with no backup), and its DELETE triggers must be exactly the pinned names.
+  SELECT string_agg(k.conrelid::regclass::text || ' -> ' || k.confrelid::regclass::text, ', ') INTO v_bad
+    FROM pg_catalog.pg_constraint k JOIN pg_catalog.pg_class c ON c.oid = k.conrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+   WHERE k.contype = 'f' AND n.nspname <> 'public'
+     AND k.confrelid IN (SELECT format('public.%I', x)::regclass FROM unnest(v_deleting) x);
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'LIVE_RESET_SCHEMA_DRIFT: a table outside public references a table this deletes from (%). Nothing was changed.', v_bad;
+  END IF;
+  SELECT string_agg(x, ', ') INTO v_bad FROM unnest(v_deleting) x
+   WHERE coalesce((SELECT jsonb_agg(t.tgname ORDER BY t.tgname) FROM pg_catalog.pg_trigger t
+                    WHERE t.tgrelid = format('public.%I', x)::regclass AND NOT t.tgisinternal AND (t.tgtype & 8) <> 0), '[]')
+         IS DISTINCT FROM coalesce(c_live->'delete_triggers'->x, '[]');
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'LIVE_RESET_TRIGGER_DRIFT: the DELETE triggers on % are not the pinned ones; review them and re-pin. Nothing was changed.', v_bad;
+  END IF;
 
   -- Content of every kept row (section tables: the rows that stay).
   FOREACH v_t IN ARRAY v_kept || ARRAY(SELECT e->>'t' FROM jsonb_array_elements(v_plan) e) LOOP

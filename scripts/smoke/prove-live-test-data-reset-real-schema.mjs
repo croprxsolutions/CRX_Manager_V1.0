@@ -308,6 +308,18 @@ try {
   editQuote('[PROVER] now a real customer quote');
   refused('content drift', apply(pinned(live)), /LIVE_RESET_CONTENT_DRIFT: rows were edited since the pin: quotes/);
   editQuote(oldNumber);
+  // A cascade from outside public onto a log table it deletes from refuses (those rows would go with no backup).
+  ok(run(`CREATE SCHEMA reset_ops; CREATE TABLE reset_ops.notification_deliveries (id uuid PRIMARY KEY,
+    notification_id uuid REFERENCES public.notifications (id) ON DELETE CASCADE);`));
+  refused('cascade from outside public', apply(pinned(live)),
+    /LIVE_RESET_SCHEMA_DRIFT: a table outside public references a table this deletes from \(reset_ops\.notification_deliveries -> notifications\)/);
+  ok(run('DROP SCHEMA reset_ops CASCADE;'));
+  // A DELETE guard added after the pin (counts and rows unchanged) refuses instead of being switched off unreviewed.
+  ok(run(`CREATE FUNCTION reset_prover.legal_hold() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RAISE EXCEPTION 'LEGAL_HOLD'; END $f$;
+    CREATE TRIGGER zz_prover_legal_hold BEFORE DELETE ON public.invoices FOR EACH ROW EXECUTE FUNCTION reset_prover.legal_hold();`));
+  refused('new delete trigger', apply(pinned(live)), /LIVE_RESET_TRIGGER_DRIFT: the DELETE triggers on invoices are not the pinned ones/);
+  ok(run('DROP TRIGGER zz_prover_legal_hold ON public.invoices; DROP FUNCTION reset_prover.legal_hold();'));
+  assert.ok(Array.isArray(live.delete_triggers.invoices) && live.delete_triggers.invoices.length > 0, 'the pin lists the invoice delete guards');
   ok(run(`SET session_replication_role = replica;
     INSERT INTO public.product_cost_basis (product_id, basis_type, cost_cents, purchase_order_item_id, selection_source, reason, effective_from, effective_to)
       SELECT product_id, 'actual_purchase', 600, id, 'migration_baseline', '[PROVER] from a PO line', now() - interval '1 day', now() FROM public.purchase_order_items ORDER BY id LIMIT 1;`, 'supabase_admin'));

@@ -1843,7 +1843,8 @@ export default function JobDetail() {
   }, [toast, isAdmin]);
 
   // #2188 (Sol r2): a job found deleted closes any dialog already open, so none can still act on it.
-  useEffect(() => {
+  // A layout effect, so the closing happens before the screen is painted and no click can land first (Luna MED).
+  useLayoutEffect(() => {
     if (deletedAt === null) return;
     setPrintOptionsOpen(false); setFieldPickerOpen(false); setShowLicenseOverrideConfirm(false);
     setShowCompleteConfirm(false); setShowCancelConfirm(false); setShowTransferConfirm(false);

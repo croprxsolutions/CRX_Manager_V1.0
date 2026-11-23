@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270225130000_unpost_ignores_voided_payment_history.sql (#2265).
+ * Real-schema proof for 20270225210000_unpost_ignores_voided_payment_history.sql (#2265).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs). Every invoice is made, posted, paid and voided through
@@ -40,7 +40,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, seed, ref, attempt, asUser, refuse, claims, USERS, ROOT, NAME, docker, scalar } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270225130000_unpost_ignores_voided_payment_history.sql';
+const CANDIDATE = '20270225210000_unpost_ignores_voided_payment_history.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const RUN = randomUUID().slice(0, 8); // fixture names, keys, ids and file paths are fresh each run

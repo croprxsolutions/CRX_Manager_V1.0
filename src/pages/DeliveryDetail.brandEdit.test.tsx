@@ -130,3 +130,29 @@ describe('DeliveryDetail edit with unsaved brand choices (Sol r2 HIGH 1)', () =>
     await waitFor(() => expect(editCalls()).toHaveLength(1));
   });
 });
+
+describe('DeliveryDetail edit: the driver choice (Mason 2026-11-23: the office may unassign)', () => {
+  async function editDriverAndSave(choice?: string) {
+    tables.data.profile_public_view = [{ id: 'user-1', full_name: 'Dana Driver', role: 'driver', is_active: true }];
+    render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 }));
+    await screen.findByRole('option', { name: /Dana Driver/ });
+    const select = screen.getByRole('option', { name: 'Unassigned' }).closest('select')!;
+    if (choice !== undefined) fireEvent.change(select, { target: { value: choice } });
+    fireEvent.click(await screen.findByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(editCalls()).toHaveLength(1));
+    return editCalls()[0][1] as Record<string, unknown>;
+  }
+
+  it('Unassigned on a delivery with a driver asks the server to clear it', async () => {
+    const args = await editDriverAndSave('');
+    expect(args.p_clear_driver).toBe(true);
+    expect(args.p_assigned_driver).toBeUndefined();
+  });
+
+  it('keeping the driver sends that driver and no clear', async () => {
+    const args = await editDriverAndSave();
+    expect(args.p_assigned_driver).toBe('user-1');
+    expect(args).not.toHaveProperty('p_clear_driver');
+  });
+});

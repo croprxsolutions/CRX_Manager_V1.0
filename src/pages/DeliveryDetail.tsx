@@ -843,6 +843,8 @@ export default function DeliveryDetail() {
       p_delivery_notes: editNotes || undefined,
       p_priority: editPriority,
       p_items: itemsPayload,
+      // The server keeps a driver it is not given, so "Unassigned" on a delivery with a driver asks it to clear one.
+      ...(!editDriver && delivery.assigned_driver ? { p_clear_driver: true } : {}),
     };
     // One key per delivery and exact edit: an exact retry reuses it, a different edit gets its own.
     const editScope = fingerprintIntentPayload([editArgs]);

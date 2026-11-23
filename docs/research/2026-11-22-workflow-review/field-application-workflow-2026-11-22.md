@@ -182,7 +182,7 @@ Severity: HIGH = could bill wrong or lose money or stock accuracy in normal use.
 ### Recommendations (in order)
 
 1. **Decide the rule for the direct Field App Invoice (N1).** Mason's call: what is that screen for? If it bills sprays of our own product, it needs to deduct stock and write a spray record, the same as a job. If it is only for product that already left another way (a delivery or a blend ticket) or customer-supplied product, the screen should say so and refuse our own stock lines.
-2. **Bill and deduct from what was actually sprayed (KI-185).** Use the sprayed acres entered at completion to scale both the stock deduction and the invoice. This one change also makes the stock and the bill agree.
+2. **Bill and deduct from what actually went in the tank (KI-185; Mason decision 4).** The mixer edits the job's product totals to what was actually mixed, and those totals drive both the stock deduction and the chemical charge (planned 160 acres, mixed 162 acres: deduct and bill 162). Sprayed acres entered at completion drive only the per-acre application fee and the spray record. This also keeps stock and the bill in step.
 3. **Lock a completed job's chemicals and acres in the database (gap 6).** Then the bill cannot drift away from what was deducted.
 4. **Add one shared "already billed?" check (gaps 4, 5)** that every billing route calls: Transfer, Split Billing, blend invoice and the direct editor.
 5. **Fix KI-187** before blend tickets are used live, so one spray deducts stock once.

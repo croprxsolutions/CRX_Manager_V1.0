@@ -47,6 +47,9 @@ const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE,
 // A later or parked file that (re)defines anything the candidate creates or relies on.
 // A later or parked file that (re)defines the voided-invoice path or write-offs.
 const TOUCHED = /(_void_invoice_split_provenance_impl_20260719|\bwrite_offs\b|_get_customer_statement_scoped_impl)/i;
+// M9 re-emits the statement impl with two arms that only read money_reversals (returned-check and refund rows);
+// with no refund or returned check, every statement row this proof checks is the same.
+const LATER_READ_ONLY = new Set(['20270225110000_m9_refunds_and_returned_checks.sql']);
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -147,7 +150,7 @@ function plan() {
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x));
   const at = all.indexOf(CANDIDATE);
   assert.ok(at >= 0, 'the candidate must be selected for post-baseline replay');
-  for (const file of all.slice(at + 1)) {
+  for (const file of all.slice(at + 1).filter((f) => !LATER_READ_ONLY.has(path.basename(f)))) {
     assert.ok(!TOUCHED.test(lf(file)), `${path.basename(file)} sorts after the candidate and touches what it relies on; re-think this proof`);
   }
   const before = all.slice(0, at);

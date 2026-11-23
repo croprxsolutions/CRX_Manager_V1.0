@@ -58,3 +58,11 @@ Both functions can only date an entry in an open month, under the month lock tha
 3. Bounced Prepayment Manager checks are in scope (`p_credit_id`). Its applications are reversed, the rest is zeroed, and it is refused if refunded. One return per credit.
 4. Guards: `void_payment` refuses a returned payment or one whose prepay was refunded. `edit_prepay_credit` refuses a balance change on a credit with M9 lines; the same balance is treated as a notes/reference-only edit, because the screen always sends the balance. `delete_prepay_credit` refuses.
 5. Invoice void keeps refusing while the returned payment's allocations exist. When a returned check reversed an invoice's application, the void stops at the FK (`money_reversal_lines_prepay_application_id_fkey`): a raw message, but nothing changes.
+
+## 7. Sol round 1 rules (built)
+1. Only a Record Payment with `payment_method='check'` can be returned.
+2. A Prepayment Manager check is every bucket sharing the customer, `created_at` and `source_reference`, the same grouping Month-End uses. Its face value is the buckets' total. It is refused if any bucket was edited (`prepay_edited` changing the original amount), deleted, refunded or already returned.
+3. `p_returned_date` is the bank's date: ≥ the day the check was received (an undated payment uses its Chicago creation day) and may be in a closed month. The entry is dated today, in an open month.
+4. Lock order matches void_payment: payment → credits → month → invoices (one sorted pass) → customer. A refund locks credits → month → customer.
+5. A refund draws only credits received on or before its date. It is refused when a drawn credit's stored balance differs from its rows.
+6. A reopened invoice goes overdue when its due date is before today in Chicago, the same rule as reverse_write_off. Only paid → owing counts as reopened.

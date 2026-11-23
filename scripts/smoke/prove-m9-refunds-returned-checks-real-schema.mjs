@@ -28,11 +28,18 @@
  *      prepay application was reversed by a returned check cannot be voided (the application row must stay).
  *   9) the recompute trigger (risk 1): a refund survives apply, batch apply, invoice void and void_payment on the same
  *      customer; every balance agrees with the balance check at the end.
+ *  10) Sol round 1: only a check payment can be returned; an edited or deleted check credit is refused; a refund only
+ *      draws credit received by its date, refuses a drifted credit (the balance check names it per credit) and trims
+ *      every kind of whitespace; a returned payment reopens a past-due invoice as overdue, counts only the invoice
+ *      that went from paid to owing, and its invoice cannot be voided (INVOICE_HAS_RETURNED_PAYMENT).
+ *  11) two sessions: a return and a void of the same payment, each way round, wait on each other (no deadlock) and
+ *      the second is refused.
  *
  * Run: node scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs   (needs Docker)
  * Prints M9_REFUNDS_RETURNED_CHECKS_PROOF_PASS when every case passes; otherwise lists each failing case and why and
- * exits 1. CRX_PROVER_KEEP_CONTAINER=1 keeps the container; CRX_PROVER_CONTAINER=<name> runs only the cases against a
- * container that this script already built and seeded (kept).
+ * exits 1. Every run replays the chain up to M9, snapshots it (database m9_before), then applies M9 on its own.
+ * CRX_PROVER_KEEP_CONTAINER=1 keeps the container; CRX_PROVER_REPLAY_ONLY=1 stops after the snapshot (kept);
+ * CRX_PROVER_CONTAINER=<name> reuses a kept container: resets to the snapshot, applies M9, seeds and runs the cases.
  */
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -45,7 +52,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const REUSE = process.env.CRX_PROVER_CONTAINER || null;
 const NAME = REUSE ?? `crx-m9-${process.pid}-${Date.now().toString(36)}`;
 const DB = 'postgres';
-const KEEP = REUSE !== null || process.env.CRX_PROVER_KEEP_CONTAINER === '1';
+const KEEP = REUSE !== null || process.env.CRX_PROVER_KEEP_CONTAINER === '1' || process.env.CRX_PROVER_REPLAY_ONLY === '1';
 const M9 = path.join(ROOT, 'supabase', 'migrations', '20270225110000_m9_refunds_and_returned_checks.sql');
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
@@ -78,8 +85,8 @@ function docker(args, options = {}) {
   if (r.error || (!options.allowFailure && r.status !== 0)) throw new Error(`${r.error?.message ?? ''}\n${r.stderr || r.stdout}`.trim());
   return r;
 }
-function psqlArgs(user = 'postgres') { return ['exec', '-i', NAME, 'psql', '-U', user, '-d', DB, '-X', '-q', '-v', 'ON_ERROR_STOP=1']; }
-function psql(sql, options = {}) { return docker(psqlArgs(options.user), { input: sql, allowFailure: options.allowFailure }); }
+function psqlArgs(user = 'postgres', db = DB) { return ['exec', '-i', NAME, 'psql', '-U', user, '-d', db, '-X', '-q', '-v', 'ON_ERROR_STOP=1']; }
+function psql(sql, options = {}) { return docker(psqlArgs(options.user, options.db), { input: sql, allowFailure: options.allowFailure }); }
 function scalar(sql) { return docker([...psqlArgs(), '-A', '-t'], { input: sql }).stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? ''; }
 function lf(file) { return readFileSync(file, 'utf8').replaceAll('\r\n', '\n'); }
 function stageText(name, text) {
@@ -170,7 +177,9 @@ function plan() {
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED / LEDGER_ONLY lists)`);
     assert.ok(!TOUCHED.test(lf(file)), `${name} now touches what this proof covers; replay it or re-think the skip`);
   }
-  return all;
+  // M9 is applied on its own after the snapshot, so it must be the last file.
+  assert.equal(path.basename(all.at(-1)), path.basename(M9), 'M9 must be the newest migration; re-think this proof');
+  return all.slice(0, -1);
 }
 function installLiveAuthUid() {
   psql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`, { user: 'supabase_admin' });
@@ -234,8 +243,9 @@ function buildContainer() {
 // ---------------------------------------------------------------------------------------------------------------
 const id = (n) => `e9090000-0000-4000-8000-${n.padStart(12, '0')}`;
 const ADMIN = id('a1'); const REP = id('b1');
-const C = { c1: id('c1'), c2: id('c2'), c3: id('c3'), c4: id('c4'), c5: id('c5'), c6: id('c6'), c7: id('c7'), c8: id('c8') };
-const INV5 = id('e5'); const INV7 = id('e7'); const INV2 = id('e2');
+const C = { c1: id('c1'), c2: id('c2'), c3: id('c3'), c4: id('c4'), c5: id('c5'), c6: id('c6'), c7: id('c7'), c8: id('c8'),
+  c9: id('c9'), c10: id('c10') };
+const INV5 = id('e5'); const INV7 = id('e7'); const INV2 = id('e2'); const INV9 = id('e9'); const INV9B = id('e9b');
 const INV8 = { a: id('e8a'), b: id('e8b'), c: id('e8c') };
 const TODAY = "(now() AT TIME ZONE 'America/Chicago')::date";
 const as = (uid) => `RESET ROLE;
@@ -278,7 +288,9 @@ const prepayState = (cust) => `json_build_object(
   'credit_rows', (SELECT md5(COALESCE(string_agg(row_to_json(pc)::text, ',' ORDER BY pc.id), '')) FROM public.prepay_credits pc WHERE customer_id = '${cust}'))`;
 const SET5 = `(SELECT id FROM public.allocation_sets WHERE customer_id = '${C.c5}' AND entity_type = 'payment')`;
 const SET6 = `(SELECT id FROM public.allocation_sets WHERE customer_id = '${C.c6}' AND entity_type = 'payment')`;
-const CHECK7 = `(SELECT id FROM public.prepay_credits WHERE customer_id = '${C.c7}' AND source_type = 'check')`;
+const bucket7 = (label) => `(SELECT id FROM public.prepay_credits WHERE customer_id = '${C.c7}' AND source_type = 'check' AND bucket_label = '${label}')`;
+const CHECK7A = bucket7('A'); const CHECK7B = bucket7('B');
+const pay10 = (num) => `(SELECT id FROM public.allocation_sets WHERE customer_id = '${C.c10}' AND check_number = '${num}')`;
 const CHECK8 = `(SELECT id FROM public.prepay_credits WHERE customer_id = '${C.c8}' AND source_type = 'check')`;
 const invoiceRow = (inv, num, cust, date, cents) =>
   `('${inv}', '${num}', '${cust}', 'misc_charge', 'posted', ${date}, DATE '2027-01-31', ${cents}, '${ADMIN}', '${ADMIN}', now())`;
@@ -300,11 +312,22 @@ function seed() {
     INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, invoice_date, due_date, total_amount_cents, created_by, posted_by, posted_at)
       VALUES ${invoiceRow(INV7, 'M9-PM-INV', C.c7, "DATE '2026-10-08'", 20000)}, ${invoiceRow(INV2, 'M9-G-INV', C.c2, TODAY, 10000)},
              ${invoiceRow(INV8.a, 'M9-R-A', C.c8, TODAY, 30000)}, ${invoiceRow(INV8.b, 'M9-R-B', C.c8, TODAY, 10000)}, ${invoiceRow(INV8.c, 'M9-R-C', C.c8, TODAY, 10000)};
+    -- Case 10: a $100.00 invoice already past due (due 2026-11-10) and a $200.00 one due in January.
+    INSERT INTO public.invoices (id, invoice_number, customer_id, invoice_type, status, invoice_date, due_date, total_amount_cents, created_by, posted_by, posted_at)
+      VALUES ('${INV9}', 'M9-OD-INV', '${C.c9}', 'misc_charge', 'posted', DATE '2026-11-01', DATE '2026-11-10', 10000, '${ADMIN}', '${ADMIN}', now()),
+             ${invoiceRow(INV9B, 'M9-OD-INV2', C.c9, "DATE '2026-11-01'", 20000)};
     COMMIT;`);
   // $500.00 Prepayment Manager checks through the real writer (cases 1, 2, 3, 4, 6).
   for (const k of ['c1', 'c2', 'c3', 'c4', 'c6', 'c7', 'c8']) {
+    // c7's check is split into two buckets ($300 + $200), as the Prepayment Manager does.
+    const splits = k === 'c7' ? '[{"label":"A","amount_cents":30000},{"label":"B","amount_cents":20000}]' : '[{"label":"A","amount_cents":50000}]';
     mustCommit(`prepay check ${k}`, `${as(ADMIN)}
-      SELECT public.create_prepay_check_splits('${C[k]}', 'M9-${k}', '[{"label":"A","amount_cents":50000}]'::jsonb, '${ADMIN}', 'm9-setup-check-${k}')::text;`);
+      SELECT public.create_prepay_check_splits('${C[k]}', 'M9-${k}', '${splits}'::jsonb, '${ADMIN}', 'm9-setup-check-${k}')::text;`);
+  }
+  // Case 11: two $100.00 check payments today, all prepay.
+  for (const num of ['5001', '5002']) {
+    mustCommit(`payment c10 ${num}`, `${as(ADMIN)}
+      SELECT public.allocate_payment('${C.c10}', 10000, 'check', 'M9-CC-${num}', '${num}', ${TODAY}, 'm9', '[]'::jsonb, '${ADMIN}', 'm9-setup-pay-c10-${num}')::text;`);
   }
   // Case 6: a $200.00 Record Payment dated today, all kept as prepay (a returned check in the open month).
   mustCommit('payment c6', `${as(ADMIN)}
@@ -314,10 +337,10 @@ function seed() {
     SELECT public.allocate_payment('${C.c5}', 153700, 'check', 'M9-RC-PAY', '1001', DATE '2026-10-15', 'm9',
       jsonb_build_array(jsonb_build_object('invoice_id', '${INV5}', 'amount_cents', 123700)), '${ADMIN}', 'm9-setup-pay-c5')::text;`));
   assert.equal(pay5.prepay_created_cents, 30000);
-  // Case 7: $150.00 of c7's $500.00 check applied to its October invoice; the check and the application are dated in
-  // October (entered there) before October is closed.
+  // Case 7: $150.00 of c7's $500.00 check (bucket A) applied to its October invoice; the check and the application are
+  // dated in October (entered there) before October is closed.
   mustCommit('apply c7', `${as(ADMIN)}
-    SELECT public.apply_prepay_to_invoice(${CHECK7}, '${INV7}', 15000, '${ADMIN}', 'm9-setup-apply-c7')::text;`);
+    SELECT public.apply_prepay_to_invoice(${CHECK7A}, '${INV7}', 15000, '${ADMIN}', 'm9-setup-apply-c7')::text;`);
   raw(`UPDATE public.prepay_credits SET created_at = '2026-10-10 15:00Z' WHERE customer_id = '${C.c7}';
     UPDATE public.prepay_applications SET applied_at = '2026-10-12 15:00Z' WHERE invoice_id = '${INV7}';`);
   // Close October through the real close (reviewed token, payments reviewed).
@@ -333,9 +356,9 @@ function seed() {
   assert.deepEqual([state.c6.stored, state.c6.credits], [70000, 70000], 'setup: c6 holds $500 check + $200 payment');
   assert.equal(state.inv5, 'paid:0', 'setup: the October invoice is paid');
   assert.equal(state.oct, 'closed', 'setup: October 2026 is closed');
-  assert.equal(scalar(`SELECT balance_cents || ':' || (SELECT balance_cents FROM public.invoices WHERE id = '${INV7}') FROM public.prepay_credits WHERE customer_id = '${C.c7}';`), '35000:5000',
+  assert.equal(scalar(`SELECT sum(balance_cents) || ':' || (SELECT balance_cents FROM public.invoices WHERE id = '${INV7}') FROM public.prepay_credits WHERE customer_id = '${C.c7}';`), '35000:5000',
     'setup: c7 check has $350 left; its October invoice owes $50');
-  console.log('[setup] admin, rep, eight customers; $500 prepay checks; Oct 15 $1,537 payment paid the $1,237 Oct 5 invoice (+$300 prepay); an October $500 prepay check, $150 applied in October; October 2026 closed');
+  console.log('[setup] admin, rep, ten customers; $500 prepay checks; Oct 15 $1,537 payment paid the $1,237 Oct 5 invoice (+$300 prepay); an October $500 prepay check in two buckets, $150 applied in October; October 2026 closed');
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -368,7 +391,7 @@ kase('1) refund $300 of a $500 prepay check', () => {
   const row = o.chk.find((x) => x.customer_id === C.c1);
   assert.deepEqual([row.received_cents, row.refunded_cents, row.expected_cents, row.stored_cents, row.credits_cents, row.ok],
     [50000, 30000, 20000, 20000, 20000, true], 'the balance check agrees after the refund');
-  assert.deepEqual(o.stmt, [{ type: 'refund', desc: 'Refund paid (outside CRX) QuickBooks check 1042', amount: 0 }],
+  assert.deepEqual(o.stmt, [{ type: 'refund', desc: 'Refund paid (outside CRX) QuickBooks check 1042 ($300.00)', amount: 0 }],
     'the statement shows the refund with $0 effect on what is owed');
 });
 
@@ -410,7 +433,7 @@ kase('4) balance check: clean -> ok; planted +100 drift -> ok=false, difference 
   assert.equal(o.clean.length, 1, 'one row for one customer');
   assert.deepEqual(o.clean[0], {
     customer_id: C.c4, farm_name: '[PROVER] M9 c4 Farm', received_cents: 50000, applied_cents: 0, refunded_cents: 0,
-    voided_cents: 0, expected_cents: 50000, stored_cents: 50000, credits_cents: 50000, difference_cents: 0, ok: true,
+    voided_cents: 0, expected_cents: 50000, stored_cents: 50000, credits_cents: 50000, difference_cents: 0, credit_mismatches: [], ok: true,
   });
   assert.deepEqual([o.drift[0].ok, o.drift[0].difference_cents, o.drift[0].stored_cents, o.drift[0].expected_cents], [false, 100, 50100, 50000]);
   assert.equal(o.everyone.find((x) => x.customer_id === C.c4)?.ok, false, 'the all-customers check flags it too');
@@ -448,6 +471,8 @@ kase('5) returned check from closed October, recorded today', () => {
   assert.equal(o.oct_rows_same, true, 'the October payment rows (allocation set + allocation lines) are unchanged');
   assert.deepEqual(o.after.oct, o.before.oct, "October's Month-End payments received unchanged");
   assert.equal(o.after.now.total_cents, o.before.now.total_cents - 153700, "this month's payments show the -$1,537.00 reversal");
+  assert.equal(o.after.now.count, o.before.now.count, 'a returned check is not counted as a payment');
+  assert.deepEqual([o.res.invoices_reopened, o.res.bank_returned_date, o.res.invoice_payment_cents, o.res.prepay_removed_cents], [1, o.res.entry_date, 123700, 30000]);
   assert.deepEqual(o.entry, [{ kind: 'returned_check', amount: 153700, today: true }], 'a returned-check entry dated today');
   const back = o.stmt.find((x) => x.type === 'returned_check');
   assert.equal(back?.amount, 123700, 'the statement puts back what the check paid on the invoice');
@@ -490,33 +515,37 @@ kase('6) rep refused; same-key replay returns the same result once; edited retry
 kase('7) Prepayment Manager check from closed October, partly applied, returned in the open month', () => {
   const months = `json_build_object('oct', public.get_monthly_summary(DATE '2026-10-01', DATE '2026-10-31') -> 'payments',
       'now', public.get_monthly_summary(date_trunc('month', ${TODAY})::date, ${TODAY}) -> 'payments')`;
-  const ret = (key) => `public.record_returned_check(NULL, ${TODAY}, 'NSF: prepayment check returned', '${ADMIN}', '${key}', ${CHECK7})`;
+  // The bank returned it on Oct 31 (closed month); staff record it today. Bucket B is named; both buckets come back.
+  const ret = (key, credit, date = "DATE '2026-10-31'") => `public.record_returned_check(NULL, ${date}, 'NSF: prepayment check returned', '${ADMIN}', '${key}', ${credit})`;
   const r = ran(session(`${as(ADMIN)}
     SELECT ${months}::text AS before \\gset
-    SELECT ${ret('m9-c7-return')}::text AS res \\gset
+    ${refusal(ret('m9-c7-too-early', CHECK7B, "DATE '2026-10-09'"))}
+    SELECT ${ret('m9-c7-return', CHECK7B)}::text AS res \\gset
     SELECT ${months}::text AS after \\gset
-    ${refusal(ret('m9-c7-return-again'))}
+    ${refusal(ret('m9-c7-return-again', CHECK7A))}
     SELECT ${check(C.c7)}::text AS chk \\gset
     ${OWNER}
     SELECT json_build_object('res', :'res'::jsonb, 'before', :'before'::jsonb, 'after', :'after'::jsonb, 'chk', :'chk'::jsonb,
       'inv', (SELECT json_build_object('status', status, 'balance', balance_cents, 'prepay', prepay_applied_cents) FROM public.invoices WHERE id = '${INV7}'),
-      'credit', (SELECT json_build_object('balance', balance_cents, 'original', original_amount_cents) FROM public.prepay_credits WHERE id = ${CHECK7}),
-      'apps', (SELECT count(*) FROM public.prepay_applications WHERE prepay_credit_id = ${CHECK7}),
+      'credit', (SELECT json_agg(json_build_object('balance', balance_cents, 'original', original_amount_cents) ORDER BY bucket_label) FROM public.prepay_credits WHERE customer_id = '${C.c7}'),
+      'apps', (SELECT count(*) FROM public.prepay_applications WHERE prepay_credit_id = ${CHECK7A}),
       'stored', (SELECT prepay_balance_cents FROM public.customers WHERE id = '${C.c7}'),
       'oct', (SELECT status FROM public.accounting_periods WHERE period_end = DATE '2026-10-31'),
-      'entry', (SELECT json_agg(json_build_object('kind', kind, 'amount', amount_cents, 'today', entry_date = ${TODAY}, 'credit', prepay_credit_id = ${CHECK7}))
+      'entry', (SELECT json_agg(json_build_object('kind', kind, 'amount', amount_cents, 'today', entry_date = ${TODAY}, 'bank', bank_returned_date, 'credit', prepay_credit_id = ${CHECK7B}))
                   FROM public.money_reversals WHERE customer_id = '${C.c7}'))::text;`));
   const o = JSON.parse(r.last);
   assert.deepEqual(o.inv, { status: 'posted', balance: 20000, prepay: 0 }, 'the October invoice owes its $200.00 again');
-  assert.deepEqual(o.credit, { balance: 0, original: 50000 }, 'the check credit ends at $0; its original amount is kept');
+  assert.deepEqual(o.credit, [{ balance: 0, original: 30000 }, { balance: 0, original: 20000 }], 'both buckets end at $0; their original amounts are kept');
   assert.equal(o.apps, 1, 'the October application row is kept');
   assert.equal(o.stored, 0, 'stored prepay -$350.00 (the unused part)');
   assert.equal(o.oct, 'closed', 'October still closed');
   assert.deepEqual(o.after.oct, o.before.oct, "October's payments received unchanged");
   assert.equal(o.after.now.total_cents, o.before.now.total_cents - 50000, "this month's payments show -$500.00");
-  assert.deepEqual(o.entry, [{ kind: 'returned_check', amount: 50000, today: true, credit: true }]);
-  assert.equal(r.refused.length, 1, 'a second return of the same check is refused');
-  assert.match(r.refused[0], /CHECK_ALREADY_RETURNED|money_reversals_one_return_per_credit/);
+  assert.deepEqual(o.entry, [{ kind: 'returned_check', amount: 50000, today: true, bank: '2026-10-31', credit: true }],
+    'one entry for the whole check at its face value, dated today, keeping the bank date');
+  assert.equal(r.refused.length, 2, `two refusals: ${JSON.stringify(r.refused)}`);
+  assert.match(r.refused[0], /RETURNED_BEFORE_RECEIVED/, 'a bank date before the check was received is refused');
+  assert.match(r.refused[1], /CHECK_ALREADY_RETURNED/, 'returning the other bucket is refused (the check already came back)');
   assert.equal(o.chk[0].ok, true, 'the balance check agrees');
   assert.deepEqual([o.chk[0].received_cents, o.chk[0].applied_cents, o.chk[0].voided_cents], [50000, 0, 50000]);
 });
@@ -552,7 +581,7 @@ kase('8) guards: void_payment, edit/delete of a refunded credit, invoice void af
   assert.match(r.refused[1], /PAYMENT_PREPAY_REFUNDED/, 'void_payment refuses a payment whose prepay was refunded');
   assert.match(r.refused[2], /PREPAY_CREDIT_HAS_REVERSALS/, 'a refunded credit balance cannot be edited');
   assert.match(r.refused[3], /PREPAY_CREDIT_HAS_REVERSALS/, 'a refunded credit cannot be deleted');
-  assert.match(r.refused[4], /money_reversal_lines_prepay_application_id_fkey/, 'an invoice with a reversed application cannot be voided');
+  assert.match(r.refused[4], /INVOICE_HAS_RETURNED_PAYMENT/, 'an invoice with a reversed application cannot be voided (clear refusal)');
   const o = JSON.parse(r.last);
   assert.equal(o.c1.balance, 20000, 'c1 balance unchanged by the note edit');
   assert.equal(o.c1.original, 50000, 'c1 original amount unchanged by the note edit');
@@ -593,18 +622,102 @@ kase('9) recompute trigger: a refund survives apply, batch apply, invoice void a
   assert.deepEqual([o.chk[0].ok, o.chk[0].refunded_cents, o.chk[0].expected_cents], [true, 5000, 43000], 'the balance check agrees');
 });
 
+kase('10) Sol round 1: check-only returns, edited/deleted credits, refund date and drift, overdue reopen, invoice void', () => {
+  const credit = (k) => `(SELECT id FROM public.prepay_credits WHERE customer_id = '${C[k]}' AND source_type = 'check')`;
+  const over9 = `(SELECT id FROM public.allocation_sets WHERE customer_id = '${C.c9}' AND payment_method = 'ach')`;
+  const chk9 = `(SELECT id FROM public.allocation_sets WHERE customer_id = '${C.c9}' AND payment_method = 'check')`;
+  const r = ran(session(`${as(ADMIN)}
+    SELECT public.allocate_payment('${C.c9}', 5000, 'ach', 'M9-ACH', NULL, ${TODAY}, 'm9', '[]'::jsonb, '${ADMIN}', 'm9-c10-ach')::text AS a \\gset
+    ${refusal(returned(over9, 'm9-c10-ret-ach'))}
+    SELECT public.edit_prepay_credit(${credit('c3')}, 40000, NULL, NULL, 'refunded by hand', '${ADMIN}', 'm9-c10-edit3')::text AS e \\gset
+    ${refusal(`public.record_returned_check(NULL, ${TODAY}, 'NSF', '${ADMIN}', 'm9-c10-ret3', ${credit('c3')})`)}
+    SELECT public.delete_prepay_credit(${credit('c4')}, 'entered twice', '${ADMIN}', 'm9-c10-del4')::text AS d \\gset
+    ${refusal(`public.record_returned_check(NULL, ${TODAY}, 'NSF', '${ADMIN}', 'm9-c10-ret4', ${credit('c4')})`)}
+    ${refusal(refund(C.c9, 1000, 'm9-c10-early', { date: `${TODAY} - 1` }))}
+    ${refusal(refund(C.c9, 1000, 'm9-c10-blank', { ref: '\t' }))}
+    ${OWNER}
+    UPDATE public.prepay_credits SET balance_cents = balance_cents + 100 WHERE id = ${credit('c2')};
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 100 WHERE id = '${C.c2}';
+    ${as(ADMIN)}
+    ${refusal(refund(C.c2, 1000, 'm9-c10-drift'))}
+    SELECT ${check(C.c2)}::text AS drift \\gset
+    SELECT public.allocate_payment('${C.c9}', 25000, 'check', 'M9-OD-PAY', '6006', ${TODAY}, 'm9',
+      jsonb_build_array(jsonb_build_object('invoice_id', '${INV9}', 'amount_cents', 10000), jsonb_build_object('invoice_id', '${INV9B}', 'amount_cents', 15000)),
+      '${ADMIN}', 'm9-c10-pay9')::text AS p \\gset
+    SELECT ${returned(chk9, 'm9-c10-ret9')}::text AS res \\gset
+    ${refusal(`public.void_invoice('${INV9}', 'wrong customer', 'm9-c10-void9')`)}
+    ${OWNER}
+    SELECT json_build_object('drift', :'drift'::jsonb, 'res', :'res'::jsonb,
+      'inv9', (SELECT status || ':' || balance_cents FROM public.invoices WHERE id = '${INV9}'),
+      'inv9b', (SELECT status || ':' || balance_cents FROM public.invoices WHERE id = '${INV9B}'),
+      'stored9', (SELECT prepay_balance_cents FROM public.customers WHERE id = '${C.c9}'))::text;`));
+  assert.equal(r.refused.length, 7, `seven refusals: ${JSON.stringify(r.refused)}`);
+  assert.match(r.refused[0], /NOT_A_CHECK_PAYMENT/, 'an ACH payment cannot be returned as a bounced check');
+  assert.match(r.refused[1], /CHECK_AMOUNT_EDITED/, 'a check whose prepay amount was edited is refused');
+  assert.match(r.refused[2], /CHECK_PREPAY_DELETED/, 'a check whose prepay was deleted is refused');
+  assert.match(r.refused[3], /PREPAY_REFUND_EXCEEDS_AVAILABLE: refund \$10\.00 is more than the \$0\.00 prepay available received on or before/, 'a refund dated before the credit was received draws nothing');
+  assert.match(r.refused[4], /REFERENCE_REQUIRED/, 'a tab-only reference is blank');
+  assert.match(r.refused[5], /PREPAY_CREDIT_DRIFT/, 'a refund from a credit that does not match its history is refused');
+  assert.match(r.refused[6], /INVOICE_HAS_RETURNED_PAYMENT/, 'an invoice a returned check paid cannot be voided');
+  const o = JSON.parse(r.last);
+  const row = o.drift[0];
+  assert.equal(row.ok, false, 'the balance check flags the drifted credit');
+  assert.equal(row.credit_mismatches.length, 1);
+  assert.equal(row.credit_mismatches[0].balance_cents - row.credit_mismatches[0].computed_cents, 100, 'named per credit, to the cent');
+  assert.equal(o.inv9, 'overdue:10000', 'the past-due invoice reopens as overdue');
+  assert.equal(o.inv9b, 'posted:20000', 'the partly paid invoice owes its $200 again and stays posted');
+  assert.equal(o.res.invoices_reopened, 1, 'only the invoice that went from paid to owing is counted');
+  assert.equal(o.stored9, 5000, "the ACH payment's $50 prepay is untouched");
+});
+
+kase('11) two sessions: return and void of the same payment wait for each other; the second is refused', () => {
+  const both = (first, second) => {
+    stageText('s1.sql', `BEGIN;\n${as(ADMIN)}\n${first}\nSELECT pg_sleep(2);\nCOMMIT;\n`);
+    stageText('s2.sql', `BEGIN;\n${as(ADMIN)}\n${second}\nCOMMIT;\n`);
+    const psqlCmd = (f) => `psql -U postgres -d ${DB} -X -q -A -t -v ON_ERROR_STOP=1 -f /tmp/${f}`;
+    const r = docker(['exec', NAME, 'sh', '-c',
+      `${psqlCmd('s1.sql')} > /tmp/s1.out 2>&1 & sleep 0.7; ${psqlCmd('s2.sql')} > /tmp/s2.out 2>&1; wait; cat /tmp/s1.out; echo ===M9SPLIT===; cat /tmp/s2.out`]);
+    const [a, b] = r.stdout.split('===M9SPLIT===');
+    return { a, b };
+  };
+  const ret = (num) => `SELECT ${returned(pay10(num), `m9-c11-ret-${num}`)}::text;`;
+  const voidp = (num) => `SELECT public.void_payment(${pay10(num)}, 'entered twice', '${ADMIN}', 'm9-c11-void-${num}')::text;`;
+  const one = both(ret('5001'), voidp('5001'));
+  assert.doesNotMatch(one.a + one.b, /deadlock/i);
+  assert.doesNotMatch(one.a, /ERROR/, `the return commits: ${one.a}`);
+  assert.match(one.b, /PAYMENT_RETURNED/, `the void waits, then is refused: ${one.b}`);
+  const two = both(voidp('5002'), ret('5002'));
+  assert.doesNotMatch(two.a + two.b, /deadlock/i);
+  assert.doesNotMatch(two.a, /ERROR/, `the void commits: ${two.a}`);
+  assert.match(two.b, /PAYMENT_VOIDED/, `the return waits, then is refused: ${two.b}`);
+  const state = scalar(`SELECT string_agg(check_number || ':' || is_active, ',' ORDER BY check_number) FROM public.allocation_sets WHERE customer_id = '${C.c10}';`);
+  assert.equal(state, '5001:true,5002:false', 'the returned payment stays active; the voided one is inactive');
+});
+
+const admin = (sql) => psql(sql, { user: 'supabase_admin', db: 'template1' });
+const KICK = "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE datname = 'postgres' AND pid <> pg_backend_pid();";
+function applyM9() {
+  stageText('m9.sql', lf(M9));
+  const first = apply('m9.sql');
+  assert.equal(first.status, 0, `M9 failed to apply:\n${first.output}`);
+  const again = apply('m9.sql');
+  assert.notEqual(again.status, 0, 'a second apply of M9 must be refused');
+  assert.match(again.output, /M9_PREFLIGHT: already applied/);
+  console.log('[prover] M9 applied; a second apply stops at its preflight');
+}
+
 async function main() {
   if (REUSE) {
-    console.log(`[prover] reusing container ${NAME} (built and seeded by this script)`);
+    admin(`${KICK} DROP DATABASE postgres WITH (FORCE);`);
+    admin('CREATE DATABASE postgres OWNER postgres TEMPLATE m9_before;');  // live and the image: postgres owns it (and so public)
+    console.log(`[prover] reusing container ${NAME}: reset to the pre-M9 snapshot`);
   } else {
     buildContainer();
-    stageText('m9-again.sql', lf(M9));
-    const again = apply('m9-again.sql');
-    assert.notEqual(again.status, 0, 'a second apply of M9 must be refused');
-    assert.match(again.output, /M9_PREFLIGHT: already applied/);
-    console.log('[prover] a second apply of M9 stops at its preflight');
-    seed();
+    admin(`${KICK} CREATE DATABASE m9_before TEMPLATE postgres;`);
+    if (process.env.CRX_PROVER_REPLAY_ONLY === '1') { console.log(`[prover] pre-M9 snapshot ready in ${NAME}`); return; }
   }
+  applyM9();
+  seed();
   const failed = [];
   for (const [name, fn] of CASES) {
     try { fn(); console.log(`[PASS] ${name}`); } catch (e) {

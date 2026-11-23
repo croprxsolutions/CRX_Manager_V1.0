@@ -13,3 +13,13 @@
 - Statement: the statement shows "Returned check" and "Refund paid (outside CRX)" rows.
 - Guards: a returned payment, or one whose prepay was refunded, cannot be voided. A credit with a refund or a returned check cannot have its balance edited or be deleted.
 - No screen yet; the UI/UX stage adds the dialog, the badge and the Month-End row. Migration `20270225110000` (local candidate, not applied). Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs`.
+- Sol round 1 fixes (same migration, still a local candidate):
+  - Only a check payment can be returned.
+  - A split Prepayment Manager check comes back as one event at its face value.
+  - Edited or deleted check credits are refused.
+  - Refunds draw only credit received by their date and refuse a drifted credit.
+  - The bank's date is kept, even in a closed month, while the entry stays in the open month.
+  - Reopened invoices go overdue when past due.
+  - The balance check names each mismatched credit.
+  - An invoice a returned check paid gets a clear refusal on void.
+  - Reconciliation (Integrity report) subtracts returned checks.

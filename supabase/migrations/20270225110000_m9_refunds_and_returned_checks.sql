@@ -17,37 +17,43 @@
 --      (one inserted term pair; the old formula when a credit has no lines). The same trigger also runs AFTER INSERT
 --      on money_reversal_lines. original_amount_cents is never changed, so Month-End's prepay-check figure is not moved.
 --   3. record_outside_refund(customer, amount, date, reference, reason, credit?, performed_by, key): active admin,
---      key required; date <= today and in an open month (check_period_open); oldest credit first (or only the one
---      picked); refused above the available prepay or when the stored balance is lower (drift); lowers the stored
---      balance by the amount.
---   4. record_returned_check(payment?, date, reason, performed_by, key, credit?): one of a Record Payment
---      (allocation set) or a Prepayment Manager check credit. Date in an open month, not before the check was
---      received. Reopens the invoices the check paid, reverses the prepay applications of its credits (those invoices
---      reopen too; the application rows stay), takes what is left off the credits and the unused part off the stored
---      balance. Refused if any of its prepay was already refunded. One return per payment and per credit. The payment
---      rows, allocation lines, applications and periods are never written.
+--      key required; date <= today and in an open month (check_period_open); draws only credits received on or before
+--      that date, oldest first (or only the one picked), read and locked in one statement; refused above what is
+--      available, when a drawn credit does not match its own rows (PREPAY_CREDIT_DRIFT), when the stored balance is
+--      lower (PREPAY_BALANCE_DRIFT), or if the draw does not cover the amount (REFUND_DRAW_INCOMPLETE).
+--   4. record_returned_check(payment?, bank date, reason, performed_by, key, credit?): one of a Record Payment made by
+--      check (NOT_A_CHECK_PAYMENT otherwise) or a Prepayment Manager check (every bucket of it, as Month-End counts
+--      it: same customer, entry time and check number; face value = their total). The bank's date may be in a closed
+--      month and is kept (bank_returned_date, not before the check was received); the entry is dated today, an open
+--      month (decision 18). Reopens the invoices the check paid (paid -> overdue when past due, else posted),
+--      reverses its prepay applications (the rows stay), takes the rest off the credits and the unused part off the
+--      stored balance. Refused when the check's prepay was refunded, deleted or had its amount edited, or it was
+--      already returned. Lock order is void_payment's: payment, credits, month, invoices (one sorted pass), customer.
+--      The payment rows, allocation lines, applications and periods are never written.
 --   5. get_prepay_balance_check(customer?): read-only; received - applied - refunded - returned = expected, against
---      the stored balance and the credits' balances; never fixes anything.
+--      the stored balance and the credits' balances, plus each credit against its own rows (credit_mismatches);
+--      never fixes anything.
 --   6. Month-End: _month_payments_received nets returned checks out of payments received on their entry date (not
---      counted as payments); _month_close_figures adds refunds {count,total_cents} and returned_checks figures (so the
+--      counted as payments; the count of every other row is unchanged); _month_close_figures adds refunds {count,total_cents} and returned_checks figures (so the
 --      review token covers them) and refunds_paid_cents / returned_checks_cents on the close receipt.
 --   7. Statement (_get_customer_statement_scoped_impl): a "Returned check" row puts back what the check paid; a
 --      "Refund paid (outside CRX)" row with $0 effect. statement_customer_has_later_balance_activity: a later returned
 --      check makes an older A/R date unrebuildable (flagged), as a later void does.
 --   8. Guards: void_payment refuses a returned payment and one whose prepay was refunded; edit_prepay_credit refuses a
---      balance change and delete_prepay_credit refuses a credit with reversal lines. Invoice void keeps refusing while
---      the returned payment's allocations exist; a reversed application can never be deleted (FK, no cascade).
+--      balance change and delete_prepay_credit refuses any credit a refund or returned check names (line, header or
+--      its returned payment). void_invoice refuses an invoice a returned check paid (INVOICE_HAS_RETURNED_PAYMENT);
+--      underneath, a reversed application can never be deleted (FK, no cascade). No prepay "restore" RPC exists.
 --   Audit: financial_audit_log_operation_type_check gains 'prepay_refunded_outside' and 'payment_returned'.
 --
 -- NOT CHANGED: who may call each replaced function, its arguments, defaults, grants and security; every other
 -- Month-End figure; saved close receipts; any existing row.
 -- caller-analysis: record_outside_refund / record_returned_check / get_prepay_balance_check :: new; no caller yet (the
 -- screen stage adds them). The replaced functions keep their signatures and wrappers.
--- ROLLBACK (its own reviewed migration, only while no money_reversals row exists): re-create the eight replaced
+-- ROLLBACK (its own reviewed migration, only while no money_reversals row exists): re-create the nine replaced
 -- functions from the bodies pinned in this file's preflight (latest defining migrations: 20260728231350 / baseline
 -- for the recompute, 20261204100000 for void_payment, baseline for edit/delete, 20270224120000 for the two Month-End
--- helpers, 20260803221244 for the tripwire, 20261204110000 for the statement), restore the audit CHECK list, drop
--- the three new functions, the trigger, the two tables and the append-only function.
+-- helpers, 20260803221244 for the tripwire, 20261204110000 for the statement, 20260827041100 for void_invoice),
+-- restore the audit CHECK list, drop the three RPCs, the three helpers, the trigger and the two tables.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -56,15 +62,16 @@ SELECT pg_current_xact_id()::text AS transaction_id;
 
 CREATE TEMP TABLE m9_pins ON COMMIT DROP AS
 SELECT * FROM (VALUES
-      ('public._recompute_prepay_credit_balance()', '62822c67b972a855aed23f9e9bac1d75', true, '{"search_path=public, pg_temp"}', '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', 0, 'v'),
-      ('public._void_payment_replay_impl_20261015(uuid,text,uuid,text)', '249d13c9887436709119b442a8928ad3', true, '{"search_path=public, pg_temp"}', '{postgres=X/postgres}', 2, 'v'),
-      ('public._edit_prepay_credit_replay_impl_20261015(uuid,bigint,text,text,text,uuid,text)', '366db16a403a0f508b28aadc8862475c', true, '{"search_path=public, pg_temp"}', '{postgres=X/postgres}', 6, 'v'),
-      ('public._delete_prepay_credit_replay_impl_20261015(uuid,text,uuid,text)', 'bcb90bd23619af6f1e45c69bb2db4169', true, '{"search_path=public, pg_temp"}', '{postgres=X/postgres}', 2, 'v'),
-      ('public._month_payments_received_20270208(date,date)', 'b090a4ff1e6711f2565414c794e96d3a', false, '{"search_path=public, pg_temp"}', '{postgres=X/postgres,service_role=X/postgres}', 0, 's'),
-      ('public._month_close_figures_20270208(date,date)', 'b20bcd3b5e5fd21adf8988cbbec80832', false, '{"search_path=public, pg_temp"}', '{postgres=X/postgres,service_role=X/postgres}', 0, 's'),
-      ('public.statement_customer_has_later_balance_activity(uuid,date)', '92ec7763565786356e95f722e1745885', true, '{"search_path=public, pg_temp"}', '{postgres=X/postgres}', 0, 's'),
-      ('public._get_customer_statement_scoped_impl(uuid,date,date)', 'ee463c1bee06baa4b71943695da3bacf', true, '{"search_path=public, pg_temp"}', '{postgres=X/postgres}', 2, 's')
-) AS t(sig, md5, secdef, cfg, acl, ndefaults, vol);
+      ('public._recompute_prepay_credit_balance()', '62822c67b972a855aed23f9e9bac1d75', true, '{"search_path=public, pg_temp"}', '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', 0, 'v', 'a2f62dc650a114afe1ab0b81295fef46'),
+      ('public._void_payment_replay_impl_20261015(uuid,text,uuid,text)', '249d13c9887436709119b442a8928ad3', true, '{"search_path=public, pg_temp"}', '{postgres=X/postgres}', 2, 'v', '7910e4a6a9893a37ebaf962b554b792b'),
+      ('public._edit_prepay_credit_replay_impl_20261015(uuid,bigint,text,text,text,uuid,text)', '366db16a403a0f508b28aadc8862475c', true, '{"search_path=public, pg_temp"}', '{postgres=X/postgres}', 6, 'v', '18d4a819523ca319527e843b3e424fb7'),
+      ('public._delete_prepay_credit_replay_impl_20261015(uuid,text,uuid,text)', 'bcb90bd23619af6f1e45c69bb2db4169', true, '{"search_path=public, pg_temp"}', '{postgres=X/postgres}', 2, 'v', '5f19865fc627436289921c95e41840c3'),
+      ('public._month_payments_received_20270208(date,date)', 'b090a4ff1e6711f2565414c794e96d3a', false, '{"search_path=public, pg_temp"}', '{postgres=X/postgres,service_role=X/postgres}', 0, 's', '532523ad705b958f78ca89573fdc9581'),
+      ('public._month_close_figures_20270208(date,date)', 'b20bcd3b5e5fd21adf8988cbbec80832', false, '{"search_path=public, pg_temp"}', '{postgres=X/postgres,service_role=X/postgres}', 0, 's', 'a2dba31d0f27815de1dc4a1136b3a0c9'),
+      ('public.statement_customer_has_later_balance_activity(uuid,date)', '92ec7763565786356e95f722e1745885', true, '{"search_path=public, pg_temp"}', '{postgres=X/postgres}', 0, 's', '61a64a802b7bad6922e8a723889eef1d'),
+      ('public._get_customer_statement_scoped_impl(uuid,date,date)', 'ee463c1bee06baa4b71943695da3bacf', true, '{"search_path=public, pg_temp"}', '{postgres=X/postgres}', 2, 's', 'b95b52d29fae2109a041dd966c38488c'),
+      ('public.void_invoice(uuid,text,text)', '2b1be1b706614f9a909581b0493d679f', true, '{"search_path=public, pg_temp"}', '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}', 1, 'v', '35c25993ab446dfdae1f1de696c26a67')
+) AS t(sig, md5, secdef, cfg, acl, ndefaults, vol, sigmd5);
 
 DO $preflight$
 DECLARE
@@ -77,7 +84,8 @@ BEGIN
   IF to_regclass('public.money_reversals') IS NOT NULL OR to_regclass('public.money_reversal_lines') IS NOT NULL
      OR EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace
                  AND proname IN ('record_outside_refund', 'record_returned_check', 'get_prepay_balance_check',
-                                 '_money_reversals_append_only_20270225')) THEN
+                                 '_money_reversals_append_only_20270225', '_prepay_credit_reversed_20270225',
+                                 '_prepay_credit_computed_balance_20270225')) THEN
     RAISE EXCEPTION 'M9_PREFLIGHT: already applied';
   END IF;
   IF to_regprocedure('public._month_close_figures_20270208(date,date)') IS NULL THEN
@@ -96,12 +104,14 @@ BEGIN
         AND p.proconfig::text = f.cfg
         AND p.proacl::text = f.acl
         AND p.pronargdefaults = f.ndefaults
-        AND p.provolatile::text = f.vol);
+        AND p.provolatile::text = f.vol
+        -- arguments with their default expressions, and the result
+        AND md5(pg_get_function_arguments(p.oid) || ' => ' || pg_get_function_result(p.oid)) = f.sigmd5);
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'M9_PREFLIGHT: drifted: %', v_bad;
   END IF;
   IF (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace
-       AND proname IN ('_recompute_prepay_credit_balance', '_void_payment_replay_impl_20261015', '_edit_prepay_credit_replay_impl_20261015', '_delete_prepay_credit_replay_impl_20261015', '_month_payments_received_20270208', '_month_close_figures_20270208', 'statement_customer_has_later_balance_activity', '_get_customer_statement_scoped_impl')) <> 8 THEN
+       AND proname IN ('_recompute_prepay_credit_balance', '_void_payment_replay_impl_20261015', '_edit_prepay_credit_replay_impl_20261015', '_delete_prepay_credit_replay_impl_20261015', '_month_payments_received_20270208', '_month_close_figures_20270208', 'statement_customer_has_later_balance_activity', '_get_customer_statement_scoped_impl', 'void_invoice')) <> 9 THEN
     RAISE EXCEPTION 'M9_PREFLIGHT: an unexpected overload of a replaced function exists';
   END IF;
   IF (SELECT md5(pg_get_constraintdef(oid)) FROM pg_constraint
@@ -110,8 +120,9 @@ BEGIN
     RAISE EXCEPTION 'M9_PREFLIGHT: financial_audit_log_operation_type_check drifted';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_recompute_prepay_credit_balance'
-                  AND tgrelid = 'public.prepay_applications'::regclass AND NOT tgisinternal) THEN
-    RAISE EXCEPTION 'M9_PREFLIGHT: the prepay recompute trigger is missing';
+                  AND tgrelid = 'public.prepay_applications'::regclass AND NOT tgisinternal AND tgenabled = 'O'
+                  AND tgfoid = 'public._recompute_prepay_credit_balance()'::regprocedure) THEN
+    RAISE EXCEPTION 'M9_PREFLIGHT: the prepay recompute trigger is missing or disabled';
   END IF;
 END
 $preflight$;
@@ -127,11 +138,16 @@ CREATE TABLE public.money_reversals (
   reason            text NOT NULL CHECK (reason ~ '\S'),
   allocation_set_id uuid REFERENCES public.allocation_sets(id),
   prepay_credit_id  uuid REFERENCES public.prepay_credits(id),
+  -- Returned check only: the day the bank returned it (may fall in a closed month); entry_date is the open-month day
+  -- it was recorded.
+  bank_returned_date date,
   performed_by      uuid NOT NULL REFERENCES public.profiles(id),
   created_at        timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT money_reversals_source CHECK (
     (kind = 'outside_refund' AND allocation_set_id IS NULL AND prepay_credit_id IS NULL)
-    OR (kind = 'returned_check' AND num_nonnulls(allocation_set_id, prepay_credit_id) = 1))
+    OR (kind = 'returned_check' AND num_nonnulls(allocation_set_id, prepay_credit_id) = 1)),
+  CONSTRAINT money_reversals_bank_date CHECK ((kind = 'returned_check') = (bank_returned_date IS NOT NULL)
+    AND (bank_returned_date IS NULL OR bank_returned_date <= entry_date))
 );
 COMMENT ON TABLE public.money_reversals IS
   'M9: a refund paid outside CRX (outside_refund) or a returned/bounced check (returned_check), dated in an open month (entry_date). Append-only; written only by record_outside_refund / record_returned_check.';
@@ -194,6 +210,49 @@ CREATE POLICY money_reversals_staff_read ON public.money_reversals FOR SELECT TO
   USING (public.is_admin() OR public.is_sales_rep());
 CREATE POLICY money_reversal_lines_staff_read ON public.money_reversal_lines FOR SELECT TO authenticated
   USING (public.is_admin() OR public.is_sales_rep());
+
+
+-- Is this credit part of a refund or a returned check (a line on it, the header naming it or its bucket group, or the
+-- returned payment that minted it)? Used by the edit / delete guards.
+CREATE FUNCTION public._prepay_credit_reversed_20270225(p_credit_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SET search_path = public, pg_temp
+AS $function$
+  SELECT EXISTS (SELECT 1 FROM public.money_reversal_lines l WHERE l.prepay_credit_id = p_credit_id)
+      OR EXISTS (SELECT 1 FROM public.money_reversals r
+                   JOIN public.prepay_credits pc ON pc.id = p_credit_id
+                  WHERE r.kind = 'returned_check' AND r.allocation_set_id IS NOT NULL
+                    AND r.allocation_set_id = pc.allocation_set_id)
+      OR EXISTS (SELECT 1 FROM public.money_reversals r
+                   JOIN public.prepay_credits h ON h.id = r.prepay_credit_id
+                   JOIN public.prepay_credits pc ON pc.id = p_credit_id
+                  WHERE r.kind = 'returned_check'
+                    AND pc.customer_id = h.customer_id AND pc.created_at = h.created_at
+                    AND pc.source_reference IS NOT DISTINCT FROM h.source_reference
+                    AND pc.source_type = 'check' AND pc.allocation_set_id IS NULL)
+$function$;
+ALTER FUNCTION public._prepay_credit_reversed_20270225(uuid) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._prepay_credit_reversed_20270225(uuid) FROM PUBLIC, anon, authenticated, service_role;
+
+-- A credit's balance from its rows (the recompute trigger's formula), for the drift refusals and the check.
+CREATE FUNCTION public._prepay_credit_computed_balance_20270225(p_credit_id uuid)
+RETURNS bigint
+LANGUAGE sql
+STABLE
+SET search_path = public, pg_temp
+AS $function$
+  SELECT pc.original_amount_cents
+         - COALESCE((SELECT sum(applied_amount_cents) FROM public.prepay_applications WHERE prepay_credit_id = pc.id), 0)
+         + COALESCE((SELECT sum(amount_cents) FROM public.money_reversal_lines
+                      WHERE prepay_credit_id = pc.id AND line_kind = 'prepay_application'), 0)
+         - COALESCE((SELECT sum(amount_cents) FROM public.money_reversal_lines
+                      WHERE prepay_credit_id = pc.id AND line_kind = 'prepay_credit'), 0)
+    FROM public.prepay_credits pc WHERE pc.id = p_credit_id
+$function$;
+ALTER FUNCTION public._prepay_credit_computed_balance_20270225(uuid) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._prepay_credit_computed_balance_20270225(uuid) FROM PUBLIC, anon, authenticated, service_role;
 
 -- 2. The prepay credit balance counts reversal lines; the same trigger runs when a line is written ----------------
 -- Audit operation types for the two new writers (the current list plus two).
@@ -422,7 +481,7 @@ BEGIN
   -- M9: a credit with a refund or a returned check recorded on it keeps its amounts (the edit would rewrite its
   -- original amount and erase them). Reference, label and notes can still change; the screen always sends the
   -- balance, so an unchanged balance is treated as no balance change.
-  IF EXISTS (SELECT 1 FROM money_reversal_lines WHERE prepay_credit_id = p_credit_id) THEN
+  IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
     IF p_new_balance_cents IS NOT NULL AND p_new_balance_cents IS DISTINCT FROM v_credit.balance_cents THEN
       RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; its balance cannot be edited';
     END IF;
@@ -535,7 +594,7 @@ BEGIN
 
   -- M9: a credit with a refund or a returned check recorded on it cannot be deleted (the delete would rewrite its
   -- original amount and erase them).
-  IF EXISTS (SELECT 1 FROM money_reversal_lines WHERE prepay_credit_id = p_credit_id) THEN
+  IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
     RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; it cannot be deleted';
   END IF;
 
@@ -593,7 +652,7 @@ CREATE OR REPLACE FUNCTION public._month_payments_received_20270208(p_start date
 AS $function$
   WITH received AS (
     -- Record Payment: the whole check, including a part kept as prepay; a voided payment is inactive.
-    SELECT COALESCE(a.total_payment_cents, a.total_allocated_cents, 0)::numeric AS cents
+    SELECT COALESCE(a.total_payment_cents, a.total_allocated_cents, 0)::numeric AS cents, false AS m9_return
       FROM public.allocation_sets a
      WHERE a.entity_type = 'payment'
        AND a.is_active
@@ -601,7 +660,7 @@ AS $function$
     UNION ALL
     -- Prepayment Manager checks at their current amount; the bucket splits of one check (one call: one created_at and
     -- one source_reference, never edited) are one payment.
-    SELECT sum(pc.original_amount_cents)::numeric
+    SELECT sum(pc.original_amount_cents)::numeric, false AS m9_return
       FROM public.prepay_credits pc
      WHERE pc.source_type = 'check'
        AND pc.allocation_set_id IS NULL
@@ -610,19 +669,19 @@ AS $function$
      GROUP BY pc.customer_id, pc.created_at, pc.source_reference
     UNION ALL
     -- Legacy payments table (none live), not deleted; dollars kept exact and rounded once on the total.
-    SELECT p.amount * 100
+    SELECT p.amount * 100, false AS m9_return
       FROM public.payments p
      WHERE p.deleted_at IS NULL
        AND p.payment_date BETWEEN p_start AND p_end
     UNION ALL
     -- M9: a returned (bounced) check comes off the month it was recorded in (always an open month), never the month
     -- it was received in; it is not a payment, so it is not counted.
-    SELECT -mr.amount_cents::numeric
+    SELECT -mr.amount_cents::numeric, true
       FROM public.money_reversals mr
      WHERE mr.kind = 'returned_check'
        AND mr.entry_date BETWEEN p_start AND p_end
   )
-  SELECT count(*) FILTER (WHERE cents > 0)::bigint, round(COALESCE(sum(cents), 0))::bigint FROM received;
+  SELECT count(*) FILTER (WHERE NOT m9_return)::bigint, round(COALESCE(sum(cents), 0))::bigint FROM received;
 $function$;
 
 CREATE OR REPLACE FUNCTION public._month_close_figures_20270208(p_period_start date, p_period_end date)
@@ -910,7 +969,8 @@ BEGIN
       mr.entry_date,
       'returned_check',
       COALESCE(mr.reference, ''),
-      'Returned check ' || COALESCE(mr.reference, '') || ' - ' || mr.reason,
+      'Returned check ' || COALESCE(mr.reference, '') || ' ($' || to_char(mr.amount_cents / 100.0, 'FM999,999,999,990.00')
+        || ', bank date ' || to_char(mr.bank_returned_date, 'MM/DD/YYYY') || ') - ' || mr.reason,
       COALESCE((SELECT sum(l.amount_cents) FROM public.money_reversal_lines l
                  WHERE l.reversal_id = mr.id AND l.line_kind IN ('invoice_payment', 'prepay_application')), 0)::bigint,
       45,
@@ -926,7 +986,7 @@ BEGIN
       mr.entry_date,
       'refund',
       COALESCE(mr.reference, ''),
-      'Refund paid (outside CRX) ' || COALESCE(mr.reference, ''),
+      'Refund paid (outside CRX) ' || COALESCE(mr.reference, '') || ' ($' || to_char(mr.amount_cents / 100.0, 'FM999,999,999,990.00') || ')',
       0::bigint,
       46,
       mr.id
@@ -973,6 +1033,57 @@ BEGIN
 END;
 $function$;
 
+CREATE OR REPLACE FUNCTION public.void_invoice(p_invoice_id uuid, p_void_reason text, p_idempotency_key text DEFAULT NULL::text)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_is_return_credit boolean;
+BEGIN
+  -- M9: an invoice a returned (bounced) check paid keeps that history (the payment's allocation and the reversed
+  -- prepay application rows stay), so it cannot be voided; say so before the void reaches them.
+  IF EXISTS (SELECT 1 FROM public.money_reversal_lines l
+              WHERE l.invoice_id = p_invoice_id AND l.line_kind IN ('invoice_payment', 'prepay_application')) THEN
+    RAISE EXCEPTION 'INVOICE_HAS_RETURNED_PAYMENT: a returned (bounced) check paid this invoice; it stays on the customer''s history and the invoice cannot be voided';
+  END IF;
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.returns r
+    WHERE r.credit_invoice_id = p_invoice_id
+  ) INTO v_is_return_credit;
+
+  IF v_is_return_credit THEN
+    PERFORM set_config('app.crx_return_credit_void', '1', true);
+  END IF;
+
+  BEGIN
+    PERFORM public._void_invoice_return_credit_guard_impl_20260826(
+      p_invoice_id,
+      p_void_reason,
+      p_idempotency_key
+    );
+  EXCEPTION WHEN OTHERS THEN
+    IF v_is_return_credit THEN
+      PERFORM set_config('app.crx_return_credit_void', '0', true);
+    END IF;
+    RAISE;
+  END;
+
+  IF v_is_return_credit THEN
+    PERFORM set_config('app.crx_return_credit_void', '0', true);
+    IF EXISTS (
+      SELECT 1
+      FROM public.returns r
+      WHERE r.credit_invoice_id = p_invoice_id
+    ) THEN
+      RAISE EXCEPTION 'RETURN_CREDIT_VOID_RELEASE_FAILED';
+    END IF;
+  END IF;
+END;
+$function$;
+
 CREATE TRIGGER trg_recompute_prepay_credit_balance_m9 AFTER INSERT ON public.money_reversal_lines
   FOR EACH ROW EXECUTE FUNCTION public._recompute_prepay_credit_balance();
 
@@ -995,16 +1106,18 @@ AS $function$
 DECLARE
   v_actor       uuid := auth.uid();
   v_today       date := (now() AT TIME ZONE 'America/Chicago')::date;
-  v_reference   text := NULLIF(btrim(p_reference), '');
-  v_reason      text := NULLIF(btrim(p_reason), '');
+  v_reference   text := NULLIF(regexp_replace(p_reference, '^\s+|\s+$', '', 'g'), '');
+  v_reason      text := NULLIF(regexp_replace(p_reason, '^\s+|\s+$', '', 'g'), '');
   v_fingerprint text;
   v_replay      jsonb;
-  v_available   bigint;
+  v_ids         uuid[] := ARRAY[]::uuid[];
+  v_available   bigint := 0;
   v_stored      bigint;
   v_farm        text;
   v_left        bigint;
   v_take        bigint;
   v_credit      record;
+  v_drift       uuid;
   v_reversal_id uuid;
   v_lines       jsonb := '[]'::jsonb;
   v_result      jsonb;
@@ -1040,25 +1153,36 @@ BEGIN
   IF length(v_reference) > 200 OR length(v_reason) > 2000 THEN
     RAISE EXCEPTION 'BAD_VALUE: reference at most 200 characters, reason at most 2000';
   END IF;
-  -- The month lock (KI-19), then the closed-period refusal: a refund is dated in an open month only.
-  PERFORM public.check_period_open(p_refund_date);
-
   IF p_credit_id IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM public.prepay_credits WHERE id = p_credit_id AND customer_id = p_customer_id) THEN
     RAISE EXCEPTION 'CREDIT_NOT_FOUND: that prepay credit is not this customer''s';
   END IF;
-  -- Credits first, then the customer: the order apply_prepay_to_invoice and void_payment take them in.
-  PERFORM 1 FROM public.prepay_credits
-   WHERE customer_id = p_customer_id AND (p_credit_id IS NULL OR id = p_credit_id) AND balance_cents > 0
-   ORDER BY id FOR UPDATE;
-  SELECT COALESCE(sum(balance_cents), 0) INTO v_available FROM public.prepay_credits
-   WHERE customer_id = p_customer_id AND (p_credit_id IS NULL OR id = p_credit_id) AND balance_cents > 0;
+
+  -- Lock order (void_payment's): credits, then the month, then the customer. Only credits received on or before the
+  -- refund date can pay it; they are read and locked in one statement, so the set drawn below is the set counted.
+  FOR v_credit IN
+    SELECT id, balance_cents FROM public.prepay_credits
+     WHERE customer_id = p_customer_id AND (p_credit_id IS NULL OR id = p_credit_id) AND balance_cents > 0
+       AND (created_at AT TIME ZONE 'America/Chicago')::date <= p_refund_date
+     ORDER BY id FOR UPDATE
+  LOOP
+    v_ids := v_ids || v_credit.id;
+    v_available := v_available + v_credit.balance_cents;
+  END LOOP;
+  -- The month lock (KI-19), then the closed-period refusal: a refund is dated in an open month only.
+  PERFORM public.check_period_open(p_refund_date);
   SELECT prepay_balance_cents, farm_name INTO v_stored, v_farm FROM public.customers WHERE id = p_customer_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'CUSTOMER_NOT_FOUND: %', p_customer_id; END IF;
   IF p_amount_cents > v_available THEN
-    RAISE EXCEPTION 'PREPAY_REFUND_EXCEEDS_AVAILABLE: refund $% is more than the $% prepay available%',
+    RAISE EXCEPTION 'PREPAY_REFUND_EXCEEDS_AVAILABLE: refund $% is more than the $% prepay % received on or before %',
       round(p_amount_cents / 100.0, 2), round(v_available / 100.0, 2),
-      CASE WHEN p_credit_id IS NOT NULL THEN ' on that credit' ELSE '' END;
+      CASE WHEN p_credit_id IS NOT NULL THEN 'on that credit' ELSE 'available' END, p_refund_date;
+  END IF;
+  SELECT id INTO v_drift FROM public.prepay_credits
+   WHERE id = ANY (v_ids) AND balance_cents IS DISTINCT FROM public._prepay_credit_computed_balance_20270225(id)
+   ORDER BY id LIMIT 1;
+  IF FOUND THEN
+    RAISE EXCEPTION 'PREPAY_CREDIT_DRIFT: prepay credit % does not match its history; run the prepay balance check first', v_drift;
   END IF;
   IF COALESCE(v_stored, 0) < p_amount_cents THEN
     RAISE EXCEPTION 'PREPAY_BALANCE_DRIFT: the customer''s stored prepay ($%) is below the refund; run the prepay balance check first',
@@ -1072,9 +1196,7 @@ BEGIN
   -- Oldest credit first (or only the one picked); each line lowers that credit through the recompute trigger.
   v_left := p_amount_cents;
   FOR v_credit IN
-    SELECT id, balance_cents FROM public.prepay_credits
-     WHERE customer_id = p_customer_id AND (p_credit_id IS NULL OR id = p_credit_id) AND balance_cents > 0
-     ORDER BY created_at, id
+    SELECT id, balance_cents FROM public.prepay_credits WHERE id = ANY (v_ids) ORDER BY created_at, id
   LOOP
     EXIT WHEN v_left = 0;
     v_take := LEAST(v_credit.balance_cents, v_left);
@@ -1083,6 +1205,10 @@ BEGIN
     v_lines := v_lines || jsonb_build_object('prepay_credit_id', v_credit.id, 'amount_cents', v_take);
     v_left := v_left - v_take;
   END LOOP;
+  IF v_left <> 0 THEN
+    RAISE EXCEPTION 'REFUND_DRAW_INCOMPLETE: $% of the refund could not be drawn from the credits; nothing was saved',
+      round(v_left / 100.0, 2);
+  END IF;
 
   UPDATE public.customers
      SET prepay_balance_cents = prepay_balance_cents - p_amount_cents, updated_at = now()
@@ -1113,7 +1239,7 @@ ALTER FUNCTION public.record_outside_refund(uuid, bigint, date, text, text, uuid
 REVOKE ALL ON FUNCTION public.record_outside_refund(uuid, bigint, date, text, text, uuid, uuid, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.record_outside_refund(uuid, bigint, date, text, text, uuid, uuid, text) TO authenticated, service_role;
 
--- 4. Returned (bounced) check: a Record Payment, or a Prepayment Manager check credit ------------------------------
+-- 4. Returned (bounced) check: a Record Payment by check, or a Prepayment Manager check (all its buckets) -----------
 CREATE FUNCTION public.record_returned_check(
   p_allocation_set_id uuid,
   p_returned_date date,
@@ -1130,7 +1256,7 @@ AS $function$
 DECLARE
   v_actor        uuid := auth.uid();
   v_today        date := (now() AT TIME ZONE 'America/Chicago')::date;
-  v_reason       text := NULLIF(btrim(p_reason), '');
+  v_reason       text := NULLIF(regexp_replace(p_reason, '^\s+|\s+$', '', 'g'), '');
   v_fingerprint  text;
   v_replay       jsonb;
   v_set          record;
@@ -1144,13 +1270,18 @@ DECLARE
   v_before       bigint;
   v_stored       bigint;
   v_reversal_id  uuid;
+  v_invoice_ids  uuid[];
   v_inv          record;
   v_app          record;
+  v_cash         bigint;
+  v_prepay       bigint;
+  v_balance      bigint;
   v_left         bigint;
+  v_last_applied date;
   v_invoice_cents bigint := 0;
   v_app_cents    bigint := 0;
   v_removed      bigint := 0;
-  v_reopened     uuid[] := ARRAY[]::uuid[];
+  v_reopened     integer := 0;
   v_credit_id    uuid;
   v_result       jsonb;
 BEGIN
@@ -1176,52 +1307,75 @@ BEGIN
   IF num_nonnulls(p_allocation_set_id, p_credit_id) <> 1 THEN
     RAISE EXCEPTION 'RETURNED_CHECK_SOURCE: give the payment or the prepayment check, exactly one';
   END IF;
+  -- p_returned_date is the day the bank returned the check (it may fall in a closed month); the entry itself is dated
+  -- today, which is always in an open month (decision 18).
   IF p_returned_date IS NULL THEN RAISE EXCEPTION 'RETURNED_DATE_REQUIRED: enter the date the bank returned the check'; END IF;
   IF p_returned_date > v_today THEN
     RAISE EXCEPTION 'RETURNED_DATE_IN_FUTURE: returned date % is after today (%) in Central time', p_returned_date, v_today;
   END IF;
   IF v_reason IS NULL THEN RAISE EXCEPTION 'REASON_REQUIRED: enter why the check came back'; END IF;
   IF length(v_reason) > 2000 THEN RAISE EXCEPTION 'BAD_VALUE: reason at most 2000 characters'; END IF;
-  -- Decision 18: the entry is dated in an open month; the month the check was received in may be closed.
-  PERFORM public.check_period_open(p_returned_date);
 
-  -- The source is locked (void_payment / edit / delete take the same row lock) but never written.
+  -- 1. Lock order (void_payment's): the payment, its credits, the month, the invoices (one sorted pass), the customer.
+  --    The payment and the credits are locked but never written.
   IF p_allocation_set_id IS NOT NULL THEN
     SELECT * INTO v_set FROM public.allocation_sets WHERE id = p_allocation_set_id FOR UPDATE;
     IF NOT FOUND OR v_set.entity_type IS DISTINCT FROM 'payment' THEN
       RAISE EXCEPTION 'PAYMENT_NOT_FOUND: %', p_allocation_set_id;
     END IF;
     IF NOT v_set.is_active THEN RAISE EXCEPTION 'PAYMENT_VOIDED: this payment was voided; nothing to return'; END IF;
+    IF v_set.payment_method IS DISTINCT FROM 'check' THEN
+      RAISE EXCEPTION 'NOT_A_CHECK_PAYMENT: only a payment made by check can be returned (this one is %)',
+        COALESCE(v_set.payment_method, 'not recorded');
+    END IF;
     v_customer := v_set.customer_id;
     v_amount := COALESCE(v_set.total_payment_cents, v_set.total_allocated_cents, 0);
     v_reference := COALESCE(NULLIF(v_set.check_number, ''), NULLIF(v_set.reference_number, ''));
-    v_received_on := v_set.payment_date;
-    SELECT COALESCE(array_agg(id ORDER BY id), ARRAY[]::uuid[]) INTO v_credit_ids FROM public.prepay_credits
+    -- The statement dates an undated payment by its Chicago creation day; so does this check.
+    v_received_on := COALESCE(v_set.payment_date, (v_set.created_at AT TIME ZONE 'America/Chicago')::date);
+    SELECT array_agg(id ORDER BY id) INTO v_credit_ids FROM public.prepay_credits
      WHERE allocation_set_id = p_allocation_set_id AND source_type = 'overpayment';
   ELSE
-    SELECT * INTO v_src FROM public.prepay_credits WHERE id = p_credit_id FOR UPDATE;
+    SELECT * INTO v_src FROM public.prepay_credits WHERE id = p_credit_id;
     IF NOT FOUND THEN RAISE EXCEPTION 'CREDIT_NOT_FOUND: %', p_credit_id; END IF;
     IF v_src.source_type IS DISTINCT FROM 'check' OR v_src.allocation_set_id IS NOT NULL THEN
       RAISE EXCEPTION 'NOT_A_PREPAYMENT_CHECK: only a Prepayment Manager check can be returned this way; return a Record Payment by its payment';
     END IF;
-    IF v_src.original_amount_cents <= 0 THEN RAISE EXCEPTION 'CHECK_ALREADY_REMOVED: this prepayment check was deleted; nothing to return'; END IF;
+    -- Every bucket of that check comes back together: the Prepayment Manager writes one check as buckets sharing the
+    -- customer, the entry time and the check number, and Month-End counts them as one payment.
+    SELECT array_agg(id ORDER BY id) INTO v_credit_ids FROM public.prepay_credits
+     WHERE customer_id = v_src.customer_id AND source_type = 'check' AND allocation_set_id IS NULL
+       AND created_at = v_src.created_at AND source_reference IS NOT DISTINCT FROM v_src.source_reference;
     v_customer := v_src.customer_id;
-    v_amount := v_src.original_amount_cents;
     v_reference := COALESCE(NULLIF(v_src.source_reference, ''), NULLIF(v_src.reference_number, ''));
     v_received_on := (v_src.created_at AT TIME ZONE 'America/Chicago')::date;
-    v_credit_ids := ARRAY[p_credit_id];
   END IF;
-  IF v_amount <= 0 THEN RAISE EXCEPTION 'NOTHING_TO_RETURN: this check has no amount'; END IF;
-  IF p_returned_date < v_received_on THEN
-    RAISE EXCEPTION 'RETURNED_BEFORE_RECEIVED: the check was received on %; it cannot come back before that', v_received_on;
+  v_credit_ids := COALESCE(v_credit_ids, ARRAY[]::uuid[]);
+  PERFORM 1 FROM public.prepay_credits WHERE id = ANY (v_credit_ids) ORDER BY id FOR UPDATE;
+  IF p_credit_id IS NOT NULL THEN
+    -- The check's face value: what Month-End counted for it (its buckets' amounts; never edited, see below).
+    SELECT COALESCE(sum(original_amount_cents), 0) INTO v_amount FROM public.prepay_credits WHERE id = ANY (v_credit_ids);
   END IF;
-  IF EXISTS (SELECT 1 FROM public.money_reversals
-              WHERE kind = 'returned_check' AND (allocation_set_id = p_allocation_set_id OR prepay_credit_id = p_credit_id)) THEN
+  IF EXISTS (SELECT 1 FROM public.money_reversals r
+              WHERE r.kind = 'returned_check'
+                AND (r.allocation_set_id = p_allocation_set_id OR r.prepay_credit_id = ANY (v_credit_ids)))
+     OR EXISTS (SELECT 1 FROM public.money_reversal_lines l JOIN public.money_reversals r ON r.id = l.reversal_id
+                 WHERE r.kind = 'returned_check' AND l.prepay_credit_id = ANY (v_credit_ids)) THEN
     RAISE EXCEPTION 'CHECK_ALREADY_RETURNED: this check is already recorded as returned';
   END IF;
-
-  -- Credits (locked in id order), refused when cash already went back out of them.
-  PERFORM 1 FROM public.prepay_credits WHERE id = ANY (v_credit_ids) ORDER BY id FOR UPDATE;
+  -- A deleted or edited credit no longer shows what the bank took back: staff record those bounces by hand.
+  IF EXISTS (SELECT 1 FROM public.prepay_credits pc
+              WHERE pc.id = ANY (v_credit_ids)
+                AND (pc.notes LIKE '%[DELETED:%'
+                     OR EXISTS (SELECT 1 FROM public.financial_audit_log fal
+                                 WHERE fal.operation_type = 'prepay_deleted' AND fal.entity_id = pc.id))) THEN
+    RAISE EXCEPTION 'CHECK_PREPAY_DELETED: part of this check''s prepay was deleted in the Prepayment Manager; record this bounce by hand';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.financial_audit_log fal
+              WHERE fal.operation_type = 'prepay_edited' AND fal.entity_id = ANY (v_credit_ids)
+                AND (fal.old_values ->> 'original_amount_cents') IS DISTINCT FROM (fal.new_values ->> 'original_amount_cents')) THEN
+    RAISE EXCEPTION 'CHECK_AMOUNT_EDITED: this check''s prepay amount was edited after it was received, so the amount the bank took back is not known here; record this bounce by hand';
+  END IF;
   SELECT COALESCE(sum(l.amount_cents), 0) INTO v_refunded
     FROM public.money_reversal_lines l JOIN public.money_reversals r ON r.id = l.reversal_id
    WHERE l.prepay_credit_id = ANY (v_credit_ids) AND l.line_kind = 'prepay_credit' AND r.kind = 'outside_refund';
@@ -1229,66 +1383,77 @@ BEGIN
     RAISE EXCEPTION 'CHECK_PREPAY_REFUNDED: $% of this check''s prepay was already refunded to the customer; record this bounce by hand',
       round(v_refunded / 100.0, 2);
   END IF;
+  IF COALESCE(v_amount, 0) <= 0 THEN RAISE EXCEPTION 'NOTHING_TO_RETURN: this check has no amount'; END IF;
+  IF p_returned_date < v_received_on THEN
+    RAISE EXCEPTION 'RETURNED_BEFORE_RECEIVED: the check was received on %; the bank cannot have returned it before that', v_received_on;
+  END IF;
   SELECT COALESCE(sum(balance_cents), 0) INTO v_before FROM public.prepay_credits WHERE id = ANY (v_credit_ids);
 
-  INSERT INTO public.money_reversals (kind, customer_id, entry_date, amount_cents, reference, reason,
+  -- 2. The month lock: the entry is dated today (open).
+  PERFORM public.check_period_open(v_today);
+
+  -- 3. Every invoice the check paid, directly or through its prepay, locked once in id order.
+  SELECT COALESCE(array_agg(x ORDER BY x), ARRAY[]::uuid[]) INTO v_invoice_ids FROM (
+    SELECT ila.invoice_id AS x FROM public.invoice_line_allocations ila
+     WHERE p_allocation_set_id IS NOT NULL AND ila.allocation_set_id = p_allocation_set_id AND ila.invoice_id IS NOT NULL
+    UNION
+    SELECT pa.invoice_id FROM public.prepay_applications pa WHERE pa.prepay_credit_id = ANY (v_credit_ids)) s;
+  PERFORM 1 FROM public.invoices WHERE id = ANY (v_invoice_ids) ORDER BY id FOR UPDATE;
+  SELECT max((applied_at AT TIME ZONE 'America/Chicago')::date) INTO v_last_applied
+    FROM public.prepay_applications WHERE prepay_credit_id = ANY (v_credit_ids);
+  IF v_last_applied > v_today THEN
+    RAISE EXCEPTION 'RETURNED_BEFORE_APPLIED: this check''s prepay was applied on %, after today', v_last_applied;
+  END IF;
+
+  INSERT INTO public.money_reversals (kind, customer_id, entry_date, bank_returned_date, amount_cents, reference, reason,
                                      allocation_set_id, prepay_credit_id, performed_by)
-  VALUES ('returned_check', v_customer, p_returned_date, v_amount, v_reference, v_reason,
+  VALUES ('returned_check', v_customer, v_today, p_returned_date, v_amount, v_reference, v_reason,
           p_allocation_set_id, p_credit_id, v_actor)
   RETURNING id INTO v_reversal_id;
 
-  -- 1. The invoices this check paid are unpaid again (void_payment's status rule).
+  -- Each invoice gives back what the check paid on it, directly and through its prepay (the application rows stay;
+  -- a reversal line counts each one back on its credit). A paid invoice that now owes money reopens as overdue when
+  -- its due date has passed, else posted (reverse_write_off's rule).
   FOR v_inv IN
-    SELECT ila.invoice_id, sum(ila.amount_cents)::bigint AS cents
-      FROM public.invoice_line_allocations ila
-     WHERE p_allocation_set_id IS NOT NULL AND ila.allocation_set_id = p_allocation_set_id AND ila.invoice_id IS NOT NULL
-     GROUP BY ila.invoice_id ORDER BY ila.invoice_id
+    SELECT id, status, due_date, paid_amount_cents, prepay_applied_cents FROM public.invoices
+     WHERE id = ANY (v_invoice_ids) ORDER BY id
   LOOP
-    PERFORM 1 FROM public.invoices WHERE id = v_inv.invoice_id AND paid_amount_cents >= v_inv.cents FOR UPDATE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'INVOICE_PAYMENT_CHANGED: an invoice this check paid no longer shows that payment; reload'; END IF;
+    SELECT COALESCE(sum(amount_cents), 0) INTO v_cash FROM public.invoice_line_allocations
+     WHERE p_allocation_set_id IS NOT NULL AND allocation_set_id = p_allocation_set_id AND invoice_id = v_inv.id;
+    SELECT COALESCE(sum(applied_amount_cents), 0) INTO v_prepay FROM public.prepay_applications
+     WHERE prepay_credit_id = ANY (v_credit_ids) AND invoice_id = v_inv.id;
+    IF v_inv.paid_amount_cents < v_cash OR v_inv.prepay_applied_cents < v_prepay THEN
+      RAISE EXCEPTION 'INVOICE_PAYMENT_CHANGED: an invoice this check paid no longer shows that payment; reload';
+    END IF;
     UPDATE public.invoices
-       SET paid_amount_cents = paid_amount_cents - v_inv.cents,
-           status = CASE
-             WHEN status IN ('paid', 'posted') THEN
-               CASE WHEN (total_amount_cents - ((paid_amount_cents - v_inv.cents) + prepay_applied_cents + write_off_cents + credit_applied_cents)) <= 0
-                    THEN 'paid' ELSE 'posted' END
-             ELSE status
-           END,
+       SET paid_amount_cents = paid_amount_cents - v_cash,
+           prepay_applied_cents = prepay_applied_cents - v_prepay,
            updated_at = now()
-     WHERE id = v_inv.invoice_id;
-    INSERT INTO public.money_reversal_lines (reversal_id, line_kind, invoice_id, amount_cents)
-    VALUES (v_reversal_id, 'invoice_payment', v_inv.invoice_id, v_inv.cents);
-    v_invoice_cents := v_invoice_cents + v_inv.cents;
-    v_reopened := v_reopened || v_inv.invoice_id;
+     WHERE id = v_inv.id
+    RETURNING balance_cents INTO v_balance;
+    IF v_inv.status = 'paid' AND v_balance > 0 THEN
+      UPDATE public.invoices
+         SET status = CASE WHEN v_inv.due_date IS NOT NULL AND v_inv.due_date < v_today THEN 'overdue' ELSE 'posted' END,
+             updated_at = now()
+       WHERE id = v_inv.id;
+      v_reopened := v_reopened + 1;
+    END IF;
+    IF v_cash > 0 THEN
+      INSERT INTO public.money_reversal_lines (reversal_id, line_kind, invoice_id, amount_cents)
+      VALUES (v_reversal_id, 'invoice_payment', v_inv.id, v_cash);
+      v_invoice_cents := v_invoice_cents + v_cash;
+    END IF;
+    FOR v_app IN
+      SELECT id, prepay_credit_id, applied_amount_cents FROM public.prepay_applications
+       WHERE prepay_credit_id = ANY (v_credit_ids) AND invoice_id = v_inv.id ORDER BY id
+    LOOP
+      INSERT INTO public.money_reversal_lines (reversal_id, line_kind, prepay_credit_id, invoice_id, prepay_application_id, amount_cents)
+      VALUES (v_reversal_id, 'prepay_application', v_app.prepay_credit_id, v_inv.id, v_app.id, v_app.applied_amount_cents);
+      v_app_cents := v_app_cents + v_app.applied_amount_cents;
+    END LOOP;
   END LOOP;
 
-  -- 2. Prepay this check funded and already applied is reversed: those invoices are unpaid again. The application
-  --    rows stay (history); a reversal line counts each one back on its credit.
-  FOR v_app IN
-    SELECT pa.id, pa.prepay_credit_id, pa.invoice_id, pa.applied_amount_cents
-      FROM public.prepay_applications pa
-     WHERE pa.prepay_credit_id = ANY (v_credit_ids)
-     ORDER BY pa.invoice_id, pa.id
-  LOOP
-    PERFORM 1 FROM public.invoices WHERE id = v_app.invoice_id AND prepay_applied_cents >= v_app.applied_amount_cents FOR UPDATE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'INVOICE_PREPAY_CHANGED: an invoice this check''s prepay paid no longer shows it; reload'; END IF;
-    UPDATE public.invoices
-       SET prepay_applied_cents = prepay_applied_cents - v_app.applied_amount_cents,
-           status = CASE
-             WHEN status IN ('paid', 'posted') THEN
-               CASE WHEN (total_amount_cents - (paid_amount_cents + (prepay_applied_cents - v_app.applied_amount_cents) + write_off_cents + credit_applied_cents)) <= 0
-                    THEN 'paid' ELSE 'posted' END
-             ELSE status
-           END,
-           updated_at = now()
-     WHERE id = v_app.invoice_id;
-    INSERT INTO public.money_reversal_lines (reversal_id, line_kind, prepay_credit_id, invoice_id, prepay_application_id, amount_cents)
-    VALUES (v_reversal_id, 'prepay_application', v_app.prepay_credit_id, v_app.invoice_id, v_app.id, v_app.applied_amount_cents);
-    v_app_cents := v_app_cents + v_app.applied_amount_cents;
-    IF NOT v_app.invoice_id = ANY (v_reopened) THEN v_reopened := v_reopened || v_app.invoice_id; END IF;
-  END LOOP;
-
-  -- 3. Whatever is left on the credits comes off (each ends at $0).
+  -- 4. Whatever is left on the credits comes off (each ends at $0).
   FOREACH v_credit_id IN ARRAY v_credit_ids LOOP
     SELECT balance_cents INTO v_left FROM public.prepay_credits WHERE id = v_credit_id;
     IF v_left > 0 THEN
@@ -1298,7 +1463,7 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- The customer's stored prepay drops by what was unapplied before (the applied part already came off when applied).
+  -- 5. The customer's stored prepay drops by what was unapplied before (the applied part came off when applied).
   SELECT prepay_balance_cents INTO v_stored FROM public.customers WHERE id = v_customer FOR UPDATE;
   IF v_before > 0 THEN
     IF COALESCE(v_stored, 0) < v_before THEN
@@ -1313,8 +1478,9 @@ BEGIN
   VALUES (
     'payment_returned', CASE WHEN p_allocation_set_id IS NOT NULL THEN 'allocation_set' ELSE 'prepay_credit' END,
     COALESCE(p_allocation_set_id, p_credit_id), v_actor, 'admin',
-    jsonb_build_object('reversal_id', v_reversal_id, 'returned_date', p_returned_date, 'reason', v_reason,
-                       'invoices_reopened', to_jsonb(v_reopened), 'invoice_payment_cents', v_invoice_cents,
+    jsonb_build_object('reversal_id', v_reversal_id, 'bank_returned_date', p_returned_date, 'entry_date', v_today,
+                       'reason', v_reason, 'credit_ids', to_jsonb(v_credit_ids), 'invoice_ids', to_jsonb(v_invoice_ids),
+                       'invoices_reopened', v_reopened, 'invoice_payment_cents', v_invoice_cents,
                        'prepay_applications_reversed_cents', v_app_cents, 'prepay_removed_cents', v_removed),
     -v_amount,
     'Returned check ' || COALESCE(v_reference, '') || ' $' || round(v_amount / 100.0, 2) || ' - ' || v_reason);
@@ -1324,8 +1490,9 @@ BEGIN
 
   v_result := jsonb_build_object(
     'reversal_id', v_reversal_id, 'kind', 'returned_check', 'customer_id', v_customer,
-    'allocation_set_id', p_allocation_set_id, 'prepay_credit_id', p_credit_id, 'returned_date', p_returned_date,
-    'amount_cents', v_amount, 'invoices_reopened', cardinality(v_reopened), 'invoice_payment_cents', v_invoice_cents,
+    'allocation_set_id', p_allocation_set_id, 'prepay_credit_id', p_credit_id, 'credit_ids', to_jsonb(v_credit_ids),
+    'bank_returned_date', p_returned_date, 'entry_date', v_today,
+    'amount_cents', v_amount, 'invoices_reopened', v_reopened, 'invoice_payment_cents', v_invoice_cents,
     'prepay_applications_reversed_cents', v_app_cents, 'prepay_removed_cents', v_removed,
     'prepay_balance_cents', (SELECT prepay_balance_cents FROM public.customers WHERE id = v_customer));
   PERFORM public.save_idempotency(p_idempotency_key, 'record_returned_check', v_result);
@@ -1374,17 +1541,27 @@ BEGIN
         JOIN public.prepay_credits pc ON pc.id = l.prepay_credit_id
         JOIN cust ON cust.id = pc.customer_id
        GROUP BY pc.customer_id
+    ), mismatches AS (
+      -- Per credit: the stored balance against its own rows, so offsetting errors on two credits still show.
+      SELECT m.customer_id, jsonb_agg(jsonb_build_object('prepay_credit_id', m.id, 'balance_cents', m.balance_cents,
+                                                         'computed_cents', m.computed) ORDER BY m.id) AS list
+        FROM (SELECT pc.customer_id, pc.id, pc.balance_cents, public._prepay_credit_computed_balance_20270225(pc.id) AS computed
+                FROM public.prepay_credits pc JOIN cust ON cust.id = pc.customer_id) m
+       WHERE m.balance_cents IS DISTINCT FROM m.computed
+       GROUP BY m.customer_id
     ), rows AS (
       SELECT cust.id, cust.farm_name, cust.stored,
              COALESCE(cr.received, 0) AS received,
              COALESCE(ap.cents, 0) - COALESCE(ln.reversed, 0) AS applied,
              COALESCE(ln.refunded, 0) AS refunded,
              COALESCE(ln.voided, 0) AS voided,
-             COALESCE(cr.on_credits, 0) AS on_credits
+             COALESCE(cr.on_credits, 0) AS on_credits,
+             mm.list AS mismatches
         FROM cust
         LEFT JOIN credits cr ON cr.customer_id = cust.id
         LEFT JOIN applied ap ON ap.customer_id = cust.id
         LEFT JOIN lines ln ON ln.customer_id = cust.id
+        LEFT JOIN mismatches mm ON mm.customer_id = cust.id
     )
     SELECT COALESCE(jsonb_agg(jsonb_build_object(
              'customer_id', id, 'farm_name', farm_name,
@@ -1392,7 +1569,9 @@ BEGIN
              'expected_cents', received - applied - refunded - voided,
              'stored_cents', stored, 'credits_cents', on_credits,
              'difference_cents', stored - (received - applied - refunded - voided),
-             'ok', stored = received - applied - refunded - voided AND on_credits = received - applied - refunded - voided)
+             'credit_mismatches', COALESCE(mismatches, '[]'::jsonb),
+             'ok', stored = received - applied - refunded - voided AND on_credits = received - applied - refunded - voided
+                   AND mismatches IS NULL)
              ORDER BY farm_name, id), '[]'::jsonb)
       FROM rows);
 END;
@@ -1449,7 +1628,7 @@ $m9blk$]),
   -- M9: a credit with a refund or a returned check recorded on it keeps its amounts (the edit would rewrite its
   -- original amount and erase them). Reference, label and notes can still change; the screen always sends the
   -- balance, so an unchanged balance is treated as no balance change.
-  IF EXISTS (SELECT 1 FROM money_reversal_lines WHERE prepay_credit_id = p_credit_id) THEN
+  IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
     IF p_new_balance_cents IS NOT NULL AND p_new_balance_cents IS DISTINCT FROM v_credit.balance_cents THEN
       RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; its balance cannot be edited';
     END IF;
@@ -1459,18 +1638,18 @@ $m9blk$]),
       ('public._delete_prepay_credit_replay_impl_20261015(uuid,text,uuid,text)', ARRAY[$m9blk$
   -- M9: a credit with a refund or a returned check recorded on it cannot be deleted (the delete would rewrite its
   -- original amount and erase them).
-  IF EXISTS (SELECT 1 FROM money_reversal_lines WHERE prepay_credit_id = p_credit_id) THEN
+  IF public._prepay_credit_reversed_20270225(p_credit_id) THEN
     RAISE EXCEPTION 'PREPAY_CREDIT_HAS_REVERSALS: this credit has a refund or returned check recorded; it cannot be deleted';
   END IF;
 $m9blk$]),
-      ('public._month_payments_received_20270208(date,date)', ARRAY[$m9blk$
+      ('public._month_payments_received_20270208(date,date)', ARRAY[$m9blk$, false AS m9_return$m9blk$] || ARRAY[$m9blk$, false AS m9_return$m9blk$] || ARRAY[$m9blk$, false AS m9_return$m9blk$] || ARRAY[$m9blk$
     UNION ALL
     -- M9: a returned (bounced) check comes off the month it was recorded in (always an open month), never the month
     -- it was received in; it is not a payment, so it is not counted.
-    SELECT -mr.amount_cents::numeric
+    SELECT -mr.amount_cents::numeric, true
       FROM public.money_reversals mr
      WHERE mr.kind = 'returned_check'
-       AND mr.entry_date BETWEEN p_start AND p_end$m9blk$] || ARRAY[$m9blk$ FILTER (WHERE cents > 0)$m9blk$]),
+       AND mr.entry_date BETWEEN p_start AND p_end$m9blk$] || ARRAY[$m9blk$ FILTER (WHERE NOT m9_return)$m9blk$]),
       ('public._month_close_figures_20270208(date,date)', ARRAY[$m9blk$    -- M9: refunds paid outside CRX and returned checks recorded in the dates (returned checks are already netted out
     -- of payments received above).
     'refunds', (SELECT jsonb_build_object('count', count(*), 'total_cents', COALESCE(sum(mr.amount_cents), 0))
@@ -1510,7 +1689,8 @@ $m9blk$]),
       mr.entry_date,
       'returned_check',
       COALESCE(mr.reference, ''),
-      'Returned check ' || COALESCE(mr.reference, '') || ' - ' || mr.reason,
+      'Returned check ' || COALESCE(mr.reference, '') || ' ($' || to_char(mr.amount_cents / 100.0, 'FM999,999,999,990.00')
+        || ', bank date ' || to_char(mr.bank_returned_date, 'MM/DD/YYYY') || ') - ' || mr.reason,
       COALESCE((SELECT sum(l.amount_cents) FROM public.money_reversal_lines l
                  WHERE l.reversal_id = mr.id AND l.line_kind IN ('invoice_payment', 'prepay_application')), 0)::bigint,
       45,
@@ -1526,13 +1706,20 @@ $m9blk$]),
       mr.entry_date,
       'refund',
       COALESCE(mr.reference, ''),
-      'Refund paid (outside CRX) ' || COALESCE(mr.reference, ''),
+      'Refund paid (outside CRX) ' || COALESCE(mr.reference, '') || ' ($' || to_char(mr.amount_cents / 100.0, 'FM999,999,999,990.00') || ')',
       0::bigint,
       46,
       mr.id
     FROM public.money_reversals mr
     WHERE mr.customer_id = p_customer_id
       AND mr.kind = 'outside_refund'
+$m9blk$]),
+      ('public.void_invoice(uuid,text,text)', ARRAY[$m9blk$  -- M9: an invoice a returned (bounced) check paid keeps that history (the payment's allocation and the reversed
+  -- prepay application rows stay), so it cannot be voided; say so before the void reaches them.
+  IF EXISTS (SELECT 1 FROM public.money_reversal_lines l
+              WHERE l.invoice_id = p_invoice_id AND l.line_kind IN ('invoice_payment', 'prepay_application')) THEN
+    RAISE EXCEPTION 'INVOICE_HAS_RETURNED_PAYMENT: a returned (bounced) check paid this invoice; it stays on the customer''s history and the invoice cannot be voided';
+  END IF;
 $m9blk$])
     ) AS b(sig, blocks) ON b.sig = f.sig
    WHERE NOT EXISTS (
@@ -1545,7 +1732,8 @@ $m9blk$])
         AND p.proconfig::text = f.cfg
         AND p.proacl::text = f.acl
         AND p.pronargdefaults = f.ndefaults
-        AND p.provolatile::text = f.vol);
+        AND p.provolatile::text = f.vol
+        AND md5(pg_get_function_arguments(p.oid) || ' => ' || pg_get_function_result(p.oid)) = f.sigmd5);
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'M9_POSTFLIGHT: not the expected body or contract: %', v_bad;
   END IF;
@@ -1557,7 +1745,9 @@ $m9blk$])
       ('public.record_outside_refund(uuid,bigint,date,text,text,uuid,uuid,text)', true),
       ('public.record_returned_check(uuid,date,text,uuid,text,uuid)', true),
       ('public.get_prepay_balance_check(uuid)', true),
-      ('public._money_reversals_append_only_20270225()', false)) AS n(sig, callable)
+      ('public._money_reversals_append_only_20270225()', false),
+      ('public._prepay_credit_reversed_20270225(uuid)', false),
+      ('public._prepay_credit_computed_balance_20270225(uuid)', false)) AS n(sig, callable)
    WHERE NOT EXISTS (
      SELECT 1 FROM pg_proc p
       WHERE p.oid = to_regprocedure(n.sig)

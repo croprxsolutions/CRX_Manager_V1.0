@@ -15,7 +15,7 @@
  *   - Tolerance of ±1 cent for floating-point rounding
  */
 
-import { supabase } from './db';
+import { supabase, supabaseUntyped } from './db';
 import { fetchAllRows } from './pagedRead';
 import { fetchBilledOutsideCrxDeliveryIds } from './deliveryExternalBilling';
 
@@ -275,15 +275,28 @@ export interface InvoiceLineAllocationRow {
   amount_cents: number;
 }
 
+/**
+ * M9: a returned (bounced) check takes its payment back off each invoice it paid. The allocation rows stay (they are
+ * the closed month's history); `money_reversal_lines` rows of kind 'invoice_payment' record what came back off.
+ */
+export interface InvoicePaymentReversalRow {
+  invoice_id: string;
+  amount_cents: number;
+}
+
 export function checkInvoicePayments(
   invoices: InvoiceRow[],
   allocations: InvoiceLineAllocationRow[],
+  reversals: InvoicePaymentReversalRow[] = [],
 ): Discrepancy[] {
-  // Sum allocation cents per invoice_id (source of truth from allocate_payment)
+  // Sum allocation cents per invoice_id (source of truth from allocate_payment), less returned checks
   const allocatedByInvoice = new Map<string, number>();
   for (const a of allocations) {
     const current = allocatedByInvoice.get(a.invoice_id) ?? 0;
     allocatedByInvoice.set(a.invoice_id, current + a.amount_cents);
+  }
+  for (const r of reversals) {
+    allocatedByInvoice.set(r.invoice_id, (allocatedByInvoice.get(r.invoice_id) ?? 0) - r.amount_cents);
   }
 
   const issues: Discrepancy[] = [];
@@ -795,7 +808,7 @@ export async function runReconciliationChecks(): Promise<ReconciliationReport> {
 
   // ── Check 3 & 4: Invoice payments + balance formula ────────────
   try {
-    const [invoiceRes, allocRes] = await Promise.all([
+    const [invoiceRes, allocRes, reversalRes] = await Promise.all([
       fetchAllRows((from, to) => supabase
         .from('invoices')
         .select('id, invoice_number, order_id, invoice_type, status, paid_amount_cents, prepay_applied_cents, write_off_cents, credit_applied_cents, total_amount_cents, balance_cents', { count: 'exact' })
@@ -808,20 +821,32 @@ export async function runReconciliationChecks(): Promise<ReconciliationReport> {
         .select('id, invoice_id, amount_cents', { count: 'exact' })
         .order('id')
         .range(from, to)),
+      // M9 (migration 20270225110000; not in the generated types yet): payments taken back by a returned check.
+      fetchAllRows((from, to) => supabaseUntyped
+        .from('money_reversal_lines')
+        .select('id, invoice_id, amount_cents', { count: 'exact' })
+        .eq('line_kind', 'invoice_payment')
+        .order('id')
+        .range(from, to)),
     ]);
 
     if (invoiceRes.error) throw new Error(`Invoices query failed: ${invoiceRes.error.message}`);
     if (allocRes.error) throw new Error(`Allocations query failed: ${allocRes.error.message}`);
+    // Before the M9 migration is applied the table does not exist: no returned checks.
+    const reversalError = reversalRes.error?.message ?? '';
+    const reversalTableMissing = /money_reversal_lines/.test(reversalError) && /does not exist|schema cache|could not find/i.test(reversalError);
+    if (reversalRes.error && !reversalTableMissing) throw new Error(`Returned-check reversals query failed: ${reversalRes.error.message}`);
+    const reversals = (reversalRes.error ? [] : reversalRes.data ?? []) as InvoicePaymentReversalRow[];
     const invoices = (invoiceRes.data ?? []) as Array<InvoiceRow & { status: string }>;
     const allocations = (allocRes.data ?? []) as InvoiceLineAllocationRow[];
     // A posted invoice moves on to 'paid' or 'overdue', so filtering on 'posted'
     // alone skipped every invoice that had money against it.
     const financialInvoices = invoices.filter((inv) => FINANCIAL_INVOICE_STATUSES.has(inv.status));
 
-    const payDisc = checkInvoicePayments(financialInvoices, allocations);
+    const payDisc = checkInvoicePayments(financialInvoices, allocations, reversals);
     checks.push({
       name: 'Invoice Payments',
-      description: 'Invoice paid_amount_cents matches SUM of invoice_line_allocations.amount_cents (source of truth from allocate_payment)',
+      description: 'Invoice paid_amount_cents matches SUM of invoice_line_allocations.amount_cents (source of truth from allocate_payment), less returned checks',
       passed: payDisc.length === 0,
       discrepancies: payDisc,
       entitiesChecked: financialInvoices.length,

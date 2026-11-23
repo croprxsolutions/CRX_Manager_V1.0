@@ -9,6 +9,35 @@
   Mason chose to leave it unfixed (plain reply, ref 3c830ed4cf69)
 - Finding 3 (HIGH) at `docs/plans/2026-11-23-job-save-version-check-CONTRACT.md:34`, text sha256 `a86160d76d167c65` (the wording stays with the proof, not here)
   Mason chose to leave it unfixed (plain reply, ref 3c830ed4cf69)
+## 2026-11-23 — #2323: Mason owner-accepted 6 Sol finding(s) at `883d1dc5dc08`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2323 at `883d1dc5dc08` (base `70755dfe6f00`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226173000_drop_inert_delivery_short_stock_trigger.sql:53`, text sha256 `a80606facf350cc4` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 2 (HIGH) at `scripts/smoke/inventory-edge-cases-1942-reverse.sql:48`, text sha256 `249c334ba717d53b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 3 (HIGH) at `scripts/smoke/single-short-stock-warning-reverse.sql:16`, text sha256 `9d76cbd19056bfbd` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 4 (HIGH) at `scripts/smoke/single-short-stock-warning-reverse.sql:24`, text sha256 `1ff52e10dc3cde86` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 5 (HIGH) at `scripts/smoke/drop-inert-delivery-short-stock-trigger-reverse.sql:20`, text sha256 `32d2129b98edca50` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 6 (HIGH) at `scripts/smoke/prove-drop-inert-delivery-short-stock-trigger-real-schema.mjs:120`, text sha256 `88224e97255247a3` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+
+## 2026-11-23 — #2323: Mason owner-accepted 5 Sol finding(s) at `99b6566efc1a`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2323 at `99b6566efc1a` (base `5b549b9e4f2f`) found 5 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226173000_drop_inert_delivery_short_stock_trigger.sql:53`, text sha256 `c2655063231cd77e` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+- Finding 2 (HIGH) at `scripts/smoke/inventory-edge-cases-1942-reverse.sql:48`, text sha256 `dfac12cf31b9fd25` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+- Finding 3 (HIGH) at `scripts/smoke/single-short-stock-warning-reverse.sql:16`, text sha256 `9d76cbd19056bfbd` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+- Finding 4 (HIGH) at `scripts/smoke/drop-inert-delivery-short-stock-trigger-reverse.sql:20`, text sha256 `2f55a0e394113457` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+- Finding 5 (HIGH) at `scripts/smoke/prove-drop-inert-delivery-short-stock-trigger-real-schema.mjs:120`, text sha256 `1479e90b28371571` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
 
 ## 2026-11-23 — #2258: Mason's earlier skip carried to 2 repeat Sol finding(s) at `a092bca8b71c`
 

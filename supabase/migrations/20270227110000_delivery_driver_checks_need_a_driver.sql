@@ -1,5 +1,5 @@
 -- Written 2026-11-23. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270226100000_delivery_driver_checks_need_a_driver.md.
+-- docs/reference/migrations.d/20270227110000_delivery_driver_checks_need_a_driver.md.
 --
 -- WHY: the delivery permission checks below let a driver act on a delivery only when they are its assigned driver.
 --   Each compares the caller with deliveries.assigned_driver inside an IF. A delivery may have no driver, and the

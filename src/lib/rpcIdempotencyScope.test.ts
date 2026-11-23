@@ -265,7 +265,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   _complete_delivery_period_preflight_impl: ['complete_delivery'],
   // Direct EXECUTE is revoked (postgres-only). Each was renamed from its public wrapper with ALTER FUNCTION ...
   // RENAME TO (20261019200000, 20270104120000), so its receipt lookup kept the public literal that the wrapper binds.
-  // 20270226100000 re-emits them only to make the driver check refuse a delivery with no driver; changing the
+  // 20270227110000 re-emits them only to make the driver check refuse a delivery with no driver; changing the
   // literal would orphan existing receipts.
   _complete_delivery_replay_impl_20261015: ['complete_delivery'],
   _complete_delivery_evidence_impl_20270104: ['complete_delivery'],

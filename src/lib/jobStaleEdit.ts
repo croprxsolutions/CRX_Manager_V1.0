@@ -7,7 +7,7 @@ import { supabase } from './db';
  * for someone else's field and product lines. Left out on purpose: updated_at (printing and applied records bump
  * it, which would refuse ordinary saves), printed_at, applied_acres, remaining_acres.
  */
-export const JOB_STALE_CHECK_COLUMNS = [
+const JOB_STALE_CHECK_COLUMNS = [
   'status', 'customer_id', 'job_date', 'scheduled_time', 'applicator_id', 'vehicle_id', 'recipe_id',
   'application_service_id', 'notes', 'batch_id', 'total_acres', 'total_price_cents', 'call_date',
   'date_proposed', 'time_proposed', 'schedule_date', 'date_expires', 'consultant_id', 'loader_comment',
@@ -25,7 +25,7 @@ export function pickJobStaleSnapshot(row: Record<string, unknown>): JobStaleSnap
 }
 
 /** The checked columns whose stored value differs from what the screen loaded. */
-export function jobChangedColumns(loaded: JobStaleSnapshot, current: Record<string, unknown>): string[] {
+function jobChangedColumns(loaded: JobStaleSnapshot, current: Record<string, unknown>): string[] {
   return JOB_STALE_CHECK_COLUMNS.filter(
     (c) => JSON.stringify(loaded[c] ?? null) !== JSON.stringify(current[c] ?? null),
   );

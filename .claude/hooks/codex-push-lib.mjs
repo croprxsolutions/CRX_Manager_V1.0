@@ -1769,6 +1769,10 @@ export function carriedSolProof(data) {
         // Only a main merge carries (Mason, 2026-11-22, #2226 Sol r7-r8): a staging carry, or an older
         // carry that records no review kind, is not a proof.
         && data.review_ref === "origin/main")
+    // An owner acceptance binds the base its review saw, through any carry chain: a restamp or
+    // post_apply keeps its source's base, so it must not launder an earlier move (Sol r8, #2226).
+    && ((carry.root_review?.owner_accepted !== true && !("owner_accepted" in data))
+      || carry.root_review?.base_sha === data.base_sha)
     && CARRY_SHA_RE.test(String(carry.from_head || ""))
     && CARRY_SHA_RE.test(String(carry.from_base || ""))
     && carry.from_head !== data.head_sha;

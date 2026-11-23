@@ -1474,6 +1474,11 @@ function collisionPromptSkipsWork(prompt) {
     assert.match(carry().stderr, /records a origin\/staging review/, "carry: a staging proof is refused");
     writeProof(reviewedHead, { ...buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean" }), review_ref: undefined });
     assert.match(carry().stderr, /records no review kind/, "carry: a proof with no review kind is refused");
+    // Nor a release review's proof on a branch that is not the release (Taha, #2226 LOW 3a).
+    writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: GUARDED_BASE, releaseRules: true }));
+    const releaseRefused = carry();
+    assert.equal(releaseRefused.status, 1, "carry: a release-rules proof is refused on a hotfix");
+    assert.match(releaseRefused.stderr, /records a origin\/main release review, not the origin\/main review this branch gets/, "carry: says why");
     writeProof(reviewedHead, buildCodexPushProof({ headSha: reviewedHead, baseSha: base, verdict: "clean", reviewRef: GUARDED_BASE }));
 
     const ok = carry();
@@ -1564,7 +1569,7 @@ function collisionPromptSkipsWork(prompt) {
     git("merge", "-q", "--no-edit", target);
     const refused = carry("--dry-run");
     assert.equal(refused.status, 1, "carry: a union rule dropped by one side still refuses");
-    assert.match(refused.stderr, /edited or removed existing lines|does not merge cleanly/, "carry: says why");
+    assert.match(refused.stderr, /does not merge cleanly/, `carry: says why (Taha, #2226 LOW 3d): ${refused.stderr}`);
   });
 
   // 4. The branch already holds a commit staging gains later, so the reviewed diff is not what
@@ -1646,6 +1651,32 @@ function collisionPromptSkipsWork(prompt) {
     assert.equal(refused.status, 1, `carry: a copy of a PR-changed file is refused (${refused.stdout})`);
     // Git may name the base's unchanged twin (docs/twin.md) as the source; any copy refuses (Sol r6 HIGH 3).
     assert.match(refused.stderr, /renamed or copied docs\/(manual\/note|twin)\.md/, "carry: names the copied file");
+  });
+
+  // 7a. A PR-side rename of a file the base side changed is refused too (Taha, #2226 LOW 3b).
+  withRepo(({ git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
+    git("mv", "docs/manual/note.md", "docs/manual/renamed.md");
+    const head = commitAll("pr renames the note");
+    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+    land(target, "main edits the note", () => writeFileSync(file("docs/manual/note.md"), "# Note\nDo the safe thing.\nAnd one more line.\n"));
+    git("merge", "-q", "--no-edit", target);
+    const refused = carry("--dry-run");
+    assert.equal(refused.status, 1, `carry: a PR-side rename of a base-changed file is refused (${refused.stdout})`);
+    assert.match(refused.stderr, /renamed or copied docs\/manual\/note\.md, which the other side changed/, "carry: names the moved file");
+  });
+
+  // 7b. A file both sides changed under a custom merge driver is refused: the driver can write anything (Taha, #2226 LOW 1).
+  withRepo(({ repo, git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
+    git("config", "merge.keepours.driver", "true");
+    writeFileSync(`${repo}/.git/info/attributes`, "src/a.ts merge=keepours\n");
+    writeFileSync(file("src/a.ts"), "export const a = 2;\nexport const pr = true;\n");
+    const head = commitAll("pr edits a.ts again");
+    writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
+    land(target, "main edits a.ts too", () => writeFileSync(file("src/a.ts"), "export const a = 1;\nexport const main = true;\n"));
+    git("merge", "-q", "--no-edit", target);
+    const refused = carry("--dry-run");
+    assert.equal(refused.status, 1, `carry: a custom merge driver is refused (${refused.stdout})`);
+    assert.match(refused.stderr, /src\/a\.ts, which uses a custom merge driver/, "carry: says why");
   });
 
   // 8. A base delta that removes a credential-shaped line, or changes a binary file, is never sent (Sol r5 HIGH 4, MED).

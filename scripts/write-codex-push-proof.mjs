@@ -2108,6 +2108,8 @@ export function carrySourceProofProblem(data, { headSha, nowMs = Date.now() } = 
 // (Sol HIGH, PR #1002; the same rule as the documentation-only exemption). A
 // bare path with no modes is never documentation: fail closed.
 const REGULAR_OR_ABSENT_MODES = new Set(["100644", "000000"]);
+// Git's own merge rules (`git check-attr` values); any other value names a configurable driver.
+const BUILTIN_MERGE_RULES = new Set(["unspecified", "set", "unset", "text", "binary", "union"]);
 function changedEntry(file) {
   return typeof file === "string" ? { path: file, oldMode: null, newMode: null } : file;
 }
@@ -2411,6 +2413,10 @@ function resolveCarry(root, nowMs) {
     // The rule as each side of the merge had it, not as the merged tree has it.
     const attrs = [fromBase, fromHead, baseSha].map((sha) => runGit(["check-attr", "--source", sha, "merge", "--", file], { cwd: root }));
     if (attrs.some((attr) => !attr.startsWith(`${file}: merge: `))) return { problem: `could not read the merge rule for ${file}` };
+    // A custom merge driver (local config + attributes) can write anything, and merge-tree runs it too (Taha, #2226 LOW 1).
+    if (attrs.some((attr) => !BUILTIN_MERGE_RULES.has(attr.slice(`${file}: merge: `.length)))) {
+      return { problem: `both sides changed ${file}, which uses a custom merge driver; resolve it by hand and run the full review` };
+    }
     if (!attrs.some((attr) => attr.endsWith(": merge: union"))) continue;
     for (const [a, b] of [[fromBase, fromHead], [fromBase, baseSha]]) {
       // No converters or helpers (they could run repo code and rewrite the counts); the path is literal.

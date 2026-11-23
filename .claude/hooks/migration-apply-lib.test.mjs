@@ -1868,6 +1868,19 @@ denies(evaluate(fixture({ codexProof: null }), { landingGate: () => ({ ok: false
   refused(gate({ pr: { headRefName: "release/next", comments: [] } }), "Taha hasn't given the go-ahead", "the release too");
   // Mason's Decision A (2026-11-12): his agents apply a release's migrations from the release PR itself.
   ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "the release PR's migration applies live before its merge");
+  // A proof made under the release-only rules proves only the release PR, never a hotfix (Sol r8, #2226).
+  {
+    const proofFile = path.join(gateDir, ".claude", "session-state", `codex-review-${HEAD_SHA}.json`);
+    writeFileSync(proofFile, JSON.stringify({ ...goodProof, review_ref: "origin/main", release_rules: true }));
+    try {
+      refused(gate(), "no fresh gpt-6.2-sol/high proof", "a release-rules proof does not prove a hotfix");
+      ok(gate({ pr: { headRefName: "release/next" } }).ok === true, "a release-rules proof still proves the release PR");
+      writeFileSync(proofFile, JSON.stringify({ ...goodProof, review_ref: "origin/main", release_rules: false }));
+      ok(gate().ok === true, "a hotfix's own main review still proves it");
+    } finally {
+      writeFileSync(proofFile, JSON.stringify(goodProof));
+    }
+  }
   // The name alone is not enough: main's release guard must have passed on this head.
   const build = readyPr.statusCheckRollup[0];
   const guardRun = readyPr.statusCheckRollup[1];

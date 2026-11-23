@@ -440,6 +440,8 @@ function evaluate({ dir, migName, queryHash, now, git, gh, listWorktrees, sessio
         if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(file)) continue;
         let data;
         try { data = JSON.parse(readFileSync(path.join(stateDir, file), "utf8")); } catch { continue; }
+        // A review run under the release-only rules counts only for the release PR, never a hotfix (Sol r8, #2226).
+        if (data?.release_rules === true && headRef !== "release/next") continue;
         if (proofValid(data, head, now, baseSha, APPLY_SOL_PROOF_MAX_AGE_MS) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead: String(data.head_sha).toLowerCase() === String(head).toLowerCase() })) { proven = true; break; }
       }
     } catch { /* an unreadable directory holds no proof — keep looking */ }

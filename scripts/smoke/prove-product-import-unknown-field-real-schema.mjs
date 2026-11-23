@@ -53,8 +53,9 @@ try {
   assert.equal(scalar("SELECT (prosrc LIKE '%KI-103%')::text FROM pg_proc WHERE oid = 'public.preview_product_import(jsonb)'::regprocedure;"), 'true');
 
   // After: the preview refuses the file and names each unknown field; nothing saved.
-  assert.equal(attempt(USERS.admin, `${refuse(`r := ${preview([good, extra])};`)} v := t || '|' || ${products};`),
-    'ok|PRODUCT_SETUP_ROW_SHAPE_INVALID: a row has a field the save does not accept: notes_typo, Rates|0');
+  // Field order follows the database collation (Luna LOW), so accept either order.
+  assert.match(attempt(USERS.admin, `${refuse(`r := ${preview([good, extra])};`)} v := t || '|' || ${products};`),
+    /^ok\|PRODUCT_SETUP_ROW_SHAPE_INVALID: a row has a field the save does not accept: (notes_typo, Rates|Rates, notes_typo)\|0$/);
   // A good file still previews ok and saves, and the save still accepts rates / expected_prices.
   assert.equal(attempt(USERS.admin, `${asUser(`r := ${preview([good])};`)} v := ${statuses};
     ${asUser(`r2 := ${save([good], 'kg')};`)} v := v || '|' || (r2->>'inserted_count') || '|' || ${products};`), 'ok|ok|1|1');

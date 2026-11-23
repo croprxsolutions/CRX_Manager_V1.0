@@ -62,11 +62,19 @@ describe('RT-4a rate cut-over modal', () => {
   });
 
   it('switches back with restore when the group is on its approved rate', async () => {
-    mockPreview.mockResolvedValue({ ...eligible, direction: 'restore', rate_source: 'approved' });
-    open('approved');
+    const restore = { ...eligible, direction: 'restore', rate_source: 'approved',
+      target: { rate_per_acre: null, rate_unit: 'Dry oz', suggested_rate: null } };
+    mockPreview.mockResolvedValue(restore);
+    mockCommit.mockResolvedValue({ parent_id: 'par1', direction: 'restore', rate_source: 'legacy' });
+    const onSaved = open('approved');
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
-    expect(await screen.findByRole('button', { name: 'Switch back to old rate' })).toBeInTheDocument();
+    const back = await screen.findByRole('button', { name: 'Switch back to old rate' });
     expect(mockPreview).toHaveBeenCalledWith('par1', 'restore');
+    expect(screen.getByText('none (Dry oz)')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'undo pilot' } });
+    fireEvent.click(back);
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(mockCommit).toHaveBeenCalledWith(restore, 'undo pilot', expect.any(String));
   });
 
   it('retries a lost reply with the same key, and a stale refusal asks for a new preview', async () => {

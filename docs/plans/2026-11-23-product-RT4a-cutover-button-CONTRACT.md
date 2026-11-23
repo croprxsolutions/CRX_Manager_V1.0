@@ -2,7 +2,9 @@
 
 Read at `origin/staging` 5b549b9e4. Builds the screen for the settled RT-4a contract
 (`2026-11-17-product-RT4-cutover-CONTRACT.md`), which said "No screen"; Mason asked for the button on 2026-11-23
-so the pilot is his own click instead of an API call in the browser pane. The database is unchanged.
+so the pilot is his own click instead of an API call in the browser pane. One database change rides with it
+(amendment at the end, Sol round 2): migration `20270227100000_rate_cutover_refuses_unrestorable.sql`, which must be
+live before the button reaches production (§3).
 
 ## 1. Outcome and authority
 

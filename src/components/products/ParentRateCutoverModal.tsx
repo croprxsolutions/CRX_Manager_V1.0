@@ -27,7 +27,8 @@ const isServerRefusal = (error: unknown) => {
 
 const TIERS = [1, 2, 3] as const;
 const perAcre = (value: number | null | undefined) => (value == null ? 'none' : formatExactUSD(value));
-const rateText = (rate: string | null, unit: string | null) => (rate == null ? 'none' : `${rate} ${unit ?? ''}`.trim());
+// A blank rate still keeps its unit (the field app offers it when someone types a rate), so show it.
+const rateText = (rate: string | null, unit: string | null) => (rate == null ? (unit?.trim() ? `none (${unit.trim()})` : 'none') : `${rate} ${unit ?? ''}`.trim());
 const text = (value: string | null) => (value?.trim() ? value : 'none');
 
 // A switch that changes no rate writes no prices (the server skips the rate write), so the saved prices stay.

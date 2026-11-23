@@ -2270,6 +2270,27 @@ function gitChangedEntries(fromRef, toRef, cwd) {
 // of main into it: two parents, the second already in main (`baseSha` contains
 // it), a tree byte-for-byte what `git merge-tree` of the two produces (nothing
 // hand-edited), and no file changed on both sides since they split. Else null.
+// `git merge-tree` in the checkout reads its local config, whose merge drivers, filters and renormalize
+// setting can run programs (Taha #2226 LOW 1; Sol r1-r2 on the follow-up). So merge in a throwaway bare
+// repository with no config or templates that borrows this one's objects, reading .gitattributes from
+// `attrSource`'s tree (built-in rules such as union still apply). Returns the spawnSync result.
+function isolatedMergeTree(root, ours, theirs, attrSource) {
+  const objects = path.resolve(root, runGit(["rev-parse", "--git-common-dir"], { cwd: root }), "objects");
+  if (!existsSync(objects)) return { error: new Error("no object store"), status: null, stdout: "" };
+  const scratch = mkdtempSync(path.join(tmpdir(), "crx-merge-tree-"));
+  try {
+    const init = runTrustedGit(["init", "-q", "--bare", "--template=", scratch], { cwd: scratch, timeout: 30_000 });
+    if (init.error || init.status !== 0) return { error: init.error || new Error("git init failed"), status: init.status, stdout: "" };
+    mkdirSync(path.join(scratch, "objects", "info"), { recursive: true });
+    writeFileSync(path.join(scratch, "objects", "info", "alternates"), `${objects}\n`);
+    return runTrustedGit(["--git-dir", scratch, "--attr-source", attrSource, "merge-tree", "--write-tree", "--no-messages", ours, theirs], {
+      cwd: scratch, timeout: 120_000, stdio: ["ignore", "pipe", "ignore"],
+    });
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
 export function cleanMainMergeParent(root, headSha, baseSha) {
   if (!CARRY_SHA_RE.test(String(headSha || "")) || !CARRY_SHA_RE.test(String(baseSha || ""))) return null;
   const parents = runGit(["rev-list", "--parents", "-n", "1", headSha], { cwd: root }).split(/\s+/).slice(1);
@@ -2281,9 +2302,7 @@ export function cleanMainMergeParent(root, headSha, baseSha) {
   const forks = runGit(["merge-base", "--all", branchHead, mainSide], { cwd: root }).split(/\s+/).filter(Boolean);
   if (forks.length !== 1 || !CARRY_SHA_RE.test(forks[0])) return null;
   const [fork] = forks;
-  const merged = runTrustedGit(["merge-tree", "--write-tree", "--no-messages", mainSide, branchHead], {
-    cwd: root, timeout: 120_000, stdio: ["ignore", "pipe", "ignore"],
-  });
+  const merged = isolatedMergeTree(root, mainSide, branchHead, headSha);
   const mergedTree = String(merged.stdout || "").split(/\r?\n/)[0].trim();
   if (merged.error || merged.status !== 0 || !CARRY_SHA_RE.test(mergedTree)) return null;
   if (runGit(["rev-parse", `${headSha}^{tree}`], { cwd: root }) !== mergedTree) return null;
@@ -2366,19 +2385,9 @@ function resolveCarry(root, nowMs) {
   if (forks.length !== 1 || forks[0] !== fromBase) {
     return { problem: `the merge's common ancestor is not the reviewed base (the branch already held commits ${target} gained since)` };
   }
-  // merge-tree runs any configured merge driver (a built-in name can be redefined) or merge.default, and
-  // such a driver can write anything, so none may be set before it runs (Taha #2226 LOW 1; Sol r1 HIGH 1-2).
-  const drivers = runTrustedGit(["config", "--get-regexp", "^merge\\..*\\.driver$|^merge\\.default$"], { cwd: root, timeout: 10_000 });
-  if (drivers.error || (drivers.status !== 0 && drivers.status !== 1)) return { problem: "could not read the git merge-driver settings" };
-  const driverKey = String(drivers.stdout || "").trim().split(/\s/)[0];
-  if (driverKey) {
-    return { problem: `a custom git merge driver is configured (${driverKey}); merge by hand and run the full review` };
-  }
   // HEAD's own parent order: a union-merged file (DECISION_LOG.md) lists "ours" first,
   // so the reversed order rebuilds a different tree from the same clean merge.
-  const merged = runTrustedGit(["merge-tree", "--write-tree", "--no-messages", parents[0], parents[1]], {
-    cwd: root, timeout: 120_000, stdio: ["ignore", "pipe", "ignore"],
-  });
+  const merged = isolatedMergeTree(root, parents[0], parents[1], headSha);
   const mergedTree = String(merged.stdout || "").split(/\r?\n/)[0].trim();
   if (merged.error || merged.status !== 0 || !CARRY_SHA_RE.test(mergedTree)) {
     return { problem: `the reviewed head does not merge cleanly onto today's ${target}` };

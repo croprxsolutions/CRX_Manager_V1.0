@@ -1665,23 +1665,23 @@ function collisionPromptSkipsWork(prompt) {
     assert.match(refused.stderr, /renamed or copied docs\/manual\/note\.md, which the other side changed/, "carry: names the moved file");
   });
 
-  // 7b. A configured merge driver refuses the carry before Git can run it, whether an attribute names it
-  // or merge.default selects it for a file with no attribute (Taha #2226 LOW 1; Sol r1 HIGH 1-2).
-  for (const [label, attributes] of [["a named driver", "src/a.ts merge=keepours\n"], ["merge.default", null]]) {
+  // 7b. The carry's merge never runs a program from the checkout's git config: a merge driver named by an
+  // attribute or one picked by merge.default (Taha #2226 LOW 1; Sol r1-r2).
+  for (const [label, setUp] of [
+    ["a named driver", (git, repo) => { git("config", "merge.marker.driver", "echo ran > driver-ran; false"); writeFileSync(`${repo}/.git/info/attributes`, "docs/manual/note.md merge=marker\n"); }],
+    ["merge.default", (git) => { git("config", "merge.marker.driver", "echo ran > driver-ran; false"); git("config", "merge.default", "marker"); }],
+  ]) {
     withRepo(({ repo, git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
-      writeFileSync(file("src/a.ts"), "export const a = 2;\nexport const pr = true;\n");
-      const head = commitAll("pr edits a.ts again");
+      writeFileSync(file("docs/manual/note.md"), "# The note\nDo the safe thing.\n");
+      const head = commitAll("pr retitles the note");
       writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
-      land(target, "main adds code", () => writeFileSync(file("src/main.ts"), "export const main = true;\n"));
+      land(target, "main extends the note", () => writeFileSync(file("docs/manual/note.md"), "# Note\nDo the safe thing.\nAnd one more line.\n"));
       git("merge", "-q", "--no-edit", target);
-      // Set up only after the test's own merge, so a marker file proves whether the carry ran the driver.
-      git("config", "merge.keepours.driver", "echo ran > driver-ran; false");
-      if (attributes) writeFileSync(`${repo}/.git/info/attributes`, attributes);
-      else git("config", "merge.default", "keepours");
-      const refused = carry("--dry-run");
-      assert.equal(refused.status, 1, `carry: ${label} is refused (${refused.stdout})`);
-      assert.match(refused.stderr, /a custom git merge driver is configured/, `carry: says why (${label})`);
-      assert.equal(existsSync(`${repo}/driver-ran`), false, `carry: ${label} never ran`);
+      // Set up only after the test's own merge, so the marker file shows whether the carry's merge ran it.
+      setUp(git, repo);
+      const result = carry("--dry-run");
+      assert.equal(existsSync(`${repo}/driver-ran`), false, `carry: ${label} never runs (${result.stdout}${result.stderr})`);
+      assert.doesNotMatch(result.stderr, /does not merge cleanly/, `carry: ${label} does not change the rebuilt merge`);
     });
   }
 

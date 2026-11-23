@@ -4,8 +4,8 @@
  */
 import { supabase } from './db';
 
-export const EPA_NOT_RECORDED = 'Not recorded';
-export const EPA_UNKNOWN = 'Unknown';
+const EPA_NOT_RECORDED = 'Not recorded';
+const EPA_UNKNOWN = 'Unknown';
 
 export interface KeptEpa {
   epa_registration: string | null;

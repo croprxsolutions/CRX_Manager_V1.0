@@ -1,6 +1,8 @@
 # M9 design: refunds paid outside CRX, prepay balance check, returned checks (stage 1)
 
-Migration: `supabase/migrations/20270226213000_m9_refunds_and_returned_checks.sql`. Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` (written first; 13 cases).
+Migration: `supabase/migrations/20270226213000_m9_refunds_and_returned_checks.sql`. Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` (written first; 15 cases now).
+
+**Sections 1–6 are the stage-1 design. Sections 7–10 (Sol rounds) override them where they differ: for example a refund is dated today with an optional `p_paid_on`, not `p_refund_date`.**
 `B:` = baseline `supabase/baselines/20260727174805_public_schema.sql.br` (decompressed line). Other refs are `supabase/migrations/`.
 
 ## 1. How money is stored today
@@ -86,5 +88,6 @@ A read-only live count found 1 customer with prepay, 1 credit, 1 payment set and
 5. `void_payment` refuses a set that is not a payment (`NOT_A_PAYMENT`).
 6. A paid-on or bank date of `-infinity` is refused (`BAD_VALUE`).
 7. Round 5 (whole branch after round 4): every credit has a known source (`CREDIT_SOURCE_UNKNOWN`) and every active payment behind the customer's credits adds up (`SOURCE_PAYMENT_TOTALS`); an entry's buckets are one receipt (one reference, one entry time); an allocation row of $0 or less is refused; the preflight pins the recompute trigger's shape; a payment dated `-infinity` is undated.
-8. Stamp moved to `20270226213000` (after staging's `20270226163000` and the open PRs' stamps).
+8. Round 6 (last advisory round): an unlinked check credit needs exactly one creation entry, and that entry must be the customer's and carry the check's reference; a source payment's credits must all be its customer's; a return refuses when an active payment puts $0 or less on an invoice it touches (`INVOICE_NEGATIVE_ALLOCATION`).
+9. Stamp moved to `20270226213000` (after staging's `20270226163000` and the open PRs' stamps).
 

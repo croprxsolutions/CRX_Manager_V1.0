@@ -38,7 +38,9 @@
 --   agrees with its rows and the stored balance is the credits' total. Anything else is refused
 --   RECORD_NEEDS_HAND_CHECK: <code>. Round 5: every credit has a known source (an overpayment linked to its payment, or
 --   an unlinked check), every active payment behind them adds up, an entry's buckets are one receipt (one reference,
---   one entry time) and no allocation row is $0 or negative. A return also refuses a draft, void, cancelled or deleted invoice
+--   one entry time) and no allocation row is $0 or negative. Round 6: an unlinked check credit needs exactly one creation
+--   entry, that entry is the customer's and the check's reference, a source payment's credits are all its customer's,
+--   and no active payment puts $0 or less on an invoice a return touches. A return also refuses a draft, void, cancelled or deleted invoice
 --   (RETURN_INVOICE_NOT_OPEN).
 --   5. get_prepay_balance_check(customer?): read-only; received - applied - refunded - returned = expected, against
 --      the stored balance and the credits' balances, plus each credit against its own rows (credit_mismatches);
@@ -70,8 +72,8 @@
 -- functions from the bodies pinned in this file's preflight (latest defining migrations: 20260728231350 / baseline
 -- for the recompute, 20261204100000 for void_payment, baseline for edit/delete, 20270224120000 for the two Month-End
 -- helpers, 20260803221244 for the tripwire, 20261204110000 for the statement, 20260827041100 for void_invoice),
--- restore the audit CHECK list and the recompute's EXECUTE grants, drop the trigger first, then the three RPCs, the
--- five helpers and the two tables. void_payment, edit and delete also set customers.updated_at when they change the cached balance.
+-- restore the audit CHECK list and the recompute's EXECUTE grants, drop the two tables first (their triggers go with
+-- them), then the three RPCs and the five helpers. void_payment, edit and delete also set customers.updated_at when they change the cached balance.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -329,6 +331,11 @@ BEGIN
               -- the buckets are one receipt: one reference and one entry time
               OR (SELECT count(DISTINCT (pc.created_at, pc.source_reference)) FROM public.prepay_credits pc
                    WHERE pc.id = ANY (p_bucket_ids)) <> 1
+              -- the entry is this customer's, for this check's reference
+              OR EXISTS (SELECT 1 FROM public.financial_audit_log fal JOIN public.prepay_credits pc ON pc.id = p_bucket_ids[1]
+                          WHERE fal.operation_type = 'prepay_credit_created' AND fal.new_values -> 'credit_ids' ? pc.id::text
+                            AND (fal.entity_id IS DISTINCT FROM p_customer_id
+                                 OR (fal.new_values ->> 'reference_number') IS DISTINCT FROM pc.source_reference))
               -- each bucket is in exactly one entry
               OR EXISTS (SELECT 1 FROM unnest(p_bucket_ids) b(id)
                           WHERE (SELECT count(*) FROM public.financial_audit_log fal
@@ -375,6 +382,10 @@ BEGIN
                         - COALESCE((SELECT sum(r.amount_cents) FROM public.money_reversal_lines r
                                       WHERE r.invoice_id = i.id AND r.line_kind = 'invoice_payment'), 0))
       THEN 'INVOICE_PAID_MISMATCH'
+    -- no active payment puts $0 or less on a touched invoice (a return must never drive paid below zero)
+    WHEN EXISTS (SELECT 1 FROM public.invoice_line_allocations l JOIN public.allocation_sets a ON a.id = l.allocation_set_id
+                  WHERE l.invoice_id = ANY (p_invoice_ids) AND a.is_active AND a.entity_type = 'payment' AND l.amount_cents <= 0)
+      THEN 'INVOICE_NEGATIVE_ALLOCATION'
     WHEN EXISTS (SELECT 1 FROM public.invoices i
                   WHERE i.id = ANY (p_invoice_ids)
                     AND i.prepay_applied_cents IS DISTINCT FROM
@@ -394,7 +405,11 @@ BEGIN
     WHEN EXISTS (SELECT 1 FROM public.prepay_credits pc
                   WHERE pc.customer_id = p_customer_id
                     AND NOT ((pc.source_type = 'overpayment' AND pc.allocation_set_id IS NOT NULL)
-                             OR (pc.source_type = 'check' AND pc.allocation_set_id IS NULL)))
+                             OR (pc.source_type = 'check' AND pc.allocation_set_id IS NULL
+                                 -- a Prepayment Manager check is proven by exactly one creation entry
+                                 AND (SELECT count(*) FROM public.financial_audit_log fal
+                                       WHERE fal.operation_type = 'prepay_credit_created'
+                                         AND fal.new_values -> 'credit_ids' ? pc.id::text) = 1)))
       THEN 'CREDIT_SOURCE_UNKNOWN'
     -- every active payment behind the customer's credits adds up (its invoice rows plus its prepay are the check)
     WHEN EXISTS (SELECT 1 FROM public.allocation_sets a
@@ -402,6 +417,8 @@ BEGIN
                     AND a.id IN (SELECT pc.allocation_set_id FROM public.prepay_credits pc WHERE pc.customer_id = p_customer_id)
                     AND (EXISTS (SELECT 1 FROM public.invoice_line_allocations l WHERE l.allocation_set_id = a.id
                                   AND (l.invoice_id IS NULL OR l.amount_cents <= 0))
+                         OR EXISTS (SELECT 1 FROM public.prepay_credits pc WHERE pc.allocation_set_id = a.id
+                                     AND pc.customer_id IS DISTINCT FROM a.customer_id)
                          OR COALESCE(a.total_allocated_cents, 0) IS DISTINCT FROM
                             (SELECT COALESCE(sum(l.amount_cents), 0) FROM public.invoice_line_allocations l WHERE l.allocation_set_id = a.id)
                          OR a.total_payment_cents IS DISTINCT FROM COALESCE(a.total_allocated_cents, 0)

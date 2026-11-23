@@ -40,3 +40,4 @@
   - Only admins can read the refund and returned-check records directly; reps still see the statement rows.
   - Void Payment refuses anything that is not a payment.
   - Round 5: a prepay credit with no known source, or one its payment never funded, blocks refunds and returns for that customer until it is checked by hand; a Prepayment Manager entry that mixes two checks is refused.
+  - Round 6: a Prepayment Manager credit with no record of its entry, or one whose entry belongs to another customer, is refused; a returned check is refused if another payment put a negative amount on the same invoice.

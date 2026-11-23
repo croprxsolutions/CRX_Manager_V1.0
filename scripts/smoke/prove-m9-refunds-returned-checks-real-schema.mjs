@@ -46,6 +46,8 @@
  *      reversal tables; void_payment refuses a set that is not a payment; -infinity dates are refused. Round 5: a
  *      credit with no known source, a credit its payment never funded, an entry mixing two receipts, a negative
  *      allocation row and a payment dated -infinity are refused.
+ *  15) Sol round 6: a check credit with no creation entry, a negative active allocation on an invoice the return
+ *      touches, an entry recorded for another customer and a payment minting another customer's credit are refused.
  *
  * Run: node scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs   (needs Docker)
  * Prints M9_REFUNDS_RETURNED_CHECKS_PROOF_PASS when every case passes; otherwise lists each failing case and why and
@@ -925,6 +927,44 @@ kase('14) Sol round 4: whole-customer gate, partial bucket list, face value, clo
   assert.equal(o.admin, '1:1', `an admin reads the refund and its line: ${r.last}`);
   assert.equal(o.rep, '0:0', 'a rep reads no reversal rows');
   assert.equal(o.inv2, 'paid:10000', 'the refused returns changed nothing on the invoice');
+});
+
+kase('15) Sol round 6: an unproven check credit, a negative allocation on a touched invoice, another customer\'s entry, a payment minting another customer\'s credit', () => {
+  const over6 = `(SELECT id FROM public.prepay_credits WHERE allocation_set_id = ${SET6})`;
+  const r = ran(session(`${OWNER}
+    -- c10: a Prepayment Manager-style check credit with no creation entry.
+    INSERT INTO public.prepay_credits (customer_id, original_amount_cents, balance_cents, source_type, source_reference)
+      VALUES ('${C.c10}', 5000, 5000, 'check', 'NOENTRY-15');
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 5000 WHERE id = '${C.c10}';
+    -- c5: a legacy active payment that puts -$25 on the invoice the October check paid (the invoice agrees).
+    INSERT INTO public.allocation_sets (entity_type, entity_id, customer_id, is_active, total_payment_cents, total_allocated_cents, payment_method, check_number, payment_date)
+      VALUES ('payment', gen_random_uuid(), '${C.c5}', true, 0, -2500, 'check', 'MINUS-15', DATE '2026-11-01');
+    INSERT INTO public.invoice_line_allocations (allocation_set_id, invoice_id, amount_cents, bill_to_customer_id, split_percentage)
+      SELECT id, '${INV5}', -2500, '${C.c5}', 100 FROM public.allocation_sets WHERE check_number = 'MINUS-15';
+    UPDATE public.invoices SET paid_amount_cents = paid_amount_cents - 2500 WHERE id = '${INV5}';
+    -- c4: a check credit whose only entry was recorded for c1.
+    INSERT INTO public.prepay_credits (customer_id, original_amount_cents, balance_cents, source_type, source_reference, bucket_label)
+      VALUES ('${C.c4}', 10000, 10000, 'check', 'OTHER-15', 'A');
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 10000 WHERE id = '${C.c4}';
+    INSERT INTO public.financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, new_values, total_impact_cents, description)
+      VALUES ('prepay_credit_created', 'prepay_credit', '${C.c1}', '${ADMIN}', jsonb_build_object('reference_number', 'OTHER-15',
+              'credit_ids', jsonb_build_array((SELECT id FROM public.prepay_credits WHERE source_reference = 'OTHER-15')), 'total_cents', 10000), 10000, 'legacy');
+    -- c6: its $200 payment's prepay is $150 for c6 and $50 for c1 (each customer's own books agree).
+    UPDATE public.prepay_credits SET original_amount_cents = 15000, balance_cents = 15000 WHERE id = ${over6};
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents - 5000 WHERE id = '${C.c6}';
+    INSERT INTO public.prepay_credits (customer_id, original_amount_cents, balance_cents, source_type, source_reference, allocation_set_id)
+      VALUES ('${C.c1}', 5000, 5000, 'overpayment', 'SPLIT-15', ${SET6});
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 5000 WHERE id = '${C.c1}';
+    ${as(ADMIN)}
+    ${refusal(refund(C.c10, 1000, 'm9-c15-noentry', { ref: 'QB 1501' }))}
+    ${refusal(returned(`(SELECT id FROM public.allocation_sets WHERE customer_id = '${C.c5}' AND check_number = '1001')`, 'm9-c15-minus'))}
+    ${refusal(`public.record_returned_check(NULL, ${TODAY}, 'NSF', '${ADMIN}', 'm9-c15-other', (SELECT id FROM public.prepay_credits WHERE source_reference = 'OTHER-15'))`)}
+    ${refusal(refund(C.c6, 1000, 'm9-c15-split', { ref: 'QB 1502' }))}
+    ${OWNER} SELECT (SELECT paid_amount_cents FROM public.invoices WHERE id = '${INV5}');`));
+  assert.deepEqual(r.refused.map((m) => /RECORD_NEEDS_HAND_CHECK: ([A-Z_]+)/.exec(m)?.[1] ?? m),
+    ['CREDIT_SOURCE_UNKNOWN', 'INVOICE_NEGATIVE_ALLOCATION', 'CHECK_BUCKETS', 'SOURCE_PAYMENT_TOTALS'],
+    `a check credit with no entry; a -$25 allocation on the invoice; an entry recorded for another customer; a payment minting another customer's credit: ${JSON.stringify(r.refused)}`);
+  assert.equal(r.last, '121200', 'the refused return left the invoice paid amount as it was');
 });
 
 const admin = (sql) => psql(sql, { user: 'supabase_admin', db: 'template1' });

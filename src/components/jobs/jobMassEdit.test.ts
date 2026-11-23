@@ -242,6 +242,14 @@ describe('jobMassEdit — Loader Worksheet bulk fields (#10)', () => {
     expect(loaderNumberError('0.001', 'capacity')).toBeNull();
     expect(loaderNumberError('1000001', 'capacity')).not.toBeNull();
     expect(loaderNumberError('  ', 'capacity')).toBeNull();
+    // #2174: checked on the text; Number() would round these onto the boundary.
+    expect(loaderNumberError('0.00099999999999999999', 'capacity')).not.toBeNull();
+    expect(loaderNumberError('1000000.0000000000000001', 'carrier')).not.toBeNull();
+    expect(loaderNumberError('1000000.000', 'capacity')).toBeNull();
+    expect(loaderNumberError('000.0010', 'capacity')).toBeNull();
+    expect(loaderNumberError('.5', 'capacity')).toBeNull();
+    expect(loaderNumberError('-0.5', 'carrier')).not.toBeNull();
+    expect(loaderNumberError('-0', 'carrier')).toBeNull();
     expect(loaderInputsValid(draft({ setLoader: true, loaderTankCapacity: '2000000' }))).toBe(false);
     expect(buildFieldPatch(draft({ setLoader: true, carrierRateGpa: '0.0001' }))?.carrier_rate_gpa).toBeNull();
   });

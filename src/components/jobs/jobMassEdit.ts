@@ -165,19 +165,36 @@ export function buildFieldPatch(draft: MassEditDraft): Record<string, string | n
 }
 
 // edit_jobs refuses loader numbers outside this range (carrier rate may also be 0).
-const LOADER_NUMBER_MIN = 0.001;
-const LOADER_NUMBER_MAX = 1_000_000;
+const LOADER_NUMBER_MIN = '0.001';
+const LOADER_NUMBER_MAX = '1000000';
+
+/** Compares two unsigned plain decimal strings exactly; the sign of the result is the sign of a - b. */
+function compareDecimalText(a: string, b: string): number {
+  const parts = (x: string) => {
+    const [i = '', f = ''] = x.split('.');
+    return [i.replace(/^0+/, ''), f.replace(/0+$/, '')];
+  };
+  const [ai, af] = parts(a);
+  const [bi, bf] = parts(b);
+  if (ai.length !== bi.length) return ai.length - bi.length;
+  if (ai !== bi) return ai < bi ? -1 : 1;
+  const w = Math.max(af.length, bf.length);
+  const pa = af.padEnd(w, '0');
+  const pb = bf.padEnd(w, '0');
+  return pa === pb ? 0 : pa < pb ? -1 : 1;
+}
 
 /** Message for a value the server would refuse, or null when the input is blank or in range. */
 export function loaderNumberError(raw: string, kind: 'carrier' | 'capacity'): string | null {
-  if (raw.trim() === '') return null;
+  const t = raw.trim();
+  if (t === '') return null;
   const label = kind === 'carrier' ? 'Carrier rate' : 'Tank capacity';
   // Plain decimals only: "12abc" and "1e-400" (which Number reads as 0) are refused.
-  if (!/^-?(\d+(\.\d*)?|\.\d+)$/.test(raw.trim())) return `${label} must be a number.`;
-  const n = Number(raw.trim());
+  if (!/^-?(\d+(\.\d*)?|\.\d+)$/.test(t)) return `${label} must be a number.`;
   // Only text that IS zero counts as 0: "0.000…001" with hundreds of zeros reads as 0 in Number and is refused below.
-  if (kind === 'carrier' && /^-?(0+(\.0*)?|\.0+)$/.test(raw.trim())) return null;
-  if (n < LOADER_NUMBER_MIN || n > LOADER_NUMBER_MAX) {
+  if (kind === 'carrier' && /^-?(0+(\.0*)?|\.0+)$/.test(t)) return null;
+  // The range is checked on the TEXT, not Number(t): "0.00099999999999999999" reads as 0.001 in Number (#2174).
+  if (t.startsWith('-') || compareDecimalText(t, LOADER_NUMBER_MIN) < 0 || compareDecimalText(t, LOADER_NUMBER_MAX) > 0) {
     return kind === 'carrier'
       ? 'Carrier rate must be 0, or 0.001 to 1,000,000.'
       : 'Tank capacity must be 0.001 to 1,000,000.';

@@ -28,10 +28,17 @@ BEGIN
      IS DISTINCT FROM 'c0b201d309650463f192fdf26eedc292' THEN
     RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_BASELINE_DRIFT: _mark_delivery_aggregate_short_stock is missing or not the 20260716191000 body';
   END IF;
+  -- Luna r1: the rollback re-creates exactly this owner, grant list and settings; refuse if live differs.
+  IF (SELECT pg_get_userbyid(proowner) || '|' || coalesce(proacl::text, '') || '|' || prosecdef::text || '|' || coalesce(array_to_string(proconfig, ';'), '')
+      FROM pg_proc WHERE oid = 'public._mark_delivery_aggregate_short_stock()'::regprocedure)
+     IS DISTINCT FROM 'postgres|{postgres=X/postgres}|true|search_path=public, pg_temp' THEN
+    RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_BASELINE_DRIFT: owner, grants, security or search_path differ from 20260716191000';
+  END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_trigger
     WHERE tgname = 'trg_mark_delivery_aggregate_short_stock' AND tgrelid = 'public.inventory_transactions'::regclass
       AND tgfoid = 'public._mark_delivery_aggregate_short_stock()'::regprocedure AND NOT tgisinternal
+      AND tgenabled = 'O'  -- enabled, as the rollback re-creates it (Luna r1)
   ) THEN
     RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_BASELINE_DRIFT: trg_mark_delivery_aggregate_short_stock is not on inventory_transactions';
   END IF;
@@ -39,7 +46,9 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM pg_proc
     WHERE oid <> 'public._mark_delivery_aggregate_short_stock()'::regprocedure
-      AND prosrc LIKE '%delivery\_aggregate\_short\_%'
+      AND (prosrc LIKE '%delivery\_aggregate\_short\_%'
+           -- a SQL-standard body lives in prosqlbody, not prosrc (Luna r1)
+           OR (prosqlbody IS NOT NULL AND pg_get_function_sqlbody(oid) LIKE '%delivery\_aggregate\_short\_%'))
   ) THEN
     RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_BASELINE_DRIFT: a function still uses the trigger''s settings (apply 20270213100000 first)';
   END IF;

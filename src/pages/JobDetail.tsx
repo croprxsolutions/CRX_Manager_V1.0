@@ -5408,7 +5408,7 @@ export default function JobDetail() {
         title="Transfer to Invoice"
         message={isMultiOwner
           ? 'This job has fields billed to more than one owner. Transfer to Invoice creates a separate invoice for each owner, billing each owner their acre share of every chemical line and of any spraying fee.'
-          // 20270222100000 (Mason, 2026-11-22): the invoice bills the payer saved on the job, the one named here.
+          // 20270224160000 (Mason, 2026-11-22): the invoice bills the payer saved on the job, the one named here.
           : `Transfer this job to an invoice for ${customers.find((c) => c.id === ([...distinctBilledCustomers][0] ?? customerId))?.farm_name || 'the billed customer'}? This will create a new invoice from the job chemicals.`}
         confirmLabel="Transfer to Invoice"
         variant="warning"

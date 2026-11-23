@@ -1335,7 +1335,7 @@ The [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) (sweep 3 #9) re-confirm
 logged here, not as a new KI.
 The 2026-11-02 cost audit noted more functions in this same ownership and role-check area (not cost); the list is in
 Mason's private notes until the scoping work is built. It also noted that an admin's automatic draft invoice for a job
-with a below-cost line always fails, so that job is billed by hand; candidate 20270222100000 (not yet live) writes each job line's
+with a below-cost line always fails, so that job is billed by hand; candidate 20270224160000 (not yet live) writes each job line's
 real quantity in the sold unit, so the ordinary check judges it exactly; a unit that can't convert stops Create Invoice by name.
 
 ### KI-07 — Other small security gaps

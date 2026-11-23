@@ -364,7 +364,7 @@ BEGIN
   -- Trigger ONLY on EXPLICIT multi-owner billing: >1 distinct field_billing_defaults
   -- customer across the job's fields (the landlord/tenant setup the finding is about).
   -- ==========================================================================
-  -- 20270222100000 (Mason, 2026-11-22: every field has a billing split, 100% or shared; each owner is billed the
+  -- 20270224160000 (Mason, 2026-11-22: every field has a billing split, 100% or shared; each owner is billed the
   -- acres of their own fields; invoices bill the payer saved on the job): each field's payers are the split saved on
   -- the job, else its Field Setup split (_job_transfer_shares_20270207); a field with neither stops Create Invoice by
   -- name, never falling back to a payer (Sol round 5).
@@ -1066,7 +1066,7 @@ BEGIN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '57661a3884ef0b32b80101b6ced149c5'
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '4055fc3465413aab696018e7b9666fd6'
      OR v_price IS NULL OR v_split IS NULL OR v_shares IS NULL OR v_lock IS NULL
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_shares) IS DISTINCT FROM '944760ebdf810f062b4dcf0fe56f11b2'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_lock) IS DISTINCT FROM '9b6d4bbfc5dcc61ba058971a9ac062b6'

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270227100000_live_test_data_reset.sql (one-time live test-data reset, Mason 2026-11-23).
+ * Real-schema proof for 20270227150000_live_test_data_reset.sql (one-time live test-data reset, Mason 2026-11-23).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), then seeds:
@@ -32,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, claims, scalar, docker, USERS, ROOT, NAME } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270227100000_live_test_data_reset.sql';
+const CANDIDATE = '20270227150000_live_test_data_reset.sql';
 const RAW = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const flag = (n) => ['1', 'true'].includes(String(process.env[n] ?? '').toLowerCase());
 const KEEP = flag('KEEP_CONTAINER');

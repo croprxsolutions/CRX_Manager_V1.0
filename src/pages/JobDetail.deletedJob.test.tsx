@@ -215,6 +215,19 @@ describe('JobDetail — refused cancel (#2174)', () => {
     expect(screen.getByDisplayValue('saved notes')).toBeTruthy();
   });
 
+  it('names a field the user cleared, so the box never hides a change (Luna r6 MED)', async () => {
+    serveJob(makeJob({}), makeJob({ status: 'cancelled' }));
+    mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'
+      ? editJobsReply([{ id: 'job-x', reason: 'status', status: 'cancelled' }])
+      : { data: null, error: null }));
+    mountAt('/jobs/job-x');
+    await screen.findByRole('heading', { name: 'J-0001' });
+    fireEvent.change(screen.getByDisplayValue('saved notes'), { target: { value: '' } });
+    await confirmCancel();
+    await waitFor(() => expect(notSavedBox()?.textContent).toBe('Job Notes: (you cleared this field)'));
+    expect(mockToast).toHaveBeenCalledWith('info', expect.stringMatching(/reloaded as saved/));
+  });
+
   it('shows no Not-saved box when nothing was typed', async () => {
     serveJob(makeJob({}), makeJob({ status: 'completed' }));
     mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'

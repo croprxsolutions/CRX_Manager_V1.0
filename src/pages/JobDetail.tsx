@@ -310,8 +310,11 @@ function describeUnsavedTyping(from: string, now: string | null): string | null 
   const before = JSON.parse(from) as Record<string, unknown>;
   const after = JSON.parse(now) as Record<string, unknown>;
   const parts = UNSAVED_TEXT_FIELDS
-    .filter(([key]) => after[key] !== before[key] && String(after[key] ?? '').trim() !== '')
-    .map(([key, label]) => `${label}:\n${String(after[key])}`);
+    .filter(([key]) => after[key] !== before[key])
+    // A field the user emptied is named too, so the box never hides a change (Luna r6 MED).
+    .map(([key, label]) => (String(after[key] ?? '').trim() === ''
+      ? `${label}: (you cleared this field)`
+      : `${label}:\n${String(after[key])}`));
   const otherChanged = Object.keys(after).some((key) => !UNSAVED_TEXT_FIELDS.some(([t]) => t === key)
     && JSON.stringify(after[key]) !== JSON.stringify(before[key]));
   if (otherChanged) parts.push('You also changed other details (such as dates, crew, fields or products). Check them on the reloaded job and enter them again if still needed.');
@@ -3345,7 +3348,7 @@ export default function JobDetail() {
     keepTypingFromRef.current = from;
     setIsDirty(false);
     void loadJobNotifications();
-    await fetchJob();
+    return fetchJob();
   };
 
   const handleCancelJob = async () => {
@@ -3363,8 +3366,9 @@ export default function JobDetail() {
       if (result.cancelled.length === 0) {
         const skip = result.skipped.find((s) => s.id === id);
         if (stillOnThisJob()) {
-          toast('info', `Job not cancelled: ${summarizeEditJobs(result)} The job has been reloaded as saved.`);
-          await reloadKeepingTyping(baselineRef.current, skip?.reason === 'deleted');
+          const reloaded = await reloadKeepingTyping(baselineRef.current, skip?.reason === 'deleted');
+          // Said after the reload, so it never claims a reload that did not happen (Luna r6 LOW).
+          toast('info', `Job not cancelled: ${summarizeEditJobs(result)} ${reloaded ? 'The job has been reloaded as saved.' : 'Refresh the page to see it as saved.'}`);
         }
         setCancelling(false);
         return;

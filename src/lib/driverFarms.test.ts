@@ -17,6 +17,20 @@ describe('fetchDriverFarms', () => {
     expect(rpc.mock.calls.map(([, args]) => (args as { p_customer_ids: string[] }).p_customer_ids.length)).toEqual([500, 500, 1]);
     expect(farms.size).toBe(1001);
   });
+
+  it('reports a malformed reply instead of reading it as no farms (#2167)', async () => {
+    rpc.mockResolvedValue({ data: {}, error: null });
+    await expect(fetchDriverFarms(['f1'])).rejects.toThrow(/unexpected result/);
+    rpc.mockResolvedValue({ data: { rows: 'invalid' }, error: null });
+    await expect(fetchDriverFarms(['f1'])).rejects.toThrow(/unexpected result/);
+  });
+
+  it('treats an email of only spaces as no email (#2167)', async () => {
+    rpc.mockResolvedValue({ data: { rows: [{ id: 'f1', farm_name: 'F', email: '   ' }, { id: 'f2', farm_name: 'G', email: ' a@b.c ' }] }, error: null });
+    const farms = await fetchDriverFarms(['f1', 'f2']);
+    expect(farms.get('f1')?.email).toBeNull();
+    expect(farms.get('f2')?.email).toBe('a@b.c');
+  });
 });
 
 describe('fetchDeliveryFarm (driver)', () => {

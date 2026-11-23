@@ -79,6 +79,9 @@ let reviewed;
 try {
   git("init", "-q", "-b", "staging");
   git("config", "core.autocrlf", "false");
+  // The command commits on its own; CI runners have no global git identity.
+  git("config", "user.name", "Restamp Test");
+  git("config", "user.email", "restamp@example.invalid");
   write(".gitignore", ".claude/session-state/\n");
   write("supabase/migrations/20270101000000_base.sql", "SELECT 1;\n");
   write("docs/changelog.d/other.md", `Unrelated history naming ${OLD}.\n`);

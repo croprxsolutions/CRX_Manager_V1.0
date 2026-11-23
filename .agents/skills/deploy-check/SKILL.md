@@ -1,182 +1,33 @@
 ---
 name: deploy-check
-description: Pre-merge checklist for CRX Manager — verifies a branch is safe to land. Since `main` is protected (2026-07-14), landing means branch → draft PR → checks → mark ready (CodeRabbit reviews only on request) → Sol → merge, and the merge is what deploys production via Vercel. Use before opening or merging a PR, or before applying migrations to Supabase.
+description: Read-only pre-PR checklist for CRX Manager — is this branch safe to open a PR for and land? Knows the staging-first flow (feature PRs merge into staging; only the weekly release and hotfixes reach main and production). Use before opening or merging a PR. It lands nothing; landing is /ship Step 8.
 ---
 
-# Pre-Deployment Check
+# Deploy check
 
-A final gate before landing work on `main`. Checks code quality, unapplied migrations,
-environment safety, and production readiness.
+A read-only checklist. It lands nothing. Where anything here differs from `.claude/commands/ship.md`, ship.md wins.
 
-**How production actually deploys (updated 2026-07-14).** `main` is protected by the GitHub
-`protect-main` ruleset, so **direct pushes to `main` are impossible for everyone** — Claude,
-Codex, and Mason alike. The landing path is:
+**How code reaches production.** A feature branch merges into `staging` (its own Vercel site and test database). Only `release/next` (weekly) and `hotfix/<name>` merge into `main`, by Taha or Mason; that merge deploys croprxsolutions.app. Direct pushes to `main` and `staging` are impossible.
 
-**push a branch → open the PR (finished and Luna-clean; a DRAFT only when it touches a Sol-list file) → finish required checks → freeze the candidate → mark a draft
-ready; an off-list PR is already ready (CodeRabbit, advisory since 2026-10-19, makes no automatic reviews since 2026-10-21; a
-PR with the `needs-coderabbit` label gets one requested full review; fix or refute any comments that arrive
-before the merge, but do not wait for a review nobody requested) → exact-SHA Sol proof → merge with
-`--match-head-commit <reviewed-head-sha>`.** The **merge** is what deploys production via Vercel's
-git integration; Vercel's one-click rollback is the accepted safety net.
+## Checklist
 
-Run this skill on the branch **before** opening the PR (and again before merging if the branch
-moved).
+1. **Branch:** `git status --short --branch`, then `git fetch origin && git rev-list --left-right --count origin/staging...HEAD` (a hotfix: `origin/main`). On `main` or `staging` → branch first. Uncommitted changes → WARN.
+2. **Code:** `npm run lint && npm run typecheck && npm run check:code-health && npm run build && npm run test` (plus `npm run test:agent-workflows` for agent-surface changes). Any failure → BLOCKED.
+3. **Secrets:** `git ls-files | grep -i "\.env"` and `grep -rlE "service_role|sk_live|sk_test|SUPABASE_SERVICE" src/ --include="*.ts" --include="*.tsx"`. Any hit → BLOCKED.
+4. **Bundle:** `ls -lh dist/assets/*.js | head -5`; WARN on any chunk over 500 KB.
+5. **Migrations:** list the branch's new `supabase/migrations/*.sql`. A feature PR's migration is applied to the staging database by the `Database` workflow after merge, never by hand. A hotfix or release migration is applied live before the merge through `scripts/apply-migration-file.mjs` (ship.md Step 5, Step 8 item 5). Destructive ones need Mason's approval of that exact file. Never `supabase db push`.
+6. **Sol:** `npm run sol-needed -- <n>` (or the Step 0.5 check in ship.md before a PR exists). On the list → a clean Sol proof on the head is required.
+7. **Taha:** a PR touching his hold list waits 4 hours (ship.md Step 8 item 4a); never push to his branches.
 
-## Step 1: Git Status
-
-```bash
-git status && git log --oneline -5
-```
-
-```bash
-git fetch origin && git rev-list --left-right --count origin/main...HEAD
-```
-
-Check:
-- Are there uncommitted changes? (WARN — should commit first)
-- Are we on a **feature branch**? Being on `main` is the problem case here, not the goal — work
-  cannot land from `main` because direct pushes are blocked. If HEAD is `main`, tell the user to
-  branch first.
-- Is the branch behind `origin/main`? (WARN — rebase or merge before opening the PR, or the
-  reviewed diff and the Vercel check will not reflect what actually lands.)
-- What was the last commit? (Show it to the user)
-
-## Step 2: Code Quality Gate
-
-Run these in sequence:
-
-```bash
-npm run lint && npm run typecheck && npm run build
-```
-
-ALL THREE must pass. If any fail, stop and report — do not proceed to deployment.
-
-## Step 3: Unit Tests
-
-```bash
-npm run test -- --reporter=verbose 2>&1 | tail -20
-```
-
-Must have 0 failures. Report test count and any failures.
-
-## Step 4: Check for Unapplied Migrations
-
-```bash
-# Count local migration files
-echo "Local migrations: $(ls supabase/migrations/*.sql | wc -l)"
-```
-
-Compare against the live database (Supabase MCP `list_migrations`). If there are NEW migrations that haven't been applied to the live database yet, WARN the user:
+## Report
 
 ```
-⚠️  You have X new migration(s) not yet applied to production.
-    Apply them through /migration-review → scripts/apply-migration-file.mjs
-    BEFORE merging (non-destructive: under Mason's 2026-09-26 landing rule
-    once the final reviews are clean; destructive, data-overwriting or access-changing: only after Mason's own `I approve` chat reply for that exact file (`scripts/owner-approve-migration.mjs` builds the request; the apply gate enforces the recorded reply)), or the
-    app will reference tables/columns/functions that don't exist yet.
-    NEVER `supabase db push` — it bypasses the review gate and is blocked.
+DEPLOY CHECK — <branch>
+Behind base: X   Clean tree: YES/NO   Last commit: <hash> <msg>
+Lint/Typecheck/Build: PASS   Tests: X/Y   Secrets: NONE   Largest chunk: XXX KB
+Migrations: <none | N, staging job | N, live apply before merge>
+Sol: <needed / not needed>   Taha hold: <yes until HH:MM / no>
+Verdict: READY FOR PR / BLOCKED (<each issue>)
 ```
 
-## Step 5: Environment Check
-
-Verify no secrets are exposed:
-
-```bash
-# Check for .env in git tracking
-git ls-files | grep -i "\.env"
-# Check for hardcoded keys in source
-grep -r "service_role" src/ --include="*.ts" --include="*.tsx" -l
-grep -r "sk_live\|sk_test\|SUPABASE_SERVICE" src/ --include="*.ts" --include="*.tsx" -l
-```
-
-If any results, BLOCK deployment and report.
-
-## Step 6: Bundle Size Check
-
-```bash
-# Build already ran in step 2, check the output size
-ls -lh dist/assets/*.js 2>/dev/null | head -5
-```
-
-Report the largest JS chunks. Warn if any single chunk is > 500KB.
-
-## Step 7: Deployment Summary
-
-```
-╔══════════════════════════════════════════╗
-║     PRE-DEPLOYMENT CHECK COMPLETE        ║
-╠══════════════════════════════════════════╣
-║                                          ║
-║  Branch:          <feature branch>       ║
-║  Behind origin/main: X commits           ║
-║  Clean working tree: YES / NO            ║
-║  Last commit:     <hash> <message>       ║
-║                                          ║
-║  Lint:            PASS                   ║
-║  TypeScript:      PASS                   ║
-║  Build:           PASS                   ║
-║  Tests:           X/Y passed             ║
-║  Secrets exposed: NONE                   ║
-║  Unapplied migrations: X                 ║
-║  Largest bundle:  XXX KB                 ║
-║                                          ║
-║  Verdict: READY FOR PR / BLOCKED         ║
-╚══════════════════════════════════════════╝
-```
-
-If ready, state the remaining landing steps explicitly — this skill does **not** land anything:
-
-1. Push the **branch** (never `main` — the `protect-main` ruleset rejects it).
-2. Open the PR once implementation is finished and Luna is clean: **ready** when it touches no file on
-   `docs/reference/sol-required-paths.md`, otherwise as a **draft** (Mason, 2026-11-02). The Codex
-   GitHub App reviews a PR when it opens ready or is marked ready, not on later pushes.
-3. Bring the branch up to date, and wait for required checks;
-   **Vercel is a required check**.
-4. Once required checks are green, freeze the candidate and record its head SHA. A draft: mark it
-   ready now. An off-list PR is already ready; a fix pushed after it opened (for a failing check or a
-   review comment) is a new head nobody has reviewed: run a Luna round on it before the push, and when
-   it changes code (not only a comment or a doc) post `@codex review` once so the Codex App reviews the
-   final head before the merge. CodeRabbit is **advisory** since 2026-10-19 (Mason) and never submits APPROVED or
-   CHANGES_REQUESTED. Since 2026-10-21 it makes no automatic reviews: marking ready starts none,
-   and it reviews only when an agent posts `@coderabbitai full review` on a PR carrying the `needs-coderabbit` label. GitHub's `protect-main`
-   ruleset no longer requires an approving review (required status checks stay). If CodeRabbit's
-   review arrives before the merge, fix or refute with evidence every comment, in one push. Do not
-   wait for it if it has not reviewed by the time checks are green and Sol is clean, and never post
-   `@coderabbitai review` to buy a re-review. A failed CodeRabbit pre-merge "error" check is a
-   finding to fix or refute, not a blocker. **A fix goes on the SAME PR** — no replacement PR. Never
-   use `@coderabbitai resume` or any other `@coderabbitai` command, except this one (Mason,
-   2026-10-29): no PR needs CodeRabbit, money PRs included, unless it carries the `needs-coderabbit`
-   label (an agent adds it when Mason asks for a CodeRabbit review). Such a PR needs one completed
-   review on any commit, so post `@coderabbitai full review` once if CodeRabbit has not reviewed it
-   (rules: `docs/reference/coderabbit-native-review.md`). The legacy `ready-for-coderabbit`
-   label route no longer triggers a review; `docs/reference/coderabbit-native-review.md` describes it.
-5. Run the `gpt-6.2-sol` high-effort proof for a change on `docs/reference/sol-required-paths.md`
-   (Mason, 2026-10-30; other changes need none), then apply the change's
-   non-destructive migration if it has one, then merge with `--match-head-commit`. Both agent
-   merge gates enforce Mason's autonomous-landing rule: the newest run of every reported check
-   green with `mergeStateStatus` CLEAN, and the Sol proof bound to that head and to a base the
-   head contains that GitHub's base has only moved forward from (Mason, 2026-10-26: a head behind
-   main may merge), or the documentation-only exception (which still needs an up-to-date head); CodeRabbit approval is
-   no longer required (2026-10-19). `CHANGES_REQUESTED` (from anyone), `--auto` and `--admin` are
-   refused. The `protect-main` ruleset has no bypass actors, so its required checks bind admins too;
-   no agent uses `--admin` either way. **The merge
-   is the deploy.**
-
-Landing under Mason's autonomous-landing rule (2026-09-26) needs no in-chat ask once those gates
-pass; report the merge explicitly rather than silently. A direct `vercel --prod` deploy outside the
-merge path or an Edge Function deploy still needs Mason's explicit yes. A non-destructive live
-migration applies under the same rule through migration-apply-guard's full proof gate (hash-bound
-dual-reviewer proof + hash-bound Sol proof, both fresh ≤30 min) in any session; a destructive,
-data-overwriting or access-changing one applies only after Mason's own `I approve` chat reply for that exact file (`scripts/owner-approve-migration.mjs` builds the request; the apply gate enforces the recorded reply), through `scripts/apply-migration-file.mjs`.
-If blocked: List every issue that needs fixing first.
-
-## Rules
-
-- NEVER push a branch, open a PR, or merge if lint, typecheck, or build fails
-- NEVER merge if tests have new failures
-- NEVER push/merge if secrets are found in source code
-- NEVER merge with unapplied migrations pending without surfacing them (warn — Mason decides the ordering)
-- NEVER attempt to push directly to `main`; the ruleset blocks it and the attempt is a bug in the plan
-- NEVER mark the PR ready (which triggers the Codex GitHub App's review) while implementation or Codex review is still changing the branch
-- NEVER merge over a `CHANGES_REQUESTED` verdict; CodeRabbit approval is not required (advisory since 2026-10-19), but every CodeRabbit comment that arrived before the merge must be fixed or refuted with evidence
-- Edge Function deploys and direct Vercel CLI deploys always need Mason's explicit approval; only the reviewed merge path is covered by the autonomous-landing rule. Non-destructive live migrations apply under that rule once migration-apply-guard's full proof + Sol gate passes; destructive, data-overwriting or access-changing migrations apply only after Mason's own `I approve` chat reply for that exact file (`scripts/owner-approve-migration.mjs` builds the request; the apply gate enforces the recorded reply), through `scripts/apply-migration-file.mjs`
+Then hand to `/ship` Step 8. Edge Function deploys, direct `vercel --prod` deploys and data deletion always need Mason's explicit yes.

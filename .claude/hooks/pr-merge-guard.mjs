@@ -677,7 +677,7 @@ function gateRequest(request) {
   // A proof of an earlier commit covers the commits after it unless those
   // touch the Sol list; same module, same budgeted gh. Exact-head proofs are tried first.
   const proof = firstAcceptedProof(proofs, headSha, (data, exactHead) =>
-    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits }) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead })
+    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits, baseRef: base }) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead })
       && (exactHead || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky));
   const valid = proof !== null;
   const carried = proof?.carried_forward === true ? proof.carry : null;
@@ -689,8 +689,8 @@ function gateRequest(request) {
       process.stderr.write(
         `SOL CARRY-FORWARD: the Sol review of head ${String(carried.from_head).slice(0, 12)} was carried to this head ` +
         `(${{
-          disjoint: "conflict-free merge of main, no shared files, one side documentation-only; Mason, 2026-10-21",
-          collision_check: "conflict-free merge of main, collision check clean; Mason, 2026-10-21",
+          disjoint: "conflict-free merge of the branch's base, no shared files, one side documentation-only; Mason, 2026-10-21",
+          collision_check: "conflict-free merge of the branch's base, collision check clean; Mason, 2026-10-21",
           restamp: "one commit that only restamped a migration; Mason, 2026-11-04",
           post_apply: "one commit that only updated the records after a live apply; Mason, 2026-11-04",
           owner_accepted: "Mason accepted every BLOCKER/HIGH finding by name, logged in DECISION_LOG.md; Mason, 2026-11-10",
@@ -724,7 +724,7 @@ function gateRequest(request) {
     `  3. Run: node scripts/write-codex-push-proof.mjs — it runs an independent read-only Codex review of the branch against that base and requires a machine verdict.\n` +
     `  4. If Codex flags blockers, fix them, push, and re-run until it reports clean; only a clean verdict on a stable, clean worktree mints the proof.\n` +
     `  5. Retry the merge. (Proof is bound to head ${headSha || "<head>"} and to the base; it lasts 24 hours on an unchanged head, keeps counting when main only moves forward afterwards, and new commits force a fresh review.)\n` +
-    `If this head only merged a newer main into a branch Sol already reviewed clean, run \`node scripts/write-codex-push-proof.mjs --carry-forward\` instead of step 3.\n` +
+    `If this head only merged a newer base (origin/staging for a feature branch, origin/main for hotfix/ and release/) into a branch Sol already reviewed clean, run \`node scripts/write-codex-push-proof.mjs --carry-forward\` instead of step 3.\n` +
     `If the Codex CLI is unavailable, PARK the change and tell Mason — do not self-certify.`
   );
 }

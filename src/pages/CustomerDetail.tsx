@@ -849,7 +849,8 @@ export default function CustomerDetail() {
         // its failure over the customer the operator is looking at now.
         if (isStale()) return;
         // A failed read keeps the entries already shown, not a false "No activity" (#2227 Sol MED).
-        if (tlError) { toast('error', 'Failed to load timeline'); return; }
+        // The section-level spinner is cleared here too: the early return skips the shared clear below (Sol r2 MED).
+        if (tlError) { toast('error', 'Failed to load timeline'); setSectionLoading(selectedTab, false); return; }
 
         // PR-07 follow-up: resolve performer names via profile_public_view (safe
         // columns only) so non-admin users still see actor names after

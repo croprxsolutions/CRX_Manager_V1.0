@@ -1007,6 +1007,7 @@ describe('CustomerDetail stale whole-record save', () => {
     const inactive = { ...original, is_active: false } as unknown as typeof original;
     let customerReads = 0;
     let timelineReads = 0;
+    const entry = (id: string, description: string) => ({ id, description, created_at: '2026-11-20T12:00:00Z', performed_by: null, event_type: 'note' });
     mockFrom.mockImplementation((table: string) => {
       if (table === 'customers') {
         return customerQuery(() => {
@@ -1014,7 +1015,10 @@ describe('CustomerDetail stale whole-record save', () => {
           return customerReads <= 2 ? inactive : ({ ...original, is_active: true, row_version: 5 } as unknown as typeof original);
         });
       }
-      if (table === 'activity_feed') timelineReads += 1;
+      if (table === 'activity_feed') {
+        timelineReads += 1;
+        return query({ data: [entry('a2', 'Customer reactivated'), entry('a1', 'Older entry')], error: null });
+      }
       return query({ data: [], error: null });
     });
     renderDetail();
@@ -1025,6 +1029,37 @@ describe('CustomerDetail stale whole-record save', () => {
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reactivate' }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Original Farm is active again.'));
     await waitFor(() => expect(timelineReads).toBe(2));
+    expect(await screen.findByText('Customer reactivated')).toBeInTheDocument();
+  });
+
+  it('a failed Timeline refresh keeps the shown entries and clears Loading (#2227, Sol r2 MED)', async () => {
+    const inactive = { ...original, is_active: false } as unknown as typeof original;
+    let customerReads = 0;
+    let timelineReads = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') {
+        return customerQuery(() => {
+          customerReads += 1;
+          return customerReads <= 2 ? inactive : ({ ...original, is_active: true, row_version: 5 } as unknown as typeof original);
+        });
+      }
+      if (table === 'activity_feed') {
+        timelineReads += 1;
+        return timelineReads === 1
+          ? query({ data: [{ id: 'a1', description: 'Older entry', created_at: '2026-11-20T12:00:00Z', performed_by: null, event_type: 'note' }], error: null })
+          : query({ data: null, error: { message: 'boom' } });
+      }
+      return query({ data: [], error: null });
+    });
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    fireEvent.click(screen.getByRole('button', { name: 'Timeline', expanded: false }));
+    expect(await screen.findByText('Older entry')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reactivate' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to load timeline'));
+    await waitFor(() => expect(screen.queryByText('Loading timeline...')).not.toBeInTheDocument());
+    expect(screen.getByText('Older entry')).toBeInTheDocument();
   });
 
   it('a stale Reactivate confirmation changes nothing and says so (#2197, Sol HIGH)', async () => {

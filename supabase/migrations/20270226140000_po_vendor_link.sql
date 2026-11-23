@@ -7,8 +7,12 @@
 -- 3. The trigger that owns vendor_id: on insert, or when the text changes, it matches again (see step 3);
 --    on any other update it keeps the old link; it refuses moving a PO with another vendor's live bills. Whatever a writer puts in vendor_id is overwritten.
 -- 3b. One name = one vendor (Mason, 2026-11-22, "go with a"): creating, renaming or restoring a vendor to a name that is
---    printed on purchase orders belonging to another vendor (linked to it, or billed by it) is refused, so a renamed
---    vendor's old name can never be taken over (Sol round 3). POs that belong to no vendor do not block the name.
+--    printed on purchase orders belonging to another vendor (linked to it, or billed by it) is refused (Sol round 3).
+--    This protects only linked or billed POs. An unlinked, unbilled PO (every PO older than this file, or one typed
+--    before its vendor existed) does not block the name: after a rename another vendor may take the old name and bill it.
+-- 3c. Accepted limit (Mason, 2026-11-22, "accept and document"; Taha's review of #2248): a PO stays unlinked if its
+--    vendor is created after the PO is written. Nothing links it later, so renaming that vendor breaks billing the PO
+--    until someone edits its vendor text. Follow-up #2279 (the screen sends the picked vendor) removes this.
 -- 4. The vendor-bill check compares the bill's vendor with the PO's link when there is one; an unlinked PO keeps the
 --    name comparison. The rest of the bill function is the pinned body unchanged.
 --
@@ -59,7 +63,7 @@ CREATE INDEX idx_purchase_orders_vendor_id ON public.purchase_orders (vendor_id)
 GRANT SELECT (vendor_id) ON public.purchase_orders TO authenticated;
 GRANT REFERENCES (vendor_id) ON public.purchase_orders TO authenticated;
 COMMENT ON COLUMN public.purchase_orders.vendor_id IS
-  'KI-144: the vendor this PO was written for. Set only by trigger_00_po_vendor_id from the vendor text when the PO is created or its vendor text changes; a vendor rename keeps it. NULL = the PO existed before KI-144 (not linked; Mason 2026-11-22) or its text matched no single active vendor. The vendor column keeps the printed name.';
+  'KI-144: the vendor this PO was written for. Set only by trigger_00_po_vendor_id from the vendor text when the PO is created or its vendor text changes; a vendor rename keeps it. NULL = the PO existed before KI-144 (not linked; Mason 2026-11-22) or its text matched no single active vendor when written; it stays NULL if that vendor is created later, so renaming the vendor then breaks billing it until the vendor text is edited (accepted, Mason 2026-11-22). The vendor column keeps the printed name.';
 
 -- One vendor for a PO's vendor text: the single active vendor whose name equals it ignoring case and outer spaces (the
 -- bill check's own rule), else NULL. No alias, legacy resolution (Sol round 1) or punctuation folding (Sol round 2): a
@@ -113,7 +117,7 @@ BEGIN
        SELECT 1 FROM public.vendor_bills vb
         WHERE vb.purchase_order_id = NEW.id AND vb.status <> 'voided' AND vb.deleted_at IS NULL
           AND vb.vendor_id IS DISTINCT FROM v_id) THEN
-    RAISE EXCEPTION 'PO_VENDOR_HAS_BILLS: purchase order % has bills from another vendor; void them before changing its vendor', NEW.po_number
+    RAISE EXCEPTION 'PO_VENDOR_HAS_BILLS: purchase order % has live vendor bills that are not from the vendor it is being changed to; void them before changing its vendor', NEW.po_number
       USING ERRCODE = 'P0001';
   END IF;
   NEW.vendor_id := v_id;

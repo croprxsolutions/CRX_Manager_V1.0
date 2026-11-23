@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270224150000_po_vendor_link.sql (KI-144; contract
+ * Real-schema proof for 20270226140000_po_vendor_link.sql (KI-144; contract
  * docs/plans/2026-11-22-ki144-po-vendor-link-CONTRACT.md; Mason 2026-11-22: "Keep original name").
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, attempt, asUser, refuse, id, USERS, ROOT, NAME, docker, psql, scalar, claims } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270224150000_po_vendor_link.sql';
+const CANDIDATE = '20270226140000_po_vendor_link.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });
@@ -61,7 +61,7 @@ try {
     INSERT INTO public.vendor_bills (vendor_id, purchase_order_id, bill_number, bill_date, due_date, payment_terms, subtotal_cents, adjustment_cents, total_cents, paid_cents, status, created_by, deleted_at)
       VALUES ('${VA}', '${PO8}', 'KI144-A-2', CURRENT_DATE, CURRENT_DATE + 30, 'Net 30', 2000, 0, 2000, 0, 'unpaid', '${USERS.admin}', now()),
              ('${VA}', '${PO9}', 'KI144-A-3', CURRENT_DATE, CURRENT_DATE + 30, 'Net 30', 2000, 0, 2000, 0, 'unpaid', '${USERS.admin}', NULL);
-    -- PO6: its text now names B, but A already billed it (Sol round 1): the bill decides the backfill link.
+    -- PO6: its text now names B, but A already billed it (Sol round 1): an edit may link it only to A, its live biller.
     INSERT INTO public.vendor_bills (vendor_id, purchase_order_id, bill_number, bill_date, due_date, payment_terms, subtotal_cents, adjustment_cents, total_cents, paid_cents, status, created_by)
       VALUES ('${VA}', '${PO6}', 'KI144-A-1', CURRENT_DATE, CURRENT_DATE + 30, 'Net 30', 2000, 0, 2000, 0, 'unpaid', '${USERS.admin}');
     INSERT INTO public.purchase_order_items (purchase_order_id, product_id, quantity_ordered, unit_cost, quantity_received, unit_size, product_name)
@@ -143,7 +143,8 @@ try {
   // A billed PO cannot be handed to another vendor while that bill is live; same vendor is fine; after a void it can.
   assert.equal(attempt(USERS.admin, `UPDATE public.purchase_orders SET vendor = 'KI144 Acme Supply', notes = 'n' WHERE id = '${PO6}'; v := ${link(PO6)};`), `ok|${VA}`);
   assert.match(attempt(USERS.admin, `UPDATE public.purchase_orders SET vendor = 'KI144 Acme Supply' WHERE id = '${PO6}';
-      UPDATE public.purchase_orders SET vendor = 'KI144 Old Co' WHERE id = '${PO6}'; v := 'NOT REFUSED';`), /PO_VENDOR_HAS_BILLS/);
+      UPDATE public.purchase_orders SET vendor = 'KI144 Old Co' WHERE id = '${PO6}'; v := 'NOT REFUSED';`),
+    /PO_VENDOR_HAS_BILLS: purchase order KI144-PO-6B has live vendor bills that are not from the vendor it is being changed to/);
   assert.match(attempt(USERS.admin, `UPDATE public.purchase_orders SET vendor = 'KI144 Acme Supply' WHERE id = '${PO6}';
       UPDATE public.purchase_orders SET vendor = 'KI144 Bolt Chem' WHERE id = '${PO6}'; v := 'NOT REFUSED';`), /PO_VENDOR_HAS_BILLS/);
   assert.equal(attempt(USERS.admin, `UPDATE public.purchase_orders SET vendor = 'KI144 Acme Supply' WHERE id = '${PO6}';
@@ -168,6 +169,11 @@ try {
   assert.equal(attempt(USERS.admin, `${RENAME_A} INSERT INTO public.purchase_orders (po_number, vendor, status, created_by)
       VALUES ('KI144-PO-7', 'KI144 Acme Supply', 'draft', '${USERS.admin}') RETURNING coalesce(vendor_id::text, 'NULL') INTO v;`), 'ok|NULL',
   'live save after a rename: old name held as an alias by another vendor stays unlinked');
+  // Accepted limit (Taha's MED, Mason "accept and document"): a PO typed before its vendor exists stays unlinked.
+  assert.equal(attempt(USERS.admin, `INSERT INTO public.purchase_orders (id, po_number, vendor, status, created_by)
+      VALUES ('${id('ca')}', 'KI144-PO-Z', 'KI144 Zulu Ag', 'draft', '${USERS.admin}');
+      INSERT INTO public.vendors (name) VALUES ('KI144 Zulu Ag'); v := ${link(id('ca'))};`), 'ok|NULL',
+  'a PO written before its vendor exists is not linked when the vendor is created (documented limit)');
   // Closed PO: a forged link change is put back before the guard compares the row; a real edit is still refused.
   assert.equal(attempt(USERS.admin, `UPDATE public.purchase_orders SET vendor_id = '${VA}', updated_at = now() WHERE id = '${PO5}'; v := ${link(PO5)};`),
     'ok|NULL');

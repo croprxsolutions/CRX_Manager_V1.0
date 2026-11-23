@@ -56,7 +56,7 @@ written with; reports and bill checks find them by vendor id. (DECISION_LOG entr
   matches again by exact name (see Sol round 1 above); on any other update it keeps `OLD.vendor_id`. Whatever a writer
   puts in `vendor_id` is overwritten, so nothing the screen sends is trusted. No RPC signature changes; the deployed
   app keeps working unchanged.
-- Order inside the one migration transaction: add the column, backfill, THEN create the trigger (a trigger created
+- (Superseded: no backfill, see top.) Order inside the one migration transaction: add the column, backfill, THEN create the trigger (a trigger created
   first would reset the backfill to `OLD.vendor_id`). Unmatched rows stay NULL (the 3 live orphans stay Mason's To-Do
   decision 23; this PR links nothing by guess). The closed-PO guard is disabled for that one UPDATE only, inside the
   same transaction, and its enabled state is checked in the postflight.
@@ -69,7 +69,7 @@ written with; reports and bill checks find them by vendor id. (DECISION_LOG entr
 
 - **Rules that always hold:** `vendor_id`, when set, is the vendor the PO's text named when that text was written.
   Renaming a vendor changes neither the PO text nor `vendor_id`. Deleting (soft) a vendor keeps the link (row kept).
-- **Existing rows:** backfilled as above. Readers that ignore the column are unaffected.
+- **Existing rows:** not linked (no backfill, see top). Readers that ignore the column are unaffected.
 - **Rollout:** the deployed app sends the same calls; the trigger fills the column. No screen change in this PR.
 - **Timing:** the trigger runs inside each writer's own transaction; a vendor renamed concurrently with a PO save gives
   the id of whichever name the text matched at that moment, which is the same vendor.
@@ -116,7 +116,7 @@ vendor-link readers).
 4. When a PO's text matches no vendor, then `vendor_id` is NULL and the bill check uses the name comparison as before.
 5. When a PO's vendor text is edited to another vendor, then `vendor_id` follows; an edit to other fields, or a case /
    spacing-only edit after a rename, keeps it; a writer setting `vendor_id` directly is overwritten.
-6. When the backfill runs, then matching rows are linked (closed POs included, guard enabled again afterwards, other
+6. (Superseded: no backfill, see top.) When the backfill runs, then matching rows are linked (closed POs included, guard enabled again afterwards, other
    header columns and activity rows unchanged) and unmatched or deleted-vendor rows stay NULL.
 7. A direct attempt to set `vendor_id` by an RPC-less path is not possible for `authenticated` (no table privilege),
    and the trigger overrides any value a definer writer passes.

@@ -52,6 +52,7 @@ $function$;
 REVOKE ALL ON FUNCTION public._mark_delivery_aggregate_short_stock()
   FROM PUBLIC, anon, authenticated, service_role;
 
+SET LOCAL lock_timeout = '5s';  -- fail fast rather than queue ledger writes behind an open writer (Sol r1)
 CREATE TRIGGER trg_mark_delivery_aggregate_short_stock
 BEFORE INSERT ON public.inventory_transactions
 FOR EACH ROW

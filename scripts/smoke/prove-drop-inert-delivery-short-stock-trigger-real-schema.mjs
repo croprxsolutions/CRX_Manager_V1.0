@@ -26,6 +26,7 @@ const lf = (f) => readFileSync(f, 'utf8').replaceAll('\r\n', '\n');
 const candidate = lf(path.join(ROOT, 'supabase', 'migrations', CANDIDATE));
 const reverse = lf(path.join(ROOT, 'scripts', 'smoke', 'drop-inert-delivery-short-stock-trigger-reverse.sql'));
 const reverse2135 = lf(path.join(ROOT, 'scripts', 'smoke', 'single-short-stock-warning-reverse.sql'));
+const reverse1942 = lf(path.join(ROOT, 'scripts', 'smoke', 'inventory-edge-cases-1942-reverse.sql'));
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const run = (sql, flags = []) => docker([...PSQL, ...flags], { input: sql, allowFailure: true });
 const ADMIN = USERS.admin;
@@ -71,9 +72,9 @@ function seedAll() {
 }
 
 // Everything the drop must not change: the ledger rows the completion writes and on-hand.
-const ledger = (del) => `coalesce((SELECT string_agg(product_id || ':' || quantity::numeric(12,2) || ':' || requires_review || ':' || coalesce(notes, '<null>'), '|' ORDER BY product_id, quantity, notes)
+const ledger = (del) => `coalesce((SELECT string_agg(product_id || ':' || quantity::text || ':' || requires_review || ':' || coalesce(notes, '<null>'), '|' ORDER BY product_id, quantity, notes)
       FROM public.inventory_transactions WHERE delivery_id = '${del}'), '<none>') || ' # ' ||
-    (SELECT string_agg(product_id || ':' || quantity_available::numeric(12,2) || ':' || quantity_prebooked::numeric(12,2), '|' ORDER BY product_id)
+    (SELECT string_agg(product_id || ':' || quantity_available::text || ':' || quantity_prebooked::text, '|' ORDER BY product_id)
       FROM public.inventory WHERE product_id IN ('${Object.values(P).join("','")}'))`;
 const complete = (name) => {
   const [del] = DELIVERIES[name];
@@ -102,6 +103,9 @@ try {
   for (const [n, got] of Object.entries(old)) console.log(`  ${n}: ${got}`);
   assert.match(old.repeated, /^ok\|short=1 .*:true:[^|]*\[SHORT STOCK — review required\]/, 'the short product must be flagged for review');
   assert.doesNotMatch(old.enough, /:true:/, 'a stocked delivery must not be flagged');
+  // Each completion must have succeeded (an error identical before and after would otherwise compare equal; Sol r1).
+  assert.match(old.enough, /^ok\|short=0 ledger=[^<]/, 'the stocked delivery must complete');
+  assert.match(old.noStockRow, /^ok\|short=1 ledger=.*:true:[^|]*\[SHORT STOCK — review required\]/, 'the no-stock-row delivery must complete flagged');
   assert.match(handSet(), /^ok\|true: ?\[2225\] hand \[SHORT STOCK — review required\]$/, 'before the drop the trigger still acts on hand-set settings');
   console.log('  trigger still acts only when its settings are set by hand');
 
@@ -130,6 +134,12 @@ try {
   assert.match(run(reverse, ['-1']).stderr, /DROP_SHORT_STOCK_TRIGGER_REVERSE_DRIFT/, 'reverse must refuse when the trigger is back');
   const again = run(candidate, ['-1']);
   assert.match(`${again.stdout}${again.stderr}`, /POSTFLIGHT_OK/, 'candidate must re-apply after the reverse');
+  // Sol r1: with the trigger gone, the earlier reverses must refuse (they restore bodies that rely on it).
+  const early2135 = run(reverse2135, ['-1']);
+  assert.match(early2135.stderr, /SINGLE_SHORT_STOCK_REVERSE_REFUSED: the short-stock ledger trigger is gone/, `#2135 reverse must refuse first: ${early2135.stderr}`);
+  assert.notEqual(run(reverse1942, ['-1']).status, 0, '#1942 reverse must refuse while #2225 is applied');
+  assert.equal(fnState(), 'absent trigger=absent', 'refused earlier reverses change nothing');
+  console.log('  #2135 and #1942 reverses refuse until this reverse has run');
   assert.equal(run(reverse, ['-1']).status, 0, 'reverse again');
 
   console.log('Order:');

@@ -44,6 +44,11 @@ BEGIN
      = 'f13018d7449506ff80c69facfb51b000' THEN
     RAISE EXCEPTION 'ROLLBACK_REFUSED: #2135 relies on this body; run scripts/smoke/single-short-stock-warning-reverse.sql first';
   END IF;
+  -- #2225 (20270224210000) dropped the short-stock ledger trigger that the restored body relies on: undo #2225 first.
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mark_delivery_aggregate_short_stock'
+                   AND tgrelid = 'public.inventory_transactions'::regclass AND tgenabled = 'O') THEN
+    RAISE EXCEPTION 'ROLLBACK_REFUSED: the short-stock ledger trigger is gone; run scripts/smoke/drop-inert-delivery-short-stock-trigger-reverse.sql first';
+  END IF;
 END;
 $refuse$;
 

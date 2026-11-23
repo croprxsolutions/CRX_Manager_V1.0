@@ -34,6 +34,11 @@ BEGIN
      IS DISTINCT FROM 'postgres|{postgres=X/postgres}|true|search_path=public, pg_temp' THEN
     RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_BASELINE_DRIFT: owner, grants, security or search_path differ from 20260716191000';
   END IF;
+  -- The rollback restores the 20260716191000 comment; refuse if live carries another (Sol r1).
+  IF obj_description('public._mark_delivery_aggregate_short_stock()'::regprocedure, 'pg_proc')
+     IS DISTINCT FROM 'Marks newly inserted delivered ledger rows for transaction-local aggregate short-stock products without mutating the append-only ledger later.' THEN
+    RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_BASELINE_DRIFT: the function comment differs from 20260716191000';
+  END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_trigger
     WHERE tgname = 'trg_mark_delivery_aggregate_short_stock' AND tgrelid = 'public.inventory_transactions'::regclass

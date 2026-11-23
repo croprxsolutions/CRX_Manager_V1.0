@@ -55,6 +55,51 @@
   Mason chose to leave it unfixed (plain reply, ref 326ba930acf4)
 - Finding 3 (HIGH) at `supabase/migrations/20270217130000_po_vendor_link.sql:247`, text sha256 `1790af9de30452a0` (the wording stays with the proof, not here)
   Mason chose to leave it unfixed (plain reply, ref 326ba930acf4)
+## 2026-11-23 — #2358: Mason owner-accepted 8 Sol finding(s) at `d5b0cb8da2bd`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2358 at `d5b0cb8da2bd` (base `3dd8f9bbf7dc`) found 8 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:5174`, text sha256 `5d8aaeb60ff4b6f0` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:4946`, text sha256 `0d804e696d80fea7` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 3 (HIGH) at `src/components/jobs/JobAttachments.tsx:288`, text sha256 `fbd6ba9544733c59` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 4 (HIGH) at `src/pages/JobDetail.tsx:4960`, text sha256 `2a2221ce00e13e39` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 5 (HIGH) at `src/pages/JobDetail.tsx:1847`, text sha256 `9e913d15613f7d05` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 6 (HIGH) at `src/pages/JobDetail.tsx:3905`, text sha256 `8bcdf4f7753cf782` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 7 (HIGH) at `src/pages/JobDetail.tsx:3325`, text sha256 `bb67d341e6d06be4` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+- Finding 8 (HIGH) at `src/pages/JobDetail.tsx:709`, text sha256 `4dbb8aeaf0f2c75b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 7d1490af6143)
+
+## 2026-11-23 — #2358: Mason owner-accepted 6 Sol finding(s) at `a41ec1170a54`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2358 at `a41ec1170a54` (base `70755dfe6f00`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:5174`, text sha256 `5d8aaeb60ff4b6f0` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 90d9625dd458)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:4946`, text sha256 `0d804e696d80fea7` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 90d9625dd458)
+- Finding 3 (HIGH) at `src/pages/JobDetail.tsx:1847`, text sha256 `9e913d15613f7d05` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 90d9625dd458)
+- Finding 4 (HIGH) at `src/pages/JobDetail.tsx:4960`, text sha256 `2a2221ce00e13e39` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 25f08ad94619)
+- Finding 5 (HIGH) at `src/pages/JobDetail.tsx:3325`, text sha256 `bb67d341e6d06be4` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 25f08ad94619)
+- Finding 6 (HIGH) at `src/pages/JobDetail.tsx:709`, text sha256 `34987d3ae445f70b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 25f08ad94619)
+
+## 2026-11-23 — #2358: Mason owner-accepted 3 Sol finding(s) at `fbb9e843d58a`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2358 at `fbb9e843d58a` (base `3bae6de0f2aa`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:5166`, text sha256 `893ae33c605aef6b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 6cc24030ac43)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:4952`, text sha256 `0dcea86f0e3caeff` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 6cc24030ac43)
+- Finding 3 (HIGH) at `src/pages/JobDetail.tsx:1847`, text sha256 `01aa2c1e83be718f` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 6cc24030ac43)
 ## 2026-11-23 — #2323: Mason owner-accepted 6 Sol finding(s) at `883d1dc5dc08`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2323 at `883d1dc5dc08` (base `70755dfe6f00`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

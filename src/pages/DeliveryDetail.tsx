@@ -48,8 +48,8 @@ import { invoiceStatusBadge } from '../lib/statusLabel';
 import { Sentry } from '../lib/sentry';
 import { fetchDeliveryFarm } from '../lib/driverFarms';
 import {
-  RECEIPT_SENDING_NOW_MESSAGE, closeDeliveryReceipt, isReceiptSendingNow, receiptCloseScope, receiptMayAlreadyBeSent,
-  receiptQueuedAt, sameReceipt, type ReceiptCloseResult,
+  RECEIPT_SENDING_NOW_MESSAGE, closeDeliveryReceipt, isReceiptChanged, isReceiptSendingNow, receiptCloseScope,
+  receiptMayAlreadyBeSent, receiptQueuedAt, type ReceiptCloseResult,
 } from '../lib/receiptsToCheck';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
@@ -69,6 +69,7 @@ import { useDeliveryBrands } from '../components/deliveries/useDeliveryBrands';
 import { DeliveryBrandsPanel } from '../components/deliveries/DeliveryBrandPicker';
 import CorrectBrandsModal from '../components/deliveries/CorrectBrandsModal';
 import { brandWarnings } from '../lib/deliveryBrands';
+import { deliveryLineFigures, fetchOtherOpenByOrderLine } from '../lib/deliveryLineRemaining';
 import type {
   Delivery, DeliveryItem, DeliveryPhoto, DeliveryRemainder,
   Customer, CustomerAddress, Profile, OrderItem, DeliveryIssueType, DeliveryCompletionEvidence, ReceiptRecipient,
@@ -277,7 +278,7 @@ export default function DeliveryDetail() {
   const [confirming, setConfirming] = useState(false);
 
   // Order context for items display
-  const [orderItemContext, setOrderItemContext] = useState<Record<string, { ordered: number; delivered: number; remaining: number }>>({});
+  const [orderItemContext, setOrderItemContext] = useState<Record<string, { ordered: number; delivered: number; remaining: number; otherOpen: number }>>({});
 
   // Parent order for cross-link
   const [parentOrder, setParentOrder] = useState<{ id: string; order_number: string } | null>(null);
@@ -451,11 +452,12 @@ export default function DeliveryDetail() {
           // same question. `order_item_field_allocations` is admin/sales_rep
           // readable (RLS `oifa_select`); a driver never sees the button anyway.
           const orderIdForSplitCheck = del.order_id;
-          const [oiRes, orderRes, invRes, splitRes, externalBillingRes] = await Promise.all([
+          const [oiRes, otherOpenRes, orderRes, invRes, splitRes, externalBillingRes] = await Promise.all([
             supabase
               .from('order_items')
               .select('id, total_units_needed, quantity_delivered, quantity_remaining')
               .eq('order_id', del.order_id),
+            fetchOtherOpenByOrderLine(del.order_id, del.id),
             supabase
               .from('orders')
               .select('id, order_number, quote_id')
@@ -512,12 +514,13 @@ export default function DeliveryDetail() {
           if (oiRes.error) {
             toast('error', sanitizeError(oiRes.error));
           } else if (oiRes.data) {
-            const ctx: Record<string, { ordered: number; delivered: number; remaining: number }> = {};
+            const ctx: Record<string, { ordered: number; delivered: number; remaining: number; otherOpen: number }> = {};
             oiRes.data.forEach((oi: { id: string; total_units_needed: number; quantity_delivered: number; quantity_remaining: number }) => {
               ctx[oi.id] = {
                 ordered: oi.total_units_needed,
                 delivered: oi.quantity_delivered,
                 remaining: oi.quantity_remaining,
+                otherOpen: otherOpenRes[oi.id] ?? 0,
               };
             });
             setOrderItemContext(ctx);
@@ -1484,20 +1487,29 @@ export default function DeliveryDetail() {
   // After the hand send: mark the paused receipt handled. A failure only leaves it on the office list.
   const closeSentReceipt = async (deliveryId: string, queuedAt: string | null) => {
     try {
-      // Only the receipt this send covered: one queued again since stays owed and listed (Sol HIGH).
-      if (!sameReceipt(await receiptQueuedAt(deliveryId), queuedAt)) {
-        toast('warning', 'A new receipt was queued for this delivery while the email was sending. It was left on "Customer receipts to check".');
+      if (!queuedAt) {
+        // None was queued when the send started, so none is closed; one queued meanwhile may still be emailed (Sol LOW).
+        // A failed read stays silent: no close was sent, so there is nothing unconfirmed to report (Sol LOW).
+        if (await receiptQueuedAt(deliveryId).catch(() => null)) {
+          toast('warning', 'A new receipt was queued for this delivery while the email was sending. The server may email it too.');
+        }
         return;
       }
-      const scope = receiptCloseScope(deliveryId, 'handled');
-      await closeDeliveryReceipt(deliveryId, 'handled', receiptCloseIdem.getKeyFor(scope));
+      // Only the receipt this send covered: the server refuses if it was queued again since (#2251).
+      const scope = receiptCloseScope(deliveryId, 'handled', queuedAt);
+      await closeDeliveryReceipt(deliveryId, 'handled', receiptCloseIdem.getKeyFor(scope), queuedAt);
       receiptCloseIdem.resetKeyFor(scope);
     } catch (err: unknown) {
+      if (isReceiptChanged(err)) {
+        toast('warning', "The email went out. This delivery's receipt changed while it was sending, so it was left as it is.");
+        return;
+      }
       // The email went out; the paused receipt just stays on the office list for someone to mark handled.
       Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
         level: 'warning', extra: { context: 'close_delivery_receipt after Email Confirmation', deliveryId },
       });
-      toast('warning', 'The email went out, but its receipt is still on "Customer receipts to check". Mark it handled there.');
+      // Not "mark it handled": the close may have failed because a newer receipt the customer is owed replaced it (Sol HIGH).
+      toast('warning', 'The email went out, but the app could not confirm its receipt was closed. Check "Customer receipts to check" before marking anything handled: if this delivery was completed again, the customer may be owed a newer receipt.');
     }
   };
 
@@ -2709,7 +2721,7 @@ export default function DeliveryDetail() {
                   {delivery.status === 'completed' && (
                     <th className="px-4 py-3 text-right font-medium text-secondary">Actual</th>
                   )}
-                  <th className="px-4 py-3 text-right font-medium text-secondary">Remaining After</th>
+                  <th className="px-4 py-3 text-right font-medium text-secondary" title="Ordered, less what is delivered and what is on open deliveries">Remaining After</th>
                   <th className="px-4 py-3 text-left font-medium text-secondary">Unit</th>
                   {items.some((i) => i.tote_number) && (
                     <th className="px-4 py-3 text-left font-medium text-secondary">Tote #</th>
@@ -2720,10 +2732,15 @@ export default function DeliveryDetail() {
                 {items.map((item) => {
                   const ctx = orderItemContext[item.order_item_id];
                   const ordered = ctx?.ordered ?? item.quantity;
-                  const prevDelivered = ctx?.delivered ?? 0;
                   const thisDelivery = item.quantity;
-                  const actualDelivered = delivery.status === 'completed' ? item.quantity_delivered : thisDelivery;
-                  const remainingAfter = Math.max(0, ordered - prevDelivered - actualDelivered);
+                  const { prevDelivered, remainingAfter } = deliveryLineFigures({
+                    status: delivery.status,
+                    ordered,
+                    orderDelivered: ctx?.delivered ?? 0,
+                    otherOpen: ctx?.otherOpen ?? 0,
+                    scheduled: thisDelivery,
+                    actual: item.quantity_delivered ?? 0,
+                  });
                   return (
                     <tr key={item.id} className="border-b border-gray-50">
                       <td className="px-4 py-3 font-medium text-nav-dark">

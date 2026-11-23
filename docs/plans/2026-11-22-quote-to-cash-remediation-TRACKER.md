@@ -6,7 +6,7 @@ Ownership rule: Taha owns quotes, bookings, invoices and billing until 2026-12-1
 
 | # | Item | Severity | Area | Owner | Disposition |
 |---|---|---|---|---|---|
-| F05 | Delivery can schedule/complete beyond the ordered quantity (ORD-2026-0017: 2 ordered, 3 delivered; DEL-00009 kept 10 after line dropped to 6) | HIGH | deliveries / stock | Claude | **In progress** — contract `2026-11-22-f05-delivery-remaining-qty-CONTRACT.md` |
+| F05 | Delivery can schedule/complete beyond the ordered quantity (ORD-2026-0017: 2 ordered, 3 delivered; DEL-00009 kept 10 after line dropped to 6) | HIGH | deliveries / stock | Claude | **Done on staging** — #2264 (migration `20270224100000`, staging only; reaches production with the release). Staging screen proof 2026-11-22 (ORD-2026-0034/0035, DEL-00031..33): Follow-up for a unit already on another open load refused in plain words, nothing created; partial completion, start-and-complete and Quick Delivery work on normal inputs. Left: "Remaining After" column, raw `ITEM_OVER_REMAINING_INCL_ACTIVE` text on New Delivery (screen PR), F05b #2272-#2275 |
 | F06 | Job completion and its linked blend ticket both deduct stock (JOB-2026-0010 / BT-2026-0002) | HIGH | jobs / stock | Claude | Next after F05. Not covered by #2170 (that PR fixes missing stock rows, not double deduction) |
 | F10 | Delivery edit drops tote, keeps cleared driver/address | HIGH (dispatch) | deliveries | Claude | Queued after F06 |
 | F15 | Damaged return defaults to restock; message always says "restocked" | MED | returns / stock | Claude | Needs Mason: default for damaged goods |

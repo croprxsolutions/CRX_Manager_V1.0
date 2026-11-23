@@ -9,8 +9,9 @@ export function receiptsToCheckFilter(now: Date) {
   return `status.eq.needs_check,and(status.in.(pending,sending),created_at.lt."${hourAgo}")`;
 }
 
-// close_delivery_receipt (20261221100000): 'manual_send' pauses a queued receipt on the office list before Email
-// Confirmation sends it by hand; 'handled' closes it so the server sender never emails it.
+// close_delivery_receipt (20261221100000, 20270223120000): 'manual_send' pauses a queued receipt on the office list
+// before Email Confirmation sends it by hand; 'handled' closes it so the server sender never emails it. With
+// expectedQueuedAt (the receipt's created_at, exactly as the server sent it) the server acts on that receipt only.
 export type ReceiptCloseReason = 'handled' | 'manual_send';
 export interface ReceiptCloseResult {
   delivery_id: string;
@@ -21,14 +22,19 @@ export interface ReceiptCloseResult {
   queued_at: string | null; // which receipt the answer is about (NULL: none queued)
 }
 
-// The key comes from useIdempotencyKey, scoped by receiptCloseScope, and is reset only after a confirmed answer.
-export const receiptCloseScope = (deliveryId: string, reason: ReceiptCloseReason) => `${deliveryId}:${reason}`;
+// The key comes from useIdempotencyKey, scoped by receiptCloseScope, and is reset only after a confirmed answer. The
+// receipt is in the scope, so a newer receipt gets its own key and a retry of the same one reuses its key (#2251).
+export const receiptCloseScope = (deliveryId: string, reason: ReceiptCloseReason, expectedQueuedAt?: string) =>
+  `${deliveryId}:${reason}:${expectedQueuedAt ?? ''}`;
 
-export async function closeDeliveryReceipt(deliveryId: string, reason: ReceiptCloseReason, idempotencyKey: string) {
+export async function closeDeliveryReceipt(
+  deliveryId: string, reason: ReceiptCloseReason, idempotencyKey: string, expectedQueuedAt?: string,
+) {
   const { data, error } = await supabaseUntyped.rpc('close_delivery_receipt', {
     p_delivery_id: deliveryId,
     p_reason: reason,
     p_idempotency_key: idempotencyKey,
+    ...(expectedQueuedAt ? { p_expected_queued_at: expectedQueuedAt } : {}),
   });
   if (error) throw error;
   return assertRpcResult<ReceiptCloseResult>(data, 'close_delivery_receipt');
@@ -46,16 +52,16 @@ export function isReceiptSendingNow(error: unknown) {
 
 export const RECEIPT_SENDING_NOW_MESSAGE = 'The server is emailing this receipt right now. Try again in a minute.';
 
-// When this delivery's queue row was (re)queued, or null when it has none. Read right before the 'handled' close so a
-// receipt queued again during a hand send is never closed by it (Sol HIGH). shortcut: a client-side re-check, so a
-// re-queue in the milliseconds between this read and the close is not caught; closing it fully needs the RPC to take
-// the expected queued_at (a migration, #2251).
+// When this delivery's queue row was (re)queued, or null when it has none. Used only after a hand send that started
+// with no receipt queued, to warn that one was queued meanwhile (the server binding needs a receipt to name).
 export async function receiptQueuedAt(deliveryId: string): Promise<string | null> {
   const { data, error } = await supabase.from('delivery_receipt_queue').select('created_at').eq('delivery_id', deliveryId).maybeSingle();
   if (error) throw error;
   return data?.created_at ?? null;
 }
 
-export function sameReceipt(a: string | null, b: string | null) {
-  return a === b || (a !== null && b !== null && Date.parse(a) === Date.parse(b));
+// The server refused because the delivery's receipt is not the one the screen named (queued again, or gone).
+export function isReceiptChanged(error: unknown) {
+  const message = error && typeof error === 'object' ? (error as { message?: unknown }).message : undefined;
+  return typeof message === 'string' && message.includes('DELIVERY_RECEIPT_CHANGED');
 }

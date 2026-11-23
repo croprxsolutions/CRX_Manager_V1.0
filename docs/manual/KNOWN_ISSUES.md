@@ -74,7 +74,7 @@ Each item's full entry is in its area section below. "Severity unsure" marks a r
 | Guards and release | SOL-12 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A release-pass command naming an invalid PR number counts as approval for the open release. | Agent (land #2203) |
 | Guards and release | KI-48 | HIGH (severity unsure) | Open | Some protections around applying live database changes have known gaps; the live migration ledger is the backstop. | Mason decision |
 | Reports | SOL-7 | HIGH | PR #2201 open into staging | A broken or absurd order total would distort the commission in profit reports. | Agent (land #2201) |
-| Reports | KI-129 (+#2195) | HIGH | Partly open | Month-end close counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. | Agent (unassigned) |
+| Reports | KI-129 (+#2195) | HIGH | Fix in PR (payments part) | Month-end close counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. Fix: migration `20270224120000` (with the #2175 close re-check). | Lane B agent |
 | Reports | KI-125 | HIGH | Fixed on staging, not live | Profit reports showed a fake large loss because commission was counted on sales billed elsewhere. | Taha (release) |
 | Field applications | #2196 | HIGH | Open | A sales rep may still be able to delete a completed, billable job outside the screens, so it drops out of Unbilled Jobs. | Mason (field-app billing) |
 | Field applications | KI-185 | HIGH | Open | A job sprayed on 80 acres but planned at 100 bills for 100, and deducts stock for 100. | Mason (field-app billing) |
@@ -999,6 +999,8 @@ today. Fix: use the `is_application_fee` case `save_invoice` already uses, plus 
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · HIGH · Agent (unassigned) · plan W1-01 · #2149 (count part), #2195 (payments part). Invoice count fixed on staging (#2149). Payments received still totals the old payments table, counts deleted payments and misses allocation-set receipts (#2195, Sol on #2189), so a month paid through allocations can show $0 received.
 
+> **2026-11-22:** payments part fixed in local candidate `20270224120000_month_close_payments_received_recheck.sql` (one PR with #2175): Record Payment checks + prepayment checks (month entered, current amount) + live legacy payments; the close re-checks the reviewed figures.
+
 **MED · PARTIAL (the close receipt's invoice count is fixed on staging with KI-125 (#2149), awaiting the production release; payments received is OPEN, a follow-up: it needs a rule for prepayment checks, which can be edited or deleted later, and a re-check at close that the figures still match what the admin reviewed) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #6)**
 Both read the legacy `payments` table (0 rows; payments now live in `allocation_sets`), so the one July 2026 customer
 payment shows as $0. The close summary also counts only invoices still `posted`, missing ones since paid or overdue.
@@ -1014,6 +1016,9 @@ Where: `get_monthly_summary` and `_close_accounting_period_replay_impl_20261015`
 has the real as-of figure. Fix: relabel "Current AR (today)" or reuse `get_ar_aging(p_period_end)`.
 
 ### KI-133 — Profitability and Gross Sales report booked orders as "revenue" without saying so
+
+> **Fix in review (Lane E, 2026-11-22):** the reports say "Booked Sales" with a one-line basis note. Drafts need no
+> filter: the database refuses a draft order status (`orders_status_check`), so Gross Sales cannot include one.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-26.
 
@@ -1038,6 +1043,9 @@ same share. Fix later: enforce the payable rule, per sale and per paid share, in
 - **Commission basis ignores the standing discount (re-verified 2026-11-21, [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)).** Order commission is figured from `orders.total_profit` before the standing grower discount (`20270117130000_standing_discount_in_order_profit.sql` ~L21 says "commission after the discount is its own planned change"), while the invoice and profit reports subtract the discount. Not tracked elsewhere; latent on production while the billing switch is off. Separate from the payout gap above (payout checks pending status ~L1154-1183 and header-to-items balance ~L744-761 in `20261204100000`, but no customer-payment eligibility). To-Do 8.5 needs two distinct acceptance checks: commission is figured on profit after the standing discount, and it is released in proportion to customer payments.
 
 ### KI-135 — "Inventory Value" label: relabel as pricing-basis value (D12 item 7)
+
+> **Fix in review (Lane E, 2026-11-22):** labels say "price-list cost"; the per-row report and CSV mark rows left out of
+> the total (CSV value blank, "In Total" column); profit and margin carry the saved-pricing-cost note.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-27.
 

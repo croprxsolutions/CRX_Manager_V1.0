@@ -7,7 +7,7 @@ vi.mock('./db', () => ({
 }));
 
 import {
-  closeDeliveryReceipt, isReceiptSendingNow, receiptCloseScope, receiptMayAlreadyBeSent, receiptsToCheckFilter,
+  closeDeliveryReceipt, isReceiptChanged, isReceiptSendingNow, receiptCloseScope, receiptMayAlreadyBeSent, receiptsToCheckFilter,
 } from './receiptsToCheck';
 
 const result = (over = {}) => ({
@@ -30,6 +30,21 @@ describe('closeDeliveryReceipt', () => {
     await closeDeliveryReceipt('d1', 'manual_send', 'k1');
     expect(rpc).toHaveBeenCalledWith('close_delivery_receipt', { p_delivery_id: 'd1', p_reason: 'manual_send', p_idempotency_key: 'k1' });
     expect(receiptCloseScope('d1', 'handled')).not.toBe(receiptCloseScope('d1', 'manual_send'));
+  });
+
+  it('names the receipt it means when given, and gives each receipt its own retry key (#2251)', async () => {
+    rpc.mockResolvedValue({ data: result(), error: null });
+    await closeDeliveryReceipt('d1', 'handled', 'k1', '2026-11-08T12:00:00.123456+00:00');
+    expect(rpc).toHaveBeenCalledWith('close_delivery_receipt', {
+      p_delivery_id: 'd1', p_reason: 'handled', p_idempotency_key: 'k1', p_expected_queued_at: '2026-11-08T12:00:00.123456+00:00',
+    });
+    expect(receiptCloseScope('d1', 'handled', 'a')).not.toBe(receiptCloseScope('d1', 'handled', 'b'));
+    expect(receiptCloseScope('d1', 'handled', 'a')).toBe(receiptCloseScope('d1', 'handled', 'a'));
+  });
+
+  it('recognises the changed-receipt refusal', () => {
+    expect(isReceiptChanged({ message: 'DELIVERY_RECEIPT_CHANGED: queued again' })).toBe(true);
+    expect(isReceiptChanged({ message: 'DELIVERY_RECEIPT_SENDING' })).toBe(false);
   });
 
   it('throws the database refusal so the screen can say why', async () => {

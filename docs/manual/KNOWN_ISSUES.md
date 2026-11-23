@@ -84,7 +84,7 @@ Each item's full entry is in its area section below. "Severity unsure" marks a r
 | Field applications | KI-187 | HIGH | Open | One spray recorded through both a blend ticket and its job could deduct stock twice. Production has no blend tickets yet. | Mason (field-app billing) |
 | Orders and deliveries | KI-199 | HIGH | Fixed on staging, not live | Partial deliveries are overstated, and field drafts can go to the wrong grower. | Mason (field-app billing) |
 | Quotes and bookings | KI-190 | HIGH | Open | Two reps drawing from one booking can order at quantities or prices that neither of them saw. | Taha |
-| Orders and deliveries | KI-167 | HIGH (severity unsure) | Open | The office must fix a line's unit by hand before it can be re-delivered. No amounts change. | Taha |
+| Orders and deliveries | KI-167 | HIGH (severity unsure) | Open (fix pending, not applied) | The office must fix a line's unit by hand before it can be re-delivered. No amounts change. | Taha |
 | Inventory | KI-168 | HIGH (severity unsure) | Open | That purchase cannot be used as an actual-cost basis. Nothing reads it yet because costing is parked. | Agent (unassigned) |
 | Payments | KI-75 | HIGH (severity unsure) | Resolved: disproved 2026-11-23 (two-session test; the key lock serializes it) | Applying a credit memo could clash with another action happening at the same moment. | None (closed) |
 | Permissions | KI-169 | HIGH | Open | Hiding Invoices or Record Payments from a person still lets them reach those actions in the database. | Taha |
@@ -335,6 +335,9 @@ before the job rows in the hold trigger's callers, or rebuild once per statement
 No amount is changed; the office must correct the line's unit by hand. **Decision (Mason, 2026-11-17: "Accept and
 land"):** #1896 ships with this open. Fix: relabel completed lines to the stock unit, or relabel a line when a void
 reopens it.
+**Fix pending (2026-11-23, not applied):** `supabase/migrations/20270225120000_ki167_relabel_completed_lines_stock_unit.sql`
+relabels the three lines to their product's stock unit ("oz" -> "Dry oz", "Gallon " and "Gall" -> "Gal"; Taha approved).
+Quantities and amounts do not change. Proof: `scripts/smoke/prove-ki167-relabel-completed-lines-real-schema.mjs`.
 
 ### KI-203 — Quick Delivery shows a dash for the unit of a product stocked in Gal
 

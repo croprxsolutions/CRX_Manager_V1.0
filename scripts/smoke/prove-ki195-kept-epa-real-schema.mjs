@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for KI-195 (20270225110000_job_proof_kept_epa): the sent proof's data and the printouts' read of
+ * Real-schema proof for KI-195 (20270225193000_job_proof_kept_epa): the sent proof's data and the printouts' read of
  * job_product_epa give the EPA number a job kept, never the catalog's later one. Builds the baseline plus every
  * migration before the candidate (shared undo-paths harness), then:
  *   FIDELITY: the replayed get_job_proof_data source has the md5 the candidate's preflight pins (live's, 2026-11-23);
@@ -25,7 +25,7 @@ import path from 'node:path';
 process.env.UNDO_PATHS_CONTAINER ||= `crx-ki195-${process.pid}-${Date.now().toString(36)}`;
 const { buildContainer, removeContainer, seedUsers, psql, scalar, docker, USERS, id, NAME, ROOT } = await import('./undo-paths/harness.mjs');
 
-const CANDIDATE = '20270225110000_job_proof_kept_epa.sql';
+const CANDIDATE = '20270225193000_job_proof_kept_epa.sql';
 const PINNED_MD5 = 'e4ec151e7306b61962fd16251f47af76';
 const CUST = id('e1'); const FIELD = id('e2');
 const P_CORR = id('e3'); const P_NONE = id('e4'); const P_OLD = id('e5');

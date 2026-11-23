@@ -1,4 +1,4 @@
--- 20270225110000_job_proof_kept_epa.sql
+-- 20270225193000_job_proof_kept_epa.sql
 --
 -- KI-195 (GitHub #2183): the "your field was sprayed" proof prints the EPA number the job kept.
 --
@@ -226,7 +226,7 @@ COMMENT ON FUNCTION public.get_job_proof_data(uuid, uuid) IS
   'recipient never sees another customer''s field; NULL = whole job (office preview). '
   'Per-field acres = job_applied_record_fields.applied_acres (real sprayed acres) when '
   'present, else the field''s effective acres. Product EPA numbers are the ones the job kept '
-  '(job_product_epa) with epa_kept / epa_not_recorded, else the product''s (KI-195, 20270225110000). '
+  '(job_product_epa) with epa_kept / epa_not_recorded, else the product''s (KI-195, 20270225193000). '
   'STABLE; SECURITY DEFINER; admin/sales_rep only.';
 
 DO $$

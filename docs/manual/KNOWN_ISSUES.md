@@ -1161,7 +1161,7 @@ total, billed unit and unit price, unchanged charge, both grouping configuration
 
 ### KI-195 — The Chemical Application Report prints today's EPA number, not the job's saved one
 
-> **2026-11-23:** Fix in review (PR to staging; migration `20270225110000` not yet applied) · MED · plan W2-26 · #2183. The four printouts read `job_product_epa`; REI/PHI sources are unchanged; see `docs/changelog.d/2026-11-23-ki195-printouts-kept-epa.md`. The description below is the state before this fix.
+> **2026-11-23:** Fix in review (PR to staging; migration `20270225193000` not yet applied) · MED · plan W2-26 · #2183. The four printouts read `job_product_epa`; REI/PHI sources are unchanged; see `docs/changelog.d/2026-11-23-ki195-printouts-kept-epa.md`. The description below is the state before this fix.
 
 **MED · OPEN (source-confirmed) · restricted-use/regulatory records · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 1) · unassigned · GitHub #2183**
 Sprayed jobs keep their EPA number in `job_product_epa` (`20261204120000` ~L143-152), including an explicit unknown,

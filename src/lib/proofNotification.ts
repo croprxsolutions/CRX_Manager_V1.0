@@ -58,7 +58,7 @@ export interface ProofProduct {
   signal_word: string | null;
   /** The job's kept number when `epa_kept`, else the catalog's (KI-195). */
   epa_registration: string | null;
-  /** True when the job kept a number (or none) for this product. Absent from a database before 20270225110000. */
+  /** True when the job kept a number (or none) for this product. Absent from a database before 20270225193000. */
   epa_kept?: boolean;
   /** True when the kept row is "Not recorded" (a job sprayed before numbers were kept). */
   epa_not_recorded?: boolean;
@@ -343,7 +343,7 @@ export function buildProofDraft(data: JobProofData): ProofDraft {
   const products: ProofDraftProductLine[] = data.products.map((p) => ({
     label: formatProductLine(p),
     signalWord: p.signal_word && p.signal_word.trim() ? p.signal_word.trim() : null,
-    // A database before 20270225110000 sends no epa_kept: its number may be the catalog's for a job that kept another,
+    // A database before 20270225193000 sends no epa_kept: its number may be the catalog's for a job that kept another,
     // so no EPA line is printed then (as before KI-195).
     epa: p.epa_kept === undefined ? null : jobEpaText(
       p.epa_kept ? { epa_registration: p.epa_registration, not_recorded: p.epa_not_recorded === true } : undefined,

@@ -29,7 +29,7 @@ No write path changes; nobody gains or loses access. Smallest change:
   abort, as the label lookups already do).
 - `chemicalApplicationReportFetch.ts` and the two `JobDetail.tsx` builders apply it to their existing label map.
 - `applicatorSheetPdf.ts` gains an `EPA Reg. No.` column (always on; it is regulatory data).
-- Migration `20270225110000_job_proof_kept_epa.sql`: `CREATE OR REPLACE` of `get_job_proof_data(uuid, uuid)`, same
+- Migration `20270225193000_job_proof_kept_epa.sql`: `CREATE OR REPLACE` of `get_job_proof_data(uuid, uuid)`, same
   signature, gate, grants and body except the products block: LEFT JOIN the lock row; `epa_registration` = the kept number
   when locked, else `_epa_norm(catalog)`; two new keys `epa_kept`, `epa_not_recorded`. Read-only, so no idempotency key.
 - `proofNotification.ts` prints `EPA Reg. No. <text>` on each product line (HTML and text). Old database (keys absent)
@@ -70,7 +70,7 @@ None. Wording `Unknown` / `Not recorded` follows KI-195 and REG-1 section 7.
 ## Cold challenge (gpt-6.2-astra high, 2026-11-23, 48 findings) and how each was settled
 
 Changed in the contract and code:
-- **Old database answer (5, 41):** a proof answer without `epa_kept` (database before `20270225110000`) prints no EPA
+- **Old database answer (5, 41):** a proof answer without `epa_kept` (database before `20270225193000`) prints no EPA
   line at all, as today, instead of a catalog number that may be wrong.
 - **Lost access / cut answer (1, 2):** the kept-number read first confirms the caller can still see the job (else the
   print aborts), and asks only for the printed products' rows (at most one each), so no row limit can cut it.

@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-22 — #2258: Mason owner-accepted 2 Sol finding(s) at `22fb41ad3422`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2258 at `22fb41ad3422` (base `bdd733f9b071`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:278`, text sha256 `aae4366d8301e44f` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 07edd845a7bd)
+- Finding 2 (HIGH) at `src/pages/CycleCounts.tsx:279`, text sha256 `fc975c95a963b758` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 07edd845a7bd)
+
 ## 2026-11-22 — #2258: Mason owner-accepted 2 Sol finding(s) at `59cef43c12b5`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2258 at `59cef43c12b5` (base `47b378731762`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

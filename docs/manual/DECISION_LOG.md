@@ -3,6 +3,9 @@
 ## 2026-11-23 — F06 / KI-187: the job takes the stock when a blend ticket is linked to it
 
 **Decision (Mason, 2026-11-23: "The job (A)").** When a spray job has a blend ticket linked to it, completing the job records the spray and takes the chemicals out of stock, as today. Create App Record on a linked ticket is refused; a ticket with its own record cannot be linked to a job; a ticket cannot be unlinked or moved off a completed job. The ticket stays the blend paperwork and its billing source (#2063). Accepted consequences: stock comes out at the job's chemical amounts, not the ticket's measured amounts; ticket lot numbers are not copied onto the spray record; a ticket linked to the wrong completed job needs an admin to fix by hand. Rejected: the ticket takes the stock (rewrites job completion, collides with #2170); whichever is recorded first (can stop the applicator closing the job). Contract: `docs/plans/2026-11-23-f06-job-blend-stock-once-CONTRACT.md`.
+
+**Decision (Mason, 2026-11-23, on Sol round 1 HIGH 2: "Refuse completion (Recommended)").** A spray job with a linked blend ticket but no chemicals entered cannot be completed until the chemicals are added, so stock and the spray record stay right. Rejected: accept that it takes nothing out of stock and lists no chemicals.
+
 ## 2026-11-23 — #2339: Mason owner-accepted 1 Sol finding(s) at `72ad09a97efa`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2339 at `72ad09a97efa` (base `d5a2696ab035`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

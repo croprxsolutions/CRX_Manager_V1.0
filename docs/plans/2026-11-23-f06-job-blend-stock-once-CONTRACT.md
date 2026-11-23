@@ -20,12 +20,14 @@ Read at `origin/staging` `c2a85624e` (2026-11-23). Issue #2178. Tracker row F06.
 Smallest change: one new migration (`20270225200000_f06_job_owns_linked_blend_stock.sql`), no change to either posting function (avoids colliding with open #2170, which rewrites job completion):
 
 1. `BEFORE INSERT` trigger on `application_records` (definer function):
-   - `blend_ticket` record whose ticket (locked `FOR UPDATE`) has a `job_id` → refuse `BLEND_TICKET_JOB_RECORDS`.
+   - `blend_ticket` record whose ticket (locked `FOR UPDATE`) is linked to a live job (job then locked; not cancelled, not deleted) → refuse `BLEND_TICKET_JOB_RECORDS`. A cancelled or deleted job cannot complete, so its ticket records as before (Sol round 1, HIGH 1).
    - `job` record: lock the job row, then (next statement) refuse `JOB_BLEND_TICKET_ALREADY_RECORDED` if a ticket linked to this job has its own record. Only old rows can reach this; the link rules stop new ones.
+   - `job` record for a job with a linked ticket that lists products but no chemical lines of its own → refuse `JOB_BLEND_TICKET_NEEDS_CHEMICALS` (Mason, 2026-11-23, Sol round 1 HIGH 2).
 2. `BEFORE UPDATE OF job_id` trigger on `blend_tickets` (definer function), returning at once when `job_id` did not change:
    - linking a ticket that has its own record → refuse `BLEND_TICKET_RECORDED_NO_JOB`;
+   - linking to a job of another customer → refuse `BLEND_TICKET_JOB_OTHER_CUSTOMER` (the save RPC already checks; this covers direct table updates; Sol round 1 HIGH 3);
    - moving or unlinking a ticket whose old job is already recorded (old job locked first) → refuse `BLEND_TICKET_COMPLETED_JOB_KEEPS_TICKET`.
-3. Plain-words messages for all four codes in `src/lib/errorSanitizer.ts` (server sentence shown after "Nothing was saved.").
+3. Plain-words messages for all six codes in `src/lib/errorSanitizer.ts` (the server sentence, without "Nothing was saved.": the app may already have started the job in an earlier request).
 
 Who may act is unchanged: both RPCs keep their role checks; triggers only add refusals. `application_records` has only a SELECT policy (checked live, read-only), so only the definer posting functions insert it; the link is guarded on the table because office users update `blend_tickets` directly. Guard functions are `SECURITY DEFINER`, owned by postgres, `search_path = public, pg_temp`, EXECUTE revoked from every app role; the postflight pins this.
 
@@ -36,7 +38,7 @@ Who may act is unchanged: both RPCs keep their role checks; triggers only add re
 - **Two tickets on one job:** neither records on its own; the job's completion takes the stock once.
 - **Existing rows:** triggers fire only on new inserts/updates. Production has no blend tickets (read-only check, 2026-11-23); staging keeps its synthetic doubled pair.
 - **Retry:** a refused call writes nothing; the idempotency receipt is bound only after success, so a retry is refused again the same way.
-- **Undo for an old doubled pair:** an admin reverses the ticket record (stock back), then the job completes.
+- **Old rows:** a linked ticket that recorded before an unfinished job: an admin reverses the ticket record (stock back), then the job completes. A pair where both already recorded (staging's synthetic pair): reversing the ticket record alone restores the single deduction; nothing else to do.
 - **Accepted gap (as KI-93):** a ticket never linked to its job, or unlinked before the job completed, is invisible to the database.
 - **Consequences Mason accepted with (A):** stock comes out at the job's chemical amounts, not the ticket's measured amounts; ticket lot numbers are not copied onto the spray record; a ticket linked to the wrong completed job needs an admin to fix by hand.
 
@@ -54,8 +56,9 @@ One database PR to `staging` (migration + sanitizer messages + ledger + docs). T
 5. Recorded ticket → linking refused; unrelated ticket and job each record as before.
 6. The internal ticket-record body is guarded too (trigger on the table).
 7. Two-session races: completion vs unlink (unlink waits on the lock, then refused); record vs link (link refused).
-8. Mutation: drop the link guard → the unlink goes through. Rollback script restores the old behaviour.
-9. Staging browser check after merge: the refusal reads in plain words on Blend Ticket Detail.
+8. Sol round 1: a linked job with no chemicals cannot complete until a line is added; a ticket on a cancelled job records; linking to another customer's job is refused.
+9. Mutation: drop the link guard → the unlink goes through. Rollback script restores the old behaviour.
+10. Staging browser check after merge: the refusal reads in plain words on Blend Ticket Detail.
 
 ## Cold challenge (Astra gpt-6.2-astra high, 2026-11-23): FINDINGS 61
 
@@ -69,6 +72,11 @@ The first-wins design did not converge. Settled and carried into design A:
 - DECISIONs 3, 4, 6-11: answered by Mason's (A) below.
 Full output kept outside the repo, in the session scratchpad.
 
+## Sol round 1 (gpt-6.2-sol high, 2026-11-23): 3 HIGH, all fixed
+
+HIGH 1 (cancelled job strands a billed ticket), HIGH 2 (job with no chemicals; Mason's decision 2) and HIGH 3 (cross-customer direct link) are fixed above. MEDs: the "Nothing was saved" wording is dropped; race B now checks the link really waited on the lock. Refuted: a repeatable-read link transaction (the app's database API runs each request at READ COMMITTED and clients cannot change it). Accepted: two bulk unlinks touching the same two jobs in opposite orders can deadlock; PostgreSQL aborts one, nothing is written, a retry works. LOWs: the rollback script runs in one transaction; the old-rows note above is corrected.
+
 ## Business decisions
 
 1. **When a spray job has a blend ticket linked to it, which one takes the chemicals out of stock?** Mason, 2026-11-23: **(A) the job.** (Rejected: (B) the ticket, which rewrites job completion; (C) whichever is recorded first, which can block the applicator from closing the job.)
+2. **A spray job with a linked blend ticket but no chemicals entered:** Mason, 2026-11-23: **refuse completion** until the chemicals are added (rejected: accept that stock stays too high and the spray record lists no chemicals).

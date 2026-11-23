@@ -265,9 +265,9 @@ function session(sql, delayMs = 0) {
 
 
 const id = (s) => `af060000-0000-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), CUST = id('c1'), P = id('b1'), INV = id('d1'), FIELD = id('f1');
+const ADMIN = id('a1'), CUST = id('c1'), CUST2 = id('c2'), P = id('b1'), INV = id('d1'), FIELD = id('f1');
 const JOB = (k) => id(`10${k}`), TICKET = (k) => id(`20${k}`);
-const KEYS = [1, 2, 3, 4, 5, 6, 7, 8];
+const KEYS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -276,7 +276,8 @@ function seed() {
   raw(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
     DELETE FROM public.unit_conversions;
     INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};
-    INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST}', '[PROVER] F06 Farm', true);
+    INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST}', '[PROVER] F06 Farm', true),
+      ('${CUST2}', '[PROVER] F06 Other Farm', true);
     INSERT INTO public.fields (id, customer_id, field_name, total_acres) VALUES ('${FIELD}', '${CUST}', '[PROVER] F06 Field', 10);
     INSERT INTO public.products (id, product_name, sku, product_form, inventory_unit, unit_size, rate_unit, container_unit,
         rate_per_acre, current_cost, tier1_price, tier2_price, tier3_price, pricing_version, is_active) VALUES
@@ -293,7 +294,12 @@ function seed() {
       VALUES ('${TICKET(k)}', 'F06-T${k}', '${ADMIN}', 'completed', 'approved', '${CUST}', 2027, current_date, 10);
     INSERT INTO public.blend_ticket_products (blend_ticket_id, product_id, product_name, quantity, unit, sequence_order, rate_per_acre, rate_per_acre_unit)
       VALUES ('${TICKET(k)}', '${P}', '[PROVER] F06 Chem', 10, 'Gal', 1, 1, 'Gal');
-    INSERT INTO public.blend_ticket_fields (blend_ticket_id, field_id, customer_id, planned_acres) VALUES ('${TICKET(k)}', '${FIELD}', '${CUST}', 10);`).join('')}`);
+    INSERT INTO public.blend_ticket_fields (blend_ticket_id, field_id, customer_id, planned_acres) VALUES ('${TICKET(k)}', '${FIELD}', '${CUST}', 10);`).join('')}
+    -- J9 has no chemical lines; J10 is cancelled with T10 linked; J11 belongs to another customer.
+    DELETE FROM public.job_chemicals WHERE job_id = '${JOB(9)}';
+    UPDATE public.jobs SET status = 'cancelled' WHERE id = '${JOB(10)}';
+    UPDATE public.blend_tickets SET job_id = '${JOB(10)}' WHERE id = '${TICKET(10)}';
+    UPDATE public.jobs SET customer_id = '${CUST2}' WHERE id = '${JOB(11)}';`);
   console.log(`[prover] seeded ${KEYS.length} in-progress jobs (10 Gal each) and ${KEYS.length} approved tickets (10 Gal each); 500 Gal on hand`);
 }
 
@@ -387,6 +393,19 @@ async function afterCases() {
   assert.notEqual(r6.status, 0, r6.output);
   assert.match(r6.output, /BLEND_TICKET_JOB_RECORDS/);
   console.log('[case 6] calling the internal ticket-record body directly on a linked ticket is refused by the table guard');
+  // 7. Mason, 2026-11-23: a job with a linked ticket but no chemicals entered cannot complete; once a line is added it can.
+  refusedAfter(link(9, JOB(9)), complete(9), /JOB_BLEND_TICKET_NEEDS_CHEMICALS/, 'case 7');
+  const addLine = `INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order)
+    VALUES ('${JOB(9)}', '${P}', 10, 'Gal', 1000, false, 1);`;
+  assert.equal(Number(okProbe(`${AS_ADMIN}\n${addLine}\n${signedIn(`${link(9, JOB(9))}\n${complete(9)}\n${ON_HAND}`)}`)), base - 10, 'case 7: with a line added the job completes');
+  ok(complete(9));
+  console.log('[case 7] J9 has T9 linked but no chemicals: completion refused, stock unchanged; after a chemical line is added it completes (10 Gal out); an empty job with no ticket still completes as before');
+  // 8. A cancelled job cannot complete, so its linked ticket records as before.
+  assert.equal(Number(ok(`${record(10)}\n${ON_HAND}`)), base - 10, 'case 8: a ticket on a cancelled job must record and take its stock');
+  console.log('[case 8] T10 is linked to cancelled J10: Create App Record works and takes 10 Gal');
+  // 9. A ticket cannot be linked to another customer's job, even by a direct table update.
+  refused(link(6, JOB(11)), /BLEND_TICKET_JOB_OTHER_CUSTOMER/, 'case 9');
+  console.log("[case 9] linking T6 to J11 (another customer's job) by a direct table update: refused");
   await races();
 }
 
@@ -406,8 +425,10 @@ async function races() {
   // Race B: T8 is being recorded on its own (ticket lock held); linking it to J8 waits, then is refused.
   const c = session(`BEGIN;\n${signedIn(record(8))}\nSELECT pg_sleep(3);\nCOMMIT;`);
   const d = session(`BEGIN;\n${signedIn(link(8, JOB(8)))}\nCOMMIT;`, 1000);
-  const [rc, rd] = await Promise.all([c, d]);
+  const w2 = session(`SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%job_id = ''${JOB(8)}''%' AND pid <> pg_backend_pid();`, 2200);
+  const [rc, rd, rw2] = await Promise.all([c, d, w2]);
   assert.equal(rc.code, 0, rc.out);
+  assert.equal(rw2.out.trim().split(/\r?\n/).filter(Boolean).at(-1), '1', `race B: the link must be waiting on a lock mid-race:\n${rw2.out}`);
   assert.notEqual(rd.code, 0, `race B: the link must be refused:\n${rd.out}`);
   assert.match(rd.out, /BLEND_TICKET_RECORDED_NO_JOB/);
   console.log('[race B] two sessions: T8 is recorded while the office links it to J8; the link waits on the ticket lock, then is refused');
@@ -422,8 +443,8 @@ function mutation() {
 
 function rollbackCases() {
   stageText('reverse.sql', lf(REVERSE));
-  const r = apply('reverse.sql');
-  assert.equal(r.status, 0, r.output);
+  const r = docker([...psqlArgs(), '-f', '/tmp/reverse.sql'], { allowFailure: true }); // the script has its own transaction
+  assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
   assert.equal(scalar("SELECT count(*) FROM pg_proc WHERE proname LIKE '\\_f06\\_%';"), '0');
   assert.equal(Number(ok(`${link(3, JOB(3))}\n${complete(3)}\n${record(3)}\n${ON_HAND}`)), Number(scalar(ON_HAND)) - 20);
   console.log('[rollback] the reverse script removes both guards and the old behaviour returns (linked job and ticket both deduct)');

@@ -294,3 +294,28 @@ describe('DeliveryDetail edit: Unassigned from a stale form (Sol r3 HIGH 1)', ()
     expect(select.disabled).toBe(true);
   });
 });
+
+describe('DeliveryDetail edit: Edit stays locked until the reload after a save lands (Sol r9 HIGH 8)', () => {
+  it('greys out Edit while the saved delivery reloads, then frees it', async () => {
+    render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 }));
+    const save = await screen.findByRole('button', { name: /Save Changes/ });
+    // Hold the reload's line read, so the page still shows the delivery as it was before the save.
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    mockFrom.mockImplementation((table: string) => {
+      const chain = buildChain(table);
+      if (table === 'delivery_items') {
+        const then = chain.then as (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => Promise<unknown>;
+        chain.then = (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => held.then(() => then(ok, bad));
+      }
+      return chain;
+    });
+    fireEvent.click(save);
+    await waitFor(() => expect(editCalls()).toHaveLength(1));
+    const edit = (await screen.findByRole('button', { name: /^Edit$/ })) as HTMLButtonElement;
+    expect(edit.disabled).toBe(true);
+    release();
+    await waitFor(() => expect((screen.getByRole('button', { name: /^Edit$/ }) as HTMLButtonElement).disabled).toBe(false));
+  });
+});

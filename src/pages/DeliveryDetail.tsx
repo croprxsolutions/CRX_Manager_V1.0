@@ -307,6 +307,11 @@ export default function DeliveryDetail() {
   const [parentQuote, setParentQuote] = useState<{ id: string; quote_number: string } | null>(null);
   // Load call order, so only the newest fetchDelivery for this route may publish.
   const fetchSeqRef = useRef(0);
+  // Edit stays locked until the reload started after a save (or a doubtful clear) has fully loaded,
+  // so Edit never opens on the delivery as it was before that save (Sol #2364 r9).
+  const [editRefreshSeq, setEditRefreshSeq] = useState(0);
+  const [loadedSeq, setLoadedSeq] = useState(0);
+  const editLocked = editRefreshSeq > loadedSeq;
 
   // The order context, invoices and remainders belong to the delivery they were read for:
   // drop them on a route change so none shows under the next delivery while it loads.
@@ -559,7 +564,6 @@ export default function DeliveryDetail() {
           // Orphan delivery: no order, so no split-billing state, order, invoices,
           // sibling deliveries or quote to carry over from a previously viewed delivery.
           setOrderNeedsSplitBilling(false);
-          setBilledOutsideCrxReason(null);
           setParentOrder(null);
           setRelatedInvoices(mergeRelatedInvoices([], byDelivery));
           setInvoicesLoaded(true);
@@ -611,7 +615,14 @@ export default function DeliveryDetail() {
     }
     setLoadFailedId(null);
     setLoading(false);
+    setLoadedSeq(seq);
   }, [id, toast, loadAsDriver]);
+
+  // fetchDelivery takes its load number before its first await, so this lock waits for exactly that load.
+  const refreshAfterEdit = () => {
+    fetchDelivery();
+    setEditRefreshSeq(fetchSeqRef.current);
+  };
 
   useEffect(() => {
     if (id) fetchDelivery();
@@ -688,7 +699,7 @@ export default function DeliveryDetail() {
   // ── Edit Mode ──────────────────────────────────────────────────────────
 
   const startEditing = async () => {
-    if (!delivery || !customer) return;
+    if (!delivery || !customer || editLocked) return;
     setEditDriver(delivery.assigned_driver || '');
     setEditDriverAtOpen(delivery.assigned_driver || '');
     clearUnconfirmedRef.current = false;
@@ -857,7 +868,7 @@ export default function DeliveryDetail() {
       if (error) {
         toast('error', sanitizeError(error));
         // The form is stale: close it and reload, so the next edit starts from the current delivery.
-        if (isStaleEditFormError(error)) { setEditing(false); fetchDelivery(); }
+        if (isStaleEditFormError(error)) { setEditing(false); refreshAfterEdit(); }
       } else {
         applyEditSaved(assertRpcResult<EditDeliveryResult>(data, 'edit_delivery'), editScope, isScheduled);
       }
@@ -880,7 +891,7 @@ export default function DeliveryDetail() {
     void brandState.reload({ discard: (edited.brand_lines_dropped ?? []).map((d) => d.old_delivery_item_id) });
     toast('success', isScheduled ? 'Delivery and items updated' : 'Delivery updated');
     setEditing(false);
-    fetchDelivery();
+    refreshAfterEdit();
   };
 
   // ── Cancel Delivery ────────────────────────────────────────────────────
@@ -2209,6 +2220,7 @@ export default function DeliveryDetail() {
                 icon={<Pencil className="w-4 h-4" />}
                 showChevron={false}
                 onClick={startEditing}
+                disabled={editLocked}
               >
                 Edit
               </Button>
@@ -2625,7 +2637,11 @@ export default function DeliveryDetail() {
             </div>
 
             <div className="flex justify-end gap-3 pt-2">
-              <Button variant="secondary" onClick={() => setEditing(false)} disabled={savingEdit}>Cancel</Button>
+              <Button variant="secondary" onClick={() => {
+                setEditing(false);
+                // After a clear whose reply never came, reload: the cached driver may no longer be true.
+                if (clearUnconfirmedRef.current) refreshAfterEdit();
+              }} disabled={savingEdit}>Cancel</Button>
               <Button onClick={saveEdit} loading={savingEdit}>Save Changes</Button>
             </div>
           </div>

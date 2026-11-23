@@ -19,6 +19,7 @@ export const PROMPT_DEDUPE_BLOCKS = [
 // owner-approval-prompt (Mason, 2026-10-09) records his `I approve` reply
 // for a parked migration; it replaced the Windows Hello signature.
 // coderabbit-skip-prompt (Mason, 2026-10-22) records his `skip coderabbit`.
+// taha-lane-prompt (Mason, 2026-11-22) records his `taha override <code>`.
 // ship-intent-reminder was removed (Mason, 2026-10-29): its word list matched
 // nearly every message and added the /ship text each time, while AGENTS.md
 // already routes build and ship work to .claude/commands/ship.md.
@@ -28,6 +29,7 @@ export const PROMPT_DEDUPE_BLOCKS = [
 export const SHARED_PROMPT_MODULES = [
   "./owner-approval-prompt.mjs",
   "./coderabbit-skip-prompt.mjs",
+  "./taha-lane-prompt.mjs",
 ];
 
 export const CLAUDE_ONLY_PROMPT_MODULES = [];

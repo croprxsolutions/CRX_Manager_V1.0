@@ -310,6 +310,8 @@
 >
 > Last reconciled against `.claude/settings.json` and `.codex/hooks.json` hook wiring on 2026-10-30.
 
+> **Taha's lanes (Mason 2026-11-22, until the end of Dec 15 Central):** both merge gates refuse any agent merge into `staging` of a PR whose `src/` or `supabase/` files are in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing), whatever OK line it has; field billing (field, spray, blend, application, job paths) is Mason's and passes. An unreadable or 250+ file list refuses. The refusal issues a 6-digit code; Mason's message of its own `taha override <code>` lets that one PR through for 24 hours (`taha-lane-lib.mjs`, `taha-lane-prompt.mjs`).
+
 ---
 
 ### Schema-Aware PreToolUse Hooks (`.claude/hooks/`)
@@ -365,7 +367,7 @@ Runs on Codex's `*` (all-tools) PreToolUse matcher through portable POSIX and Wi
 ### UserPromptSubmit Hooks (`.claude/hooks/`)
 These run when Mason submits a prompt, BEFORE Claude reads it. They inject extra context via `additionalContext` — they don't block — so Mason's intent is preserved while Claude is forced to slow down on risky wording or nudged toward the right workflow.
 
-`prompt-router.mjs` is the single registered command for this event. It reads the prompt once and invokes only `hold-latch-prompt.mjs`, (since 2026-10-09) `owner-approval-prompt.mjs` and (since 2026-10-22) `coderabbit-skip-prompt.mjs` on both Claude and Codex. `ship-intent-reminder.mjs` was unwired on 2026-10-29 (Mason): its word list matched nearly every message and added the `/ship` text and landing policy each time, which `AGENTS.md` already states every session; Mason deleted the file the same day. Of the remaining modules, the last records Mason's `I approve` (or `approve <code>`) reply for a parked migration and does nothing on any other message. On 2026-10-02 (Mason) five other reminder modules were unwired, and PR #882 deleted them (2026-10-06): `dangerous-phrase-warning`, `codex-gauntlet-reminder`, `agent-pair-review-reminder`, `codex-to-claude-handoff-reminder` and `autopilot-intent-reminder`. They duplicated the user-level risky-phrase nudge or the ship reminder and fired on agent reports as often as on Mason's words.
+`prompt-router.mjs` is the single registered command for this event. It reads the prompt once and invokes only `hold-latch-prompt.mjs`, (since 2026-10-09) `owner-approval-prompt.mjs` (since 2026-10-22) `coderabbit-skip-prompt.mjs` and (since 2026-11-22) `taha-lane-prompt.mjs` on both Claude and Codex. `ship-intent-reminder.mjs` was unwired on 2026-10-29 (Mason): its word list matched nearly every message and added the `/ship` text and landing policy each time, which `AGENTS.md` already states every session; Mason deleted the file the same day. Of the remaining modules, the last records Mason's `I approve` (or `approve <code>`) reply for a parked migration and does nothing on any other message. On 2026-10-02 (Mason) five other reminder modules were unwired, and PR #882 deleted them (2026-10-06): `dangerous-phrase-warning`, `codex-gauntlet-reminder`, `agent-pair-review-reminder`, `codex-to-claude-handoff-reminder` and `autopilot-intent-reminder`. They duplicated the user-level risky-phrase nudge or the ship reminder and fired on agent reports as often as on Mason's words.
 
 | Hook | What it warns on / reminds | Why |
 |------|------------------|-----|

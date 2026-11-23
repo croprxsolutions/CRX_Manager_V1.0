@@ -64,6 +64,13 @@ BEGIN
                                     WHERE l.job_id = jc.job_id AND l.product_id = jc.product_id)) THEN
     RAISE EXCEPTION 'PARENT_EPA_CORRECTION_ON_PREFLIGHT: a sprayed or finished job is missing a kept EPA number';
   END IF;
+  -- ...and keeps doing so: the triggers that write those rows are present and enabled (Sol r2 MED).
+  IF (SELECT count(*) FROM pg_trigger t
+       WHERE NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+         AND ((t.tgname = 'trg_job_epa_freeze_on_spray' AND t.tgrelid = 'public.job_applied_records'::regclass)
+           OR (t.tgname = 'trg_job_epa_freeze_on_finish' AND t.tgrelid = 'public.jobs'::regclass))) <> 2 THEN
+    RAISE EXCEPTION 'PARENT_EPA_CORRECTION_ON_PREFLIGHT: a trigger that keeps sprayed jobs'' EPA numbers is missing or disabled';
+  END IF;
   -- The identity check this file re-emits is exactly 20261207113000's (owner-only, no grants).
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._product_parent_identity_after(public.product_parents,jsonb)')
@@ -216,7 +223,8 @@ BEGIN
 END;
 $function$;
 
--- Re-emitted from 20261207113000 with one change: clearing the EPA number is refused (Mason, 2026-11-23).
+-- Re-emitted from 20261207113000 with two changes: clearing the EPA number is refused (Mason, 2026-11-23), and so is a
+-- correction that would drop a size's restricted-use status (Sol r2 #1).
 CREATE OR REPLACE FUNCTION public._product_parent_identity_after(p_parent public.product_parents, p_changes jsonb) RETURNS jsonb
 LANGUAGE plpgsql STABLE SET search_path = public, pg_temp AS $function$
 DECLARE
@@ -255,6 +263,19 @@ BEGIN
     IF v_unsaved IS NOT NULL THEN
       RAISE EXCEPTION 'PRODUCT_PARENT_EPA_RECORD_UNSAVED: invoice % has a line for this product with no saved EPA number, so it would change too. Open and save a draft invoice to give it one; a posted one must be unposted, saved and posted again', v_unsaved;
     END IF;
+    -- Sol r2 #1: a size that is restricted-use only through its current number's registration would lose that status
+    -- (future invoice lines would capture 'unknown', and no restricted-use sales record is made for those).
+    SELECT string_agg(DISTINCT p.product_name, ', ')
+      INTO v_unsaved
+      FROM public.product_parent_members m
+      JOIN public.products p ON p.id = m.product_id
+      JOIN public.epa_registrations r
+        ON r.epa_registration = public._normalize_epa_registration(p.epa_registration) AND r.rup_status = 'yes'
+     WHERE m.parent_id = p_parent.id AND NOT COALESCE(p.is_rup, false)
+       AND NOT EXISTS (SELECT 1 FROM public.epa_registrations r2 WHERE r2.epa_registration = v_epa AND r2.rup_status = 'yes');
+    IF v_unsaved IS NOT NULL THEN
+      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_RUP_LOST: % is restricted-use only through its current EPA number. Mark it restricted-use first, then correct the number', v_unsaved;
+    END IF;
   END IF;
   RETURN jsonb_build_object(
     'formulation_type', CASE WHEN p_changes ? 'formulation_type' THEN NULLIF(btrim(p_changes->>'formulation_type'), '') ELSE p_parent.formulation_type END,
@@ -275,7 +296,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public._product_parent_identity_after(public.product_parents,jsonb)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = 'b734bf0030abd302f9b95b72c5e2d515'
+                    AND md5(replace(p.prosrc, chr(13), '')) = 'c088d5ce713f866cb65bcf74cfa0cfe3'
                     AND p.proowner = 'postgres'::regrole AND NOT p.prosecdef
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')

@@ -1936,6 +1936,18 @@
       "violation_key": "get_delivery_brands(p_delivery_id uuid)#256184097514",
       "justification": "New in 20270104120000 (Brand PR B-1a, PR #1808, ledger 20261111235530); live body read 2026-11-11: NO-COST. Callable by: an active admin or sales_rep, or the driver assigned to that delivery (_delivery_brand_may_read); anyone else gets NOT_AUTHORIZED. Flagged because it joins products while serializing whole rows of _delivery_line_brand_list (to_jsonb(l)); those rows have a fixed column list (source, parent_id, brand_id, brand_name, epa_registration, manufacturer, is_currently_sourced, is_rup, signal_word, row_version). From products it reads only product_name; from delivery_items only ids, quantity, quantity_delivered and unit_size. No cost, profit or margin field is read or returned.",
       "dated": "2026-11-11"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_batch_year_end_summaries(p_customer_ids uuid[], p_season integer)#cc9c1309d333",
+      "justification": "KI-119 (20270201100000, container-computed key; equals live once applied): page access guard added first; the rest of the chain is unchanged. Previous review: KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; its \"cost\" key is sale revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes. Re-keyed 2026-11-21 (Sol r4): get_customer_year_end_summary, which this chain reaches, now refuses a sales rep with both Reports and Customers hidden; container-computed.",
+      "dated": "2026-11-19"
+    },
+    {
+      "predicate": "cost-exposure-review",
+      "violation_key": "get_customer_year_end_summary(p_customer_id uuid, p_season integer)#faba25e96497",
+      "justification": "KI-119 (20270201100000, Mason 2026-11-21, Sol r4; container-computed key, equals live once applied): refuses a sales rep with both Reports and Customers hidden, right after the existing admin-or-rep check; the rest of the chain is unchanged. Previous review: KI-02 audit (docs/audits/2026-11-02-cost-margin-definer-function-audit.md), live pg_get_functiondef read 2026-11-02: SAFE. Callable by: admin or rep; its \"cost\" key is sale revenue. The key hashes this function and every helper it reaches; re-read the chain when it changes.",
+      "dated": "2026-11-21"
     }
   ]
 }

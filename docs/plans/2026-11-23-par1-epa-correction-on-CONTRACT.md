@@ -71,9 +71,11 @@ Smallest change:
   reader after a correction would print the new number on old invoices (Astra #45).
 - Exceptions already accepted (record map): a job sprayed or finished before `20261204120000` prints **Not recorded**
   rather than any number; a blank invoice line for a size that had no number shows the new number (Mason accepted,
-  record map follow-up 4); invoices and RUP records made after the correction take the new number. A deleted draft
+  record map follow-up 4); invoices and RUP records made after the correction take the new number, except a draft line
+  saved before the correction and posted after without being re-saved: it keeps the number (and restricted-use capture)
+  it was saved with, which is what that invoice prints (Sol r2 LOW). A deleted draft
   invoice restored after a correction behaves as any draft: saving it fills its lines from the trigger.
-- Clearing: refused (Mason, 2026-11-23, Sol r1 #1): this file re-emits `_product_parent_identity_after` with one added
+- Clearing: refused (Mason, 2026-11-23, Sol r1 #1): this file re-emits `_product_parent_identity_after` with an added
   check, so save and preview refuse a blank number (`PRODUCT_PARENT_INVALID`).
 - Records made or rebuilt after a correction take the corrected number (record map rule, Mason accepted again
   2026-11-23, option B over fixing the writers): a job sprayed before but completed after writes the new number into its
@@ -140,3 +142,24 @@ Atrazine 4L only (Mason's call in the parent session, not this file): #39 (the l
   migration header and record say so.
 - #6 MED (report shows the line's generic number where the invoice printed brand numbers): follow-up.
 - #7 MED, #8-#10 LOW: fixed (`af325011a`).
+
+## Sol settlement (round 2, 2026-11-23, head 0b16f50a1)
+
+- #1 HIGH (a correction drops restricted-use status of a size flagged only through its current number's
+  registration): fixed. The identity check refuses it (`PRODUCT_PARENT_EPA_RUP_LOST`, save and preview) unless the size
+  is marked restricted-use or the new number's registration says restricted-use. Proved in the container. Live
+  2026-11-23: Atrazine 4L's three sizes sit at a number whose registration says not restricted-use, so its correction is
+  not blocked.
+- #2 HIGH (an app tab opened before KI-195's deploy prints the corrected number on an old job): same mechanism as r1 #3.
+  The PR stays held until KI-195's screens are live in production; a tab left open across that deploy is the residual
+  risk, for Mason to accept or not.
+- MED (year-end groups a branded line under its generic copy): same as r1 #6, follow-up.
+- MED (preflight checks kept rows but not their writer): fixed; the preflight requires both freeze triggers enabled
+  (proved by a refused apply with one disabled; both enabled live).
+- MED (sweep flags both year-end functions between the `20270201100000` apply and this one): fixed; the allowlist keeps
+  the `20270201100000` keys beside the post-apply keys.
+- LOW (`100-497` vs `100 - 497` splitting rows): refuted for live data: 0 invoice line copies fail the EPA number
+  pattern after trimming (live read-only, 2026-11-23).
+- LOW (prover never renders the statement or a branded line): the branded part is the r1 #6 follow-up; the statement
+  prints the invoice line copy, which the prover shows unchanged.
+- LOW (contract overstated the draft case): fixed in "State and failure".

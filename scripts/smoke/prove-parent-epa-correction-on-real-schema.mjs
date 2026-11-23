@@ -105,11 +105,16 @@ try {
   let r = applyFile(false);
   assert.notEqual(r.status, 0); assert.match(out(r), /PARENT_EPA_CORRECTION_ON_NOT_IN_TRANSACTION/);
   assert.equal(scalar('SELECT public._product_parent_epa_correction_enabled();'), 'f', 'a refused apply leaves the switch off');
+  psql('ALTER TABLE public.jobs DISABLE TRIGGER trg_job_epa_freeze_on_finish;');
+  r = applyFile(true);
+  assert.notEqual(r.status, 0); assert.match(out(r), /trigger that keeps sprayed jobs' EPA numbers is missing or disabled/);
+  psql('ALTER TABLE public.jobs ENABLE TRIGGER trg_job_epa_freeze_on_finish;');
+  assert.equal(scalar('SELECT public._product_parent_epa_correction_enabled();'), 'f', 'a refused apply leaves the switch off');
   r = applyFile(true);
   assert.equal(r.status, 0, `the candidate applies: ${out(r)}`);
   r = applyFile(true);
   assert.notEqual(r.status, 0); assert.match(out(r), /PARENT_EPA_CORRECTION_ON_PREFLIGHT: the switch is missing or already on/);
-  console.log('[PAR1-ON] APPLY: refused outside one transaction; commits; a second apply stops at the preflight');
+  console.log('[PAR1-ON] APPLY: refused outside one transaction and with a kept-number trigger disabled; commits; a second apply stops at the preflight');
 
   assert.deepEqual(yearEndEpa(), [OLD]);
   const before = fingerprint();
@@ -141,6 +146,23 @@ try {
     'the job logbook record keeps 524-475');
   assert.equal(proofEpa(J_OPEN), NEW, 'a job not sprayed yet shows the corrected number');
   console.log('[PAR1-ON] AFTER: old records unchanged byte for byte; spray proof, kept job number, year-end summary, invoice line, RUP record and brand keep 524-475; the unsprayed job shows 100-497-37686');
+
+  // Sol r2 #1: sizes restricted-use only through their current number's registration keep that status.
+  psql(`INSERT INTO public.epa_registrations (epa_registration, rup_status, created_by, updated_by)
+    VALUES ('${NEW}', 'yes', '${USERS.admin}', '${USERS.admin}');`);
+  refused(USERS.admin, correct('k-rup', version(), '524-477'), /PRODUCT_PARENT_EPA_RUP_LOST/);
+  refused(USERS.admin, `SELECT public.preview_product_parent_identity_correction('${PARENT}', '{"generic_epa_registration": "524-477"}'::jsonb);`,
+    /PRODUCT_PARENT_EPA_RUP_LOST/);
+  assert.equal(productEpa(S1), NEW, 'the refused correction changed nothing');
+  psql(`INSERT INTO public.epa_registrations (epa_registration, rup_status, created_by, updated_by)
+    VALUES ('524-477', 'yes', '${USERS.admin}', '${USERS.admin}');`);
+  ok(USERS.admin, `SELECT public.preview_product_parent_identity_correction('${PARENT}', '{"generic_epa_registration": "524-477"}'::jsonb);`);
+  psql(`DELETE FROM public.epa_registrations WHERE epa_registration = '524-477';
+    SET session_replication_role = replica; UPDATE public.products SET is_rup = true WHERE id IN ('${S1}', '${S2}');`);
+  ok(USERS.admin, `SELECT public.preview_product_parent_identity_correction('${PARENT}', '{"generic_epa_registration": "524-477"}'::jsonb);`);
+  psql(`SET session_replication_role = replica; UPDATE public.products SET is_rup = false WHERE id IN ('${S1}', '${S2}');
+    DELETE FROM public.epa_registrations WHERE epa_registration = '${NEW}';`);
+  console.log('[PAR1-ON] AFTER: a correction that would drop restricted-use status is refused (save and preview); allowed when the new number is restricted-use or the size is marked');
 
   // A line saved with no copy for a size that has a number (e.g. a writer that bypassed the fill trigger) falls back to
   // the size's number in the year-end, and blocks the next correction until it is saved (PRODUCT_PARENT_EPA_RECORD_UNSAVED).

@@ -2,8 +2,13 @@
 -- (the 20260716191000 body, byte for byte), its grants and comment, and trg_mark_delivery_aggregate_short_stock.
 -- Run as one transaction (psql -1). Proven by scripts/smoke/prove-drop-inert-delivery-short-stock-trigger-real-schema.mjs.
 
+CREATE TEMP TABLE drop_short_stock_trigger_2225_reverse_tx ON COMMIT DROP AS SELECT pg_current_xact_id()::text AS transaction_id;
+
 DO $reverse_preflight$
 BEGIN
+  IF to_regclass('pg_temp.drop_short_stock_trigger_2225_reverse_tx') IS NULL THEN
+    RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_REVERSE_DRIFT: run this file as one transaction (psql -1)';
+  END IF;
   IF to_regprocedure('public._mark_delivery_aggregate_short_stock()') IS NOT NULL
      OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mark_delivery_aggregate_short_stock') THEN
     RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_REVERSE_DRIFT: the trigger or its function already exists';
@@ -54,3 +59,18 @@ EXECUTE FUNCTION public._mark_delivery_aggregate_short_stock();
 
 COMMENT ON FUNCTION public._mark_delivery_aggregate_short_stock()
   IS 'Marks newly inserted delivered ledger rows for transaction-local aggregate short-stock products without mutating the append-only ledger later.';
+
+DO $reverse_postflight$
+BEGIN
+  IF (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = to_regprocedure('public._mark_delivery_aggregate_short_stock()'))
+       IS DISTINCT FROM 'c0b201d309650463f192fdf26eedc292'
+     OR has_function_privilege('anon', 'public._mark_delivery_aggregate_short_stock()', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public._mark_delivery_aggregate_short_stock()', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public._mark_delivery_aggregate_short_stock()', 'EXECUTE')
+     OR (SELECT proowner FROM pg_proc WHERE oid = 'public._mark_delivery_aggregate_short_stock()'::regprocedure) IS DISTINCT FROM 'postgres'::regrole
+     OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mark_delivery_aggregate_short_stock'
+                      AND tgrelid = 'public.inventory_transactions'::regclass) THEN
+    RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_REVERSE_POSTFLIGHT: body, owner, grants or trigger are not the 20260716191000 ones (run as postgres)';
+  END IF;
+END;
+$reverse_postflight$;

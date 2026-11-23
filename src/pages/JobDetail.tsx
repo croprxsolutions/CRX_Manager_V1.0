@@ -2925,6 +2925,13 @@ export default function JobDetail() {
           setSaving(false);
           return;
         }
+        if (changed.includes('deleted_at') && stillOnThisJob()) {
+          // #2188: a job deleted meanwhile reloads read-only; stay locked until the reload lands.
+          toast('info', 'Not saved: this job was deleted.');
+          await fetchJob();
+          setSaving(false);
+          return;
+        }
         if (changed.length > 0) {
           if (stillOnThisJob()) toast('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
           setSaving(false);

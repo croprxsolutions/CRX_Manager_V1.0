@@ -175,7 +175,8 @@ describe('JobDetail — deleted job (#2188)', () => {
     fireEvent.change(screen.getByLabelText('Ground crew'), { target: { value: 'crew-1' } });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Save Changes/ })); });
     expect(await screen.findByText(/deleted on 11\/2\/2026/)).toBeTruthy();
-    expect(jobsCalls).toBe(2);
+    expect(jobsCalls).toBe(3); // load, the #2337 stale re-read (finds it deleted), the reload
+    expect(mockRpc).not.toHaveBeenCalledWith('save_job', expect.anything());
     for (const name of [/Save Changes/, /Cancel Job/, /Start Job/, /Complete Job/]) {
       expect(screen.queryByRole('button', { name })).toBeNull();
     }

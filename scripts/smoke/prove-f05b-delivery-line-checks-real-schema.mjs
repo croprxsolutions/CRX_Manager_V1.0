@@ -353,7 +353,8 @@ async function applyCandidate() {
   assert.equal(a.code, 0, `the apply must not fail beside a live completion:\n${a.out}`);
   const at = (out, name) => Number(out.match(new RegExp(`${name}=([0-9.]+)`))?.[1]);
   const [read, applying, committedAt, applied] = [at(c.out, 'read'), at(a.out, 'applying'), at(c.out, 'committed'), at(a.out, 'applied')];
-  assert.ok(read < applying && applying < committedAt,
+  // The migration must finish while the completion is still open: it may not wait for it (Sol r5 MED).
+  assert.ok(read < applying && applying < applied && applied < committedAt,
     `the apply did not overlap the completion: read ${read}, applying ${applying}, committed ${committedAt}, applied ${applied}`);
   assert.equal(state(D8), 'completed|1|0');
   console.log('[apply] the migration applies (pre- and postflight pass) beside a half-done completion: no deadlock, nothing lost');
@@ -433,7 +434,7 @@ function afterCases() {
   r = committed(`SELECT public.process_offline_action('${OFF}', '${OFF_KEY}')`);
   assert.equal(r.status, 0, r.output);
   const rec = scalar(`SELECT status || '|' || coalesce(failure_code, '') || '|' || attempt_count FROM public.offline_action_receipts WHERE client_action_id = '${OFF}';`);
-  assert.match(rec, /^needs_review\|[A-Z_]+\|1$/);
+  assert.equal(rec, 'needs_review|PAYLOAD_INVALID|1');  // the proof check's own code, exactly as before (Sol r5 LOW)
   assert.equal(state(D5), 'in_progress|0|0');
   console.log(`[case 7] offline sync unchanged: an all-zero completion still goes to office review (${rec}); the load stays in progress`);
 

@@ -29,6 +29,19 @@
   Mason chose to leave it unfixed (plain reply, ref 326ba930acf4)
 - Finding 3 (HIGH) at `supabase/migrations/20270217130000_po_vendor_link.sql:247`, text sha256 `1790af9de30452a0` (the wording stays with the proof, not here)
   Mason chose to leave it unfixed (plain reply, ref 326ba930acf4)
+## 2026-11-23 — #2330: Mason owner-accepted 2 Sol finding(s) at `f497bf5e6801`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2330 at `f497bf5e6801` (base `de5387c0b4b6`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:982`, text sha256 `92250e5b4c870e33` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 463a87918bc1)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:982`, text sha256 `87efb2b3d6fccdcd` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 463a87918bc1)
+
+## 2026-11-23 — #2330: Mason owner-accepted 1 Sol finding(s) at `9f486882345f`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2330 at `9f486882345f` (base `e499bdbe9450`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:982`, text sha256 `e652920fc9ae23b3` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref b8cc463e916e)
 ## 2026-11-23 — #2339: Mason owner-accepted 1 Sol finding(s) at `72ad09a97efa`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2339 at `72ad09a97efa` (base `d5a2696ab035`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

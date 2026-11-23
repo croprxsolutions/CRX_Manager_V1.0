@@ -132,7 +132,7 @@ export async function fetchMasterMixSummaryData(jobIds: string[]): Promise<Maste
   for (const jobId of uniqueIds) {
     const jobNumber = numberById.get(jobId) ?? null;
     try {
-      const data = await fetchChemicalApplicationReportData(jobId);
+      const data = await fetchChemicalApplicationReportData(jobId, { keptEpa: false });
       if (!data) {
         excluded.push({ job_id: jobId, job_number: jobNumber, reason: 'Job no longer exists' });
         continue;

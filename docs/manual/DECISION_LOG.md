@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — #2247: a job stays editable until invoiced; invoices bill the payer saved on the job
+
+**Decision (Mason, 2026-11-22, in chat, after Sol round 8 hit the stop rule).** Office staff must keep editing a spray job after the applicator marks it complete, so it does not lock at completion. "Lock it when rep or admin says it is posted": once a rep or admin creates its invoice, the job's chemicals, fields and billing split can't change until that invoice is voided. Create Invoice bills what is on the job at that moment, to the billing split saved on the job (the one the job screen shows); only a field with no saved split falls back to its Field Setup split, as the job screen does. The round-7 refusal of a grower-supplied line that took company stock is withdrawn (Sol round 8 found it could refuse a valid job). Accepted as pre-existing, pending a follow-up: editing a completed job's chemicals does not adjust the stock that completion already took, so stock can disagree with the invoice.
+
 ## 2026-11-22 — #2247: every field has a billing split; a job bills each owner the acres of their own fields
 
 **Decision (Mason, 2026-11-22, in chat).** "in field setup we always have the billing split set per field ... the total acres of John field is all billed to him and the field that is 50/50 is split accordingly on those acres." For #2247, Create Invoice refuses and names any job field with no billing split instead of guessing a payer (live check: 0 of 5 fields lack one). Requiring a split when a field is created is a separate Field Setup follow-up.

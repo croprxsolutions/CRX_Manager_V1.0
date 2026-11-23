@@ -23,15 +23,20 @@
 --     commissions read a line's booked cost as cost x quantity; a single invoice bills the sum of its lines
 --     (a field's per-acre price is not billed: Mason, 2026-11-22). A deleted
 --     job is refused (JOB_DELETED) and a deleted blend ticket with a live invoice blocks (Sol round 1).
---     Every field needs a billing split (JOB_FIELD_NO_BILLING_SPLIT names the ones without; the job's fields and
---     splits are locked first), and a job whose fields are all billed to one owner is invoiced to that owner
---     (Mason, 2026-11-22: each owner is billed for their own fields' acres). A line marked customer-supplied whose
---     product was taken from company stock when the job was completed is refused (JOB_LINE_SUPPLIED_BUT_STOCK_USED,
---     Sol round 7).
+--     Every field needs a billing split (JOB_FIELD_NO_BILLING_SPLIT names the ones without), and a job whose fields
+--     are all billed to one owner is invoiced to that owner (Mason, 2026-11-22: each owner is billed for their own
+--     fields' acres). Mason, 2026-11-22 (Sol round 8): the split is the one saved on the job (job_field_shares, what
+--     the job screen shows), read by the new private _job_transfer_shares_20270207; only a field with none saved
+--     falls back to its Field Setup split, as the job screen does. The job bills what is on it at Create Invoice.
+--  4. New trigger function _job_lines_lock_when_invoiced_20270207 on job_chemicals, job_fields and job_field_shares
+--     (Mason, 2026-11-22: "lock it when rep or admin says it is posted"): once a job is invoiced its chemicals,
+--     fields and split can't change (JOB_INVOICED_LOCKED) until its invoice is voided; a completed job stays
+--     editable. A change made while Create Invoice runs waits for it (the job row is held FOR UPDATE).
 --  The below-cost wall is unchanged: a line priced per sold unit is judged by it exactly. Grants, owners, SECURITY
 --  DEFINER and search_path are unchanged. No stored row changes; old invoices keep their quantity-1 lines.
 --
--- ROLLBACK: scripts/smoke/job-transfer-below-cost-reverse.sql restores the transfer body and drops the helpers, proven
+-- ROLLBACK: scripts/smoke/job-transfer-below-cost-reverse.sql restores the transfer body and drops the helpers and the
+-- lock triggers, proven
 -- by scripts/smoke/prove-job-transfer-below-cost-real-schema.mjs. Invoices already written keep their real quantities.
 
 DO $preflight$
@@ -48,7 +53,9 @@ BEGIN
     RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: the transfer body, owner, settings or grants are not the reviewed ones (20261120100000)';
   END IF;
   IF to_regprocedure('public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint)') IS NOT NULL
-     OR to_regprocedure('public._job_transfer_split_qty_20270207(numeric,numeric[])') IS NOT NULL THEN
+     OR to_regprocedure('public._job_transfer_split_qty_20270207(numeric,numeric[])') IS NOT NULL
+     OR to_regprocedure('public._job_transfer_shares_20270207(uuid)') IS NOT NULL
+     OR to_regprocedure('public._job_lines_lock_when_invoiced_20270207()') IS NOT NULL THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: already applied';
   END IF;
   IF to_regprocedure('public.field_app_priced_quantity(numeric,text,text,text)') IS NULL
@@ -185,7 +192,34 @@ ALTER FUNCTION public._job_transfer_split_qty_20270207(numeric, numeric[]) OWNER
 REVOKE ALL ON FUNCTION public._job_transfer_split_qty_20270207(numeric, numeric[])
   FROM PUBLIC, anon, authenticated, service_role;
 
--- 3. The transfer, from 20261120100000: real quantities, the deleted-job and deleted-ticket refusals.
+-- 3. Who pays for each of a job's fields: the split saved on the job (job_field_shares: what the job screen shows and
+--    save_job keeps), else the field's Field Setup split, as the job screen falls back (Mason, 2026-11-22: invoices
+--    bill the payer saved on the job). One row per job field and payer.
+CREATE FUNCTION public._job_transfer_shares_20270207(p_job_id uuid)
+ RETURNS TABLE (field_id uuid, customer_id uuid, split_pct numeric, is_primary boolean, acres_to_treat numeric, pricing_note text)
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT jf.field_id, s.customer_id, s.split_pct, COALESCE(s.is_primary, false), jf.acres_to_treat, s.pricing_note
+    FROM job_fields jf
+    CROSS JOIN LATERAL (
+      SELECT jfs.customer_id, jfs.split_pct::numeric, jfs.is_primary,
+             (SELECT max(fbd.pricing_note) FROM field_billing_defaults fbd
+               WHERE fbd.field_id = jf.field_id AND fbd.customer_id = jfs.customer_id)
+        FROM job_field_shares jfs WHERE jfs.job_id = jf.job_id AND jfs.field_id = jf.field_id
+      UNION ALL
+      SELECT fbd.customer_id, fbd.split_pct::numeric, fbd.is_primary, fbd.pricing_note
+        FROM field_billing_defaults fbd
+       WHERE fbd.field_id = jf.field_id
+         AND NOT EXISTS (SELECT 1 FROM job_field_shares x WHERE x.job_id = jf.job_id AND x.field_id = jf.field_id)
+    ) s(customer_id, split_pct, is_primary, pricing_note)
+   WHERE jf.job_id = p_job_id
+$function$;
+ALTER FUNCTION public._job_transfer_shares_20270207(uuid) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._job_transfer_shares_20270207(uuid) FROM PUBLIC, anon, authenticated, service_role;
+
+-- 4. The transfer, from 20261120100000: real quantities, the deleted-job and deleted-ticket refusals.
 CREATE OR REPLACE FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(p_job_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -194,7 +228,6 @@ CREATE OR REPLACE FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(
 AS $function$
 DECLARE
   v_unsplit_fields text;
-  v_supplied_used text;
   v_payer_id uuid;
   v_job RECORD;
   v_invoice_id uuid;
@@ -220,7 +253,6 @@ DECLARE
   v_owners_cost bigint;
   v_share RECORD;
   v_share_total bigint := 0;
-  v_has_price_override boolean := false;
   v_share_cum_pct numeric := 0;
   v_share_cum_cents bigint := 0;
   v_existing jsonb;
@@ -305,18 +337,6 @@ BEGIN
     RAISE EXCEPTION 'BLEND_TICKET_ALREADY_BILLED: a blend ticket for this job has already been billed; invoicing the job too would double-bill the customer. Void that blend-ticket invoice first if you meant to re-bill here.';
   END IF;
 
-  -- 20270222100000 (Sol round 7): a line marked as the grower's own product after completion took company stock
-  -- (complete_job writes 'job_applied' only for lines not customer-supplied), so it is never turned into a $0 line.
-  SELECT p.product_name INTO v_supplied_used
-    FROM job_chemicals jc JOIN products p ON p.id = jc.product_id
-   WHERE jc.job_id = p_job_id AND jc.customer_supplied
-     AND EXISTS (SELECT 1 FROM inventory_transactions it
-                  WHERE it.job_id = p_job_id AND it.product_id = jc.product_id AND it.transaction_type = 'job_applied')
-   ORDER BY p.product_name LIMIT 1;
-  IF FOUND THEN
-    RAISE EXCEPTION 'JOB_LINE_SUPPLIED_BUT_STOCK_USED: % was taken from company stock when this job was completed, but is now marked as the grower''s own product. Nothing was invoiced; correct the job''s chemical line first.', v_supplied_used USING ERRCODE = 'P0001';
-  END IF;
-
   FOR v_field IN
     SELECT jf.field_id, jf.acres_to_treat, f.field_name, f.crop_type AS f_crop_type
     FROM job_fields jf JOIN fields f ON f.id = jf.field_id
@@ -345,10 +365,12 @@ BEGIN
   -- customer across the job's fields (the landlord/tenant setup the finding is about).
   -- ==========================================================================
   -- 20270222100000 (Mason, 2026-11-22: every field has a billing split, 100% or shared; each owner is billed the
-  -- acres of their own fields): a field with no billing split stops Create Invoice by name, never falling back to a
-  -- payer (Sol round 5: the fallback put every acre and the spraying fee on the one configured owner).
-  -- Sol round 6: the job's fields and their splits are locked first (FOR SHARE; Field Setup's save_field updates the
-  -- field row before replacing its splits), so a concurrent save can't remove a split after this check.
+  -- acres of their own fields; invoices bill the payer saved on the job): each field's payers are the split saved on
+  -- the job, else its Field Setup split (_job_transfer_shares_20270207); a field with neither stops Create Invoice by
+  -- name, never falling back to a payer (Sol round 5).
+  -- Sol round 6: the fields and their Field Setup splits are locked first (FOR SHARE; Field Setup's save_field updates
+  -- the field row before replacing its splits). Sol round 8: the job's own fields, chemicals and saved split can't
+  -- change meanwhile: their lock trigger waits for this job row (held FOR UPDATE above) and then refuses an invoiced job.
   PERFORM 1 FROM job_fields jf JOIN fields f ON f.id = jf.field_id
     WHERE jf.job_id = p_job_id ORDER BY f.id FOR SHARE OF f;
   PERFORM 1 FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
@@ -356,14 +378,12 @@ BEGIN
   SELECT string_agg(f.field_name, ', ' ORDER BY f.field_name) INTO v_unsplit_fields
     FROM job_fields jf JOIN fields f ON f.id = jf.field_id
     WHERE jf.job_id = p_job_id
-      AND NOT EXISTS (SELECT 1 FROM field_billing_defaults fbd WHERE fbd.field_id = jf.field_id);
+      AND NOT EXISTS (SELECT 1 FROM public._job_transfer_shares_20270207(p_job_id) s WHERE s.field_id = jf.field_id);
   IF v_unsplit_fields IS NOT NULL THEN
     RAISE EXCEPTION 'JOB_FIELD_NO_BILLING_SPLIT: % has no billing split. Nothing was invoiced; set who pays for it (100%% or a shared split) in Field Setup first.', v_unsplit_fields USING ERRCODE = 'P0001';
   END IF;
 
-  SELECT count(DISTINCT fbd.customer_id) INTO v_n_owners
-    FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
-    WHERE jf.job_id = p_job_id;
+  SELECT count(DISTINCT s.customer_id) INTO v_n_owners FROM public._job_transfer_shares_20270207(p_job_id) s;
 
   IF COALESCE(v_n_owners, 0) > 1 THEN
     -- 20270207125000 (Mason, 2026-11-22: "we never bill flat per acre it is always summary of chemical and sales
@@ -372,9 +392,8 @@ BEGIN
     -- Validate every billed field's splits total 100 (mirror FIELD_SPLIT_NOT_100), so the
     -- owner acre shares sum to the job acres and calculate_billing_splits stays penny-exact.
     IF EXISTS (
-      SELECT 1 FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
-      WHERE jf.job_id = p_job_id
-      GROUP BY jf.field_id HAVING sum(fbd.split_pct) < 99.99 OR sum(fbd.split_pct) > 100.01
+      SELECT 1 FROM public._job_transfer_shares_20270207(p_job_id) s
+      GROUP BY s.field_id HAVING sum(s.split_pct) < 99.99 OR sum(s.split_pct) > 100.01
     ) THEN
       RAISE EXCEPTION 'FIELD_SPLIT_NOT_100: one or more of this job''s fields has billing splits that do not total 100%%. Fix the field billing defaults before invoicing.';
     END IF;
@@ -392,13 +411,11 @@ BEGIN
              bool_or(is_primary) AS is_primary,
              max(farm_name) AS farm_name
       FROM (
-        SELECT fbd.customer_id AS owner_id,
-               COALESCE(jf.acres_to_treat, 0) * fbd.split_pct / 100.0 AS billable_acres,
-               COALESCE(fbd.is_primary, false) AS is_primary, c.farm_name
-          FROM job_fields jf
-          JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
-          JOIN customers c ON c.id = fbd.customer_id
-          WHERE jf.job_id = p_job_id
+        SELECT s.customer_id AS owner_id,
+               COALESCE(s.acres_to_treat, 0) * s.split_pct / 100.0 AS billable_acres,
+               s.is_primary, c.farm_name
+          FROM public._job_transfer_shares_20270207(p_job_id) s
+          JOIN customers c ON c.id = s.customer_id
       ) parts
       GROUP BY owner_id
     ) oa;
@@ -421,9 +438,9 @@ BEGIN
       -- Fields this owner is billed for (informational header list).
       SELECT array_agg(DISTINCT fname ORDER BY fname) INTO v_member_field_names FROM (
         SELECT f.field_name AS fname
-          FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
-          JOIN fields f ON f.id = jf.field_id
-          WHERE jf.job_id = p_job_id AND fbd.customer_id = v_owner_ids[v_oidx]
+          FROM public._job_transfer_shares_20270207(p_job_id) s
+          JOIN fields f ON f.id = s.field_id
+          WHERE s.customer_id = v_owner_ids[v_oidx]
       ) mf;
 
       v_invoice_number := next_invoice_number('field_application');
@@ -686,19 +703,17 @@ BEGIN
   -- Fail-safe for legacy single-owner defaults that predate the deferred table guard.
   -- Match the multi-owner FIELD_SPLIT_NOT_100 validation before creating any invoice rows.
   IF EXISTS (
-    SELECT 1 FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
-    WHERE jf.job_id = p_job_id
-    GROUP BY jf.field_id HAVING sum(fbd.split_pct) < 99.99 OR sum(fbd.split_pct) > 100.01
+    SELECT 1 FROM public._job_transfer_shares_20270207(p_job_id) s
+    GROUP BY s.field_id HAVING sum(s.split_pct) < 99.99 OR sum(s.split_pct) > 100.01
   ) THEN
     RAISE EXCEPTION 'FIELD_SPLIT_NOT_100: one or more of this job''s fields has billing splits that do not total 100%%. Fix the field billing defaults before invoicing.';
   END IF;
 
   -- Sol round 6 (Mason, 2026-11-22: each owner is billed for their own fields' acres): a job whose fields are all
   -- billed to one owner is invoiced to that owner (header, receivable, restricted-use buyer, commissions), even when
-  -- the job's own customer is someone else; a job with no fields stays on the job's customer.
-  SELECT fbd.customer_id INTO v_payer_id
-    FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
-    WHERE jf.job_id = p_job_id LIMIT 1;
+  -- the job's own customer is someone else; a job with no fields stays on the job's customer. Sol round 8: the payer
+  -- saved on the job, the one its screen names.
+  SELECT s.customer_id INTO v_payer_id FROM public._job_transfer_shares_20270207(p_job_id) s LIMIT 1;
   v_payer_id := COALESCE(v_payer_id, v_job.customer_id);
 
   -- OVERNIGHT FIX (Run 2 cycle 6 — invoice-number canonicalization, Codex-confirmed MEDIUM):
@@ -813,28 +828,25 @@ BEGIN
   -- allowed above).
   UPDATE invoices SET total_amount_cents = v_line_sum, total_cost_cents = v_total_cost_cents WHERE id = v_invoice_id;
 
-  IF EXISTS (SELECT 1 FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id WHERE jf.job_id = p_job_id) THEN
-    SELECT EXISTS (SELECT 1 FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id WHERE jf.job_id = p_job_id AND fbd.price_override_cents IS NOT NULL) INTO v_has_price_override;
+  IF EXISTS (SELECT 1 FROM public._job_transfer_shares_20270207(p_job_id)) THEN
     FOR v_share IN
-      SELECT fbd.customer_id, c.farm_name,
-        CASE WHEN sum(COALESCE(jf.acres_to_treat, 0)) > 0
-          THEN sum(fbd.split_pct * COALESCE(jf.acres_to_treat, 0)) / sum(COALESCE(jf.acres_to_treat, 0))
-          ELSE avg(fbd.split_pct) END AS avg_split_pct,
-        sum(COALESCE(jf.acres_to_treat, 0)) *
-          CASE WHEN sum(COALESCE(jf.acres_to_treat, 0)) > 0
-            THEN sum(fbd.split_pct * COALESCE(jf.acres_to_treat, 0)) / sum(COALESCE(jf.acres_to_treat, 0))
-            ELSE avg(fbd.split_pct) END / 100.0 AS share_acres,
-        bool_or(fbd.is_primary) AS is_primary,
-        CASE WHEN count(DISTINCT fbd.price_override_cents) = 1 AND min(fbd.price_override_cents) IS NOT NULL
-          THEN min(fbd.price_override_cents) ELSE NULL END AS price_override_cents,
-        max(fbd.pricing_note) AS pricing_note,
-        row_number() OVER (ORDER BY bool_or(fbd.is_primary) DESC, c.farm_name) AS sort_ord,
-        sum(CASE WHEN sum(COALESCE(jf.acres_to_treat, 0)) > 0
-          THEN sum(fbd.split_pct * COALESCE(jf.acres_to_treat, 0)) / sum(COALESCE(jf.acres_to_treat, 0))
-          ELSE avg(fbd.split_pct) END) OVER () AS pct_total
-      FROM job_fields jf JOIN field_billing_defaults fbd ON fbd.field_id = jf.field_id
-      JOIN customers c ON c.id = fbd.customer_id WHERE jf.job_id = p_job_id
-      GROUP BY fbd.customer_id, c.farm_name
+      SELECT s.customer_id, c.farm_name,
+        CASE WHEN sum(COALESCE(s.acres_to_treat, 0)) > 0
+          THEN sum(s.split_pct * COALESCE(s.acres_to_treat, 0)) / sum(COALESCE(s.acres_to_treat, 0))
+          ELSE avg(s.split_pct) END AS avg_split_pct,
+        sum(COALESCE(s.acres_to_treat, 0)) *
+          CASE WHEN sum(COALESCE(s.acres_to_treat, 0)) > 0
+            THEN sum(s.split_pct * COALESCE(s.acres_to_treat, 0)) / sum(COALESCE(s.acres_to_treat, 0))
+            ELSE avg(s.split_pct) END / 100.0 AS share_acres,
+        bool_or(s.is_primary) AS is_primary,
+        max(s.pricing_note) AS pricing_note,
+        row_number() OVER (ORDER BY bool_or(s.is_primary) DESC, c.farm_name) AS sort_ord,
+        sum(CASE WHEN sum(COALESCE(s.acres_to_treat, 0)) > 0
+          THEN sum(s.split_pct * COALESCE(s.acres_to_treat, 0)) / sum(COALESCE(s.acres_to_treat, 0))
+          ELSE avg(s.split_pct) END) OVER () AS pct_total
+      FROM public._job_transfer_shares_20270207(p_job_id) s
+      JOIN customers c ON c.id = s.customer_id
+      GROUP BY s.customer_id, c.farm_name
     LOOP
       DECLARE v_amount bigint; v_ppa bigint;
       BEGIN
@@ -1007,17 +1019,57 @@ REVOKE ALL ON FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(uuid
 GRANT EXECUTE ON FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)
   TO postgres;
 
+-- 5. Mason, 2026-11-22 ("lock it when rep or admin says it is posted"): an invoiced job's chemicals, fields and saved
+--    split can't change until its invoice is voided (voiding sets the job back to completed); a completed job stays
+--    editable. FOR SHARE waits for a Create Invoice in progress (it holds the job FOR UPDATE), then reads its outcome.
+CREATE FUNCTION public._job_lines_lock_when_invoiced_20270207()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_ids uuid[] := '{}';
+  v_id uuid;
+  v_status text;
+BEGIN
+  IF TG_OP IN ('UPDATE', 'DELETE') THEN v_ids := array_append(v_ids, OLD.job_id); END IF;
+  IF TG_OP IN ('INSERT', 'UPDATE') THEN v_ids := array_append(v_ids, NEW.job_id); END IF;
+  FOR v_id IN SELECT DISTINCT u FROM unnest(v_ids) u WHERE u IS NOT NULL ORDER BY u LOOP
+    v_status := NULL;
+    SELECT j.status INTO v_status FROM public.jobs j WHERE j.id = v_id FOR SHARE;
+    IF v_status = 'invoiced' THEN
+      RAISE EXCEPTION 'JOB_INVOICED_LOCKED: This job has been invoiced, so its chemicals, fields and billing split can''t be changed. Nothing was saved; void the job''s invoice first to change them.' USING ERRCODE = 'P0001';
+    END IF;
+  END LOOP;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
+END;
+$function$;
+ALTER FUNCTION public._job_lines_lock_when_invoiced_20270207() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._job_lines_lock_when_invoiced_20270207() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER trg_job_chemicals_lock_when_invoiced BEFORE INSERT OR UPDATE OR DELETE ON public.job_chemicals
+  FOR EACH ROW EXECUTE FUNCTION public._job_lines_lock_when_invoiced_20270207();
+CREATE TRIGGER trg_job_fields_lock_when_invoiced BEFORE INSERT OR UPDATE OR DELETE ON public.job_fields
+  FOR EACH ROW EXECUTE FUNCTION public._job_lines_lock_when_invoiced_20270207();
+CREATE TRIGGER trg_job_field_shares_lock_when_invoiced BEFORE INSERT OR UPDATE OR DELETE ON public.job_field_shares
+  FOR EACH ROW EXECUTE FUNCTION public._job_lines_lock_when_invoiced_20270207();
+
 DO $postflight$
 DECLARE
   v_price oid := to_regprocedure('public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint)');
   v_split oid := to_regprocedure('public._job_transfer_split_qty_20270207(numeric,numeric[])');
+  v_shares oid := to_regprocedure('public._job_transfer_shares_20270207(uuid)');
+  v_lock oid := to_regprocedure('public._job_lines_lock_when_invoiced_20270207()');
 BEGIN
   IF current_setting('crx.jbc_xid', true) IS DISTINCT FROM pg_current_xact_id()::text THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '0db2f031523db3ab6c70bc7f1b5a86e9'
-     OR v_price IS NULL OR v_split IS NULL
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '57661a3884ef0b32b80101b6ced149c5'
+     OR v_price IS NULL OR v_split IS NULL OR v_shares IS NULL OR v_lock IS NULL
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_shares) IS DISTINCT FROM '944760ebdf810f062b4dcf0fe56f11b2'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_lock) IS DISTINCT FROM '9b6d4bbfc5dcc61ba058971a9ac062b6'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '0d225231da5e5adc8d21ed092796270a'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: a body is not the one this file installs';
@@ -1028,11 +1080,14 @@ BEGIN
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]
                     AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[])
      OR EXISTS (SELECT 1 FROM pg_proc p
-                 WHERE p.oid IN (v_price, v_split)
-                   AND (p.prosecdef OR p.proowner <> 'postgres'::regrole
+                 WHERE p.oid IN (v_price, v_split, v_shares, v_lock)
+                   AND (p.prosecdef <> (p.oid = v_lock) OR p.proowner <> 'postgres'::regrole
                         OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]))
      OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) a
-                 WHERE p.oid IN (v_price, v_split) AND a.privilege_type = 'EXECUTE' AND a.grantee <> 'postgres'::regrole) THEN
+                 WHERE p.oid IN (v_price, v_split, v_shares, v_lock) AND a.privilege_type = 'EXECUTE' AND a.grantee <> 'postgres'::regrole)
+     OR (SELECT count(*) FROM pg_trigger t
+          WHERE t.tgfoid = v_lock AND NOT t.tgisinternal AND t.tgenabled = 'O'
+            AND t.tgrelid IN ('public.job_chemicals'::regclass, 'public.job_fields'::regclass, 'public.job_field_shares'::regclass)) <> 3 THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: owner, settings or grants are not as reviewed';
   END IF;
 END;

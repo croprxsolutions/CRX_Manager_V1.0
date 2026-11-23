@@ -19,7 +19,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -261,6 +261,8 @@ const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const WALL = 'public._enforce_below_cost_line()';
 const PRICE = 'public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint)';
 const SPLIT = 'public._job_transfer_split_qty_20270207(numeric,numeric[])';
+const SHARES = 'public._job_transfer_shares_20270207(uuid)';
+const LOCK = 'public._job_lines_lock_when_invoiced_20270207()';
 const OLD_BODY = 'a54e3e6a3a2b920e9bcd1a350cd92423';
 const OLD_WALL = '5fa0a5f975dc2a84b3c6599a84b8cc55';
 const md5Of = (sig) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
@@ -376,6 +378,19 @@ const resave = (jobSql, uid) => `${transferOnly(jobSql)}
 ${as(uid)}SELECT public.save_invoice(jsonb_build_object('id', i.id, 'customer_id', i.customer_id, 'invoice_type', i.invoice_type),
   jbc.items(i.id), 'jbc-' || gen_random_uuid()) FROM invoices i WHERE i.job_id = (SELECT id FROM j);
 SELECT jbc.billed((SELECT id FROM j)) || ' | approvals=' || jbc.approvals();`;
+// The job, with a billing split saved on it (rows of field, payer, percent, primary), sent to Create Invoice.
+const savedShares = (jobSql, rows) => `${asAdmin}
+CREATE TEMP TABLE j AS SELECT ${jobSql} AS id;
+RESET ROLE;
+INSERT INTO job_field_shares (job_id, field_id, customer_id, split_pct, is_primary)
+  SELECT (SELECT id FROM j), v.f, v.c, v.p, v.pr FROM (VALUES ${rows}) v(f, c, p, pr);
+${asAdmin}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());
+SELECT jbc.billed((SELECT id FROM j)) || ' | approvals=' || jbc.approvals() || ' | ' || (SELECT status FROM jobs WHERE id = (SELECT id FROM j));`;
+// A change to the job's own rows, as the table owner, after Create Invoice.
+const afterInvoice = (stmt) => `${transferOnly(job('Gal', 10, 5000))}
+RESET ROLE;
+${stmt}
+SELECT 'changed';`;
 const CASES = {
   // 3 fl oz at 39c/fl oz = $1.17 is 0.0234 Gal at $49.92 ($1.17); its cost is 3/128 Gal x $30 = 70.3c.
   small3floz: transfer(job('fl oz', 3, 39, 23)),
@@ -468,15 +483,34 @@ SET LOCAL session_replication_role = replica;
 UPDATE jobs SET deleted_at = now() WHERE id = (SELECT id FROM j);
 SET LOCAL session_replication_role = origin;
 ${asAdmin}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());`,
-  // Sol round 7: a line marked as the grower's own product after completion took company stock ('job_applied' on this job).
-  suppliedStockUsed: `${asAdmin}
-CREATE TEMP TABLE j AS SELECT ${job('Gal', 10, 0, 0, G, true)} AS id;
+  // Sol round 8 #2 (Mason, 2026-11-22: invoices bill the payer saved on the job): the split saved on the job wins over
+  // Field Setup's. Field Z is set to B 100% in Field Setup, but the job saved A 100%; field A (A 100%) saved A 60/B 40.
+  savedPayer: savedShares(job('Gal', 10, 5000, 3000, Z), `('${Z}'::uuid, '${A}'::uuid, 100::numeric, true)`),
+  savedSplit: savedShares(job('Gal', 10, 5000, 3000, G), `('${G}'::uuid, '${A}'::uuid, 60::numeric, true), ('${G}'::uuid, '${B}'::uuid, 40::numeric, false)`),
+  // Sol round 8 #4 (the round-7 check is withdrawn): 5 Gal from company stock and 5 Gal of the grower's own of one product.
+  sameProductTwoLines: `${asAdmin}
+CREATE TEMP TABLE j AS SELECT ${job('Gal', 5, 5000)} AS id;
 RESET ROLE;
+INSERT INTO job_chemicals (job_id, product_id, quantity, unit, rate_per_acre, rate_unit, price_per_unit_cents, cost_per_unit_cents, customer_supplied)
+  SELECT id, '${P}', 5, 'Gal', 0.5, 'Gal', 0, 0, true FROM j;
 SET LOCAL session_replication_role = replica;
 INSERT INTO inventory_transactions (product_id, transaction_type, quantity, from_location, performed_by, notes, job_id)
-  SELECT '${P}', 'job_applied', 10, 'Main Warehouse', '${ADMIN}', 'JBC completion', (SELECT id FROM j);
+  SELECT '${P}', 'job_applied', 5, 'Main Warehouse', '${ADMIN}', 'JBC completion', (SELECT id FROM j);
 SET LOCAL session_replication_role = origin;
-${asAdmin}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());`,
+${asAdmin}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());
+SELECT jbc.billed((SELECT id FROM j)) || ' | approvals=' || jbc.approvals() || ' | ' || (SELECT status FROM jobs WHERE id = (SELECT id FROM j));`,
+  // Mason, 2026-11-22 ("lock it when rep or admin says it is posted"): an invoiced job's lines, fields and saved split
+  // can't change; a completed job's can.
+  lockedFields: afterInvoice('DELETE FROM job_fields WHERE job_id = (SELECT id FROM j);'),
+  lockedChem: afterInvoice('UPDATE job_chemicals SET quantity = quantity WHERE job_id = (SELECT id FROM j);'),
+  lockedShares: afterInvoice(`INSERT INTO job_field_shares (job_id, field_id, customer_id, split_pct, is_primary) SELECT id, '${G}', '${B}', 100, true FROM j;`),
+  editCompleted: `${asAdmin}
+CREATE TEMP TABLE j AS SELECT ${job('Gal', 10, 5000)} AS id;
+RESET ROLE;
+UPDATE job_chemicals SET quantity = quantity WHERE job_id = (SELECT id FROM j);
+INSERT INTO job_field_shares (job_id, field_id, customer_id, split_pct, is_primary) SELECT id, '${G}', '${A}', 100, true FROM j;
+DELETE FROM job_fields WHERE job_id = (SELECT id FROM j);
+SELECT 'changed';`,
 };
 // The wall itself, outside the transfer: a below-cost line written straight into a transfer-made draft invoice.
 const directLine = `${transferOnly(job('Gal', 10, 5000))}
@@ -484,6 +518,37 @@ RESET ROLE;
 INSERT INTO invoice_items (invoice_id, product_id, description, quantity, unit_size, unit_price_cents, extended_cents, cost_cents, sort_order, is_application_fee)
 SELECT i.id, '${P}', 'direct', 1, 'Gal', 100, 100, 0, 99, false FROM invoices i WHERE i.job_id = (SELECT id FROM j);
 SELECT 'written';`;
+
+// Sol round 8 #3: a change to a job's fields made while Create Invoice runs on it waits for it, then is refused.
+async function concurrentLock() {
+  const jobId = scalar(`SELECT ${job('Gal', 10, 5000)};`);
+  const first = spawn('docker', [...psqlArgs(), '-A', '-t'], { cwd: ROOT });
+  let firstOut = '';
+  first.stdout.on('data', (d) => { firstOut += d; });
+  first.stderr.on('data', (d) => { firstOut += d; });
+  const firstDone = new Promise((resolve) => first.on('close', resolve));
+  first.stdin.end(`BEGIN;
+${asAdmin}SELECT public.transfer_job_to_invoice('${jobId}', '${ADMIN}', 'jbc-' || gen_random_uuid());
+RESET ROLE;
+SELECT pg_sleep(4);
+COMMIT;
+`);
+  // Wait until the first session has invoiced the job (it then holds the job row while it sleeps).
+  const sleeping = () => scalar("SELECT count(*) FROM pg_stat_activity WHERE wait_event = 'PgSleep';") !== '0';
+  for (let i = 0; i < 300 && !sleeping(); i += 1) await new Promise((r) => setTimeout(r, 100));
+  assert.ok(sleeping(), `Create Invoice did not finish in the first session:
+${firstOut}`);
+  const started = Date.now();
+  const second = probe(`DELETE FROM job_fields WHERE job_id = '${jobId}';
+SELECT 'changed';`);
+  const waited = Date.now() - started;
+  assert.equal(await firstDone, 0, firstOut);
+  assert.notEqual(second.status, 0, second.output);
+  assert.match(second.output, /JOB_INVOICED_LOCKED/);
+  assert.ok(waited >= 1000, `the change waited for Create Invoice (${waited} ms)`);
+  assert.equal(scalar(`SELECT count(*) FROM job_fields WHERE job_id = '${jobId}';`), '1');
+  console.log(`[after] concurrentLock: a field change sent while Create Invoice ran waited ${waited} ms, then was refused JOB_INVOICED_LOCKED; the field is still on the job`);
+}
 
 async function main() {
   if (REUSE) {
@@ -516,6 +581,8 @@ async function main() {
   const payerBefore = okProbe(CASES.payerB);
   console.log(`[before] payerB: ${payerBefore}`);
   assert.match(payerBefore, /^A:/, "before: A's job on a field billed 100% to B was invoiced to A");
+  assert.equal(okProbe(CASES.lockedFields), 'changed', "before: an invoiced job's fields could still be removed");
+  console.log("[before] lockedFields: an invoiced job's field could still be removed");
 
   stageText('candidate.sql', lf(CANDIDATE));
   const first = apply('candidate.sql');
@@ -527,6 +594,8 @@ async function main() {
   assert.equal(acl(WALL), wallAcl, 'the wall ACL must not change');
   assert.equal(grants(PRICE), 'postgres', 'the line-price helper is executable by no API role');
   assert.equal(grants(SPLIT), 'postgres', 'the split helper is executable by no API role');
+  assert.equal(grants(SHARES), 'postgres', 'the saved-split helper is executable by no API role');
+  assert.equal(grants(LOCK), 'postgres', 'the lock trigger function is executable by no API role');
   const second = apply('candidate.sql');
   assert.notEqual(second.status, 0);
   assert.match(second.output, /JOB_BELOW_COST_PREFLIGHT/);
@@ -608,8 +677,23 @@ async function main() {
   console.log('[after] deletedTicket: a deleted blend ticket with a live invoice blocks (BLEND_TICKET_ALREADY_BILLED)');
   refusedProbe(CASES.deletedJob, /JOB_DELETED/);
   console.log('[after] deletedJob: refused JOB_DELETED');
-  refusedProbe(CASES.suppliedStockUsed, /JOB_LINE_SUPPLIED_BUT_STOCK_USED: \[PROVER\] JBC chem was taken from company stock when this job was completed, but is now marked as the grower's own product\. Nothing was invoiced/);
-  console.log('[after] suppliedStockUsed: refused JOB_LINE_SUPPLIED_BUT_STOCK_USED, naming the product, nothing billed');
+  after('savedPayer', 'A:50000:50000:30000:10.0000 Gal @5000=50000/c3000/product/manual', 'the payer saved on the job (A) is billed, not the Field Setup payer (B)');
+  after('savedSplit', 'A:30000:30000:18000:6.0000 Gal @5000=30000/c3000/product/manual B:20000:20000:12000:4.0000 Gal @5000=20000/c3000/product/manual',
+    "the split saved on the job (A 60/B 40) is billed, not Field Setup's A 100%");
+  {
+    const v = okProbe(CASES.sameProductTwoLines);
+    console.log(`[after] sameProductTwoLines: ${v}`);
+    assert.match(v, /^A:25000:25000:15000:/, 'company stock and the grower\'s own of one product: the company line bills $250');
+    assert.ok(v.includes('5.0000 Gal @5000=25000/c3000/product/manual') && v.includes('5.0000 Gal @0=0/c0/none/manual') && v.endsWith(ok),
+      "both lines are written: the company sale and the grower's $0 line");
+  }
+  for (const k of ['lockedFields', 'lockedChem', 'lockedShares']) {
+    refusedProbe(CASES[k], /JOB_INVOICED_LOCKED: This job has been invoiced, so its chemicals, fields and billing split can't be changed\. Nothing was saved/);
+    console.log(`[after] ${k}: refused JOB_INVOICED_LOCKED`);
+  }
+  assert.equal(okProbe(CASES.editCompleted), 'changed', "a completed job's chemicals, fields and split can still be changed");
+  console.log("[after] editCompleted: a completed (not invoiced) job's chemicals, fields and split can still be changed");
+  await concurrentLock();
   refusedProbe(directLine, /BELOW_COST_CONTEXT_REQUIRED/);
   console.log('[after] a below-cost invoice line written outside the transfer: still refused by the unchanged wall');
 
@@ -621,9 +705,10 @@ async function main() {
   assert.equal(md5Of(WALL), OLD_WALL);
   assert.equal(acl(WALL), wallAcl);
   assert.equal(grants(IMPL), implGrants);
-  assert.equal(scalar(`SELECT to_regprocedure('${PRICE}') IS NULL AND to_regprocedure('${SPLIT}') IS NULL;`), 't');
+  assert.equal(scalar(`SELECT to_regprocedure('${PRICE}') IS NULL AND to_regprocedure('${SPLIT}') IS NULL AND to_regprocedure('${SHARES}') IS NULL AND to_regprocedure('${LOCK}') IS NULL;`), 't');
+  assert.equal(okProbe(CASES.lockedFields), 'changed', 'rollback: the lock triggers are gone');
   refusedProbe(CASES.small3floz, /BELOW_COST_CONTEXT_REQUIRED/);
-  console.log('[rollback] transfer body and grants restored, helpers dropped; 3 fl oz is refused again');
+  console.log('[rollback] transfer body and grants restored, helpers and lock triggers dropped; 3 fl oz is refused again');
   console.log('JOB_TRANSFER_BELOW_COST_PROOF_PASS');
 }
 

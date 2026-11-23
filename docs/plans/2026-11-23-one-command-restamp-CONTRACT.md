@@ -59,11 +59,11 @@ they stay bound to one SQL hash; live apply proofs are minted at release time an
 - When `restamp-migration.mjs` runs in a scratch repo with a Sol proof on HEAD → one commit, files renamed,
   carry proof written; the SQL body keeps every byte (superseded by the settled rule below).
 
-## Open business decisions
+## Business decisions
 
 1. Extend Mason's 2026-11-04 "a restamp keeps its Sol review" (byte-identical SQL) to a restamp whose
    only SQL edit is the header's link to its own record, with that record's pin following. Yes: #2338-
-   style restamps stop costing a Sol round. No: they keep needing a full Sol run. Recommended: yes.
+   style restamps stop costing a Sol round. No: they keep needing a full Sol run. **DECIDED: yes (Mason, 2026-11-23).**
 
 ## Cold challenge (Astra, gpt-6.2-astra high, 21 findings) and how each was settled
 
@@ -89,7 +89,7 @@ The design above was narrowed in response; the shipped rule is:
 - Evidence (#18, #19): the real #2338 restamp (`31436d84de`, non-ASCII SQL, real pins) carries under
   the rule; the command run on its pre-restamp head `94d9e864a3` produces the identical tree
   (`8df9d755`); #2331 and #2248 restamps carry; #2324 (`22509a8cf2`, SQL changed) refuses.
-- #1 DECISION for Mason: extend "a restamp keeps its Sol review" (2026-11-04, byte-identical SQL) to
+- #1 DECIDED yes by Mason (2026-11-23): extend "a restamp keeps its Sol review" (2026-11-04, byte-identical SQL) to
   the header self-link + pin case. Recommended yes.
 
 ## Luna

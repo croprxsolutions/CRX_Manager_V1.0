@@ -181,6 +181,22 @@ const SKIP_ALL_RES = [
   /^i disagree(?: with (?:that|those|these|them|it|all of them))?$/,
 ];
 const SKIP_SOME_RE = /^(?:skip|accept|don't fix|do not fix) (?:findings? )?(\d{1,2}(?:(?:, ?| | and |, and )\d{1,2})*)$/;
+// A looser reply (2026-11-22 retro: "Skip I agree skip it", "accept skip" were refused on #2256):
+// a short message with the word skip or accept counts unless it asks, sets a condition, negates,
+// asks for a fix, or points at findings in a way the numbers cannot carry.
+const LOOSE_MAX_WORDS = 12;
+const LOOSE_REFUSE_RE = /\b(?:if|unless|but|after|first|once|when|explain|why|what|how|no|not|never|don't|dont|won't|can't|cannot|shouldn't|except|besides|other|others|rest|else|instead|only|later|wait|hold|pause|stop|fix|fixed|fixing|one|second|third|last|some|few|half|any|either|neither|which|both)\b/;
+const LOOSE_ALL_WORDS_RE = /\b(?:all|them|these|those|everything)\b/;
+function looseSkip(t) {
+  if (/\?/.test(t) || !/\b(?:skip|accept)\b/.test(t) || LOOSE_REFUSE_RE.test(t)) return null;
+  const words = t.split(/[^a-z0-9']+/).filter(Boolean);
+  if (words.length > LOOSE_MAX_WORDS || words.some((w) => /\d/.test(w) && !/^\d{1,2}$/.test(w))) return null;
+  const numbers = words.filter((w) => /^\d+$/.test(w)).map(Number);
+  // "that"/"it" only when EVERY skip/accept points at it ("Skip I agree skip it" = all of them).
+  const single = [...t.matchAll(/\b(?:skip|accept)\b(?: (\S+))?/g)].every((m) => /^(?:it|that)\b/.test(m[1] ?? ""));
+  if (numbers.length) return LOOSE_ALL_WORDS_RE.test(t) || /\b(?:it|that)\b/.test(t) ? null : { numbers };
+  return single ? { all: true, single: true } : { all: true };
+}
 
 /**
  * Mason's plain skip reply, the WHOLE message: { all: true } or { numbers: [...] }; else null.
@@ -203,14 +219,16 @@ export function skipFromReply(prompt) {
   // "that"/"it" name ONE finding: they skip only when the list has one (Luna, 2026-11-21).
   if (SKIP_ALL_RES.some((re) => re.test(t))) return / (?:it|that)(?: alone| fixed)?$/.test(t) ? { all: true, single: true } : { all: true };
   const m = SKIP_SOME_RE.exec(t);
-  return m ? { numbers: m[1].split(/\D+/).filter(Boolean).map(Number) } : null;
+  return m ? { numbers: m[1].split(/\D+/).filter(Boolean).map(Number) } : looseSkip(t);
 }
 
 /**
  * The finding numbers a skip covers, from the findings the request showed; or { problem }.
- * @returns {{numbers: number[]}|{problem: string}}
+ * `alreadySkipped`: numbers he already skipped in this same Sol run (alreadySkippedIn), which may
+ * be named again without being shown; they come back as `ignored`.
+ * @returns {{numbers: number[], ignored?: number[]}|{problem: string}}
  */
-export function skipSelection(skip, shownFindings) {
+export function skipSelection(skip, shownFindings, alreadySkipped = []) {
   const shown = (shownFindings || []).map((f) => f.n);
   if (!skip) return { problem: "his reply is not a skip" };
   if (skip.reason !== undefined) {
@@ -222,9 +240,15 @@ export function skipSelection(skip, shownFindings) {
   const nums = skip.numbers || [];
   if (!nums.length) return { problem: "his reply names no finding" };
   if (new Set(nums).size !== nums.length) return { problem: "his reply names a finding twice" };
-  const missing = nums.filter((n) => !shown.includes(n));
+  // A number not shown is ignored only if he already skipped that finding in this same Sol run
+  // (2026-11-22 retro: "skip 1 2 and 3" with 3 skipped earlier); any other stray number refuses.
+  const unshown = nums.filter((n) => !shown.includes(n));
+  const ignored = unshown.filter((n) => alreadySkipped.includes(n)).sort((a, b) => a - b);
+  const missing = unshown.filter((n) => !ignored.includes(n));
   if (missing.length) return { problem: `finding ${missing.join(", ")} was not in the list he was shown` };
-  return { numbers: [...nums].sort((a, b) => a - b) };
+  const picked = nums.filter((n) => shown.includes(n)).sort((a, b) => a - b);
+  if (!picked.length) return { problem: "his reply names no finding" };
+  return ignored.length ? { numbers: picked, ignored } : { numbers: picked };
 }
 
 const PR_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d+)$/i;
@@ -314,9 +338,13 @@ export function verifySolSkip({ approval, record, checkReply, checkShown }) {
   if (pullRequestUrlFor(p.pullRequestUrl, p.pullRequest) === null) return no("it does not name the pull request's repository");
   if (JSON.stringify(p.summary) !== JSON.stringify(solSkipSummary(p))) return no("what Mason was shown does not match what it covers");
   const said = skipFromReply(approval.reply);
-  const sel = skipSelection(said, p.findings);
+  const ignored = approval.ignored ?? [];
+  if (!Array.isArray(ignored)) return no("its ignored list is unreadable");
+  const sel = skipSelection(said, p.findings, ignored);
   if (sel.problem) return no(`the recorded reply does not hold (${sel.problem})`);
   if (JSON.stringify(sel.numbers) !== JSON.stringify(approval.selected)) return no("the recorded reply does not match the findings recorded as skipped");
+  // Every number recorded as ignored must be one his reply named and was not shown.
+  if (JSON.stringify(sel.ignored ?? []) !== JSON.stringify(ignored)) return no("the recorded reply does not match the findings recorded as already skipped");
   const issued = Date.parse(p.issuedAt);
   const deadline = Date.parse(p.expiresAt);
   const approved = Date.parse(approval.approvedAt);
@@ -330,7 +358,7 @@ export function verifySolSkip({ approval, record, checkReply, checkShown }) {
   if (typeof checkShown !== "function") return no("what he was shown before his reply was not checked");
   try { checkShown(mark, p); }
   catch (e) { return no(`his reply could not be tied to this request (${e?.message || e})`); }
-  return { ok: true, payload: p, numbers: sel.numbers, reason: said.reason ?? SKIP_REASON, approvedAt: approval.approvedAt };
+  return { ok: true, payload: p, numbers: sel.numbers, ignored, reason: said.reason ?? SKIP_REASON, approvedAt: approval.approvedAt };
 }
 
 /** Every skip receipt saved for `head` in `stateDir`, parsed (unreadable ones are left out). */
@@ -341,6 +369,22 @@ export function readSkipReceipts(stateDir, head) {
   return names.filter((n) => n.startsWith(prefix) && n.endsWith(".json")).sort().flatMap((n) => {
     try { return [JSON.parse(readFileSync(path.join(stateDir, n), "utf8"))]; } catch { return []; }
   });
+}
+
+/**
+ * Finding numbers already skipped by a receipt in `stateDir` for the same Sol run (head, base and
+ * review time) as skip request payload `p`. This only lets a reply NAME them again: collectAcceptances
+ * still requires an earlier verified receipt to cover each one.
+ */
+export function alreadySkippedIn(stateDir, p) {
+  const out = new Set();
+  for (const r of readSkipReceipts(stateDir, String(p.prHead))) {
+    let q;
+    try { q = JSON.parse(r.payload); } catch { continue; }
+    if (q?.purpose !== OWNER_SOL_SKIP_PURPOSE || q.prHead !== p.prHead || q.baseSha !== p.baseSha || q.reviewedAt !== p.reviewedAt) continue;
+    for (const n of Array.isArray(r.selected) ? r.selected : []) if (Number.isInteger(n)) out.add(n);
+  }
+  return [...out].sort((a, b) => a - b);
 }
 
 /** The request for finding `n` of `record`. Field order is fixed. */
@@ -465,6 +509,8 @@ export function collectAcceptances({ record, readAcceptance, readSkips = () => [
   for (const s of [...readSkips()].sort((a, b) => String(a?.approvedAt).localeCompare(String(b?.approvedAt)))) {
     const r = verifySolSkip({ approval: s, record, checkReply, checkShown });
     if (!r.ok) continue; // a receipt from an earlier run on this head simply does not count
+    // A number his reply named but was not shown counts only if an earlier receipt skipped it.
+    if (!r.ignored.every((n) => skipped.has(n))) continue;
     for (const n of r.numbers) {
       if (!skipped.has(n)) {
         skipped.set(n, { ok: true, skipped: true, payload: { ...r.payload, finding: record.findings[n - 1] }, reason: r.reason, approvedAt: r.approvedAt });

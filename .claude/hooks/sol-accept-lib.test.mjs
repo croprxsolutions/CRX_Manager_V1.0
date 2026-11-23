@@ -302,7 +302,7 @@ assert.deepEqual(skipFromReply("don't fix finding 2"), { numbers: [2] }, "skip: 
 for (const no of ["ok", "yesterday it worked", "yes\nand merge", "Yes, can you explain this first?", "yes if Taha agrees",
   "yes but fix finding 2", "yes, after the release", "Yes what does it mean", "I approve", "move on", "merge it", "no", "no, fix it", "skip?", "skip the explanation and fix it",
   "I don't want that approach", "accept only if the totals reconcile", "accept all 1 3", "accept 123456", "accept 123456 fine by me",
-  "skip\nand merge", "please skip", "skip 123", ""]) {
+  "skip\nand merge", "skip 123", ""]) {
   assert.equal(skipFromReply(no), null, `skip: "${no}" is not a skip`);
 }
 const shownF = [{ n: 1 }, { n: 3 }];
@@ -432,6 +432,67 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   tx(ownerApprovalSummary(JSON.parse(mig)).join("\n"));
   const outMig = hook("yes");
   assert.match(outMig, /OWNER APPROVAL RECORDED/, `hook: a plain yes to the migration shown goes to the migration, not the waiting skip (${outMig})`);
+  // ── Natural skip replies (2026-11-22 retro: on PR #2256 the hook refused four replies Mason meant
+  // as skips). Every case runs, so one run lists each failure. ──
+  const fails = [];
+  const t = (name, fn) => { try { fn(); } catch (e) { fails.push(`${name}: ${e.message.split("\n")[0]}`); } };
+  t("'Skip I agree skip it' skips all", () => assert.deepEqual(skipFromReply("Skip I agree skip it"), { all: true }));
+  t("'accept skip' skips all", () => assert.deepEqual(skipFromReply("accept skip"), { all: true }));
+  t("'Skip, I agree.' skips all", () => assert.deepEqual(skipFromReply("Skip, I agree."), { all: true }));
+  t("'please skip' skips all", () => assert.deepEqual(skipFromReply("please skip"), { all: true }));
+  t("'ok skip them' skips all", () => assert.deepEqual(skipFromReply("ok skip them"), { all: true }));
+  t("'yeah accept it' names one", () => assert.deepEqual(skipFromReply("yeah accept it"), { all: true, single: true }));
+  t("'please skip 1 and 2' names numbers", () => assert.deepEqual(skipFromReply("please skip 1 and 2"), { numbers: [1, 2] }));
+  for (const no of ["Skip I agree skip it?", "skip it if Taha agrees", "accept skip but fix 2 first", "skip them when the release is out", "skip, but why?",
+    "don't skip", "do not accept that", "never skip these", "skip all except 2", "skip the 2nd one", "skip one of them", "skip the rest", "hold on, skip",
+    "skip it later", "skip and fix it", "accept skip 1 all", "skip it 1", "accept 1234567", "I'll skip lunch today then we can talk about the plan for next week ok"]) {
+    t(`'${no}' still skips nothing`, () => assert.equal(skipFromReply(no), null));
+  }
+  t("selection: an unshown number already skipped is ignored", () => assert.deepEqual(skipSelection({ numbers: [1, 2, 3] }, [{ n: 1 }, { n: 2 }], [3]), { numbers: [1, 2], ignored: [3] }));
+  t("selection: an unshown number NOT skipped still refuses", () => assert.match(skipSelection({ numbers: [1, 2, 3] }, [{ n: 1 }, { n: 2 }], [4]).problem, /finding 3 was not in the list/));
+  t("selection: only already-skipped numbers skips nothing new", () => assert.match(skipSelection({ numbers: [3] }, [{ n: 1 }], [3]).problem, /names no finding/));
+  t("selection: a shown number is never 'ignored'", () => assert.deepEqual(skipSelection({ numbers: [1] }, [{ n: 1 }], [1]), { numbers: [1] }));
+  // Finding 3 skipped by an earlier reply in the SAME Sol run, then 1 and 2 shown: "skip 1 2 and 3".
+  const rec5 = buildBlockersRecord({ headSha: "f".repeat(40), baseSha: BASE, findings: rec3.findings, timestamp: iso(NOW - 30 * 60 * 1000) });
+  const reqFor = (rec, numbers) => {
+    const code = String(codeSeq++);
+    const text = buildSolSkipPayload({ record: rec, numbers, pullRequest: 2200, pullRequestUrl: "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/2200", issuedAt: iso(NOW - 1000),
+      expiresAt: iso(skipDeadlineMs(rec, NOW - 1000, 24 * 60 * 60 * 1000)), nonce: `skipnonce${code}`, code, sessionId: SESSION });
+    writeApprovalRequest(stateDir, text);
+    shownFor[code] = JSON.parse(text).summary.join("\n");
+    return code;
+  };
+  const a5 = reqFor(rec5, [1, 2]);
+  t("reply: 'skip 1 2 and 3' with 3 NOT yet skipped still refuses", () => assert.match(skipReply(a5, "skip 1 2 and 3").reason ?? "", /finding 3 was not in the list/));
+  t("reply: skip 3 first", () => assert.equal(skipReply(reqFor(rec5, [3]), "skip 3").ok, true));
+  const b5 = reqFor(rec5, [1, 2]);
+  const ok5 = skipReply(b5, "skip 1 2 and 3");
+  t("reply: 'skip 1 2 and 3' after 3 was skipped records 1 and 2", () => { assert.equal(ok5.ok, true, ok5.reason); assert.deepEqual(ok5.selected, [1, 2]); });
+  const rcpt5 = readSkipReceipts(stateDir, "f".repeat(40)).find((r) => JSON.parse(r.payload).code === b5);
+  t("receipt: records the ignored number", () => assert.deepEqual(rcpt5?.ignored, [3]));
+  t("verify: the receipt holds", () => { const v = verifySolSkip({ approval: rcpt5, record: rec5, checkReply: assertReplyAlone, checkShown: assertSkipShown }); assert.equal(v.ok, true, v.reason); });
+  t("verify: an edited ignored list is refused", () => assert.match(verifySolSkip({ approval: { ...rcpt5, ignored: [] }, record: rec5 }).reason ?? "", /does not hold|does not match/));
+  t("collect: all three covered", () => {
+    const got = collectAcceptances({ record: rec5, readAcceptance: () => null, readSkips: () => readSkipReceipts(stateDir, "f".repeat(40)), checkReply: assertReplyAlone, checkShown: assertSkipShown });
+    assert.equal(got.problem, undefined, got.problem);
+    assert.deepEqual(got.accepted.map((a) => a.payload.finding.n), [1, 2, 3]);
+  });
+  t("collect: a receipt whose ignored finding no other receipt skipped does not count", () => {
+    const only = () => readSkipReceipts(stateDir, "f".repeat(40)).filter((r) => JSON.parse(r.payload).code === b5);
+    assert.match(collectAcceptances({ record: rec5, readAcceptance: () => null, readSkips: only, checkReply: assertReplyAlone, checkShown: assertSkipShown }).problem ?? "", /finding 1/);
+  });
+  // A skip from an EARLIER Sol run on the same head does not make a number ignorable.
+  const rec5b = { ...rec5, timestamp: iso(NOW - 10 * 60 * 1000) };
+  t("reply: a skip from an earlier Sol run on this head does not count", () => assert.match(skipReply(reqFor(rec5b, [1, 2]), "skip 1 2 and 3").reason ?? "", /finding 3 was not in the list/));
+  // The real hook, end to end.
+  for (const said of ["Skip I agree skip it", "accept skip"]) {
+    const r = skipReq([1, 2]);
+    tx(r.payload.summary.join("\n"));
+    t(`hook: '${said}' skips both`, () => assert.match(hook(said), /SOL FINDINGS SKIPPED — Mason skipped finding\(s\) 1, 2 of 3/));
+  }
+  t("hook: a question still skips nothing", () => { const r = skipReq([1, 2]); tx(r.payload.summary.join("\n")); assert.equal(/SKIPPED —/.test(hook("Skip I agree skip it?")), false); });
+  assert.equal(fails.length, 0, `natural skip replies:\n  ${fails.join("\n  ")}`);
+
 }
 
 console.log("sol-accept-lib.test.mjs: all assertions passed");

@@ -62,7 +62,7 @@ const LANE_FILE_PREFIXES = [
 const STRONG_LANE_WORDS = new Set(["quote", "quotes", "hold", "holds", "prepay", "prepayment", "prepayments", "booking", "bookings", "booked"]);
 
 // The block's own wiring: a PR that edits or unhooks it needs Mason's code too (Taha's review of #2303).
-const BLOCK_FILES_RE = /^(?:\.claude\/hooks\/(?:taha-lane-[\w.-]+|pr-merge-guard|merge-guard-launcher|prompt-router)\.mjs|\.codex\/hooks\/production-action-guard\.mjs|\.claude\/settings\.json|\.codex\/hooks\.json)$/i;
+const BLOCK_FILES_RE = /^(?:\.claude\/hooks\/(?:taha-lane-[\w.-]+|pr-merge-guard|merge-guard-launcher|prompt-router|sol-risk-lib)\.mjs|\.codex\/hooks\/production-action-guard\.mjs|\.claude\/settings\.json|\.codex\/hooks\.json)$/i;
 
 /** True when this changed file is app or database code in Taha's lane (and not field billing), or the block itself. */
 export function isTahaLanePath(name) {
@@ -230,8 +230,9 @@ export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = 
   const override = findTahaLaneOverride({ dirs, pullRequest, headSha, now });
   if (override) {
     if (!override.tahaToldAt) {
-      const body = `@TahaKhanAbdalli Mason overrode the Taha lane block for this PR at \`${override.headSha}\` (his code ${override.code}, valid until ${override.expiresAt}), ` +
-        `so an agent may merge it into staging; the other merge checks still apply. It ${problem.reason}.`;
+      const body = `@TahaKhanAbdalli Mason's override of the Taha lane block was used for a merge attempt on this PR at \`${override.headSha}\` ` +
+        `(his code ${override.code}, valid until ${override.expiresAt}). The other merge checks still apply, so this attempt may still be refused; ` +
+        `the PR's own merged state is the record of whether it landed. It ${problem.reason}.`;
       if (!tellTaha(body)) {
         return `${prefix}: TAHA LANE BLOCK — Mason's override for #${pullRequest} is valid, but the PR comment telling Taha could not be posted, so the merge is refused. Retry the merge.`;
       }

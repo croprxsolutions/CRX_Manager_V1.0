@@ -40,12 +40,13 @@ for (const p of [
   // Taha's review of #2303: the block's own wiring needs Mason's code too.
   ".claude/hooks/taha-lane-lib.mjs", ".claude/hooks/taha-lane-prompt.mjs", ".claude/hooks/pr-merge-guard.mjs",
   ".claude/hooks/prompt-router.mjs", ".codex/hooks/production-action-guard.mjs", ".claude/settings.json", ".codex/hooks.json",
+  ".claude/hooks/sol-risk-lib.mjs", // holds GATED_MERGE_BASES; dropping staging there would turn the block off
 ]) ok(isTahaLanePath(p), `${p} is Taha's`);
 for (const p of [
   "src/pages/FieldApplicationInvoice.tsx", "src/components/field-invoices/Row.tsx", "src/pages/FieldInvoices.tsx",
   "supabase/migrations/20270224110000_retire_per_acre_field_pricing.sql", "src/pages/JobDetail.tsx", "src/pages/BlendTickets.tsx",
   "src/pages/Deliveries.tsx", "src/pages/InventoryPage.tsx", "src/lib/threshold.ts", "docs/workflows/QUOTE_TO_DELIVERY.md",
-  "scripts/quote-report.mjs", ".claude/hooks/sol-risk-lib.mjs", ".claude/hooks/pr-merge-guard.test.mjs",
+  "scripts/quote-report.mjs", ".claude/hooks/codex-push-lib.mjs", ".claude/hooks/pr-merge-guard.test.mjs",
   "src/lib/fieldAppNewInvoiceAddress.ts", "src/pages/FieldStop.billing.test.tsx", "src/pages/FieldAppSplitInvoiceEditor.tsx",
   "src/components/field-invoices/UnbilledApplicationsPanel.tsx", "src/pages/VendorBillDetail.tsx",
   "supabase/migrations/20261022021000_order_invoice_refuses_field_split.sql",

@@ -124,7 +124,7 @@
 > `post_apply`, same `base_sha` as the source) only when HEAD is ONE ordinary commit on top of a
 > head with a clean Sol proof under 24 hours old (the original full review too), and every file it touches is a
 > regular non-executable file among: `docs/reference/migrations.d/<name>.md` for a migration the reviewed PR adds
-> and `docs/changelog.d/*.md` (edited or added; never a `README.md` or agent instruction file), `docs/manual/KNOWN_ISSUES.md` and `.claude/schema-registry.json` (edited), `src/lib/rpcContracts.test.ts` when its
+> and `docs/changelog.d/*.md` (edited or added; never a `README.md` or agent instruction file), `docs/manual/KNOWN_ISSUES.md` and `.claude/schema-registry.json` (edited), `docs/manual/known-issues.d/*.md` (edited or added), `src/lib/rpcContracts.test.ts` when its
 > only change is adding the PR's own migration timestamps to `MIGRATIONS_AWAITING_TYPE_REGENERATION` (Mason, 2026-11-05), and
 > `scripts/db-invariant-sweeps/allowlist.json`, where every changed entry keeps its position, predicate and other
 > fields, keeps the signature before `#` with a NEW 12-hex hash, appends to its justification, and has a real
@@ -180,9 +180,9 @@
 > "Last verified" stamp is fixed before Sol instead of voiding its proof (PR #1650, the sixth time).
 > **Sol round hard stop (Mason, 2026-11-09).** Every full run prints "Sol round N" (ledger `sol-rounds.jsonl`, counted
 > per branch commit); rounds 3–4 add the AGENTS.md stop-rule reminder. From round 5 the run refuses with no Codex call
-> and nothing recorded (`solRoundGate()`), unless `docs/manual/DECISION_LOG.md` at the reviewed head has an entry whose
+> and nothing recorded (`solRoundGate()`), unless the decision log at the reviewed head (`docs/manual/DECISION_LOG.md` or any `docs/manual/decision-log.d/*.md`, each file read on its own; `decisionLogAt()`) has an entry whose
 > heading carries a real date of today (Central) or later, with a `**Decision` line naming Mason, that names the PR as `#<n>`. So: ask Mason the business
-> trade-off, record his answer naming the PR, commit, re-run. `--dry-run` prints the would-be refusal and exits 0;
+> trade-off, record his answer naming the PR as a new `decision-log.d/` file, commit, re-run. The future-date pre-flight reads the same folder. `--dry-run` prints the would-be refusal and exits 0;
 > the carries never count rounds. Why: PR #1653 reached round 8 past a warning-only line before Mason was asked.
 >
 > **Autonomous landing (Mason, 2026-09-26) — this block supersedes older wording in the rows below where they

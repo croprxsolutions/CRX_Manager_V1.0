@@ -55,6 +55,17 @@ assert.equal(followUpsProblem(pr("no section", "TahaKhanAbdalli")), null);
 assert.deepEqual(followUpLines("## Follow-ups\n- #1 a\n## Next\n- not this"), ["#1 a"]);
 assert.equal(followUpLines("nothing"), null);
 
+// A dated known-issues.d file is a home (new known issues get no KI number, 2026-11-22).
+assert.equal(followUpsProblem(pr("## Follow-ups\n- docs/manual/known-issues.d/2026-11-22-receipt-retry-gap.md retry gap")), null);
+assert.equal(followUpsProblem(pr("## Follow-ups\n- `docs/manual/known-issues.d/2026-11-22-mason’s-gap.md`")), null);
+for (const bad of [
+  "docs/manual/known-issues.d/README.md",
+  "docs/manual/known-issues.d/notes.md",
+  "docs/manual/decision-log.d/2026-11-22-x.md",
+  "xdocs/manual/known-issues.d/2026-11-22-x.md",
+  "docs/manual/known-issues.d/2026-11-22-x.mdx",
+]) assert.match(followUpsProblem(pr(`## Follow-ups\n- ${bad}`)) ?? "", /name no issue/, bad);
+
 assert.match(followUpsDenial("PR MERGE GATE", "1700", "the PR description has no `## Follow-ups` section."), /gh pr edit 1700 --body-file/);
 
 console.log("followups-lib: all assertions passed");

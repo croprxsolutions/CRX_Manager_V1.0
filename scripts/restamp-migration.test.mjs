@@ -37,15 +37,17 @@ const latin1 = (text) => Buffer.from(text, "utf8").toString("latin1");
   ];
   const oldSql = header(OLD) + body;
   const goodSql = header(NEW) + body;
-  const judge = ({ newSql = goodSql, newRecord = record(NEW, newSql), smoke = `run ${NEW}_${STEM}.sql\n`, branchAdded = [] } = {}) => restampProblem({
+  const judge = ({ newSql = goodSql, newRecord = record(NEW, newSql), smoke = `run ${NEW}_${STEM}.sql\n`, branchAdded = [], oldRecord = record(OLD, oldSql) } = {}) => restampProblem({
     branchAdded,
     entries,
     readFile: (side, file) => latin1(file.endsWith(".sql") ? (side === "old" ? oldSql : newSql)
-      : file.endsWith(".md") ? (side === "old" ? record(OLD, oldSql) : newRecord)
+      : file.endsWith(".md") ? (side === "old" ? oldRecord : newRecord)
         : (side === "old" ? `run ${OLD}_${STEM}.sql\n` : smoke)),
   });
   assert.equal(judge(), null, "restamp rule: the header's self-link and the matching pin carry; the body's own stamp literal stays");
   assert.match(judge({ newRecord: record(NEW, oldSql) }), /pin is not the new SQL's hash/, "restamp rule: a pin left on the old SQL's hash is refused");
+  const unpinned = (stamp) => `**LOCAL CANDIDATE — NOT APPLIED.** \`${stamp}_${STEM}.sql\`. Test.\n`;
+  assert.match(judge({ oldRecord: unpinned(OLD), newRecord: unpinned(NEW) }), /must be renamed and pin it/, "restamp rule: a changed SQL needs its record's pin");
   assert.match(judge({ newRecord: record(NEW, "other") }), /changed beyond the timestamp and its SQL sha256 pin/, "restamp rule: a pin to any other hash is refused");
   assert.match(judge({ smoke: `run ${NEW}_${STEM}.sql\n${sha(goodSql)}\n` }), /prove\.mjs changed beyond the timestamp/, "restamp rule: a hash in any other file is refused");
   assert.match(judge({ newSql: goodSql.replace(`as ${OLD}`, `as ${NEW}`) }), /the migration's SQL changed/, "restamp rule: the stamp swapped in the body is refused");
@@ -79,8 +81,8 @@ try {
   write("supabase/migrations/20270101000000_base.sql", "SELECT 1;\n");
   write("docs/changelog.d/other.md", `Unrelated history naming ${OLD}.\n`);
   const base = commit("base");
-  git("update-ref", "refs/remotes/origin/staging", base);
-  git("update-ref", "refs/remotes/origin/main", base);
+  git("branch", "main", base);
+  git("remote", "add", "origin", repo); // the command fetches main and staging from origin
   git("switch", "-q", "-c", "feature");
   const sql = header(OLD) + body;
   write(`supabase/migrations/${OLD}_${STEM}.sql`, sql);
@@ -110,31 +112,31 @@ try {
   refused("a stamp not above the base's newest", () => {
     git("switch", "-q", "staging");
     write("supabase/migrations/20270228000000_later.sql", "SELECT 3;\n");
-    git("update-ref", "refs/remotes/origin/staging", commit("later on staging"));
+    commit("later on staging");
     git("switch", "-q", "feature");
     return reviewed;
   }, /is not newer than 20270228000000/);
-  git("update-ref", "refs/remotes/origin/staging", base);
+  git("branch", "-f", "staging", base);
   refused("a migration already on staging", () => {
-    git("update-ref", "refs/remotes/origin/staging", reviewed);
+    git("branch", "-f", "staging", reviewed);
     return reviewed;
   }, /origin\/staging already has supabase\/migrations\/20270226100000_/);
-  git("update-ref", "refs/remotes/origin/staging", base);
+  git("branch", "-f", "staging", base);
   refused("the same migration landed under another stamp", () => {
     git("switch", "-q", "staging");
     write(`supabase/migrations/20270225000000_${STEM}.sql`, "SELECT 4;\n");
-    git("update-ref", "refs/remotes/origin/staging", commit("same name, other stamp"));
+    commit("same name, other stamp");
     git("switch", "-q", "feature");
     return reviewed;
   }, /already has supabase\/migrations\/20270225000000_/);
-  git("update-ref", "refs/remotes/origin/staging", base);
+  git("branch", "-f", "staging", base);
   refused("a missing record", () => {
     rmSync(path.join(repo, "docs", "reference", "migrations.d", `${OLD}_${STEM}.md`));
     return commit("drop record");
   }, /is missing; every migration needs its record/);
   const bareTo = run(OLD, "--to");
   assert.equal(bareTo.status, 2, "restamp command: --to with no value is a usage error, not a generated stamp");
-  git("update-ref", "refs/remotes/origin/staging", base);
+  git("branch", "-f", "staging", base);
   refused("staging itself", () => { git("switch", "-q", "staging"); return git("rev-parse", "HEAD"); }, /not a feature branch/);
 } finally {
   rmSync(repo, { recursive: true, force: true });

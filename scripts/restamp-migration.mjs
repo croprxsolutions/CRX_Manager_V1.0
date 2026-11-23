@@ -44,9 +44,9 @@ process.chdir(git("rev-parse", "--show-toplevel"));
 const branch = tryGit("symbolic-ref", "--quiet", "--short", "HEAD").stdout.trim();
 if (!branch || /^(main|staging|release\/|hotfix\/)/.test(branch)) fail(`"${branch || "detached HEAD"}" is not a feature branch into staging`);
 if (git("status", "--porcelain")) fail("the worktree is not clean; commit or set aside your changes first");
-// Offline, the local copies of the bases are used; the PR's stamp check still runs against the real base.
+// Stale bases could miss a landed copy or a newer stamp, so no fetch, no restamp.
 const fetched = spawnSync("git", ["fetch", "--quiet", "origin", "+refs/heads/main:refs/remotes/origin/main", "+refs/heads/staging:refs/remotes/origin/staging"], { stdio: "ignore" });
-if (fetched.status !== 0) console.error(`WARNING: could not fetch origin; checking against the local ${BASE} and origin/main, which may be behind.`);
+if (fetched.status !== 0) fail("could not fetch origin main and staging");
 
 const sqls = git("ls-files", "supabase/migrations").split("\n").filter((f) => f.startsWith(`supabase/migrations/${oldStamp}_`) && f.endsWith(".sql"));
 if (sqls.length !== 1) fail(`expected one supabase/migrations/${oldStamp}_*.sql, found ${sqls.length}`);
@@ -71,7 +71,8 @@ const top = [...stampsOn(BASE), ...stampsOn("origin/main")].sort().at(-1) ?? "";
 if (newStamp <= top) fail(`${newStamp} is not newer than ${top}, the newest migration on ${BASE} or main`);
 const branchStamps = owned.map((p) => /^supabase\/migrations\/(\d{14})_[^/]+\.sql$/.exec(p)?.[1]).filter((s) => s && s !== oldStamp);
 if (branchStamps.includes(newStamp)) fail(`${newStamp} is already used on this branch`);
-const between = branchStamps.find((s) => s > oldStamp && s < newStamp);
+const [low, high] = [oldStamp, newStamp].sort();
+const between = branchStamps.find((s) => s > low && s < high);
 if (between) fail(`this branch's migration ${between} sits between ${oldStamp} and ${newStamp}; restamping one would change the apply order, so restamp them by hand and run a full Sol review`);
 
 const swap = (text) => text.split(oldStamp).join(newStamp);
@@ -90,6 +91,9 @@ const sqlText = readFileSync(oldSql, "latin1");
 const sqlLines = sqlText.split("\n");
 const bodyStart = sqlLines.findIndex((line) => line.trim() !== "" && !line.trimStart().startsWith("--"));
 const newSqlText = sqlLines.map((line, i) => (bodyStart === -1 || i < bodyStart ? line.split(`migrations.d/${oldStem}.md`).join(`migrations.d/${newStem}.md`) : line)).join("\n");
+if (sqlLines.some((line, i) => bodyStart !== -1 && i >= bodyStart && line.includes(oldStamp))) {
+  console.error(`note: the SQL body still names ${oldStamp}; it is left byte for byte, as Sol reviewed it.`);
+}
 const pin = (hash) => `SQL sha256: \`${hash}\``;
 const [oldPin, newPin] = [pin(sha(sqlText)), pin(sha(newSqlText))];
 

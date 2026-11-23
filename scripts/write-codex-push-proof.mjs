@@ -2707,6 +2707,7 @@ export function restampProblem({ entries, readFile, branchAdded = [] }) {
   const pin = (hash) => `SQL sha256: \`${hash}\``;
   const [oldSha, newSha] = [sha(oldSql), sha(newSql)];
   const paths = new Map(entries.map((entry) => [entry.path, entry]));
+  let recordPins = null;
   for (const entry of entries) {
     const { path: file, oldMode, newMode } = entry;
     if (!RESTAMP_MODES.has(oldMode) || !RESTAMP_MODES.has(newMode) || (oldMode !== ABSENT_MODE && newMode !== ABSENT_MODE && oldMode !== newMode)) {
@@ -2731,11 +2732,14 @@ export function restampProblem({ entries, readFile, branchAdded = [] }) {
       if (lf(after) !== lf(before) && !headerOnlyChange(lf(before), lf(after), selfLink)) return "the migration's SQL changed";
     } else if (file === ownRecord) {
       if (after !== restamp(before) && after !== restamp(before).split(pin(oldSha)).join(pin(newSha))) return `${file} changed beyond the timestamp and its SQL sha256 pin`;
-      if ([...after.matchAll(/SQL sha256: `([0-9a-f]{64})`/g)].some((m) => m[1] !== newSha)) return `${file}'s SQL sha256 pin is not the new SQL's hash`;
+      recordPins = [...after.matchAll(/SQL sha256: `([0-9a-f]{64})`/g)].map((m) => m[1]);
+      if (recordPins.some((h) => h !== newSha)) return `${file}'s SQL sha256 pin is not the new SQL's hash`;
     } else if (after !== restamp(before)) {
       return `${file} changed beyond the timestamp`;
     }
   }
+  // A changed SQL must be bound by its renamed record's one pin; byte-identical SQL keeps the format's optional pin.
+  if (oldSha !== newSha && recordPins?.length !== 1) return `the SQL changed, so ${ownRecord} must be renamed and pin it with one SQL sha256`;
   return null;
 }
 

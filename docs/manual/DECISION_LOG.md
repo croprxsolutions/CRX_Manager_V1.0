@@ -1,5 +1,15 @@
 # Decision Log
 
+## 2026-11-22 — #2256: Mason owner-accepted 3 Sol finding(s) at `591e6a34de34`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2256 at `591e6a34de34` (base `9c77cd3a5d22`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/components/deliveries/ReceiptsToCheck.tsx:96`, text sha256 `8fa2f87a2f18aafb` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 1ba4939db9f5)
+- Finding 2 (HIGH) at `src/pages/DeliveryDetail.tsx:1493`, text sha256 `e1351c2ce5dcdaec` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 1ba4939db9f5)
+- Finding 3 (HIGH) at `src/pages/DeliveryDetail.tsx:1550`, text sha256 `cf5fc817743fe50a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 56304b763489)
+
 ## 2026-11-22 — #2256: Mason owner-accepted 3 Sol finding(s) at `f218cd0a6cb3`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2256 at `f218cd0a6cb3` (base `d069dc004e94`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

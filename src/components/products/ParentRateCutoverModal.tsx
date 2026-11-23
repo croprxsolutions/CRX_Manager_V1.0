@@ -14,6 +14,11 @@ import { OpenWorkList } from './ParentRatesModal';
 
 type Eligible = Extract<RateCutoverPreview, { eligible: true }>;
 
+// The database's reason without the generic prefix, for messages that say what happened in their own words.
+const refusalText = (error: unknown) => sanitizeError(error).replace(/^Nothing was saved\.\s*/, '');
+const ALREADY = [RpcErrorCodes.PRODUCT_PARENT_CUTOVER_ALREADY_APPROVED, RpcErrorCodes.PRODUCT_PARENT_CUTOVER_ALREADY_LEGACY];
+const alreadySwitched = (error: unknown) => ALREADY.some((code) => hasRpcCode(error, code));
+
 const isServerRefusal = (error: unknown) => {
   const message = error instanceof Error ? error.message
     : typeof error === 'object' && error !== null && 'message' in error ? String((error as { message: unknown }).message) : '';
@@ -96,7 +101,14 @@ export default function ParentRateCutoverModal({ parent, profileId, rateSource, 
   const showPreview = async () => {
     setSaving(true);
     try {
-      setPreview(await previewParentRateCutover(parent.id, direction));
+      const result = await previewParentRateCutover(parent.id, direction);
+      // Switched under this page (another admin): reload so the panel shows the true rate in use.
+      if (!result.eligible && alreadySwitched({ message: result.refusal })) {
+        toast('info', `${refusalText({ message: result.refusal })}; page reloaded`);
+        onSaved();
+        return;
+      }
+      setPreview(result);
     } catch (error) {
       toast('error', sanitizeError(error));
     } finally {
@@ -109,17 +121,22 @@ export default function ParentRateCutoverModal({ parent, profileId, rateSource, 
     try {
       await commitParentRateCutover(plan, reason.trim(), getKey());
       resetKey();
+      const unchanged = plan.changes ? '' : '; rate and prices unchanged';
       toast('success', direction === 'promote'
-        ? `${parent.name} now uses its approved rate on all ${plan.expected.sizes.length} size(s)`
-        : `${parent.name} is back on its old rate on all ${plan.expected.sizes.length} size(s)`);
+        ? `${parent.name} now uses its approved rate on all ${plan.expected.sizes.length} size(s)${unchanged}`
+        : `${parent.name} is back on its old rate on all ${plan.expected.sizes.length} size(s)${unchanged}`);
       onSaved();
     } catch (error) {
+      // Already switched (another admin, or this admin's own lost reply): not a failure, the page reloads.
+      if (alreadySwitched(error)) {
+        toast('info', `${refusalText(error)}; page reloaded`);
+        onSaved();
+        return;
+      }
       toast('error', sanitizeError(error));
       // A database refusal retires the preview: preview again. Only a lost reply (no refusal code) keeps it, so
-      // Switch resends the same key and payload. Already switched (another admin or a lost reply): reload.
+      // Switch resends the same key and payload.
       if (isServerRefusal(error)) setPreview(null);
-      if (hasRpcCode(error, RpcErrorCodes.PRODUCT_PARENT_CUTOVER_ALREADY_APPROVED)
-        || hasRpcCode(error, RpcErrorCodes.PRODUCT_PARENT_CUTOVER_ALREADY_LEGACY)) onSaved();
     } finally {
       setSaving(false);
     }
@@ -150,7 +167,7 @@ export default function ParentRateCutoverModal({ parent, profileId, rateSource, 
         </p>
         {preview && !preview.eligible && (
           <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900" role="alert">
-            Can&apos;t switch. {sanitizeError({ message: preview.refusal }).replace(/^Nothing was saved\.\s*/, '')}
+            Can&apos;t switch. {refusalText({ message: preview.refusal })}
           </p>
         )}
         {plan && <CutoverTable plan={plan} seedOrEach={seedOrEach} />}

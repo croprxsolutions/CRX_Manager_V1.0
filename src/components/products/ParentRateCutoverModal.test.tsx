@@ -114,5 +114,25 @@ describe('RT-4a rate cut-over modal', () => {
     fireEvent.change(await screen.findByLabelText('Reason (required)'), { target: { value: 'pilot' } });
     fireEvent.click(screen.getByRole('button', { name: 'Switch to approved rate' }));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(mockToast).toHaveBeenCalledWith('info', '"Smart Test" already uses its approved rate; page reloaded');
+    expect(mockToast).not.toHaveBeenCalledWith('error', expect.anything());
+  });
+
+  it('a preview refused because the group was already switched reloads the page', async () => {
+    mockPreview.mockResolvedValue({ parent_id: 'par1', direction: 'promote', eligible: false,
+      refusal: 'PRODUCT_PARENT_CUTOVER_ALREADY_APPROVED: "Smart Test" already uses its approved rate' });
+    const onSaved = open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  });
+
+  it('a switch that changes no rate says so in the success message', async () => {
+    mockPreview.mockResolvedValue({ ...eligible, changes: false });
+    mockCommit.mockResolvedValue({ parent_id: 'par1', direction: 'promote', rate_source: 'approved' });
+    open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.change(await screen.findByLabelText('Reason (required)'), { target: { value: 'pilot' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to approved rate' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Smart Test now uses its approved rate on all 1 size(s); rate and prices unchanged'));
   });
 });

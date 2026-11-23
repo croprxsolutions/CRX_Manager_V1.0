@@ -99,6 +99,7 @@ import { JobChemicalProductPicker } from '../components/jobs/JobChemicalProductP
 import JobLabelCorrectionsNotice from '../components/jobs/JobLabelCorrectionsNotice';
 import { buildJobChemicalsPayload } from '../lib/jobChemicalPayload';
 import { JOB_CHEMICAL_COLUMNS, JOB_COLUMNS, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
+import { JOB_CHANGED_SINCE_LOADED_MESSAGE, jobChangedSinceLoaded, pickJobStaleSnapshot, type JobStaleSnapshot } from '../lib/jobStaleEdit';
 import { sendEmail } from '../lib/emailService';
 import {
   parsePreNotificationTemplate,
@@ -312,6 +313,8 @@ export default function JobDetail() {
   const transferJobIdem = useIdempotencyKey('transfer_job_to_invoice', profile?.id || '');
   // Crew/loader values as last loaded, so a save sends (and checks) only the ones the user changed.
   const savedLoaderRef = useRef({ groundCrewId: '', carrier: '', capacity: '' });
+  // The job as last loaded: Save is refused if someone else changed it since (applicator, date, crew, ...).
+  const loadedJobSnapshotRef = useRef<JobStaleSnapshot | null>(null);
   const isNew = id === 'new';
   const isEditable = role === 'admin' || role === 'sales_rep';
   // Cost is admin-only (Mason, 2026-10-15): the server works it out for everyone else's saves.
@@ -2020,6 +2023,7 @@ export default function JobDetail() {
     // #10 loader-worksheet inputs (numbers stored as strings in the form).
     setCarrierRateGpa(j.carrier_rate_gpa != null ? String(j.carrier_rate_gpa) : '');
     setTankCapacity(j.loader_tank_capacity != null ? String(j.loader_tank_capacity) : '');
+    loadedJobSnapshotRef.current = pickJobStaleSnapshot(j as unknown as Record<string, unknown>);
     savedLoaderRef.current = {
       groundCrewId: j.ground_crew_id || '',
       carrier: j.carrier_rate_gpa != null ? String(j.carrier_rate_gpa) : '',
@@ -2789,6 +2793,15 @@ export default function JobDetail() {
 
     setSaving(true);
     try {
+      // Refuse a save over someone else's newer change instead of silently replacing it.
+      if (!isNew && loadedJobSnapshotRef.current) {
+        const changed = await jobChangedSinceLoaded(id!, loadedJobSnapshotRef.current);
+        if (changed.length > 0) {
+          if (stillOnThisJob()) toast('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
+          setSaving(false);
+          return;
+        }
+      }
       const payload = {
         customer_id: customerId,
         job_date: jobDate,

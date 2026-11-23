@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270226130000_save_job_refuses_changed_job.sql (contract:
+ * Real-schema proof for 20270226160000_save_job_refuses_changed_job.sql (contract:
  * docs/plans/2026-11-23-job-save-version-check-CONTRACT.md). Builds the checked-in baseline plus every
  * post-baseline migration BEFORE the candidate in a network-disabled PostgreSQL container
  * (scripts/smoke/undo-paths/harness.mjs), seeds a job, and:
@@ -18,7 +18,8 @@
  *   5. the page's own dispatch, carried into its version, saves; with someone else's dispatch change too, refused;
  *   6. printing, applied acres and a chemical's cost leave the version unchanged;
  *   7. a driver is refused job_edit_version; a sales rep gets one;
- *   8. a malformed expected_version is refused; a driver's save carrying one gets INSUFFICIENT_ROLE.
+ *   8. a malformed expected_version is refused; a driver's save carrying one gets INSUFFICIENT_ROLE;
+ *   9. 20270226150000's refusal still fires: a completed job's chemicals can't change, current version or not.
  *
  * Run: node scripts/smoke/prove-job-save-version-real-schema.mjs   (needs Docker; never touches live)
  * Prints JOB_SAVE_VERSION_PROOF_PASS on success.
@@ -29,15 +30,15 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, seed, ref, psql, scalar, attempt, asUser, refuse, claims, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270226130000_save_job_refuses_changed_job.sql';
+const CANDIDATE = '20270226160000_save_job_refuses_changed_job.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const { admin: ADMIN, rep: REP, driver: DRIVER, applicator: APPLICATOR } = USERS;
 const CHANGED = 'JOB_CHANGED_SINCE_LOADED: This job changed after you opened it. Nothing was saved. Reload the page to see the job as it is now, then make your edits again.';
 const JOB = ref('job');
 
 /** save_job as the page sends it; `expected` is a SQL jsonb expression, or null to send no version. */
-const save = (notes, expected, key = null, who = ADMIN) => `public.save_job(${JOB},
-  jsonb_build_object('customer_id', ${ref('cust')}, 'status', 'scheduled', 'job_date', '2027-04-01', 'total_acres', 160,
+const save = (notes, expected, key = null, who = ADMIN, status = 'scheduled') => `public.save_job(${JOB},
+  jsonb_build_object('customer_id', ${ref('cust')}, 'status', '${status}', 'job_date', '2027-04-01', 'total_acres', 160,
     'notes', '${notes}', 'field_shares', '[]'::jsonb)${expected ? ` || jsonb_build_object('expected_version', ${expected})` : ''},
   (SELECT jsonb_agg(jsonb_build_object('field_id', f.field_id, 'acres_to_treat', 80, 'sort_order', f.sort_order) ORDER BY f.sort_order)
      FROM public.job_fields f WHERE f.job_id = ${JOB}),
@@ -102,7 +103,7 @@ try {
   assert.equal(scalar(`SELECT count(*) FROM public.job_fields WHERE job_id = ${JOB};`), '2', 'the seeded job must have two field lines');
 
   const wrapperMd5 = scalar("SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure;");
-  console.log(`[job-version] reviewed 20270101000000 wrapper md5: ${wrapperMd5}`);
+  console.log(`[job-version] reviewed 20270226150000 wrapper md5: ${wrapperMd5}`);
   assert.ok(candidate.includes(`'${wrapperMd5}'`), 'the candidate preflight must pin the wrapper md5 printed above');
 
   // 0. Today: both saves from the same page version succeed; the second silently overwrites the first.
@@ -188,6 +189,15 @@ try {
   assert.match(show('8 malformed', attempt(ADMIN, `${refuse(`r := ${save('[JV] bad', `'"x"'::jsonb`)};`)} v := t;`)), /^ok\|EXPECTED_VERSION_INVALID/);
   // A non-editor carrying a (stale) version gets the role refusal, not a version answer.
   assert.match(show('8 driver save', attempt(DRIVER, `${refuse(`r := ${save('[JV] driver', V('c1'), null, DRIVER)};`)} v := t;`)), /^ok\|INSUFFICIENT_ROLE/);
+
+  // 9. 20270226150000's refusal is kept: a completed job's chemicals can't change, even from the current version.
+  elsewhere(`SET session_replication_role = replica; UPDATE public.jobs SET status = 'completed' WHERE id = ${JOB}; SET session_replication_role = origin`);
+  remember('c9');
+  assert.match(show('9 completed job, chemicals dropped', commit(`f0 := public._job_edit_version(${JOB})::text;
+    ${refuse(`r := ${save('[JV] completed', V('c9'), 'jv-completed', ADMIN, 'completed')};`)}
+    v := t || '|unchanged=' || (f0 = public._job_edit_version(${JOB})::text);`)), /^ok\|JOB_COMPLETED_CHEMICALS_LOCKED.*\|unchanged=true$/);
+  assert.equal(scalar("SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure;"),
+    'd199976b5fe5851918cbdfbec6f2bdff', 'the installed save_job must be the body the postflight pins');
 
   console.log('\nJOB_SAVE_VERSION_PROOF_PASS');
 } finally {

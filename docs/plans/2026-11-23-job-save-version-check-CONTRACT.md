@@ -4,7 +4,7 @@ Follow-up to PR #2337 (screen-only check). Decision: `docs/manual/decision-log.d
 
 ## Facts (with source)
 
-- `save_job` (6 args) is a wrapper: actor check, folds rate units, then calls `_save_job_cost_step2_impl` (admin) or the same with server-priced chemicals (non-admin). Newest wrapper body: `20270101000000_rate_unit_followups_whitespace_dotted_floz_save_job_fold.sql`. The impl is the old `save_job` body from `20260904185900`, renamed in `20261019230000`.
+- `save_job` (6 args) is a wrapper: actor check, folds rate units, then calls `_save_job_cost_step2_impl` (admin) or the same with server-priced chemicals (non-admin). Newest wrapper body: `20270226150000_job_transfer_below_cost_whole_line.sql` (#2247, which added the up-front INSUFFICIENT_ROLE, the key's advisory lock and job row lock, and JOB_COMPLETED_CHEMICALS_LOCKED). The impl is the old `save_job` body from `20260904185900`, renamed in `20261019230000`.
 - The impl's replay: `check_idempotency_intent(key, 'save_job', actor, fingerprint)` takes `pg_advisory_xact_lock(hashtextextended('crx:idempotency:'||key,0))`, deletes the key's receipt if `expires_at < now()`, and returns the stored result (same actor + same fingerprint), or raises (other operation / actor / fingerprint). It writes nothing else. The impl then locks the job row `FOR UPDATE` and rewrites job columns and all `job_fields`, `job_field_shares`, `job_chemicals` lines (delete + insert, so line ids change on every save).
 - Only active admins and sales reps may save (`INSUFFICIENT_ROLE` otherwise, inside the impl).
 - `save_job`'s existing-job UPDATE writes neither `status` nor crew/loader columns; the page's follow-up `edit_jobs` writes crew/loader, sending only the values the user changed.
@@ -16,10 +16,10 @@ Follow-up to PR #2337 (screen-only check). Decision: `docs/manual/decision-log.d
 ## 1. Outcome and authority
 
 - **Outcome:** a job Save is refused, with nothing written, when what it compares changed after the page read it. The check runs inside `save_job`, under the job row lock, after the replay lookup. Closes #2337's gaps: (1) two saves at once, (2) a retry after a lost reply gets the stored result, (3) the page's own Dispatch wizard no longer absorbs someone else's change.
-- **Smallest change (DB PR):** one migration, `20270226130000_save_job_refuses_changed_job.sql`:
+- **Smallest change (DB PR):** one migration, `20270226160000_save_job_refuses_changed_job.sql`:
   - `_job_edit_version(p_job_id) returns jsonb` (internal, no API grants): `{core: md5 of the job's edited columns + its field, share and chemical lines (with line ids, without cost), dispatches: sorted "job_field_id|applicator_id|crew_id|dispatch_status" strings}`. Columns are #2337's list (`src/lib/jobStaleEdit.ts`). Left out, as in #2337: `updated_at`, `printed_at`, applied/remaining acres, cost.
   - `job_edit_version(p_job_id) returns jsonb`: the RPC the page calls. Returns the version for an active admin or sales rep; refuses anyone else.
-  - `save_job` wrapper (same signature, frozen): when `p_job_id` is set, the payload carries `expected_version` and the caller is an active admin or sales rep (anyone else goes straight to the impl's `INSUFFICIENT_ROLE`): a malformed version is refused; with a key, take the same advisory lock the impl takes and, if a live receipt exists, hold it `FOR SHARE` (so no expired-key sweep can delete it before the impl reads it) and skip the compare (the impl then replays or refuses; it never writes); otherwise lock the job row and refuse `JOB_CHANGED_SINCE_LOADED` unless the current version equals the expected one (dispatch strings compared as a set). No `expected_version` = today's behavior, so the deployed app is unaffected.
+  - `save_job` wrapper (same signature, frozen): built on #2247's body, which already refuses non-editors (`INSUFFICIENT_ROLE`) before anything else and locks the key, then the job row. When `p_job_id` is set and the payload carries `expected_version`: a malformed version is refused before any lock; under the key's advisory lock, if a live receipt exists, hold it `FOR SHARE` (so no expired-key sweep can delete it before the impl reads it) and skip the compare (the impl then replays or refuses; it never writes); otherwise, under the job row lock, refuse `JOB_CHANGED_SINCE_LOADED` unless the current version equals the expected one (dispatch strings compared as a set). No `expected_version` = today's behavior, so the deployed app is unaffected.
 - **Screen PR (after the DB is live):** the page calls `job_edit_version` before its job select (the invoice screens read the version in the same query as the header; a computed field on `jobs` is unreadable because of the cost column lock, so this is a separate read whose only failure direction is a false refusal) and sends it as `expected_version`. After its own Dispatch wizard it replaces only the dispatch strings of the locations it dispatched, with the assignments it sent (status is always `dispatched`; a wrong guess only refuses). It drops #2337's pre-save re-read and maps the refusal to the existing message. If the version could not be read, Save of an existing job is blocked with "reload" (fail closed), never sent without it.
 - **Later (named, not in these PRs):** once the screen has been live long enough for open tabs to reload, a small migration can make `expected_version` mandatory for existing-job saves, closing the old-tab path.
 - **Authority:** unchanged. The version carries no cost (only line ids, which reps can already read), and is withheld from non-editors.
@@ -40,7 +40,7 @@ Follow-up to PR #2337 (screen-only check). Decision: `docs/manual/decision-log.d
 
 ## 3. Delivery
 
-DB PR into `staging` first (compatible: the deployed app sends no `expected_version`). PR #2247 also rewrites `save_job` from the same body: it lands first, and this migration is then rebuilt on its body (both sets of refusals kept, preflight md5 re-pinned) before review and apply. Screen PR on top of #2337's branch, merges only after the DB is live. Rollback order: screen first, then the database. Mason merges both by hand; no live apply without him.
+DB PR into `staging` first (compatible: the deployed app sends no `expected_version`). Built on PR #2247's `save_job` (merged to staging 2026-11-23, Mason's yes the same day to rebuild on it): its refusals are kept, the preflight pins its body and the postflight pins ours. Screen PR on top of #2337's branch, merges only after the DB is live. Rollback order: screen first, then the database. Mason merges both by hand; no live apply without him.
 
 ## 4. Proof cases
 
@@ -55,7 +55,8 @@ Database cases: `scripts/smoke/prove-job-save-version-real-schema.mjs` (disposab
 6. When a job is printed, applied acres change, or a chemical's cost changes in place, then the version is unchanged.
 7. A driver calling `job_edit_version` is refused; a sales rep gets the same version; the internal function is not callable by the app.
 8. A malformed `expected_version` is refused; a driver's save carrying a version gets `INSUFFICIENT_ROLE`, not a version answer.
-9. Screen (browser, staging, after the DB is live): two tabs on one job, save in each → the second is refused with the reload message; own Dispatch wizard then Save → saved; version read failing → Save blocked.
+9. A completed job's chemicals still can't change (#2247's `JOB_COMPLETED_CHEMICALS_LOCKED`), current version or not; the installed body is the one the postflight pins.
+10. Screen (browser, staging, after the DB is live): two tabs on one job, save in each → the second is refused with the reload message; own Dispatch wizard then Save → saved; version read failing → Save blocked.
 
 ## Challenge (Astra gpt-6.2-astra high, 2026-11-23): 41 findings
 

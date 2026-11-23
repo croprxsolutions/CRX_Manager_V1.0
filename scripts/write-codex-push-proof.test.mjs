@@ -2773,10 +2773,10 @@ not json
     mkdirSync(stateDir, { recursive: true });
     // The shape saveBlockersRecord writes: the record plus the review kind (Sol round 2, 2026-11-22).
     writeFileSync(path.join(stateDir, blockersRecordName(reviewed)), JSON.stringify({ ...buildBlockersRecord({ headSha: reviewed, baseSha: base, findings }), review_ref: GUARDED_BASE, release_rules: false }));
-    const accept = (n, code, reason) => {
+    const accept = (n, code, reason, at = reviewed) => {
       const now = Date.now();
       writeApprovalRequest(stateDir, buildSolAcceptPayload({
-        record: JSON.parse(readFileSync(path.join(stateDir, blockersRecordName(reviewed)), "utf8")), n, pullRequest: 4242, pullRequestUrl: "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242",
+        record: JSON.parse(readFileSync(path.join(stateDir, blockersRecordName(at)), "utf8")), n, pullRequest: 4242, pullRequestUrl: "https://github.com/croprxsolutions/CRX_Manager_V1.0/pull/4242",
         issuedAt: new Date(now - 1000).toISOString(), expiresAt: new Date(now + 60 * 60 * 1000).toISOString(), nonce: `n${code}`, code, sessionId: SESSION,
       }));
       const text = `accept ${code} ${reason}`;
@@ -2855,6 +2855,47 @@ not json
     const stale = run(scriptPath, "--carry-owner-accepted");
     assert.equal(stale.status, 1, "owner-accepted e2e: acceptances of an earlier Sol run are refused");
     assert.match(stale.stderr, /earlier Sol run/);
+
+    // A PR into staging (Mason, 2026-11-23): --log writes its own new decision-log.d/ file, never
+    // DECISION_LOG.md, so parallel PRs cannot conflict; the carry accepts exactly that one new file.
+    git("switch", "-q", "-c", "staging-pr", base);
+    write("src/sale.ts", "export const sell = () => 3;\n");
+    const reviewedS = commitAll("staging pr change");
+    writeFileSync(path.join(stateDir, blockersRecordName(reviewedS)), JSON.stringify({ ...buildBlockersRecord({ headSha: reviewedS, baseSha: base, findings }), review_ref: "origin/staging", release_rules: false }));
+    accept(1, "333333", "we never sell before switch-on", reviewedS);
+    accept(2, "444444", "not a live SaaS yet", reviewedS);
+    const logBefore = readFileSync(file(LOG), "utf8");
+    const loggedS = run(logScript, "--log");
+    assert.equal(loggedS.status, 0, `owner-accepted e2e (staging): --log writes the entry (${loggedS.stderr})`);
+    assert.equal(readFileSync(file(LOG), "utf8"), logBefore, "owner-accepted e2e (staging): DECISION_LOG.md is untouched");
+    const added = git("status", "--porcelain", "--untracked-files=all").split("\n").map((l) => l.slice(3)).filter(Boolean);
+    assert.equal(added.length, 1, `owner-accepted e2e (staging): one new file (${added})`);
+    const FRAG = added[0];
+    assert.match(FRAG, new RegExp(`^docs/manual/decision-log\\.d/\\d{4}-\\d{2}-\\d{2}-pr4242-sol-skip-${reviewedS.slice(0, 12)}\\.md$`), "owner-accepted e2e (staging): dated, PR-named fragment");
+    assert.match(loggedS.stdout, new RegExp(`Wrote the entry to ${FRAG.replace(/[.]/g, "\\.")}`));
+    assert.match(readFileSync(file(FRAG), "utf8"), /^## \d{4}-\d{2}-\d{2} — #4242: Mason owner-accepted 2 Sol finding\(s\)[\s\S]*not a live SaaS yet \(ref [^)]+\)\n$/,"owner-accepted e2e (staging): one entry, one trailing newline");
+    const fragHead = commitAll("docs: Mason skipped Sol findings");
+    const okS = run(scriptPath, "--carry-owner-accepted");
+    assert.equal(okS.status, 0, `owner-accepted e2e (staging): the proof is written (${okS.stderr})`);
+    const mintedS = JSON.parse(readFileSync(codexPushProofPath(repo, fragHead), "utf8"));
+    assert.equal(mintedS.carry.mode, "owner_accepted");
+    assert.equal(proofValid(mintedS, fragHead, Date.now(), base), true, "owner-accepted e2e (staging): the gates accept it for the logged head");
+    // The round-5 reader (decisionLogAt) sees the fragment entry like one in DECISION_LOG.md.
+    const { decisionLogAt } = await import("./write-codex-push-proof.mjs");
+    assert.ok(decisionLogAt(repo, fragHead).some((t) => t.includes("#4242: Mason owner-accepted 2")), "owner-accepted e2e (staging): the decision-log readers find the fragment");
+    const refusedS = (label, mutate, why) => {
+      git("reset", "-q", "--hard", fragHead);
+      mutate();
+      git("reset", "-q", "--soft", reviewedS);
+      const squashed = commitAll(`refused: ${label}`);
+      const result = run(scriptPath, "--carry-owner-accepted");
+      assert.equal(result.status, 1, `owner-accepted e2e (staging): ${label} is refused`);
+      assert.match(result.stderr, why, `owner-accepted e2e (staging): ${label} says why`);
+      assert.equal(existsSync(codexPushProofPath(repo, squashed)), false, `owner-accepted e2e (staging): nothing written for ${label}`);
+    };
+    refusedS("the entry also in DECISION_LOG.md", () => write(LOG, `${logBefore}x\n`), /must only add the new file docs\/manual\/decision-log\.d\//);
+    refusedS("an edited fragment", () => write(FRAG, readFileSync(file(FRAG), "utf8").replace("not a live SaaS yet", "approved by everyone")), /must hold exactly the entry/);
+    refusedS("the entry only in DECISION_LOG.md", () => { rmSync(file(FRAG)); write(LOG, `${logBefore}x\n`); }, /must only add the new file/);
   } finally {
     rmSync(repo, { recursive: true, force: true, maxRetries: 5 });
     rmSync(transcripts, { recursive: true, force: true, maxRetries: 5 });

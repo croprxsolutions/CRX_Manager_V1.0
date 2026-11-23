@@ -718,8 +718,8 @@ function gateRequest(request) {
           collision_check: "conflict-free merge of the branch's base, collision check clean; Mason, 2026-10-21",
           restamp: "one commit that only restamped a migration; Mason, 2026-11-04",
           post_apply: "one commit that only updated the records after a live apply; Mason, 2026-11-04",
-          owner_accepted: "Mason accepted every BLOCKER/HIGH finding by name, logged in DECISION_LOG.md; Mason, 2026-11-10",
-          owner_accepted_carried: "Sol marked every BLOCKER/HIGH finding the same as one Mason skipped on this pull request in the last 7 days, logged in DECISION_LOG.md; Mason, 2026-11-22",
+          owner_accepted: "Mason accepted every BLOCKER/HIGH finding by name, logged in the decision log; Mason, 2026-11-10",
+          owner_accepted_carried: "Sol marked every BLOCKER/HIGH finding the same as one Mason skipped on this pull request in the last 7 days, logged in the decision log; Mason, 2026-11-22",
         }[carried.mode]})` +
         `${!String(carried.mode).startsWith("owner_accepted") && carried.root_review?.owner_accepted === true ? "; the original review's BLOCKER/HIGH findings were owner-accepted by Mason, not fixed" : ""}.\n`,
       );

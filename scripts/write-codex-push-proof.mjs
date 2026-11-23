@@ -82,10 +82,13 @@ import {
   carriedProofEntries,
   carryPromptLines,
   collectAcceptances,
+  DECISION_LOG_DIR,
   DECISION_LOG_PATH,
+  decisionFragmentText,
   decisionLogEntry,
   gateFilesIn,
   insertDecisionEntry,
+  ownerAcceptLogTarget,
   OWNER_ACCEPTED_CARRIED,
   parseSolFindings,
   priorAcceptances,
@@ -1980,7 +1983,7 @@ export function futureDecisionLogDates(diffText, today) {
 // -- Decision-log fragments (Mason, 2026-11-22) --
 // New entries go one file each in decision-log.d/, so sibling PRs stop conflicting on
 // DECISION_LOG.md. Every reader takes the big file AND every fragment.
-export const DECISION_LOG_DIR = "docs/manual/decision-log.d";
+export { DECISION_LOG_DIR };
 
 // Only direct, dated children count, as the README and the ledger guards name them (Taha LOW, #2277).
 const DECISION_FRAGMENT_RE = /^docs\/manual\/decision-log\.d\/\d{4}-\d{2}-\d{2}-[^/]+\.md$/;
@@ -3127,7 +3130,8 @@ function usage() {
     "                   Refuses (use the full review) when anything else changed.",
     "  --carry-owner-accepted  When Mason accepted every BLOCKER/HIGH finding of the reviewed head's",
     "                   Sol run (his `skip` reply, scripts/owner-accept-sol-finding.mjs) and HEAD",
-    "                   is one commit on top of it that only adds the DECISION_LOG.md entry --log wrote,",
+    "                   is one commit on top of it that only adds the entry --log wrote (a staging PR:",
+    "                   one new decision-log.d/ file; else in DECISION_LOG.md),",
     "                   write a carried proof marked owner_accepted. Refuses anything else.",
   ].join("\n");
 }
@@ -3190,7 +3194,7 @@ function saveBlockersRecord(root, headSha, baseSha, stdout, { reviewRef, release
     `Sol's BLOCKER/HIGH findings, numbered for Mason:\n${parsed.findings.map((f) => `  ${f.n}. ${f.severity}: ${f.text}${"same_as" in f ? ` [${f.same_as ?? "NEW"}]` : ""}`).join("\n")}\n` +
     (allSame
       ? "Sol marked EVERY one the same as a finding Mason already skipped on this pull request. Carry his skip without asking him: " +
-        "node scripts/owner-accept-sol-finding.mjs --log, commit DECISION_LOG.md alone, then node scripts/write-codex-push-proof.mjs " +
+        "node scripts/owner-accept-sol-finding.mjs --log, commit the one file it writes alone, then node scripts/write-codex-push-proof.mjs " +
         "--carry-owner-accepted. If either refuses, it says why; then ask Mason as below.\n"
       : "") +
     "Fix them; for ones Mason disagrees with (say plainly if one is a real money, stock, data or security bug), ask him once: node scripts/owner-accept-sol-finding.mjs <numbers> (AGENTS.md › Sol).\n",
@@ -3198,7 +3202,7 @@ function saveBlockersRecord(root, headSha, baseSha, stdout, { reviewRef, release
 }
 
 // --carry-owner-accepted: HEAD is ONE commit on top of the reviewed head that only adds
-// the DECISION_LOG.md entry for Mason's acceptances, and every BLOCKER/HIGH of that run
+// the decision-log entry for Mason's acceptances (ownerAcceptLogTarget), and every BLOCKER/HIGH of that run
 // carries a valid acceptance. Writes a carried proof bound to HEAD; refuses anything else.
 function runCarryOwnerAccepted(root, options) {
   const refuse = (why) => {
@@ -3242,14 +3246,18 @@ function runCarryOwnerAccepted(root, options) {
   if (got.problem) return refuse(got.problem);
   let entries;
   try { entries = gitChangedEntries(fromHead, headSha, root); } catch { return refuse("could not list the changed files"); }
-  if (entries.length !== 1 || entries[0].path !== DECISION_LOG_PATH || entries[0].oldMode !== "100644" || entries[0].newMode !== "100644") {
-    return refuse(`the commit on top of the reviewed head must change only ${DECISION_LOG_PATH}`);
+  const entry = (carried ? carriedDecisionLogEntry : decisionLogEntry)({ record, accepted: got.accepted });
+  let target;
+  try { target = ownerAcceptLogTarget(record, entry); } catch (error) { return refuse(error.message); }
+  // A fragment is a NEW file (old mode 000000); DECISION_LOG.md is an existing one.
+  if (entries.length !== 1 || entries[0].path !== target.path || entries[0].oldMode !== (target.fragment ? "000000" : "100644") || entries[0].newMode !== "100644") {
+    return refuse(`the commit on top of the reviewed head must ${target.fragment ? "only add the new file" : "change only"} ${target.path}`);
   }
-  const before = gitBlobUtf8(root, fromHead, DECISION_LOG_PATH);
-  const after = gitBlobUtf8(root, headSha, DECISION_LOG_PATH);
-  if (before === null || after === null) return refuse(`${DECISION_LOG_PATH} could not be read as UTF-8`);
-  if (after.replace(/\r\n/g, "\n") !== insertDecisionEntry(before, (carried ? carriedDecisionLogEntry : decisionLogEntry)({ record, accepted: got.accepted }))) {
-    return refuse(`${DECISION_LOG_PATH} must gain exactly the entry \`node scripts/owner-accept-sol-finding.mjs --log\` writes, and nothing else`);
+  const before = target.fragment ? "" : gitBlobUtf8(root, fromHead, target.path);
+  const after = gitBlobUtf8(root, headSha, target.path);
+  if (before === null || after === null) return refuse(`${target.path} could not be read as UTF-8`);
+  if (after.replace(/\r\n/g, "\n") !== (target.fragment ? decisionFragmentText(entry) : insertDecisionEntry(before, entry))) {
+    return refuse(`${target.path} must ${target.fragment ? "hold" : "gain"} exactly the entry \`node scripts/owner-accept-sol-finding.mjs --log\` writes, and nothing else`);
   }
   // The code running now (wherever it was started from) must be the bytes committed at this head.
   try {

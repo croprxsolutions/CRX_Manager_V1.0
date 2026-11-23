@@ -1348,7 +1348,8 @@ export default function CustomerDetail() {
     try {
       // The version from when the dialog opened, not whatever a later reload installed.
       const previousRowVersion = opened?.id === id ? opened.rowVersion : null;
-      const changedElsewhere = () => toast('warning', 'This customer was changed by someone else since you opened the page. Nothing was saved. Reload the page and try again.');
+      // A lost reply to an earlier try that did commit also lands here, so the message does not claim who changed it (#2227).
+      const changedElsewhere = () => toast('warning', 'Nothing was changed: this customer changed since you opened the page, or an earlier Reactivate already went through. Reload the page to check.');
       if (previousRowVersion === null) { changedElsewhere(); return; }
       // Only the exact version this admin was shown: an old confirmation must not undo a newer deactivation.
       const result = await supabase
@@ -1372,7 +1373,10 @@ export default function CustomerDetail() {
           performedBy: profile.id,
           entityType: 'customer',
           customerId: id,
-        })).catch(() => {});
+        }))
+          // An open Timeline shows the new entry (#2227); fetchTabData ignores a customer the admin has left.
+          .then(() => { if (openSectionsRef.current.has('timeline')) void fetchTabData('timeline'); })
+          .catch(() => {});
       }
       if (currentIdRef.current !== id || visitRef.current !== visit) return;
       const nextRowVersion = (result.data as Array<{ row_version?: unknown }>)[0]?.row_version;

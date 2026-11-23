@@ -80,6 +80,8 @@ If you cannot run it, say so; do not call it done.
 | any `src/`, `supabase/functions/` or migration | `compliance-reviewer` |
 | workflow / lifecycle / page↔RPC logic | `/review-workflow` |
 
+Wait for every dispatched reviewer to report before Step 4; a reviewer still running counts as not reviewed.
+
 ## Step 4 — Fix loop
 
 For each confirmed BLOCKER or HIGH (read the cited line first): fix, re-run Step 2, re-dispatch the reviewers whose scope you touched. Fix cheap MED/LOW; list the rest as deferred. Stop and hand Mason both positions when the `AGENTS.md` stop rule triggers (the same BLOCKER/HIGH survives two fix rounds; one mechanism yields a new BLOCKER/HIGH in three rounds, every reviewer counted; a design trusts a screen-sent ID at round 2).

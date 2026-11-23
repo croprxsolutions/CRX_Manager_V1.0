@@ -1,4 +1,4 @@
--- Rollback for supabase/migrations/20270220120000_job_completion_missing_stock_rows.sql
+-- Rollback for supabase/migrations/20270224170000_job_completion_missing_stock_rows.sql
 -- (proven by scripts/smoke/prove-job-completion-missing-stock-rows-real-schema.mjs).
 -- Refuses, changing nothing, unless the lock function and complete_job are still the bodies that migration
 -- installed. Then restores the KI-150 lock body (lock existing rows only) and the previous complete_job

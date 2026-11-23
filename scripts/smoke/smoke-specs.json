@@ -1313,6 +1313,16 @@
         "inventory"
       ]
     },
+    "po_cost_expected_cost": {
+      "chain": "smoke-po-cost-expected-cost.sql",
+      "description": "REQUIRES 20270217120000 (KI-197). An active admin corrects a [SMOKE] PO line with the cost they saw (saved), then from a stale screen (refused PO_COST_CHANGED_SINCE_LOADED, cost unchanged). Terminal rollback.",
+      "covers": [
+        "set_purchase_order_item_costs"
+      ],
+      "area": [
+        "regression"
+      ]
+    },
     "create_cycle_count": {
       "chain": "smoke-create-cycle-count.sql",
       "description": "KI-160 (20270209160000): one call saves the count and a line per stock row at the location (expected = on-hand); the same key replays the same count; a second start at that location is refused with COUNT_ALREADY_OPEN. Uses one active admin and [SMOKE] fixtures at a [SMOKE] location; terminal rollback.",

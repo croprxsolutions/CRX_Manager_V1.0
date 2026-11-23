@@ -399,6 +399,9 @@ async function afterCases() {
     VALUES ('${JOB(9)}', '${P}', 10, 'Gal', 1000, false, 1);`;
   assert.equal(Number(okProbe(`${AS_ADMIN}\n${addLine}\n${signedIn(`${link(9, JOB(9))}\n${complete(9)}\n${ON_HAND}`)}`)), base - 10, 'case 7: with a line added the job completes');
   ok(complete(9));
+  //    Luna round 2: nor can a ticket be linked to a job already completed with no chemicals.
+  refused(`${complete(9)}\n${link(9, JOB(9))}`, /BLEND_TICKET_JOB_NEEDS_CHEMICALS/, 'case 7 link after');
+  console.log('[case 7] J9 completed with no chemicals, then T9 linked to it: refused');
   console.log('[case 7] J9 has T9 linked but no chemicals: completion refused, stock unchanged; after a chemical line is added it completes (10 Gal out); an empty job with no ticket still completes as before');
   // 8. A cancelled job cannot complete, so its linked ticket records as before.
   assert.equal(Number(ok(`${record(10)}\n${ON_HAND}`)), base - 10, 'case 8: a ticket on a cancelled job must record and take its stock');

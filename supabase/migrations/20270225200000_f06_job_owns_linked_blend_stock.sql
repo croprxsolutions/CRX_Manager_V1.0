@@ -5,6 +5,8 @@
 --     deleted job cannot complete, so its linked ticket records as before.
 --   * A job with a linked ticket that lists products, but with no chemical lines of its own, cannot complete
 --     (JOB_BLEND_TICKET_NEEDS_CHEMICALS; Mason, 2026-11-23 after Sol round 1): it would take nothing and block the ticket.
+--     Likewise a ticket with products cannot be linked to a job already completed with no chemicals
+--     (BLEND_TICKET_JOB_NEEDS_CHEMICALS).
 --   * A job whose linked ticket already has its own record cannot record again (JOB_BLEND_TICKET_ALREADY_RECORDED);
 --     only old rows can reach this, as the link rules below stop new ones.
 --   * A ticket with its own record cannot be linked to a job (BLEND_TICKET_RECORDED_NO_JOB).
@@ -102,13 +104,22 @@ BEGIN
     RAISE EXCEPTION 'BLEND_TICKET_JOB_OTHER_CUSTOMER: a blend ticket can only be linked to a spray job for the same customer.'
       USING ERRCODE = 'P0001';
   END IF;
-  IF OLD.job_id IS NOT NULL THEN
-    PERFORM 1 FROM public.jobs j WHERE j.id = OLD.job_id FOR NO KEY UPDATE;
-    IF EXISTS (SELECT 1 FROM public.application_records ar
-                WHERE ar.source_type = 'job' AND ar.source_id = OLD.job_id) THEN
-      RAISE EXCEPTION 'BLEND_TICKET_COMPLETED_JOB_KEEPS_TICKET: this blend ticket''s spray job is already completed and took the stock, so the ticket can''t be unlinked or moved to another job.'
-        USING ERRCODE = 'P0001';
-    END IF;
+  -- Old and new job locked in one statement in id order, so two tickets swapping jobs cannot deadlock.
+  PERFORM 1 FROM public.jobs j WHERE j.id IN (OLD.job_id, NEW.job_id) ORDER BY j.id FOR NO KEY UPDATE;
+  IF OLD.job_id IS NOT NULL
+     AND EXISTS (SELECT 1 FROM public.application_records ar
+                  WHERE ar.source_type = 'job' AND ar.source_id = OLD.job_id) THEN
+    RAISE EXCEPTION 'BLEND_TICKET_COMPLETED_JOB_KEEPS_TICKET: this blend ticket''s spray job is already completed and took the stock, so the ticket can''t be unlinked or moved to another job.'
+      USING ERRCODE = 'P0001';
+  END IF;
+  -- Mason, 2026-11-23: a completed job with no chemicals took nothing, so it cannot own a ticket's products either.
+  IF NEW.job_id IS NOT NULL
+     AND EXISTS (SELECT 1 FROM public.application_records ar
+                  WHERE ar.source_type = 'job' AND ar.source_id = NEW.job_id)
+     AND NOT EXISTS (SELECT 1 FROM public.job_chemicals jc WHERE jc.job_id = NEW.job_id)
+     AND EXISTS (SELECT 1 FROM public.blend_ticket_products btp WHERE btp.blend_ticket_id = NEW.id) THEN
+    RAISE EXCEPTION 'BLEND_TICKET_JOB_NEEDS_CHEMICALS: that spray job was completed with no chemicals entered, so it took nothing out of stock and can''t take this blend ticket''s products. Leave the ticket unlinked and use Create App Record on it.'
+      USING ERRCODE = 'P0001';
   END IF;
   RETURN NEW;
 END;

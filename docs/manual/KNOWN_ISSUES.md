@@ -1225,7 +1225,7 @@ route. Live (audit aggregate, not re-run): no blend tickets in production yet. B
 one shared check so a linked ticket and job record one application and one deduction; prove with a fictional linked
 job and ticket, reading the stock ledger after each step.
 
-**Fix in review (2026-11-23):** `20270225200000_f06_job_owns_linked_blend_stock.sql` — Mason chose that the job takes the stock; table guards refuse the ticket's own record while linked and any link change that would let both record. Proof: `scripts/smoke/prove-f06-job-owns-linked-blend-stock-real-schema.mjs`. Close when applied on production.
+**Fix in review (2026-11-23):** `20270225200000_f06_job_owns_linked_blend_stock.sql` — Mason chose that the job takes the stock; table guards refuse the ticket's own record while linked and any link change that would let both record. Proof: `scripts/smoke/prove-f06-job-owns-linked-blend-stock-real-schema.mjs`. Accepted gap (Mason, 2026-11-23): a ticket never linked, or unlinked before its job completes, can still take stock alongside the job. Close when applied on production.
 
 ### KI-177 — Changing a completed job's date can change which quote prices its invoice
 

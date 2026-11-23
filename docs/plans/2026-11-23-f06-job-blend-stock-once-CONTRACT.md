@@ -39,7 +39,8 @@ Who may act is unchanged: both RPCs keep their role checks; triggers only add re
 - **Existing rows:** triggers fire only on new inserts/updates. Production has no blend tickets (read-only check, 2026-11-23); staging keeps its synthetic doubled pair.
 - **Retry:** a refused call writes nothing; the idempotency receipt is bound only after success, so a retry is refused again the same way.
 - **Old rows:** a linked ticket that recorded before an unfinished job: an admin reverses the ticket record (stock back), then the job completes. A pair where both already recorded (staging's synthetic pair): reversing the ticket record alone restores the single deduction; nothing else to do.
-- **Accepted gap (as KI-93):** a ticket never linked to its job, or unlinked before the job completed, is invisible to the database.
+- **Accepted gap (as KI-93; Mason, 2026-11-23, Luna round 2 HIGH 2):** a ticket never linked to its job, or unlinked before the job completed, is invisible to the database.
+- **Luna round 2 HIGH 1:** a ticket with products cannot be linked to a job already completed with no chemicals (`BLEND_TICKET_JOB_NEEDS_CHEMICALS`); the link change locks old and new job in one statement, in id order.
 - **Consequences Mason accepted with (A):** stock comes out at the job's chemical amounts, not the ticket's measured amounts; ticket lot numbers are not copied onto the spray record; a ticket linked to the wrong completed job needs an admin to fix by hand.
 
 ## Delivery
@@ -80,3 +81,4 @@ HIGH 1 (cancelled job strands a billed ticket), HIGH 2 (job with no chemicals; M
 
 1. **When a spray job has a blend ticket linked to it, which one takes the chemicals out of stock?** Mason, 2026-11-23: **(A) the job.** (Rejected: (B) the ticket, which rewrites job completion; (C) whichever is recorded first, which can block the applicator from closing the job.)
 2. **A spray job with a linked blend ticket but no chemicals entered:** Mason, 2026-11-23: **refuse completion** until the chemicals are added (rejected: accept that stock stays too high and the spray record lists no chemicals).
+3. **A ticket unlinked from its job before the job is completed:** Mason, 2026-11-23: **accept the gap** (treated like a ticket never linked; the office keeps the ability to correct a wrong link). Rejected: remembering past links.

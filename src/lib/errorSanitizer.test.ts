@@ -692,7 +692,7 @@ describe('one spray takes stock once (F06)', () => {
   it('drops the code and capitalises the server sentence', () => {
     expect(sanitizeError(new Error('BLEND_TICKET_JOB_RECORDS: this blend ticket is linked to a spray job. Completing the job records the spray.')))
       .toBe('This blend ticket is linked to a spray job. Completing the job records the spray.');
-    for (const code of ['JOB_BLEND_TICKET_ALREADY_RECORDED', 'JOB_BLEND_TICKET_NEEDS_CHEMICALS', 'BLEND_TICKET_RECORDED_NO_JOB', 'BLEND_TICKET_COMPLETED_JOB_KEEPS_TICKET', 'BLEND_TICKET_JOB_OTHER_CUSTOMER']) {
+    for (const code of ['JOB_BLEND_TICKET_ALREADY_RECORDED', 'JOB_BLEND_TICKET_NEEDS_CHEMICALS', 'BLEND_TICKET_JOB_NEEDS_CHEMICALS', 'BLEND_TICKET_RECORDED_NO_JOB', 'BLEND_TICKET_COMPLETED_JOB_KEEPS_TICKET', 'BLEND_TICKET_JOB_OTHER_CUSTOMER']) {
       expect(sanitizeError(`${code}: a reason.`)).toBe('A reason.');
     }
   });

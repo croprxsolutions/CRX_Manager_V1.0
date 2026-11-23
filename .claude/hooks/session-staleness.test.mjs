@@ -430,6 +430,73 @@ try {
     ok(!additionalContextOf(r).includes("behind origin/main"), "MAIN-BEHIND: no origin/main stays silent");
   }
 
+  // ── MAIN-ON-STAGING (2026-11-22): the main checkout tracks staging; session
+  // start fetches it and tells the session to catch up, never changing the folder. ──
+  {
+    const mainRepo = path.join(tmpRoot, "staging-main");
+    const linked = path.join(tmpRoot, "staging-linked");
+    const git = (...args) => execFileSync("git", ["-C", mainRepo, ...args], { env: isolatedGitEnv, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    execFileSync("git", ["init", "-b", "staging", mainRepo], { env: isolatedGitEnv, stdio: "ignore" });
+    git("config", "user.email", "session-staleness@example.com");
+    git("config", "user.name", "Session Staleness Test");
+    writeFileSync(path.join(mainRepo, "a.txt"), "one\n");
+    writeFileSync(path.join(mainRepo, ".gitignore"), "local.json\n");
+    git("add", "a.txt", ".gitignore");
+    git("commit", "-m", "base");
+    // Upstream staging: two commits ahead; the first starts tracking a locally ignored
+    // file, the second changes a.txt.
+    git("switch", "-c", "upstream");
+    writeFileSync(path.join(mainRepo, "local.json"), "upstream\n");
+    git("add", "-f", "local.json");
+    git("commit", "-m", "upstream 1");
+    writeFileSync(path.join(mainRepo, "a.txt"), "two\n");
+    git("commit", "-am", "upstream 2");
+    // A real bare origin; the hook must fetch it (no local origin/staging is seeded),
+    // even under a narrowed fetch refspec that never names staging (Luna MED/LOW).
+    const originRepo = path.join(tmpRoot, "staging-origin.git");
+    execFileSync("git", ["init", "--bare", originRepo], { env: isolatedGitEnv, stdio: "ignore" });
+    git("remote", "add", "origin", originRepo);
+    git("config", "remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/main");
+    git("push", "-q", "origin", "upstream:refs/heads/staging");
+    git("switch", "staging");
+    git("worktree", "add", "--detach", linked);
+
+    // A decoy local tag named origin/staging must not stand in for the remote ref (Sol MED).
+    git("tag", "origin/staging", "HEAD");
+    // Behind: fetched, the session is told to catch up first, the folder is never touched.
+    writeFileSync(path.join(mainRepo, "a.txt"), "local edit\n");
+    const before = git("rev-parse", "HEAD");
+    r = runHook(linked);
+    eq(r.status, 0, "MAIN-ON-STAGING: exits 0");
+    let ctx = additionalContextOf(r);
+    ok(ctx.includes("ACTION FIRST") && ctx.includes("2 commit(s) behind origin/staging"), "MAIN-ON-STAGING: even a small lag tells the session to catch up first");
+    const tip = git("rev-parse", "refs/remotes/origin/staging");
+    ok(ctx.includes(`merge --ff-only --no-overwrite-ignore ${tip}`), "MAIN-ON-STAGING: the update names the exact fetched commit and keeps ignored files");
+    ok(ctx.includes("symbolic-ref HEAD still prints refs/heads/staging") && ctx.includes("never delete a lock"), "MAIN-ON-STAGING: the steps re-check the branch and never delete a lock");
+    eq(git("rev-parse", "HEAD"), before, "MAIN-ON-STAGING: the hook never moves the folder");
+    eq(readFileSync(path.join(mainRepo, "a.txt"), "utf8"), "local edit\n", "MAIN-ON-STAGING: the hook never touches local edits");
+
+    // Following the warning's own command with a locally ignored file in the way: refused, file kept.
+    git("checkout", "--", "a.txt");
+    writeFileSync(path.join(mainRepo, "local.json"), "mine\n");
+    const cmd = ctx.match(/merge --ff-only --no-overwrite-ignore \S+/)[0].split(" ");
+    assert.throws(() => git(...cmd), undefined, "MAIN-ON-STAGING: the prescribed merge refuses to overwrite an ignored file"); pass++;
+    eq(readFileSync(path.join(mainRepo, "local.json"), "utf8"), "mine\n", "MAIN-ON-STAGING: the ignored file survives");
+
+    // Caught up: silent.
+    rmSync(path.join(mainRepo, "local.json"));
+    git(...cmd);
+    r = runHook(linked);
+    ok(!additionalContextOf(r).includes("origin/staging"), "MAIN-ON-STAGING: an up-to-date folder stays silent");
+
+    // Its own local commit: never "catch up"; ask Mason.
+    git("commit", "--allow-empty", "-m", "local only");
+    r = runHook(linked);
+    ctx = additionalContextOf(r);
+    ok(ctx.includes("1 local commit(s) that are not on origin/staging") && ctx.includes("NEEDS MASON"), "MAIN-ON-STAGING: local commits are flagged for Mason, not merged");
+    ok(!ctx.includes("ACTION FIRST"), "MAIN-ON-STAGING: local commits never get the catch-up instruction");
+  }
+
   console.log(`session-staleness: ${pass} assertions passed`);
 } finally {
   rmSync(tmpRoot, { recursive: true, force: true });

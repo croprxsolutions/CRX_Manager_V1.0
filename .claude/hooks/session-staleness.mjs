@@ -5,7 +5,8 @@
 //     (schema-neutral cron/data-only migrations do not create a false alarm)
 //   - Uncommitted files from a prior session
 //   - core.hooksPath pointing anywhere but this checkout's .husky
-//   - The main checkout (where hooks and merge gates run) far behind origin/main
+//   - The main checkout (where hooks and merge gates run): on staging it is
+//     fetched and the session told to catch it up; otherwise warn when far behind origin/main
 //   - Weekly DB backup missing or stale. Two evidence sources, newest wins:
 //     backups/LATEST-OK.json (stamped by a locally-run scripts/backup-db.mjs)
 //     and the "Off-site DB backup" GitHub Actions workflow in
@@ -292,15 +293,54 @@ try {
 // Every session's hooks and merge gates run from the main checkout, not the
 // worktree. When it lags, the gates enforce old rules: on 2026-11-21 it was 509
 // commits behind and refused every valid gpt-6.2-sol Sol proof (4th time).
-// Local refs only (whatever the last fetch left): no network at session start.
+// Since 2026-11-22 the main checkout sits on `staging` (Mason: "always in sync with
+// staging"). It is fetched here and the session is told to catch it up at even one
+// commit behind. Warn only, never merge: Sol (2026-11-22) showed a background update
+// can move the wrong branch, overwrite ignored files, or be killed half-way by the
+// hook timeout, so the session's agent does the careful update (Mason chose this).
+// On any other branch: local refs only, warn when far behind origin/main.
 const MAIN_BEHIND_LIMIT = 50;
 try {
   const { resolveMainCheckoutRoot } = await import("./registry-freshness-lib.mjs");
   const mainRoot = resolveMainCheckoutRoot(projectDir);
-  if (mainRoot) {
-    const behind = Number(execFileSync("git", ["-C", mainRoot, "rev-list", "--count", "HEAD..origin/main"], {
-      encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
-    }).trim());
+  // GIT_DIR and friends from the hook's environment must not redirect these calls to another repository.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
+  const git = (args) => execFileSync("git", ["-C", mainRoot, ...args], {
+    encoding: "utf8", timeout: 5000, env, stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  let head = "";
+  try { if (mainRoot) head = git(["symbolic-ref", "-q", "HEAD"]); } catch { /* detached HEAD */ }
+  if (mainRoot && head === "refs/heads/staging") {
+    const ref = "refs/remotes/origin/staging"; // full name: a local tag or branch called origin/staging cannot stand in
+    // Explicit refspec (a narrowed remote.origin.fetch would leave the ref stale); no tags; FETCH_HEAD left alone.
+    let fetched = true;
+    try { git(["fetch", "-q", "--no-tags", "--no-write-fetch-head", "origin", `+refs/heads/staging:${ref}`]); } catch { fetched = false; }
+    const root = mainRoot.replace(/\\/g, "/");
+    // One snapshot of each tip, so both counts compare the same two commits.
+    const tip = git(["rev-parse", "--verify", "-q", `${ref}^{commit}`]);
+    const here = git(["rev-parse", "--verify", "-q", "HEAD^{commit}"]);
+    const behind = Number(git(["rev-list", "--count", `${here}..${tip}`]));
+    const ahead = Number(git(["rev-list", "--count", `${tip}..${here}`]));
+    const stale = fetched ? "" : "\n   (Could not reach GitHub just now; this compares with the last download of staging.)";
+    if (ahead > 0) {
+      warnings.push(
+        `🕰 The main checkout '${root}' has ${ahead} local commit(s) that are not on origin/staging${behind ? ` and is ${behind} behind it` : ""}.\n` +
+        `   Every session's hooks run from that folder, so they run code that is not on staging. Do not change it:\n` +
+        `   tell Mason (NEEDS MASON - DECISION REQUIRED) and ask what to do with those commits.${stale}`
+      );
+    } else if (behind > 0) {
+      warnings.push(
+        `🕰 ACTION FIRST: the main checkout '${root}' is ${behind} commit(s) behind origin/staging. Every session's hooks\n` +
+        `   and gates run from that folder, so they enforce outdated rules. Before other work, catch it up:\n` +
+        `   1. Check that none of its uncommitted files change upstream: compare git -C '${root}' status --short\n` +
+        `      with git -C '${root}' diff --name-only HEAD ${tip} (any overlap: stop and ask Mason).\n` +
+        `   2. Confirm git -C '${root}' symbolic-ref HEAD still prints refs/heads/staging, then run\n` +
+        `      git -C '${root}' merge --ff-only --no-overwrite-ignore ${tip}\n` +
+        `   Any refusal (a lock file, a file in the way, not a fast-forward): stop and ask Mason; never delete a lock.${stale}`
+      );
+    }
+  } else if (mainRoot) {
+    const behind = Number(git(["rev-list", "--count", "HEAD..origin/main"]));
     if (behind > MAIN_BEHIND_LIMIT) {
       const root = mainRoot.replace(/\\/g, "/");
       warnings.push(

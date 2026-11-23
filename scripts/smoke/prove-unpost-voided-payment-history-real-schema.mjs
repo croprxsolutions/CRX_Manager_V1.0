@@ -20,11 +20,14 @@
  *          (d) group unpost of a group whose payment was voided works, saves and re-posts; an active one still blocks;
  *          (r) race: void_payment holds the payment set (its first lock) and is held at an advisory-lock gate before it
  *              reaches the invoice; unpost on the same invoice then runs and finishes without waiting on that set, and
- *              both commit or refuse with no deadlock. The same race against a body that also locks active sets (the
- *              round-3 order) deadlocks, so the probe can see one. Ordered by locks only, no sleeps.
- * Every probe is rolled back. Fixtures use fresh ids each run.
- * Reuse: UNDO_PATHS_CONTAINER=<name> runs against a container already built to just before the candidate (the run still
- * applies the file through its preflight and postflight) and never removes it.
+ *              both commit or refuse with no deadlock. The same race against a body that also locks every set behind
+ *              the invoice right after the invoice lock (the round-3 order) deadlocks, so the probe can see one.
+ *              Ordered by locks only (each session found by its own application_name), no sleeps; every session has
+ *              statement and lock timeouts and is killed when the probe ends.
+ * Every probe is rolled back, except the race fixtures, which must commit for two sessions to see them. Fixtures use
+ * fresh ids each run. Every body swap (drift, control) is undone in a finally.
+ * Reuse: UNDO_PATHS_CONTAINER=<name> runs against a container already built to just before the candidate; the run checks
+ * that before writing any fixture, applies the file through its preflight and postflight, and never removes it.
  *
  * Run: node scripts/smoke/prove-unpost-voided-payment-history-real-schema.mjs   (needs Docker; never touches live)
  * Prints UNPOST_VOIDED_PAYMENT_HISTORY_PROOF_PASS on success.
@@ -40,20 +43,27 @@ import { buildContainer, removeContainer, seedUsers, seed, ref, attempt, asUser,
 const CANDIDATE = '20270225130000_unpost_ignores_voided_payment_history.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
-const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });
-// The file as an operator might run it by hand: `psql -f`, no ON_ERROR_STOP, no single transaction.
-function plainApply() {
-  const staged = path.join(tmpdir(), `${NAME}-candidate.sql`);
-  writeFileSync(staged, candidate, 'utf8');
-  try { docker(['cp', staged, `${NAME}:/tmp/candidate.sql`]); } finally { unlinkSync(staged); }
-  return docker(['exec', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-f', '/tmp/candidate.sql'], { allowFailure: true });
+const RUN = randomUUID().slice(0, 8); // fixture names, keys, ids and file paths are fresh each run
+// The candidate file, copied once into the container at a path unique to this run.
+const STAGED = `/tmp/p2265-candidate-${RUN}.sql`;
+function stageCandidate() {
+  const host = path.join(tmpdir(), `p2265-candidate-${RUN}-${process.pid}.sql`);
+  writeFileSync(host, candidate, 'utf8');
+  try { docker(['cp', host, `${NAME}:${STAGED}`]); } finally { unlinkSync(host); }
 }
+// The way the apply script runs it: one transaction, stop on the first error.
+const apply = () => docker([...PSQL, '-1', '-f', STAGED], { allowFailure: true });
+// The way an operator might run it by hand: `psql -f`, no ON_ERROR_STOP, no single transaction.
+const plainApply = () => docker(['exec', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-f', STAGED], { allowFailure: true });
 const IMPL = "'public._unpost_invoice_replay_impl_20261015(uuid,uuid,text)'::regprocedure";
 const implMd5 = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = ${IMPL};`);
 // Re-issue the impl with a body computed from its current one (expr over prosrc): owner and grants are kept.
 const setImplSrc = (expr) => docker([...PSQL], { input: `DO $d$ BEGIN EXECUTE format('CREATE OR REPLACE FUNCTION public._unpost_invoice_replay_impl_20261015(p_invoice_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path TO ''public'', ''pg_temp'' AS %L', (SELECT ${expr} FROM pg_proc WHERE oid = ${IMPL})); END $d$;` });
+const PINNED_MD5 = '161f18c3ccd6126a6fb683c5160f82dc';
+const NEW_MD5 = '5dbf08047772d875bfbe66ec8b63cbfd';
+// Puts an exact body back (as a dollar-quoted literal) and checks its md5: used in a finally after each swap.
+const restoreImpl = (body, md5) => { setImplSrc(`$body$${body}$body$::text`); assert.equal(implMd5(), md5, 'body restored'); };
 const ADMIN = USERS.admin;
-const RUN = randomUUID().slice(0, 8); // fixture names, keys and ids are fresh each run, so a reused container never collides
 const CUST = randomUUID();
 const GRP = randomUUID();
 
@@ -96,8 +106,8 @@ const caseA = `${draft('a-s1')} ${post('a-p1')} ${pay('a-pay', 100000)} ${voidPa
   ${unpost('a-un')} v := ${status()} || '|' || ${history()} || '|audit ' || coalesce(${auditKeepsLine(100000)}, '-');
   ${saveBack('a-s2')} v := v || '|saved ' || (SELECT count(*) FROM public.invoice_items WHERE invoice_id = u);
   ${post('a-p2')} v := v || '|' || ${status()} || '|' || ${history()};`;
-// (a3) a legacy row that names the line but has no invoice_id, or a stale one: unpost still unlinks it (filling a
-// missing invoice_id with this invoice, a stale one kept), and the draft saves and re-posts.
+// (a3) a legacy row that names the line but has no invoice_id: unpost unlinks it and fills the invoice_id with this
+// invoice, and the draft saves and re-posts. (A row recording another invoice is refused: caseA3Stale.)
 const caseA3 = (before, after) => `${draft('a3-s1')} ${post('a3-p1')} ${pay('a3-pay', 100000)} ${voidPay('a3-void')} ${legacyLink()}
   UPDATE public.invoice_line_allocations SET invoice_id = ${before} WHERE allocation_set_id = (r->>'allocation_set_id')::uuid;
   ${linkedLine} ${unpost('a3-un')} v := ${status()} || '|audit ' || coalesce(${auditKeepsLine(100000)}, '-') || '|row '
@@ -150,15 +160,29 @@ const caseD2 = () => `u := ${G1}; ${postGroup('d2-pg1')} ${pay('d2-pay1', 60000)
   BEGIN ${unpostGroup('d2-ug')} t := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN t := SQLERRM; END; v := t;`;
 
 // (r) Two real sessions. A session's SQL is piped to psql, which runs each statement as it arrives.
-function session(sql) {
-  const child = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { cwd: ROOT });
+// Each session carries its own application_name, statement and lock timeouts.
+const sessions = [];
+function session(app, sql) {
+  const child = spawn('docker', ['exec', '-i', '-e', `PGAPPNAME=${app}`, NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { cwd: ROOT });
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
   const done = new Promise((resolve) => child.on('close', (code) => resolve({ code, out })));
+  child.stdin.write("SET statement_timeout = '60s'; SET lock_timeout = '30s';\n");
   if (sql !== undefined) child.stdin.end(sql);
+  sessions.push(child);
   return { child, done };
 }
+// Ends every race session: the child processes and their backends.
+function killSessions() {
+  for (const child of sessions.splice(0)) { child.stdin.destroy(); child.kill('SIGKILL'); }
+  docker([...PSQL], { input: `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name LIKE 'p2265-race-${RUN}-%';`, allowFailure: true });
+}
+const withTimeout = (promise, ms, label) => {
+  let timer;
+  return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`timed out: ${label}`)), ms); })])
+    .finally(() => clearTimeout(timer));
+};
 // Polls a catalog condition until it holds (a lock state, not a time): fails after 60 s.
 async function until(sql, label) {
   for (const end = Date.now() + 60000; Date.now() < end;) {
@@ -168,36 +192,38 @@ async function until(sql, label) {
   throw new Error(`timed out waiting for ${label}`);
 }
 const GATE = 2265001;
-const gateLock = (granted) => `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND objid = ${GATE} AND granted = ${granted});`;
+const appName = (tag, role) => `p2265-race-${RUN}-${tag}-${role}`;
+const gateLock = (app, granted) => `SELECT EXISTS (SELECT 1 FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+  WHERE l.locktype = 'advisory' AND l.objid = ${GATE} AND l.granted = ${granted} AND a.application_name = '${app}');`;
 async function race(tag) {
   // A posted invoice part-paid by one active payment (committed).
   const ids = attempt(ADMIN, `${draft(`r-s-${tag}-${RUN}`)} ${post(`r-p-${tag}-${RUN}`)} ${pay(`r-pay-${tag}-${RUN}`, 60000)}
     v := u::text || ',' || (r->>'allocation_set_id');`, { commit: true });
   const [inv, set] = ids.replace(/^ok\|/, '').split(',');
-  const gate = session();
+  const gate = session(appName(tag, 'gate'));
   gate.child.stdin.write(`SELECT pg_advisory_lock(${GATE});\n`);
-  await until(gateLock(true), 'the gate');
+  await until(gateLock(appName(tag, 'gate'), true), 'the gate');
   // void_payment's own order: the payment set first (FOR UPDATE), then the invoice. Held at the gate in between.
-  const voider = session(`BEGIN;\n${claims(ADMIN)}\nSELECT 1 FROM public.allocation_sets WHERE id = '${set}' FOR UPDATE;
+  const voider = session(appName(tag, 'void'), `BEGIN;\n${claims(ADMIN)}\nSELECT 1 FROM public.allocation_sets WHERE id = '${set}' FOR UPDATE;
 SELECT pg_advisory_xact_lock(${GATE});
 SET LOCAL ROLE authenticated;
 SELECT public.void_payment('${set}', 'race', '${ADMIN}', 'r-void-${tag}-${RUN}');
 COMMIT;\n`);
-  await until(gateLock(false), 'void_payment at the gate');
-  const unposter = session(`BEGIN;\n${claims(ADMIN)}\nSET LOCAL ROLE authenticated;
+  await until(gateLock(appName(tag, 'void'), false), 'void_payment at the gate');
+  const unposter = session(appName(tag, 'unpost'), `BEGIN;\n${claims(ADMIN)}\nSET LOCAL ROLE authenticated;
 SELECT public.unpost_invoice('${inv}', '${ADMIN}', 'r-un-${tag}-${RUN}');
 COMMIT;\n`);
   // Unpost either finishes, or waits on a lock (held by void_payment): then open the gate either way.
   let unpostDone = false;
   unposter.done.then(() => { unpostDone = true; });
   for (const end = Date.now() + 60000; !unpostDone && Date.now() < end;) {
-    if (scalar(`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%unpost_invoice(%');`) === 't') break;
+    if (scalar(`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND application_name = '${appName(tag, 'unpost')}');`) === 't') break;
     await new Promise((resolve) => { setTimeout(resolve, 50); });
   }
   const waited = !unpostDone;
   gate.child.stdin.end(`SELECT pg_advisory_unlock(${GATE});\n`);
-  const [v, un] = await Promise.all([voider.done, unposter.done]);
-  await gate.done;
+  const [v, un] = await withTimeout(Promise.all([voider.done, unposter.done]), 90000, 'the race sessions');
+  await withTimeout(gate.done, 30000, 'the gate session');
   const after = scalar(`SELECT i.status || '|' || i.paid_amount_cents || '|' || s.is_active FROM public.invoices i, public.allocation_sets s
     WHERE i.id = '${inv}' AND s.id = '${set}';`);
   return { waited, deadlock: /deadlock detected/.test(v.out + un.out), voidOut: v.out, voidCode: v.code, unpostOut: un.out, after };
@@ -206,6 +232,9 @@ COMMIT;\n`);
 const REUSE = Boolean(process.env.UNDO_PATHS_CONTAINER); // a container already built to just before the candidate
 try {
   if (!REUSE) { buildContainer({ stopBefore: CANDIDATE }); seedUsers(); }
+  // Before any fixture: the container must hold the pinned body (a reused one may already have this migration).
+  assert.equal(implMd5(), PINNED_MD5, 'the container is not at the state just before this migration; rebuild it');
+  stageCandidate();
   seed(`p2265-drafts-${RUN}`, `INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST}', '[P2265] Unpost Farm', true);
     DO $s$ DECLARE a uuid; b uuid; BEGIN
       SET LOCAL ROLE authenticated;
@@ -229,25 +258,27 @@ try {
     console.log('[before] a posted invoice whose only payment was voided is refused by unpost and by group unpost');
 
     // A drifted body: plain psql -f keeps going after an error, yet the file changes nothing (one statement writes).
-    const pinned = implMd5();
-    assert.equal(pinned, '161f18c3ccd6126a6fb683c5160f82dc');
-    setImplSrc("prosrc || E'-- drift\\n'");
-    const drifted = implMd5();
-    assert.notEqual(drifted, pinned);
-    const plain = plainApply();
-    assert.equal(plain.status, 0, 'plain psql -f keeps going and exits 0');
-    assert.match(plain.stderr, /PREFLIGHT_FAIL: _unpost_invoice_replay_impl_20261015 changed/);
-    assert.doesNotMatch(plain.stderr, /POSTFLIGHT_OK/);
-    assert.equal(implMd5(), drifted, 'the drifted body must be untouched');
-    setImplSrc("left(prosrc, -length(E'-- drift\\n'))");
-    assert.equal(implMd5(), pinned, 'pinned body restored');
+    const pinnedBody = JSON.parse(scalar(`SELECT to_json(prosrc)::text FROM pg_proc WHERE oid = ${IMPL};`));
+    try {
+      setImplSrc("prosrc || E'-- drift\\n'");
+      const drifted = implMd5();
+      assert.notEqual(drifted, PINNED_MD5);
+      const plain = plainApply();
+      assert.equal(plain.status, 0, 'plain psql -f keeps going and exits 0');
+      assert.match(plain.stderr, /PREFLIGHT_FAIL: _unpost_invoice_replay_impl_20261015 changed/);
+      assert.doesNotMatch(plain.stderr, /POSTFLIGHT_OK/);
+      assert.equal(implMd5(), drifted, 'the drifted body must be untouched');
+    } finally {
+      restoreImpl(pinnedBody, PINNED_MD5);
+    }
     console.log('[apply] drifted body: plain psql -f (no ON_ERROR_STOP) printed PREFLIGHT_FAIL and left the function unchanged');
-    const once = apply(['-1']);
+    const once = apply();
     assert.equal(once.status, 0, `apply failed: ${once.stderr}`);
     assert.match(once.stderr, /POSTFLIGHT_OK/);
-    const again = apply(['-1']);
+    const again = apply();
+    assert.notEqual(again.status, 0, 're-apply must exit non-zero');
     assert.match(`${again.stdout}${again.stderr}`, /PREFLIGHT_FAIL: _unpost_invoice_replay_impl_20261015 changed/, 're-apply must refuse');
-    assert.equal(implMd5(), 'd799306fc9dee0c1489da4a28a3af26e');
+    assert.equal(implMd5(), NEW_MD5);
     console.log('[apply] applied once with POSTFLIGHT_OK (new body md5 pinned), re-apply refused');
   }
 
@@ -277,24 +308,28 @@ try {
   console.log('[d] group: voided-only member unposts with its group, saves and re-posts; an active payment on a member still blocks the group');
 
   // (r) unpost vs void_payment on the same invoice.
-  const fixed = await race('fixed');
-  assert.equal(fixed.deadlock, false, `deadlock:\n${fixed.voidOut}\n${fixed.unpostOut}`);
-  assert.equal(fixed.waited, false, 'unpost must not wait on the payment set void_payment holds');
-  assert.match(fixed.unpostOut, /Cannot unpost invoice \S+ — it has payments/);
-  assert.equal(fixed.voidCode, 0, fixed.voidOut);
-  assert.equal(fixed.after, 'posted|0|false');
-  console.log('[r] void_payment holding the payment set at a gate: unpost refused at once without waiting on it; void_payment then committed; no deadlock');
-  // The probe sees a deadlock when unpost also locks active sets after the invoice (the round-3 order).
-  const lockAll = "replace(prosrc, E'WHERE s.entity_type = ''payment'' AND s.is_active = false\\n             AND s.id IN', 'WHERE s.id IN')";
-  setImplSrc(lockAll);
-  assert.notEqual(implMd5(), 'd799306fc9dee0c1489da4a28a3af26e', 'mutation applied');
-  const inverted = await race('inverted');
-  assert.equal(inverted.waited, true, 'with active sets locked, unpost waits on the set void_payment holds');
-  assert.equal(inverted.deadlock, true, `expected a deadlock:\n${inverted.voidOut}\n${inverted.unpostOut}`);
   const candidateBody = candidate.split('AS $function$')[1].split('$function$')[0];
-  setImplSrc(`$body$${candidateBody}$body$::text`);
-  assert.equal(implMd5(), 'd799306fc9dee0c1489da4a28a3af26e', 'candidate body restored');
-  console.log('[r] control: with active sets also locked after the invoice, the same race deadlocks (detected), so the probe can see one');
+  try {
+    const fixed = await race('fixed');
+    assert.equal(fixed.deadlock, false, `deadlock:\n${fixed.voidOut}\n${fixed.unpostOut}`);
+    assert.equal(fixed.waited, false, 'unpost must not wait on the payment set void_payment holds');
+    assert.match(fixed.unpostOut, /Cannot unpost invoice \S+ — it has payments/);
+    assert.equal(fixed.voidCode, 0, fixed.voidOut);
+    assert.equal(fixed.after, 'posted|0|false');
+    console.log('[r] void_payment holding the payment set at a gate: unpost refused at once without waiting on it; void_payment then committed; no deadlock');
+    // Control: the probe sees a deadlock when unpost locks every set behind the invoice right after the invoice lock
+    // (the round-3 order).
+    const lockAll = `replace(prosrc, '  -- First a lock-free read,', '  PERFORM 1 FROM allocation_sets s WHERE s.id IN (SELECT ila.allocation_set_id FROM invoice_line_allocations ila WHERE ila.invoice_id = p_invoice_id) ORDER BY s.id FOR SHARE;' || chr(10) || '  -- First a lock-free read,')`;
+    setImplSrc(lockAll);
+    assert.notEqual(implMd5(), NEW_MD5, 'mutation applied');
+    const inverted = await race('inverted');
+    assert.equal(inverted.waited, true, 'with every set locked, unpost waits on the set void_payment holds');
+    assert.equal(inverted.deadlock, true, `expected a deadlock:\n${inverted.voidOut}\n${inverted.unpostOut}`);
+  } finally {
+    killSessions();
+    restoreImpl(candidateBody, NEW_MD5);
+  }
+  console.log('[r] control: with every set behind the invoice locked right after the invoice lock, the same race deadlocks (detected), so the probe can see one');
 
   console.log('\nUNPOST_VOIDED_PAYMENT_HISTORY_PROOF_PASS');
 } finally {

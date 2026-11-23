@@ -7,7 +7,7 @@ Follow-up to PR #2337 (screen-only check). Decision: `docs/manual/decision-log.d
 - `save_job` (6 args) is a wrapper: actor check, folds rate units, then calls `_save_job_cost_step2_impl` (admin) or the same with server-priced chemicals (non-admin). Newest wrapper body: `20270226150000_job_transfer_below_cost_whole_line.sql` (#2247, which added the up-front INSUFFICIENT_ROLE, the key's advisory lock and job row lock, and JOB_COMPLETED_CHEMICALS_LOCKED). The impl is the old `save_job` body from `20260904185900`, renamed in `20261019230000`.
 - The impl's replay: `check_idempotency_intent(key, 'save_job', actor, fingerprint)` takes `pg_advisory_xact_lock(hashtextextended('crx:idempotency:'||key,0))`, deletes the key's receipt if `expires_at < now()`, and returns the stored result (same actor + same fingerprint), or raises (other operation / actor / fingerprint). It writes nothing else. The impl then locks the job row `FOR UPDATE` and rewrites job columns and all `job_fields`, `job_field_shares`, `job_chemicals` lines (delete + insert, so line ids change on every save).
 - Only active admins and sales reps may save (`INSUFFICIENT_ROLE` otherwise, inside the impl).
-- `save_job`'s existing-job UPDATE writes neither `status` nor crew/loader columns; the page's follow-up `edit_jobs` writes crew/loader, sending only the values the user changed.
+- `save_job`'s existing-job UPDATE writes `loader_comment` from the payload but not `status`, the ground crew, carrier rate or tank capacity; the page's follow-up `edit_jobs` writes those, sending only the values the user changed.
 - `job_chemicals` is only written by insert/delete (`save_job`, quote conversion); no `UPDATE job_chemicals` exists in any migration or in `src/`. So a cost change always comes with new line ids.
 - `dispatch_job_locations` and `undispatch_job_locations` lock the job row `FOR UPDATE`; dispatch upserts `job_location_dispatches` per location (assignee, `dispatch_status = 'dispatched'`) and logs one `activity_feed` row each. The only trigger on that table sets `updated_at`. Its newest wrapper (`20261123110000`:756) binds the assignments into its replay fingerprint.
 - Expired idempotency receipts are also deleted outside the key's advisory lock (e.g. `20260714220000`:31).
@@ -54,6 +54,7 @@ Database cases: `scripts/smoke/prove-job-save-version-real-schema.mjs` (disposab
 5. When the page dispatches a location itself and sends the version with that location's dispatch string replaced, then Save succeeds; when another dispatcher also changed a location, it is refused.
 6. When a job is printed, applied acres change, or a chemical's cost changes in place, then the version is unchanged.
 7. A driver calling `job_edit_version` is refused; a sales rep gets the same version; the internal function is not callable by the app.
+7b. A sales rep denied the Job Schedule page is refused both `job_edit_version` and `save_job` (`INSUFFICIENT_ROLE`), as `edit_jobs` already refuses them (Sol round 2).
 8. A malformed `expected_version` is refused; a driver's save carrying a version gets `INSUFFICIENT_ROLE`, not a version answer.
 9. A completed job's chemicals still can't change (#2247's `JOB_COMPLETED_CHEMICALS_LOCKED`), current version or not; the installed body is the one the postflight pins.
 10. Screen (browser, staging, after the DB is live): two tabs on one job, save in each → the second is refused with the reload message; own Dispatch wizard then Save → saved; version read failing → Save blocked.
@@ -64,6 +65,11 @@ Database cases: `scripts/smoke/prove-job-save-version-real-schema.mjs` (disposab
 - Pre-existing, not changed by this work: Save's triggers rewriting dispatches when the whole-job applicator changes or fields are re-added (#19-#21); the wizard replacing a same-location assignment (#1); a rep's retry failing replay when server pricing changed in between (#24); crew/loader follow-ups after the core save (#29; they already send only changed values); recovery = reload, as #2337 (#31).
 - Declined: a stored revision counter bumped by triggers on four tables plus a dispatch RPC change (#41): more moving parts on live tables for the same outcome (no silent overwrite).
 - Answered by the proof cases or the screen PR's tests: #10, #12, #16, #17, #27, #33, #35-#37. Performance (#40): one small extra read per page load; the compare reads one job's lines.
+
+## Sol rounds (2026-11-23)
+
+- Round 1: HIGH #1 (two other changes, the second undoing the first, between the page's version read and form read) and #2 (crew/loader follow-up, issue #2365) skipped by Mason. MEDs fixed: page permission on `job_edit_version`, job id in the version, rollback order.
+- Round 2: the same two repeated. New HIGHs fixed: `save_job` honours the Job Schedule page denial (it did not before); with a version, the job's dispatch rows are held `FOR SHARE` before the compare, so a crew deletion's cascade cannot change them mid-save. MEDs fixed: the receipt lookup is limited to `save_job` receipts; the postflight checks one job, not every job. LOWs fixed: `deleted_at` hashed in UTC; loader comment wording; the race proof holds 8 s.
 
 ## Open business decisions
 

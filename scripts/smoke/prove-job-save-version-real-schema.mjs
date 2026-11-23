@@ -55,18 +55,18 @@ const V = (name) => `(SELECT ver FROM undo_paths.versions WHERE name = '${name}'
 /** As someone else, committed (postgres: a direct write, the same rows another screen would change). */
 const elsewhere = (sql) => psql(`BEGIN;\n${claims(ADMIN)}\n${sql};\nCOMMIT;`);
 
-/** Session A saves from `expectedSql` and holds its transaction open for 5 s; resolves when it commits. */
+/** Session A saves from `expectedSql` and holds its transaction open for 8 s; resolves when it commits. */
 function holdingSave(expectedSql, key) {
   const h = spawn('docker', ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { stdio: ['pipe', 'pipe', 'pipe'] });
   let err = '';
   h.stderr.on('data', (d) => { err += d; });
-  h.stdin.end(`BEGIN;\n${claims(ADMIN)}\nSET LOCAL ROLE authenticated;\nSELECT ${save('[JV] first save', expectedSql, key)};\nRESET ROLE;\nSELECT pg_sleep(5);\nCOMMIT;\n`);
+  h.stdin.end(`BEGIN;\n${claims(ADMIN)}\nSET LOCAL ROLE authenticated;\nSELECT ${save('[JV] first save', expectedSql, key)};\nRESET ROLE;\nSELECT pg_sleep(8);\nCOMMIT;\n`);
   return new Promise((resolve) => h.on('close', (code) => resolve({ code, err })));
 }
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 function waitForHolder() {
   for (let i = 0; i < 100; i += 1) {
-    if (scalar(`SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(5)%' AND state = 'active' AND pid <> pg_backend_pid();`) === '1') return;
+    if (scalar(`SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(8)%' AND state = 'active' AND pid <> pg_backend_pid();`) === '1') return;
     pause(100);
   }
   throw new Error('the holding session never reached its sleep');
@@ -187,6 +187,7 @@ try {
   // A rep denied the Job Schedule page is refused, as edit_jobs refuses them (Sol round 1).
   psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_append(coalesce(denied_pages, '{}'), 'jobs') WHERE id = '${REP}';`);
   assert.equal(show('7 rep denied the jobs page', attempt(REP, `${refuse(`r := public.job_edit_version(${JOB});`)} v := t;`)), 'ok|INSUFFICIENT_ROLE');
+  assert.match(show('7 rep denied the jobs page, save', attempt(REP, `${refuse(`r := ${save('[JV] denied rep', null, null, REP)};`)} v := t;`)), /^ok\|INSUFFICIENT_ROLE/);
   psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_remove(denied_pages, 'jobs') WHERE id = '${REP}';`);
 
   // 8. A malformed version is refused.
@@ -202,7 +203,7 @@ try {
     ${refuse(`r := ${save('[JV] completed', V('c9'), 'jv-completed', ADMIN, 'completed')};`)}
     v := t || '|unchanged=' || (f0 = public._job_edit_version(${JOB})::text);`)), /^ok\|JOB_COMPLETED_CHEMICALS_LOCKED.*\|unchanged=true$/);
   assert.equal(scalar("SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure;"),
-    'ed891cb95d25e5c341595a5d36e3a313', 'the installed save_job must be the body the postflight pins');
+    '6d479113e90ebebbb3e09efa68398afa', 'the installed save_job must be the body the postflight pins');
 
   console.log('\nJOB_SAVE_VERSION_PROOF_PASS');
 } finally {

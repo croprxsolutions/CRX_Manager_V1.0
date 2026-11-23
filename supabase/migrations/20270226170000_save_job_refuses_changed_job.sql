@@ -19,7 +19,9 @@
 --      otherwise the save is refused with JOB_CHANGED_SINCE_LOADED unless the version is unchanged
 --      (dispatches as a set). No expected_version = today's behavior (the deployed app sends none).
 --      Every 20270226150000 refusal (ACTOR_MISMATCH, INSUFFICIENT_ROLE, JOB_COMPLETED_CHEMICALS_LOCKED)
---      is kept unchanged and in the same order.
+--      is kept in the same order. INSUFFICIENT_ROLE now also refuses a sales rep denied the Job Schedule
+--      page, as edit_jobs (20270203110000) does (Sol round 2). With a version, the job's dispatch rows are
+--      held FOR SHARE before the compare, so a crew deletion cannot change them mid-save (Sol round 2).
 --
 -- idempotency-body-check: exempt -- save_job's p_idempotency_key is unchanged and passed through to the
 -- impl, whose replay is unchanged; the new compare is skipped exactly when that replay will answer.
@@ -62,7 +64,7 @@ AS $fn$
         j.recipe_id, j.application_service_id, j.notes, j.batch_id, j.total_acres, j.total_price_cents, j.call_date,
         j.date_proposed, j.time_proposed, j.schedule_date, j.date_expires, j.consultant_id, j.loader_comment,
         j.additional_info, j.internal_memo, j.ground_crew_id, j.carrier_rate_gpa, j.loader_tank_capacity,
-        j.invoice_id, j.deleted_at, j.tags),
+        j.invoice_id, j.deleted_at AT TIME ZONE 'UTC', j.tags),
       (SELECT COALESCE(jsonb_agg(jsonb_build_array(f.id, f.field_id, f.acres_to_treat, f.planted_acres, f.crop,
                 f.strip, f.pests, f.sort_order) ORDER BY f.id), '[]'::jsonb)
          FROM job_fields f WHERE f.job_id = j.id),
@@ -126,7 +128,9 @@ BEGIN
   IF auth.uid() IS NULL OR p_performed_by IS DISTINCT FROM auth.uid() THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match auth.uid()' USING ERRCODE = 'P0001';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true AND role IN ('admin', 'sales_rep')) THEN
+  -- A rep denied the Job Schedule page is refused, as edit_jobs (20270203110000) and job_edit_version refuse them.
+  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true
+                   AND (role = 'admin' OR (role = 'sales_rep' AND NOT coalesce('jobs' = ANY (denied_pages), false)))) THEN
     RAISE EXCEPTION 'INSUFFICIENT_ROLE';
   END IF;
   -- The page's version (#2337 follow-up, 20270226170000): JSON null is the same as none.
@@ -154,13 +158,16 @@ BEGIN
       -- lost reply gets its stored result. FOR SHARE holds the receipt until commit: an expired-key sweep
       -- elsewhere cannot delete it in between and turn the impl's lookup into an unchecked first call.
       IF v_expected IS NOT NULL THEN
-        PERFORM 1 FROM public.idempotency_keys WHERE idempotency_key = p_idempotency_key AND (expires_at IS NULL OR expires_at >= now()) FOR SHARE;
+        PERFORM 1 FROM public.idempotency_keys WHERE idempotency_key = p_idempotency_key AND operation = 'save_job'
+                       AND (expires_at IS NULL OR expires_at >= now()) FOR SHARE;
         v_replay := FOUND;
       END IF;
     END IF;
     SELECT j.status = 'completed' INTO v_completed FROM public.jobs j WHERE j.id = p_job_id FOR UPDATE;
     -- Under the job row lock: refuse a save over a change made after the page read the job.
     IF v_expected IS NOT NULL AND NOT v_replay THEN
+      -- The job row lock does not stop a crew deletion's cascade on dispatches: hold them until commit.
+      PERFORM 1 FROM public.job_location_dispatches d WHERE d.job_id = p_job_id FOR SHARE;
       v_current := public._job_edit_version(p_job_id);
       IF v_current IS NOT NULL AND (
            v_current ->> 'core' IS DISTINCT FROM v_expected ->> 'core'
@@ -221,13 +228,13 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = 'ed891cb95d25e5c341595a5d36e3a313'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '6d479113e90ebebbb3e09efa68398afa'
                     AND p.prosecdef AND p.proowner = 'postgres'::regrole
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]) THEN
     RAISE EXCEPTION 'JOB_VERSION_POSTFLIGHT: save_job is not the body, owner or settings this file installs';
   END IF;
-  -- Every existing job gets a version (the function reads every column it names).
-  IF EXISTS (SELECT 1 FROM jobs j WHERE public._job_edit_version(j.id) IS NULL) THEN
+  -- The version runs against real rows (one job is enough: LANGUAGE sql bodies are checked at CREATE).
+  IF EXISTS (SELECT 1 FROM jobs) AND (SELECT public._job_edit_version(j.id) FROM jobs j LIMIT 1) IS NULL THEN
     RAISE EXCEPTION 'JOB_VERSION_POSTFLIGHT: a job has no version';
   END IF;
 END

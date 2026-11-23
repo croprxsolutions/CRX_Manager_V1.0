@@ -724,6 +724,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(!check(proof({ review_ref: "origin/main", release_rules: true }), { baseRef: "main", headRef: "hotfix/fix-x" }), "a release review never counts for a hotfix into main");
   ok(!check(proof({ review_ref: "origin/main", release_rules: true }), { baseRef: "main" }), "a release review with no head branch named does not count");
   ok(!check(proof({ review_ref: "origin/main", release_rules: true }), { baseRef: null, headRef: "hotfix/fix-x" }), "a release review never counts for a hotfix, even with no base named");
+  ok(!check(proof({ review_ref: "origin/main", release_rules: true }), { baseRef: null, headRef: "release/next" }), "a release review needs the base named as main");
   ok(check(proof({ review_ref: "origin/main", release_rules: false }), { baseRef: "main", headRef: "hotfix/fix-x" }), "a main review counts for a hotfix into main");
   ok(check(proof(), { baseRef: "staging" }), "a proof from before review kinds were recorded is judged as before");
   ok(check(proof()), "main moved forward after the review: the proof of the unchanged head still counts");

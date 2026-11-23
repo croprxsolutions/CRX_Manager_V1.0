@@ -1817,8 +1817,9 @@ export function proofValid(data, headSha, nowMs, expectedBaseSha, maxAgeMs = SOL
 // proofs name no kind and are judged as before.
 export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, mergeBase, prCommits = null, baseRef = null, headRef = null }) {
   const SHA = /^[0-9a-f]{40}$/i;
-  // A release review needs the release PR whether or not the caller names a base (Luna r1 HIGH, #2297).
-  if (data?.release_rules === true && String(headRef ?? "").trim().toLowerCase() !== "release/next") return false;
+  // A release review needs the release PR into main, named by both branches (Luna r1 HIGH, r2 MED, #2297).
+  if (data?.release_rules === true && (String(headRef ?? "").trim().toLowerCase() !== "release/next"
+    || String(baseRef ?? "").trim().toLowerCase() !== "main")) return false;
   if (baseRef !== null && data && "review_ref" in data) {
     const ref = `origin/${String(baseRef).trim().toLowerCase()}`;
     if (data.review_ref !== ref || (data.release_rules === true && ref !== "origin/main")) return false;

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270226183000_f05b_delivery_line_checks.sql (F05b #2274, #2275; contract
+ * Real-schema proof for 20270227140000_f05b_delivery_line_checks.sql (F05b #2274; contract
  * docs/plans/2026-11-22-f05b-delivery-line-checks-CONTRACT.md).
  *
  * Builds the checked-in production schema baseline in a network-disabled Supabase PostgreSQL 17 container,
- * replays every post-baseline migration before the candidate (harness from the F05 prover), shows both gaps before
+ * replays every post-baseline migration before the candidate (harness from the F05 prover), shows the gap before
  * the candidate, applies it, then checks every proof case through the real RPCs as the signed-in admin. Refusals that
  * matter to the office are run as real committed calls and read back from a new connection.
  *
@@ -26,7 +26,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270226183000_f05b_delivery_line_checks.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270227140000_f05b_delivery_line_checks.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'f05b-delivery-line-checks-reverse.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);
@@ -42,7 +42,7 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate or its follow-up creates or relies on.
-const TOUCHED = /(_complete_delivery_authorized_impl\w*|delivery_items_quantities_finite)/i;
+const TOUCHED = /(_complete_delivery_authorized_impl\w*)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -331,25 +331,19 @@ const stock = () => scalar(`SELECT quantity_available || '/' || quantity_prebook
 const orderLine = () => scalar(`SELECT quantity_delivered || '/' || quantity_remaining FROM public.order_items WHERE id = '${OI}';`);
 
 function beforeCases() {
-  // The gap, before the candidate: an all-zero completion goes through (rolled back), and a line can hold NaN.
+  // The gap, before the candidate: an all-zero completion goes through (rolled back).
   const r = probe(`${completeCall(D1, { [D1A]: 0 }, 'f05b-b1')};
     SELECT status FROM public.deliveries WHERE id = '${D1}';`, ADMIN);
   assert.equal(r.status, 0, r.output);
   assert.equal(r.last, 'completed', `before the fix an all-zero completion should go through:\n${r.output}`);
-  okProbe(`SET session_replication_role = replica; UPDATE public.delivery_items SET quantity = 'NaN', quantity_delivered = 'Infinity' WHERE id = '${D1A}';`);
-  console.log('[before] reproduced: an all-zero completion completes the load, and a delivery line accepts NaN and Infinity');
+  console.log('[before] reproduced: an all-zero completion completes the load');
 }
 
 async function applyCandidate() {
   stageText('candidate.sql', lf(CANDIDATE));
-  // A non-finite line already present blocks the apply and is named.
-  raw(`UPDATE public.delivery_items SET quantity = 'Infinity' WHERE id = '${D6A}';`);
-  const stuck = apply('candidate.sql');
-  assert.notEqual(stuck.status, 0, 'a non-finite delivery line must block the apply');
-  assert.match(stuck.output, new RegExp(`F05B_PREFLIGHT[^\\n]*${D6A}`), stuck.output);
-  raw(`UPDATE public.delivery_items SET quantity = 1 WHERE id = '${D6A}';`);
-  // Once fixed, apply it while a live completion is half done (Sol r1 HIGH): the completion has read D8's lines and
-  // not yet written them when the migration starts. Both must finish (no deadlock); the migration waits its turn.
+  // Apply it while a live completion is half done (Sol r1 HIGH): the completion has read D8's lines and not yet
+  // written them when the migration starts. Both must finish (no deadlock, nothing lost). The migration takes no
+  // table lock, so it need not wait for the completion.
   const mark = (name) => `SELECT '${name}=' || extract(epoch FROM clock_timestamp());`;
   const completer = session(`BEGIN;\nSELECT count(*) FROM public.delivery_items WHERE delivery_id = '${D8}';\n${mark('read')}\n`
     + `SELECT pg_sleep(3);\n${AS_ADMIN}\n${completeCall(D8, null, 'f05b-apply-load')};\nCOMMIT;\n${mark('committed')}\n`);
@@ -359,11 +353,10 @@ async function applyCandidate() {
   assert.equal(a.code, 0, `the apply must not fail beside a live completion:\n${a.out}`);
   const at = (out, name) => Number(out.match(new RegExp(`${name}=([0-9.]+)`))?.[1]);
   const [read, applying, committedAt, applied] = [at(c.out, 'read'), at(a.out, 'applying'), at(c.out, 'committed'), at(a.out, 'applied')];
-  assert.ok(read < applying && applying < committedAt && committedAt <= applied,
+  assert.ok(read < applying && applying < committedAt,
     `the apply did not overlap the completion: read ${read}, applying ${applying}, committed ${committedAt}, applied ${applied}`);
   assert.equal(state(D8), 'completed|1|0');
-  console.log('[apply] a non-finite line blocks the apply and is named; once fixed, the migration applies (pre- and postflight pass)'
-    + ' beside a half-done completion, which finishes first: no deadlock, nothing lost');
+  console.log('[apply] the migration applies (pre- and postflight pass) beside a half-done completion: no deadlock, nothing lost');
 }
 
 function afterCases() {
@@ -444,41 +437,25 @@ function afterCases() {
   assert.equal(state(D5), 'in_progress|0|0');
   console.log(`[case 7] offline sync unchanged: an all-zero completion still goes to office review (${rec}); the load stays in progress`);
 
-  // 8. Non-finite quantities are refused by the table check alone (other triggers off, so nothing else can refuse),
-  //    on insert and update, for both columns; finite values, fractions and a NULL delivered still save.
-  // The older chk_di_quantity (quantity > 0) already refuses -Infinity as a scheduled quantity; NaN counts as
-  // above every number in PostgreSQL, so NaN and Infinity got past it until now.
-  for (const v of ['NaN', 'Infinity', '-Infinity']) {
-    const qtyCheck = v === '-Infinity' ? /chk_di_quantity|delivery_items_quantities_finite/ : /delivery_items_quantities_finite/;
-    refusedProbe(`SET session_replication_role = replica; UPDATE public.delivery_items SET quantity = '${v}' WHERE id = '${D1A}';`, qtyCheck);
-    refusedProbe(`SET session_replication_role = replica; UPDATE public.delivery_items SET quantity_delivered = '${v}' WHERE id = '${D1A}';`, /delivery_items_quantities_finite/);
-    refusedProbe(`SET session_replication_role = replica; INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
-      VALUES ('${D4}', '${OI}', '${P}', '${v}', 'Gal');`, qtyCheck);
-  }
-  okProbe(`SET session_replication_role = replica; UPDATE public.delivery_items SET quantity = 1.25, quantity_delivered = NULL WHERE id = '${D1A}';
-    INSERT INTO public.delivery_items (delivery_id, order_item_id, product_id, quantity, quantity_delivered, unit_size) VALUES ('${D4}', '${OI}', '${P}', 0.5, 0, 'Gal');`);
-  console.log('[case 8] NaN / Infinity / -Infinity refused on insert and update of both quantities; 1.25, 0.5, 0 and NULL delivered save');
-
-  // 9. Grants: the completion step stays callable only through complete_delivery.
+  // 8. Grants: the completion step stays callable only through complete_delivery.
   for (const role of ['anon', 'authenticated', 'service_role']) {
     assert.equal(scalar(`SELECT has_function_privilege('${role}', 'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)', 'EXECUTE');`), 'f', role);
   }
-  console.log('[case 9] anon, authenticated and service_role cannot call the completion step directly');
+  console.log('[case 8] anon, authenticated and service_role cannot call the completion step directly');
 }
 
 function rollbackCases() {
   stageText('reverse.sql', lf(REVERSE));
   const r = apply('reverse.sql');
   assert.equal(r.status, 0, r.output);
-  assert.equal(scalar(`SELECT count(*) FROM pg_constraint WHERE conname = 'delivery_items_quantities_finite';`), '0');
   assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = 'public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'::regprocedure;`), '7efd361c003d860361992711e3b15e92');
   const back = probe(`${completeCall(D1, { [D1A]: 0 }, 'f05b-r1')}; SELECT status FROM public.deliveries WHERE id = '${D1}';`, ADMIN);
   assert.equal(back.status, 0, back.output);
   assert.equal(back.last, 'completed', back.output);
-  console.log('[rollback] the reverse script restores the old completion step and drops the check: an all-zero completion goes through again');
+  console.log('[rollback] the reverse script restores the old completion step: an all-zero completion goes through again');
 }
 
-// 10. Race (Luna r2 HIGH): a direct line delete that began while the load was scheduled is still open when
+// 9. Race (Luna r2 HIGH): a direct line delete that began while the load was scheduled is still open when
 //     start-and-complete runs. The check must wait for it and see the load has no lines left, not complete it empty.
 //     Today the parent-lock trigger makes the delete lock the delivery row, so the completion waits there; the new
 //     line lock is a second guard this case does not separately exercise (Sol r1 LOW).
@@ -496,7 +473,7 @@ async function raceCase() {
   assert.notEqual(c.code, 0, `start-and-complete must be refused once the in-flight delete lands:\n${c.out}`);
   assert.match(c.out, /DELIVERY_NOTHING_DELIVERED/);
   assert.equal(state(D7), 'scheduled||0');
-  console.log('[case 10] race: a line delete in flight when start-and-complete runs is waited for; the now-empty load is refused and stays scheduled');
+  console.log('[case 9] race: a line delete in flight when start-and-complete runs is waited for; the now-empty load is refused and stays scheduled');
 }
 
 async function main() {

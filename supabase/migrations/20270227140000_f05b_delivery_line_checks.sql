@@ -1,42 +1,23 @@
--- F05b (#2274, #2275): two delivery rules the screens already keep, now kept by the database.
+-- F05b (#2274): a delivery rule the screens already keep, now kept by the database.
 -- Contract: docs/plans/2026-11-22-f05b-delivery-line-checks-CONTRACT.md.
 --   * #2274: completing a delivery with nothing delivered is refused (DELIVERY_NOTHING_DELIVERED, SQLSTATE 23514),
 --     inside the shared completion step every completion goes through (complete_delivery and start_and_complete_delivery
 --     via _complete_delivery_aggregate_impl; offline sync calls complete_delivery; a delivery can enter 'completed' only
 --     through complete_delivery, _require_delivery_completion_evidence). Only the new block below changes; the rest of
 --     _complete_delivery_authorized_impl is the 20270203120000 body unchanged.
---   * #2275: delivery line quantities must be finite numbers (no NaN or +/-Infinity), as order lines are since F05.
+-- #2275 (finite delivery line quantities) is no longer here: 20270226213000 (#2331) added the same checks first.
 -- Nothing is rewritten. Completed deliveries that already have nothing delivered (five line-less loads from March 2026
 -- on production) stay as they are: the rule is checked only when a delivery is being completed.
 -- actor-binding-check: exempt -- internal _impl, EXECUTE revoked from every client role; its only caller,
 -- _complete_delivery_aggregate_impl, binds p_performed_by to auth.uid() (ACTOR_MISMATCH) before calling it.
 
-SET LOCAL lock_timeout = '5s';
--- One lock, taken first and never upgraded: the ACCESS EXCLUSIVE lock the new check constraint needs anyway. A
--- completion already reading the lines finishes first (its own later line writes still go through, as it already holds
--- a lock there), and the migration then waits for nothing else, so it cannot deadlock with one (Sol r1 HIGH). The
--- deliveries table is not locked: replacing the function needs no table lock, and a later completion waits on the lines.
-LOCK TABLE public.delivery_items IN ACCESS EXCLUSIVE MODE;
-
+-- No table lock: replacing the function needs none.
 DO $preflight$
-DECLARE
-  v_count integer;
-  v_ids text;
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.delivery_items'::regclass
-              AND conname = 'delivery_items_quantities_finite') THEN
-    RAISE EXCEPTION 'F05B_PREFLIGHT: already applied';
-  END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)'))
      IS DISTINCT FROM '7efd361c003d860361992711e3b15e92' THEN
-    RAISE EXCEPTION 'F05B_PREFLIGHT: _complete_delivery_authorized_impl is not the reviewed 20270203120000 body';
-  END IF;
-  SELECT count(*), string_agg(di.id::text, ', ' ORDER BY di.id) INTO v_count, v_ids
-    FROM public.delivery_items di
-   WHERE NOT (di.quantity < 'Infinity'::numeric AND di.quantity > '-Infinity'::numeric AND (di.quantity_delivered IS NULL OR (di.quantity_delivered < 'Infinity'::numeric AND di.quantity_delivered > '-Infinity'::numeric)));
-  IF v_count > 0 THEN
-    RAISE EXCEPTION 'F05B_PREFLIGHT: % delivery line(s) have a quantity that is not a finite number: %. Fix them by hand first.', v_count, v_ids;
+    RAISE EXCEPTION 'F05B_PREFLIGHT: _complete_delivery_authorized_impl is not the reviewed 20270203120000 body (or F05b is already applied)';
   END IF;
 END
 $preflight$;
@@ -153,9 +134,6 @@ END;
 $function$;
 REVOKE ALL ON FUNCTION public._complete_delivery_authorized_impl(uuid, text, uuid, jsonb, text, text, text, timestamp with time zone) FROM PUBLIC, anon, authenticated, service_role;
 
-ALTER TABLE public.delivery_items
-  ADD CONSTRAINT delivery_items_quantities_finite CHECK (quantity < 'Infinity'::numeric AND quantity > '-Infinity'::numeric AND (quantity_delivered IS NULL OR (quantity_delivered < 'Infinity'::numeric AND quantity_delivered > '-Infinity'::numeric)));
-
 DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
@@ -167,10 +145,6 @@ BEGIN
                     AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
                     AND NOT has_function_privilege('service_role', p.oid, 'EXECUTE')) THEN
     RAISE EXCEPTION 'F05B_POSTFLIGHT: _complete_delivery_authorized_impl body, security, search_path or grants are not as reviewed';
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.delivery_items'::regclass
-                    AND conname = 'delivery_items_quantities_finite' AND contype = 'c' AND convalidated) THEN
-    RAISE EXCEPTION 'F05B_POSTFLIGHT: the finite-quantity constraint is missing or not validated';
   END IF;
 END
 $postflight$;

@@ -100,8 +100,8 @@ describe('sanitizeError', () => {
     expect(shown).toBe('Nothing was saved. Other open deliveries for this order already hold 2 of this product, so only 0 more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.');
     expect(shown).not.toMatch(/ITEM_OVER|2b680d4a/);
   });
-  it('explains the finite-quantity check on delivery lines (F05b) in plain words', () => {
-    const shown = sanitizeError({ code: '23514', message: 'new row for relation "delivery_items" violates check constraint "delivery_items_quantities_finite"' });
+  it.each(['delivery_items_quantity_finite_chk', 'delivery_items_quantity_delivered_finite_chk'])('explains the finite-quantity check %s on delivery lines in plain words', (name) => {
+    const shown = sanitizeError({ code: '23514', message: `new row for relation "delivery_items" violates check constraint "${name}"` });
     expect(shown).toBe('Nothing was saved. Delivery quantities must be ordinary numbers. Reload the delivery and enter them again');
   });
   it('explains a completion past the order (F05) without the raw token', () => {

@@ -1,12 +1,11 @@
--- Rollback for 20270226183000_f05b_delivery_line_checks.sql (F05b #2274, #2275), proven by
+-- Rollback for 20270227140000_f05b_delivery_line_checks.sql (F05b #2274), proven by
 -- scripts/smoke/prove-f05b-delivery-line-checks-real-schema.mjs.
--- Restores the 20270203120000 completion wrapper and drops the finite-quantity check, all or nothing. The forward
+-- Restores the 20270203120000 completion wrapper, all or nothing. The forward
 -- migration wrote no data. To use it live, copy it into a new migration through the gates (without BEGIN / COMMIT);
 -- never run it by hand against a live database. While it is off, a direct call can again complete a delivery with
--- nothing delivered, and a delivery line can store NaN or Infinity.
+-- nothing delivered.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
-LOCK TABLE public.delivery_items IN ACCESS EXCLUSIVE MODE;  -- one lock, first, never upgraded (see the forward migration)
 DO $installed$
 BEGIN
   -- Restore only over the reviewed F05b body, so a later change to this function is never silently undone (Sol r1 MED).
@@ -17,7 +16,6 @@ BEGIN
   END IF;
 END
 $installed$;
-ALTER TABLE public.delivery_items DROP CONSTRAINT IF EXISTS delivery_items_quantities_finite;
 CREATE OR REPLACE FUNCTION public._complete_delivery_authorized_impl(
   p_delivery_id uuid,
   p_signed_by text,

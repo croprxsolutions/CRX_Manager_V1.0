@@ -139,6 +139,17 @@ describe('JobDetail stale-edit refusal', () => {
     expect(mockToast).not.toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
   });
 
+  it('does not mistake an earlier save by the same user for a change by someone else', async () => {
+    // Reads: load, re-read before save 1, the refetch after save 1 (now holding the saved notes), re-read before save 2.
+    const saved = { ...JOB, notes: 'B notes' };
+    serveJob(JOB, saved, saved);
+    await openAndSave();
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_job', expect.anything()));
+    await clickSave();
+    await waitFor(() => expect(mockRpc.mock.calls.filter(([fn]) => fn === 'save_job')).toHaveLength(2));
+    expect(mockToast).not.toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
+  });
+
   it('checks again on a retry after the database refused the save (nothing committed)', async () => {
     serveJob(JOB, { ...JOB, applicator_id: 'other-applicator' });
     let saves = 0;

@@ -148,6 +148,14 @@ try {
   assert.match(run(candidate, ['-1']).stderr, /a function still uses the trigger's settings \(apply 20270213100000 first\)/,
     'candidate must refuse while the old wrapper still sets the settings');
   assert.equal(fnState(), fnBefore, 'a refused candidate changes nothing');
+  // Sol r2: with #2135 undone, the #1942 reverse's own trigger check (not the #2135 body check) must refuse.
+  const IT = 'public.inventory_transactions';
+  assert.equal(run(`ALTER TABLE ${IT} DISABLE TRIGGER trg_mark_delivery_aggregate_short_stock;`).status, 0);
+  const off1942 = run(reverse1942, ['-1']);
+  assert.match(off1942.stderr, /ROLLBACK_REFUSED: the short-stock ledger trigger is gone/, `#1942 reverse, trigger disabled: ${off1942.stderr}`);
+  assert.equal(run(`ALTER TABLE ${IT} ENABLE TRIGGER trg_mark_delivery_aggregate_short_stock;`).status, 0);
+  assert.equal(fnState(), fnBefore, 'the refused #1942 reverse changes nothing');
+  console.log('  with #2135 undone, the #1942 reverse refuses on its own trigger check while the trigger is disabled');
 
   console.log('DROP_INERT_SHORT_STOCK_TRIGGER_PROOF_PASS');
 } finally {

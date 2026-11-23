@@ -10,7 +10,8 @@ BEGIN
     RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_REVERSE_DRIFT: run this file as one transaction (psql -1)';
   END IF;
   IF to_regprocedure('public._mark_delivery_aggregate_short_stock()') IS NOT NULL
-     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mark_delivery_aggregate_short_stock') THEN
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mark_delivery_aggregate_short_stock'
+                  AND tgrelid = 'public.inventory_transactions'::regclass) THEN
     RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_REVERSE_DRIFT: the trigger or its function already exists';
   END IF;
 END;

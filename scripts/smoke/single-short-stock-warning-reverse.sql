@@ -14,7 +14,8 @@ BEGIN
   END IF;
   -- #2225 (20270224210000) dropped the short-stock ledger trigger that the restored body relies on: undo #2225 first.
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mark_delivery_aggregate_short_stock'
-                   AND tgrelid = 'public.inventory_transactions'::regclass AND tgenabled = 'O') THEN
+                   AND tgrelid = 'public.inventory_transactions'::regclass AND tgenabled = 'O'
+                   AND tgtype = 7) THEN  -- BEFORE INSERT FOR EACH ROW: only that shape can flag the new row
     RAISE EXCEPTION 'SINGLE_SHORT_STOCK_REVERSE_REFUSED: the short-stock ledger trigger is gone; run scripts/smoke/drop-inert-delivery-short-stock-trigger-reverse.sql first';
   END IF;
 END;

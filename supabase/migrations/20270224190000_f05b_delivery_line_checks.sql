@@ -92,8 +92,8 @@ BEGIN
   -- F05b #2274: nothing delivered is not a completion. The screens already refuse it (DeliveryDetail hasAnyQty,
   -- FieldStop); this is the server rule. Same figure per line as the body: the clamped figure sent for that line,
   -- or the full scheduled quantity when no figures were sent. A delivery with no lines is refused too. Raised here,
-  -- before any lock or write and inside the call, so offline sync records it for the office (23514 -> needs review)
-  -- and a replay of a saved completion (v_status 'replay') is never checked.
+  -- after the delivery row lock but before the line, order-line or stock locks and any write, inside the call, so
+  -- offline sync records it for the office (23514 -> needs review); a replay (v_status 'replay') is never checked.
   IF v_status = 'in_progress'
      AND NOT EXISTS (SELECT 1 FROM public.delivery_items di
                       WHERE di.delivery_id = p_delivery_id
@@ -150,7 +150,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-                    AND md5(replace(p.prosrc, chr(13), '')) = '92765aba826fb1641c1ba12e302b910d'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '8567f3bbbe66fa56b8289e6252cde877'
                     AND p.prosecdef
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')

@@ -49,9 +49,9 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 Fix first: see "Top 5" in [MASTER_FIX_PLAN.md](MASTER_FIX_PLAN.md).
 
-## BLOCKER and HIGH at a glance (re-checked 2026-11-21; Sol un-park rounds added 2026-11-22)
+## BLOCKER and HIGH at a glance (re-checked 2026-11-21; Sol un-park rounds added 2026-11-22; statuses re-checked 2026-11-23)
 
-There are 28 items: 2 BLOCKER and 26 HIGH (statuses re-checked 2026-11-23 against merged staging PRs).
+There are 28 items: 2 BLOCKER and 26 HIGH (statuses re-checked against PRs merged to staging).
 - 11 (SOL-1 to SOL-6, SOL-8 to SOL-12) are resolved: Mason chose to remove the staging-only release pass, and PR #2203 merged to staging 2026-11-22.
 - 7 are fixed on staging but not live yet (SOL-7, KI-129 payments part, KI-125, #2196, #2063, KI-199, KI-119).
 - 10 are open, partly open or check-first.

@@ -495,7 +495,11 @@ export function sanitizeError(error: unknown): string {
   }
   // Partial completion figures (20270203120000, #1942) and completing past the order (F05): the server sentence says what to do.
   const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER|DELIVERY_NOTHING_DELIVERED):\s*(.+)$/s);
-  if (deliveryQuantities) return `The delivery was not completed. ${deliveryQuantities[1].trim()}`;
+  if (deliveryQuantities) {
+    // The server sentences start lowercase (they follow the token); start the second sentence with a capital.
+    const sentence = deliveryQuantities[1].trim();
+    return `The delivery was not completed. ${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}`;
+  }
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.
   const countRule = message.match(/^(?:CYCLE_COUNT_ROW_ALREADY_OPEN|CYCLE_COUNT_ROW_WRONG_PLACE|CYCLE_COUNT_REOPEN_FORBIDDEN|CYCLE_COUNT_REVERSE_BLOCKED|CYCLE_COUNT_QTY_INVALID):\s*(.+)$/s);
   if (countRule) return `Nothing was saved. ${countRule[1].trim()}`;

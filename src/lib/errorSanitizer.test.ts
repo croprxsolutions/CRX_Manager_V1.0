@@ -79,7 +79,12 @@ describe('sanitizeError', () => {
     ['DELIVERY_QUANTITIES_INVALID', 'every delivered quantity must be a number; reload the delivery and enter the quantities again.'],
     ['DELIVERY_NOTHING_DELIVERED', 'every product on it has a delivered quantity of zero. If nothing was delivered, call the office.'],
   ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
-    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
+    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` }))
+      .toBe(`The delivery was not completed. ${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}`);
+  });
+  it('starts the explained refusal with a capital letter (Taha, #2324)', () => {
+    expect(sanitizeError({ code: '23514', message: 'DELIVERY_NOTHING_DELIVERED: every product on it has a delivered quantity of zero.' }))
+      .toBe('The delivery was not completed. Every product on it has a delivered quantity of zero.');
   });
   it.each([
     ['DELIVERY_OVER_ORDER', 'Atrazine 4L — only 0 left to schedule (ordered 10, delivered 10, on other open deliveries 0: none). Cancel another delivery for this order, or reduce one that has not started, first.'],

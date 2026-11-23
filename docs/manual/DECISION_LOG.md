@@ -1,5 +1,14 @@
 # Decision Log
 
+## 2026-11-23 — #2248: Mason's earlier skip carried to 5 repeat Sol finding(s) at `47d594e25f95`
+
+**Carried automatically (2026-11-23).** Sol's full review of PR #2248 at `47d594e25f95` (base `f91774df22ea`) found 5 BLOCKER/HIGH finding(s); Sol marked each the same as one Mason skipped on this pull request.
+- Finding 1 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:105`, text sha256 `4126081fa8fba083`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+- Finding 2 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:113`, text sha256 `ed73e8847ce2751f`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+- Finding 3 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:116`, text sha256 `b1d7cacf6d92b881`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+- Finding 4 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:154`, text sha256 `fdcd29918ecd0586`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+- Finding 5 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:257`, text sha256 `0ba7ad6523e3e450`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+
 ## 2026-11-23 — #2248: Mason owner-accepted 5 Sol finding(s) at `a9f282bc7b09`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2248 at `a9f282bc7b09` (base `3dd8f9bbf7dc`) found 5 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

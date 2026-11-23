@@ -11,6 +11,26 @@
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2324 at `5b12fac2527f` (base `ac09b76f9877`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
 - Finding 1 (HIGH) at `supabase/migrations/20270226183000_f05b_delivery_line_checks.sql:113`, text sha256 `536ee062fda86bfa` (the wording stays with the proof, not here)
   Mason chose to leave it unfixed (plain reply, ref fe9cb6de024e)
+## 2026-11-23 — #2337: Mason owner-accepted 3 Sol finding(s) at `4c8c43249b67`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2337 at `4c8c43249b67` (base `2a4b17f13baa`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:2918`, text sha256 `b08949ec6eff6613` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 40bd26e7f564)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:5513`, text sha256 `789804598375ae0a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 40bd26e7f564)
+- Finding 3 (HIGH) at `src/pages/JobDetail.tsx:2935`, text sha256 `4d4729381240b9b8` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 40bd26e7f564)
+
+## 2026-11-23 — #2337: Mason owner-accepted 3 Sol finding(s) at `cd5f79b8e0e2`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2337 at `cd5f79b8e0e2` (base `e499bdbe9450`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:2896`, text sha256 `5bde7b41dd16c020` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d6dcdbb4e90e)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:5459`, text sha256 `81c2c4e9e10c21a1` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d6dcdbb4e90e)
+- Finding 3 (HIGH) at `src/pages/JobDetail.tsx:2903`, text sha256 `fca1b8826d90146d` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref d6dcdbb4e90e)
+
 ## 2026-11-23 — #2358: Mason owner-accepted 8 Sol finding(s) at `d5b0cb8da2bd`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2358 at `d5b0cb8da2bd` (base `3dd8f9bbf7dc`) found 8 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

@@ -448,7 +448,7 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
     "nope skip", "I cant accept that", "skip two", "skip two and three", "skip the minor ones", "skip the low severity ones", "skip the nits", "skip this",
     "accept this", "skip 1 keep 2", "accept 1 reject 2", "skip 1, repair 2", "accept the risk on 2, patch 3", "skip 1 of 3", "skip for 2 days",
     "skip the details", "skip the summary", "skip the jargon please", "skip the review", "I accept your recommendation", "skip until Taha checks",
-    "skip before the release", "skip them before merging", "skip, address them"]) {
+    "skip before the release", "skip them before merging", "skip, address them", "I might accept", "skip 1 or 2", "skip finding one"]) {
     t(`'${no}' skips nothing (security review)`, () => assert.equal(skipFromReply(no), null));
   }
   for (const no of ["Skip I agree skip it?", "skip it if Taha agrees", "accept skip but fix 2 first", "skip them when the release is out", "skip, but why?",

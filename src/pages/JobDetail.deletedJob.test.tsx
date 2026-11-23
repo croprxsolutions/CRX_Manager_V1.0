@@ -112,7 +112,7 @@ function deferred() {
   return { promise, release };
 }
 
-// jobsCalls counts page loads; the one-row read of a refused job (who last wrote it, when deleted) is answered by `stamp`.
+// jobsCalls counts page loads; the one-row read of a refused job's deletion date is answered by `stamp`.
 let jobsCalls = 0;
 function serveJob(job: Record<string, unknown>, stamp: Record<string, unknown> | null = null) {
   jobsCalls = 0;
@@ -120,7 +120,7 @@ function serveJob(job: Record<string, unknown>, stamp: Record<string, unknown> |
     if (table === 'jobs') {
       const chain = chainShell();
       chain.select = (cols: string) => {
-        if (cols === 'updated_by, deleted_at') return buildChain({ data: stamp, error: null });
+        if (cols === 'deleted_at') return buildChain({ data: stamp, error: null });
         jobsCalls += 1;
         return buildChain({ data: job, error: null });
       };
@@ -180,45 +180,47 @@ describe('JobDetail — refused cancel (#2174)', () => {
     fireEvent.change(screen.getByDisplayValue('saved notes'), { target: { value: 'typed meanwhile' } });
     await confirmCancel();
     await waitFor(() => expect(screen.queryByRole('button', { name: /Save Changes/ })).toBeNull());
+    expect(screen.getByText(/Someone else changed this job/)).toBeTruthy();
     expect(screen.getByDisplayValue('typed meanwhile')).toBeTruthy();
+    expect((screen.getByDisplayValue('typed meanwhile') as HTMLTextAreaElement).disabled).toBe(true);
     expect(jobsCalls).toBe(1);
     expect(logActivity).not.toHaveBeenCalled();
   });
 
+  it('a cancel refused because the job moved on offers no invoice or notice until Reload (Mason, Sol HIGH)', async () => {
+    serveJob(makeJob({}));
+    mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'
+      ? editJobsReply([{ id: 'job-x', reason: 'status', status: 'completed' }])
+      : { data: null, error: null }));
+    mountAt('/jobs/job-x');
+    await screen.findByRole('heading', { name: 'J-0001' });
+    await confirmCancel();
+    expect(await screen.findByText(/Someone else changed this job/)).toBeTruthy();
+    for (const name of [/Transfer to Invoice/, /Complete Job/, /Start Job/, /Cancel Job/, /Save Changes/]) {
+      expect(screen.queryByRole('button', { name })).toBeNull();
+    }
+    // The reported status is not shown as the job's own (it can be an invoice lock, Sol MED).
+    expect(screen.queryByText('completed')).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Reload/ })); });
+    await waitFor(() => expect(jobsCalls).toBe(2));
+    await waitFor(() => expect(screen.queryByText(/Someone else changed this job/)).toBeNull());
+  });
+
   it('shows a job deleted meanwhile as deleted, on the day it was deleted', async () => {
-    serveJob(makeJob({}), { updated_by: 'user-2', deleted_at: '2026-11-02T15:00:00Z' });
+    serveJob(makeJob({}), { deleted_at: '2026-11-02T03:00:00Z' });
     mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'
       ? editJobsReply([{ id: 'job-x', reason: 'deleted' }])
       : { data: null, error: null }));
     mountAt('/jobs/job-x');
     await screen.findByRole('heading', { name: 'J-0001' });
     await confirmCancel();
-    expect(await screen.findByText(new RegExp(`deleted on ${new Date('2026-11-02T15:00:00Z').toLocaleDateString()}`))).toBeTruthy();
+    // 03:00Z on Nov 2 is still Nov 1 in Crop RX's business time zone (Sol LOW).
+    expect(await screen.findByText(/deleted on 11\/1\/2026/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Save Changes/ })).toBeNull();
   });
 
-  it('logs job_cancelled when a retry finds the cancel a lost reply committed', async () => {
-    serveJob(makeJob({}), { updated_by: 'user-1', deleted_at: null });
-    let calls = 0;
-    mockRpc.mockImplementation((fn: string) => {
-      if (fn !== 'edit_jobs') return Promise.resolve({ data: null, error: null });
-      calls += 1;
-      return calls === 1
-        ? Promise.reject(new Error('Failed to fetch'))
-        : Promise.resolve(editJobsReply([{ id: 'job-x', reason: 'status', status: 'cancelled' }]));
-    });
-    mountAt('/jobs/job-x');
-    await screen.findByRole('heading', { name: 'J-0001' });
-    await confirmCancel();
-    await waitFor(() => expect(calls).toBe(1));
-    expect(logActivity).not.toHaveBeenCalled();
-    await confirmCancel();
-    await waitFor(() => expect(logActivity).toHaveBeenCalledTimes(1));
-    expect(logActivity).toHaveBeenCalledWith(expect.objectContaining({ event: 'job_cancelled' }));
-  });
-
-  it('does not log a lost-reply retry when someone else cancelled the job meanwhile', async () => {
-    serveJob(makeJob({}), { updated_by: 'user-2', deleted_at: null });
+  it('a retry after a lost reply does not guess who cancelled (Mason: the database will record it)', async () => {
+    serveJob(makeJob({}));
     let calls = 0;
     mockRpc.mockImplementation((fn: string) => {
       if (fn !== 'edit_jobs') return Promise.resolve({ data: null, error: null });
@@ -251,7 +253,7 @@ describe('JobDetail — refused cancel (#2174)', () => {
 
 describe('JobDetail — crew/loader refusal after save (#2174)', () => {
   it('keeps text typed during the save instead of reloading over it', async () => {
-    serveJob(makeJob({}), { updated_by: 'user-2', deleted_at: '2026-11-02T15:00:00Z' });
+    serveJob(makeJob({}), { deleted_at: '2026-11-02T15:00:00Z' });
     const saveGate = deferred();
     mockRpc.mockImplementation((fn: string) => {
       if (fn === 'save_job') return saveGate.promise.then(() => ({ data: { job_id: 'job-x' }, error: null }));
@@ -271,7 +273,7 @@ describe('JobDetail — crew/loader refusal after save (#2174)', () => {
     expect(await screen.findByText(/This job was deleted/)).toBeTruthy();
   });
 
-  it('stays dirty when the form is typed back to its pre-save values after a partial save (Luna HIGH)', async () => {
+  it('locks the page with Reload after a partial save while typing, keeping the typed text (Mason, Sol HIGH)', async () => {
     serveJob(makeJob({}));
     const saveGate = deferred();
     mockRpc.mockImplementation((fn: string) => {
@@ -281,19 +283,20 @@ describe('JobDetail — crew/loader refusal after save (#2174)', () => {
     });
     mountAt('/jobs/job-x');
     await screen.findByRole('heading', { name: 'J-0001' });
-    fireEvent.change(screen.getByDisplayValue('saved notes'), { target: { value: 'notes B' } });
     fireEvent.change(screen.getByLabelText('Ground crew'), { target: { value: 'crew-1' } });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Save Changes/ })); });
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_job', expect.anything()));
-    fireEvent.change(screen.getByDisplayValue('notes B'), { target: { value: 'notes C' } });
+    fireEvent.change(screen.getByDisplayValue('saved notes'), { target: { value: 'typed during save' } });
     await act(async () => { saveGate.release(); await saveGate.promise; });
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/crew\/loader settings did not save/)));
-    // Back to the values from before the save: the server now holds "notes B", so this is still unsaved.
-    fireEvent.change(screen.getByDisplayValue('notes C'), { target: { value: 'saved notes' } });
-    fireEvent.change(screen.getByLabelText('Ground crew'), { target: { value: '' } });
-    await act(async () => { await Promise.resolve(); });
+    expect(await screen.findByText(/Part of your save did not go through/)).toBeTruthy();
+    const notes = screen.getByDisplayValue('typed during save') as HTMLTextAreaElement;
+    expect(notes.disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: /Save Changes/ })).toBeNull();
     expect(dirty.value).toBe(true);
     expect(jobsCalls).toBe(1);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Reload/ })); });
+    await waitFor(() => expect(jobsCalls).toBe(2));
+    await waitFor(() => expect(screen.queryByText(/Part of your save did not go through/)).toBeNull());
   });
 
   it('reloads as before when nothing was typed during the save', async () => {

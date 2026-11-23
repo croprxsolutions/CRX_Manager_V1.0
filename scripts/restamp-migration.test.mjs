@@ -1,5 +1,7 @@
-// End to end on a throwaway repository: scripts/restamp-migration.mjs renames, swaps the stamp and the
-// record's SQL sha256 pin, commits, and carries the Sol proof; a stamp inside the SQL body is refused.
+// scripts/restamp-migration.mjs and the 2026-11-23 restamp-carry rule (restampProblem), on a throwaway
+// repository: only the SQL header's link to its own record and that record's SQL sha256 pin may change
+// beyond the stamp; an extra branch migration between the stamps, a stale or foreign pin, and an SQL body
+// change all refuse.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -14,32 +16,42 @@ import { tempDir } from "./lib/test-temp-dir.mjs";
 const script = fileURLToPath(new URL("./restamp-migration.mjs", import.meta.url));
 const env = { ...process.env };
 for (const name of gitLocalEnvironmentNames()) delete env[name];
-const sha = (text) => createHash("sha256").update(text).digest("hex");
+const sha = (text) => createHash("sha256").update(Buffer.from(text, "utf8")).digest("hex");
 const OLD = "20270226100000";
 const NEW = "20270227110000";
 const STEM = "delivery_driver_checks";
-const header = (stamp) => `-- STATUS: NOT APPLIED. Tracked in\n-- docs/reference/migrations.d/${stamp}_${STEM}.md.\n\n`;
-const body = "CREATE TABLE t (id bigint);\n";
+// Non-ASCII on purpose: the pin is the hash of the bytes, and the writer reads blobs as latin1.
+const header = (stamp) => `-- Written 2026-11-23 — not applied. Tracked in\n-- docs/reference/migrations.d/${stamp}_${STEM}.md.\n\n`;
+const body = `CREATE TABLE t (id bigint); -- first written as ${OLD}\n`;
 const record = (stamp, sql) => `**LOCAL CANDIDATE — NOT APPLIED.** \`${stamp}_${STEM}.sql\` (SQL sha256: \`${sha(sql)}\`). Test.\n`;
+const latin1 = (text) => Buffer.from(text, "utf8").toString("latin1");
 
-// restampProblem: the new header and pin rules, unit level.
+// restampProblem, unit level.
 {
   const entries = [
     { path: `supabase/migrations/${OLD}_${STEM}.sql`, oldMode: "100644", newMode: "000000" },
     { path: `supabase/migrations/${NEW}_${STEM}.sql`, oldMode: "000000", newMode: "100644" },
     { path: `docs/reference/migrations.d/${OLD}_${STEM}.md`, oldMode: "100644", newMode: "000000" },
     { path: `docs/reference/migrations.d/${NEW}_${STEM}.md`, oldMode: "000000", newMode: "100644" },
+    { path: "scripts/smoke/prove.mjs", oldMode: "100644", newMode: "100644" },
   ];
-  const judge = (newSql, newRecord, oldSql = header(OLD) + body) => restampProblem({
+  const oldSql = header(OLD) + body;
+  const goodSql = header(NEW) + body;
+  const judge = ({ newSql = goodSql, newRecord = record(NEW, newSql), smoke = `run ${NEW}_${STEM}.sql\n`, branchAdded = [] } = {}) => restampProblem({
+    branchAdded,
     entries,
-    readFile: (side, file) => (file.endsWith(".sql") ? (side === "old" ? oldSql : newSql) : (side === "old" ? record(OLD, oldSql) : newRecord)),
+    readFile: (side, file) => latin1(file.endsWith(".sql") ? (side === "old" ? oldSql : newSql)
+      : file.endsWith(".md") ? (side === "old" ? record(OLD, oldSql) : newRecord)
+        : (side === "old" ? `run ${OLD}_${STEM}.sql\n` : smoke)),
   });
-  const good = header(NEW) + body;
-  assert.equal(judge(good, record(NEW, good)), null, "restamp: the stamp in the header comment and the matching pin carry");
-  assert.match(judge(good, record(NEW, "other")), /changed beyond the timestamp/, "restamp: a pin to any other hash is refused");
-  const inBody = (stamp) => `${header(stamp)}SELECT '${stamp}';\n`;
-  assert.match(judge(inBody(NEW), record(NEW, inBody(NEW)), inBody(OLD)), /the migration's SQL changed/, "restamp: the stamp below the header is refused");
-  assert.match(judge(good + "SELECT 1;\n", record(NEW, good + "SELECT 1;\n")), /the migration's SQL changed/, "restamp: an extra statement is refused");
+  assert.equal(judge(), null, "restamp rule: the header's self-link and the matching pin carry; the body's own stamp literal stays");
+  assert.match(judge({ newRecord: record(NEW, oldSql) }), /pin is not the new SQL's hash/, "restamp rule: a pin left on the old SQL's hash is refused");
+  assert.match(judge({ newRecord: record(NEW, "other") }), /changed beyond the timestamp and its SQL sha256 pin/, "restamp rule: a pin to any other hash is refused");
+  assert.match(judge({ smoke: `run ${NEW}_${STEM}.sql\n${sha(goodSql)}\n` }), /prove\.mjs changed beyond the timestamp/, "restamp rule: a hash in any other file is refused");
+  assert.match(judge({ newSql: goodSql.replace(`as ${OLD}`, `as ${NEW}`) }), /the migration's SQL changed/, "restamp rule: the stamp swapped in the body is refused");
+  assert.match(judge({ newSql: header(NEW).replace("Written", `Written ${NEW}`) + body }), /the migration's SQL changed/, "restamp rule: any other header edit is refused");
+  assert.match(judge({ branchAdded: [`supabase/migrations/20270227000000_other.sql`] }), /sits between the old and new stamps/, "restamp rule: a branch migration between the stamps is refused");
+  assert.equal(judge({ branchAdded: [`supabase/migrations/20270101000000_other.sql`] }), null, "restamp rule: a branch migration below both stamps is fine");
 }
 
 // The command, end to end.
@@ -48,13 +60,25 @@ const git = (...args) => execFileSync("git", ["-c", "user.name=Restamp Test", "-
 const run = (...args) => spawnSync(process.execPath, [script, ...args], { cwd: repo, env, encoding: "utf8" });
 const write = (rel, text) => { mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true }); writeFileSync(path.join(repo, rel), text); };
 const read = (rel) => readFileSync(path.join(repo, rel), "utf8");
+const commit = (message) => { git("add", "-A"); git("commit", "-qm", message); return git("rev-parse", "HEAD"); };
+const refused = (label, setup, why) => {
+  git("reset", "-q", "--hard", reviewed);
+  git("clean", "-qfd");
+  const before = setup();
+  const result = run(OLD, "--to", NEW);
+  assert.equal(result.status, 1, `restamp command: ${label} is refused (${result.stdout}${result.stderr})`);
+  assert.match(result.stderr, why, `restamp command: ${label} says why`);
+  assert.equal(git("rev-parse", "HEAD"), before, `restamp command: ${label} commits nothing`);
+  assert.equal(git("status", "--porcelain"), "", `restamp command: ${label} leaves the tree clean`);
+};
+let reviewed;
 try {
   git("init", "-q", "-b", "staging");
   git("config", "core.autocrlf", "false");
   write(".gitignore", ".claude/session-state/\n");
+  write("supabase/migrations/20270101000000_base.sql", "SELECT 1;\n");
   write("docs/changelog.d/other.md", `Unrelated history naming ${OLD}.\n`);
-  git("add", "-A"); git("commit", "-qm", "base");
-  const base = git("rev-parse", "HEAD");
+  const base = commit("base");
   git("update-ref", "refs/remotes/origin/staging", base);
   git("update-ref", "refs/remotes/origin/main", base);
   git("switch", "-q", "-c", "feature");
@@ -62,8 +86,7 @@ try {
   write(`supabase/migrations/${OLD}_${STEM}.sql`, sql);
   write(`docs/reference/migrations.d/${OLD}_${STEM}.md`, record(OLD, sql));
   write("docs/changelog.d/mine.md", `Adds ${OLD}_${STEM}.\n`);
-  git("add", "-A"); git("commit", "-qm", "pr");
-  const reviewed = git("rev-parse", "HEAD");
+  reviewed = commit("pr");
   mkdirSync(path.dirname(codexPushProofPath(repo, reviewed)), { recursive: true });
   writeFileSync(codexPushProofPath(repo, reviewed), JSON.stringify(buildCodexPushProof({ headSha: reviewed, baseSha: base, verdict: "clean" })));
 
@@ -72,24 +95,32 @@ try {
   const head = git("rev-parse", "HEAD");
   assert.equal(git("rev-parse", "HEAD~1"), reviewed, "restamp command: exactly one commit");
   const newSql = read(`supabase/migrations/${NEW}_${STEM}.sql`);
-  assert.equal(newSql, header(NEW) + body, "restamp command: only the header's stamp changed");
-  assert.equal(read(`docs/reference/migrations.d/${NEW}_${STEM}.md`), record(NEW, newSql), "restamp command: record renamed with the new name and pin");
+  assert.equal(newSql, header(NEW) + body, "restamp command: only the header's self-link changed; the body keeps its bytes");
+  assert.equal(read(`docs/reference/migrations.d/${NEW}_${STEM}.md`), record(NEW, newSql), "restamp command: record renamed, new name and pin");
   assert.equal(read("docs/changelog.d/mine.md"), `Adds ${NEW}_${STEM}.\n`, "restamp command: the branch's own note follows");
   assert.equal(read("docs/changelog.d/other.md"), `Unrelated history naming ${OLD}.\n`, "restamp command: files the branch does not change are left alone");
   const proof = JSON.parse(readFileSync(codexPushProofPath(repo, head), "utf8"));
   assert.equal(proof.carry.mode, "restamp", "restamp command: the Sol proof carried");
   assert.equal(proofValid(proof, head, Date.now(), base), true, "restamp command: the gates accept the carried proof");
 
-  // A stamp inside the SQL body: refused before any change.
-  git("reset", "-q", "--hard", reviewed);
-  write(`supabase/migrations/${OLD}_${STEM}.sql`, `${sql}SELECT '${OLD}';\n`);
-  git("add", "-A"); git("commit", "-qm", "body names stamp");
-  const before = git("rev-parse", "HEAD");
-  const refused = run(OLD, "--to", NEW);
-  assert.equal(refused.status, 1, "restamp command: a stamp in the SQL body is refused");
-  assert.match(refused.stderr, /below the leading comment header/, "restamp command: says why");
-  assert.equal(git("rev-parse", "HEAD"), before, "restamp command: nothing committed");
-  assert.equal(existsSync(path.join(repo, "supabase/migrations", `${NEW}_${STEM}.sql`)), false, "restamp command: nothing renamed");
+  refused("a branch migration between the stamps", () => {
+    write("supabase/migrations/20270227000000_other.sql", "SELECT 2;\n");
+    return commit("second migration");
+  }, /sits between/);
+  refused("a stamp not above the base's newest", () => {
+    git("switch", "-q", "staging");
+    write("supabase/migrations/20270228000000_later.sql", "SELECT 3;\n");
+    git("update-ref", "refs/remotes/origin/staging", commit("later on staging"));
+    git("switch", "-q", "feature");
+    return reviewed;
+  }, /is not newer than 20270228000000/);
+  git("update-ref", "refs/remotes/origin/staging", base);
+  refused("a migration already on staging", () => {
+    git("update-ref", "refs/remotes/origin/staging", reviewed);
+    return reviewed;
+  }, /already on origin\/staging/);
+  git("update-ref", "refs/remotes/origin/staging", base);
+  refused("staging itself", () => { git("switch", "-q", "staging"); return git("rev-parse", "HEAD"); }, /not a feature branch/);
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }

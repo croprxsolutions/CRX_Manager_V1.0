@@ -270,6 +270,10 @@ eq(ledgerCheck([MIG, "docs/CHANGELOG.md"]).ok, true, "CHANGELOG satisfies a Code
 eq(ledgerCheck([MIG, "docs/manual/DECISION_LOG.md"]).ok, true, "DECISION_LOG satisfies");
 eq(ledgerCheck([MIG, "docs/manual/KNOWN_ISSUES.md"]).ok, true, "KNOWN_ISSUES satisfies");
 eq(ledgerCheck([MIG, "docs/manual/OWNER_PLAYBOOK.md"]).ok, true, "another docs/manual file satisfies");
+eq(ledgerCheck([MIG, "docs/manual/decision-log.d/2026-11-22-x.md"]).ok, true, "a decision-log.d entry satisfies");
+eq(ledgerCheck([MIG, "docs/manual/known-issues.d/2026-11-22-x.md"]).ok, true, "a known-issues.d entry satisfies");
+eq(ledgerCheck([MIG, "docs/manual/other.d/2026-11-22-x.md"]).ok, false, "another docs/manual subfolder does not");
+eq(ledgerCheck([MIG, "docs/manual/decision-log.d/README.md"]).ok, false, "the fragment folder README does not");
 eq(ledgerCheck([MIG, "docs/reference/agent-guardrails.md"]).ok, true, "agent-guardrails.md satisfies");
 eq(ledgerCheck([MIG, "docs/loops/tooling-loop-ledger.md"]).ok, true, "a loop ledger satisfies");
 eq(ledgerCheck([MIG, "docs/CHANGELOG.md"]).ok, true, "CHANGELOG satisfies a Claude proof-wrapper change");

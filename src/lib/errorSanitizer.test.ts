@@ -80,6 +80,18 @@ describe('sanitizeError', () => {
   ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
   });
+  it.each([
+    ['DELIVERY_OVER_ORDER', 'Atrazine 4L — only 0 left to schedule (ordered 10, delivered 10, on other open deliveries 0: none). Cancel another delivery for this order, or reduce one that has not started, first.'],
+    ['ORDER_LINE_BELOW_DELIVERIES', 'Atrazine 4L cannot go below 10 (delivered 0, on open deliveries 10: DEL-1 (10)). Cancel those deliveries, or reduce ones that have not started, first.'],
+    ['ORDER_LINE_QUANTITY_NOT_FINITE', 'Atrazine 4L — ordered and delivered quantities must be finite numbers.'],
+    ['ORDER_LINE_CHECK_ISOLATION', 'delivery and order quantities can only change in a read-committed transaction.'],
+  ])('explains an order-quantity refusal %s (F05) without the raw token', (token, sentence) => {
+    expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
+  });
+  it('explains a completion past the order (F05) without the raw token', () => {
+    const sentence = 'Atrazine 4L — this would deliver more than was ordered. Call the office before completing this delivery.';
+    expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
+  });
   it('explains a not-a-number count (20270126110000)', () => {
     expect(sanitizeError({ code: '23514', message: 'CYCLE_COUNT_QTY_INVALID: the counted quantity must be a number.' }))
       .toBe('Nothing was saved. the counted quantity must be a number.');
@@ -300,8 +312,8 @@ describe('sanitizeError', () => {
       .toBe('Say why the cost of a received line is changing');
     expect(sanitizeError('PO_CANCELLED: cannot change cost on a cancelled purchase order'))
       .toBe('This purchase order is cancelled, so its cost cannot change');
-    expect(sanitizeError('PO_COST_BELOW_BILLED: this correction would leave the active vendor bills more than 5% over the purchase order total; void or adjust the bill first'))
-      .toBe('This would put the purchase order more than 5% below its vendor bills. Void or adjust the bill first');
+    expect(sanitizeError('PO_COST_BELOW_BILLED: this correction would put the active vendor bills more than 5% over what arrived on the purchase order or over its ordered total; void or adjust the bill first'))
+      .toBe('This would put the vendor bills more than 5% over what has arrived on the purchase order, or over its ordered total. Void or adjust the bill first');
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can change a customer\'s default commission split'))
       .toBe("Only an admin can set or change a customer's default commission split");
     expect(sanitizeError('COMMISSION_SPLIT_ADMIN_ONLY: only an admin can set a customer\'s default commission split'))
@@ -654,5 +666,18 @@ describe('product setup and import refusals (20261107090000)', () => {
       .toBe("This draft's sales tax doesn't match its sale's Sales tax box. Switch the box over and back, ending at the setting you want, to re-apply it to the sale's drafts (a split draft that can't be edited: set the box back to match it, or void and redraft its group), then post");
     expect(sanitizeError('SALES_TAX_ORDER_CLOSED: a cancelled or voided sale can\'t change'))
       .toBe("This sale is cancelled or voided, so its sales tax can't change");
+  });
+});
+
+describe('customer receipt refusals (KI-25)', () => {
+  it('drops the database code and keeps plain words', () => {
+    expect(sanitizeError(new Error('DELIVERY_NOT_COMPLETED: this delivery is not completed any more; do not send its receipt')))
+      .toBe('Nothing was sent. This delivery is not completed any more, so its receipt must not be sent.');
+    expect(sanitizeError(new Error("DELIVERY_RECEIPT_CHANGED: this delivery's receipt was queued again since; reload the page")))
+      .toBe("Nothing was changed. This delivery's receipt was queued again since. Reload the page.");
+  });
+  it('leaves the invoice-posting DELIVERY_NOT_COMPLETED sentence alone', () => {
+    const msg = 'DELIVERY_NOT_COMPLETED: delivery D-42 for invoice INV-1002 has been deleted. Void this invoice instead of posting it.';
+    expect(sanitizeError(new Error(msg))).not.toMatch(/receipt/);
   });
 });

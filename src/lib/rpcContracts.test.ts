@@ -2941,6 +2941,9 @@ const MIGRATION_ONLY_RPCS_WITH_IDEMPOTENCY = new Set<string>([
   // (20270126110000 renamed it, so no generated type carries it yet); keyed by complete_delivery's p_idempotency_key.
   // Prune once the generated types carry it.
   '_complete_delivery_authorized_impl_20270122',
+  // 20270209160000 (KI-160, local candidate): starts a stock count in one step; requires its key and saves and binds
+  // its receipt. The screen PR adds the generated type and prunes this entry.
+  'create_cycle_count',
 ]);
 
 /**

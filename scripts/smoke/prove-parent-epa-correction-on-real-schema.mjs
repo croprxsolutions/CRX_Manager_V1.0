@@ -16,6 +16,7 @@
  * Prints PARENT_EPA_CORRECTION_ON_PROOF_PASS on success.
  */
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
 
 process.env.UNDO_PATHS_CONTAINER ||= `crx-par1on-${process.pid}-${Date.now().toString(36)}`;
@@ -89,7 +90,10 @@ try {
     INSERT INTO public.delivery_item_brands (id, delivery_item_id, delivery_id, product_id, source, parent_id, parent_brand_id,
         brand_name, epa_registration, quantity, entered_by)
       VALUES ('${PICK}', '${id('da')}', '${id('db')}', '${S1}', 'parent', '${PARENT}', '${BRAND}',
-        '[PROVER] Atz (Winfield)', '1381-158', 1, '${USERS.admin}');`);
+        '[PROVER] Atz (Winfield)', '1381-158', 1, '${USERS.admin}');
+    INSERT INTO public.application_records (record_number, source_type, source_id, customer_id, field_id, application_date, product_data)
+      VALUES ('PAR1-AR', 'job', '${J_DONE}', '${CUST}', '${FIELD}', current_date,
+        jsonb_build_array(jsonb_build_object('product_id', '${S1}', 'epa_registration', '${OLD}')));`);
   assert.equal(optional.status, 0, `seeding a RUP record: ${out(optional)}`);
   assert.equal(scalar(`SELECT epa_registration FROM public.job_product_epa WHERE job_id = '${J_DONE}' AND product_id = '${S1}';`), OLD);
   console.log('[PAR1-ON] seeded a parent with two sizes at 524-475, a completed (kept) and an open job, a posted invoice and a RUP record');
@@ -127,6 +131,8 @@ try {
   assert.equal(scalar(`SELECT epa_registration FROM public.rup_sales_records WHERE invoice_id = '${INV}';`), OLD);
   assert.equal(scalar(`SELECT epa_registration FROM public.product_parent_brands WHERE id = '${BRAND}';`), '1381-158', 'the brand keeps its own number');
   assert.equal(scalar(`SELECT epa_registration FROM public.delivery_item_brands WHERE id = '${PICK}';`), '1381-158', 'the delivery brand pick keeps its number');
+  assert.equal(scalar(`SELECT product_data->0->>'epa_registration' FROM public.application_records WHERE record_number = 'PAR1-AR';`), OLD,
+    'the job logbook record keeps 524-475');
   assert.equal(proofEpa(J_OPEN), NEW, 'a job not sprayed yet shows the corrected number');
   console.log('[PAR1-ON] AFTER: old records unchanged byte for byte; spray proof, kept job number, year-end summary, invoice line, RUP record and brand keep 524-475; the unsprayed job shows 100-497-37686');
 
@@ -147,6 +153,9 @@ try {
   docker(['cp', path.join(ROOT, 'scripts', 'db-invariant-sweeps', 'predicates', 'cost-exposure-review.sql'), `${NAME}:/tmp/cost.sql`]);
   const keys = run(`\\i /tmp/cost.sql`).stdout.split(/\r?\n/).filter((l) => /year_end/.test(l)).map((l) => l.split('|')[0]);
   console.log(`[PAR1-ON] post-apply cost-exposure keys: ${keys.join(' ; ')}`);
+  const allow = fs.readFileSync(path.join(ROOT, 'scripts', 'db-invariant-sweeps', 'allowlist.json'), 'utf8');
+  assert.equal(keys.length, 2, 'the cost-exposure sweep ran and listed both year-end functions');
+  for (const key of keys) assert.ok(allow.includes(`"${key.trim()}"`), `allowlist carries ${key}`);
   console.log('PARENT_EPA_CORRECTION_ON_PROOF_PASS');
 } finally {
   removeContainer();

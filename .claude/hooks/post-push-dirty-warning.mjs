@@ -8,25 +8,41 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { isGitPush, pushDestinationBranches, shellSegments } from "./codex-push-lib.mjs";
 
 const run = promisify(execFile);
-// Each gh call is capped, and at most two fit inside the router's 20s hook limit.
+// Each gh call is capped, and at most two fit inside the router's 20s hook limit;
+// several pushes are asked about in parallel, so each still gets that budget.
 const GH_CALL_TIMEOUT_MS = 6_000;
 const RETRY_DELAY_MS = 3_000;
+const MAX_PUSHES_CHECKED = 3;
 
 // The folder the push ran in: `git -C <dir> push` (the push guard's required
 // spelling on this machine) wins over the tool's cwd. Only a -C directly before
 // `push` counts, so another command's -C in the same line is ignored.
-// shortcut: asks for the PR of the folder's current branch, not a refspec's
-// target (`git push origin a:b`); upgrade if such pushes become common here.
 export function pushDir(command, cwd) {
   const m = /\bgit\s+-C\s+("([^"]+)"|'([^']+)'|([^\s;&|]+))\s+push\b/.exec(String(command || ""));
   const dir = m ? m[2] || m[3] || m[4] : "";
   return dir ? path.resolve(cwd || process.cwd(), dir) : cwd || process.cwd();
 }
 
-async function ghPrState(dir) {
-  const { stdout } = await run("gh", ["pr", "view", "--json", "number,state,mergeStateStatus"], {
+// Every push in the command (#2014): its folder, and the remote branch it wrote
+// (a refspec's destination), or null for the folder's current branch.
+export function pushTargets(command, cwd) {
+  const seen = new Map();
+  for (const segment of shellSegments(String(command || ""))) {
+    if (!isGitPush(segment)) continue;
+    const dir = pushDir(segment, cwd);
+    let branches = [];
+    try { branches = pushDestinationBranches(segment, null); } catch { /* unreadable: current branch */ }
+    for (const branch of branches.length ? branches : [null]) seen.set(`${dir}\0${branch}`, { dir, branch });
+  }
+  return [...seen.values()].slice(0, MAX_PUSHES_CHECKED);
+}
+
+async function ghPrState(dir, branch) {
+  const args = ["pr", "view", ...(branch ? [branch] : []), "--json", "number,state,mergeStateStatus"];
+  const { stdout } = await run("gh", args, {
     cwd: dir, timeout: GH_CALL_TIMEOUT_MS, windowsHide: true,
   });
   return JSON.parse(stdout);
@@ -34,12 +50,12 @@ async function ghPrState(dir) {
 
 // GitHub recomputes mergeability after a push and answers UNKNOWN meanwhile, so
 // an UNKNOWN gets one retry.
-export async function dirtyWarning(dir, { view = ghPrState, delayMs = RETRY_DELAY_MS } = {}) {
+export async function dirtyWarning(dir, { view = ghPrState, delayMs = RETRY_DELAY_MS, branch = null } = {}) {
   try {
-    let pr = await view(dir);
+    let pr = await view(dir, branch);
     if (pr?.mergeStateStatus === "UNKNOWN") {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
-      pr = await view(dir);
+      pr = await view(dir, branch);
     }
     if (pr?.state !== "OPEN" || pr?.mergeStateStatus !== "DIRTY") return "";
     return `⚠️ PR #${pr.number} conflicts with its base; GitHub runs no full CI until you merge the base in.`;
@@ -62,7 +78,9 @@ function payload() {
 const input = payload();
 const command = input?.tool_input?.command;
 if (command) {
-  const warning = await dirtyWarning(pushDir(command, input?.cwd || input?.tool_input?.cwd));
+  const targets = pushTargets(command, input?.cwd || input?.tool_input?.cwd);
+  const warnings = await Promise.all(targets.map(({ dir, branch }) => dirtyWarning(dir, { branch })));
+  const warning = [...new Set(warnings.filter(Boolean))].join("\n");
   if (warning) {
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: warning } }));
   }

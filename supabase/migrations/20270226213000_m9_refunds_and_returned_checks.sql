@@ -36,7 +36,9 @@
 --   invoice's paid and prepay amounts agree with its active rows. On the WHOLE customer: every credit's source payment
 --   is this customer's (active, or voided to $0), every application is on this customer's invoices, every credit
 --   agrees with its rows and the stored balance is the credits' total. Anything else is refused
---   RECORD_NEEDS_HAND_CHECK: <code>. A return also refuses a draft, void, cancelled or deleted invoice
+--   RECORD_NEEDS_HAND_CHECK: <code>. Round 5: every credit has a known source (an overpayment linked to its payment, or
+--   an unlinked check), every active payment behind them adds up, an entry's buckets are one receipt (one reference,
+--   one entry time) and no allocation row is $0 or negative. A return also refuses a draft, void, cancelled or deleted invoice
 --   (RETURN_INVOICE_NOT_OPEN).
 --   5. get_prepay_balance_check(customer?): read-only; received - applied - refunded - returned = expected, against
 --      the stored balance and the credits' balances, plus each credit against its own rows (credit_mismatches);
@@ -68,8 +70,8 @@
 -- functions from the bodies pinned in this file's preflight (latest defining migrations: 20260728231350 / baseline
 -- for the recompute, 20261204100000 for void_payment, baseline for edit/delete, 20270224120000 for the two Month-End
 -- helpers, 20260803221244 for the tripwire, 20261204110000 for the statement, 20260827041100 for void_invoice),
--- restore the audit CHECK list and the recompute's EXECUTE grants, drop the three RPCs, the five helpers, the trigger
--- and the two tables. void_payment, edit and delete also set customers.updated_at when they change the cached balance.
+-- restore the audit CHECK list and the recompute's EXECUTE grants, drop the trigger first, then the three RPCs, the
+-- five helpers and the two tables. void_payment, edit and delete also set customers.updated_at when they change the cached balance.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -147,6 +149,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_recompute_prepay_credit_balance'
                   AND tgrelid = 'public.prepay_applications'::regclass AND NOT tgisinternal AND tgenabled = 'O'
+                  AND tgtype = 13 AND tgqual IS NULL  -- AFTER INSERT OR DELETE, FOR EACH ROW, no WHEN
                   AND tgfoid = 'public._recompute_prepay_credit_balance()'::regprocedure) THEN
     RAISE EXCEPTION 'M9_PREFLIGHT: the prepay recompute trigger is missing or disabled';
   END IF;
@@ -323,6 +326,9 @@ BEGIN
               OR (SELECT count(*) FROM public.prepay_credits pc
                    WHERE pc.id = ANY (p_bucket_ids) AND pc.customer_id = p_customer_id
                      AND pc.source_type = 'check' AND pc.allocation_set_id IS NULL) <> cardinality(p_bucket_ids)
+              -- the buckets are one receipt: one reference and one entry time
+              OR (SELECT count(DISTINCT (pc.created_at, pc.source_reference)) FROM public.prepay_credits pc
+                   WHERE pc.id = ANY (p_bucket_ids)) <> 1
               -- each bucket is in exactly one entry
               OR EXISTS (SELECT 1 FROM unnest(p_bucket_ids) b(id)
                           WHERE (SELECT count(*) FROM public.financial_audit_log fal
@@ -350,7 +356,8 @@ BEGIN
     -- a Record Payment: its allocated total is its invoice allocation rows, and those plus its prepay are the check
     WHEN EXISTS (SELECT 1 FROM public.allocation_sets a
                   WHERE a.id = p_allocation_set_id
-                    AND (EXISTS (SELECT 1 FROM public.invoice_line_allocations l WHERE l.allocation_set_id = a.id AND l.invoice_id IS NULL)
+                    AND (EXISTS (SELECT 1 FROM public.invoice_line_allocations l WHERE l.allocation_set_id = a.id
+                                  AND (l.invoice_id IS NULL OR l.amount_cents <= 0))
                          OR COALESCE(a.total_allocated_cents, 0) IS DISTINCT FROM
                             (SELECT COALESCE(sum(l.amount_cents), 0) FROM public.invoice_line_allocations l WHERE l.allocation_set_id = a.id)
                          OR a.total_payment_cents IS DISTINCT FROM COALESCE(a.total_allocated_cents, 0)
@@ -383,6 +390,24 @@ BEGIN
                     AND (a.customer_id IS DISTINCT FROM p_customer_id OR a.entity_type IS DISTINCT FROM 'payment'
                          OR (NOT a.is_active AND (pc.original_amount_cents <> 0 OR pc.balance_cents <> 0))))
       THEN 'CREDIT_SOURCE_MISMATCH'
+    -- every credit came from a Record Payment (overpayment, linked) or a Prepayment Manager check (check, unlinked)
+    WHEN EXISTS (SELECT 1 FROM public.prepay_credits pc
+                  WHERE pc.customer_id = p_customer_id
+                    AND NOT ((pc.source_type = 'overpayment' AND pc.allocation_set_id IS NOT NULL)
+                             OR (pc.source_type = 'check' AND pc.allocation_set_id IS NULL)))
+      THEN 'CREDIT_SOURCE_UNKNOWN'
+    -- every active payment behind the customer's credits adds up (its invoice rows plus its prepay are the check)
+    WHEN EXISTS (SELECT 1 FROM public.allocation_sets a
+                  WHERE a.is_active
+                    AND a.id IN (SELECT pc.allocation_set_id FROM public.prepay_credits pc WHERE pc.customer_id = p_customer_id)
+                    AND (EXISTS (SELECT 1 FROM public.invoice_line_allocations l WHERE l.allocation_set_id = a.id
+                                  AND (l.invoice_id IS NULL OR l.amount_cents <= 0))
+                         OR COALESCE(a.total_allocated_cents, 0) IS DISTINCT FROM
+                            (SELECT COALESCE(sum(l.amount_cents), 0) FROM public.invoice_line_allocations l WHERE l.allocation_set_id = a.id)
+                         OR a.total_payment_cents IS DISTINCT FROM COALESCE(a.total_allocated_cents, 0)
+                            + (SELECT COALESCE(sum(pc.original_amount_cents), 0) FROM public.prepay_credits pc
+                                WHERE pc.allocation_set_id = a.id AND pc.source_type = 'overpayment')))
+      THEN 'SOURCE_PAYMENT_TOTALS'
     WHEN EXISTS (SELECT 1 FROM public.prepay_applications pa
                    JOIN public.prepay_credits pc ON pc.id = pa.prepay_credit_id
                    JOIN public.invoices i ON i.id = pa.invoice_id
@@ -1506,7 +1531,7 @@ BEGIN
         COALESCE(v_set.payment_method, 'not recorded');
     END IF;
     -- An undated payment was never counted as a receipt by Month-End, so it cannot be netted out of one.
-    IF v_set.payment_date IS NULL THEN
+    IF v_set.payment_date IS NULL OR NOT isfinite(v_set.payment_date) THEN
       RAISE EXCEPTION 'PAYMENT_UNDATED: this payment has no payment date; record this bounce by hand';
     END IF;
     IF p_returned_date < v_set.payment_date THEN

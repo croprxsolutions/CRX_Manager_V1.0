@@ -24,7 +24,7 @@
   - An invoice a returned check paid gets a clear refusal on void.
   - Reconciliation (Integrity report) subtracts returned checks.
 - Sol round 2 fixes (same migration, still a local candidate):
-  - A second refund with the same reference and amount needs the admin to confirm it.
+  - A second refund with the same reference needs the admin to confirm it (any amount since round 3).
   - A refund can draw a payment's prepay from the payment's date, is refused if a drawn credit was edited after the refund date, and checks only the credits it draws.
   - A return refuses a drifted credit, a payment whose records don't add up to the check, an undated payment, and a Prepayment Manager check whose buckets can't be identified.
   - The Integrity report stops counting voided payments' allocations.
@@ -39,3 +39,4 @@
   - A returned check never changes a draft, void or deleted invoice.
   - Only admins can read the refund and returned-check records directly; reps still see the statement rows.
   - Void Payment refuses anything that is not a payment.
+  - Round 5: a prepay credit with no known source, or one its payment never funded, blocks refunds and returns for that customer until it is checked by hand; a Prepayment Manager entry that mixes two checks is refused.

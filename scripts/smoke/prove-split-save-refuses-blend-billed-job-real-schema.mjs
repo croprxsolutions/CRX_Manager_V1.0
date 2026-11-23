@@ -36,7 +36,7 @@ const TOUCHED = /(_save_field_app_split_invoice_impl|save_field_app_split_invoic
 // M9 re-emits the void_invoice wrapper with one refusal that fires only for an invoice a returned check paid
 // (money_reversal_lines); this proof's voids have none.
 // Pinned to the reviewed bytes: an edited M9 trips this proof's guard again.
-const LATER_READ_ONLY = new Map([['20270226213000_m9_refunds_and_returned_checks.sql', '9529ea99fd43decd9e426866f920dd17a58d89e07daa0a944fcf1a8cd47d3151']]);
+const LATER_READ_ONLY = new Map([['20270226213000_m9_refunds_and_returned_checks.sql', '375fd2ef3dff0d9777039a12a6eb62bd4e756c6ca8bfcd0525966717b702992c']]);
 const laterReadOnly = (file) => LATER_READ_ONLY.get(path.basename(file)) === createHash('sha256').update(readFileSync(file)).digest('hex');
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',

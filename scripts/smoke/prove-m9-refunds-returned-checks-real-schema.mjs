@@ -43,7 +43,9 @@
  *  14) Sol round 4: the whole customer must agree (a credit minted by another customer's payment, a stored balance
  *      below the credits' total); a Prepayment Manager entry that lists only some of its buckets, or whose buckets do
  *      not add up to its total, is refused; a return refuses a draft or deleted invoice; a rep cannot read the
- *      reversal tables; void_payment refuses a set that is not a payment; -infinity dates are refused.
+ *      reversal tables; void_payment refuses a set that is not a payment; -infinity dates are refused. Round 5: a
+ *      credit with no known source, a credit its payment never funded, an entry mixing two receipts, a negative
+ *      allocation row and a payment dated -infinity are refused.
  *
  * Run: node scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs   (needs Docker)
  * Prints M9_REFUNDS_RETURNED_CHECKS_PROOF_PASS when every case passes; otherwise lists each failing case and why and
@@ -866,6 +868,42 @@ kase('14) Sol round 4: whole-customer gate, partial bucket list, face value, clo
     -- A date of -infinity is not a date (L18).
     ${refusal(refund(C.c4, 1000, 'm9-c14-inf', { date: "'-infinity'::date", ref: 'QB 1402' }))}
     ${refusal(`public.record_returned_check(${pay2}, '-infinity'::date, 'NSF', '${ADMIN}', 'm9-c14-inf-ret')`)}
+    -- Round 5. c8: an overpayment credit with no payment behind it.
+    ${OWNER}
+    INSERT INTO public.prepay_credits (customer_id, original_amount_cents, balance_cents, source_type, source_reference)
+      VALUES ('${C.c8}', 5000, 5000, 'overpayment', 'ORPHAN-15');
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 5000 WHERE id = '${C.c8}';
+    ${as(ADMIN)}
+    ${refusal(refund(C.c8, 1000, 'm9-c14-unknown', { ref: 'QB 1403' }))}
+    -- c9: a $100 all-prepay check payment, plus a $50 credit linked to it that it never funded.
+    SELECT public.allocate_payment('${C.c9}', 10000, 'check', 'M9-C14-P9', '7009', ${TODAY}, 'm9', '[]'::jsonb, '${ADMIN}', 'm9-c14-pay9')::text AS p9 \\gset
+    ${OWNER}
+    INSERT INTO public.prepay_credits (customer_id, original_amount_cents, balance_cents, source_type, source_reference, allocation_set_id)
+      VALUES ('${C.c9}', 5000, 5000, 'overpayment', 'EXTRA-15', (SELECT id FROM public.allocation_sets WHERE customer_id = '${C.c9}' AND check_number = '7009'));
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 5000 WHERE id = '${C.c9}';
+    ${as(ADMIN)}
+    ${refusal(refund(C.c9, 1000, 'm9-c14-extra', { ref: 'QB 1404' }))}
+    -- c3: one entry listing buckets of two different receipts.
+    ${OWNER}
+    INSERT INTO public.prepay_credits (customer_id, original_amount_cents, balance_cents, source_type, source_reference, bucket_label, created_at)
+      VALUES ('${C.c3}', 30000, 30000, 'check', 'MIX-A', 'A', '2026-11-03 15:00Z'), ('${C.c3}', 20000, 20000, 'check', 'MIX-B', 'A', '2026-11-04 15:00Z');
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 50000 WHERE id = '${C.c3}';
+    INSERT INTO public.financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, new_values, total_impact_cents, description)
+      VALUES ('prepay_credit_created', 'prepay_credit', '${C.c3}', '${ADMIN}', jsonb_build_object('reference_number', 'MIX',
+              'credit_ids', (SELECT jsonb_agg(id) FROM public.prepay_credits WHERE customer_id = '${C.c3}' AND source_reference IN ('MIX-A', 'MIX-B')),
+              'total_cents', 50000), 50000, 'legacy');
+    ${as(ADMIN)}
+    ${refusal(`public.record_returned_check(NULL, ${TODAY}, 'NSF', '${ADMIN}', 'm9-c14-mix', (SELECT id FROM public.prepay_credits WHERE source_reference = 'MIX-A'))`)}
+    -- c7: a legacy $100 check payment recorded as $150 and -$50 on one invoice; and one dated -infinity.
+    ${OWNER}
+    INSERT INTO public.allocation_sets (entity_type, entity_id, customer_id, is_active, total_payment_cents, total_allocated_cents, payment_method, check_number, payment_date)
+      VALUES ('payment', gen_random_uuid(), '${C.c7}', true, 10000, 10000, 'check', 'NEG-15', ${TODAY}),
+             ('payment', gen_random_uuid(), '${C.c7}', true, 1000, 0, 'check', 'INF-15', '-infinity');
+    INSERT INTO public.invoice_line_allocations (allocation_set_id, invoice_id, amount_cents, bill_to_customer_id, split_percentage)
+      SELECT a.id, '${INV7}', v.cents, '${C.c7}', 100 FROM public.allocation_sets a, (VALUES (15000), (-5000)) v(cents) WHERE a.check_number = 'NEG-15';
+    ${as(ADMIN)}
+    ${refusal(returned(`(SELECT id FROM public.allocation_sets WHERE check_number = 'NEG-15')`, 'm9-c14-neg'))}
+    ${refusal(returned(`(SELECT id FROM public.allocation_sets WHERE check_number = 'INF-15')`, 'm9-c14-infpay'))}
     -- Reads: an admin sees a refund's record and line; a rep sees no row of either table (case 11's committed return
     -- included).
     SELECT ${refund(C.c4, 1000, 'm9-c14-ok', { ref: 'QB 1401' })}::text AS ok \\gset
@@ -879,8 +917,10 @@ kase('14) Sol round 4: whole-customer gate, partial bucket list, face value, clo
   assert.deepEqual(r.refused.map((m) => /^([A-Z_]+)(?::\s*([A-Z_]+))?/.exec(m)?.slice(1).filter(Boolean).join(': ') ?? m),
     ['RECORD_NEEDS_HAND_CHECK: CREDIT_SOURCE_MISMATCH', 'RECORD_NEEDS_HAND_CHECK: STORED_BALANCE_MISMATCH',
      'RECORD_NEEDS_HAND_CHECK: CHECK_BUCKETS', 'RECORD_NEEDS_HAND_CHECK: CHECK_FACE_VALUE',
-     'RETURN_INVOICE_NOT_OPEN', 'RETURN_INVOICE_NOT_OPEN', 'NOT_A_PAYMENT', 'BAD_VALUE', 'BAD_VALUE'],
-    `another customer's payment behind a credit; a stored balance below the credits; a partial bucket list; a face value that is not the entry's total; a draft and a deleted invoice; a non-payment void; -infinity dates: ${JSON.stringify(r.refused)}`);
+     'RETURN_INVOICE_NOT_OPEN', 'RETURN_INVOICE_NOT_OPEN', 'NOT_A_PAYMENT', 'BAD_VALUE', 'BAD_VALUE',
+     'RECORD_NEEDS_HAND_CHECK: CREDIT_SOURCE_UNKNOWN', 'RECORD_NEEDS_HAND_CHECK: SOURCE_PAYMENT_TOTALS',
+     'RECORD_NEEDS_HAND_CHECK: CHECK_BUCKETS', 'RECORD_NEEDS_HAND_CHECK: PAYMENT_TOTALS', 'PAYMENT_UNDATED'],
+    `another customer's payment behind a credit; a stored balance below the credits; a partial bucket list; a face value that is not the entry's total; a draft and a deleted invoice; a non-payment void; -infinity dates; round 5: an unlinked overpayment credit, a credit its payment never funded, an entry mixing two receipts, a negative allocation row, a payment dated -infinity: ${JSON.stringify(r.refused)}`);
   const o = JSON.parse(r.last);
   assert.equal(o.admin, '1:1', `an admin reads the refund and its line: ${r.last}`);
   assert.equal(o.rep, '0:0', 'a rep reads no reversal rows');

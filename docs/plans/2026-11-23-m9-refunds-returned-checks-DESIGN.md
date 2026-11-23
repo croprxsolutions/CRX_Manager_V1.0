@@ -85,5 +85,6 @@ A read-only live count found 1 customer with prepay, 1 credit, 1 payment set and
 4. `money_reversals` and `money_reversal_lines` are readable by active admins only. Reps still see the statement rows (the statement reads them as definer). No screen reads them as a rep; the Integrity report is admin-only.
 5. `void_payment` refuses a set that is not a payment (`NOT_A_PAYMENT`).
 6. A paid-on or bank date of `-infinity` is refused (`BAD_VALUE`).
-7. Stamp moved to `20270226213000` (after staging's `20270226163000` and the open PRs' stamps).
+7. Round 5 (whole branch after round 4): every credit has a known source (`CREDIT_SOURCE_UNKNOWN`) and every active payment behind the customer's credits adds up (`SOURCE_PAYMENT_TOTALS`); an entry's buckets are one receipt (one reference, one entry time); an allocation row of $0 or less is refused; the preflight pins the recompute trigger's shape; a payment dated `-infinity` is undated.
+8. Stamp moved to `20270226213000` (after staging's `20270226163000` and the open PRs' stamps).
 

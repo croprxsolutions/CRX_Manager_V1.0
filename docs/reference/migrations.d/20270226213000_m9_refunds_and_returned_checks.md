@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** M9, refunds paid outside CRX + prepay balance check + returned (bounced) checks (Mason's decision 18): `20270226213000_m9_refunds_and_returned_checks.sql` (SQL sha256: `9529ea99fd43decd9e426866f920dd17a58d89e07daa0a944fcf1a8cd47d3151`). It must apply after `20270224120000_month_close_payments_received_recheck` (its preflight requires `_month_close_figures_20270208`).
+**LOCAL CANDIDATE — NOT APPLIED.** M9, refunds paid outside CRX + prepay balance check + returned (bounced) checks (Mason's decision 18): `20270226213000_m9_refunds_and_returned_checks.sql` (SQL sha256: `375fd2ef3dff0d9777039a12a6eb62bd4e756c6ca8bfcd0525966717b702992c`). It must apply after `20270224120000_month_close_payments_received_recheck` (its preflight requires `_month_close_figures_20270208`).
 
 **Preflight** pins nine function bodies (md5 of prosrc without CR). For each it also pins the owner, SECURITY DEFINER, search_path, grants (compared as a set), number of defaults, volatility, and an md5 of the argument list with default expressions and result. The bodies:
 - `_recompute_prepay_credit_balance` `62822c67…`
@@ -137,11 +137,18 @@ Also in round 3:
   - L21: `p_paid_on` has no default (it sits before required arguments); the screen sends null.
   - L22, L23: proof hygiene (actor-forgery and cross-operation replay cases; two runners on one reused container).
   - L24: CRLF checkouts trip the skip-list hashes: the safe direction (as round 3 L29).
+- Sol round 5 (24 findings on d09368a8b, the whole branch after round 4). HIGH 1–2 fixed, with cheap MED/LOW fixes:
+  - H1: `CREDIT_SOURCE_UNKNOWN` (a credit that is neither an overpayment linked to its payment nor an unlinked check) and `SOURCE_PAYMENT_TOTALS` (every active payment behind the customer's credits must add up, so a credit its payment never funded is refused).
+  - H2: an entry's buckets must be one receipt (one reference and one entry time), else `CHECK_BUCKETS`.
+  - M4: an allocation row of $0 or less fails `PAYMENT_TOTALS` / `SOURCE_PAYMENT_TOTALS`.
+  - M14: the preflight also pins the recompute trigger's shape (AFTER INSERT OR DELETE, FOR EACH ROW, no WHEN).
+  - L18: a payment dated `-infinity` is refused as undated. L23: changelog wording. L24: this rollback's drop order.
+  - Not changed: M3 (another customer's money on a touched invoice; split billing can legitimately bill another customer, so a strict rule needs Taha's call), M8 (a refund's credit timestamp can flag an older A/R date as unrebuildable: the safe direction), and the repeats of round 4's not-changed items (M5–M7, M9–M13, L15–L17, L19–L22).
 - Stamp: `20270225110000` was restamped to `20270226213000` (after staging's newest, `20270226163000`, and the open PRs' stamps).
 
-**Proof:** `node scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` prints M9_REFUNDS_RETURNED_CHECKS_PROOF_PASS. It runs 14 cases, including the recompute on apply, batch apply, invoice void and void_payment, and a two-session return/void race. The prover applies M9 on its own to a snapshot of the chain just before it.
+**Proof:** `node scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` prints M9_REFUNDS_RETURNED_CHECKS_PROOF_PASS. It runs 14 cases (case 14 holds the round 4 and 5 refusals), including the recompute on apply, batch apply, invoice void and void_payment, and a two-session return/void race. The prover applies M9 on its own to a snapshot of the chain just before it.
 
 **Rollback:** a follow-up migration, valid only while `money_reversals` is empty.
 - Re-create the nine bodies pinned above and restore the audit list.
 - Restore the recompute's EXECUTE grants.
-- Drop the three RPCs, the five helpers (including `_money_reversals_append_only_20270225`), the trigger `trg_recompute_prepay_credits_m9`, and both tables.
+- Drop the trigger `trg_recompute_prepay_credits_m9` first (it depends on a helper), then the three RPCs, the five helpers (including `_money_reversals_append_only_20270225`) and both tables.

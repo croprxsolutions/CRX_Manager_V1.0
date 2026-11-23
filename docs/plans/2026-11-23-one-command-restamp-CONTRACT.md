@@ -22,7 +22,7 @@ than a stamp change still needs a full Sol review.
 - Gates trust the proof's `carry.mode`; the judgment lives only in `restampProblem`
   (`carriedSolProof`, `.claude/hooks/codex-push-lib.mjs:1757`).
 
-## The change (files)
+## The change as first proposed (superseded: the shipped rule is under "Cold challenge" below)
 
 1. `scripts/write-codex-push-proof.mjs` `restampProblem` also accepts:
    - SQL whose LF text equals the old LF text with the stamp swapped, where every changed line sits in the
@@ -91,3 +91,12 @@ The design above was narrowed in response; the shipped rule is:
   (`8df9d755`); #2331 and #2248 restamps carry; #2324 (`22509a8cf2`, SQL changed) refuses.
 - #1 DECISION for Mason: extend "a restamp keeps its Sol review" (2026-11-04, byte-identical SQL) to
   the header self-link + pin case. Recommended yes.
+
+## Luna
+
+- r1 (5): fixed a same-name migration under another stamp on a base (HIGH), a missing record, a bare
+  `--to`; a failed fetch now refuses (r2). No-pin record: a changed SQL now needs its record's one pin (r2).
+- r2 (4, no HIGH): both stamp orders checked; the body-stamp case prints a note and keeps the body.
+- r3 HIGH refuted: restamping above migrations that already landed on staging is the purpose. Staging
+  ran those first, the PR stamp check (`stampProblems`) requires the new stamp above the base's newest,
+  so after the restamp live applies in the order staging did; without it live would flip that order.

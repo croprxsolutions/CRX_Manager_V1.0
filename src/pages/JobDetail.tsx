@@ -49,7 +49,7 @@ import { fetchCurrentWeather, parseCentroid } from '../lib/weatherCapture';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import SectionCard from '../components/ui/SectionCard';
 import SectionJumpBar from '../components/ui/SectionJumpBar';
-import { parseLocalDate, todayInBusinessTz } from '../lib/dateUtils';
+import { parseLocalDate, todayInBusinessTz, BUSINESS_TIMEZONE } from '../lib/dateUtils';
 import { centsTimesQuantity, isExactDecimalText, quantitySurvivesSave } from '../lib/money';
 import { applyChemEdit, autofillPriceText, priceTextInLineUnit, chemLineBillingHazard, chemQuantityDisagreesWithRate, chemQuantityExpectedButZero, chemUnitUnspecifiedSides, unitHasCharacterSaveJobRefuses, fieldAcresSurvivesSave, fmt4, rateDenominatorIsUnrecognized, recomputeChemRowForAcres, reconcileChemAutofillUnits, sumAcres, sumAcresExact, toGallonOrLbEquivalent, type ChemBillingHazard } from '../lib/chemCalculator';
 import { compareToMaxRate, normalizeRateUnit, phiHarvestWarning } from '../lib/labelGuardrails';
@@ -122,6 +122,7 @@ interface JobDbRow {
   id: string;
   job_number: string;
   status: JobStatus;
+  deleted_at?: string | null;
   customer_id: string;
   job_date: string;
   scheduled_time?: string | null;
@@ -412,6 +413,8 @@ export default function JobDetail() {
   // Job form
   const [jobNumber, setJobNumber] = useState('');
   const [status, setStatus] = useState<JobStatus>('scheduled');
+  // #2188: a job removed with Delete Jobs (soft delete) opens read-only, marked deleted.
+  const [deletedAt, setDeletedAt] = useState<string | null>(null);
   // #23: pre-fill the customer when arriving from a customer page
   // (/jobs/new?customer_id=…). Only for a NEW job; existing jobs load their own
   // customer in fetchJob. A stale/bogus id simply renders as no selection.
@@ -1839,6 +1842,14 @@ export default function JobDetail() {
     setLicensesByProfile(byProfile);
   }, [toast, isAdmin]);
 
+  // #2188 (Sol r2): a job found deleted closes any dialog already open, so none can still act on it.
+  useEffect(() => {
+    if (deletedAt === null) return;
+    setPrintOptionsOpen(false); setFieldPickerOpen(false); setShowLicenseOverrideConfirm(false);
+    setShowCompleteConfirm(false); setShowCancelConfirm(false); setShowTransferConfirm(false);
+    setShowPreNoticeConfirm(false); setShowPostNoticeConfirm(false); setDispatchWizardOpen(false);
+  }, [deletedAt]);
+
   const fetchJob = useCallback(async () => {
     // Ticket for THIS run (see loadGenerationRef). A post-save / post-start refetch
     // issued while still on its own job shares the mounted run's ticket and proceeds
@@ -1997,6 +2008,7 @@ export default function JobDetail() {
     // new round trip in phase 1, above the last isCurrentLoad() check.
     setJobNumber(j.job_number);
     setStatus(j.status);
+    setDeletedAt(j.deleted_at ?? null);
     setCustomerId(j.customer_id);
     setJobDate(j.job_date);
     setSavedJobDate(j.job_date);
@@ -2628,13 +2640,7 @@ export default function JobDetail() {
     // previously-saved value (or be rejected by the CHECK). Blank stays allowed
     // (it clears intentionally). Mirrors the mass-edit loaderInputsValid guard.
     // Only a changed value is checked: an older stored value the server would now refuse must not block a notes-only save.
-    const loaderBase = isNew ? { carrier: '', capacity: '' } : savedLoaderRef.current;
-    const loaderError = (carrierRateGpa !== loaderBase.carrier ? loaderNumberError(carrierRateGpa, 'carrier') : null)
-      ?? (tankCapacity !== loaderBase.capacity ? loaderNumberError(tankCapacity, 'capacity') : null);
-    if (loaderError) {
-      toast('error', `${loaderError} Fix it on the Loader Worksheet tab (or clear it).`);
-      return;
-    }
+    if (refuseBadLoaderInputs()) return;
 
     // B5 license gate pre-check — only when assigning or CHANGING the applicator.
     if (applicatorId && applicatorId !== (savedApplicatorId || '')) {
@@ -2657,6 +2663,16 @@ export default function JobDetail() {
     }
 
     await performSave(false, overrideReasonForAudit);
+  };
+
+  /** Toasts and returns true when a CHANGED loader number is out of range (#10). performSave checks
+   *  it too, since the expired-license "Assign Anyway" path calls performSave directly (#2174). */
+  const refuseBadLoaderInputs = (): boolean => {
+    const loaderBase = isNew ? { carrier: '', capacity: '' } : savedLoaderRef.current;
+    const loaderError = (carrierRateGpa !== loaderBase.carrier ? loaderNumberError(carrierRateGpa, 'carrier') : null)
+      ?? (tankCapacity !== loaderBase.capacity ? loaderNumberError(tankCapacity, 'capacity') : null);
+    if (loaderError) toast('error', `${loaderError} Fix it on the Loader Worksheet tab (or clear it).`);
+    return loaderError !== null;
   };
 
   /** Assign the applicator via the override RPC (admin-only path, B5). */
@@ -2791,6 +2807,8 @@ export default function JobDetail() {
       toast('error', 'Field acreage would lose precision when saved. Enter acreage that can be saved unchanged and try again.');
       return;
     }
+    // Before save_job, so a refused loader number never lets the main save commit alone.
+    if (refuseBadLoaderInputs()) return;
 
     setSaving(true);
     try {
@@ -3872,7 +3890,10 @@ export default function JobDetail() {
   }
 
   // A failed customers/fields/products read closes editing until a retry succeeds.
-  const canEdit = isEditable && (isNew || status === 'scheduled' || status === 'in_progress') && lookupLoadFailures.length === 0 && !lookupsLoading
+  const isDeleted = !isNew && deletedAt !== null;
+  // #2188: a deleted job offers nothing that changes it (edit, start, complete, cancel, transfer, print stamps, notices, logs).
+  const officeCanChange = isEditable && !isDeleted;
+  const canEdit = officeCanChange && (isNew || status === 'scheduled' || status === 'in_progress') && lookupLoadFailures.length === 0 && !lookupsLoading
     // Locked while a new job saves: an edit typed then would be neither saved nor warned about.
     && !(isNew && saving);
   // U12: the assigned applicator (job-level applicator_id match — mirrors the
@@ -3887,18 +3908,18 @@ export default function JobDetail() {
   // (hasActiveDispatch) can also start/complete — mirrors the assignment-
   // unification migration's server-side authorization. Cancel/Transfer stay
   // office-only (isEditable) — deliberately NOT widened.
-  const canStart = !isNew && status === 'scheduled' && (isEditable || isAssignedApplicator || hasActiveDispatch);
+  const canStart = !isNew && !isDeleted && status === 'scheduled' && (isEditable || isAssignedApplicator || hasActiveDispatch);
   // #68: also allow completing a still-'scheduled' job (sprayed earlier, keyed in
   // now). handleComplete chains start_job → complete_job so the office skips the
   // fake Start-then-Complete click. Start Job also stays available for the
   // start-now-spray-later flow.
-  const canComplete = !isNew && (status === 'in_progress' || status === 'scheduled') && (isEditable || isAssignedApplicator || hasActiveDispatch);
+  const canComplete = !isNew && !isDeleted && (status === 'in_progress' || status === 'scheduled') && (isEditable || isAssignedApplicator || hasActiveDispatch);
   // Cancel/Transfer are OFFICE decisions (cancelling work or converting it to a
   // billable invoice) — not verified-safe to hand an applicator: Cancel had NO
   // role gate at all before U12 (any of admin/sales_rep/applicator viewing this
   // page could click it), and Transfer's only gate was the job's status.
-  const canCancel = !isNew && (status === 'scheduled' || status === 'in_progress') && isEditable;
-  const canTransfer = !isNew && status === 'completed' && isEditable;
+  const canCancel = !isNew && (status === 'scheduled' || status === 'in_progress') && officeCanChange;
+  const canTransfer = !isNew && status === 'completed' && officeCanChange;
 
   // Selectable customers for a share row = the field owner + any customer (cross-bill).
   const shareInputCls = 'w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg disabled:bg-gray-50';
@@ -3936,13 +3957,15 @@ export default function JobDetail() {
           )}
           {!isNew && (
             <div className="flex items-center gap-2 mt-1.5">
-              <Badge variant={statusVariant[status]}>{status.replace('_', ' ')}</Badge>
+              {isDeleted
+                ? <Badge variant="danger">deleted</Badge>
+                : <Badge variant={statusVariant[status]}>{status.replace('_', ' ')}</Badge>}
               <span className="text-sm text-secondary">{parseLocalDate(jobDate).toLocaleDateString()}</span>
             </div>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
-          {!isNew && fieldRows.some((f) => f.field_id) && chemRows.some((c) => c.product_id) && (
+          {!isNew && !isDeleted && fieldRows.some((f) => f.field_id) && chemRows.some((c) => c.product_id) && (
             <>
               <Button icon={<ClipboardList className="w-4 h-4" />} variant="secondary" onClick={() => setPrintOptionsOpen(true)} loading={generatingSheet !== null}>
                 
@@ -4034,6 +4057,13 @@ export default function JobDetail() {
           )}
         </div>
       </div>
+
+      {isDeleted && (
+        <div role="alert" className="flex items-center gap-2 px-4 py-2.5 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          <Ban className="w-4 h-4 shrink-0" />
+          <span>This job was deleted{deletedAt ? ` on ${new Date(deletedAt).toLocaleDateString('en-US', { timeZone: BUSINESS_TIMEZONE })}` : ''}. It is kept for the record and can no longer be changed.</span>
+        </div>
+      )}
 
       {lookupLoadFailures.length > 0 && (
         <div role="alert" className="flex items-center justify-between gap-3 px-4 py-2.5 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
@@ -4138,7 +4168,7 @@ export default function JobDetail() {
                 reassigning an existing split. */}
             {/* Codex R4 P2: only render for dispatchable statuses — the wizard's
                 RPC rejects anything else with JOB_NOT_DISPATCHABLE at Finish. */}
-            {!isNew && isEditable && (status === 'scheduled' || status === 'in_progress') && (
+            {!isNew && officeCanChange && (status === 'scheduled' || status === 'in_progress') && (
               <button
                 type="button"
                 onClick={openDispatchWizard}
@@ -4978,7 +5008,7 @@ export default function JobDetail() {
             // DELETE policy still restricts an applicator to files they uploaded.
             <JobAttachments
               jobId={id}
-              canEdit={isEditable || (role === 'applicator' && applicatorId === profile?.id)}
+              canEdit={!isDeleted && (isEditable || (role === 'applicator' && applicatorId === profile?.id))}
             />
           )}
 
@@ -4991,7 +5021,7 @@ export default function JobDetail() {
             <div className="flex items-center gap-2">
               {/* #40 Codex P2: a PRE-application notice only on a not-yet-applied job
                   (scheduled / in_progress); hidden on completed / invoiced / cancelled. */}
-              {isEditable && !isNew && id && (status === 'scheduled' || status === 'in_progress') && (
+              {officeCanChange && !isNew && id && (status === 'scheduled' || status === 'in_progress') && (
                 <Button icon={<Bell className="w-4 h-4" />}
                   size="sm"
                   variant={preSendCopy.isResend ? 'secondary' : 'primary'}
@@ -5009,7 +5039,7 @@ export default function JobDetail() {
               {/* #41: a POST-application notice only on an APPLIED job (completed /
                   invoiced); hidden on scheduled / in_progress / cancelled. Same
                   fail-closed gating + re-send safety as the pre control above. */}
-              {isEditable && !isNew && id && (status === 'completed' || status === 'invoiced') && (
+              {officeCanChange && !isNew && id && (status === 'completed' || status === 'invoiced') && (
                 <Button icon={<Bell className="w-4 h-4" />}
                   size="sm"
                   variant={postSendCopy.isResend ? 'secondary' : 'primary'}

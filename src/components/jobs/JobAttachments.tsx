@@ -52,6 +52,8 @@ export default function JobAttachments({ jobId, canEdit = true }: JobAttachments
   const [uploading, setUploading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<JobAttachment | null>(null);
+  // An open delete confirmation closes when editing is taken away, e.g. the job was deleted (#2188, Sol r2).
+  useEffect(() => { if (!canEdit) setConfirmDelete(null); }, [canEdit]);
 
   const refresh = useCallback(async () => {
     try {
@@ -281,9 +283,9 @@ export default function JobAttachments({ jobId, canEdit = true }: JobAttachments
       )}
 
       <ConfirmModal
-        open={confirmDelete !== null}
+        open={canEdit && confirmDelete !== null}
         onClose={() => setConfirmDelete(null)}
-        onConfirm={() => confirmDelete && handleDelete(confirmDelete)}
+        onConfirm={() => canEdit && confirmDelete && handleDelete(confirmDelete)}
         title="Delete attachment?"
         message={`Permanently delete "${confirmDelete?.file_name}"? This removes the file and cannot be undone.`}
         confirmLabel="Delete"

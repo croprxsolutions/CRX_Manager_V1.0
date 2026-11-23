@@ -64,7 +64,7 @@ vi.mock('../lib/productParents', () => {
 });
 vi.mock('../lib/sentry', () => ({ Sentry: { captureException: mockSentryCaptureException } }));
 
-import FieldAppSplitInvoiceEditor from './FieldAppSplitInvoiceEditor';
+import FieldAppSplitInvoiceEditor, { splitBackendError } from './FieldAppSplitInvoiceEditor';
 
 // Fields and products are search pickers (Goal 4, M38): type into one, then click a result.
 async function searchAndPick(box: string, text: string, option: RegExp) {
@@ -407,5 +407,19 @@ describe('FieldAppSplitInvoiceEditor field search picker', () => {
     fireEvent.focus(box);
     fireEvent.change(box, { target: { value: 'Nor' } });
     await waitFor(() => expect(fieldCalls.not).toContainEqual(['id', 'in', expect.stringContaining('field-1')]));
+  });
+});
+
+describe('splitBackendError', () => {
+  it('keeps the blend-billed refusal (#2063) instead of reporting a missing backend', () => {
+    const msg = 'BLEND_TICKET_ALREADY_BILLED: a blend ticket for this job is already billed (invoice INV-1001); billing the job here too would double-bill the customer. If you meant to bill the job here, ask an admin to void or delete that blend-ticket invoice first.';
+    expect(splitBackendError(new Error(msg))).toContain('ask an admin to void or delete that blend-ticket invoice first');
+  });
+  it('keeps the read-committed refusal (#2063) instead of reporting a missing backend', () => {
+    const msg = 'SPLIT_INVOICE_NEEDS_READ_COMMITTED: save a split invoice for a job in a READ COMMITTED transaction, so an invoice billed meanwhile for the same job is seen.';
+    expect(splitBackendError(new Error(msg))).not.toBe('Split billing backend not enabled yet.');
+  });
+  it('still reports a missing backend function', () => {
+    expect(splitBackendError(new Error('function public.save_field_app_split_invoice does not exist'))).toBe('Split billing backend not enabled yet.');
   });
 });

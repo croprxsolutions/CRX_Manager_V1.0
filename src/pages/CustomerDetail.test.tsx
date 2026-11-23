@@ -111,7 +111,7 @@ vi.mock('../hooks/useIdempotencyKey', () => ({
   }),
 }));
 vi.mock('../hooks/useUnsavedChanges', () => ({ useUnsavedChanges: (dirty: boolean) => { dirtyStates.push(dirty); return { state: 'unblocked', reset: vi.fn(), proceed: vi.fn() }; } }));
-vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
+vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn(async () => true) }));
 // KI-77's duplicate check: finds nothing unless a test holds it open.
 const duplicateCheck = vi.hoisted(() => ({ find: vi.fn(async (..._args: unknown[]) => [] as unknown[]) }));
 vi.mock('../lib/customerDuplicates', () => ({ findLikelyDuplicateCustomers: (...args: unknown[]) => duplicateCheck.find(...args) }));
@@ -1003,6 +1003,65 @@ describe('CustomerDetail stale whole-record save', () => {
     })));
   });
 
+  it('an open Timeline re-reads after a reactivation is logged (#2227)', async () => {
+    const inactive = { ...original, is_active: false } as unknown as typeof original;
+    let customerReads = 0;
+    let timelineReads = 0;
+    const entry = (id: string, description: string) => ({ id, description, created_at: '2026-11-20T12:00:00Z', performed_by: null, event_type: 'note' });
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') {
+        return customerQuery(() => {
+          customerReads += 1;
+          return customerReads <= 2 ? inactive : ({ ...original, is_active: true, row_version: 5 } as unknown as typeof original);
+        });
+      }
+      if (table === 'activity_feed') {
+        timelineReads += 1;
+        return query({ data: [entry('a2', 'Customer reactivated'), entry('a1', 'Older entry')], error: null });
+      }
+      return query({ data: [], error: null });
+    });
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    fireEvent.click(screen.getByRole('button', { name: 'Timeline', expanded: false }));
+    await waitFor(() => expect(timelineReads).toBe(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reactivate' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Original Farm is active again.'));
+    await waitFor(() => expect(timelineReads).toBe(2));
+    expect(await screen.findByText('Customer reactivated')).toBeInTheDocument();
+  });
+
+  it('a failed Timeline refresh keeps the shown entries and clears Loading (#2227, Sol r2 MED)', async () => {
+    const inactive = { ...original, is_active: false } as unknown as typeof original;
+    let customerReads = 0;
+    let timelineReads = 0;
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'customers') {
+        return customerQuery(() => {
+          customerReads += 1;
+          return customerReads <= 2 ? inactive : ({ ...original, is_active: true, row_version: 5 } as unknown as typeof original);
+        });
+      }
+      if (table === 'activity_feed') {
+        timelineReads += 1;
+        return timelineReads === 1
+          ? query({ data: [{ id: 'a1', description: 'Older entry', created_at: '2026-11-20T12:00:00Z', performed_by: null, event_type: 'note' }], error: null })
+          : query({ data: null, error: { message: 'boom' } });
+      }
+      return query({ data: [], error: null });
+    });
+    renderDetail();
+    await screen.findByDisplayValue('Original Farm');
+    fireEvent.click(screen.getByRole('button', { name: 'Timeline', expanded: false }));
+    expect(await screen.findByText('Older entry')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reactivate' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', 'Failed to load timeline'));
+    await waitFor(() => expect(screen.queryByText('Loading timeline...')).not.toBeInTheDocument());
+    expect(screen.getByText('Older entry')).toBeInTheDocument();
+  });
+
   it('a stale Reactivate confirmation changes nothing and says so (#2197, Sol HIGH)', async () => {
     const inactive = { ...original, is_active: false } as unknown as typeof original;
     let updatePayload: unknown;
@@ -1022,11 +1081,14 @@ describe('CustomerDetail stale whole-record save', () => {
     });
     renderDetail();
     await screen.findByDisplayValue('Original Farm');
+    eqCalls.length = 0; // only the update's filters from here (Sol MED)
     fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reactivate' }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('changed by someone else')));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Reload the page to check')));
     expect(updatePayload).toEqual({ is_active: true });
     expect(eqCalls).toContainEqual(['row_version', inactive.row_version]);
+    // The update names this customer, not every inactive customer at that version (#2227).
+    expect(eqCalls).toContainEqual(['id', inactive.id]);
     expect(screen.getByText('Inactive')).toBeInTheDocument();
     expect(mockToast).not.toHaveBeenCalledWith('success', expect.anything());
   });
@@ -1060,7 +1122,7 @@ describe('CustomerDetail stale whole-record save', () => {
     fireEvent.click(reload);
     await screen.findByDisplayValue('Newer Farm');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Reactivate' }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('changed by someone else')));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('Reload the page to check')));
     expect(eqCalls).toContainEqual(['row_version', inactive.row_version]);
     expect(eqCalls).not.toContainEqual(['row_version', newerInactive.row_version]);
   });

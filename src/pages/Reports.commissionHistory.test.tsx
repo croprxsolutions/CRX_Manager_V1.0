@@ -175,7 +175,7 @@ describe('Reports commission history', () => {
     // Profitability: only the rep's own Commissions, without the Order Profit column.
     expect(screen.queryByRole('button', { name: 'By Customer' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'By Product' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Revenue Summary' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Booked Sales Summary' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Commissions' })).toBeInTheDocument();
     expect(screen.queryByText('Order Profit')).not.toBeInTheDocument();
 
@@ -266,7 +266,7 @@ describe('Reports commission history', () => {
     renderReports();
 
     expect(screen.getByRole('button', { name: 'By Customer' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Revenue Summary' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Booked Sales Summary' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Financial' }));
     expect(screen.getByRole('button', { name: 'P&L' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Gross Sales' })).toBeInTheDocument();

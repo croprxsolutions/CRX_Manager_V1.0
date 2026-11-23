@@ -9,8 +9,9 @@ export function receiptsToCheckFilter(now: Date) {
   return `status.eq.needs_check,and(status.in.(pending,sending),created_at.lt."${hourAgo}")`;
 }
 
-// close_delivery_receipt (20261221100000): 'manual_send' pauses a queued receipt on the office list before Email
-// Confirmation sends it by hand; 'handled' closes it so the server sender never emails it.
+// close_delivery_receipt (20261221100000, 20270223120000): 'manual_send' pauses a queued receipt on the office list
+// before Email Confirmation sends it by hand; 'handled' closes it so the server sender never emails it. With
+// expectedQueuedAt (the receipt's created_at, exactly as the server sent it) the server acts on that receipt only.
 export type ReceiptCloseReason = 'handled' | 'manual_send';
 export interface ReceiptCloseResult {
   delivery_id: string;
@@ -21,14 +22,19 @@ export interface ReceiptCloseResult {
   queued_at: string | null; // which receipt the answer is about (NULL: none queued)
 }
 
-// The key comes from useIdempotencyKey, scoped by receiptCloseScope, and is reset only after a confirmed answer.
-export const receiptCloseScope = (deliveryId: string, reason: ReceiptCloseReason) => `${deliveryId}:${reason}`;
+// The key comes from useIdempotencyKey, scoped by receiptCloseScope, and is reset only after a confirmed answer. The
+// receipt is in the scope, so a newer receipt gets its own key and a retry of the same one reuses its key (#2251).
+export const receiptCloseScope = (deliveryId: string, reason: ReceiptCloseReason, expectedQueuedAt?: string) =>
+  `${deliveryId}:${reason}:${expectedQueuedAt ?? ''}`;
 
-export async function closeDeliveryReceipt(deliveryId: string, reason: ReceiptCloseReason, idempotencyKey: string) {
+export async function closeDeliveryReceipt(
+  deliveryId: string, reason: ReceiptCloseReason, idempotencyKey: string, expectedQueuedAt?: string,
+) {
   const { data, error } = await supabaseUntyped.rpc('close_delivery_receipt', {
     p_delivery_id: deliveryId,
     p_reason: reason,
     p_idempotency_key: idempotencyKey,
+    ...(expectedQueuedAt ? { p_expected_queued_at: expectedQueuedAt } : {}),
   });
   if (error) throw error;
   return assertRpcResult<ReceiptCloseResult>(data, 'close_delivery_receipt');
@@ -46,16 +52,33 @@ export function isReceiptSendingNow(error: unknown) {
 
 export const RECEIPT_SENDING_NOW_MESSAGE = 'The server is emailing this receipt right now. Try again in a minute.';
 
-// When this delivery's queue row was (re)queued, or null when it has none. Read right before the 'handled' close so a
-// receipt queued again during a hand send is never closed by it (Sol HIGH). shortcut: a client-side re-check, so a
-// re-queue in the milliseconds between this read and the close is not caught; closing it fully needs the RPC to take
-// the expected queued_at (a migration, #2251).
-export async function receiptQueuedAt(deliveryId: string): Promise<string | null> {
-  const { data, error } = await supabase.from('delivery_receipt_queue').select('created_at').eq('delivery_id', deliveryId).maybeSingle();
+export type QueuedReceipt = { status: string; sent_at: string | null; send_authorized_at: string | null };
+
+// This delivery's queued receipt, or null when none is queued. Used only after a hand send that started with no
+// receipt queued, to warn about one queued meanwhile (#2291). A failed read throws: the caller cannot tell.
+export async function readQueuedReceipt(deliveryId: string): Promise<QueuedReceipt | null> {
+  const { data, error } = await supabase.from('delivery_receipt_queue')
+    .select('status, sent_at, send_authorized_at').eq('delivery_id', deliveryId).maybeSingle();
   if (error) throw error;
-  return data?.created_at ?? null;
+  return (data as QueuedReceipt | null) ?? null;
 }
 
-export function sameReceipt(a: string | null, b: string | null) {
-  return a === b || (a !== null && b !== null && Date.parse(a) === Date.parse(b));
+// What to tell the office about a receipt queued while a hand send was going out, or null to say nothing (#2291).
+// A receipt marked handled can still have been emailed (handling keeps sent_at and send_authorized_at), so only
+// one with no send recorded or authorized is quiet.
+export function queuedMeanwhileWarning(row: QueuedReceipt | null): string | null {
+  if (!row) return null;
+  const queued = 'A new receipt was queued for this delivery while the email was sending';
+  if (row.status === 'sent' || row.sent_at || row.send_authorized_at) {
+    return `${queued}, and the server has emailed it or may have. The customer may have two receipts.`;
+  }
+  if (row.status === 'needs_check') return `${queued}. It is on "Customer receipts to check": check it there before sending again.`;
+  if (row.status === 'pending' || row.status === 'sending') return `${queued}. The server may email it too.`;
+  return null;
+}
+
+// The server refused because the delivery's receipt is not the one the screen named (queued again, or gone).
+export function isReceiptChanged(error: unknown) {
+  const message = error && typeof error === 'object' ? (error as { message?: unknown }).message : undefined;
+  return typeof message === 'string' && message.includes('DELIVERY_RECEIPT_CHANGED');
 }

@@ -54,7 +54,7 @@ import { fileURLToPath } from "node:url";
 import { destructiveMigrationCheck } from "./live-testdata-lib.mjs";
 import { accessChangeCheck, dataRewriteCheck } from "./migration-access-lib.mjs";
 import {
-  OWNER_SOL_ACCEPT_PURPOSE, OWNER_SOL_ACCEPT_VIA, OWNER_SOL_SKIP_PURPOSE, OWNER_SOL_SKIP_VIA, reasonProblem, skipSelection, solAcceptFileName,
+  OWNER_SOL_ACCEPT_PURPOSE, OWNER_SOL_ACCEPT_VIA, OWNER_SOL_SKIP_PURPOSE, OWNER_SOL_SKIP_VIA, reasonProblem, skipSelection, alreadySkippedIn, solAcceptFileName,
   solSkipFileName, solSkipSummary,
 } from "./sol-accept-lib.mjs";
 
@@ -275,6 +275,8 @@ const BOOKKEEPING_TYPES = new Set([
 ]);
 const isBookkeeping = (e, currentPrompt) => BOOKKEEPING_TYPES.has(e?.type) ||
   (e?.type === "system" && e.subtype === "stop_hook_summary") ||
+  // The turn timer (no content in 267 real records, 2026-11-22); one carrying text still ends the scan.
+  (e?.type === "system" && e.subtype === "turn_duration" && (e.content == null || String(e.content).trim() === "")) ||
   (e?.type === "queue-operation" &&
     (e.content == null || String(e.content).trim() === String(currentPrompt ?? "").trim()));
 const isToolResult = (e) => e?.type === "user" && Array.isArray(e.message?.content) && e.message.content.length > 0 &&
@@ -664,11 +666,13 @@ export function recordReplyApproval({
   if (form !== "accept" && solAccept) return no(`the request for code ${code} is a Sol finding; accept it with: accept ${code} followed by your reason`);
   if (!selftest && !solAccept && !solSkip && p.purpose !== OWNER_APPROVAL_PURPOSE) return no(`the request for code ${code} is not a migration approval request`);
   let selected = null;
+  let ignored = null;
   if (solSkip) {
     if (!/^[0-9a-f]{40}$/i.test(String(p.prHead)) || !Array.isArray(p.findings)) return no(`the request for code ${code} names no usable head or findings`);
-    const sel = skipSelection(skip, p.findings);
+    const sel = skipSelection(skip, p.findings, alreadySkippedIn(dir, p));
     if (sel.problem) return no(sel.problem);
     selected = sel.numbers;
+    ignored = sel.ignored ?? null;
   }
   const why = String(reason ?? "").trim();
   if (solAccept && reasonProblem(why)) {
@@ -696,6 +700,7 @@ export function recordReplyApproval({
     ...(solAccept ? { reason: why } : {}),
     // One receipt for every finding he skipped in this reply, so a crash never records half of them.
     ...(solSkip ? { selected } : {}),
+    ...(ignored ? { ignored } : {}),
     replyMark: mark,
   };
   const out = path.join(dir, selftest ? selfTestResultName(code)
@@ -801,6 +806,8 @@ export const OWNER_TRUST_FILES = Object.freeze([
   ".claude/hooks/migration-landing-gate-lib.mjs",
   ".claude/hooks/codex-push-lib.mjs",
   "scripts/apply-migration-file.mjs",
+  // Decides whether the #2193 live prerequisite passes (Sol HIGH).
+  ".claude/hooks/migration-prerequisite-lib.mjs",
   "scripts/owner-approve-migration.mjs",
   ".claude/hooks/sol-accept-lib.mjs",
   "scripts/owner-accept-sol-finding.mjs",

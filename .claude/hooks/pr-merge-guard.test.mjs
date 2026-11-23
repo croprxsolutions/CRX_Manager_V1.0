@@ -603,7 +603,7 @@ ok(
   "the proof's ancestry checks run through the budgeted hardGateGh",
 );
 ok(
-  /proofValidForMerge\(\{\s*data,\s*headSha,\s*nowMs:\s*Date\.now\(\),\s*baseSha,\s*isAncestor:\s*isAncestorOnGitHub,\s*mergeBase:\s*mergeBaseOnGitHubOnce,\s*prCommits\s*\}\)/.test(gateRequestSource),
+  /proofValidForMerge\(\{\s*data,\s*headSha,\s*nowMs:\s*Date\.now\(\),\s*baseSha,\s*isAncestor:\s*isAncestorOnGitHub,\s*mergeBase:\s*mergeBaseOnGitHubOnce,\s*prCommits,\s*baseRef:\s*base\s*\}\)/.test(gateRequestSource),
   "the proof scan binds the proof to this head, GitHub's base and GitHub's ancestry answers",
 );
 ok(
@@ -635,7 +635,7 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(/firstAcceptedProof\(proofs, headSha, \(data, exactHead\) =>\s*proofValidForMerge\(\{ data, headSha[^\n]*\)\s*&& \(exactHead \|\| !solRiskOnGitHub\(\{ baseSha: data\.head_sha, headSha, repo: request\.repo, gh: hardGateGh \}\)\.risky\)\);/.test(gateRequestSource),
     "an earlier Sol proof is accepted only when the commits after it are low risk; exact-head proofs are tried first");
   // Owner acceptances count only for the PR they were given for (Sol gate round 3, 2026-11-21).
-  ok(/prCommits \}\) && ownerAcceptedForPr\(data, \{ number: pr\.number, url: pr\.url, exactHead \}\)\r?\n/.test(gateRequestSource), "an owner-accepted proof counts only for its own pull request, at its exact version");
+  ok(/prCommits, baseRef: base \}\) && ownerAcceptedForPr\(data, \{ number: pr\.number, url: pr\.url, exactHead \}\)\r?\n/.test(gateRequestSource), "an owner-accepted proof counts only for its own pull request, at its exact version");
   ok(/"--json", "number,url,baseRefName/.test(gateRequestSource), "the merge gate reads the pull request's address");
   ok(/const valid = proof !== null;/.test(gateRequestSource), "only an accepted proof opens the Sol allow point");
   ok(/const risk = solRiskOnGitHub\(\{\s*baseSha,\s*headSha,\s*repo:\s*request\.repo,\s*gh:\s*hardGateGh\s*\}\);/.test(gateRequestSource),
@@ -714,6 +714,12 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   };
 
   ok(check(proof(), { baseSha: B0 }), "a proof bound to the base the merge lands on still counts");
+  // Review kind (Sol r5 HIGH 1, #2226): a proof that records it counts only for a PR into that branch.
+  ok(check(proof({ review_ref: "origin/staging", release_rules: false }), { baseRef: "staging" }), "a staging review counts for a staging PR");
+  ok(!check(proof({ review_ref: "origin/main", release_rules: true }), { baseRef: "staging" }), "a release review never counts for a staging PR");
+  ok(!check(proof({ review_ref: "origin/staging", release_rules: false }), { baseRef: "main" }), "a staging review never counts for a main PR");
+  ok(!check(proof({ review_ref: "origin/staging", release_rules: true }), { baseRef: "staging" }), "release rules count only for main");
+  ok(check(proof(), { baseRef: "staging" }), "a proof from before review kinds were recorded is judged as before");
   ok(check(proof()), "main moved forward after the review: the proof of the unchanged head still counts");
   ok(!check(proof({ head_sha: X })), "a proof of a different head never counts");
   ok(!check(proof({ base_sha: X })), "a proof whose base the head does not contain never counts");

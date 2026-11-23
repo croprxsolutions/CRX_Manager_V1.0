@@ -12050,6 +12050,7 @@ export type Database = {
       }
       quote_sections: {
         Row: {
+          confidence: string | null
           field_id: string | null
           id: string
           needed_by_date: string | null
@@ -12058,8 +12059,10 @@ export type Database = {
           section_name: string
           section_notes: string | null
           sort_order: number
+          timing: string | null
         }
         Insert: {
+          confidence?: string | null
           field_id?: string | null
           id?: string
           needed_by_date?: string | null
@@ -12068,8 +12071,10 @@ export type Database = {
           section_name?: string
           section_notes?: string | null
           sort_order?: number
+          timing?: string | null
         }
         Update: {
+          confidence?: string | null
           field_id?: string | null
           id?: string
           needed_by_date?: string | null
@@ -12078,6 +12083,7 @@ export type Database = {
           section_name?: string
           section_notes?: string | null
           sort_order?: number
+          timing?: string | null
         }
         Relationships: [
           {
@@ -18574,15 +18580,19 @@ export type Database = {
       cleanup_rate_limits: { Args: never; Returns: undefined }
       close_accounting_period: {
         Args: {
+          p_commissions_reviewed?: boolean
           p_idempotency_key?: string
+          p_payments_reviewed?: boolean
           p_performed_by: string
           p_period_end: string
+          p_reviewed_token?: string
         }
         Returns: Json
       }
       close_delivery_receipt: {
         Args: {
           p_delivery_id: string
+          p_expected_queued_at?: string
           p_idempotency_key?: string
           p_reason: string
         }
@@ -20106,6 +20116,7 @@ export type Database = {
         }[]
       }
       get_program_completion: { Args: { p_season?: number }; Returns: Json }
+      get_purchasing_plan: { Args: { p_months_ahead?: number }; Returns: Json }
       get_quote_cost_alerts: {
         Args: { p_quote_id: string }
         Returns: {

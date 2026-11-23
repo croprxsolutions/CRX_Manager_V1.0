@@ -209,13 +209,109 @@ assert.ok(
     .every((local) => !candidateMigrationPaths.has(path.resolve(local))),
   'candidate migration was classified into the surrounding replay',
 );
+// Live-only storage policy/bucket migrations: storage.objects/buckets are owned by the platform and absent from this disposable database.
+const STORAGE_OWNED_SKIPS = new Set([
+  '20260914100700_customer_document_bytes_server_only.sql',
+  '20261015230000_staff_photo_storage_access.sql',
+  '20261016030000_staff_photo_buckets_private.sql',
+]);
+// One-shot live-data migrations are withheld from the replay plan; record each in the ledger at its place in the order, as live has it (later preflights read it).
+const ONE_SHOT_STEMS = Object.keys(JSON.parse(readFileSync(path.join(ROOT, 'supabase', 'baselines', 'one-shot-migrations.json'), 'utf8')).one_shot).sort();
+const ledgerOneShots = new Set();
+function recordOneShotsBefore(name) {
+  for (const stem of ONE_SHOT_STEMS) {
+    if (stem >= name || ledgerOneShots.has(stem)) continue;
+    ledgerOneShots.add(stem);
+    recordLedger(stem);
+  }
+}
+function recordLedger(stem) {
+  sql(`INSERT INTO supabase_migrations.schema_migrations (version, name, statements) SELECT '${stem.slice(0, 14)}', '${stem}', ARRAY[]::text[] WHERE NOT EXISTS (SELECT 1 FROM supabase_migrations.schema_migrations WHERE name = '${stem}') ON CONFLICT (version) DO NOTHING;`);
+}
+// Batch 2's preflight pins live's auth.uid() body (the image's reads only request.jwt.claim.sub); install live's exact body, as the other real-schema provers do.
+const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
+  + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
+  + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
+  + '  )::uuid\n';
+function installLiveAuthUid() {
+  adminSql(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $live_uid$${LIVE_AUTH_UID_SRC}$live_uid$;`);
+}
+// 20261104150000 (WP-PM-9, live) pins three live function bodies that the historical LF replay
+// does not reproduce; install them exactly as PM-9's own prover does, right before that file.
+const FORMS_SEED_EACH = '20261104150000_product_forms_seed_each.sql';
+const LIVE_BODY_MD5 = {
+  'public.field_app_priced_quantity(numeric,text,text,text)': 'bc91a52577840973f18f1710e47edf2b',
+  'public.convert_to_gl_lb(numeric,text,text)': 'ce9265521821c09b0cf74de45afb375b',
+  'public.validate_product_units()': '83a51c58c83cd83bea760bd117410a38',
+};
+
+function bodyFrom(file, expression) {
+  const match = expression.exec(readFileSync(path.join(migrationDir, file), 'utf8'));
+  assert.ok(match, `${file} no longer contains its pinned function body`);
+  return match[1];
+}
+function restoreLiveBodies() {
+  // Historical replay uses LF staging; validate_product_units had CRLF in live prosrc.
+  const validate = bodyFrom('20260211000000_unit_tracking_pricing_overhaul.sql',
+    /CREATE OR REPLACE FUNCTION validate_product_units\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$;/)
+    .replaceAll('\r\n', '\n').replaceAll('\n', '\r\n');  // same bytes on an LF or CRLF checkout
+  const field = bodyFrom('20260630180000_field_app_pricing_unit_fix.sql',
+    /CREATE OR REPLACE FUNCTION public.field_app_priced_quantity\([\s\S]*?AS \$fapq\$([\s\S]*?)\$fapq\$;/);
+  const seededConvert = bodyFrom(FORMS_SEED_EACH,
+    /CREATE OR REPLACE FUNCTION public.convert_to_gl_lb\([\s\S]*?AS \$function\$([\s\S]*?)\$function\$;/).replaceAll('\r\n', '\n');
+  const seedArm = "  IF lower(coalesce(p_product_form, '')) IN ('seed','each') THEN RETURN QUERY SELECT NULL::numeric, NULL::text; RETURN; END IF;\n";
+  assert.equal(seededConvert.split(seedArm).length - 1, 1);
+  const convert = seededConvert.replace(seedArm, '');
+  sql(`CREATE OR REPLACE FUNCTION public.validate_product_units() RETURNS trigger LANGUAGE plpgsql
+    SET search_path = public, pg_temp AS $live_validate$${validate}$live_validate$;`);
+  sql(`CREATE OR REPLACE FUNCTION public.field_app_priced_quantity(
+      p_applied_qty numeric, p_rate_unit text, p_inventory_unit text, p_product_form text)
+    RETURNS numeric LANGUAGE plpgsql IMMUTABLE SET search_path = public, pg_temp
+    AS $live_field$${field}$live_field$;`);
+  sql(`CREATE OR REPLACE FUNCTION public.convert_to_gl_lb(
+      p_total_applied numeric, p_rate_unit text, p_product_form text)
+    RETURNS TABLE(converted_value numeric, converted_unit text) LANGUAGE plpgsql IMMUTABLE
+    SET search_path = public AS $live_convert$${convert}$live_convert$;`);
+  for (const [signature, expected] of Object.entries(LIVE_BODY_MD5)) {
+    assert.equal(scalar(`SELECT md5(prosrc) FROM pg_proc WHERE oid = '${signature}'::regprocedure;`),
+      expected, `${signature} is not the pinned live body before the candidate`);
+  }
+}
+const LIVE_UNIT_ROWS = "('3f5c3827-8523-4b42-9913-ad479588ff95'::uuid, 'Dry oz', 1, 'dry', '1 dry ounce'), ('5ed18e4b-c4d9-42fc-b85e-22babd3fc098'::uuid, 'Ea', 1, 'both', 'Each / unit'), ('f9e10e66-5027-464e-bb9e-ed9800875256'::uuid, 'fl oz', 1, 'liquid', '1 fluid ounce'), ('4406cacd-a7fe-42db-8c84-694e61bb937b'::uuid, 'g', 0.03527396, 'dry', '1 gram = 0.03527396 dry ounces (1000 mg)'), ('29d05e43-cb40-461b-a969-88ee299faca8'::uuid, 'Gal', 128, 'liquid', '1 gallon = 128 fluid ounces'), ('53997e31-d152-4ab6-b768-d1aa81b657bf'::uuid, 'Lb', 16, 'dry', '1 pound = 16 dry ounces'), ('fc5d349f-b58c-48f1-991d-fa0161fd3d01'::uuid, 'LB', 16, 'dry', '1 pound (capitalized alias)'), ('ddde7daf-8090-492b-aed9-c0b7f8ecfd34'::uuid, 'MG', 0.00003527396, 'dry', '1 milligram = 0.00003527396 dry ounces'), ('438d5f7b-f015-4319-b2b7-4f9a672cb350'::uuid, 'oz', 1, 'liquid', '1 fluid ounce (alias for fl oz)'), ('b69ddac6-68ed-4f1d-8e09-e63a7fa6635a'::uuid, 'Oz', 1, 'liquid', '1 fluid ounce (capitalized alias)'), ('a31f95a0-df80-4025-977f-f1fb4e5c8d53'::uuid, 'Pt', 16, 'liquid', '1 pint = 16 fluid ounces'), ('35532f45-2fd0-4400-87d8-3509a58377c0'::uuid, 'qt', 32, 'liquid', '1 quart lowercase (alias for Qt)'), ('915f25ff-8876-4a49-a375-940047e38313'::uuid, 'Qt', 32, 'liquid', '1 quart = 32 fluid ounces'), ('722e8d86-8e68-47d8-a940-209fad38c70e'::uuid, 'Unit', 1, 'both', 'Each / unit (alias for Ea)')";
+// Preflights of later migrations pin live reference rows the schema-only baseline lacks; give them live's, as the other real-schema provers do.
+function seedLiveReferenceRowsFor(name) {
+  // BLK-1a's preflight needs live's count units (live has Ea and Unit, factor 1, both).
+  if (name === '20261117130000_tote_fill_from_bulk.sql') {
+    sql(`INSERT INTO public.unit_conversions (unit, factor_oz, unit_type) SELECT u, 1, 'both' FROM (VALUES ('Ea'), ('Unit')) v(u) WHERE NOT EXISTS (SELECT 1 FROM public.unit_conversions WHERE unit = v.u);`);
+  }
+  // RT-1's preflight pins live's unit factors; give it live's 14 unit rows.
+  if (name === '20261229110000_product_rates_draft.sql') {
+    adminSql(`SET session_replication_role = replica; DELETE FROM public.unit_conversions; INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS}; SET session_replication_role = origin;`);
+  }
+  // Live ran REG-1's one-time seed before this file; its preflight refuses without the seed row.
+  if (name === '20270106110000_invoice_brands_rup.sql') {
+    adminSql(`SET session_replication_role = replica; INSERT INTO public.epa_registration_seed_run (seeded_by, rup_default, fingerprint) SELECT '00000000-0000-4000-8000-000000000000', 'unknown', 'units-proof' WHERE NOT EXISTS (SELECT 1 FROM public.epa_registration_seed_run); SET session_replication_role = origin;`);
+  }
+}
 function applyMigration(local, marker) {
   const name = path.basename(local);
+  recordOneShotsBefore(name);
+  seedLiveReferenceRowsFor(name);
+  if (name === FORMS_SEED_EACH) restoreLiveBodies();
+  if (name === '20261016140000_bind_stock_replay_receipts_batch2.sql') installLiveAuthUid();
+  // Batch 4a refuses to apply while an unexpired receipt exists (live waits 24 hours); the receipts this proof's own earlier steps wrote are aged past expiry instead.
+  if (name === '20261102180000_bind_money_replay_receipts_batch4a.sql') sql(`UPDATE public.idempotency_keys SET expires_at = now() - interval '1 second' WHERE expires_at IS NULL OR expires_at >= now();`);
+  if (STORAGE_OWNED_SKIPS.has(name)) {
+    console.log(`POST_BASELINE_MIGRATION_SKIPPED_STORAGE_OWNED ${name}`);
+    recordLedger(name.slice(0, -4));
+    return;
+  }
   const remote = `${marker}_${name}`;
   copySql(local, remote);
   const ownsTransaction = /^[ \t]*BEGIN[ \t]*;/mi.test(readFileSync(local, 'utf8'));
   if (ownsTransaction) sql(`\\i /tmp/${remote}`);
   else applyFile(remote);
+  recordLedger(name.slice(0, -4)); // later migrations' ordering preflights read the ledger
   console.log(`POST_BASELINE_MIGRATION_APPLIED ${name}${ownsTransaction ? ' (self-transacted)' : ''}`);
 }
 
@@ -293,7 +389,7 @@ CREATE TABLE IF NOT EXISTS storage.buckets (
 );
 CREATE TABLE IF NOT EXISTS storage.objects (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text NOT NULL,
-  name text NOT NULL, owner_id text
+  name text NOT NULL, owner_id text, metadata jsonb, created_at timestamptz DEFAULT now(), UNIQUE (bucket_id, name)
 );
 CREATE OR REPLACE FUNCTION storage.foldername(name text)
 RETURNS text[] LANGUAGE sql IMMUTABLE
@@ -301,6 +397,10 @@ AS $$ SELECT string_to_array(name, '/') $$;
 CREATE OR REPLACE FUNCTION storage.filename(name text)
 RETURNS text LANGUAGE sql IMMUTABLE
 AS $$ SELECT split_part(name, '/', array_length(string_to_array(name, '/'), 1)) $$;
+GRANT USAGE ON SCHEMA storage TO postgres;
+GRANT ALL ON storage.objects, storage.buckets TO postgres;
+-- As live has it: row security on, which job_access_ends_with_the_job's baseline check requires.
+ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 `);
   applyFile('acl.sql');
   adminSql('\\i /tmp/platform.sql');
@@ -313,6 +413,8 @@ CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
 );
 \\i /tmp/migration-history.sql
 `);
+  // delivery_completion_evidence's preflight needs the private delivery-proof buckets, as live has them.
+  sql(`INSERT INTO storage.buckets (id, name, public) VALUES ('delivery-photos', 'delivery-photos', false), ('delivery-signatures', 'delivery-signatures', false) ON CONFLICT (id) DO NOTHING;`);
   for (const local of preCandidateMigrations) applyMigration(local, 'pre_candidate');
   console.log(`PRE_CANDIDATE_POST_BASELINE_REPLAY_PASS count=${preCandidateMigrations.length} baseline_high_water=${BASELINE_MANIFEST.migrations_high_water}`);
   // The concurrency contract is entirely in public/auth. The storage platform
@@ -326,7 +428,12 @@ CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
   const vendor = scalar(`INSERT INTO public.vendors(name) VALUES ('[PROOF] period vendor ${process.pid}') RETURNING id;`);
   const date = '2025-01-15', end = '2025-01-31', monthKey = 2025 * 12 + 1 - 1;
   const bill = (key, d = date) => `${claims()} SELECT public.create_vendor_bill('${vendor}'::uuid,NULL,'proof-${key}','${d}',NULL,NULL,1000,0,NULL,'${key}');`;
-  const close = key => `${claims()} SELECT public.close_accounting_period('${end}'::date,'${ADMIN}'::uuid,'${key}');`;
+  // #2175 (20270224120000, replayed after the candidates): once present, the close re-checks the reviewed figures'
+  // token; the baseline below runs before it, with the 3-argument close.
+  const close = key => scalar(`SELECT to_regprocedure('public._month_close_figures_20270208(date,date)') IS NOT NULL`) === 't'
+    ? `${claims()} SELECT public.close_accounting_period('${end}'::date,'${ADMIN}'::uuid,'${key}',
+    public.get_monthly_summary(date_trunc('month','${end}'::date)::date,'${end}'::date)->>'review_token',true,true);`
+    : `${claims()} SELECT public.close_accounting_period('${end}'::date,'${ADMIN}'::uuid,'${key}');`;
   const recordPayment = (billId, key, amount = 100) => `${claims()} SELECT public.record_vendor_payment('${billId}'::uuid,${amount},'${date}'::date,'check',NULL,NULL,'${key}');`;
   const voidPayment = (paymentId, key) => `${claims()} SELECT public.void_vendor_payment('${paymentId}'::uuid,'proof void','${key}');`;
   const voidBill = (billId, key) => `${claims()} SELECT public.void_vendor_bill('${billId}'::uuid,'proof void','${key}');`;
@@ -508,7 +615,7 @@ SELECT public._section9_record_vendor_payment_intent_impl_20260826(
   sql(`DROP TRIGGER proof_pause_period ON public.accounting_periods; DROP FUNCTION public._proof_pause_period(); DELETE FROM public.accounting_periods WHERE period_start='2025-01-01';`);
   console.log('CANDIDATE_CLOSE_SAME_KEY_SERIALIZATION_PASS');
   sql(`${claims()} INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES ('00000000-0000-0000-0000-0000000000a2','period-proof-applicator@example.invalid','{"full_name":"Period Proof Applicator","role":"applicator"}'::jsonb) ON CONFLICT DO NOTHING; INSERT INTO public.profiles(id,email,role,is_active) VALUES ('00000000-0000-0000-0000-0000000000a2','period-proof-applicator@example.invalid','applicator',true) ON CONFLICT (id) DO UPDATE SET role=EXCLUDED.role,is_active=true;`);
-  sql(`INSERT INTO public.products(product_name, inventory_unit) VALUES ('[PROOF] sibling smoke product ${process.pid}', 'Gal');`);
+  sql(`INSERT INTO public.products(product_name, unit_size, inventory_unit, product_form) VALUES ('[PROOF] sibling smoke product ${process.pid}', 'Gal', 'Gal', 'liquid');`);
   for (const sibling of SIBLING_SMOKES) {
     run(['cp', path.join(ROOT, 'scripts', 'smoke', sibling), `${NAME}:/tmp/${sibling}`]);
     const siblingResult = sql(`${claims()}\n\\i /tmp/${sibling}`, { fail: true });
@@ -597,15 +704,16 @@ SELECT public._section9_record_vendor_payment_intent_impl_20260826(
   sql(`DROP TRIGGER proof_pause_bill_update ON public.vendor_bills; DROP FUNCTION public._proof_pause_bill_update();`);
   console.log('CANDIDATE_UPDATE_SHARED_REVERSE_MONTH_COMPLETION_PASS');
 
-  // Mutation-sensitive canonical-order proof. The reverse input is Feb -> Jan,
-  // and this live candidate demonstrably requests Jan first: holding Jan
-  // exclusively leaves it NOT GRANTED with no granted Feb lock. The static
-  // source test separately requires the helper's ascending ORDER BY clause.
+  // Reverse input Feb -> Jan with January held exclusively: the update must wait on January and
+  // then finish with the right date. Since KI-19 (20261103220000) check_period_open takes the
+  // old month's lock first, so February may already be granted; Mason accepted that order on
+  // 2026-11-22 (#2233: a rare 40P01 cancel, nothing written). The static source test still
+  // requires the helper's ascending ORDER BY clause.
   const reverseInput = scalar(`${bill('order-reverse-input', '2025-02-15')}`);
   const h6 = session(`BEGIN; SELECT pg_advisory_xact_lock(73492010, ${monthKey}); SELECT 'JAN_EXCLUSIVE_HELD'; SELECT pg_sleep(${BARRIER_SECONDS}); COMMIT;`, 'JAN_EXCLUSIVE_HELD'); await h6.ready;
   const reverseOrder = session(`BEGIN; SELECT 'REVERSE_ORDER_STARTED'; ${update(reverseInput, '2025-01-15', 'order-reverse-input-update')} COMMIT; SELECT 'REVERSE_ORDER_DONE';`, 'REVERSE_ORDER_STARTED'); await reverseOrder.ready;
   await waitForMonthLock(monthKey, 'ShareLock', false, 1, 'reverse-input canonical first January lock');
-  assert.equal(scalar(`SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND classid=73492010 AND objid=${febKey} AND mode='ShareLock' AND granted`), '0');
+  console.log(`[prover] reverse input: February ShareLock granted while waiting on January = ${scalar(`SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND classid=73492010 AND objid=${febKey} AND mode='ShareLock' AND granted`)} (KI-19 order, accepted in #2233)`);
   await h6.done; const reverseOrderResult = await reverseOrder.done; assert.equal(reverseOrderResult.code, 0, reverseOrderResult.err);
   assert.equal(scalar(`SELECT bill_date::text FROM public.vendor_bills WHERE id='${reverseInput}'::uuid`), '2025-01-15');
   console.log('CANDIDATE_UPDATE_CANONICAL_JAN_FIRST_PASS');

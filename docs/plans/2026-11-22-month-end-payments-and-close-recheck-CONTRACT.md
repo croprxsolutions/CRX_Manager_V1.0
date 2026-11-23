@@ -1,0 +1,210 @@
+# Behavior contract: Month-End payments received (KI-129 / #2195) + close re-check (#2175)
+
+Read at `origin/staging` def05e704 (branch `claude/lane-b-2195`, cut 2026-11-22). One PR: DECISION_LOG 2026-11-21 ("month close keeps
+saving the figures current at the click") says the payments-received follow-up must include the close re-check.
+
+## Facts (source)
+
+- `get_monthly_summary` (newest body `20270206110000_pnl_commission_share_billed.sql` §2) totals `payments` (legacy table;
+  0 rows live) and the close impl `_close_accounting_period_replay_impl_20261015` (same file §4) sums `payments` with **no
+  `deleted_at` filter**. Live (read-only, 2026-11-22): 0 legacy payments, 1 active `allocation_sets` row of
+  `entity_type='payment'`, 1 `prepay_credits` row (`overpayment`, made by that payment), 0 prepay checks.
+- Record Payment = `allocate_payment`: one `allocation_sets` row, `entity_type='payment'`, `total_payment_cents` = the check,
+  `payment_date` always set (defaults to Chicago today, `check_period_open` under the month lock). Any part not applied to
+  invoices becomes a `prepay_credits` row `source_type='overpayment'` with `allocation_set_id` = that set.
+- Void = `void_payment`: sets `allocation_sets.is_active=false` (row kept).
+- Prepayment check = `create_prepay_check_splits`: one or more `prepay_credits` rows `source_type='check'`, no allocation set,
+  no date column but `created_at` (all splits of one check share `created_at`, `customer_id`, `reference_number`).
+  `edit_prepay_credit` rewrites `original_amount_cents` (= new balance + applied); `delete_prepay_credit` sets
+  `original_amount_cents` = amount already applied (0 if none). Neither takes the month lock.
+- Statement (`20261103120000` §statement) already uses allocation sets (`is_active`, `entity_type='payment'`) + live legacy rows.
+- Screen `src/pages/MonthEndClose.tsx`: shows `get_monthly_summary`; payments and commissions need a "reviewed" tick (screen
+  only); `close_accounting_period(p_period_end, p_performed_by, p_idempotency_key)` saves its own receipt figures.
+
+## Outcome and authority
+
+1. **Payments received** (summary `payments.count/total_cents` and receipt `payments_received_cents`) = one helper
+   `_month_payments_received_20270208(start, end)`:
+   - active `allocation_sets` `entity_type='payment'`, `payment_date` in the month (a new CHECK `allocation_sets_payment_has_date` makes it required for payment sets; Sol round 2):
+     `total_payment_cents` (the whole check, including any overpayment part);
+   - prepayment checks: `prepay_credits.source_type='check'`, Chicago `created_at` date in the month, current
+     `original_amount_cents` > 0; one check = distinct (customer, created_at, source_reference): every split of one check is written by one call, so shares `created_at` (transaction time) and `source_reference` (set once from the check number, never edited; the editable `reference_number` is left out);
+   - legacy `payments` with `deleted_at IS NULL`, `payment_date` in the month (dollars summed exactly, rounded once to cents).
+   Overpayment prepay credits are NOT added again (already inside their payment). Credit memos, prepay applications and
+   write-offs are not money received.
+2. **Close re-check**: `get_monthly_summary` adds `review_token` = md5 of every period figure it shows except today's AR,
+   plus the figures the close receipt saves. `close_accounting_period` gains `p_reviewed_token text`,
+   `p_payments_reviewed boolean`, `p_commissions_reviewed boolean`. Under the month lock it recomputes the same figures once
+   and **refuses** with `CLOSE_FIGURES_CHANGED` when the token differs, or `CLOSE_REVIEW_REQUIRED` (reload) when it is missing; refuses (`CLOSE_REVIEW_REQUIRED`) when
+   payments exist and `p_payments_reviewed` is not true, or commission is non-zero and `p_commissions_reviewed` is not true.
+   The receipt is built from that same computed set, so what was compared is what is saved. The screen, on that refusal,
+   reloads the figures, clears the ticks, and says the figures changed.
+3. Who may act: unchanged (active admin for summary and close; wrapper + impl both check). New helpers: no grants to
+   `anon`/`authenticated`/`PUBLIC` (SECURITY DEFINER callers only). Screen values: period end and token are compared, never
+   trusted for figures; actor is `auth.uid()`.
+4. Files: new migration `supabase/migrations/20270224120000_month_close_payments_received_recheck.sql` + record + changelog,
+   `src/pages/MonthEndClose.tsx` (+ test), prover `scripts/smoke/prove-month-close-payments-recheck-real-schema.mjs`,
+   contract tests that pin the close signature, KI/plan docs.
+
+## State and failure
+
+- No automatic record changes. Close still writes only `accounting_periods` + the replay receipt.
+- Signature change: the 3-argument `close_accounting_period` and its impl are dropped and recreated with the 3 new
+  defaulted arguments (no overload left). The already-deployed screen calls with 3 arguments → gets `CLOSE_REVIEW_REQUIRED`
+  (token missing, "reload") until the new screen deploys; month close is a once-a-month admin action, so this short window is
+  accepted (stated in the PR).
+- Replay: a retry with the same key returns the saved receipt without re-checking (the fingerprint stays actor + period
+  end), so a timed-out successful close still replays even if figures moved after it.
+- Timing: double click / retry → same key → replay. Two admins → month lock + "already closed". Figures edited between
+  page load and click → refused, screen reloads. Edit racing the close itself → impl computes once, compares and saves
+  that one set (READ COMMITTED within one statement).
+- Existing rows: legacy deleted payments stop counting (live: none). Saved receipts are never rewritten.
+- Undo: reopen unchanged.
+
+## Delivery
+
+One PR: `close_accounting_period` and `get_monthly_summary` are already live (the name stays), so CI's live-function list
+passes before the apply; split not needed (memory rule exception for already-live functions).
+
+## Proof cases (real migrated DB, disposable container, rolled back)
+
+1. Month with one active allocation-set payment ($1,500.00, $300 of it overpayment), one voided set, one deleted legacy
+   payment, one live legacy payment ($50.00), one prepayment check split in two buckets ($200 + $100), one deleted prepay
+   check (nothing applied), one overpayment credit → summary payments = 3 payments, $1,850.00; before the migration it
+   showed the legacy total only.
+2. Close with the token from the summary + both ticks → closes; receipt `payments_received_cents` = 185000.
+3. Change one figure (edit the prepay check) after reading the token → close refused `CLOSE_FIGURES_CHANGED`, period stays open.
+4. Missing token (old 3-argument call) → refused.
+5. Payments present, `p_payments_reviewed` false → `CLOSE_REVIEW_REQUIRED`; commission non-zero and not ticked → same.
+6. Retry with the same key after a successful close, after a figure changed → same receipt replayed.
+7. Sales rep → refused for both; anon cannot execute; helpers have no `authenticated` grant.
+8. Browser (local app against the local/staging DB, never production): summary shows the allocation-set payment; a stale
+   close shows the "figures changed" message and reloads.
+
+## Open business decisions
+
+1. **Prepayment checks in "payments received"** (DECISION_LOG 2026-11-21 asked for a rule). Options: (a) count each
+   prepayment check in the month it was entered, at its current amount (an edit or delete later changes that month's
+   screen figure, never a saved close receipt); (b) leave prepayment checks out (only Record Payment money counts).
+   **DECIDED (Mason, 2026-11-22): (a)**, "yes should count as payment received" (DECISION_LOG 2026-11-22).
+
+## Cold challenge (Astra gpt-6.2-astra high, 2026-11-22, 56 findings) and how each settled
+
+- **Corrected:** prepay-check grouping drops the reference (#2; an edit to one split's reference would make two payments);
+  the screen enables Close only with a review token for the selected month and tells "figures changed" apart from
+  "confirm a tick" and "reload, the app was updated" (#22, #23, #46); the token includes the period start and end, so a
+  token for another month or a partial range never passes (#27); proof adds splits written by the real
+  `create_prepay_check_splits` sharing `created_at` (#4), a partial delete, an edit, a voided payment, a null payment date
+  near Chicago midnight, a today's-AR-only change that must not block the close, an inactive admin, and the replay after
+  a refused stale close (#6, #13, #28, #29, #42, #43).
+- **Disproved:** #8 (a later void rewrites a closed month): `_void_payment_replay_impl_20261015` calls
+  `check_period_open(payment_date)` (`20261204100000` line ~994), so a closed month's payment cannot be voided.
+  #9 legacy rounding: `payments.payment_date` is `date`; per-row rounding (the summary's) is kept; live has 0 rows.
+  #10–#12 legacy/historical shapes: live read-only 2026-11-22: 0 legacy payments, 1 allocation set (dated), 1
+  overpayment credit linked to it, 0 prepay checks. #36 one snapshot: the impl reads the figures once into one value and
+  builds both the comparison and the receipt from it. #38 precedence: "already closed" is checked before the review checks.
+  #30: helpers are granted only to service_role (as the KI-125 helpers), the impl to nobody; the prover checks the ACLs.
+  #47: the new screen on an old database cannot close (no token in the old summary → Close stays disabled).
+- **Re-labelled DECISION (to Mason, one question):** #1, #5, #6, #7 — whether prepayment checks count, at their current
+  amount, in the month entered.
+- **Declined / follow-ups (not this fix; each predates it):** #16–#19 the deliveries and needs-pricing checklist items are
+  screen-only (a server rule for them is a new business rule); #20–#21 the receipt keeps its own invoice/order/delivery
+  bases (now covered by the token, so a change to them still refuses); #24–#26 the review is of displayed totals, with the
+  same predicates on both sides; #34/#37 a prepay check edited after the close changes the month's screen figure, not the
+  saved receipt (same as every other figure today, DECISION_LOG 2026-11-21); #39–#41 replay after a reopen is unchanged
+  behavior; #50 true two-session races: the month lock already serializes every month-dated writer
+  (`check_period_open`); prepay edits are not month-dated. #54/#55 smaller designs: the shipped design already uses one
+  private figures function for summary and close; the audit-log-based prepay count needs its own historical proof and is
+  not smaller.
+
+## Sol round 1 (gpt-6.2-sol high, 2026-11-22) and how each settled
+
+- **Fixed:** the screen sent `null` for a missing token (type error) → sends nothing; prepay checks group also by
+  `source_reference` (two checks entered in one transaction stay two payments; proof case); legacy dollars summed
+  before one rounding; the vendor-bill concurrency proof uses the 3-argument close before this migration exists; any
+  close refusal reloads the figures; the "figures changed" message no longer claims it already reloaded; contract wording.
+- **Refuted (evidence):** HIGH "an undated payment voided under another month": `allocate_payment` always stores
+  `payment_date` (defaults to Chicago today, line ~215 of `20261103220000`); live read-only 2026-11-22: 0 undated payment
+  sets of 1; the void writer is Taha's (to 2026-12-15) and unchanged here. HIGH "a prepay edit racing the close": the
+  edit either lands before the close's single read (and is in the saved figure) or after it (the same end state as an
+  edit made just after the close, which DECISION_LOG 2026-11-22 accepts: the screen figure moves, the saved receipt
+  does not); prepay writers are Taha's and take no month lock today. MED "cutover window": accepted above (State and
+  failure), stated in the PR.
+
+## Sol round 2 (2026-11-22) and how each settled
+
+- **Fixed:** HIGH (round 1 #2 again) "a void of an undated payment checks today's month": the migration adds CHECK
+  `allocation_sets_payment_has_date` (payment sets must carry `payment_date`; the apply stops if any is undated; live
+  0 of 1), and the report uses `payment_date` only, so the report month and the month `void_payment` locks are always
+  the same; a void in a closed month is refused. No writer function changed (`allocate_payment` already always sets
+  it). LOW: any failed close closes the confirmation dialog so the cleared checklist is visible.
+- **Refuted / accepted (evidence):** MED legacy rounding/NaN: `public.payments` is marked superseded with zero writers
+  (`20260809170700`), 0 rows live; round 1 asked for sum-first, round 2 for per-row: either way $0 today. MED two checks
+  with the same customer, check number and transaction: Prepayment Manager saves one check per call; the same check
+  number twice in one call is not a real entry. MED a prepay entry left uncommitted across midnight: same class as
+  round 1 HIGH #3 (prepay writers are Taha's and take no month lock; the saved receipt is not rewritten, the screen
+  figure moves, as DECISION_LOG 2026-11-22 accepts). MED rush-order count not in the token: screen-only checklist item,
+  declined above (#16-#19). MED cutover: accepted (State and failure). LOW number precision: needs a total above
+  $90 trillion.
+
+## Sol round 3 (2026-11-22) and how each settled
+
+- **Fixed:** HIGH (round 1 #3 / round 2 MED #4 again) "a prepay edit commits between the close's check and the month
+  being marked closed": the close impl now takes `LOCK TABLE public.prepay_credits IN SHARE MODE` after the month
+  lock and before computing the figures, so an in-flight Prepayment Manager write finishes first (then the token no
+  longer matches and the close refuses) or waits until the close commits (then it is a post-close edit: screen figure
+  only, DECISION_LOG 2026-11-22). Writers unchanged; the hold lasts only for the close transaction. Proof case: a
+  close waits for an in-flight edit. LOW: the rollback note now drops `allocation_sets_payment_has_date` too.
+- **Refuted / accepted (evidence):** MED legacy `payments` rounding/NaN (round 2, unchanged: superseded table, 0 rows,
+  no writers). MED `orders.total_price` NaN: the close receipt's order count and the summary's order total are the
+  same expressions as before (the summary already converted that total); no new conversion of an order amount is
+  introduced. MED untyped prepay checks from an older writer: live read-only 2026-11-22 shows 0 `prepay_credits` rows
+  with `source_type` NULL. MED rush orders, MED cutover, LOW grouping, LOW number precision: as round 2.
+
+## Sol round 4 (2026-11-22) and Mason's decision
+
+- Round 4 HIGHs: the round-3 `prepay_credits` SHARE lock can deadlock with an invoice void (void updates
+  `prepay_credits`, then takes a write-off month lock); delivery voids and commission payouts dated in another month
+  can change a reviewed figure while the close runs. Same mechanism (writers racing the close itself) for the third
+  round, so per AGENTS.md the business trade-off went to Mason.
+- **Decision (Mason, 2026-11-22, option A):** the re-check catches edits made while the admin reviews; an edit saved
+  in the same instant as the Close click shows on the screen, not on the saved receipt, the same as an edit after the
+  close. The prepay lock is removed (no deadlock); no writer is changed. DECISION_LOG 2026-11-22.
+
+## Sol round 5 (2026-11-22) and how each settled
+
+- HIGH (new mechanism, the close retry key): a close whose reply was lost kept its key; after a reopen, a second close
+  in the same tab replayed the old receipt and said "closed" while the month stayed open. Fixed: the screen retires
+  the close key whenever it sees the month closed (`MonthEndClose.tsx`), test "closes again with a fresh key after a
+  lost close reply and a reopen" (fails without the fix). Bug captain approved the fix.
+- MED rollback record: now drops the payment-date constraint and ships with a revert of this screen. Fixed.
+- MED legacy cents/NaN, untyped prepay rows, same-transaction checks, rush checklist; LOW e2e keys, number precision:
+  same as rounds 2-3 (legacy `payments` has 0 rows live; 0 untyped prepay rows; rush orders are screen-only;
+  e2e follow-up listed).
+
+## Sol round 6 (2026-11-22) and Mason's decision
+
+- HIGH (same retry-key path as round 5): a close whose reply is lost, then a reopen from another tab before this tab
+  refreshes, leaves this tab's key alive; its next close replayed the old receipt while the month was open.
+  Both captains: stop and ask Mason. **Decision (Mason, 2026-11-22, Lane B session): "Database refuses it".** The
+  close impl now replays a saved receipt only while the month is still closed (checked under the month lock; the
+  pre-lock early replay is removed), else `CLOSE_REOPENED_SINCE`; the screen retires the key and asks to close again.
+  Proof case and screen test added. DECISION_LOG 2026-11-22.
+- MED `smoke-unpost-invoice.sql` / `smoke-unpost-invoice-group.sql` inserted undated payment sets, which the new
+  constraint refuses: both now set `payment_date`. Other provers that insert undated sets stop before this migration.
+- MED legacy cents/NaN, prepay grouping, split rollout; LOW e2e (#2245), number precision, private impl types: as
+  rounds 2-5.
+- Luna on ff8906222: MED "ticks survive a reopen" refuted (the page learns of a reopen only through `fetchData`, which
+  clears every tick first, `MonthEndClose.tsx:149-153`); LOW legacy cents as before; LOW rpc-functions.md now names
+  `CLOSE_REOPENED_SINCE`.
+
+## Sol round 7 (2026-11-22) and Mason's decision
+
+- HIGH (retry-key path, third round): after a reopen and a re-close with a new key, the old key replayed its
+  superseded receipt. Bug captain: stop, no patch. **Decision (Mason, 2026-11-22, Lane B session): "Refuse it".** A
+  replay now requires the month's current close to be the one that key made: the key's `idempotency_keys.created_at`
+  (saved in the close's own transaction) must equal the period's `closed_at`, read FOR SHARE under the month lock
+  (which also waits for an uncommitted reopen: the round-7 MED on lock order). Otherwise `CLOSE_REOPENED_SINCE`.
+  Proof: close, reopen, old key refused, new payment, re-close with a new key, old key still refused, new key replays.
+- MED rollback note: now drops the 6-argument functions first. Fixed.
+- MED untyped prepay rows, grouping, legacy cents, cutover; LOW precision, private impl types: as rounds 2-6.

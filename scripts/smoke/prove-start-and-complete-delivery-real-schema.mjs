@@ -56,7 +56,9 @@ const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + '  )::uuid\n';
 const LIVE_AUTH_UID_MD5 = 'cdef18c69c4f4cbbced2eaf81e628b49';
 const SMOKE = path.join(ROOT, 'scripts', 'smoke');
-const CHAIN = path.join(SMOKE, 'smoke-start-and-complete-delivery.sql');
+// The live chain calls the later 10-argument signature; this proof replays only to the candidate (8 arguments), so it runs a frozen candidate-era copy.
+const LIVE_CHAIN = 'smoke-start-and-complete-delivery.sql';
+const CHAIN = path.join(SMOKE, 'fixtures', 'start-and-complete-delivery-candidate-era.sql');
 const SPECS = path.join(SMOKE, 'smoke-specs.json');
 // Every other non-container chain that completes a delivery or a job. Each must keep passing after
 // the candidate if it passed before it (some need live data this database lacks; those are
@@ -293,7 +295,7 @@ function main() {
   assert.ok(after.pass, `AFTER: the chain failed: ${after.fail}`);
   const movedDoc = movedSequences(seqBefore, sequences()).filter((s) => documentNumberSequences().has(s));
   const spec = JSON.parse(readFileSync(SPECS, 'utf8')).specs.start_and_complete_delivery;
-  assert.ok(spec && spec.chain === path.basename(CHAIN), 'smoke-specs.json has no entry for the chain');
+  assert.ok(spec && spec.chain === LIVE_CHAIN, 'smoke-specs.json has no entry for the chain');
   if (movedDoc.length) assert.equal(spec.container_only, true, `AFTER: the chain drew document numbers (${movedDoc.join(', ')}) but its spec is not container_only`);
   console.log(`[prover] AFTER: the chain passes and rolls back; document-number sequences moved: ${movedDoc.join(', ') || 'none'} (CONTAINER ONLY)`);
   covering('AFTER', passedBefore);

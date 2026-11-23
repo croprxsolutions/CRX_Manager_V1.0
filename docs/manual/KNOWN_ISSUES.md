@@ -26,7 +26,7 @@ this pass; treat as open until someone checks).
 **Where other facts live (not here).** Applied-migration ledger, row counts and high-water mark:
 `docs/reference/migration-history.md`. Current status: `CURRENT_STATE.md`. Settled decisions: `DECISION_LOG.md`.
 
-**Update rules.** When a finding is found, fixed, or decided, edit THIS file (do not start another issue list).
+**Update rules.** A NEW finding goes in its own file in [`known-issues.d/`](known-issues.d/README.md) (2026-11-22; read it together with this file). When an item here is fixed or decided, edit THIS file (do not start another issue list).
 A fixed item is removed from here and its text (with the PR or migration that fixed it) is appended to the
 archive. Do not re-fix something listed here as ACCEPTED without a new decision from Mason.
 
@@ -74,7 +74,7 @@ Each item's full entry is in its area section below. "Severity unsure" marks a r
 | Guards and release | SOL-12 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A release-pass command naming an invalid PR number counts as approval for the open release. | Agent (land #2203) |
 | Guards and release | KI-48 | HIGH (severity unsure) | Open | Some protections around applying live database changes have known gaps; the live migration ledger is the backstop. | Mason decision |
 | Reports | SOL-7 | HIGH | PR #2201 open into staging | A broken or absurd order total would distort the commission in profit reports. | Agent (land #2201) |
-| Reports | KI-129 (+#2195) | HIGH | Partly open | Month-end close counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. | Agent (unassigned) |
+| Reports | KI-129 (+#2195) | HIGH | Fix in PR (payments part) | Month-end close counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. Fix: migration `20270224120000` (with the #2175 close re-check). | Lane B agent |
 | Reports | KI-125 | HIGH | Fixed on staging, not live | Profit reports showed a fake large loss because commission was counted on sales billed elsewhere. | Taha (release) |
 | Field applications | #2196 | HIGH | Open | A sales rep may still be able to delete a completed, billable job outside the screens, so it drops out of Unbilled Jobs. | Mason (field-app billing) |
 | Field applications | KI-185 | HIGH | Open | A job sprayed on 80 acres but planned at 100 bills for 100, and deducts stock for 100. | Mason (field-app billing) |
@@ -255,19 +255,17 @@ KI-126 and KI-130 (#2149) keep their own entries.
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · MED · Agent (unassigned) · plan W2-06.
+> **Re-checked 2026-11-22 on staging `a77855293`:** Partly open · MED · Agent (unassigned) · plan W2-06.
 
-**MED · OPEN (sender and app switch live; close action live in the database, not on a screen yet) · UI/database/Edge Function · Claude**
-The database half is live (`20261113140000`, PR #1495): a receipt asked for at completion is recorded in the same
-save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`, PR #1647) was deployed live on
-2026-11-08 with `verify_jwt` off, and the office "Customer receipts to check" card is on Deliveries. The app switch
-that asks for the server receipt (PR #1649) merged 2026-11-09. Not built: provider bounce handling (no email
-bounces are tracked today on any path). The database half of a "mark handled" action is live
-(`20261221100000_close_delivery_receipt`, ledger `20261109152447`, PR #1678), but no screen calls it yet (checked on
-`main` 2026-11-10), so the points below still hold. The office
-card lists every unsent receipt with no age cut-off, so one the office already handled stays listed, and a manual
-Email Confirmation does not pause a worker retry (Sol MED, PR #1647), so the customer can get a second copy. Mason
-chose (2026-11-08) to land the app switch first; the close action's screen is the remaining follow-up.
+**MED · PARTLY OPEN (retry, close action and its screens built; email bounces not tracked) · UI/database/Edge Function · Claude**
+A receipt asked for at completion is recorded in the same save in `delivery_receipt_queue` (`20261113140000`,
+PR #1495) and emailed with retries by the Edge Function `send-delivery-receipts` (PR #1647, live 2026-11-08); the app
+switch to the server receipt merged 2026-11-09 (PR #1649). The close action `close_delivery_receipt`
+(`20261221100000`, ledger `20261109152447`, PR #1678) now has its screens (2026-11-22): each row on "Customer receipts
+to check" (Deliveries) has **Mark handled**, so a handled receipt leaves the list and the server never emails it, and
+Email Confirmation pauses any receipt still queued before its hand send, then marks it handled once the email goes
+out (a failed hand send leaves it on the list). Still open: provider bounce handling (no email bounces are tracked
+on any path). The three rare duplicates Mason accepted on 2026-11-09 (DECISION_LOG) stay accepted.
 
 ### KI-26 — Delivery completion-evidence leftovers
 
@@ -465,7 +463,7 @@ the RPCs, atomic create. Repair step 2 (To-Do 0.17), before the pre-season count
 (also refuses the same row twice on one count; concurrent claims serialized); a count's status only moves forward (in progress
 to completed or cancelled, completed to cancelled), so no count can be reopened or reversed twice; signed-in users lose direct UPDATE on `cycle_counts` and `cycle_count_items`, so a
 completed count cannot be marked cancelled without its reversal and a line's variance is only what the save RPC computed (a direct line insert may set only the four columns the app sends). **Still open here:** the three-request creation (a failed create leaves an empty open count, which
-now blocks a new count at that warehouse until it is cancelled from the Cycle Counts screen).
+now blocks a new count at that warehouse until it is cancelled from the Cycle Counts screen). **In progress (Lane E, 2026-11-22):** `create_cycle_count` (`20270209160000`) does the whole start in one step; the screen switch and removing the direct inserts follow.
 
 ### KI-163 — Small stock-history gaps
 
@@ -490,6 +488,9 @@ names from products. Live: 3 POs match no vendor (PO-2026-0030, PO-2026-0018, PO
 Fix: add `vendor_id` set by `save_purchase_order`, keep the text as a snapshot; backfilling the 3 is To-Do decision 23.
 
 ### KI-151 — Changing PO line costs is still checked against the ordered value
+
+> **Fix in review (Lane E, 2026-11-22):** Mason chose "judge against what arrived" (DECISION_LOG 2026-11-22). Migration
+> `20270223100000_po_cost_cut_judged_against_received.sql` uses the KI-143 limit; applies after the KI-197 migration.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-12.
 
@@ -536,6 +537,8 @@ running local test app.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-15.
 
+> **In progress (Lane E, 2026-11-22):** database part (expected cost check, migration `20270217120000`) in review; the screen sends it in a follow-up PR; the "Most recent received PO" label is its own small PR.
+
 **LOW · OPEN (source-confirmed) · purchasing · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 2) · unassigned**
 - `set_purchase_order_item_costs` (`20261021140000` ~L513, only definition) takes the line and new cost only
   (`PurchaseOrderDetail.tsx` ~L1370). Saves are serialized and logged in cost history, but a second admin working from
@@ -575,7 +578,7 @@ spelling on receipt.
 | ID | Sev | Status | What goes wrong | Owner | Plan |
 |---|---|---|---|---|---|
 | #2190 | MED | Open | Two deliveries completing at the same moment on the same products can make one fail and need a retry; nothing is saved wrongly. | Agent (unassigned) | W2-12 |
-| #2193 | MED | Open | If applied before the EPA batch, the one-time load commits with some ingredients missing their groups and never fills them later. | Agent (unassigned) | W2-13 |
+| #2193 | MED | FIXED-ON-STAGING | If applied before the EPA batch, the one-time load commits with some ingredients missing their groups and never fills them later. Fixed: the live-apply tooling refuses the load until at least 90 of its 123 list rows match an active ingredient on live (shows the count). | Agent (Lane D) | W2-13 |
 | #2172 | LOW | Open | A very large batch (about 3,000 approvals) could make Confirm silently send nothing. Not reachable today (hundreds of rates). | Agent (unassigned) | W3-16 |
 | #2135 | LOW | Fix in review (`20270213100000`, branch `claude/lane-c2-single-short-stock`) | Staff see an inflated short-stock count and get two warnings and two notifications; stock math is right. | Agent (unassigned) | W3-17 |
 | #1912 | LOW | On staging, not live | Retry keys with hidden characters are now refused. Issue can be closed once released. | Agent (unassigned) | R-13 |
@@ -998,6 +1001,8 @@ today. Fix: use the `is_application_fee` case `save_invoice` already uses, plus 
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · HIGH · Agent (unassigned) · plan W1-01 · #2149 (count part), #2195 (payments part). Invoice count fixed on staging (#2149). Payments received still totals the old payments table, counts deleted payments and misses allocation-set receipts (#2195, Sol on #2189), so a month paid through allocations can show $0 received.
 
+> **2026-11-22:** payments part fixed in local candidate `20270224120000_month_close_payments_received_recheck.sql` (one PR with #2175): Record Payment checks + prepayment checks (month entered, current amount) + live legacy payments; the close re-checks the reviewed figures.
+
 **MED · PARTIAL (the close receipt's invoice count is fixed on staging with KI-125 (#2149), awaiting the production release; payments received is OPEN, a follow-up: it needs a rule for prepayment checks, which can be edited or deleted later, and a re-check at close that the figures still match what the admin reviewed) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #6)**
 Both read the legacy `payments` table (0 rows; payments now live in `allocation_sets`), so the one July 2026 customer
 payment shows as $0. The close summary also counts only invoices still `posted`, missing ones since paid or overdue.
@@ -1013,6 +1018,9 @@ Where: `get_monthly_summary` and `_close_accounting_period_replay_impl_20261015`
 has the real as-of figure. Fix: relabel "Current AR (today)" or reuse `get_ar_aging(p_period_end)`.
 
 ### KI-133 — Profitability and Gross Sales report booked orders as "revenue" without saying so
+
+> **Fix in review (Lane E, 2026-11-22):** the reports say "Booked Sales" with a one-line basis note. Drafts need no
+> filter: the database refuses a draft order status (`orders_status_check`), so Gross Sales cannot include one.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-26.
 
@@ -1037,6 +1045,9 @@ same share. Fix later: enforce the payable rule, per sale and per paid share, in
 - **Commission basis ignores the standing discount (re-verified 2026-11-21, [2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md)).** Order commission is figured from `orders.total_profit` before the standing grower discount (`20270117130000_standing_discount_in_order_profit.sql` ~L21 says "commission after the discount is its own planned change"), while the invoice and profit reports subtract the discount. Not tracked elsewhere; latent on production while the billing switch is off. Separate from the payout gap above (payout checks pending status ~L1154-1183 and header-to-items balance ~L744-761 in `20261204100000`, but no customer-payment eligibility). To-Do 8.5 needs two distinct acceptance checks: commission is figured on profit after the standing discount, and it is released in proportion to customer payments.
 
 ### KI-135 — "Inventory Value" label: relabel as pricing-basis value (D12 item 7)
+
+> **Fix in review (Lane E, 2026-11-22):** labels say "price-list cost"; the per-row report and CSV mark rows left out of
+> the total (CSV value blank, "In Total" column); profit and margin carry the saved-pricing-cost note.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-27.
 
@@ -1428,6 +1439,7 @@ overwrite each other (one settings record). Fix depends on who owns crop program
 ### KI-182 — The Purchase Orders screen uses guessable retry codes
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-31 · #2047.
+> **2026-11-22:** FIXED-ON-STAGING once branch `fix/ki182-po-random-retry-codes` merges: the bulk Cancel on the Purchase Orders list now sends one random code per PO (shared `useIdempotencyKey`), reused only for a retry of that PO's cancel. The PO detail page already used random codes.
 
 **MED · OPEN · purchasing · found 2026-11-21 (Sol round 9, #2047) · unassigned**
 Every app action shares one table of retry codes (idempotency keys). The PO screen builds its cancel code from the user
@@ -1685,13 +1697,18 @@ tools. `scripts/backup-claude-memory.mjs:476` refuses the same way.
 
 ### KI-51 — Supplier-pricing Phase 3C containment and time-bombs
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-41. The containment check caps history at 4,096 commits and main already has more; check whether new-branch pushes are affected.
+> **Re-checked 2026-11-22 on staging `f8ee14ee8`:** Resolved for new-branch pushes · LOW · plan W2-41.
 
-**MED · OPEN · tooling-guards · unassigned**
+**LOW · RESOLVED (cap) · tooling-guards**
 The trusted containment check is not a required check on `main` (rules: Vercel, Lint/Type/Test/Build, SQL
-Migration Validation). The first-push ancestry cap is 4,096 commits (`scripts/check-supplier-pricing-phase3-private-artifacts.mjs:25`);
-`main` has 3,032 and grows ~200/month, so about five months until every new branch push is blocked; raise it before
-then. Byte/candidate scan budgets (3 GiB, 100,000) need re-measuring. Maintenance watch.
+Migration Validation). History cap: 4,096 commits (`MAX_HISTORY_COMMITS` in
+`scripts/check-supplier-pricing-phase3-private-artifacts.mjs`); `origin/main` has 4,463 and `origin/staging` 4,550.
+**New-branch pushes are not affected** (checked 2026-11-22): the pre-push check scans only commits not on the
+remote's advertised default branch, so a new branch cut from staging scanned 87 commits and passed. CI scans only
+`base..head` for pull requests and runs on push only for `main` and `staging`, which are never created new. The cap
+still refuses a new-branch push when the checkout has no local copy of `main` (not fetched) or pushes to a URL that
+differs from the remote's fetch URL; that refusal now names the fix (fetch, push by remote name, push again).
+Byte/candidate scan budgets (3 GiB, 100,000) need re-measuring. Maintenance watch.
 
 ### KI-52 — Tests and tooling hygiene
 
@@ -1724,15 +1741,20 @@ against a live generation.
 
 ### KI-84 — The split-billing backfill smoke chain fails on current `main`
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-40 · #1110.
+> **Re-checked 2026-11-22 on staging `045464a22`:** Resolved · LOW · plan W3-40 · #1110.
 
-**LOW · OPEN · tooling/smoke · unassigned (Mason, 2026-10-27: noted, not now)**
-`scripts/smoke/smoke-backfill-refuse-split-billing.sql` stops before `SMOKE_PASS_ROLLBACK` on a current-main
-database. It completes a delivery with a direct `UPDATE`, which 20261022075000 now refuses
-(`COMPLETION_EVIDENCE_REQUIRED`). It also needs the versioned `post_invoice_group` branch, using the pattern in
-`smoke-field-app-split-penny-exact.sql`. This is a test gap, not a customer defect: the refusal it proves stays
-live, and `prove-quote-customer-row-version-real-schema.mjs` still runs the chain in its old form on the July
-catalog (#1110). Done = the chain passes on main and still fails first against 20261006200000 (CRX-LIFE-001).
+**LOW · RESOLVED 2026-11-22 · tooling/smoke**
+`scripts/smoke/smoke-backfill-refuse-split-billing.sql` reaches `SMOKE_PASS_ROLLBACK` on a database built from the
+baseline plus every migration (338 replayed, through `20270213100000`). Earlier repairs (#1523, #1524, #2057) already
+completed the delivery under the `crx.delivery_completion_evidence` marker that 20261022075000 requires, used the
+versioned `post_invoice_group` call and the split claim, and gave test products a form and sold unit, so the chain
+itself needed no further edit. It cannot run on the catalog just before 20261006200000 (it stops on the later
+split-claim rule). With 20261006200000's refusal reverted in a scratch database only (CHECK dropped, wrapper type
+refusal removed) it fails first on `create_split_invoices_from_order created field_application invoices from an
+order`, its CRX-LIFE-001 assertion. `prove-order-invoice-type-gate-real-schema.mjs` runs on that old catalog, so
+#2234 gives it the frozen copy `scripts/smoke/fixtures/backfill-refuse-split-billing-candidate-era.sql` (the chain as of
+`342135561`); `prove-quote-customer-row-version-real-schema.mjs` and four other provers already pull their
+candidate-era form from git.
 
 ### KI-96 — Unused code and copied helpers make every change slower
 
@@ -1771,17 +1793,17 @@ cases only. Workaround: run a delete or cleanup as its own command, not in one t
 
 ### KI-113 — The customer-document byte-boundary prover is out of date
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-43 · #1698, #1663, #635.
+> **Re-checked 2026-11-22 on staging `f8ee14ee8`:** Resolved (after phase) · LOW · plan W3-43 · #1698, #1663, #635.
 
-**LOW · OPEN · tooling-tests · source: #1698 (from #1663)**
-`scripts/smoke/prove-customer-document-bytes-server-only.mjs` (PR #635) builds a hand-made scratch project (a
-`profiles`/`customers` fixture plus `20260717013415`, then `20260914100700`) and serves today's
-`customer-document-files`. Its `--phase=after` fails on `profiles.email NOT NULL`, and today's function also relies on
-later migrations (`20261013220000`, `20261222100000`) its fixture lacks, so a one-line email fix would not make it
-pass. Not a customer risk today: live read-only 2026-11-09, the `customer-documents` bucket is private and no
-`storage.objects` policy names it or omits `bucket_id`, so browser users reach its files only through
-`customer-document-files`; the 2026-11-08 local click-through (KI-07) exercised that path. No other prover covers this
-boundary. Fix when next needed: rebuild it on the real-schema harness.
+**LOW · RESOLVED 2026-11-22 · tooling-tests**
+`scripts/smoke/prove-customer-document-bytes-server-only.mjs --phase=after` runs again on today's full migration
+chain and today's unmodified `customer-document-files` function: `node scripts/local-app/doc-bytes.mjs rebuild`
+(a third, separate local stack) then `node scripts/smoke/run-customer-document-bytes-proof.mjs` (30/30 checks;
+`--negative-control` re-adds a browser read policy on the bucket and 4 checks fail, so the boundary is still
+tested). Three assertions follow later decisions: any active rep may work any customer (20261013220000), and an
+admin can still download a removed document (KI-07); a rep is still refused after removal and a driver is refused.
+Still not covered: `--phase=before` (the original hole) needs the chain stopped before 20260914100700 and is kept
+as historical; the function runs under host Deno, not the Edge Runtime container.
 
 ### KI-115 — Many screens send database errors to Sentry as "[object Object]"
 

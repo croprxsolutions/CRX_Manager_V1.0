@@ -48,12 +48,13 @@ const CANDIDATE = path.join(ROOT, 'supabase', 'migrations', '20261006200000_refu
 const WRAPPER = 'public.create_invoice_from_order(uuid,uuid,text,text)';
 const CHECK_NAME = 'invoices_field_application_has_no_order';
 const CHAINS = {
-  order: path.join(ROOT, 'scripts', 'smoke', 'smoke-order-invoice-type-gate.sql'),
-  split: path.join(ROOT, 'scripts', 'smoke', 'smoke-backfill-refuse-split-billing.sql'),
-  fieldApp: path.join(ROOT, 'scripts', 'smoke', 'smoke-field-app-split-penny-exact.sql'),
+  order: path.join(ROOT, 'scripts', 'smoke', 'fixtures', 'order-invoice-type-gate-candidate-era.sql'),
+  // Frozen pre-20261215110000 copy: the live chain expects the later group-assign guard, which this replay (up to 20261006200000) lacks.
+  split: path.join(ROOT, 'scripts', 'smoke', 'fixtures', 'backfill-refuse-split-billing-candidate-era.sql'),
+  fieldApp: path.join(ROOT, 'scripts', 'smoke', 'fixtures', 'field-app-split-penny-exact-candidate-era.sql'),
   // The other two registered chains that cover create_invoice_from_order.
-  lifecycle: path.join(ROOT, 'scripts', 'smoke', 'smoke-govern-invoice-order-money-lifecycle.sql'),
-  keys: path.join(ROOT, 'scripts', 'smoke', 'smoke-money-lifecycle-idempotency-required.sql'),
+  lifecycle: path.join(ROOT, 'scripts', 'smoke', 'fixtures', 'govern-invoice-order-money-lifecycle-candidate-era.sql'),
+  keys: path.join(ROOT, 'scripts', 'smoke', 'fixtures', 'money-lifecycle-idempotency-required-candidate-era.sql'),
 };
 // md5(replace(prosrc, chr(13), '')) read from live (project rhyzpcqhnizqbxphqdkr)
 // on 2026-10-07 UTC (2026-10-06 Chicago). Live stores the idem impl's body with CRLF line endings (raw

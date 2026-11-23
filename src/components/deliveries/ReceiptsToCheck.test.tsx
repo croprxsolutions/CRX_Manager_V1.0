@@ -14,8 +14,17 @@ const query = {
     return Promise.resolve(answers.shift() ?? { data: [], error: null, count: 0 });
   },
 };
-vi.mock('../../lib/db', () => ({ supabase: { from: () => query } }));
+const rpc = vi.fn();
+const toast = vi.fn();
+vi.mock('../../lib/db', () => ({
+  supabase: { from: () => query },
+  supabaseUntyped: { rpc: (...args: unknown[]) => rpc(...args) },
+  assertRpcResult: (data: unknown) => data,
+  sanitizeError: (e: { message?: string }) => e?.message ?? 'error',
+}));
 vi.mock('../../lib/sentry', () => ({ Sentry: { captureException: vi.fn() } }));
+vi.mock('../ui/Toast', () => ({ useToast: () => ({ toast }) }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'u1' } }) }));
 
 import ReceiptsToCheck from './ReceiptsToCheck';
 
@@ -28,7 +37,50 @@ const rows = (n: number) => Array.from({ length: n }, (_, i) => row(i));
 const show = () => render(<MemoryRouter><ReceiptsToCheck /></MemoryRouter>);
 
 describe('ReceiptsToCheck', () => {
-  beforeEach(() => { answers.length = 0; ranges.length = 0; });
+  beforeEach(() => { answers.length = 0; ranges.length = 0; rpc.mockReset(); toast.mockReset(); });
+
+  it('marks a receipt handled after confirming, once even on a double click, and reloads the list', async () => {
+    let finishClose: (a: { data: unknown; error: unknown }) => void = () => {};
+    rpc.mockReturnValueOnce(new Promise((resolve) => { finishClose = resolve; }));
+    answers.push({ data: [row(1)], error: null, count: 1 }, { data: [], error: null, count: 0 });
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark receipt for D-1 handled' }));
+    expect(rpc).not.toHaveBeenCalled(); // asks first
+    const confirm = await screen.findByRole('button', { name: 'Mark handled' });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc.mock.calls[0][0]).toBe('close_delivery_receipt');
+    expect(rpc.mock.calls[0][1]).toMatchObject({ p_delivery_id: 'd1', p_reason: 'handled', p_expected_queued_at: '2026-11-08T12:00:00Z' });
+    await act(async () => {
+      finishClose({ data: { delivery_id: 'd1', outcome: 'closed', previous_status: 'needs_check', sent_at: null, send_authorized_at: null }, error: null });
+    });
+    await waitFor(() => expect(screen.queryByText('D-1')).not.toBeInTheDocument());
+    expect(toast).toHaveBeenCalledWith('success', 'Receipt marked handled. The server will not email it.');
+    expect(ranges).toHaveLength(2);
+  });
+
+  it('says to try again in a minute while the server is emailing it, and keeps the row', async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { message: 'DELIVERY_RECEIPT_SENDING: this delivery receipt is being emailed right now' } });
+    answers.push({ data: [row(1)], error: null, count: 1 });
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark receipt for D-1 handled' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark handled' }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('warning', 'The server is emailing this receipt right now. Try again in a minute.'));
+    expect(screen.getByText('D-1')).toBeInTheDocument();
+    expect(ranges).toHaveLength(1);
+  });
+
+  it('when the receipt was queued again since the list loaded, closes nothing, says so and reloads (#2251)', async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { message: "DELIVERY_RECEIPT_CHANGED: this delivery's receipt was queued again since; reload the page" } });
+    answers.push({ data: [row(1)], error: null, count: 1 }, { data: [], error: null, count: 0 });
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark receipt for D-1 handled' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark handled' }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('warning', expect.stringMatching(/changed since the list loaded. Nothing was closed/)));
+    await waitFor(() => expect(ranges).toHaveLength(2));
+    expect(screen.queryByRole('button', { name: 'Mark handled' })).not.toBeInTheDocument();
+  });
 
   it('says so when the list fails to load instead of showing nothing', async () => {
     answers.push({ data: null, error: { message: 'denied' } });

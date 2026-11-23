@@ -52,6 +52,15 @@ export function inventoryValueNote({ belowZeroCount, noCostCount }: InventoryVal
   return parts.join(' · ');
 }
 
+/** Why a report row is left out of the inventory value ('' when it is counted or has no stock): the same rule as the total. */
+export function inventoryRowLeftOut(quantity: number | string | null, unitCost: number | string | null | undefined): '' | 'below zero' | 'no cost' | 'unreadable' {
+  const q = Number(quantity ?? 0);
+  if (Number.isNaN(q)) return 'unreadable';
+  if (q < 0) return 'below zero';
+  if (q > 0 && (unitCost == null || !(Number(unitCost) > 0))) return 'no cost';
+  return '';
+}
+
 export function summarizeInventoryValue(
   rows: ReadonlyArray<{
     quantity: number | string | null;
@@ -67,15 +76,13 @@ export function summarizeInventoryValue(
       summary.valueCents = Number.NaN; // unreadable stock fails the total visibly
       continue;
     }
-    if (quantity < 0) summary.belowZeroCount += 1;
-    if (!(quantity > 0)) continue;
-    if (row.unitCost == null || !(Number(row.unitCost) > 0)) {
-      summary.noCostCount += 1;
-      continue;
-    }
+    const leftOut = inventoryRowLeftOut(quantity, row.unitCost);
+    if (leftOut === 'below zero') summary.belowZeroCount += 1;
+    if (leftOut === 'no cost') summary.noCostCount += 1;
+    if (leftOut || !(quantity > 0)) continue;
     summary.valueCents += row.rowValue != null
       ? quantityTimesCostCents(row.rowValue, 1)
-      : quantityTimesCostCents(row.quantity as number | string, row.unitCost);
+      : quantityTimesCostCents(row.quantity as number | string, row.unitCost as number | string); // inventoryRowLeftOut ruled out a missing cost
   }
   return summary;
 }

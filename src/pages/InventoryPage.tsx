@@ -34,6 +34,7 @@ import TransactionLedgerModal from '../components/inventory/TransactionLedgerMod
 import BatchAdjustModal from '../components/inventory/BatchAdjustModal';
 import InventoryPositionMobileCards from '../components/inventory/InventoryPositionMobileCards';
 import ToteFillModal from '../components/inventory/ToteFillModal';
+import PurchasingTab from '../components/inventory/PurchasingTab';
 import { listFillableToteIds, TOTE_FILL_LOCATION } from '../lib/toteFill';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import ReasonModal from '../components/ui/ReasonModal';
@@ -195,7 +196,7 @@ export default function InventoryPage() {
   const [mobileSearch, setMobileSearch] = useState('');
   const [isEditingInventory, setIsEditingInventory] = useState(false);
   const [locations, setLocations] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'inventory' | 'forecast'>('inventory');
+  const [activeTab, setActiveTab] = useState<'inventory' | 'purchasing' | 'forecast'>('inventory');
   const [forecastData, setForecastData] = useState<Array<{
     product_id: string; product_name: string; sku: string | null;
     needed_month: string; planned_demand: number; job_demand: number; current_available: number;
@@ -1482,7 +1483,7 @@ export default function InventoryPage() {
     { label: 'Delivered YTD', value: totalDeliveredYTD, color: 'bg-gray-50 text-gray-600', icon: Package },
     // Valued at cost, so admin-only (cost is admin-only, Mason 2026-10-15; the server
     // no longer sends non-admins current_cost, which would show a false $0).
-    ...(showInventoryCost ? [{ label: 'Inventory Value', value: valuation.valueCents, color: 'bg-emerald-50 text-emerald-600', icon: Package, format: 'cents' as const, note: inventoryValueNote(valuation) }] : []),
+    ...(showInventoryCost ? [{ label: 'Inventory Value (price-list cost)', value: valuation.valueCents, color: 'bg-emerald-50 text-emerald-600', icon: Package, format: 'cents' as const, note: inventoryValueNote(valuation) }] : []),
   ];
 
   const filteredProducts = products.filter((p) =>
@@ -1875,11 +1876,21 @@ export default function InventoryPage() {
             ),
           },
           {
+            key: 'purchasing',
+            label: (
+              <>
+                <ShoppingCart className="w-4 h-4" />
+                Purchasing
+              </>
+            ),
+            content: activeTab === 'purchasing' ? <PurchasingTab /> : null,
+          },
+          {
             key: 'forecast',
             label: (
               <>
                 <TrendingUp className="w-4 h-4" />
-                Forecast
+                Reservations (old view)
               </>
             ),
             content: (
@@ -1887,7 +1898,10 @@ export default function InventoryPage() {
                 {/* Forecast Tab */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-nav-dark">Planned Demand Forecast</h3>
+              <div>
+                <h3 className="text-lg font-semibold text-nav-dark">Reservations (old view)</h3>
+                <p className="text-sm text-secondary">Planned holds by month. For buying, use the Purchasing tab.</p>
+              </div>
               <Button variant="secondary" size="sm" onClick={fetchForecast} loading={forecastLoading}>
                 Refresh
               </Button>
@@ -1970,7 +1984,7 @@ export default function InventoryPage() {
           },
         ]}
         activeKey={activeTab}
-        onChange={(key) => setActiveTab(key as 'inventory' | 'forecast')}
+        onChange={(key) => setActiveTab(key as 'inventory' | 'purchasing' | 'forecast')}
         ariaLabel="Inventory views"
       />
 

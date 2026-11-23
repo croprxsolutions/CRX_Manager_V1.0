@@ -92,7 +92,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W1-10 | KI-167 | HIGH | Open | Office must hand-fix a line's unit before it can be re-delivered; no amounts change. | KNOWN_ISSUES | #1896 | Taha (to 2026-12-15) |
 | W2-04 | KI-128 | MED | Open | Voiding an order can leave its invoice alive in receivables, reminders and finance charges. | KNOWN_ISSUES |  | Taha (to 2026-12-15) |
 | W2-05 | KI-191 | MED | Open | Booking orders vanish from salesperson-filtered sales reports. | KNOWN_ISSUES (2026-11-21 audit) |  | Taha (to 2026-12-15) |
-| W2-06 | KI-25 | MED | Partly open | A delivery receipt that fails to send is queued and sent by a worker, but the office cannot mark one "handled", so handled ones stay on the check list and a customer may get a second copy. | KNOWN_ISSUES |  | Agent (unassigned) |
+| W2-06 | KI-25 | MED | Partly open | Mark handled and the Email Confirmation pause are on screen (2026-11-22); still open: email bounces are not tracked. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W2-07 | KI-188 | MED | Open | A remainder stays "scheduled" after its follow-up delivery is cancelled or voided, so the pending queue no longer shows product still owed. | KNOWN_ISSUES (2026-11-21 audit) | #2179 (open) | Agent (unassigned) |
 | W2-45 | #2097 | MED | Check first | Stock held for a grower could release early. The expiry job does skip quotes with quantity_drawn > 0, so the described gap was not reproduced. | GitHub issue | #2097 | Taha (to 2026-12-15) |
 | W3-05 | KI-152 | LOW | Open | No database rule stops a completion from reopening a cancelled order, but the app cannot reach it today. | KNOWN_ISSUES |  | Agent (unassigned) |
@@ -109,7 +109,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W2-10 | KI-144 | MED | Open | A vendor rename does not carry to old purchase orders, so vendor reports and bill checks can miss some orders. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W2-11 | KI-165 | MED | Open | A count started before a unit change could record stock in the wrong unit; not reachable today. | KNOWN_ISSUES | #1896 | Agent (unassigned) |
 | W2-12 | #2190 | MED | Open | Two deliveries completing at the same moment on the same products can make one fail and need a retry; nothing is saved wrongly. | Sol round 1, release #2189 (GitHub) | #2190 | Agent (unassigned) |
-| W2-13 | #2193 | MED | Open | If applied before the EPA batch, the one-time load commits with some ingredients missing their groups and never fills them later. | Sol round 1, release #2189 (GitHub) | #2193 | Agent (unassigned) |
+| W2-13 | #2193 | MED | Fixed (staging PR) | If applied before the EPA batch, the one-time load commits with some ingredients missing their groups and never fills them later. | Sol round 1, release #2189 (GitHub) | #2193 | Agent (Lane D) |
 | W3-07 | KI-100 | LOW | Open | An editor can type rate changes that get thrown away when another admin locks rates meanwhile. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-08 | KI-103 | LOW | Open | A file with an unknown extra column looks fine in preview, then the whole save is refused (nothing written) | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-09 | KI-109 | LOW | Open | Stale "previewed" price-change sets pile up; a completed job can still be edited; a few small UI/label gaps. | KNOWN_ISSUES |  | Agent (unassigned) |
@@ -160,11 +160,11 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 
 | Order | ID | Sev | Status | What goes wrong (plain English) | Source | GitHub | Owner |
 |---|---|---|---|---|---|---|---|
-| W1-01 | KI-129 | HIGH | Partly open | The month-end close receipt shows payments received from the old payments table: it counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. The invoice-count half is fixed on staging (#2149). | KNOWN_ISSUES | #2149 (count part), #2195 (payments part) | Agent (unassigned) |
+| W1-01 | KI-129 | HIGH | Partly open | The month-end close receipt shows payments received from the old payments table: it counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. The invoice-count half is fixed on staging (#2149); the payments half is in a PR with W2-24 (migration `20270224120000`). | KNOWN_ISSUES | #2149 (count part), #2195 (payments part) | Lane B agent |
 | W2-21 | KI-13 | MED | Open | A returned product still leaves the rep's commission in place; some commission money columns can still hold half-cents. Clawback overlaps KI-184 (profit reports) and To-Do 8.3; whole-cent commission columns still open. | KNOWN_ISSUES |  | Mason decision |
 | W2-22 | KI-184 | MED | Open | A returned sale keeps its commission cost in profit reports, so profit looks too low. | KNOWN_ISSUES | #2149 (follow-up) | Taha (to 2026-12-15) |
 | W2-23 | KI-154 | MED | Open | A salesperson could be paid commission on a sale the customer has not paid for; basis also ignores the standing discount. | KNOWN_ISSUES |  | Mason decision |
-| W2-24 | #2175 | MED | Open | Numbers can change between the admin's review and the click, and the close saves the new ones; the commission "reviewed" box is screen-only. | GitHub issue | #2175 | Agent (unassigned) |
+| W2-24 | #2175 | MED | Open | Numbers can change between the admin's review and the click, and the close saves the new ones; the commission "reviewed" box is screen-only. Fix in a PR with W1-01: the close refuses changed figures and unconfirmed payments/commission (migration `20270224120000`). | GitHub issue | #2175 | Lane B agent |
 | W3-26 | KI-133 | LOW | Open | Reports count undelivered orders as revenue without saying "booked"; people may misread profit. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-27 | KI-135 | LOW | Open | The Inventory value total is labelled as if it were an accounting value, but it is priced at price-list cost. | KNOWN_ISSUES |  | Agent (unassigned) |
 
@@ -199,7 +199,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 |---|---|---|---|---|---|---|---|
 | W1-08 | KI-169 | HIGH | Open | Hiding Invoices or Record Payments for a person still leaves those actions reachable in the database. Mason 2026-11-19: real lock; reports now (KI-119, on staging), money actions after 2026-12-15. | KNOWN_ISSUES |  | Taha (to 2026-12-15) |
 | W2-30 | KI-03 | MED | Partly open | Any rep can still unpost, move or consolidate another rep's invoices and change commission splits; the field-invoice part is accepted, the rest is unbuilt. | KNOWN_ISSUES |  | Taha (to 2026-12-15) |
-| W2-31 | KI-182 | MED | Open | Purchase Orders screen retry codes are predictable; they should be random like the other screens' codes. | KNOWN_ISSUES | #2047 | Agent (unassigned) |
+| W2-31 | KI-182 | MED | Fixed (staging PR) | Purchase Orders screen retry codes are predictable; they should be random like the other screens' codes. | KNOWN_ISSUES | #2047 | Agent (unassigned) |
 | W2-32 | KI-74 | MED | Partly open | Cost columns locked and safe posting view in place. Remaining: commission amount plus rate can reveal a rep's profit; Quick Receive shows which open PO line is cheaper. | KNOWN_ISSUES | #1057 | Mason decision |
 | W2-33 | #2162 | MED | Open | Drivers can still read full farm records directly, more than Mason wants them to see; planned for after step 1 is live. | GitHub issue | #2162 | Agent (unassigned) |
 | W3-34 | KI-07 | LOW | Partly open | Most small permission leftovers are revoked; an applicator-profile licensing field is unchecked and two document-restore edge cases are deferred. | KNOWN_ISSUES | #1698 | Agent (unassigned) |
@@ -241,15 +241,15 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W2-38 | KI-46 | MED | Open | One Windows-specific path to a saved review proof is not covered by the proof check; the check should cover it. | KNOWN_ISSUES |  | Mason decision |
 | W2-39 | KI-47 | MED | Open | A few risky command shapes are still auto-approved for agents instead of being stopped. | KNOWN_ISSUES | #530 (partial fix) | Agent (unassigned) |
 | W2-40 | KI-49 | MED | Open | A review run outside the standard wrapper can record a misleading result; the wrapper is the safe path. | KNOWN_ISSUES |  | Mason decision |
-| W2-41 | KI-51 | MED | Open | Once history passes the cap, every new branch push is blocked by the containment check. The containment check caps history at 4,096 commits and main already has more; check whether new-branch pushes are affected. | KNOWN_ISSUES |  | Agent (unassigned) |
+| W2-41 | KI-51 | LOW | Resolved (PR pending) | Checked 2026-11-22: new-branch pushes are not affected; the check stops at the remote's default branch, so a branch from staging scans about 90 commits. Only a checkout with no local copy of main still hits the cap; that refusal now says to fetch and push again. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W2-42 | KI-78 | MED | Partly open | Many guard gaps remain (CodeRabbit gate, review-proof guard, #364 protections, sync-agent-workflows limits, cloud-session commit gates). FIXED: env-guard service-role scan. ACCEPTED: PR #605 hook gaps. Wording issue: entry says `quantity_available` has no CHECK, but a `>= 0` check exists. | KNOWN_ISSUES | #516, #605, #364 | Agent (unassigned) |
 | W2-43 | #2191 | MED | Open | A squash of the main-into-staging merge would pass the gate and then break the release ancestry check, stalling a release. | Sol round 1, release #2189 (GitHub) | #2191 | Agent (unassigned) |
 | W2-44 | #2192 | MED | Open | A hidden "Fixes #n" in a PR description can close an issue nobody meant to close. Taha merges .github changes. | Sol round 1, release #2189 (GitHub) | #2192 | Agent (unassigned) |
 | W3-39 | KI-52 | LOW | Partly open | Flaky page tests, a few unwritten safety sweeps and small leftovers (e.g. Escape in the bulk-import prompt). | KNOWN_ISSUES | #1062, #1143, #1110, #350 (closed) | Agent (unassigned) |
-| W3-40 | KI-84 | LOW | Open | A safety test script is broken; the protection it proves is still live. No customer impact. | KNOWN_ISSUES | #1110 | Agent (unassigned) |
+| W3-40 | KI-84 | LOW | Resolved (PR pending) | The split-billing backfill safety test passes on today's schema again, and still fails first on its CRX-LIFE-001 check when that protection is removed. | KNOWN_ISSUES | #1110 | Agent (unassigned) |
 | W3-41 | KI-96 | LOW | Partly open | Dead code and copy-pasted helpers make every change slower and riskier; no behavior bug. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-42 | KI-107 | LOW | Open | Agents get blocked on harmless cleanup commands; workaround is to run the delete alone. | KNOWN_ISSUES | #1536 (closed) | Agent (unassigned) |
-| W3-43 | KI-113 | LOW | Open | An old safety proof for private customer files no longer runs; live bucket was checked private by hand. | KNOWN_ISSUES | #1698, #1663, #635 | Agent (unassigned) |
+| W3-43 | KI-113 | LOW | Resolved (PR pending) | The private-customer-files proof runs again on today's schema and function (30/30), and still fails when a browser read policy is re-added. | KNOWN_ISSUES | #1698, #1663, #635 | Agent (unassigned) |
 | W3-44 | KI-115 | LOW | Partly open | Some error reports lose the real reason, so production problems are harder to diagnose. | KNOWN_ISSUES | #1748, #1751, #1771, #1730, #1764 | Agent (unassigned) |
 | W3-45 | KI-164 | LOW | Partly open | Some stock/pricing safety proofs were broken; repaired 2026-11-16; database sweep and regression tests still to do. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W3-46 | #2194 | LOW | Open | If the same grants are stored in a different order the migration aborts safely and stops the release apply until re-checked. Severity lowered from MED: fails safe, no data touched. | Sol round 1, release #2189 (GitHub) | #2194 | Agent (unassigned) |

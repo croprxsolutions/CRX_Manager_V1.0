@@ -54,6 +54,8 @@ const LEDGER_RES = [
   // can never stand in for a recorded change.
   ENTRY_RE,
   /^docs\/manual\/[^/]+\.md$/,
+  // One file per decision-log or known-issues entry (2026-11-22), so sibling PRs stop conflicting.
+  /^docs\/manual\/(?:decision-log|known-issues)\.d\/\d{4}-\d{2}-\d{2}-[^/]+\.md$/,
   /^docs\/reference\/agent-guardrails\.md$/,
   /^docs\/reference\/migration-history\.md$/,
   /^docs\/reference\/migrations\.d\/\d{14}_[^/]+\.md$/,
@@ -261,8 +263,8 @@ if (isMain) {
   console.error("Fix: stage at least ONE ledger update in the same commit —");
   console.error("  • docs/changelog.d/<date>-<slug>.md   (PREFERRED — one file per change, no merge conflicts)");
   console.error("  • docs/CHANGELOG.md            (what changed, for shipped work)");
-  console.error("  • docs/manual/DECISION_LOG.md  (a settled decision)");
-  console.error("  • docs/manual/KNOWN_ISSUES.md  (a finding / parked item)");
+  console.error("  • docs/manual/decision-log.d/<date>-<slug>.md  (a settled decision)");
+  console.error("  • docs/manual/known-issues.d/<date>-<slug>.md  (a finding / parked item)");
   console.error("  • any other docs/manual/*.md, docs/reference/agent-guardrails.md, or a docs/loops/ ledger");
   console.error("");
   console.error("Do NOT write a throwaway line to satisfy the guard — record what actually changed and why.");

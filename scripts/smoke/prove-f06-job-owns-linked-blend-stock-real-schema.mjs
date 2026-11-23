@@ -267,7 +267,7 @@ function session(sql, delayMs = 0) {
 const id = (s) => `af060000-0000-4000-8000-${String(s).padStart(12, '0')}`;
 const ADMIN = id('a1'), CUST = id('c1'), CUST2 = id('c2'), P = id('b1'), INV = id('d1'), FIELD = id('f1');
 const JOB = (k) => id(`10${k}`), TICKET = (k) => id(`20${k}`);
-const KEYS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+const KEYS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
@@ -448,6 +448,33 @@ async function races() {
   assert.notEqual(rd.code, 0, `race B: the link must be refused:\n${rd.out}`);
   assert.match(rd.out, /BLEND_TICKET_RECORDED_NO_JOB/);
   console.log('[race B] two sessions: T8 is recorded while the office links it to J8; the link waits on the ticket lock, then is refused');
+  // Luna round 6: a job customer change and a link on the same job serialize on the job row, in either order.
+  const waiting = (pattern) => session(`SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '${pattern}' AND pid <> pg_backend_pid();`, 2200);
+  const changeCustomer = (k) => `UPDATE public.jobs SET customer_id = '${CUST2}' WHERE id = '${JOB(k)}';`;
+  // Race C: J12's customer change holds the job row; linking T12 (customer A) waits, then sees customer B and is refused.
+  const [re, rf, rw3] = await Promise.all([
+    session(`BEGIN;\n${signedIn(changeCustomer(12))}\nSELECT pg_sleep(3);\nCOMMIT;`),
+    session(`BEGIN;\n${signedIn(link(12, JOB(12)))}\nCOMMIT;`, 1000),
+    waiting(`%job_id = ''${JOB(12)}''%`),
+  ]);
+  assert.equal(re.code, 0, re.out);
+  assert.equal(rw3.out.trim().split(/\r?\n/).filter(Boolean).at(-1), '1', `race C: the link must be waiting on a lock mid-race:\n${rw3.out}`);
+  assert.notEqual(rf.code, 0, `race C: the link must be refused:\n${rf.out}`);
+  assert.match(rf.out, /BLEND_TICKET_JOB_OTHER_CUSTOMER/);
+  assert.equal(scalar(`SELECT coalesce(job_id::text, 'none') FROM public.blend_tickets WHERE id = '${TICKET(12)}';`), 'none');
+  console.log("[race C] two sessions: J12's customer changes while the office links T12 to it; the link waits on the job, then is refused");
+  // Race D: linking T13 to J13 holds the job row; changing J13's customer waits, then sees the link and is refused.
+  const [rg, rh, rw4] = await Promise.all([
+    session(`BEGIN;\n${signedIn(link(13, JOB(13)))}\nSELECT pg_sleep(3);\nCOMMIT;`),
+    session(`BEGIN;\n${signedIn(changeCustomer(13))}\nCOMMIT;`, 1000),
+    waiting(`%customer_id = ''${CUST2}'' WHERE id = ''${JOB(13)}''%`),
+  ]);
+  assert.equal(rg.code, 0, rg.out);
+  assert.equal(rw4.out.trim().split(/\r?\n/).filter(Boolean).at(-1), '1', `race D: the customer change must be waiting on a lock mid-race:\n${rw4.out}`);
+  assert.notEqual(rh.code, 0, `race D: the customer change must be refused:\n${rh.out}`);
+  assert.match(rh.out, /BLEND_TICKET_JOB_OTHER_CUSTOMER/);
+  assert.equal(scalar(`SELECT customer_id FROM public.jobs WHERE id = '${JOB(13)}';`), CUST);
+  console.log("[race D] two sessions: T13 is linked to J13 while the office changes J13's customer; the change waits on the job, then is refused");
 }
 
 function mutation() {

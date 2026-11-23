@@ -3321,8 +3321,9 @@ export default function JobDetail() {
           if (result.skipped.some((s) => s.reason === 'deleted')) {
             // #2188: a deleted job reloads read-only; nothing typed there can be saved anyway.
             toast('info', `Job not cancelled: ${summarizeEditJobs(result)}`);
-            setCancelling(false);
+            // Stay locked until the reload lands, so nothing typed meanwhile is overwritten (Luna MED).
             await fetchJob();
+            setCancelling(false);
             return;
           }
           // No reload: the form stays editable, so a reload could overwrite what the user types meanwhile.

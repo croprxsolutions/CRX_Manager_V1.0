@@ -54,7 +54,8 @@ Fix first: see "Top 5" in [MASTER_FIX_PLAN.md](MASTER_FIX_PLAN.md).
 There are 28 items: 2 BLOCKER and 26 HIGH (statuses re-checked against PRs merged to staging).
 - 11 (SOL-1 to SOL-6, SOL-8 to SOL-12) are resolved: Mason chose to remove the staging-only release pass, and PR #2203 merged to staging 2026-11-22.
 - 7 are fixed on staging but not live yet (SOL-7, KI-129 payments part, KI-125, #2196, #2063, KI-199, KI-119).
-- 10 are open, partly open or check-first.
+- 1 is resolved as disproved (KI-75, 2026-11-23).
+- 9 are open, partly open or check-first.
 
 Each item's full entry is in its area section below. "Severity unsure" marks a rating that needs more checking. "Check first" means a credible report that reading the code could not settle.
 
@@ -85,7 +86,7 @@ Each item's full entry is in its area section below. "Severity unsure" marks a r
 | Quotes and bookings | KI-190 | HIGH | Open | Two reps drawing from one booking can order at quantities or prices that neither of them saw. | Taha |
 | Orders and deliveries | KI-167 | HIGH (severity unsure) | Open | The office must fix a line's unit by hand before it can be re-delivered. No amounts change. | Taha |
 | Inventory | KI-168 | HIGH (severity unsure) | Open | That purchase cannot be used as an actual-cost basis. Nothing reads it yet because costing is parked. | Agent (unassigned) |
-| Payments | KI-75 | HIGH (severity unsure) | Check first | Applying a credit memo could clash with another action happening at the same moment. | Taha |
+| Payments | KI-75 | HIGH (severity unsure) | Resolved: disproved 2026-11-23 (two-session test; the key lock serializes it) | Applying a credit memo could clash with another action happening at the same moment. | None (closed) |
 | Permissions | KI-169 | HIGH | Open | Hiding Invoices or Record Payments from a person still lets them reach those actions in the database. | Taha |
 | Permissions | KI-119 | HIGH | Fixed on staging, not live | A person with Reports hidden can still pull report data. | Agent (release) |
 
@@ -369,7 +370,9 @@ If another admin locks rates while a product page is open, the page still offers
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-08.
 
-**LOW · OPEN, no fix planned · products/import · found 2026-11-05 (Sol LOW on #1486)**
+> **Fix in review (Lane E, 2026-11-22):** migration `20270224200000` makes the preview refuse the unknown field by name; closes once it is live.
+
+**LOW · OPEN, fix in review · products/import · found 2026-11-05 (Sol LOW on #1486)**
 `preview_product_import` ignores unknown top-level keys on a row, but `apply_product_setup` refuses them, so such a
 file previews "ready" and then the whole save is refused with nothing written. The screen never sends extra keys,
 and keys inside `insert` or `rates` are already refused by the preview. The Check File timeout first filed under
@@ -917,6 +920,14 @@ days)", and have `save_customer` refuse terms the parser would default.
 
 ### KI-75 — Retry-key detail (extends KI-10, KI-11)
 
+> **Closed 2026-11-23 (disproved), Taha:** the credit-memo apply race cannot happen. `check_idempotency` takes
+> `pg_advisory_xact_lock('crx:idempotency:' || key)` before it reads (`20260714230000_gauntlet_core_guards`,
+> `20260716160000_fix_idempotency_committed_replay_guard`), so every call with one key waits for the first to commit.
+> Two-session test on a synthetic local database, session A holding its transaction open 6 s: the same key and same
+> arguments → B waits, then returns A's application id (one application, memo debited once); the same key with
+> another target → B is refused with `IDEMPOTENCY_ARGUMENT_MISMATCH` and the second invoice is untouched. Nothing
+> else in this entry is open.
+
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Check first · HIGH · Taha (to 2026-12-15) · plan W1-13. The credit-memo apply race after the lock was not re-proven in this pass.
 
 **HIGH on money paths · OPEN · money**
@@ -1113,6 +1124,8 @@ Fix it together with KI-157, where every invoice PDF reads the live product name
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · HIGH · Mason (field-app billing) · plan W1-03 · #2176.
 
+> **MUST DO (Mason, 2026-11-22).** Sol round 9 on #2247 re-found this on the transfer's saved-split path (`job_field_shares` x `acres_to_treat`, `20270226150000` ~L415). Mason skipped it for #2247 on the condition that this known issue (KI-185, GitHub #2176) is fixed next, in its own PR after #2247; it is no longer CAN-WAIT (To-Do 5.7). #2247 itself still bills planned acres.
+
 **HIGH · OPEN (source-confirmed on main and staging; not reproduced end to end) · field-app billing/stock · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 6) · Mason (field-app billing) · GitHub #2176**
 Job completion stores the actual acres per field on the application record (`_complete_job_replay_impl_20261015`,
 `20261217100000` ~L783-813; with no acres supplied it falls back to the plan) but never updates `job_fields` or `job_chemicals`. Transfer to Invoice
@@ -1150,7 +1163,7 @@ total, billed unit and unit price, unchanged charge, both grouping configuration
 
 ### KI-195 — The Chemical Application Report prints today's EPA number, not the job's saved one
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Mason (field-app billing) · plan W2-26 · #2183.
+> **2026-11-23:** Fix in review (PR to staging; migration `20270225193000` not yet applied) · MED · plan W2-26 · #2183. The four printouts read `job_product_epa`; REI/PHI sources are unchanged; see `docs/changelog.d/2026-11-23-ki195-printouts-kept-epa.md`. The description below is the state before this fix.
 
 **MED · OPEN (source-confirmed) · restricted-use/regulatory records · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 1) · unassigned · GitHub #2183**
 Sprayed jobs keep their EPA number in `job_product_epa` (`20261204120000` ~L143-152), including an explicit unknown,
@@ -1342,7 +1355,8 @@ The [2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) (sweep 3 #9) re-confirm
 logged here, not as a new KI.
 The 2026-11-02 cost audit noted more functions in this same ownership and role-check area (not cost); the list is in
 Mason's private notes until the scoping work is built. It also noted that an admin's automatic draft invoice for a job
-with a below-cost line always fails, so that job is billed by hand.
+with a below-cost line always fails, so that job is billed by hand; candidate 20270226150000 (not yet live) writes each job line's
+real quantity in the sold unit, so the ordinary check judges it exactly; a unit that can't convert stops Create Invoice by name.
 
 ### KI-07 — Other small security gaps
 
@@ -1410,6 +1424,8 @@ get their own lock. Exploit-level detail is held privately until the fix is live
 Mason decided 2026-11-19 that Page Access also locks money actions, but the Invoices and Record Payments actions wait
 for Taha after 2026-12-15 (billing is his area until then). Reuse `public._require_page_access` from KI-119's
 migration, adding those page keys to it.
+Also in scope (Sol round 9 on #2247, 2026-11-22; Mason skipped it there as pre-existing): Create Invoice from a job
+(`transfer_job_to_invoice`) checks only for an active admin or sales rep, not the rep's denied Job Schedule and Field Invoices pages.
 
 ### KI-122 — An admin password reset leaves the user's existing sign-ins open and is not audited
 
@@ -1825,14 +1841,21 @@ messages and data are never sent, for errors and performance samples alike (chec
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · LOW · Agent (unassigned) · plan W3-45.
 
-**LOW (proof) · PARTLY FIXED · tooling · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md), Codex audit) · unassigned**
+**LOW (proof) · FIXED 2026-11-23 · tooling · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md), Codex audit) · unassigned**
 **2026-11-16 (repair step 6):**
 - All four proofs below run to PASS again: the undo prover replays the whole chain, the three provers refuse only a
   later file that redefines what they rely on, and the pricing proof uses the current cost-change form.
 - The 5 `cost-exposure-review` hashes were re-keyed after a live re-read. The only changed function their chains
   reach is `_enqueue_delivery_receipt`, which reads no cost.
 
-Still open: the KI-159 database sweep and each repair step's regression test.
+**2026-11-23 (repair step 6 finished):**
+- The KI-159 sweep (`scripts/db-invariant-sweeps/predicates/stock-matches-history.sql`, PR #1897) ran read-only on
+  production: PASS, 0 rows.
+- `src/lib/productMasterRepairGuards.test.ts` pins each fixed step in its newest migration (KI-156, KI-158, KI-160,
+  KI-161, KI-162) and checks that the sweep and the browser check read every history type the same way (KI-159).
+  Each case was shown failing with its fix undone. KI-157 is still open, so it has none.
+- Not part of this item: the same live run flags `cost-exposure-review` (31), `actor-forgery` (5) and
+  `actor-forgery-fin-audit` (1) on functions changed since their review keys were taken.
 
 Several proofs did not complete on 2026-11-13, so those workflows are not certified:
 - The full undo prover stops rebuilding at `20261217100000_job_access_ends_with_the_job.sql` (`JOB_ACCESS_BASELINE_DRIFT`).
@@ -1843,7 +1866,7 @@ The live `cost-exposure-review` predicate fails on 5 changed signatures (`comple
 `start_and_complete_delivery`, `create_invoice_from_order`, `create_split_invoices_from_order`,
 `process_offline_action`). A manual check by both reviewers found no cost leak; the review hashes are stale.
 Stock-vs-history is checked only in the browser integrity report and a one-off script, not by the database sweep
-(KI-159). No tests cover KI-156 to KI-162. Fix: repair the fixtures alongside each repair step, refresh the review
+(KI-159). No tests covered KI-156 to KI-162 (2026-11-13). Fix: repair the fixtures alongside each repair step, refresh the review
 hashes, and add each step's regression test. Repair step 6 (To-Do 0.17).
 
 ### KI-78 — Tooling and guard details (extends KI-04, KI-46, KI-47, KI-48, KI-49, KI-50, KI-65, KI-68)

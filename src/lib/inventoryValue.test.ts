@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { quantityTimesCostCents, summarizeInventoryValue } from './inventoryValue';
+import { inventoryRowLeftOut, quantityTimesCostCents, summarizeInventoryValue } from './inventoryValue';
 
 describe('inventory value (KI-135)', () => {
   it('multiplies exactly and rounds half away from zero', () => {
@@ -27,5 +27,16 @@ describe('inventory value (KI-135)', () => {
     expect(summarizeInventoryValue([{ quantity: 0.5, unitCost: 0.01, rowValue: 0 }]).valueCents).toBe(0);
     expect(summarizeInventoryValue([{ quantity: 2, unitCost: 1.25, rowValue: '2.50' }]).valueCents).toBe(250);
     expect(summarizeInventoryValue([{ quantity: 'NaN', unitCost: 1 }]).valueCents).toBeNaN();
+  });
+});
+
+describe('inventoryRowLeftOut (KI-135: report rows match the total)', () => {
+  it('names why a row is left out, with the same rule as the total', () => {
+    expect(inventoryRowLeftOut(-3, 10)).toBe('below zero');
+    expect(inventoryRowLeftOut(5, 0)).toBe('no cost');
+    expect(inventoryRowLeftOut(5, null)).toBe('no cost');
+    expect(inventoryRowLeftOut(0, null)).toBe('');
+    expect(inventoryRowLeftOut('5', '1.25')).toBe('');
+    expect(inventoryRowLeftOut('NaN', 10)).toBe('unreadable');
   });
 });

@@ -1,6 +1,6 @@
 # Known Issues — what is open today
 
-**Last verified:** 2026-11-21 for the live ledger only (latest live row `20261121061349`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates. Triage 2026-11-22: see changelog.d.
+**Last verified:** 2026-11-23 for the live ledger only (latest live row `20261121061349`); KI-30 EPA numbers 2026-11-09; other evidence retains its stated dates. Triage 2026-11-22: see changelog.d.
 
 **WP-PM-3 local candidate source review: 2026-11-02.** WP-PM-3 (`20261103100000_product_active_guard`) was applied live 2026-11-02; KI-89–KI-91 closed 2026-11-08 and KI-92 closed 2026-11-10 (see the closed list).
 
@@ -49,44 +49,44 @@ archive. Do not re-fix something listed here as ACCEPTED without a new decision 
 
 Fix first: see "Top 5" in [MASTER_FIX_PLAN.md](MASTER_FIX_PLAN.md).
 
-## BLOCKER and HIGH at a glance (re-checked 2026-11-21; Sol un-park rounds added 2026-11-22)
+## BLOCKER and HIGH at a glance (re-checked 2026-11-21; Sol un-park rounds added 2026-11-22; statuses re-checked 2026-11-23)
 
-There are 28 items: 2 BLOCKER and 26 HIGH.
-- 6 (SOL-1 to SOL-6) are partly fixed locally. Sol round 2 found new holes; Mason chose to remove the staging-only release pass instead (PR #2203).
-- 1 (SOL-7) is in PR #2201, open into staging.
-- 3 are fixed on staging but not live yet.
-- 18 are open or partly open, including 5 new release-pass findings (SOL-8 to SOL-12).
+There are 28 items: 2 BLOCKER and 26 HIGH (statuses re-checked against PRs merged to staging).
+- 11 (SOL-1 to SOL-6, SOL-8 to SOL-12) are resolved: Mason chose to remove the staging-only release pass, and PR #2203 merged to staging 2026-11-22.
+- 7 are fixed on staging but not live yet (SOL-7, KI-129 payments part, KI-125, #2196, #2063, KI-199, KI-119).
+- 1 is resolved as disproved (KI-75, 2026-11-23).
+- 9 are open, partly open or check-first.
 
 Each item's full entry is in its area section below. "Severity unsure" marks a rating that needs more checking. "Check first" means a credible report that reading the code could not settle.
 
 | Area | ID | Sev | Status | Impact | Owner |
 |---|---|---|---|---|---|
-| Guards and release | SOL-1 | BLOCKER | Resolved by removing the pass (PR #2203; closes when it merges) | The production merge gate could accept a local copy, instead of the live database record, as proof that a reviewed database change was applied. | Agent (land #2203) |
-| Guards and release | SOL-2 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A message that only mentioned a release, or added a condition or a future time, could count as Mason's go-ahead. | Agent (land #2203) |
-| Guards and release | SOL-3 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A go-ahead given for one release could cover a different release PR or another repository. | Agent (land #2203) |
-| Guards and release | SOL-4 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A new approval reset the 24-hour clock on older approvals. | Agent (land #2203) |
-| Guards and release | SOL-5 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A production merge could skip Taha's 4-hour review window. | Agent (land #2203) |
-| Guards and release | SOL-6 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A hotfix merged during a release could leave the release half-applied on the live database. | Agent (land #2203) |
-| Guards and release | SOL-8 | BLOCKER | Resolved by removing the pass (PR #2203; closes when it merges) | The merge guard runs a helper from the working folder without first confirming it was reviewed, and that helper can reach live database credentials. Fix: the guard only runs reviewed code. | Agent (land #2203) |
-| Guards and release | SOL-9 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | The merge guard's check of a PR's database changes can miss one on a very large PR, or read the file list and the files from different versions. | Agent (land #2203) |
-| Guards and release | SOL-10 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | While a release is open, a hotfix's database change could go live while its app change is refused, leaving the two out of step. | Agent (land #2203) |
-| Guards and release | SOL-11 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | The merge guard's 4-hour hold for Taha ends early once he comments, and does not keep honouring an explicit "hold". | Agent (land #2203) |
-| Guards and release | SOL-12 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A release-pass command naming an invalid PR number counts as approval for the open release. | Agent (land #2203) |
+| Guards and release | SOL-1 | BLOCKER | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | The production merge gate could accept a local copy, instead of the live database record, as proof that a reviewed database change was applied. | None (closed) |
+| Guards and release | SOL-2 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A message that only mentioned a release, or added a condition or a future time, could count as Mason's go-ahead. | None (closed) |
+| Guards and release | SOL-3 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A go-ahead given for one release could cover a different release PR or another repository. | None (closed) |
+| Guards and release | SOL-4 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A new approval reset the 24-hour clock on older approvals. | None (closed) |
+| Guards and release | SOL-5 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A production merge could skip Taha's 4-hour review window. | None (closed) |
+| Guards and release | SOL-6 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A hotfix merged during a release could leave the release half-applied on the live database. | None (closed) |
+| Guards and release | SOL-8 | BLOCKER | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | The merge guard runs a helper from the working folder without first confirming it was reviewed, and that helper can reach live database credentials. Fix: the guard only runs reviewed code. | None (closed) |
+| Guards and release | SOL-9 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | The merge guard's check of a PR's database changes can miss one on a very large PR, or read the file list and the files from different versions. | None (closed) |
+| Guards and release | SOL-10 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | While a release is open, a hotfix's database change could go live while its app change is refused, leaving the two out of step. | None (closed) |
+| Guards and release | SOL-11 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | The merge guard's 4-hour hold for Taha ends early once he comments, and does not keep honouring an explicit "hold". | None (closed) |
+| Guards and release | SOL-12 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A release-pass command naming an invalid PR number counts as approval for the open release. | None (closed) |
 | Guards and release | KI-48 | HIGH (severity unsure) | Open | Some protections around applying live database changes have known gaps; the live migration ledger is the backstop. | Mason decision |
-| Reports | SOL-7 | HIGH | PR #2201 open into staging | A broken or absurd order total would distort the commission in profit reports. | Agent (land #2201) |
-| Reports | KI-129 (+#2195) | HIGH | Partly open | Month-end close counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. | Agent (unassigned) |
+| Reports | SOL-7 | HIGH | Fixed on staging (#2201, merged 2026-11-22), not live | A broken or absurd order total would distort the commission in profit reports. | Agent (release) |
+| Reports | KI-129 (+#2195) | HIGH | Payments part fixed on staging (#2242, merged 2026-11-22), not live | Month-end close counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. Fix: migration `20270224120000` (with the #2175 close re-check). | Lane B agent |
 | Reports | KI-125 | HIGH | Fixed on staging, not live | Profit reports showed a fake large loss because commission was counted on sales billed elsewhere. | Taha (release) |
-| Field applications | #2196 | HIGH | Open | A sales rep may still be able to delete a completed, billable job outside the screens, so it drops out of Unbilled Jobs. | Mason (field-app billing) |
+| Field applications | #2196 | HIGH | Fixed on staging (#2222, merged 2026-11-22), not live | A sales rep may still be able to delete a completed, billable job outside the screens, so it drops out of Unbilled Jobs. | Mason (field-app billing) |
 | Field applications | KI-185 | HIGH | Open | A job sprayed on 80 acres but planned at 100 bills for 100, and deducts stock for 100. | Mason (field-app billing) |
 | Field applications | KI-198 | HIGH | Open | The same shared-field job can bill different totals depending on which billing screen is used. | Mason (field-app billing) |
 | Field applications | #2061 | HIGH (severity unsure) | Check first | A job could be billed twice. | Mason (field-app billing) |
-| Field applications | #2063 | HIGH (severity unsure) | Check first | A job could be billed twice: once on a blend invoice, then again on a split field invoice. | Mason (field-app billing) |
+| Field applications | #2063 | HIGH (severity unsure) | Fixed on staging (#2260, merged 2026-11-23 UTC), not live | A job could be billed twice: once on a blend invoice, then again on a split field invoice. | Mason (field-app billing) |
 | Field applications | KI-187 | HIGH | Open | One spray recorded through both a blend ticket and its job could deduct stock twice. Production has no blend tickets yet. | Mason (field-app billing) |
 | Orders and deliveries | KI-199 | HIGH | Fixed on staging, not live | Partial deliveries are overstated, and field drafts can go to the wrong grower. | Mason (field-app billing) |
 | Quotes and bookings | KI-190 | HIGH | Open | Two reps drawing from one booking can order at quantities or prices that neither of them saw. | Taha |
 | Orders and deliveries | KI-167 | HIGH (severity unsure) | Open | The office must fix a line's unit by hand before it can be re-delivered. No amounts change. | Taha |
 | Inventory | KI-168 | HIGH (severity unsure) | Open | That purchase cannot be used as an actual-cost basis. Nothing reads it yet because costing is parked. | Agent (unassigned) |
-| Payments | KI-75 | HIGH (severity unsure) | Check first | Applying a credit memo could clash with another action happening at the same moment. | Taha |
+| Payments | KI-75 | HIGH (severity unsure) | Resolved: disproved 2026-11-23 (two-session test; the key lock serializes it) | Applying a credit memo could clash with another action happening at the same moment. | None (closed) |
 | Permissions | KI-169 | HIGH | Open | Hiding Invoices or Record Payments from a person still lets them reach those actions in the database. | Taha |
 | Permissions | KI-119 | HIGH | Fixed on staging, not live | A person with Reports hidden can still pull report data. | Agent (release) |
 
@@ -370,7 +370,9 @@ If another admin locks rates while a product page is open, the page still offers
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-08.
 
-**LOW · OPEN, no fix planned · products/import · found 2026-11-05 (Sol LOW on #1486)**
+> **Fix in review (Lane E, 2026-11-22):** migration `20270224200000` makes the preview refuse the unknown field by name; closes once it is live.
+
+**LOW · OPEN, fix in review · products/import · found 2026-11-05 (Sol LOW on #1486)**
 `preview_product_import` ignores unknown top-level keys on a row, but `apply_product_setup` refuses them, so such a
 file previews "ready" and then the whole save is refused with nothing written. The screen never sends extra keys,
 and keys inside `insert` or `rates` are already refused by the preview. The Check File timeout first filed under
@@ -461,7 +463,7 @@ the RPCs, atomic create. Repair step 2 (To-Do 0.17), before the pre-season count
 (also refuses the same row twice on one count; concurrent claims serialized); a count's status only moves forward (in progress
 to completed or cancelled, completed to cancelled), so no count can be reopened or reversed twice; signed-in users lose direct UPDATE on `cycle_counts` and `cycle_count_items`, so a
 completed count cannot be marked cancelled without its reversal and a line's variance is only what the save RPC computed (a direct line insert may set only the four columns the app sends). **Still open here:** the three-request creation (a failed create leaves an empty open count, which
-now blocks a new count at that warehouse until it is cancelled from the Cycle Counts screen). **In progress (Lane E, 2026-11-22):** `create_cycle_count` (`20270209160000`) does the whole start in one step; the screen switch and removing the direct inserts follow.
+now blocks a new count at that warehouse until it is cancelled from the Cycle Counts screen). **Database part on staging (#2219 merged 2026-11-22; awaiting the production release):** `create_cycle_count` (`20270209160000`) does the whole start in one step; the screen switch and removing the direct inserts follow.
 
 ### KI-163 — Small stock-history gaps
 
@@ -490,7 +492,7 @@ Fix: add `vendor_id` set by `save_purchase_order`, keep the text as a snapshot; 
 
 ### KI-151 — Changing PO line costs is still checked against the ordered value
 
-> **Fix in review (Lane E, 2026-11-22):** Mason chose "judge against what arrived" (DECISION_LOG 2026-11-22). Migration
+> **Fixed on staging (#2266 merged 2026-11-23 UTC; awaiting the production release):** Mason chose "judge against what arrived" (DECISION_LOG 2026-11-22). Migration
 > `20270223100000_po_cost_cut_judged_against_received.sql` uses the KI-143 limit; applies after the KI-197 migration.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-12.
@@ -538,7 +540,7 @@ running local test app.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-15.
 
-> **In progress (Lane E, 2026-11-22):** database part (expected cost check, migration `20270217120000`) in review; the screen sends it in a follow-up PR; the "Most recent received PO" label is its own small PR.
+> **Lane E, 2026-11-22:** database part (expected cost check, migration `20270217120000`) merged to staging (#2244; awaiting the production release); the screen sends it in a follow-up PR; the "Most recent received PO" label is its own small PR.
 
 **LOW · OPEN (source-confirmed) · purchasing · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 2) · unassigned**
 - `set_purchase_order_item_costs` (`20261021140000` ~L513, only definition) takes the line and new cost only
@@ -581,7 +583,7 @@ spelling on receipt.
 | #2190 | MED | Open | Two deliveries completing at the same moment on the same products can make one fail and need a retry; nothing is saved wrongly. | Agent (unassigned) | W2-12 |
 | #2193 | MED | FIXED-ON-STAGING | If applied before the EPA batch, the one-time load commits with some ingredients missing their groups and never fills them later. Fixed: the live-apply tooling refuses the load until at least 90 of its 123 list rows match an active ingredient on live (shows the count). | Agent (Lane D) | W2-13 |
 | #2172 | LOW | Open | A very large batch (about 3,000 approvals) could make Confirm silently send nothing. Not reachable today (hundreds of rates). | Agent (unassigned) | W3-16 |
-| #2135 | LOW | Fix in review (`20270213100000`, branch `claude/lane-c2-single-short-stock`) | Staff see an inflated short-stock count and get two warnings and two notifications; stock math is right. | Agent (unassigned) | W3-17 |
+| #2135 | LOW | Fixed on staging (#2224 merged 2026-11-22, `20270213100000`); awaiting the production release | Staff see an inflated short-stock count and get two warnings and two notifications; stock math is right. | Agent (unassigned) | W3-17 |
 | #1912 | LOW | On staging, not live | Retry keys with hidden characters are now refused. Issue can be closed once released. | Agent (unassigned) | R-13 |
 | #1829 | LOW | Check first | A confirmed rate approval could be lost if the reply is dropped and the user leaves. | Agent (unassigned) | W3-51 |
 
@@ -921,6 +923,14 @@ days)", and have `save_customer` refuse terms the parser would default.
 
 ### KI-75 — Retry-key detail (extends KI-10, KI-11)
 
+> **Closed 2026-11-23 (disproved), Taha:** the credit-memo apply race cannot happen. `check_idempotency` takes
+> `pg_advisory_xact_lock('crx:idempotency:' || key)` before it reads (`20260714230000_gauntlet_core_guards`,
+> `20260716160000_fix_idempotency_committed_replay_guard`), so every call with one key waits for the first to commit.
+> Two-session test on a synthetic local database, session A holding its transaction open 6 s: the same key and same
+> arguments → B waits, then returns A's application id (one application, memo debited once); the same key with
+> another target → B is refused with `IDEMPOTENCY_ARGUMENT_MISMATCH` and the second invoice is untouched. Nothing
+> else in this entry is open.
+
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Check first · HIGH · Taha (to 2026-12-15) · plan W1-13. The credit-memo apply race after the lock was not re-proven in this pass.
 
 **HIGH on money paths · OPEN · money**
@@ -1002,6 +1012,8 @@ today. Fix: use the `is_application_fee` case `save_invoice` already uses, plus 
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · HIGH · Agent (unassigned) · plan W1-01 · #2149 (count part), #2195 (payments part). Invoice count fixed on staging (#2149). Payments received still totals the old payments table, counts deleted payments and misses allocation-set receipts (#2195, Sol on #2189), so a month paid through allocations can show $0 received.
 
+> **2026-11-22:** payments part fixed on staging by #2242 (merged 2026-11-23 UTC, `20270224120000_month_close_payments_received_recheck.sql`, with #2175; awaiting the production release): Record Payment checks + prepayment checks (month entered, current amount) + live legacy payments; the close re-checks the reviewed figures.
+
 **MED · PARTIAL (the close receipt's invoice count is fixed on staging with KI-125 (#2149), awaiting the production release; payments received is OPEN, a follow-up: it needs a rule for prepayment checks, which can be edited or deleted later, and a re-check at close that the figures still match what the admin reviewed) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #6)**
 Both read the legacy `payments` table (0 rows; payments now live in `allocation_sets`), so the one July 2026 customer
 payment shows as $0. The close summary also counts only invoices still `posted`, missing ones since paid or overdue.
@@ -1017,6 +1029,9 @@ Where: `get_monthly_summary` and `_close_accounting_period_replay_impl_20261015`
 has the real as-of figure. Fix: relabel "Current AR (today)" or reuse `get_ar_aging(p_period_end)`.
 
 ### KI-133 — Profitability and Gross Sales report booked orders as "revenue" without saying so
+
+> **Fix in review (Lane E, 2026-11-22):** the reports say "Booked Sales" with a one-line basis note. Drafts need no
+> filter: the database refuses a draft order status (`orders_status_check`), so Gross Sales cannot include one.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-26.
 
@@ -1042,6 +1057,9 @@ same share. Fix later: enforce the payable rule, per sale and per paid share, in
 
 ### KI-135 — "Inventory Value" label: relabel as pricing-basis value (D12 item 7)
 
+> **Fix in review (Lane E, 2026-11-22):** labels say "price-list cost"; the per-row report and CSV mark rows left out of
+> the total (CSV value blank, "In Total" column); profit and margin carry the saved-pricing-cost note.
+
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-27.
 
 **LOW · OPEN · inventory/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 1 #3) · unassigned**
@@ -1058,7 +1076,7 @@ rows, so summing the CSV reproduces the old wrong total. Fix: match the rows to 
 | ID | Sev | Status | What goes wrong | Owner | Plan |
 |---|---|---|---|---|---|
 | #2175 | MED | Open | Numbers can change between the admin's review and the click, and the close saves the new ones; the commission "reviewed" box is screen-only. | Agent (unassigned) | W2-24 |
-| SOL-7 | HIGH | PR #2201 open into staging | A broken or absurd order total would distort the share-billed commission in profit reports. PR #2201 open into staging (Sol round 3 clean; round 2 also required whole cents): New migration 20270208100000 refuses order totals that are not finite or are at or above the report's usable limit (1e15). | Mason decision (un-park) | R-07 |
+| SOL-7 | HIGH | Fixed on staging (#2201 merged 2026-11-22); awaiting the production release | A broken or absurd order total would distort the share-billed commission in profit reports. PR #2201 merged to staging 2026-11-22 (Sol round 3 clean; round 2 also required whole cents): New migration 20270208100000 refuses order totals that are not finite or are at or above the report's usable limit (1e15). | Mason decision (un-park) | R-07 |
 
 ---
 
@@ -1280,11 +1298,11 @@ single-to-group edit, soft-deleted group members.
 | ID | Sev | Status | What goes wrong | Owner | Plan |
 |---|---|---|---|---|---|
 | #2145 | LOW | Open | Two people editing jobs on the same booking at once can have one save refused (retry works); user deactivation can lag a moment. | Mason (field-app billing) | W3-31 |
-| #2196 | HIGH | Open | A sales rep may still be able to delete a completed (billable) job through a direct table path, so it could drop out of Unbilled Jobs. | Mason (field-app billing) | W1-02 |
+| #2196 | HIGH | Fixed on staging (#2222 merged 2026-11-22, `20270210110000`); awaiting the production release | A sales rep may still be able to delete a completed (billable) job through a direct table path, so it could drop out of Unbilled Jobs. | Mason (field-app billing) | W1-02 |
 | #2188 | LOW | Open | An old link to a deleted job shows it as Scheduled with Cancel/Start buttons (database still refuses changes). | Mason (field-app billing) | W3-32 |
 | #2141 | LOW | Open | A job-made group draft could be cancelled leaving the job pointing at a cancelled invoice. Live has none today. | Mason (field-app billing) | W3-33 |
 | #2064 | MED | On staging, not live | A rep can now save an included grower-share chemical only if the per-acre price covers cost; otherwise an admin is needed. Not on main yet. | Mason (field-app billing) | R-12 |
-| #2063 | HIGH | Check first | A job could be billed twice (blend invoice then split field invoice). Live data not checked; code region still in the unchanged file. | Mason (field-app billing) | W1-06 |
+| #2063 | HIGH | Fixed on staging (#2260 merged 2026-11-23 UTC, `20270224130000`); awaiting the production release | A job could be billed twice (blend invoice then split field invoice). Live data not checked. | Mason (field-app billing) | W1-06 |
 | #2061 | HIGH | Check first | A job could be billed a second time. Issue says live-unchanged; not traced. | Mason (field-app billing) | W1-05 |
 | #1933 | MED | Check first | Some units cannot convert, so an application line may refuse or misprice. | Mason (field-app billing) | W2-50 |
 | #1926 | LOW | Check first | A very small application could bill as zero. | Mason (field-app billing) | W3-54 |
@@ -1821,14 +1839,21 @@ messages and data are never sent, for errors and performance samples alike (chec
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · LOW · Agent (unassigned) · plan W3-45.
 
-**LOW (proof) · PARTLY FIXED · tooling · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md), Codex audit) · unassigned**
+**LOW (proof) · FIXED 2026-11-23 · tooling · found 2026-11-13 ([Product Master review](../audits/2026-11-13-product-master-review.md), Codex audit) · unassigned**
 **2026-11-16 (repair step 6):**
 - All four proofs below run to PASS again: the undo prover replays the whole chain, the three provers refuse only a
   later file that redefines what they rely on, and the pricing proof uses the current cost-change form.
 - The 5 `cost-exposure-review` hashes were re-keyed after a live re-read. The only changed function their chains
   reach is `_enqueue_delivery_receipt`, which reads no cost.
 
-Still open: the KI-159 database sweep and each repair step's regression test.
+**2026-11-23 (repair step 6 finished):**
+- The KI-159 sweep (`scripts/db-invariant-sweeps/predicates/stock-matches-history.sql`, PR #1897) ran read-only on
+  production: PASS, 0 rows.
+- `src/lib/productMasterRepairGuards.test.ts` pins each fixed step in its newest migration (KI-156, KI-158, KI-160,
+  KI-161, KI-162) and checks that the sweep and the browser check read every history type the same way (KI-159).
+  Each case was shown failing with its fix undone. KI-157 is still open, so it has none.
+- Not part of this item: the same live run flags `cost-exposure-review` (31), `actor-forgery` (5) and
+  `actor-forgery-fin-audit` (1) on functions changed since their review keys were taken.
 
 Several proofs did not complete on 2026-11-13, so those workflows are not certified:
 - The full undo prover stops rebuilding at `20261217100000_job_access_ends_with_the_job.sql` (`JOB_ACCESS_BASELINE_DRIFT`).
@@ -1839,7 +1864,7 @@ The live `cost-exposure-review` predicate fails on 5 changed signatures (`comple
 `start_and_complete_delivery`, `create_invoice_from_order`, `create_split_invoices_from_order`,
 `process_offline_action`). A manual check by both reviewers found no cost leak; the review hashes are stale.
 Stock-vs-history is checked only in the browser integrity report and a one-off script, not by the database sweep
-(KI-159). No tests cover KI-156 to KI-162. Fix: repair the fixtures alongside each repair step, refresh the review
+(KI-159). No tests covered KI-156 to KI-162 (2026-11-13). Fix: repair the fixtures alongside each repair step, refresh the review
 hashes, and add each step's regression test. Repair step 6 (To-Do 0.17).
 
 ### KI-78 — Tooling and guard details (extends KI-04, KI-46, KI-47, KI-48, KI-49, KI-50, KI-65, KI-68)
@@ -1890,25 +1915,25 @@ hashes, and add each step's regression test. Repair step 6 (To-Do 0.17).
 | #2192 | MED | Open | A hidden "Fixes #n" in a PR description can close an issue nobody meant to close. Taha merges .github changes. | Agent (unassigned) | W2-44 |
 | #2194 | LOW | Open | If the same grants are stored in a different order the migration aborts safely and stops the release apply until re-checked. Severity lowered from MED: fails safe, no data touched. | Agent (unassigned) | W3-46 |
 | #1950 | LOW | Check first | Two agents could land at once if the lock wait times out. | Agent (unassigned) | W3-55 |
-| SOL-8 | BLOCKER | Resolved by removing the pass (PR #2203; closes when it merges) | The merge guard runs a helper from the working folder without first confirming it was reviewed, and that helper can reach live database credentials. Fix: the guard only runs reviewed code. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | Agent (land #2203) | R2-01 |
-| SOL-9 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | The merge guard's check of a PR's database changes can miss one on a very large PR, or read the file list and the files from different versions. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | Agent (land #2203) | R2-02 |
-| SOL-10 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | While a release is open, a hotfix's database change could go live while its app change is refused, leaving the two out of step. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | Agent (land #2203) | R2-03 |
-| SOL-11 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | The merge guard's 4-hour hold for Taha ends early once he comments, and does not keep honouring an explicit "hold". (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | Agent (land #2203) | R2-04 |
-| SOL-12 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A release-pass command naming an invalid PR number counts as approval for the open release. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | Agent (land #2203) | R2-05 |
-| SOL-13 | MED | Resolved by removing the pass (PR #2203; closes when it merges) | The guard's SQL comparison treats two slightly different texts (a line-ending edge case) as the same. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | Agent (land #2203) | R2-06 |
-| SOL-14 | MED | Resolved by removing the pass (PR #2203; closes when it merges) | A mistaken release command for a hotfix number blocks the later correct hotfix command. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | Agent (land #2203) | R2-07 |
-| SOL-15 | MED | Resolved by removing the pass (PR #2203; closes when it merges) | Checking many database files one by one can use up the guard's time budget and refuse a valid merge. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | Agent (land #2203) | R2-08 |
-| SOL-16 | MED | Resolved by removing the pass (PR #2203; closes when it merges) | A command sent with no PR number can attach to a release PR opened just after it was sent. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | Agent (land #2203) | R2-09 |
-| SOL-17 | MED | Resolved by removing the pass (PR #2203; closes when it merges) | A pass records only a PR number, not the repository, and the guard accepts both the old and new repository names. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | Agent (land #2203) | R2-10 |
-| SOL-18 | LOW | Resolved by removing the pass (PR #2203; closes when it merges) | An eleventh pass within 24 hours silently drops the oldest one early. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | Agent (land #2203) | R2-11 |
-| SOL-19 | LOW | Resolved by removing the pass (PR #2203; closes when it merges) | The lookup for the open release reads only the first 100 open PRs. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | Agent (land #2203) | R2-12 |
-| SOL-20 | LOW | Resolved by removing the pass (PR #2203; closes when it merges) | A slow GitHub answer can use up the prompt hook's whole time limit. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | Agent (land #2203) | R2-13 |
-| SOL-1 | BLOCKER | Resolved by removing the pass (PR #2203; closes when it merges) | The production merge gate could accept a local snapshot, not the live database record, as proof a reviewed migration was applied. Partly fixed locally (round 2 found new holes, SOL-8 to SOL-20; Mason chose to remove the pass, which was on staging only: PR #2203): The gate now compares the live ledger SQL with the PR's migration file. | Mason decision (un-park) | R-01 |
-| SOL-2 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A message that only mentioned a release, or set a condition or a future time, could count as Mason's go-ahead. Partly fixed locally (round 2 found new holes, SOL-8 to SOL-20; Mason chose to remove the pass, which was on staging only: PR #2203): Only a message that is the bare command grants a pass. | Mason decision (un-park) | R-02 |
-| SOL-3 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A go-ahead given for one release could cover a different release PR or another repository. Partly fixed locally (round 2 found new holes, SOL-8 to SOL-20; Mason chose to remove the pass, which was on staging only: PR #2203): The pass is pinned to the release PR open at that moment, in this repository only. | Mason decision (un-park) | R-03 |
-| SOL-4 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A new approval refreshed the time limit on older approvals. Partly fixed locally (round 2 found new holes, SOL-8 to SOL-20; Mason chose to remove the pass, which was on staging only: PR #2203): Each grant keeps its own 24 hours. | Mason decision (un-park) | R-04 |
-| SOL-5 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | Taha could lose his review window on a production merge. Partly fixed locally (round 2 found new holes, SOL-8 to SOL-20; Mason chose to remove the pass, which was on staging only: PR #2203): Pass-backed merges into main still wait out the hold. | Mason decision (un-park) | R-05 |
-| SOL-6 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A release could be left half-applied on the live database. Partly fixed locally (round 2 found new holes, SOL-8 to SOL-20; Mason chose to remove the pass, which was on staging only: PR #2203): Pass-backed hotfixes are refused while a release PR is open. | Mason decision (un-park) | R-06 |
+| SOL-8 | BLOCKER | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | The merge guard runs a helper from the working folder without first confirming it was reviewed, and that helper can reach live database credentials. Fix: the guard only runs reviewed code. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | None (closed) | R2-01 |
+| SOL-9 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | The merge guard's check of a PR's database changes can miss one on a very large PR, or read the file list and the files from different versions. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | None (closed) | R2-02 |
+| SOL-10 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | While a release is open, a hotfix's database change could go live while its app change is refused, leaving the two out of step. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | None (closed) | R2-03 |
+| SOL-11 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | The merge guard's 4-hour hold for Taha ends early once he comments, and does not keep honouring an explicit "hold". (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | None (closed) | R2-04 |
+| SOL-12 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A release-pass command naming an invalid PR number counts as approval for the open release. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | None (closed) | R2-05 |
+| SOL-13 | MED | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | The guard's SQL comparison treats two slightly different texts (a line-ending edge case) as the same. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | None (closed) | R2-06 |
+| SOL-14 | MED | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A mistaken release command for a hotfix number blocks the later correct hotfix command. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | None (closed) | R2-07 |
+| SOL-15 | MED | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | Checking many database files one by one can use up the guard's time budget and refuse a valid merge. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | None (closed) | R2-08 |
+| SOL-16 | MED | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A command sent with no PR number can attach to a release PR opened just after it was sent. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | None (closed) | R2-09 |
+| SOL-17 | MED | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A pass records only a PR number, not the repository, and the guard accepts both the old and new repository names. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | None (closed) | R2-10 |
+| SOL-18 | LOW | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | An eleventh pass within 24 hours silently drops the oldest one early. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | None (closed) | R2-11 |
+| SOL-19 | LOW | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | The lookup for the open release reads only the first 100 open PRs. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | None (closed) | R2-12 |
+| SOL-20 | LOW | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A slow GitHub answer can use up the prompt hook's whole time limit. (Sol round 2 on the local guard branch, 2026-11-22, not pushed; the release pass is on staging only.) | None (closed) | R2-13 |
+| SOL-1 | BLOCKER | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | The production merge gate could accept a local snapshot, not the live database record, as proof a reviewed migration was applied. Partly fixed locally (round 2 found new holes, SOL-8 to SOL-20; Mason chose to remove the pass, which was on staging only: PR #2203): The gate now compares the live ledger SQL with the PR's migration file. | Mason decision (un-park) | R-01 |
+| SOL-2 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A message that only mentioned a release, or set a condition or a future time, could count as Mason's go-ahead. Partly fixed locally (round 2 found new holes, SOL-8 to SOL-20; Mason chose to remove the pass, which was on staging only: PR #2203): Only a message that is the bare command grants a pass. | Mason decision (un-park) | R-02 |
+| SOL-3 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A go-ahead given for one release could cover a different release PR or another repository. Partly fixed locally (round 2 found new holes, SOL-8 to SOL-20; Mason chose to remove the pass, which was on staging only: PR #2203): The pass is pinned to the release PR open at that moment, in this repository only. | Mason decision (un-park) | R-03 |
+| SOL-4 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A new approval refreshed the time limit on older approvals. Partly fixed locally (round 2 found new holes, SOL-8 to SOL-20; Mason chose to remove the pass, which was on staging only: PR #2203): Each grant keeps its own 24 hours. | Mason decision (un-park) | R-04 |
+| SOL-5 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | Taha could lose his review window on a production merge. Partly fixed locally (round 2 found new holes, SOL-8 to SOL-20; Mason chose to remove the pass, which was on staging only: PR #2203): Pass-backed merges into main still wait out the hold. | Mason decision (un-park) | R-05 |
+| SOL-6 | HIGH | Resolved: release pass removed (PR #2203 merged to staging 2026-11-22) | A release could be left half-applied on the live database. Partly fixed locally (round 2 found new holes, SOL-8 to SOL-20; Mason chose to remove the pass, which was on staging only: PR #2203): Pass-backed hotfixes are refused while a release PR is open. | Mason decision (un-park) | R-06 |
 
 ---
 

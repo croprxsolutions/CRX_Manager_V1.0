@@ -52,12 +52,29 @@ export function isReceiptSendingNow(error: unknown) {
 
 export const RECEIPT_SENDING_NOW_MESSAGE = 'The server is emailing this receipt right now. Try again in a minute.';
 
-// When this delivery's queue row was (re)queued, or null when it has none. Used only after a hand send that started
-// with no receipt queued, to warn that one was queued meanwhile (the server binding needs a receipt to name).
-export async function receiptQueuedAt(deliveryId: string): Promise<string | null> {
-  const { data, error } = await supabase.from('delivery_receipt_queue').select('created_at').eq('delivery_id', deliveryId).maybeSingle();
+export type QueuedReceipt = { status: string; sent_at: string | null; send_authorized_at: string | null };
+
+// This delivery's queued receipt, or null when none is queued. Used only after a hand send that started with no
+// receipt queued, to warn about one queued meanwhile (#2291). A failed read throws: the caller cannot tell.
+export async function readQueuedReceipt(deliveryId: string): Promise<QueuedReceipt | null> {
+  const { data, error } = await supabase.from('delivery_receipt_queue')
+    .select('status, sent_at, send_authorized_at').eq('delivery_id', deliveryId).maybeSingle();
   if (error) throw error;
-  return data?.created_at ?? null;
+  return (data as QueuedReceipt | null) ?? null;
+}
+
+// What to tell the office about a receipt queued while a hand send was going out, or null to say nothing (#2291).
+// A receipt marked handled can still have been emailed (handling keeps sent_at and send_authorized_at), so only
+// one with no send recorded or authorized is quiet.
+export function queuedMeanwhileWarning(row: QueuedReceipt | null): string | null {
+  if (!row) return null;
+  const queued = 'A new receipt was queued for this delivery while the email was sending';
+  if (row.status === 'sent' || row.sent_at || row.send_authorized_at) {
+    return `${queued}, and the server has emailed it or may have. The customer may have two receipts.`;
+  }
+  if (row.status === 'needs_check') return `${queued}. It is on "Customer receipts to check": check it there before sending again.`;
+  if (row.status === 'pending' || row.status === 'sending') return `${queued}. The server may email it too.`;
+  return null;
 }
 
 // The server refused because the delivery's receipt is not the one the screen named (queued again, or gone).

@@ -88,6 +88,12 @@ describe('sanitizeError', () => {
   ])('explains an order-quantity refusal %s (F05) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
   });
+  it('explains the older New Delivery cross-load refusal in words, without the raw token or line id', () => {
+    const message = 'ITEM_OVER_REMAINING_INCL_ACTIVE: order_item_id 2b680d4a-7765-4f02-b9a4-b5cef819709b has 2 units on other active deliveries; only 0 available (2 remaining on order minus 2 active)';
+    const shown = sanitizeError({ code: 'P0001', message });
+    expect(shown).toBe('Nothing was saved. Other open deliveries for this order already hold 2 of this product, so only 0 more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.');
+    expect(shown).not.toMatch(/ITEM_OVER|2b680d4a/);
+  });
   it('explains a completion past the order (F05) without the raw token', () => {
     const sentence = 'Atrazine 4L — this would deliver more than was ordered. Call the office before completing this delivery.';
     expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
@@ -666,6 +672,19 @@ describe('product setup and import refusals (20261107090000)', () => {
       .toBe("This draft's sales tax doesn't match its sale's Sales tax box. Switch the box over and back, ending at the setting you want, to re-apply it to the sale's drafts (a split draft that can't be edited: set the box back to match it, or void and redraft its group), then post");
     expect(sanitizeError('SALES_TAX_ORDER_CLOSED: a cancelled or voided sale can\'t change'))
       .toBe("This sale is cancelled or voided, so its sales tax can't change");
+  });
+});
+
+describe('sanitizeError #2063 blend-billed refusal', () => {
+  // The exact sentence 20270224130000 raises (no ticket number since Sol round 3).
+  const sentence = (shown: string) => 'a blend ticket for this job is already billed (%); billing the job here too would double-bill the customer. If you meant to bill the job here, ask an admin to void or delete that blend-ticket invoice first.'.replace('%', shown);
+  it('keeps the server sentence whole for an invoice the caller may open', () => {
+    expect(sanitizeError('BLEND_TICKET_ALREADY_BILLED: ' + sentence('invoice INV-1001')))
+      .toBe(sentence('invoice INV-1001'));
+  });
+  it('keeps the server sentence whole for an invoice the caller cannot open', () => {
+    expect(sanitizeError('BLEND_TICKET_ALREADY_BILLED: ' + sentence('an invoice you cannot open')))
+      .toBe(sentence('an invoice you cannot open'));
   });
 });
 

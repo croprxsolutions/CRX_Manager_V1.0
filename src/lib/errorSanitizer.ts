@@ -367,6 +367,11 @@ export function sanitizeError(error: unknown): string {
     return detail ? `${detail.charAt(0).toUpperCase()}${detail.slice(1)}.`
       : 'This customer still has open work (orders, deliveries, holds, quotes, invoices, spray jobs, returns or prepay money). Finish, bill or settle it before deactivating it.';
   }
+  // #2063 (20270224130000): the server names only invoices the caller may read and what to do; keep it whole.
+  if (/^BLEND_TICKET_ALREADY_BILLED:/.test(message)) {
+    return message.slice('BLEND_TICKET_ALREADY_BILLED:'.length)
+      .replace(/[؜‎‏‪-‮⁦-⁩]/g, '').trim();
+  }
   // Rate lock (20261107060000), product parents (20261108120000), tote fill (20261117130000) and weights (20261207100000), chemistry (20261209100000), crop + timing choices (20261229120000): the server text after the token is the operator's answer.
   const rateRefusal = message.match(/^(?:PRODUCT_RATES_LOCKED|PRODUCT_RATES_STALE|PRODUCT_RATE_INVALID|PRODUCT_RATE_DUPLICATE_PRODUCT|PRODUCT_RATE_LOCK_UNCHANGED|PRODUCT_RATE_CORRECTION_NO_CHANGE|PRODUCT_RATE_UNIT_INVALID|PRODUCT_RATES_NOT_LOCKED|PRODUCT_RATE_PREVIEW_CHANGED|PRODUCT_RATES_READ_ONLY_IN_PRICE_WORKBOOK|REASON_TOO_LONG|PRODUCT_PARENT_[A-Z_]+|WORKBOOK_(?:WEIGHTS|INGREDIENTS)_REFUSED|WORKBOOK_NOTHING_TO_SAVE|TOTE_FILL_[A-Z_]+|PRODUCT_WEIGHT_[A-Z_]+|CHEMISTRY_[A-Z_]+|INGREDIENT_[A-Z_]+|COST_REFERENCE_[A-Z_]+|USE_TIMING_[A-Z_]+|REASON_REQUIRED|EVIDENCE_REQUIRED|EVIDENCE_TOO_LONG):\s*(.+)$/s)?.[1];
   if (rateRefusal) {
@@ -481,6 +486,11 @@ export function sanitizeError(error: unknown): string {
   // 20270224100000): the server sentence says what is wrong.
   const deliveryLineRule = message.match(/^(?:DELIVERY_LINE_NOT_ON_ORDER|DELIVERY_LINE_PRODUCT_MISMATCH|DELIVERY_LINE_UNIT_MISMATCH|DELIVERY_LINE_DUPLICATE|DELIVERY_ORDER_LOCKED|DELIVERY_OVER_ORDER|ORDER_LINE_BELOW_DELIVERIES|ORDER_LINE_QUANTITY_NOT_FINITE|ORDER_LINE_CHECK_ISOLATION):\s*(.+)$/s);
   if (deliveryLineRule) return `Nothing was saved. ${deliveryLineRule[1].trim()}`;
+  // New Delivery's older cross-load check (20260518010000): its text carries a raw line id, so say it in words.
+  const overActive = message.match(/^ITEM_OVER_REMAINING_INCL_ACTIVE:.*? has (\S+) units on other active deliveries; only (\S+) available/s);
+  if (overActive) {
+    return `Nothing was saved. Other open deliveries for this order already hold ${overActive[1]} of this product, so only ${overActive[2]} more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.`;
+  }
   // Partial completion figures (20270203120000, #1942) and completing past the order (F05): the server sentence says what to do.
   const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER):\s*(.+)$/s);
   if (deliveryQuantities) return `The delivery was not completed. ${deliveryQuantities[1].trim()}`;

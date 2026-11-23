@@ -1,5 +1,5 @@
 -- Written 2026-11-23. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270227100000_rate_cutover_refuses_unrestorable.md.
+-- docs/reference/migrations.d/20270227160000_rate_cutover_refuses_unrestorable.md.
 --
 -- WHY (Sol, RT-4a button review, 2026-11-23; Mason chose the database fix the same day): a switch to the approved
 --   rate (20270125100000) could succeed in two cases it should refuse.

@@ -3,7 +3,7 @@
 Read at `origin/staging` 5b549b9e4. Builds the screen for the settled RT-4a contract
 (`2026-11-17-product-RT4-cutover-CONTRACT.md`), which said "No screen"; Mason asked for the button on 2026-11-23
 so the pilot is his own click instead of an API call in the browser pane. One database change rides with it
-(amendment at the end, Sol round 2): migration `20270227100000_rate_cutover_refuses_unrestorable.sql`, which must be
+(amendment at the end, Sol round 2): migration `20270227160000_rate_cutover_refuses_unrestorable.sql`, which must be
 live before the button reaches production (§3).
 
 ## 1. Outcome and authority
@@ -58,7 +58,7 @@ live before the button reaches production (§3).
 
 ## 3. Delivery
 
-PR to `staging` carrying the button and migration `20270227100000_rate_cutover_refuses_unrestorable.sql` together
+PR to `staging` carrying the button and migration `20270227160000_rate_cutover_refuses_unrestorable.sql` together
 (amendment below). Ordering: the migration must be live before the button reaches production, so the two ship in
 the same release and the release's migration is applied before its merge (`ship.md`). The rate-switch functions
 already live (20270125100000) stay callable meanwhile, but nothing calls them until the button ships. No live call:
@@ -108,7 +108,7 @@ None. Authority, refusals, undo and the freeze were settled in the RT-4a contrac
 
 ## Amendment (2026-11-23, Sol round 2; Mason: "DB fix")
 
-- A promote that changes the rate or unit is refused by the database when the old values would fail the switch back's checks (`PRODUCT_PARENT_CUTOVER_NOT_RESTORABLE`) or field-app invoicing cannot convert the approved unit to a size's sold unit (`PRODUCT_PARENT_CUTOVER_UNIT_NOT_INVOICEABLE`). Migration `20270227100000_rate_cutover_refuses_unrestorable.sql`. The screen keeps no copy of these checks; it shows the refusal.
+- A promote that changes the rate or unit is refused by the database when the old values would fail the switch back's checks (`PRODUCT_PARENT_CUTOVER_NOT_RESTORABLE`) or field-app invoicing cannot convert the approved unit to a size's sold unit (`PRODUCT_PARENT_CUTOVER_UNIT_NOT_INVOICEABLE`). Migration `20270227160000_rate_cutover_refuses_unrestorable.sql`. The screen keeps no copy of these checks; it shows the refusal.
 
 ## Amendment (2026-11-23, Sol round 3; Mason: "Fix in this PR")
 

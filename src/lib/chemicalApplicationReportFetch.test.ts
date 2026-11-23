@@ -196,6 +196,14 @@ describe('fetchChemicalApplicationReportData — the EPA number the job kept (KI
     expect(await epaOf()).toBe('Not recorded');
   });
 
+  it('the batch summaries (keptEpa: false) never read the kept numbers and keep the catalog number', async () => {
+    wireSupabase(JOB_ROW, PRODUCT_LABEL_ROWS, [{ product_id: 'p1', epa_registration: '999-1', not_recorded: false }]);
+    mockResolveBilledCustomers.mockResolvedValue(resolved);
+    const data = await fetchChemicalApplicationReportData('job-1', { keptEpa: false });
+    expect(data!.products[0].epa_registration).toBe('123-45');
+    expect(mockFrom.mock.calls.map((c) => c[0])).not.toContain('job_product_epa');
+  });
+
   it('prints the catalog number when the job kept none (not yet sprayed)', async () => {
     wireSupabase(JOB_ROW, PRODUCT_LABEL_ROWS, []);
     mockResolveBilledCustomers.mockResolvedValue(resolved);

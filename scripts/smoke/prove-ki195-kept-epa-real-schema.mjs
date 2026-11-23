@@ -140,7 +140,7 @@ try {
   if (process.env.KI195_PROOF_OUT) {
     writeFileSync(process.env.KI195_PROOF_OUT, JSON.stringify({
       proof: { sprayed: after, backfilled: proof(USERS.admin, J_BACKFILLED), open: proof(USERS.admin, J_OPEN) },
-      kept: { sprayed: keptRows(USERS.applicator, J_SPRAYED), backfilled: keptRows(USERS.applicator, J_BACKFILLED), open: [] },
+      kept: { sprayed: keptRows(USERS.rep, J_SPRAYED), backfilled: keptRows(USERS.rep, J_BACKFILLED), open: [] },
       ids: { P_CORR, P_NONE, P_OLD },
     }, null, 2));
   }

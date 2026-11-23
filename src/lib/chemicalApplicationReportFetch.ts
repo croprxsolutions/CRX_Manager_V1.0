@@ -80,6 +80,11 @@ interface ProductLabel {
 interface ReportFetchOptions {
   /** Defaults to true so the Chemical Application Report remains compliance-strict. */
   strict?: boolean;
+  /**
+   * KI-195: print the EPA number the job kept (default). The batch mixing and usage summaries pass false: they
+   * name the product being loaded today, and Master Mix tells same-named products apart by catalog number.
+   */
+  keptEpa?: boolean;
 }
 
 /**
@@ -89,7 +94,7 @@ interface ReportFetchOptions {
  */
 export async function fetchChemicalApplicationReportData(
   jobId: string,
-  { strict = true }: ReportFetchOptions = {},
+  { strict = true, keptEpa = true }: ReportFetchOptions = {},
 ): Promise<ApplicatorSheetData | null> {
   const { data, error } = await supabase
     .from('jobs')
@@ -143,7 +148,7 @@ export async function fetchChemicalApplicationReportData(
     if (missingLabel.length > 0) throw new Error('Some products on this job have no label data on file — the chemical report cannot be completed.');
 
     // KI-195: a sprayed job prints the EPA number it kept, never the catalog's later one.
-    await applyKeptEpa(jobId, labelById);
+    if (keptEpa) await applyKeptEpa(jobId, labelById);
   }
 
   // Billed customers via the SECURITY DEFINER RPC (saved job_field_shares →

@@ -36,6 +36,10 @@ No write path changes; nobody gains or loses access. Smallest change:
   reads as unlocked, so the screen works before and after the apply. The email is built in the browser and sent through
   the existing `send-email` type: no Edge Function deploy.
 
+Batch reports (Master Mix, Chemical Summary, Projected Use) keep the catalog number and do not read the kept rows
+(Sol r1 HIGH: Master Mix tells same-named products apart by catalog number; they are loading and usage sheets, not
+per-job records).
+
 Unchanged: invoice PDFs (KI-157, Taha's lane), split invoice re-save (KI-117), product names (the snapshot has none), the
 Master Mix/summary reports beyond inheriting the per-job text.
 
@@ -45,7 +49,7 @@ Master Mix/summary reports beyond inheriting the per-job text.
 - Lock read fails or is cut: the report, applicator sheet and WPS notice abort with the existing error toast; never print
   the catalog number for a locked product.
 - An applicator who can see the job reads its lock rows (policy follows `jobs`); one who cannot see the job cannot print it.
-- Rollout: the screen tolerates the old RPC (no `epa_kept` key → catalog, today's behavior). The migration alone changes
+- Rollout: the screen tolerates the old RPC (no `epa_kept` key → no EPA line in the proof email, today's behavior). The migration alone changes
   only the proof JSON (new keys, normalized catalog) and the deployed app ignores the new keys.
 
 ## Proof cases (staging DB via local vite, or the real-schema prover; never production data)
@@ -101,3 +105,16 @@ Disproved or out of scope, with evidence:
 No DECISION finding needs Mason: 8 and 16 follow existing fallbacks and the settled per-product rule; 19 (one summary
 row, several jobs) only affects Master Mix naming, fixed above; 30 (mistaken first lock) is a write-path question outside
 this read-only change; 37 has no case (new jobs have no locks).
+
+## Sol round 1 (2026-11-23) and how each finding was settled
+
+- HIGH Master Mix label from a historical number: fixed. The three batch reports pass `keptEpa: false` and keep the
+  catalog number (unchanged from staging); the Master Mix edit is reverted.
+- MED summary reports depend on the kept read: fixed by the same change.
+- MED catalog read vs a spray lock recorded during the print: refuted. A print made before the lock exists shows the
+  job as it was when printed (no number was kept yet); a later reprint shows the kept number.
+- MED proof-send retry spanning the migration apply: refuted as not introduced here. A retry re-renders from fresh
+  data, as it already does for any change between attempts (weather, acres); the window is the seconds of one apply.
+- MED cost-exposure allowlist key: a post-apply step in the migration record (the key is computed from the live chain).
+- LOW prover export read as the applicator after the window: fixed (exports the rep's read).
+- LOW rollout wording in this contract: fixed above.

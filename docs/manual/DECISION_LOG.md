@@ -1,5 +1,15 @@
 # Decision Log
 
+## 2026-11-23 — #2170: Mason owner-accepted 3 Sol finding(s) at `20c50d55c114`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2170 at `20c50d55c114` (base `c2a85624e19a`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226120000_job_completion_missing_stock_rows.sql:182`, text sha256 `da0be87da49c87dc` (the wording stays with the proof, not here)
+  Mason's reason: rare and safe: nothing is half-saved, worst case a short wait or one completion must be redone (ref 4db4a73ed8e7)
+- Finding 2 (HIGH) at `supabase/migrations/20270226120000_job_completion_missing_stock_rows.sql:183`, text sha256 `2758b9a6db65d177` (the wording stays with the proof, not here)
+  Mason's reason: rare and safe: nothing is half-saved, worst case a short wait or one completion must be redone (ref 4db4a73ed8e7)
+- Finding 3 (HIGH) at `supabase/migrations/20270226120000_job_completion_missing_stock_rows.sql:183`, text sha256 `a97304522644db69` (the wording stays with the proof, not here)
+  Mason's reason: rare and safe: nothing is half-saved, worst case a short wait or one completion must be redone (ref 4db4a73ed8e7)
+
 ## 2026-11-23 — #2170: Mason owner-accepted 2 Sol finding(s) at `a1926307688b`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2170 at `a1926307688b` (base `42039d705cc1`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

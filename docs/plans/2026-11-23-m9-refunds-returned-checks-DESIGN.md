@@ -1,6 +1,6 @@
 # M9 design: refunds paid outside CRX, prepay balance check, returned checks (stage 1)
 
-Proof (fails until the migration lands): `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs`.
+Migration: `supabase/migrations/20270225110000_m9_refunds_and_returned_checks.sql`. Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` (written first; 9 cases).
 `B:` = baseline `supabase/baselines/20260727174805_public_schema.sql.br` (decompressed line). Other refs are `supabase/migrations/`.
 
 ## 1. How money is stored today
@@ -14,19 +14,19 @@ Proof (fails until the migration lands): `scripts/smoke/prove-m9-refunds-returne
 - **Month-End "payments received"** `_month_payments_received_20270208` (20270224120000:106) = active payment sets by `payment_date` + `'check'` credits at **current** `original_amount_cents` by Chicago `created_at` + legacy payments. Overpayment credits are not counted again.
 
 ## 2. New tables (append-only; written only by SECURITY DEFINER functions; admin + rep SELECT, like the allocation tables in 20261022040000)
-- `money_reversals`: `id`, `kind` (`'outside_refund'|'returned_check'`), `customer_id`, `entry_date` (must be in an open month), `amount_cents > 0`, `reference`, `reason`, `allocation_set_id` (returned check only; partial UNIQUE where `kind='returned_check'`, so a check can be returned once), `performed_by`, `created_at`.
-- `money_reversal_lines`: `id`, `reversal_id`, `line_kind` (`'prepay_credit'|'invoice_payment'|'prepay_application'`), `prepay_credit_id`, `invoice_id`, `prepay_application_id` (UNIQUE when set), `amount_cents > 0`.
+- `money_reversals`: `id`, `kind` (`'outside_refund'|'returned_check'`), `customer_id`, `entry_date` (must be in an open month), `amount_cents > 0`, `reference`, `reason`, `allocation_set_id` or `prepay_credit_id` (returned check only, exactly one; each has a partial UNIQUE, so a payment or a Prepayment Manager check comes back once), `performed_by`, `created_at`.
+- `money_reversal_lines`: `id`, `reversal_id`, `line_kind` (`'prepay_credit'|'invoice_payment'|'prepay_application'`), `prepay_credit_id`, `invoice_id`, `prepay_application_id` (UNIQUE when set; FK with no cascade, so a reversed application can never be deleted), `amount_cents > 0`.
 
 **No trigger undoes it**: the recompute becomes `balance = original − Σ applications + Σ reversed-application lines − Σ prepay_credit lines`, and the same trigger runs AFTER INSERT on `money_reversal_lines`. `original_amount_cents` is never changed, so Month-End's check figure stays as it is.
 
 **record_outside_refund**: active admin, `p_performed_by` must be the caller, key required (`check_idempotency_intent` + `save_idempotency` + `_bind_replay_receipt_20261015`, the 20270209160000 pattern; add the operation to `src/lib/rpcIdempotencyScope.test.ts` / `rpcContracts.test.ts`). Rules: `p_refund_date` ≤ today (Chicago) and `check_period_open`; reference and reason not blank. Locks the customer, then credits with a balance (oldest `created_at, id` first, or only `p_credit_id`). Refused if the amount is more than what is available. Writes one `prepay_credit` line per credit drawn. Lowers `customers.prepay_balance_cents` by the amount; if the stored balance is lower than that, it refuses (drift) rather than flooring at 0. Also writes `financial_audit_log` and `activity_feed`.
 
-**record_returned_check** (decision 18): same guards and idempotency. The set must be an active `'payment'` with no earlier return; `p_returned_date` must be open, ≤ today and ≥ `payment_date`. It reads the set and its allocation lines **without writing them**:
+**record_returned_check** (decision 18): same guards and idempotency. Takes `p_allocation_set_id` (an active `'payment'`) or `p_credit_id` (a Prepayment Manager `source_type='check'` credit), exactly one, with no earlier return. `p_returned_date` must be open, ≤ today and ≥ the day the check was received. It reads the source **without writing it**:
 1. For each invoice it paid, lower `paid_amount_cents` by that invoice's allocation sum and set `paid` → `posted` (void_payment's CASE). Writes an `invoice_payment` line.
 2. **Prepay the check funded and already applied is reversed too** (your suggestion; the money never arrived). For each application of the set's overpayment credit, lower that invoice's `prepay_applied_cents` and reopen it. Writes a `prepay_application` line. The application row stays.
 3. Write a `prepay_credit` line for what is left, so the credit ends at 0. Lower the customer balance by the credit's balance before step 2 (the applied part was already taken off when it was applied).
 4. Refused if that credit has refund lines: refunded cash cannot come back out of prepay, so the admin handles it by hand.
-5. Header `amount_cents = total_payment_cents`. `allocation_sets`, `invoice_line_allocations`, `prepay_applications` and `accounting_periods` are never written, so the closed month's rows stay byte-identical.
+5. Header `amount_cents` = `total_payment_cents` (payment) or the credit's `original_amount_cents` (Prepayment Manager check; one bucket per return). `allocation_sets`, `invoice_line_allocations`, `prepay_applications` and `accounting_periods` are never written, so the closed month's rows stay byte-identical.
 
 **get_prepay_balance_check** (admin, STABLE, writes nothing), per customer with a credit or a non-zero stored balance (inactive customers included):
 - `received` = Σ `original_amount_cents`. Void and delete already lowered these in place, so they are folded in.
@@ -36,12 +36,12 @@ Proof (fails until the migration lands): `scripts/smoke/prove-m9-refunds-returne
 - `difference = stored − expected`; `ok = stored = expected AND credits = expected`.
 
 ## 3. Month-End
-Both functions can only date an entry in an open month, under the month lock that `check_period_open` takes (20261103220000:62). A closed month's rows and figures therefore never move. In `_month_payments_received_20270208`, add one arm: returned checks as **−amount** on `entry_date`, so the open month nets the bounce. `count` keeps counting payments received only. Refunds are not receipts. They become a separate figure, `refunds {count,total_cents}` in the summary (so in the review token), with `refunds_paid_cents` and `returned_checks_cents` added to `close_receipt`. Proof case 5 pins the netting.
+Both functions can only date an entry in an open month, under the month lock that `check_period_open` takes (20261103220000:62). A closed month's rows and figures therefore never move. In `_month_payments_received_20270208`, add one arm: returned checks as **−amount** on `entry_date`, so the open month nets the bounce. `count` keeps counting payments received only. Refunds are not receipts. They become a separate figure, `refunds {count,total_cents}` (plus `returned_checks {count,total_cents}` for display) in the summary, so the review token covers them, with `refunds_paid_cents` and `returned_checks_cents` added to `close_receipt`. Proof case 5 pins the netting.
 
 ## 4. Read paths to touch
 - **A/R aging, today**: no change. Invoices reopen through `balance_cents`, and the prepay column reads the customer balance.
 - **A/R aging, past date**: `statement_customer_has_later_balance_activity` (20260803221244:165) gets a `money_reversals` arm (`created_at` after the cutoff), so an older date flags the customer as void does today.
-- **Statement** (`_get_customer_statement_scoped_impl`, 20261204110000:1262): add a "Returned check <ref>" row on `entry_date` for +(invoice_payment + prepay_application lines). The October payment and "Prepay Applied" rows stay.
+- **Statement** (`_get_customer_statement_scoped_impl`, 20261204110000:1262): add a "Returned check <ref>" row on `entry_date` for +(invoice_payment + prepay_application lines). The October payment and "Prepay Applied" rows stay. A refund shows as "Refund paid (outside CRX) <ref>" with $0 effect.
 - **Prepay history / Prepayment Manager** read `prepay_credits` directly (balances right automatically). The new history rows come from `money_reversals` (screen stage).
 - **Reconciliation**: `checkInvoicePayments` (src/lib/reconciliation.ts:278) must subtract `invoice_payment` lines. It also appears to miscount voided payments today (not confirmed).
 
@@ -51,3 +51,10 @@ Both functions can only date an entry in an open month, under the month lock tha
 3. Invoice void refuses while an active set has allocations on the invoice (20261204100000:5553). A returned set stays active, so its reopened invoice cannot be voided. If that guard is taught about returns, the void must also skip the returned set's allocation rows and the reversed applications it would otherwise delete (:5591-5611). M9 leaves the refusal in place.
 4. A bounced Prepayment Manager check (no allocation set) is not covered by `record_returned_check(p_allocation_set_id)`.
 5. A reopened past-due invoice goes to `posted`, not `overdue` (as void does). Whether something resets `overdue` is not confirmed.
+
+## 6. Stage 2 defaults (built; each goes to Taha for a final OK and is easy to change)
+1. Month-End nets returned checks into payments received (−amount on `entry_date`, not counted as a payment) and adds the refunds figure and the two close-receipt keys.
+2. Statement: refund info row, $0 effect.
+3. Bounced Prepayment Manager checks are in scope (`p_credit_id`). Its applications are reversed, the rest is zeroed, and it is refused if refunded. One return per credit.
+4. Guards: `void_payment` refuses a returned payment or one whose prepay was refunded. `edit_prepay_credit` refuses a balance change on a credit with M9 lines; the same balance is treated as a notes/reference-only edit, because the screen always sends the balance. `delete_prepay_credit` refuses.
+5. Invoice void keeps refusing while the returned payment's allocations exist. When a returned check reversed an invoice's application, the void stops at the FK (`money_reversal_lines_prepay_application_id_fkey`): a raw message, but nothing changes.

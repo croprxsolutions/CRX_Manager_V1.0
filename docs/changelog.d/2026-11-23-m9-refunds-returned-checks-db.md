@@ -1,0 +1,15 @@
+## 2026-11-23 - M9 (database): refunds paid outside CRX, prepay balance check, returned checks
+
+- `record_outside_refund` records a refund paid back to a customer outside CRX (for example a QuickBooks check).
+  - It takes the money off the customer's prepay, oldest credit first or one picked credit, and never below $0.
+  - It is refused in a closed month.
+  - It leaves a refund record (who, when, amount, reference, reason, and how much came from each credit). Today's workaround of editing the credit down left no record.
+- `record_returned_check` records a bounced check, either a Record Payment or a Prepayment Manager check (Mason's decision 18).
+  - The entry is dated in the open month.
+  - The invoices the check paid, directly or through its prepay, are unpaid again, and its prepay comes off.
+  - The closed month stays closed and its rows are not rewritten.
+- `get_prepay_balance_check` compares each customer's prepay (received − applied − refunded − returned) with the stored balance and the credits. It is read-only and fixes nothing.
+- Month-End: a returned check comes off "payments received" in the month it is recorded. Refunds and returned checks are new figures on the summary and the close receipt.
+- Statement: the statement shows "Returned check" and "Refund paid (outside CRX)" rows.
+- Guards: a returned payment, or one whose prepay was refunded, cannot be voided. A credit with a refund or a returned check cannot have its balance edited or be deleted.
+- No screen yet; the UI/UX stage adds the dialog, the badge and the Month-End row. Migration `20270225110000` (local candidate, not applied). Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs`.

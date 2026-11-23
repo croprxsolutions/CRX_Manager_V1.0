@@ -118,6 +118,19 @@ describe('RT-4a rate cut-over modal', () => {
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.anything());
   });
 
+  it('a preview held for one group is not sent for another', async () => {
+    mockPreview.mockResolvedValue(eligible);
+    const { rerender } = render(<ParentRateCutoverModal parent={parent} profileId="u1" rateSource="legacy" onClose={vi.fn()} onSaved={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    await screen.findByTestId('rate-cutover-table');
+    rerender(<ParentRateCutoverModal parent={{ ...parent, id: 'par2' }} profileId="u1" rateSource="legacy" onClose={vi.fn()} onSaved={vi.fn()} />);
+    expect(screen.queryByTestId('rate-cutover-table')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeInTheDocument();
+    rerender(<ParentRateCutoverModal parent={parent} profileId="u1" rateSource="approved" onClose={vi.fn()} onSaved={vi.fn()} />);
+    expect(screen.queryByTestId('rate-cutover-table')).toBeNull();
+    expect(mockCommit).not.toHaveBeenCalled();
+  });
+
   it('a preview refused because the group was already switched reloads the page', async () => {
     mockPreview.mockResolvedValue({ parent_id: 'par1', direction: 'promote', eligible: false,
       refusal: 'PRODUCT_PARENT_CUTOVER_ALREADY_APPROVED: "Smart Test" already uses its approved rate' });

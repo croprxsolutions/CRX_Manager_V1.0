@@ -93,7 +93,9 @@ export default function ParentRateCutoverModal({ parent, profileId, rateSource, 
   const seedOrEach = parent.product_form === 'seed' || parent.product_form === 'each';
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
-  const [preview, setPreview] = useState<RateCutoverPreview | null>(null);
+  const [heldPreview, setPreview] = useState<RateCutoverPreview | null>(null);
+  // A preview counts only for the group and direction on screen now; otherwise preview again.
+  const preview = heldPreview?.parent_id === parent.id && heldPreview.direction === direction ? heldPreview : null;
   const plan = preview?.eligible ? preview : null;
   const { getKey, resetKey } = useIdempotencyKey('commit_parent_rate_cutover', profileId,
     JSON.stringify([parent.id, direction, plan?.expected ?? null, reason.trim()]));

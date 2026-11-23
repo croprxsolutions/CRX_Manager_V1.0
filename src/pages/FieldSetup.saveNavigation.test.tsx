@@ -191,7 +191,7 @@ describe('FieldSetup — a new field whose acreage step fails', () => {
         return chain(table === 'fields' ? { field_name: 'South 40', customer_id: 'customer-1', state: 'IL', irrigation: false, is_active: true } : null);
       }
       const self = chain(null);
-      const splits = Promise.resolve({ data: [{ customer_id: 'customer-9', split_pct: 100, is_primary: true, notes: null, price_override_cents: null, pricing_note: null }], error: null });
+      const splits = Promise.resolve({ data: [{ customer_id: 'customer-9', split_pct: 100, is_primary: true, notes: null }], error: null });
       self.then = splits.then.bind(splits);
       return self;
     });
@@ -273,7 +273,10 @@ describe('FieldSetup — an attribute-only save after a boundary save (KI-31)', 
         return chain(table === 'fields' ? { id: 'field-1', field_name: 'North 80', customer_id: 'customer-1', total_acres: 12 } : null);
       }
       const self = chain(null);
-      const splits = Promise.resolve({ data: [{ customer_id: 'customer-1', customer: { farm_name: 'Test Farm' }, split_pct: 100, is_primary: true, notes: null, price_override_cents: null, pricing_note: null }], error: null });
+      const splits = Promise.resolve({ data: [
+        { customer_id: 'customer-1', customer: { farm_name: 'Test Farm' }, split_pct: 60, is_primary: true, notes: null },
+        { customer_id: 'customer-2', customer: { farm_name: 'Other Farm' }, split_pct: 40, is_primary: false, notes: null },
+      ], error: null });
       self.then = splits.then.bind(splits);
       return self;
     });
@@ -282,17 +285,38 @@ describe('FieldSetup — an attribute-only save after a boundary save (KI-31)', 
       { initialEntries: ['/fields/field-1'] },
     );
     render(<RouterProvider router={router} />);
-    fireEvent.change(await screen.findByPlaceholderText('e.g. Prepaid rate, Landlord rate'), { target: { value: 'Landlord rate' } });
+    fireEvent.change(await screen.findByDisplayValue('60'), { target: { value: '70' } });
+    fireEvent.change(screen.getByDisplayValue('40'), { target: { value: '30' } });
     fireEvent.click(screen.getByRole('button', { name: 'Draw boundary' }));
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Field updated'));
-    expect(saveFieldCalls()[0][1].p_billing_defaults).toMatchObject([{ pricing_note: 'Landlord rate' }]);
+    expect(saveFieldCalls()[0][1].p_billing_defaults).toEqual([
+      { customer_id: 'customer-1', split_pct: 70, is_primary: true, notes: null },
+      { customer_id: 'customer-2', split_pct: 30, is_primary: false, notes: null },
+    ]);
 
     await waitFor(() => expect(leaveWarningArmed()).toBe(false)); // the post-save dirty check has settled clean
     await router.navigate('/other');
     expect(router.state.location.pathname).toBe('/other');
     expect(await screen.findByText('Other page')).toBeInTheDocument();
     expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument();
+  });
+
+  it('offers no per-acre price or pricing note on a billing split (retired 2026-11-22)', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== 'field_billing_defaults') {
+        return chain(table === 'fields' ? { id: 'field-1', field_name: 'North 80', customer_id: 'customer-1', total_acres: 12 } : null);
+      }
+      const self = chain(null);
+      const splits = Promise.resolve({ data: [{ customer_id: 'customer-1', customer: { farm_name: 'Test Farm' }, split_pct: 100, is_primary: true, notes: null }], error: null });
+      self.then = splits.then.bind(splits);
+      return self;
+    });
+    const router = createMemoryRouter([{ path: '/fields/:id', element: <FieldSetup /> }], { initialEntries: ['/fields/field-1'] });
+    render(<RouterProvider router={router} />);
+    expect(await screen.findByDisplayValue('100')).toBeInTheDocument();
+    expect(screen.queryByText(/Price Override/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Pricing Note')).not.toBeInTheDocument();
   });
 
   it('keeps an edit made while the save was in flight unsaved', async () => {

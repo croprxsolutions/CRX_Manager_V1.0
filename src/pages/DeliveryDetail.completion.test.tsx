@@ -15,7 +15,7 @@
  *     and it fills without a reload.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const SIGNATURE_DATA_URL = `data:image/png;base64,iVBORw0KGgo${'A'.repeat(669)}`;
@@ -653,8 +653,9 @@ describe('Email Confirmation and the server receipt queue', () => {
     mockSendEmail.mockResolvedValue({ success: true });
     await renderPage();
     fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
-    await waitFor(() => expect(mockSendEmail).toHaveBeenCalledTimes(1));
-    await new Promise((r) => setTimeout(r, 20));
+    // The follow-up runs to its end (the queue read is its last step) before the check (Sol LOW).
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('delivery_receipt_queue'));
+    await act(async () => { await Promise.resolve(); });
     expect(closeCalls()).toEqual(['manual_send']);
   });
 

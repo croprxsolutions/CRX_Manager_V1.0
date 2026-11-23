@@ -1,5 +1,13 @@
 # Decision Log
 
+## 2026-11-23 — #2330: Mason owner-accepted 2 Sol finding(s) at `f497bf5e6801`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2330 at `f497bf5e6801` (base `de5387c0b4b6`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/JobDetail.tsx:982`, text sha256 `92250e5b4c870e33` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 463a87918bc1)
+- Finding 2 (HIGH) at `src/pages/JobDetail.tsx:982`, text sha256 `87efb2b3d6fccdcd` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 463a87918bc1)
+
 ## 2026-11-23 — #2330: Mason owner-accepted 1 Sol finding(s) at `9f486882345f`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2330 at `9f486882345f` (base `e499bdbe9450`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

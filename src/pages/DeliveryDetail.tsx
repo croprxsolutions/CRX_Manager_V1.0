@@ -856,7 +856,7 @@ export default function DeliveryDetail() {
         // The form is stale: close it and reload, so the next edit starts from the current driver.
         if (isDriverChangedError(error)) { setEditing(false); fetchDelivery(); }
       } else {
-        applyEditSaved(data, editScope, isScheduled);
+        applyEditSaved(assertRpcResult<EditDeliveryResult>(data, 'edit_delivery'), editScope, isScheduled);
       }
     } catch (err) {
       // An unconfirmed reply keeps the key, so Save again replays the server's answer.
@@ -866,8 +866,7 @@ export default function DeliveryDetail() {
     }
   };
 
-  const applyEditSaved = (data: unknown, editScope: string, isScheduled: boolean) => {
-    const edited = assertRpcResult<{ brand_lines_dropped?: { old_delivery_item_id: string; product_id: string | null }[] }>(data, 'edit_delivery');
+  const applyEditSaved = (edited: EditDeliveryResult, editScope: string, isScheduled: boolean) => {
     editIdem.resetKeyFor(editScope);
     // A changed or removed line loses its brand picks (20270104120000); say which, so they are picked again.
     const dropped = (edited.brand_lines_dropped ?? []).map((d) => (
@@ -3310,6 +3309,8 @@ async function fetchInvoicesByDelivery(deliveryId: string): Promise<Record<strin
 // The server keeps a driver it is not given, so picking "Unassigned" over the driver the form opened with asks it
 // to clear that driver; it refuses (DRIVER_CHANGED) if the delivery has another driver by then (20270226163000).
 // A form that opened with no driver never clears (a Take Delivery since then must survive its save).
+type EditDeliveryResult = { brand_lines_dropped?: { old_delivery_item_id: string; product_id: string | null }[] };
+
 function isDriverChangedError(error: { message?: string }): boolean {
   return /^DRIVER_CHANGED\b/.test(error.message ?? '');
 }

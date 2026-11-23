@@ -442,7 +442,15 @@ assert.match(skipSelection({ numbers: [1, 1] }, shownF).problem, /twice/, "selec
   t("'please skip' skips all", () => assert.deepEqual(skipFromReply("please skip"), { all: true }));
   t("'ok skip them' skips all", () => assert.deepEqual(skipFromReply("ok skip them"), { all: true }));
   t("'yeah accept it' names one", () => assert.deepEqual(skipFromReply("yeah accept it"), { all: true, single: true }));
-  t("'please skip 1 and 2' names numbers", () => assert.deepEqual(skipFromReply("please skip 1 and 2"), { numbers: [1, 2] }));
+  t("'accept the risk' skips all", () => assert.deepEqual(skipFromReply("accept the risk"), { all: true }));
+  // Security review, 2026-11-22: each of these was read as a skip by a block-list parser.
+  for (const no of ["please skip 1 and 2", "skip nothing", "skip none of them", "accept none", "I wont skip", "I wouldn't skip these", "I refuse to accept these",
+    "nope skip", "I cant accept that", "skip two", "skip two and three", "skip the minor ones", "skip the low severity ones", "skip the nits", "skip this",
+    "accept this", "skip 1 keep 2", "accept 1 reject 2", "skip 1, repair 2", "accept the risk on 2, patch 3", "skip 1 of 3", "skip for 2 days",
+    "skip the details", "skip the summary", "skip the jargon please", "skip the review", "I accept your recommendation", "skip until Taha checks",
+    "skip before the release", "skip them before merging", "skip, address them"]) {
+    t(`'${no}' skips nothing (security review)`, () => assert.equal(skipFromReply(no), null));
+  }
   for (const no of ["Skip I agree skip it?", "skip it if Taha agrees", "accept skip but fix 2 first", "skip them when the release is out", "skip, but why?",
     "don't skip", "do not accept that", "never skip these", "skip all except 2", "skip the 2nd one", "skip one of them", "skip the rest", "hold on, skip",
     "skip it later", "skip and fix it", "accept skip 1 all", "skip it 1", "accept 1234567", "I'll skip lunch today then we can talk about the plan for next week ok"]) {

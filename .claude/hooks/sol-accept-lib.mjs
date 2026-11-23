@@ -182,19 +182,17 @@ const SKIP_ALL_RES = [
 ];
 const SKIP_SOME_RE = /^(?:skip|accept|don't fix|do not fix) (?:findings? )?(\d{1,2}(?:(?:, ?| | and |, and )\d{1,2})*)$/;
 // A looser reply (2026-11-22 retro: "Skip I agree skip it", "accept skip" were refused on #2256):
-// a short message with the word skip or accept counts unless it asks, sets a condition, negates,
-// asks for a fix, or points at findings in a way the numbers cannot carry.
-const LOOSE_MAX_WORDS = 12;
-const LOOSE_REFUSE_RE = /\b(?:if|unless|but|after|first|once|when|explain|why|what|how|no|not|never|don't|dont|won't|can't|cannot|shouldn't|except|besides|other|others|rest|else|instead|only|later|wait|hold|pause|stop|fix|fixed|fixing|one|second|third|last|some|few|half|any|either|neither|which|both)\b/;
-const LOOSE_ALL_WORDS_RE = /\b(?:all|them|these|those|everything)\b/;
+// skip or accept plus ONLY the agreeing filler words below. An allow-list, not a block-list: any other
+// word ("none", "reject 2", "the jargon", "until") skips nothing (security review, 2026-11-22).
+// Numbers stay with SKIP_SOME_RE's exact shape; a question mark never counts.
+const LOOSE_WORDS = new Set(["skip", "accept", "i", "agree", "ok", "okay", "yes", "yeah", "yep", "sure", "fine", "please", "go", "ahead",
+  "just", "and", "the", "risk", "all", "them", "these", "those", "it", "that"]);
 function looseSkip(t) {
-  if (/\?/.test(t) || !/\b(?:skip|accept)\b/.test(t) || LOOSE_REFUSE_RE.test(t)) return null;
-  const words = t.split(/[^a-z0-9']+/).filter(Boolean);
-  if (words.length > LOOSE_MAX_WORDS || words.some((w) => /\d/.test(w) && !/^\d{1,2}$/.test(w))) return null;
-  const numbers = words.filter((w) => /^\d+$/.test(w)).map(Number);
+  if (/\?/.test(t)) return null;
+  const words = t.split(/[\s,;:.!]+/).filter(Boolean);
+  if (!words.some((w) => w === "skip" || w === "accept") || !words.every((w) => LOOSE_WORDS.has(w))) return null;
   // "that"/"it" only when EVERY skip/accept points at it ("Skip I agree skip it" = all of them).
-  const single = [...t.matchAll(/\b(?:skip|accept)\b(?: (\S+))?/g)].every((m) => /^(?:it|that)\b/.test(m[1] ?? ""));
-  if (numbers.length) return LOOSE_ALL_WORDS_RE.test(t) || /\b(?:it|that)\b/.test(t) ? null : { numbers };
+  const single = words.every((w, i) => (w !== "skip" && w !== "accept") || words[i + 1] === "it" || words[i + 1] === "that");
   return single ? { all: true, single: true } : { all: true };
 }
 

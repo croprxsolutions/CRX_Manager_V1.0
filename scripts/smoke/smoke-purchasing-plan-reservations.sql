@@ -26,6 +26,7 @@ DECLARE
   v_plan2 jsonb;
   v_x jsonb;
   v_n int := 0;
+  v_on boolean;  -- #2237: the tables refuse NaN/infinity and dates outside 2000-2099
 BEGIN
   SELECT id INTO v_admin FROM profiles WHERE role = 'admin' AND is_active = true ORDER BY created_at LIMIT 1;
   IF v_admin IS NULL THEN
@@ -129,6 +130,23 @@ BEGIN
       FROM jsonb_array_elements(p_prod->'coverage') c, jsonb_array_elements(c->'pos') WITH ORDINALITY x(p, ord)
      WHERE c->>'group' = p_group;
   $f$;
+  -- #2237: once the finite-values migration is applied, the tables refuse the impossible values C21-C24 used to
+  -- store. Each such write must then fail with a check violation (inline blocks below), and the plan check that
+  -- needed it is skipped.
+  SELECT count(*) = 11 INTO v_on FROM pg_constraint WHERE conname IN (
+    'job_chemicals_quantity_finite_chk', 'jobs_job_date_window_chk', 'inventory_quantity_available_finite_chk',
+    'inventory_quantity_prebooked_finite_chk', 'inventory_quantity_on_order_finite_chk',
+    'order_items_quantity_remaining_finite_chk', 'order_items_total_units_needed_finite_chk',
+    'order_items_quantity_delivered_finite_chk', 'deliveries_scheduled_date_window_chk',
+    'delivery_items_quantity_finite_chk', 'delivery_items_quantity_delivered_finite_chk');
+  IF NOT v_on AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname IN (
+       'job_chemicals_quantity_finite_chk', 'jobs_job_date_window_chk', 'inventory_quantity_available_finite_chk',
+       'inventory_quantity_prebooked_finite_chk', 'inventory_quantity_on_order_finite_chk',
+       'order_items_quantity_remaining_finite_chk', 'order_items_total_units_needed_finite_chk',
+       'order_items_quantity_delivered_finite_chk', 'deliveries_scheduled_date_window_chk',
+       'delivery_items_quantity_finite_chk', 'delivery_items_quantity_delivered_finite_chk')) THEN
+    RAISE EXCEPTION 'SMOKE_SETUP: only some of the #2237 constraints exist';
+  END IF;
 
   -- ------------------------------------------------------------------ fixtures
   -- C1: Firm 100 at +20, shelf 40, PO 60 at +7.        C2: the same with the PO at +30.
@@ -434,14 +452,36 @@ BEGIN
   -- Added: a NaN shelf balance, open POs dated infinity and -infinity, and a PO line whose remaining quantity is NaN.
   -- Coverage, buying and months are unchanged.
   v_x := pg_temp.prod(get_purchasing_plan(12), v_p[7]);
-  PERFORM pg_temp.shelf(v_p[7], 'NaN');
+  IF v_on THEN
+    BEGIN
+      PERFORM pg_temp.shelf(v_p[7], 'NaN');
+      RAISE EXCEPTION 'SMOKE_FAIL: (C21 the table must refuse the impossible value)';
+    EXCEPTION WHEN check_violation THEN
+      NULL;
+    END;
+  ELSE
+    PERFORM pg_temp.shelf(v_p[7], 'NaN');
+  END IF;
   PERFORM pg_temp.po(v_p[7], v_admin, 'SMKRS-C21B-' || v_suffix, 10, 0);
   UPDATE purchase_orders SET expected_delivery_date = 'infinity' WHERE po_number = 'SMKRS-C21B-' || v_suffix;
   PERFORM pg_temp.po(v_p[7], v_admin, 'SMKRS-C21C-' || v_suffix, 10, 0);
   UPDATE purchase_orders SET expected_delivery_date = '-infinity' WHERE po_number = 'SMKRS-C21C-' || v_suffix;
-  PERFORM pg_temp.po(v_p[7], v_admin, 'SMKRS-C21D-' || v_suffix, 10, 2);
-  UPDATE purchase_order_items SET quantity_ordered = 'NaN'
-   WHERE purchase_order_id = (SELECT id FROM purchase_orders WHERE po_number = 'SMKRS-C21D-' || v_suffix);
+  IF v_on THEN
+    -- The PO line trigger copies NaN into the stock row's on-order count, which now refuses it. The refusal also
+    -- undoes this PO, so it is not counted as cover.
+    BEGIN
+      PERFORM pg_temp.po(v_p[7], v_admin, 'SMKRS-C21D-' || v_suffix, 10, 2);
+      UPDATE purchase_order_items SET quantity_ordered = 'NaN'
+       WHERE purchase_order_id = (SELECT id FROM purchase_orders WHERE po_number = 'SMKRS-C21D-' || v_suffix);
+      RAISE EXCEPTION 'SMOKE_FAIL: (C21D the table must refuse a NaN PO quantity)';
+    EXCEPTION WHEN check_violation THEN
+      NULL;
+    END;
+  ELSE
+    PERFORM pg_temp.po(v_p[7], v_admin, 'SMKRS-C21D-' || v_suffix, 10, 2);
+    UPDATE purchase_order_items SET quantity_ordered = 'NaN'
+     WHERE purchase_order_id = (SELECT id FROM purchase_orders WHERE po_number = 'SMKRS-C21D-' || v_suffix);
+  END IF;
   v_plan2 := get_purchasing_plan(12);
   IF pg_temp.prod(v_plan2, v_p[7]) IS NULL
      OR pg_temp.prod(v_plan2, v_p[7])->'coverage' IS DISTINCT FROM v_x->'coverage'
@@ -460,9 +500,9 @@ BEGIN
      OR pg_temp.prod(v_plan2, v_p[7])->'months' IS DISTINCT FROM v_x->'months'
      OR NOT (pg_temp.prod(v_plan2, v_p[7])->'reasons' ? 'check_data')
      OR (SELECT count(*) FROM jsonb_array_elements(v_plan2->'check_data') c
-          WHERE (c->>'product_id')::uuid = v_p[7] AND c->>'kind' = 'po_line') <> 4
-     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
-                     WHERE (c->>'product_id')::uuid = v_p[7] AND c->>'kind' = 'stock') THEN
+          WHERE (c->>'product_id')::uuid = v_p[7] AND c->>'kind' = 'po_line') <> 4 - v_on::int  -- the refused C21D line is not stored
+     OR (NOT v_on AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
+                     WHERE (c->>'product_id')::uuid = v_p[7] AND c->>'kind' = 'stock')) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (C21 a PO dated year 300000) % %', pg_temp.prod(v_plan2, v_p[7]), v_plan2->'check_data';
   END IF;
   -- The allocator itself: a NaN or infinite supply is no cover, and a NaN need takes nothing from the next one.
@@ -481,8 +521,18 @@ BEGIN
   -- the Firm line keeps the shelf (the NaN order is skipped), the Maybe is not covered.
   PERFORM pg_temp.shelf(v_p[22], 10);
   PERFORM pg_temp.ord(v_p[22], v_customer, v_admin, 'SMKRS-C22B-' || v_suffix, 10);
-  UPDATE order_items SET quantity_remaining = 'NaN'
-   WHERE order_id = (SELECT id FROM orders WHERE order_number = 'SMKRS-C22B-' || v_suffix);
+  IF v_on THEN
+    BEGIN
+      UPDATE order_items SET quantity_remaining = 'NaN'
+       WHERE order_id = (SELECT id FROM orders WHERE order_number = 'SMKRS-C22B-' || v_suffix);
+      RAISE EXCEPTION 'SMOKE_FAIL: (C22B the table must refuse the impossible value)';
+    EXCEPTION WHEN check_violation THEN
+      NULL;
+    END;
+  ELSE
+    UPDATE order_items SET quantity_remaining = 'NaN'
+     WHERE order_id = (SELECT id FROM orders WHERE order_number = 'SMKRS-C22B-' || v_suffix);
+  END IF;
   PERFORM pg_temp.bk(v_p[22], v_customer, v_admin, 'C22BF', 'sent', '[{"q":10,"d":5,"c":"firm"}]');
   PERFORM pg_temp.bk(v_p[22], v_customer, v_admin, 'C22BM', 'sent', '[{"q":10,"d":1,"c":"maybe"}]');
   -- C: 10 on the shelf, an order of 10 whose only delivery is scheduled at 'infinity', a Firm 10 at +5:
@@ -490,12 +540,23 @@ BEGIN
   PERFORM pg_temp.shelf(v_p[23], 10);
   PERFORM pg_temp.ord(v_p[23], v_customer, v_admin, 'SMKRS-C22C-' || v_suffix, 10);
   PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
-  INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
-  SELECT 'SMKRS-C22C-D-' || v_suffix, o.id, v_customer, 'scheduled', 'infinity', v_admin
-    FROM orders o WHERE o.order_number = 'SMKRS-C22C-' || v_suffix RETURNING id INTO v_q2;
-  INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
-  SELECT v_q2, oi.id, v_p[23], 10, 'Gal' FROM order_items oi JOIN orders o ON o.id = oi.order_id
-   WHERE o.order_number = 'SMKRS-C22C-' || v_suffix;
+  IF v_on THEN
+    BEGIN
+      INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+      SELECT 'SMKRS-C22C-D-' || v_suffix, o.id, v_customer, 'scheduled', 'infinity', v_admin
+        FROM orders o WHERE o.order_number = 'SMKRS-C22C-' || v_suffix;
+      RAISE EXCEPTION 'SMOKE_FAIL: (C22C the table must refuse the impossible value)';
+    EXCEPTION WHEN check_violation THEN
+      NULL;
+    END;
+  ELSE
+    INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+    SELECT 'SMKRS-C22C-D-' || v_suffix, o.id, v_customer, 'scheduled', 'infinity', v_admin
+      FROM orders o WHERE o.order_number = 'SMKRS-C22C-' || v_suffix RETURNING id INTO v_q2;
+    INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+    SELECT v_q2, oi.id, v_p[23], 10, 'Gal' FROM order_items oi JOIN orders o ON o.id = oi.order_id
+     WHERE o.order_number = 'SMKRS-C22C-' || v_suffix;
+  END IF;
   PERFORM set_config('app.crx_below_cost_operation', '', true);
   PERFORM pg_temp.bk(v_p[23], v_customer, v_admin, 'C22C', 'sent', '[{"q":10,"d":5,"c":"firm"}]');
   v_plan2 := get_purchasing_plan(12);
@@ -507,18 +568,18 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: (C22A a booking dated at the minimum date) %', v_x;
   END IF;
   v_x := pg_temp.prod(v_plan2, v_p[22]);
-  IF pg_temp.g(v_x, 'committed') <> '10/10/0/0' OR pg_temp.g(v_x, 'shown') <> '10/0/0/10'
+  IF NOT v_on AND (pg_temp.g(v_x, 'committed') <> '10/10/0/0' OR pg_temp.g(v_x, 'shown') <> '10/0/0/10'
      OR (v_x->>'suggested')::numeric <> 0 OR NOT (v_x->'reasons' ? 'check_data')
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
-                     WHERE (c->>'product_id')::uuid = v_p[22] AND c->>'kind' = 'order_line') THEN
+                     WHERE (c->>'product_id')::uuid = v_p[22] AND c->>'kind' = 'order_line')) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (C22B a NaN order line) %', v_x;
   END IF;
   v_x := pg_temp.prod(v_plan2, v_p[23]);
-  IF pg_temp.g(v_x, 'committed') <> '20/10/0/10' OR (v_x->>'suggested')::numeric <> 10
+  IF NOT v_on AND (pg_temp.g(v_x, 'committed') <> '20/10/0/10' OR (v_x->>'suggested')::numeric <> 10
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r
                      WHERE r->>'kind' = 'order' AND (r->>'need_date')::date = v_t)
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
-                     WHERE (c->>'product_id')::uuid = v_p[23] AND c->>'kind' = 'delivery') THEN
+                     WHERE (c->>'product_id')::uuid = v_p[23] AND c->>'kind' = 'delivery')) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (C22C a delivery scheduled at infinity) %', v_x;
   END IF;
   v_n := v_n + 1;
@@ -528,7 +589,16 @@ BEGIN
   v_q := pg_temp.bk(v_p[24], v_customer, v_admin, 'C23A', 'sent', '[{"q":100,"d":30,"c":"firm"}]');
   INSERT INTO jobs (job_number, customer_id, status, job_date, quote_id, created_by)
   VALUES ('SMKRS-C23A-' || v_suffix, v_customer, 'scheduled', v_t + 20, v_q, v_admin) RETURNING id INTO v_pid;
-  INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order) VALUES (v_pid, v_p[24], 'NaN', 'Gal', 1);
+  IF v_on THEN
+    BEGIN
+      INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order) VALUES (v_pid, v_p[24], 'NaN', 'Gal', 1);
+      RAISE EXCEPTION 'SMOKE_FAIL: (C23A the table must refuse the impossible value)';
+    EXCEPTION WHEN check_violation THEN
+      NULL;
+    END;
+  ELSE
+    INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order) VALUES (v_pid, v_p[24], 'NaN', 'Gal', 1);
+  END IF;
   DELETE FROM inventory_holds WHERE source_id = v_pid;
   INSERT INTO job_product_draws (job_id, quote_id, product_id, quantity_drawn) VALUES (v_pid, v_q, v_p[24], 60);
   -- B: an accepted Firm 100 whose only order is soft-deleted and whose only draw is NaN: still counted (buy 100), flagged.
@@ -545,6 +615,17 @@ BEGIN
   PERFORM pg_temp.ord(v_p[27], v_customer, v_admin, 'SMKRS-C23D-' || v_suffix, 10);
   PERFORM set_config('app.crx_below_cost_operation', 'create_direct_order', true);
   FOR v_i IN 1..2 LOOP
+    IF v_on AND v_i = 1 THEN
+      BEGIN
+        INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
+        SELECT 'SMKRS-C23D-1-' || v_suffix, o.id, v_customer, 'scheduled', 'infinity', v_admin
+          FROM orders o WHERE o.order_number = 'SMKRS-C23D-' || v_suffix;
+        RAISE EXCEPTION 'SMOKE_FAIL: (C23D the table must refuse the impossible value)';
+      EXCEPTION WHEN check_violation THEN
+        NULL;
+      END;
+      CONTINUE;
+    END IF;
     INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
     SELECT 'SMKRS-C23D-' || v_i || '-' || v_suffix, o.id, v_customer, 'scheduled',
            CASE v_i WHEN 1 THEN 'infinity'::date ELSE v_t + 30 END, v_admin
@@ -562,9 +643,9 @@ BEGIN
   VALUES (v_q2, v_p[28], 10, 0, 6, 'Gal');
   v_plan2 := get_purchasing_plan(12);
   v_x := pg_temp.prod(v_plan2, v_p[24]);
-  IF (v_x->>'suggested')::numeric IS DISTINCT FROM 100
+  IF NOT v_on AND ((v_x->>'suggested')::numeric IS DISTINCT FROM 100
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
-                     WHERE (c->>'product_id')::uuid = v_p[24] AND c->>'kind' = 'job_line') THEN
+                     WHERE (c->>'product_id')::uuid = v_p[24] AND c->>'kind' = 'job_line')) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (C23A a NaN job line keeps its draw) %', v_x;
   END IF;
   v_x := pg_temp.prod(v_plan2, v_p[25]);
@@ -582,8 +663,8 @@ BEGIN
   v_x := pg_temp.prod(v_plan2, v_p[27]);
   IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r
                   WHERE r->>'kind' = 'order' AND (r->>'need_date')::date = v_t + 30)
-     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
-                     WHERE (c->>'product_id')::uuid = v_p[27] AND c->>'kind' = 'delivery') THEN
+     OR (NOT v_on AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
+                     WHERE (c->>'product_id')::uuid = v_p[27] AND c->>'kind' = 'delivery')) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (C23D a bad delivery is left out, the good one dates the order) %', v_x;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
@@ -597,8 +678,17 @@ BEGIN
   v_q := pg_temp.bk(v_p[29], v_customer, v_admin, 'C24A', 'sent', '[{"q":100,"d":30,"c":"firm"}]');
   INSERT INTO jobs (job_number, customer_id, status, job_date, quote_id, created_by)
   VALUES ('SMKRS-C24A-' || v_suffix, v_customer, 'scheduled', v_t + 20, v_q, v_admin) RETURNING id INTO v_pid;
-  INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order)
-  VALUES (v_pid, v_p[29], 60, 'Gal', 1), (v_pid, v_p[29], 'NaN', 'Gal', 2);
+  INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order) VALUES (v_pid, v_p[29], 60, 'Gal', 1);
+  IF v_on THEN
+    BEGIN
+      INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order) VALUES (v_pid, v_p[29], 'NaN', 'Gal', 2);
+      RAISE EXCEPTION 'SMOKE_FAIL: (C24A the table must refuse the impossible value)';
+    EXCEPTION WHEN check_violation THEN
+      NULL;
+    END;
+  ELSE
+    INSERT INTO job_chemicals (job_id, product_id, quantity, unit, sort_order) VALUES (v_pid, v_p[29], 'NaN', 'Gal', 2);
+  END IF;
   DELETE FROM inventory_holds WHERE source_id = v_pid;
   INSERT INTO job_product_draws (job_id, quote_id, product_id, quantity_drawn) VALUES (v_pid, v_q, v_p[29], 60);
   -- B: an order of 10 with a valid delivery of 10 at +60 and another delivery whose quantity is NaN at +90:
@@ -609,6 +699,18 @@ BEGIN
     INSERT INTO deliveries (delivery_number, order_id, customer_id, status, scheduled_date, created_by)
     SELECT 'SMKRS-C24B-' || v_i || '-' || v_suffix, o.id, v_customer, 'scheduled', v_t + 30 * (v_i + 1), v_admin
       FROM orders o WHERE o.order_number = 'SMKRS-C24B-' || v_suffix RETURNING id INTO v_q2;
+    IF v_on AND v_i = 2 THEN
+      BEGIN
+        INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
+        SELECT v_q2, oi.id, v_p[30], 'NaN', 'Gal'
+          FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE o.order_number = 'SMKRS-C24B-' || v_suffix;
+        RAISE EXCEPTION 'SMOKE_FAIL: (C24B the table must refuse the impossible value)';
+      EXCEPTION WHEN check_violation THEN
+        NULL;
+      END;
+      DELETE FROM deliveries WHERE id = v_q2;  -- the refused line leaves an empty delivery behind; remove it
+      CONTINUE;
+    END IF;
     INSERT INTO delivery_items (delivery_id, order_item_id, product_id, quantity, unit_size)
     SELECT v_q2, oi.id, v_p[30], CASE v_i WHEN 1 THEN 10 ELSE 'NaN'::numeric END, 'Gal'
       FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE o.order_number = 'SMKRS-C24B-' || v_suffix;
@@ -623,8 +725,8 @@ BEGIN
   IF (v_x->>'suggested')::numeric IS DISTINCT FROM 0
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_x->'rows') r
                      WHERE r->>'kind' = 'order' AND (r->>'need_date')::date = v_t + 60)
-     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
-                     WHERE (c->>'product_id')::uuid = v_p[30] AND c->>'kind' = 'delivery') THEN
+     OR (NOT v_on AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_plan2->'check_data') c
+                     WHERE (c->>'product_id')::uuid = v_p[30] AND c->>'kind' = 'delivery')) THEN
     RAISE EXCEPTION 'SMOKE_FAIL: (C24B a NaN delivery keeps the good delivery date) %', v_x;
   END IF;
   v_n := v_n + 1;
@@ -635,6 +737,9 @@ BEGIN
     RAISE EXCEPTION 'SMOKE_FAIL: _purchasing_allocate is callable by clients';
   END IF;
 
-  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: % booking-reservation groups passed', v_n;
+  IF v_on THEN
+    RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: % booking-reservation groups passed (#2237 constraints on)', v_n;
+  END IF;
+  RAISE EXCEPTION 'SMOKE_PASS_ROLLBACK: % booking-reservation groups passed (#2237 constraints off)', v_n;
 END;
 $smoke$;

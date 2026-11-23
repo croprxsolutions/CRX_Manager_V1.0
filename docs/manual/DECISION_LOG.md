@@ -24,6 +24,77 @@
 
 **Decision (Mason, 2026-11-23, after Luna round 4 found new holes in the no-chemicals rule: "Job's list always counts (Recommended)").** Supersedes the no-chemicals refusal above. The job takes exactly what is on its own chemical list, even when it is empty or short; a linked ticket still does not record on its own. Accepted risk: a job completed without its chemicals entered leaves stock too high for that spray. The other fixes stay (cancelled jobs, same customer, now also checked on new tickets).
 
+## 2026-11-23 — #2323: Mason owner-accepted 6 Sol finding(s) at `883d1dc5dc08`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2323 at `883d1dc5dc08` (base `70755dfe6f00`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226173000_drop_inert_delivery_short_stock_trigger.sql:53`, text sha256 `a80606facf350cc4` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 2 (HIGH) at `scripts/smoke/inventory-edge-cases-1942-reverse.sql:48`, text sha256 `249c334ba717d53b` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 3 (HIGH) at `scripts/smoke/single-short-stock-warning-reverse.sql:16`, text sha256 `9d76cbd19056bfbd` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 4 (HIGH) at `scripts/smoke/single-short-stock-warning-reverse.sql:24`, text sha256 `1ff52e10dc3cde86` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 5 (HIGH) at `scripts/smoke/drop-inert-delivery-short-stock-trigger-reverse.sql:20`, text sha256 `32d2129b98edca50` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+- Finding 6 (HIGH) at `scripts/smoke/prove-drop-inert-delivery-short-stock-trigger-real-schema.mjs:120`, text sha256 `88224e97255247a3` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 20ef5940f37e)
+
+## 2026-11-23 — #2323: Mason owner-accepted 5 Sol finding(s) at `99b6566efc1a`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2323 at `99b6566efc1a` (base `5b549b9e4f2f`) found 5 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226173000_drop_inert_delivery_short_stock_trigger.sql:53`, text sha256 `c2655063231cd77e` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+- Finding 2 (HIGH) at `scripts/smoke/inventory-edge-cases-1942-reverse.sql:48`, text sha256 `dfac12cf31b9fd25` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+- Finding 3 (HIGH) at `scripts/smoke/single-short-stock-warning-reverse.sql:16`, text sha256 `9d76cbd19056bfbd` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+- Finding 4 (HIGH) at `scripts/smoke/drop-inert-delivery-short-stock-trigger-reverse.sql:20`, text sha256 `2f55a0e394113457` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+- Finding 5 (HIGH) at `scripts/smoke/prove-drop-inert-delivery-short-stock-trigger-real-schema.mjs:120`, text sha256 `1479e90b28371571` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref c825cfa88191)
+
+## 2026-11-23 — #2258: Mason's earlier skip carried to 2 repeat Sol finding(s) at `a092bca8b71c`
+
+**Carried automatically (2026-11-23).** Sol's full review of PR #2258 at `a092bca8b71c` (base `ac09b76f9877`) found 2 BLOCKER/HIGH finding(s); Sol marked each the same as one Mason skipped on this pull request.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:278`, text sha256 `dc59d01a4a69202a`: carried from ref 85379a983ed7 at `ede225b742c3` to `a092bca8b71c`; Sol marked it the same
+- Finding 2 (HIGH) at `src/pages/CycleCounts.tsx:279`, text sha256 `1cffde4ab865ba7c`: carried from ref ac3f23505870 at `975d42607513` to `a092bca8b71c`; Sol marked it the same
+
+## 2026-11-22 — #2258: Mason owner-accepted 1 Sol finding(s) at `bc3a7201ea7b`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2258 at `bc3a7201ea7b` (base `6aceb0747958`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:278`, text sha256 `1002073490faeb54` (the wording stays with the proof, not here)
+  Mason's reason: too small to eeffect anything (ref 2a2066ef4333)
+
+## 2026-11-22 — #2258: Mason owner-accepted 2 Sol finding(s) at `22fb41ad3422`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2258 at `22fb41ad3422` (base `bdd733f9b071`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:278`, text sha256 `aae4366d8301e44f` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 07edd845a7bd)
+- Finding 2 (HIGH) at `src/pages/CycleCounts.tsx:279`, text sha256 `fc975c95a963b758` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 07edd845a7bd)
+
+## 2026-11-22 — #2258: Mason owner-accepted 2 Sol finding(s) at `59cef43c12b5`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2258 at `59cef43c12b5` (base `47b378731762`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:278`, text sha256 `c641f9d0631096b3` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 85379a983ed7)
+- Finding 2 (HIGH) at `src/pages/CycleCounts.tsx:279`, text sha256 `56b8b47959726181` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 85379a983ed7)
+
+## 2026-11-22 — #2258: Mason owner-accepted 2 Sol finding(s) at `389bc90baa5d`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2258 at `389bc90baa5d` (base `9c77cd3a5d22`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:279`, text sha256 `331f0a93f85b220c` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref ac3f23505870)
+- Finding 2 (HIGH) at `src/pages/CycleCounts.tsx:278`, text sha256 `f9d9155095ebf9c3` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref ac3f23505870)
+
+## 2026-11-22 — #2258: Mason owner-accepted 1 Sol finding(s) at `c81e3b653b92`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2258 at `c81e3b653b92` (base `f9750a8a4b66`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/CycleCounts.tsx:279`, text sha256 `93cc29ef46522238` (the wording stays with the proof, not here)
+  Mason's reason: too small won’t happen (ref 6775f6a52ea3)
 ## 2026-11-23 — #2247: Mason owner-accepted 6 Sol finding(s) at `3f0ff8fb7e3c`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2247 at `3f0ff8fb7e3c` (base `3bae6de0f2aa`) found 6 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

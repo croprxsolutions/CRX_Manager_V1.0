@@ -386,7 +386,7 @@ export function sanitizeError(error: unknown): string {
     return message.slice('BLEND_TICKET_ALREADY_BILLED:'.length)
       .replace(/[؜‎‏‪-‮⁦-⁩]/g, '').trim();
   }
-  // F06 (20270226193000): the server sentence after the code says why and what to do.
+  // F06 (20270227150000): the server sentence after the code says why and what to do.
   const sprayStockRefusal = message.match(/^(?:BLEND_TICKET_JOB_RECORDS|JOB_BLEND_TICKET_ALREADY_RECORDED|BLEND_TICKET_RECORDED_NO_JOB|BLEND_TICKET_COMPLETED_JOB_KEEPS_TICKET|BLEND_TICKET_JOB_OTHER_CUSTOMER):\s*(.+)$/s)?.[1];
   if (sprayStockRefusal) return `${sprayStockRefusal.charAt(0).toUpperCase()}${sprayStockRefusal.slice(1)}`;
   // Rate lock (20261107060000), product parents (20261108120000), tote fill (20261117130000) and weights (20261207100000), chemistry (20261209100000), crop + timing choices (20261229120000): the server text after the token is the operator's answer.

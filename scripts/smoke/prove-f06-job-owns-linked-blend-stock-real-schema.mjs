@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270226193000_f06_job_owns_linked_blend_stock.sql (F06 / KI-187; contract
+ * Real-schema proof for 20270227150000_f06_job_owns_linked_blend_stock.sql (F06 / KI-187; contract
  * docs/plans/2026-11-23-f06-job-blend-stock-once-CONTRACT.md). Mason, 2026-11-23: a job with a linked blend ticket
  * takes the stock through its completion; the ticket never takes it a second time.
  *
@@ -27,7 +27,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270226193000_f06_job_owns_linked_blend_stock.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270227150000_f06_job_owns_linked_blend_stock.sql');
 const REVERSE = path.join(ROOT, 'scripts', 'smoke', 'f06-job-owns-linked-blend-stock-reverse.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set([]);

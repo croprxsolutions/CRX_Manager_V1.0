@@ -17,7 +17,7 @@ Read at `origin/staging` `c2a85624e` (2026-11-23). Issue #2178. Tracker row F06.
 
 **Rule:** when a spray job has a blend ticket linked to it, the **job** takes the chemicals out of stock (its completion records the spray, as today). The linked ticket never takes them a second time. Every refusal says why and what to do; no stock, record, invoice or job status changes on a refusal.
 
-Smallest change: one new migration (`20270226193000_f06_job_owns_linked_blend_stock.sql`), no change to either posting function (avoids colliding with open #2170, which rewrites job completion):
+Smallest change: one new migration (`20270227150000_f06_job_owns_linked_blend_stock.sql`), no change to either posting function (avoids colliding with open #2170, which rewrites job completion):
 
 1. `BEFORE INSERT` trigger on `application_records` (definer function):
    - `blend_ticket` record whose ticket (locked `FOR UPDATE`) is linked to a live job (job then locked; not cancelled, not deleted) → refuse `BLEND_TICKET_JOB_RECORDS`. A cancelled or deleted job cannot complete, so its ticket records as before (Sol round 1, HIGH 1).

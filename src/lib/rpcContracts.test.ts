@@ -2958,7 +2958,7 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   _delivery_brands_on_complete:
     "delivery-completion helper called within the keyed completion transaction; live catalog denies EXECUTE to anon, authenticated, and service_role",
   _f06_application_record_one_deduction:
-    "F06 BEFORE INSERT trigger on application_records (20270226193000); RETURNS trigger, only locks rows (FOR NO KEY UPDATE NOWAIT is not a write) and refuses; EXECUTE revoked from anon, authenticated, and service_role",
+    "F06 BEFORE INSERT trigger on application_records (20270227150000); RETURNS trigger, only locks rows (FOR NO KEY UPDATE NOWAIT is not a write) and refuses; EXECUTE revoked from anon, authenticated, and service_role",
   _lock_invoice_post_inputs:
     "posting serialization helper whose body only locks invoice inputs with SELECT FOR UPDATE; live catalog permits service_role EXECUTE only and denies anon/authenticated",
   _sync_product_vendor_copy:

@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** Repair step 5, part 1 (KI-139, KI-141, KI-162, C-13): `20270113100000_stock_checks_negative_onorder_chicago.sql` (SQL sha256: `3d31cc43251b062fda6a8ea13a990462027752d571fbee07e824b864a051b7b0`). Four stock and receiving checks, re-emitting four function bodies. No table, row, grant or owner changes.
+**APPLIED LIVE 2026-11-21 05:55:53 UTC (11:55 PM Central)**, ledger version `20261121055553` carrying name `20270113100000_stock_checks_negative_onorder_chicago` (release v0.1.0, #1990; read-only ledger check 2026-11-23). Repair step 5, part 1 (KI-139, KI-141, KI-162, C-13): `20270113100000_stock_checks_negative_onorder_chicago.sql` (SQL sha256: `3d31cc43251b062fda6a8ea13a990462027752d571fbee07e824b864a051b7b0`). Four stock and receiving checks, re-emitting four function bodies. No table, row, grant or owner changes.
 
 **What it does.**
 - `_reconcile_negative_inventory_replay_impl_20261015` (KI-139): refuses a row whose on-hand is not below zero ("Only stock below zero can be reconciled here ..."), and refuses `NaN` / `Infinity`. A same-key retry still returns the first answer (the impl's `check_idempotency` runs first).

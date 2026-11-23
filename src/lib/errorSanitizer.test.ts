@@ -88,6 +88,12 @@ describe('sanitizeError', () => {
   ])('explains an order-quantity refusal %s (F05) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`Nothing was saved. ${sentence}`);
   });
+  it('explains the older New Delivery cross-load refusal in words, without the raw token or line id', () => {
+    const message = 'ITEM_OVER_REMAINING_INCL_ACTIVE: order_item_id 2b680d4a-7765-4f02-b9a4-b5cef819709b has 2 units on other active deliveries; only 0 available (2 remaining on order minus 2 active)';
+    const shown = sanitizeError({ code: 'P0001', message });
+    expect(shown).toBe('Nothing was saved. Other open deliveries for this order already hold 2 of this product, so only 0 more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.');
+    expect(shown).not.toMatch(/ITEM_OVER|2b680d4a/);
+  });
   it('explains a completion past the order (F05) without the raw token', () => {
     const sentence = 'Atrazine 4L — this would deliver more than was ordered. Call the office before completing this delivery.';
     expect(sanitizeError({ code: '23514', message: `DELIVERY_EXCEEDS_ORDER: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
@@ -355,6 +361,26 @@ describe('sanitizeError', () => {
     expect(sanitizeError({ message: 'CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. Smith Farms still has 2 open order(s), 1 open quote(s). Finish or cancel that work, bill it, credit its returns and use up or refund its prepay first' }))
       .toBe('Nothing was deactivated. Smith Farms still has 2 open order(s), 1 open quote(s). Finish or cancel that work, bill it, credit its returns and use up or refund its prepay first.');
     expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK')).toContain('spray jobs, returns or prepay money). Finish, bill or settle it before deactivating it.');
+    expect(sanitizeError({ message: 'JOB_LINE_BELOW_COST: Roundup ‮Pro is priced below its cost on this job. Nothing was invoiced; its price must be corrected before this job can be invoiced.' }))
+      .toBe('Roundup Pro is priced below its cost on this job. Nothing was invoiced; its price must be corrected before this job can be invoiced.');
+    expect(sanitizeError('JOB_LINE_BELOW_COST')).toContain('priced below its cost');
+    expect(sanitizeError('JOB_DELETED: this job was deleted')).toBe("This job was deleted, so it can't be invoiced. Nothing was invoiced.");
+    expect(sanitizeError('JOB_FIELD_NO_BILLING_SPLIT: North 40 has no billing split. Nothing was invoiced; set who pays for it (100% or a shared split) in Field Setup first.'))
+      .toBe('North 40 has no billing split. Nothing was invoiced; set who pays for it (100% or a shared split) in Field Setup first.');
+    expect(sanitizeError('JOB_LINE_PRICE_NOT_WHOLE_CENTS: Roundup is priced per "Gal" on this job, which comes to a fraction of a cent per "Qt" (the unit it is sold in), and rounding that changes the line by more than $0.50. Nothing was invoiced; change the job price per "Gal" so it converts to whole cents per "Qt" (for example $41.52).'))
+      .toBe('Roundup is priced per "Gal" on this job, which comes to a fraction of a cent per "Qt" (the unit it is sold in), and rounding that changes the line by more than $0.50. Nothing was invoiced; change the job price per "Gal" so it converts to whole cents per "Qt" (for example $41.52).');
+    expect(sanitizeError('JOB_LINE_UNIT_UNCONVERTIBLE: Roundup is recorded on this job in "Ea", which can\'t be converted to the unit it is sold in ("Gal"). Nothing was invoiced; correct the unit on the job or the product first.'))
+      .toBe('Roundup is recorded on this job in "Ea", which can\'t be converted to the unit it is sold in ("Gal"). Nothing was invoiced; correct the unit on the job or the product first.');
+    expect(sanitizeError('JOB_LINE_ROUNDING: Round‮up can\'t be recorded to 4 decimals in Gal without its amount changing by more than $0.50.'))
+      .toBe("Roundup can't be recorded to 4 decimals in Gal without its amount changing by more than $0.50.");
+    expect(sanitizeError('JOB_LINE_COST_MISSING: Roundup has no cost recorded.')).toBe('Roundup has no cost recorded.');
+    expect(sanitizeError('JOB_LINE_QUANTITY_INVALID')).toContain('check its quantity, unit and cost');
+    expect(sanitizeError("JOB_INVOICED_LOCKED: This job has been invoiced, so its chemicals, fields and billing split can't be changed. Nothing was saved; void the job's invoice first to change them."))
+      .toBe("This job has been invoiced, so its chemicals, fields and billing split can't be changed. Nothing was saved; void the job's invoice first to change them.");
+    expect(sanitizeError("JOB_COMPLETED_CHEMICALS_LOCKED: This job is complete, so its chemicals can't be changed: completion already took them from stock. Nothing was saved."))
+      .toBe("This job is complete, so its chemicals can't be changed: completion already took them from stock. Nothing was saved.");
+    expect(sanitizeError('JOB_LINE_BELOW_COST: Round​up\nPro\u0007 is priced below its cost on this job.'))
+      .toBe('Roundup Pro is priced below its cost on this job.');
     expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. \u202Esmraf\u202C\u061C still has open invoices. Settle them first'))
       .toBe('Nothing was deactivated. smraf still has open invoices. Settle them first.');
     expect(sanitizeError({ message: 'CUSTOMER_INACTIVE_NEW_WORK: nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added' }))
@@ -666,6 +692,19 @@ describe('product setup and import refusals (20261107090000)', () => {
       .toBe("This draft's sales tax doesn't match its sale's Sales tax box. Switch the box over and back, ending at the setting you want, to re-apply it to the sale's drafts (a split draft that can't be edited: set the box back to match it, or void and redraft its group), then post");
     expect(sanitizeError('SALES_TAX_ORDER_CLOSED: a cancelled or voided sale can\'t change'))
       .toBe("This sale is cancelled or voided, so its sales tax can't change");
+  });
+});
+
+describe('sanitizeError #2063 blend-billed refusal', () => {
+  // The exact sentence 20270224130000 raises (no ticket number since Sol round 3).
+  const sentence = (shown: string) => 'a blend ticket for this job is already billed (%); billing the job here too would double-bill the customer. If you meant to bill the job here, ask an admin to void or delete that blend-ticket invoice first.'.replace('%', shown);
+  it('keeps the server sentence whole for an invoice the caller may open', () => {
+    expect(sanitizeError('BLEND_TICKET_ALREADY_BILLED: ' + sentence('invoice INV-1001')))
+      .toBe(sentence('invoice INV-1001'));
+  });
+  it('keeps the server sentence whole for an invoice the caller cannot open', () => {
+    expect(sanitizeError('BLEND_TICKET_ALREADY_BILLED: ' + sentence('an invoice you cannot open')))
+      .toBe(sentence('an invoice you cannot open'));
   });
 });
 

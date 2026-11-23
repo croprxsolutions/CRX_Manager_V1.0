@@ -311,7 +311,7 @@ async function generateLegacyInvoicePdf(data: InvoicePdfData): Promise<JsPDFWith
         ? fmtNum(item.unit_price_cents / 100, 2)
         : item.is_application_fee
           ? `${fmtNum(item.unit_price_cents / 100, 2)}/AC`
-          : `${fmtNum(item.unit_price_cents / 100, 2)} ${item.gl_lb_unit || item.unit_size || ''}`.trim();
+          : `${fmtNum(item.unit_price_cents / 100, 2)} ${item.unit_size || item.gl_lb_unit || ''}`.trim(); // the price is per the line's own (sold) unit
       const product = productCellText(item, data);
       return showEpa
         ? [product, invoiceLineEpaText(item.brand_lines, item.epa_registration), rateStr, totalApplied, unitPrice, fmt(item.extended_cents)]

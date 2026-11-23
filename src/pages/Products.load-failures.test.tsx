@@ -161,6 +161,19 @@ describe('Products list reads', () => {
     expect(screen.getByRole('button', { name: /review pricing file/i })).toBeEnabled();
   });
 
+  it('a pricing file picked while product groups have not loaded says so and clears the pick (#2160)', async () => {
+    mocks.getProductParents.mockRejectedValueOnce(new Error('offline'));
+    const { container } = render(<Products />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load product groups.');
+    const input = container.querySelector('input[type="file"][accept^=".xlsx"]') as HTMLInputElement;
+    const file = new File(['x'], 'pricing.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    Object.defineProperty(input, 'value', { configurable: true, writable: true, value: 'C:\\fakepath\\pricing.xlsx' });
+    fireEvent.change(input, { target: { files: [file] } });
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(
+      'error', 'Product groups have not loaded. Use Try again, then choose the file again.'));
+    expect(input.value).toBe('');
+  });
+
   it('keeps the rows when a refresh fails, turns row actions off, and Try again brings them back', async () => {
     render(<Products />);
     await screen.findByText('Loose Product');

@@ -108,8 +108,8 @@ BEGIN
   PERFORM post_invoice(v_inv_money, public._invoice_post_version(v_inv_money), '[SMOKE] up-money-post-'||v_sfx);
   -- Attach money: an allocation row + a non-zero paid_amount_cents header (override the
   -- generated balance via admin_override is NOT needed — paid_amount_cents is a plain col).
-  INSERT INTO allocation_sets (entity_type, entity_id, version, is_active, customer_id, total_payment_cents, total_allocated_cents)
-    VALUES ('payment', gen_random_uuid(), 1, true, v_cust, 100000, 100000) RETURNING id INTO v_aset;
+  INSERT INTO allocation_sets (entity_type, entity_id, version, is_active, customer_id, total_payment_cents, total_allocated_cents, payment_date)
+    VALUES ('payment', gen_random_uuid(), 1, true, v_cust, 100000, 100000, CURRENT_DATE) RETURNING id INTO v_aset;
   INSERT INTO invoice_line_allocations (allocation_set_id, bill_to_customer_id, split_percentage, amount_cents, invoice_id)
     VALUES (v_aset, v_cust, 100, 100000, v_inv_money);
   UPDATE invoices SET paid_amount_cents = 100000 WHERE id=v_inv_money;

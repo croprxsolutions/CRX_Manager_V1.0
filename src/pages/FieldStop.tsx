@@ -75,6 +75,9 @@ async function readStopAddress(addressId: string): Promise<{ line: string; error
   return { line: [a.address_line, a.city, a.state, a.zip].filter(Boolean).join(', '), error: error ?? (data ? null : new Error('stop address not found')) };
 }
 
+// An email of only spaces is no email, so the missing-email warning still shows (#2167).
+const hasEmail = (email: string | null | undefined): boolean => !!email?.trim();
+
 // A driver's stop never asks the customers table for the farm: withStopFarm fills it from the driver lookup (#2018).
 function stopColumns(isDriver: boolean): string {
   const base = 'id, delivery_number, status, updated_at, customer_id, order_id, created_by, delivery_address_id, delivery_notes, assigned_driver';
@@ -126,6 +129,9 @@ export default function FieldStop() {
   const leftAtSiteInputRef = useRef<HTMLInputElement>(null);
   // Latest stop id the route is showing — older in-flight fetches bail (H3 stale guard).
   const activeStopIdRef = useRef<string | undefined>(undefined);
+  // #2167: each fetchStop call's ticket; only the newest load of the same stop may act, so an older failed
+  // farm lookup cannot send the driver back to My Route after a newer load succeeded.
+  const stopLoadSeqRef = useRef(0);
 
   const [delivery, setDelivery] = useState<StopDelivery | null>(null);
   const [items, setItems] = useState<StopItem[]>([]);
@@ -190,7 +196,8 @@ export default function FieldStop() {
     // Stale-route guard (H3): on rapid stop-to-stop navigation an older in-flight
     // fetch must not overwrite the current stop's delivery/items/address/photos —
     // handleComplete submits against the live route id plus this component state.
-    const isStale = () => activeStopIdRef.current !== id;
+    const seq = ++stopLoadSeqRef.current;
+    const isStale = () => activeStopIdRef.current !== id || stopLoadSeqRef.current !== seq;
     setLoading(true);
     const { data, error } = await supabase
       .from('deliveries')
@@ -223,7 +230,7 @@ export default function FieldStop() {
     setAddressLine(farmAddress);
     setReceiptRecipient(null);
     // Only an open stop sends a receipt on completion.
-    if (!del.customer?.email && (del.status === 'scheduled' || del.status === 'in_progress')) {
+    if (!hasEmail(del.customer?.email) && (del.status === 'scheduled' || del.status === 'in_progress')) {
       void fetchReceiptRecipient(del.id).then((recipient) => { if (!isStale()) setReceiptRecipient(recipient); });
     }
     if (del.status === 'scheduled') setStep('arrive');
@@ -326,7 +333,8 @@ export default function FieldStop() {
   const isPartial = items.some((it) => (deliveryQtys[it.id] ?? it.quantity) < it.quantity);
   // What complete_delivery checks before it completes (migration 20261022075000).
   const completionEvidence: DeliveryCompletionEvidence = noOnePresent ? 'left_at_site' : usePaperTicket ? 'paper_ticket' : 'signature';
-  const receiptEmail = delivery?.customer?.email || receiptRecipient?.email || null;
+  // An email of only spaces is no email, so the missing-email warning still shows (#2167).
+  const receiptEmail = delivery?.customer?.email?.trim() || receiptRecipient?.email?.trim() || null;
   // The proof the chosen path needs is in place (the server checks it again).
   const evidenceReady = completionEvidence === 'left_at_site'
     ? hasLeftAtSitePhoto(photos)

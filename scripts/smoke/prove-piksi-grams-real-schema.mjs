@@ -36,6 +36,7 @@ const REVERSE_LIVE = lf(path.join(ROOT, 'scripts', 'smoke', 'piksi-grams-reverse
 assert.ok(REVERSE_LIVE.includes(LIVE_MOVEMENTS_PIN), 'reverse still pins the live movement set');
 assert.ok(REVERSE_LIVE.includes(LIVE_COUNTS_PIN), 'reverse still pins the live cycle-count set');
 const REVERSE = REVERSE_LIVE.replace(LIVE_MOVEMENTS_PIN, EMPTY_MOVEMENTS_PIN).replace(LIVE_COUNTS_PIN, EMPTY_COUNTS_PIN);
+const SWEEP = lf(path.join(ROOT, 'scripts', 'smoke', 'piksi-grams-sweep.sql')).replace(/--[^\n]*\n/g, '').trim().replace(/;$/, '');
 const ADMIN = USERS.admin;
 const raw = (sql) => psql(`SET session_replication_role = replica; ${sql} SET session_replication_role = origin;`, { user: 'supabase_admin' });
 /** Runs SQL in one transaction (committed or rolled back) as postgres with every trigger on. */
@@ -172,8 +173,17 @@ function beforeCases() {
   const weight = tx(`SET session_replication_role = replica; INSERT INTO public.product_size_net_weight_values (product_id, net_lb, entered_value, source, basis, review_state)
       VALUES ('${INF}', 2, 2, 'label', '{}'::jsonb, 'draft'); SET session_replication_role = origin;\n${FORWARD}`, false);
   assert.notEqual(weight.status, 0); assert.match(weight.output, /PIKSI_G_ROW_MOVED/);
+  const stray = tx(`SET session_replication_role = replica; UPDATE public.products SET product_name = 'Piksi Dust Plus - 900G Jar' WHERE id = '${CTRL}';
+      SET session_replication_role = origin;\n${FORWARD}`, false);
+  assert.notEqual(stray.status, 0); assert.match(stray.output, /another product is Piksi or uses MG/);
+  const strayMg = tx(`SET session_replication_role = replica; UPDATE public.products SET rate_unit = 'MG' WHERE id = '${CTRL}';
+      SET session_replication_role = origin;\n${FORWARD}`, false);
+  assert.notEqual(strayMg.status, 0); assert.match(strayMg.output, /another product is Piksi or uses MG/);
+  const rateUnit = tx(`SET session_replication_role = replica; UPDATE public.order_items SET rate_unit = 'MG' WHERE id = '${OI.b}';
+      SET session_replication_role = origin;\n${FORWARD}`, false);
+  assert.notEqual(rateUnit.status, 0); assert.match(rateUnit.output, /PIKSI_G_ROW_MOVED/);
   assert.equal(numbers(), n0); assert.equal(labels(), l0);
-  console.log('[case] P1 a moved pinned line or a changed PO conversion snapshot refuses (PIKSI_G_ROW_MOVED), an unlisted receipt refuses (PIKSI_G_UNLISTED_ROW); P2 an open count, an unlocked rate lock or a recorded jar net weight refuses; nothing changed');
+  console.log('[case] P1 a moved pinned line, a pinned order line carrying a rate unit, or a changed PO conversion snapshot refuses (PIKSI_G_ROW_MOVED), an unlisted receipt refuses (PIKSI_G_UNLISTED_ROW); P2 an open count, an unlocked rate lock or a recorded jar net weight refuses; P3 another Piksi-named or MG product refuses; nothing changed');
 }
 
 let numbers0, control0;
@@ -222,6 +232,12 @@ function applyCases() {
     DO $c$ BEGIN IF (SELECT unit_size FROM public.order_items WHERE id = '${fx('f1')}') IS DISTINCT FROM 'g' THEN RAISE EXCEPTION 'BLANK_NOT_G'; END IF; END $c$;`, false);
   assert.equal(blank.status, 0, blank.output);
   console.log('[case] A3 a new order line typed in MG is refused (LINE_UNIT_NOT_STOCK_UNIT); a blank unit becomes g');
+
+  const sweep = (pre) => tx(`${pre}\nDO $s$ BEGIN RAISE NOTICE 'SWEEP_ROWS=%', (SELECT count(*) FROM (${SWEEP}) s); END $s$;`, false);
+  assert.match(sweep('').output, /SWEEP_ROWS=0/, 'the after-apply sweep is clean on the migrated data');
+  assert.match(sweep(`SET session_replication_role = replica; UPDATE public.order_items SET rate_unit = 'MG' WHERE id = '${OI.b}'; SET session_replication_role = origin;`).output,
+    /SWEEP_ROWS=1/, 'the sweep finds a Piksi line saved in MG after the apply');
+  console.log('[case] S1 the after-apply sweep (piksi-grams-sweep.sql) finds nothing on the migrated data and flags a Piksi line saved in MG afterwards');
 
   const again = tx(FORWARD, false);
   assert.notEqual(again.status, 0); assert.match(again.output, /PIKSI_G_ROW_MOVED/);

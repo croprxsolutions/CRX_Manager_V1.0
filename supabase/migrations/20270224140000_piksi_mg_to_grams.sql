@@ -96,6 +96,14 @@ BEGIN
      OR NOT EXISTS (SELECT 1 FROM public.unit_conversions WHERE unit = 'g' AND unit_type = 'dry' AND factor_oz = 0.03527396) THEN
     RAISE EXCEPTION 'PIKSI_G_ROW_MOVED: the MG or g conversion factor is not the reviewed one. Nothing was changed.';
   END IF;
+  -- A product added since the review (another Piksi, or anything else in MG) would silently stay MG (none live).
+  SELECT string_agg(p.product_name, ', ' ORDER BY p.product_name) INTO v_bad FROM public.products p
+   WHERE p.id NOT IN (c_plus, c_inf, c_old)
+     AND (p.product_name ILIKE '%piksi%' OR 'mg' IN (lower(p.inventory_unit), lower(p.unit_size), lower(p.rate_unit),
+                                                    lower(p.container_unit), lower(p.max_label_rate_unit)));
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'PIKSI_G_ROW_MOVED: another product is Piksi or uses MG, nothing was changed: %', v_bad;
+  END IF;
 
   -- Products and groups, as reviewed (live 2026-11-22).
   CREATE TEMP TABLE piksi_prod (id uuid PRIMARY KEY, product_name text, is_active boolean, container_size numeric,
@@ -177,7 +185,7 @@ BEGIN
                                AND i.quantity_prebooked = r.done_qty AND i.quantity_on_order = r.extra)
      WHEN 'oi' THEN EXISTS (SELECT 1 FROM public.order_items x JOIN public.orders o ON o.id = x.order_id
                              WHERE x.id = r.id AND x.product_id = r.product_id AND x.unit_size = r.old_unit
-                               AND x.order_id = r.ref AND x.total_units_needed = r.qty
+                               AND x.rate_unit IS NULL AND x.order_id = r.ref AND x.total_units_needed = r.qty
                                AND COALESCE(x.quantity_delivered, 0) = r.done_qty AND o.status::text = r.status)
      WHEN 'di' THEN EXISTS (SELECT 1 FROM public.delivery_items x JOIN public.deliveries d ON d.id = x.delivery_id
                              WHERE x.id = r.id AND x.product_id = r.product_id AND x.unit_size = r.old_unit

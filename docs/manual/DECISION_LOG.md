@@ -1,5 +1,9 @@
 # Decision Log
 
+## 2026-11-22 — PR #2240: per-acre pricing screens ship with #2239
+
+**Decision (Mason, in chat 2026-11-22, before Sol round 7 on PR #2240):** "Yes, it covers 2240". His "Yes, simplify" decision for #2239 also covers #2240. #2240 removes the Field Setup "Price Override ($/ac)" and "Pricing Note" boxes and the grower-share banners. It merges right after #2239, so no release is cut between the two.
+
 ## 2026-11-22 — #2239: Mason owner-accepted 2 Sol finding(s) at `77ebcbce17ae`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2239 at `77ebcbce17ae` (base `9c77cd3a5d22`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

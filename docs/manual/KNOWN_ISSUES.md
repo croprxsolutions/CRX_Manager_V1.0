@@ -26,7 +26,7 @@ this pass; treat as open until someone checks).
 **Where other facts live (not here).** Applied-migration ledger, row counts and high-water mark:
 `docs/reference/migration-history.md`. Current status: `CURRENT_STATE.md`. Settled decisions: `DECISION_LOG.md`.
 
-**Update rules.** When a finding is found, fixed, or decided, edit THIS file (do not start another issue list).
+**Update rules.** A NEW finding goes in its own file in [`known-issues.d/`](known-issues.d/README.md) (2026-11-22; read it together with this file). When an item here is fixed or decided, edit THIS file (do not start another issue list).
 A fixed item is removed from here and its text (with the PR or migration that fixed it) is appended to the
 archive. Do not re-fix something listed here as ACCEPTED without a new decision from Mason.
 

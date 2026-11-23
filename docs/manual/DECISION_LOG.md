@@ -1049,7 +1049,7 @@ Later the same day Mason settled the 14 held: today's rate kept on the 9 that di
 **Operative rule.** Active readiness totals and live-rate readers retain their existing scope. The new download explicitly requests inactive history; old no-argument downloads remain active-only. PostgreSQL checks current group activity under the existing locks. Proposal: `docs/plans/2026-11-14-inactive-rate-review-CONTRACT.md`, issue #1814. Candidate only; no apply, merge or deployment.
 
 Last verified: 2026-10-29. Adding an entry does not change this date.
-Update triggers: append when an architectural/policy/business decision is made or reversed.
+Update triggers: when an architectural/policy/business decision is made or reversed, add a NEW file in `docs/manual/decision-log.d/` (one per entry; see its README), not here (2026-11-22). This file stays as the history; the owner-accept `--log` entry is the one thing still written here.
 
 An ADR-style ("Architecture Decision Record") running log so future agents don't re-litigate
 settled calls. Newest first, roughly — a few entries from the same week sit slightly out of date

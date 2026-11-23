@@ -12,7 +12,7 @@ This replaces only the short plan in `ship.md` › Step 0.5 (its steps 2–3); S
 
 ## Step 1: Establish the facts
 
-Read the affected screen, the server enforcement (RPC bodies, RLS, triggers), the schema, and the relevant `docs/manual/DECISION_LOG.md` and `KNOWN_ISSUES.md` entries. Note the commit you read. A function's current body is in the NEWEST migration that defines it, often a large later re-emit: search all of `supabase/migrations/`, not just the file that created it. The registry and repository are not proof of what production runs: when the plan depends on live behavior, check it read-only (the read-only database tool or `npm run db-sweeps:live`), never by changing data. Small throwaway probes are allowed; shipping code is not.
+Read the affected screen, the server enforcement (RPC bodies, RLS, triggers), the schema, and the relevant `docs/manual/DECISION_LOG.md` and `KNOWN_ISSUES.md` entries, plus their `decision-log.d/` and `known-issues.d/` files. Note the commit you read. A function's current body is in the NEWEST migration that defines it, often a large later re-emit: search all of `supabase/migrations/`, not just the file that created it. The registry and repository are not proof of what production runs: when the plan depends on live behavior, check it read-only (the read-only database tool or `npm run db-sweeps:live`), never by changing data. Small throwaway probes are allowed; shipping code is not.
 
 Keep three things apart:
 - **facts**, with where they came from;

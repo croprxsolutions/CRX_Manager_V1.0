@@ -54,6 +54,8 @@ const LEDGER_RES = [
   // can never stand in for a recorded change.
   ENTRY_RE,
   /^docs\/manual\/[^/]+\.md$/,
+  // One file per decision-log or known-issues entry (2026-11-22), so sibling PRs stop conflicting.
+  /^docs\/manual\/(?:decision-log|known-issues)\.d\/\d{4}-\d{2}-\d{2}-[^/]+\.md$/,
   /^docs\/reference\/agent-guardrails\.md$/,
   /^docs\/reference\/migration-history\.md$/,
   /^docs\/reference\/migrations\.d\/\d{14}_[^/]+\.md$/,

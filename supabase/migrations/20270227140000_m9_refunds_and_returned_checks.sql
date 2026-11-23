@@ -1,5 +1,5 @@
 -- Written 2026-11-23. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270226213000_m9_refunds_and_returned_checks.md.
+-- docs/reference/migrations.d/20270227140000_m9_refunds_and_returned_checks.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY (M9, billing plan 4 Nov / audit 1.3; design docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md):
@@ -40,7 +40,10 @@
 --   an unlinked check), every active payment behind them adds up, an entry's buckets are one receipt (one reference,
 --   one entry time) and no allocation row is $0 or negative. Round 6: an unlinked check credit needs exactly one creation
 --   entry, that entry is the customer's and the check's reference, a source payment's credits are all its customer's,
---   and no active payment puts $0 or less on an invoice a return touches. A return also refuses a draft, void, cancelled or deleted invoice
+--   and no active payment puts $0 or less on an invoice a return touches. Round 8: every Prepayment Manager entry
+--   naming a check credit of the customer is one whole receipt of this customer (its buckets, reference, one entry
+--   time, its recorded total, no sibling outside it), for refunds too (CHECK_ENTRY_MISMATCH); a refund or return on
+--   any bucket freezes the amounts of all its siblings (edit / delete guard). A return also refuses a draft, void, cancelled or deleted invoice
 --   (RETURN_INVOICE_NOT_OPEN).
 --   5. get_prepay_balance_check(customer?): read-only; received - applied - refunded - returned = expected, against
 --      the stored balance and the credits' balances, plus each credit against its own rows (credit_mismatches);
@@ -260,6 +263,15 @@ AS $function$
                    JOIN public.prepay_credits pc ON pc.id = p_credit_id
                   WHERE r.kind = 'returned_check' AND r.allocation_set_id IS NOT NULL
                     AND r.allocation_set_id = pc.allocation_set_id)
+      -- or a sibling bucket of its Prepayment Manager entry (one check is one receipt: refunding or returning any
+      -- bucket freezes the amounts of all of them)
+      OR EXISTS (SELECT 1 FROM public.financial_audit_log fal
+                   CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END) b(id)
+                  WHERE fal.operation_type = 'prepay_credit_created'
+                    AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array'
+                    AND fal.new_values -> 'credit_ids' ? p_credit_id::text
+                    AND (EXISTS (SELECT 1 FROM public.money_reversal_lines l WHERE l.prepay_credit_id::text = b.id)
+                         OR EXISTS (SELECT 1 FROM public.money_reversals r WHERE r.prepay_credit_id::text = b.id)))
 $function$;
 ALTER FUNCTION public._prepay_credit_reversed_20270225(uuid) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._prepay_credit_reversed_20270225(uuid) FROM PUBLIC, anon, authenticated, service_role;
@@ -411,6 +423,34 @@ BEGIN
                                        WHERE fal.operation_type = 'prepay_credit_created'
                                          AND fal.new_values -> 'credit_ids' ? pc.id::text) = 1)))
       THEN 'CREDIT_SOURCE_UNKNOWN'
+    -- every Prepayment Manager entry naming one of the customer's check credits is one whole receipt of this
+    -- customer: its buckets are all this customer's unlinked checks with the entry's reference and one entry time,
+    -- they add up to the entry's recorded total, and no other check credit of that receipt sits outside it
+    WHEN EXISTS (
+      SELECT 1 FROM public.financial_audit_log fal
+       WHERE fal.operation_type = 'prepay_credit_created'
+         AND jsonb_typeof(fal.new_values -> 'credit_ids') = 'array'
+         AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END) b(id)
+                       JOIN public.prepay_credits pc ON pc.id::text = b.id
+                      WHERE pc.customer_id = p_customer_id AND pc.source_type = 'check' AND pc.allocation_set_id IS NULL)
+         AND (fal.entity_id IS DISTINCT FROM p_customer_id
+              OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END) b(id)
+                           LEFT JOIN public.prepay_credits pc ON pc.id::text = b.id
+                          WHERE pc.id IS NULL OR pc.customer_id IS DISTINCT FROM p_customer_id
+                             OR pc.source_type IS DISTINCT FROM 'check' OR pc.allocation_set_id IS NOT NULL
+                             OR pc.source_reference IS DISTINCT FROM (fal.new_values ->> 'reference_number'))
+              OR (SELECT count(DISTINCT pc.created_at) FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END) b(id)
+                    JOIN public.prepay_credits pc ON pc.id::text = b.id) <> 1
+              OR fal.new_values -> 'total_cents' IS DISTINCT FROM
+                 (SELECT to_jsonb(sum(pc.original_amount_cents)) FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END) b(id)
+                    JOIN public.prepay_credits pc ON pc.id::text = b.id)
+              OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(fal.new_values -> 'credit_ids') = 'array' THEN fal.new_values -> 'credit_ids' END) b(id)
+                           JOIN public.prepay_credits pc ON pc.id::text = b.id
+                           JOIN public.prepay_credits o ON o.customer_id = pc.customer_id AND o.source_type = 'check'
+                                AND o.allocation_set_id IS NULL AND o.created_at = pc.created_at
+                                AND o.source_reference IS NOT DISTINCT FROM pc.source_reference
+                          WHERE NOT (fal.new_values -> 'credit_ids' ? o.id::text))))
+      THEN 'CHECK_ENTRY_MISMATCH'
     -- every active payment behind the customer's credits adds up (its invoice rows plus its prepay are the check)
     WHEN EXISTS (SELECT 1 FROM public.allocation_sets a
                   WHERE a.is_active

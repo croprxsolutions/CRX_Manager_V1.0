@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Real-schema proof for M9 (refunds paid outside CRX, prepay balance check, returned checks):
- * 20270226213000_m9_refunds_and_returned_checks.sql. Design: docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md.
+ * 20270227140000_m9_refunds_and_returned_checks.sql. Design: docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md.
  * Written first (stage 1: every case failed because the functions did not exist, with setup passing).
  *
  * Container setup and replay copied from prove-month-close-payments-recheck-real-schema.mjs, replaying EVERY
@@ -48,6 +48,9 @@
  *      allocation row and a payment dated -infinity are refused.
  *  15) Sol round 6: a check credit with no creation entry, a negative active allocation on an invoice the return
  *      touches, an entry recorded for another customer and a payment minting another customer's credit are refused.
+ *  16) Sol round 8: every Prepayment Manager entry naming a check credit of the customer must be one whole receipt of
+ *      this customer, for refunds too (a $500 credit whose entry records $50; one split check recorded as two entries);
+ *      refunding one bucket freezes its siblings' amounts (edit / delete refused).
  *
  * Run: node scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs   (needs Docker)
  * Prints M9_REFUNDS_RETURNED_CHECKS_PROOF_PASS when every case passes; otherwise lists each failing case and why and
@@ -56,6 +59,7 @@
  * CRX_PROVER_CONTAINER=<name> reuses a kept container: resets to the snapshot, applies M9, seeds and runs the cases.
  */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -67,7 +71,7 @@ const REUSE = process.env.CRX_PROVER_CONTAINER || null;
 const NAME = REUSE ?? `crx-m9-${process.pid}-${Date.now().toString(36)}`;
 const DB = 'postgres';
 const KEEP = REUSE !== null || process.env.CRX_PROVER_KEEP_CONTAINER === '1' || process.env.CRX_PROVER_REPLAY_ONLY === '1';
-const M9 = path.join(ROOT, 'supabase', 'migrations', '20270226213000_m9_refunds_and_returned_checks.sql');
+const M9 = path.join(ROOT, 'supabase', 'migrations', '20270227140000_m9_refunds_and_returned_checks.sql');
 // Marks the containers this script creates; reuse mode refuses any other container.
 const LABEL = 'crx.prover.m9-refunds-returned-checks';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
@@ -85,7 +89,12 @@ const LEDGER_ONLY = new Set([
   // Need live's storage.objects policies, which this database does not have; neither touches money.
   '20261217100000_job_access_ends_with_the_job.sql',
   '20261220100000_applicator_keeps_own_record_fields.sql',
+  // Its preflight pins stage_offline_action as 20261217100000 (ledger-only above) leaves it. Delivery driver checks
+  // only: its one check_period_open mention is an unchanged call in a re-emitted delivery completion body, which no M9
+  // case runs. Reviewed bytes pinned below, so an edit trips the TOUCHED guard again.
+  '20270227110000_delivery_driver_checks_need_a_driver.sql',
 ]);
+const LEDGER_ONLY_REVIEWED = new Map([['20270227110000_delivery_driver_checks_need_a_driver.sql', '78a24c2bf56e5901b771575e2c818ef2dccbaf3781cbd2bb159a0d762724714e']]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // Parked/ledger-only files must not touch what M9 relies on.
 const TOUCHED = /(prepay_credits|prepay_applications|allocation_sets|invoice_line_allocations|prepay_balance_cents|_month_payments_received|close_accounting_period|check_period_open)/i;
@@ -191,7 +200,8 @@ function plan() {
   for (const name of [...PARKED, ...LEDGER_ONLY]) {
     const file = all.find((f) => path.basename(f) === name);
     assert.ok(file, `${name} must be in the replay plan (re-check the PARKED / LEDGER_ONLY lists)`);
-    assert.ok(!TOUCHED.test(lf(file)), `${name} now touches what this proof covers; replay it or re-think the skip`);
+    const reviewed = LEDGER_ONLY_REVIEWED.get(name) === createHash('sha256').update(readFileSync(file)).digest('hex');
+    assert.ok(reviewed || !TOUCHED.test(lf(file)), `${name} now touches what this proof covers; replay it or re-think the skip`);
   }
   // M9 is applied on its own after the snapshot; later migrations are not replayed (this proof is about M9).
   const at = all.findIndex((f) => path.basename(f) === path.basename(M9));
@@ -733,7 +743,7 @@ kase('11) two sessions: return and void of the same payment wait for each other;
   assert.equal(state, '5001:true,5002:false', 'the returned payment stays active; the voided one is inactive');
 });
 
-kase('12) Sol round 2: duplicate refund, drift anywhere on the customer (round 4), return drift and totals, one entry per check (return and Month-End), trigger grants', () => {
+kase('12) Sol round 2: duplicate refund, drift anywhere on the customer (round 4), return drift and totals, one entry per check (Month-End; round 8: such a return is refused), trigger grants', () => {
   const credit = (k) => `(SELECT id FROM public.prepay_credits WHERE customer_id = '${C[k]}' AND source_type = 'check' AND source_reference = 'M9-${k}')`;
   const over6 = `(SELECT id FROM public.prepay_credits WHERE allocation_set_id = ${SET6})`;
   const legacy = `(SELECT id FROM public.allocation_sets WHERE customer_id = '${C.c2}' AND check_number = 'LEGACY-1')`;
@@ -768,23 +778,25 @@ kase('12) Sol round 2: duplicate refund, drift anywhere on the customer (round 4
     SELECT public.create_prepay_check_splits('${C.c4}', 'DUP-1', '[{"label":"A","amount_cents":10000}]'::jsonb, '${ADMIN}', 'm9-c12-dup-a')::text AS da \\gset
     SELECT public.create_prepay_check_splits('${C.c4}', 'DUP-1', '[{"label":"A","amount_cents":20000}]'::jsonb, '${ADMIN}', 'm9-c12-dup-b')::text AS db \\gset
     SELECT (public.get_monthly_summary(date_trunc('month', ${TODAY})::date, ${TODAY}) #>> '{payments,count}') AS count_after \\gset
-    SELECT public.record_returned_check(NULL, ${TODAY}, 'NSF', '${ADMIN}', 'm9-c12-ret-dup', ${dupFirst})::text AS rd \\gset
+    -- Round 8: two entries for one receipt (same reference and entry time) cannot be told apart; refused.
+    ${refusal(`public.record_returned_check(NULL, ${TODAY}, 'NSF', '${ADMIN}', 'm9-c12-ret-dup', ${dupFirst})`)}
     ${OWNER}
-    SELECT json_build_object('r1', :'r1'::jsonb, 'r3', :'r3'::jsonb, 'rd', :'rd'::jsonb,
+    SELECT json_build_object('r1', :'r1'::jsonb, 'r3', :'r3'::jsonb,
       'counted', :'count_after'::int - :'count_before'::int,
       'dup', (SELECT json_agg(balance_cents ORDER BY original_amount_cents) FROM public.prepay_credits WHERE customer_id = '${C.c4}' AND source_reference = 'DUP-1'),
       'same_entry', (SELECT count(DISTINCT created_at) FROM public.prepay_credits WHERE customer_id = '${C.c4}' AND source_reference = 'DUP-1'),
       'grant', has_function_privilege('authenticated', 'public._recompute_prepay_credit_balance()', 'EXECUTE'))::text;`));
-  assert.equal(r.refused.length, 4, `four refusals: ${JSON.stringify(r.refused)}`);
+  assert.equal(r.refused.length, 5, `five refusals: ${JSON.stringify(r.refused)}`);
   assert.match(r.refused[0], /REFUND_DUPLICATE_REFERENCE/, 'the same outside check again (any amount, any case) needs confirming');
   assert.match(r.refused[1], /RECORD_NEEDS_HAND_CHECK: CREDIT_DRIFT/, 'round 4: a drifted credit of the customer blocks a refund even when it is not drawn');
   assert.match(r.refused[2], /RECORD_NEEDS_HAND_CHECK: CREDIT_DRIFT/, 'a return from a drifted credit is refused');
   assert.match(r.refused[3], /RECORD_NEEDS_HAND_CHECK: PAYMENT_TOTALS/, 'a legacy payment whose records do not add up to the check is refused');
+  assert.match(r.refused[4], /RECORD_NEEDS_HAND_CHECK: CHECK_ENTRY_MISMATCH/, 'round 8: two entries for one receipt are refused');
   const o = JSON.parse(r.last);
   assert.equal(o.r3.amount_cents, 10000, 'the admin can confirm a second refund with the same reference');
   assert.equal(o.counted, 2, 'two checks entered together are two payments');
   assert.equal(o.same_entry, 1, 'the two checks share one entry time and number');
-  assert.deepEqual([o.rd.amount_cents, o.dup], [10000, [0, 20000]], 'only the check named comes back');
+  assert.deepEqual(o.dup, [10000, 20000], 'the refused return changed neither check');
   assert.equal(o.grant, false, 'authenticated cannot execute the recompute trigger function');
 });
 
@@ -965,6 +977,44 @@ kase('15) Sol round 6: an unproven check credit, a negative allocation on a touc
     ['CREDIT_SOURCE_UNKNOWN', 'INVOICE_NEGATIVE_ALLOCATION', 'CHECK_BUCKETS', 'SOURCE_PAYMENT_TOTALS'],
     `a check credit with no entry; a -$25 allocation on the invoice; an entry recorded for another customer; a payment minting another customer's credit: ${JSON.stringify(r.refused)}`);
   assert.equal(r.last, '121200', 'the refused return left the invoice paid amount as it was');
+});
+
+kase('16) Sol round 8: every check entry of the customer is one whole receipt (refunds too); siblings of a refunded bucket are frozen', () => {
+  const r = ran(session(`${OWNER}
+    -- c10: a $500 check credit whose one entry records a $50 check.
+    INSERT INTO public.prepay_credits (customer_id, original_amount_cents, balance_cents, source_type, source_reference, bucket_label)
+      VALUES ('${C.c10}', 50000, 50000, 'check', 'SMALL-16', 'A');
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 50000 WHERE id = '${C.c10}';
+    INSERT INTO public.financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, new_values, total_impact_cents, description)
+      VALUES ('prepay_credit_created', 'prepay_credit', '${C.c10}', '${ADMIN}', jsonb_build_object('reference_number', 'SMALL-16',
+              'credit_ids', jsonb_build_array((SELECT id FROM public.prepay_credits WHERE source_reference = 'SMALL-16')), 'total_cents', 5000), 5000, 'legacy');
+    -- c9: one $500 check in two buckets ($300 + $200, one entry time) recorded as two entries, each with its own total.
+    INSERT INTO public.prepay_credits (customer_id, original_amount_cents, balance_cents, source_type, source_reference, bucket_label, created_at)
+      VALUES ('${C.c9}', 30000, 30000, 'check', 'SPLIT-16', 'A', '2026-11-05 15:00Z'), ('${C.c9}', 20000, 20000, 'check', 'SPLIT-16', 'B', '2026-11-05 15:00Z');
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 50000 WHERE id = '${C.c9}';
+    INSERT INTO public.financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, new_values, total_impact_cents, description)
+      SELECT 'prepay_credit_created', 'prepay_credit', '${C.c9}', '${ADMIN}', jsonb_build_object('reference_number', 'SPLIT-16',
+             'credit_ids', jsonb_build_array(id), 'total_cents', original_amount_cents), original_amount_cents, 'legacy'
+        FROM public.prepay_credits WHERE source_reference = 'SPLIT-16';
+    ${as(ADMIN)}
+    ${refusal(refund(C.c10, 30000, 'm9-c16-small', { ref: 'QB 1601' }))}
+    ${refusal(`public.record_returned_check(NULL, ${TODAY}, 'NSF', '${ADMIN}', 'm9-c16-split', (SELECT id FROM public.prepay_credits WHERE source_reference = 'SPLIT-16' AND bucket_label = 'A'))`)}
+    ${refusal(refund(C.c9, 1000, 'm9-c16-split-refund', { ref: 'QB 1602' }))}
+    -- c7: refund $10 from bucket A of its split check; bucket B (untouched) can no longer be edited or deleted.
+    SELECT ${refund(C.c7, 1000, 'm9-c16-c7', { credit: CHECK7A, ref: 'QB 1603' })}::text AS r7 \\gset
+    ${refusal(`public.edit_prepay_credit(${CHECK7B}, 10000, NULL, NULL, 'shrink the sibling', '${ADMIN}', 'm9-c16-edit7b')`)}
+    ${refusal(`public.delete_prepay_credit(${CHECK7B}, 'entered twice', '${ADMIN}', 'm9-c16-del7b')`)}
+    ${OWNER}
+    SELECT json_build_object('r7', :'r7'::jsonb,
+      'c7b', (SELECT original_amount_cents || ':' || balance_cents FROM public.prepay_credits WHERE id = ${CHECK7B}),
+      'c10', (SELECT count(*) FROM public.money_reversals WHERE customer_id = '${C.c10}' AND kind = 'outside_refund'))::text;`));
+  assert.deepEqual(r.refused.map((m) => /RECORD_NEEDS_HAND_CHECK: ([A-Z_]+)/.exec(m)?.[1] ?? /^([A-Z_]+)/.exec(m)?.[1] ?? m),
+    ['CHECK_ENTRY_MISMATCH', 'CHECK_ENTRY_MISMATCH', 'CHECK_ENTRY_MISMATCH', 'PREPAY_CREDIT_HAS_REVERSALS', 'PREPAY_CREDIT_HAS_REVERSALS'],
+    `a refund from a check whose entry records less; a split check scattered over two entries (return and refund); a sibling of a refunded bucket edited or deleted: ${JSON.stringify(r.refused)}`);
+  const o = JSON.parse(r.last);
+  assert.equal(o.r7.amount_cents, 1000, 'the refund from a clean split check is recorded');
+  assert.equal(o.c7b, '20000:20000', 'the untouched sibling keeps its amount');
+  assert.equal(o.c10, 0, 'no refund was recorded from the unproven check');
 });
 
 const admin = (sql) => psql(sql, { user: 'supabase_admin', db: 'template1' });

@@ -51,7 +51,7 @@ const TOUCHED = /(_void_invoice_split_provenance_impl_20260719|\bwrite_offs\b|_g
 // M9 re-emits the statement impl with two arms that only read money_reversals (returned-check and refund rows);
 // with no refund or returned check, every statement row this proof checks is the same.
 // Pinned to the reviewed bytes: an edited M9 trips this proof's guard again.
-const LATER_READ_ONLY = new Map([['20270226213000_m9_refunds_and_returned_checks.sql', 'ad75d2bc7ea3cff5348e772a3b8d0e4fc365c6339f338b6ec5a4b6b9b93479be']]);
+const LATER_READ_ONLY = new Map([['20270227140000_m9_refunds_and_returned_checks.sql', '730708ec33d94add2867c11a42ab61bee50d1e6ba9b236e0aed61823e5333cdd']]);
 const laterReadOnly = (file) => LATER_READ_ONLY.get(path.basename(file)) === createHash('sha256').update(readFileSync(file)).digest('hex');
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"

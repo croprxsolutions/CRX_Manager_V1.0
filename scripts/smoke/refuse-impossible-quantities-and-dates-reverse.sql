@@ -1,4 +1,4 @@
--- REVERSE of 20270225130000_refuse_impossible_quantities_and_dates (#2237). Apply as its own reviewed migration,
+-- REVERSE of 20270226213000_refuse_impossible_quantities_and_dates (#2237). Apply as its own reviewed migration,
 -- one transaction. Drops exactly the 11 CHECK constraints that migration added, and only if each is still the
 -- exact definition it installed on the right table (otherwise it refuses and changes nothing). No row changes.
 -- Proven by scripts/smoke/prove-refuse-impossible-quantities-and-dates-real-schema.mjs.
@@ -49,7 +49,7 @@ BEGIN
     IF (SELECT count(*) FROM pg_constraint c
         WHERE c.conrelid = format('public.%I', r.tbl)::regclass AND c.conname = r.conname AND c.contype = 'c'
           AND pg_get_constraintdef(c.oid) = r.def) <> 1 THEN
-      RAISE EXCEPTION 'ROLLBACK_REFUSED: %.% is missing or not the definition 20270225130000 installed', r.tbl, r.conname;
+      RAISE EXCEPTION 'ROLLBACK_REFUSED: %.% is missing or not the definition 20270226213000 installed', r.tbl, r.conname;
     END IF;
   END LOOP;
 END;

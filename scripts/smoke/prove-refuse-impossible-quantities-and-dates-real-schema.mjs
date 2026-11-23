@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270225130000_refuse_impossible_quantities_and_dates.sql (#2237).
+ * Real-schema proof for 20270226213000_refuse_impossible_quantities_and_dates.sql (#2237).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), seeds one invented row in each table, then checks:
@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, USERS, ROOT, NAME, docker, scalar } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270225130000_refuse_impossible_quantities_and_dates.sql';
+const CANDIDATE = '20270226213000_refuse_impossible_quantities_and_dates.sql';
 const lf = (f) => readFileSync(f, 'utf8').replaceAll('\r\n', '\n');
 const candidate = lf(path.join(ROOT, 'supabase', 'migrations', CANDIDATE));
 const reverse = lf(path.join(ROOT, 'scripts', 'smoke', 'refuse-impossible-quantities-and-dates-reverse.sql'));

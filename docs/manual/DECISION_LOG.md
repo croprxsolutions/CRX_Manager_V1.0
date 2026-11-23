@@ -21,6 +21,70 @@
 ## 2026-11-21 — Job completion waits to create a first stock row, the way deliveries do
 
 **Decision (Mason, this task, 2026-11-21).** Two field jobs that finish together and both need a Main Warehouse stock row that does not exist yet must both finish. Stock ends at the sum of what they used. One job must not fail and need a retry. This is the delivery rule from #2045, applied to job completion. It narrows the 2026-11-18 acceptance of that deadlock as a non-issue, which stopped further patches on #1940; deliveries were fixed after that, and jobs were the piece still open (#2121). Rush-order stock rows stay on #2121.
+## 2026-11-23 — #2248: Mason's earlier skip carried to 5 repeat Sol finding(s) at `47d594e25f95`
+
+**Carried automatically (2026-11-23).** Sol's full review of PR #2248 at `47d594e25f95` (base `f91774df22ea`) found 5 BLOCKER/HIGH finding(s); Sol marked each the same as one Mason skipped on this pull request.
+- Finding 1 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:105`, text sha256 `4126081fa8fba083`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+- Finding 2 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:113`, text sha256 `ed73e8847ce2751f`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+- Finding 3 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:116`, text sha256 `b1d7cacf6d92b881`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+- Finding 4 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:154`, text sha256 `fdcd29918ecd0586`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+- Finding 5 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:257`, text sha256 `0ba7ad6523e3e450`: carried from ref a01e8b2547a1 at `2c46e6d242ff` to `47d594e25f95`; Sol marked it the same
+
+## 2026-11-23 — #2248: Mason owner-accepted 5 Sol finding(s) at `a9f282bc7b09`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2248 at `a9f282bc7b09` (base `3dd8f9bbf7dc`) found 5 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:105`, text sha256 `e97b7427fefb3576` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a01e8b2547a1)
+- Finding 2 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:113`, text sha256 `5fc32abb80f0166a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a01e8b2547a1)
+- Finding 3 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:116`, text sha256 `772b908beab04ba1` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a01e8b2547a1)
+- Finding 4 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:154`, text sha256 `e4e00227b1c6e3ca` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a01e8b2547a1)
+- Finding 5 (HIGH) at `supabase/migrations/20270227120000_po_vendor_link.sql:257`, text sha256 `215e683e9440f958` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a01e8b2547a1)
+
+## 2026-11-23 — #2248: Mason owner-accepted 4 Sol finding(s) at `b8e98b96bc76`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2248 at `b8e98b96bc76` (base `3bae6de0f2aa`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270226140000_po_vendor_link.sql:105`, text sha256 `f4d2e0966879e620` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref be8c4e200812)
+- Finding 2 (HIGH) at `supabase/migrations/20270226140000_po_vendor_link.sql:113`, text sha256 `329c67dbb617fc4a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref be8c4e200812)
+- Finding 3 (HIGH) at `supabase/migrations/20270226140000_po_vendor_link.sql:154`, text sha256 `bae46cfecc8b8ca5` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref be8c4e200812)
+- Finding 4 (HIGH) at `supabase/migrations/20270226140000_po_vendor_link.sql:257`, text sha256 `7d08fe11a5c45869` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref be8c4e200812)
+
+## 2026-11-22 — #2248: Mason owner-accepted 4 Sol finding(s) at `3c21932f1d32`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2248 at `3c21932f1d32` (base `6aceb0747958`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224150000_po_vendor_link.sql:93`, text sha256 `cd02e7cc7a140ec7` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 5ab1851b81b5)
+- Finding 2 (HIGH) at `supabase/migrations/20270224150000_po_vendor_link.sql:95`, text sha256 `b8e61dfbb6d379bb` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 5ab1851b81b5)
+- Finding 3 (HIGH) at `supabase/migrations/20270224150000_po_vendor_link.sql:247`, text sha256 `75b7cbbe04a0db27` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 5ab1851b81b5)
+- Finding 4 (HIGH) at `supabase/migrations/20270224150000_po_vendor_link.sql:282`, text sha256 `15a71b28eed51e13` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 5ab1851b81b5)
+
+## 2026-11-22 — #2248: Mason owner-accepted 2 Sol finding(s) at `f8ec641a8de9`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2248 at `f8ec641a8de9` (base `bdd733f9b071`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224150000_po_vendor_link.sql:94`, text sha256 `4797e988388a23ab` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 0ef975a607d3)
+- Finding 2 (HIGH) at `supabase/migrations/20270224150000_po_vendor_link.sql:141`, text sha256 `b2cf0efa72ae067e` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 0ef975a607d3)
+
+## 2026-11-22 — #2248: Mason owner-accepted 3 Sol finding(s) at `5de9ea34eb65`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2248 at `5de9ea34eb65` (base `a7785529318b`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270217130000_po_vendor_link.sql:95`, text sha256 `0721da6a38581ad1` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 326ba930acf4)
+- Finding 2 (HIGH) at `supabase/migrations/20270217130000_po_vendor_link.sql:92`, text sha256 `35ee9e3a32e7a739` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 326ba930acf4)
+- Finding 3 (HIGH) at `supabase/migrations/20270217130000_po_vendor_link.sql:247`, text sha256 `1790af9de30452a0` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 326ba930acf4)
 ## 2026-11-23 — #2337: Mason owner-accepted 3 Sol finding(s) at `4c8c43249b67`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2337 at `4c8c43249b67` (base `2a4b17f13baa`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
@@ -470,6 +534,18 @@
 
 **Decision (Mason, in chat, 2026-11-18: "1").** After Sol round 2 on PR #1980 found that stock held for a Maybe booking read as free, Mason chose: held stock is always spoken for in `get_purchasing_plan`, whatever the booking's confidence, but a hold never makes the plan buy on its own. A hold covering its booking's (or job's) own lines counts today only up to the stock on the shelf left after other holds, backing Firm lines first; the unbacked part stays as the booking line with its own date and confidence (a Maybe line stays shown only).
 **Supersedes:** rule (2) of "2026-11-18 — Purchasing plan: no 'expedite a later PO' alternative; a Maybe booking's held stock follows its confidence". Rule (1) stands.
+## 2026-11-22 — PR #2248 (KI-144): one vendor name = one vendor
+
+**Decision (Mason, relayed from his conversation with the bugs-triage session, 2026-11-22: "go with a"):** a purchase order keeps the vendor name it was written with ("Keep original name", earlier the same day), and a vendor may not be created, renamed or restored to a name already printed on another vendor's purchase orders; the app refuses it and suggests a slightly different name (for example "Acme Ag LLC"). Raised after Sol round 3 reached the AGENTS.md mechanism cap on vendor-name reuse.
+
+## 2026-11-22 — A purchase order keeps its original vendor name after a rename (KI-144)
+
+**Decision (Mason, relayed by the Lane E bug captain 2026-11-22):** "Keep original name." Renaming a vendor does not change the name on its old purchase orders; reports and bill checks find those POs by the vendor's id.
+
+**Why:** a PO is a document sent to a vendor; its printed name is history. Until now the PO stored only the name, so after a rename the vendor-bill check (and some reports) no longer matched the vendor's own old POs.
+
+**What this implies:** `purchase_orders.vendor_id` links each PO to its vendor (set by the server from the vendor name when the PO is written; never by the screen). A vendor bill on a linked PO must come from that vendor. POs whose name matches no single active vendor stay unlinked and keep the old name check; linking the 3 live ones is still To-Do decision 23.
+
 ## 2026-11-22 — #2197: sales reps may reactivate an inactive customer from its page
 
 **Decision (Mason, 2026-11-22, relayed by the bug captain: "Yes, reps too").** The customer page's Reactivate button shows for admins and sales reps, matching what the database already allows (`customers_update` policy: admin or sales rep) and the #2048 refusal text ("An admin or sales rep must reactivate"). Screen-only change; the database rule is unchanged. Drivers and applicators still get no button and are refused by the database.

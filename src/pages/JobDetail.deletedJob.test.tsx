@@ -114,13 +114,19 @@ function deferred() {
 
 // jobsCalls counts page loads; the one-row read of a refused job's deletion date is answered by `stamp`.
 let jobsCalls = 0;
-function serveJob(job: Record<string, unknown>, stamp: Record<string, unknown> | null = null) {
+function serveJob(job: Record<string, unknown>, stamp: Record<string, unknown> | null = null, stampGate?: Promise<void>) {
   jobsCalls = 0;
   mockFrom.mockImplementation((table: string) => {
     if (table === 'jobs') {
       const chain = chainShell();
       chain.select = (cols: string) => {
-        if (cols === 'deleted_at') return buildChain({ data: stamp, error: null });
+        if (cols === 'deleted_at') {
+          if (!stampGate) return buildChain({ data: stamp, error: null });
+          const chain2 = chainShell();
+          const p = stampGate.then(() => ({ data: stamp, error: null }));
+          chain2.then = p.then.bind(p);
+          return chain2;
+        }
         jobsCalls += 1;
         return buildChain({ data: job, error: null });
       };
@@ -204,6 +210,24 @@ describe('JobDetail — refused cancel (#2174)', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Reload/ })); });
     await waitFor(() => expect(jobsCalls).toBe(2));
     await waitFor(() => expect(screen.queryByText(/Someone else changed this job/)).toBeNull());
+  });
+
+  it('locks a job refused as deleted at once, before its deletion date is read (Luna r5 HIGH)', async () => {
+    const stampGate = deferred();
+    serveJob(makeJob({}), { deleted_at: '2026-11-02T15:00:00Z' }, stampGate.promise);
+    mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'
+      ? editJobsReply([{ id: 'job-x', reason: 'deleted' }])
+      : { data: null, error: null }));
+    mountAt('/jobs/job-x');
+    await screen.findByRole('heading', { name: 'J-0001' });
+    await confirmCancel();
+    // The date read is still pending, yet the page is already locked.
+    expect(await screen.findByText(/This job was deleted\. It is kept/)).toBeTruthy();
+    for (const name of [/Save Changes/, /Cancel Job/, /Start Job/, /Complete Job/]) {
+      expect(screen.queryByRole('button', { name })).toBeNull();
+    }
+    await act(async () => { stampGate.release(); await stampGate.promise; });
+    expect(await screen.findByText(/deleted on 11\/2\/2026/)).toBeTruthy();
   });
 
   it('shows a job deleted meanwhile as deleted, on the day it was deleted', async () => {

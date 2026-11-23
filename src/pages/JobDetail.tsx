@@ -3312,10 +3312,12 @@ export default function JobDetail() {
   // job's own, since "invoiced" can mean only that an invoice covers it (Sol MED).
   const showRefusedJob = async (skip: EditJobsSkip | undefined, stillOnThisJob: () => boolean) => {
     if (skip?.reason === 'deleted') {
+      // Lock at once; the date read below only fills in the banner (Luna r5 HIGH).
+      if (stillOnThisJob()) setDeletedAt((d) => d ?? '');
       const { data, error } = await supabase.from('jobs').select('deleted_at').eq('id', id!).maybeSingle();
       if (error) Sentry.captureException(toSentryError(error), { extra: { context: 'read_refused_job' } });
       // An unreadable date shows no date rather than today (Luna LOW).
-      if (stillOnThisJob()) setDeletedAt((d) => d ?? (data as { deleted_at: string | null } | null)?.deleted_at ?? '');
+      if (stillOnThisJob()) setDeletedAt((d) => d || ((data as { deleted_at: string | null } | null)?.deleted_at ?? ''));
     } else if (skip && stillOnThisJob()) {
       setStaleNotice('Someone else changed this job since you opened it. Reload to see it as saved.');
     }

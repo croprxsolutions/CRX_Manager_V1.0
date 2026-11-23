@@ -11,4 +11,15 @@ Companion to `chemical-sales-workflow-2026-11-22.html` and `field-application-wo
 | 5 | Buying for Likely bookings | A percentage set in Settings (e.g. 70%). Purchasing "To buy" = Firm + orders + X% of Likely; full Likely still shown. Display only, never reserves stock. Maybe stays 0%. | Inventory / bookings |
 | 6 | Cost on an edited order | Existing lines keep their booked cost; only a newly added line takes today's cost. | Orders: Taha's lane until 12-15 |
 
+## Chemical sales walkthrough (Mason, 2026-11-22, second round)
+
+| # | Topic | Decision | Lane |
+|---|---|---|---|
+| 7 | Close - Short with undelivered orders from the booking | Block the close and list each open order (ordered / delivered / still due, with a link) plus any unused prepay. Staff deliver it or "Cancel remaining" first; then the close goes through. Extra product priced at today's price does not block. (Astra's recommendation, accepted.) | Bookings: Taha's lane until 12-15 |
+| 8 | Changing a price on a draft invoice | Allowed, but the screen shows the booked/order price beside it and requires a short reason when they differ; who, old, new and why are logged. Below-cost still needs an admin. | Chemical billing: Taha's lane until 12-15 |
+| 9 | Quick Delivery for a grower with an open booking | Stronger than today's banner: a product that is on his open booking is flagged per line, and staff pick "draw from booking" (booked price, booking goes down) or "sell separately" (tier price). | Bookings/deliveries |
+| 10 | Completing a delivery when stock shows short | Keep today: allow, record the negative, flag it for admin review. Drivers are never blocked. | No change |
+| 11 | Product cost from what was paid the vendor | Already decided 2026-11-04 in `docs/plans/2026-07-16-inventory-costing-plan.md` section 12 (average-cost Phase 2, fresh start from a stock count); parked until Mason's build go-ahead. | - |
+| 12 | Roll over / Duplicate to next season | Copy products, sections, rates per acre and program notes only. Never copy fields (so no acres or quantities), dates, timing or confidence. Whether roll over closes last year's booking is not decided yet. | Bookings: Taha's lane until 12-15 |
+
 Still open: prepay (tie to booking, price lock) - waiting on Mason's brainstorm.

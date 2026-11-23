@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promptModulesFor } from "./prompt-router.mjs";
 import { postToolModulesFor } from "./posttool-router.mjs";
-import { dirtyWarning, pushDir } from "./post-push-dirty-warning.mjs";
+import { dirtyWarning, pushDir, pushTargets } from "./post-push-dirty-warning.mjs";
 import { dedupeContextBlocks } from "./hook-router-runtime.mjs";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 
@@ -168,6 +168,18 @@ eq(postToolModulesFor({ tool_name: "Bash", tool_input: { command: "git status" }
   eq(pushDir('git -C "C:/a b" push', "C:/cwd"), path.resolve("C:/cwd", "C:/a b"), "git -C folder wins");
   eq(pushDir("git push", "C:/cwd"), "C:/cwd", "plain push uses the tool cwd");
   eq(pushDir("git -C C:/repoA status; git -C C:/repoB push origin HEAD", "C:/cwd"), path.resolve("C:/cwd", "C:/repoB"), "only the push's own -C counts");
+  // #2014: every push in the command, and a refspec's destination branch.
+  const targets = (command) => pushTargets(command, "C:/cwd").map(({ dir, branch }) => `${path.basename(dir)}@${branch}`);
+  eq(targets("git -C C:/a push && git -C C:/b push").join(" "), "a@null b@null", "two repositories in one command: both checked");
+  eq(targets("git push origin topic:release").join(" "), "cwd@release", "a refspec push asks for its destination branch");
+  eq(targets("git push origin HEAD").join(" "), "cwd@null", "HEAD means the folder's current branch");
+  eq(targets("git push origin HEAD other").join(" "), "cwd@null cwd@other", "HEAD beside another refspec still checks the current branch");
+  eq(targets("git status").join(" "), "", "no push, nothing to check");
+  eq(targets("git push origin HEAD:123").join(" "), "", "an all-digit branch is not mistaken for a PR number");
+  eq(targets("git push origin a b c d").length, 3, "at most three pushes are asked about");
+  const asked = [];
+  await dirtyWarning("x", { branch: "release", delayMs: 0, view: async (_dir, branch) => { asked.push(branch); return { state: "OPEN", mergeStateStatus: "CLEAN" }; } });
+  eq(asked.join(), "release", "the destination branch is passed to gh");
 }
 
 const claude = JSON.parse(readFileSync(path.join(ROOT, ".claude", "settings.json"), "utf8"));

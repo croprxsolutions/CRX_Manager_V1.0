@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
   fetchMarginFloors: vi.fn(),
   setMarginFloors: vi.fn(),
+  setupWorkbookSaved: null as null | (() => void),
 }));
 
 const product = {
@@ -69,7 +70,9 @@ vi.mock('../lib/productPricing', async (importOriginal) => ({
   createPricingWorkbookExport: vi.fn(),
 }));
 vi.mock('../components/products/BulkProductImport', () => ({ default: () => null }));
-vi.mock('../components/products/ProductSetupWorkbookModal', () => ({ default: () => null }));
+vi.mock('../components/products/ProductSetupWorkbookModal', () => ({
+  default: ({ onSaved }: { onSaved: () => void }) => { mocks.setupWorkbookSaved = onSaved; return null; },
+}));
 vi.mock('../components/ui/Toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
 vi.mock('../lib/costFields', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/costFields')>()),
@@ -211,6 +214,19 @@ describe('Products list margin floors', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect((screen.getByLabelText('Margin floor percent for Floor Product') as HTMLInputElement).value).toBe('16');
     expect((screen.getByLabelText('Margin floor percent for Other Product') as HTMLInputElement).value).toBe('20');
+  });
+
+  it('refuses a floor draft typed before a floors re-read failed (#2160)', async () => {
+    const input = await openFloorEditor();
+    fireEvent.change(input, { target: { value: '16' } });
+    // A setup-workbook save re-reads the list and floors while the draft is open; the floors read fails.
+    mocks.fetchMarginFloors.mockRejectedValueOnce(new Error('offline'));
+    await act(async () => { mocks.setupWorkbookSaved?.(); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load margin floors.');
+    fireEvent.click(screen.getByRole('button', { name: 'Save (1)' }));
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith(
+      'error', 'Margin floors have not loaded. Use Try again, then enter the floor changes again.'));
+    expect(mocks.setMarginFloors).not.toHaveBeenCalled();
   });
 
   it('keeps the catalog when floors fail to load, with the floor column read-only', async () => {

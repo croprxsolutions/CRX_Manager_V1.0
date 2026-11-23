@@ -72,7 +72,7 @@ import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipState
 import { prFilesOnGitHub, tahaLaneGate, tellTahaOnGitHub } from "../../.claude/hooks/taha-lane-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "../../.claude/hooks/pr-claim-lib.mjs";
-import { ownerAcceptedForPr } from "../../.claude/hooks/sol-accept-lib.mjs";
+import { ownerAcceptedForPr, usesCarriedSkip } from "../../.claude/hooks/sol-accept-lib.mjs";
 
 // Sol HIGH finding (2026-08-14, write-scope review): with the Supabase connector
 // write-enabled, ANY mutating Supabase tool Codex can reach is a route to
@@ -586,6 +586,10 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
   // A PR merge may land a head that is behind main (Mason, 2026-10-26;
   // proofValidForMerge): the proof's own base must be in the head and behind
   // GitHub's base. A direct push to main keeps the exact-base binding.
+  // A carried repeat skip lands through Claude's merge guard only (Mason, 2026-11-23): Codex hands it over.
+  if (usesCarriedSkip(proof)) {
+    return proofRequirement(headSha, riskDescription, "This Sol proof carries Mason's earlier skip to a repeat finding; Codex never merges it. Hand the merge to Claude.", baseSha);
+  }
   // Owner-accepted findings count only for their own pull request at its exact version (Sol gate round 5).
   const ownerOk = ownerAcceptedForPr(proof, { number: pullRequest?.number, url: pullRequest?.url, exactHead: String(proof?.head_sha).toLowerCase() === String(headSha).toLowerCase() });
   const proven = ownerOk && (authoritativeBaseSha

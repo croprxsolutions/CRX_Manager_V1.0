@@ -105,10 +105,10 @@ try {
   let r = applyFile(false);
   assert.notEqual(r.status, 0); assert.match(out(r), /PARENT_EPA_CORRECTION_ON_NOT_IN_TRANSACTION/);
   assert.equal(scalar('SELECT public._product_parent_epa_correction_enabled();'), 'f', 'a refused apply leaves the switch off');
-  psql('ALTER TABLE public.jobs DISABLE TRIGGER trg_job_epa_freeze_on_finish;');
+  psql('ALTER TABLE public.job_chemicals DISABLE TRIGGER trg_job_line_epa_lock;');
   r = applyFile(true);
   assert.notEqual(r.status, 0); assert.match(out(r), /trigger that keeps sprayed jobs' EPA numbers is missing or disabled/);
-  psql('ALTER TABLE public.jobs ENABLE TRIGGER trg_job_epa_freeze_on_finish;');
+  psql('ALTER TABLE public.job_chemicals ENABLE TRIGGER trg_job_line_epa_lock;');
   assert.equal(scalar('SELECT public._product_parent_epa_correction_enabled();'), 'f', 'a refused apply leaves the switch off');
   r = applyFile(true);
   assert.equal(r.status, 0, `the candidate applies: ${out(r)}`);

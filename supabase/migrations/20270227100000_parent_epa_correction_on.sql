@@ -68,7 +68,8 @@ BEGIN
   IF (SELECT count(*) FROM pg_trigger t
        WHERE NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
          AND ((t.tgname = 'trg_job_epa_freeze_on_spray' AND t.tgrelid = 'public.job_applied_records'::regclass)
-           OR (t.tgname = 'trg_job_epa_freeze_on_finish' AND t.tgrelid = 'public.jobs'::regclass))) <> 2 THEN
+           OR (t.tgname = 'trg_job_epa_freeze_on_finish' AND t.tgrelid = 'public.jobs'::regclass)
+           OR (t.tgname = 'trg_job_line_epa_lock' AND t.tgrelid = 'public.job_chemicals'::regclass))) <> 3 THEN
     RAISE EXCEPTION 'PARENT_EPA_CORRECTION_ON_PREFLIGHT: a trigger that keeps sprayed jobs'' EPA numbers is missing or disabled';
   END IF;
   -- The identity check this file re-emits is exactly 20261207113000's (owner-only, no grants).
@@ -223,10 +224,11 @@ BEGIN
 END;
 $function$;
 
--- Re-emitted from 20261207113000 with two changes: clearing the EPA number is refused (Mason, 2026-11-23), and so is a
+-- correction that would drop a size's restricted-use status (Sol r2 #1). VOLATILE (was STABLE) so the restricted-use read
+-- after the registration lock sees registration edits committed while it waited (Sol r3 #3).
 -- correction that would drop a size's restricted-use status (Sol r2 #1).
 CREATE OR REPLACE FUNCTION public._product_parent_identity_after(p_parent public.product_parents, p_changes jsonb) RETURNS jsonb
-LANGUAGE plpgsql STABLE SET search_path = public, pg_temp AS $function$
+LANGUAGE plpgsql VOLATILE SET search_path = public, pg_temp AS $function$
 DECLARE
   v_epa text := p_parent.generic_epa_registration;
   v_unsaved text;
@@ -261,10 +263,12 @@ BEGIN
        AND public._epa_norm(p.epa_registration) IS NOT NULL
        AND public._epa_norm(p.epa_registration) IS DISTINCT FROM v_epa;
     IF v_unsaved IS NOT NULL THEN
-      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_RECORD_UNSAVED: invoice % has a line for this product with no saved EPA number, so it would change too. Open and save a draft invoice to give it one; a posted one must be unposted, saved and posted again', v_unsaved;
+      RAISE EXCEPTION 'PRODUCT_PARENT_EPA_RECORD_UNSAVED: invoice % has a line for this product with no saved EPA number, so it would change too. Open and save a draft invoice to give it one; a posted one must be unposted, saved and posted again (a paid or void invoice cannot be, so ask a developer to save that line''s number)', v_unsaved;
     END IF;
     -- Sol r2 #1: a size that is restricted-use only through its current number's registration would lose that status
     -- (future invoice lines would capture 'unknown', and no restricted-use sales record is made for those).
+    -- The shared registration lock first, as the invoice capture takes it, so a registration edit cannot interleave.
+    PERFORM public._epa_registration_lock(false);
     SELECT string_agg(DISTINCT p.product_name, ', ')
       INTO v_unsaved
       FROM public.product_parent_members m
@@ -296,8 +300,8 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public._product_parent_identity_after(public.product_parents,jsonb)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = 'c088d5ce713f866cb65bcf74cfa0cfe3'
-                    AND p.proowner = 'postgres'::regrole AND NOT p.prosecdef
+                    AND md5(replace(p.prosrc, chr(13), '')) = '11f49a97cdd895c723b42e600c6248f7'
+                    AND p.proowner = 'postgres'::regrole AND NOT p.prosecdef AND p.provolatile = 'v'
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
                     AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')) THEN

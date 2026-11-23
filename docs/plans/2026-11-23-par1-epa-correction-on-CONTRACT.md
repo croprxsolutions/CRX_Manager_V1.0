@@ -163,3 +163,22 @@ Atrazine 4L only (Mason's call in the parent session, not this file): #39 (the l
 - LOW (prover never renders the statement or a branded line): the branded part is the r1 #6 follow-up; the statement
   prints the invoice line copy, which the prover shows unchanged.
 - LOW (contract overstated the draft case): fixed in "State and failure".
+
+## Sol settlement (round 3, 2026-11-23, head 4dfcf9fce)
+
+- #1 HIGH (a job sprayed before a correction and completed after writes the new number in its logbook record) and #4
+  HIGH (a split field invoice reposted after a correction takes the new number): repeats of r1 #2 and #4, Mason's
+  option B. Need Mason's skip in this session.
+- #2 HIGH (an app tab opened before KI-195's deploy): third round for one cause (r1 #3, r2 #2, r3 #2). Stopped patching;
+  put to Mason as a business decision.
+- #3 HIGH (a registration edit racing a correction): fixed; the identity check takes the shared registration lock
+  before the restricted-use read and is VOLATILE so that read sees edits committed while it waited.
+- #5 MED (return credit under the new number): option B, already accepted (r1 #5).
+- #6 MED (branded lines under the generic number): r1 #6 follow-up.
+- #7 MED (preflight misses `trg_job_line_epa_lock`): fixed; all three triggers must be enabled (prover disables the line
+  lock and the apply is refused; enabled live).
+- #8 MED (the unsaved-line message offered an unpost path paid and void invoices cannot take): message fixed. Live
+  2026-11-23 the only blank-space line is on an unposted invoice and not on Atrazine 4L.
+- #9 LOW: refuted as r2 (0 odd live copies). #10 LOW (modal text while the switch is off): the migration is applied
+  before the PR merges (release rule), so the screen goes live with the switch on; after a switch-only rollback the
+  refusal message says corrections are switched off.

@@ -116,6 +116,16 @@
 
 **Decision (Mason, relayed from his conversation with the bugs-triage session, 2026-11-22: "go with B"):** a purchase-order cost correction is refused when the line's cost or product changed after the screen loaded it. A PO vendor change or a product unit change in that window is NOT checked: an accepted risk, since only admins correct costs. Raised after Sol round 3 reached the AGENTS.md mechanism cap.
 
+## 2026-11-22 — A PO cost correction is judged against what arrived (KI-151)
+
+**Decision (Mason, relayed by the Lane E bug captain 2026-11-22):** "if cost is edited it needs edited if only receive 8 of 10 should show owing 2. if edited quantity to 8 and we receive 8 then we shouldn't show anymore coming". Cost corrections on a purchase order are judged against what actually arrived, not what was ordered.
+
+**Why:** since KI-143, vendor bills are already limited by what arrived (capped at the ordered total; the ordered total before anything arrives). The cost-correction check still used the ordered total, so a received line could be cut below what was billed for it.
+
+**Follow-up decision (Mason, 2026-11-22, in the Lane E session, "Yes, that rule"):** a cost cut is refused only when that cut itself puts the bills over the line. A bill already over what arrived (for example billed in full up front, goods still coming) does not block a correction.
+
+**What this implies:** a cost cut is refused when it moves the PO's active vendor bills from within 5% to more than 5% over what arrived (like the bill check, capped at the ordered total; the ordered total before anything arrives). Separately, as before KI-151, no cut may leave the bills more than 5% over the ordered total, even when a bill was already confirmed over it (Sol round 2, 2026-11-22: else a $110 bill on a $100 order lets the order be cut to $0). Owed and still-coming quantities are unchanged: receiving 8 of 10 still shows 2 coming, and a line whose ordered quantity matches what arrived shows nothing coming. Raising a cost is never refused.
+
 ## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
 
 **Decision (Mason, in chat 2026-11-22, after Sol gate round 6 left 2 HIGH findings on the skip mechanism itself):** "then we will override SOL if we need to I don't want over complicated codes to type I want it to explicitly ask if I accept the risk and I say yes with reason and that's good enough". The skip request now asks plainly whether he accepts the risk of leaving the findings unfixed; `yes` and a reason is enough, and the reason is logged. Round 6's two findings (`.claude/hooks/sol-accept-lib.mjs:233`, `scripts/owner-accept-sol-finding.mjs:107`) are left unfixed as his business call: both concern how far a skip he gave can stretch, not money, stock, customer data or logins. This PR changes gate files, so the agent merge guard still requires a clean Sol; Mason or Taha merges it by hand.

@@ -1968,8 +1968,9 @@ export const DECISION_LOG_DIR = "docs/manual/decision-log.d";
 // DECISION_LOG.md plus every decision-log.d/*.md (README excepted) at `ref`, one text per file.
 // A file that cannot be read is left out, which can only make the round-5 stop refuse.
 export function decisionLogAt(root, ref) {
-  const fragments = runGit(["ls-tree", "-r", "--name-only", ref, "--", `${DECISION_LOG_DIR}/`], { cwd: root })
-    .split(/\r?\n/).filter((p) => p.endsWith(".md") && path.posix.basename(p) !== "README.md");
+  // -z: raw names (no core.quotePath escaping of non-ASCII); a name with a newline cannot go to --batch.
+  const fragments = runGit(["ls-tree", "-r", "-z", "--name-only", ref, "--", `${DECISION_LOG_DIR}/`], { cwd: root })
+    .split("\0").filter((p) => p.endsWith(".md") && !p.includes("\n") && path.posix.basename(p) !== "README.md");
   const result = runTrustedGit(["cat-file", "--batch"], {
     cwd: root, encoding: "buffer", timeout: 60_000,
     input: Buffer.from([DECISION_LOG_PATH, ...fragments].map((p) => `${ref}:${p}\n`).join(""), "utf8"),

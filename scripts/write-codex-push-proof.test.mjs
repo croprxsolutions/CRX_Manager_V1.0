@@ -2592,6 +2592,11 @@ not json
     assert.equal(gate(named).refuse, false, "fragments: an entry ONLY in decision-log.d/ unlocks round 5");
     assert.match(solRoundStatusLine({ round: 5, prNumber: 2270, decisionLog: decisionLogAt(repo, named), today }), /: found\)\.$/, "fragments: the status line finds it");
     assert.equal(gate(base).refuse, true, "fragments: the head without the fragment still refuses");
+    // A non-ASCII name is read too (git quotes it in ls-tree output without -z; Codex App P2).
+    branchFrom("curly", base);
+    git("config", "core.quotePath", "true");
+    write(`${DECISION_LOG_DIR}/2026-11-22-mason’s-decision.md`, "## 2026-11-22 — Mason’s call on #2270\n\n**Decision (Mason, in chat).** Keep it.\n");
+    assert.equal(gate(commit()).refuse, false, "fragments: a non-ASCII fragment name unlocks round 5");
     // Text in one file never joins another file's entry.
     branchFrom("glue", base);
     write(`${DECISION_LOG_DIR}/2026-11-22-a.md`, "## 2026-11-22 — Unrelated, no newline at the end");

@@ -58,10 +58,12 @@ const LOGS_ALL = ['email_log', 'integrity_alerts', 'failed_notifications', 'watc
 const LOGS_FILTERED = { activity_feed: 'related_entity', notifications: 'related_entity', financial_audit_log: 'entity' };
 const PIN_QUERY = (/-- PIN QUERY BEGIN\n([\s\S]*?)-- PIN QUERY END/.exec(RAW)?.[1] ?? '').split('\n').map((l) => l.replace(/^-- ?/, '')).join('\n');
 assert.match(PIN_QUERY, /pg_control_system/, 'the PIN QUERY block is missing');
-const LIVE_SLOT = 'c_live constant jsonb := NULL;';
-assert.equal(RAW.split(LIVE_SLOT).length, 2, 'the live pin slot must appear once');
+// The pin slot, NULL as reviewed or already filled with live's pins (either way this proof swaps in its own).
+const LIVE_SLOT = /c_live constant jsonb := (?:NULL|'(?:[^']|'')*');/;
+assert.equal(RAW.match(new RegExp(LIVE_SLOT, 'g'))?.length, 1, 'the live pin slot must appear once');
+const FILLED = !RAW.match(LIVE_SLOT)[0].endsWith('NULL;');
 // system_identifier is a 64-bit number: it is carried as a string here and written back as a bare JSON number.
-const pinned = (pins) => RAW.replace(LIVE_SLOT, `c_live constant jsonb := '${JSON.stringify(pins)
+const pinned = (pins) => RAW.replace(LIVE_SLOT, () => `c_live constant jsonb := '${JSON.stringify(pins)
   .replace(/"system_identifier":"(\d+)"/, '"system_identifier":$1').replaceAll("'", "''")}';`);
 const pins = () => JSON.parse(scalar(PIN_QUERY).replace(/"system_identifier": (\d+)/, '"system_identifier": "$1"'));
 
@@ -246,7 +248,12 @@ const refused = (label, r, pattern) => {
 
 let built = false;
 try {
-  if (REUSE) console.log(`[prover] reusing ${NAME}`);
+  if (REUSE) {
+    // Only a network-less container this harness could have built: never a shared or development database.
+    const net = docker(['inspect', '-f', '{{.HostConfig.NetworkMode}} {{.Config.Image}}', NAME]).stdout.trim();
+    assert.match(net, /^none public\.ecr\.aws\/supabase\/postgres:/, `refusing to reuse ${NAME} (${net}): not a harness container`);
+    console.log(`[prover] reusing ${NAME}`);
+  }
   else { buildContainer({ stopBefore: CANDIDATE }); built = true; seedUsers(); }
   if (!REUSE || scalar("SELECT count(*) FROM pg_namespace WHERE nspname = 'reset_prover';") === '0') {
     for (const area of ['invoices', 'deliveries', 'purchasing', 'payables', 'returns', 'periods-pricing', 'commission']) {
@@ -256,10 +263,14 @@ try {
   }
   const start = dbState();
 
+  // The file classified exactly this schema's tables.
+  const setMd5 = scalar("SELECT md5(string_agg(c.relname::text, ',' ORDER BY c.relname)) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r';");
+  assert.match(RAW, new RegExp(`c_table_set_md5 constant text := '${setMd5}';`), `c_table_set_md5 must be '${setMd5}' for this schema (classify any new table first)`);
+
   // (a) Not live: the checked-in file and a copy pinned to another database change nothing.
   const asIs = apply(RAW);
   assert.equal(asIs.status, 0, asIs.stderr);
-  assert.match(asIs.stderr, /LIVE_RESET_SKIPPED_NOT_LIVE: the live pins are not filled in/);
+  assert.match(asIs.stderr, FILLED ? /LIVE_RESET_SKIPPED_NOT_LIVE: this is not the pinned live database/ : /LIVE_RESET_SKIPPED_NOT_LIVE: the live pins are not filled in/);
   assert.equal(dbState(), start, 'the checked-in file changed something');
   const live = pins();
   const other = apply(pinned({ ...live, system_identifier: String(BigInt(live.system_identifier) + 1n) }));
@@ -276,6 +287,13 @@ try {
   refused('count drift', apply(pinned({ ...live, counts: { ...live.counts, orders: live.counts.orders + 1 } })),
     /LIVE_RESET_COUNT_DRIFT: rows changed since the pin: orders \d+ \(pinned \d+\)/);
   refused('schema drift', apply(pinned({ ...live, counts: { ...live.counts, not_a_table: 0 } })), /LIVE_RESET_SCHEMA_DRIFT: .*not_a_table/);
+  refused('stale pin', apply(pinned({ ...live, pinned_at: '2026-01-01T00:00:00Z' })), /LIVE_RESET_PIN_EXPIRED/);
+  // An edit that keeps every count (a quote renamed) is still caught.
+  const editQuote = (to) => ok(run(`SET session_replication_role = replica; UPDATE public.quotes SET quote_number = '${to}' WHERE id = ${idOf('seed1-quote')};`, 'supabase_admin'));
+  const oldNumber = scalar(`SELECT quote_number FROM public.quotes WHERE id = ${idOf('seed1-quote')};`);
+  editQuote('[PROVER] now a real customer quote');
+  refused('content drift', apply(pinned(live)), /LIVE_RESET_CONTENT_DRIFT: rows were edited since the pin: quotes/);
+  editQuote(oldNumber);
   ok(run(`SET session_replication_role = replica;
     INSERT INTO public.product_cost_basis (product_id, basis_type, cost_cents, purchase_order_item_id, selection_source, reason, effective_from, effective_to)
       SELECT product_id, 'actual_purchase', 600, id, 'migration_baseline', '[PROVER] from a PO line', now() - interval '1 day', now() FROM public.purchase_order_items ORDER BY id LIMIT 1;`, 'supabase_admin'));
@@ -289,10 +307,15 @@ try {
   const keptTables = Object.keys(before.counts).filter((t) => !CORE.includes(t) && !LOGS_ALL.includes(t) && !(t in LOGS_FILTERED));
   const keptMd5 = Object.fromEntries(keptTables.map((t) => [t, tableMd5('public', t, EXCL[t])]));
   const deletedMd5 = Object.fromEntries([...CORE, ...LOGS_ALL].map((t) => [t, tableMd5('public', t)]));
+  const logGone = (schema, t) => scalar(`SELECT md5(coalesce(string_agg(md5(to_jsonb(x)::text), '' ORDER BY md5(to_jsonb(x)::text)), '')) FROM ${schema}.${t} x
+    WHERE ${LOGS_FILTERED[t]}_type = ANY ('{${TYPES.join(',')}}'::text[]) OR ${LOGS_FILTERED[t]}_id IN (SELECT id FROM reset_prover.cleared_ids);`);
+  const idTables = CORE.filter((c) => scalar(`SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${c}' AND column_name = 'id' AND data_type = 'uuid'`) === '1');
+  ok(run(`CREATE TABLE reset_prover.cleared_ids AS ${idTables.map((c) => `SELECT id FROM public.${c}`).join(' UNION ')};`));
   const logKept = (t) => scalar(`SELECT md5(coalesce(string_agg(md5(to_jsonb(x)::text), '' ORDER BY md5(to_jsonb(x)::text)), '')) FROM public.${t} x
-    WHERE (${LOGS_FILTERED[t]}_type = ANY ('{${TYPES.join(',')}}'::text[]) OR ${LOGS_FILTERED[t]}_id IN (${CORE.map((c) => `SELECT ${scalar(`SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${c}' AND column_name = 'id' AND data_type = 'uuid'`) === '1' ? 'id' : 'NULL::uuid'} FROM public.${c}`).join(' UNION ')})) IS NOT TRUE;`);
+    WHERE (${LOGS_FILTERED[t]}_type = ANY ('{${TYPES.join(',')}}'::text[]) OR ${LOGS_FILTERED[t]}_id IN (SELECT id FROM reset_prover.cleared_ids)) IS NOT TRUE;`);
   const logKeptBefore = Object.fromEntries(Object.keys(LOGS_FILTERED).map((t) => [t, logKept(t)]));
-  const triggers = () => scalar(`SELECT string_agg(c.relname || '.' || t.tgname || '=' || t.tgenabled::text, ',' ORDER BY 1)
+  const logGoneBefore = Object.fromEntries(Object.keys(LOGS_FILTERED).map((t) => [t, logGone('public', t)]));
+  const triggers = () => scalar(`SELECT string_agg(c.relname || '.' || t.tgname || '=' || t.tgenabled::text, ',' ORDER BY c.relname, t.tgname)
     FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND NOT t.tgisinternal;`);
   const trigBefore = triggers();
   assert.ok(Number(scalar(`SELECT sum(quantity_available) + sum(quantity_prebooked) FROM public.inventory;`)) > 0, 'the seed holds stock');
@@ -363,6 +386,7 @@ try {
     assert.equal(scalar(`SELECT count(*) FROM reset_backup_20261123.${t};`), String(before.counts[t]), `backup of ${t}`);
     assert.equal(tableMd5('reset_backup_20261123', t), deletedMd5[t], `backup rows of ${t} differ from the originals`);
   }
+  for (const t of Object.keys(LOGS_FILTERED)) assert.equal(logGone('reset_backup_20261123', t), logGoneBefore[t], `backup rows of ${t} differ from the originals`);
   assert.equal(scalar("SELECT count(*) FROM reset_backup_20261123._manifest WHERE rows_deleted IS DISTINCT FROM rows_backed_up;"), '0');
   assert.equal(scalar(`SELECT count(*) FROM reset_backup_20261123._sequences WHERE NOT (seq = ANY ('{${SEQS.join(',')}}'::text[]));`), '0');
   assert.equal(scalar("SELECT has_schema_privilege('authenticated', 'reset_backup_20261123', 'USAGE') OR has_schema_privilege('anon', 'reset_backup_20261123', 'USAGE');"), 'f');

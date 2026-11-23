@@ -14,7 +14,9 @@
 -- LIVE_RESET_SKIPPED_NOT_LIVE, no error: the staging Database job applies every merged migration). The main session
 -- fills c_live with the single JSON value returned by the read-only PIN QUERY below, run on live right before the
 -- apply. Even then it runs only where pg_control_system().system_identifier and the pinned admin profile, customer
--- and product ids all match; anywhere else it is again a no-op notice.
+-- and product ids all match; anywhere else it is again a no-op notice. A pin older than 6 hours refuses
+-- (LIVE_RESET_PIN_EXPIRED), so a later replay onto a clone or restore of live cannot run it either. Never apply the
+-- unfilled file to live (it would be recorded as applied with nothing done); fill and restamp first.
 --
 -- PIN QUERY (read-only; run on live; paste its one value, as a quoted jsonb literal, into c_live):
 -- PIN QUERY BEGIN
@@ -23,8 +25,14 @@
 --   'admin_profile_id', (SELECT id FROM public.profiles WHERE role = 'admin' ORDER BY created_at, id LIMIT 1),
 --   'customer_id', (SELECT id FROM public.customers ORDER BY created_at, id LIMIT 1),
 --   'product_id', (SELECT id FROM public.products ORDER BY created_at, id LIMIT 1),
+--   'pinned_at', now(),
 --   'counts', (SELECT jsonb_object_agg(c.relname, (xpath('/row/n/text()', query_to_xml(
 --                 format('SELECT count(*) AS n FROM public.%I', c.relname), false, true, '')))[1]::text::bigint)
+--                FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+--               WHERE n.nspname = 'public' AND c.relkind = 'r'),
+--   'digests', (SELECT jsonb_object_agg(c.relname, (xpath('/row/h/text()', query_to_xml(format(
+--                 'SELECT md5(coalesce(string_agg(md5(to_jsonb(x)::text), '''' ORDER BY md5(to_jsonb(x)::text)), '''')) AS h FROM public.%I x',
+--                 c.relname), false, true, '')))[1]::text)
 --                FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 --               WHERE n.nspname = 'public' AND c.relkind = 'r')
 -- )::text AS live_reset_pins;
@@ -32,15 +40,17 @@
 --
 -- PREFLIGHT (on live; refuses with an exception and changes nothing): the backup schema already exists
 -- (LIVE_RESET_ALREADY_APPLIED); c_live is malformed (LIVE_RESET_PINS_MISSING); the public table set differs from the
--- pinned one (LIVE_RESET_SCHEMA_DRIFT: a table nobody classified); any public table's row count differs from its pin
--- (LIVE_RESET_COUNT_DRIFT: someone used the app after the read, re-read and re-pin); a kept cost basis row points at a
+-- pinned one or from the set this file classified (c_table_set_md5), or a foreign key outside public points at a table
+-- it deletes from (LIVE_RESET_SCHEMA_DRIFT); any public table's row count or content differs from its pin
+-- (LIVE_RESET_COUNT_DRIFT / LIVE_RESET_CONTENT_DRIFT: someone used the app after the read, re-pin); a kept cost basis row points at a
 -- PO line (LIVE_RESET_COST_BASIS_FROM_PO: product_cost_basis keeps its history, so that needs a decision); a trigger
 -- that must be switched off is not in its normal on state (LIVE_RESET_GUARD_STATE). Every public table is locked
 -- IN EXCLUSIVE MODE (reads go on, writes wait) before the counts, with a 10-second lock_timeout.
 --
 -- BACKUP FIRST: every row this deletes is copied into a new schema reset_backup_20261123 (CREATE TABLE AS, one table per
 -- source table), plus full pre-images of public.inventory and public.customers, the six number sequences
--- (_sequences), the triggers switched off (_triggers_off) and a manifest (_manifest). No API role can read it.
+-- (_sequences), the triggers switched off (_triggers_off) and a manifest (_manifest). Only its owner can read it
+-- (every other grant on the schema and its tables is revoked).
 --
 -- GUARDS: on each table it deletes from, every user trigger that fires on DELETE is switched off with
 -- ALTER TABLE ... DISABLE TRIGGER <name> (each must be on, 'O', first), only around the deletes, then switched back on.
@@ -90,6 +100,8 @@ DECLARE
   c_clear_backup_snapshots constant boolean := false;
 
   c_backup constant text := 'reset_backup_20261123';
+  -- md5 of the sorted, comma-joined public table names this file classified (the proof checks it against the schema).
+  c_table_set_md5 constant text := '39cd9a9a0e89506e92bd5d9e5a27f7ac';
   -- Delete order, children first; a comma groups tables that reference each other (one statement).
   c_core constant text[] := ARRAY[
     'accounting_periods', 'invoice_line_allocations', 'order_line_allocations', 'prepay_applications', 'prepay_credits',
@@ -166,12 +178,15 @@ BEGIN
   END IF;
 
   -- ===== Preflight =====
+  IF (c_live->>'pinned_at') IS NULL OR now() > (c_live->>'pinned_at')::timestamptz + interval '6 hours' THEN
+    RAISE EXCEPTION 'LIVE_RESET_PIN_EXPIRED: the pins were read at %, more than 6 hours ago; re-pin. Nothing was changed.', c_live->>'pinned_at';
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = c_backup) THEN
     RAISE EXCEPTION 'LIVE_RESET_ALREADY_APPLIED: schema % exists; the reset ran already. Nothing was changed.', c_backup;
   END IF;
   v_counts := c_live->'counts';
-  IF jsonb_typeof(v_counts) IS DISTINCT FROM 'object' THEN
-    RAISE EXCEPTION 'LIVE_RESET_PINS_MISSING: c_live has no counts object. Nothing was changed.';
+  IF jsonb_typeof(v_counts) IS DISTINCT FROM 'object' OR jsonb_typeof(c_live->'digests') IS DISTINCT FROM 'object' THEN
+    RAISE EXCEPTION 'LIVE_RESET_PINS_MISSING: c_live has no counts or digests object. Nothing was changed.';
   END IF;
 
   PERFORM set_config('lock_timeout', '10s', true);
@@ -187,11 +202,21 @@ BEGIN
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'LIVE_RESET_SCHEMA_DRIFT: the public tables differ from the pinned set (%). Nothing was changed.', v_bad;
   END IF;
+  IF md5(array_to_string(v_tables, ',')) IS DISTINCT FROM c_table_set_md5 THEN
+    RAISE EXCEPTION 'LIVE_RESET_SCHEMA_DRIFT: the public tables are not the % this file classified (a table was added or removed); classify it first. Nothing was changed.', c_table_set_md5;
+  END IF;
 
   v_core := string_to_array(array_to_string(c_core, ','), ',');
   SELECT string_agg(x, ', ') INTO v_bad FROM unnest(v_core) x WHERE x <> ALL (v_tables);
   IF v_bad IS NOT NULL OR (SELECT count(DISTINCT x) FROM unnest(v_core) x) <> cardinality(v_core) THEN
     RAISE EXCEPTION 'LIVE_RESET_SCHEMA_DRIFT: the delete list names missing or repeated tables (%). Nothing was changed.', v_bad;
+  END IF;
+  SELECT string_agg(k.conrelid::regclass::text || ' -> ' || k.confrelid::regclass::text, ', ') INTO v_bad
+    FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE k.contype = 'f' AND n.nspname <> 'public'
+     AND k.confrelid IN (SELECT format('public.%I', x)::regclass FROM unnest(v_tables) x);
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'LIVE_RESET_SCHEMA_DRIFT: a table outside public references a public table (%). Nothing was changed.', v_bad;
   END IF;
 
   v_bad := NULL;
@@ -203,6 +228,14 @@ BEGIN
   END LOOP;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'LIVE_RESET_COUNT_DRIFT: rows changed since the pin: %. Nothing was changed.', v_bad;
+  END IF;
+  v_bad := NULL;
+  FOREACH v_t IN ARRAY v_tables LOOP
+    EXECUTE format('SELECT md5(coalesce(string_agg(md5(to_jsonb(x)::text), '''' ORDER BY md5(to_jsonb(x)::text)), '''')) FROM public.%I x', v_t) INTO v_md5;
+    IF v_md5 IS DISTINCT FROM c_live->'digests'->>v_t THEN v_bad := concat_ws(', ', v_bad, v_t); END IF;
+  END LOOP;
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'LIVE_RESET_CONTENT_DRIFT: rows were edited since the pin: %. Nothing was changed.', v_bad;
   END IF;
 
   SELECT (SELECT count(*) FROM public.product_cost_basis WHERE purchase_order_item_id IS NOT NULL)
@@ -328,13 +361,10 @@ BEGIN
   -- ===== Stock 0, customers $0, numbering 0001 =====
   UPDATE public.inventory
      SET quantity_available = 0, quantity_prebooked = 0, quantity_on_order = 0, last_counted_at = NULL, updated_at = now()
-   WHERE quantity_available <> 0 OR quantity_prebooked <> 0 OR quantity_on_order <> 0 OR last_counted_at IS NOT NULL
-      OR quantity_available IS NULL OR quantity_prebooked IS NULL OR quantity_on_order IS NULL;
-  UPDATE public.customers SET prepay_balance_cents = 0
-   WHERE prepay_balance_cents IS DISTINCT FROM 0 AND prepay_balance_cents IS NOT NULL;
-  FOREACH v_t IN ARRAY c_seqs LOOP
-    PERFORM setval(format('public.%I', v_t)::regclass, 1, false);
-  END LOOP;
+   WHERE quantity_available IS DISTINCT FROM 0 OR quantity_prebooked IS DISTINCT FROM 0
+      OR quantity_on_order IS DISTINCT FROM 0 OR last_counted_at IS NOT NULL;
+  -- row_version is bumped by customers_bump_row_version, so an open customer screen refuses a stale save.
+  UPDATE public.customers SET prepay_balance_cents = 0, updated_at = now() WHERE prepay_balance_cents IS DISTINCT FROM 0;
 
   -- ===== Postflight =====
   SELECT string_agg(c.relname || '.' || t.tgname || '=' || t.tgenabled::text, ',' ORDER BY c.relname, t.tgname) INTO v_trig_after
@@ -376,35 +406,42 @@ BEGIN
     END IF;
   END LOOP;
 
-  IF EXISTS (SELECT 1 FROM public.customers WHERE prepay_balance_cents <> 0) THEN
+  IF EXISTS (SELECT 1 FROM public.customers WHERE prepay_balance_cents IS DISTINCT FROM 0) THEN
     RAISE EXCEPTION 'LIVE_RESET_POSTFLIGHT: a customer still has a prepay balance.';
   END IF;
   IF EXISTS (SELECT 1 FROM public.inventory
-              WHERE quantity_available <> 0 OR quantity_prebooked <> 0 OR quantity_on_order <> 0 OR last_counted_at IS NOT NULL) THEN
+              WHERE quantity_available IS DISTINCT FROM 0 OR quantity_prebooked IS DISTINCT FROM 0
+                 OR quantity_on_order IS DISTINCT FROM 0 OR last_counted_at IS NOT NULL) THEN
     RAISE EXCEPTION 'LIVE_RESET_POSTFLIGHT: an inventory row still holds stock.';
   END IF;
+
+  -- The backup is for its owner only: every other grant (PUBLIC, API roles, default-privilege grantees) is revoked.
+  EXECUTE format('REVOKE ALL ON SCHEMA %I FROM PUBLIC', c_backup);
+  EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM PUBLIC', c_backup);
+  FOR r IN SELECT DISTINCT a.grantee::regrole::text AS g
+             FROM pg_namespace n, aclexplode(n.nspacl) a WHERE n.nspname = c_backup AND a.grantee <> 0 AND a.grantee <> n.nspowner
+           UNION
+           SELECT DISTINCT a.grantee::regrole::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace, aclexplode(c.relacl) a
+            WHERE n.nspname = c_backup AND a.grantee <> 0 AND a.grantee <> c.relowner LOOP
+    EXECUTE format('REVOKE ALL ON SCHEMA %I FROM %s', c_backup, r.g);
+    EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM %s', c_backup, r.g);
+  END LOOP;
+  IF EXISTS (SELECT 1 FROM pg_namespace n, aclexplode(n.nspacl) a WHERE n.nspname = c_backup AND a.grantee <> n.nspowner)
+     OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace, aclexplode(c.relacl) a
+                 WHERE n.nspname = c_backup AND a.grantee <> c.relowner) THEN
+    RAISE EXCEPTION 'LIVE_RESET_POSTFLIGHT: a role other than the owner can still reach the backup schema.';
+  END IF;
+
+  -- Numbering last: setval is not undone by a rollback, so nothing that can still fail comes after it.
   FOREACH v_t IN ARRAY c_seqs LOOP
+    PERFORM setval(format('public.%I', v_t)::regclass, 1, false);
     EXECUTE format('SELECT last_value = 1 AND NOT is_called FROM public.%I', v_t) INTO v_ok;
     IF v_ok IS NOT TRUE THEN
       RAISE EXCEPTION 'LIVE_RESET_POSTFLIGHT: % would not give 0001 next.', v_t;
     END IF;
   END LOOP;
 
-  -- The backup is for the owner only.
-  EXECUTE format('REVOKE ALL ON SCHEMA %I FROM PUBLIC', c_backup);
-  EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM PUBLIC', c_backup);
-  FOR r IN SELECT rolname FROM pg_roles WHERE rolname IN ('anon', 'authenticated', 'service_role') LOOP
-    EXECUTE format('REVOKE ALL ON SCHEMA %I FROM %I', c_backup, r.rolname);
-    EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM %I', c_backup, r.rolname);
-  END LOOP;
-  IF EXISTS (SELECT 1 FROM pg_roles ro CROSS JOIN pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = c_backup AND ro.rolname IN ('anon', 'authenticated', 'service_role')
-                AND (has_table_privilege(ro.oid, c.oid, 'SELECT,INSERT,UPDATE,DELETE')
-                     OR has_schema_privilege(ro.oid, n.oid, 'USAGE'))) THEN
-    RAISE EXCEPTION 'LIVE_RESET_POSTFLIGHT: an API role can still reach the backup schema.';
-  END IF;
-
-  SELECT sum(rows_deleted) INTO v_n FROM reset_backup_20261123._manifest;
+  EXECUTE format('SELECT sum(rows_deleted) FROM %I._manifest', c_backup) INTO v_n;
   RAISE NOTICE 'LIVE_RESET_DONE: % rows deleted from % tables (all backed up in %); % delete triggers were off and are back on; stock 0, prepay 0, numbering restarts at 0001.',
     v_n, (SELECT count(*) FROM reset_backup_20261123._manifest), c_backup,
     (SELECT count(*) FROM reset_backup_20261123._triggers_off);

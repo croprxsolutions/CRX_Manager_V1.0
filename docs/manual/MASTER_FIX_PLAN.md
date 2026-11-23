@@ -92,7 +92,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 | W1-10 | KI-167 | HIGH | Open | Office must hand-fix a line's unit before it can be re-delivered; no amounts change. | KNOWN_ISSUES | #1896 | Taha (to 2026-12-15) |
 | W2-04 | KI-128 | MED | Open | Voiding an order can leave its invoice alive in receivables, reminders and finance charges. | KNOWN_ISSUES |  | Taha (to 2026-12-15) |
 | W2-05 | KI-191 | MED | Open | Booking orders vanish from salesperson-filtered sales reports. | KNOWN_ISSUES (2026-11-21 audit) |  | Taha (to 2026-12-15) |
-| W2-06 | KI-25 | MED | Partly open | A delivery receipt that fails to send is queued and sent by a worker, but the office cannot mark one "handled", so handled ones stay on the check list and a customer may get a second copy. | KNOWN_ISSUES |  | Agent (unassigned) |
+| W2-06 | KI-25 | MED | Partly open | Mark handled and the Email Confirmation pause are on screen (2026-11-22); still open: email bounces are not tracked. | KNOWN_ISSUES |  | Agent (unassigned) |
 | W2-07 | KI-188 | MED | Open | A remainder stays "scheduled" after its follow-up delivery is cancelled or voided, so the pending queue no longer shows product still owed. | KNOWN_ISSUES (2026-11-21 audit) | #2179 (open) | Agent (unassigned) |
 | W2-45 | #2097 | MED | Check first | Stock held for a grower could release early. The expiry job does skip quotes with quantity_drawn > 0, so the described gap was not reproduced. | GitHub issue | #2097 | Taha (to 2026-12-15) |
 | W3-05 | KI-152 | LOW | Open | No database rule stops a completion from reopening a cancelled order, but the app cannot reach it today. | KNOWN_ISSUES |  | Agent (unassigned) |
@@ -199,7 +199,7 @@ Next after these: KI-169 (Page Access locks for invoice and payment actions; Mas
 |---|---|---|---|---|---|---|---|
 | W1-08 | KI-169 | HIGH | Open | Hiding Invoices or Record Payments for a person still leaves those actions reachable in the database. Mason 2026-11-19: real lock; reports now (KI-119, on staging), money actions after 2026-12-15. | KNOWN_ISSUES |  | Taha (to 2026-12-15) |
 | W2-30 | KI-03 | MED | Partly open | Any rep can still unpost, move or consolidate another rep's invoices and change commission splits; the field-invoice part is accepted, the rest is unbuilt. | KNOWN_ISSUES |  | Taha (to 2026-12-15) |
-| W2-31 | KI-182 | MED | Open | Purchase Orders screen retry codes are predictable; they should be random like the other screens' codes. | KNOWN_ISSUES | #2047 | Agent (unassigned) |
+| W2-31 | KI-182 | MED | Fixed (staging PR) | Purchase Orders screen retry codes are predictable; they should be random like the other screens' codes. | KNOWN_ISSUES | #2047 | Agent (unassigned) |
 | W2-32 | KI-74 | MED | Partly open | Cost columns locked and safe posting view in place. Remaining: commission amount plus rate can reveal a rep's profit; Quick Receive shows which open PO line is cheaper. | KNOWN_ISSUES | #1057 | Mason decision |
 | W2-33 | #2162 | MED | Open | Drivers can still read full farm records directly, more than Mason wants them to see; planned for after step 1 is live. | GitHub issue | #2162 | Agent (unassigned) |
 | W3-34 | KI-07 | LOW | Partly open | Most small permission leftovers are revoked; an applicator-profile licensing field is unchecked and two document-restore edge cases are deferred. | KNOWN_ISSUES | #1698 | Agent (unassigned) |

@@ -36,6 +36,42 @@ let pass = 0;
 const ok = (c, m) => { assert.ok(c, m); pass++; };
 const eq = (a, b, m) => { assert.equal(a, b, m); pass++; };
 
+// Growth check for "must stay near-linear" (2026-11-22: single sub-millisecond runs read 0.123ms
+// vs 1.081ms on a Windows CI worker and failed a PR that never touched this code). Each sample
+// repeats the call until MIN_SAMPLE_MS has passed and keeps the per-call time, the best of 5
+// samples, so a timer tick or scheduling pause cannot dominate. The input grows 8x: linear is
+// ~8x the time, quadratic ~64x; failing above 24x leaves 3x slack on each side.
+const MIN_SAMPLE_MS = 20;
+const GROWTH = 8;
+const MAX_RATIO = 24;
+function perCallMs(fn, input) {
+  let best = Infinity;
+  for (let sample = 0; sample < 5; sample++) {
+    let calls = 0;
+    const start = process.hrtime.bigint();
+    let elapsed = 0;
+    do { fn(input); calls++; elapsed = Number(process.hrtime.bigint() - start) / 1e6; } while (elapsed < MIN_SAMPLE_MS);
+    best = Math.min(best, elapsed / calls);
+  }
+  return best;
+}
+function growthRatio(fn, makeInput, n) {
+  const small = makeInput(n);
+  const large = makeInput(n * GROWTH);
+  perCallMs(fn, small); // warm up, discard
+  const a = perCallMs(fn, small);
+  const b = perCallMs(fn, large);
+  return { small: a, large: b, ratio: b / a };
+}
+const nearLinear = (r) => r.ratio < MAX_RATIO;
+const growthText = (n, r) => `${n} took ${r.small.toFixed(4)}ms, ${n * GROWTH} took ${r.large.toFixed(4)}ms (${r.ratio.toFixed(1)}x; linear ~${GROWTH}x, quadratic ~${GROWTH * GROWTH}x, limit ${MAX_RATIO}x)`;
+// The check must still catch quadratic blow-up: a deliberately quadratic scan fails it.
+{
+  const quadratic = (q) => { let x = 0; for (let i = 0; i < q.length; i++) for (let j = i; j < q.length; j++) x ^= q.charCodeAt(j); return x; };
+  const r = growthRatio(quadratic, (n) => "x".repeat(n), 500);
+  ok(!nearLinear(r), `the growth check catches a quadratic scan: ${growthText(500, r)}`);
+}
+
 const onDisk = collectPredicates();
 const diskNames = onDisk.map((p) => p.file);
 
@@ -183,25 +219,9 @@ ok(fs.existsSync(path.join(PREDICATE_DIR, diskNames[0])), "the generator's predi
 //    here, since an inflated `small` would let a genuinely quadratic
 //    implementation pass the ratio.
 {
-  const time = (n) => {
-    const q = " ".repeat(n) + "x";
-    let best = Infinity;
-    for (let run = 0; run < 7; run++) {
-      const t = process.hrtime.bigint();
-      isKnownSweepPredicate(q);
-      best = Math.min(best, Number(process.hrtime.bigint() - t) / 1e6);
-    }
-    return best;
-  };
-  time(20000); // warm up, discard
-  const small = time(20000);
-  const large = time(80000);
-  // 4x the input. Linear is ~4x the time, quadratic ~16x. 8x is comfortably
-  // clear of both, and the old `/\s+$/` measured ~16x here.
-  ok(
-    large < Math.max(small, 0.01) * 8,
-    `normalisation must stay near-linear: 20k took ${small.toFixed(3)}ms, 80k took ${large.toFixed(3)}ms (quadratic would be ~16x)`,
-  );
+  // The old `/\s+$/` was quadratic here (growthRatio, above).
+  const r = growthRatio(isKnownSweepPredicate, (n) => " ".repeat(n) + "x", 10000);
+  ok(nearLinear(r), `normalisation must stay near-linear: ${growthText(10000, r)}`);
 }
 
 // 9. Trailing whitespace: ASCII only, and that boundary is the point.
@@ -584,20 +604,9 @@ eq(normalizePredicateSql, guardNormalizePredicateSql, "the generator uses the gu
 
   // Recognition must stay near-linear: it runs on every execute_sql call, and
   // an input that opens with the envelope's head reaches the scans.
-  const time = (n) => {
-    const q = `SELECT json_build_object(\n  'predicate', '${"\n) AS v),\n  'function_contracts', ".repeat(n / 40)}\n) AS sweep_result;`;
-    let best = Infinity;
-    for (let run = 0; run < 7; run++) {
-      const t = process.hrtime.bigint();
-      isKnownSweepQuery(q);
-      best = Math.min(best, Number(process.hrtime.bigint() - t) / 1e6);
-    }
-    return best;
-  };
-  time(200000);
-  const small = time(200000);
-  const large = time(800000);
-  ok(large < Math.max(small, 0.01) * 8, `wrapped-query recognition stays near-linear: 200k took ${small.toFixed(3)}ms, 800k took ${large.toFixed(3)}ms`);
+  const wrappedOf = (n) => `SELECT json_build_object(\n  'predicate', '${"\n) AS v),\n  'function_contracts', ".repeat(n / 40)}\n) AS sweep_result;`;
+  const r = growthRatio(isKnownSweepQuery, wrappedOf, 100000);
+  ok(nearLinear(r), `wrapped-query recognition stays near-linear: ${growthText(100000, r)}`);
 }
 
 // 14. No predicate has a line break INSIDE a string literal, quoted identifier

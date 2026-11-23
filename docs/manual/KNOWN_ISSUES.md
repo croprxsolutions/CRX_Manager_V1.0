@@ -255,19 +255,17 @@ KI-126 and KI-130 (#2149) keep their own entries.
 
 ### KI-25 — A customer receipt that fails to send after a delivery completion is not retried
 
-> **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · MED · Agent (unassigned) · plan W2-06.
+> **Re-checked 2026-11-22 on staging `a77855293`:** Partly open · MED · Agent (unassigned) · plan W2-06.
 
-**MED · OPEN (sender and app switch live; close action live in the database, not on a screen yet) · UI/database/Edge Function · Claude**
-The database half is live (`20261113140000`, PR #1495): a receipt asked for at completion is recorded in the same
-save in `delivery_receipt_queue`. The sender (Edge Function `send-delivery-receipts`, PR #1647) was deployed live on
-2026-11-08 with `verify_jwt` off, and the office "Customer receipts to check" card is on Deliveries. The app switch
-that asks for the server receipt (PR #1649) merged 2026-11-09. Not built: provider bounce handling (no email
-bounces are tracked today on any path). The database half of a "mark handled" action is live
-(`20261221100000_close_delivery_receipt`, ledger `20261109152447`, PR #1678), but no screen calls it yet (checked on
-`main` 2026-11-10), so the points below still hold. The office
-card lists every unsent receipt with no age cut-off, so one the office already handled stays listed, and a manual
-Email Confirmation does not pause a worker retry (Sol MED, PR #1647), so the customer can get a second copy. Mason
-chose (2026-11-08) to land the app switch first; the close action's screen is the remaining follow-up.
+**MED · PARTLY OPEN (retry, close action and its screens built; email bounces not tracked) · UI/database/Edge Function · Claude**
+A receipt asked for at completion is recorded in the same save in `delivery_receipt_queue` (`20261113140000`,
+PR #1495) and emailed with retries by the Edge Function `send-delivery-receipts` (PR #1647, live 2026-11-08); the app
+switch to the server receipt merged 2026-11-09 (PR #1649). The close action `close_delivery_receipt`
+(`20261221100000`, ledger `20261109152447`, PR #1678) now has its screens (2026-11-22): each row on "Customer receipts
+to check" (Deliveries) has **Mark handled**, so a handled receipt leaves the list and the server never emails it, and
+Email Confirmation pauses any receipt still queued before its hand send, then marks it handled once the email goes
+out (a failed hand send leaves it on the list). Still open: provider bounce handling (no email bounces are tracked
+on any path). The three rare duplicates Mason accepted on 2026-11-09 (DECISION_LOG) stay accepted.
 
 ### KI-26 — Delivery completion-evidence leftovers
 
@@ -463,7 +461,7 @@ the RPCs, atomic create. Repair step 2 (To-Do 0.17), before the pre-season count
 (also refuses the same row twice on one count; concurrent claims serialized); a count's status only moves forward (in progress
 to completed or cancelled, completed to cancelled), so no count can be reopened or reversed twice; signed-in users lose direct UPDATE on `cycle_counts` and `cycle_count_items`, so a
 completed count cannot be marked cancelled without its reversal and a line's variance is only what the save RPC computed (a direct line insert may set only the four columns the app sends). **Still open here:** the three-request creation (a failed create leaves an empty open count, which
-now blocks a new count at that warehouse until it is cancelled from the Cycle Counts screen).
+now blocks a new count at that warehouse until it is cancelled from the Cycle Counts screen). **In progress (Lane E, 2026-11-22):** `create_cycle_count` (`20270209160000`) does the whole start in one step; the screen switch and removing the direct inserts follow.
 
 ### KI-163 — Small stock-history gaps
 
@@ -491,6 +489,9 @@ names from products. Live: 3 POs match no vendor (PO-2026-0030, PO-2026-0018, PO
 Fix: add `vendor_id` set by `save_purchase_order`, keep the text as a snapshot; backfilling the 3 is To-Do decision 23.
 
 ### KI-151 — Changing PO line costs is still checked against the ordered value
+
+> **Fix in review (Lane E, 2026-11-22):** Mason chose "judge against what arrived" (DECISION_LOG 2026-11-22). Migration
+> `20270223100000_po_cost_cut_judged_against_received.sql` uses the KI-143 limit; applies after the KI-197 migration.
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-12.
 
@@ -536,6 +537,8 @@ running local test app.
 ### KI-197 — PO cost corrections can overwrite each other; "Most recent received PO" sorts by PO date
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-15.
+
+> **In progress (Lane E, 2026-11-22):** database part (expected cost check, migration `20270217120000`) in review; the screen sends it in a follow-up PR; the "Most recent received PO" label is its own small PR.
 
 **LOW · OPEN (source-confirmed) · purchasing · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 2) · unassigned**
 - `set_purchase_order_item_costs` (`20261021140000` ~L513, only definition) takes the line and new cost only
@@ -1429,6 +1432,7 @@ overwrite each other (one settings record). Fix depends on who owns crop program
 ### KI-182 — The Purchase Orders screen uses guessable retry codes
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · MED · Agent (unassigned) · plan W2-31 · #2047.
+> **2026-11-22:** FIXED-ON-STAGING once branch `fix/ki182-po-random-retry-codes` merges: the bulk Cancel on the Purchase Orders list now sends one random code per PO (shared `useIdempotencyKey`), reused only for a retry of that PO's cancel. The PO detail page already used random codes.
 
 **MED · OPEN · purchasing · found 2026-11-21 (Sol round 9, #2047) · unassigned**
 Every app action shares one table of retry codes (idempotency keys). The PO screen builds its cancel code from the user

@@ -506,6 +506,11 @@ const SHOWN = `Approve this ONE change ...\nTo approve, reply: I approve\n(Refer
       "the bookkeeping Claude Code writes after every turn does not hide the agent's message");
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), T("user", "Stop hook feedback: wrap up", { isMeta: true }), ...AFTER_TURN])),
       "text Claude Code injects after the agent's message (a Stop hook's feedback) ends the scan");
+    const TIMER = { type: "system", subtype: "turn_duration", durationMs: 959312, messageCount: 506, isMeta: false };
+    ok(has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify(TIMER), ...AFTER_TURN, masonSaid("I approve")])),
+      "the turn timer record (no text, real shape) does not hide the agent's message");
+    ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ ...TIMER, content: "Should I merge?" }), masonSaid("I approve")])),
+      "a turn timer record carrying text ends the scan");
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "system", subtype: "compact_boundary" })])),
       "a compaction after the agent's message ends the scan");
     ok(!has(last([masonSaid("fix it"), agentSaid(SHOWN), JSON.stringify({ type: "system", subtype: "informational", content: "Should I merge?" })])),

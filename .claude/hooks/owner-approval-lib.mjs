@@ -275,6 +275,8 @@ const BOOKKEEPING_TYPES = new Set([
 ]);
 const isBookkeeping = (e, currentPrompt) => BOOKKEEPING_TYPES.has(e?.type) ||
   (e?.type === "system" && e.subtype === "stop_hook_summary") ||
+  // The turn timer (no content in 267 real records, 2026-11-22); one carrying text still ends the scan.
+  (e?.type === "system" && e.subtype === "turn_duration" && (e.content == null || String(e.content).trim() === "")) ||
   (e?.type === "queue-operation" &&
     (e.content == null || String(e.content).trim() === String(currentPrompt ?? "").trim()));
 const isToolResult = (e) => e?.type === "user" && Array.isArray(e.message?.content) && e.message.content.length > 0 &&

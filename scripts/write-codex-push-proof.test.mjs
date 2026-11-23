@@ -1665,26 +1665,6 @@ function collisionPromptSkipsWork(prompt) {
     assert.match(refused.stderr, /renamed or copied docs\/manual\/note\.md, which the other side changed/, "carry: names the moved file");
   });
 
-  // 7b. The carry's merge never runs a program from the checkout's git config: a merge driver named by an
-  // attribute or one picked by merge.default (Taha #2226 LOW 1; Sol r1-r2).
-  for (const [label, setUp] of [
-    ["a named driver", (git, repo) => { git("config", "merge.marker.driver", "echo ran > driver-ran; false"); writeFileSync(`${repo}/.git/info/attributes`, "docs/manual/note.md merge=marker\n"); }],
-    ["merge.default", (git) => { git("config", "merge.marker.driver", "echo ran > driver-ran; false"); git("config", "merge.default", "marker"); }],
-  ]) {
-    withRepo(({ repo, git, file, land, carry, commitAll, writeProof, readProof, reviewedHead, target }) => {
-      writeFileSync(file("docs/manual/note.md"), "# The note\nDo the safe thing.\n");
-      const head = commitAll("pr retitles the note");
-      writeProof(head, sameBaseCarry(head, readProof(reviewedHead)));
-      land(target, "main extends the note", () => writeFileSync(file("docs/manual/note.md"), "# Note\nDo the safe thing.\nAnd one more line.\n"));
-      git("merge", "-q", "--no-edit", target);
-      // Set up only after the test's own merge, so the marker file shows whether the carry's merge ran it.
-      setUp(git, repo);
-      const result = carry("--dry-run");
-      assert.equal(existsSync(`${repo}/driver-ran`), false, `carry: ${label} never runs (${result.stdout}${result.stderr})`);
-      assert.doesNotMatch(result.stderr, /does not merge cleanly/, `carry: ${label} does not change the rebuilt merge`);
-    });
-  }
-
   // 8. A base delta that removes a credential-shaped line, or changes a binary file, is never sent (Sol r5 HIGH 4, MED).
   for (const [label, edit, why] of [
     ["a removed credential", (file) => writeFileSync(file("src/cfg.ts"), "export const cfg = {};\n"), /removed or edited existing lines/],

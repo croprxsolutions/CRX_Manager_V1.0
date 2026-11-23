@@ -527,7 +527,8 @@ export function evaluateMigrationApply({
         `If this migration is genuinely meant to ship, MOVE THE FILE into supabase/migrations/ as a ` +
         `tracked, reviewable change and take it through review — do not route around this by pasting the ` +
         `body under a canonical-looking name. If it is parked or rejected, it is not meant to ship: check ` +
-        `docs/manual/DECISION_LOG.md and docs/manual/KNOWN_ISSUES.md before doing anything else.`);
+        `docs/manual/DECISION_LOG.md, docs/manual/KNOWN_ISSUES.md and their decision-log.d/ and ` +
+        `known-issues.d/ folders before doing anything else.`);
     }
     migrationSourceFile = source.file;
   }
@@ -892,7 +893,7 @@ export function evaluateMigrationApply({
       `MIGRATION APPLY GUARD: an autopilot flag exists but is EXPIRED or malformed — the hands-free ` +
       `authorization for this run has LAPSED, and no one is confirmed present. ALL migration applies ` +
       `are parked (benign ones too). PARK the migration (scripts/.staging-migrations/ + a ` +
-      `docs/manual/KNOWN_ISSUES.md note) and wait for Mason: he can re-arm ` +
+      `docs/manual/known-issues.d/ note) and wait for Mason: he can re-arm ` +
       `(node .claude/hooks/autopilot-arm.mjs --hours N) or disarm in person (--off). ` +
       `Do NOT delete or rewrite the flag yourself to get past this.`);
   }
@@ -944,7 +945,7 @@ export function evaluateMigrationApply({
         `Mason's autonomous-landing rule (2026-09-26), which keeps the settled 2026-07-13 refusal — because ` +
         `deleted data has no point-in-time recovery on this Supabase plan, and no agent-run command can ` +
         `prove that Mason approved this exact migration (Sol HIGH, 2026-09-26). PARK it ` +
-        `(scripts/.staging-migrations/ + a docs/manual/KNOWN_ISSUES.md entry with the plain-English risk) ` +
+        `(scripts/.staging-migrations/ + a docs/manual/known-issues.d/ entry with the plain-English risk) ` +
         `and hand it to Mason. Do NOT disarm autopilot, rename, split or rewrite the SQL to route around ` +
         `this (an EXPIRED flag also refuses, deliberately).`,
       // Sol HIGH, round 11; Mason's in-chat choice 2026-09-27: "Data rewrites wait".

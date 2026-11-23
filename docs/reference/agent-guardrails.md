@@ -124,7 +124,7 @@
 > `post_apply`, same `base_sha` as the source) only when HEAD is ONE ordinary commit on top of a
 > head with a clean Sol proof under 24 hours old (the original full review too), and every file it touches is a
 > regular non-executable file among: `docs/reference/migrations.d/<name>.md` for a migration the reviewed PR adds
-> and `docs/changelog.d/*.md` (edited or added; never a `README.md` or agent instruction file), `docs/manual/KNOWN_ISSUES.md` and `.claude/schema-registry.json` (edited), `src/lib/rpcContracts.test.ts` when its
+> and `docs/changelog.d/*.md` (edited or added; never a `README.md` or agent instruction file), `docs/manual/KNOWN_ISSUES.md` and `.claude/schema-registry.json` (edited), `docs/manual/known-issues.d/*.md` (edited or added), `src/lib/rpcContracts.test.ts` when its
 > only change is adding the PR's own migration timestamps to `MIGRATIONS_AWAITING_TYPE_REGENERATION` (Mason, 2026-11-05), and
 > `scripts/db-invariant-sweeps/allowlist.json`, where every changed entry keeps its position, predicate and other
 > fields, keeps the signature before `#` with a NEW 12-hex hash, appends to its justification, and has a real
@@ -139,8 +139,10 @@
 > <n> ...` (any finding he disagrees with: a business call, or a bug or gap too small or impractical to affect the business; an owner-accepted proof counts only for its own PR, by number and repository address, at its exact head, at merge and migration apply, Codex merge guard included) builds ONE request (`crx-owner-sol-skip-v1`) for several findings, its deadline never past the Sol
 > run's own 24 hours, and Mason answers in plain words with no code: the whole message `yes, <reason>` to the summary's "do you accept the risk?"
 > (2026-11-22; the reason passes `reasonProblem` and is logged), or `skip`, `skip 1 3`, `I disagree`, `I don't want that`,
-> `don't fix`, `accept` and the like (`skipFromReply`; a bare `yes`, `ok`, `move on`, `merge it`, questions and mixed text skip nothing;
-> `that` or `it` skips only when the list holds one finding).
+> `don't fix`, `accept` and the like (`skipFromReply`; since 2026-11-22 `skip` or `accept` with only agreeing filler words, such as `accept skip` or
+> `Skip I agree skip it`, also counts (an allow-list: any other word, such as none, reject or until, skips nothing); a bare `yes`, `ok`, `move on`, `merge it` and questions skip nothing;
+> `that` or `it` skips only when the list holds one finding). A number he names that was not shown is ignored only when he already skipped
+> that finding in the same Sol run (the receipt records it as `ignored`, and `collectAcceptances` counts it only if an earlier receipt covers it).
 > The reply hook records it only when a skip request built in this session is waiting and the agent's last message is exactly
 > its summary (`resolvePlainReply` with `purposes`, the same check as the migration `I approve`), into one receipt per reply
 > (`owner-approval-sol-skip-<head>-<code>.json`, `selected` numbers), which `verifySolSkip` re-checks against the Sol run, the
@@ -178,9 +180,9 @@
 > "Last verified" stamp is fixed before Sol instead of voiding its proof (PR #1650, the sixth time).
 > **Sol round hard stop (Mason, 2026-11-09).** Every full run prints "Sol round N" (ledger `sol-rounds.jsonl`, counted
 > per branch commit); rounds 3–4 add the AGENTS.md stop-rule reminder. From round 5 the run refuses with no Codex call
-> and nothing recorded (`solRoundGate()`), unless `docs/manual/DECISION_LOG.md` at the reviewed head has an entry whose
+> and nothing recorded (`solRoundGate()`), unless the decision log at the reviewed head (`docs/manual/DECISION_LOG.md` or any `docs/manual/decision-log.d/*.md`, each file read on its own; `decisionLogAt()`) has an entry whose
 > heading carries a real date of today (Central) or later, with a `**Decision` line naming Mason, that names the PR as `#<n>`. So: ask Mason the business
-> trade-off, record his answer naming the PR, commit, re-run. `--dry-run` prints the would-be refusal and exits 0;
+> trade-off, record his answer naming the PR as a new `decision-log.d/` file, commit, re-run. The future-date pre-flight reads the same folder. `--dry-run` prints the would-be refusal and exits 0;
 > the carries never count rounds. Why: PR #1653 reached round 8 past a warning-only line before Mason was asked.
 >
 > **Autonomous landing (Mason, 2026-09-26) — this block supersedes older wording in the rows below where they

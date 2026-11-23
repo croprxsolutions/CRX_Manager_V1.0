@@ -251,6 +251,21 @@ try {
     "a ledger edit amended out of the session's commit must not count as the record");
   pass++;
 
+  // ── Session 1h2 (2026-11-22): a decision-log.d / known-issues.d entry file is
+  //    a ledger record on its own → no warning ──
+  for (const folder of ["decision-log.d", "known-issues.d"]) {
+    const s1h2 = `ledger-test-fragment-${folder}`;
+    snapshots.push(startSession(s1h2));
+    mkdirSync(path.join(tmp, "docs", "manual", folder), { recursive: true });
+    writeFileSync(path.join(tmp, "src", `fragment-${folder}.txt`), "real work\n");
+    writeFileSync(path.join(tmp, "docs", "manual", folder, "2026-11-22-fragment-test.md"), "## 2026-11-22 — Entry\n\nRecorded.\n");
+    git(["add", "."], tmp);
+    git(["commit", "-qm", `work plus ${folder} entry`], tmp);
+    const fragment = runStopWrap(s1h2, tmp);
+    assert.ok(!LEDGER_WARNING.test(fragment.stdout), `a ${folder} entry file must count as the record; got: ${fragment.stdout}`);
+    pass++;
+  }
+
   // ── Session 1i (Codex P2, PR #827 round 7): an unrecorded session commit
   //    replayed by a rebase that needed a conflict resolution is recorded as
   //    `rebase (continue)`; the original commit is then unreachable → still

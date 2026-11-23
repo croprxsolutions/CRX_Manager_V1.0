@@ -336,8 +336,8 @@ No amount is changed; the office must correct the line's unit by hand. **Decisio
 land"):** #1896 ships with this open. Fix: relabel completed lines to the stock unit, or relabel a line when a void
 reopens it.
 **Fix pending (2026-11-23, not applied):** `supabase/migrations/20270225120000_ki167_relabel_completed_lines_stock_unit.sql`
-relabels the three lines to their product's stock unit ("oz" -> "Dry oz", "Gallon " and "Gall" -> "Gal"; Taha approved).
-Quantities and amounts do not change. Proof: `scripts/smoke/prove-ki167-relabel-completed-lines-real-schema.mjs`.
+relabels the three lines (and any open remainder of them) to their product's stock unit ("oz" -> "Dry oz", "Gallon " and
+"Gall" -> "Gal"; Taha approved). Quantities and amounts do not change. Its live order and product ids are still to be filled in. Proof: `scripts/smoke/prove-ki167-relabel-completed-lines-real-schema.mjs`.
 
 ### KI-203 — Quick Delivery shows a dash for the unit of a product stocked in Gal
 

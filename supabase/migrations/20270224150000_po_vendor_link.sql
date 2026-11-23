@@ -2,10 +2,9 @@
 -- a purchase order keeps a link to the vendor it was written for, so renaming that vendor no longer breaks billing it.
 --
 -- 1. purchase_orders.vendor_id (nullable, references vendors). The vendor text stays as the name printed on the PO.
--- 2. Backfill: a billed PO is linked to the one vendor that billed it; an unbilled PO to the active vendor whose
---    name equals its text ignoring case and outer spaces (no alias). Unmatched rows stay NULL (To-Do decision 23 is Mason's). The
---    closed-PO guard is switched off for that one UPDATE inside this transaction and checked back on in the postflight.
--- 3. Only THEN the trigger that owns vendor_id: on insert, or when the text changes, it matches again (see step 3);
+-- 2. No backfill (Mason, 2026-11-22, "drop old-po linking"): purchase orders that exist when this runs keep vendor_id
+--    NULL and keep the name comparison they have today. Only POs written from now on are linked.
+-- 3. The trigger that owns vendor_id: on insert, or when the text changes, it matches again (see step 3);
 --    on any other update it keeps the old link; it refuses moving a PO with another vendor's live bills. Whatever a writer puts in vendor_id is overwritten.
 -- 3b. One name = one vendor (Mason, 2026-11-22, "go with a"): creating, renaming or restoring a vendor to a name that is
 --    printed on purchase orders belonging to another vendor (linked to it, or billed by it) is refused, so a renamed
@@ -14,7 +13,7 @@
 --    name comparison. The rest of the bill function is the pinned body unchanged.
 --
 -- Rollback: a NEW forward migration that drops trigger_00_po_vendor_id and trigger_vendor_name_not_on_other_vendor_pos and restores the pinned bill-function body
--- (20270103180000_po_close_short.sql); keep the column and its values (a link cannot be rebuilt after a rename).
+-- (20270103180000_po_close_short.sql); keep the column (a link cannot be rebuilt after a rename) but do not trust it once the trigger is gone.
 -- Never re-run or edit this file.
 
 SET LOCAL lock_timeout = '10s';
@@ -60,7 +59,7 @@ CREATE INDEX idx_purchase_orders_vendor_id ON public.purchase_orders (vendor_id)
 GRANT SELECT (vendor_id) ON public.purchase_orders TO authenticated;
 GRANT REFERENCES (vendor_id) ON public.purchase_orders TO authenticated;
 COMMENT ON COLUMN public.purchase_orders.vendor_id IS
-  'KI-144: the vendor this PO was written for. Set only by trigger_00_po_vendor_id from the vendor text when the PO is created or its vendor text changes; a vendor rename keeps it. NULL = the text matched no single active vendor. The vendor column keeps the printed name.';
+  'KI-144: the vendor this PO was written for. Set only by trigger_00_po_vendor_id from the vendor text when the PO is created or its vendor text changes; a vendor rename keeps it. NULL = the PO existed before KI-144 (not linked; Mason 2026-11-22) or its text matched no single active vendor. The vendor column keeps the printed name.';
 
 -- One vendor for a PO's vendor text: the single active vendor whose name equals it ignoring case and outer spaces (the
 -- bill check's own rule), else NULL. No alias, legacy resolution (Sol round 1) or punctuation folding (Sol round 2): a
@@ -79,34 +78,6 @@ AS $function$
 $function$;
 ALTER FUNCTION public._po_vendor_id_for_text(text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public._po_vendor_id_for_text(text) FROM PUBLIC, anon, authenticated, service_role;
-
--- The backfill's link for an existing PO (a temp function, gone when this database session ends): a PO already billed is linked to the one
--- vendor that billed it (those bills passed the name check when written), or left NULL if its bills disagree; an
--- unbilled PO is linked by its text. Voided or deleted bills do not count.
-CREATE FUNCTION pg_temp.ki144_backfill_vendor_id(p_po_id uuid, p_text text)
-RETURNS uuid
-LANGUAGE sql
-STABLE
-AS $function$
-  SELECT CASE
-    WHEN EXISTS (SELECT 1 FROM public.vendor_bills vb WHERE vb.purchase_order_id = p_po_id AND vb.status <> 'voided' AND vb.deleted_at IS NULL)
-      THEN (SELECT CASE WHEN count(DISTINCT vb.vendor_id) = 1 THEN min(vb.vendor_id::text)::uuid END
-              FROM public.vendor_bills vb WHERE vb.purchase_order_id = p_po_id AND vb.status <> 'voided' AND vb.deleted_at IS NULL)
-    ELSE public._po_vendor_id_for_text(p_text)
-  END;
-$function$;
-
--- 2. Backfill, before the trigger exists (it would keep the old NULL).
--- One statement, so the guard cannot stay off even if this file were run statement by statement.
-DO $backfill$
-BEGIN
-  ALTER TABLE public.purchase_orders DISABLE TRIGGER trigger_0_guard_closed_po;
-  UPDATE public.purchase_orders po
-     SET vendor_id = pg_temp.ki144_backfill_vendor_id(po.id, po.vendor)
-   WHERE pg_temp.ki144_backfill_vendor_id(po.id, po.vendor) IS NOT NULL;
-  ALTER TABLE public.purchase_orders ENABLE TRIGGER trigger_0_guard_closed_po;
-END
-$backfill$;
 
 -- 3. The trigger that owns the link. Named to fire before trigger_0_guard_closed_po, so a closed PO's link is put back
 --    before the guard compares the row. Insert: link by exact name. A vendor-text edit: link by exact name (Sol round 1:
@@ -321,8 +292,8 @@ BEGIN
      OR (SELECT tgenabled FROM pg_trigger WHERE tgrelid = 'public.vendors'::regclass AND tgname = 'trigger_vendor_name_not_on_other_vendor_pos') IS DISTINCT FROM 'O' THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: the closed-PO guard, the vendor-link trigger or the vendor-name trigger is not enabled';
   END IF;
-  IF EXISTS (SELECT 1 FROM public.purchase_orders po WHERE po.vendor_id IS DISTINCT FROM pg_temp.ki144_backfill_vendor_id(po.id, po.vendor)) THEN
-    RAISE EXCEPTION 'POSTFLIGHT_FAIL: a PO''s vendor link does not match its bills or vendor text';
+  IF EXISTS (SELECT 1 FROM public.purchase_orders po WHERE po.vendor_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: an existing purchase order was linked (existing POs stay unlinked)';
   END IF;
   IF NOT has_column_privilege('authenticated', 'public.purchase_orders', 'vendor_id', 'SELECT')
      OR NOT has_column_privilege('authenticated', 'public.purchase_orders', 'vendor_id', 'REFERENCES')
@@ -331,7 +302,7 @@ BEGIN
      OR has_table_privilege('authenticated', 'public.purchase_orders', 'SELECT') THEN
     RAISE EXCEPTION 'POSTFLIGHT_FAIL: vendor_id grants are wrong';
   END IF;
-  RAISE NOTICE 'POSTFLIGHT_OK: % of % purchase orders linked to a vendor',
-    (SELECT count(vendor_id) FROM public.purchase_orders), (SELECT count(*) FROM public.purchase_orders);
+  RAISE NOTICE 'POSTFLIGHT_OK: 0 of % existing purchase orders linked; new ones link as they are written',
+    (SELECT count(*) FROM public.purchase_orders);
 END;
 $postflight$;

@@ -6,7 +6,7 @@
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), seeds vendors and POs (one closed), shows a rename
  * breaking a bill before the fix, applies the candidate (autocommit refused, POSTFLIGHT_OK, re-apply refused), then
- * checks the backfill, the trigger and the bill check through the real create_vendor_bill and save_purchase_order as the
+ * checks that existing POs stay unlinked, the trigger and the bill check through the real create_vendor_bill and save_purchase_order as the
  * signed-in admin. Every probe after the seed rolls back.
  *
  * Run: node scripts/smoke/prove-po-vendor-link-real-schema.mjs   (needs Docker; never touches live)
@@ -30,7 +30,6 @@ const bill = (vendor, po, cents = 5000) =>
 const billed = (vendor, po) => attempt(USERS.admin, `${asUser(`u := ${bill(vendor, po)};`)} v := (u IS NOT NULL)::text;`);
 const billRefused = (vendor, po) => attempt(USERS.admin, `${refuse(`u := ${bill(vendor, po)};`)} v := t;`);
 const link = (po) => `(SELECT coalesce(vendor_id::text, 'NULL') FROM public.purchase_orders WHERE id = '${po}')`;
-const links = () => scalar(`SELECT string_agg(coalesce(vendor_id::text, 'NULL'), ',' ORDER BY id) FROM public.purchase_orders WHERE id IN ('${PO1}','${PO2}','${PO3}','${PO4}','${PO5}');`);
 const RENAME_A = `UPDATE public.vendors SET name = 'KI144 Acme Supply Co' WHERE id = '${VA}';`;
 
 try {
@@ -90,15 +89,23 @@ try {
   assert.match(`${again.stdout}${again.stderr}`, /PREFLIGHT_FAIL: purchase_orders.vendor_id already exists/, 're-apply must refuse');
   console.log('[apply] autocommit refused (nothing added), applied once with POSTFLIGHT_OK, re-apply refused');
 
-  // Backfill: exact name beats B's alias; case/space noise links; deleted vendor and unknown text stay NULL; closed PO
-  // linked with every other column, the guard and the activity feed unchanged.
-  assert.equal(links(), [VA, VA, 'NULL', 'NULL', VB].join(','));
-  assert.equal(scalar(`SELECT ${link(PO7)} || ',' || ${link(PO8)};`), 'NULL,' + VB, 'punctuation is not folded; a deleted bill does not decide the link');
-  assert.equal(scalar(`SELECT ${link(PO6)};`), VA, 'a billed PO is linked to the vendor that billed it, not the vendor its text names now');
-  assert.equal(scalar(`SELECT (to_jsonb(po) - 'vendor_id')::text FROM public.purchase_orders po WHERE id = '${PO5}';`), po5Before, 'closed PO otherwise unchanged');
-  assert.equal(scalar('SELECT count(*) FROM public.activity_feed;'), feedBefore, 'backfill wrote no activity');
+  // No backfill (Mason, "drop old-po linking"): every existing PO stays unlinked, closed PO and guard untouched.
+  assert.equal(scalar(`SELECT count(vendor_id) || '/' || count(*) FROM public.purchase_orders;`), '0/' + scalar('SELECT count(*) FROM public.purchase_orders;'));
+  assert.match(once.stderr, /POSTFLIGHT_OK: 0 of \d+ existing purchase orders linked/);
+  assert.equal(scalar(`SELECT (to_jsonb(po) - 'vendor_id')::text FROM public.purchase_orders po WHERE id = '${PO5}';`), po5Before, 'closed PO unchanged');
+  assert.equal(scalar('SELECT count(*) FROM public.activity_feed;'), feedBefore, 'apply wrote no activity');
   assert.equal(scalar("SELECT tgenabled FROM pg_trigger WHERE tgname = 'trigger_0_guard_closed_po';"), 'O');
-  console.log("[backfill] exact name only (no alias, no punctuation folding); billed PO follows its biller; deleted/unknown stay NULL; closed PO linked, guard back on");
+  // An existing PO keeps the old name rule: after a rename its vendor can no longer bill it (the accepted cost).
+  assert.match(attempt(USERS.admin, `${RENAME_A} ${refuse(`u := ${bill(VA, PO1)};`)} v := t;`), /^ok\|VENDOR_PO_MISMATCH: bill vendor "KI144 Acme Supply Co" does not match PO vendor "KI144 Acme Supply"$/);
+  console.log('[no-backfill] existing POs all stay unlinked and keep the name rule; closed PO unchanged, guard on');
+  // Fixture: link PO1 and PO2 through the trigger with a real vendor-text edit (outer space only, printed name restored),
+  // standing in for POs written after the migration.
+  psql(`BEGIN; ${claims(USERS.admin)}
+    UPDATE public.purchase_orders SET vendor = vendor || ' ' WHERE id IN ('${PO1}', '${PO2}');
+    UPDATE public.purchase_orders SET vendor = rtrim(vendor) WHERE id = '${PO1}';
+    UPDATE public.purchase_orders SET vendor = '  ki144 ACME supply ' WHERE id = '${PO2}';
+    COMMIT;`);
+  assert.equal(scalar(`SELECT ${link(PO1)} || ',' || ${link(PO2)} || ',' || (SELECT vendor FROM public.purchase_orders WHERE id = '${PO1}');`), `${VA},${VA},KI144 Acme Supply`);
 
   // Bills.
   assert.match(attempt(USERS.admin, `${RENAME_A} ${asUser(`u := ${bill(VA, PO1)};`)} v := (u IS NOT NULL)::text || '|' ||
@@ -147,7 +154,7 @@ try {
     /PO_VENDOR_HAS_BILLS/, 'an unlinked PO with a live bill cannot change vendor either');
   assert.equal(attempt(USERS.admin, `UPDATE public.purchase_orders SET vendor = 'KI144 Acme Supply' WHERE id = '${PO8}'; v := ${link(PO8)};`), `ok|${VA}`,
     'a deleted bill does not block a vendor correction');
-  console.log('[sol-r1/r2] billed PO linked to its biller; re-spelt edit moves the link; vendor change refused while another vendor has a live bill, linked or not; deleted bills ignored; punctuation not folded');
+  console.log('[sol-r1/r2] an edit links a billed PO only to its biller; re-spelt edit moves the link; vendor change refused while another vendor has a live bill, linked or not; deleted bills ignored; punctuation not folded');
   // One name = one vendor (Mason, "go with a"): A's old name, printed on A's POs, cannot be taken by B (rename or new
   // vendor); A itself may take it back; a name printed only on unowned POs is free.
   assert.match(attempt(USERS.admin, `${RENAME_A} UPDATE public.vendors SET name = 'KI144 Acme Supply' WHERE id = '${VB}'; v := 'NOT REFUSED';`),
@@ -163,7 +170,7 @@ try {
   'live save after a rename: old name held as an alias by another vendor stays unlinked');
   // Closed PO: a forged link change is put back before the guard compares the row; a real edit is still refused.
   assert.equal(attempt(USERS.admin, `UPDATE public.purchase_orders SET vendor_id = '${VA}', updated_at = now() WHERE id = '${PO5}'; v := ${link(PO5)};`),
-    `ok|${VB}`);
+    'ok|NULL');
   assert.match(attempt(USERS.admin, `UPDATE public.purchase_orders SET notes = 'x' WHERE id = '${PO5}'; v := 'NOT REFUSED';`), /PO_CLOSED/);
   console.log('[trigger] insert and real save link; text change follows; notes/forged link/case-only edit keep it; closed PO guard intact');
 

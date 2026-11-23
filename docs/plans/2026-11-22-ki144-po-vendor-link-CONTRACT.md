@@ -3,6 +3,10 @@
 Read at `origin/staging` `ab0f6cdfc` (2026-11-22). Plan-contract pilot. Database part first; the screen and report
 readers follow in their own PR once this is on the staging database.
 
+**Changed 2026-11-22 (Mason, "drop old-po linking"):** there is no backfill. Existing POs keep `vendor_id` NULL and the
+name check; only POs written (or whose vendor text is edited) after the migration are linked. Every backfill rule below
+is superseded by this line.
+
 ## Facts (with sources)
 
 - `purchase_orders.vendor` is free text with no link to `vendors` (KNOWN_ISSUES KI-144).

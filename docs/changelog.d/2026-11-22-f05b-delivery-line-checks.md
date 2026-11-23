@@ -1,0 +1,4 @@
+## 2026-11-22 — F05b: a delivery cannot be completed with nothing delivered, and delivery quantities must be real numbers
+
+- New migration `20270224190000_f05b_delivery_line_checks.sql` (not applied anywhere yet). Completing a delivery is refused (`DELIVERY_NOTHING_DELIVERED`) when no product would be delivered above zero, including a delivery with no products; the screens already refused this, now the database does too (#2274). Delivery line quantities can no longer be NaN or infinite (#2275), as F05 did for order lines. Nothing existing is changed: the five completed March 2026 loads with no products stay as they are, and a retry of a saved completion still returns its receipt.
+- Contract: `docs/plans/2026-11-22-f05b-delivery-line-checks-CONTRACT.md`. Proof: `node scripts/smoke/prove-f05b-delivery-line-checks-real-schema.mjs` (disposable database). Rollback: `scripts/smoke/f05b-delivery-line-checks-reverse.sql`.

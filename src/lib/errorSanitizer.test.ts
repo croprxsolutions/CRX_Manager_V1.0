@@ -77,6 +77,7 @@ describe('sanitizeError', () => {
   it.each([
     ['DELIVERY_QUANTITIES_STALE', "this delivery's lines changed since the screen loaded them; reload it and enter the quantities again."],
     ['DELIVERY_QUANTITIES_INVALID', 'every delivered quantity must be a number; reload the delivery and enter the quantities again.'],
+    ['DELIVERY_NOTHING_DELIVERED', 'every product on it has a delivered quantity of zero. If nothing was delivered, call the office.'],
   ])('explains a refused partial completion %s (20270203120000) without the raw token', (token, sentence) => {
     expect(sanitizeError({ code: '23514', message: `${token}: ${sentence}` })).toBe(`The delivery was not completed. ${sentence}`);
   });
@@ -93,6 +94,10 @@ describe('sanitizeError', () => {
     const shown = sanitizeError({ code: 'P0001', message });
     expect(shown).toBe('Nothing was saved. Other open deliveries for this order already hold 2 of this product, so only 0 more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.');
     expect(shown).not.toMatch(/ITEM_OVER|2b680d4a/);
+  });
+  it('explains the finite-quantity check on delivery lines (F05b) in plain words', () => {
+    const shown = sanitizeError({ code: '23514', message: 'new row for relation "delivery_items" violates check constraint "delivery_items_quantities_finite"' });
+    expect(shown).toBe('Nothing was saved. Delivery quantities must be ordinary numbers. Reload the delivery and enter them again');
   });
   it('explains a completion past the order (F05) without the raw token', () => {
     const sentence = 'Atrazine 4L — this would deliver more than was ordered. Call the office before completing this delivery.';

@@ -9,6 +9,8 @@ const CONSTRAINT_PATTERNS: Array<[RegExp, string]> = [
   [/^UNKNOWN_STORAGE_LOCATION\b/, 'Nothing was saved. Stock can go only into Main Warehouse until transfers between warehouses exist. Choose Main Warehouse and try again'],
   // #2000 (20270201120000): an inactive customer gets no new orders, deliveries, holds or spray jobs.
   [/^CUSTOMER_INACTIVE_NEW_WORK\b/, 'Nothing was saved. This customer is inactive. An admin or sales rep must reactivate the customer before new orders, deliveries, stock holds or spray jobs are added'],
+  // F05b (20270224190000): a delivery line's quantities must be finite numbers.
+  [/violates check constraint "delivery_items_quantities_finite"/, 'Nothing was saved. Delivery quantities must be ordinary numbers. Reload the delivery and enter them again'],
   [/violates check constraint "inventory_holds_source_needs_customer"/, 'Nothing was saved. A stock hold for a spray job or quote must name its customer'],
   [/^WORK_CUSTOMER_MOVE_NOT_ALLOWED\b/, 'Nothing was saved. Only an admin or sales rep can move an order, delivery, stock hold or spray job to another customer or order, or reopen a delivery'],
   [/^PRODUCT_CATEGORY_RETIRED\b/, 'This category is retired. Choose an active category'],
@@ -487,7 +489,7 @@ export function sanitizeError(error: unknown): string {
     return `Nothing was saved. Other open deliveries for this order already hold ${overActive[1]} of this product, so only ${overActive[2]} more can be scheduled. Lower the quantity, or cancel or reduce another delivery for this order first.`;
   }
   // Partial completion figures (20270203120000, #1942) and completing past the order (F05): the server sentence says what to do.
-  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER):\s*(.+)$/s);
+  const deliveryQuantities = message.match(/^(?:DELIVERY_QUANTITIES_(?:STALE|INVALID)|DELIVERY_EXCEEDS_ORDER|DELIVERY_NOTHING_DELIVERED):\s*(.+)$/s);
   if (deliveryQuantities) return `The delivery was not completed. ${deliveryQuantities[1].trim()}`;
   // Stock-count guards (20270119130000, KI-160): the server sentence names the count and what to do.
   const countRule = message.match(/^(?:CYCLE_COUNT_ROW_ALREADY_OPEN|CYCLE_COUNT_ROW_WRONG_PLACE|CYCLE_COUNT_REOPEN_FORBIDDEN|CYCLE_COUNT_REVERSE_BLOCKED|CYCLE_COUNT_QTY_INVALID):\s*(.+)$/s);

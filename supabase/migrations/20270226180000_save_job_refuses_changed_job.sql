@@ -1,4 +1,4 @@
--- 20270226170000: a job Save is refused when the job changed after the page read it (follow-up to #2337).
+-- 20270226180000: a job Save is refused when the job changed after the page read it (follow-up to #2337).
 --
 -- Contract: docs/plans/2026-11-23-job-save-version-check-CONTRACT.md. #2337 checks this on the screen
 -- (a re-read just before save_job), which leaves timing gaps; this moves the compare into save_job,
@@ -105,7 +105,7 @@ END;
 $fn$;
 
 COMMENT ON FUNCTION public.job_edit_version(uuid) IS
-  'Version of a job as the job page edits it (20270226170000). Read it BEFORE the job rows and send it to save_job as p_job_payload.expected_version; save_job refuses JOB_CHANGED_SINCE_LOADED if the job changed since. Admins and sales reps; carries no cost.';
+  'Version of a job as the job page edits it (20270226180000). Read it BEFORE the job rows and send it to save_job as p_job_payload.expected_version; save_job refuses JOB_CHANGED_SINCE_LOADED if the job changed since. Admins and sales reps; carries no cost.';
 
 REVOKE ALL ON FUNCTION public.job_edit_version(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.job_edit_version(uuid) TO authenticated, service_role;
@@ -133,7 +133,7 @@ BEGIN
                    AND (role = 'admin' OR (role = 'sales_rep' AND NOT coalesce('jobs' = ANY (denied_pages), false)))) THEN
     RAISE EXCEPTION 'INSUFFICIENT_ROLE';
   END IF;
-  -- The page's version (#2337 follow-up, 20270226170000): JSON null is the same as none.
+  -- The page's version (#2337 follow-up, 20270226180000): JSON null is the same as none.
   IF p_job_id IS NULL OR jsonb_typeof(v_expected) = 'null' THEN
     v_expected := NULL;
   END IF;
@@ -228,7 +228,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure
-                    AND md5(replace(p.prosrc, chr(13), '')) = '6d479113e90ebebbb3e09efa68398afa'
+                    AND md5(replace(p.prosrc, chr(13), '')) = '58fc0fedb205902364f8020bdd8312e8'
                     AND p.prosecdef AND p.proowner = 'postgres'::regrole
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[]) THEN
     RAISE EXCEPTION 'JOB_VERSION_POSTFLIGHT: save_job is not the body, owner or settings this file installs';

@@ -2669,6 +2669,9 @@ function runFocusedSolCheck(root, options, { baseRef, baseSha, headSha, prompt, 
 // proof when HEAD is ONE commit on top of it that only renames exactly one
 // migration to a new stamp (identical LF-normalized SQL) and replaces the old
 // stamp with the new one in other files. Anything else refuses: full review.
+// Mason, 2026-11-23: the stamp may also change in the SQL's leading comment header
+// (outside every statement and function body), and another file's SQL sha256 pin
+// may move from the old SQL's LF hash to the new one's; nothing else.
 const RESTAMP_MIGRATION_RE = /^supabase\/migrations\/(\d{14})(_[^/]+\.sql)$/;
 const ABSENT_MODE = "000000";
 const RESTAMP_MODES = new Set(["100644", "100755", ABSENT_MODE]);
@@ -2686,6 +2689,13 @@ export function restampProblem({ entries, readFile }) {
   const [toPath, newStamp, toRest] = migTo[0];
   if (fromRest !== toRest || oldStamp === newStamp) return "the migration's name changed beyond its timestamp";
   const restamp = (text) => text.split(oldStamp).join(newStamp);
+  const lf = (text) => text.replace(/\r\n/g, "\n");
+  const oldSql = readFile("old", fromPath);
+  const newSql = readFile("new", toPath);
+  if (oldSql === null || newSql === null) return "the migration could not be read";
+  // A record's `SQL sha256` pin is the hash of the LF text (docs/reference/migrations.d/README.md).
+  const sha = (text) => createHash("sha256").update(Buffer.from(lf(text), "latin1")).digest("hex");
+  const [oldSha, newSha] = [sha(oldSql), sha(newSql)];
   const paths = new Map(entries.map((entry) => [entry.path, entry]));
   for (const entry of entries) {
     const { path: file, oldMode, newMode } = entry;
@@ -2708,12 +2718,22 @@ export function restampProblem({ entries, readFile }) {
     const after = readFile("new", file);
     if (before === null || after === null) return `${file} could not be read`;
     if (file === toPath) {
-      if (after.replace(/\r\n/g, "\n") !== before.replace(/\r\n/g, "\n")) return "the migration's SQL changed";
-    } else if (after !== restamp(before)) {
+      if (lf(after) !== lf(before) && !headerOnlyRestamp(lf(before), lf(after), restamp)) return "the migration's SQL changed";
+    } else if (after !== restamp(before) && after !== restamp(before).split(oldSha).join(newSha)) {
       return `${file} changed beyond the timestamp`;
     }
   }
   return null;
+}
+
+// True when `after` is `before` with the stamp swapped only in the leading comment
+// header: the lines before the first one that is neither blank nor a `--` comment.
+function headerOnlyRestamp(before, after, restamp) {
+  if (after !== restamp(before)) return false;
+  const oldLines = before.split("\n");
+  const newLines = after.split("\n");
+  const bodyStart = oldLines.findIndex((line) => line.trim() !== "" && !line.trimStart().startsWith("--"));
+  return oldLines.every((line, i) => line === newLines[i] || bodyStart === -1 || i < bodyStart);
 }
 
 function gitBlob(root, sha, file) {

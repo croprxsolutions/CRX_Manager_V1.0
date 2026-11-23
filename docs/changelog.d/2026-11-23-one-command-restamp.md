@@ -1,0 +1,6 @@
+## 2026-11-23 - A stale migration stamp is one command, and keeps its Sol review
+
+- New `node scripts/restamp-migration.mjs <old-stamp> [--to <stamp>] [--base <ref>]`: renames the migration and its `migrations.d` record to a new stamp (from `next-migration-stamp`), swaps the old stamp and the record's SQL sha256 pin in the files the branch already changes, commits, and runs `--carry-restamp`. It refuses when the stamp appears in the SQL below its leading comment header.
+- `--carry-restamp` (`restampProblem` in `scripts/write-codex-push-proof.mjs`) now also accepts the stamp swapped in the SQL's leading `--` comment header and a pin moved from the old SQL's LF hash to the new one's. Why: on 2026-11-23 #2324, #2331, #2338 and #2248 were all re-dated by hand while waiting to merge; #2338's carry refused only because its header comment named the record path.
+- Unchanged: the PR stamp check, the live in-order rule, the apply proof gate (`--restamp-from` still needs byte-identical SQL) and every Sol gate. No `.github/` change.
+- Tests: `scripts/restamp-migration.test.mjs`; replayed the real restamp commits `31436d84de` (#2338), `b2b579c97d` (#2331) and `a9f282bc7b` (#2248): all carry. `22509a8cf2` (#2324, which also changed SQL) still refuses.

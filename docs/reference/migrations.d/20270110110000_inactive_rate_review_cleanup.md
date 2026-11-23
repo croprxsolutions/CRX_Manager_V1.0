@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** #1814: `20270110110000_inactive_rate_review_cleanup.sql` (SQL sha256: `7f980faaff2fd23642522535b885cca9f30e5c7c316482d4a587586f9f5b6772`). Adds an explicit inactive-history download and cleanup-only support while retaining the deployed active-only download and all existing roles, values and audit history. Not merged or deployed.
+**APPLIED LIVE 2026-11-21 05:55:27 UTC (11:55 PM Central)**, ledger version `20261121055527` carrying name `20270110110000_inactive_rate_review_cleanup` (release v0.1.0, #1990; read-only ledger check 2026-11-23). #1814: `20270110110000_inactive_rate_review_cleanup.sql` (SQL sha256: `7f980faaff2fd23642522535b885cca9f30e5c7c316482d4a587586f9f5b6772`). Adds an explicit inactive-history download and cleanup-only support while retaining the deployed active-only download and all existing roles, values and audit history. Not merged or deployed.
 
 # Inactive rate history cleanup
 

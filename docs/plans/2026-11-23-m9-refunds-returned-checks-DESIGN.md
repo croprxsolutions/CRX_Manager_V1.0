@@ -1,6 +1,6 @@
 # M9 design: refunds paid outside CRX, prepay balance check, returned checks (stage 1)
 
-Migration: `supabase/migrations/20270225110000_m9_refunds_and_returned_checks.sql`. Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` (written first; 9 cases).
+Migration: `supabase/migrations/20270225110000_m9_refunds_and_returned_checks.sql`. Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` (written first; 13 cases).
 `B:` = baseline `supabase/baselines/20260727174805_public_schema.sql.br` (decompressed line). Other refs are `supabase/migrations/`.
 
 ## 1. How money is stored today
@@ -71,3 +71,8 @@ Both functions can only date an entry in an open month, under the month lock tha
 1. A return must add up: invoice-payment lines + credit lines = face value. Each credit line already holds its applied part once that part is counted back. Otherwise the return is refused and handled by hand.
 2. A refund's credits are eligible from their receipt date: the payment date for a Record Payment's prepay, the entry day for a Prepayment Manager check. A second refund with the same reference (any case) and amount needs `p_allow_duplicate_reference`.
 3. Reconciliation counts only allocations of active payment sets. Its returned-check ledger is treated as empty only when the table is missing (42P01 / PGRST205).
+
+## 9. Sol round 3 rules (built)
+1. **One integrity gate** (`_m9_check_records_20270225`) replaces the scattered legacy checks. A refund or return refuses `RECORD_NEEDS_HAND_CHECK: <code>` unless everything it touches agrees: customer, check buckets, deleted/edited credits, payment totals, exact invoice paid/prepay amounts, credit drift and stored balance.
+2. **Refunds** are dated today. `p_paid_on` keeps the outside date. A second refund with the same reference needs confirming.
+3. **One Prepayment Manager entry is one check** (its audit row) everywhere: return, edit/delete guard, Month-End count.

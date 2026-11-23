@@ -28,3 +28,8 @@
   - A refund can draw a payment's prepay from the payment's date, is refused if a drawn credit was edited after the refund date, and checks only the credits it draws.
   - A return refuses a drifted credit, a payment whose records don't add up to the check, an undated payment, and a Prepayment Manager check whose buckets can't be identified.
   - The Integrity report stops counting voided payments' allocations.
+- Sol round 3 changes (same migration, still a local candidate):
+  - A refund is now recorded on the day it is entered, with an optional "paid on" date kept for the record (it may be in a closed month).
+  - Before any refund or return, one check confirms the records it touches agree: same customer, complete check, totals, invoice amounts and balances. If they don't, it is refused "needs a hand check" with the reason.
+  - Two Prepayment Manager checks entered together count as two payments on Month-End.
+  - Statements show the check or refund reference only, never the staff reason.

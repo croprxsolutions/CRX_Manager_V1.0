@@ -285,26 +285,17 @@ export interface InvoicePaymentReversalRow {
   amount_cents: number;
 }
 
-/**
- * Before the M9 migration is applied, `money_reversal_lines` does not exist: that alone means "no returned checks".
- * Only a missing table counts (Postgres 42P01, or PostgREST's PGRST205 "table not in the schema cache"); any other
- * error, such as a missing column, must still fail the check.
- */
-export function isMissingReversalTable(error: { code?: string } | null | undefined): boolean {
-  return error?.code === '42P01' || error?.code === 'PGRST205';
-}
-
 export function checkInvoicePayments(
   invoices: InvoiceRow[],
   allocations: InvoiceLineAllocationRow[],
   reversals: InvoicePaymentReversalRow[] = [],
-  inactiveSetIds: ReadonlySet<string> = new Set(),
+  activePaymentSetIds?: ReadonlySet<string>,
 ): Discrepancy[] {
-  // Sum allocation cents per invoice_id (source of truth from allocate_payment), less returned checks. A voided
-  // payment's set is inactive and its allocation rows stay: they no longer count.
+  // Sum allocation cents per invoice_id (source of truth from allocate_payment), less returned checks. When the active
+  // payment sets are given, only their allocation rows count (a voided payment's rows stay, under an inactive set).
   const allocatedByInvoice = new Map<string, number>();
   for (const a of allocations) {
-    if (a.allocation_set_id && inactiveSetIds.has(a.allocation_set_id)) continue;
+    if (activePaymentSetIds && !(a.allocation_set_id && activePaymentSetIds.has(a.allocation_set_id))) continue;
     const current = allocatedByInvoice.get(a.invoice_id) ?? 0;
     allocatedByInvoice.set(a.invoice_id, current + a.amount_cents);
   }
@@ -819,16 +810,26 @@ export async function runReconciliationChecks(): Promise<ReconciliationReport> {
     });
   }
 
-  // ── Check 3 & 4: Invoice payments + balance formula ────────────
+  // ── Check 3 & 4: Invoice payments + balance formula (each check in its own try) ────────────
+  let checkedInvoices: Array<InvoiceRow & { status: string }> | null = null;
+  let invoiceLoadError = '';
   try {
-    const [invoiceRes, allocRes, reversalRes, inactiveRes] = await Promise.all([
-      fetchAllRows((from, to) => supabase
-        .from('invoices')
-        .select('id, invoice_number, order_id, invoice_type, status, paid_amount_cents, prepay_applied_cents, write_off_cents, credit_applied_cents, total_amount_cents, balance_cents', { count: 'exact' })
-        .not('status', 'in', '("voided","cancelled")')
-        .is('deleted_at', null)
-        .order('id')
-        .range(from, to)),
+    const invoiceRes = await fetchAllRows((from, to) => supabase
+      .from('invoices')
+      .select('id, invoice_number, order_id, invoice_type, status, paid_amount_cents, prepay_applied_cents, write_off_cents, credit_applied_cents, total_amount_cents, balance_cents', { count: 'exact' })
+      .not('status', 'in', '("voided","cancelled")')
+      .is('deleted_at', null)
+      .order('id')
+      .range(from, to));
+    if (invoiceRes.error) throw new Error(`Invoices query failed: ${invoiceRes.error.message}`);
+    checkedInvoices = (invoiceRes.data ?? []) as Array<InvoiceRow & { status: string }>;
+  } catch (err) {
+    invoiceLoadError = err instanceof Error ? err.message : String(err);
+  }
+
+  try {
+    if (!checkedInvoices) throw new Error(invoiceLoadError);
+    const [allocRes, reversalRes, setRes] = await Promise.all([
       fetchAllRows((from, to) => supabase
         .from('invoice_line_allocations')
         .select('id, invoice_id, amount_cents, allocation_set_id', { count: 'exact' })
@@ -844,40 +845,28 @@ export async function runReconciliationChecks(): Promise<ReconciliationReport> {
       fetchAllRows((from, to) => supabase
         .from('allocation_sets')
         .select('id', { count: 'exact' })
-        .eq('is_active', false)
+        .eq('is_active', true)
+        .eq('entity_type', 'payment')
         .order('id')
         .range(from, to)),
     ]);
-
-    if (invoiceRes.error) throw new Error(`Invoices query failed: ${invoiceRes.error.message}`);
     if (allocRes.error) throw new Error(`Allocations query failed: ${allocRes.error.message}`);
-    if (inactiveRes.error) throw new Error(`Payment sets query failed: ${inactiveRes.error.message}`);
-    const reversalTableMissing = isMissingReversalTable(reversalRes.error as { code?: string } | null);
-    if (reversalRes.error && !reversalTableMissing) throw new Error(`Returned-check reversals query failed: ${reversalRes.error.message}`);
-    const reversals = (reversalRes.error ? [] : reversalRes.data ?? []) as InvoicePaymentReversalRow[];
-    const inactiveSetIds = new Set(((inactiveRes.data ?? []) as Array<{ id: string }>).map((r) => r.id));
-    const invoices = (invoiceRes.data ?? []) as Array<InvoiceRow & { status: string }>;
+    if (reversalRes.error) throw new Error(`Returned-check reversals query failed: ${reversalRes.error.message}`);
+    if (setRes.error) throw new Error(`Payment sets query failed: ${setRes.error.message}`);
     const allocations = (allocRes.data ?? []) as InvoiceLineAllocationRow[];
+    const reversals = (reversalRes.data ?? []) as InvoicePaymentReversalRow[];
+    const activePaymentSetIds = new Set(((setRes.data ?? []) as Array<{ id: string }>).map((r) => r.id));
     // A posted invoice moves on to 'paid' or 'overdue', so filtering on 'posted'
     // alone skipped every invoice that had money against it.
-    const financialInvoices = invoices.filter((inv) => FINANCIAL_INVOICE_STATUSES.has(inv.status));
+    const financialInvoices = checkedInvoices.filter((inv) => FINANCIAL_INVOICE_STATUSES.has(inv.status));
 
-    const payDisc = checkInvoicePayments(financialInvoices, allocations, reversals, inactiveSetIds);
+    const payDisc = checkInvoicePayments(financialInvoices, allocations, reversals, activePaymentSetIds);
     checks.push({
       name: 'Invoice Payments',
       description: 'Invoice paid_amount_cents matches SUM of invoice_line_allocations.amount_cents of active payments (source of truth from allocate_payment), less returned checks',
       passed: payDisc.length === 0,
       discrepancies: payDisc,
       entitiesChecked: financialInvoices.length,
-    });
-
-    const balDisc = checkInvoiceBalances(invoices);
-    checks.push({
-      name: 'Invoice Balance Formula',
-      description: 'balance_cents = total - paid - prepay (GENERATED ALWAYS sanity check)',
-      passed: balDisc.length === 0,
-      discrepancies: balDisc,
-      entitiesChecked: invoices.length,
     });
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -888,6 +877,20 @@ export async function runReconciliationChecks(): Promise<ReconciliationReport> {
       discrepancies: [],
       entitiesChecked: 0,
     });
+  }
+
+  try {
+    if (!checkedInvoices) throw new Error(invoiceLoadError);
+    const balDisc = checkInvoiceBalances(checkedInvoices);
+    checks.push({
+      name: 'Invoice Balance Formula',
+      description: 'balance_cents = total - paid - prepay (GENERATED ALWAYS sanity check)',
+      passed: balDisc.length === 0,
+      discrepancies: balDisc,
+      entitiesChecked: checkedInvoices.length,
+    });
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
     checks.push({
       name: 'Invoice Balance Formula',
       description: `balance_cents = total - paid - prepay (GENERATED ALWAYS sanity check) [ERROR: ${errMsg}]`,

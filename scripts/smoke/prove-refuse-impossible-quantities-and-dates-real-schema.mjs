@@ -27,7 +27,7 @@ const candidate = lf(path.join(ROOT, 'supabase', 'migrations', CANDIDATE));
 const reverse = lf(path.join(ROOT, 'scripts', 'smoke', 'refuse-impossible-quantities-and-dates-reverse.sql'));
 const smoke = lf(path.join(ROOT, 'scripts', 'smoke', 'smoke-purchasing-plan-reservations.sql'));
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
-const run = (sql, flags = []) => docker([...PSQL, ...flags], { input: sql, allowFailure: true });
+const run = (sql, flags = []) => docker([...PSQL, ...flags, '-f', '-'], { input: sql, allowFailure: true });
 const out = (r) => `${r.stdout}${r.stderr}`;
 const ADMIN = USERS.admin;
 const ids = (n) => `22370000-0000-4000-8000-${Buffer.from(String(n)).toString('hex').padStart(12, '0')}`; // any short tag, valid uuid

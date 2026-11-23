@@ -16,7 +16,8 @@ const TAHA_LOGIN = "tahakhanabdalli";
 const HEADING = /^ {0,3}#{2,4}[ \t]+follow-?ups[ \t]*:?[ \t]*#*[ \t]*$/i;
 const ANY_HEADING = /^ {0,3}#{1,6}(?:[ \t]|$)/;
 // Existence of the issue is checked by the /ship close-out, not here (no network in this rule).
-const HOME = /(?:^|[^\w&])#\d+\b|\bKI-\d+\b|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+\b/i;
+// New known issues get no KI number; their home is a dated file in known-issues.d/ (2026-11-22).
+const HOME = /(?:^|[^\w&])#\d+\b|\bKI-\d+\b|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+\b|(?:^|[\s`(])docs\/manual\/known-issues\.d\/\d{4}-\d{2}-\d{2}-[^\s/`)]+\.md(?=$|[\s`),.;:])/i;
 
 // The section's lines, or null when the body has no Follow-ups heading.
 // Only what GitHub renders counts: hidden HTML comments and fenced code blocks are dropped (Luna, 2026-11-09).
@@ -68,7 +69,7 @@ export function followUpsProblem(pullRequest) {
   }
   const homeless = lines.filter((line) => !isNone(line) && !HOME.test(line));
   if (homeless.length) {
-    return `these Follow-ups lines name no issue (#123) or known issue (KI-12) to hold the work: ${homeless.map((l) => JSON.stringify(l.slice(0, 80))).join("; ")}.`;
+    return `these Follow-ups lines name no issue (#123), known issue (KI-12) or docs/manual/known-issues.d/<date>-<slug>.md file to hold the work: ${homeless.map((l) => JSON.stringify(l.slice(0, 80))).join("; ")}.`;
   }
   return null;
 }

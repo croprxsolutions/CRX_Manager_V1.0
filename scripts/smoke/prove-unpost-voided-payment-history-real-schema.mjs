@@ -6,10 +6,13 @@
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs). Every invoice is made, posted, paid and voided through
  * the app's own functions (save_invoice, post_invoice / post_invoice_group, allocate_payment, void_payment).
  *   BEFORE: a posted invoice whose only payment was voided cannot be unposted (alone or in its group).
- *   APPLY:  autocommit refused, POSTFLIGHT_OK, re-apply refused by the md5 pin.
+ *   APPLY:  against a drifted body, plain `psql -f` (no ON_ERROR_STOP, no -1) reports PREFLIGHT_FAIL and leaves the
+ *           function unchanged; against the pinned body it applies with POSTFLIGHT_OK; re-apply is refused by the md5 pin.
  *   AFTER:  (a) it unposts; the draft saves with its lines and re-posts; the voided payment's rows keep invoice_id and
  *               amount, lose only their line link, and the audit row keeps each one's allocation, line and amount;
- *          (a3) the same for a legacy row naming the line with no invoice_id (filled with this invoice) or a stale one;
+ *          (a3) the same for a legacy row naming the line with no invoice_id (filled with this invoice); one that records
+ *               another invoice refuses with UNPOST_HISTORY_NEEDS_HAND_CHECK and changes nothing;
+ *          (a4) two voided payments on two different lines: both unlinked and audited, the draft saves and re-posts;
  *          (a2) without that unlink, the draft save is refused by invoice_line_allocations_invoice_item_id_fkey;
  *          (b) an active payment still blocks; (c) one voided and one active payment still block;
  *          (e) a non-payment allocation still blocks, even on an inactive set, and so does an active payment
@@ -24,7 +27,8 @@
  */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, seed, ref, attempt, asUser, refuse, USERS, ROOT, NAME, docker, scalar } from './undo-paths/harness.mjs';
 
@@ -32,6 +36,17 @@ const CANDIDATE = '20270225130000_unpost_ignores_voided_payment_history.sql';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PSQL = ['exec', '-i', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
 const apply = (flags = []) => docker([...PSQL, ...flags], { input: candidate, allowFailure: true });
+// The file as an operator might run it by hand: `psql -f`, no ON_ERROR_STOP, no single transaction.
+function plainApply() {
+  const staged = path.join(tmpdir(), `${NAME}-candidate.sql`);
+  writeFileSync(staged, candidate, 'utf8');
+  try { docker(['cp', staged, `${NAME}:/tmp/candidate.sql`]); } finally { unlinkSync(staged); }
+  return docker(['exec', NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-f', '/tmp/candidate.sql'], { allowFailure: true });
+}
+const IMPL = "'public._unpost_invoice_replay_impl_20261015(uuid,uuid,text)'::regprocedure";
+const implMd5 = () => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = ${IMPL};`);
+// Re-issue the impl with its own body plus (or minus) a trailing comment: owner and grants are kept.
+const setImplSrc = (expr) => docker([...PSQL], { input: `DO $d$ BEGIN EXECUTE format('CREATE OR REPLACE FUNCTION public._unpost_invoice_replay_impl_20261015(p_invoice_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path TO ''public'', ''pg_temp'' AS %L', (SELECT ${expr} FROM pg_proc WHERE oid = ${IMPL})); END $d$;` });
 const ADMIN = USERS.admin;
 const RUN = randomUUID().slice(0, 8); // fixture names, keys and ids are fresh each run, so a reused container never collides
 const CUST = randomUUID();
@@ -84,6 +99,24 @@ const caseA3 = (before, after) => `${draft('a3-s1')} ${post('a3-p1')} ${pay('a3-
     || (SELECT (invoice_item_id IS NULL AND invoice_id IS NOT DISTINCT FROM ${after})::text FROM public.invoice_line_allocations WHERE id = f1::uuid);
   ${saveBack('a3-s2')} v := v || '|saved ' || (SELECT count(*) FROM public.invoice_items WHERE invoice_id = u);
   ${post('a3-p2')} v := v || '|' || ${status()};`;
+// (a3) stale: a voided row naming a line of this invoice but recording another invoice is left for a person.
+const caseA3Stale = (other) => `${draft('a3s-s1')} ${post('a3s-p1')} ${pay('a3s-pay', 100000)} ${voidPay('a3s-void')} ${legacyLink()}
+  UPDATE public.invoice_line_allocations SET invoice_id = ${other} WHERE allocation_set_id = (r->>'allocation_set_id')::uuid; ${linkedLine}
+  ${refuse(`r2 := public.unpost_invoice(u, '${ADMIN}', 'a3s-un');`)} v := t || '|' || ${status()} || '|row '
+    || (SELECT (invoice_item_id::text = f0 AND invoice_id = ${other})::text FROM public.invoice_line_allocations WHERE id = f1::uuid);`;
+// (a4) two voided payments, each naming a different line: both are unlinked and audited, and the save goes through.
+const caseA4 = `${draft('a4-s1')} ${post('a4-p1')} ${pay('a4-pay1', 60000)} ${pay('a4-pay2', 40000, 'r3')} ${voidPay('a4-void1')} ${voidPay('a4-void2', 'r3')}
+  ${legacyLink()} UPDATE public.invoice_line_allocations
+    SET invoice_item_id = (SELECT id FROM public.invoice_items WHERE invoice_id = u ORDER BY sort_order, id OFFSET 1 LIMIT 1)
+    WHERE allocation_set_id = (r3->>'allocation_set_id')::uuid;
+  r2 := (SELECT jsonb_agg(jsonb_build_object('allocation_id', a.id::text, 'invoice_item_id', a.invoice_item_id::text, 'amount_cents', a.amount_cents,
+      'invoice_id_before', a.invoice_id::text) ORDER BY a.id) FROM public.invoice_line_allocations a
+    WHERE a.allocation_set_id IN ((r->>'allocation_set_id')::uuid, (r3->>'allocation_set_id')::uuid));
+  v := (SELECT count(DISTINCT e->>'invoice_item_id')::text FROM jsonb_array_elements(r2) e);
+  r3 := r2; ${unpost('a4-un')}
+  v := v || '|' || ${status()} || '|audit ' || (${audit} = r3)::text || '|' || ${history()};
+  ${saveBack('a4-s2')} v := v || '|saved ' || (SELECT count(*) FROM public.invoice_items WHERE invoice_id = u);
+  ${post('a4-p2')} v := v || '|' || ${status()};`;
 const caseA2 = `${draft('a2-s1')} ${post('a2-p1')} ${pay('a2-pay', 100000)} ${voidPay('a2-void')} ${legacyLink()}
   ${unpost('a2-un')} ${legacyLink()} BEGIN ${saveBack('a2-s2')} t := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN t := SQLERRM; END; v := t;`;
 // Part-paid, so the invoice is still 'posted' and the money check (not the paid-status check) is what refuses.
@@ -136,14 +169,27 @@ try {
     assert.match(attempt(ADMIN, caseD()), /^P0001\|Cannot unpost invoice \S+ — it has payments/, 'old group refusal not reproduced');
     console.log('[before] a posted invoice whose only payment was voided is refused by unpost and by group unpost');
 
-    const auto = apply();
-    assert.match(`${auto.stdout}${auto.stderr}`, /PREFLIGHT_FAIL: run this file as one transaction/, 'autocommit apply must refuse');
+    // A drifted body: plain psql -f keeps going after an error, yet the file changes nothing (one statement writes).
+    const pinned = implMd5();
+    assert.equal(pinned, '161f18c3ccd6126a6fb683c5160f82dc');
+    setImplSrc("prosrc || E'-- drift\\n'");
+    const drifted = implMd5();
+    assert.notEqual(drifted, pinned);
+    const plain = plainApply();
+    assert.equal(plain.status, 0, 'plain psql -f keeps going and exits 0');
+    assert.match(plain.stderr, /PREFLIGHT_FAIL: _unpost_invoice_replay_impl_20261015 changed/);
+    assert.doesNotMatch(plain.stderr, /POSTFLIGHT_OK/);
+    assert.equal(implMd5(), drifted, 'the drifted body must be untouched');
+    setImplSrc("left(prosrc, -length(E'-- drift\\n'))");
+    assert.equal(implMd5(), pinned, 'pinned body restored');
+    console.log('[apply] drifted body: plain psql -f (no ON_ERROR_STOP) printed PREFLIGHT_FAIL and left the function unchanged');
     const once = apply(['-1']);
     assert.equal(once.status, 0, `apply failed: ${once.stderr}`);
     assert.match(once.stderr, /POSTFLIGHT_OK/);
     const again = apply(['-1']);
     assert.match(`${again.stdout}${again.stderr}`, /PREFLIGHT_FAIL: _unpost_invoice_replay_impl_20261015 changed/, 're-apply must refuse');
-    console.log('[apply] autocommit refused, applied once with POSTFLIGHT_OK, re-apply refused');
+    assert.equal(implMd5(), 'aef1be53a1e278dc0e57a360c15fa7cb');
+    console.log('[apply] applied once with POSTFLIGHT_OK (new body md5 pinned), re-apply refused');
   }
 
   // (a) unpost, save the draft with its lines, re-post; history rows stay with invoice_id and amount.
@@ -152,10 +198,12 @@ try {
   // (a2) the unlink is what lets the save through.
   assert.match(attempt(ADMIN, caseA2), /^ok\|.*invoice_line_allocations_invoice_item_id_fkey/);
   console.log('[a2] with the line link put back, the draft save is refused by invoice_line_allocations_invoice_item_id_fkey');
-  for (const [before, after, label] of [['NULL', 'u', 'no invoice_id'], [G2, G2, 'a stale invoice_id']]) {
-    assert.equal(attempt(ADMIN, caseA3(before, after)), 'ok|unposted|audit true|row true|saved 2|posted', label);
-  }
-  console.log('[a3] a legacy history row naming the line with no invoice_id (filled) or a stale one (kept) is unlinked and audited; the draft saves and re-posts');
+  assert.equal(attempt(ADMIN, caseA3('NULL', 'u')), 'ok|unposted|audit true|row true|saved 2|posted');
+  assert.match(attempt(ADMIN, caseA3Stale(G2)),
+    /^ok\|UNPOST_HISTORY_NEEDS_HAND_CHECK: invoice \S+ has a voided payment allocation \([0-9a-f-]{36}\) .*\|posted\|row true$/);
+  console.log('[a3] a legacy history row naming the line with no invoice_id is unlinked (invoice_id filled) and audited, and the draft saves and re-posts; one recording another invoice refuses with UNPOST_HISTORY_NEEDS_HAND_CHECK and changes nothing');
+  assert.equal(attempt(ADMIN, caseA4), 'ok|2|unposted|audit true|2/2/100000|saved 2|posted');
+  console.log('[a4] two voided payments on two lines: both unlinked and audited; the draft saves and re-posts');
   // (b), (c), (e) still refused.
   assert.match(attempt(ADMIN, caseB), REFUSED);
   assert.match(attempt(ADMIN, caseC), REFUSED);

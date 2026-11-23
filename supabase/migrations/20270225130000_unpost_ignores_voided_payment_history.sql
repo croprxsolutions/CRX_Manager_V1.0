@@ -7,28 +7,35 @@
 --   1. The allocation count skips rows whose set is a voided payment (entity_type 'payment' AND is_active = false),
 --      the same rule void_invoice uses, and now also counts a row that names only one of this invoice's lines. An
 --      active payment, an order or invoice set, paid/prepay/write-off/credit amounts, prepay and credit
---      applications all still refuse, as before.
+--      applications all still refuse, as before. The sets behind those rows are locked FOR SHARE (id order) before
+--      the count, and the unlink below uses the same rows.
 --   2. On a successful unpost, every voided-payment row naming one of this invoice's lines (whatever its invoice_id)
 --      loses only its invoice_item_id: every draft save deletes and re-adds the lines, and the invoice_item_id
 --      foreign key has no ON DELETE, so a row still naming a line would refuse the first save. allocate_payment has
 --      written invoice_id only since 20260315200000; rows from before then also name a line. A row with no
---      invoice_id gets this invoice's (ila_target_check needs one of the two). The unpost audit row keeps each one
+--      invoice_id gets this invoice's (ila_target_check needs one of the two). A voided-payment row that names one of
+--      this invoice's lines but records ANOTHER invoice refuses the unpost (UNPOST_HISTORY_NEEDS_HAND_CHECK) instead
+--      of being unlinked. The unpost audit row keeps each unlinked one
 --      (new_values.voided_payment_history_unlinked: [{allocation_id, invoice_item_id, amount_cents, invoice_id_before}]).
 --   3. The audit description's dollar amount is (cents * 0.01)::numeric(20,2) (was / 100.0 then numeric(12,2), which
 --      overflows on a 10-billion-dollar total and would roll the unpost back).
 -- Body otherwise byte-identical to the 20260711050000 body renamed in 20261102180000 (md5 pinned below). No other
 -- data changes.
 --
+-- One statement does the whole change: the DO block below checks the pinned body, replaces it (EXECUTE), sets owner
+-- and grants, and runs the postflight. A failed check raises before the only write, so nothing changes even under
+-- plain `psql -f` without ON_ERROR_STOP; a failed postflight rolls the replacement back.
+--
 -- Rollback: a NEW forward migration restoring the pinned body (never re-run or edit this file). Unlinked line links
 -- are not restored (the lines they named are replaced by the next draft save); the audit rows keep them.
 
-SET LOCAL lock_timeout = '10s';
-
-DO $preflight$
+DO $migrate$
 DECLARE
   p pg_proc%ROWTYPE;
 BEGIN
-  CREATE TEMP TABLE unpost_2265_tx (x int) ON COMMIT DROP;
+  PERFORM set_config('lock_timeout', '10s', true);
+
+  -- Preflight: the reviewed body, one overload, owner, mode, search_path and EXECUTE grants.
   SELECT * INTO p FROM pg_proc WHERE oid = to_regprocedure('public._unpost_invoice_replay_impl_20261015(uuid,uuid,text)');
   IF p.oid IS NULL OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '161f18c3ccd6126a6fb683c5160f82dc' THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: _unpost_invoice_replay_impl_20261015 changed since 2026-11-23 (md5 %); re-read it before applying',
@@ -44,17 +51,9 @@ BEGIN
         IS DISTINCT FROM ARRAY['postgres'] THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: _unpost_invoice_replay_impl_20261015 has an extra overload, or its owner, mode, search_path or EXECUTE grants changed';
   END IF;
-END
-$preflight$;
 
-DO $tx$
-BEGIN
-  IF to_regclass('pg_temp.unpost_2265_tx') IS NULL THEN
-    RAISE EXCEPTION 'PREFLIGHT_FAIL: run this file as one transaction (psql -1 / the apply script)';
-  END IF;
-END
-$tx$;
-
+  -- The replacement, in this same statement.
+  EXECUTE $create$
 CREATE OR REPLACE FUNCTION public._unpost_invoice_replay_impl_20261015(p_invoice_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -71,6 +70,8 @@ DECLARE
   v_rup_voided int := 0;
   v_credit_app_count int := 0;  -- CREDIT-APPLY
   v_history_unlinked jsonb := '[]'::jsonb;  -- #2265
+  v_history_ids uuid[] := '{}';  -- #2265
+  v_history_elsewhere uuid;  -- #2265
 BEGIN
   SELECT role INTO v_actor_role FROM profiles
     WHERE id = auth.uid() AND is_active = true AND role IN ('admin','sales_rep');
@@ -99,11 +100,28 @@ BEGIN
   -- (20260718221505); they are no longer money on this invoice, so they do not block unpost.
   -- Every other allocation (an active payment, any order or invoice set) still does, whether it names
   -- this invoice or only one of its lines (a pre-2026-03-15 row may carry the line alone).
-  SELECT count(*) INTO v_alloc_count FROM invoice_line_allocations ila
-   WHERE (ila.invoice_id = p_invoice_id
-          OR ila.invoice_item_id IN (SELECT ii.id FROM invoice_items ii WHERE ii.invoice_id = p_invoice_id))
-     AND NOT EXISTS (SELECT 1 FROM allocation_sets hist WHERE hist.id = ila.allocation_set_id
-                       AND hist.entity_type = 'payment' AND hist.is_active = false);
+  -- The sets behind those rows are locked first (FOR SHARE, in id order), so none can change between
+  -- this count and the unlink below, which uses the same rows (v_history_ids).
+  PERFORM 1 FROM allocation_sets s
+   WHERE s.id IN (SELECT ila.allocation_set_id FROM invoice_line_allocations ila
+                   WHERE ila.invoice_id = p_invoice_id
+                      OR ila.invoice_item_id IN (SELECT ii.id FROM invoice_items ii WHERE ii.invoice_id = p_invoice_id))
+   ORDER BY s.id
+     FOR SHARE;
+  SELECT count(*) FILTER (WHERE NOT h.voided),
+         COALESCE(array_agg(h.id ORDER BY h.id) FILTER (WHERE h.voided AND h.on_line), '{}'),
+         (array_agg(h.id ORDER BY h.id) FILTER (WHERE h.voided AND h.on_line
+                                                  AND h.invoice_id IS NOT NULL AND h.invoice_id <> p_invoice_id))[1]
+    INTO v_alloc_count, v_history_ids, v_history_elsewhere
+    FROM (SELECT ila.id, ila.invoice_id,
+                 COALESCE(ila.invoice_item_id IN (SELECT ii.id FROM invoice_items ii WHERE ii.invoice_id = p_invoice_id), false) AS on_line,
+                 EXISTS (SELECT 1 FROM allocation_sets hist WHERE hist.id = ila.allocation_set_id
+                           AND hist.entity_type = 'payment' AND hist.is_active = false) AS voided
+            FROM invoice_line_allocations ila
+           WHERE ila.invoice_id = p_invoice_id
+              OR ila.invoice_item_id IN (SELECT ii.id FROM invoice_items ii WHERE ii.invoice_id = p_invoice_id)
+           ORDER BY ila.id
+             FOR UPDATE OF ila) h;
   SELECT count(*) INTO v_prepay_count FROM prepay_applications     WHERE invoice_id = p_invoice_id;
   -- CREDIT-APPLY: active applications where this invoice is the memo OR the target.
   SELECT count(*) INTO v_credit_app_count FROM credit_memo_applications
@@ -117,6 +135,11 @@ BEGIN
      OR COALESCE(v_inv.credit_applied_cents, 0) <> 0
   THEN
     RAISE EXCEPTION 'Cannot unpost invoice % — it has payments, prepay, write-offs, or applied credit. Reverse those first (or void the invoice instead).', v_inv.invoice_number;
+  END IF;
+  -- #2265: a voided payment row that names one of this invoice's lines but records ANOTHER invoice is
+  -- left for a person: unlinking it would leave that other invoice as its only target.
+  IF v_history_elsewhere IS NOT NULL THEN
+    RAISE EXCEPTION 'UNPOST_HISTORY_NEEDS_HAND_CHECK: invoice % has a voided payment allocation (%) that names one of its lines but is recorded against another invoice. Nothing was changed; check that allocation by hand before unposting.', v_inv.invoice_number, v_history_elsewhere;
   END IF;
 
   PERFORM check_period_open(v_inv.invoice_date);
@@ -132,16 +155,14 @@ BEGIN
 
   -- #2265: a draft save deletes and re-adds every line, and invoice_line_allocations.invoice_item_id
   -- has no ON DELETE, so a history row still naming one of this invoice's lines would refuse the
-  -- first save, whatever its invoice_id says. Unlink the line only; the row keeps its amount and set,
-  -- and its invoice_id (a missing one is filled with this invoice, which ila_target_check needs once
-  -- the line is gone). The audit row below keeps each row's line, amount and prior invoice_id.
+  -- first save. Unlink the line only (the rows counted above as history on a line, still locked);
+  -- each keeps its amount and set, and a missing invoice_id is filled with this invoice
+  -- (ila_target_check needs one of the two). The audit row below keeps each row's line, amount and
+  -- prior invoice_id.
   WITH history AS (
     SELECT ila.id, ila.invoice_id, ila.invoice_item_id, ila.amount_cents
       FROM invoice_line_allocations ila
-     WHERE ila.invoice_item_id IN (SELECT ii.id FROM invoice_items ii WHERE ii.invoice_id = p_invoice_id)
-       AND EXISTS (SELECT 1 FROM allocation_sets hist WHERE hist.id = ila.allocation_set_id
-                     AND hist.entity_type = 'payment' AND hist.is_active = false)
-       FOR UPDATE OF ila
+     WHERE ila.id = ANY (v_history_ids)
   ), unlinked AS (
     UPDATE invoice_line_allocations ila
        SET invoice_item_id = NULL, invoice_id = COALESCE(ila.invoice_id, p_invoice_id)
@@ -207,26 +228,25 @@ BEGIN
 
   RETURN v_result;
 END;
-$function$;
+$function$
+$create$;
+  ALTER FUNCTION public._unpost_invoice_replay_impl_20261015(uuid, uuid, text) OWNER TO postgres;
+  REVOKE ALL ON FUNCTION public._unpost_invoice_replay_impl_20261015(uuid, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
 
-ALTER FUNCTION public._unpost_invoice_replay_impl_20261015(uuid, uuid, text) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public._unpost_invoice_replay_impl_20261015(uuid, uuid, text) FROM PUBLIC, anon, authenticated, service_role;
-
-DO $postflight$
-DECLARE
-  p pg_proc%ROWTYPE;
-BEGIN
+  -- Postflight: the new body, still one overload, owner, mode, search_path and EXECUTE grants.
   SELECT * INTO p FROM pg_proc WHERE oid = to_regprocedure('public._unpost_invoice_replay_impl_20261015(uuid,uuid,text)');
   IF p.oid IS NULL
-     OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM 'fc357251b73caf37728691c574ebe9b5'
+     OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM 'aef1be53a1e278dc0e57a360c15fa7cb'
+     OR (SELECT count(*) FROM pg_proc o
+          WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_unpost_invoice_replay_impl_20261015') <> 1
      OR p.proowner <> 'postgres'::regrole
      OR NOT p.prosecdef
      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
      OR ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
                 FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
         IS DISTINCT FROM ARRAY['postgres'] THEN
-    RAISE EXCEPTION 'POSTFLIGHT_FAIL: _unpost_invoice_replay_impl_20261015 body, owner, mode, search_path or EXECUTE grants are wrong';
+    RAISE EXCEPTION 'POSTFLIGHT_FAIL: _unpost_invoice_replay_impl_20261015 body, overloads, owner, mode, search_path or EXECUTE grants are wrong';
   END IF;
   RAISE NOTICE 'POSTFLIGHT_OK';
 END
-$postflight$;
+$migrate$;

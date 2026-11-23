@@ -1,9 +1,9 @@
 /**
  * JobDetail — a save over someone else's newer change is refused (Mason, 2026-11-23).
  *
- * Before this, two people editing one job meant the last Save silently won: the second person's stale
- * applicator, date or crew replaced the first person's. Save now re-reads the job and refuses, saving
- * nothing, when a checked value moved since the page loaded.
+ * The page reads the job's edit version (job_edit_version) before its job select and sends it with Save as
+ * expected_version; save_job refuses JOB_CHANGED_SINCE_LOADED under the job row lock when the job moved
+ * (database proof: scripts/smoke/prove-job-save-version-real-schema.mjs). These tests prove the page's half.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -60,7 +60,7 @@ vi.mock('../lib/activityLogger', () => ({ logActivity: vi.fn() }));
 
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import JobDetail from './JobDetail';
-import { JOB_CHANGED_SINCE_LOADED_MESSAGE } from '../lib/jobStaleEdit';
+import { JOB_CHANGED_SINCE_LOADED_MESSAGE, withOwnDispatches } from '../lib/jobStaleEdit';
 
 const JOB = {
   id: 'job-a', job_number: 'J-AAAA-1001', job_date: '2026-03-01', customer_id: 'cust-1',
@@ -68,118 +68,88 @@ const JOB = {
   customer: { farm_name: 'Farm Alpha' }, vehicle: null, quote: null, quote_section: null,
   job_fields: [], job_chemicals: [], job_field_shares: [], applied_info: null,
 };
+const VERSION = { core: 'abc123', dispatches: ['jf1|app-1||dispatched'] };
 
-/** First jobs read = the page load; read n (n >= 2) = the n-1th pre-save re-read, answered with `current[n-2]` (or the last). */
-function serveJob(...current: Record<string, unknown>[]) {
-  let jobsCalls = 0;
-  mockFrom.mockImplementation((table: string) => {
-    if (table === 'jobs') {
-      jobsCalls += 1;
-      return buildChain({ data: jobsCalls === 1 ? JOB : current[Math.min(jobsCalls - 2, current.length - 1)], error: null });
-    }
-    return buildChain({ data: [], error: null });
-  });
+let order: string[] = [];
+let versionResult: { data: unknown; error: unknown } = { data: VERSION, error: null };
+let saveResult: { data: unknown; error: unknown } = { data: { job_id: 'job-a' }, error: null };
+
+function savePayloads() {
+  return mockRpc.mock.calls.filter(([fn]) => fn === 'save_job').map(([, args]) => (args as { p_job_payload: Record<string, unknown> }).p_job_payload);
 }
 
 async function clickSave() {
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Save Changes/ })); });
 }
 
-async function openAndSave() {
+async function openJob() {
   const router = createMemoryRouter([{ path: '/jobs/:id', element: <JobDetail /> }], { initialEntries: ['/jobs/job-a'] });
   render(<RouterProvider router={router} />);
   await screen.findByRole('heading', { name: 'J-AAAA-1001' });
-  await clickSave();
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   eqCalls.length = 0;
   selectCalls.length = 0;
-  mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'save_job'
-    ? { data: { job_id: 'job-a' }, error: null }
-    : { data: null, error: null }));
+  order = [];
+  versionResult = { data: VERSION, error: null };
+  saveResult = { data: { job_id: 'job-a' }, error: null };
+  mockFrom.mockImplementation((table: string) => {
+    if (table === 'jobs') order.push('jobs');
+    return buildChain({ data: table === 'jobs' ? JOB : [], error: null });
+  });
+  mockRpc.mockImplementation((fn: string) => {
+    if (fn === 'job_edit_version') { order.push('version'); return Promise.resolve(versionResult); }
+    if (fn === 'save_job') return Promise.resolve(saveResult);
+    return Promise.resolve({ data: null, error: null });
+  });
 });
 
-describe('JobDetail stale-edit refusal', () => {
-  it.each([
-    ['applicator', { applicator_id: 'other-applicator' }],
-    ['date', { job_date: '2026-03-09' }],
-    ['crew', { ground_crew_id: 'crew-2' }],
-    // A billing split change leaves every job total as it was.
-    ['billing split', { job_field_shares: [{ field_id: 'f1', customer_id: 'cust-2', split_pct: 50, is_primary: false }] }],
-    // Reassigning one field's applicator leaves the job row as it was.
-    ['tags', { tags: ['urgent'] }],
-    ['field dispatch', { job_location_dispatches: [{ job_field_id: 'jf1', applicator_id: 'a2', crew_id: null, dispatch_status: 'dispatched' }] }],
-  ])('refuses the save when someone else changed the %s after the page loaded', async (_label, change) => {
-    serveJob({ ...JOB, ...change });
-    await openAndSave();
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE));
-    expect(mockRpc).not.toHaveBeenCalledWith('save_job', expect.anything());
-    expect(eqCalls).toContainEqual(['id', 'job-a']);
-    // The re-read itself asks for every compared line table (the mock would supply them regardless).
-    const reRead = String(selectCalls.filter((c) => typeof c === 'string' && c.includes('job_fields(') && !c.includes('job_number')).at(-1));
-    for (const t of ['job_fields(', 'job_field_shares(', 'job_chemicals(', 'job_location_dispatches(', 'tags']) expect(reRead).toContain(t);
+describe('JobDetail edit-version check', () => {
+  it('reads the version before the job and sends it with Save', async () => {
+    await openJob();
+    expect(order.slice(0, 2)).toEqual(['version', 'jobs']);
+    expect(mockRpc).toHaveBeenCalledWith('job_edit_version', { p_job_id: 'job-a' });
+    await clickSave();
+    await waitFor(() => expect(savePayloads()).toHaveLength(1));
+    expect(savePayloads()[0].expected_version).toEqual(VERSION);
   });
 
-  it('refuses the retry of a save whose reply was lost once that save committed', async () => {
-    // Accepted trade-off (Mason, 2026-11-23): the re-read cannot tell an own lost save from someone else's, so it
-    // refuses and asks for a reload rather than risk writing over another person's change.
-    serveJob(JOB, { ...JOB, notes: 'committed by the lost save' });
-    let saves = 0;
-    mockRpc.mockImplementation((fn: string) => {
-      if (fn !== 'save_job') return Promise.resolve({ data: null, error: null });
-      saves += 1;
-      return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } });
-    });
-    await openAndSave();
-    await waitFor(() => expect(saves).toBe(1));
+  it('shows the reload message when the database refuses the save', async () => {
+    saveResult = { data: null, error: { message: 'JOB_CHANGED_SINCE_LOADED: This job changed after you opened it.' } };
+    await openJob();
     await clickSave();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE));
-    expect(saves).toBe(1);
   });
 
-  it("refuses an admin's save when someone else changed a product's cost after the page loaded", async () => {
-    const chem = { id: 'jc1', product_id: 'p1', quantity: 10, unit: 'oz', rate_per_acre: 2, rate_unit: 'oz', sort_order: 0 };
-    const withChem = { ...JOB, job_chemicals: [chem] };
-    let jobsCalls = 0;
-    mockFrom.mockImplementation((table: string) => {
-      if (table === 'jobs') { jobsCalls += 1; return buildChain({ data: withChem, error: null }); }
-      return buildChain({ data: [], error: null });
-    });
-    let costReads = 0;
-    mockRpc.mockImplementation((fn: string) => {
-      if (fn === 'get_admin_cost_fields') {
-        costReads += 1;
-        return Promise.resolve({ data: { jc1: { cost_per_unit_cents: costReads === 1 ? 1000 : 1250 } }, error: null });
-      }
-      return Promise.resolve(fn === 'save_job' ? { data: { job_id: 'job-a' }, error: null } : { data: [], error: null });
-    });
-    await openAndSave();
-    // A mix with products saves only once the label-rate policy has loaded; retry the click until it does.
-    await waitFor(async () => {
-      if (jobsCalls < 2) await clickSave();
-      expect(jobsCalls).toBe(2);
-    });
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE));
-    expect(mockRpc).not.toHaveBeenCalledWith('save_job', expect.anything());
-  });
-
-  it('saves normally when nothing changed underneath', async () => {
-    serveJob(JOB);
-    await openAndSave();
-    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_job', expect.anything()));
-    expect(mockToast).not.toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
-  });
-
-  it('does not mistake an earlier save by the same user for a change by someone else', async () => {
-    // Reads: load, re-read before save 1, the refetch after save 1 (now holding the saved notes), re-read before save 2.
-    const saved = { ...JOB, notes: 'B notes' };
-    serveJob(JOB, saved, saved);
-    await openAndSave();
-    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_job', expect.anything()));
+  it('blocks Save when the version could not be read (fail closed)', async () => {
+    versionResult = { data: null, error: { message: 'Failed to fetch' } };
+    await openJob();
     await clickSave();
-    await waitFor(() => expect(mockRpc.mock.calls.filter(([fn]) => fn === 'save_job')).toHaveLength(2));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/could not check whether the job is current/)));
+    expect(savePayloads()).toHaveLength(0);
+  });
+
+  it('retries a save whose reply was lost with the same payload, version included, so the database replays it', async () => {
+    saveResult = { data: null, error: { message: 'Failed to fetch' } };
+    await openJob();
+    await clickSave();
+    await waitFor(() => expect(savePayloads()).toHaveLength(1));
+    saveResult = { data: { job_id: 'job-a' }, error: null };
+    await clickSave();
+    await waitFor(() => expect(savePayloads()).toHaveLength(2));
+    expect(savePayloads()[1]).toEqual(savePayloads()[0]);
     expect(mockToast).not.toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
+  });
+});
+
+describe('withOwnDispatches', () => {
+  it("replaces only the dispatched locations' strings, keeping everyone else's", () => {
+    const v = { core: 'c', dispatches: ['jf1|app-1||dispatched', 'jf2|app-2||completed'] };
+    expect(withOwnDispatches(v, [{ job_field_id: 'jf1', applicator_id: null, crew_id: 'crew-9' },
+      { job_field_id: 'jf3', applicator_id: 'app-3', crew_id: null }])).toEqual({
+      core: 'c', dispatches: ['jf1||crew-9|dispatched', 'jf2|app-2||completed', 'jf3|app-3||dispatched'],
+    });
   });
 });

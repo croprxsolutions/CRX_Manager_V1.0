@@ -99,7 +99,7 @@ import { JobChemicalProductPicker } from '../components/jobs/JobChemicalProductP
 import JobLabelCorrectionsNotice from '../components/jobs/JobLabelCorrectionsNotice';
 import { buildJobChemicalsPayload } from '../lib/jobChemicalPayload';
 import { JOB_CHEMICAL_COLUMNS, JOB_COLUMNS, PRODUCT_COLUMNS, withAdminCosts } from '../lib/costFields';
-import { JOB_CHANGED_SINCE_LOADED_MESSAGE, jobChangedSinceLoaded, pickJobStaleSnapshot, withFreshDispatches, type JobStaleSnapshot } from '../lib/jobStaleEdit';
+import { JOB_CHANGED_SINCE_LOADED_MESSAGE, readJobEditVersion, withOwnDispatches, type JobEditVersion } from '../lib/jobStaleEdit';
 import { sendEmail } from '../lib/emailService';
 import {
   parsePreNotificationTemplate,
@@ -313,8 +313,8 @@ export default function JobDetail() {
   const transferJobIdem = useIdempotencyKey('transfer_job_to_invoice', profile?.id || '');
   // Crew/loader values as last loaded, so a save sends (and checks) only the ones the user changed.
   const savedLoaderRef = useRef({ groundCrewId: '', carrier: '', capacity: '' });
-  // The job as last loaded: Save is refused if someone else changed it since (applicator, date, crew, ...).
-  const loadedJobSnapshotRef = useRef<JobStaleSnapshot | null>(null);
+  // The job's edit version as last loaded: save_job refuses the Save if someone else changed the job since.
+  const loadedJobVersionRef = useRef<JobEditVersion | null>(null);
   const isNew = id === 'new';
   const isEditable = role === 'admin' || role === 'sales_rep';
   // Cost is admin-only (Mason, 2026-10-15): the server works it out for everyone else's saves.
@@ -1884,6 +1884,16 @@ export default function JobDetail() {
     // settle guard defers adoption until this fetch's state has actually rendered.
     baselineSettleGuardRef.current = true;
     baselineRef.current = null;
+    // Read before the job select: a change landing in between can only refuse a Save (the safe side), never be
+    // overwritten. A failed read leaves no version, and Save then asks for a reload.
+    let loadedVersion: JobEditVersion | null = null;
+    if (isEditable) {
+      try {
+        loadedVersion = await readJobEditVersion(id!);
+      } catch (versionErr) {
+        Sentry.captureException(toSentryError(versionErr), { extra: { context: 'job_edit_version' } });
+      }
+    }
     const { data, error } = await supabase
       // PR-07 follow-up: dropped applicator FK embed — full_name isn't read
       // anywhere in this page; only applicator_id is consumed (line 235).
@@ -1897,7 +1907,6 @@ export default function JobDetail() {
         job_fields(*, field:fields(field_name)),
         job_chemicals(${JOB_CHEMICAL_COLUMNS}, product:products(product_name)),
         job_field_shares(*),
-        job_location_dispatches(job_field_id, applicator_id, crew_id, dispatch_status),
         applied_info:job_applied_info(*)
       `)
       .eq('id', id!)
@@ -2024,7 +2033,7 @@ export default function JobDetail() {
     // #10 loader-worksheet inputs (numbers stored as strings in the form).
     setCarrierRateGpa(j.carrier_rate_gpa != null ? String(j.carrier_rate_gpa) : '');
     setTankCapacity(j.loader_tank_capacity != null ? String(j.loader_tank_capacity) : '');
-    loadedJobSnapshotRef.current = pickJobStaleSnapshot(j as unknown as Record<string, unknown>);
+    loadedJobVersionRef.current = loadedVersion;
     savedLoaderRef.current = {
       groundCrewId: j.ground_crew_id || '',
       carrier: j.carrier_rate_gpa != null ? String(j.carrier_rate_gpa) : '',
@@ -2112,7 +2121,7 @@ export default function JobDetail() {
     setBaselineSettleTick((t) => t + 1);
     // initialLoadDone is armed by the loading-settle effect (rAF after loading=false).
     return true;
-  }, [id, toast, navigate, isAdmin]);
+  }, [id, toast, navigate, isAdmin, isEditable]);
 
   // Route invalidation runs in a LAYOUT effect, not the passive one below. Passive
   // effects are deferred: React commits the new route's render and can yield to the
@@ -2768,7 +2777,7 @@ export default function JobDetail() {
   const performSave = async (licenseOverride: boolean, overrideReasonForAudit?: string) => {
     // Crew/loader values as loaded when Save was clicked: a reload during the save must not make an untouched value look edited.
     const loaderBaseAtSave = isNew ? { groundCrewId: '', carrier: '', capacity: '' } : { ...savedLoaderRef.current };
-    const snapshotAtSave = isNew ? null : loadedJobSnapshotRef.current;
+    const versionAtSave = isNew ? null : loadedJobVersionRef.current;
     // Bound to the route this save STARTED on — see captureRouteEpoch. Captured here
     // rather than in handleSave because the expired-license override path calls
     // performSave directly, and this is where the save actually begins. The job row is
@@ -2793,9 +2802,17 @@ export default function JobDetail() {
       return;
     }
 
+    // Fail closed: without the version read at load, save_job could not tell a newer change from none.
+    if (!isNew && !versionAtSave) {
+      toast('error', 'This page could not check whether the job is current. Nothing was saved. Reload the page, then save again.');
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
+        // save_job refuses JOB_CHANGED_SINCE_LOADED when the job no longer matches this (20270226130000).
+        ...(versionAtSave ? { expected_version: versionAtSave } : {}),
         customer_id: customerId,
         job_date: jobDate,
         scheduled_time: scheduledTime || null,
@@ -2888,29 +2905,6 @@ export default function JobDetail() {
       // lost reply is refused with the committed job, which the catch below opens; an edit to an existing job gets a
       // key per exact payload, since re-applying an edit to the same job is harmless.
       const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, payload, fieldsPayload, chemsPayload]);
-      // Refuse a save over a newer change instead of silently replacing it. Compared with the job as it was when
-      // Save was clicked, so a refetch during the save cannot move the baseline under this payload.
-      if (!isNew && snapshotAtSave) {
-        let changed: string[];
-        try {
-          changed = await jobChangedSinceLoaded(id!, snapshotAtSave, isAdmin);
-        } catch (readErr) {
-          Sentry.captureException(toSentryError(readErr), { extra: { context: 'job_stale_edit_check' } });
-          if (stillOnThisJob()) toast('error', sanitizeError(readErr));
-          setSaving(false);
-          return;
-        }
-        if (changed.length > 0) {
-          if (stillOnThisJob()) toast('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
-          setSaving(false);
-          return;
-        }
-        // The operator left (or discarded) this job while the check ran: write nothing.
-        if (!stillOnThisJob()) {
-          setSaving(false);
-          return;
-        }
-      }
       if (lastJobSaveScopeRef.current && lastJobSaveScopeRef.current !== saveScope) saveJobIdem.resetKeyFor(lastJobSaveScopeRef.current);
       lastJobSaveScopeRef.current = saveScope;
       const { data, error } = await supabase.rpc('save_job', {
@@ -3186,6 +3180,8 @@ export default function JobDetail() {
       // on arrival here: save_job's refusal arrives as a plain PostgREST object,
       // so the guard never matched a real refusal and this friendly message never
       // fired. hasRpcCode() reads object-shaped errors, so it now does.
+      } else if (hasRpcCode(err, RpcErrorCodes.JOB_CHANGED_SINCE_LOADED)) {
+        if (stillOnThisJob()) toast('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
       } else if (hasRpcCode(err, RpcErrorCodes.SHARE_NOT_100)) {
         toast('error', "Each field's customer shares must total 100%.");
       } else if (isNew && typeof getIdempotencyMismatchResult(err, 'save_job')?.job_id === 'string') {
@@ -5450,15 +5446,11 @@ export default function JobDetail() {
         crews={groundCrews}
         performedBy={profile?.id || ''}
         isAdmin={role === 'admin'}
-        onDispatched={() => {
+        onDispatched={(sent) => {
           setDispatchWizardOpen(false);
-          // Our own dispatch is not someone else's change: move just the dispatch lines of the baseline forward.
-          // A failed read leaves the old baseline, so the next Save asks for a reload (the safe side).
-          const snap = loadedJobSnapshotRef.current;
-          if (!snap || !id) return;
-          withFreshDispatches(id, snap)
-            .then((next) => { if (loadedJobSnapshotRef.current === snap) loadedJobSnapshotRef.current = next; })
-            .catch((err: unknown) => Sentry.captureException(toSentryError(err), { extra: { context: 'job_stale_dispatch_refresh' } }));
+          // Our own dispatch is not someone else's change: move just those locations' dispatch strings forward.
+          const v = loadedJobVersionRef.current;
+          if (v) loadedJobVersionRef.current = withOwnDispatches(v, sent);
         }}
       />
     </div>

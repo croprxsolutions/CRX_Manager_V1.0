@@ -208,6 +208,8 @@ export const RpcErrorCodes = {
   // screen sent no version.
   INVOICE_CHANGED_SINCE_LOADED: 'INVOICE_CHANGED_SINCE_LOADED',
   INVOICE_VERSION_REQUIRED: 'INVOICE_VERSION_REQUIRED',
+  // save_job edit-version check (20270226130000): the job changed after the page read its version.
+  JOB_CHANGED_SINCE_LOADED: 'JOB_CHANGED_SINCE_LOADED',
   // return-credit COGS and year-end report guards (20260827041000/041100)
   RETURN_CREDIT_CUTOVER_IN_PROGRESS: 'RETURN_CREDIT_CUTOVER_IN_PROGRESS',
   CUSTOMER_SCOPE_DENIED: 'CUSTOMER_SCOPE_DENIED',

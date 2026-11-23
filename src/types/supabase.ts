@@ -20377,6 +20377,7 @@ export type Database = {
         }
         Returns: Json
       }
+      job_edit_version: { Args: { p_job_id: string }; Returns: Json }
       link_blend_ticket_to_order: {
         Args: {
           p_blend_ticket_id: string

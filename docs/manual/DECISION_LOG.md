@@ -19,6 +19,12 @@
 ## 2026-11-22 — KI-114 (#1958): Piksi Dust is grams everywhere, same prices
 
 **Decision (Mason, 2026-11-22, in the bug-captain session: "Yes, grams (Recommended)"; and in the Lane C session: "piksi dust is in grams we billed like mg but it is grams and all mg need changed to gram price is same as grams etc").** This supersedes the 2026-11-13 "MG means milligrams" decision. Every Piksi `MG` label (products, groups, stock, order, delivery and PO lines, receipts) becomes `g` with no quantity or price changed; the four older Plus delivery lines that still say "Dry oz" become `g` too ("all"). This replaces the 2026-11-13 reading ("MG means milligrams") used by `20270121100000` and the 2026-11-17 "keep both on today's values" choice. Migration `20270226110000_piksi_mg_to_grams`; contract `docs/plans/2026-11-22-ki114-piksi-grams-CONTRACT.md`. Releasing Piksi from the rate cut-over hold list stays a separate step.
+## 2026-11-23 — #2339: Mason owner-accepted 1 Sol finding(s) at `72ad09a97efa`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2339 at `72ad09a97efa` (base `d5a2696ab035`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270225170000_edit_delivery_unassign_driver.sql:163`, text sha256 `0b58c3bcd5704aec` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 916ef4a93319)
+
 ## 2026-11-22 — #2260: Mason owner-accepted 1 Sol finding(s) at `2986f407e617`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2260 at `2986f407e617` (base `47947bc95348`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

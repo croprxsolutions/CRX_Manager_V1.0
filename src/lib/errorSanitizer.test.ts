@@ -5,8 +5,10 @@ describe('sanitizeError', () => {
   it('explains a refused delivery Unassigned in plain words', () => {
     expect(sanitizeError({ message: 'DRIVER_CHANGED: the driver was changed since the form opened; reload and try again' }))
       .toMatch(/^Nothing was saved\. The driver was changed since you opened this form/);
-    expect(sanitizeError({ message: 'DRIVER_CLEAR_STARTED: a started delivery cannot be unassigned' }))
-      .toMatch(/^Nothing was saved\. A started delivery cannot be unassigned/);
+    expect(sanitizeError({ message: 'DRIVER_CLEAR_STARTED: a started delivery cannot be unassigned; assign another driver instead' }))
+      .toMatch(/^Nothing was saved\. This delivery has started, so it cannot be unassigned/);
+    expect(sanitizeError({ message: 'Cannot edit delivery items once delivery is in progress' }))
+      .toMatch(/^Nothing was saved\. This delivery has started, so its items cannot be edited/);
   });
 
   it('keeps the product and order details from active-status refusals', () => {

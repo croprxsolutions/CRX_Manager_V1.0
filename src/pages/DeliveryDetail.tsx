@@ -828,7 +828,7 @@ export default function DeliveryDetail() {
 
     const editArgs = {
       p_delivery_id: id!,
-      p_assigned_driver: editDriver || undefined,
+      p_assigned_driver: pickedDriverArg(editDriver, editDriverAtOpen),
       p_scheduled_date: editDate,
       p_scheduled_time: editTime || undefined,
       p_delivery_window_start: editWindowStart || undefined,
@@ -853,8 +853,8 @@ export default function DeliveryDetail() {
 
       if (error) {
         toast('error', sanitizeError(error));
-        // The form is stale: close it and reload, so the next edit starts from the current driver.
-        if (isDriverChangedError(error)) { setEditing(false); fetchDelivery(); }
+        // The form is stale: close it and reload, so the next edit starts from the current delivery.
+        if (isStaleEditFormError(error)) { setEditing(false); fetchDelivery(); }
       } else {
         applyEditSaved(assertRpcResult<EditDeliveryResult>(data, 'edit_delivery'), editScope, isScheduled);
       }
@@ -2425,8 +2425,9 @@ export default function DeliveryDetail() {
                 >
                   {/* The server refuses to unassign a started delivery; assign another driver instead. */}
                   <option value="" disabled={!!editDriverAtOpen && delivery.status === 'in_progress'}>Unassigned</option>
-                  {editDriver && !drivers.some((d) => d.id === editDriver) && (
-                    <option value={editDriver}>Current driver (not in list)</option>
+                  {/* Keyed on the driver at open, so it stays selectable after another pick. */}
+                  {editDriverAtOpen && !drivers.some((d) => d.id === editDriverAtOpen) && (
+                    <option value={editDriverAtOpen}>Current driver (not in list)</option>
                   )}
                   {drivers.map((d) => (
                     <option key={d.id} value={d.id}>{d.full_name} ({d.role})</option>
@@ -3311,8 +3312,15 @@ async function fetchInvoicesByDelivery(deliveryId: string): Promise<Record<strin
 // A form that opened with no driver never clears (a Take Delivery since then must survive its save).
 type EditDeliveryResult = { brand_lines_dropped?: { old_delivery_item_id: string; product_id: string | null }[] };
 
-function isDriverChangedError(error: { message?: string }): boolean {
-  return /^DRIVER_CHANGED\b/.test(error.message ?? '');
+// Refusals that mean the form showed an older delivery (driver changed, or the delivery started).
+function isStaleEditFormError(error: { message?: string }): boolean {
+  return /^(DRIVER_CHANGED|DRIVER_CLEAR_STARTED|Cannot edit delivery items once delivery is in progress)\b/.test(error.message ?? '');
+}
+
+// Send a driver only when the user changed it: an untouched list keeps whatever driver the delivery has now,
+// so a stale form saving other fields never puts back a driver dispatch replaced (Taha, #2364).
+function pickedDriverArg(chosen: string, atOpen: string): string | undefined {
+  return chosen && chosen !== atOpen ? chosen : undefined;
 }
 
 function clearDriverArg(chosen: string, atOpen: string): { p_clear_driver?: true; p_expected_driver?: string } {

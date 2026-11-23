@@ -151,10 +151,37 @@ describe('DeliveryDetail edit: the driver choice (Mason 2026-11-23: the office m
     expect(args.p_assigned_driver).toBeUndefined();
   });
 
-  it('keeping the driver sends that driver and no clear', async () => {
+  it('leaving the driver alone sends no driver, so the server keeps the current one (Taha, #2364)', async () => {
     const args = await editDriverAndSave();
-    expect(args.p_assigned_driver).toBe('user-1');
+    expect(args.p_assigned_driver).toBeUndefined();
     expect(args).not.toHaveProperty('p_clear_driver');
+    expect(args).not.toHaveProperty('p_expected_driver');
+  });
+
+  it('picking another driver sends that driver and no clear', async () => {
+    tables.data.profile_public_view = [
+      { id: 'user-1', full_name: 'Dana Driver', role: 'driver', is_active: true },
+      { id: 'user-2', full_name: 'Lee Driver', role: 'driver', is_active: true },
+    ];
+    render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 }));
+    await screen.findByRole('option', { name: /Lee Driver/ });
+    fireEvent.change(screen.getByRole('option', { name: 'Unassigned' }).closest('select')!, { target: { value: 'user-2' } });
+    fireEvent.click(await screen.findByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(editCalls()).toHaveLength(1));
+    const args = editCalls()[0][1] as Record<string, unknown>;
+    expect(args.p_assigned_driver).toBe('user-2');
+    expect(args).not.toHaveProperty('p_clear_driver');
+    expect(args).not.toHaveProperty('p_expected_driver');
+  });
+
+  it('an inactive current driver stays selectable after another pick', async () => {
+    tables.data.profile_public_view = [];
+    render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 }));
+    const select = (await screen.findByRole('option', { name: 'Unassigned' })).closest('select')!;
+    fireEvent.change(select, { target: { value: '' } });
+    expect(screen.getByRole('option', { name: 'Current driver (not in list)' })).toBeTruthy();
   });
 });
 
@@ -197,6 +224,24 @@ describe('DeliveryDetail edit: Unassigned from a stale form (Sol r3 HIGH 1)', ()
     // Sol r4 HIGH 1: the stale form closes and the delivery reloads, so the next edit shows the current driver.
     await waitFor(() => expect(screen.queryByRole('button', { name: /Save Changes/ })).toBeNull());
     await waitFor(() => expect(deliveryLoads()).toBeGreaterThan(loadsBefore));
+  });
+
+  it('a delivery started since the form opened: the refusal closes the form and reloads (Taha, #2364)', async () => {
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'edit_delivery'
+      ? { data: null, error: { message: 'Cannot edit delivery items once delivery is in progress' } }
+      : { data: { success: true }, error: null }));
+    render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 }));
+    fireEvent.click(await screen.findByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(editCalls()).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Save Changes/ })).toBeNull());
+  });
+
+  it('Unassigned is greyed out on a started delivery that has a driver', async () => {
+    tables.data.deliveries = [{ ...(tables.data.deliveries[0] as object), status: 'in_progress' }];
+    render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 }));
+    expect(((await screen.findByRole('option', { name: 'Unassigned' })) as HTMLOptionElement).disabled).toBe(true);
   });
 
   it('unlocks the form after an unconfirmed (empty) reply, so Save can retry', async () => {

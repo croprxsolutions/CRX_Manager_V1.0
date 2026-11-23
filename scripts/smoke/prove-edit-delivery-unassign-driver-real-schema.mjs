@@ -249,15 +249,17 @@ function refusedProbe(sql, pattern, uid) {
 }
 
 const id = (s) => `a0a55000-0000-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), DRV1 = id('d1'), DRV2 = id('d2'), CUST = id('c1'), ORD = id('e1');
+const ADMIN = id('a1'), REP = id('a2'), DRV1 = id('d1'), DRV2 = id('d2'), CUST = id('c1'), ORD = id('e1');
 const DEL = id('f1'), DONE = id('f2'), OPEN = id('f3'), STARTED = id('f4');
 
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
     ('${ADMIN}', 'unassign-admin@example.invalid', '{"full_name":"[PROVER] Office","role":"admin"}'::jsonb),
+    ('${REP}', 'unassign-rep@example.invalid', '{"full_name":"[PROVER] Rep","role":"sales_rep"}'::jsonb),
     ('${DRV1}', 'unassign-d1@example.invalid', '{"full_name":"[PROVER] Driver One","role":"driver"}'::jsonb),
     ('${DRV2}', 'unassign-d2@example.invalid', '{"full_name":"[PROVER] Driver Two","role":"driver"}'::jsonb);`);
   raw(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
+    UPDATE public.profiles SET role = 'sales_rep', is_active = true, denied_pages = ARRAY['deliveries'] WHERE id = '${REP}';
     UPDATE public.profiles SET role = 'driver', is_active = true WHERE id IN ('${DRV1}', '${DRV2}');
     INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST}', '[PROVER] Unassign Farm', true);
     INSERT INTO public.orders (id, order_number, customer_id, status) VALUES ('${ORD}', 'UNASSIGN-O1', '${CUST}', 'confirmed');
@@ -336,6 +338,10 @@ function afterCases() {
   refusedProbe(edit(STARTED, 'u-9', ', p_clear_driver => true'), /DRIVER_CLEAR_STARTED/, ADMIN);
   assert.equal(scalar(`SELECT ${driverOf(STARTED)} || '|' || coalesce((SELECT delivery_notes FROM public.deliveries WHERE id = '${STARTED}'), '') || '|' || ${notes(STARTED)} || '|' || ${events(STARTED)};`), `${DRV1}||0|0`);
   assert.equal(okProbe(`${edit(STARTED, 'u-9b', `, p_assigned_driver => '${DRV2}'`)} SELECT ${driverOf(STARTED)};`, ADMIN), DRV2);
+  // 10. A sales rep with the Deliveries page turned off cannot clear a driver; an ordinary edit is unchanged.
+  refusedProbe(edit(OPEN, 'u-10', ', p_clear_driver => true', REP), /PAGE_DENIED/, REP);
+  okProbe(edit(OPEN, 'u-10b', '', REP), REP);
+  console.log('[case 10] a rep with the Deliveries page turned off is refused Unassigned; their other edits behave as before');
   console.log('[case 9] a started delivery is refused Unassigned (nothing saved) and can still move to Driver Two');
 }
 

@@ -11,6 +11,7 @@
 --      a started (in_progress) delivery is refused (DRIVER_CLEAR_STARTED; the whole edit rolls back): the completion
 --      checks compare the caller with assigned_driver, so a started delivery may move to another driver but must
 --      never be left with none;
+--      a non-admin with the Deliveries page turned off (profiles.denied_pages) is refused too (PAGE_DENIED);
 --   3. on a scheduled delivery the driver is set to none and the driver who had it gets a "Delivery Unassigned"
 --      notification;
 --   4. the replay fingerprint gains clear_driver only when true, so every other request keeps its fingerprint; an
@@ -28,7 +29,7 @@
 -- idempotency-body-check: exempt -- the wrapper checks the key (check_idempotency_intent) and the impl records it;
 --   the wrapper only rewrites the stored result and binds the receipt, as the 20270104120000 wrapper did.
 --
--- ORDERING: after 20270104120000. Not re-runnable (preflight refuses). Postflight pins the new body md5 2b9a2d2caf0bf3997d5627501e61518e.
+-- ORDERING: after 20270104120000. Not re-runnable (preflight refuses). Postflight pins the new body md5 c2510b70aa41e7f92ba880491d6127f5.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -144,6 +145,11 @@ BEGIN
   IF v_replay IS NULL AND p_clear_driver IS TRUE THEN
     SELECT d.assigned_driver, d.delivery_number, d.status INTO v_cleared_from, v_number, v_status
       FROM public.deliveries d WHERE d.id = p_delivery_id;
+    -- Clearing releases the delivery to the driver pickup list, so a non-admin denied the Deliveries page may not.
+    IF EXISTS (SELECT 1 FROM public.profiles pr WHERE pr.id = v_actor AND pr.role <> 'admin'
+                AND 'deliveries' = ANY (pr.denied_pages)) THEN
+      RAISE EXCEPTION 'PAGE_DENIED: the Deliveries page is turned off for this user' USING ERRCODE = '42501';
+    END IF;
     -- Completion checks compare the caller with assigned_driver; a started delivery must never be left with none.
     IF v_status = 'in_progress' THEN
       RAISE EXCEPTION 'DRIVER_CLEAR_STARTED: a started delivery cannot be unassigned; assign another driver instead'
@@ -227,7 +233,7 @@ DECLARE
 BEGIN
   IF v_oid IS NULL
      OR (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'edit_delivery') <> 1
-     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_oid) IS DISTINCT FROM '2b9a2d2caf0bf3997d5627501e61518e'
+     OR (SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = v_oid) IS DISTINCT FROM 'c2510b70aa41e7f92ba880491d6127f5'
      OR NOT (SELECT prosecdef FROM pg_proc WHERE oid = v_oid)
      OR (SELECT proconfig FROM pg_proc WHERE oid = v_oid) IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[] THEN
     RAISE EXCEPTION 'EDIT_DELIVERY_UNASSIGN_POSTFLIGHT: edit_delivery is not one reviewed SECURITY DEFINER signature';

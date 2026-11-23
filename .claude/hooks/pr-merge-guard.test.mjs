@@ -647,6 +647,10 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(/if \(!risk\.risky\) \{[\s\S]{0,400}?advisoryQueue\.push\(request\);\s*return;\s*\}/.test(gateRequestSource.slice(riskCall)),
     "the low-risk allow point is guarded by risk.risky");
   ok(/import \{ agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
+  // Taha lane block (#2303; behaviour in taha-lane-lib.test.mjs and the Codex gate test): inside the staging branch,
+  // bound to the head being merged, with the gate itself telling Taha, and a refusal denies.
+  ok(/if \(base === "staging"\) \{[\s\S]{0,2500}?const lane = tahaLaneGate\(\{[\s\S]{0,200}?pullRequest: Number\(pr\.number\),\s*headSha: pr\.headRefOid,\s*tellTaha: \(body\) => tellTahaOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, pullRequest: Number\(pr\.number\), body \}\),\s*files: prFilesOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, number: Number\(pr\.number\) \}\),[\s\S]{0,300}?if \(lane\) deny\(lane\);/.test(gateRequestSource),
+    "a staging merge runs the Taha lane gate at the PR's head and denies on its refusal");
   ok(/if \(base === "staging"\) \{[\s\S]{0,300}mainCommitsInPrOnGitHub\(\{ stagingSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(backMerge\) deny\(/.test(gateRequestSource), "a PR into staging carrying main's unbacked-merged commits is refused");
   // staging gets every main gate (Mason on #1363, 2026-11-04); staging-first: agents never merge into main
   // or the back-merge, and a migration may go into staging.

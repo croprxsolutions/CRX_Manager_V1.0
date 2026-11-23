@@ -70,14 +70,53 @@ export function isTahaLanePath(name) {
   if (BLOCK_FILES_RE.test(file)) return true;
   if (!/^(?:src|supabase)\//i.test(file)) return false;
   if (LANE_FILE_PREFIXES.some((p) => file.startsWith(p))) return true;
-  const words = wordsOf(file);
+  return isLaneName(file);
+}
+
+function isLaneName(name) {
+  const words = wordsOf(name);
   if (isFieldBilling(words) && !words.some((w) => STRONG_LANE_WORDS.has(w))) return false;
   return isBill(words) || words.some((w) => LANE_WORDS.has(w));
 }
 
+// A migration is Taha's when its SQL writes to, locks or changes one of these tables, or creates,
+// replaces, alters or drops a function whose name is in his lane (Taha in Slack, 2026-11-23: #2331
+// and #2338 had neutral file names; #2338 rebuilt the delivery step that writes invoices).
+// Reading a table does not count; a row lock (FOR UPDATE / FOR SHARE) does.
+export const TAHA_LANE_TABLES = [
+  "quotes", "quote_items", "quote_sections", "quote_versions", "quote_price_changes", "quote_product_draws",
+  "quote_templates", "quote_pdf_templates",
+  "orders", "order_items", "order_shares", "order_item_shares", "order_line_allocations", "order_item_field_allocations",
+  "inventory_holds",
+  "invoices", "invoice_items", "invoice_shares", "invoice_line_shares", "invoice_line_share_snapshots",
+  "invoice_line_allocations", "invoice_sales_tax_rates", "invoice_standing_discount_rates", "invoice_line_rup_captures",
+  "invoice_line_brand_rup_captures", "invoice_delivery_recovery_capabilities", "split_invoice_creation_claims",
+  "split_invoice_mutation_claims", "split_invoice_provenance", "credit_memo_applications",
+  "payments", "prepay_credits", "prepay_applications",
+  "commissions", "commission_payments", "commission_payment_items", "commission_settlement_events",
+  "commission_earned_state_ledger", "commission_history_cutover",
+];
+const TABLE = String.raw`(?:"?public"?\s*\.\s*)?"?(?:${TAHA_LANE_TABLES.join("|")})"?(?![\w$]|\s*\.)`;
+// "ON" covers triggers, policies, indexes and grants; TABLE / ONLY / IF EXISTS are optional fillers.
+const WRITE_RE = new RegExp(String.raw`\b(?:insert\s+into|merge\s+into|update|delete\s+from|truncate|alter|drop|lock|on)(?:\s+(?:table|only|if\s+exists))*\s+` + TABLE, "i");
+const READ_RE = new RegExp(String.raw`\b(?:from|join)(?:\s+only)?\s+` + TABLE, "i");
+const ROW_LOCK_RE = /\bfor\s+(?:no\s+key\s+)?update\b|\bfor\s+(?:key\s+)?share\b/i;
+const FUNCTION_RE = /\b(?:create(?:\s+or\s+replace)?|alter|drop)\s+(?:function|procedure)\s+(?:if\s+exists\s+)?(?:"?public"?\s*\.\s*)?"?([\w$]+)/gi;
+
+/** True when this migration SQL touches Taha's lane; unreadable SQL (null) counts, so the block fails closed. */
+export function isTahaLaneSql(sql) {
+  if (typeof sql !== "string") return true;
+  // shortcut: a "--" inside a string literal hides the rest of that line; upgrade to a tokenizer if one ever slips past.
+  const text = sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
+  if (WRITE_RE.test(text)) return true;
+  if (ROW_LOCK_RE.test(text) && READ_RE.test(text)) return true;
+  return [...text.matchAll(FUNCTION_RE)].some((m) => isLaneName(m[1]));
+}
+
 /**
  * Why this merge is refused, or null. `files`: GitHub compare entries
- * ({filename, previous_filename}) or null when they could not be read (refuses).
+ * ({filename, previous_filename, sql?}) or null when they could not be read (refuses).
+ * An entry carrying `sql` (a migration's text, or null when unreadable) is also judged by its SQL.
  */
 export function tahaLaneProblem({ files, now = Date.now() }) {
   if (now >= TAHA_LANE_UNTIL_MS) return null;
@@ -87,6 +126,10 @@ export function tahaLaneProblem({ files, now = Date.now() }) {
   for (const entry of files) {
     for (const name of [entry?.filename, entry?.previous_filename]) {
       if (typeof name === "string" && isTahaLanePath(name) && !hits.includes(name)) hits.push(name);
+    }
+    const name = entry?.filename;
+    if (entry && "sql" in entry && typeof name === "string" && !hits.includes(name) && isTahaLaneSql(entry.sql)) {
+      hits.push(entry.sql === null ? `${name} (its SQL could not be read)` : name);
     }
   }
   return hits.length ? { files: hits, reason: `it changes Taha's areas (${hits.slice(0, 5).join(", ")}${hits.length > 5 ? `, and ${hits.length - 5} more` : ""})` } : null;
@@ -100,10 +143,25 @@ export function prFilesOnGitHub({ repo, gh, number }) {
   const repoPath = ghApiRepoPath(repo);
   if (!repoPath || !Number.isInteger(number) || number < 1) return null;
   try {
-    const rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/files?per_page=100`, "--jq", '.[] | [.status, .filename, (.previous_filename // "")] | @tsv']))
+    const rows = String(gh(["api", "--paginate", `${repoPath}/pulls/${number}/files?per_page=100`, "--jq",
+      '.[] | [.status, .filename, (.previous_filename // ""), ((.contents_url // "") | ([capture("[?&]ref=(?<r>[0-9a-f]{40})").r][0] // ""))] | @tsv']))
       .split(/\r?\n/).filter(Boolean).map((line) => line.split("\t"));
-    if (rows.some((r) => r.length < 2 || r.length > 3 || !r[1])) return null;
-    return rows.map(([, filename, previous]) => ({ filename, previous_filename: previous || undefined }));
+    if (rows.some((r) => r.length < 2 || r.length > 4 || !r[1])) return null;
+    return rows.map(([status, filename, previous, ref]) => {
+      const entry = { filename, previous_filename: previous || undefined };
+      // Migrations are judged by their SQL at the PR's commit too; a removed or unreadable one counts as Taha's.
+      if (/^supabase\/migrations\/.+\.sql$/i.test(filename)) entry.sql = status === "removed" ? null : migrationSql({ repoPath, gh, filename, ref });
+      return entry;
+    });
+  } catch { return null; }
+}
+
+function migrationSql({ repoPath, gh, filename, ref }) {
+  if (!/^[0-9a-f]{40}$/i.test(String(ref ?? ""))) return null;
+  try {
+    const filePath = filename.split("/").map(encodeURIComponent).join("/");
+    const sql = String(gh(["api", "-H", "Accept: application/vnd.github.raw", `${repoPath}/contents/${filePath}?ref=${ref}`]));
+    return sql.trim() ? sql : null;
   } catch { return null; }
 }
 

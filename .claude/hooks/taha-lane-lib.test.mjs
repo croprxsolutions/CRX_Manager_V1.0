@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
-  TAHA_LANE_UNTIL_MS, findTahaLaneOverride, isTahaLanePath, prFilesOnGitHub, issueTahaLaneCode, recordTahaLaneOverride,
+  TAHA_LANE_UNTIL_MS, findTahaLaneOverride, isTahaLanePath, isTahaLaneSql, prFilesOnGitHub, issueTahaLaneCode, recordTahaLaneOverride,
   tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
 } from "./taha-lane-lib.mjs";
 
@@ -68,6 +68,54 @@ eq(prFilesOnGitHub({ repo: undefined, number: 7, gh: () => "" }), [], "no rows i
 eq(prFilesOnGitHub({ repo: undefined, number: 7, gh: () => { throw new Error("offline"); } }), null, "GitHub down → unreadable");
 eq(prFilesOnGitHub({ repo: undefined, number: 7, gh: () => "{\"not\":\"tsv\"}" }), null, "a strange answer → unreadable");
 eq(prFilesOnGitHub({ repo: undefined, number: NaN, gh: () => tsv }), null, "no PR number → unreadable");
+
+// ── a migration is judged by its SQL, not only its name (Taha, 2026-11-23: #2331, #2338) ──
+for (const [sql, why] of [
+  ["ALTER TABLE public.order_items ADD CONSTRAINT q CHECK (quantity > 0);", "#2331: a check on order lines"],
+  ["CREATE OR REPLACE FUNCTION public._complete_delivery_impl() AS $$ BEGIN INSERT INTO invoices (id) VALUES (1); END $$;", "#2338: a delivery step that writes invoices"],
+  ['UPDATE "public"."payments" SET x = 1;', "a quoted update"],
+  ["DELETE FROM ONLY prepay_credits WHERE id = 1;", "a delete"],
+  ["LOCK TABLE public.quotes IN SHARE MODE;", "a table lock"],
+  ["TRUNCATE commissions;", "a truncate"],
+  ["CREATE TRIGGER t BEFORE UPDATE ON public.inventory_holds FOR EACH ROW EXECUTE FUNCTION f();", "a trigger on holds"],
+  ["CREATE POLICY p ON quote_items FOR SELECT USING (true);", "a policy"],
+  ["GRANT SELECT ON TABLE public.invoice_items TO authenticated;", "a grant"],
+  ["SELECT id FROM public.invoices WHERE id = 1 FOR UPDATE;", "a row lock on invoices"],
+  ["CREATE FUNCTION public.post_invoice_v2() RETURNS void AS $$ SELECT 1 $$;", "a function named for invoices"],
+  ["DROP FUNCTION IF EXISTS public.release_hold(uuid);", "dropping a hold function"],
+  [null, "SQL that could not be read"],
+]) ok(isTahaLaneSql(sql), `Taha's: ${why}`);
+for (const [sql, why] of [
+  ["UPDATE deliveries SET driver_id = NULL; INSERT INTO activity_feed (x) VALUES (1);", "deliveries only"],
+  ["SELECT count(*) FROM invoices i JOIN orders o ON o.id = i.order_id;", "reading invoices"],
+  ["-- UPDATE invoices SET x = 1\n/* INSERT INTO payments */ SELECT 1;", "lane words only in comments"],
+  ["UPDATE invoices_archive SET x = 1;", "a table that only starts with a lane name"],
+  ["CREATE OR REPLACE FUNCTION public.close_delivery_receipt() AS $$ SELECT 1 $$;", "a neutral function"],
+  ["CREATE FUNCTION public.save_spray_job_invoice() AS $$ SELECT 1 $$;", "a field-billing function name"],
+]) ok(!isTahaLaneSql(sql), `not Taha's: ${why}`);
+const mig = (filename, sql) => ({ filename, status: "added", sql });
+ok(tahaLaneProblem({ files: [mig("supabase/migrations/20270226213000_refuse_impossible_quantities_and_dates.sql", "ALTER TABLE public.order_items ADD CHECK (q > 0);")], now: NOW }),
+  "a neutral-named migration that changes order lines is refused");
+eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270227000000_driver.sql", "UPDATE deliveries SET x = 1;")], now: NOW }), null, "a neutral migration on deliveries passes");
+eq(tahaLaneProblem({ files: [mig("supabase/migrations/20270227000000_driver.sql", null)], now: NOW })?.files, ["supabase/migrations/20270227000000_driver.sql (its SQL could not be read)"], "unreadable SQL refuses, and says why");
+
+// Reading the SQL from GitHub at the PR's commit.
+const REF = "a".repeat(40);
+const ghFake = (answers) => { const calls = []; const fn = (args) => { calls.push(args); const a = answers(args); if (a instanceof Error) throw a; return a; }; fn.calls = calls; return fn; };
+const migTsv = `added\tsupabase/migrations/20270227_x.sql\t\t${REF}\nremoved\tsupabase/migrations/20270101_old.sql\t\t\nmodified\tsrc/a.ts\t\t${REF}\n`;
+let fake = ghFake((args) => args.includes("--paginate") ? migTsv : "UPDATE orders SET x = 1;");
+eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake }), [
+  { filename: "supabase/migrations/20270227_x.sql", previous_filename: undefined, sql: "UPDATE orders SET x = 1;" },
+  { filename: "supabase/migrations/20270101_old.sql", previous_filename: undefined, sql: null },
+  { filename: "src/a.ts", previous_filename: undefined },
+], "migrations carry their SQL; a removed one is unreadable; app files carry none");
+ok(fake.calls.some((a) => a.includes("Accept: application/vnd.github.raw") && a.some((x) => x === `repos/o/r/contents/supabase/migrations/20270227_x.sql?ref=${REF}`)), "the SQL is read at the PR's own commit");
+eq(fake.calls.length, 2, "only the one readable migration is fetched");
+fake = ghFake((args) => args.includes("--paginate") ? migTsv : new Error("404"));
+eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake })[0].sql, null, "a failed SQL read is unreadable, not empty");
+fake = ghFake((args) => args.includes("--paginate") ? `added\tsupabase/migrations/20270227_x.sql\t\t\n` : "UPDATE orders SET x = 1;");
+eq(prFilesOnGitHub({ repo: "o/r", number: 7, gh: fake })[0].sql, null, "no commit to read at is unreadable");
+
 eq(tahaLaneProblem({ files: f("src/pages/Quotes.tsx"), now: TAHA_LANE_UNTIL_MS }), null, "off after Dec 15");
 eq(tahaLaneProblem({ files: null, now: TAHA_LANE_UNTIL_MS + 1 }), null, "off after Dec 15 even when unreadable");
 ok(tahaLaneProblem({ files: f("src/pages/Quotes.tsx"), now: TAHA_LANE_UNTIL_MS - 1 }), "still on at the last moment of Dec 15");

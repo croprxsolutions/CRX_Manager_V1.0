@@ -8,6 +8,7 @@ vi.mock('./db', () => ({
 
 import {
   closeDeliveryReceipt, isReceiptChanged, isReceiptSendingNow, receiptCloseScope, receiptMayAlreadyBeSent, receiptsToCheckFilter,
+  queuedMeanwhileWarning,
 } from './receiptsToCheck';
 
 const result = (over = {}) => ({
@@ -60,5 +61,23 @@ describe('receiptMayAlreadyBeSent', () => {
     expect(receiptMayAlreadyBeSent(result({ send_authorized_at: '2026-11-08T12:00:00Z' }))).toBe(true);
     expect(receiptMayAlreadyBeSent(result())).toBe(false);
     expect(receiptMayAlreadyBeSent(result({ outcome: 'none' }))).toBe(false);
+  });
+});
+
+describe('queuedMeanwhileWarning (#2291)', () => {
+  const row = (status: string, sent_at: string | null = null, send_authorized_at: string | null = null) => ({ status, sent_at, send_authorized_at });
+  it('is quiet only for no receipt, or one handled with no send recorded or authorized', () => {
+    expect(queuedMeanwhileWarning(null)).toBeNull();
+    expect(queuedMeanwhileWarning(row('cancelled'))).toBeNull();
+  });
+  it('says a handled receipt the server emailed may be a second copy (Sol r2 MED)', () => {
+    expect(queuedMeanwhileWarning(row('cancelled', '2026-11-23T06:00:00Z'))).toMatch(/may have two receipts/);
+    expect(queuedMeanwhileWarning(row('cancelled', null, '2026-11-23T06:00:00Z'))).toMatch(/may have two receipts/);
+    expect(queuedMeanwhileWarning(row('needs_check', '2026-11-23T06:00:00Z'))).toMatch(/may have two receipts/);
+  });
+  it('points to the list for one to check, and warns for one still waiting', () => {
+    expect(queuedMeanwhileWarning(row('needs_check'))).toMatch(/Customer receipts to check/);
+    expect(queuedMeanwhileWarning(row('pending'))).toMatch(/server may email it too/);
+    expect(queuedMeanwhileWarning(row('sending'))).toMatch(/server may email it too/);
   });
 });

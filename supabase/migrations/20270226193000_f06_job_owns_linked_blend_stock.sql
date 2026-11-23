@@ -12,7 +12,9 @@
 --   * A ticket cannot leave a job that already recorded the spray (BLEND_TICKET_COMPLETED_JOB_KEEPS_TICKET), so it
 --     cannot be unlinked and then recorded a second time.
 --   * A ticket can only be linked to a job of its own customer (BLEND_TICKET_JOB_OTHER_CUSTOMER), as save_blend_ticket
---     already requires; this also covers new tickets, direct office table updates and a later customer change.
+--     already requires; this also covers new tickets, direct office table updates and a later customer change, on the
+--     ticket or on the job (Mason, 2026-11-23, after Luna round 5: a job's customer cannot change while a ticket of
+--     another customer would be left linked to it).
 -- Both posting functions (job completion, Create App Record) are unchanged: application_records has no write policy
 -- (only these definer functions insert it), and the link is guarded on the table because office users may update
 -- blend_tickets directly. Old rows are not touched: production has no blend tickets (read-only, 2026-11-23); staging
@@ -28,7 +30,8 @@ SET LOCAL lock_timeout = '5s';
 DO $preflight$
 BEGIN
   IF to_regprocedure('public._f06_application_record_one_deduction()') IS NOT NULL
-     OR to_regprocedure('public._f06_blend_ticket_link_keeps_stock_once()') IS NOT NULL THEN
+     OR to_regprocedure('public._f06_blend_ticket_link_keeps_stock_once()') IS NOT NULL
+     OR to_regprocedure('public._f06_job_customer_keeps_linked_tickets()') IS NOT NULL THEN
     RAISE EXCEPTION 'F06_PREFLIGHT: already applied';
   END IF;
 END
@@ -124,17 +127,44 @@ CREATE TRIGGER blend_ticket_link_keeps_stock_once_f06
   BEFORE INSERT OR UPDATE OF job_id, customer_id ON public.blend_tickets
   FOR EACH ROW EXECUTE FUNCTION public._f06_blend_ticket_link_keeps_stock_once();
 
+CREATE FUNCTION public._f06_job_customer_keeps_linked_tickets()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $fn$
+BEGIN
+  IF NEW.customer_id IS NOT DISTINCT FROM OLD.customer_id THEN
+    RETURN NEW;
+  END IF;
+  -- The UPDATE already holds this job row, so a link change on a ticket (which locks the job) waits for it and then
+  -- sees the new customer; a link committed first is seen here.
+  IF EXISTS (SELECT 1 FROM public.blend_tickets bt
+              WHERE bt.job_id = NEW.id AND bt.customer_id IS DISTINCT FROM NEW.customer_id) THEN
+    RAISE EXCEPTION 'BLEND_TICKET_JOB_OTHER_CUSTOMER: this spray job has a blend ticket linked to it for its current customer, so the job''s customer can''t change. Unlink the ticket first.'
+      USING ERRCODE = 'P0001';
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+ALTER FUNCTION public._f06_job_customer_keeps_linked_tickets() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public._f06_job_customer_keeps_linked_tickets() FROM PUBLIC, anon, authenticated, service_role;
+CREATE TRIGGER job_customer_keeps_linked_tickets_f06
+  BEFORE UPDATE OF customer_id ON public.jobs
+  FOR EACH ROW EXECUTE FUNCTION public._f06_job_customer_keeps_linked_tickets();
+
 DO $postflight$
 BEGIN
   IF (SELECT count(*) FROM pg_proc p
        WHERE p.oid IN (to_regprocedure('public._f06_application_record_one_deduction()'),
-                       to_regprocedure('public._f06_blend_ticket_link_keeps_stock_once()'))
+                       to_regprocedure('public._f06_blend_ticket_link_keeps_stock_once()'),
+                       to_regprocedure('public._f06_job_customer_keeps_linked_tickets()'))
          AND p.prosecdef
          AND pg_get_userbyid(p.proowner) = 'postgres'
          AND p.proconfig = ARRAY['search_path=public, pg_temp']
          AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
          AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
-         AND NOT has_function_privilege('service_role', p.oid, 'EXECUTE')) <> 2 THEN
+         AND NOT has_function_privilege('service_role', p.oid, 'EXECUTE')) <> 3 THEN
     RAISE EXCEPTION 'F06_POSTFLIGHT: guard functions security, owner, search_path or grants are not as reviewed';
   END IF;
   IF (SELECT count(*) FROM pg_trigger t
@@ -142,7 +172,9 @@ BEGIN
          AND ((t.tgrelid = 'public.application_records'::regclass AND t.tgname = 'application_record_one_deduction_f06'
                AND t.tgfoid = to_regprocedure('public._f06_application_record_one_deduction()'))
            OR (t.tgrelid = 'public.blend_tickets'::regclass AND t.tgname = 'blend_ticket_link_keeps_stock_once_f06'
-               AND t.tgfoid = to_regprocedure('public._f06_blend_ticket_link_keeps_stock_once()')))) <> 2 THEN
+               AND t.tgfoid = to_regprocedure('public._f06_blend_ticket_link_keeps_stock_once()'))
+           OR (t.tgrelid = 'public.jobs'::regclass AND t.tgname = 'job_customer_keeps_linked_tickets_f06'
+               AND t.tgfoid = to_regprocedure('public._f06_job_customer_keeps_linked_tickets()')))) <> 3 THEN
     RAISE EXCEPTION 'F06_POSTFLIGHT: guard triggers missing or disabled';
   END IF;
 END

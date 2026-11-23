@@ -355,8 +355,8 @@ function applyCandidate() {
   assert.match(again.output, /F06_PREFLIGHT: already applied/);
   assert.equal(scalar(`SELECT string_agg(p.proname || ':' || p.prosecdef || ':' || pg_get_userbyid(p.proowner) || ':' || has_function_privilege('authenticated', p.oid, 'EXECUTE'), ',' ORDER BY p.proname)
     FROM pg_proc p WHERE p.proname LIKE '\\_f06\\_%';`),
-    '_f06_application_record_one_deduction:true:postgres:false,_f06_blend_ticket_link_keeps_stock_once:true:postgres:false');
-  console.log('[apply] candidate applies once (postflight passed), a second run is refused; both guards are definer, owned by postgres, not callable by app users');
+    '_f06_application_record_one_deduction:true:postgres:false,_f06_blend_ticket_link_keeps_stock_once:true:postgres:false,_f06_job_customer_keeps_linked_tickets:true:postgres:false');
+  console.log('[apply] candidate applies once (postflight passed), a second run is refused; all three guards are definer, owned by postgres, not callable by app users');
 }
 
 async function afterCases() {
@@ -417,6 +417,11 @@ UPDATE public.jobs SET status = 'cancelled' WHERE id = '${JOB(3)}';\nSET LOCAL s
   // 9. A ticket cannot be linked to another customer's job, even by a direct table update.
   refused(link(6, JOB(11)), /BLEND_TICKET_JOB_OTHER_CUSTOMER/, 'case 9');
   console.log("[case 9] linking T6 to J11 (another customer's job) by a direct table update: refused");
+  // Luna round 5: the job side too. A linked job's customer cannot change; an unlinked job's, or a save that keeps it, can.
+  refused(`${link(4, JOB(4))}\nUPDATE public.jobs SET customer_id = '${CUST2}' WHERE id = '${JOB(4)}';`, /BLEND_TICKET_JOB_OTHER_CUSTOMER/, 'case 9 job customer change');
+  assert.equal(ok(`${link(4, JOB(4))}\nUPDATE public.jobs SET customer_id = '${CUST}' WHERE id = '${JOB(4)}';\nSELECT 'kept';`), 'kept', 'case 9 job save keeping its customer');
+  assert.equal(ok(`UPDATE public.jobs SET customer_id = '${CUST2}' WHERE id = '${JOB(6)}';\nSELECT customer_id FROM public.jobs WHERE id = '${JOB(6)}';`), CUST2, 'case 9 unlinked job customer change');
+  console.log("[case 9] changing linked J4's customer: refused; a save keeping it, or changing unlinked J6's customer: saved");
   await races();
 }
 
@@ -458,7 +463,7 @@ function rollbackCases() {
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
   assert.equal(scalar("SELECT count(*) FROM pg_proc WHERE proname LIKE '\\_f06\\_%';"), '0');
   assert.equal(Number(ok(`${link(3, JOB(3))}\n${complete(3)}\n${record(3)}\n${ON_HAND}`)), Number(scalar(ON_HAND)) - 20);
-  console.log('[rollback] the reverse script removes both guards and the old behaviour returns (linked job and ticket both deduct)');
+  console.log('[rollback] the reverse script removes the three guards and the old behaviour returns (linked job and ticket both deduct)');
 }
 
 async function main() {

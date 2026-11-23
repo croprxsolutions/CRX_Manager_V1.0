@@ -22,8 +22,8 @@ Smallest change: one new migration (`20270226193000_f06_job_owns_linked_blend_st
 1. `BEFORE INSERT` trigger on `application_records` (definer function):
    - `blend_ticket` record whose ticket (locked `FOR UPDATE`) is linked to a live job (job then locked; not cancelled, not deleted) → refuse `BLEND_TICKET_JOB_RECORDS`. A cancelled or deleted job cannot complete, so its ticket records as before (Sol round 1, HIGH 1).
    - `job` record: lock the job row, then (next statement) refuse `JOB_BLEND_TICKET_ALREADY_RECORDED` if a ticket linked to this job has its own record. Only old rows can reach this; the link rules stop new ones.
-   - `job` record for a job with a linked ticket that lists products but no chemical lines of its own → refuse `JOB_BLEND_TICKET_NEEDS_CHEMICALS` (Mason, 2026-11-23, Sol round 1 HIGH 2).
-2. `BEFORE UPDATE OF job_id` trigger on `blend_tickets` (definer function), returning at once when `job_id` did not change:
+   - (Removed after Luna round 4, decision 5: the job takes exactly its own chemical list, even an empty one; no `JOB_BLEND_TICKET_NEEDS_CHEMICALS` refusal.)
+2. `BEFORE INSERT OR UPDATE OF job_id, customer_id` trigger on `blend_tickets` (definer function), returning at once on an update that changes neither:
    - linking a ticket that has its own record → refuse `BLEND_TICKET_RECORDED_NO_JOB`;
    - linking to a job of another customer → refuse `BLEND_TICKET_JOB_OTHER_CUSTOMER` (the save RPC already checks; this covers direct table updates; Sol round 1 HIGH 3);
    - moving or unlinking a ticket whose old job is already recorded (old job locked first) → refuse `BLEND_TICKET_COMPLETED_JOB_KEEPS_TICKET`.
@@ -40,7 +40,7 @@ Who may act is unchanged: both RPCs keep their role checks; triggers only add re
 - **Retry:** a refused call writes nothing; the idempotency receipt is bound only after success, so a retry is refused again the same way.
 - **Old rows:** a linked ticket that recorded before an unfinished job: an admin reverses the ticket record (stock back), then the job completes. A pair where both already recorded (staging's synthetic pair): reversing the ticket record alone restores the single deduction; nothing else to do.
 - **Accepted gap (as KI-93; Mason, 2026-11-23, Luna round 2 HIGH 2):** a ticket never linked to its job, or unlinked before the job completed, is invisible to the database.
-- **Luna round 2 HIGH 1:** a ticket with products cannot be linked to a job already completed with no chemicals (`BLEND_TICKET_JOB_NEEDS_CHEMICALS`); the link change locks old and new job in one statement, in id order.
+- **Luna round 2 HIGH 1 (later removed, decision 5):** a ticket with products cannot be linked to a job already completed with no chemicals (`BLEND_TICKET_JOB_NEEDS_CHEMICALS`); the link change locks old and new job in one statement, in id order.
 - **Consequences Mason accepted with (A):** stock comes out at the job's chemical amounts, not the ticket's measured amounts; ticket lot numbers are not copied onto the spray record; a ticket linked to the wrong completed job needs an admin to fix by hand.
 
 ## Delivery
@@ -57,7 +57,7 @@ One database PR to `staging` (migration + sanitizer messages + ledger + docs). T
 5. Recorded ticket → linking refused; unrelated ticket and job each record as before.
 6. The internal ticket-record body is guarded too (trigger on the table).
 7. Two-session races: completion vs unlink (unlink waits on the lock, then refused); record vs link (link refused).
-8. Sol round 1: a linked job with no chemicals cannot complete until a line is added; a ticket on a cancelled job records; linking to another customer's job is refused.
+8. A linked job with no chemicals completes and takes nothing, and its ticket still cannot record (decision 5); a ticket on a cancelled job records; linking to another customer's job is refused, on new tickets and customer changes too.
 9. Mutation: drop the link guard → the unlink goes through. Rollback script restores the old behaviour.
 10. Staging browser check after merge: the refusal reads in plain words on Blend Ticket Detail.
 
@@ -80,7 +80,8 @@ HIGH 1 (cancelled job strands a billed ticket), HIGH 2 (job with no chemicals; M
 ## Business decisions
 
 1. **When a spray job has a blend ticket linked to it, which one takes the chemicals out of stock?** Mason, 2026-11-23: **(A) the job.** (Rejected: (B) the ticket, which rewrites job completion; (C) whichever is recorded first, which can block the applicator from closing the job.)
-2. **A spray job with a linked blend ticket but no chemicals entered:** Mason, 2026-11-23: **refuse completion** until the chemicals are added (rejected: accept that stock stays too high and the spray record lists no chemicals).
+2. **A spray job with a linked blend ticket but no chemicals entered:** (superseded by decision 5) Mason, 2026-11-23: **refuse completion** until the chemicals are added (rejected: accept that stock stays too high and the spray record lists no chemicals).
 3. **A ticket unlinked from its job before the job is completed:** Mason, 2026-11-23: **accept the gap** (treated like a ticket never linked; the office keeps the ability to correct a wrong link). Rejected: remembering past links.
-4. **Luna round 3 (third round in a row with a new HIGH in the job-owns-stock exceptions):** Mason, 2026-11-23: **fix both, then Sol** — a cancelled or deleted job that already recorded still owns the stock; only chemicals from our stock count; a linked ticket's customer change is checked. If Sol finds another case here, stop and offer the simpler design (a linked ticket never records on its own).
+4. **Luna round 3 (third round in a row with a new HIGH in the job-owns-stock exceptions):** Mason, 2026-11-23: **fix both, then Sol** — a cancelled or deleted job that already recorded still owns the stock; only chemicals from our stock count; a linked ticket's customer change is checked. Agreed fallback if the exceptions keep growing: the simpler design (a linked ticket never records on its own).
 5. **Luna round 4 (new holes in the no-chemicals rule):** Mason, 2026-11-23: **the job's own chemical list always counts** — the no-chemicals refusals (`JOB_BLEND_TICKET_NEEDS_CHEMICALS`, `BLEND_TICKET_JOB_NEEDS_CHEMICALS`) are removed and decision 2 is superseded. The customer check also runs on new tickets and after the job lock.
+6. **Luna round 5 (a job's customer could change under a linked ticket; third round on the same-customer rule):** Mason, 2026-11-23: **add the job-side check** — `BEFORE UPDATE OF customer_id ON jobs` refuses the change while a ticket of another customer is linked (`BLEND_TICKET_JOB_OTHER_CUSTOMER`).

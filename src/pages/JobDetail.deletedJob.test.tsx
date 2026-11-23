@@ -194,6 +194,21 @@ describe('JobDetail — refused cancel', () => {
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringMatching(/already cancelled/)));
     expect(logActivity).not.toHaveBeenCalled();
   });
+
+  it('a cancel refused because the job was deleted reloads it as deleted and locked', async () => {
+    serveJob(makeJob({}), makeJob({ deleted_at: '2026-11-02T15:00:00Z' }));
+    mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'
+      ? editJobsReply([{ id: 'job-x', reason: 'deleted' }])
+      : { data: null, error: null }));
+    mountAt('/jobs/job-x');
+    await screen.findByRole('heading', { name: 'J-0001' });
+    await confirmCancel();
+    expect(await screen.findByText(/deleted on 11\/2\/2026/)).toBeTruthy();
+    for (const name of [/Start Job/, /Complete Job/, /Save Changes/]) {
+      expect(screen.queryByRole('button', { name })).toBeNull();
+    }
+    expect(logActivity).not.toHaveBeenCalled();
+  });
 });
 
 describe('JobDetail — expired-license Assign Anyway (#2174)', () => {

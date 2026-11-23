@@ -372,7 +372,7 @@ export function sanitizeError(error: unknown): string {
     return "This job was deleted, so it can't be invoiced. Nothing was invoiced.";
   }
   // 20270222100000: Create Invoice on a spray job names the chemical it can't invoice and why (never the cost).
-  const jobLine = /^(JOB_LINE_(?:BELOW_COST|UNIT_UNCONVERTIBLE|COST_MISSING|ROUNDING|QUANTITY_INVALID|PRICE_NOT_WHOLE_CENTS)|JOB_FIELD_NO_BILLING_SPLIT)(?::|$)/.exec(message)?.[1];
+  const jobLine = /^(JOB_LINE_(?:BELOW_COST|UNIT_UNCONVERTIBLE|COST_MISSING|ROUNDING|QUANTITY_INVALID|PRICE_NOT_WHOLE_CENTS|SUPPLIED_BUT_STOCK_USED)|JOB_FIELD_NO_BILLING_SPLIT)(?::|$)/.exec(message)?.[1];
   if (jobLine) {
     // Product names and units are typed by users: fold line breaks and drop text-direction and invisible characters so they cannot split or reorder the sentence.
     return message.slice(jobLine.length).replace(/^:\s*/, '')

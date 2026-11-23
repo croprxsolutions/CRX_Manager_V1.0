@@ -468,6 +468,15 @@ SET LOCAL session_replication_role = replica;
 UPDATE jobs SET deleted_at = now() WHERE id = (SELECT id FROM j);
 SET LOCAL session_replication_role = origin;
 ${asAdmin}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());`,
+  // Sol round 7: a line marked as the grower's own product after completion took company stock ('job_applied' on this job).
+  suppliedStockUsed: `${asAdmin}
+CREATE TEMP TABLE j AS SELECT ${job('Gal', 10, 0, 0, G, true)} AS id;
+RESET ROLE;
+SET LOCAL session_replication_role = replica;
+INSERT INTO inventory_transactions (product_id, transaction_type, quantity, from_location, performed_by, notes, job_id)
+  SELECT '${P}', 'job_applied', 10, 'Main Warehouse', '${ADMIN}', 'JBC completion', (SELECT id FROM j);
+SET LOCAL session_replication_role = origin;
+${asAdmin}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());`,
 };
 // The wall itself, outside the transfer: a below-cost line written straight into a transfer-made draft invoice.
 const directLine = `${transferOnly(job('Gal', 10, 5000))}
@@ -599,6 +608,8 @@ async function main() {
   console.log('[after] deletedTicket: a deleted blend ticket with a live invoice blocks (BLEND_TICKET_ALREADY_BILLED)');
   refusedProbe(CASES.deletedJob, /JOB_DELETED/);
   console.log('[after] deletedJob: refused JOB_DELETED');
+  refusedProbe(CASES.suppliedStockUsed, /JOB_LINE_SUPPLIED_BUT_STOCK_USED: \[PROVER\] JBC chem was taken from company stock when this job was completed, but is now marked as the grower's own product\. Nothing was invoiced/);
+  console.log('[after] suppliedStockUsed: refused JOB_LINE_SUPPLIED_BUT_STOCK_USED, naming the product, nothing billed');
   refusedProbe(directLine, /BELOW_COST_CONTEXT_REQUIRED/);
   console.log('[after] a below-cost invoice line written outside the transfer: still refused by the unchanged wall');
 

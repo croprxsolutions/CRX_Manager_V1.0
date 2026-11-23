@@ -25,7 +25,9 @@
 --     job is refused (JOB_DELETED) and a deleted blend ticket with a live invoice blocks (Sol round 1).
 --     Every field needs a billing split (JOB_FIELD_NO_BILLING_SPLIT names the ones without; the job's fields and
 --     splits are locked first), and a job whose fields are all billed to one owner is invoiced to that owner
---     (Mason, 2026-11-22: each owner is billed for their own fields' acres).
+--     (Mason, 2026-11-22: each owner is billed for their own fields' acres). A line marked customer-supplied whose
+--     product was taken from company stock when the job was completed is refused (JOB_LINE_SUPPLIED_BUT_STOCK_USED,
+--     Sol round 7).
 --  The below-cost wall is unchanged: a line priced per sold unit is judged by it exactly. Grants, owners, SECURITY
 --  DEFINER and search_path are unchanged. No stored row changes; old invoices keep their quantity-1 lines.
 --
@@ -192,6 +194,7 @@ CREATE OR REPLACE FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(
 AS $function$
 DECLARE
   v_unsplit_fields text;
+  v_supplied_used text;
   v_payer_id uuid;
   v_job RECORD;
   v_invoice_id uuid;
@@ -300,6 +303,18 @@ BEGIN
       AND i.deleted_at IS NULL
   ) THEN
     RAISE EXCEPTION 'BLEND_TICKET_ALREADY_BILLED: a blend ticket for this job has already been billed; invoicing the job too would double-bill the customer. Void that blend-ticket invoice first if you meant to re-bill here.';
+  END IF;
+
+  -- 20270222100000 (Sol round 7): a line marked as the grower's own product after completion took company stock
+  -- (complete_job writes 'job_applied' only for lines not customer-supplied), so it is never turned into a $0 line.
+  SELECT p.product_name INTO v_supplied_used
+    FROM job_chemicals jc JOIN products p ON p.id = jc.product_id
+   WHERE jc.job_id = p_job_id AND jc.customer_supplied
+     AND EXISTS (SELECT 1 FROM inventory_transactions it
+                  WHERE it.job_id = p_job_id AND it.product_id = jc.product_id AND it.transaction_type = 'job_applied')
+   ORDER BY p.product_name LIMIT 1;
+  IF FOUND THEN
+    RAISE EXCEPTION 'JOB_LINE_SUPPLIED_BUT_STOCK_USED: % was taken from company stock when this job was completed, but is now marked as the grower''s own product. Nothing was invoiced; correct the job''s chemical line first.', v_supplied_used USING ERRCODE = 'P0001';
   END IF;
 
   FOR v_field IN
@@ -1001,7 +1016,7 @@ BEGIN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '8597859b35d0c25b28046e94bda62cba'
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '0db2f031523db3ab6c70bc7f1b5a86e9'
      OR v_price IS NULL OR v_split IS NULL
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '0d225231da5e5adc8d21ed092796270a'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN

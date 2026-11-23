@@ -357,6 +357,8 @@ describe('sanitizeError', () => {
       .toBe("Roundup can't be recorded to 4 decimals in Gal without its amount changing by more than $0.50.");
     expect(sanitizeError('JOB_LINE_COST_MISSING: Roundup has no cost recorded.')).toBe('Roundup has no cost recorded.');
     expect(sanitizeError('JOB_LINE_QUANTITY_INVALID')).toContain('check its quantity, unit and cost');
+    expect(sanitizeError("JOB_LINE_SUPPLIED_BUT_STOCK_USED: Roundup was taken from company stock when this job was completed, but is now marked as the grower's own product. Nothing was invoiced; correct the job's chemical line first."))
+      .toBe("Roundup was taken from company stock when this job was completed, but is now marked as the grower's own product. Nothing was invoiced; correct the job's chemical line first.");
     expect(sanitizeError('JOB_LINE_BELOW_COST: Round​up\nPro\u0007 is priced below its cost on this job.'))
       .toBe('Roundup Pro is priced below its cost on this job.');
     expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. \u202Esmraf\u202C\u061C still has open invoices. Settle them first'))

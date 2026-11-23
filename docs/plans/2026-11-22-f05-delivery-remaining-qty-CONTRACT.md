@@ -59,7 +59,7 @@ Database PR first (target `staging`, Sol required: migration + inventory). Scree
 
 1. The audit's over-scheduling case (staging ORD-2026-0017): a second load for an order line's last unit is refused `DELIVERY_OVER_ORDER`; nothing created. (Exact steps stay in the private audit notes until the fix is live.)
 2. Reverse order (follow-up first, then New Delivery) → New Delivery refused (existing check), follow-up stands.
-3. Legacy double schedule already present (two open loads for one unit, created with the trigger disabled): completing either → refused `DELIVERY_EXCEEDS_ORDER`, naming the other load (Mason, 2026-11-22); nothing kept by the refused call; after the office cancels one, the other completes. An in-progress load cannot be edited, so the message says cancel, not reduce (rls-security-reviewer M1).
+3. Legacy double schedule already present (two open loads for one unit, created with the trigger disabled): completing either → refused `DELIVERY_EXCEEDS_ORDER`, naming only the product, not the other load (Mason, 2026-11-22; the driver must not learn of other loads, see the settlements below); nothing kept by the refused call; after the office cancels one, the other completes. An in-progress load cannot be edited, so the message says cancel, not reduce (rls-security-reviewer M1).
 4. Order cut 10 → 6 while 10 scheduled → refused `ORDER_LINE_BELOW_DELIVERIES`; after editing the delivery to 6, the cut succeeds.
 5. Order cut below delivered (no open loads) → refused.
 6. Partial completion (schedule 10, deliver 6) → allowed; remainder 4 created; follow-up for 4 allowed.

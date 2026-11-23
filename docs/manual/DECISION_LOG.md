@@ -1,5 +1,34 @@
 # Decision Log
 
+## 2026-11-22 — #2260: Mason owner-accepted 1 Sol finding(s) at `2986f407e617`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2260 at `2986f407e617` (base `47947bc95348`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224130000_split_save_refuses_blend_billed_job.sql:468`, text sha256 `32047052df1dc593` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 23b34b05e204)
+
+## 2026-11-22 — #2260: Mason owner-accepted 1 Sol finding(s) at `4d163d2f76dd`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2260 at `4d163d2f76dd` (base `6aceb0747958`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224130000_split_save_refuses_blend_billed_job.sql:468`, text sha256 `b4e9fb8b4fb0cabc` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a468655881f9)
+
+## 2026-11-22 — #2260: Mason owner-accepted 1 Sol finding(s) at `855ce0932fc2`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2260 at `855ce0932fc2` (base `9c77cd3a5d22`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270220100000_split_save_refuses_blend_billed_job.sql:468`, text sha256 `4a61b3259237e652` (the wording stays with the proof, not here)
+  Mason's reason: can’t happen (ref 85a503d1eaa9)
+
+## 2026-11-22 — #2260: Mason owner-accepted 1 Sol finding(s) at `554e0478f5fa`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2260 at `554e0478f5fa` (base `a7785529318b`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270220100000_split_save_refuses_blend_billed_job.sql:468`, text sha256 `5e2a94a0171ff80b` (the wording stays with the proof, not here)
+  Mason's reason: I acceot (ref eb5211ed82bb)
+
+## 2026-11-22 — #2063: a job a blend ticket billed is not billed again by a split field invoice
+
+**Decision (Mason, 2026-11-22: "Yes, accept all four" in the Lane A session; "Accept all four (Recommended)" in the bug-captain session).** (1) A blend-ticket invoice counts as billing its job from creation, drafts included, until it is voided, cancelled or deleted (the rule Transfer to Invoice and the blend invoice already use). (2) A refused split save names the blend ticket and its invoice number, never the amount, and says to void that invoice first or ask an admin. (3) Bills entered without choosing the job are not caught; accepted gap. (4) A split set whose invoices were all voided keeps holding its job, unchanged; a possible follow-up. Lane A builds #2063 (supersedes the issue note naming Taha). Sol round 1 narrowed (2): the message names only the invoice numbers the person may already open (a rep sees "an invoice you cannot open" for an admin's invoice, never a count); Sol round 3 dropped the ticket number (user-typed text) and the message now says to ask an admin to void or delete it (voiding is admin-only). Contract: `docs/plans/2026-11-22-job-double-bill-blend-CONTRACT.md`.
+
+**Decision (Mason, 2026-11-22, in the bug-captain session: "Ship with today's rule (Recommended)"), on Sol round 2's one HIGH.** A draft whose blend-ticket link was set by hand through the general invoice save still blocks the job's split invoice: the same rule Transfer to Invoice and the blend-ticket invoice already use. It can only wrongly hold a job, never double-bill, and the refusal says to void the invoice or ask an admin. Closing that loose link in the general invoice save is follow-up #2254 (owner Taha, his invoice area).
 ## 2026-11-22 — #2242: Mason owner-accepted 2 Sol finding(s) at `89407911738d`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2242 at `89407911738d` (base `a7a12c782afc`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
@@ -93,7 +122,7 @@
 ## 2026-11-22 — #2264: Mason owner-accepted 1 Sol finding(s) at `fdf75b56929b`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2264 at `fdf75b56929b` (base `f9750a8a4b66`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
-- Finding 1 (HIGH) at `supabase/migrations/20270218100000_f05_order_line_quantity_guard.sql:62`, text sha256 `a0571bb37993f57e` (the wording stays with the proof, not here)
+- Finding 1 (HIGH) at `supabase/migrations/20270218100000_f05_order_line_quantity_guard.sql:62` (the file's name when Sol reviewed it; since restamped to `20270224100000`), text sha256 `a0571bb37993f57e` (the wording stays with the proof, not here)
   Mason's reason: old double-booked orders get fixed by hand in F05b (ref cfb23a2ce43d)
 ## 2026-11-22 — PR #2226: staging merges never carry a Sol proof; skipped Sol findings never carry onto a newer base
 
@@ -283,7 +312,7 @@
 **What this forbids/implies:** KI-191, KI-198, KI-185 and #2075 are built to these rules; Transfer, office auto-draft and Split Billing must agree.
 ## 2026-11-22 — F05: two open loads holding the same units: neither completes until the office cancels one
 
-The staging audit (2026-11-21) found one order line scheduled past what was ordered, so 2 ordered ended 3 delivered. The fix (`20270218100000_f05_order_line_quantity_guard.sql`) refuses any write that would put delivered + open loads past what was ordered.
+The staging audit (2026-11-21) found one order line scheduled past what was ordered, so 2 ordered ended 3 delivered. The fix (`20270224100000_f05_order_line_quantity_guard.sql`, first drafted as `20270218100000`) refuses any write that would put delivered + open loads past what was ordered.
 
 **Decision (Mason, in chat, 2026-11-22: "yes"):** where two open loads already hold the same units from before the fix, completing either in a way that would deliver more than was ordered is refused until the office cancels or reduces the extra load (a partial completion that still fits with the other open load is allowed). The driver is told to call the office; stock never moves twice. Rejected: first load to complete wins (the second driver finds out only at the farm).
 

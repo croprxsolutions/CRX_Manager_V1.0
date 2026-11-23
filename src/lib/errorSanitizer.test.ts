@@ -680,6 +680,19 @@ describe('product setup and import refusals (20261107090000)', () => {
   });
 });
 
+describe('sanitizeError #2063 blend-billed refusal', () => {
+  // The exact sentence 20270224130000 raises (no ticket number since Sol round 3).
+  const sentence = (shown: string) => 'a blend ticket for this job is already billed (%); billing the job here too would double-bill the customer. If you meant to bill the job here, ask an admin to void or delete that blend-ticket invoice first.'.replace('%', shown);
+  it('keeps the server sentence whole for an invoice the caller may open', () => {
+    expect(sanitizeError('BLEND_TICKET_ALREADY_BILLED: ' + sentence('invoice INV-1001')))
+      .toBe(sentence('invoice INV-1001'));
+  });
+  it('keeps the server sentence whole for an invoice the caller cannot open', () => {
+    expect(sanitizeError('BLEND_TICKET_ALREADY_BILLED: ' + sentence('an invoice you cannot open')))
+      .toBe(sentence('an invoice you cannot open'));
+  });
+});
+
 describe('customer receipt refusals (KI-25)', () => {
   it('drops the database code and keeps plain words', () => {
     expect(sanitizeError(new Error('DELIVERY_NOT_COMPLETED: this delivery is not completed any more; do not send its receipt')))

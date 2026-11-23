@@ -1,4 +1,4 @@
--- Reverse of 20270225140000_drop_inert_delivery_short_stock_trigger.sql: re-creates _mark_delivery_aggregate_short_stock
+-- Reverse of 20270226173000_drop_inert_delivery_short_stock_trigger.sql: re-creates _mark_delivery_aggregate_short_stock
 -- (the 20260716191000 body, byte for byte), its grants and comment, and trg_mark_delivery_aggregate_short_stock.
 -- Run as one transaction (psql -1). Proven by scripts/smoke/prove-drop-inert-delivery-short-stock-trigger-real-schema.mjs.
 

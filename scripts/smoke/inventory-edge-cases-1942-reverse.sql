@@ -44,7 +44,7 @@ BEGIN
      = 'f13018d7449506ff80c69facfb51b000' THEN
     RAISE EXCEPTION 'ROLLBACK_REFUSED: #2135 relies on this body; run scripts/smoke/single-short-stock-warning-reverse.sql first';
   END IF;
-  -- #2225 (20270225140000) dropped the short-stock ledger trigger that the restored body relies on: undo #2225 first.
+  -- #2225 (20270226173000) dropped the short-stock ledger trigger that the restored body relies on: undo #2225 first.
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mark_delivery_aggregate_short_stock'
                    AND tgrelid = 'public.inventory_transactions'::regclass AND tgenabled = 'O'
                    AND tgtype = 7) THEN  -- BEFORE INSERT FOR EACH ROW: only that shape can flag the new row

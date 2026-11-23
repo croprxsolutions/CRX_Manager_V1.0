@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270220100000_split_save_refuses_blend_billed_job (#2063).
+ * Real-schema proof for 20270224130000_split_save_refuses_blend_billed_job (#2063).
  * Contract: docs/plans/2026-11-22-job-double-bill-blend-CONTRACT.md (proof cases 1-10).
  * Container setup, replay and seed copied from probe-job-double-bill-blend-real-schema.mjs. Blend-ticket invoices
  * are made by create_invoice_from_blend_ticket with triggers on; only the legacy deleted-ticket case is inserted
@@ -29,7 +29,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270220100000_split_save_refuses_blend_billed_job.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270224130000_split_save_refuses_blend_billed_job.sql');
 // A later or parked file that (re)defines what the candidate changes or this proof relies on.
 const TOUCHED = /(_save_field_app_split_invoice_impl|save_field_app_split_invoice|create_invoice_from_blend_ticket|enforce_linked_blend_ticket_header_lock|FUNCTION (public\.)?void_invoice\()/i;
 const PARKED = new Set([

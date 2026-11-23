@@ -1,5 +1,5 @@
 -- Written 2026-11-22. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270220100000_split_save_refuses_blend_billed_job.md.
+-- docs/reference/migrations.d/20270224130000_split_save_refuses_blend_billed_job.md.
 --
 -- WHY (#2063): the field-application split save (_save_field_app_split_invoice_impl) checked other split sets and the
 --   job's own invoice, but never a blend-ticket invoice for the job, so one spray pass could be billed twice: once from

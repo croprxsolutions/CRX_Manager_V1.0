@@ -2,7 +2,7 @@
 
 Read at `origin/staging` a77855293 (2026-11-22). Status: **settled for the split-save fix (#2063)**; the transfer
 hardening (#2061) is a later follow-up, built on the spray-invoice quote-price PR's transfer body after it lands.
-Migration: `supabase/migrations/20270220100000_split_save_refuses_blend_billed_job.sql`. Prover:
+Migration: `supabase/migrations/20270224130000_split_save_refuses_blend_billed_job.sql`. Prover:
 `scripts/smoke/prove-split-save-refuses-blend-billed-job-real-schema.mjs`.
 
 ## Facts
@@ -141,7 +141,7 @@ staff-photo policies; named in the prover), so a pass shows the split refusal on
 | 36 | Fixed: proof 5. |
 | 37 | Fixed: F6 lists queries' scope and role. |
 | 38 | Fixed: F3/F6 live trigger binding, body md5, owner, indexes. |
-| 39 | Stamp `20270220100000` sorts after every split-impl definition; F7; preflight md5. |
+| 39 | Stamp `20270224130000` sorts after every split-impl definition; F7; preflight md5. |
 | 40 | Settled (Established decisions). |
 | 41 | Transfer isolation is out of this PR (transfer follow-up). |
 | 43 | Rollback (State, timing). |

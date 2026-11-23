@@ -142,7 +142,7 @@ function plan() {
   const r = spawnSync(process.execPath, ['scripts/list-post-baseline-migrations.mjs', '--include-one-shot'], { cwd: ROOT, encoding: 'utf8' });
   if (r.status !== 0) throw new Error(r.stderr);
   const all = r.stdout.split(/\r?\n/).filter((x) => x.startsWith('supabase/migrations/')).map((x) => path.join(ROOT, x))
-    .filter((f) => path.basename(f) !== '20270220100000_split_save_refuses_blend_billed_job.sql');
+    .filter((f) => path.basename(f) !== '20270224130000_split_save_refuses_blend_billed_job.sql');
   for (const name of PARKED) assert.ok(all.some((f) => path.basename(f) === name), `${name} must be in the replay plan (re-check the PARKED list)`);
   return all;
 }

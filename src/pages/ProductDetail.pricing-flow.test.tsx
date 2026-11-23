@@ -998,6 +998,29 @@ describe('ProductDetail governed pricing flow', () => {
     expect(screen.queryByText(/Editing is locked until the latest values load/i)).toBeNull();
   });
 
+  it('#2308: an older Product read that is superseded does not release Reload Product while the newer read is out', async () => {
+    mockLoadRateLock.mockResolvedValue({ ...ratesOpen, is_locked: true, changed_by_name: 'Other Admin', reason: 'season' });
+    render(<ProductDetail />);
+    const banner = await screen.findByTestId('product-rates-locked');
+    // A failed reload after a correction leaves editing locked, with Reload Product offered.
+    fireEvent.click(await within(banner).findByRole('button', { name: 'Correct rates' }));
+    productLoadResults.push({ data: null, error: new Error('reload failed') });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+    expect(await screen.findByRole('button', { name: 'Reload Product' })).toBeEnabled();
+    // Two Finish clicks while the first Product read is still out: the second read supersedes the first.
+    fireEvent.click(within(banner).getByRole('button', { name: 'Correct rates' }));
+    let settleSecond: (value: unknown) => void = () => {};
+    productLoadResults.push(new Promise(() => {}) as never);
+    productLoadResults.push(new Promise((resolve) => { settleSecond = resolve; }) as never);
+    fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reload Product' })).toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Finish correction' }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole('button', { name: 'Reload Product' })).toBeDisabled();
+    settleSecond({ data: null, error: new Error('reload failed') });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reload Product' })).toBeEnabled());
+  });
+
   it('#2308: leaving the Product during Reload Product shows no failure toast', async () => {
     const { unmount } = render(<ProductDetail />);
     const quotingNotes = await screen.findByLabelText('Quoting Notes');

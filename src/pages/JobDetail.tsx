@@ -315,6 +315,8 @@ export default function JobDetail() {
   const savedLoaderRef = useRef({ groundCrewId: '', carrier: '', capacity: '' });
   // The job as last loaded: Save is refused if someone else changed it since (applicator, date, crew, ...).
   const loadedJobSnapshotRef = useRef<JobStaleSnapshot | null>(null);
+  // The edit last sent to save_job with no confirmed reply yet (a retry of it skips the stale check).
+  const unconfirmedJobSaveScopeRef = useRef<string | null>(null);
   const isNew = id === 'new';
   const isEditable = role === 'admin' || role === 'sales_rep';
   // Cost is admin-only (Mason, 2026-10-15): the server works it out for everyone else's saves.
@@ -2793,15 +2795,6 @@ export default function JobDetail() {
 
     setSaving(true);
     try {
-      // Refuse a save over someone else's newer change instead of silently replacing it.
-      if (!isNew && loadedJobSnapshotRef.current) {
-        const changed = await jobChangedSinceLoaded(id!, loadedJobSnapshotRef.current);
-        if (changed.length > 0) {
-          if (stillOnThisJob()) toast('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
-          setSaving(false);
-          return;
-        }
-      }
       const payload = {
         customer_id: customerId,
         job_date: jobDate,
@@ -2895,6 +2888,25 @@ export default function JobDetail() {
       // lost reply is refused with the committed job, which the catch below opens; an edit to an existing job gets a
       // key per exact payload, since re-applying an edit to the same job is harmless.
       const saveScope = isNew ? 'new' : fingerprintIntentPayload([id, payload, fieldsPayload, chemsPayload]);
+      // Refuse a save over someone else's newer change instead of silently replacing it. Skipped when this exact
+      // edit was already sent without a confirmed reply: it may have committed, and save_job's replay must answer.
+      if (!isNew && loadedJobSnapshotRef.current && unconfirmedJobSaveScopeRef.current !== saveScope) {
+        let changed: string[];
+        try {
+          changed = await jobChangedSinceLoaded(id!, loadedJobSnapshotRef.current);
+        } catch (readErr) {
+          Sentry.captureException(toSentryError(readErr), { extra: { context: 'job_stale_edit_check' } });
+          if (stillOnThisJob()) toast('error', sanitizeError(readErr));
+          setSaving(false);
+          return;
+        }
+        if (changed.length > 0) {
+          if (stillOnThisJob()) toast('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
+          setSaving(false);
+          return;
+        }
+      }
+      unconfirmedJobSaveScopeRef.current = saveScope;
       if (lastJobSaveScopeRef.current && lastJobSaveScopeRef.current !== saveScope) saveJobIdem.resetKeyFor(lastJobSaveScopeRef.current);
       lastJobSaveScopeRef.current = saveScope;
       const { data, error } = await supabase.rpc('save_job', {
@@ -2913,6 +2925,7 @@ export default function JobDetail() {
       }
       const result = assertRpcResult<SaveJobResult>(data, 'save_job');
       saveJobIdem.resetKeyFor(saveScope);
+      unconfirmedJobSaveScopeRef.current = null;
       const savedJobIdForNotify = isNew ? result.job_id : (id as string);
 
       // Fires HERE — at the commit point — not on the success path further down, because two

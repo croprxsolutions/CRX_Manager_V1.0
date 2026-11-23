@@ -8,10 +8,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { mockFrom, mockRpc, mockToast } = vi.hoisted(() => ({
+const { mockFrom, mockRpc, mockToast, eqCalls } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockRpc: vi.fn(),
   mockToast: vi.fn(),
+  eqCalls: [] as unknown[][],
 }));
 
 const CHAIN_METHODS = ['select', 'insert', 'update', 'upsert', 'delete', 'eq', 'neq',
@@ -23,6 +24,7 @@ const CHAIN_METHODS = ['select', 'insert', 'update', 'upsert', 'delete', 'eq', '
 function buildChain(result: { data: unknown; error: unknown }): Record<string, unknown> {
   const self: Record<string, unknown> = {};
   for (const m of CHAIN_METHODS) self[m] = () => self;
+  self.eq = (...args: unknown[]) => { eqCalls.push(args); return self; };
   const promise = Promise.resolve(result);
   self.then = promise.then.bind(promise);
   self.catch = promise.catch.bind(promise);
@@ -65,27 +67,32 @@ const JOB = {
   job_fields: [], job_chemicals: [], job_field_shares: [], applied_info: null,
 };
 
-/** First jobs read = the page load; every later one = the pre-save re-read, answered with `current`. */
-function serveJob(current: Record<string, unknown>) {
+/** First jobs read = the page load; read n (n >= 2) = the n-1th pre-save re-read, answered with `current[n-2]` (or the last). */
+function serveJob(...current: Record<string, unknown>[]) {
   let jobsCalls = 0;
   mockFrom.mockImplementation((table: string) => {
     if (table === 'jobs') {
       jobsCalls += 1;
-      return buildChain({ data: jobsCalls === 1 ? JOB : current, error: null });
+      return buildChain({ data: jobsCalls === 1 ? JOB : current[Math.min(jobsCalls - 2, current.length - 1)], error: null });
     }
     return buildChain({ data: [], error: null });
   });
+}
+
+async function clickSave() {
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Save Changes/ })); });
 }
 
 async function openAndSave() {
   const router = createMemoryRouter([{ path: '/jobs/:id', element: <JobDetail /> }], { initialEntries: ['/jobs/job-a'] });
   render(<RouterProvider router={router} />);
   await screen.findByRole('heading', { name: 'J-AAAA-1001' });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Save Changes/ })); });
+  await clickSave();
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  eqCalls.length = 0;
   mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'save_job'
     ? { data: { job_id: 'job-a' }, error: null }
     : { data: null, error: null }));
@@ -96,11 +103,33 @@ describe('JobDetail stale-edit refusal', () => {
     ['applicator', { applicator_id: 'other-applicator' }],
     ['date', { job_date: '2026-03-09' }],
     ['crew', { ground_crew_id: 'crew-2' }],
+    // A billing split change leaves every job total as it was.
+    ['billing split', { job_field_shares: [{ field_id: 'f1', customer_id: 'cust-2', split_pct: 50, is_primary: false }] }],
   ])('refuses the save when someone else changed the %s after the page loaded', async (_label, change) => {
     serveJob({ ...JOB, ...change });
     await openAndSave();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE));
     expect(mockRpc).not.toHaveBeenCalledWith('save_job', expect.anything());
+    expect(eqCalls).toContainEqual(['id', 'job-a']);
+  });
+
+  it('lets the exact retry of a save whose reply was lost reach save_job, even though it committed', async () => {
+    // The first save commits but its reply is lost, so the re-read now sees this user's own change. Refusing the
+    // retry would strand the edit unconfirmed; save_job's idempotent replay must answer it instead.
+    serveJob(JOB, { ...JOB, notes: 'committed by the lost save' });
+    let saves = 0;
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn !== 'save_job') return Promise.resolve({ data: null, error: null });
+      saves += 1;
+      return Promise.resolve(saves === 1
+        ? { data: null, error: { message: 'Failed to fetch' } }
+        : { data: { job_id: 'job-a' }, error: null });
+    });
+    await openAndSave();
+    await waitFor(() => expect(saves).toBe(1));
+    await clickSave();
+    await waitFor(() => expect(saves).toBe(2));
+    expect(mockToast).not.toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
   });
 
   it('saves normally when nothing changed underneath', async () => {

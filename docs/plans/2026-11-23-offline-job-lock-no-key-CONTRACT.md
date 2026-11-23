@@ -49,3 +49,14 @@ Database only, one migration, compatible with the deployed app (same signature, 
 ## Open business decisions
 
 None.
+
+## Status: PARKED (2026-11-23 overnight), behind #2170
+
+Sol round 1 (gpt-6.2-sol high, capture kept in the session scratchpad) returned two HIGHs that share one cause with Astra #4 and Luna r1's MED, so this is the same mechanism a third time:
+
+1. The weaker outer lock (`FOR NO KEY UPDATE`) lets another transaction take `KEY SHARE` on the job through a child row's foreign key and then wait to update the job, while `complete_job`'s inner body upgrades to `FOR UPDATE` (`20261217100000_job_access_ends_with_the_job.sql:539`). Sol's concrete case is the office spray-record save (its EPA-history trigger, `20261204120000_job_lines_keep_epa_number.sql:201/260`), not `load_recipe_into_job` (the app lost EXECUTE on that in `20261023100000`). A deadlock there can cancel the office save.
+2. Landing `20270225120000` first makes the staging stamp gate refuse #2170's `20270224170000`.
+
+The real fix is to take the job `FOR NO KEY UPDATE` everywhere completion locks it, including the inner `complete_job` body that #2170 also redefines. So this change belongs inside #2170 or on top of it after it merges (restamped after it), not ahead of it. Proof work here is reusable: the forced sibling-race prover (`scripts/smoke/prove-offline-job-lock-no-key-update-real-schema.mjs`) shows the deadlock before and both completions finishing after.
+
+Sol MEDs to carry: the prover should pin #2170's SQL by hash rather than read a branch ref; force lock waits with advisory locks or `pg_locks` polling instead of fixed delays; require exactly one application record per job and per-job stock deltas; re-key the cost-exposure allowlist after apply. LOWs: correct section 5's office-path inventory (spray save, the EPA trigger's `FOR SHARE`); pin the full ACL in the preflight.

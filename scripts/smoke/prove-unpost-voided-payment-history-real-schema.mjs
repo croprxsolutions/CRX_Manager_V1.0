@@ -9,6 +9,7 @@
  *   APPLY:  autocommit refused, POSTFLIGHT_OK, re-apply refused by the md5 pin.
  *   AFTER:  (a) it unposts; the draft saves with its lines and re-posts; the voided payment's rows keep invoice_id and
  *               amount, lose only their line link, and the audit row keeps each one's allocation, line and amount;
+ *          (a3) the same for a legacy row naming the line with no invoice_id (filled with this invoice) or a stale one;
  *          (a2) without that unlink, the draft save is refused by invoice_line_allocations_invoice_item_id_fkey;
  *          (b) an active payment still blocks; (c) one voided and one active payment still block;
  *          (e) a non-payment allocation still blocks, even on an inactive set, and so does an active payment
@@ -61,10 +62,13 @@ const history = (inv = 'u') => `(SELECT count(*) || '/' || count(*) FILTER (WHER
   WHERE a.invoice_id = ${inv} AND s.entity_type = 'payment' AND NOT s.is_active)`;
 const audit = `(SELECT new_values->'voided_payment_history_unlinked' FROM public.financial_audit_log
   WHERE operation_type = 'invoice_unposted' AND entity_id = u ORDER BY created_at DESC LIMIT 1)`;
-// The audit row must keep the line each unlinked row named (f0, read before the unpost) with its allocation and amount.
+// The audit row must keep the line each unlinked row named (f0), its allocation (f1), amount and prior invoice_id (f2),
+// all read before the unpost.
 const linkedLine = `f0 := (SELECT invoice_item_id::text FROM public.invoice_line_allocations WHERE allocation_set_id = (r->>'allocation_set_id')::uuid);
-  f1 := (SELECT id::text FROM public.invoice_line_allocations WHERE allocation_set_id = (r->>'allocation_set_id')::uuid);`;
-const auditKeepsLine = (cents) => `(${audit} = jsonb_build_array(jsonb_build_object('allocation_id', f1, 'invoice_item_id', f0, 'amount_cents', ${cents})))::text`;
+  f1 := (SELECT id::text FROM public.invoice_line_allocations WHERE allocation_set_id = (r->>'allocation_set_id')::uuid);
+  f2 := (SELECT invoice_id::text FROM public.invoice_line_allocations WHERE allocation_set_id = (r->>'allocation_set_id')::uuid);`;
+const auditKeepsLine = (cents) => `(${audit} = jsonb_build_array(jsonb_build_object('allocation_id', f1, 'invoice_item_id', f0, 'amount_cents', ${cents},
+  'invoice_id_before', f2)))::text`;
 const status = (inv = 'u') => `(SELECT status FROM public.invoices WHERE id = ${inv})`;
 const REFUSED = /^ok\|Cannot unpost invoice \S+ — it has payments, prepay, write-offs, or applied credit/;
 
@@ -72,6 +76,14 @@ const caseA = `${draft('a-s1')} ${post('a-p1')} ${pay('a-pay', 100000)} ${voidPa
   ${unpost('a-un')} v := ${status()} || '|' || ${history()} || '|audit ' || coalesce(${auditKeepsLine(100000)}, '-');
   ${saveBack('a-s2')} v := v || '|saved ' || (SELECT count(*) FROM public.invoice_items WHERE invoice_id = u);
   ${post('a-p2')} v := v || '|' || ${status()} || '|' || ${history()};`;
+// (a3) a legacy row that names the line but has no invoice_id, or a stale one: unpost still unlinks it (filling a
+// missing invoice_id with this invoice, a stale one kept), and the draft saves and re-posts.
+const caseA3 = (before, after) => `${draft('a3-s1')} ${post('a3-p1')} ${pay('a3-pay', 100000)} ${voidPay('a3-void')} ${legacyLink()}
+  UPDATE public.invoice_line_allocations SET invoice_id = ${before} WHERE allocation_set_id = (r->>'allocation_set_id')::uuid;
+  ${linkedLine} ${unpost('a3-un')} v := ${status()} || '|audit ' || coalesce(${auditKeepsLine(100000)}, '-') || '|row '
+    || (SELECT (invoice_item_id IS NULL AND invoice_id IS NOT DISTINCT FROM ${after})::text FROM public.invoice_line_allocations WHERE id = f1::uuid);
+  ${saveBack('a3-s2')} v := v || '|saved ' || (SELECT count(*) FROM public.invoice_items WHERE invoice_id = u);
+  ${post('a3-p2')} v := v || '|' || ${status()};`;
 const caseA2 = `${draft('a2-s1')} ${post('a2-p1')} ${pay('a2-pay', 100000)} ${voidPay('a2-void')} ${legacyLink()}
   ${unpost('a2-un')} ${legacyLink()} BEGIN ${saveBack('a2-s2')} t := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN t := SQLERRM; END; v := t;`;
 // Part-paid, so the invoice is still 'posted' and the money check (not the paid-status check) is what refuses.
@@ -79,12 +91,13 @@ const caseB = `${draft('b-s1')} ${post('b-p1')} ${pay('b-pay', 60000)} ${refuse(
 const caseC = `${draft('c-s1')} ${post('c-p1')} ${pay('c-pay1', 60000)} ${pay('c-pay2', 40000, 'r3')} ${voidPay('c-void')}
   ${refuse(`r2 := public.unpost_invoice(u, '${ADMIN}', 'c-un');`)} v := t;`;
 // Allocation rows written directly, so paid stays 0 and only the allocation count can block: a non-payment set
-// (active or not) and an active payment set still count.
-const caseE = (entity, active) => { const set = randomUUID(); return `${draft('e-s1')} ${post('e-p1')}
+// (active or not) and an active payment set still count, also when the row names only one of the lines (lineOnly).
+const caseE = (entity, active, lineOnly = false) => { const set = randomUUID(); return `${draft('e-s1')} ${post('e-p1')}
   INSERT INTO public.allocation_sets (id, entity_type, entity_id, customer_id, is_active, created_by, payment_date)
     VALUES ('${set}', '${entity}', u, '${CUST}', ${active}, '${ADMIN}', ${entity === 'payment' ? 'CURRENT_DATE' : 'NULL'});
-  INSERT INTO public.invoice_line_allocations (allocation_set_id, invoice_id, bill_to_customer_id, split_percentage, amount_cents)
-    VALUES ('${set}', u, '${CUST}', 100, 1000);
+  INSERT INTO public.invoice_line_allocations (allocation_set_id, invoice_id, invoice_item_id, bill_to_customer_id, split_percentage, amount_cents)
+    VALUES ('${set}', ${lineOnly ? 'NULL' : 'u'}, ${lineOnly ? '(SELECT id FROM public.invoice_items WHERE invoice_id = u ORDER BY sort_order, id LIMIT 1)' : 'NULL'},
+      '${CUST}', 100, 1000);
   ${refuse(`r2 := public.unpost_invoice(u, '${ADMIN}', 'e-un');`)} v := t || ' paid=' || (SELECT paid_amount_cents FROM public.invoices WHERE id = u);`; };
 // The group members' ids, resolved after the seed (a signed-in call cannot read undo_paths).
 let G1;
@@ -139,13 +152,18 @@ try {
   // (a2) the unlink is what lets the save through.
   assert.match(attempt(ADMIN, caseA2), /^ok\|.*invoice_line_allocations_invoice_item_id_fkey/);
   console.log('[a2] with the line link put back, the draft save is refused by invoice_line_allocations_invoice_item_id_fkey');
+  for (const [before, after, label] of [['NULL', 'u', 'no invoice_id'], [G2, G2, 'a stale invoice_id']]) {
+    assert.equal(attempt(ADMIN, caseA3(before, after)), 'ok|unposted|audit true|row true|saved 2|posted', label);
+  }
+  console.log('[a3] a legacy history row naming the line with no invoice_id (filled) or a stale one (kept) is unlinked and audited; the draft saves and re-posts');
   // (b), (c), (e) still refused.
   assert.match(attempt(ADMIN, caseB), REFUSED);
   assert.match(attempt(ADMIN, caseC), REFUSED);
-  for (const [entity, active] of [['invoice', true], ['invoice', false], ['payment', true]]) {
-    assert.match(attempt(ADMIN, caseE(entity, active)), /^ok\|Cannot unpost invoice \S+ — it has payments.* paid=0$/, `${entity} ${active}`);
+  for (const [entity, active, lineOnly] of [['invoice', true], ['invoice', false], ['payment', true], ['payment', true, true]]) {
+    assert.match(attempt(ADMIN, caseE(entity, active, lineOnly)), /^ok\|Cannot unpost invoice \S+ — it has payments.* paid=0$/,
+      `${entity} ${active} ${lineOnly ? 'line only' : ''}`);
   }
-  console.log('[b/c/e] an active payment, one voided plus one active payment, an invoice-type allocation (active or not), and an active payment allocation with paid 0 still block');
+  console.log('[b/c/e] an active payment, one voided plus one active payment, an invoice-type allocation (active or not), and an active payment allocation with paid 0 (naming the invoice, or only a line) still block');
   // (d) group unpost.
   assert.equal(attempt(ADMIN, caseD()), 'ok|unposted,unposted|1/1/60000|audit true|posted,posted|1/1/60000');
   assert.match(attempt(ADMIN, caseD2()), /^ok\|Cannot unpost invoice \S+ — it has payments/);

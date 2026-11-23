@@ -5,15 +5,17 @@
 -- Change (CREATE OR REPLACE of _unpost_invoice_replay_impl_20261015, the body unpost_invoice and
 -- unpost_invoice_group both run; same signature, owner, SECURITY DEFINER, search_path and postgres-only EXECUTE):
 --   1. The allocation count skips rows whose set is a voided payment (entity_type 'payment' AND is_active = false),
---      the same rule void_invoice uses. An active payment, an order or invoice set, paid/prepay/write-off/credit
---      amounts, prepay and credit applications all still refuse, as before.
---   2. On a successful unpost those history rows lose only their invoice_item_id (they keep invoice_id, amount and
---      set): every draft save deletes and re-adds the lines, and the invoice_item_id foreign key has no ON DELETE,
---      so a row still naming a line would refuse the first save. allocate_payment has written invoice_id only since
---      20260315200000; rows from before then also name a line. The unpost audit row keeps each unlinked row's line
---      (new_values.voided_payment_history_unlinked: [{allocation_id, invoice_item_id, amount_cents}]).
---   3. The audit description's dollar amount is numeric(20,2) (was numeric(12,2), which overflows on a 10-billion-
---      dollar total and would roll the unpost back).
+--      the same rule void_invoice uses, and now also counts a row that names only one of this invoice's lines. An
+--      active payment, an order or invoice set, paid/prepay/write-off/credit amounts, prepay and credit
+--      applications all still refuse, as before.
+--   2. On a successful unpost, every voided-payment row naming one of this invoice's lines (whatever its invoice_id)
+--      loses only its invoice_item_id: every draft save deletes and re-adds the lines, and the invoice_item_id
+--      foreign key has no ON DELETE, so a row still naming a line would refuse the first save. allocate_payment has
+--      written invoice_id only since 20260315200000; rows from before then also name a line. A row with no
+--      invoice_id gets this invoice's (ila_target_check needs one of the two). The unpost audit row keeps each one
+--      (new_values.voided_payment_history_unlinked: [{allocation_id, invoice_item_id, amount_cents, invoice_id_before}]).
+--   3. The audit description's dollar amount is (cents * 0.01)::numeric(20,2) (was / 100.0 then numeric(12,2), which
+--      overflows on a 10-billion-dollar total and would roll the unpost back).
 -- Body otherwise byte-identical to the 20260711050000 body renamed in 20261102180000 (md5 pinned below). No other
 -- data changes.
 --
@@ -95,9 +97,11 @@ BEGIN
 
   -- #2265: a voided payment keeps its allocation rows as history on an inactive payment set
   -- (20260718221505); they are no longer money on this invoice, so they do not block unpost.
-  -- Every other allocation (an active payment, any order or invoice set) still does.
+  -- Every other allocation (an active payment, any order or invoice set) still does, whether it names
+  -- this invoice or only one of its lines (a pre-2026-03-15 row may carry the line alone).
   SELECT count(*) INTO v_alloc_count FROM invoice_line_allocations ila
-   WHERE ila.invoice_id = p_invoice_id
+   WHERE (ila.invoice_id = p_invoice_id
+          OR ila.invoice_item_id IN (SELECT ii.id FROM invoice_items ii WHERE ii.invoice_id = p_invoice_id))
      AND NOT EXISTS (SELECT 1 FROM allocation_sets hist WHERE hist.id = ila.allocation_set_id
                        AND hist.entity_type = 'payment' AND hist.is_active = false);
   SELECT count(*) INTO v_prepay_count FROM prepay_applications     WHERE invoice_id = p_invoice_id;
@@ -127,24 +131,26 @@ BEGIN
   PERFORM set_config('app.admin_override', 'false', true);
 
   -- #2265: a draft save deletes and re-adds every line, and invoice_line_allocations.invoice_item_id
-  -- has no ON DELETE, so a history row still naming a line would refuse the first save. Unlink the
-  -- line only; the row keeps its invoice_id, amount and set, and the audit row below keeps each
-  -- row's line and amount (the line attribution survives there).
+  -- has no ON DELETE, so a history row still naming one of this invoice's lines would refuse the
+  -- first save, whatever its invoice_id says. Unlink the line only; the row keeps its amount and set,
+  -- and its invoice_id (a missing one is filled with this invoice, which ila_target_check needs once
+  -- the line is gone). The audit row below keeps each row's line, amount and prior invoice_id.
   WITH history AS (
-    SELECT ila.id, ila.invoice_item_id, ila.amount_cents
+    SELECT ila.id, ila.invoice_id, ila.invoice_item_id, ila.amount_cents
       FROM invoice_line_allocations ila
-     WHERE ila.invoice_id = p_invoice_id
-       AND ila.invoice_item_id IS NOT NULL
+     WHERE ila.invoice_item_id IN (SELECT ii.id FROM invoice_items ii WHERE ii.invoice_id = p_invoice_id)
        AND EXISTS (SELECT 1 FROM allocation_sets hist WHERE hist.id = ila.allocation_set_id
                      AND hist.entity_type = 'payment' AND hist.is_active = false)
        FOR UPDATE OF ila
   ), unlinked AS (
-    UPDATE invoice_line_allocations ila SET invoice_item_id = NULL
+    UPDATE invoice_line_allocations ila
+       SET invoice_item_id = NULL, invoice_id = COALESCE(ila.invoice_id, p_invoice_id)
       FROM history h WHERE ila.id = h.id
-    RETURNING h.id, h.invoice_item_id, h.amount_cents
+    RETURNING h.id, h.invoice_id, h.invoice_item_id, h.amount_cents
   )
   SELECT COALESCE(jsonb_agg(jsonb_build_object('allocation_id', u.id, 'invoice_item_id', u.invoice_item_id,
-                                               'amount_cents', u.amount_cents) ORDER BY u.id), '[]'::jsonb)
+                                               'amount_cents', u.amount_cents, 'invoice_id_before', u.invoice_id)
+                    ORDER BY u.id), '[]'::jsonb)
     INTO v_history_unlinked
     FROM unlinked u;
 
@@ -165,7 +171,7 @@ BEGIN
     jsonb_build_object('status', 'unposted', 'unposted_at', now()::text, 'rup_rows_voided', v_rup_voided,
       'voided_payment_history_unlinked', v_history_unlinked),
     -1 * COALESCE(v_inv.total_amount_cents, 0),
-    'Unposted ' || v_inv.invoice_number || ' (was ' || v_inv.status || ') — $' || (COALESCE(v_inv.total_amount_cents,0) / 100.0)::numeric(20,2)
+    'Unposted ' || v_inv.invoice_number || ' (was ' || v_inv.status || ') — $' || (COALESCE(v_inv.total_amount_cents,0) * 0.01)::numeric(20,2)
       || CASE WHEN v_rup_voided > 0 THEN '; ' || v_rup_voided || ' RUP sale row(s) voided' ELSE '' END
   );
 
@@ -212,7 +218,7 @@ DECLARE
 BEGIN
   SELECT * INTO p FROM pg_proc WHERE oid = to_regprocedure('public._unpost_invoice_replay_impl_20261015(uuid,uuid,text)');
   IF p.oid IS NULL
-     OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '7e00d6a01a40649b6f31f2956182e2f2'
+     OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM 'fc357251b73caf37728691c574ebe9b5'
      OR p.proowner <> 'postgres'::regrole
      OR NOT p.prosecdef
      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]

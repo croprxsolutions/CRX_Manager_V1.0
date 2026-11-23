@@ -1130,6 +1130,29 @@ describe('ProductDetail governed pricing flow', () => {
     expect(screen.getByRole('button', { name: 'Reload Product' })).toBeEnabled();
   });
 
+  it('#2200: two Reload Product clicks report once, even when the first one\'s side read settles last', async () => {
+    render(<ProductDetail />);
+    const quotingNotes = await screen.findByLabelText('Quoting Notes');
+    fireEvent.change(quotingNotes, { target: { value: 'New guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await screen.findByText(/could not be refreshed, so what is shown may be out of date/i);
+    let settleFirstBasis: (value: unknown) => void = () => {};
+    mockGetCostBasisWorkspace.mockReturnValueOnce(new Promise((resolve) => { settleFirstBasis = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Product' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Reload Product' })).not.toBeInTheDocument());
+    // While the first reload's Cost Basis read is still out, a second failed refresh offers Reload Product again.
+    fireEvent.change(screen.getByLabelText('Quoting Notes'), { target: { value: 'Newer guidance' } });
+    productLoadResults.push({ data: null, error: { message: 'products unavailable' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reload Product' }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', 'Product reloaded.'));
+    settleFirstBasis(await mockGetCostBasisWorkspace.getMockImplementation()?.());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const reloadToasts = mockToast.mock.calls.filter(([, message]) => String(message).startsWith('Product reloaded'));
+    expect(reloadToasts).toEqual([['success', 'Product reloaded.']]);
+  });
+
   it('#2200: an out-of-date cost-basis read is not shown as the current basis in Cost History', async () => {
     mockGetCostBasisWorkspace.mockResolvedValueOnce({
       enabled: true,

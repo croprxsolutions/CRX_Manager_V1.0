@@ -17,7 +17,7 @@
  *   4. no expected_version saves as today;
  *   5. the page's own dispatch, carried into its version, saves; with someone else's dispatch change too, refused;
  *   6. printing, applied acres and a chemical's cost leave the version unchanged;
- *   7. a driver is refused job_edit_version; a sales rep gets one;
+ *   7. a driver, or a rep denied the Job Schedule page, is refused job_edit_version; a sales rep gets one;
  *   8. a malformed expected_version is refused; a driver's save carrying one gets INSUFFICIENT_ROLE;
  *   9. 20270226150000's refusal still fires: a completed job's chemicals can't change, current version or not.
  *
@@ -184,6 +184,10 @@ try {
   assert.equal(show('7 driver', attempt(DRIVER, `${refuse(`r := public.job_edit_version(${JOB});`)} v := t;`)), 'ok|INSUFFICIENT_ROLE');
   assert.equal(show('7 sales rep', attempt(REP, `${asUser(`r := public.job_edit_version(${JOB});`)} v := (r = public._job_edit_version(${JOB}))::text;`)), 'ok|true');
   assert.equal(scalar("SELECT has_function_privilege('authenticated', 'public._job_edit_version(uuid)', 'EXECUTE');"), 'f');
+  // A rep denied the Job Schedule page is refused, as edit_jobs refuses them (Sol round 1).
+  psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_append(coalesce(denied_pages, '{}'), 'jobs') WHERE id = '${REP}';`);
+  assert.equal(show('7 rep denied the jobs page', attempt(REP, `${refuse(`r := public.job_edit_version(${JOB});`)} v := t;`)), 'ok|INSUFFICIENT_ROLE');
+  psql(`SET session_replication_role = replica; UPDATE public.profiles SET denied_pages = array_remove(denied_pages, 'jobs') WHERE id = '${REP}';`);
 
   // 8. A malformed version is refused.
   assert.match(show('8 malformed', attempt(ADMIN, `${refuse(`r := ${save('[JV] bad', `'"x"'::jsonb`)};`)} v := t;`)), /^ok\|EXPECTED_VERSION_INVALID/);

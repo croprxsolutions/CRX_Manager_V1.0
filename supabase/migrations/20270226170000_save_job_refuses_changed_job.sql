@@ -5,13 +5,13 @@
 -- under the job row lock, after the replay lookup. Built on save_job as 20270226150000 (#2247) left it.
 --
 -- Changes:
---   1. _job_edit_version(uuid): internal. {core: md5 of the job's edited columns and its field, share
+--   1. _job_edit_version(uuid): internal. {core: md5 of the job's id, its edited columns and its field, share
 --      and chemical lines (line ids included, cost left out: every cost change is a delete + insert,
 --      so it changes the ids), dispatches: "job_field_id|applicator_id|crew_id|dispatch_status" per
 --      location, sorted}. Left out on purpose (as #2337): updated_at, printed_at, applied/remaining
 --      acres, which printing and applied records change.
 --   2. job_edit_version(uuid): what JobDetail reads BEFORE its job select (a change in between then
---      refuses the save instead of slipping through). Active admins and sales reps only.
+--      refuses the save instead of slipping through). Active admins, and sales reps not denied the Job Schedule page (as edit_jobs).
 --   3. save_job wrapper, same signature: 20270226150000's body plus one step. When an existing job's
 --      payload carries expected_version, its shape is checked before any lock. Under the locks
 --      20270226150000 already takes (the key's advisory lock, then the job row FOR UPDATE), a live
@@ -29,7 +29,8 @@
 --
 -- Rollback: re-run 20270226150000's save_job CREATE OR REPLACE and its REVOKE/GRANT; then
 --   DROP FUNCTION public.job_edit_version(uuid); DROP FUNCTION public._job_edit_version(uuid);
--- Either order with the screen is safe: the old body ignores expected_version.
+-- Roll back the screen first, then this: once job_edit_version is gone the screen can't load a version and
+-- blocks Save, and the old save_job ignores expected_version.
 
 DO $preflight$
 DECLARE
@@ -57,7 +58,7 @@ SET search_path = public, pg_temp
 AS $fn$
   SELECT CASE WHEN j.id IS NULL THEN NULL ELSE jsonb_build_object(
     'core', md5(jsonb_build_array(
-      jsonb_build_array(j.status, j.customer_id, j.job_date, j.scheduled_time, j.applicator_id, j.vehicle_id,
+      jsonb_build_array(j.id, j.status, j.customer_id, j.job_date, j.scheduled_time, j.applicator_id, j.vehicle_id,
         j.recipe_id, j.application_service_id, j.notes, j.batch_id, j.total_acres, j.total_price_cents, j.call_date,
         j.date_proposed, j.time_proposed, j.schedule_date, j.date_expires, j.consultant_id, j.loader_comment,
         j.additional_info, j.internal_memo, j.ground_crew_id, j.carrier_rate_gpa, j.loader_tank_capacity,
@@ -92,7 +93,9 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $fn$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_active AND role IN ('admin', 'sales_rep')) THEN
+  -- Who may edit jobs, as edit_jobs decides it (20270203110000): a rep denied the Job Schedule page is refused.
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_active
+                   AND (role = 'admin' OR (role = 'sales_rep' AND NOT coalesce('jobs' = ANY (denied_pages), false)))) THEN
     RAISE EXCEPTION 'INSUFFICIENT_ROLE' USING ERRCODE = 'P0001';
   END IF;
   RETURN public._job_edit_version(p_job_id);

@@ -92,8 +92,13 @@ BEGIN
   -- F05b #2274: nothing delivered is not a completion. The screens already refuse it (DeliveryDetail hasAnyQty,
   -- FieldStop); this is the server rule. Same figure per line as the body: the clamped figure sent for that line,
   -- or the full scheduled quantity when no figures were sent. A delivery with no lines is refused too. Raised here,
-  -- after the delivery row lock but before the line, order-line or stock locks and any write, inside the call, so
+  -- after the delivery row lock and before the order-line or stock locks and any write, inside the call, so
   -- offline sync records it for the office (23514 -> needs review); a replay (v_status 'replay') is never checked.
+  -- The lines are locked first: a direct line write does not lock the delivery, so one already in flight (say, a
+  -- line deleted while the load was still scheduled) must finish before the check reads them (Luna r2 HIGH).
+  IF v_status = 'in_progress' THEN
+    PERFORM 1 FROM public.delivery_items di WHERE di.delivery_id = p_delivery_id ORDER BY di.id FOR UPDATE;
+  END IF;
   IF v_status = 'in_progress'
      AND NOT EXISTS (SELECT 1 FROM public.delivery_items di
                       WHERE di.delivery_id = p_delivery_id
@@ -150,7 +155,7 @@ DO $postflight$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
                   WHERE p.oid = to_regprocedure('public._complete_delivery_authorized_impl(uuid,text,uuid,jsonb,text,text,text,timestamp with time zone)')
-                    AND md5(replace(p.prosrc, chr(13), '')) = '8567f3bbbe66fa56b8289e6252cde877'
+                    AND md5(replace(p.prosrc, chr(13), '')) = 'a017451765aa3adf6fdeeaa0b246e0ba'
                     AND p.prosecdef
                     AND p.proconfig = ARRAY['search_path=public, pg_temp']
                     AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')

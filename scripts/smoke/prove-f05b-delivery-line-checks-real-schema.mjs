@@ -267,7 +267,7 @@ const ADMIN = id('a1'), CUST = id('c1'), P = id('b1'), INV = id('d1'), ORD = id(
 // D1 all-zero target; D2 mixed (two lines); D3 scheduled, for start-and-complete; D4 in progress with no lines;
 // DL legacy completed with no lines (the March 2026 shape); D5 offline target; D6 completes, then replays its key.
 const D1 = id('f1'), D1A = id('f11'), D2 = id('f2'), D2A = id('f21'), D2B = id('f22'), D3 = id('f3'), D3A = id('f31');
-const D4 = id('f4'), DL = id('f9'), D5 = id('f5'), D5A = id('f51'), D6 = id('f6'), D6A = id('f61');
+const D4 = id('f4'), DL = id('f9'), D5 = id('f5'), D5A = id('f51'), D6 = id('f6'), D6A = id('f61'), D7 = id('f7'), D7A = id('f71');
 const OFF = id('ab1'), OFF_KEY = 'f05b-offline-1';
 
 function seed() {
@@ -292,7 +292,8 @@ function seed() {
       ('${D3}', 'F05B-D3', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'scheduled', false),
       ('${D4}', 'F05B-D4', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
       ('${D5}', 'F05B-D5', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
-      ('${D6}', 'F05B-D6', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false);
+      ('${D6}', 'F05B-D6', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'in_progress', false),
+      ('${D7}', 'F05B-D7', '${ORD}', '${CUST}', '${ADMIN}', '${ADMIN}', 'scheduled', false);
     INSERT INTO public.deliveries (id, delivery_number, order_id, customer_id, created_by, status, is_quick_delivery, completed_at, signed_by) VALUES
       ('${DL}', 'F05B-DL', '${ORD}', '${CUST}', '${ADMIN}', 'completed', false, '2026-03-20', 'Legacy');
     INSERT INTO public.delivery_items (id, delivery_id, order_item_id, product_id, quantity, unit_size) VALUES
@@ -300,7 +301,8 @@ function seed() {
       ('${D2A}', '${D2}', '${OI2}', '${P}', 1, 'Gal'), ('${D2B}', '${D2}', '${OI}', '${P}', 1, 'Gal'),
       ('${D3A}', '${D3}', '${OI}', '${P}', 1, 'Gal'),
       ('${D5A}', '${D5}', '${OI}', '${P}', 1, 'Gal'),
-      ('${D6A}', '${D6}', '${OI}', '${P}', 1, 'Gal');`);
+      ('${D6A}', '${D6}', '${OI}', '${P}', 1, 'Gal'),
+      ('${D7A}', '${D7}', '${OI}', '${P}', 1, 'Gal');`);
   console.log('[prover] seeded one order (10 and 5 units) with six open loads and one line-less legacy completed load');
 }
 
@@ -459,12 +461,31 @@ function rollbackCases() {
   console.log('[rollback] the reverse script restores the old completion step and drops the check: an all-zero completion goes through again');
 }
 
+// 10. Race (Luna r2 HIGH): a direct line delete that began while the load was scheduled is still open when
+//     start-and-complete runs. The check must wait for it and see the load has no lines left, not complete it empty.
+async function raceCase() {
+  const deleter = session(`BEGIN; DELETE FROM public.delivery_items WHERE id = '${D7A}'; SELECT pg_sleep(3); COMMIT;`);
+  const completer = session(`BEGIN;
+${AS_ADMIN}
+${startComplete(D7, null, 'f05b-10')};
+COMMIT;
+`, 1000);
+  const [d, c] = await Promise.all([deleter, completer]);
+  assert.equal(d.code, 0, d.out);
+  assert.notEqual(c.code, 0, `start-and-complete must be refused once the in-flight delete lands:
+${c.out}`);
+  assert.match(c.out, /DELIVERY_NOTHING_DELIVERED/);
+  assert.equal(state(D7), 'scheduled||0');
+  console.log('[case 10] race: a line delete in flight when start-and-complete runs is waited for; the now-empty load is refused and stays scheduled');
+}
+
 async function main() {
   buildContainer();
   seed();
   beforeCases();
   applyCandidate();
   afterCases();
+  await raceCase();
   rollbackCases();
   console.log('F05B_DELIVERY_LINE_CHECKS_PROOF_PASS');
 }

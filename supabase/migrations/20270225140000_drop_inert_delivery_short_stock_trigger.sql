@@ -63,13 +63,14 @@ BEGIN
   IF (SELECT count(*) FROM pg_trigger WHERE tgfoid = 'public._mark_delivery_aggregate_short_stock()'::regprocedure) <> 1 THEN
     RAISE EXCEPTION 'DROP_SHORT_STOCK_TRIGGER_BASELINE_DRIFT: another trigger uses _mark_delivery_aggregate_short_stock';
   END IF;
+
+  -- The drops live in this block so a refused check stops them even on a client that continues after errors (Sol r4).
+  -- Fail fast rather than queue every ledger write behind a long reader of inventory_transactions.
+  PERFORM set_config('lock_timeout', '5s', true);
+  DROP TRIGGER trg_mark_delivery_aggregate_short_stock ON public.inventory_transactions;
+  DROP FUNCTION public._mark_delivery_aggregate_short_stock();
 END;
 $preflight$;
-
--- Fail fast rather than queue every ledger write behind a long reader of inventory_transactions.
-SET LOCAL lock_timeout = '5s';
-DROP TRIGGER trg_mark_delivery_aggregate_short_stock ON public.inventory_transactions;
-DROP FUNCTION public._mark_delivery_aggregate_short_stock();
 
 DO $postflight$
 BEGIN

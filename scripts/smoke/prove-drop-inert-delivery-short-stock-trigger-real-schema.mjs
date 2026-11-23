@@ -113,6 +113,10 @@ try {
   const auto = run(candidate);
   assert.match(`${auto.stdout}${auto.stderr}`, /PREFLIGHT_FAIL: run this file as one transaction/, 'autocommit apply must refuse');
   assert.equal(fnState(), fnBefore, 'a refused apply changes nothing');
+  // Sol r4: autocommit on a client that continues after errors must change nothing either.
+  const autoContinue = run(candidate, ['-v', 'ON_ERROR_STOP=0']);
+  assert.match(`${autoContinue.stdout}${autoContinue.stderr}`, /PREFLIGHT_FAIL: run this file as one transaction/, 'continue-on-error autocommit must refuse');
+  assert.equal(fnState(), fnBefore, 'a continue-on-error autocommit apply changes nothing');
   const once = run(candidate, ['-1']);
   assert.equal(once.status, 0, `${once.stdout}${once.stderr}`);
   assert.match(`${once.stdout}${once.stderr}`, /POSTFLIGHT_OK/);

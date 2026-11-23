@@ -175,3 +175,21 @@ describe('DeliveryDetail edit: a driver taken while the form is open (Sol r2 HIG
     expect(editCalls()[0][1]).not.toHaveProperty('p_clear_driver');
   });
 });
+
+describe('DeliveryDetail edit: Unassigned from a stale form (Sol r3 HIGH 1)', () => {
+  it('refuses to clear a driver someone else assigned after the form opened', async () => {
+    tables.data.profile_public_view = [
+      { id: 'user-1', full_name: 'Dana Driver', role: 'driver', is_active: true },
+      { id: 'user-2', full_name: 'Lee Driver', role: 'driver', is_active: true },
+    ];
+    render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 }));
+    await screen.findByRole('option', { name: /Dana Driver/ });
+    // Dispatch reassigns the delivery to Lee while this form stays open on Dana.
+    tables.data.deliveries = [{ ...(tables.data.deliveries[0] as object), assigned_driver: 'user-2' }];
+    fireEvent.change(screen.getByRole('option', { name: 'Unassigned' }).closest('select')!, { target: { value: '' } });
+    fireEvent.click(await screen.findByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/driver was changed/)));
+    expect(editCalls()).toHaveLength(0);
+  });
+});

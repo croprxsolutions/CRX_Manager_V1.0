@@ -1813,12 +1813,14 @@ export function proofValid(data, headSha, nowMs, expectedBaseSha, maxAgeMs = SOL
 //
 // `baseRef` is the PR's base branch name. A proof that records its review kind
 // (`review_ref`, since 2026-11-22) counts only for a PR into that branch, and a
-// release review only for main; older proofs name no kind and are judged as before.
-export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, mergeBase, prCommits = null, baseRef = null }) {
+// release review only for the release PR (`headRef` release/next) into main (#2297); older
+// proofs name no kind and are judged as before.
+export function proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor, mergeBase, prCommits = null, baseRef = null, headRef = null }) {
   const SHA = /^[0-9a-f]{40}$/i;
   if (baseRef !== null && data && "review_ref" in data) {
     const ref = `origin/${String(baseRef).trim().toLowerCase()}`;
-    if (data.review_ref !== ref || (data.release_rules === true && ref !== "origin/main")) return false;
+    const releasePr = ref === "origin/main" && String(headRef ?? "").trim().toLowerCase() === "release/next";
+    if (data.review_ref !== ref || (data.release_rules === true && !releasePr)) return false;
   }
   const proofBase = String(data?.base_sha || "");
   const proofHead = String(data?.head_sha || "").toLowerCase();

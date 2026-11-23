@@ -310,7 +310,7 @@
 >
 > Last reconciled against `.claude/settings.json` and `.codex/hooks.json` hook wiring on 2026-10-30.
 
-> **Taha's lanes (Mason 2026-11-22, until the end of Dec 15 Central):** both merge gates refuse any agent merge into `staging` of a PR whose `src/` or `supabase/` files are in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing), whatever OK line it has; field billing (field, spray, blend, application, job paths) is Mason's and passes. An unreadable or 250+ file list refuses. The refusal issues a 6-digit code; Mason's message of its own `taha override <code>` lets that one PR through for 24 hours (`taha-lane-lib.mjs`, `taha-lane-prompt.mjs`).
+> **Taha's lanes (Mason 2026-11-22, until the end of Dec 15 Central):** both merge gates refuse any agent merge into `staging` of a PR whose `src/` or `supabase/` files are in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing), whatever OK line it has; field billing (field app/invoice, spray, blend, application, job paths) is Mason's and passes; a PR that edits the block's own wiring is refused too. An unreadable or 250+ file list refuses. The refusal issues a 6-digit code bound to the PR's current head; Mason's message of its own `taha override #<PR> <code>` lets that PR at that commit through for 24 hours (a new push needs a new code), and the gate itself posts a PR comment tagging Taha before allowing it, or refuses (`taha-lane-lib.mjs`, `taha-lane-prompt.mjs`). Names, not file contents, decide the lane.
 
 ---
 

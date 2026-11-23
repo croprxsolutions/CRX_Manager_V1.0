@@ -5,8 +5,10 @@
 // #1980 and #1989 merged after Taha asked; a written note did not stop them.
 //
 // Mason can still let ONE named PR through: the merge refusal issues a 6-digit
-// code for that PR, and his chat message `taha override <code>` (taha-lane-prompt.mjs)
-// turns it into a 24-hour override for that PR only. An agent cannot mint a
+// code for that PR at its current head, and his chat message `taha override #<PR> <code>`
+// (taha-lane-prompt.mjs) turns it into a 24-hour override for that PR at that head
+// only: a later push needs a new code (Taha's review of #2303). When it is used the
+// gate itself tells Taha on the PR, or refuses. An agent cannot mint a
 // working code: only a request this guard wrote counts. Same accepted residual as
 // coderabbit-skip-lib.mjs: an agent that runs the prompt hook by hand with a forged
 // message gets through; this is an honest-mistake net, not a security boundary.
@@ -51,9 +53,13 @@ const wordsOf = (name) => String(name)
 // shortcut: names, not code, decide the lane; add a file here when review finds another billing entry point.
 const LANE_FILE_PREFIXES = ["src/pages/OrderDetail."];
 
-/** True when this changed file is app or database code in Taha's lane (and not field billing). */
+// The block's own wiring: a PR that edits or unhooks it needs Mason's code too (Taha's review of #2303).
+const BLOCK_FILES_RE = /^(?:\.claude\/hooks\/(?:taha-lane-[\w.-]+|pr-merge-guard|merge-guard-launcher|prompt-router)\.mjs|\.codex\/hooks\/production-action-guard\.mjs|\.claude\/settings\.json|\.codex\/hooks\.json)$/i;
+
+/** True when this changed file is app or database code in Taha's lane (and not field billing), or the block itself. */
 export function isTahaLanePath(name) {
   const file = String(name ?? "").replace(/\\/g, "/");
+  if (BLOCK_FILES_RE.test(file)) return true;
   if (!/^(?:src|supabase)\//i.test(file)) return false;
   if (LANE_FILE_PREFIXES.some((p) => file.startsWith(p))) return true;
   const words = wordsOf(file);
@@ -94,6 +100,7 @@ export function prFilesOnGitHub({ repo, gh, number }) {
 }
 
 const usablePr = (n) => Number.isInteger(n) && n > 0;
+const usableHead = (sha) => /^[0-9a-f]{40}$/i.test(String(sha ?? ""));
 const requestName = (code) => `taha-lane-request-${code}.json`;
 const overrideName = (pr) => `taha-lane-override-pr${pr}.json`;
 
@@ -111,23 +118,24 @@ const live = (data, maxAge, now) => {
 };
 
 /**
- * The code Mason types to let `pullRequest` through. Reuses a live request for
- * the same PR, else writes a new one to every folder in `dirs`. null when none
- * could be saved (the refusal then says so; the block still holds).
+ * The code Mason types to let `pullRequest` at `headSha` through. Reuses a live
+ * request for the same PR and head, else writes a new one to every folder in
+ * `dirs`. null when none could be saved (the refusal then says so; the block holds).
  */
-export function issueTahaLaneCode({ dirs, pullRequest, now = Date.now(), newCode = () => String(randomInt(0, 1_000_000)).padStart(6, "0") }) {
-  if (!usablePr(pullRequest)) return null;
+export function issueTahaLaneCode({ dirs, pullRequest, headSha, now = Date.now(), newCode = () => String(randomInt(0, 1_000_000)).padStart(6, "0") }) {
+  if (!usablePr(pullRequest) || !usableHead(headSha)) return null;
+  headSha = headSha.toLowerCase();
   for (const dir of dirs || []) {
     let names = [];
     try { names = readdirSync(dir); } catch { continue; }
     for (const n of names) {
       if (!/^taha-lane-request-\d{6}\.json$/.test(n)) continue;
       const data = readSmall(path.join(dir, n));
-      if (data?.pullRequest === pullRequest && live(data, TAHA_LANE_CODE_MAX_AGE_MS, now)) return data.code;
+      if (data?.pullRequest === pullRequest && data?.headSha === headSha && live(data, TAHA_LANE_CODE_MAX_AGE_MS, now)) return data.code;
     }
   }
   const code = newCode();
-  const payload = { pullRequest, code, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + TAHA_LANE_CODE_MAX_AGE_MS).toISOString() };
+  const payload = { pullRequest, headSha, code, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + TAHA_LANE_CODE_MAX_AGE_MS).toISOString() };
   let wrote = 0;
   for (const dir of dirs || []) {
     try {
@@ -140,25 +148,31 @@ export function issueTahaLaneCode({ dirs, pullRequest, now = Date.now(), newCode
   return wrote ? code : null;
 }
 
-// The WHOLE message must be the command (a phone may capitalise it or add a period).
-const COMMAND_RE = /^\s*taha\s+override\s+(\d{6})\s*[.!]?\s*$/i;
-export const tahaOverrideCode = (reply) => COMMAND_RE.exec(String(reply ?? ""))?.[1] ?? null;
-/** True when some line of the message mentions the command but the message is not only that. */
-export const tahaOverrideAttempt = (reply) => !tahaOverrideCode(reply) && /\btaha\s+override\b/i.test(String(reply ?? ""));
+// The WHOLE message must be the command, naming the PR Mason means (a phone may capitalise it or add a period).
+const COMMAND_RE = /^\s*taha\s+override\s+#(\d{1,7})\s+(\d{6})\s*[.!]?\s*$/i;
+/** { pullRequest, code } when the whole message is `taha override #<PR> <code>`, else null. */
+export const tahaOverrideCommand = (reply) => {
+  const m = COMMAND_RE.exec(String(reply ?? ""));
+  return m ? { pullRequest: Number(m[1]), code: m[2] } : null;
+};
+/** True when the message mentions the command but is not exactly it. */
+export const tahaOverrideAttempt = (reply) => !tahaOverrideCommand(reply) && /\btaha\s+override\b/i.test(String(reply ?? ""));
 
 /**
- * Turn Mason's code into a 24-hour override for the PR it was issued for.
- * Returns { ok: true, payload } or { ok: false, reason }.
+ * Turn Mason's code into a 24-hour override for the PR and head it was issued
+ * for. The PR he named must be that PR. Returns { ok: true, payload } or { ok: false, reason }.
  */
-export function recordTahaLaneOverride({ dirs, code, now = Date.now() }) {
+export function recordTahaLaneOverride({ dirs, pullRequest, code, now = Date.now() }) {
   if (!/^\d{6}$/.test(String(code ?? ""))) return { ok: false, reason: "the code is not 6 digits" };
+  if (!usablePr(pullRequest)) return { ok: false, reason: "the message names no PR" };
   let request = null;
   for (const dir of dirs || []) {
     const data = readSmall(path.join(dir, requestName(code)));
-    if (data?.code === code && usablePr(data?.pullRequest) && live(data, TAHA_LANE_CODE_MAX_AGE_MS, now)) { request = data; break; }
+    if (data?.code === code && usablePr(data?.pullRequest) && usableHead(data?.headSha) && live(data, TAHA_LANE_CODE_MAX_AGE_MS, now)) { request = data; break; }
   }
   if (!request) return { ok: false, reason: `no live merge-block code ${code} was found (it may be mistyped, used, or more than 24 hours old)` };
-  const payload = { pullRequest: request.pullRequest, code, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + TAHA_LANE_OVERRIDE_MAX_AGE_MS).toISOString() };
+  if (request.pullRequest !== pullRequest) return { ok: false, reason: `code ${code} was issued for #${request.pullRequest}, not #${pullRequest}` };
+  const payload = { pullRequest: request.pullRequest, headSha: request.headSha, code, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + TAHA_LANE_OVERRIDE_MAX_AGE_MS).toISOString() };
   let wrote = 0;
   for (const dir of dirs || []) {
     try {
@@ -171,34 +185,59 @@ export function recordTahaLaneOverride({ dirs, code, now = Date.now() }) {
   return wrote ? { ok: true, payload } : { ok: false, reason: "the override could not be saved" };
 }
 
-/** Mason's live override for this PR, or null. */
-export function findTahaLaneOverride({ dirs, pullRequest, now = Date.now() }) {
-  if (!usablePr(pullRequest)) return null;
+/** Mason's live override for this PR at exactly this head, or null. */
+export function findTahaLaneOverride({ dirs, pullRequest, headSha, now = Date.now() }) {
+  if (!usablePr(pullRequest) || !usableHead(headSha)) return null;
   for (const dir of dirs || []) {
     const data = readSmall(path.join(dir, overrideName(pullRequest)));
-    if (data?.pullRequest === pullRequest && live(data, TAHA_LANE_OVERRIDE_MAX_AGE_MS, now)) return data;
+    if (data?.pullRequest === pullRequest && data?.headSha === headSha.toLowerCase() && live(data, TAHA_LANE_OVERRIDE_MAX_AGE_MS, now)) return data;
   }
   return null;
 }
 
+function markTahaTold({ dirs, override }) {
+  for (const dir of dirs || []) {
+    const file = path.join(dir, overrideName(override.pullRequest));
+    try { if (existsSync(file)) writeFileSync(file, `${JSON.stringify({ ...override, tahaToldAt: new Date().toISOString() }, null, 2)}\n`, "utf8"); } catch { /* the next try posts again */ }
+  }
+}
+
+/** Posts the PR comment that tells Taha. true only when GitHub took it. */
+export function tellTahaOnGitHub({ repo, gh, pullRequest, body }) {
+  const repoPath = ghApiRepoPath(repo);
+  if (!repoPath || !usablePr(pullRequest)) return false;
+  try {
+    return /^\d+$/.test(String(gh(["api", "-X", "POST", `${repoPath}/issues/${pullRequest}/comments`, "-f", `body=${body}`, "--jq", ".id"])).trim());
+  } catch { return false; }
+}
+
 /**
  * The merge gates' single call: null when the merge may go on, otherwise the
- * refusal text. `notice(text)` receives a note when Mason's override lets it through.
+ * refusal text. With Mason's override for this PR and head, `tellTaha(body)`
+ * must post the PR comment first (once per override); if it can't, the merge is refused.
  */
-export function tahaLaneGate({ prefix, pullRequest, files, dirs, now = Date.now(), notice = () => {} }) {
+export function tahaLaneGate({ prefix, pullRequest, headSha, files, dirs, now = Date.now(), tellTaha = () => false, notice = () => {} }) {
   const problem = tahaLaneProblem({ files, now });
   if (!problem) return null;
-  const override = findTahaLaneOverride({ dirs, pullRequest, now });
+  const override = findTahaLaneOverride({ dirs, pullRequest, headSha, now });
   if (override) {
-    notice(`${prefix}: TAHA LANE OVERRIDDEN BY MASON for #${pullRequest} (code ${override.code}, valid until ${override.expiresAt}): ${problem.reason}. ` +
-      `Tell Taha: gh pr comment ${pullRequest} --body "Merged into staging with Mason's override of the lane block."\n`);
+    if (!override.tahaToldAt) {
+      const body = `@TahaKhanAbdalli Mason overrode the Taha lane block for this PR at \`${override.headSha}\` (his code ${override.code}, valid until ${override.expiresAt}), ` +
+        `so an agent may merge it into staging; the other merge checks still apply. It ${problem.reason}.`;
+      if (!tellTaha(body)) {
+        return `${prefix}: TAHA LANE BLOCK — Mason's override for #${pullRequest} is valid, but the PR comment telling Taha could not be posted, so the merge is refused. Retry the merge.`;
+      }
+      markTahaTold({ dirs, override });
+    }
+    notice(`${prefix}: TAHA LANE OVERRIDDEN BY MASON for #${pullRequest} at ${override.headSha}; Taha was told on the PR.\n`);
     return null;
   }
-  const code = issueTahaLaneCode({ dirs, pullRequest, now });
+  const code = issueTahaLaneCode({ dirs, pullRequest, headSha, now });
   return `${prefix}: TAHA LANE BLOCK — #${pullRequest || "?"} is refused because ${problem.reason}. ` +
-    "Until Dec 15 agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing), " +
-    "whatever OK line the PR has (Mason to Taha, 2026-11-22). Leave it for Taha: post a PR comment or a KI. " +
+    "Until Dec 15 agents never merge in Taha's areas (quotes, bookings, purchasing holds, chemical invoices and billing) " +
+    "or change this block, whatever OK line the PR has (Mason to Taha, 2026-11-22). Leave it for Taha: post a PR comment or a KI. " +
     (code
-      ? `Only if Mason wants it merged anyway: tell him why in one line and ask him to send, as a message of its own: taha override ${code}`
+      ? `Only if Mason wants it merged anyway: tell him why in one line and ask him to send, as a message of its own: taha override #${pullRequest} ${code} ` +
+        "(it covers this PR at its current commit only; a new push needs a new code)"
       : "The override code could not be saved, so only Taha can land it.");
 }

@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "../../scripts/lib/test-temp-dir.mjs";
 import {
   TAHA_LANE_UNTIL_MS, findTahaLaneOverride, isTahaLanePath, prFilesOnGitHub, issueTahaLaneCode, recordTahaLaneOverride,
-  tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCode,
+  tahaLaneGate, tahaLaneProblem, tahaOverrideAttempt, tahaOverrideCommand, tellTahaOnGitHub,
 } from "./taha-lane-lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -30,12 +30,15 @@ for (const p of [
   // Codex P1/P2 on #2303: bill splits are billing; data "fields" are not field billing.
   "src/pages/OrderDetail.tsx", "src/pages/OrderDetail.billing.test.tsx", "src/lib/billSplitLock.ts","src/components/orders/LineBillSplit.tsx", "src/lib/invoiceRowPdfFields.ts",
   "supabase/migrations/20270129180000_ki81_quote_line_sent_field.sql", "supabase/migrations/20260702131000_a3_save_quote_restore_dropped_fields.sql",
+  // Taha's review of #2303: the block's own wiring needs Mason's code too.
+  ".claude/hooks/taha-lane-lib.mjs", ".claude/hooks/taha-lane-prompt.mjs", ".claude/hooks/pr-merge-guard.mjs",
+  ".claude/hooks/prompt-router.mjs", ".codex/hooks/production-action-guard.mjs", ".claude/settings.json", ".codex/hooks.json",
 ]) ok(isTahaLanePath(p), `${p} is Taha's`);
 for (const p of [
   "src/pages/FieldApplicationInvoice.tsx", "src/components/field-invoices/Row.tsx", "src/pages/FieldInvoices.tsx",
   "supabase/migrations/20270224110000_retire_per_acre_field_pricing.sql", "src/pages/JobDetail.tsx", "src/pages/BlendTickets.tsx",
   "src/pages/Deliveries.tsx", "src/pages/InventoryPage.tsx", "src/lib/threshold.ts", "docs/workflows/QUOTE_TO_DELIVERY.md",
-  ".claude/hooks/taha-lane-lib.mjs", "scripts/quote-report.mjs",
+  "scripts/quote-report.mjs", ".claude/hooks/sol-risk-lib.mjs", ".claude/hooks/pr-merge-guard.test.mjs",
   "src/lib/fieldAppNewInvoiceAddress.ts", "src/pages/FieldStop.billing.test.tsx", "src/pages/FieldAppSplitInvoiceEditor.tsx",
   "src/components/field-invoices/UnbilledApplicationsPanel.tsx", "src/pages/VendorBillDetail.tsx",
   "supabase/migrations/20261022021000_order_invoice_refuses_field_split.sql",
@@ -61,40 +64,56 @@ eq(tahaLaneProblem({ files: f("src/pages/Quotes.tsx"), now: TAHA_LANE_UNTIL_MS }
 eq(tahaLaneProblem({ files: null, now: TAHA_LANE_UNTIL_MS + 1 }), null, "off after Dec 15 even when unreadable");
 ok(tahaLaneProblem({ files: f("src/pages/Quotes.tsx"), now: TAHA_LANE_UNTIL_MS - 1 }), "still on at the last moment of Dec 15");
 
-// ── the command ─────────────────────────────────────────────────────────────
-eq(tahaOverrideCode("taha override 123456"), "123456", "plain command");
-eq(tahaOverrideCode("  Taha Override 123456."), "123456", "phone capitalisation and a period");
-eq(tahaOverrideCode("taha override 12345"), null, "five digits is not a code");
-eq(tahaOverrideCode("please taha override 123456"), null, "other words before it");
-eq(tahaOverrideCode("taha override 123456 now"), null, "other words after it");
-ok(tahaOverrideAttempt("ok taha override 123456"), "a near miss is noticed");
+// ── the command names the PR ────────────────────────────────────────────────
+eq(tahaOverrideCommand("taha override #2242 123456"), { pullRequest: 2242, code: "123456" }, "plain command");
+eq(tahaOverrideCommand("  Taha Override #2242 123456."), { pullRequest: 2242, code: "123456" }, "phone capitalisation and a period");
+eq(tahaOverrideCommand("taha override 123456"), null, "a code without the PR is not the command");
+eq(tahaOverrideCommand("taha override #2242 12345"), null, "five digits is not a code");
+eq(tahaOverrideCommand("please taha override #2242 123456"), null, "other words before it");
+eq(tahaOverrideCommand("taha override #2242 123456 now"), null, "other words after it");
+ok(tahaOverrideAttempt("taha override 123456"), "the old form is noticed and refused");
 ok(!tahaOverrideAttempt("hello"), "ordinary chat is not an attempt");
 
-// ── code → override, one PR, 24 hours ───────────────────────────────────────
+// ── code → override, one PR at one commit, 24 hours ────────────────────────
+const A = "a".repeat(40), B = "b".repeat(40);
 const root = tempDir("taha-lane-");
-const dir = path.join(root, ".claude", "session-state");
+const dir = path.join(root, ".claude", "session-" + "state");
 mkdirSync(path.dirname(dir), { recursive: true });
 const dirs = [dir];
-const code = issueTahaLaneCode({ dirs, pullRequest: 2242, now: NOW, newCode: () => "424242" });
+eq(issueTahaLaneCode({ dirs, pullRequest: 2242, headSha: "nope", now: NOW }), null, "no code without a real head");
+const code = issueTahaLaneCode({ dirs, pullRequest: 2242, headSha: A, now: NOW, newCode: () => "424242" });
 eq(code, "424242", "a code is issued");
-eq(issueTahaLaneCode({ dirs, pullRequest: 2242, now: NOW + 1000, newCode: () => "999999" }), "424242", "a live code for the same PR is reused");
-eq(findTahaLaneOverride({ dirs, pullRequest: 2242, now: NOW }), null, "a code alone is not an override");
-eq(recordTahaLaneOverride({ dirs, code: "111111", now: NOW }).ok, false, "an unknown code records nothing");
-eq(recordTahaLaneOverride({ dirs, code, now: NOW + 25 * 3600e3 }).ok, false, "a code older than 24 hours records nothing");
-const rec = recordTahaLaneOverride({ dirs, code, now: NOW + 60e3 });
-ok(rec.ok && rec.payload.pullRequest === 2242, "the code becomes an override for its PR");
-eq(recordTahaLaneOverride({ dirs, code, now: NOW + 120e3 }).ok, false, "a code works once");
-ok(findTahaLaneOverride({ dirs, pullRequest: 2242, now: NOW + 3600e3 }), "the override is found for that PR");
-eq(findTahaLaneOverride({ dirs, pullRequest: 2243, now: NOW + 3600e3 }), null, "no other PR is covered");
-eq(findTahaLaneOverride({ dirs, pullRequest: 2242, now: NOW + 60e3 + 24 * 3600e3 }), null, "the override ends after 24 hours");
+eq(issueTahaLaneCode({ dirs, pullRequest: 2242, headSha: A, now: NOW + 1000, newCode: () => "999999" }), "424242", "a live code for the same PR and head is reused");
+eq(issueTahaLaneCode({ dirs, pullRequest: 2242, headSha: B, now: NOW + 1000, newCode: () => "777777" }), "777777", "a new head gets a new code");
+eq(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: A, now: NOW }), null, "a code alone is not an override");
+eq(recordTahaLaneOverride({ dirs, pullRequest: 2242, code: "111111", now: NOW }).ok, false, "an unknown code records nothing");
+eq(recordTahaLaneOverride({ dirs, pullRequest: 2242, code, now: NOW + 25 * 3600e3 }).ok, false, "a code older than 24 hours records nothing");
+const wrongPr = recordTahaLaneOverride({ dirs, pullRequest: 2292, code, now: NOW + 30e3 });
+ok(!wrongPr.ok && /issued for #2242, not #2292/.test(wrongPr.reason), "Mason naming another PR records nothing");
+const rec = recordTahaLaneOverride({ dirs, pullRequest: 2242, code, now: NOW + 60e3 });
+ok(rec.ok && rec.payload.pullRequest === 2242 && rec.payload.headSha === A, "the code becomes an override for its PR and head");
+eq(recordTahaLaneOverride({ dirs, pullRequest: 2242, code, now: NOW + 120e3 }).ok, false, "a code works once");
+ok(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: A, now: NOW + 3600e3 }), "the override is found for that PR and head");
+eq(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: B, now: NOW + 3600e3 }), null, "a later push is not covered");
+eq(findTahaLaneOverride({ dirs, pullRequest: 2243, headSha: A, now: NOW + 3600e3 }), null, "no other PR is covered");
+eq(findTahaLaneOverride({ dirs, pullRequest: 2242, headSha: A, now: NOW + 60e3 + 24 * 3600e3 }), null, "the override ends after 24 hours");
 
 // ── the gate the merge guards call ──────────────────────────────────────────
-const notes = [];
-eq(tahaLaneGate({ prefix: "T", pullRequest: 2242, files: f("src/pages/Quotes.tsx"), dirs, now: NOW + 3600e3, notice: (t) => notes.push(t) }), null, "override lets the PR through");
-ok(notes[0]?.includes("OVERRIDDEN BY MASON"), "and says so");
-const refusal = tahaLaneGate({ prefix: "T", pullRequest: 2300, files: f("src/pages/Quotes.tsx"), dirs, now: NOW, notice: () => {} });
-ok(/TAHA LANE BLOCK/.test(refusal) && /taha override \d{6}/.test(refusal), "a refusal gives Mason a code to type");
-eq(tahaLaneGate({ prefix: "T", pullRequest: 2300, files: f("src/pages/Deliveries.tsx"), dirs, now: NOW }), null, "outside the lane, nothing to do");
+const lane = f("src/pages/Quotes.tsx");
+const failTell = tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha: A, files: lane, dirs, now: NOW + 3600e3, tellTaha: () => false });
+ok(/comment telling Taha could not be posted/.test(failTell), "override but Taha can't be told → refused");
+const told = [];
+eq(tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha: A, files: lane, dirs, now: NOW + 3600e3, tellTaha: (b) => { told.push(b); return true; } }), null, "override + Taha told → through");
+ok(told.length === 1 && told[0].startsWith("@TahaKhanAbdalli") && told[0].includes(A), "the comment tags Taha and names the commit");
+eq(tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha: A, files: lane, dirs, now: NOW + 3600e3, tellTaha: () => { told.push("again"); return true; } }), null, "a retry still passes");
+eq(told.length, 1, "and Taha is told once, not on every retry");
+const pushed = tahaLaneGate({ prefix: "T", pullRequest: 2242, headSha: B, files: lane, dirs, now: NOW + 3600e3, tellTaha: () => true });
+ok(/taha override #2242 777777/.test(pushed), "after a new push the block is back, with the new head's code");
+const refusal = tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: lane, dirs, now: NOW });
+ok(/TAHA LANE BLOCK/.test(refusal) && /taha override #2300 \d{6}/.test(refusal), "a refusal gives Mason the exact line, PR included");
+eq(tahaLaneGate({ prefix: "T", pullRequest: 2300, headSha: A, files: f("src/pages/Deliveries.tsx"), dirs, now: NOW }), null, "outside the lane, nothing to do");
+eq(tellTahaOnGitHub({ repo: undefined, pullRequest: 5, body: "x", gh: () => "123" }), true, "GitHub took the comment");
+eq(tellTahaOnGitHub({ repo: undefined, pullRequest: 5, body: "x", gh: () => { throw new Error("403"); } }), false, "a failed post is false");
 
 // ── the real prompt hook, as Claude Code runs it ───────────────────────────
 const runHook = (prompt, cwd) => {
@@ -106,13 +125,14 @@ const runHook = (prompt, cwd) => {
 };
 const repo = tempDir("taha-lane-repo-");
 spawnSync("git", ["init", "-q", repo]);
-const state = path.join(repo, ".claude", "session-state");
+const state = path.join(repo, ".claude", "session-" + "state");
 mkdirSync(state, { recursive: true });
-const hookCode = issueTahaLaneCode({ dirs: [state], pullRequest: 2247 });
+const hookCode = issueTahaLaneCode({ dirs: [state], pullRequest: 2247, headSha: A });
 eq(runHook("hello there", repo), "", "ordinary chat: the hook says nothing");
-ok(runHook(`ok taha override ${hookCode}`, repo).includes("NOT RECORDED"), "a near miss is refused out loud");
-ok(runHook("taha override 000001", repo).includes("NOT RECORDED"), "a code the guard never issued is refused");
-ok(runHook(`taha override ${hookCode}`, repo).includes("RECORDED — Mason let PR #2247"), "his code is recorded");
+ok(runHook(`ok taha override #2247 ${hookCode}`, repo).includes("NOT RECORDED"), "a near miss is refused out loud");
+ok(runHook("taha override #2247 000001", repo).includes("NOT RECORDED"), "a code the guard never issued is refused");
+ok(runHook(`taha override #2292 ${hookCode}`, repo).includes("not #2292"), "the wrong PR is refused");
+ok(runHook(`taha override #2247 ${hookCode}`, repo).includes("RECORDED — Mason let PR #2247"), "his code is recorded");
 ok(readdirSync(state).includes("taha-lane-override-pr2247.json"), "the override file exists for the gates");
 
 console.log(`taha-lane-lib tests: ${pass} passed`);

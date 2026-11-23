@@ -69,7 +69,7 @@ import {
 import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub } from "../../.claude/hooks/sol-risk-lib.mjs";
 import { followUpsDenial, followUpsProblem } from "../../.claude/hooks/followups-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
-import { prFilesOnGitHub, tahaLaneGate } from "../../.claude/hooks/taha-lane-lib.mjs";
+import { prFilesOnGitHub, tahaLaneGate, tellTahaOnGitHub } from "../../.claude/hooks/taha-lane-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "../../.claude/hooks/pr-claim-lib.mjs";
 import { ownerAcceptedForPr } from "../../.claude/hooks/sol-accept-lib.mjs";
@@ -749,11 +749,13 @@ function gatePullRequestMerge({ request, repoDir, nowMs, runGit, runGh, claim = 
     if (frozen) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${frozen}.`);
     const destructive = stagingDestructiveProblem({ repo: request.repo, gh: (args) => runGh(args, repoDir), number: pullRequest.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pullRequest.headRefOid, baseSha: pullRequest.baseRefOid });
     if (destructive) return denied(`CODEX PRODUCTION GATE: this merge into staging is refused: ${destructive}.`);
-    // Taha's lanes until Dec 15 (taha-lane-lib.mjs, Mason 2026-11-22); Mason's `taha override <code>` lets one PR through.
+    // Taha's lanes until Dec 15 (taha-lane-lib.mjs, Mason 2026-11-22); Mason's `taha override #<PR> <code>` lets one PR at one commit through.
     const lanePr = Number(pullRequest.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? request.selector : NaN));
     const lane = tahaLaneGate({
       prefix: "CODEX PRODUCTION GATE",
       pullRequest: lanePr,
+      headSha: pullRequest.headRefOid,
+      tellTaha: (body) => tellTahaOnGitHub({ repo: request.repo, gh: (args) => runGh(args, repoDir), pullRequest: lanePr, body }),
       files: prFilesOnGitHub({ repo: request.repo, gh: (args) => runGh(args, repoDir), number: lanePr }),
       dirs: skipStateDirs([repoDir]),
       notice: (text) => process.stderr.write(text),

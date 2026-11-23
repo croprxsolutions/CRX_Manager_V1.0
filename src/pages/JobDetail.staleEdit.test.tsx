@@ -138,4 +138,19 @@ describe('JobDetail stale-edit refusal', () => {
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_job', expect.anything()));
     expect(mockToast).not.toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE);
   });
+
+  it('checks again on a retry after the database refused the save (nothing committed)', async () => {
+    serveJob(JOB, { ...JOB, applicator_id: 'other-applicator' });
+    let saves = 0;
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn !== 'save_job') return Promise.resolve({ data: null, error: null });
+      saves += 1;
+      return Promise.resolve({ data: null, error: { code: 'P0001', message: 'SHARE_NOT_100' } });
+    });
+    await openAndSave();
+    await waitFor(() => expect(saves).toBe(1));
+    await clickSave();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', JOB_CHANGED_SINCE_LOADED_MESSAGE));
+    expect(saves).toBe(1);
+  });
 });

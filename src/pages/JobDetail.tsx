@@ -2918,6 +2918,9 @@ export default function JobDetail() {
         p_idempotency_key: saveJobIdem.getKeyFor(saveScope),
       });
 
+      // A database refusal (it carries a code) committed nothing, so a retry gets the stale check again; only a
+      // reply that never arrived leaves the outcome unknown.
+      if (error && (error as { code?: string }).code) unconfirmedJobSaveScopeRef.current = null;
       if (error) throw error;
       if (isWholeJobApplicatorReassign && !licenseOverride) {
         displacementCommitted = true;

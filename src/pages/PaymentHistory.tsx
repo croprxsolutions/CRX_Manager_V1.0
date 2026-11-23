@@ -134,7 +134,7 @@ export default function PaymentHistory() {
       .from('invoice_line_allocations')
       .select(`
         id, invoice_id, amount_cents, split_percentage, bill_to_customer_id,
-        invoices ( invoice_number ),
+        invoices!invoice_line_allocations_invoice_id_fkey ( invoice_number ),
         customers!invoice_line_allocations_bill_to_customer_id_fkey ( farm_name )
       `)
       .eq('allocation_set_id', setId)

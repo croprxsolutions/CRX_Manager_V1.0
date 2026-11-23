@@ -656,3 +656,16 @@ describe('product setup and import refusals (20261107090000)', () => {
       .toBe("This sale is cancelled or voided, so its sales tax can't change");
   });
 });
+
+describe('customer receipt refusals (KI-25)', () => {
+  it('drops the database code and keeps plain words', () => {
+    expect(sanitizeError(new Error('DELIVERY_NOT_COMPLETED: this delivery is not completed any more; do not send its receipt')))
+      .toBe('Nothing was sent. This delivery is not completed any more, so its receipt must not be sent.');
+    expect(sanitizeError(new Error("DELIVERY_RECEIPT_CHANGED: this delivery's receipt was queued again since; reload the page")))
+      .toBe("Nothing was changed. This delivery's receipt was queued again since. Reload the page.");
+  });
+  it('leaves the invoice-posting DELIVERY_NOT_COMPLETED sentence alone', () => {
+    const msg = 'DELIVERY_NOT_COMPLETED: delivery D-42 for invoice INV-1002 has been deleted. Void this invoice instead of posting it.';
+    expect(sanitizeError(new Error(msg))).not.toMatch(/receipt/);
+  });
+});

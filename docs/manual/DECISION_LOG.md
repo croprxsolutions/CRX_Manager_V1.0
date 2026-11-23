@@ -13,6 +13,25 @@
 **Decision (Mason, in chat 2026-11-22, after Sol gate round 7: "Yes, drop it").** Sol found a new HIGH in the staging carry in each of 7 rounds, so it is removed rather than patched again. A feature branch that merges `origin/staging` always needs a new full Sol review, and the gates refuse any proof carried onto a staging base, including one minted earlier. Mason's reason: everything on staging is fully reviewed again before it is released to the live app. The carry stays for `hotfix/` and `release/` branches merging `origin/main`, and its collision check now runs only when main's changes add lines and remove or edit none (a removed line may be a credential, and no pattern catches every format). This replaces the "free carry only" decision above.
 
 **Decision (Mason, in chat 2026-11-22, after Sol gate round 8: "Fix #1, then I merge").** Round 8 found 4 HIGHs. #1 (an older carried proof that records no review kind could still count at a staging merge) is fixed: only a proof carried onto `origin/main` counts. Mason overrides the other three and merges this PR by hand, with no further Sol round: #3 (`.claude/hooks/pr-merge-guard.mjs:681`, an earlier proof still counts after a staging merge that touches no Sol-list file) is his round-6 "keep the 10-30 rule" decision; #2 (`.claude/hooks/codex-push-lib.mjs:1763`, how far a restamp or post-apply carry can stretch an older owner acceptance) and #4 (`scripts/write-codex-push-proof.mjs:3314`, a release-rules review reused by the live migration gate for a hotfix) are gaps in older gate features this PR did not add, left to their own follow-up. None is a money, stock or customer-data bug.
+## 2026-11-22 — #2256: Mason owner-accepted 3 Sol finding(s) at `591e6a34de34`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2256 at `591e6a34de34` (base `9c77cd3a5d22`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/components/deliveries/ReceiptsToCheck.tsx:96`, text sha256 `8fa2f87a2f18aafb` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 1ba4939db9f5)
+- Finding 2 (HIGH) at `src/pages/DeliveryDetail.tsx:1493`, text sha256 `e1351c2ce5dcdaec` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 1ba4939db9f5)
+- Finding 3 (HIGH) at `src/pages/DeliveryDetail.tsx:1550`, text sha256 `cf5fc817743fe50a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 56304b763489)
+
+## 2026-11-22 — #2256: Mason owner-accepted 3 Sol finding(s) at `f218cd0a6cb3`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2256 at `f218cd0a6cb3` (base `d069dc004e94`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/DeliveryDetail.tsx:1493`, text sha256 `cc1e48c10a3de110` (the wording stays with the proof, not here)
+  Mason's reason: I accept not big chance (ref b9bbd42731de)
+- Finding 2 (HIGH) at `src/components/deliveries/ReceiptsToCheck.tsx:96`, text sha256 `7066242aa819f205` (the wording stays with the proof, not here)
+  Mason's reason: I accept not big chance (ref b9bbd42731de)
+- Finding 3 (HIGH) at `src/pages/DeliveryDetail.tsx:1562`, text sha256 `4e2720e2b1b9e457` (the wording stays with the proof, not here)
+  Mason's reason: I accept not big chance (ref b9bbd42731de)
 
 ## 2026-11-22 — #1980: Mason owner-accepted 2 Sol finding(s) at `596e9a966c78`
 

@@ -1183,7 +1183,7 @@ function fieldApplicationRow(item: InvoicePdfItem, data: InvoicePdfData, showEpa
     ? fmt(item.unit_price_cents)
     : item.is_application_fee
       ? `${fmt(item.unit_price_cents)} AC`
-      : `${fmt(item.unit_price_cents)} ${item.gl_lb_unit || item.unit_size || ''}`;
+      : `${fmt(item.unit_price_cents)} ${item.unit_size || item.gl_lb_unit || ''}`; // per the line's own (sold) unit (spray-job Sol round 3)
   return [
     productCellText(item, data),
     ...(showEpa ? [invoiceLineEpaText(item.brand_lines, item.epa_registration)] : []),

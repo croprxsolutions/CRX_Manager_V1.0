@@ -1,5 +1,11 @@
 # Decision Log
 
+## 2026-11-22 — #2264: Mason owner-accepted 1 Sol finding(s) at `11f3f026b9ef`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2264 at `11f3f026b9ef` (base `bdd733f9b071`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270224100000_f05_order_line_quantity_guard.sql:64`, text sha256 `e23b6d9637ecd6bd` (the wording stays with the proof, not here)
+  Mason's reason: too small to effect buisness (ref d240b31a7419)
+
 ## 2026-11-22 — #2264: Mason owner-accepted 1 Sol finding(s) at `fdf75b56929b`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2264 at `fdf75b56929b` (base `f9750a8a4b66`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

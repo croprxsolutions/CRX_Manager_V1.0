@@ -424,6 +424,7 @@ export default function ProductDetail() {
   const [priceHistoryReloadToken, setPriceHistoryReloadToken] = useState(0);
   const pricingPreviewIntentRef = useRef<string | null>(null);
   const pricingPreviewRequestRef = useRef(0);
+  const pricingReloadRequestRef = useRef(0);
   // Committed product id, read after awaits to drop results for a product the user has left.
   const productIdRef = useLatestRef(id);
   // The product itself. Cost is admin-only (Mason, 2026-10-15), so a role change is a different read.
@@ -927,14 +928,6 @@ export default function ProductDetail() {
             epa_registration: fresh.generic_epa_registration ?? '' }));
         }).catch((reloadError: unknown) => Sentry.captureException(reloadError));
       }
-      if (hasRpcCode(err, RpcErrorCodes.PRODUCT_RATES_LOCKED)) {
-        // Rates were locked meanwhile: put the saved rates back so the rest of the edit can save.
-        // Forget the stale open lock first, so a failed refresh still leaves the rates read-only.
-        setRateLock(null);
-        loadRateLock();
-        setProduct((current) => ({ ...current, rate_per_acre: persistedProduct?.rate_per_acre ?? null,
-          rate_unit: persistedProduct?.rate_unit ?? null, suggested_rate: persistedProduct?.suggested_rate ?? null }));
-      }
       revealPhoneSection(pricingChanged(product, persistedProduct, pricingMoneyDrafts) ? 'pricing' : 'information');
     } finally {
       setSaving(false);
@@ -1056,24 +1049,26 @@ export default function ProductDetail() {
   };
 
   const handlePricingReload = async () => {
+    const reloadRequest = ++pricingReloadRequestRef.current;
     setPricingReloading(true);
     setPriceHistoryReloadToken((current) => current + 1);
-    const [productReloaded, historyReloaded, basisReloaded] = await Promise.all([
-      fetchProduct(),
-      fetchCostHistory(),
-      fetchCostBasisWorkspace(),
-    ]);
-    if (productReloaded) {
-      toast(
-        historyReloaded && basisReloaded ? 'success' : 'warning',
-        historyReloaded && basisReloaded
-          ? 'Product pricing reloaded.'
-          : 'Product pricing reloaded, but pricing history or governed cost-basis options are not available yet.',
-      );
-    } else {
-      toast('error', 'Product pricing could not be reloaded. Try again before making another change.');
-    }
+    const sideReads = Promise.all([fetchCostHistory(), fetchCostBasisWorkspace()]);
+    const productReloaded = await fetchProduct();
+    // Only the Product read holds the button (#2200): the side cards show their own loading and Try again.
     setPricingReloading(false);
+    if (!productReloaded) {
+      toast('error', 'This Product could not be reloaded. Try again before making another change.');
+      return;
+    }
+    const [historyReloaded, basisReloaded] = await sideReads;
+    // A newer Reload Product took over the side reads; only that one reports them.
+    if (reloadRequest !== pricingReloadRequestRef.current) return;
+    toast(
+      historyReloaded && basisReloaded ? 'success' : 'warning',
+      historyReloaded && basisReloaded
+        ? 'Product reloaded.'
+        : 'Product reloaded, but Cost History or Cost Basis did not load. Use Try again on that card.',
+    );
   };
 
   const handleEpaLookup = async () => {
@@ -2429,7 +2424,9 @@ export default function ProductDetail() {
                 ) : (
                   <div className="space-y-2 text-sm text-secondary">
                     <p>No legacy cost changes recorded.</p>
-                    {costBasisWorkspace?.current_basis ? (
+                    {costBasisWorkspace?.current_basis && costBasisRead.status === 'loaded' && costBasisRead.stale ? (
+                      <p>Governed cost-basis details could not be refreshed, so the current basis is not shown. Try again in Cost Basis above.</p>
+                    ) : costBasisWorkspace?.current_basis ? (
                       costBasisWorkspace.current_basis.selection_source === 'migration_baseline' ? (
                         <p>
                           Current governed cost baseline:{' '}

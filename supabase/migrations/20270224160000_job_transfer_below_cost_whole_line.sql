@@ -455,7 +455,8 @@ BEGIN
         (now() AT TIME ZONE 'America/Chicago')::date, NULL::date,  -- KI-14: the due-date trigger derives it from this owner's terms
         0, 0, 0, 0,
         COALESCE(v_member_field_names, v_field_names), v_crop_type, v_member_acres, v_applicator_name, v_vehicle_name,
-        v_job.job_date, v_job.notes,
+        -- Sol r9 (Mason, 2026-11-22): job notes print only on the job customer's own invoice.
+        v_job.job_date, CASE WHEN v_owner_ids[v_oidx] = v_job.customer_id THEN v_job.notes END,
         COALESCE(
           v_job.season,
           CASE WHEN extract(month FROM (now() AT TIME ZONE 'America/Chicago')::date) >= 10
@@ -739,7 +740,8 @@ BEGIN
     (now() AT TIME ZONE 'America/Chicago')::date, NULL::date,  -- KI-14: the due-date trigger derives it from this owner's terms
     COALESCE(v_job.total_price_cents, 0), 0, 0, 0,
     v_field_names, v_crop_type, v_total_acres, v_applicator_name, v_vehicle_name,
-    v_job.job_date, v_job.notes,
+    -- Sol r9 (Mason, 2026-11-22): job notes print only on the job customer's own invoice.
+    v_job.job_date, CASE WHEN v_payer_id = v_job.customer_id THEN v_job.notes END,
     -- N2-7 #109<<< stamp the JOB's season, not the season-of-now. An invoice cut in a
     -- later season for a prior-season job must file under the job's season (reports/
     -- year-end read invoices.season). invoices.season is NOT NULL and jobs.season is
@@ -1066,7 +1068,7 @@ BEGIN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: the preflight did not run in this transaction; apply this file as ONE transaction';
   END IF;
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM '4055fc3465413aab696018e7b9666fd6'
+       WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)'::regprocedure) IS DISTINCT FROM 'df11843a858fa7907bf58f936715dc57'
      OR v_price IS NULL OR v_split IS NULL OR v_shares IS NULL OR v_lock IS NULL
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_shares) IS DISTINCT FROM '944760ebdf810f062b4dcf0fe56f11b2'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_lock) IS DISTINCT FROM '9b6d4bbfc5dcc61ba058971a9ac062b6'

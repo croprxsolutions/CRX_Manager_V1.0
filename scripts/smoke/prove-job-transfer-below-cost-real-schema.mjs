@@ -487,6 +487,24 @@ ${asAdmin}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 
   // Field Setup's. Field Z is set to B 100% in Field Setup, but the job saved A 100%; field A (A 100%) saved A 60/B 40.
   savedPayer: savedShares(job('Gal', 10, 5000, 3000, Z), `('${Z}'::uuid, '${A}'::uuid, 100::numeric, true)`),
   savedSplit: savedShares(job('Gal', 10, 5000, 3000, G), `('${G}'::uuid, '${A}'::uuid, 60::numeric, true), ('${G}'::uuid, '${B}'::uuid, 40::numeric, false)`),
+  // Sol r9 #4 (Mason, 2026-11-22): job notes print only on the job customer's (A's) own invoice, never on another payer's.
+  notesOtherPayer: `${asAdmin}
+CREATE TEMP TABLE j AS SELECT ${job('Gal', 10, 5000)} AS id;
+RESET ROLE;
+UPDATE jobs SET notes = 'JBC private note' WHERE id = (SELECT id FROM j);
+INSERT INTO job_field_shares (job_id, field_id, customer_id, split_pct, is_primary)
+  SELECT (SELECT id FROM j), v.f, v.c, v.p, v.pr FROM (VALUES ('${G}'::uuid, '${A}'::uuid, 60::numeric, true), ('${G}'::uuid, '${B}'::uuid, 40::numeric, false)) v(f, c, p, pr);
+${asAdmin}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());
+RESET ROLE;
+SELECT string_agg(CASE WHEN customer_id = '${A}' THEN 'A' ELSE 'B' END || '=' || COALESCE(header_notes, 'none'), ' ' ORDER BY customer_id = '${A}' DESC) FROM invoices WHERE job_id = (SELECT id FROM j);`,
+  notesSoleOtherPayer: `${asAdmin}
+CREATE TEMP TABLE j AS SELECT ${job('Gal', 10, 5000)} AS id;
+RESET ROLE;
+UPDATE jobs SET notes = 'JBC private note' WHERE id = (SELECT id FROM j);
+INSERT INTO job_field_shares (job_id, field_id, customer_id, split_pct, is_primary) SELECT id, '${G}', '${B}', 100, true FROM j;
+${asAdmin}SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', 'jbc-' || gen_random_uuid());
+RESET ROLE;
+SELECT string_agg(CASE WHEN customer_id = '${A}' THEN 'A' ELSE 'B' END || '=' || COALESCE(header_notes, 'none'), ' ') FROM invoices WHERE job_id = (SELECT id FROM j);`,
   // Sol round 8 #4 (the round-7 check is withdrawn): 5 Gal from company stock and 5 Gal of the grower's own of one product.
   sameProductTwoLines: `${asAdmin}
 CREATE TEMP TABLE j AS SELECT ${job('Gal', 5, 5000)} AS id;
@@ -678,6 +696,9 @@ async function main() {
   refusedProbe(CASES.deletedJob, /JOB_DELETED/);
   console.log('[after] deletedJob: refused JOB_DELETED');
   after('savedPayer', 'A:50000:50000:30000:10.0000 Gal @5000=50000/c3000/product/manual', 'the payer saved on the job (A) is billed, not the Field Setup payer (B)');
+  assert.equal(okProbe(CASES.notesOtherPayer), 'A=JBC private note B=none', "split: the job's notes print on A's (the job customer's) invoice only");
+  assert.equal(okProbe(CASES.notesSoleOtherPayer), 'B=none', "another payer's sole invoice never carries the job customer's notes");
+  console.log("[after] notesOtherPayer, notesSoleOtherPayer: job notes print only on the job customer's own invoice");
   after('savedSplit', 'A:30000:30000:18000:6.0000 Gal @5000=30000/c3000/product/manual B:20000:20000:12000:4.0000 Gal @5000=20000/c3000/product/manual',
     "the split saved on the job (A 60/B 40) is billed, not Field Setup's A 100%");
   {

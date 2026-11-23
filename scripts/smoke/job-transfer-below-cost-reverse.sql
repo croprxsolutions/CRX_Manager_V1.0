@@ -9,7 +9,7 @@ BEGIN
      OR to_regprocedure('public._job_transfer_shares_20270207(uuid)') IS NULL OR to_regprocedure('public._job_lines_lock_when_invoiced_20270207()') IS NULL
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_shares_20270207(uuid)')) IS DISTINCT FROM '944760ebdf810f062b4dcf0fe56f11b2'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_lines_lock_when_invoiced_20270207()')) IS DISTINCT FROM '9b6d4bbfc5dcc61ba058971a9ac062b6'
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM '4055fc3465413aab696018e7b9666fd6'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM 'df11843a858fa7907bf58f936715dc57'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint)')) IS DISTINCT FROM '0d225231da5e5adc8d21ed092796270a'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_split_qty_20270207(numeric, numeric[])')) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
     RAISE EXCEPTION 'JOB_TRANSFER_BELOW_COST_ROLLBACK_PREFLIGHT: the live bodies are not the ones 20270224160000 installed; nothing changed';

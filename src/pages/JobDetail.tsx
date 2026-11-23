@@ -1,7 +1,7 @@
 import { toSentryError } from '../lib/sentryError';
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, useMemo, lazy, Suspense } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Save, Plus, Trash2, Check, FileText, Beaker, Ban, MessageSquarePlus, Printer, CloudSun, MapPin, Truck, ClipboardList, FlaskConical, Bell, History, BookmarkPlus, GripVertical, ChevronUp, ChevronDown, Map as MapIcon, ShieldAlert, CalendarClock, AlertTriangle, RefreshCw, Sprout, Send, Paperclip, StickyNote } from 'lucide-react';
+import { Save, Plus, Trash2, Check, FileText, Beaker, Ban, MessageSquarePlus, Printer, CloudSun, MapPin, Truck, ClipboardList, FlaskConical, Bell, History, BookmarkPlus, GripVertical, ChevronUp, ChevronDown, Map as MapIcon, ShieldAlert, CalendarClock, AlertTriangle, Sprout, Send, Paperclip, StickyNote } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -298,6 +298,26 @@ interface ShareRow {
   is_primary: boolean;
 }
 
+// #2174: the free-text fields whose unsaved typing is shown, copyable, after a refused save or cancel.
+const UNSAVED_TEXT_FIELDS: [string, string][] = [
+  ['notes', 'Job Notes'], ['additionalInfo', 'Additional Info'],
+  ['internalMemo', 'Internal Job/Invoice Memo'], ['loaderComment', 'Loader Comment'],
+];
+
+// What changed between two form snapshots, as text a user can copy; null when nothing did.
+function describeUnsavedTyping(from: string, now: string | null): string | null {
+  if (!now || now === from) return null;
+  const before = JSON.parse(from) as Record<string, unknown>;
+  const after = JSON.parse(now) as Record<string, unknown>;
+  const parts = UNSAVED_TEXT_FIELDS
+    .filter(([key]) => after[key] !== before[key] && String(after[key] ?? '').trim() !== '')
+    .map(([key, label]) => `${label}:\n${String(after[key])}`);
+  const otherChanged = Object.keys(after).some((key) => !UNSAVED_TEXT_FIELDS.some(([t]) => t === key)
+    && JSON.stringify(after[key]) !== JSON.stringify(before[key]));
+  if (otherChanged) parts.push('You also changed other details (such as dates, crew, fields or products). Check them on the reloaded job and enter them again if still needed.');
+  return parts.length > 0 ? parts.join('\n\n') : null;
+}
+
 export default function JobDetail() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -417,9 +437,10 @@ export default function JobDetail() {
   const [status, setStatus] = useState<JobStatus>('scheduled');
   // #2188: a job removed with Delete Jobs (soft delete) opens read-only, marked deleted.
   const [deletedAt, setDeletedAt] = useState<string | null>(null);
-  // #2174 (Mason, 2026-11-23): set when the server refused a write because the job changed elsewhere. The page
-  // keeps what is on screen but locks every change until Reload, so nothing is saved, invoiced or sent from stale details.
-  const [staleNotice, setStaleNotice] = useState<string | null>(null);
+  // #2174 (Mason, 2026-11-23): a save or cancel refused because the job changed elsewhere reloads the job at once.
+  // Text typed but not saved is kept in this copyable box until dismissed; it is captured when the reload lands.
+  const [unsavedText, setUnsavedText] = useState<string | null>(null);
+  const keepTypingFromRef = useRef<string | null>(null);
   // #23: pre-fill the customer when arriving from a customer page
   // (/jobs/new?customer_id=…). Only for a NEW job; existing jobs load their own
   // customer in fetchJob. A stale/bogus id simply renders as no selection.
@@ -1845,6 +1866,14 @@ export default function JobDetail() {
     setLicensesByProfile(byProfile);
   }, [toast, isAdmin]);
 
+  // #2188 (Sol r2): a job found deleted closes any dialog already open, so none can still act on it.
+  useEffect(() => {
+    if (deletedAt === null) return;
+    setPrintOptionsOpen(false); setFieldPickerOpen(false); setShowLicenseOverrideConfirm(false);
+    setShowCompleteConfirm(false); setShowCancelConfirm(false); setShowTransferConfirm(false);
+    setShowPreNoticeConfirm(false); setShowPostNoticeConfirm(false); setDispatchWizardOpen(false);
+  }, [deletedAt]);
+
   const fetchJob = useCallback(async () => {
     // Ticket for THIS run (see loadGenerationRef). A post-save / post-start refetch
     // issued while still on its own job shares the mounted run's ticket and proceeds
@@ -2004,7 +2033,12 @@ export default function JobDetail() {
     setJobNumber(j.job_number);
     setStatus(j.status);
     setDeletedAt(j.deleted_at ?? null);
-    setStaleNotice(null);
+    if (keepTypingFromRef.current !== null) {
+      // Read at install, so typing done while this reload was in flight is kept too (Sol r2).
+      const kept = describeUnsavedTyping(keepTypingFromRef.current, latestSnapshotRef.current);
+      keepTypingFromRef.current = null;
+      if (kept) setUnsavedText(kept);
+    }
     setCustomerId(j.customer_id);
     setJobDate(j.job_date);
     setSavedJobDate(j.job_date);
@@ -3006,14 +3040,10 @@ export default function JobDetail() {
               setIsDirty(false);
               skipUnsavedPromptRef.current = true;
               navigate(`/jobs/${result.job_id}`);
-            } else if (latestSnapshotRef.current === snapAtSave) {
-              setIsDirty(false);
-              await fetchJob();
             } else {
-              // #2174 (Mason, 2026-11-23): typed while saving. Keep that typing visible but lock the page until
-              // Reload: a retry from this form could overwrite what someone else changed meanwhile.
-              await showRefusedJob(crewSkip, stillOnThisJob);
-              if (stillOnThisJob()) setStaleNotice('Part of your save did not go through, and the job may have changed meanwhile. Copy anything you typed, then reload.');
+              // #2174: reload at once; anything typed after Save is kept in the Not-saved box.
+              if (crewSkip?.reason === 'deleted') setDeletedAt((d) => d ?? '');
+              await reloadKeepingTyping(snapAtSave);
             }
           }
           setSaving(false);
@@ -3039,12 +3069,13 @@ export default function JobDetail() {
             await writeOverrideAudit(overrideReasonForAudit, isNew ? result.job_id : (id || null));
           }
           if (stillOnThisJob()) {
-            setIsDirty(false);
             if (isNew) {
+              setIsDirty(false);
               skipUnsavedPromptRef.current = true;
               navigate(`/jobs/${result.job_id}`);
             } else {
-              await fetchJob();
+              // #2174 (Sol r2 MED): anything typed after Save is kept in the Not-saved box.
+              await reloadKeepingTyping(snapAtSave);
             }
           }
           setSaving(false);
@@ -3307,20 +3338,13 @@ export default function JobDetail() {
     setCompleting(false);
   };
 
-  // Show what the server reported for a refused write without reloading over typing (#2174): a deleted job
-  // shows as deleted; any other refusal locks the page until Reload. The reported status is not shown as the
-  // job's own, since "invoiced" can mean only that an invoice covers it (Sol MED).
-  const showRefusedJob = async (skip: EditJobsSkip | undefined, stillOnThisJob: () => boolean) => {
-    if (skip?.reason === 'deleted') {
-      // Lock at once; the date read below only fills in the banner (Luna r5 HIGH).
-      if (stillOnThisJob()) setDeletedAt((d) => d ?? '');
-      const { data, error } = await supabase.from('jobs').select('deleted_at').eq('id', id!).maybeSingle();
-      if (error) Sentry.captureException(toSentryError(error), { extra: { context: 'read_refused_job' } });
-      // An unreadable date shows no date rather than today (Luna LOW).
-      if (stillOnThisJob()) setDeletedAt((d) => d || ((data as { deleted_at: string | null } | null)?.deleted_at ?? ''));
-    } else if (skip && stillOnThisJob()) {
-      setStaleNotice('Someone else changed this job since you opened it. Reload to see it as saved.');
-    }
+  // #2174 (Mason, 2026-11-23): reload the job as saved, keeping text typed since `from` in the Not-saved box.
+  // The notice log is reloaded too, so a notice sent elsewhere meanwhile counts as sent (Sol r2 MED).
+  const reloadKeepingTyping = async (from: string | null) => {
+    keepTypingFromRef.current = from;
+    setIsDirty(false);
+    void loadJobNotifications();
+    await fetchJob();
   };
 
   const handleCancelJob = async () => {
@@ -3337,10 +3361,11 @@ export default function JobDetail() {
       });
       if (result.cancelled.length === 0) {
         const skip = result.skipped.find((s) => s.id === id);
-        // No reload, so unsaved typing stays on screen; the page locks until Reload.
-        await showRefusedJob(skip, stillOnThisJob);
         if (stillOnThisJob()) {
-          toast('info', `Job not cancelled: ${summarizeEditJobs(result)} Refresh to see the job as saved.`);
+          // A deleted job locks at once, before the reload lands (Luna r5).
+          if (skip?.reason === 'deleted') setDeletedAt((d) => d ?? '');
+          toast('info', `Job not cancelled: ${summarizeEditJobs(result)} The job has been reloaded as saved.`);
+          await reloadKeepingTyping(baselineRef.current);
         }
         setCancelling(false);
         return;
@@ -3358,6 +3383,8 @@ export default function JobDetail() {
       const cancelMsg = editJobsErrorMessage(err);
       Sentry.captureException(toSentryError(err), { extra: { context: 'cancel_job' } });
       toast('error', cancelMsg);
+      // The cancel may have committed with its reply lost: reload so the page shows the job as saved (Sol r2 MED).
+      if (stillOnThisJob()) await reloadKeepingTyping(baselineRef.current);
     }
     setCancelling(false);
   };
@@ -3916,9 +3943,7 @@ export default function JobDetail() {
   // A failed customers/fields/products read closes editing until a retry succeeds.
   const isDeleted = !isNew && deletedAt !== null;
   // #2188: a deleted job offers nothing that changes it (edit, start, complete, cancel, transfer, print stamps, notices, logs).
-  // #2174: a page locked by a refused write offers nothing either, until Reload.
-  const isLocked = isDeleted || staleNotice !== null;
-  const officeCanChange = isEditable && !isLocked;
+  const officeCanChange = isEditable && !isDeleted;
   const canEdit = officeCanChange && (isNew || status === 'scheduled' || status === 'in_progress') && lookupLoadFailures.length === 0 && !lookupsLoading
     // Locked while a new job saves: an edit typed then would be neither saved nor warned about.
     && !(isNew && saving);
@@ -3934,12 +3959,12 @@ export default function JobDetail() {
   // (hasActiveDispatch) can also start/complete — mirrors the assignment-
   // unification migration's server-side authorization. Cancel/Transfer stay
   // office-only (isEditable) — deliberately NOT widened.
-  const canStart = !isNew && !isLocked && status === 'scheduled' && (isEditable || isAssignedApplicator || hasActiveDispatch);
+  const canStart = !isNew && !isDeleted && status === 'scheduled' && (isEditable || isAssignedApplicator || hasActiveDispatch);
   // #68: also allow completing a still-'scheduled' job (sprayed earlier, keyed in
   // now). handleComplete chains start_job → complete_job so the office skips the
   // fake Start-then-Complete click. Start Job also stays available for the
   // start-now-spray-later flow.
-  const canComplete = !isNew && !isLocked && (status === 'in_progress' || status === 'scheduled') && (isEditable || isAssignedApplicator || hasActiveDispatch);
+  const canComplete = !isNew && !isDeleted && (status === 'in_progress' || status === 'scheduled') && (isEditable || isAssignedApplicator || hasActiveDispatch);
   // Cancel/Transfer are OFFICE decisions (cancelling work or converting it to a
   // billable invoice) — not verified-safe to hand an applicator: Cancel had NO
   // role gate at all before U12 (any of admin/sales_rep/applicator viewing this
@@ -3991,7 +4016,7 @@ export default function JobDetail() {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
-          {!isNew && !isLocked && fieldRows.some((f) => f.field_id) && chemRows.some((c) => c.product_id) && (
+          {!isNew && !isDeleted && fieldRows.some((f) => f.field_id) && chemRows.some((c) => c.product_id) && (
             <>
               <Button icon={<ClipboardList className="w-4 h-4" />} variant="secondary" onClick={() => setPrintOptionsOpen(true)} loading={generatingSheet !== null}>
                 
@@ -4091,12 +4116,14 @@ export default function JobDetail() {
         </div>
       )}
 
-      {!isDeleted && staleNotice && (
-        <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
-          <span className="flex-1 min-w-0">{staleNotice} Nothing on this page can be changed until you reload.</span>
-          <Button size="sm" variant="secondary" icon={<RefreshCw className="w-4 h-4" />}
-            onClick={() => { setIsDirty(false); void fetchJob(); }}>Reload</Button>
+      {unsavedText && (
+        <div role="status" className="px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span className="flex-1 min-w-0">This job changed elsewhere, so your last change did not fully go through. The job below has been reloaded as saved. What you typed is below and was <strong>not saved</strong>; copy anything you still need.</span>
+            <Button size="sm" variant="ghost" onClick={() => setUnsavedText(null)}>Dismiss</Button>
+          </div>
+          <pre className="whitespace-pre-wrap font-sans bg-white border border-amber-200 rounded p-2">{unsavedText}</pre>
         </div>
       )}
 
@@ -5043,7 +5070,7 @@ export default function JobDetail() {
             // DELETE policy still restricts an applicator to files they uploaded.
             <JobAttachments
               jobId={id}
-              canEdit={!isLocked && (isEditable || (role === 'applicator' && applicatorId === profile?.id))}
+              canEdit={!isDeleted && (isEditable || (role === 'applicator' && applicatorId === profile?.id))}
             />
           )}
 

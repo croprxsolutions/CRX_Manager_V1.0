@@ -112,23 +112,20 @@ function deferred() {
   return { promise, release };
 }
 
-// jobsCalls counts page loads; the one-row read of a refused job's deletion date is answered by `stamp`.
+// jobsCalls counts page loads. `later` is served from the second load on; `laterGate` holds that load.
 let jobsCalls = 0;
-function serveJob(job: Record<string, unknown>, stamp: Record<string, unknown> | null = null, stampGate?: Promise<void>) {
+function serveJob(job: Record<string, unknown>, later: Record<string, unknown> = job, laterGate?: Promise<void>) {
   jobsCalls = 0;
   mockFrom.mockImplementation((table: string) => {
     if (table === 'jobs') {
       const chain = chainShell();
-      chain.select = (cols: string) => {
-        if (cols === 'deleted_at') {
-          if (!stampGate) return buildChain({ data: stamp, error: null });
-          const chain2 = chainShell();
-          const p = stampGate.then(() => ({ data: stamp, error: null }));
-          chain2.then = p.then.bind(p);
-          return chain2;
-        }
+      chain.select = () => {
         jobsCalls += 1;
-        return buildChain({ data: job, error: null });
+        if (jobsCalls === 1 || !laterGate) return buildChain({ data: jobsCalls === 1 ? job : later, error: null });
+        const held = chainShell();
+        const p = laterGate.then(() => ({ data: later, error: null }));
+        held.then = p.then.bind(p);
+        return held;
       };
       return chain;
     }
@@ -136,6 +133,9 @@ function serveJob(job: Record<string, unknown>, stamp: Record<string, unknown> |
     return buildChain({ data: [], error: null });
   });
 }
+
+const notSavedBox = () => screen.queryByText((_, el) => el?.tagName === 'PRE');
+const notificationLoads = () => mockFrom.mock.calls.filter((c) => c[0] === 'job_notifications').length;
 
 const editJobsReply = (skipped: unknown[]) => ({
   data: { updated: [], cancelled: [], deleted: [], skipped }, error: null,
@@ -176,62 +176,78 @@ describe('JobDetail — deleted job (#2188)', () => {
 });
 
 describe('JobDetail — refused cancel (#2174)', () => {
-  it('locks editing when the job is already cancelled, keeping typed text and not reloading', async () => {
-    serveJob(makeJob({}));
+  it('reloads the job as saved and keeps what was typed in a copyable Not-saved box (Mason)', async () => {
+    serveJob(makeJob({}), makeJob({ status: 'cancelled' }));
     mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'
       ? editJobsReply([{ id: 'job-x', reason: 'status', status: 'cancelled' }])
       : { data: null, error: null }));
     mountAt('/jobs/job-x');
     await screen.findByRole('heading', { name: 'J-0001' });
+    const noticeLoadsBefore = notificationLoads();
     fireEvent.change(screen.getByDisplayValue('saved notes'), { target: { value: 'typed meanwhile' } });
     await confirmCancel();
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Save Changes/ })).toBeNull());
-    expect(screen.getByText(/Someone else changed this job/)).toBeTruthy();
-    expect(screen.getByDisplayValue('typed meanwhile')).toBeTruthy();
-    expect((screen.getByDisplayValue('typed meanwhile') as HTMLTextAreaElement).disabled).toBe(true);
-    expect(jobsCalls).toBe(1);
+    await waitFor(() => expect(jobsCalls).toBe(2));
+    await waitFor(() => expect(notSavedBox()?.textContent).toBe('Job Notes:\ntyped meanwhile'));
+    expect(screen.getByText(/was/).textContent).toMatch(/not saved/);
+    // The form now shows the job as saved; the notice log is re-read too (Sol r2 MED).
+    expect(screen.getByDisplayValue('saved notes')).toBeTruthy();
+    expect(notificationLoads()).toBeGreaterThan(noticeLoadsBefore);
+    expect(screen.getByText('cancelled')).toBeTruthy();
+    expect(dirty.value).toBe(false);
     expect(logActivity).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Dismiss' })); });
+    expect(notSavedBox()).toBeNull();
   });
 
-  it('a cancel refused because the job moved on offers no invoice or notice until Reload (Mason, Sol HIGH)', async () => {
-    serveJob(makeJob({}));
+  it('keeps typing done while the reload is in flight (Sol r2 HIGH)', async () => {
+    const reloadGate = deferred();
+    serveJob(makeJob({}), makeJob({ status: 'completed' }), reloadGate.promise);
     mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'
       ? editJobsReply([{ id: 'job-x', reason: 'status', status: 'completed' }])
       : { data: null, error: null }));
     mountAt('/jobs/job-x');
     await screen.findByRole('heading', { name: 'J-0001' });
     await confirmCancel();
-    expect(await screen.findByText(/Someone else changed this job/)).toBeTruthy();
-    for (const name of [/Transfer to Invoice/, /Complete Job/, /Start Job/, /Cancel Job/, /Save Changes/]) {
-      expect(screen.queryByRole('button', { name })).toBeNull();
-    }
-    // The reported status is not shown as the job's own (it can be an invoice lock, Sol MED).
-    expect(screen.queryByText('completed')).toBeNull();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Reload/ })); });
     await waitFor(() => expect(jobsCalls).toBe(2));
-    await waitFor(() => expect(screen.queryByText(/Someone else changed this job/)).toBeNull());
+    fireEvent.change(screen.getByDisplayValue('saved notes'), { target: { value: 'typed during reload' } });
+    await act(async () => { reloadGate.release(); await reloadGate.promise; });
+    await waitFor(() => expect(notSavedBox()?.textContent).toBe('Job Notes:\ntyped during reload'));
+    expect(screen.getByDisplayValue('saved notes')).toBeTruthy();
   });
 
-  it('locks a job refused as deleted at once, before its deletion date is read (Luna r5 HIGH)', async () => {
-    const stampGate = deferred();
-    serveJob(makeJob({}), { deleted_at: '2026-11-02T15:00:00Z' }, stampGate.promise);
+  it('shows no Not-saved box when nothing was typed', async () => {
+    serveJob(makeJob({}), makeJob({ status: 'completed' }));
+    mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'
+      ? editJobsReply([{ id: 'job-x', reason: 'status', status: 'completed' }])
+      : { data: null, error: null }));
+    mountAt('/jobs/job-x');
+    await screen.findByRole('heading', { name: 'J-0001' });
+    await confirmCancel();
+    await waitFor(() => expect(jobsCalls).toBe(2));
+    await waitFor(() => expect(screen.getByText('completed')).toBeTruthy());
+    expect(notSavedBox()).toBeNull();
+  });
+
+  it('locks a job refused as deleted at once, before the reload lands (Luna r5 HIGH)', async () => {
+    const reloadGate = deferred();
+    serveJob(makeJob({}), makeJob({ deleted_at: '2026-11-02T15:00:00Z' }), reloadGate.promise);
     mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'
       ? editJobsReply([{ id: 'job-x', reason: 'deleted' }])
       : { data: null, error: null }));
     mountAt('/jobs/job-x');
     await screen.findByRole('heading', { name: 'J-0001' });
     await confirmCancel();
-    // The date read is still pending, yet the page is already locked.
+    // The reload is still pending, yet the page is already locked.
     expect(await screen.findByText(/This job was deleted\. It is kept/)).toBeTruthy();
     for (const name of [/Save Changes/, /Cancel Job/, /Start Job/, /Complete Job/]) {
       expect(screen.queryByRole('button', { name })).toBeNull();
     }
-    await act(async () => { stampGate.release(); await stampGate.promise; });
+    await act(async () => { reloadGate.release(); await reloadGate.promise; });
     expect(await screen.findByText(/deleted on 11\/2\/2026/)).toBeTruthy();
   });
 
   it('shows a job deleted meanwhile as deleted, on the day it was deleted', async () => {
-    serveJob(makeJob({}), { deleted_at: '2026-11-02T03:00:00Z' });
+    serveJob(makeJob({}), makeJob({ deleted_at: '2026-11-02T03:00:00Z' }));
     mockRpc.mockImplementation((fn: string) => Promise.resolve(fn === 'edit_jobs'
       ? editJobsReply([{ id: 'job-x', reason: 'deleted' }])
       : { data: null, error: null }));
@@ -243,7 +259,7 @@ describe('JobDetail — refused cancel (#2174)', () => {
     expect(screen.queryByRole('button', { name: /Save Changes/ })).toBeNull();
   });
 
-  it('a retry after a lost reply does not guess who cancelled (Mason: the database will record it)', async () => {
+  it('a lost reply reloads the job, and the retry does not guess who cancelled (Mason, Sol r2 MED)', async () => {
     serveJob(makeJob({}));
     let calls = 0;
     mockRpc.mockImplementation((fn: string) => {
@@ -256,7 +272,7 @@ describe('JobDetail — refused cancel (#2174)', () => {
     mountAt('/jobs/job-x');
     await screen.findByRole('heading', { name: 'J-0001' });
     await confirmCancel();
-    await waitFor(() => expect(calls).toBe(1));
+    await waitFor(() => expect(jobsCalls).toBe(2));
     await confirmCancel();
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringMatching(/already cancelled/)));
     expect(logActivity).not.toHaveBeenCalled();
@@ -276,8 +292,8 @@ describe('JobDetail — refused cancel (#2174)', () => {
 });
 
 describe('JobDetail — crew/loader refusal after save (#2174)', () => {
-  it('keeps text typed during the save instead of reloading over it', async () => {
-    serveJob(makeJob({}), { deleted_at: '2026-11-02T15:00:00Z' });
+  it('a job deleted meanwhile reloads as deleted, keeping text typed during the save', async () => {
+    serveJob(makeJob({}), makeJob({ deleted_at: '2026-11-02T15:00:00Z' }));
     const saveGate = deferred();
     mockRpc.mockImplementation((fn: string) => {
       if (fn === 'save_job') return saveGate.promise.then(() => ({ data: { job_id: 'job-x' }, error: null }));
@@ -292,12 +308,12 @@ describe('JobDetail — crew/loader refusal after save (#2174)', () => {
     fireEvent.change(screen.getByDisplayValue('saved notes'), { target: { value: 'typed during save' } });
     await act(async () => { saveGate.release(); await saveGate.promise; });
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/crew\/loader settings did not save/)));
-    expect(screen.getByDisplayValue('typed during save')).toBeTruthy();
-    expect(jobsCalls).toBe(1);
-    expect(await screen.findByText(/This job was deleted/)).toBeTruthy();
+    expect(await screen.findByText(/deleted on 11\/2\/2026/)).toBeTruthy();
+    await waitFor(() => expect(notSavedBox()?.textContent).toBe('Job Notes:\ntyped during save'));
+    expect(jobsCalls).toBe(2);
   });
 
-  it('locks the page with Reload after a partial save while typing, keeping the typed text (Mason, Sol HIGH)', async () => {
+  it('a partial save while typing reloads at once and keeps the typed text (Mason)', async () => {
     serveJob(makeJob({}));
     const saveGate = deferred();
     mockRpc.mockImplementation((fn: string) => {
@@ -312,15 +328,11 @@ describe('JobDetail — crew/loader refusal after save (#2174)', () => {
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('save_job', expect.anything()));
     fireEvent.change(screen.getByDisplayValue('saved notes'), { target: { value: 'typed during save' } });
     await act(async () => { saveGate.release(); await saveGate.promise; });
-    expect(await screen.findByText(/Part of your save did not go through/)).toBeTruthy();
-    const notes = screen.getByDisplayValue('typed during save') as HTMLTextAreaElement;
-    expect(notes.disabled).toBe(true);
-    expect(screen.queryByRole('button', { name: /Save Changes/ })).toBeNull();
-    expect(dirty.value).toBe(true);
-    expect(jobsCalls).toBe(1);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Reload/ })); });
     await waitFor(() => expect(jobsCalls).toBe(2));
-    await waitFor(() => expect(screen.queryByText(/Part of your save did not go through/)).toBeNull());
+    await waitFor(() => expect(notSavedBox()?.textContent).toBe('Job Notes:\ntyped during save'));
+    expect(screen.getByDisplayValue('saved notes')).toBeTruthy();
+    expect((screen.getByDisplayValue('saved notes') as HTMLTextAreaElement).disabled).toBe(false);
+    await waitFor(() => expect(dirty.value).toBe(false));
   });
 
   it('reloads as before when nothing was typed during the save', async () => {
@@ -333,5 +345,6 @@ describe('JobDetail — crew/loader refusal after save (#2174)', () => {
     fireEvent.change(screen.getByLabelText('Ground crew'), { target: { value: 'crew-1' } });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Save Changes/ })); });
     await waitFor(() => expect(jobsCalls).toBe(2));
+    expect(notSavedBox()).toBeNull();
   });
 });

@@ -822,9 +822,7 @@ export default function DeliveryDetail() {
       return;
     }
 
-    setSavingEdit(true); // locks Save and Cancel before the driver check, so the form cannot change under it
-    const stale = await staleDriverClear(id!, editDriver, editDriverAtOpen);
-    if (stale) { toast('error', stale); setSavingEdit(false); return; }
+    setSavingEdit(true);
 
     const itemsPayload = editItemsPayload(isScheduled, activeEditItems);
 
@@ -3296,9 +3294,10 @@ async function fetchInvoicesByDelivery(deliveryId: string): Promise<Record<strin
 }
 
 // The server keeps a driver it is not given, so picking "Unassigned" over the driver the form opened with asks it
-// to clear one. A form that opened with no driver never clears (a Take Delivery since then must survive its save).
-function clearDriverArg(chosen: string, atOpen: string): { p_clear_driver?: true } {
-  return !chosen && atOpen ? { p_clear_driver: true } : {};
+// to clear that driver; it refuses (DRIVER_CHANGED) if the delivery has another driver by then (20270226163000).
+// A form that opened with no driver never clears (a Take Delivery since then must survive its save).
+function clearDriverArg(chosen: string, atOpen: string): { p_clear_driver?: true; p_expected_driver?: string } {
+  return !chosen && atOpen ? { p_clear_driver: true, p_expected_driver: atOpen } : {};
 }
 
 /** The edit's line items: sent only for a scheduled delivery. */
@@ -3306,15 +3305,6 @@ function editItemsPayload(isScheduled: boolean, active: { order_item_id: string;
   return isScheduled
     ? active.map((i) => ({ order_item_id: i.order_item_id, product_id: i.product_id, quantity: i.quantity, unit_size: i.unit_size || null }))
     : null;
-}
-
-/** Before Unassigned clears a driver: the reason to refuse when the delivery's driver changed since the form opened, else null. */
-async function staleDriverClear(deliveryId: string, chosen: string, atOpen: string): Promise<string | null> {
-  if (!clearDriverArg(chosen, atOpen).p_clear_driver) return null;
-  // shortcut: a reassignment in the instant between this read and the save still loses; the server check is #2348.
-  const { data, error } = await supabase.from('deliveries').select('assigned_driver').eq('id', deliveryId).single();
-  if (error || !data) return 'Could not check the current driver. Try again.';
-  return data.assigned_driver === atOpen ? null : 'The driver was changed since you opened this form. Cancel, then edit again.';
 }
 
 /** The order's invoices plus those linked by delivery_id, one row per invoice id, newest first. */

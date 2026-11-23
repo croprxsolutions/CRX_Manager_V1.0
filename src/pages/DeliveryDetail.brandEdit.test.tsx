@@ -147,6 +147,7 @@ describe('DeliveryDetail edit: the driver choice (Mason 2026-11-23: the office m
   it('Unassigned on a delivery with a driver asks the server to clear it', async () => {
     const args = await editDriverAndSave('');
     expect(args.p_clear_driver).toBe(true);
+    expect(args.p_expected_driver).toBe('user-1');
     expect(args.p_assigned_driver).toBeUndefined();
   });
 
@@ -177,19 +178,19 @@ describe('DeliveryDetail edit: a driver taken while the form is open (Sol r2 HIG
 });
 
 describe('DeliveryDetail edit: Unassigned from a stale form (Sol r3 HIGH 1)', () => {
-  it('refuses to clear a driver someone else assigned after the form opened', async () => {
-    tables.data.profile_public_view = [
-      { id: 'user-1', full_name: 'Dana Driver', role: 'driver', is_active: true },
-      { id: 'user-2', full_name: 'Lee Driver', role: 'driver', is_active: true },
-    ];
+  it('names the driver the form showed, and shows the refusal when the driver changed since', async () => {
+    tables.data.profile_public_view = [{ id: 'user-1', full_name: 'Dana Driver', role: 'driver', is_active: true }];
+    mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'edit_delivery'
+      ? { data: null, error: { message: 'DRIVER_CHANGED: the driver was changed since the form opened; reload and try again' } }
+      : { data: { success: true }, error: null }));
     render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 }));
     await screen.findByRole('option', { name: /Dana Driver/ });
-    // Dispatch reassigns the delivery to Lee while this form stays open on Dana.
-    tables.data.deliveries = [{ ...(tables.data.deliveries[0] as object), assigned_driver: 'user-2' }];
     fireEvent.change(screen.getByRole('option', { name: 'Unassigned' }).closest('select')!, { target: { value: '' } });
     fireEvent.click(await screen.findByRole('button', { name: /Save Changes/ }));
+    await waitFor(() => expect(editCalls()).toHaveLength(1));
+    expect(editCalls()[0][1]).toMatchObject({ p_clear_driver: true, p_expected_driver: 'user-1' });
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('error', expect.stringMatching(/driver was changed/)));
-    expect(editCalls()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /Save Changes/ })).toBeTruthy();
   });
 });

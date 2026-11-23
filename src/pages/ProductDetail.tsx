@@ -425,6 +425,8 @@ export default function ProductDetail() {
   const pricingPreviewIntentRef = useRef<string | null>(null);
   const pricingPreviewRequestRef = useRef(0);
   const pricingReloadRequestRef = useRef(0);
+  // Leaving this Product (or the page) ends any pending Reload Product's report (#2308, Luna r1 MED).
+  useEffect(() => () => { pricingReloadRequestRef.current += 1; }, [id]);
   // Committed product id, read after awaits to drop results for a product the user has left.
   const productIdRef = useLatestRef(id);
   // The product itself. Cost is admin-only (Mason, 2026-10-15), so a role change is a different read.
@@ -1053,22 +1055,29 @@ export default function ProductDetail() {
     setPricingReloading(true);
     setPriceHistoryReloadToken((current) => current + 1);
     const sideReads = Promise.all([fetchCostHistory(), fetchCostBasisWorkspace()]);
-    const productReloaded = await fetchProduct();
+    const productRead = await reloadProduct();
     // Only the Product read holds the button (#2200): the side cards show their own loading and Try again.
-    setPricingReloading(false);
-    if (!productReloaded) {
+    // A newer Reload Product owns the button now, so only the newest one releases it.
+    if (reloadRequest === pricingReloadRequestRef.current) setPricingReloading(false);
+    // Skipped: the page closed or a newer read took over, which reports itself (#2308 LOW).
+    if (productRead.status === 'skipped') return false;
+    if (productRead.status !== 'applied' || productRead.data.product === null) {
       toast('error', 'This Product could not be reloaded. Try again before making another change.');
-      return;
+      return false;
     }
-    const [historyReloaded, basisReloaded] = await sideReads;
-    // A newer Reload Product took over the side reads; only that one reports them.
-    if (reloadRequest !== pricingReloadRequestRef.current) return;
-    toast(
-      historyReloaded && basisReloaded ? 'success' : 'warning',
-      historyReloaded && basisReloaded
-        ? 'Product reloaded.'
-        : 'Product reloaded, but Cost History or Cost Basis did not load. Use Try again on that card.',
-    );
+    // The Product is current, so callers go on; the side cards report later (#2308 MED: a hung
+    // Cost Basis read no longer holds the rate-correction window open).
+    void sideReads.then(([historyReloaded, basisReloaded]) => {
+      // A newer Reload Product took over the side reads; only that one reports them.
+      if (reloadRequest !== pricingReloadRequestRef.current) return;
+      toast(
+        historyReloaded && basisReloaded ? 'success' : 'warning',
+        historyReloaded && basisReloaded
+          ? 'Product reloaded.'
+          : 'Product reloaded, but Cost History or Cost Basis did not load. Use Try again on that card.',
+      );
+    });
+    return true;
   };
 
   const handleEpaLookup = async () => {

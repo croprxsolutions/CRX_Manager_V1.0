@@ -1,4 +1,4 @@
-**LOCAL CANDIDATE — NOT APPLIED.** Billing plan M4a: `20270109100200_sales_tax_checkbox.sql` (SQL sha256: `a5ffbe01e7d09c0b962560d59dd935f64949ab29b1152fd44b1ae09a532a1b64`). The sales tax checkbox on a chemical sale: one rate from Settings (6.25), on its own "Sales tax 6.25%" line after the standing discount, per payer, to the cent.
+**APPLIED LIVE 2026-11-21 05:53:36 UTC (11:53 PM Central)**, ledger version `20261121055336` carrying name `20270109100200_sales_tax_checkbox` (release v0.1.0, #1990; read-only ledger check 2026-11-23). Billing plan M4a: `20270109100200_sales_tax_checkbox.sql` (SQL sha256: `a5ffbe01e7d09c0b962560d59dd935f64949ab29b1152fd44b1ae09a532a1b64`). The sales tax checkbox on a chemical sale: one rate from Settings (6.25), on its own "Sales tax 6.25%" line after the standing discount, per payer, to the cent.
 
 **Restamped 2026-11-16** from `20261231120000` to `20270109100200`, SQL byte-identical (same sha256): applied on staging under the old name, but below main's newest (`20270109100000`), so the release would have refused it (#1868). The staging job renames its ledger row (#1837); live applies it under the new name.
 

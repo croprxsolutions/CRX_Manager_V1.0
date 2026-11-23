@@ -4085,6 +4085,7 @@ export default function FieldApplicationInvoice() {
                     <li key={p.label} className="text-sm text-gray-700">
                       <span className="font-medium">{p.label}</span>
                       {p.signalWord && <span className="text-amber-700"> ({p.signalWord})</span>}
+                      {p.epa && <div className="text-xs text-gray-500">EPA Reg. No. {p.epa}</div>}
                       {p.safeTiming && <div className="text-xs text-gray-500">{p.safeTiming}</div>}
                     </li>
                   ))}

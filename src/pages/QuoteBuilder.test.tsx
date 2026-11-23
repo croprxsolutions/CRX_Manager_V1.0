@@ -1549,7 +1549,7 @@ describe('QuoteBuilder', () => {
       const fixture = configureDrawDownFixture({ message: 'IDEMPOTENCY_RESULT_INVALID' });
       await submitOneUnitDraw(fixture.quote.id);
       await waitFor(() => expect(mockResetIdempotencyKey).toHaveBeenCalled());
-      expect(sessionStorage.length).toBe(1);
+      expect(sessionStorage.length).toBe(2); // the kept draw and its booking version (KI-190)
 
       const dialog = await reloadAndOpenDraw(fixture.quote.id);
       expect(await within(dialog).findByRole('button', { name: 'I checked' })).toBeInTheDocument();
@@ -1577,7 +1577,7 @@ describe('QuoteBuilder', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Finish it' }));
       await waitFor(() => expect(drawCalls()).toHaveLength(2));
       await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Finish it' })).not.toBeDisabled());
-      expect(sessionStorage.length).toBe(1);
+      expect(sessionStorage.length).toBe(2); // the kept draw and its booking version (KI-190)
 
       dialog = await reloadAndOpenDraw(fixture.quote.id);
       expect(await within(dialog).findByText(/got no reply/)).toBeInTheDocument();
@@ -1716,6 +1716,56 @@ describe('QuoteBuilder', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
       await waitFor(() => expect(sentDraws()).toEqual([{ product_id: 'product-1', quantity: 3, extra_price: 'today' }]));
       await waitFor(() => expect(mockToast).toHaveBeenCalledWith('success', expect.stringContaining('ORD-2')));
+    });
+
+    // KI-190: Partial Order draws against the booking the rep reviewed, like Whole Convert.
+    it('sends the booking version this screen showed', async () => {
+      const dialog = await openDrawAndEnter('1');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
+      await waitFor(() => {
+        const call = mockRpc.mock.calls.find(([name]) => name === 'draw_down_quote');
+        expect((call?.[1] as { p_expected_row_version?: unknown }).p_expected_row_version).toBe(7);
+      });
+    });
+
+    it('a booking that changed since it was opened is refused: nothing ordered, reload asked', async () => {
+      const dialog = await openDrawAndEnter('1');
+      mockRpc.mockImplementation((name: string) => Promise.resolve(name === 'draw_down_quote'
+        ? { data: null, error: { code: 'P0001', message: 'QUOTE_STALE_WRITE: this booking changed since you opened it' } }
+        : { data: null, error: null }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('changed since you opened it')));
+      expect(mockToast).not.toHaveBeenCalledWith('success', expect.anything());
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Create order from booking' })).not.toBeInTheDocument());
+      expect(await screen.findByText('Reload this quote before saving?')).toBeInTheDocument();
+    });
+
+    it('refuses locally when the booking moved on between loading this screen and opening the dialog', async () => {
+      const fixture = configureDrawDownFixture({ message: 'unused' });
+      const tables = (quote: unknown) => (table: string) => buildChain({
+        data: table === 'quotes' ? quote
+          : table === 'quote_sections' ? [fixture.section]
+          : table === 'quote_items' ? [fixture.item]
+          : table === 'customers' ? [{ id: 'customer-1', farm_name: 'Farm', assigned_tier: 1, is_active: true }]
+          : table === 'products' ? [fixture.product]
+          : [],
+        error: null,
+      });
+      mockFrom.mockImplementation(tables(fixture.quote));
+      renderQuoteBuilder(fixture.quote.id);
+      const createOrderButton = await screen.findByRole('button', { name: 'Create order' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await waitFor(() => expect(dirtyStates[dirtyStates.length - 1]).toBe(false));
+      // Another rep drew from the booking: the database is now at version 8, this screen at 7.
+      mockFrom.mockImplementation(tables({ ...fixture.quote, row_version: 8 }));
+      fireEvent.click(createOrderButton);
+      fireEvent.click(await screen.findByRole('menuitem', { name: /Draw part of booking/ }));
+      const dialog = await screen.findByRole('dialog', { name: 'Create order from booking' });
+      fireEvent.change(await within(dialog).findByRole('spinbutton'), { target: { value: '1' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create order' }));
+      await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('changed since you opened it')));
+      expect(mockRpc.mock.calls.some(([name]) => name === 'draw_down_quote')).toBe(false);
+      expect(await screen.findByText('Reload this quote before saving?')).toBeInTheDocument();
     });
 
     it('sends the booked price when the rep picks it', async () => {

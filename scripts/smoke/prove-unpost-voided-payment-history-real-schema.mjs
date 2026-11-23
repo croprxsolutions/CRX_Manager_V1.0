@@ -117,7 +117,7 @@ const caseA3 = (before, after) => `${draft('a3-s1')} ${post('a3-p1')} ${pay('a3-
 // (a3) stale: a voided row naming a line of this invoice but recording another invoice is left for a person.
 const caseA3Stale = (other) => `${draft('a3s-s1')} ${post('a3s-p1')} ${pay('a3s-pay', 100000)} ${voidPay('a3s-void')} ${legacyLink()}
   UPDATE public.invoice_line_allocations SET invoice_id = ${other} WHERE allocation_set_id = (r->>'allocation_set_id')::uuid; ${linkedLine}
-  ${refuse(`r2 := public.unpost_invoice(u, '${ADMIN}', 'a3s-un');`)} v := t || '|' || ${status()} || '|row '
+  ${refuse(`r2 := public.unpost_invoice(u, '${ADMIN}', 'a3s-un-${RUN}');`)} v := t || '|' || ${status()} || '|row '
     || (SELECT (invoice_item_id::text = f0 AND invoice_id = ${other})::text FROM public.invoice_line_allocations WHERE id = f1::uuid);`;
 // (a4) two voided payments, each naming a different line: both are unlinked and audited, and the save goes through.
 const caseA4 = `${draft('a4-s1')} ${post('a4-p1')} ${pay('a4-pay1', 60000)} ${pay('a4-pay2', 40000, 'r3')} ${voidPay('a4-void1')} ${voidPay('a4-void2', 'r3')}
@@ -135,9 +135,9 @@ const caseA4 = `${draft('a4-s1')} ${post('a4-p1')} ${pay('a4-pay1', 60000)} ${pa
 const caseA2 = `${draft('a2-s1')} ${post('a2-p1')} ${pay('a2-pay', 100000)} ${voidPay('a2-void')} ${legacyLink()}
   ${unpost('a2-un')} ${legacyLink()} BEGIN ${saveBack('a2-s2')} t := 'NOT REFUSED'; EXCEPTION WHEN OTHERS THEN t := SQLERRM; END; v := t;`;
 // Part-paid, so the invoice is still 'posted' and the money check (not the paid-status check) is what refuses.
-const caseB = `${draft('b-s1')} ${post('b-p1')} ${pay('b-pay', 60000)} ${refuse(`r2 := public.unpost_invoice(u, '${ADMIN}', 'b-un');`)} v := t;`;
+const caseB = `${draft('b-s1')} ${post('b-p1')} ${pay('b-pay', 60000)} ${refuse(`r2 := public.unpost_invoice(u, '${ADMIN}', 'b-un-${RUN}');`)} v := t;`;
 const caseC = `${draft('c-s1')} ${post('c-p1')} ${pay('c-pay1', 60000)} ${pay('c-pay2', 40000, 'r3')} ${voidPay('c-void')}
-  ${refuse(`r2 := public.unpost_invoice(u, '${ADMIN}', 'c-un');`)} v := t;`;
+  ${refuse(`r2 := public.unpost_invoice(u, '${ADMIN}', 'c-un-${RUN}');`)} v := t;`;
 // Allocation rows written directly, so paid stays 0 and only the allocation count can block: a non-payment set
 // (active or not) and an active payment set still count, also when the row names only one of the lines (lineOnly).
 const caseE = (entity, active, lineOnly = false) => { const set = randomUUID(); return `${draft('e-s1')} ${post('e-p1')}
@@ -146,7 +146,7 @@ const caseE = (entity, active, lineOnly = false) => { const set = randomUUID(); 
   INSERT INTO public.invoice_line_allocations (allocation_set_id, invoice_id, invoice_item_id, bill_to_customer_id, split_percentage, amount_cents)
     VALUES ('${set}', ${lineOnly ? 'NULL' : 'u'}, ${lineOnly ? '(SELECT id FROM public.invoice_items WHERE invoice_id = u ORDER BY sort_order, id LIMIT 1)' : 'NULL'},
       '${CUST}', 100, 1000);
-  ${refuse(`r2 := public.unpost_invoice(u, '${ADMIN}', 'e-un');`)} v := t || ' paid=' || (SELECT paid_amount_cents FROM public.invoices WHERE id = u);`; };
+  ${refuse(`r2 := public.unpost_invoice(u, '${ADMIN}', 'e-un-${RUN}');`)} v := t || ' paid=' || (SELECT paid_amount_cents FROM public.invoices WHERE id = u);`; };
 // The group members' ids, resolved after the seed (a signed-in call cannot read undo_paths).
 let G1;
 let G2;
@@ -232,8 +232,13 @@ COMMIT;\n`);
 const REUSE = Boolean(process.env.UNDO_PATHS_CONTAINER); // a container already built to just before the candidate
 try {
   if (!REUSE) { buildContainer({ stopBefore: CANDIDATE }); seedUsers(); }
-  // Before any fixture: the container must hold the pinned body (a reused one may already have this migration).
+  // Before any fixture: the container must hold the pinned body (a reused one may already have this migration),
+  // with exactly the owner, mode, settings and grants the preflight accepts. The drift probe later re-issues the impl
+  // with fixed settings, so other drift on a reused container must stop the proof here.
   assert.equal(implMd5(), PINNED_MD5, 'the container is not at the state just before this migration; rebuild it');
+  assert.equal(scalar(`SELECT proowner::regrole || '|' || prosecdef || '|' || proisstrict::text || provolatile::text || proparallel::text || proleakproof::text
+      || procost::text || '|' || proconfig::text || '|' || coalesce(proacl::text, '') FROM pg_proc WHERE oid = ${IMPL};`),
+    `postgres|true|falsevufalse100|{"search_path=public, pg_temp"}|{postgres=X/postgres}`, 'starting function is not the pinned one');
   stageCandidate();
   seed(`p2265-drafts-${RUN}`, `INSERT INTO public.customers (id, farm_name, is_active) VALUES ('${CUST}', '[P2265] Unpost Farm', true);
     DO $s$ DECLARE a uuid; b uuid; BEGIN
@@ -257,11 +262,6 @@ try {
     assert.match(attempt(ADMIN, caseD()), /^P0001\|Cannot unpost invoice \S+ — it has payments/, 'old group refusal not reproduced');
     console.log('[before] a posted invoice whose only payment was voided is refused by unpost and by group unpost');
 
-    // The probes below re-issue the impl with fixed settings, so first prove the starting function is exactly what the
-    // preflight accepts (pinned body, owner, mode, settings, grants); a reused container with other drift stops here.
-    assert.equal(scalar(`SELECT md5(replace(prosrc, chr(13), '')) || '|' || proowner::regrole || '|' || prosecdef || '|' || proconfig::text
-      || '|' || coalesce(proacl::text, '') FROM pg_proc WHERE oid = ${IMPL};`),
-      `${PINNED_MD5}|postgres|true|{"search_path=public, pg_temp"}|{postgres=X/postgres}`, 'starting function is not the pinned one');
     // A drifted body: plain psql -f keeps going after an error, yet the file changes nothing (one statement writes).
     const pinnedBody = JSON.parse(scalar(`SELECT to_json(prosrc)::text FROM pg_proc WHERE oid = ${IMPL};`));
     try {

@@ -2,9 +2,10 @@
 -- file (apply_product_setup accepts only insert, rates and expected_prices). preview_product_import now refuses such a
 -- file up front with PRODUCT_SETUP_ROW_SHAPE_INVALID naming the field. The screen never sends extra fields, so its
 -- behavior is unchanged. Same signature and grants; the body is the 20261107130000 body (md5-pinned below) plus one
--- check. No data changes.
+-- check (and refuses "expected_prices" without "rates", which the save also refuses). No data changes.
 --
--- Rollback: re-run the preview_product_import body from 20261107130000_product_import.sql as CREATE OR REPLACE.
+-- Rollback: a NEW forward migration restoring the 20261107130000 body (never re-run or edit this file), with its own
+-- ledger record and the preview_product_import allowlist entry re-keyed back.
 
 SET LOCAL lock_timeout = '10s';
 
@@ -64,6 +65,10 @@ BEGIN
     RAISE EXCEPTION 'PRODUCT_SETUP_ROW_SHAPE_INVALID: a row has a field the save does not accept: %',
       (SELECT string_agg(DISTINCT k, ', ' ORDER BY k) FROM jsonb_array_elements(p_rows) r, jsonb_object_keys(r) k
         WHERE k NOT IN ('insert', 'rates', 'expected_prices'));
+  END IF;
+  -- The save also refuses "expected_prices" without "rates" (the preview computes those prices from the rates).
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_rows) r WHERE r ? 'expected_prices' AND NOT r ? 'rates') THEN
+    RAISE EXCEPTION 'PRODUCT_SETUP_ROW_SHAPE_INVALID: a row has "expected_prices" without "rates"; the save refuses it';
   END IF;
 
   FOR v_row, v_n IN SELECT r, n FROM jsonb_array_elements(p_rows) WITH ORDINALITY AS t(r, n) LOOP

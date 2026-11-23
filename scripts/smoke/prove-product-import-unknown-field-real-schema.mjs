@@ -59,7 +59,11 @@ try {
   assert.equal(attempt(USERS.admin, `${asUser(`r := ${preview([good])};`)} v := ${statuses};
     ${asUser(`r2 := ${save([good], 'kg')};`)} v := v || '|' || (r2->>'inserted_count') || '|' || ${products};`), 'ok|ok|1|1');
   assert.equal(attempt(USERS.admin, `${asUser(`r := ${preview([{ ...good, rates: { rate_per_acre: '2', rate_unit: 'oz', suggested_rate: null } }])};`)} v := ${statuses};`), 'ok|ok');
-  assert.equal(attempt(USERS.admin, `${asUser(`r := ${preview([{ ...good, expected_prices: null }])};`)} v := ${statuses};`), 'ok|ok', 'expected_prices is an accepted row key');
+  // expected_prices without rates: the save refuses it, so the preview refuses it too (Taha LOW).
+  assert.equal(attempt(USERS.admin, `${refuse(`r := ${preview([{ ...good, expected_prices: null }])};`)} v := t;`),
+    'ok|PRODUCT_SETUP_ROW_SHAPE_INVALID: a row has "expected_prices" without "rates"; the save refuses it');
+  // rates plus expected_prices (the shape the screen saves) still previews ok.
+  assert.equal(attempt(USERS.admin, `${asUser(`r := ${preview([{ ...good, rates: { rate_per_acre: '2', rate_unit: 'oz', suggested_rate: null }, expected_prices: {} }])};`)} v := ${statuses};`), 'ok|ok');
   // Existing shape and permission refusals are unchanged.
   assert.equal(attempt(USERS.admin, `${refuse(`r := ${preview([{ rates: {} }])};`)} v := split_part(t, ':', 1);`), 'ok|PRODUCT_SETUP_ROW_SHAPE_INVALID');
   assert.equal(attempt(USERS.admin, `${refuse(`r := ${preview(['x'])};`)} v := split_part(t, ':', 1);`), 'ok|PRODUCT_SETUP_ROW_SHAPE_INVALID');

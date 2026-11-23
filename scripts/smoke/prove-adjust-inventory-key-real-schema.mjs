@@ -8,7 +8,7 @@
  *      adjust stock; a same-key retry returns the first answer and writes nothing more;
  *   2. keys with a newline, tab, control character, space or non-ASCII letter, a blank key and NULL are refused
  *      with IDEMPOTENCY_KEY_REQUIRED, and nothing changes (no stock, ledger or receipt row);
- *   3. follow-up 20270201150000: no public function keeps the weak check, and each of the 20 functions with the
+ *   3. follow-up 20270224180000: no public function keeps the weak check, and each of the 20 functions with the
  *      strict check refuses a newline key, while a normal key gets past the key check (rolled back);
  *   4. a second apply of either migration is refused by its preflight;
  *   5. the registered full adjust_inventory chain passes on the new body, and a sales rep removes a customer document
@@ -24,7 +24,7 @@ import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, scalar, attempt, asUser, refuse, USERS, ROOT, NAME, docker } from './undo-paths/harness.mjs';
 
 const CANDIDATE = '20270201140000_adjust_inventory_key_printable_only.sql';
-const FOLLOW_UP = '20270201150000_idempotency_keys_printable_only.sql';
+const FOLLOW_UP = '20270224180000_idempotency_keys_printable_only.sql';
 const reuse = process.env.ADJUST_KEY_PROOF_REUSE === '1';
 const candidate = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const PROD = '7c7a0000-0000-4000-8000-000019120001';
@@ -87,7 +87,7 @@ INSERT INTO public.customers (id, farm_name, assigned_sales_rep, is_active) VALU
     assert.equal(got, 'ok|IDEMPOTENCY_KEY_REQUIRED: adjust_inventory requires p_idempotency_key|unchanged=true', label);
   }
 
-  // 3. Follow-up (20270201150000): no public function keeps the weak check, and each of the 20 functions with the
+  // 3. Follow-up (20270224180000): no public function keeps the weak check, and each of the 20 functions with the
   //    strict check refuses 'abc' + newline with IDEMPOTENCY_KEY_REQUIRED, while the same call with a normal key
   //    gets past the key check (it fails later on the dummy arguments, or not at all). Every other argument is
   //    NULL except: the actor arguments (signed-in admin), a reason, and hold type 'manual', so earlier checks pass.

@@ -344,7 +344,7 @@ const INTERNAL_OPERATION_REFERENCES: Record<string, string[]> = {
   _section9_cancel_purchase_order_serialized: ['cancel_purchase_order'],
   _section9_create_vendor_bill_intent_impl_20260826: ['create_vendor_bill'],
   // Section 9 (20260826221000 onward) moved the public AP bodies into these impls behind their public wrappers, so
-  // each kept the public literal its wrapper binds. 20270201150000 (#1912)
+  // each kept the public literal its wrapper binds. 20270224180000 (#1912)
   // re-emits them only to refuse idempotency keys with a non-printable character; changing the literal would orphan
   // existing receipts.
   _section9_create_vendor_bill_cumulative_impl: ['create_vendor_bill'],

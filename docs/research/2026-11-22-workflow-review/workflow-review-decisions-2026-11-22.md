@@ -1,6 +1,6 @@
 # Mason's decisions from the 2026-11-22 workflow review
 
-Companion to `chemical-sales-workflow-2026-11-22.html` and `field-application-workflow-2026-11-22.md` in this folder. None of this is built yet.
+Companion to `chemical-sales-workflow-2026-11-22.html` and `field-application-workflow-2026-11-22.md` in this folder. These are business rules, mostly not built yet. Already true today (checked 2026-11-22): decision 6 for ordinary edits (an existing line keeps its cost; a product swap or new line takes the cost sent), and decision 10 (stock shortage never blocks the driver). Corrections from the review: `review-reconciliation-2026-11-22.md`.
 
 | # | Topic | Decision (Mason, 2026-11-22) | Lane |
 |---|---|---|---|
@@ -9,7 +9,7 @@ Companion to `chemical-sales-workflow-2026-11-22.html` and `field-application-wo
 | 3 | Field App Invoice screen | One screen for all field billing. Straight chemical the grower picks up = chemical sale (order/delivery), never a field invoice. Product we MIX (our rig or grower sprays) = Field App Invoice, with the applicator (our rig or the grower) filled in and a spray record written. Stock leaves exactly once: at mixing (blend ticket), or at invoice save when there is no blend ticket or job. | Field billing: Mason's lane |
 | 4 | Job quantities | Product charge and stock follow what actually went in the tank: the mixer edits the job's product totals (planned 160 ac, mixed 162 ac -> bill and deduct 162). Sprayed acres go on the spray record and drive the per-acre application fee. | Mason's lane |
 | 5 | Buying for Likely bookings | **Dropped (Mason, 2026-11-22).** No percentage setting. Mason judges how much of the Likely amount to buy himself; Purchasing keeps showing Firm ("To buy") and Likely ("Could add") as built. | - |
-| 6 | Cost on an edited order | Existing lines keep their booked cost; only a newly added line takes today's cost. | Orders: Taha's lane until 12-15 |
+| 6 | Cost on an edited order | Existing lines keep their booked cost; only a newly added line takes today's cost. **Already how the app works** for edits to an existing line. | Orders: Taha's lane until 12-15 |
 
 ## Chemical sales walkthrough (Mason, 2026-11-22, second round)
 
@@ -21,5 +21,18 @@ Companion to `chemical-sales-workflow-2026-11-22.html` and `field-application-wo
 | 10 | Completing a delivery when stock shows short | Keep today: allow, record the negative, flag it for admin review. Drivers are never blocked. | No change |
 | 11 | Product cost from what was paid the vendor | Already decided 2026-11-04 in `docs/plans/2026-07-16-inventory-costing-plan.md` section 12 (average-cost Phase 2, fresh start from a stock count); parked until Mason's build go-ahead. | - |
 | 12 | Roll over / Duplicate to next season | Copy products, sections, rates per acre and program notes only. Never copy fields (so no acres or quantities), dates, timing or confidence. Whether roll over closes last year's booking is not decided yet. | Bookings: Taha's lane until 12-15 |
+
+## Open questions from the review (2026-11-22)
+
+These came out of reconciling the Codex reviews; each needs Mason's business call. Details: `review-reconciliation-2026-11-22.md`.
+
+- **Q1 (decision 1):** commission "paid" should mean cash or prepay actually applied, not the invoice's paid status (a write-off or credit memo also marks it paid). Recommend: cash + prepay only; write-offs and return credits never earn commission.
+- **Q2 (decisions 1 + 7, gap 16):** Cancel Remaining is refused once a return was received or any commission row isn't pending. Recommend: let it release only the undelivered part, leaving delivered, returned and already-paid commission untouched. Decision 7 depends on this.
+- **Q3 (decision 8):** should a draft price *above* the booked price also need "grower agreed", like on the booking? Recommend: yes.
+- **Q4 (decision 10 vs F05, gap 11):** the built F05 guard refuses the driver's completion when it would deliver more than the order line says ("call the office"). Decision 10 says drivers are never blocked. Recommend: decision 10 covers stock shortage only; over the order quantity stays an office stop.
+- **Q5 (gap 19):** returns marked Damaged/opened: never restock without an admin? Recommend: yes.
+- **Q6 (gap 22):** bounced check from a closed month: record a "returned check" in the current month instead of reopening? Recommend: yes.
+- **Q7 (gap 5):** an order edit after its commission is in a payout batch or paid: refuse the edit (like Cancel Remaining does), or carry a correction into the next payout? Recommend: refuse until the batch is voided now; carry corrections once decision 1 is built.
+- **Q8 (decision 12):** does Roll over close last year's booking? (still open)
 
 Still open: prepay (tie to booking, price lock) - waiting on Mason's brainstorm.

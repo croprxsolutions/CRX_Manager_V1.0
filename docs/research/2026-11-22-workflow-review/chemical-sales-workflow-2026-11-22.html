@@ -35,13 +35,13 @@ table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{border:1px soli
 </style></head><body>
 
 <h1>Chemical Sales — how a booking becomes stock, a delivery, an invoice and money</h1>
-<div class="sub">Read from the newest code (staging, 2026-11-22, commit 3f1ca8933). Some of it is <b>not live yet</b> — tags show where each piece stands. Read-only review: nothing was changed.</div>
+<div class="sub">Read from the code on the staging branch (commit e8cd4ea82, same code as 3f1ca8933; staging tip 42039d705 adds only a field-billing guard). Corrected 2026-11-22 after two Codex reviews and three independent Claude checks; see <code>review-reconciliation-2026-11-22.md</code>. Read-only review: nothing was run against a database.</div>
 <div class="legend">
 <span><i class="dot" style="background:#9ca3af"></i>What you do</span>
 <span><i class="dot" style="background:var(--b)"></i>Stock effect</span>
 <span><i class="dot" style="background:var(--g)"></i>Money effect</span>
 <span><i class="dot" style="background:var(--r)"></i>Gap / risk</span>
-<span class="tag t-live">LIVE</span><span class="tag t-stg">STAGING ONLY</span><span class="tag t-none">NOT BUILT</span>
+<span class="tag t-live">LIVE</span><span class="tag t-stg">STAGING</span> = in the staging branch code, not applied live (whether the staging database has it was not checked) <span class="tag t-none">NOT BUILT</span>
 </div>
 
 <h2>1. The main path</h2>
@@ -49,85 +49,109 @@ table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{border:1px soli
 
 <div class="stage"><h3>① Quote / Booking</h3><div class="scr">Quotes → Quote Builder</div>
 <div class="box do"><b>Do</b>Build sections (field, products, rate, acres, price). Per section pick <b>Needed-by</b>, <b>Timing</b> (Pre-plant / In season / Late summer) and <b>Confidence</b> (Firm / Likely / Maybe) <span class="tag t-stg">STAGING</span>. Optional "Planned program" switch. Send it.</div>
-<div class="box stock"><b>Stock</b><ul><li>Draft (not Planned): counts <u>nowhere</u>.</li><li>Sent: shows on the Purchasing tab only (advice, nothing reserved).</li><li>Only the old <b>Planned</b> switch puts a real hold on shelf stock — and it ignores Firm/Likely/Maybe.</li></ul></div>
-<div class="box money"><b>Money</b>Sending locks the price until expiry (season end). Raising a price later needs "Grower agreed".</div>
-<div class="box gap"><b>Gaps</b><ul><li>Holds still follow "Planned", not "Firm".</li><li>Hold quietly ends 14 days after Needed-by.</li><li>Duplicate / Roll over drop fields, dates, timing, confidence.</li></ul></div>
+<div class="box stock"><b>Stock</b><ul><li>Draft (not Planned): counts <u>nowhere</u>.</li><li>Sent (not Planned): counts on the Purchasing tab only (advice, nothing reserved on the shelf).</li><li>Only the <b>Planned</b> switch puts a real hold on shelf stock — on <u>every</u> line, whatever its Firm/Likely/Maybe. A Planned <i>draft</i> also counts in Purchasing like a sent booking <span class="tag t-stg">STAGING</span>.</li><li>Holds drop once the booking is accepted/converted; drawing product shrinks them.</li></ul></div>
+<div class="box money"><b>Money</b>Sending saves the price. Expiry defaults to season end (staff can pick another date); Planned or part-drawn bookings don't auto-expire. Lowering a price is always allowed; raising a booked price needs "Grower agreed".</div>
+<div class="box gap"><b>Gaps</b><ul><li>Holds follow "Planned", not "Firm".</li><li>Hold ends 14 days after Needed-by (no date = never ends). Office Cockpit lists expiring holds.</li><li>Duplicate / Roll over copy acres, quantities and the Planned switch; neither closes last year's booking.</li></ul></div>
 </div>
 
 <div class="stage"><h3>② Purchasing</h3><div class="scr">Inventory → Purchasing tab <span class="tag t-stg">STAGING</span> · Purchase Orders</div>
 <div class="box do"><b>Do</b>Read "To buy" and "Order X by &lt;date&gt;" per product, then create a PO by hand.</div>
-<div class="box stock"><b>Stock</b><ul><li>Shelf + POs by arrival date are matched to needs in date order, with a running balance (not month by month).</li><li><b>To buy</b> = Firm + orders + jobs + holds. <b>Could add</b> = Likely. Maybe shown, never bought.</li><li>Receiving a PO adds on-hand stock.</li></ul></div>
-<div class="box money"><b>Money</b>Receiving does <u>not</u> change product cost; cost comes from the catalog price list.</div>
-<div class="box gap"><b>Gaps</b><ul><li>No "make a PO from this" button.</li><li>Old Forecast view still compares each month to the whole warehouse.</li></ul></div>
+<div class="box stock"><b>Stock</b><ul><li>Shelf + open (non-draft) POs are shared out once. Needs go in priority order (shelf-only holds → negative stock → committed → Could add → Maybe), by date within each group. A late PO can cover a need (flagged) but never adds a buy.</li><li><b>To buy</b> = the <u>uncovered</u> part of negative stock + orders + active jobs + manual holds + <u>dated</u> Firm lines, within the horizon. Undated Firm goes to a "needs a date" list.</li><li><b>Could add</b> = the uncovered part of Likely <u>and lines with no confidence set</u>. Maybe shown, never bought.</li><li>Receiving a PO adds on-hand stock.</li></ul></div>
+<div class="box money"><b>Money</b>Receiving does <u>not</u> change the catalog cost (<code>current_cost</code>); the PO's own cost is separate and feeds vendor bills.</div>
+<div class="box gap"><b>Gaps</b><ul><li>No "make a PO from this" button.</li><li>Old Forecast view compares each month's hold demand to today's warehouse stock, with no running balance.</li></ul></div>
 </div>
 
-<div class="stage"><h3>③ Order</h3><div class="scr">Convert / Partial Order / New Order</div>
-<div class="box do"><b>Do</b>Convert the whole booking, or take Partial Orders as the grower calls. Extra beyond the booking can be priced today's or booked price.</div>
-<div class="box stock"><b>Stock</b><ul><li>Order quantity becomes <b>"committed"</b> (prebooked). Shelf count unchanged.</li><li>Booking holds shrink unit for unit as product is drawn.</li><li>Shortage = warning only.</li></ul></div>
-<div class="box money"><b>Money</b><ul><li>Order line keeps the booked price and the cost from quote time.</li><li><b>Commission is created now</b>, on planned profit.</li></ul></div>
-<div class="box gap"><b>Gaps</b><ul><li>Order warnings ignore stock held for <u>another grower's</u> booking.</li><li>Editing an order line re-stamps today's cost (profit &amp; commission shift).</li><li>Close-Short ignores open partial orders.</li></ul></div>
+<div class="stage"><h3>③ Order</h3><div class="scr">Convert / Partial Order / New Order / Rush</div>
+<div class="box do"><b>Do</b>Convert the whole booking, or take Partial Orders as the grower calls. Extra beyond the booking can be priced at today's or the booked price.</div>
+<div class="box stock"><b>Stock</b><ul><li>Order quantity becomes <b>"committed"</b> (prebooked). Shelf count unchanged.</li><li>Booking holds shrink unit for unit as booked product is drawn.</li><li>Shortage = warning only (and the warning ignores holds).</li></ul></div>
+<div class="box money"><b>Money</b><ul><li>Booked lines keep the booked price and quote-time cost; extra and direct-order lines take today's cost.</li><li><b>Commission is created now</b>, on planned profit (Rush orders: when priced).</li><li>Editing an existing line <u>keeps its cost</u>; price/qty edits re-figure profit and <i>pending</i> commission. Booking-draw orders can't be edited.</li></ul></div>
+<div class="box gap"><b>Gaps</b><ul><li>Order warnings ignore stock held for <u>another grower's</u> booking.</li><li>An edit ignores commission already in a payout batch or paid.</li><li>Close-Short ignores open partial orders.</li><li>Cancel Remaining is refused for good after a received return or any cancelled commission row.</li></ul></div>
 </div>
 
 <div class="stage"><h3>④ Delivery</h3><div class="scr">New Delivery → Confirm → Complete</div>
-<div class="box do"><b>Do</b>Schedule, driver confirms (starts), driver completes. Short loads leave a remainder for a follow-up.</div>
-<div class="box stock"><b>Stock</b><ul><li><b>Complete is the only step that takes stock off the shelf</b> and clears the matching "committed".</li><li>Negative stock allowed (flagged for review).</li><li>Void (admin) puts it back — blocked once invoice is posted.</li></ul></div>
-<div class="box money"><b>Money</b>Completing makes a <b>draft invoice</b> automatically, at the order-line price.</div>
-<div class="box gap"><b>Gaps</b><ul><li>An order line can be cut below what's on an open delivery.</li><li>Returns restock but never reduce commission.</li></ul></div>
+<div class="box do"><b>Do</b>Schedule, driver confirms (starts), driver completes (or office does start+complete in one step). Short loads leave a remainder for a follow-up.</div>
+<div class="box stock"><b>Stock</b><ul><li><b>Complete is the only step that takes stock off the shelf</b> (actual quantity, Main Warehouse) and clears the matching "committed".</li><li>Negative stock allowed (flagged for review).</li><li>Void (admin, with reason) puts it back — refused while a posted/paid/overdue invoice exists (database trigger) or a return was received. <b>Fix Delivery</b> voids delivery + invoice together and re-creates commission.</li></ul></div>
+<div class="box money"><b>Money</b>Completing makes a <b>draft invoice</b> at the order-line price on the ordinary path. Bill Split makes one draft per payer; a field/acre split drafts only when the whole order ships the same day, else it's flagged for manual split billing; Quick Delivery already made its draft.</div>
+<div class="box gap"><b>Gaps</b><ul><li>An order line can be cut below what's on an open delivery — fix built (F05) <span class="tag t-stg">NOT APPLIED ANYWHERE</span>.</li><li>Cancel Remaining also cancels a load already on the truck.</li></ul></div>
 </div>
 
 <div class="stage"><h3>⑤ Invoice</h3><div class="scr">Invoices → Invoice Detail</div>
-<div class="box do"><b>Do</b>Review the draft, add freight/misc lines, Post.</div>
-<div class="box stock"><b>Stock</b>None. Can't bill more than was delivered (database cap).</div>
-<div class="box money"><b>Money</b><ul><li>Posting locks amounts, starts the due date (Net 30) and AR.</li><li>Closed months refuse changes.</li><li>Sales tax + standing discount lines <span class="tag t-stg">STAGING, switched off</span>.</li></ul></div>
-<div class="box gap"><b>Gaps</b><ul><li>Void + re-bill leaves the rep's commission cancelled for good.</li><li>Draft price can be edited; nothing re-checks it against the sent quote.</li></ul></div>
+<div class="box do"><b>Do</b>Review the draft, add freight/misc lines, Post. An unpaid posted invoice can be unposted, edited and re-posted.</div>
+<div class="box stock"><b>Stock</b>None. Can't bill more than was delivered (database cap). <u>Billing less is not caught.</u></div>
+<div class="box money"><b>Money</b><ul><li>Posting locks amounts and starts AR. Due date = invoice date + invoice's terms, else customer's terms, else Net 30.</li><li>Closed months refuse posting and payments.</li><li>Sales tax + standing discount <span class="tag t-stg">STAGING, database switch off; controls hidden on live</span>.</li></ul></div>
+<div class="box gap"><b>Gaps</b><ul><li>Void + re-bill: if that was the order's last active invoice, pending commission stays cancelled (Fix Delivery doesn't have this problem).</li><li>Draft price can be edited with no comparison to the booked price.</li><li>A lowered quantity makes the delivery look fully billed.</li></ul></div>
 </div>
 
 <div class="stage"><h3>⑥ Payment &amp; Commission</h3><div class="scr">Payments · Prepay · Commission Payments · Month-End</div>
-<div class="box do"><b>Do</b>Record payment against posted invoices; apply prepay; pay reps; close the month.</div>
+<div class="box do"><b>Do</b>Record payment against posted invoices; enter prepay checks; apply prepay; pay reps; close the month.</div>
 <div class="box stock"><b>Stock</b>None.</div>
-<div class="box money"><b>Money</b><ul><li>Payment lowers invoice balance; overpay becomes a prepay credit.</li><li>Prepay can pay any posted invoice of that customer.</li></ul></div>
-<div class="box gap"><b>Gaps</b><ul><li><b>Commission can be paid before the sale is invoiced or paid.</b></li><li>Prepay is not tied to a booking and doesn't lock price.</li><li>Live Month-End "payments received" reads an old table (fix is on staging).</li></ul></div>
+<div class="box money"><b>Money</b><ul><li>Payment lowers invoice balance; overpay becomes a prepay credit.</li><li>Prepay can pay any posted/overdue invoice of that customer.</li><li>"Paid" can also come from a write-off, prepay or credit memo — no new cash.</li></ul></div>
+<div class="box gap"><b>Gaps</b><ul><li><b>Commission can be paid before the sale is invoiced or paid.</b></li><li>Prepay is not tied to a booking and doesn't lock price.</li><li>Live Month-End "payments received" reads an old table (fix <span class="tag t-stg">STAGING</span>).</li><li>Same check can be entered in both payment screens.</li></ul></div>
 </div>
 </div>
 
-<h2>2. Your "planned vs firm" idea — where each kind of quote counts</h2>
+<h2>2. Planned vs firm — where each kind of quote counts</h2>
 <div class="ladder">
-<div class="rung c0"><h4>Draft quote</h4>Counts <b>nothing</b>.<br>(Exception: a draft with "Planned" on still holds stock.) <span class="tag t-live">LIVE</span></div>
-<div class="rung c1"><h4>Sent · Maybe</h4>Shown on Purchasing.<br><b>Never</b> bought for, never held. <span class="tag t-stg">STAGING</span></div>
-<div class="rung c2"><h4>Sent · Likely</h4>"Could add" column — the full amount; you judge how much to buy. Not held. <span class="tag t-stg">STAGING</span></div>
-<div class="rung c3"><h4>Sent · Firm</h4>"To buy" column, with "Order X by date". <b>Not yet held on the shelf</b> (still needs Planned switch). <span class="tag t-stg">STAGING</span></div>
-<div class="rung c4"><h4>Order</h4>"Committed" — real reservation. Counts in To buy. <span class="tag t-live">LIVE</span></div>
-<div class="rung c5"><h4>Delivered</h4>Leaves the shelf. Invoice drafted. <span class="tag t-live">LIVE</span></div>
+<div class="rung c0"><h4>Draft quote</h4>Counts <b>nothing</b>. <span class="tag t-live">LIVE</span><br>Exception: a draft with "Planned" on holds stock <span class="tag t-live">LIVE</span> and counts in Purchasing <span class="tag t-stg">STAGING</span>.</div>
+<div class="rung c1"><h4>Sent · Maybe</h4>Shown on Purchasing. <b>Never</b> bought for. Held only if Planned is on. <span class="tag t-stg">STAGING</span></div>
+<div class="rung c2"><h4>Sent · Likely (or unset)</h4>"Could add" — the part not already covered by stock or POs; you judge how much to buy. Held only if Planned is on. <span class="tag t-stg">STAGING</span></div>
+<div class="rung c3"><h4>Sent · Firm</h4>Gets first claim on stock and POs; "To buy" + "Order X by date" for what's uncovered. No date = "needs a date" list. Not held on the shelf unless Planned. <span class="tag t-stg">STAGING</span></div>
+<div class="rung c4"><h4>Order</h4>"Committed" — real reservation <span class="tag t-live">LIVE</span>. Counts in To buy <span class="tag t-stg">STAGING</span>.</div>
+<div class="rung c5"><h4>Delivered</h4>Leaves the shelf. Invoice drafted (split orders: see ④). <span class="tag t-live">LIVE</span></div>
 </div>
-<div class="idea"><b>How you use it:</b> Purchasing shows "To buy" (Firm + orders) and "Could add" (all of Likely). You decide by judgment how much of Likely to buy; no percentage setting is planned (Mason, 2026-11-22).</div>
+<div class="idea"><b>How you use it:</b> Purchasing shows "To buy" (Firm + orders, uncovered part) and "Could add" (Likely and unset, uncovered part). You decide by judgment how much of Likely to buy; no percentage setting is planned (Mason, 2026-11-22).</div>
 
 <h2>3. Side doors (other ways stock and money move)</h2>
 <div class="side">
-<div class="card"><h4>Quick Delivery</h4>Skips the quote: makes order + delivery + draft invoice at once, at the customer's tier price and today's cost. Stock comes off at Complete.</div>
-<div class="card"><h4>New Order (direct)</h4>No booking. Commits stock, uses today's cost. Same delivery → invoice path.</div>
-<div class="card"><h4>Returns</h4>Unopened product goes back on the shelf; a credit memo reverses the sale. Commission is <b>not</b> reduced.</div>
-<div class="card"><h4>Purchase Orders</h4>Create → submit → receive (adds stock). Over-receiving needs an admin. Cost is not updated from the vendor price.</div>
+<div class="card"><h4>Quick Delivery</h4>Skips the quote: makes order + scheduled delivery (stock committed) + optional draft invoice at once, at tier price and today's cost. The draft is dated when it's created, not when it ships. Stock comes off at Complete.</div>
+<div class="card"><h4>New Order (direct)</h4>No booking. Commits stock, today's cost. Same delivery → invoice path.</div>
+<div class="card"><h4>Rush order</h4>Ship now, price later: commits stock with pricing pending; can deliver; can't post the bill until priced. Commission created at pricing.</div>
+<div class="card"><h4>Bulk order import</h4>Imported orders are confirmed and commit stock in a batch; shortages reported during import.</div>
+<div class="card"><h4>Cancel / Cancel Remaining / Void order</h4>Releases undelivered committed stock, cancels its loads and drafts, cancels pending commission. Refused when commission is batched/paid, a return was received, or any commission row isn't pending.</div>
+<div class="card"><h4>Fix Delivery</h4>One screen: voids the delivery and its invoices together, puts stock back, reopens quantities, replaces pending commission. Blocked by payments, returns and some split/closed-month cases.</div>
+<div class="card"><h4>Returns</h4>Request → approve → receive. Lines ticked "restock" go back on the shelf (the tick defaults on, even if condition is changed to Damaged). The credit memo follows the billed payer and must be applied. Commission is <b>not</b> reduced.</div>
+<div class="card"><h4>Purchase Orders</h4>Create → submit → receive (adds stock). Over-receiving needs an admin + reason. Quick Receive, receipt reversal and PO Close-Short also exist. Vendor bills create money owed. Catalog cost not updated.</div>
+<div class="card"><h4>Billed outside CRX</h4>Completed delivery still moves stock; a record keeps it out of the unbilled queue and blocks a second CRX invoice.</div>
+<div class="card"><h4>From-scratch invoice</h4>Charge lines only (freight, service); no product lines, no stock.</div>
+<div class="card"><h4>Write-off / credit memo / finance charge</h4>Write-off lowers AR without cash (reversible). Credit memo lowers a balance. Finance charges create a new unposted invoice on overdue balances. No stock.</div>
+<div class="card"><h4>Stock corrections</h4>Manual add/adjust, cycle counts, tote fill from bulk: change shelf stock outside sales, no money.</div>
 </div>
 
 <h2>4. Gaps ranked (inventory + money) and your rule for each</h2>
+<p style="font-size:12.5px;color:var(--mute)">All LIVE unless tagged. #1–15 are the original list, corrected; #16–30 were added from the reviews. Struck-out wording was wrong in the first version.</p>
 <table>
 <tr><th>#</th><th>Sev</th><th>What can go wrong</th><th>Example</th><th>Your rule</th></tr>
-<tr><td>1</td><td class="H">HIGH</td><td>Commission can be paid as soon as the order exists — before delivery, invoice or payment — and is based on planned, not billed, profit.</td><td>Rep is paid on 500 gal; grower takes 300 and pays late.</td><td>Payable only after the customer pays, on what was billed (decision 1).</td></tr>
-<tr><td>2</td><td class="H">HIGH</td><td>Orders don't warn when they take stock held for another grower's booking.</td><td>100 gal held for Grower A; Grower B's order takes it with no warning.</td><td>Warn, naming the grower and booking, then allow (11-17).</td></tr>
-<tr><td>3</td><td class="H">HIGH</td><td>Shelf holds follow the old "Planned" switch, not Firm, and end 14 days after Needed-by.</td><td>Firm booking holds nothing; a late spray loses its product.</td><td>Only Firm holds stock, until delivered or closed (11-17 design).</td></tr>
-<tr><td>4</td><td class="H">HIGH</td><td>Prepay isn't tied to a booking and doesn't lock price.</td><td>Spring prepay gets used on a fall invoice.</td><td>Open — your brainstorm.</td></tr>
-<tr><td>5</td><td class="M">MED</td><td>Editing an order line re-stamps it with today's cost.</td><td>Booked at last fall's cost; an edit in May shifts profit and commission.</td><td>Existing lines keep the booked cost; only new lines take today's (decision 6).</td></tr>
-<tr><td>6</td><td class="M">MED</td><td>Void an invoice and re-bill → rep's commission stays cancelled forever.</td><td>Fixing a typo on an invoice costs the rep his commission.</td><td>Commission follows the money: re-bill restores it (decision 2).</td></tr>
-<tr><td>7</td><td class="M">MED</td><td>Returns never reduce commission.</td><td>Product comes back, credit issued, rep keeps full commission.</td><td>A return lowers commission (decision 2).</td></tr>
-<tr><td>8</td><td class="M">MED</td><td>Close-Short on a booking ignores open partial orders.</td><td>"Grower walked away" but an order still holds stock.</td><td>Block the close and list each open order + unused prepay; deliver or cancel the rest first (decision 7).</td></tr>
-<tr><td>9</td><td class="M">MED</td><td>A draft invoice price can be changed with no check against the booked price and no reason.</td><td>Booked at $40, someone types $38 and posts it.</td><td>Allowed, booked price shown beside it, reason required and logged (decision 8).</td></tr>
-<tr><td>10</td><td class="M">MED</td><td>Quick Delivery sells booked products at tier price without touching the booking.</td><td>Booked 300 at $40; counter sale of 50 at $44; booking still says 300 open.</td><td>Flag booked products per line: draw from booking or sell separately (decision 9).</td></tr>
-<tr><td>11</td><td class="M">MED</td><td>An order line can be cut below what's already on an open delivery.</td><td>Driver delivers more than the order now says; another order's reservation is eaten.</td><td>Technical fix (block it); no business call needed.</td></tr>
-<tr><td>12</td><td class="M">MED</td><td>Roll over / Duplicate don't match how you renew a plan (and roll over can leave last year's booking open).</td><td>Next year's plan needs re-entry.</td><td>Copy products, sections, rates per acre and program notes only — never fields, acres, dates, timing or confidence (decision 12). Closing last year's booking: not decided.</td></tr>
+<tr><td>1</td><td class="H">HIGH</td><td>Commission can be paid as soon as the order exists — before delivery, invoice or payment — on planned, not billed, profit (KI-154).</td><td>Rep is paid on 500 gal; grower takes 300 and pays late.</td><td>Payable only after the customer pays, on what was billed (decision 1). <b>Open:</b> base it on cash applied, not the invoice's "paid" status — a write-off also marks it paid.</td></tr>
+<tr><td>2</td><td class="H">HIGH</td><td>Orders don't warn when they take stock held for another grower's booking.</td><td>100 gal held for Grower A; Grower B's order commits it with no warning.</td><td>Warn, naming the grower and booking, then allow (11-17).</td></tr>
+<tr><td>3</td><td class="H">HIGH</td><td>Shelf holds follow the "Planned" switch, not Firm, and end 14 days after Needed-by (never, if no date).</td><td>A Firm booking without Planned holds nothing; a late spray can lose its product.</td><td>Only Firm holds stock, until delivered or closed (11-17 design).</td></tr>
+<tr><td>4</td><td class="M">MED</td><td>Prepay isn't tied to a booking and doesn't lock price. (Was HIGH; the money still only pays that customer's own invoices.)</td><td>Spring prepay gets used on a fall invoice.</td><td>Open — your brainstorm.</td></tr>
+<tr><td>5</td><td class="M">MED</td><td><s>Editing an order line re-stamps today's cost.</s> Wrong: existing lines keep their cost. Real gap: an edit that lowers profit leaves commission that's already in a payout batch or paid untouched.</td><td>$200 commission in a payout batch; quantity cut drops profit to $800; batch still pays $200 instead of $80.</td><td>Decision 6 is already how the app works. Batched/paid case: <b>needs your call</b>.</td></tr>
+<tr><td>6</td><td class="M">MED</td><td>Void the order's last active invoice and re-bill → pending commission stays cancelled, <u>and</u> the cancelled row then blocks Cancel Remaining (#16).</td><td>Fixing a typo by void + re-bill costs the rep commission. (Unpost-edit-repost or Fix Delivery avoid it.)</td><td>Commission follows the money: re-bill restores it (decision 2).</td></tr>
+<tr><td>7</td><td class="M">MED</td><td>Returns never reduce commission (KI-184).</td><td>Product comes back, credit issued, rep keeps full commission.</td><td>A return lowers commission (decision 2).</td></tr>
+<tr><td>8</td><td class="H">HIGH</td><td>Close-Short on a booking ignores open partial orders (was MED; the 11-17 audit had it HIGH).</td><td>"Grower walked away" but a 300-gal order from the booking still holds stock.</td><td>Block the close and list each open order + unused prepay; deliver or cancel the rest first (decision 7). Needs #16 fixed first or it can dead-end.</td></tr>
+<tr><td>9</td><td class="M">MED</td><td>A draft invoice price can be changed with no check against the booked price and no reason.</td><td>Booked at $40, someone types $38 (or $44) and posts it.</td><td>Allowed, booked price shown beside it, reason required and logged (decision 8). <b>Open:</b> should a <i>higher</i> price also need "grower agreed"?</td></tr>
+<tr><td>10</td><td class="M">MED</td><td>Quick Delivery sells booked products at tier price without touching the booking (only a customer-wide banner).</td><td>Booked 300 at $40; counter sale of 50 at $44; booking still says 300 open.</td><td>Flag booked products per line: draw from booking or sell separately (decision 9).</td></tr>
+<tr><td>11</td><td class="M">MED</td><td>An order line can be cut below what's already on an open delivery. <span class="tag t-stg">FIX BUILT (F05), NOT APPLIED ANYWHERE</span></td><td>Order cut to 60 with an 80-gal load still scheduled; driver delivers 80.</td><td>Block it (F05). <b>Open:</b> F05 also refuses the <i>driver's</i> completion when it goes over the order — conflicts with decision 10.</td></tr>
+<tr><td>12</td><td class="M">MED</td><td>Roll over / Duplicate copy acres, quantities and the Planned switch, and leave last year's booking open — so a rolled Planned draft and the old booking can both count in Purchasing.</td><td>120 gal left on last year's booking + 120 gal on the rolled draft = 240 counted.</td><td>Copy products, sections, rates per acre and program notes only (decision 12). Closing last year's booking: <b>not decided</b>.</td></tr>
 <tr><td>13</td><td class="L">LOW</td><td>Delivery completes even when the shelf shows short (stock goes negative).</td><td>App says 30 gal, delivery is 50 → shows -20.</td><td>Keep: allow, flag for admin to fix the count (decision 10).</td></tr>
-<tr><td>14</td><td class="L">LOW</td><td>No "make a PO from this" button on Purchasing.</td><td>You retype the To-buy numbers into a new PO.</td><td>Not decided; you buy by judgment (Likely % idea dropped).</td></tr>
-<tr><td>15</td><td class="L">LOW</td><td>Live Month-End shows ~$0 payments received.</td><td>—</td><td>Fixed on staging, not live yet.</td></tr>
+<tr><td>14</td><td class="L">LOW</td><td>No "make a PO from this" button on Purchasing.</td><td>You retype the To-buy numbers into a new PO.</td><td>Not decided; you buy by judgment.</td></tr>
+<tr><td>15</td><td class="H">HIGH</td><td>Live Month-End shows ~$0 payments received, so the cash check can pass without review (KI-129). (Was LOW because the fix exists; it is not live.) <span class="tag t-stg">FIX ON STAGING</span></td><td>$100,000 of receipts shows as $0.</td><td>Ship the fix.</td></tr>
+<tr><td>16</td><td class="H">HIGH</td><td><b>New.</b> Once a return is received, or any commission row on the order isn't pending (e.g. after #6 or a Fix Delivery), Cancel Remaining is refused forever — no other screen can release the undelivered rest.</td><td>100 gal ordered, 60 shipped, 5 returned, grower declines the last 40 → 40 stay committed; Purchasing keeps saying buy them; the booking can't be closed short.</td><td><b>Needs your call</b> (recommend: let it release only the undelivered part, keeping delivered, returned and paid amounts).</td></tr>
+<tr><td>17</td><td class="M">MED</td><td><b>New.</b> Lowering the quantity on a draft invoice makes the delivery look fully billed; the shortfall drops off every "unbilled" list.</td><td>100 gal delivered at $40, invoice posted for 60 → $1,600 never billed, nothing flags it.</td><td>Technical fix: compare billed vs shipped per line and keep the difference on the queue.</td></tr>
+<tr><td>18</td><td class="M">MED</td><td><b>New.</b> The same check can be entered in Record Payment and in Prepayment Manager; the duplicate check only looks at one.</td><td>$10,000 check pays an invoice and also sits as $10,000 prepay.</td><td>Technical fix: one check-number check across both screens.</td></tr>
+<tr><td>19</td><td class="M">MED</td><td><b>New.</b> A return marked Damaged still restocks if the "restock" tick (on by default) is left on.</td><td>20 gal of damaged product becomes sellable stock.</td><td><b>Needs your call</b> (recommend: damaged/opened never restocks without an admin).</td></tr>
+<tr><td>20</td><td class="M">MED</td><td><b>New.</b> Cancel Remaining also cancels a load the driver has already started; the driver then can't complete it.</td><td>40 gal on the truck leave the yard but are never deducted or billed.</td><td>Technical fix: refuse while a load is in progress.</td></tr>
+<tr><td>21</td><td class="M">MED</td><td><b>New.</b> Month-End close doesn't check for completed deliveries with no invoice (Office Cockpit still lists them).</td><td>Draft cancelled with no replacement; month closes with a $4,000 shipment unbilled.</td><td>Technical fix: close checks unbilled deliveries.</td></tr>
+<tr><td>22</td><td class="M">MED</td><td><b>New.</b> A bounced check from a closed month can only be voided by reopening that month.</td><td>October $12,000 check bounces in November after October closed.</td><td><b>Needs your call</b> (recommend: a "returned check" entry in the current month).</td></tr>
+<tr><td>23</td><td class="M">MED</td><td><b>New.</b> Quick Delivery's draft invoice keeps its creation date, not the ship date (editable before posting).</td><td>Created Sept 29, shipped Oct 2 → invoice dated September.</td><td>Technical fix: date it at completion.</td></tr>
+<tr><td>24</td><td class="M">MED</td><td><b>New.</b> Quick Delivery orders start with tax off and no rep, so only an admin can tick sales tax. <span class="tag t-stg">STAGING</span></td><td>6.25% on a $10,000 taxable sale missed.</td><td>Decide with the sales-tax work.</td></tr>
+<tr><td>25</td><td class="L">LOW</td><td><b>New.</b> An admin can edit a voided payment's prepay credit back to a balance.</td><td>Voided $5,000 check's $2,000 overpay re-entered.</td><td>Technical fix: no edit on voided credits.</td></tr>
+<tr><td>26</td><td class="L">LOW</td><td><b>New.</b> Voided orders still count in Month-End order dollars (display only).</td><td>$20,000 voided + $20,000 replacement shows $40,000.</td><td>Technical fix.</td></tr>
+<tr><td>27</td><td class="L">LOW</td><td><b>New.</b> Month-End counts deliveries by scheduled date, not ship date.</td><td>Scheduled Sept 30, shipped Oct 3 → counted in September.</td><td>Technical fix.</td></tr>
+<tr><td>28</td><td class="L">LOW</td><td><b>New.</b> Quick Delivery saves the server's tier price, which can differ from the one shown if the tier changed seconds before.</td><td>Shown $40, saved $44.</td><td>Technical fix: reconfirm on change.</td></tr>
+<tr><td>29</td><td class="L">LOW</td><td><b>New.</b> Split-payer return quantities finer than hundredths can't be returned (known trade-off).</td><td>0.005 gal stranded.</td><td>Accepted.</td></tr>
+<tr><td>30</td><td class="L">LOW</td><td><b>New.</b> Quick Delivery's database call doesn't insist on a retry key (the screen always sends one).</td><td>No exposure today.</td><td>Technical fix.</td></tr>
 </table>
 
-<div class="foot">Rules: decision numbers refer to <code>workflow-review-decisions-2026-11-22.md</code> in this folder (Mason, 2026-11-22); "11-17" refers to the bookings audit design. Sources: code + database functions on staging 3f1ca8933; prior audit docs/research/2026-11-17-bookings-flow-audit. Not tested against a database; findings come from reading code. Several staging changes are not live yet. Field application side is covered in a separate review.</div>
+<div class="foot">Rules: decision numbers refer to <code>workflow-review-decisions-2026-11-22.md</code> in this folder (Mason, 2026-11-22); "11-17" refers to the bookings audit design. Sources: code + database functions on the staging branch (e8cd4ea82); live status from <code>docs/reference/migrations.d/</code> records only. Not tested against a database; findings come from reading code. Reviews reconciled in <code>review-reconciliation-2026-11-22.md</code>. Field application side is covered in a separate review.</div>
 </body></html>

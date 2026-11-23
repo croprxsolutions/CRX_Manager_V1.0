@@ -39,7 +39,7 @@ BEGIN
   PERFORM set_config('lock_timeout', '10s', true);
 
   -- Preflight: the reviewed body, one overload, owner, mode, the attributes CREATE OR REPLACE resets (strict, volatility,
-  -- parallel, leakproof, cost), search_path and EXECUTE grants.
+  -- parallel, leakproof, cost, argument defaults, result type), search_path and EXECUTE grants.
   SELECT * INTO p FROM pg_proc WHERE oid = to_regprocedure('public._unpost_invoice_replay_impl_20261015(uuid,uuid,text)');
   IF p.oid IS NULL OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM '161f18c3ccd6126a6fb683c5160f82dc' THEN
     RAISE EXCEPTION 'PREFLIGHT_FAIL: _unpost_invoice_replay_impl_20261015 changed since 2026-11-23 (md5 %); re-read it before applying',
@@ -50,11 +50,13 @@ BEGIN
      OR p.proowner <> 'postgres'::regrole
      OR NOT p.prosecdef
      OR p.proisstrict OR p.provolatile <> 'v' OR p.proparallel <> 'u' OR p.proleakproof OR p.procost <> 100
+     OR pg_get_function_arguments(p.oid) IS DISTINCT FROM 'p_invoice_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text'
+     OR pg_get_function_result(p.oid) IS DISTINCT FROM 'jsonb'
      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
      OR ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
                 FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)
         IS DISTINCT FROM ARRAY['postgres'] THEN
-    RAISE EXCEPTION 'PREFLIGHT_FAIL: _unpost_invoice_replay_impl_20261015 has an extra overload, or its owner, mode, strictness, volatility, parallel/leakproof/cost, search_path or EXECUTE grants changed';
+    RAISE EXCEPTION 'PREFLIGHT_FAIL: _unpost_invoice_replay_impl_20261015 has an extra overload, or its owner, mode, strictness, volatility, parallel/leakproof/cost, argument defaults, result type, search_path or EXECUTE grants changed';
   END IF;
 
   -- The replacement, in this same statement.
@@ -274,6 +276,8 @@ $create$;
      OR p.proowner <> 'postgres'::regrole
      OR NOT p.prosecdef
      OR p.proisstrict OR p.provolatile <> 'v' OR p.proparallel <> 'u' OR p.proleakproof OR p.procost <> 100
+     OR pg_get_function_arguments(p.oid) IS DISTINCT FROM 'p_invoice_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text'
+     OR pg_get_function_result(p.oid) IS DISTINCT FROM 'jsonb'
      OR p.proconfig IS DISTINCT FROM ARRAY['search_path=public, pg_temp']::text[]
      OR ARRAY(SELECT DISTINCT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
                 FROM aclexplode(p.proacl) a WHERE a.privilege_type = 'EXECUTE' ORDER BY 1)

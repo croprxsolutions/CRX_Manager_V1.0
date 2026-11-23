@@ -165,6 +165,9 @@ const sessions = [];
 function session(app, sql) {
   const child = spawn('docker', ['exec', '-i', '-e', `PGAPPNAME=${app}`, NAME, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { cwd: ROOT });
   let out = '';
+  // A Docker exec that dies early must not crash Node (EPIPE) before the finally restores the candidate.
+  child.on('error', (e) => { out += `\n[spawn error] ${e.message}`; });
+  child.stdin.on('error', (e) => { out += `\n[stdin error] ${e.message}`; });
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
   const done = new Promise((resolve) => child.on('close', (code) => resolve({ code, out })));

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270225120000_ki167_relabel_completed_lines_stock_unit.sql (KI-167).
+ * Real-schema proof for 20270225230000_ki167_relabel_completed_lines_stock_unit.sql (KI-167).
  *
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs). Seeds three invented orders shaped like the three live
@@ -12,7 +12,7 @@
  *   ORD-2026-0484  first load completed short (20 of 25), remainder 5 "Gall"; the real follow-up lifecycle then
  *                  delivers it (create_followup_delivery, written before the line-unit guard existed, so the guard is
  *                  off for that one call), which closes the remainder as fulfilled (history).
- * The candidate's LIVE_ID_TODO placeholders are filled with this fixture's ids; the unfilled file refuses. Then:
+ * The candidate's live ids are swapped for this fixture's ids; a copy with them NULL refuses. Then:
  *   (a) before: void the last load -> the line reopens -> the replacement (a new delivery in the line's unit, as New
  *       Delivery sends it, and on ORD-2026-0381 a follow-up from the open remainder) is refused with
  *       LINE_UNIT_NOT_STOCK_UNIT. Rolled back.
@@ -36,7 +36,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildContainer, removeContainer, seedUsers, attempt, asUser, refuse, claims, scalar, docker, USERS, ROOT, NAME } from './undo-paths/harness.mjs';
 
-const CANDIDATE = '20270225120000_ki167_relabel_completed_lines_stock_unit.sql';
+const CANDIDATE = '20270225230000_ki167_relabel_completed_lines_stock_unit.sql';
 const RAW = readFileSync(path.join(ROOT, 'supabase', 'migrations', CANDIDATE), 'utf8').replaceAll('\r\n', '\n');
 const flag = (name) => ['1', 'true'].includes(String(process.env[name] ?? '').trim().toLowerCase());
 const REUSE = flag('KI167_REUSE');
@@ -139,22 +139,26 @@ const followUpSql = (l, key) => `r := public.create_followup_delivery('${l.D}', 
 // The replacement the office would use: a follow-up while the first load's remainder is open, else a new delivery.
 const replacementSql = (l, key) => (l === DIRECT ? followUpSql(l, key) : newDeliverySql(l, key));
 
-// The candidate with this fixture's ids in place of its LIVE_ID_TODO placeholders.
+// The candidate carries the live ids (read 2026-11-23); the proof swaps in this fixture's ids, and an unfilled copy
+// (ids and remainder list NULL) must refuse.
+const LIVE = {
+  'ORD-2026-0188': { order: '401d9573-1569-4400-a586-4b976b7361ca', product: 'ac926057-cfae-4070-9cb6-ff2ecc421c3c' },
+  'ORD-2026-0381': { order: 'c44975be-eb7d-4ebf-b6f9-04c0f8180091', product: 'c4d75524-7426-4e3d-87a5-9524dbba7280' },
+  'ORD-2026-0484': { order: '79a42790-635e-4868-9a9d-a19a46adefea', product: '0c093448-80d9-4d50-aa43-738500f919b8' },
+};
+const LIVE_REMAINDERS = "c_remainders constant text := '[]';";
+function swap(sql, from, to) {
+  assert.equal(sql.split(from).length, 2, `${from} must appear once in the candidate`);
+  return sql.replace(from, to);
+}
 function filled(remainderJson) {
   let sql = RAW;
-  for (const l of LINES) {
-    for (const [what, value] of [['order', l.O], ['product', l.P]]) {
-      const marker = `NULL /* LIVE_ID_TODO ${what} ${l.order} */`;
-      assert.equal(sql.split(marker).length, 2, `placeholder ${marker} must appear once`);
-      sql = sql.replace(marker, `'${value}'`);
-    }
-  }
-  const marker = 'NULL /* LIVE_ID_TODO open remainders */';
-  assert.equal(sql.split(marker).length, 2);
-  sql = sql.replace(marker, `'${sq(remainderJson)}'`);
-  assert.doesNotMatch(sql, /NULL \/\* LIVE_ID_TODO/);
-  return sql;
+  for (const l of LINES) for (const what of ['order', 'product']) sql = swap(sql, `'${LIVE[l.order][what]}'`, `'${what === 'order' ? l.O : l.P}'`);
+  return swap(sql, LIVE_REMAINDERS, `c_remainders constant text := '${sq(remainderJson)}';`);
 }
+let UNFILLED = RAW;
+for (const l of LINES) for (const what of ['order', 'product']) UNFILLED = swap(UNFILLED, `'${LIVE[l.order][what]}'`, 'NULL');
+UNFILLED = swap(UNFILLED, LIVE_REMAINDERS, 'c_remainders constant text := NULL;');
 const refused = (label, r, pattern) => {
   assert.notEqual(r.status, 0, `${label}: must refuse`);
   assert.match(r.stderr, pattern, `${label}: ${r.stderr}`);
@@ -174,7 +178,7 @@ try {
   const unchanged = () => { assert.equal(lineState(), seeded); assert.equal(remainders(), remaindersSeeded); };
 
   // The checked-in file refuses until its live ids are filled in.
-  refused('placeholders', run(`BEGIN;\n${RAW}\nROLLBACK;`), /KI167_LIVE_IDS_MISSING: the live order and product ids/);
+  refused('placeholders', run(`BEGIN;\n${UNFILLED}\nROLLBACK;`), /KI167_LIVE_IDS_MISSING: the live order and product ids/);
   unchanged();
 
   // (a) Before: the void reopens the line in its old unit and every replacement is refused.

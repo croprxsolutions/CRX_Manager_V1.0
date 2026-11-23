@@ -18,8 +18,9 @@
 -- all go through with them in place (invoices there are the drafts completion writes; a posted invoice is not proven).
 -- Any such line on these three order lines in another spelling is listed as a NOTICE, for the record.
 --
--- LIVE_ID_TODO: the order and product ids and the open-remainder list below are read live (read-only) before apply.
--- While any is still NULL the migration refuses (KI167_LIVE_IDS_MISSING) and changes nothing.
+-- The order and product ids and the open-remainder list below were read live (read-only, 2026-11-23 evening, Taha's OK):
+-- no remainders on the three lines, no unfinished delivery lines, 0 other order lines off their stock unit.
+-- If any is ever NULL the migration refuses (KI167_LIVE_IDS_MISSING) and changes nothing.
 --
 -- LOCKS: row locks only, in the order an order edit takes them (update_order_items locks the order, then its lines,
 -- whose a1 guard then shares the product): the three orders FOR UPDATE, the three products FOR SHARE (so no rename or
@@ -48,9 +49,9 @@
 
 DO $ki167$
 DECLARE
-  -- LIVE_ID_TODO: open (pending) remainders of the three lines in an old spelling, read live: '[]' if none, else
+  -- Open (pending) remainders of the three lines in an old spelling, read live: '[]' if none, else
   -- '[{"id": "...", "order_item_id": "...", "old_unit": "...", "quantity": n}]'.
-  c_remainders constant text := NULL /* LIVE_ID_TODO open remainders */;
+  c_remainders constant text := '[]';
   c_uuid constant text := '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
   v_rem  jsonb;
   v_bad  text;
@@ -61,12 +62,12 @@ BEGIN
   CREATE TEMP TABLE ki167_rows (id uuid PRIMARY KEY, order_id uuid, order_number text, product_id uuid,
     product_name text, old_unit text, new_unit text, needed numeric, delivered numeric) ON COMMIT DROP;
   INSERT INTO pg_temp.ki167_rows VALUES
-    ('1a9a6d97-8540-47ac-8616-7792774d7502', NULL /* LIVE_ID_TODO order ORD-2026-0188 */, 'ORD-2026-0188',
-     NULL /* LIVE_ID_TODO product ORD-2026-0188 */, 'Treaty Extra', 'oz', 'Dry oz', 800, 800),
-    ('ff563d1a-31d0-46d8-9329-2a928c818c12', NULL /* LIVE_ID_TODO order ORD-2026-0381 */, 'ORD-2026-0381',
-     NULL /* LIVE_ID_TODO product ORD-2026-0381 */, 'Trivapro - Bulk', 'Gallon ', 'Gal', 192, 192),
-    ('b81e22ff-9596-4abe-80fe-56b8684e5968', NULL /* LIVE_ID_TODO order ORD-2026-0484 */, 'ORD-2026-0484',
-     NULL /* LIVE_ID_TODO product ORD-2026-0484 */,
+    ('1a9a6d97-8540-47ac-8616-7792774d7502', '401d9573-1569-4400-a586-4b976b7361ca', 'ORD-2026-0188',
+     'ac926057-cfae-4070-9cb6-ff2ecc421c3c', 'Treaty Extra', 'oz', 'Dry oz', 800, 800),
+    ('ff563d1a-31d0-46d8-9329-2a928c818c12', 'c44975be-eb7d-4ebf-b6f9-04c0f8180091', 'ORD-2026-0381',
+     'c4d75524-7426-4e3d-87a5-9524dbba7280', 'Trivapro - Bulk', 'Gallon ', 'Gal', 192, 192),
+    ('b81e22ff-9596-4abe-80fe-56b8684e5968', '79a42790-635e-4868-9a9d-a19a46adefea', 'ORD-2026-0484',
+     '0c093448-80d9-4d50-aa43-738500f919b8',
      'Gen Select 2LB: (Ceridian 2EC, Clethodim 2EC, Volunteer) - 2.5 Gal', 'Gall', 'Gal', 25, 25);
 
   IF c_remainders IS NULL OR EXISTS (SELECT 1 FROM pg_temp.ki167_rows WHERE order_id IS NULL OR product_id IS NULL) THEN

@@ -335,7 +335,7 @@ before the job rows in the hold trigger's callers, or rebuild once per statement
 No amount is changed; the office must correct the line's unit by hand. **Decision (Mason, 2026-11-17: "Accept and
 land"):** #1896 ships with this open. Fix: relabel completed lines to the stock unit, or relabel a line when a void
 reopens it.
-**Fix pending (2026-11-23, not applied):** `supabase/migrations/20270225120000_ki167_relabel_completed_lines_stock_unit.sql`
+**Fix pending (2026-11-23, not applied):** `supabase/migrations/20270225230000_ki167_relabel_completed_lines_stock_unit.sql`
 relabels the three lines (and any open remainder of them) to their product's stock unit ("oz" -> "Dry oz", "Gallon " and
 "Gall" -> "Gal"; Taha approved). Quantities and amounts do not change. Its live order and product ids are still to be filled in. Proof: `scripts/smoke/prove-ki167-relabel-completed-lines-real-schema.mjs`.
 

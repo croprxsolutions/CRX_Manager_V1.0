@@ -18,18 +18,23 @@ Companion to `chemical-sales-workflow-2026-11-22.html` and `field-application-wo
 | 7 | Close - Short with undelivered orders from the booking | Block the close and list each open order (ordered / delivered / still due, with a link) plus any unused prepay. Staff deliver it or "Cancel remaining" first; then the close goes through. Extra product priced at today's price does not block. (Astra's recommendation, accepted.) | Bookings: Taha's lane until 12-15 |
 | 8 | Changing a price on a draft invoice | Allowed, but the screen shows the booked/order price beside it and requires a short reason when they differ; who, old, new and why are logged. Below-cost still needs an admin. | Chemical billing: Taha's lane until 12-15 |
 | 9 | Quick Delivery for a grower with an open booking | Stronger than today's banner: a product that is on his open booking is flagged per line, and staff pick "draw from booking" (booked price, booking goes down) or "sell separately" (tier price). | Bookings/deliveries |
-| 10 | Completing a delivery when stock shows short | Keep today: allow, record the negative, flag it for admin review. Drivers are never blocked. | No change |
+| 10 | Completing a delivery when stock shows short | Keep today: allow, record the negative, flag it for admin review. Drivers are never blocked by a stock shortage. (Going over the order quantity is different: decision 16.) | No change |
 | 11 | Product cost from what was paid the vendor | Already decided 2026-11-04 in `docs/plans/2026-07-16-inventory-costing-plan.md` section 12 (average-cost Phase 2, fresh start from a stock count); parked until Mason's build go-ahead. | - |
 | 12 | Roll over / Duplicate to next season | Copy products, sections, rates per acre and program notes only. Never copy fields (so no acres or quantities), dates, timing or confidence. Whether roll over closes last year's booking is not decided yet. | Bookings: Taha's lane until 12-15 |
 
+## Third round (Mason, 2026-11-23, answering review questions Q1-Q4)
+
+| # | Topic | Decision | Lane |
+|---|---|---|---|
+| 13 | What "customer paid" means for commission (decision 1) | Only cash or prepay actually applied. A write-off or a return credit never earns commission, even though it marks the invoice paid. | Taha's lane until 12-15 |
+| 14 | Cancel Remaining after a return or a cancelled/paid commission (gap 16) | Release only the undelivered part. Delivered quantities, returns and already-paid commission stay as they are. This unblocks decision 7. | Orders: Taha's lane until 12-15 |
+| 15 | Draft invoice price above the booked price (decision 8) | A logged reason is enough, up or down. No "grower agreed" tick on the invoice. Below cost still needs an admin. | Taha's lane until 12-15 |
+| 16 | Driver completing more than the order line says (F05 vs decision 10) | Blocked: the driver is told to call the office. Decision 10 ("never block the driver") covers only the shelf showing short. The built F05 guard already behaves this way. | Deliveries |
+
 ## Open questions from the review (2026-11-22)
 
-These came out of reconciling the Codex reviews; each needs Mason's business call. Details: `review-reconciliation-2026-11-22.md`.
+Q1-Q4 were answered as decisions 13-16. These remain: Details: `review-reconciliation-2026-11-22.md`.
 
-- **Q1 (decision 1):** commission "paid" should mean cash or prepay actually applied, not the invoice's paid status (a write-off or credit memo also marks it paid). Recommend: cash + prepay only; write-offs and return credits never earn commission.
-- **Q2 (decisions 1 + 7, gap 16):** Cancel Remaining is refused once a return was received or any commission row isn't pending. Recommend: let it release only the undelivered part, leaving delivered, returned and already-paid commission untouched. Decision 7 depends on this.
-- **Q3 (decision 8):** should a draft price *above* the booked price also need "grower agreed", like on the booking? Recommend: yes.
-- **Q4 (decision 10 vs F05, gap 11):** the built F05 guard refuses the driver's completion when it would deliver more than the order line says ("call the office"). Decision 10 says drivers are never blocked. Recommend: decision 10 covers stock shortage only; over the order quantity stays an office stop.
 - **Q5 (gap 19):** returns marked Damaged/opened: never restock without an admin? Recommend: yes.
 - **Q6 (gap 22):** bounced check from a closed month: record a "returned check" in the current month instead of reopening? Recommend: yes.
 - **Q7 (gap 5):** an order edit after its commission is in a payout batch or paid: refuse the edit (like Cancel Remaining does), or carry a correction into the next payout? Recommend: refuse until the batch is voided now; carry corrections once decision 1 is built.

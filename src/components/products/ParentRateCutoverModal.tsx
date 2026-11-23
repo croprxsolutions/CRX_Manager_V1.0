@@ -32,9 +32,9 @@ const text = (value: string | null) => (value?.trim() ? value : 'none');
 
 // A switch that changes no rate writes no prices (the server skips the rate write), so the saved prices stay.
 const afterPrices = (plan: Eligible, size: Eligible['expected']['sizes'][number]) => (plan.changes ? size.prices : size.before_prices);
-// Every new per-acre price reads as an exact dollar amount (or none), so the admin switches to what they saw.
-const allShownExactly = (plan: Eligible) => plan.expected.sizes.every((size) =>
-  TIERS.every((tier) => perAcre(afterPrices(plan, size)[`tier${tier}_price_per_acre`]) !== 'Invalid amount'));
+// Every per-acre price shown, old and new, reads as an exact dollar amount (or none), so the admin switches to what they saw.
+const allShownExactly = (plan: Eligible) => plan.expected.sizes.every((size) => TIERS.every((tier) =>
+  [size.before_prices, afterPrices(plan, size)].every((prices) => perAcre(prices[`tier${tier}_price_per_acre`]) !== 'Invalid amount')));
 
 function CutoverTable({ plan, seedOrEach }: { plan: Eligible; seedOrEach: boolean }) {
   return (

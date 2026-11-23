@@ -118,6 +118,15 @@ describe('RT-4a rate cut-over modal', () => {
     expect(mockToast).not.toHaveBeenCalledWith('error', expect.anything());
   });
 
+  it('keeps Switch off when an old price shown is not an exact amount', async () => {
+    mockPreview.mockResolvedValue({ ...eligible, expected: { ...eligible.expected,
+      sizes: [{ ...eligible.expected.sizes[0], before_prices: prices(2.215) }] } });
+    open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.change(await screen.findByLabelText('Reason (required)'), { target: { value: 'pilot' } });
+    expect(screen.getByRole('button', { name: 'Switch to approved rate' })).toBeDisabled();
+  });
+
   it('a preview held for one group is not sent for another', async () => {
     mockPreview.mockResolvedValue(eligible);
     const { rerender } = render(<ParentRateCutoverModal parent={parent} profileId="u1" rateSource="legacy" onClose={vi.fn()} onSaved={vi.fn()} />);

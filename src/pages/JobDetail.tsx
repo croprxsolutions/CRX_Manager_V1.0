@@ -1849,6 +1849,7 @@ export default function JobDetail() {
     setPrintOptionsOpen(false); setFieldPickerOpen(false); setShowLicenseOverrideConfirm(false);
     setShowCompleteConfirm(false); setShowCancelConfirm(false); setShowTransferConfirm(false);
     setShowPreNoticeConfirm(false); setShowPostNoticeConfirm(false); setDispatchWizardOpen(false);
+    setShowRecipeModal(false); setShowSaveRecipeModal(false);
   }, [deletedAt]);
 
   const fetchJob = useCallback(async () => {
@@ -4074,7 +4075,8 @@ export default function JobDetail() {
       )}
 
       {/* §2 Watchdog — inline advisory flags for this job (auto-refreshes on open) */}
-      {!isNew && id && <WatchdogFlagBanner jobId={id} autoRefresh />}
+      {/* A deleted job has no work left to flag, so its watchdog flags are neither shown nor dismissable (Sol MED). */}
+      {!isNew && !isDeleted && id && <WatchdogFlagBanner jobId={id} autoRefresh />}
 
       <SectionJumpBar
         sections={[
@@ -5142,7 +5144,7 @@ export default function JobDetail() {
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-crx-green/20 focus:border-crx-green resize-none disabled:bg-gray-50"
                 placeholder="Internal only — never appears on customer-facing documents." />
             </div>
-            {!isNew && (
+            {!isNew && !isDeleted && (
               <p className="text-xs text-secondary">
                 Print status: {' '}
                 <span className="font-medium">{/* printed_at lives on the row; the list shows it */}Generate the WPS notice to mark this job printed.</span>

@@ -121,7 +121,7 @@ try {
   assert.equal(fingerprint(), before, 'an old record (invoice line, invoice, RUP record, delivery pick, kept job number, application record, job line or brand) changed');
   assert.equal(proofEpa(J_DONE), OLD, 'the completed job\'s spray proof keeps 524-475');
   assert.equal(scalar(as(USERS.rep, `SELECT epa_registration FROM public.job_product_epa WHERE job_id = '${J_DONE}' AND product_id = '${S1}';`)), OLD,
-    'the applicator sheet / report / WPS read (applyKeptEpa) keeps 524-475');
+    'the kept row the applicator sheet / report / WPS read as a rep (src/lib/jobEpa.ts, unit-tested by KI-195) keeps 524-475');
   assert.deepEqual(yearEndEpa(), [OLD], 'the year-end summary prints the line\'s 524-475, not the product\'s new number');
   assert.equal(scalar(`SELECT epa_registration FROM public.invoice_items WHERE invoice_id = '${INV}';`), OLD);
   assert.equal(scalar(`SELECT epa_registration FROM public.rup_sales_records WHERE invoice_id = '${INV}';`), OLD);
@@ -130,11 +130,14 @@ try {
   assert.equal(proofEpa(J_OPEN), NEW, 'a job not sprayed yet shows the corrected number');
   console.log('[PAR1-ON] AFTER: old records unchanged byte for byte; spray proof, kept job number, year-end summary, invoice line, RUP record and brand keep 524-475; the unsprayed job shows 100-497-37686');
 
-  // A line with no copy for a size with no number (allowed by the correction) shows the size's number in the year-end.
+  // A line saved with no copy for a size that has a number (e.g. a writer that bypassed the fill trigger) falls back to
+  // the size's number in the year-end, and blocks the next correction until it is saved (PRODUCT_PARENT_EPA_RECORD_UNSAVED).
   psql(`SET session_replication_role = replica;
     INSERT INTO public.invoice_items (invoice_id, product_id, description, quantity, unit_price_cents, extended_cents, cost_cents, epa_registration) VALUES
       ('${INV}', '${S1}', '[PROVER] Atz blank line', 1, 1500, 1500, 1000, NULL);`);
   assert.deepEqual(yearEndEpa().sort(), [NEW, OLD].sort(), 'a blank line falls back to the product; the copied line keeps its own');
+  refused(USERS.admin, correct('k-blank', version(), '524-477'), /PRODUCT_PARENT_EPA_RECORD_UNSAVED/);
+  assert.equal(productEpa(S1), NEW, 'the refused correction changed nothing');
 
   assert.deepEqual(JSON.parse(ok(USERS.admin, correct('k-fix', ver))), receipt, 'a retry returns the same receipt');
   refused(USERS.admin, correct('k-stale', ver, '524-477'), /STALE|version/i);

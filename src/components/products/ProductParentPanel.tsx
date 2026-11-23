@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Card, { CardHeader } from '../ui/Card';
 import Button from '../ui/Button';
@@ -9,11 +9,13 @@ import Badge from '../ui/Badge';
 import { useToast } from '../ui/Toast';
 import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 import { hasRpcCode, RpcErrorCodes, sanitizeError } from '../../lib/db';
-import { SIZE_ROLE_LABELS, updateProductParent, type ProductParent } from '../../lib/productParents';
+import { Sentry } from '../../lib/sentry';
+import { getParentRateSource, SIZE_ROLE_LABELS, updateProductParent, type ProductParent, type RateSource } from '../../lib/productParents';
 import { visibleProductCategories } from '../../lib/productSetup';
 import type { CropOption, ProductCategory, UseTimingOption } from '../../types';
 import UseTimingPicker from './UseTimingPicker';
 import ParentRatesModal from './ParentRatesModal';
+import ParentRateCutoverModal from './ParentRateCutoverModal';
 import ParentIdentityModal from './ParentIdentityModal';
 import MoveProductSizeModal from './MoveProductSizeModal';
 
@@ -202,13 +204,24 @@ export default function ProductParentPanel({
   busy: boolean;
   onChanged: () => void;
 }) {
-  const [open, setOpen] = useState<null | 'edit' | 'rates' | 'identity' | { move: string }>(null);
+  const [open, setOpen] = useState<null | 'edit' | 'rates' | 'cutover' | 'identity' | { move: string }>(null);
+  // RT-4a: which rate the group uses; null while loading or when the read failed (the switch then waits).
+  const [rateSource, setRateSource] = useState<RateSource | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setRateSource(null);
+    getParentRateSource(parent.id)
+      .then((source) => { if (!cancelled) setRateSource(source); })
+      .catch((error: unknown) => Sentry.captureException(error, { extra: { context: 'product_parent_rate_source' } }));
+    return () => { cancelled = true; };
+  }, [parent.id, parent.parent_version]);
   const seedOrEach = parent.product_form === 'seed' || parent.product_form === 'each';
   const close = () => setOpen(null);
   const saved = () => { setOpen(null); onChanged(); };
   const blocked = busy ? 'Save or discard your other changes first' : undefined;
 
   const rows = parentRows(parent, seedOrEach, timingOptions);
+  rows.splice(3, 0, ['Rate in use', rateSource === null ? 'Checking…' : rateSource === 'approved' ? 'Approved rate (from the rate review)' : 'Old rate']);
 
   return (
     <Card>
@@ -228,6 +241,10 @@ export default function ProductParentPanel({
             <Button size="sm" variant="secondary" showChevron={false} disabled={busy || ratesLocked === null} title={blocked}
               onClick={() => setOpen('rates')}>
               {ratesLocked ? 'Correct parent rates' : 'Parent rates'}
+            </Button>
+            <Button size="sm" variant="secondary" showChevron={false} disabled={busy || rateSource === null} title={blocked}
+              onClick={() => setOpen('cutover')}>
+              {rateSource === 'approved' ? 'Switch back to old rate' : 'Switch to approved rate'}
             </Button>
             <Button size="sm" variant="secondary" showChevron={false} disabled={busy} title={blocked} onClick={() => setOpen('identity')}>Correct identity</Button>
           </div>
@@ -249,6 +266,9 @@ export default function ProductParentPanel({
       {open === 'rates' && ratesLocked !== null && (
         <ParentRatesModal parent={parent} profileId={profileId} ratesLocked={ratesLocked} unitOptions={rateUnitOptions}
           onClose={close} onSaved={saved} />
+      )}
+      {open === 'cutover' && rateSource !== null && (
+        <ParentRateCutoverModal parent={parent} profileId={profileId} rateSource={rateSource} onClose={close} onSaved={saved} />
       )}
       {open === 'identity' && <ParentIdentityModal parent={parent} profileId={profileId} onClose={close} onSaved={saved} />}
       {open !== null && typeof open === 'object' && (

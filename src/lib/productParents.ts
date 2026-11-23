@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { assertRpcResult, supabaseUntyped } from './db';
+import { assertRpcResult, supabase, supabaseUntyped } from './db';
 import { Sentry } from './sentry';
 import type { ProductRatePerAcre } from '../types';
 import { toSentryError } from './sentryError';
@@ -227,6 +227,55 @@ export const correctParentIdentity = async (input: {
   if (error) throw error;
   return assertRpcResult<ParentWriteResult>(data, 'correct_product_parent_identity');
 }
+
+// RT-4a (20270125100000_product_rate_cutover): a group uses its old ('legacy') or its approved RT-3 rate.
+export type RateSource = 'legacy' | 'approved';
+export type CutoverDirection = 'promote' | 'restore';
+
+/** preview_parent_rate_cutover: the plan, or why it is refused. `expected` goes back unchanged to commit. */
+export type RateCutoverPreview =
+  | { parent_id: string; direction: CutoverDirection; eligible: false; refusal: string }
+  | {
+    parent_id: string;
+    direction: CutoverDirection;
+    eligible: true;
+    name: string;
+    rate_source: RateSource;
+    changes: boolean;
+    current: { rate_per_acre: string | null; rate_unit: string | null };
+    target: RateValues;
+    expected: Record<string, unknown> & { sizes: ParentRatePreviewSize[] };
+  };
+
+export interface RateCutoverReceipt {
+  parent_id: string;
+  direction: CutoverDirection;
+  rate_source: RateSource;
+  parent_version: number;
+  event_id: number;
+  changed: boolean;
+}
+
+export async function getParentRateSource(parentId: string): Promise<RateSource> {
+  const { data, error } = await supabase.from('product_parents').select('rate_source').eq('id', parentId).single();
+  if (error) throw error;
+  return data.rate_source === 'approved' ? 'approved' : 'legacy';
+}
+
+export const previewParentRateCutover = async (parentId: string, direction: CutoverDirection) => {
+  const { data, error } = await supabaseUntyped.rpc('preview_parent_rate_cutover', { p_parent_id: parentId, p_direction: direction });
+  if (error) throw error;
+  return assertRpcResult<RateCutoverPreview>(data, 'preview_parent_rate_cutover');
+};
+
+export const commitParentRateCutover = async (preview: Extract<RateCutoverPreview, { eligible: true }>, reason: string, key: string) => {
+  const { data, error } = await supabaseUntyped.rpc('commit_parent_rate_cutover', {
+    p_parent_id: preview.parent_id, p_direction: preview.direction, p_expected: preview.expected,
+    p_reason: reason, p_idempotency_key: key,
+  });
+  if (error) throw error;
+  return assertRpcResult<RateCutoverReceipt>(data, 'commit_parent_rate_cutover');
+};
 
 const OPEN_WORK_BATCH = 500;
 

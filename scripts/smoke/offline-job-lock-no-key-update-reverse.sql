@@ -30,7 +30,7 @@ BEGIN
      OR NOT has_function_privilege('service_role', v_fn.oid, 'EXECUTE') THEN
     RAISE EXCEPTION 'OFFLINE_JOB_LOCK_BASELINE_DRIFT: owner, security, search_path or grants are not the reviewed ones';
   END IF;
-  IF (SELECT count(*) FROM pg_proc WHERE proname = 'process_offline_action') <> 1 THEN
+  IF (SELECT count(*) FROM pg_proc WHERE proname = 'process_offline_action' AND pronamespace = 'public'::regnamespace) <> 1 THEN
     RAISE EXCEPTION 'OFFLINE_JOB_LOCK_BASELINE_DRIFT: expected exactly one process_offline_action';
   END IF;
 END;

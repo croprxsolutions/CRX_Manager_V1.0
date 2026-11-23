@@ -1,6 +1,6 @@
 # CRX Manager Agent Contract
 
-Shared rules for all agents; `CLAUDE.md` imports this. Load detailed procedures only when routed below.
+Shared rules for all agents; `CLAUDE.md` imports this. Load detailed procedures only when routed.
 
 **Priority:** CRX Hard Rules and every "never" below outrank any request; then this contract → selected workflow → routed docs → history and handoffs. Mason sets scope, not waivers: a gate needs his explicit approval in this conversation or a standing exception here. Name conflicts; follow priority.
 
@@ -19,7 +19,7 @@ Crop RX Solutions' production agricultural chemical distribution app. Repository
 - Review/audit/diagnosis/status/plan requests are read-only; build/change/fix/finish/handle/implement/ship authorizes reversible work through verification and protected delivery. Codex and Claude both proceed after a short plan without waiting for approval.
 - Deliver what was asked at the scope intended. Explain concerns and continue rather than quietly narrowing, widening, or transforming it. Guard/audit work needs a request, demonstrated blocker, or current production incident.
 - Obey explicit limits and "stop", "pause", or "hold on" literally.
-- Stop and hand over both positions plus a recommendation only when: the same BLOCKER/HIGH survives two fix rounds; one mechanism (lock, timer, guard, design) yields a new BLOCKER/HIGH in three rounds, Astra, Luna and Sol counted (stop patching, name it, ask Mason the business trade-off that removes it (block/warn, re-plan); Sol refuses round 5+ until DECISION_LOG.md names the PR); a checked BLOCKER stays disputed; a required gate cannot run; or a hard gate needs Mason. If a design trusts an ID the screen sends back, ask Mason the business rule at round 2. Round caps are ceilings. Mason's "skip" drops a finding (ship.md).
+- Stop and hand over both positions plus a recommendation only when: the same BLOCKER/HIGH survives two fix rounds; one mechanism (lock, timer, guard, design) yields a new BLOCKER/HIGH in three rounds, Astra, Luna and Sol counted (stop patching, name it, ask Mason the business trade-off that removes it (block/warn/re-plan); Sol refuses round 5+ until the decision log names the PR); a checked BLOCKER stays disputed; a required gate cannot run; or a hard gate needs Mason. If a design trusts a screen-sent ID, ask Mason the business rule at round 2. Round caps are ceilings. Mason's skip drops a finding, repeats too (ship.md).
 
 ## Start and Route
 
@@ -37,7 +37,7 @@ Current code, migrations, tests, grants, and live read-only evidence outrank his
 | Delegation, agent collaboration, or agent-surface changes | `docs/workflows/AGENT_COLLABORATION.md` and `docs/reference/agent-guardrails.md` |
 | Choosing a Codex model or effort | `docs/reference/codex-model-tuning.md` |
 | Push, PR finalization, merge, or release | `.claude/commands/ship.md` |
-| Settled decisions, known problems, or current status | `docs/manual/DECISION_LOG.md`, `docs/manual/KNOWN_ISSUES.md`, or `docs/manual/CURRENT_STATE.md` |
+| Settled decisions, known problems, or current status | `docs/manual/DECISION_LOG.md` + `decision-log.d/`, `docs/manual/KNOWN_ISSUES.md` + `known-issues.d/`; `docs/manual/CURRENT_STATE.md` |
 | Research, how other ag software works, or past app context | `docs/research/` first, then the shared CRX Notes vault (`docs/reference/knowledge-vaults.md`), before starting new research |
 | Mason asks how the system or agent process works | `docs/manual/OWNER_PLAYBOOK.md` |
 

@@ -1,13 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { MailWarning } from 'lucide-react';
-import { supabase } from '../../lib/db';
+import { supabase, sanitizeError } from '../../lib/db';
 import { Sentry } from '../../lib/sentry';
 import Button from '../ui/Button';
-import { RECEIPTS_TO_CHECK_PAGE, receiptsToCheckFilter } from '../../lib/receiptsToCheck';
+import ConfirmModal from '../ui/ConfirmModal';
+import { useToast } from '../ui/Toast';
+import { useAuth } from '../../contexts/AuthContext';
+import {
+  RECEIPTS_TO_CHECK_PAGE, RECEIPT_SENDING_NOW_MESSAGE, closeDeliveryReceipt, isReceiptChanged, isReceiptSendingNow,
+  receiptCloseScope,
+  receiptsToCheckFilter,
+} from '../../lib/receiptsToCheck';
+import { useIdempotencyKey } from '../../hooks/useIdempotencyKey';
 
 // KI-25: customer receipts the server could not confirm it sent (needs_check), plus owed ones still waiting after
-// an hour. The office opens the delivery and uses Email Confirmation. Visible to admins and sales reps (RLS).
+// an hour. The office opens the delivery and uses Email Confirmation, or marks a receipt handled (the server then
+// never sends it). Visible to admins and sales reps (RLS).
 interface ReceiptRow {
   id: string;
   delivery_id: string;
@@ -31,6 +40,13 @@ export default function ReceiptsToCheck() {
   const [pages, setPages] = useState(1);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [reload, setReload] = useState(0);
+  const [handling, setHandling] = useState<ReceiptRow | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const { toast } = useToast();
+  const { profile } = useAuth();
+  const closeIdem = useIdempotencyKey('close_delivery_receipt', profile?.id || '');
 
   useEffect(() => {
     let live = true;
@@ -70,7 +86,43 @@ export default function ReceiptsToCheck() {
       live = false;
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [pages]);
+  }, [pages, reload]);
+
+  const markHandled = async () => {
+    if (!handling || !profile || savingRef.current) return;
+    savingRef.current = true; // a second click before the re-render cannot send a second call
+    setSaving(true);
+    // Only the receipt this row showed: the server refuses one queued again since (#2251).
+    const scope = receiptCloseScope(handling.delivery_id, 'handled', handling.created_at);
+    try {
+      const result = await closeDeliveryReceipt(handling.delivery_id, 'handled', closeIdem.getKeyFor(scope), handling.created_at);
+      closeIdem.resetKeyFor(scope);
+      toast('success', result.outcome === 'sent'
+        ? 'The server had already emailed this receipt; nothing to close.'
+        : result.outcome === 'none'
+          ? 'This receipt was already handled or removed; nothing changed.'
+          : 'Receipt marked handled. The server will not email it.');
+      setHandling(null);
+      setReload((n) => n + 1);
+    } catch (err: unknown) {
+      if (isReceiptSendingNow(err)) {
+        toast('warning', RECEIPT_SENDING_NOW_MESSAGE);
+      } else if (isReceiptChanged(err)) {
+        closeIdem.resetKeyFor(scope); // a refusal is final for this receipt: never keep its key (#2291)
+        toast('warning', "This delivery's receipt changed since the list loaded. Nothing was closed; reloading the list.");
+        setHandling(null);
+        setReload((n) => n + 1);
+      } else {
+        Sentry.captureException(err instanceof Error ? err : new Error(String(err)), {
+          extra: { context: 'close_delivery_receipt handled', deliveryId: handling.delivery_id },
+        });
+        toast('error', sanitizeError(err));
+      }
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
 
   if (failed) {
     return (
@@ -87,7 +139,7 @@ export default function ReceiptsToCheck() {
         Customer receipts to check ({total})
       </h2>
       <p className="mt-1 text-amber-800">
-        These delivery receipts were not confirmed as emailed. Open the delivery and use Email Confirmation if the customer still needs one.
+        These delivery receipts were not confirmed as emailed. Open the delivery and use Email Confirmation if the customer still needs one, or mark it handled once it is dealt with.
       </p>
       <ul className="mt-2 divide-y divide-amber-200">
         {rows.map((row) => {
@@ -103,6 +155,16 @@ export default function ReceiptsToCheck() {
                 {step && <> {step}</>}
               </span>
               <span className="text-xs text-amber-700 sm:ml-auto">{new Date(row.created_at).toLocaleDateString()}</span>
+              <Button
+                variant="secondary"
+                size="sm"
+                showChevron={false}
+                className="mt-1 self-start sm:mt-0"
+                onClick={() => setHandling(row)}
+                aria-label={`Mark receipt for ${row.deliveries?.delivery_number || 'this delivery'} handled`}
+              >
+                Mark handled
+              </Button>
             </li>
           );
         })}
@@ -114,6 +176,16 @@ export default function ReceiptsToCheck() {
           </Button>
         </div>
       )}
+      <ConfirmModal
+        open={handling !== null}
+        onClose={() => { if (!saving) setHandling(null); }}
+        onConfirm={markHandled}
+        title="Mark receipt handled"
+        message={`Take the receipt for ${handling?.deliveries?.delivery_number || 'this delivery'} off this list? The server will not email it. Use this once the customer has it or does not need it.`}
+        confirmLabel="Mark handled"
+        variant="warning"
+        loading={saving}
+      />
     </section>
   );
 }

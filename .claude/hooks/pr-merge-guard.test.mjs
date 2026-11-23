@@ -603,7 +603,7 @@ ok(
   "the proof's ancestry checks run through the budgeted hardGateGh",
 );
 ok(
-  /proofValidForMerge\(\{\s*data,\s*headSha,\s*nowMs:\s*Date\.now\(\),\s*baseSha,\s*isAncestor:\s*isAncestorOnGitHub,\s*mergeBase:\s*mergeBaseOnGitHubOnce,\s*prCommits\s*\}\)/.test(gateRequestSource),
+  /proofValidForMerge\(\{\s*data,\s*headSha,\s*nowMs:\s*Date\.now\(\),\s*baseSha,\s*isAncestor:\s*isAncestorOnGitHub,\s*mergeBase:\s*mergeBaseOnGitHubOnce,\s*prCommits,\s*baseRef:\s*base\s*\}\)/.test(gateRequestSource),
   "the proof scan binds the proof to this head, GitHub's base and GitHub's ancestry answers",
 );
 ok(
@@ -635,7 +635,9 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(/firstAcceptedProof\(proofs, headSha, \(data, exactHead\) =>\s*proofValidForMerge\(\{ data, headSha[^\n]*\)\s*&& \(exactHead \|\| !solRiskOnGitHub\(\{ baseSha: data\.head_sha, headSha, repo: request\.repo, gh: hardGateGh \}\)\.risky\)\);/.test(gateRequestSource),
     "an earlier Sol proof is accepted only when the commits after it are low risk; exact-head proofs are tried first");
   // Owner acceptances count only for the PR they were given for (Sol gate round 3, 2026-11-21).
-  ok(/prCommits \}\) && ownerAcceptedForPr\(data, \{ number: pr\.number, url: pr\.url, exactHead \}\)\r?\n/.test(gateRequestSource), "an owner-accepted proof counts only for its own pull request, at its exact version");
+  ok(/prCommits, baseRef: base \}\) && ownerAcceptedForPr\(data, \{ number: pr\.number, url: pr\.url, exactHead, proofs: rootProofs \}\)\r?\n/.test(gateRequestSource), "an owner-accepted proof counts only for its own pull request, at its exact version; a carried skip is traced only through untracked local proofs");
+  ok(/return tracked !== null && !tracked\.has\(f\);/.test(gateRequestSource), "a proof git tracks never stands for Mason's skip");
+  ok(/const rootProofs = proofs\.some\(usesCarriedSkip\) \?/.test(gateRequestSource), "git is asked only when a carried proof is present");
   ok(/"--json", "number,url,baseRefName/.test(gateRequestSource), "the merge gate reads the pull request's address");
   ok(/const valid = proof !== null;/.test(gateRequestSource), "only an accepted proof opens the Sol allow point");
   ok(/const risk = solRiskOnGitHub\(\{\s*baseSha,\s*headSha,\s*repo:\s*request\.repo,\s*gh:\s*hardGateGh\s*\}\);/.test(gateRequestSource),
@@ -645,6 +647,10 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   ok(/if \(!risk\.risky\) \{[\s\S]{0,400}?advisoryQueue\.push\(request\);\s*return;\s*\}/.test(gateRequestSource.slice(riskCall)),
     "the low-risk allow point is guarded by risk.risky");
   ok(/import \{ agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDestructiveProblem, GATED_MERGE_BASES, mainCommitsInPrOnGitHub, solRiskOnGitHub \} from "\.\/sol-risk-lib\.mjs";/.test(guardSource), "the guard uses the shared risk module");
+  // Taha lane block (#2303; behaviour in taha-lane-lib.test.mjs and the Codex gate test): inside the staging branch,
+  // bound to the head being merged, with the gate itself telling Taha, and a refusal denies.
+  ok(/if \(base === "staging"\) \{[\s\S]{0,2500}?const lane = tahaLaneGate\(\{[\s\S]{0,200}?pullRequest: Number\(pr\.number\),\s*headSha: pr\.headRefOid,\s*tellTaha: \(body\) => tellTahaOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, pullRequest: Number\(pr\.number\), body \}\),\s*files: prFilesOnGitHub\(\{ repo: request\.repo, gh: hardGateGh, number: Number\(pr\.number\) \}\),[\s\S]{0,300}?if \(lane\) deny\(lane\);/.test(gateRequestSource),
+    "a staging merge runs the Taha lane gate at the PR's head and denies on its refusal");
   ok(/if \(base === "staging"\) \{[\s\S]{0,300}mainCommitsInPrOnGitHub\(\{ stagingSha: pr\.baseRefOid, headSha: pr\.headRefOid, repo: request\.repo, gh: hardGateGh \}\);\s*if \(backMerge\) deny\(/.test(gateRequestSource), "a PR into staging carrying main's unbacked-merged commits is refused");
   // staging gets every main gate (Mason on #1363, 2026-11-04); staging-first: agents never merge into main
   // or the back-merge, and a migration may go into staging.
@@ -714,6 +720,12 @@ ok(!/if \(!headContainsBase\)/.test(gateRequestSource), "a head behind its base 
   };
 
   ok(check(proof(), { baseSha: B0 }), "a proof bound to the base the merge lands on still counts");
+  // Review kind (Sol r5 HIGH 1, #2226): a proof that records it counts only for a PR into that branch.
+  ok(check(proof({ review_ref: "origin/staging", release_rules: false }), { baseRef: "staging" }), "a staging review counts for a staging PR");
+  ok(!check(proof({ review_ref: "origin/main", release_rules: true }), { baseRef: "staging" }), "a release review never counts for a staging PR");
+  ok(!check(proof({ review_ref: "origin/staging", release_rules: false }), { baseRef: "main" }), "a staging review never counts for a main PR");
+  ok(!check(proof({ review_ref: "origin/staging", release_rules: true }), { baseRef: "staging" }), "release rules count only for main");
+  ok(check(proof(), { baseRef: "staging" }), "a proof from before review kinds were recorded is judged as before");
   ok(check(proof()), "main moved forward after the review: the proof of the unchanged head still counts");
   ok(!check(proof({ head_sha: X })), "a proof of a different head never counts");
   ok(!check(proof({ base_sha: X })), "a proof whose base the head does not contain never counts");

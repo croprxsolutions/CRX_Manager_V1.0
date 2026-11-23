@@ -848,7 +848,9 @@ export default function CustomerDetail() {
         // Guarded before the toast: a superseded timeline read must not report
         // its failure over the customer the operator is looking at now.
         if (isStale()) return;
-        if (tlError) toast('error', 'Failed to load timeline');
+        // A failed read keeps the entries already shown, not a false "No activity" (#2227 Sol MED).
+        // The section-level spinner is cleared here too: the early return skips the shared clear below (Sol r2 MED).
+        if (tlError) { toast('error', 'Failed to load timeline'); setSectionLoading(selectedTab, false); return; }
 
         // PR-07 follow-up: resolve performer names via profile_public_view (safe
         // columns only) so non-admin users still see actor names after
@@ -1348,7 +1350,8 @@ export default function CustomerDetail() {
     try {
       // The version from when the dialog opened, not whatever a later reload installed.
       const previousRowVersion = opened?.id === id ? opened.rowVersion : null;
-      const changedElsewhere = () => toast('warning', 'This customer was changed by someone else since you opened the page. Nothing was saved. Reload the page and try again.');
+      // A lost reply to an earlier try that did commit also lands here, so the message does not claim who changed it (#2227).
+      const changedElsewhere = () => toast('warning', 'Nothing was changed: this customer changed since you opened the page, or an earlier Reactivate already went through. Reload the page to check.');
       if (previousRowVersion === null) { changedElsewhere(); return; }
       // Only the exact version this admin was shown: an old confirmation must not undo a newer deactivation.
       const result = await supabase
@@ -1372,7 +1375,10 @@ export default function CustomerDetail() {
           performedBy: profile.id,
           entityType: 'customer',
           customerId: id,
-        })).catch(() => {});
+        }))
+          // An open Timeline shows the new entry (#2227); fetchTabData ignores a customer the admin has left.
+          .then((logged) => { if (logged && openSectionsRef.current.has('timeline')) void fetchTabData('timeline'); })
+          .catch(() => {});
       }
       if (currentIdRef.current !== id || visitRef.current !== visit) return;
       const nextRowVersion = (result.data as Array<{ row_version?: unknown }>)[0]?.row_version;

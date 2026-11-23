@@ -71,7 +71,8 @@ import { agentMergeProblem, prApprovalProblem, releaseFreezeProblem, stagingDest
 import { followUpsDenial, followUpsProblem } from "./followups-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "./pr-claim-lib.mjs";
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "./coderabbit-skip-lib.mjs";
-import { ownerAcceptedForPr } from "./sol-accept-lib.mjs";
+import { ownerAcceptedForPr, trackedNamesIn, usesCarriedSkip } from "./sol-accept-lib.mjs";
+import { prFilesOnGitHub, tahaLaneGate, tellTahaOnGitHub } from "./taha-lane-lib.mjs";
 
 const GITHUB_MERGE_TOOL = /merge_pull_request$/i;
 
@@ -541,6 +542,17 @@ function gateRequest(request) {
     if (frozen) deny(`PR MERGE GATE: this merge into staging is refused: ${frozen}.`);
     const destructive = stagingDestructiveProblem({ repo: request.repo, gh: hardGateGh, number: pr.number ?? (/^\d+$/.test(String(request.selector ?? "")) ? Number(request.selector) : undefined), headSha: pr.headRefOid, baseSha: pr.baseRefOid });
     if (destructive) deny(`PR MERGE GATE: this merge into staging is refused: ${destructive}.`);
+    // Taha's lanes until Dec 15 (taha-lane-lib.mjs, Mason 2026-11-22); Mason's `taha override #<PR> <code>` lets one PR at one commit through.
+    const lane = tahaLaneGate({
+      prefix: "PR MERGE GATE",
+      pullRequest: Number(pr.number),
+      headSha: pr.headRefOid,
+      tellTaha: (body) => tellTahaOnGitHub({ repo: request.repo, gh: hardGateGh, pullRequest: Number(pr.number), body }),
+      files: prFilesOnGitHub({ repo: request.repo, gh: hardGateGh, number: Number(pr.number) }),
+      dirs: skipStateDirs([payload?.cwd, process.env.CLAUDE_PROJECT_DIR, process.cwd()]),
+      notice: (text) => process.stderr.write(text),
+    });
+    if (lane) deny(lane);
   }
 
   // ── no merging over an unresolved objection ────────────────────────────────
@@ -665,19 +677,32 @@ function gateRequest(request) {
   // The PR's own commits: a Sol proof of an earlier one counts, with no GitHub call per proof file.
   const prCommits = new Set((Array.isArray(pr.commits) ? pr.commits : []).map((c) => String(c?.oid || "").toLowerCase()));
   const proofs = [];
+  const found = [];
   for (const stateDir of proofSearchDirs(projectDir, listWorktreesFromProjectDir)) {
     try {
       if (!existsSync(stateDir)) continue;
       for (const f of readdirSync(stateDir)) {
         if (!/^codex-review-[A-Za-z0-9_.-]+\.json$/.test(f)) continue;
-        try { proofs.push(JSON.parse(readFileSync(path.join(stateDir, f), "utf8"))); } catch { continue; }
+        try {
+          const data = JSON.parse(readFileSync(path.join(stateDir, f), "utf8"));
+          proofs.push(data);
+          found.push({ data, stateDir, f });
+        } catch { continue; }
       }
     } catch { /* unreadable directory means no proof HERE — keep looking */ }
   }
+  // Only untracked proofs can stand for Mason's own skip behind a carried one (Sol, 2026-11-23); git is
+  // asked only when a carried proof is present, so ordinary merges spend nothing on it.
+  const trackedByDir = new Map();
+  const rootProofs = proofs.some(usesCarriedSkip) ? found.filter(({ stateDir, f }) => {
+    if (!trackedByDir.has(stateDir)) trackedByDir.set(stateDir, trackedNamesIn(stateDir));
+    const tracked = trackedByDir.get(stateDir);
+    return tracked !== null && !tracked.has(f);
+  }).map(({ data }) => data) : [];
   // A proof of an earlier commit covers the commits after it unless those
   // touch the Sol list; same module, same budgeted gh. Exact-head proofs are tried first.
   const proof = firstAcceptedProof(proofs, headSha, (data, exactHead) =>
-    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits }) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead })
+    proofValidForMerge({ data, headSha, nowMs: Date.now(), baseSha, isAncestor: isAncestorOnGitHub, mergeBase: mergeBaseOnGitHubOnce, prCommits, baseRef: base }) && ownerAcceptedForPr(data, { number: pr.number, url: pr.url, exactHead, proofs: rootProofs })
       && (exactHead || !solRiskOnGitHub({ baseSha: data.head_sha, headSha, repo: request.repo, gh: hardGateGh }).risky));
   const valid = proof !== null;
   const carried = proof?.carried_forward === true ? proof.carry : null;
@@ -689,13 +714,14 @@ function gateRequest(request) {
       process.stderr.write(
         `SOL CARRY-FORWARD: the Sol review of head ${String(carried.from_head).slice(0, 12)} was carried to this head ` +
         `(${{
-          disjoint: "conflict-free merge of main, no shared files, one side documentation-only; Mason, 2026-10-21",
-          collision_check: "conflict-free merge of main, collision check clean; Mason, 2026-10-21",
+          disjoint: "conflict-free merge of the branch's base, no shared files, one side documentation-only; Mason, 2026-10-21",
+          collision_check: "conflict-free merge of the branch's base, collision check clean; Mason, 2026-10-21",
           restamp: "one commit that only restamped a migration; Mason, 2026-11-04",
           post_apply: "one commit that only updated the records after a live apply; Mason, 2026-11-04",
           owner_accepted: "Mason accepted every BLOCKER/HIGH finding by name, logged in DECISION_LOG.md; Mason, 2026-11-10",
+          owner_accepted_carried: "Sol marked every BLOCKER/HIGH finding the same as one Mason skipped on this pull request in the last 7 days, logged in DECISION_LOG.md; Mason, 2026-11-22",
         }[carried.mode]})` +
-        `${carried.mode !== "owner_accepted" && carried.root_review?.owner_accepted === true ? "; the original review's BLOCKER/HIGH findings were owner-accepted by Mason, not fixed" : ""}.\n`,
+        `${!String(carried.mode).startsWith("owner_accepted") && carried.root_review?.owner_accepted === true ? "; the original review's BLOCKER/HIGH findings were owner-accepted by Mason, not fixed" : ""}.\n`,
       );
     }
     advisoryQueue.push(request);
@@ -724,7 +750,7 @@ function gateRequest(request) {
     `  3. Run: node scripts/write-codex-push-proof.mjs — it runs an independent read-only Codex review of the branch against that base and requires a machine verdict.\n` +
     `  4. If Codex flags blockers, fix them, push, and re-run until it reports clean; only a clean verdict on a stable, clean worktree mints the proof.\n` +
     `  5. Retry the merge. (Proof is bound to head ${headSha || "<head>"} and to the base; it lasts 24 hours on an unchanged head, keeps counting when main only moves forward afterwards, and new commits force a fresh review.)\n` +
-    `If this head only merged a newer main into a branch Sol already reviewed clean, run \`node scripts/write-codex-push-proof.mjs --carry-forward\` instead of step 3.\n` +
+    `If this head only merged a newer base (origin/staging for a feature branch, origin/main for hotfix/ and release/) into a branch Sol already reviewed clean, run \`node scripts/write-codex-push-proof.mjs --carry-forward\` instead of step 3.\n` +
     `If the Codex CLI is unavailable, PARK the change and tell Mason — do not self-certify.`
   );
 }

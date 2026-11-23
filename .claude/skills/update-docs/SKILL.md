@@ -69,8 +69,9 @@ characters: the date (America/Chicago) and the scope you re-checked, e.g. "for t
 only"; a date with no scope means the whole document was re-read. `check:docs` fails a longer line
 or a second one. The evidence of what you read goes in your
 PR's `docs/changelog.d/` note, never on the stamp line. Bump the date only after re-reading the doc
-against live state. In `DECISION_LOG.md`, correct or reverse a decision with a NEW entry that names
-the one it supersedes; do not rewrite an old entry's rule, and do not bump its stamp for a new entry.
+against live state. New decision-log and known-issue entries go one file each in `docs/manual/decision-log.d/` and
+`docs/manual/known-issues.d/` (each folder's README), never into the big files. Correct or reverse a
+decision with a NEW entry that names the one it supersedes; do not rewrite an old entry's rule, and do not bump its stamp for a new entry.
 
 ## Step 4: Check pages-routes.md
 

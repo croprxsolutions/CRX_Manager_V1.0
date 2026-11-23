@@ -1,4 +1,4 @@
--- Reverses 20270225160000_job_transfer_below_cost_whole_line.sql (run as ONE transaction).
+-- Reverses 20270226150000_job_transfer_below_cost_whole_line.sql (run as ONE transaction).
 -- Invoices it already wrote keep their real quantities; only the transfer body is restored and the helpers and the
 -- invoiced-job lock triggers dropped, and save_job no longer refuses a completed job's chemical change.
 BEGIN;
@@ -9,11 +9,11 @@ BEGIN
      OR to_regprocedure('public._job_transfer_shares_20270207(uuid)') IS NULL OR to_regprocedure('public._job_lines_lock_when_invoiced_20270207()') IS NULL
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_shares_20270207(uuid)')) IS DISTINCT FROM '944760ebdf810f062b4dcf0fe56f11b2'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_lines_lock_when_invoiced_20270207()')) IS DISTINCT FROM '9b6d4bbfc5dcc61ba058971a9ac062b6'
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM 'dd6b304b7f93fd16aedb40567bdb1554'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM 'aa385acd9adb57eadb0a52ac37b833d8'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint)')) IS DISTINCT FROM '0d225231da5e5adc8d21ed092796270a'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_split_qty_20270207(numeric, numeric[])')) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public.save_job(uuid, jsonb, jsonb, jsonb, uuid, text)'::regprocedure) IS DISTINCT FROM 'f5444826af3b0420ec65f5708a382642' THEN
-    RAISE EXCEPTION 'JOB_TRANSFER_BELOW_COST_ROLLBACK_PREFLIGHT: the live bodies are not the ones 20270225160000 installed; nothing changed';
+    RAISE EXCEPTION 'JOB_TRANSFER_BELOW_COST_ROLLBACK_PREFLIGHT: the live bodies are not the ones 20270226150000 installed; nothing changed';
   END IF;
 END $rev$;
 CREATE OR REPLACE FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(p_job_id uuid, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text)

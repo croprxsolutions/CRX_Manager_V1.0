@@ -377,6 +377,8 @@ describe('sanitizeError', () => {
     expect(sanitizeError('JOB_LINE_QUANTITY_INVALID')).toContain('check its quantity, unit and cost');
     expect(sanitizeError("JOB_INVOICED_LOCKED: This job has been invoiced, so its chemicals, fields and billing split can't be changed. Nothing was saved; void the job's invoice first to change them."))
       .toBe("This job has been invoiced, so its chemicals, fields and billing split can't be changed. Nothing was saved; void the job's invoice first to change them.");
+    expect(sanitizeError("JOB_COMPLETED_CHEMICALS_LOCKED: This job is complete, so its chemicals can't be changed: completion already took them from stock. Nothing was saved."))
+      .toBe("This job is complete, so its chemicals can't be changed: completion already took them from stock. Nothing was saved.");
     expect(sanitizeError('JOB_LINE_BELOW_COST: Round​up\nPro\u0007 is priced below its cost on this job.'))
       .toBe('Roundup Pro is priced below its cost on this job.');
     expect(sanitizeError('CUSTOMER_HAS_OPEN_WORK: nothing was deactivated. \u202Esmraf\u202C\u061C still has open invoices. Settle them first'))

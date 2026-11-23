@@ -36,8 +36,8 @@ Read at `54a6a0db9` (this branch, caught up with `origin/staging` b2f3b2e1c).
   follow-up PR after #2247, starting from the re-check's open questions.
 
 ### Behavior
-- **Server (`save_job`, re-emitted wrapper).** For an existing job, after the actor check and only when the caller is an
-  active admin or sales rep (anyone else falls through to the writer, which refuses as today), the wrapper takes the
+- **Server (`save_job`, re-emitted wrapper).** After the actor check, anyone but an active admin or sales rep is
+  refused with the writer's own `INSUFFICIENT_ROLE` (security review LOW: before any helper runs). For an existing job the wrapper then takes the
   idempotency advisory lock (`hashtextextended('crx:idempotency:' || key, 0)`, the exact lock
   `check_idempotency_intent` takes, `20260811130000:108`, skipped for a null or blank key) and then the job row
   `FOR UPDATE`: the same order the writer uses, so the writer's own later locks are re-entrant. If the job is
@@ -45,7 +45,7 @@ Read at `54a6a0db9` (this branch, caught up with `origin/staging` b2f3b2e1c).
   runs the writer, and compares the new lines with it (`EXCEPT ALL` both ways, typed values, so `10` equals `10.0`).
   Any difference refuses the whole save with `JOB_COMPLETED_CHEMICALS_LOCKED`: "This job is complete, so its
   chemicals can't be changed: completion already took them from stock. Nothing was saved."
-- Changes to anything else on a completed job (fields, notes, rates) save as today. Jobs in any other status save as
+- Other changes to a completed job (notes and other details that leave every chemical line's product, quantity, unit and grower-supplied mark as they were) save as today; a rate or acreage change that moves a line's quantity is refused like any chemical change. Jobs in any other status save as
   today; invoiced jobs stay refused by the line lock.
 - **Screen.** No change. The job screen already hides Save on completed jobs (`JobDetail.tsx:3870`), so office staff
   lose nothing; the refusal closes the API path.

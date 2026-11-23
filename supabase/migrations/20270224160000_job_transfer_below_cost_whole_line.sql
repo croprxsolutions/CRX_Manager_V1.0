@@ -1069,8 +1069,8 @@ CREATE TRIGGER trg_job_field_shares_lock_when_invoiced BEFORE INSERT OR UPDATE O
 --    "Refuse now, build later"): completion already took its chemicals from stock, and nothing gives that back.
 --    For an admin or sales rep saving an existing job it takes the writer's own locks first, in the writer's order
 --    (the idempotency key's advisory lock as check_idempotency_intent takes it, then the job row), so a completed
---    job's lines are read under the lock and compared with what the writer leaves. Anyone else reaches the writer
---    unchanged, which refuses them as before. A replayed key writes nothing, so it passes.
+--    job's lines are read under the lock and compared with what the writer leaves. Anyone else is refused here with
+--    the writer's own INSUFFICIENT_ROLE, before any helper runs. A replayed key writes nothing, so it passes.
 CREATE OR REPLACE FUNCTION public.save_job(p_job_id uuid, p_job_payload jsonb, p_fields jsonb, p_chemicals jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -1086,14 +1086,16 @@ BEGIN
   IF auth.uid() IS NULL OR p_performed_by IS DISTINCT FROM auth.uid() THEN
     RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match auth.uid()' USING ERRCODE = 'P0001';
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true AND role IN ('admin', 'sales_rep')) THEN
+    RAISE EXCEPTION 'INSUFFICIENT_ROLE';
+  END IF;
   IF jsonb_typeof(p_chemicals) = 'array' THEN
     SELECT COALESCE(jsonb_agg(CASE WHEN jsonb_typeof(t.e -> 'rate_unit') = 'string'
                                    THEN jsonb_set(t.e, '{rate_unit}', to_jsonb(public.unit_fold_invisible(t.e ->> 'rate_unit')))
                                    ELSE t.e END ORDER BY t.o), '[]'::jsonb)
       INTO v_chemicals FROM jsonb_array_elements(p_chemicals) WITH ORDINALITY AS t(e, o);
   END IF;
-  IF p_job_id IS NOT NULL AND EXISTS (
-       SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true AND role IN ('admin', 'sales_rep')) THEN
+  IF p_job_id IS NOT NULL THEN
     IF p_idempotency_key IS NOT NULL AND btrim(p_idempotency_key) <> '' THEN
       PERFORM pg_advisory_xact_lock(hashtextextended('crx:idempotency:' || p_idempotency_key, 0));
     END IF;
@@ -1144,7 +1146,7 @@ BEGIN
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '0d225231da5e5adc8d21ed092796270a'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
-          WHERE p.oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure) IS DISTINCT FROM 'b25a17a1884fd621b2f03482c8b0771d' THEN
+          WHERE p.oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure) IS DISTINCT FROM 'f5444826af3b0420ec65f5708a382642' THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: a body is not the one this file installs';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p

@@ -12,7 +12,7 @@ BEGIN
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM 'df11843a858fa7907bf58f936715dc57'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint)')) IS DISTINCT FROM '0d225231da5e5adc8d21ed092796270a'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_split_qty_20270207(numeric, numeric[])')) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81'
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public.save_job(uuid, jsonb, jsonb, jsonb, uuid, text)'::regprocedure) IS DISTINCT FROM 'b25a17a1884fd621b2f03482c8b0771d' THEN
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public.save_job(uuid, jsonb, jsonb, jsonb, uuid, text)'::regprocedure) IS DISTINCT FROM 'f5444826af3b0420ec65f5708a382642' THEN
     RAISE EXCEPTION 'JOB_TRANSFER_BELOW_COST_ROLLBACK_PREFLIGHT: the live bodies are not the ones 20270224160000 installed; nothing changed';
   END IF;
 END $rev$;

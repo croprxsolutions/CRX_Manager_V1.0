@@ -7,8 +7,9 @@
 --   1. The allocation count skips rows whose set is a voided payment (entity_type 'payment' AND is_active = false),
 --      the same rule void_invoice uses, and now also counts a row that names only one of this invoice's lines. An
 --      active payment, an order or invoice set, paid/prepay/write-off/credit amounts, prepay and credit
---      applications all still refuse, as before. The sets behind those rows are locked FOR SHARE (id order) before
---      the count, and the unlink below uses the same rows.
+--      applications all still refuse, as before. Only the voided-payment sets behind those rows are locked (FOR SHARE,
+--      id order, after the invoice), and exactly those count as history; the unlink below uses the same rows. An
+--      active set is never locked here, which keeps void_payment's set-then-invoice order deadlock-free.
 --   2. On a successful unpost, every voided-payment row naming one of this invoice's lines (whatever its invoice_id)
 --      loses only its invoice_item_id: every draft save deletes and re-adds the lines, and the invoice_item_id
 --      foreign key has no ON DELETE, so a row still naming a line would refuse the first save. allocate_payment has
@@ -72,6 +73,7 @@ DECLARE
   v_history_unlinked jsonb := '[]'::jsonb;  -- #2265
   v_history_ids uuid[] := '{}';  -- #2265
   v_history_elsewhere uuid;  -- #2265
+  v_history_sets uuid[] := '{}';  -- #2265
 BEGIN
   SELECT role INTO v_actor_role FROM profiles
     WHERE id = auth.uid() AND is_active = true AND role IN ('admin','sales_rep');
@@ -100,14 +102,18 @@ BEGIN
   -- (20260718221505); they are no longer money on this invoice, so they do not block unpost.
   -- Every other allocation (an active payment, any order or invoice set) still does, whether it names
   -- this invoice or only one of its lines (a pre-2026-03-15 row may carry the line alone).
-  -- The sets behind those rows are locked first (FOR SHARE, in id order), so none can change between
-  -- this count and the unlink below, which uses the same rows (v_history_ids).
-  PERFORM 1 FROM allocation_sets s
-   WHERE s.id IN (SELECT ila.allocation_set_id FROM invoice_line_allocations ila
-                   WHERE ila.invoice_id = p_invoice_id
-                      OR ila.invoice_item_id IN (SELECT ii.id FROM invoice_items ii WHERE ii.invoice_id = p_invoice_id))
-   ORDER BY s.id
-     FOR SHARE;
+  -- Only the voided-payment sets are locked (FOR SHARE, id order), and exactly those count as history,
+  -- so none can change between this check and the unlink below, which uses the same rows
+  -- (v_history_ids). An active set is not locked: it blocks whatever happens to it next, and locking it
+  -- here (after the invoice) would invert void_payment's set-then-invoice lock order and deadlock.
+  SELECT COALESCE(array_agg(x.id ORDER BY x.id), '{}') INTO v_history_sets
+    FROM (SELECT s.id FROM allocation_sets s
+           WHERE s.entity_type = 'payment' AND s.is_active = false
+             AND s.id IN (SELECT ila.allocation_set_id FROM invoice_line_allocations ila
+                           WHERE ila.invoice_id = p_invoice_id
+                              OR ila.invoice_item_id IN (SELECT ii.id FROM invoice_items ii WHERE ii.invoice_id = p_invoice_id))
+           ORDER BY s.id
+             FOR SHARE) x;
   SELECT count(*) FILTER (WHERE NOT h.voided),
          COALESCE(array_agg(h.id ORDER BY h.id) FILTER (WHERE h.voided AND h.on_line), '{}'),
          (array_agg(h.id ORDER BY h.id) FILTER (WHERE h.voided AND h.on_line
@@ -115,8 +121,7 @@ BEGIN
     INTO v_alloc_count, v_history_ids, v_history_elsewhere
     FROM (SELECT ila.id, ila.invoice_id,
                  COALESCE(ila.invoice_item_id IN (SELECT ii.id FROM invoice_items ii WHERE ii.invoice_id = p_invoice_id), false) AS on_line,
-                 EXISTS (SELECT 1 FROM allocation_sets hist WHERE hist.id = ila.allocation_set_id
-                           AND hist.entity_type = 'payment' AND hist.is_active = false) AS voided
+                 COALESCE(ila.allocation_set_id = ANY (v_history_sets), false) AS voided
             FROM invoice_line_allocations ila
            WHERE ila.invoice_id = p_invoice_id
               OR ila.invoice_item_id IN (SELECT ii.id FROM invoice_items ii WHERE ii.invoice_id = p_invoice_id)
@@ -236,7 +241,7 @@ $create$;
   -- Postflight: the new body, still one overload, owner, mode, search_path and EXECUTE grants.
   SELECT * INTO p FROM pg_proc WHERE oid = to_regprocedure('public._unpost_invoice_replay_impl_20261015(uuid,uuid,text)');
   IF p.oid IS NULL
-     OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM 'aef1be53a1e278dc0e57a360c15fa7cb'
+     OR md5(replace(p.prosrc, chr(13), '')) IS DISTINCT FROM 'd799306fc9dee0c1489da4a28a3af26e'
      OR (SELECT count(*) FROM pg_proc o
           WHERE o.pronamespace = 'public'::regnamespace AND o.proname = '_unpost_invoice_replay_impl_20261015') <> 1
      OR p.proowner <> 'postgres'::regrole

@@ -1,5 +1,15 @@
 # Decision Log
 
+## 2026-11-23 — #2323: Mason owner-accepted 3 Sol finding(s) at `23478c5310ab`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2323 at `23478c5310ab` (base `c00e3af0c495`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `scripts/smoke/drop-inert-delivery-short-stock-trigger-reverse.sql:20`, text sha256 `59e70d67aba2ee0a` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a51f67ac6fdc)
+- Finding 2 (HIGH) at `scripts/smoke/single-short-stock-warning-reverse.sql:16`, text sha256 `2f0ab2fb0aea7acd` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a51f67ac6fdc)
+- Finding 3 (HIGH) at `scripts/smoke/prove-drop-inert-delivery-short-stock-trigger-real-schema.mjs:120`, text sha256 `415d2b8ae36e7195` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref a51f67ac6fdc)
+
 ## 2026-11-22 — #2260: Mason owner-accepted 1 Sol finding(s) at `2986f407e617`
 
 **Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #2260 at `2986f407e617` (base `47947bc95348`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

@@ -331,7 +331,7 @@ describe('Inventory', () => {
     H.functions.get_inventory_position = [position];
     H.failing.set('get_inventory_forecast', mode);
     at('/inventory', <InventoryPage />);
-    fireEvent.click(await screen.findByRole('tab', { name: /Forecast/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /Reservations/ }));
     expect(await screen.findByText('The demand forecast could not be loaded')).toBeInTheDocument();
     expect(screen.queryByText(/No planned demand data/)).not.toBeInTheDocument();
   });
@@ -340,7 +340,7 @@ describe('Inventory', () => {
     H.functions.get_inventory_position = [position];
     H.failing.set('get_inventory_forecast', 'error');
     at('/inventory', <InventoryPage />);
-    fireEvent.click(await screen.findByRole('tab', { name: /Forecast/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /Reservations/ }));
     expect(await screen.findByText('The demand forecast could not be loaded')).toBeInTheDocument();
 
     H.failing.delete('get_inventory_forecast');

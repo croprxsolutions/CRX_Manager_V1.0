@@ -10,6 +10,27 @@
 - Finding 3 (HIGH) at `src/pages/DeliveryDetail.tsx:1562`, text sha256 `4e2720e2b1b9e457` (the wording stays with the proof, not here)
   Mason's reason: I accept not big chance (ref b9bbd42731de)
 
+## 2026-11-22 — #1980: Mason owner-accepted 2 Sol finding(s) at `596e9a966c78`
+
+**Decision (Mason, by chat reply, 2026-11-22).** Sol's review of PR #1980 at `596e9a966c78` (base `a7785529318b`) found 2 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `src/pages/QuoteBuilder.tsx:5788`, text sha256 `62289c837c8d5bff` (the wording stays with the proof, not here)
+  Mason's reason: I accept it is small chance (ref cae96f3067fd)
+- Finding 2 (HIGH) at `src/pages/QuoteBuilder.tsx:5436`, text sha256 `21fde77b4c797bc5` (the wording stays with the proof, not here)
+  Mason's reason: I accept it is small chance (ref cae96f3067fd)
+
+## 2026-11-22 — #1980: Mason approves Sol round 6 now that #1989 has landed
+
+**Decision (Mason, in chat, 2026-11-22: "Yes, run Sol").** Sol round 5 on #1980 found that the Purchasing tab could count PO stock another booking had already claimed. On 2026-11-21 Mason chose to hold #1980 until #1989 (the booking line is the reservation) landed, rather than accept the finding. #1989 merged to staging on 2026-11-22 (`6e77a9e7a`), and #1980 now reads its coverage, late-PO, follow-up, unbacked-hold and Check data keys. Mason approved running Sol round 6 on #1980 at that state.
+
+## 2026-11-21 — #1980: Mason chose to drop "restore keeps Timing/Confidence"
+
+**Decision (Mason, in chat, 2026-11-21: "Yes and log for future work").** Sol round 3 on #1980 found that keeping each section's Timing and Confidence across a version restore or rewind (matched by section name) could give an old product a new section's Firm pick, or pair a current Firm pick with an older needed-by date. Mason chose to drop that change: a restore or rewind keeps its existing behavior and clears Timing and Confidence (blank never counts as Firm), and both restore prompts say so. A safe design (picks stored in each version snapshot) is logged in #1977 as future work. This entry names #1980 so Sol may run round 5 on it.
+
+## 2026-11-19 — #1980: Mason owner-accepted 1 Sol finding(s) at `e2225f84faab`
+
+**Decision (Mason, owner-accepted by `accept <code>` reply, 2026-11-19).** Sol's review of PR #1980 at `e2225f84faab` (base `5f87729d2685`) found 1 BLOCKER/HIGH finding(s). Mason accepted each one as a business non-issue; they are left unfixed.
+- Finding 1 (HIGH) at `src/components/inventory/PurchasingTab.tsx:250`, text sha256 `472a69929a17b261` (the wording stays with the proof, not here)
+  Mason's reason: this case cannot happen in our business (ref e8d08e3a7329)
 ## 2026-11-22 — PR #2231 (#2193): Mason overrides Sol round 4's one HIGH; hand merge
 
 **Decision (Mason, 2026-11-22, relayed by the bug captain: "A").** Sol round 4 (head `d86e4eefc`) left one HIGH: the MCP apply door runs the guard code from the main checkout, so the new prerequisite check protects that door only once the main checkout is updated past this PR. Override reason: the check is active once installed, and the modes-of-action load is applied only at release, after this PR lands; the script door (the normal path) carries the check itself. The race Sol raised in rounds 1-3 is fixed (in-transaction re-count under the ingredient lock). The skip tool cannot accept findings on gate files, and the agent merge guard needs a clean Sol on them, so Mason or Taha merges PR #2231 by hand; agents do not land it. Sol's MED/LOW findings are tracked in #2230.
@@ -81,6 +102,9 @@
 ## 2026-11-22 — #2197: sales reps may reactivate an inactive customer from its page
 
 **Decision (Mason, 2026-11-22, relayed by the bug captain: "Yes, reps too").** The customer page's Reactivate button shows for admins and sales reps, matching what the database already allows (`customers_update` policy: admin or sales rep) and the #2048 refusal text ("An admin or sales rep must reactivate"). Screen-only change; the database rule is unchanged. Drivers and applicators still get no button and are refused by the database.
+## 2026-11-22 — PR #2244 (KI-197): stale-screen PO cost check covers cost and product only (accepted risk)
+
+**Decision (Mason, relayed from his conversation with the bugs-triage session, 2026-11-22: "go with B"):** a purchase-order cost correction is refused when the line's cost or product changed after the screen loaded it. A PO vendor change or a product unit change in that window is NOT checked: an accepted risk, since only admins correct costs. Raised after Sol round 3 reached the AGENTS.md mechanism cap.
 
 ## 2026-11-22 — PR #2199: Mason overrides Sol round 6; "yes with a reason" is enough
 

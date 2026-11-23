@@ -461,7 +461,7 @@ the RPCs, atomic create. Repair step 2 (To-Do 0.17), before the pre-season count
 (also refuses the same row twice on one count; concurrent claims serialized); a count's status only moves forward (in progress
 to completed or cancelled, completed to cancelled), so no count can be reopened or reversed twice; signed-in users lose direct UPDATE on `cycle_counts` and `cycle_count_items`, so a
 completed count cannot be marked cancelled without its reversal and a line's variance is only what the save RPC computed (a direct line insert may set only the four columns the app sends). **Still open here:** the three-request creation (a failed create leaves an empty open count, which
-now blocks a new count at that warehouse until it is cancelled from the Cycle Counts screen).
+now blocks a new count at that warehouse until it is cancelled from the Cycle Counts screen). **In progress (Lane E, 2026-11-22):** `create_cycle_count` (`20270209160000`) does the whole start in one step; the screen switch and removing the direct inserts follow.
 
 ### KI-163 — Small stock-history gaps
 
@@ -531,6 +531,8 @@ running local test app.
 ### KI-197 — PO cost corrections can overwrite each other; "Most recent received PO" sorts by PO date
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Open · LOW · Agent (unassigned) · plan W3-15.
+
+> **In progress (Lane E, 2026-11-22):** database part (expected cost check, migration `20270217120000`) in review; the screen sends it in a follow-up PR; the "Most recent received PO" label is its own small PR.
 
 **LOW · OPEN (source-confirmed) · purchasing · found 2026-11-21 ([2026-11-21 audit verification](../audits/2026-11-21-quote-to-invoice-audit-verification.md), audit 2) · unassigned**
 - `set_purchase_order_item_costs` (`20261021140000` ~L513, only definition) takes the line and new cost only

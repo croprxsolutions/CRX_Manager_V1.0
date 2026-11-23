@@ -49,7 +49,7 @@ import { Sentry } from '../lib/sentry';
 import { fetchDeliveryFarm } from '../lib/driverFarms';
 import {
   RECEIPT_SENDING_NOW_MESSAGE, closeDeliveryReceipt, isReceiptChanged, isReceiptSendingNow, receiptCloseScope,
-  receiptMayAlreadyBeSent, receiptQueuedAt, type ReceiptCloseResult,
+  receiptMayAlreadyBeSent, receiptServerMaySend, type ReceiptCloseResult,
 } from '../lib/receiptsToCheck';
 import { fetchAllRows, fetchAllRowsForIds } from '../lib/pagedRead';
 import { activeInvoiceCountsTowardBilling, activeInvoiceCoversDelivery } from '../lib/deliveryInvoiceCoverage';
@@ -1486,21 +1486,25 @@ export default function DeliveryDetail() {
 
   // After the hand send: mark the paused receipt handled. A failure only leaves it on the office list.
   const closeSentReceipt = async (deliveryId: string, queuedAt: string | null) => {
-    try {
-      if (!queuedAt) {
-        // None was queued when the send started, so none is closed; one queued meanwhile may still be emailed (Sol LOW).
-        // A failed read stays silent: no close was sent, so there is nothing unconfirmed to report (Sol LOW).
-        if (await receiptQueuedAt(deliveryId).catch(() => null)) {
-          toast('warning', 'A new receipt was queued for this delivery while the email was sending. The server may email it too.');
-        }
-        return;
+    if (!queuedAt) {
+      // None was queued when the send started, so none is closed; one queued meanwhile may still be emailed (Sol LOW).
+      // Only a receipt still waiting for the server counts, and a failed read says so rather than staying silent (#2291).
+      const maySend = await receiptServerMaySend(deliveryId).catch(() => null);
+      if (maySend === null) {
+        toast('warning', 'The email went out, but the app could not check whether a new receipt was queued meanwhile. Check "Customer receipts to check".');
+      } else if (maySend) {
+        toast('warning', 'A new receipt was queued for this delivery while the email was sending. The server may email it too.');
       }
-      // Only the receipt this send covered: the server refuses if it was queued again since (#2251).
-      const scope = receiptCloseScope(deliveryId, 'handled', queuedAt);
+      return;
+    }
+    // Only the receipt this send covered: the server refuses if it was queued again since (#2251).
+    const scope = receiptCloseScope(deliveryId, 'handled', queuedAt);
+    try {
       await closeDeliveryReceipt(deliveryId, 'handled', receiptCloseIdem.getKeyFor(scope), queuedAt);
       receiptCloseIdem.resetKeyFor(scope);
     } catch (err: unknown) {
       if (isReceiptChanged(err)) {
+        receiptCloseIdem.resetKeyFor(scope); // a refusal is final for this receipt: never keep its key (#2291)
         toast('warning', "The email went out. This delivery's receipt changed while it was sending, so it was left as it is.");
         return;
       }

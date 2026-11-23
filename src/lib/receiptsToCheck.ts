@@ -52,12 +52,13 @@ export function isReceiptSendingNow(error: unknown) {
 
 export const RECEIPT_SENDING_NOW_MESSAGE = 'The server is emailing this receipt right now. Try again in a minute.';
 
-// When this delivery's queue row was (re)queued, or null when it has none. Used only after a hand send that started
-// with no receipt queued, to warn that one was queued meanwhile (the server binding needs a receipt to name).
-export async function receiptQueuedAt(deliveryId: string): Promise<string | null> {
-  const { data, error } = await supabase.from('delivery_receipt_queue').select('created_at').eq('delivery_id', deliveryId).maybeSingle();
+// True when this delivery has a receipt the server may still email (pending or being sent); a handled, sent or
+// held receipt is not. Used only after a hand send that started with no receipt queued, to warn that one was
+// queued meanwhile (#2291). A failed read throws: the caller cannot tell.
+export async function receiptServerMaySend(deliveryId: string): Promise<boolean> {
+  const { data, error } = await supabase.from('delivery_receipt_queue').select('status').eq('delivery_id', deliveryId).maybeSingle();
   if (error) throw error;
-  return data?.created_at ?? null;
+  return data?.status === 'pending' || data?.status === 'sending';
 }
 
 // The server refused because the delivery's receipt is not the one the screen named (queued again, or gone).

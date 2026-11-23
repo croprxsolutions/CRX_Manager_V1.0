@@ -623,6 +623,7 @@ describe('Email Confirmation and the server receipt queue', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/receipt changed while it was sending, so it was left as it is/)));
     expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringMatching(/Mark it handled there/));
+    expect(closeCalls()).toEqual(['manual_send', 'handled']); // no retry without the receipt it named (#2291)
   });
 
   it('when the close cannot be confirmed, never says to mark it handled (Sol HIGH, #2251)', async () => {
@@ -639,13 +640,36 @@ describe('Email Confirmation and the server receipt queue', () => {
   it('with none queued at the start, warns when one was queued during the send and closes nothing (Sol LOW, #2251)', async () => {
     mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
     mockSendEmail.mockImplementation(async () => {
-      tables.data.delivery_receipt_queue = [{ created_at: '2026-10-21T15:10:00.000001+00:00' }];
+      tables.data.delivery_receipt_queue = [{ status: 'pending' }];
       return { success: true };
     });
     await renderPage();
     fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
     await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/new receipt was queued .* while the email was sending/)));
     expect(closeCalls()).toEqual(['manual_send']);
+  });
+
+  it('does not warn about a receipt queued meanwhile that someone already marked handled (#2291)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
+    mockSendEmail.mockImplementation(async () => {
+      tables.data.delivery_receipt_queue = [{ status: 'cancelled' }];
+      return { success: true };
+    });
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('delivery_receipt_queue'));
+    await act(async () => { await Promise.resolve(); });
+    expect(mockToast).not.toHaveBeenCalledWith('warning', expect.stringMatching(/new receipt was queued/));
+  });
+
+  it('says it could not check when the follow-up queue read fails (#2291)', async () => {
+    mockRpc.mockImplementation(() => Promise.resolve(answer({ outcome: 'none', previous_status: null, queued_at: null })));
+    mockFrom.mockImplementation((table: string) => table === 'delivery_receipt_queue'
+      ? { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: { message: 'Failed to fetch' } }) }) }) }
+      : buildChain(table));
+    await renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Email Confirmation/ }));
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringMatching(/could not check whether a new receipt was queued/)));
   });
 
   it('with no receipt queued when the send started, closes nothing afterwards (#2251)', async () => {

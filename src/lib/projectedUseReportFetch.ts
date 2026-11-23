@@ -125,7 +125,7 @@ export async function fetchProjectedUseData(jobIds: string[]): Promise<Projected
     }
 
     try {
-      const data = await fetchChemicalApplicationReportData(jobId);
+      const data = await fetchChemicalApplicationReportData(jobId, { keptEpa: false });
       if (!data) {
         excluded.push({ job_id: jobId, job_number: jobNumber, reason: 'Job no longer exists' });
         continue;

@@ -21,6 +21,7 @@ import { useLatestRef } from '../hooks/useLatestRef';
 import { fingerprintIntentPayload, getIdempotencyBindingRejection, getIdempotencyMismatchResult } from '../lib/idempotency';
 import { getLicenseStatus, licenseStatusLabel } from '../lib/licenseStatus';
 import { generateWpsNoticePdf } from '../lib/wpsNoticePdf';
+import { applyKeptEpa } from '../lib/jobEpa';
 import { generateApplicatorSheetPdf } from '../lib/applicatorSheetPdf';
 import { prepareApplicatorSheetPrintData } from '../lib/applicatorSheetPrintData';
 import PrintOptionsDialog, { type ApplicatorPrintSelection } from '../components/jobs/PrintOptionsDialog';
@@ -977,6 +978,8 @@ export default function JobDetail() {
           setPrintingWps(false);
           return;
         }
+        // KI-195: a sprayed job prints the EPA number it kept (a failed read lands in the catch below).
+        if (!isNew && id) await applyKeptEpa(id, labelById);
       }
       await generateWpsNoticePdf({
         job_number: jobNumber || 'draft',
@@ -1056,6 +1059,8 @@ export default function JobDetail() {
       // abort (return null → caller toasts) so a compliance printout is never built
       // with missing label data (Codex P2; mirrors the WPS-notice path).
       if (pids.some((pid) => !labelById.has(pid))) return null;
+      // KI-195: the EPA number the job kept; a failed read throws to the caller's catch (no PDF).
+      if (!isNew && id) await applyKeptEpa(id, labelById);
     }
 
     // Billed customers via the SECURITY DEFINER RPC (saved job_field_shares →
@@ -5372,8 +5377,9 @@ export default function JobDetail() {
         onConfirm={() => { setShowTransferConfirm(false); handleTransferToInvoice(); }}
         title="Transfer to Invoice"
         message={isMultiOwner
-          ? `This job has fields billed to more than one owner. Transfer to Invoice creates ONE invoice to ${customers.find((c) => c.id === customerId)?.farm_name || 'the primary customer'}; each landlord's share shows on statements but CANNOT be paid separately (per-owner billing for spray jobs is coming soon). Continue only if the tenant is collecting from the other owners.`
-          : 'Transfer this job to an invoice? This will create a new invoice from the job chemicals.'}
+          ? 'This job has fields billed to more than one owner. Transfer to Invoice creates a separate invoice for each owner, billing each owner their acre share of every chemical line and of any spraying fee.'
+          // 20270226150000 (Sol r9, Mason 2026-11-22): no payer named; the server bills the split saved at transfer time.
+          : "Transfer this job to an invoice for the customer set on its fields' billing split? This will create a new invoice from the job chemicals."}
         confirmLabel="Transfer to Invoice"
         variant="warning"
         loading={transferring}

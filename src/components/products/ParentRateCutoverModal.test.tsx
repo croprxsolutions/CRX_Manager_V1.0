@@ -127,6 +127,16 @@ describe('RT-4a rate cut-over modal', () => {
     expect(screen.getByRole('button', { name: 'Switch to approved rate' })).toBeDisabled();
   });
 
+  it('keeps Switch off when the old values could not be switched back', async () => {
+    mockPreview.mockResolvedValue({ ...eligible,
+      snapshot: { legacy: { rate_per_acre: '1.8', rate_unit: 'Dry oz', suggested_rate: 'x'.repeat(201) } } });
+    open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    fireEvent.change(await screen.findByLabelText('Reason (required)'), { target: { value: 'pilot' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('its old suggested rate is longer than 200 characters, so it could not be switched back');
+    expect(screen.getByRole('button', { name: 'Switch to approved rate' })).toBeDisabled();
+  });
+
   it('a preview held for one group is not sent for another', async () => {
     mockPreview.mockResolvedValue(eligible);
     const { rerender } = render(<ParentRateCutoverModal parent={parent} profileId="u1" rateSource="legacy" onClose={vi.fn()} onSaved={vi.fn()} />);

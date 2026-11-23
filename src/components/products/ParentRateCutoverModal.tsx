@@ -36,6 +36,27 @@ const afterPrices = (plan: Eligible, size: Eligible['expected']['sizes'][number]
 const allShownExactly = (plan: Eligible) => plan.expected.sizes.every((size) => TIERS.every((tier) =>
   [size.before_prices, afterPrices(plan, size)].every((prices) => perAcre(prices[`tier${tier}_price_per_acre`]) !== 'Invalid amount')));
 
+// Switching back re-saves the old values through the rate save's checks (_apply_parent_rates, _product_rate_value_ok).
+// Old values that fail them could never be put back, leaving the group stuck on its approved rate, so promote waits.
+function restoreProblem(plan: Eligible, seedOrEach: boolean): string | null {
+  const old = plan.snapshot?.legacy;
+  if (plan.direction !== 'promote' || !plan.changes || !old) return null;
+  if (!/^([0-9]{1,12}(\.[0-9]{1,6})?)?$/.test((old.rate_per_acre ?? '').trim())) return 'its old rate per acre has more than 6 decimals';
+  if (!seedOrEach && (old.rate_unit ?? '').trim().length > 40) return 'its old rate unit is longer than 40 characters';
+  if ((old.suggested_rate ?? '').trim().length > 200) return 'its old suggested rate is longer than 200 characters';
+  return null;
+}
+
+// Why Switch stays off (shown in the warning box), or null when the preview may be switched.
+function cutoverWarning(preview: RateCutoverPreview | null, seedOrEach: boolean): string | null {
+  if (!preview) return null;
+  if (!preview.eligible) return `Can't switch. ${refusalText({ message: preview.refusal })}`;
+  const back = restoreProblem(preview, seedOrEach);
+  if (back) return `Can't switch yet: ${back}, so it could not be switched back. Fix it with Correct parent rates first.`;
+  // Not a box of its own: an inexact price already reads "Invalid amount" in the table.
+  return allShownExactly(preview) ? null : '';
+}
+
 function CutoverTable({ plan, seedOrEach }: { plan: Eligible; seedOrEach: boolean }) {
   return (
     <div className="space-y-3">
@@ -97,6 +118,7 @@ export default function ParentRateCutoverModal({ parent, profileId, rateSource, 
   // A preview counts only for the group and direction on screen now; otherwise preview again.
   const preview = heldPreview?.parent_id === parent.id && heldPreview.direction === direction ? heldPreview : null;
   const plan = preview?.eligible ? preview : null;
+  const warning = cutoverWarning(preview, seedOrEach);
   const { getKey, resetKey } = useIdempotencyKey('commit_parent_rate_cutover', profileId,
     JSON.stringify([parent.id, direction, plan?.expected ?? null, reason.trim()]));
 
@@ -156,7 +178,7 @@ export default function ParentRateCutoverModal({ parent, profileId, rateSource, 
         <>
           <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
           {plan
-            ? <Button onClick={() => void commit()} loading={saving} disabled={saving || reason.trim() === '' || !allShownExactly(plan)}>{title}</Button>
+            ? <Button onClick={() => void commit()} loading={saving} disabled={saving || reason.trim() === '' || warning !== null}>{title}</Button>
             : <Button onClick={() => void showPreview()} loading={saving} disabled={saving}>Preview</Button>}
         </>
       )}
@@ -167,11 +189,7 @@ export default function ParentRateCutoverModal({ parent, profileId, rateSource, 
             ? `Switches ${parent.name} and all ${parent.sizes.length} size(s) from today's rate to the rate approved in the rate review, and reprices their per-acre prices. Saved quotes, orders and jobs keep their prices. You can switch back.`
             : `Puts back the rate, unit and suggested rate ${parent.name} had before the switch, on all ${parent.sizes.length} size(s), with per-acre prices at today's stock prices.`}
         </p>
-        {preview && !preview.eligible && (
-          <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900" role="alert">
-            Can&apos;t switch. {refusalText({ message: preview.refusal })}
-          </p>
-        )}
+        {warning && <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900" role="alert">{warning}</p>}
         {plan && <CutoverTable plan={plan} seedOrEach={seedOrEach} />}
         {plan && <ReasonField id="rate-cutover-reason" label="Reason" value={reason} onChange={setReason} />}
       </fieldset>

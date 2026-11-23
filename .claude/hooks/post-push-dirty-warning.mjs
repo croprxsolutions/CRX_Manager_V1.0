@@ -35,8 +35,11 @@ export function pushTargets(command, cwd) {
     const dir = pushDir(segment, cwd);
     let branches = [];
     try { branches = pushDestinationBranches(segment, null); } catch { /* unreadable: current branch */ }
-    for (const branch of branches.length ? branches : [null]) seen.set(`${dir}\0${branch}`, { dir, branch });
+    // An all-digit branch would be read by `gh pr view` as a PR number, so it is skipped (Luna r1 LOW).
+    for (const branch of (branches.length ? branches : [null]).filter((name) => !/^\d+$/.test(name ?? ""))) seen.set(`${dir}\0${branch}`, { dir, branch });
   }
+  // shortcut: only the first three targets are asked about (time limit), so a fourth push or
+  // refspec gets no warning; ask in batches if such commands become common.
   return [...seen.values()].slice(0, MAX_PUSHES_CHECKED);
 }
 

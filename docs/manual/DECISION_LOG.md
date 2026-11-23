@@ -10,6 +10,8 @@
 
 **Decision (Mason, 2026-11-23, after Luna round 3 found a new HIGH in the same exceptions for the third round: "Fix both, then Sol (Recommended)").** A cancelled or deleted job that already recorded still owns the stock; only chemicals from our stock (not customer-supplied) count as chemicals entered; changing a linked ticket's customer is checked too. If Sol finds another case in these exceptions, stop and bring Mason a simpler design (a linked ticket never records on its own).
 
+**Decision (Mason, 2026-11-23, after Luna round 4 found new holes in the no-chemicals rule: "Job's list always counts (Recommended)").** Supersedes the no-chemicals refusal above. The job takes exactly what is on its own chemical list, even when it is empty or short; a linked ticket still does not record on its own. Accepted risk: a job completed without its chemicals entered leaves stock too high for that spray. The other fixes stay (cancelled jobs, same customer, now also checked on new tickets).
+
 ## 2026-11-23 — #2339: Mason owner-accepted 1 Sol finding(s) at `72ad09a97efa`
 
 **Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2339 at `72ad09a97efa` (base `d5a2696ab035`) found 1 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.

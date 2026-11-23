@@ -393,16 +393,10 @@ async function afterCases() {
   assert.notEqual(r6.status, 0, r6.output);
   assert.match(r6.output, /BLEND_TICKET_JOB_RECORDS/);
   console.log('[case 6] calling the internal ticket-record body directly on a linked ticket is refused by the table guard');
-  // 7. Mason, 2026-11-23: a job with a linked ticket but no chemicals entered cannot complete; once a line is added it can.
-  refusedAfter(link(9, JOB(9)), complete(9), /JOB_BLEND_TICKET_NEEDS_CHEMICALS/, 'case 7');
-  const addLine = `INSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order)
-    VALUES ('${JOB(9)}', '${P}', 10, 'Gal', 1000, false, 1);`;
-  assert.equal(Number(okProbe(`${AS_ADMIN}\n${addLine}\n${signedIn(`${link(9, JOB(9))}\n${complete(9)}\n${ON_HAND}`)}`)), base - 10, 'case 7: with a line added the job completes');
-  ok(complete(9));
-  //    Luna round 2: nor can a ticket be linked to a job already completed with no chemicals.
-  refused(`${complete(9)}\n${link(9, JOB(9))}`, /BLEND_TICKET_JOB_NEEDS_CHEMICALS/, 'case 7 link after');
-  console.log('[case 7] J9 completed with no chemicals, then T9 linked to it: refused');
-  console.log('[case 7] J9 has T9 linked but no chemicals: completion refused, stock unchanged; after a chemical line is added it completes (10 Gal out); an empty job with no ticket still completes as before');
+  // 7. Mason, 2026-11-23 (after Luna round 4): the job's own chemical list always counts, even when empty.
+  assert.equal(Number(ok(`${link(9, JOB(9))}\n${complete(9)}\n${ON_HAND}`)), base, 'case 7: an empty job takes nothing');
+  refused(`${link(9, JOB(9))}\n${complete(9)}\n${record(9)}`, /BLEND_TICKET_JOB_RECORDS/, 'case 7 ticket after empty job');
+  console.log("[case 7] J9 has no chemicals and T9 linked: J9 completes and takes nothing (its own list counts); T9 still cannot record (accepted)");
   // 8. A cancelled job cannot complete, so its linked ticket records as before.
   assert.equal(Number(ok(`${record(10)}\n${ON_HAND}`)), base - 10, 'case 8: a ticket on a cancelled job must record and take its stock');
   console.log('[case 8] T10 is linked to cancelled J10: Create App Record works and takes 10 Gal');
@@ -411,10 +405,12 @@ async function afterCases() {
 UPDATE public.jobs SET status = 'cancelled' WHERE id = '${JOB(3)}';\nSET LOCAL session_replication_role = origin;\nSET LOCAL ROLE authenticated;`,
     record(3), /BLEND_TICKET_JOB_RECORDS/, 'case 8 recorded then cancelled');
   console.log('[case 8] J3 completed (10 Gal out), then cancelled: Create App Record on its linked T3 is still refused');
-  // Luna round 3: only chemicals from our stock count; a job with only a customer-supplied line cannot complete with a linked ticket.
-  refusedAfter(`RESET ROLE;\nINSERT INTO public.job_chemicals (job_id, product_id, quantity, unit, price_per_unit_cents, customer_supplied, sort_order)
-    VALUES ('${JOB(9)}', '${P}', 10, 'Gal', 0, true, 1);\nSET LOCAL ROLE authenticated;\n${link(9, JOB(9))}`, complete(9), /JOB_BLEND_TICKET_NEEDS_CHEMICALS/, 'case 7 customer-supplied only');
-  console.log('[case 7] J9 with only a customer-supplied chemical line and T9 linked: completion refused');
+  // Luna round 4: a new ticket is checked too: linked at creation to another customer's job is refused, to its own customer's job is fine.
+  const newTicket = (job) => `INSERT INTO public.blend_tickets (id, ticket_number, uploaded_by, status, review_status, customer_id, season, ticket_date, total_acres, job_id)
+    VALUES ('${TICKET(99)}', 'F06-T99', '${ADMIN}', 'completed', 'approved', '${CUST}', 2027, current_date, 10, '${job}');`;
+  refusedProbe(newTicket(JOB(11)), /BLEND_TICKET_JOB_OTHER_CUSTOMER/);
+  okProbe(`${newTicket(JOB(5))}\nSELECT 1;`);
+  console.log("[case 9] a new ticket created already linked to another customer's job: refused; to its own customer's job: saved");
   // Luna round 3: changing a linked ticket's customer is checked too.
   refused(`${link(4, JOB(4))}\nUPDATE public.blend_tickets SET customer_id = '${CUST2}' WHERE id = '${TICKET(4)}';`, /BLEND_TICKET_JOB_OTHER_CUSTOMER/, 'case 9 customer change');
   console.log("[case 9] changing linked T4's customer away from its job's customer: refused");

@@ -12,6 +12,9 @@
  *           convert, a missing cost and rounding over 50 cents; an admin's and a sales rep's ordinary re-save keeps the
  *           lines; the below-cost wall is unchanged. A second apply stops at the preflight; grants unchanged; the
  *           rollback script restores the transfer body and drops the helpers.
+ *   #2283:  save_job refuses any change to a completed job's chemical lines (quantity, unit, product, supplied, added,
+ *           removed) for an admin and a sales rep; unchanged lines and other edits save; scheduled and in-progress jobs
+ *           save as before; a replayed key returns its first result; the rollback restores the old save_job.
  *
  * Run: node scripts/smoke/prove-job-transfer-below-cost-real-schema.mjs   (needs Docker)
  * Prints JOB_TRANSFER_BELOW_COST_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
@@ -52,7 +55,7 @@ const LEDGER_ONLY = new Set([
 ]);
 const ONE_SHOT = new Set(Object.keys(JSON.parse(readFileSync(path.join(BASELINE, 'one-shot-migrations.json'), 'utf8')).one_shot));
 // A later or parked file that (re)defines anything the candidate changes or relies on.
-const TOUCHED = /(_transfer_job_to_invoice_intent_impl_20260908|_enforce_below_cost_line|_job_transfer_line_price|_job_transfer_split_qty|normalize_rate_unit|field_app_priced_quantity|safe_cents_qty|crx_below_cost_operation)/i;
+const TOUCHED = /(_transfer_job_to_invoice_intent_impl_20260908|save_job|_save_job_cost_step2_impl|_cost_step2_job_chemicals|check_idempotency_intent|_enforce_below_cost_line|_job_transfer_line_price|_job_transfer_split_qty|normalize_rate_unit|field_app_priced_quantity|safe_cents_qty|crx_below_cost_operation)/i;
 const LIVE_AUTH_UID_SRC = '\n  select \n  coalesce(\n'
   + "    nullif(current_setting('request.jwt.claim.sub', true), ''),\n"
   + "    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')\n"
@@ -255,7 +258,7 @@ function refusedProbe(sql, pattern, uid) {
 }
 
 const id = (s) => `b5b5b5b5-2207-4000-8000-${String(s).padStart(12, '0')}`;
-const ADMIN = id('a1'), REP = id('a2'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), MGP = id('d6'), O = id('f3'), OS = id('f4'), N = id('f5'), X = id('f6'), Y = id('f7'), Z = id('f8'), SVC = id('e1');
+const ADMIN = id('a1'), REP = id('a2'), APP = id('a3'), A = id('c1'), B = id('c2'), G = id('f1'), F = id('f2'), P = id('d1'), NC = id('d2'), DRY = id('d3'), RUP = id('d4'), QT = id('d5'), MGP = id('d6'), O = id('f3'), OS = id('f4'), N = id('f5'), X = id('f6'), Y = id('f7'), Z = id('f8'), SVC = id('e1');
 const IMPL = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid,uuid,text)';
 const WRAPPER = 'public.transfer_job_to_invoice(uuid,uuid,text)';
 const WALL = 'public._enforce_below_cost_line()';
@@ -263,6 +266,8 @@ const PRICE = 'public._job_transfer_line_price_20270207(uuid,text,numeric,text,b
 const SPLIT = 'public._job_transfer_split_qty_20270207(numeric,numeric[])';
 const SHARES = 'public._job_transfer_shares_20270207(uuid)';
 const LOCK = 'public._job_lines_lock_when_invoiced_20270207()';
+const SAVE = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)';
+const OLD_SAVE = 'bd60e8f74deba4b769f9a448ad64acb9';
 const OLD_BODY = 'a54e3e6a3a2b920e9bcd1a350cd92423';
 const OLD_WALL = '5fa0a5f975dc2a84b3c6599a84b8cc55';
 const md5Of = (sig) => scalar(`SELECT md5(replace(prosrc, chr(13), '')) FROM pg_proc WHERE oid = '${sig}'::regprocedure;`);
@@ -273,9 +278,11 @@ const grants = (sig) => scalar(`SELECT COALESCE(string_agg(g, ',' ORDER BY g), '
 function seed() {
   psql(`INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
     ('${ADMIN}', 'jbc-admin@example.invalid', '{"full_name":"[PROVER] JBC Admin","role":"admin"}'::jsonb),
-    ('${REP}', 'jbc-rep@example.invalid', '{"full_name":"[PROVER] JBC Rep","role":"sales_rep"}'::jsonb);`);
+    ('${REP}', 'jbc-rep@example.invalid', '{"full_name":"[PROVER] JBC Rep","role":"sales_rep"}'::jsonb),
+    ('${APP}', 'jbc-app@example.invalid', '{"full_name":"[PROVER] JBC Applicator","role":"applicator"}'::jsonb);`);
   raw(`UPDATE public.profiles SET role = 'admin', is_active = true WHERE id = '${ADMIN}';
     UPDATE public.profiles SET role = 'sales_rep', is_active = true WHERE id = '${REP}';
+    UPDATE public.profiles SET role = 'applicator', is_active = true WHERE id = '${APP}';
     DELETE FROM public.unit_conversions;
     INSERT INTO public.unit_conversions (id, unit, factor_oz, unit_type, notes) VALUES ${LIVE_UNIT_ROWS};
     INSERT INTO public.customers (id, farm_name, assigned_tier, is_active) VALUES ('${A}', '[PROVER] JBC Farm A', 1, true), ('${B}', '[PROVER] JBC Farm B', 1, true);
@@ -359,6 +366,21 @@ function seed() {
           'product_form', x.product_form, 'is_application_fee', x.is_application_fee, 'price_source', x.price_source)
           ORDER BY x.sort_order), '[]'::jsonb)
         FROM invoice_items x WHERE x.invoice_id = p_invoice $f$;
+    -- What the job screen sends back on a save: the job's header, fields and chemical lines as stored (#2283).
+    CREATE FUNCTION jbc.hdr(p_job uuid) RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $f$
+      SELECT jsonb_strip_nulls(to_jsonb(j)) FROM jobs j WHERE j.id = p_job $f$;
+    CREATE FUNCTION jbc.flds(p_job uuid) RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $f$
+      SELECT COALESCE(jsonb_agg(to_jsonb(f) ORDER BY f.sort_order, f.id), '[]'::jsonb) FROM job_fields f WHERE f.job_id = p_job $f$;
+    CREATE FUNCTION jbc.chems(p_job uuid) RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $f$
+      SELECT COALESCE(jsonb_agg(to_jsonb(c) ORDER BY c.sort_order, c.id), '[]'::jsonb) FROM job_chemicals c WHERE c.job_id = p_job $f$;
+    -- The job's lines as product:quantity:unit:supplied, and its note.
+    CREATE FUNCTION jbc.lines(p_job uuid) RETURNS text LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $f$
+      SELECT COALESCE(string_agg(format('%s:%s:%s:%s', right(p.sku, 1), trim_scale(c.quantity), c.unit, c.customer_supplied), ',' ORDER BY p.sku, c.quantity), '-')
+             || ' note=' || COALESCE((SELECT notes FROM jobs WHERE id = p_job), '-')
+        FROM job_chemicals c JOIN products p ON p.id = c.product_id WHERE c.job_id = p_job $f$;
+    CREATE FUNCTION jbc.set_status(p_job uuid, p_status text) RETURNS void LANGUAGE sql SECURITY DEFINER
+      SET search_path = public, pg_temp SET session_replication_role = replica AS $f$
+      UPDATE jobs SET status = p_status WHERE id = p_job $f$;
     GRANT USAGE ON SCHEMA jbc TO authenticated;
     GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA jbc TO authenticated;`, { user: 'supabase_admin' });
   console.log('[prover] committed test rows: an admin and a sales rep; farms A and B; field A (A 100%), field A+B (A 60%, B 40%), a per-acre-priced field; chemicals stocked by the Gal at $30 (one restricted-use), by the Qt at $8 and by the Lb at $16 (dry); a grower product with no cost');
@@ -530,6 +552,22 @@ INSERT INTO job_field_shares (job_id, field_id, customer_id, split_pct, is_prima
 DELETE FROM job_fields WHERE job_id = (SELECT id FROM j);
 SELECT 'changed';`,
 };
+// #2283 (Mason, 2026-11-22: "Refuse now, build later"): save_job, as uid, on a job (status set first), sending back
+// its header, fields and lines with <chem> applied to the lines (c = the stored lines) and <hdr> to the header (h).
+const saveJob = (uid, { status = 'completed', chem = 'c', hdr = 'h', key = "'jbc-' || gen_random_uuid()", jobSql = job('Gal', 10, 5000) } = {}) => `${as(uid)}
+CREATE TEMP TABLE j AS SELECT ${jobSql} AS id;
+SELECT jbc.set_status((SELECT id FROM j), '${status}');
+SELECT public.save_job((SELECT id FROM j), ${hdr.replace(/\bh\b/g, 'jbc.hdr((SELECT id FROM j))')}, jbc.flds((SELECT id FROM j)),
+  ${chem.replace(/\bc\b/g, 'jbc.chems((SELECT id FROM j))')}, '${uid}', ${key});
+SELECT jbc.lines((SELECT id FROM j));`;
+const SAVES = {
+  qty: "jsonb_set(jsonb_set(c, '{0,quantity}', '12'), '{0,rate_per_acre}', '1.2')",
+  unit: `c #- '{0}' || jsonb_build_array((c -> 0) || '{"unit": "Qt", "rate_unit": "Qt", "quantity": 40, "rate_per_acre": 4}'::jsonb)`,
+  product: `jsonb_set(c, '{0,product_id}', '"${RUP}"')`,
+  supplied: "jsonb_set(c, '{0,customer_supplied}', 'true')",
+  added: "c || jsonb_build_array(c -> 0)",
+  removed: "'[]'::jsonb",
+};
 // The wall itself, outside the transfer: a below-cost line written straight into a transfer-made draft invoice.
 const directLine = `${transferOnly(job('Gal', 10, 5000))}
 RESET ROLE;
@@ -578,7 +616,8 @@ async function main() {
   assert.equal(md5Of(WALL), OLD_WALL, 'the replayed wall body is not the one the candidate expects');
   assert.equal(scalar(`SELECT (SELECT count(*) FROM auth.users WHERE id = '${ADMIN}') + (SELECT count(*) FROM pg_namespace WHERE nspname = 'jbc');`),
     '0', 'this database was already used by a proof run: make a fresh copy');
-  const implGrants = grants(IMPL), wrapperGrants = grants(WRAPPER), wallAcl = acl(WALL);
+  assert.equal(md5Of(SAVE), OLD_SAVE, 'the replayed save_job body is not the one the candidate expects');
+  const implGrants = grants(IMPL), wrapperGrants = grants(WRAPPER), wallAcl = acl(WALL), saveGrants = grants(SAVE);
   seed();
 
   // BEFORE: every small line is refused; ten Gal below cost passes, as quantity 1.
@@ -600,6 +639,8 @@ async function main() {
   console.log(`[before] payerB: ${payerBefore}`);
   assert.match(payerBefore, /^A:/, "before: A's job on a field billed 100% to B was invoiced to A");
   assert.equal(okProbe(CASES.lockedFields), 'changed', "before: an invoiced job's fields could still be removed");
+  assert.equal(okProbe(saveJob(ADMIN, { chem: SAVES.qty })), '1:12:Gal:f note=-', "before: a completed job's quantity could be changed through save_job");
+  console.log("[before] a completed job's chemical quantity changed through save_job (stock unchanged)");
   console.log("[before] lockedFields: an invoiced job's field could still be removed");
 
   stageText('candidate.sql', lf(CANDIDATE));
@@ -614,6 +655,7 @@ async function main() {
   assert.equal(grants(SPLIT), 'postgres', 'the split helper is executable by no API role');
   assert.equal(grants(SHARES), 'postgres', 'the saved-split helper is executable by no API role');
   assert.equal(grants(LOCK), 'postgres', 'the lock trigger function is executable by no API role');
+  assert.equal(grants(SAVE), saveGrants, 'save_job grants must not change');
   const second = apply('candidate.sql');
   assert.notEqual(second.status, 0);
   assert.match(second.output, /JOB_BELOW_COST_PREFLIGHT/);
@@ -712,8 +754,44 @@ async function main() {
     refusedProbe(CASES[k], /JOB_INVOICED_LOCKED: This job has been invoiced, so its chemicals, fields and billing split can't be changed\. Nothing was saved/);
     console.log(`[after] ${k}: refused JOB_INVOICED_LOCKED`);
   }
-  assert.equal(okProbe(CASES.editCompleted), 'changed', "a completed job's chemicals, fields and split can still be changed");
-  console.log("[after] editCompleted: a completed (not invoiced) job's chemicals, fields and split can still be changed");
+  assert.equal(okProbe(CASES.editCompleted), 'changed', "a completed job's rows can still be changed by the table owner");
+  console.log("[after] editCompleted: a completed (not invoiced) job's fields and split can still be changed (the lock is for invoiced jobs)");
+  // #2283: save_job refuses any change to a completed job's (product, quantity, unit, supplied) lines; nothing is saved.
+  for (const [k, chem] of Object.entries(SAVES)) for (const [who, uid] of [['admin', ADMIN], ['sales rep', REP]]) {
+    refusedProbe(saveJob(uid, { chem, hdr: `jsonb_set(h, '{notes}', '"edited"')` }),
+      /JOB_COMPLETED_CHEMICALS_LOCKED: This job is complete, so its chemicals can't be changed: completion already took them from stock\. Nothing was saved\./);
+    console.log(`[after] completed job, ${who}, chemical ${k}: refused JOB_COMPLETED_CHEMICALS_LOCKED, nothing saved`);
+  }
+  {
+    const same = okProbe(saveJob(ADMIN, { jobSql: `jbc.twoline('${G}')`,
+      chem: `(SELECT jsonb_agg(jsonb_set(e, '{quantity}', to_jsonb((e ->> 'quantity') || '.0')) ORDER BY o DESC) FROM jsonb_array_elements(c) WITH ORDINALITY t(e, o))`,
+      hdr: `jsonb_set(h, '{notes}', '"edited"')` }));
+    console.log(`[after] completed job, same lines reordered as 10.0 and 8.0, note edited: ${same}`);
+    assert.equal(same, '1:10:Gal:t,5:8:Qt:f note=edited', "a completed job's unchanged lines save, and other changes save");
+  }
+  for (const status of ['scheduled', 'in_progress']) {
+    const v = okProbe(saveJob(ADMIN, { status, chem: SAVES.qty }));
+    console.log(`[after] ${status} job, quantity 10 -> 12: ${v}`);
+    assert.equal(v, '1:12:Gal:f note=-', `a ${status} job's chemicals still save`);
+  }
+  {
+    const replay = okProbe(`${asAdmin}
+CREATE TEMP TABLE j AS SELECT ${job('Gal', 10, 5000)} AS id;
+SELECT jbc.set_status((SELECT id FROM j), 'scheduled');
+CREATE TEMP TABLE a AS SELECT jbc.hdr(id) AS h, jbc.flds(id) AS f, jsonb_set(jsonb_set(jbc.chems(id), '{0,quantity}', '12'), '{0,rate_per_acre}', '1.2') AS c FROM j;
+SELECT public.save_job((SELECT id FROM j), h, f, c, '${ADMIN}', 'jbc-replay-1') FROM a;
+SELECT jbc.set_status((SELECT id FROM j), 'completed');
+SELECT public.save_job((SELECT id FROM j), h, f, c, '${ADMIN}', 'jbc-replay-1') ->> 'job_id' = (SELECT id FROM j)::text FROM a;
+SELECT jbc.lines((SELECT id FROM j));`);
+    console.log(`[after] a scheduled job's save replayed after completion: ${replay}`);
+    assert.equal(replay, '1:12:Gal:f note=-', 'a replayed key returns its first result and changes nothing');
+  }
+  refusedProbe(saveJob(APP, { chem: SAVES.qty }), /INSUFFICIENT_ROLE/);
+  console.log('[after] an applicator saving a completed job: refused INSUFFICIENT_ROLE as before');
+  refusedProbe(`${transferOnly(job('Gal', 10, 5000))}
+SELECT public.save_job((SELECT id FROM j), jbc.hdr((SELECT id FROM j)), jbc.flds((SELECT id FROM j)), jbc.chems((SELECT id FROM j)), '${ADMIN}', 'jbc-' || gen_random_uuid());`,
+  /JOB_INVOICED_LOCKED/);
+  console.log('[after] an invoiced job saved: refused JOB_INVOICED_LOCKED');
   await concurrentLock();
   refusedProbe(directLine, /BELOW_COST_CONTEXT_REQUIRED/);
   console.log('[after] a below-cost invoice line written outside the transfer: still refused by the unchanged wall');
@@ -726,6 +804,9 @@ async function main() {
   assert.equal(md5Of(WALL), OLD_WALL);
   assert.equal(acl(WALL), wallAcl);
   assert.equal(grants(IMPL), implGrants);
+  assert.equal(md5Of(SAVE), OLD_SAVE, 'rollback restores save_job');
+  assert.equal(grants(SAVE), saveGrants);
+  assert.equal(okProbe(saveJob(ADMIN, { chem: SAVES.qty })), '1:12:Gal:f note=-', 'rollback: the completed-job refusal is gone');
   assert.equal(scalar(`SELECT to_regprocedure('${PRICE}') IS NULL AND to_regprocedure('${SPLIT}') IS NULL AND to_regprocedure('${SHARES}') IS NULL AND to_regprocedure('${LOCK}') IS NULL;`), 't');
   assert.equal(okProbe(CASES.lockedFields), 'changed', 'rollback: the lock triggers are gone');
   refusedProbe(CASES.small3floz, /BELOW_COST_CONTEXT_REQUIRED/);

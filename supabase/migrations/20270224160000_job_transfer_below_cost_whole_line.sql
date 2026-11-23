@@ -1,7 +1,8 @@
 -- Create Invoice on a spray job writes each chemical line's real quantity (Mason, 2026-11-21 and 2026-11-22).
 -- Contract: docs/plans/2026-11-21-job-transfer-below-cost-CONTRACT.md ("Redesign: real quantities").
 -- actor-binding-check: exempt -- no new caller-facing function; the transfer's public wrapper (transfer_job_to_invoice)
--- and its actor binding and p_idempotency_key are unchanged; the two helpers are not callable by API roles.
+-- and its actor binding and p_idempotency_key are unchanged; the helpers are not callable by API roles; save_job keeps
+-- its signature, actor check (p_performed_by = auth.uid()), p_idempotency_key and grants.
 --
 -- WHY: the transfer wrote each chemical line as quantity 1 with the whole line total as its price, and the below-cost
 -- wall compared that total with the cost of ONE stock unit. A 3 fl oz line ($1.17) on a product costing $30 a gallon,
@@ -32,6 +33,9 @@
 --     (Mason, 2026-11-22: "lock it when rep or admin says it is posted"): once a job is invoiced its chemicals,
 --     fields and split can't change (JOB_INVOICED_LOCKED) until its invoice is voided; a completed job stays
 --     editable. A change made while Create Invoice runs waits for it (the job row is held FOR UPDATE).
+--  5. save_job (re-emitted from 20270101000000) refuses a chemical change on a completed job by name
+--     (JOB_COMPLETED_CHEMICALS_LOCKED; #2283, Mason, 2026-11-22: "Refuse now, build later"): completion already took
+--     the chemicals from stock and nothing gives it back. Everything else on a completed job saves as before.
 --  The below-cost wall is unchanged: a line priced per sold unit is judged by it exactly. Grants, owners, SECURITY
 --  DEFINER and search_path are unchanged. No stored row changes; old invoices keep their quantity-1 lines.
 --
@@ -51,6 +55,10 @@ BEGIN
                        AND p.proowner = 'postgres'::regrole
                        AND p.proacl = ARRAY['postgres=X/postgres']::aclitem[]) THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: the transfer body, owner, settings or grants are not the reviewed ones (20261120100000)';
+  END IF;
+  IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
+       WHERE p.oid = to_regprocedure('public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)')) IS DISTINCT FROM 'bd60e8f74deba4b769f9a448ad64acb9' THEN
+    RAISE EXCEPTION 'JOB_BELOW_COST_PREFLIGHT: save_job is not the reviewed body (20270101000000)';
   END IF;
   IF to_regprocedure('public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint)') IS NOT NULL
      OR to_regprocedure('public._job_transfer_split_qty_20270207(numeric,numeric[])') IS NOT NULL
@@ -1057,6 +1065,67 @@ CREATE TRIGGER trg_job_fields_lock_when_invoiced BEFORE INSERT OR UPDATE OR DELE
 CREATE TRIGGER trg_job_field_shares_lock_when_invoiced BEFORE INSERT OR UPDATE OR DELETE ON public.job_field_shares
   FOR EACH ROW EXECUTE FUNCTION public._job_lines_lock_when_invoiced_20270207();
 
+-- 5. save_job (re-emitted from 20270101000000) refuses a chemical change on a completed job (#2283; Mason, 2026-11-22:
+--    "Refuse now, build later"): completion already took its chemicals from stock, and nothing gives that back.
+--    For an admin or sales rep saving an existing job it takes the writer's own locks first, in the writer's order
+--    (the idempotency key's advisory lock as check_idempotency_intent takes it, then the job row), so a completed
+--    job's lines are read under the lock and compared with what the writer leaves. Anyone else reaches the writer
+--    unchanged, which refuses them as before. A replayed key writes nothing, so it passes.
+CREATE OR REPLACE FUNCTION public.save_job(p_job_id uuid, p_job_payload jsonb, p_fields jsonb, p_chemicals jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_chemicals jsonb := p_chemicals;
+  v_completed boolean := false;
+  v_result jsonb;
+  v_before jsonb;
+BEGIN
+  IF auth.uid() IS NULL OR p_performed_by IS DISTINCT FROM auth.uid() THEN
+    RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match auth.uid()' USING ERRCODE = 'P0001';
+  END IF;
+  IF jsonb_typeof(p_chemicals) = 'array' THEN
+    SELECT COALESCE(jsonb_agg(CASE WHEN jsonb_typeof(t.e -> 'rate_unit') = 'string'
+                                   THEN jsonb_set(t.e, '{rate_unit}', to_jsonb(public.unit_fold_invisible(t.e ->> 'rate_unit')))
+                                   ELSE t.e END ORDER BY t.o), '[]'::jsonb)
+      INTO v_chemicals FROM jsonb_array_elements(p_chemicals) WITH ORDINALITY AS t(e, o);
+  END IF;
+  IF p_job_id IS NOT NULL AND EXISTS (
+       SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true AND role IN ('admin', 'sales_rep')) THEN
+    IF p_idempotency_key IS NOT NULL AND btrim(p_idempotency_key) <> '' THEN
+      PERFORM pg_advisory_xact_lock(hashtextextended('crx:idempotency:' || p_idempotency_key, 0));
+    END IF;
+    SELECT j.status = 'completed' INTO v_completed FROM public.jobs j WHERE j.id = p_job_id FOR UPDATE;
+    IF v_completed THEN
+      SELECT COALESCE(jsonb_agg(jsonb_build_object('product_id', jc.product_id, 'quantity', jc.quantity, 'unit', jc.unit,
+                                              'customer_supplied', jc.customer_supplied)), '[]'::jsonb)
+        INTO v_before FROM public.job_chemicals jc WHERE jc.job_id = p_job_id;
+    END IF;
+  END IF;
+  IF public.is_admin() THEN
+    v_result := public._save_job_cost_step2_impl(p_job_id, p_job_payload, p_fields, v_chemicals, p_performed_by, p_idempotency_key);
+  ELSE
+    v_result := public._save_job_cost_step2_impl(p_job_id, p_job_payload, p_fields,
+      public._cost_step2_job_chemicals(p_job_id, v_chemicals), p_performed_by, p_idempotency_key);
+  END IF;
+  IF v_completed AND EXISTS (
+       (SELECT product_id, quantity, unit, customer_supplied FROM jsonb_to_recordset(v_before) AS b(product_id uuid, quantity numeric, unit text, customer_supplied boolean)
+        EXCEPT ALL
+        SELECT jc.product_id, jc.quantity, jc.unit, jc.customer_supplied FROM public.job_chemicals jc WHERE jc.job_id = p_job_id)
+       UNION ALL
+       (SELECT jc.product_id, jc.quantity, jc.unit, jc.customer_supplied FROM public.job_chemicals jc WHERE jc.job_id = p_job_id
+        EXCEPT ALL
+        SELECT product_id, quantity, unit, customer_supplied FROM jsonb_to_recordset(v_before) AS b(product_id uuid, quantity numeric, unit text, customer_supplied boolean))) THEN
+    RAISE EXCEPTION 'JOB_COMPLETED_CHEMICALS_LOCKED: This job is complete, so its chemicals can''t be changed: completion already took them from stock. Nothing was saved.' USING ERRCODE = 'P0001';
+  END IF;
+  RETURN v_result;
+END;
+$function$;
+REVOKE EXECUTE ON FUNCTION public.save_job(uuid, jsonb, jsonb, jsonb, uuid, text) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.save_job(uuid, jsonb, jsonb, jsonb, uuid, text) TO authenticated, service_role;
+
 DO $postflight$
 DECLARE
   v_price oid := to_regprocedure('public._job_transfer_line_price_20270207(uuid,text,numeric,text,bigint)');
@@ -1073,7 +1142,9 @@ BEGIN
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_shares) IS DISTINCT FROM '944760ebdf810f062b4dcf0fe56f11b2'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_lock) IS DISTINCT FROM '9b6d4bbfc5dcc61ba058971a9ac062b6'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_price) IS DISTINCT FROM '0d225231da5e5adc8d21ed092796270a'
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = v_split) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
+          WHERE p.oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure) IS DISTINCT FROM 'b25a17a1884fd621b2f03482c8b0771d' THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: a body is not the one this file installs';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_proc p
@@ -1089,7 +1160,13 @@ BEGIN
                  WHERE p.oid IN (v_price, v_split, v_shares, v_lock) AND a.privilege_type = 'EXECUTE' AND a.grantee <> 'postgres'::regrole)
      OR (SELECT count(*) FROM pg_trigger t
           WHERE t.tgfoid = v_lock AND NOT t.tgisinternal AND t.tgenabled = 'O'
-            AND t.tgrelid IN ('public.job_chemicals'::regclass, 'public.job_fields'::regclass, 'public.job_field_shares'::regclass)) <> 3 THEN
+            AND t.tgrelid IN ('public.job_chemicals'::regclass, 'public.job_fields'::regclass, 'public.job_field_shares'::regclass)) <> 3
+     OR NOT EXISTS (SELECT 1 FROM pg_proc p
+                     WHERE p.oid = 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)'::regprocedure
+                       AND p.prosecdef AND p.proowner = 'postgres'::regrole
+                       AND p.proconfig = ARRAY['search_path=public, pg_temp']::text[])
+     OR has_function_privilege('anon', 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.save_job(uuid,jsonb,jsonb,jsonb,uuid,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'JOB_BELOW_COST_POSTFLIGHT: owner, settings or grants are not as reviewed';
   END IF;
 END;

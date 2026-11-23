@@ -1,6 +1,6 @@
 -- Reverses 20270224160000_job_transfer_below_cost_whole_line.sql (run as ONE transaction).
 -- Invoices it already wrote keep their real quantities; only the transfer body is restored and the helpers and the
--- invoiced-job lock triggers dropped.
+-- invoiced-job lock triggers dropped, and save_job no longer refuses a completed job's chemical change.
 BEGIN;
 -- Only undo this migration's own bodies: stop if a later migration has re-emitted any of them.
 DO $rev$
@@ -11,7 +11,8 @@ BEGIN
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_lines_lock_when_invoiced_20270207()')) IS DISTINCT FROM '9b6d4bbfc5dcc61ba058971a9ac062b6'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM 'df11843a858fa7907bf58f936715dc57'
      OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint)')) IS DISTINCT FROM '0d225231da5e5adc8d21ed092796270a'
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_split_qty_20270207(numeric, numeric[])')) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81' THEN
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = to_regprocedure('public._job_transfer_split_qty_20270207(numeric, numeric[])')) IS DISTINCT FROM '265dd41fceb98f8c7721d496bbe47d81'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public.save_job(uuid, jsonb, jsonb, jsonb, uuid, text)'::regprocedure) IS DISTINCT FROM 'b25a17a1884fd621b2f03482c8b0771d' THEN
     RAISE EXCEPTION 'JOB_TRANSFER_BELOW_COST_ROLLBACK_PREFLIGHT: the live bodies are not the ones 20270224160000 installed; nothing changed';
   END IF;
 END $rev$;
@@ -739,6 +740,47 @@ REVOKE ALL ON FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(uuid
 GRANT EXECUTE ON FUNCTION public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)
   TO postgres;
 
+-- save_job as 20270101000000 left it (no completed-job chemical refusal).
+CREATE OR REPLACE FUNCTION public.save_job(p_job_id uuid, p_job_payload jsonb, p_fields jsonb, p_chemicals jsonb, p_performed_by uuid, p_idempotency_key text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_chemicals jsonb := p_chemicals;
+BEGIN
+  IF auth.uid() IS NULL OR p_performed_by IS DISTINCT FROM auth.uid() THEN
+    RAISE EXCEPTION 'ACTOR_MISMATCH: p_performed_by must match auth.uid()' USING ERRCODE = 'P0001';
+  END IF;
+  -- Fold invisible characters and tabs out of each line's rate unit first, as the job_chemicals trigger's
+  -- rate_unit_line_refusal does, so the impl's own unit rules judge the same text the screen shows (KI-16). The stock
+  -- Unit is NOT folded: the non-admin cost lookup matches the stored unit as written (Sol round 3). Order and keys kept.
+  IF jsonb_typeof(p_chemicals) = 'array' THEN
+    SELECT COALESCE(jsonb_agg(CASE WHEN jsonb_typeof(t.e -> 'rate_unit') = 'string'
+                                   THEN jsonb_set(t.e, '{rate_unit}', to_jsonb(public.unit_fold_invisible(t.e ->> 'rate_unit')))
+                                   ELSE t.e END
+                              ORDER BY t.o), '[]'::jsonb)
+      INTO v_chemicals
+      FROM jsonb_array_elements(p_chemicals) WITH ORDINALITY AS t(e, o);
+  END IF;
+  -- Cost is admin-only (Mason, 2026-10-15): a non-admin's chemical cost comes from the server.
+  -- The impl keeps every check it had (actor, role, units, totals, idempotency).
+  IF public.is_admin() THEN
+    RETURN public._save_job_cost_step2_impl(
+      p_job_id, p_job_payload, p_fields, v_chemicals, p_performed_by, p_idempotency_key);
+  END IF;
+  RETURN public._save_job_cost_step2_impl(
+    p_job_id, p_job_payload, p_fields,
+    public._cost_step2_job_chemicals(p_job_id, v_chemicals),
+    p_performed_by, p_idempotency_key);
+END;
+$function$;
+
+-- Kept by CREATE OR REPLACE; restated so the file is self-describing.
+REVOKE EXECUTE ON FUNCTION public.save_job(uuid, jsonb, jsonb, jsonb, uuid, text) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.save_job(uuid, jsonb, jsonb, jsonb, uuid, text) TO authenticated, service_role;
+
 DROP FUNCTION public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint);
 DROP FUNCTION public._job_transfer_split_qty_20270207(numeric, numeric[]);
 DROP TRIGGER trg_job_chemicals_lock_when_invoiced ON public.job_chemicals;
@@ -752,7 +794,8 @@ DO $rev$
 BEGIN
   IF to_regprocedure('public._job_transfer_line_price_20270207(uuid, text, numeric, text, bigint)') IS NOT NULL OR to_regprocedure('public._job_transfer_split_qty_20270207(numeric, numeric[])') IS NOT NULL
      OR to_regprocedure('public._job_transfer_shares_20270207(uuid)') IS NOT NULL OR to_regprocedure('public._job_lines_lock_when_invoiced_20270207()') IS NOT NULL
-     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM 'a54e3e6a3a2b920e9bcd1a350cd92423' THEN
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public._transfer_job_to_invoice_intent_impl_20260908(uuid, uuid, text)'::regprocedure) IS DISTINCT FROM 'a54e3e6a3a2b920e9bcd1a350cd92423'
+     OR (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p WHERE p.oid = 'public.save_job(uuid, jsonb, jsonb, jsonb, uuid, text)'::regprocedure) IS DISTINCT FROM 'bd60e8f74deba4b769f9a448ad64acb9' THEN
     RAISE EXCEPTION 'JOB_TRANSFER_BELOW_COST_ROLLBACK_POSTFLIGHT: the old body was not restored';
   END IF;
 END $rev$;

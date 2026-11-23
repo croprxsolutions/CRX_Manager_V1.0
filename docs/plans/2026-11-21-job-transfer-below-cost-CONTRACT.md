@@ -1,11 +1,77 @@
 # Behavior contract: Create Invoice on a spray job stops refusing small and customer-supplied chemical lines
 
-> **Current behavior (2026-11-22, supersedes earlier sections where they differ):** lines carry their real quantity in the sold unit at a price per sold unit and book today's catalog cost per sold unit, which the below-cost check also uses (Sol round 4: a job's saved cost can be per a different unit, or $0). A customer-supplied product is a $0 information line with no catalog link. It is recorded in the job's own unit and never converted (it bills nothing), so the unconvertible-unit stop applies to priced lines only. An unconvertible unit (including a rate like "Gal per acre") stops and names it; there is no quantity-1 fallback. Every field on the job must have a billing split (100% or shared); one without stops Create Invoice by name (Mason, 2026-11-22). On a job with more than one owner, each owner gets a separate invoice for the acres of their own fields; a job whose fields are all billed to one owner is invoiced to that owner, even when the job's customer is someone else (Sol round 6). The job's fields and splits are locked while Create Invoice runs. A metric unit (g, kg, mg, mL, L) is used only when it is the product's sold unit; any other stops by name, because job completion deducts it from stock unconverted (Sol round 6). A field's per-acre price is never billed (Mason: "we never bill flat per acre"); the spraying fee covers every treated acre. The invoice and statement PDFs print the price per the line's own unit (Mason chose "fix now" on Sol round 3).
+> **Current behavior (2026-11-22, supersedes earlier sections where they differ):** lines carry their real quantity in the sold unit at a price per sold unit and book today's catalog cost per sold unit, which the below-cost check also uses (Sol round 4: a job's saved cost can be per a different unit, or $0). A customer-supplied product is a $0 information line with no catalog link. It is recorded in the job's own unit and never converted (it bills nothing), so the unconvertible-unit stop applies to priced lines only. An unconvertible unit (including a rate like "Gal per acre") stops and names it; there is no quantity-1 fallback. Every field on the job must have a billing split (100% or shared); one without stops Create Invoice by name (Mason, 2026-11-22). On a job with more than one owner, each owner gets a separate invoice for the acres of their own fields; a job whose fields are all billed to one owner is invoiced to that owner, even when the job's customer is someone else (Sol round 6). The job's fields and splits are locked while Create Invoice runs. A metric unit (g, kg, mg, mL, L) is used only when it is the product's sold unit; any other stops by name, because job completion deducts it from stock unconverted (Sol round 6). A field's per-acre price is never billed (Mason: "we never bill flat per acre"); the spraying fee covers every treated acre. The invoice and statement PDFs print the price per the line's own unit (Mason chose "fix now" on Sol round 3). `save_job` refuses any change to a completed job's chemical lines (#2283, Mason, 2026-11-22: "Refuse now, build later").
 
 Read at `origin/staging` 3a9694685 (2026-11-21). Decision: Mason, 2026-11-21 ("Yes, fix it next", relayed by the
 parent session): a spray job's Create Invoice must stop refusing (a) a chemical line whose total is under one stock
 unit's cost and (b) a customer-supplied $0 line, without weakening the below-cost wall for orders or invoices. A
 normal line that is genuinely sold below cost must still be refused. Field application invoices are Mason's own work.
+
+## A completed job's chemicals are refused (#2283, Mason 2026-11-22: "Refuse now, build later")
+
+Read at `54a6a0db9` (this branch, caught up with `origin/staging` b2f3b2e1c).
+
+### Facts (source)
+- Completion takes stock once: for each line with `quantity > 0` and `customer_supplied = false`, it removes
+  `COALESCE(field_app_priced_quantity(quantity, normalize_rate_unit(unit), inventory_unit, product_form), quantity)`
+  from `inventory` at `'Main Warehouse'` and writes a `job_applied` row with the `job_id`
+  (`20261217100000:816-898`). The row isn't linked to a line.
+- `save_job` (wrapper `20270101000000:278`, writer `_save_job_cost_step2_impl`, body `20260904185900:114`) lets an
+  active admin or sales rep save any job. It doesn't check status, and it deletes and re-inserts every chemical line
+  (`:1286-1315`), so line ids change on every save. No other path writes chemical lines on an existing job. Direct
+  table writes were revoked in `20261204120000:117-127`, `edit_jobs` doesn't touch lines, and offline replay only
+  completes jobs.
+- Nothing gives back a completed job's stock. Voiding an invoice and soft-deleting a job both leave it alone.
+- Ledger check `20270103150000:75-76`: `adjusted` counts with its sign, `job_applied` as minus.
+- The job screen allows edits only on scheduled and in-progress jobs (`src/pages/JobDetail.tsx:3870`). The DECISION_LOG
+  entry for 2026-11-22 says the office must keep editing after completion, and accepted this stock gap until now.
+- An invoiced job's lines are locked by `_job_lines_lock_when_invoiced_20270207` (this PR).
+
+### Decision history
+- Mason, 2026-11-22: "Edit + stock follows" and, for the spray record, "Update it too". The first Astra challenge
+  (44 findings) and the targeted re-check (24 more, most HIGH: lot-number races, lot amounts, legacy unconvertible
+  units, missing or duplicate spray records, deadlocks with completion) showed the design did not converge.
+- **Mason, 2026-11-22, superseding the above: "Refuse now, build later."** #2247 makes the server refuse a chemical
+  change on a completed job, by name, so stock can't drift silently. The edit-and-stock-follows feature is its own
+  follow-up PR after #2247, starting from the re-check's open questions.
+
+### Behavior
+- **Server (`save_job`, re-emitted wrapper).** For an existing job, after the actor check and only when the caller is an
+  active admin or sales rep (anyone else falls through to the writer, which refuses as today), the wrapper takes the
+  idempotency advisory lock (`hashtextextended('crx:idempotency:' || key, 0)`, the exact lock
+  `check_idempotency_intent` takes, `20260811130000:108`, skipped for a null or blank key) and then the job row
+  `FOR UPDATE`: the same order the writer uses, so the writer's own later locks are re-entrant. If the job is
+  `completed`, it records the job's chemical lines as a multiset of (product, quantity, unit, grower-supplied),
+  runs the writer, and compares the new lines with it (`EXCEPT ALL` both ways, typed values, so `10` equals `10.0`).
+  Any difference refuses the whole save with `JOB_COMPLETED_CHEMICALS_LOCKED`: "This job is complete, so its
+  chemicals can't be changed: completion already took them from stock. Nothing was saved."
+- Changes to anything else on a completed job (fields, notes, rates) save as today. Jobs in any other status save as
+  today; invoiced jobs stay refused by the line lock.
+- **Screen.** No change. The job screen already hides Save on completed jobs (`JobDetail.tsx:3870`), so office staff
+  lose nothing; the refusal closes the API path.
+- **Automatic record change.** None: a refusal only.
+- **Rule that always holds.** A completed job's (product, quantity, unit, supplied) lines never change, so the stock
+  completion took always matches them.
+
+### Timing, existing rows, delivery
+- **Two saves at once.** The job lock serializes them; each compares against the lines it saw under the lock.
+- **A save that started while the job was scheduled and finishes after completion.** It waits for the lock, then sees
+  `completed` and is refused if it changes the lines.
+- **Retry.** A replayed key writes nothing, so its lines are unchanged and it returns the first result.
+- **Existing rows.** Nothing changes. A completed job already edited before this keeps its drift (documented limit).
+- **Legacy units.** A save that sends back the same stored values passes; one that rewrites a legacy unit string is
+  refused (safe direction).
+- **Delivery.** In #2247's migration. The deployed screen never saves a completed job, so it is unaffected.
+
+### Proof cases (real schema, local prover)
+1. A completed job: an admin changes a quantity, the unit, the product, the grower-supplied mark, or adds or removes a
+   line: each refused `JOB_COMPLETED_CHEMICALS_LOCKED`; the lines are unchanged after.
+2. A completed job saved with the same lines (reordered, `10` sent as `10.0`) and a changed note: saved; note changed.
+3. A sales rep changing a completed job's quantity: refused the same way.
+4. A scheduled or in-progress job's chemical change: saved as today.
+5. A replayed key of a save made while the job was scheduled, sent after completion: returns the first result.
+6. An applicator calling `save_job` on a completed job: refused `INSUFFICIENT_ROLE` as today.
+7. An invoiced job: still refused `JOB_INVOICED_LOCKED`.
 
 ## Redesign: real quantities (Mason, 2026-11-22, "Redesign")
 

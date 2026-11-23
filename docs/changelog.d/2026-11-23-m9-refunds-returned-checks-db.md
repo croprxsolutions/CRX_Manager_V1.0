@@ -12,7 +12,7 @@
 - Month-End: a returned check comes off "payments received" in the month it is recorded. Refunds and returned checks are new figures on the summary and the close receipt.
 - Statement: the statement shows "Returned check" and "Refund paid (outside CRX)" rows.
 - Guards: a returned payment, or one whose prepay was refunded, cannot be voided. A credit with a refund or a returned check cannot have its balance edited or be deleted.
-- No screen yet; the UI/UX stage adds the dialog, the badge and the Month-End row. Migration `20270225110000` (local candidate, not applied). Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs`.
+- No screen yet; the UI/UX stage adds the dialog, the badge and the Month-End row. Migration `20270226213000` (local candidate, not applied). Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs`.
 - Sol round 1 fixes (same migration, still a local candidate):
   - Only a check payment can be returned.
   - A split Prepayment Manager check comes back as one event at its face value.
@@ -33,3 +33,9 @@
   - Before any refund or return, one check confirms the records it touches agree: same customer, complete check, totals, invoice amounts and balances. If they don't, it is refused "needs a hand check" with the reason.
   - Two Prepayment Manager checks entered together count as two payments on Month-End.
   - Statements show the check or refund reference only, never the staff reason.
+- Sol round 4 changes (same migration, now `20270226213000`, still a local candidate):
+  - Before any refund or return, the whole customer's prepay must agree: every credit matches its history, the stored balance is the credits' total, and every credit came from this customer's own payment and was used on this customer's invoices. Otherwise it is refused "needs a hand check".
+  - A Prepayment Manager check comes back only as its whole entry; a partial list of its buckets, or buckets that don't add up to the check, is refused.
+  - A returned check never changes a draft, void or deleted invoice.
+  - Only admins can read the refund and returned-check records directly; reps still see the statement rows.
+  - Void Payment refuses anything that is not a payment.

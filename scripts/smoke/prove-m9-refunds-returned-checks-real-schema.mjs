@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Real-schema proof for M9 (refunds paid outside CRX, prepay balance check, returned checks):
- * 20270225110000_m9_refunds_and_returned_checks.sql. Design: docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md.
+ * 20270226213000_m9_refunds_and_returned_checks.sql. Design: docs/plans/2026-11-23-m9-refunds-returned-checks-DESIGN.md.
  * Written first (stage 1: every case failed because the functions did not exist, with setup passing).
  *
  * Container setup and replay copied from prove-month-close-payments-recheck-real-schema.mjs, replaying EVERY
@@ -34,11 +34,16 @@
  *      that went from paid to owing, and its invoice cannot be voided (INVOICE_HAS_RETURNED_PAYMENT).
  *  11) two sessions: a return and a void of the same payment, each way round, wait on each other (no deadlock) and
  *      the second is refused (the order is forced with an advisory-lock blocker and lock-wait polling, no sleeps).
- *  12) Sol round 2: a duplicate outside refund needs confirming; only drawn credits are drift-checked; a return
+ *  12) Sol round 2: a duplicate outside refund needs confirming; a drifted credit blocks a refund even when it is
+ *      not drawn (round 4: the whole customer must agree); a return
  *      refuses a drifted credit and a payment whose records do not add up to the check; two checks entered with one
  *      number in one transaction are two payments and come back separately; the recompute trigger function is not
  *      executable by API roles.
  *  13) the integrity gate (round 3): each kind of disagreement is refused RECORD_NEEDS_HAND_CHECK with its reason.
+ *  14) Sol round 4: the whole customer must agree (a credit minted by another customer's payment, a stored balance
+ *      below the credits' total); a Prepayment Manager entry that lists only some of its buckets, or whose buckets do
+ *      not add up to its total, is refused; a return refuses a draft or deleted invoice; a rep cannot read the
+ *      reversal tables; void_payment refuses a set that is not a payment; -infinity dates are refused.
  *
  * Run: node scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs   (needs Docker)
  * Prints M9_REFUNDS_RETURNED_CHECKS_PROOF_PASS when every case passes; otherwise lists each failing case and why and
@@ -58,7 +63,7 @@ const REUSE = process.env.CRX_PROVER_CONTAINER || null;
 const NAME = REUSE ?? `crx-m9-${process.pid}-${Date.now().toString(36)}`;
 const DB = 'postgres';
 const KEEP = REUSE !== null || process.env.CRX_PROVER_KEEP_CONTAINER === '1' || process.env.CRX_PROVER_REPLAY_ONLY === '1';
-const M9 = path.join(ROOT, 'supabase', 'migrations', '20270225110000_m9_refunds_and_returned_checks.sql');
+const M9 = path.join(ROOT, 'supabase', 'migrations', '20270226213000_m9_refunds_and_returned_checks.sql');
 // Marks the containers this script creates; reuse mode refuses any other container.
 const LABEL = 'crx.prover.m9-refunds-returned-checks';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
@@ -724,7 +729,7 @@ kase('11) two sessions: return and void of the same payment wait for each other;
   assert.equal(state, '5001:true,5002:false', 'the returned payment stays active; the voided one is inactive');
 });
 
-kase('12) Sol round 2: duplicate refund, drift on drawn credits only, return drift and totals, one entry per check (return and Month-End), trigger grants', () => {
+kase('12) Sol round 2: duplicate refund, drift anywhere on the customer (round 4), return drift and totals, one entry per check (return and Month-End), trigger grants', () => {
   const credit = (k) => `(SELECT id FROM public.prepay_credits WHERE customer_id = '${C[k]}' AND source_type = 'check' AND source_reference = 'M9-${k}')`;
   const over6 = `(SELECT id FROM public.prepay_credits WHERE allocation_set_id = ${SET6})`;
   const legacy = `(SELECT id FROM public.allocation_sets WHERE customer_id = '${C.c2}' AND check_number = 'LEGACY-1')`;
@@ -750,7 +755,7 @@ kase('12) Sol round 2: duplicate refund, drift on drawn credits only, return dri
       VALUES ('${C.c2}', 3000, 3000, 'overpayment', 'LEGACY-1', ${legacy});
     UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 3000 WHERE id = '${C.c2}';
     ${as(ADMIN)}
-    SELECT ${refund(C.c8, 1000, 'm9-c12-r8', { ref: 'QB 2008' })}::text AS r8 \\gset
+    ${refusal(refund(C.c8, 1000, 'm9-c12-r8', { ref: 'QB 2008' }))}
     ${refusal(returned(SET6, 'm9-c12-ret6'))}
     ${refusal(returned(legacy, 'm9-c12-legacy'))}
     -- Two Prepayment Manager checks with one number in one transaction (same entry time): Month-End counts two
@@ -761,19 +766,19 @@ kase('12) Sol round 2: duplicate refund, drift on drawn credits only, return dri
     SELECT (public.get_monthly_summary(date_trunc('month', ${TODAY})::date, ${TODAY}) #>> '{payments,count}') AS count_after \\gset
     SELECT public.record_returned_check(NULL, ${TODAY}, 'NSF', '${ADMIN}', 'm9-c12-ret-dup', ${dupFirst})::text AS rd \\gset
     ${OWNER}
-    SELECT json_build_object('r1', :'r1'::jsonb, 'r3', :'r3'::jsonb, 'r8', :'r8'::jsonb, 'rd', :'rd'::jsonb,
+    SELECT json_build_object('r1', :'r1'::jsonb, 'r3', :'r3'::jsonb, 'rd', :'rd'::jsonb,
       'counted', :'count_after'::int - :'count_before'::int,
       'dup', (SELECT json_agg(balance_cents ORDER BY original_amount_cents) FROM public.prepay_credits WHERE customer_id = '${C.c4}' AND source_reference = 'DUP-1'),
       'same_entry', (SELECT count(DISTINCT created_at) FROM public.prepay_credits WHERE customer_id = '${C.c4}' AND source_reference = 'DUP-1'),
       'grant', has_function_privilege('authenticated', 'public._recompute_prepay_credit_balance()', 'EXECUTE'))::text;`));
-  assert.equal(r.refused.length, 3, `three refusals: ${JSON.stringify(r.refused)}`);
+  assert.equal(r.refused.length, 4, `four refusals: ${JSON.stringify(r.refused)}`);
   assert.match(r.refused[0], /REFUND_DUPLICATE_REFERENCE/, 'the same outside check again (any amount, any case) needs confirming');
-  assert.match(r.refused[1], /RECORD_NEEDS_HAND_CHECK: CREDIT_DRIFT/, 'a return from a drifted credit is refused');
-  assert.match(r.refused[2], /RECORD_NEEDS_HAND_CHECK: PAYMENT_TOTALS/, 'a legacy payment whose records do not add up to the check is refused');
+  assert.match(r.refused[1], /RECORD_NEEDS_HAND_CHECK: CREDIT_DRIFT/, 'round 4: a drifted credit of the customer blocks a refund even when it is not drawn');
+  assert.match(r.refused[2], /RECORD_NEEDS_HAND_CHECK: CREDIT_DRIFT/, 'a return from a drifted credit is refused');
+  assert.match(r.refused[3], /RECORD_NEEDS_HAND_CHECK: PAYMENT_TOTALS/, 'a legacy payment whose records do not add up to the check is refused');
   const o = JSON.parse(r.last);
   assert.equal(o.r3.amount_cents, 10000, 'the admin can confirm a second refund with the same reference');
   assert.equal(o.counted, 2, 'two checks entered together are two payments');
-  assert.equal(o.r8.credits.length, 1, 'a drifted credit the refund does not draw does not block it');
   assert.equal(o.same_entry, 1, 'the two checks share one entry time and number');
   assert.deepEqual([o.rd.amount_cents, o.dup], [10000, [0, 20000]], 'only the check named comes back');
   assert.equal(o.grant, false, 'authenticated cannot execute the recompute trigger function');
@@ -800,8 +805,86 @@ kase('13) the integrity gate: each disagreement is refused RECORD_NEEDS_HAND_CHE
     ${refusal(refund(C.c1, 1000, 'm9-c13-stored', { ref: 'QB 1301' }))}
     ${OWNER} SELECT 'done';`));
   assert.deepEqual(r.refused.map((m) => /RECORD_NEEDS_HAND_CHECK: ([A-Z_]+)/.exec(m)?.[1] ?? m),
-    ['CUSTOMER_MISMATCH', 'CHECK_BUCKETS', 'INVOICE_PAID_MISMATCH', 'INVOICE_PREPAY_MISMATCH', 'STORED_BALANCE_LOW'],
-    'a credit of another customer; a bucket that is no longer a check; an invoice paid amount that disagrees with its payments; an invoice prepay amount that disagrees with its applications; a stored balance below the refund');
+    ['CUSTOMER_MISMATCH', 'CHECK_BUCKETS', 'INVOICE_PAID_MISMATCH', 'INVOICE_PREPAY_MISMATCH', 'STORED_BALANCE_MISMATCH'],
+    'a credit of another customer; a bucket that is no longer a check; an invoice paid amount that disagrees with its payments; an invoice prepay amount that disagrees with its applications; a stored balance that is not the credits\' total');
+});
+
+kase('14) Sol round 4: whole-customer gate, partial bucket list, face value, closed invoices, rep reads, non-payment void', () => {
+  const pm1 = `(SELECT id FROM public.prepay_credits WHERE customer_id = '${C.c1}' AND source_type = 'check')`;
+  const leg = (label) => `(SELECT id FROM public.prepay_credits WHERE customer_id = '${C.c3}' AND source_reference = 'LEG-14' AND bucket_label = '${label}')`;
+  const order3 = `(SELECT id FROM public.allocation_sets WHERE customer_id = '${C.c3}' AND entity_type = 'order')`;
+  const pay2 = `(SELECT id FROM public.allocation_sets WHERE customer_id = '${C.c2}' AND check_number = '7007')`;
+  const r = ran(session(`${OWNER}
+    -- c1: a $100 overpayment credit minted by c5's payment (another customer's money); the books otherwise agree.
+    INSERT INTO public.prepay_credits (customer_id, original_amount_cents, balance_cents, source_type, source_reference, allocation_set_id)
+      VALUES ('${C.c1}', 10000, 10000, 'overpayment', 'FOREIGN-14', ${SET5});
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 10000 WHERE id = '${C.c1}';
+    ${as(ADMIN)}
+    ${refusal(refund(C.c1, 1000, 'm9-c14-foreign', { credit: pm1 }))}
+    -- c6: two clean credits ($500 check, $200 payment) but a stored balance $100 short.
+    ${OWNER}
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents - 10000 WHERE id = '${C.c6}';
+    ${as(ADMIN)}
+    ${refusal(refund(C.c6, 1000, 'm9-c14-low'))}
+    -- c3: a legacy $500 Prepayment Manager check in two buckets ($300 + $200, one entry time) whose entry lists only
+    -- the $300 bucket.
+    ${OWNER}
+    INSERT INTO public.prepay_credits (customer_id, original_amount_cents, balance_cents, source_type, source_reference, bucket_label, created_at)
+      VALUES ('${C.c3}', 30000, 30000, 'check', 'LEG-14', 'A', '2026-11-02 15:00Z'), ('${C.c3}', 20000, 20000, 'check', 'LEG-14', 'B', '2026-11-02 15:00Z');
+    UPDATE public.customers SET prepay_balance_cents = prepay_balance_cents + 50000 WHERE id = '${C.c3}';
+    INSERT INTO public.financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, new_values, total_impact_cents, description)
+      VALUES ('prepay_credit_created', 'prepay_credit', '${C.c3}', '${ADMIN}',
+              jsonb_build_object('reference_number', 'LEG-14', 'credit_ids', jsonb_build_array(${leg('A')}), 'total_cents', 50000), 50000, 'legacy');
+    ${as(ADMIN)}
+    ${refusal(`public.record_returned_check(NULL, ${TODAY}, 'NSF', '${ADMIN}', 'm9-c14-partial', ${leg('A')})`)}
+    -- The $200 bucket gets its own entry: now the $300 entry's buckets do not add up to its $500 total.
+    ${OWNER}
+    INSERT INTO public.financial_audit_log (operation_type, entity_type, entity_id, actor_user_id, new_values, total_impact_cents, description)
+      VALUES ('prepay_credit_created', 'prepay_credit', '${C.c3}', '${ADMIN}',
+              jsonb_build_object('reference_number', 'LEG-14', 'credit_ids', jsonb_build_array(${leg('B')}), 'total_cents', 20000), 20000, 'legacy');
+    ${as(ADMIN)}
+    ${refusal(`public.record_returned_check(NULL, ${TODAY}, 'NSF', '${ADMIN}', 'm9-c14-face', ${leg('A')})`)}
+    -- c2: a check pays its $100 invoice, which is then put back to draft (legacy) and, separately, soft-deleted.
+    SELECT public.allocate_payment('${C.c2}', 10000, 'check', 'M9-C14-PAY', '7007', ${TODAY}, 'm9',
+      jsonb_build_array(jsonb_build_object('invoice_id', '${INV2}', 'amount_cents', 10000)), '${ADMIN}', 'm9-c14-pay2')::text AS p2 \\gset
+    ${OWNER}
+    SET CONSTRAINTS ALL IMMEDIATE;
+    ALTER TABLE public.invoices DISABLE TRIGGER enforce_invoice_status_transition;  -- legacy row; rolled back
+    UPDATE public.invoices SET status = 'draft' WHERE id = '${INV2}';
+    ${as(ADMIN)}
+    ${refusal(returned(pay2, 'm9-c14-draft'))}
+    ${OWNER}
+    UPDATE public.invoices SET status = 'paid', deleted_at = now() WHERE id = '${INV2}';
+    ${as(ADMIN)}
+    ${refusal(returned(pay2, 'm9-c14-deleted'))}
+    -- An order allocation set cannot be voided as a payment.
+    ${OWNER}
+    INSERT INTO public.allocation_sets (entity_type, entity_id, customer_id, is_active, total_payment_cents, total_allocated_cents)
+      VALUES ('order', gen_random_uuid(), '${C.c3}', true, 0, 0);
+    ${as(ADMIN)}
+    ${refusal(`public.void_payment(${order3}, 'not a payment', '${ADMIN}', 'm9-c14-void-order')`)}
+    -- A date of -infinity is not a date (L18).
+    ${refusal(refund(C.c4, 1000, 'm9-c14-inf', { date: "'-infinity'::date", ref: 'QB 1402' }))}
+    ${refusal(`public.record_returned_check(${pay2}, '-infinity'::date, 'NSF', '${ADMIN}', 'm9-c14-inf-ret')`)}
+    -- Reads: an admin sees a refund's record and line; a rep sees no row of either table (case 11's committed return
+    -- included).
+    SELECT ${refund(C.c4, 1000, 'm9-c14-ok', { ref: 'QB 1401' })}::text AS ok \\gset
+    SELECT (SELECT count(*) FROM public.money_reversals WHERE customer_id = '${C.c4}') || ':' || (SELECT count(*) FROM public.money_reversal_lines l
+      JOIN public.money_reversals mr ON mr.id = l.reversal_id WHERE mr.customer_id = '${C.c4}') AS admin_reads \\gset
+    ${as(REP)}
+    SELECT (SELECT count(*) FROM public.money_reversals) || ':' || (SELECT count(*) FROM public.money_reversal_lines) AS rep_reads \\gset
+    ${OWNER}
+    SELECT json_build_object('admin', :'admin_reads', 'rep', :'rep_reads',
+      'inv2', (SELECT status || ':' || paid_amount_cents FROM public.invoices WHERE id = '${INV2}'))::text;`));
+  assert.deepEqual(r.refused.map((m) => /^([A-Z_]+)(?::\s*([A-Z_]+))?/.exec(m)?.slice(1).filter(Boolean).join(': ') ?? m),
+    ['RECORD_NEEDS_HAND_CHECK: CREDIT_SOURCE_MISMATCH', 'RECORD_NEEDS_HAND_CHECK: STORED_BALANCE_MISMATCH',
+     'RECORD_NEEDS_HAND_CHECK: CHECK_BUCKETS', 'RECORD_NEEDS_HAND_CHECK: CHECK_FACE_VALUE',
+     'RETURN_INVOICE_NOT_OPEN', 'RETURN_INVOICE_NOT_OPEN', 'NOT_A_PAYMENT', 'BAD_VALUE', 'BAD_VALUE'],
+    `another customer's payment behind a credit; a stored balance below the credits; a partial bucket list; a face value that is not the entry's total; a draft and a deleted invoice; a non-payment void; -infinity dates: ${JSON.stringify(r.refused)}`);
+  const o = JSON.parse(r.last);
+  assert.equal(o.admin, '1:1', `an admin reads the refund and its line: ${r.last}`);
+  assert.equal(o.rep, '0:0', 'a rep reads no reversal rows');
+  assert.equal(o.inv2, 'paid:10000', 'the refused returns changed nothing on the invoice');
 });
 
 const admin = (sql) => psql(sql, { user: 'supabase_admin', db: 'template1' });

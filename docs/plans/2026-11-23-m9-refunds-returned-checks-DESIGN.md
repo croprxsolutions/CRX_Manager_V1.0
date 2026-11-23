@@ -1,6 +1,6 @@
 # M9 design: refunds paid outside CRX, prepay balance check, returned checks (stage 1)
 
-Migration: `supabase/migrations/20270225110000_m9_refunds_and_returned_checks.sql`. Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` (written first; 13 cases).
+Migration: `supabase/migrations/20270226213000_m9_refunds_and_returned_checks.sql`. Proof: `scripts/smoke/prove-m9-refunds-returned-checks-real-schema.mjs` (written first; 13 cases).
 `B:` = baseline `supabase/baselines/20260727174805_public_schema.sql.br` (decompressed line). Other refs are `supabase/migrations/`.
 
 ## 1. How money is stored today
@@ -13,7 +13,7 @@ Migration: `supabase/migrations/20270225110000_m9_refunds_and_returned_checks.sq
 - **edit/delete_prepay_credit** (B:24203, B:23070) rewrite `original_amount_cents` (= new balance + applied). That is today's refund workaround, and it erases history.
 - **Month-End "payments received"** `_month_payments_received_20270208` (20270224120000:106) = active payment sets by `payment_date` + `'check'` credits at **current** `original_amount_cents` by Chicago `created_at` + legacy payments. Overpayment credits are not counted again.
 
-## 2. New tables (append-only; written only by SECURITY DEFINER functions; admin + rep SELECT, like the allocation tables in 20261022040000)
+## 2. New tables (append-only; written only by SECURITY DEFINER functions; admin-only SELECT since Sol round 4)
 - `money_reversals`: `id`, `kind` (`'outside_refund'|'returned_check'`), `customer_id`, `entry_date` (must be in an open month), `amount_cents > 0`, `reference`, `reason`, `allocation_set_id` or `prepay_credit_id` (returned check only, exactly one; each has a partial UNIQUE, so a payment or a Prepayment Manager check comes back once), `performed_by`, `created_at`.
 - `money_reversal_lines`: `id`, `reversal_id`, `line_kind` (`'prepay_credit'|'invoice_payment'|'prepay_application'`), `prepay_credit_id`, `invoice_id`, `prepay_application_id` (UNIQUE when set; FK with no cascade, so a reversed application can never be deleted), `amount_cents > 0`.
 
@@ -76,3 +76,14 @@ Both functions can only date an entry in an open month, under the month lock tha
 1. **One integrity gate** (`_m9_check_records_20270225`) replaces the scattered legacy checks. A refund or return refuses `RECORD_NEEDS_HAND_CHECK: <code>` unless everything it touches agrees: customer, check buckets, deleted/edited credits, payment totals, exact invoice paid/prepay amounts, credit drift and stored balance.
 2. **Refunds** are dated today. `p_paid_on` keeps the outside date. A second refund with the same reference needs confirming.
 3. **One Prepayment Manager entry is one check** (its audit row) everywhere: return, edit/delete guard, Month-End count.
+
+## 10. Sol round 4 rules (built; Taha's option A, 23 Nov)
+A read-only live count found 1 customer with prepay, 1 credit, 1 payment set and no customer failing a check, so the strict gate costs nothing for the Dec 15 trial.
+1. **The whole customer must agree** before a refund or a return writes. The gate adds, after its touched-record checks: `CREDIT_SOURCE_MISMATCH` (a credit's payment is another customer's, not a payment, or voided with money left), `APPLICATION_CUSTOMER_MISMATCH` (a credit applied to another customer's invoice), `CREDIT_DRIFT` (any credit of the customer against its own rows) and `STORED_BALANCE_MISMATCH` (stored balance ≠ the credits' total). A drifted credit the refund does not draw now blocks it too.
+2. **A Prepayment Manager check is all of its entry.** Each bucket is in exactly one `prepay_credit_created` entry, no check bucket with the same customer, reference and entry time is missing from every entry (`CHECK_BUCKETS`), and the buckets' amounts add up to the entry's `total_cents` (`CHECK_FACE_VALUE`). A partial bucket list is refused, never understated.
+3. A return refuses an invoice that is draft, unposted, voided, cancelled or deleted (`RETURN_INVOICE_NOT_OPEN`).
+4. `money_reversals` and `money_reversal_lines` are readable by active admins only. Reps still see the statement rows (the statement reads them as definer). No screen reads them as a rep; the Integrity report is admin-only.
+5. `void_payment` refuses a set that is not a payment (`NOT_A_PAYMENT`).
+6. A paid-on or bank date of `-infinity` is refused (`BAD_VALUE`).
+7. Stamp moved to `20270226213000` (after staging's `20270226163000` and the open PRs' stamps).
+

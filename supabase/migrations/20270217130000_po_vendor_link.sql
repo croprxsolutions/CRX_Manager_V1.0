@@ -13,7 +13,7 @@
 -- 4. The vendor-bill check compares the bill's vendor with the PO's link when there is one; an unlinked PO keeps the
 --    name comparison. The rest of the bill function is the pinned body unchanged.
 --
--- Rollback: a NEW forward migration that drops trigger_00_po_vendor_id and restores the pinned bill-function body
+-- Rollback: a NEW forward migration that drops trigger_00_po_vendor_id and trigger_vendor_name_not_on_other_vendor_pos and restores the pinned bill-function body
 -- (20270103180000_po_close_short.sql); keep the column and its values (a link cannot be rebuilt after a rename).
 -- Never re-run or edit this file.
 

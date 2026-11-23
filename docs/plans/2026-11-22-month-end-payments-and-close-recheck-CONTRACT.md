@@ -42,7 +42,7 @@ saving the figures current at the click") says the payments-received follow-up m
 3. Who may act: unchanged (active admin for summary and close; wrapper + impl both check). New helpers: no grants to
    `anon`/`authenticated`/`PUBLIC` (SECURITY DEFINER callers only). Screen values: period end and token are compared, never
    trusted for figures; actor is `auth.uid()`.
-4. Files: new migration `supabase/migrations/20270220110000_month_close_payments_received_recheck.sql` + record + changelog,
+4. Files: new migration `supabase/migrations/20270224120000_month_close_payments_received_recheck.sql` + record + changelog,
    `src/pages/MonthEndClose.tsx` (+ test), prover `scripts/smoke/prove-month-close-payments-recheck-real-schema.mjs`,
    contract tests that pin the close signature, KI/plan docs.
 

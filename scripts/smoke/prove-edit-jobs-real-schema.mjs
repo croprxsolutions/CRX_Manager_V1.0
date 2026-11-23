@@ -32,7 +32,7 @@ const CANDIDATE = path.join(MIGRATIONS, '20270203110000_job_writes_through_rpcs.
 const FOLLOW_UPS = [];
 // These only call the idempotency helpers from their own new or changed functions; neither redefines anything the proof covers.
 const LATER_READ_ONLY = new Set(['20270203120000_inventory_edge_cases_1942.sql', '20270204120000_driver_available_deliveries.sql',
-  '20270206110000_pnl_commission_share_billed.sql', '20270220110000_month_close_payments_received_recheck.sql']);
+  '20270206110000_pnl_commission_share_billed.sql', '20270224120000_month_close_payments_received_recheck.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

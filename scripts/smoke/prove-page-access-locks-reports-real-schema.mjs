@@ -30,8 +30,8 @@ const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const CANDIDATE = path.join(MIGRATIONS, '20270201100000_page_access_locks_reports.sql');
 const FOLLOW_UPS = [];
-// 20270220110000 (KI-129 payments / #2175) re-creates the Month-End functions after this candidate; this proof stops before it.
-const LATER_READ_ONLY = new Set(['20270220110000_month_close_payments_received_recheck.sql']);
+// 20270224120000 (KI-129 payments / #2175) re-creates the Month-End functions after this candidate; this proof stops before it.
+const LATER_READ_ONLY = new Set(['20270224120000_month_close_payments_received_recheck.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

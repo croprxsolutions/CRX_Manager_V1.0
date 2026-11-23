@@ -38,8 +38,8 @@ const CANDIDATE = path.join(MIGRATIONS, '20270129160000_release_fixes_1990.sql')
 // 20270129171000 (same release) replaces three of these bodies on top of this candidate's, adding only the
 // sold-unit refusal and ACTOR_MISMATCH; its own prover (prove-field-app-no-sold-unit-real-schema.mjs) covers it.
 const FOLLOW_UPS = [path.join(MIGRATIONS, '20270129171000_field_app_refuses_product_without_sold_unit.sql')];
-// 20270220110000 (KI-129 payments / #2175) re-creates the Month-End functions after this candidate; this proof stops before it.
-const LATER_READ_ONLY = new Set(['20270220110000_month_close_payments_received_recheck.sql']);
+// 20270224120000 (KI-129 payments / #2175) re-creates the Month-End functions after this candidate; this proof stops before it.
+const LATER_READ_ONLY = new Set(['20270224120000_month_close_payments_received_recheck.sql']);
 const PARKED = new Set([
   '20260914100700_customer_document_bytes_server_only.sql',
   '20261015230000_staff_photo_storage_access.sql',

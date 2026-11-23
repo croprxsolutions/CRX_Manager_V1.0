@@ -1,5 +1,5 @@
 -- Written 2026-11-22. STATUS: NOT APPLIED (staging candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270220110000_month_close_payments_received_recheck.md.
+-- docs/reference/migrations.d/20270224120000_month_close_payments_received_recheck.md.
 -- Re-read the live ledger before applying.
 --
 -- WHY (contract: docs/plans/2026-11-22-month-end-payments-and-close-recheck-CONTRACT.md):

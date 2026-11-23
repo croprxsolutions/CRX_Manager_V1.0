@@ -74,7 +74,7 @@ Each item's full entry is in its area section below. "Severity unsure" marks a r
 | Guards and release | SOL-12 | HIGH | Resolved by removing the pass (PR #2203; closes when it merges) | A release-pass command naming an invalid PR number counts as approval for the open release. | Agent (land #2203) |
 | Guards and release | KI-48 | HIGH (severity unsure) | Open | Some protections around applying live database changes have known gaps; the live migration ledger is the backstop. | Mason decision |
 | Reports | SOL-7 | HIGH | PR #2201 open into staging | A broken or absurd order total would distort the commission in profit reports. | Agent (land #2201) |
-| Reports | KI-129 (+#2195) | HIGH | Fix in PR (payments part) | Month-end close counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. Fix: migration `20270220110000` (with the #2175 close re-check). | Lane B agent |
+| Reports | KI-129 (+#2195) | HIGH | Fix in PR (payments part) | Month-end close counts deleted payments and misses payments recorded through allocation sets, so a month can show $0 received. Fix: migration `20270224120000` (with the #2175 close re-check). | Lane B agent |
 | Reports | KI-125 | HIGH | Fixed on staging, not live | Profit reports showed a fake large loss because commission was counted on sales billed elsewhere. | Taha (release) |
 | Field applications | #2196 | HIGH | Open | A sales rep may still be able to delete a completed, billable job outside the screens, so it drops out of Unbilled Jobs. | Mason (field-app billing) |
 | Field applications | KI-185 | HIGH | Open | A job sprayed on 80 acres but planned at 100 bills for 100, and deducts stock for 100. | Mason (field-app billing) |
@@ -999,7 +999,7 @@ today. Fix: use the `is_application_fee` case `save_invoice` already uses, plus 
 
 > **Re-checked 2026-11-21 on staging `3a9694685`:** Partly open · HIGH · Agent (unassigned) · plan W1-01 · #2149 (count part), #2195 (payments part). Invoice count fixed on staging (#2149). Payments received still totals the old payments table, counts deleted payments and misses allocation-set receipts (#2195, Sol on #2189), so a month paid through allocations can show $0 received.
 
-> **2026-11-22:** payments part fixed in local candidate `20270220110000_month_close_payments_received_recheck.sql` (one PR with #2175): Record Payment checks + prepayment checks (month entered, current amount) + live legacy payments; the close re-checks the reviewed figures.
+> **2026-11-22:** payments part fixed in local candidate `20270224120000_month_close_payments_received_recheck.sql` (one PR with #2175): Record Payment checks + prepayment checks (month entered, current amount) + live legacy payments; the close re-checks the reviewed figures.
 
 **MED · PARTIAL (the close receipt's invoice count is fixed on staging with KI-125 (#2149), awaiting the production release; payments received is OPEN, a follow-up: it needs a rule for prepayment checks, which can be edited or deleted later, and a re-check at close that the figures still match what the admin reviewed) · money/reports · found 2026-11-10 ([2026-11-10 sweeps](sweeps/bug-sweeps-2026-11-10.md) sweep 3 #6)**
 Both read the legacy `payments` table (0 rows; payments now live in `allocation_sets`), so the one July 2026 customer

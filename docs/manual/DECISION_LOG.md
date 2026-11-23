@@ -36,7 +36,7 @@
 
 ## 2026-11-22 — KI-129 / #2195: prepayment checks count as payments received
 
-**Decision (Mason, 2026-11-22, relayed by the bug-sprint captain):** "yes should count as payment received". Month-End payments received counts each Prepayment Manager check in the month it was entered, at its current amount (all buckets of one check are one payment); Record Payment checks count in full (an overpayment's prepay credit is not added again); voided payments and deleted old-style payments do not count. A later edit or delete of a prepayment check changes that month's screen figure, never a closed month's saved close receipt. Made in migration `20270220110000_month_close_payments_received_recheck.sql` (live only once applied) with the #2175 close re-check (the 2026-11-21 entry below asked for both together).
+**Decision (Mason, 2026-11-22, relayed by the bug-sprint captain):** "yes should count as payment received". Month-End payments received counts each Prepayment Manager check in the month it was entered, at its current amount (all buckets of one check are one payment); Record Payment checks count in full (an overpayment's prepay credit is not added again); voided payments and deleted old-style payments do not count. A later edit or delete of a prepayment check changes that month's screen figure, never a closed month's saved close receipt. Made in migration `20270224120000_month_close_payments_received_recheck.sql` (live only once applied) with the #2175 close re-check (the 2026-11-21 entry below asked for both together).
 
 ## 2026-11-22 — PR #2226: staging merges never carry a Sol proof; skipped Sol findings never carry onto a newer base
 

@@ -428,7 +428,7 @@ CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
   const vendor = scalar(`INSERT INTO public.vendors(name) VALUES ('[PROOF] period vendor ${process.pid}') RETURNING id;`);
   const date = '2025-01-15', end = '2025-01-31', monthKey = 2025 * 12 + 1 - 1;
   const bill = (key, d = date) => `${claims()} SELECT public.create_vendor_bill('${vendor}'::uuid,NULL,'proof-${key}','${d}',NULL,NULL,1000,0,NULL,'${key}');`;
-  // #2175 (20270220110000, replayed after the candidates): once present, the close re-checks the reviewed figures'
+  // #2175 (20270224120000, replayed after the candidates): once present, the close re-checks the reviewed figures'
   // token; the baseline below runs before it, with the 3-argument close.
   const close = key => scalar(`SELECT to_regprocedure('public._month_close_figures_20270208(date,date)') IS NOT NULL`) === 't'
     ? `${claims()} SELECT public.close_accounting_period('${end}'::date,'${ADMIN}'::uuid,'${key}',

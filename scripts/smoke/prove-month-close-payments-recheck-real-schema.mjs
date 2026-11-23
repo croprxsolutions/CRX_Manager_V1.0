@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-schema proof for 20270220110000_month_close_payments_received_recheck (KI-129 payments received / #2175 close re-check).
+ * Real-schema proof for 20270224120000_month_close_payments_received_recheck (KI-129 payments received / #2175 close re-check).
  * Container setup and replay copied from prove-pnl-commission-share-billed-real-schema.mjs. Then, on synthetic rows:
  *   1. BEFORE: Month-End shows only legacy payments; the close receipt even counts a deleted legacy payment.
  *   2. The candidate applies; a second apply is refused by its preflight.
@@ -26,7 +26,7 @@ const KEEP = process.env.CRX_PROVER_KEEP_CONTAINER === '1';
 const IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.143';
 const BASELINE = path.join(ROOT, 'supabase', 'baselines');
 const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
-const CANDIDATE = path.join(MIGRATIONS, '20270220110000_month_close_payments_received_recheck.sql');
+const CANDIDATE = path.join(MIGRATIONS, '20270224120000_month_close_payments_received_recheck.sql');
 const FOLLOW_UPS = [];
 const LATER_READ_ONLY = new Set();
 const PARKED = new Set([

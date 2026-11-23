@@ -4,4 +4,4 @@
 - Closing a month now re-checks, in the database, that the month's figures still match what the admin reviewed, and that payments and commission were confirmed. If anything changed, the close is refused, nothing is saved, and the screen reloads the figures to review again.
 - If a close's reply was lost and the month was reopened before the screen refreshed, retrying the close is refused instead of showing the old "Period closed" receipt; the screen asks to review and close again (Mason, 2026-11-22).
 - A Record Payment must now carry its payment date in the database (it always has), so voiding a payment always checks that payment's own month and can never change a closed month's figure.
-- Migration `20270220110000_month_close_payments_received_recheck.sql` (local candidate, not applied). Proof: `node scripts/smoke/prove-month-close-payments-recheck-real-schema.mjs`.
+- Migration `20270224120000_month_close_payments_received_recheck.sql` (local candidate, not applied). Proof: `node scripts/smoke/prove-month-close-payments-recheck-real-schema.mjs`.

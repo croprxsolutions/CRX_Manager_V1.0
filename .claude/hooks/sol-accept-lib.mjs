@@ -640,6 +640,9 @@ export function priorAcceptances(proofs, { prNumber, prUrl, nowMs = Date.now(), 
     const fromBase = proof.carry.from_base;
     if (!SHA_RE.test(String(fromHead)) || !SHA_RE.test(String(fromBase)) || !onBranch(fromHead)) continue;
     for (const e of proof.owner_accepted) {
+      // Only Mason's own skip, in its own wording and its own reviewed change, is shown again: a carried
+      // entry's newer wording never replaces what he accepted (Sol, 2026-11-23).
+      if (proof.carry.mode === OWNER_ACCEPTED_CARRIED || e?.carried_from !== undefined) continue;
       const root = rootOf(e, proof);
       if (e?.pull_request !== prNumber || pullRequestUrlFor(e?.pull_request_url, prNumber) !== want || !rootAgeOk(root.accepted_at, nowMs)) continue;
       if (!SHA_RE.test(String(root.head_sha)) || !/^[0-9a-f]{12,}$/i.test(String(root.ref)) || !Number.isInteger(root.n) || !SEVERITY_RANK[root.severity]) continue;

@@ -71,7 +71,7 @@ import { followUpsDenial, followUpsProblem } from "../../.claude/hooks/followups
 import { coderabbitSkipNotice, findCodeRabbitSkip, skipPullRequestFor, skipStateDirs } from "../../.claude/hooks/coderabbit-skip-lib.mjs";
 import { literalReadOnlySearch } from "../../.claude/hooks/read-only-search-lib.mjs";
 import { claimOrRefuse, claimsFileFor } from "../../.claude/hooks/pr-claim-lib.mjs";
-import { ownerAcceptedForPr, trackedNamesIn } from "../../.claude/hooks/sol-accept-lib.mjs";
+import { ownerAcceptedForPr, usesCarriedSkip } from "../../.claude/hooks/sol-accept-lib.mjs";
 
 // Sol HIGH finding (2026-08-14, write-scope review): with the Supabase connector
 // write-enabled, ANY mutating Supabase tool Codex can reach is a route to
@@ -548,15 +548,6 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
   };
   const stateDir = path.join(repoDir, ".claude", "session-state");
   let proofPath = path.join(stateDir, `codex-review-${headSha}.json`);
-  // Every proof here, so a carried skip can trace back to Mason's own acceptance (Sol, 2026-11-22).
-  const proofs = [];
-  try {
-    const tracked = trackedNamesIn(stateDir) ?? new Set(readdirSync(stateDir)); // git silent: none counts
-    for (const f of readdirSync(stateDir)) {
-      if (!/^codex-review-[0-9a-f]{40}\.json$/i.test(f) || tracked.has(f)) continue;
-      try { proofs.push(JSON.parse(readFileSync(path.join(stateDir, f), "utf8"))); } catch { /* unreadable: not a proof */ }
-    }
-  } catch { /* no state directory: no proofs */ }
   // Sol runs once before the PR opens (Mason, 2026-10-29): with no proof of this
   // head, a proof of an earlier commit on this PR's branch may count.
   if (!existsSync(proofPath) && authoritativeBaseSha) {
@@ -569,7 +560,7 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
             const data = JSON.parse(readFileSync(p, "utf8"));
             // The commits after the reviewed one must be notes only (Sol, 2026-10-29).
             return proofValidForMerge({ data, headSha, nowMs, baseSha, isAncestor: isAncestorLocally, mergeBase: mergeBaseLocally, baseRef: pullRequest?.baseRefName ?? null })
-              && ownerAcceptedForPr(data, { number: pullRequest?.number, url: pullRequest?.url, exactHead: false, proofs })
+              && ownerAcceptedForPr(data, { number: pullRequest?.number, url: pullRequest?.url, exactHead: false })
               && typeof laterChangesLowRisk === "function" && laterChangesLowRisk(String(data.head_sha).toLowerCase(), headSha) === true;
           } catch {
             return false;
@@ -591,8 +582,12 @@ function gateMainChange({ repoDir, sourceRef, sourceSha, nowMs, runGit, authorit
   // A PR merge may land a head that is behind main (Mason, 2026-10-26;
   // proofValidForMerge): the proof's own base must be in the head and behind
   // GitHub's base. A direct push to main keeps the exact-base binding.
+  // A carried repeat skip lands through Claude's merge guard only (Mason, 2026-11-23): Codex hands it over.
+  if (usesCarriedSkip(proof)) {
+    return proofRequirement(headSha, riskDescription, "This Sol proof carries Mason's earlier skip to a repeat finding; Codex never merges it. Hand the merge to Claude.", baseSha);
+  }
   // Owner-accepted findings count only for their own pull request at its exact version (Sol gate round 5).
-  const ownerOk = ownerAcceptedForPr(proof, { number: pullRequest?.number, url: pullRequest?.url, exactHead: String(proof?.head_sha).toLowerCase() === String(headSha).toLowerCase(), proofs });
+  const ownerOk = ownerAcceptedForPr(proof, { number: pullRequest?.number, url: pullRequest?.url, exactHead: String(proof?.head_sha).toLowerCase() === String(headSha).toLowerCase() });
   const proven = ownerOk && (authoritativeBaseSha
     ? proofValidForMerge({ data: proof, headSha, nowMs, baseSha, isAncestor: isAncestorLocally, mergeBase: mergeBaseLocally, baseRef: pullRequest?.baseRefName ?? null })
     : proofValid(proof, headSha, nowMs, baseSha));

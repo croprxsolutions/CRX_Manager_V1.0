@@ -3424,15 +3424,16 @@ export function run(argv = process.argv.slice(2)) {
     process.stderr.write(`${roundGate.message}\n`);
     return 1;
   }
-  process.stdout.write(`${solRoundLine(round, preflight.facts?.pr?.number)}\n`);
-  recordSolRound(ledger, headBefore, preflight.facts?.pr?.number);
-  // A record from an earlier run on this head must never be used after this one (Astra, 2026-11-22).
+  // A record from an earlier run on this head must never be used after this one (Astra, 2026-11-22);
+  // removed before the round is counted, so a locked file never spends a round.
   try { unlinkSync(path.join(root, ".claude", "session-state", blockersRecordName(headBefore))); } catch (err) {
     if (err?.code !== "ENOENT") {
       process.stderr.write(`Could not remove the earlier Sol findings record for this head (${err?.code || err}); close whatever holds it and run again.\n`);
       return 1;
     }
   }
+  process.stdout.write(`${solRoundLine(round, preflight.facts?.pr?.number)}\n`);
+  recordSolRound(ledger, headBefore, preflight.facts?.pr?.number);
   let reviewWorkspace;
   let result;
   let codexRun = { codexBin, fallbackUsed: false, primaryResult: null };

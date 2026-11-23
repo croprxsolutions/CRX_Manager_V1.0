@@ -147,10 +147,15 @@ try {
   assert.match(carriedChainProblem(proof, [proof], now), /holds Mason's skip/);
   // A later restamp of a carried proof keeps the check (its entries still carry carried_from).
   assert.match(carriedChainProblem({ ...proof, carry: { ...proof.carry, mode: "restamp" } }, [], now), /holds Mason's skip/);
-  // A second repeat (carried → carried) still traces to Mason's own acceptance.
-  const chain = priorAcceptances([rootProof, { ...proof, carry: { ...proof.carry, from_head: newHead } }], { prNumber: PR, prUrl: URL, nowMs: now });
+  // A second repeat is shown Mason's own skip again, in his original wording and reviewed change,
+  // never the carried proof's newer wording.
+  const carriedLater = { ...proof, carry: { ...proof.carry, from_head: newHead }, owner_accepted: [{ ...proof.owner_accepted[0], text: "src.ts:6 - broader wording" }] };
+  const chain = priorAcceptances([rootProof, carriedLater], { prNumber: PR, prUrl: URL, nowMs: now });
   assert.equal(chain.length, 1);
   assert.equal(chain[0].root.head_sha, logged);
+  assert.equal(chain[0].from_head, reviewed);
+  assert.equal(chain[0].text, rootProof.owner_accepted[0].text);
+  assert.deepEqual(priorAcceptances([carriedLater], { prNumber: PR, prUrl: URL, nowMs: now }), [], "a carried proof alone offers nothing");
 
   // (b) one NEW finding → refused: Mason is asked as before.
   const mixed = recordOf([

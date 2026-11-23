@@ -16,10 +16,10 @@ Read at `origin/staging` 3f1ca8933 (2026-11-22). Mason, 2026-11-22: "build somet
 3. The ref names an acceptance on the SAME pull request (number and repository URL), whose root acceptance is at most 7 days old, whose accepted head is an ancestor of the new head.
 4. Same file path: the finding's `file` (from `file:line`) equals the accepted finding's file; the line may move. A finding with no readable location refuses.
 5. Severity never rises: HIGH accepted, BLOCKER now → refuse.
-6. The PR's own change to that file is unchanged: its `-U0` added/removed lines (merge-base..head, hunk headers dropped) at the new head equal those at the accepted head. A catch-up merge that only moves base code passes; any PR edit to that file refuses.
+6. The PR's own change to that file is unchanged and not empty: its whole patch (merge-base..head, hunk positions and blob ids included) at the new head equals the one at the head Mason skipped at. Any PR edit to that file, or a base change to it, refuses (Mason is asked); a file the PR does not change never carries.
 7. A PR that changes gate or approval files refuses (existing rule, which also covers release/hotfix PRs with gate files).
 8. The `DECISION_LOG.md` entry is written by `--log` and committed alone; the proof writer rebuilds it byte for byte. Wording: "carried from ref <ref> at <old head> to <new head>; Sol marked it the same".
-9. The proof's mode is `owner_accepted_carried`. `carriedSolProof` treats it like `owner_accepted` (same base, non-empty list). The merge gate and the migration-apply gate accept it only when every entry traces to a root `owner_accepted` proof found among the local proofs with the same ref, head, PR, URL and time, under 7 days old.
+9. The proof's mode is `owner_accepted_carried`. `carriedSolProof` treats it like `owner_accepted` (same base, non-empty list). Claude's staging merge gate accepts it only when every entry traces to a root `owner_accepted` proof (an untracked local proof file) with the same ref, head, PR, URL and time, under 7 days old. The live migration-apply gate never accepts a carried skip, and Codex's merge guard hands such a PR to Claude (Mason, 2026-11-23). A run Sol marks all-repeat is never put to Mason (Mason, 2026-11-23).
 
 ## Existing rows
 
@@ -59,4 +59,4 @@ The carry is a local script run on a clean worktree, bound to exact SHAs; a move
 
 ## Open business decisions
 
-- **Reverses part of #2226 and #2199** (`DECISION_LOG.md` 2026-11-22: skips never carry onto a newer base; a skip counts only for the version it was given for). Mason, 2026-11-22: build it, accepted risk; small Sol findings on this PR he may bypass by hand. **Accepted risk:** Sol could label a new issue "same"; the same-file, same-PR, unchanged-PR-change and severity checks limit it.
+- **Reverses part of #2226 and #2199** (`DECISION_LOG.md` 2026-11-22: skips never carry onto a newer base; a skip counts only for the version it was given for). Mason, 2026-11-22: build it, accepted risk. This PR changes gate files, so it gets no owner skip of its own: it needs a clean Sol run, and a person merges it. **Accepted risk:** Sol could label a new issue "same"; the same-file, same-PR, unchanged-PR-change and severity checks limit it.

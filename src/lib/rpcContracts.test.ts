@@ -2978,6 +2978,11 @@ const MUTATOR_INVENTORY_EXEMPT: Record<string, string> = {
   // M4a sales tax (local candidate 20270109100200): trigger function, never an RPC.
   _sales_tax_record_rate_20261231:
     'AFTER INSERT / UPDATE OF invoice_type row trigger on invoices: records a taxed sale\'s draft at the Settings rate once (ON CONFLICT DO NOTHING), and re-records only when a draft really switches type, so a replay writes nothing new; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
+  // M4 commission after the standing discount (local candidate 20270304100000): trigger function and its helper, never RPCs.
+  _recompute_order_commissions_20270304:
+    'helper of the commission-after-discount triggers: puts a sale\'s pending, unbatched commission rows on its profit after the standing discount, writing nothing when they already sit on it, so a replay is a no-op; every API-role EXECUTE is revoked',
+  _commission_after_discount_20270304:
+    'DEFERRABLE INITIALLY DEFERRED constraint trigger on invoice_items, invoices and commissions: calls _recompute_order_commissions_20270304, a no-op when the rows are right, so a replay writes nothing; Postgres refuses direct calls of a trigger function and every API-role EXECUTE is revoked',
   // M4b standing discount (local candidate 20270109100100): trigger functions and their recompute helper, never RPCs.
   _recompute_standing_discount_20261231:
     'helper of the standing-discount triggers and set_invoice_standing_discount: records a draft\'s rate once (ON CONFLICT DO NOTHING) and rewrites its computed discount line and total, writing nothing when they are already right, so a replay is a no-op; every API-role EXECUTE is revoked',

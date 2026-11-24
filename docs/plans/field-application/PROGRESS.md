@@ -59,12 +59,20 @@ Every slice batch also asks, for its release: the merge into `main` (Taha or Mas
 
 | Item | State | Proof / link | Note |
 |---|---|---|---|
-| Paperwork fixes | NOT STARTED | | |
+| 1 Safety on every page | PARKED | `feat/field-paper-1` (not pushed) | Strip on every page (map pages too); Custom config can no longer hide REI/PHI. Parked: Terra HIGH (a 35+ product mix cannot fit the strip on every page) survived 2 fix rounds; asked Mason 2026-11-24 to allow 'see the safety table on page 1' past that size |
+| 2 Map pages only print | PARKED (menu entry) | `feat/field-paper-2` (stacked on 1): print library `mapsOnly` option, rendered one-field and multi-field, Terra CLEAN | Maps only, safety on every page, no blank first page; a job with no maps refuses plainly. The one `JobDetail.tsx` print-menu entry waits for the lease (asked below) and needs Sol (JobDetail is on the Sol list) |
+| 3 Spray-order numbers on maps | PARKED (stacked on 1) | `feat/field-paper-3`; Terra CLEAN on its own diff | Overview labels `N · acres`; per-field page title `Stop N`; numbers restart per job (test) |
+| 4 Directions link per field | PARKED (stacked on 3) | `feat/field-paper-4`; Terra 2 MED + 1 LOW, fixed or refuted | Tappable Google Maps link per mapped field, in stop order, under the field table |
+| 5 Loader water to add + finished gallons | IN REVIEW | `feat/field-paper-5` (own branch from staging); rendered: tank loads, condensed, one batch, overfill, unknown unit, missing amount; Terra 2 LOW fixed | Loader PDF and job-page panel show Finished gallons and Water to add in loader units ("58 GL 7.68 FL OZ"), per tank and as one batch. Dry adds no volume; overfill prints 0 + warning; a product it cannot size is named, never guessed |
+| 6 EPA dash / Unknown | PARKED ("Unknown" half) | dash: already prints for any blank number (`applicatorSheetPdf.test.ts`, blank and null rows) | No product value says a product is EPA-registered (`products.epa_registration` is the number only; `epa_registrations` is keyed by the number). "Unknown" needs that flag: asked below |
 
 ## Needs another lane
 
 | Asked by | Owning lane | What | Done? |
 |---|---|---|---|
+| Paperwork (group 6) | Database | A product value that says "this product is EPA-registered" (so a registered product with no number prints "Unknown" and an unregistered one prints a dash, KI-206). Today nothing tells the two apart | |
+| Paperwork (group 1) | Office screens (SettingsPage) | The Custom applicator sheet REI/PHI checkboxes no longer hide anything (safety always prints): remove or relabel them | |
+| Paperwork (group 2) | Database (lease holder) | The `JobDetail.tsx` lease, for one print-menu entry: "Map pages only" | |
 
 ## Disputed review findings (for the slice batch)
 

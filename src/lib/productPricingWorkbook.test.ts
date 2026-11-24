@@ -9,6 +9,8 @@ import {
   MAX_PRICING_WORKBOOK_ROWS,
   MAX_PRICING_WORKBOOK_UNCOMPRESSED_BYTES,
   parseProductPricingWorkbook,
+  priceSheetExpiredText,
+  priceSheetRefusalText,
   PRICING_WORKBOOK_FORMAT_VERSION,
   PRICING_WORKBOOK_HEADERS,
   PRICING_WORKBOOK_MANIFEST_SHEET,
@@ -407,5 +409,31 @@ describe('product pricing workbook', () => {
     expect(groupedUseTimingRefusal(preview, grouped)).toBe('Nothing was saved. Use Timing is set on the parent: '
       + 'Atrazine 1 gal (parent "Atrazine 4L"). Change it on the product page\'s Parent panel, then download a new workbook.');
     expect(groupedUseTimingRefusal(preview, new Map())).toBeNull();
+  });
+});
+
+describe('price sheet refusal wording', () => {
+  const expiresAt = '2026-11-24T18:00:00+00:00';
+  const before = Date.parse('2026-11-24T17:59:59Z');
+  const after = Date.parse('2026-11-24T18:00:00Z');
+
+  it('says expired only once expires_at has passed', () => {
+    expect(priceSheetExpiredText(expiresAt, before)).toBeNull();
+    expect(priceSheetExpiredText(expiresAt, after)).toBe('Nothing was saved. This price sheet expired (sheets last 7 days). Download a fresh one');
+    expect(priceSheetExpiredText('not a date', after)).toBeNull();
+  });
+
+  it('tells an expired sheet from a used sheet or another user sheet for each combined server code', () => {
+    for (const code of ['WORKBOOK_V2_EXPORT_REQUIRED', 'WORKBOOK_EXPORT_INVALID_OR_EXPIRED', 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED']) {
+      expect(priceSheetRefusalText({ message: code }, expiresAt, after)).toMatch(/This price sheet expired \(sheets last 7 days\)/);
+      expect(priceSheetRefusalText(new Error(code), expiresAt, before))
+        .toBe('Nothing was saved. This price sheet was already applied, or was downloaded by another user. Download a fresh one');
+    }
+  });
+
+  it('leaves other errors, and an unreadable expiry, to the general wording', () => {
+    expect(priceSheetRefusalText({ message: 'PRICING_DUPLICATE_PRODUCT_ID' }, expiresAt, before)).toBeNull();
+    expect(priceSheetRefusalText({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' }, '', before)).toBeNull();
+    expect(priceSheetRefusalText(null, expiresAt, before)).toBeNull();
   });
 });

@@ -100,13 +100,18 @@ vi.mock('../lib/productPricingSupplierEvidenceWorkbook', () => ({
   parseProductPricingWorkbookWithSupplierEvidence: mockParsePricing,
 }));
 
-vi.mock('../lib/productPricingWorkbook', () => ({
-  generateProductPricingWorkbook: vi.fn(),
-  MAX_PRICING_WORKBOOK_FILE_BYTES: pricingWorkbookFileLimit,
-  MAX_PRICING_WORKBOOK_ROWS: pricingWorkbookRowLimit,
-  parseProductPricingWorkbook: mockParsePricing,
-  groupedUseTimingRefusal: () => null,
-}));
+vi.mock('../lib/productPricingWorkbook', async () => {
+  const actual = await vi.importActual<typeof import('../lib/productPricingWorkbook')>('../lib/productPricingWorkbook');
+  return {
+    generateProductPricingWorkbook: vi.fn(),
+    MAX_PRICING_WORKBOOK_FILE_BYTES: pricingWorkbookFileLimit,
+    MAX_PRICING_WORKBOOK_ROWS: pricingWorkbookRowLimit,
+    parseProductPricingWorkbook: mockParsePricing,
+    groupedUseTimingRefusal: () => null,
+    priceSheetExpiredText: actual.priceSheetExpiredText,
+    priceSheetRefusalText: actual.priceSheetRefusalText,
+  };
+});
 
 vi.mock('../components/ui/EditableDataTable', () => ({
   default: function MockEditableDataTable({ data, onSave, filters, columns }: {
@@ -617,6 +622,34 @@ describe('Products governed inline pricing flow', () => {
         sha256: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
       },
     })));
+  });
+
+  it('says an expired price sheet expired, before any preview', async () => {
+    mockParsePricing.mockResolvedValue({ exportId: 'export-1', expiresAt: '2020-01-01T00:00:00+00:00', rows: [] });
+    const { container } = render(<Products />);
+    await screen.findByRole('button', { name: 'Review Pricing File' });
+    const input = container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!;
+    fireEvent.change(input, { target: { files: [new File(['abc'], 'old.xlsx')] } });
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error',
+      'Nothing was saved. This price sheet expired (sheets last 7 days). Download a fresh one',
+    ));
+    expect(mockPreviewPricing).not.toHaveBeenCalled();
+  });
+
+  it('says a current price sheet the server refuses was already applied or belongs to another user', async () => {
+    mockParsePricing.mockResolvedValue({ exportId: 'export-1', expiresAt: '2999-01-01T00:00:00+00:00', rows: [] });
+    mockPreviewPricing.mockRejectedValue({ message: 'WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED' });
+    const { container } = render(<Products />);
+    await screen.findByRole('button', { name: 'Review Pricing File' });
+    const input = container.querySelector<HTMLInputElement>('input[type="file"][accept^=".xlsx"]')!;
+    fireEvent.change(input, { target: { files: [new File(['abc'], 'used.xlsx')] } });
+
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith(
+      'error',
+      'Nothing was saved. This price sheet was already applied, or was downloaded by another user. Download a fresh one',
+    ));
   });
 
   it('exports the full price sheet: every active product, never an inactive one', async () => {

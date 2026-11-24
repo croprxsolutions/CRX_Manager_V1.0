@@ -773,6 +773,26 @@ export async function parseProductPricingWorkbook(
   };
 }
 
+// The server refuses a used, expired or another user's price sheet with one combined code
+// (errorSanitizer keeps the combined wording as the fallback); the sheet's own expiry says which.
+const PRICE_SHEET_REFUSED = /^(?:WORKBOOK_V2_EXPORT_REQUIRED|WORKBOOK_EXPORT_INVALID_OR_EXPIRED|WORKBOOK_EXPORT_CONSUMED_OR_EXPIRED)\b/;
+const PRICE_SHEET_EXPIRED_TEXT = 'Nothing was saved. This price sheet expired (sheets last 7 days). Download a fresh one';
+const PRICE_SHEET_USED_TEXT = 'Nothing was saved. This price sheet was already applied, or was downloaded by another user. Download a fresh one';
+
+/** The refusal for a price sheet already past its expires_at; null while it is current or unreadable. */
+export function priceSheetExpiredText(expiresAt: string, now = Date.now()): string | null {
+  const expiry = Date.parse(expiresAt);
+  return Number.isFinite(expiry) && expiry <= now ? PRICE_SHEET_EXPIRED_TEXT : null;
+}
+
+/** Plain words for the server's combined price sheet refusal; null for any other error. */
+export function priceSheetRefusalText(error: unknown, expiresAt: string, now = Date.now()): string | null {
+  const message = error instanceof Error ? error.message : (error as { message?: unknown } | null)?.message;
+  if (typeof message !== 'string' || !PRICE_SHEET_REFUSED.test(message)) return null;
+  if (!Number.isFinite(Date.parse(expiresAt))) return null;
+  return priceSheetExpiredText(expiresAt, now) ?? PRICE_SHEET_USED_TEXT;
+}
+
 /**
  * A grouped size's use timing belongs to its parent (PAR-1); the database refuses a direct change too.
  * Returns the refusal naming each grouped product and its parent, or null when none was edited.

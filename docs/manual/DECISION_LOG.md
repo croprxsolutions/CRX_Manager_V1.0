@@ -1,5 +1,26 @@
 # Decision Log
 
+## 2026-11-23 — #2372: Mason owner-accepted 3 Sol finding(s) at `7d3bebb5aeb7`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2372 at `7d3bebb5aeb7` (base `015566676500`) found 3 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:96`, text sha256 `2b543c4a8e4e38b5` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref cb4b852f3709)
+- Finding 2 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:99`, text sha256 `bafc22425cfe9fea` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref cb4b852f3709)
+- Finding 3 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:51`, text sha256 `40b54920e9b17d4c` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref cb4b852f3709)
+
+## 2026-11-23 — #2372: Mason owner-accepted 4 Sol finding(s) at `99b9e9ba7e0e`
+
+**Decision (Mason, by chat reply, 2026-11-23).** Sol's review of PR #2372 at `99b9e9ba7e0e` (base `2a4b17f13baa`) found 4 BLOCKER/HIGH finding(s). Mason chose to leave each one unfixed.
+- Finding 1 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:51`, text sha256 `3d60ebdec0dcb4ec` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 3949b4d093b4)
+- Finding 2 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:96`, text sha256 `a44329d5a48b94b3` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 3949b4d093b4)
+- Finding 3 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:79`, text sha256 `5f10a71b9616c61e` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 3949b4d093b4)
+- Finding 4 (HIGH) at `supabase/migrations/20270227160000_rate_cutover_refuses_unrestorable.sql:99`, text sha256 `dc2d5bb0b45ec653` (the wording stays with the proof, not here)
+  Mason chose to leave it unfixed (plain reply, ref 3949b4d093b4)
 ## 2026-11-23 — #2248: Mason's earlier skip carried to 5 repeat Sol finding(s) at `47d594e25f95`
 
 **Carried automatically (2026-11-23).** Sol's full review of PR #2248 at `47d594e25f95` (base `f91774df22ea`) found 5 BLOCKER/HIGH finding(s); Sol marked each the same as one Mason skipped on this pull request.

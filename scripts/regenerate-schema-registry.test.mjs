@@ -7,11 +7,13 @@ import { statSync } from 'node:fs';
 const registryPath = new URL('../.claude/schema-registry.json', import.meta.url);
 const registryMtime = statSync(registryPath).mtimeMs;
 // Imported after the mtime read: a static import would run first and hide a write on import.
-const { INTROSPECTION_QUERIES, liveIntrospection } = await import('./regenerate-schema-registry.mjs');
+const { INTROSPECTION_QUERIES, PROJECTS, liveIntrospection, fetchTypes } = await import('./regenerate-schema-registry.mjs');
 
 const sent = [];
 const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, text: async () => body });
-const fakeFetch = (rowsFor) => async (_url, init) => {
+const urls = [];
+const fakeFetch = (rowsFor) => async (url, init) => {
+  urls.push(url);
   const body = JSON.parse(init.body);
   sent.push(body);
   const key = Object.keys(INTROSPECTION_QUERIES).find((k) => INTROSPECTION_QUERIES[k] === body.query);
@@ -33,6 +35,23 @@ await fails((key) => reply(200, key === 'applied_names' ? '[]' : '[{"x":1}]'), /
 // A schema with no generated columns is valid, not a failed read.
 const noGenerated = await liveIntrospection({ token: 't', fetchImpl: fakeFetch((key) => reply(200, key === 'generated_columns' ? '[]' : '[{"x":1}]')) });
 assert.deepEqual(noGenerated.generated_columns, []);
+
+// Default is live; --staging reads the staging project and nothing else.
+assert(urls.slice(0, 6).every((u) => u === `https://api.supabase.com/v1/projects/${PROJECTS.live}/database/query`));
+urls.length = 0;
+await liveIntrospection({ token: 't', projectRef: PROJECTS.staging, fetchImpl: fakeFetch(() => reply(200, '[{"x":1}]')) });
+assert.equal(urls.length, 6);
+assert(urls.every((u) => u === 'https://api.supabase.com/v1/projects/fsnjredpmakbmhwowjjt/database/query'));
+
+// Types: the staging project's public schema; anything but a types string fails closed.
+let typesUrl;
+const typesFetch = (status, body) => async (url) => { typesUrl = url; return reply(status, body); };
+assert.equal(await fetchTypes({ token: 't', projectRef: PROJECTS.staging, fetchImpl: typesFetch(200, JSON.stringify({ types: 'export type Database = { public: {} }' })) }), 'export type Database = { public: {} }');
+assert.equal(typesUrl, 'https://api.supabase.com/v1/projects/fsnjredpmakbmhwowjjt/types/typescript?included_schemas=public');
+await assert.rejects(() => fetchTypes({ token: 't', fetchImpl: typesFetch(200, JSON.stringify({ types: 'public: unavailable' })) }), /types: HTTP 200/);
+await assert.rejects(() => fetchTypes({ token: 't', fetchImpl: typesFetch(401, '{"message":"no"}') }), /HTTP 401/);
+await assert.rejects(() => fetchTypes({ token: 't', fetchImpl: typesFetch(200, '{"types":""}') }), /types: HTTP 200/);
+await assert.rejects(() => fetchTypes({ token: 't', fetchImpl: typesFetch(200, 'oops') }), /not JSON/);
 
 // Importing the module must not run a mode (the old top-level code stamped the registry on import).
 assert.equal(statSync(registryPath).mtimeMs, registryMtime, 'importing the module wrote the registry');

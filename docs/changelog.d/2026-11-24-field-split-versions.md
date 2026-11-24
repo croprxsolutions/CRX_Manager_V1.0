@@ -7,6 +7,7 @@
 - Until FP-4 (job billing reads split history), each payer's product and application shares must be equal (`FIELD_SPLIT_SHARES_MUST_MATCH_UNTIL_FP4`), because billing still uses the one-share copy.
 - The copy marks the owner primary when the owner pays, otherwise the largest payer (lowest customer id on a tie); the apply stops if that would move today's primary mark.
 - Deleting a customer who owns or pays on a field is now refused (was: the customer's fields were deleted with it). Deleting a field that has a split is refused until FP-3 adds archiving; mark it inactive instead.
-- Existing splits become version 1 ("history before this date unknown"); thirds saved as 33.333333% each become exactly 33.333334 / 33.333333 / 33.333333.
+- Existing splits become version 1 ("history before this date unknown"); thirds saved as 33.333333% each become exactly 33.333334 / 33.333333 / 33.333333. Shares that total within 0.01% of 100% (backfill or Field Setup) are scaled in proportion to exactly 100%, as order invoicing already did, so no cents move between payers (50.01 / 50.00 becomes 50.005 / 49.995).
+- Main payer (Mason, 2026-11-24, "Yes, automatic"): the copy marks the owner primary when the owner pays, otherwise the largest payer; Field Setup's Set Primary is ignored. Condition: FP-1 and the Field Setup screen PR that removes Set Primary reach live in the same release.
 - Proof: `node scripts/smoke/prove-field-split-versions-real-schema.mjs` (`FIELD_SPLIT_VERSIONS_PROOF_PASS`, local Docker).
 - Not verified: the staging database (applied by the staging DB job after merge); the Field Setup screen change (its own PR).

@@ -191,6 +191,12 @@ try {
   assert.match(r, /PER_ACRE_PRICING_RETIRED/, `per-acre price refused: ${r}`);
   r = attempt(USERS.admin, `${refuse(saveField(F5, B, 'Five', `'[{"customer_id":"${B}","split_pct":90}]'::jsonb`, 'k-sf-90'))} v := t;`);
   assert.match(r, /must total 100/, `save_field 90% refused: ${r}`);
+  // Shares within 0.01% of 100% are scaled in proportion, as order invoicing did: 50.01/50.00 -> 50.005/49.995 (Sol r5 HIGH).
+  commit(USERS.admin, asUser(saveField(F5, B, 'Five', `'[{"customer_id":"${B}","split_pct":50.01},{"customer_id":"${C}","split_pct":50.00}]'::jsonb`, 'k-sf-near')) + ' v := u::text;');
+  assert.equal(inForce(F5), [`${B}:50005000/50005000`, `${C}:49995000/49995000`].sort().join(','), 'a near-100% split is scaled in proportion, not shifted onto one payer');
+  const vF5 = versions(F5);
+  commit(USERS.admin, asUser(saveField(F5, B, 'Five renamed', `'[{"customer_id":"${B}","split_pct":50.005},{"customer_id":"${C}","split_pct":49.995}]'::jsonb`, 'k-sf-near-name')) + ' v := u::text;');
+  assert.equal(versions(F5), vF5, 'resending the scaled copy (an old-screen name-only save) writes no version');
   console.log('[save_field] name-only and notes-only saves write no version; an empty save on a split field is refused; 0% payer survives; price refused');
 
   // 4. Retries.

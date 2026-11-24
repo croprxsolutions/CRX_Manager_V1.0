@@ -21,7 +21,8 @@
 --   5. fields.customer_id: ON DELETE CASCADE -> RESTRICT (I approve: constraint change). No customer-delete flow
 --      exists in the app; deleting a customer who owns or pays on a field is now refused.
 --   6. Backfill: each field's current split becomes version 1 (history_known = false, from 1900-01-01, both share
---      sets = today's percent x 1,000,000, any rounding difference to the largest share, lowest customer id on a tie).
+--      sets = today's percents scaled in proportion to exactly 100% (share / total, as order invoicing did), in micro-percent,
+--      the last micro-percent of rounding to the largest share, lowest customer id on a tie).
 --   7. Until FP-4: each payer's product and application shares must be equal (FIELD_SPLIT_SHARES_MUST_MATCH_UNTIL_FP4),
 --      because job billing still falls back to the copy, which holds one share per payer.
 --
@@ -32,11 +33,13 @@
 --   - a split equal to today's in-force product shares (payers above 0%) writes no version (an old-screen name-only
 --     save); a different one writes a version starting Central today with product = application shares;
 --   - each element's notes go to field_payer_notes; is_primary is ignored (the copy marks the owner primary when paying, else the largest share);
---   - a price_override_cents or pricing_note is refused (per-acre pricing is retired, 20270224110000).
+--   - a price_override_cents or pricing_note is refused (per-acre pricing is retired, 20270224110000);
+--   - shares totalling within 0.01% of 100% are scaled in proportion to exactly 100%, as order invoicing did (e.g. 50.01/50.00
+--     is saved as 50.005/49.995, billing the same cents as before); a larger gap is refused.
 --
 -- CUTOVER (rule 6, inside this transaction after the locks): stops if any field_billing_defaults row carries a
 --   per-acre price or note, a primary mark the copy would move (owner if paying, else largest share), or a
---   rounding difference over 10,000 micro-percent. Permitted live counts (read-only 2026-11-24): 5 fields with a split,
+--   total more than 0.01% away from 100%. Permitted live counts (read-only 2026-11-24): 5 fields with a split,
 --   6 rows, 0 of each stop condition. Staging (2026-11-24): TEST fields only, incl. a non-owner 100% primary (kept).
 --
 -- NOT CHANGED: every reader of field_billing_defaults (they read the copy until FP-4 moves them), fbd_select, the
@@ -667,6 +670,7 @@ DECLARE
   v_current jsonb;
   v_sent jsonb;
   v_diff bigint;
+  v_total numeric;
 BEGIN
   v_actor := auth.uid();
   IF v_actor IS NULL THEN RAISE EXCEPTION 'AUTH_REQUIRED'; END IF;
@@ -714,17 +718,19 @@ BEGIN
                 WHERE (e->>'split_pct')::numeric <= 0 OR (e->>'split_pct')::numeric > 100) THEN
       RAISE EXCEPTION 'FIELD_SPLIT_INVALID_SHARE: each share must be above 0%% and at most 100%%' USING ERRCODE = '22023';
     END IF;
-    -- Percent x 1,000,000; the rounding difference to exactly 100% goes to the largest share (lowest customer id on a tie).
+    -- Shares within 0.01% of 100% are scaled in proportion to exactly 100% (share / total), as order invoicing
+    -- already normalised them (20261029160000); the last micro-percent of rounding goes to the largest share
+    -- (lowest customer id on a tie) (Sol r5 HIGH: no silent shift between payers).
+    v_total := (SELECT sum((e->>'split_pct')::numeric) FROM jsonb_array_elements(p_billing_defaults) e);
+    IF abs(v_total - 100) > 0.01 THEN
+      RAISE EXCEPTION 'Billing splits must total 100%% (got %)', trim_scale(v_total) USING ERRCODE = '22023';
+    END IF;
     SELECT jsonb_agg(jsonb_build_object('customer_id', e->>'customer_id',
-                                        'product_share_micro_pct', round((e->>'split_pct')::numeric * 1000000),
-                                        'application_share_micro_pct', round((e->>'split_pct')::numeric * 1000000))
-                     ORDER BY round((e->>'split_pct')::numeric * 1000000) DESC, e->>'customer_id')
+                                        'product_share_micro_pct', round((e->>'split_pct')::numeric * 100000000 / v_total),
+                                        'application_share_micro_pct', round((e->>'split_pct')::numeric * 100000000 / v_total))
+                     ORDER BY round((e->>'split_pct')::numeric * 100000000 / v_total) DESC, e->>'customer_id')
       INTO v_payers FROM jsonb_array_elements(p_billing_defaults) e;
     v_diff := 100000000 - (SELECT sum((x->>'product_share_micro_pct')::bigint) FROM jsonb_array_elements(v_payers) x);
-    IF abs(v_diff) > 10000 THEN
-      RAISE EXCEPTION 'Billing splits must total 100%% (got %)',
-        trim_scale((100000000 - v_diff)::numeric / 1000000) USING ERRCODE = '22023';
-    END IF;
     IF v_diff <> 0 THEN
       v_payers := jsonb_set(jsonb_set(v_payers, '{0,product_share_micro_pct}',
                     to_jsonb((v_payers->0->>'product_share_micro_pct')::bigint + v_diff)),
@@ -840,16 +846,19 @@ DECLARE
   v_field uuid;
   v_payers jsonb;
   v_diff bigint;
+  v_total numeric;
   v_version uuid;
 BEGIN
   FOR v_field IN SELECT DISTINCT field_id FROM public.field_billing_defaults ORDER BY field_id LOOP
-    SELECT jsonb_agg(jsonb_build_object('c', customer_id, 'm', round(split_pct * 1000000)::bigint)
-                     ORDER BY round(split_pct * 1000000) DESC, customer_id)
+    -- Scaled in proportion to exactly 100%, as order invoicing normalises the copy (Sol r5 HIGH).
+    SELECT sum(split_pct) INTO v_total FROM public.field_billing_defaults WHERE field_id = v_field;
+    IF abs(v_total - 100) > 0.01 THEN
+      RAISE EXCEPTION 'FIELD_SPLIT_CUTOVER_STOP: field % split totals % percent', v_field, v_total;
+    END IF;
+    SELECT jsonb_agg(jsonb_build_object('c', customer_id, 'm', round(split_pct * 100000000 / v_total)::bigint)
+                     ORDER BY round(split_pct * 100000000 / v_total) DESC, customer_id)
       INTO v_payers FROM public.field_billing_defaults WHERE field_id = v_field;
     v_diff := 100000000 - (SELECT sum((x->>'m')::bigint) FROM jsonb_array_elements(v_payers) x);
-    IF abs(v_diff) > 10000 THEN
-      RAISE EXCEPTION 'FIELD_SPLIT_CUTOVER_STOP: field % split is % micro-percent away from 100%%', v_field, v_diff;
-    END IF;
     v_payers := jsonb_set(v_payers, '{0,m}', to_jsonb((v_payers->0->>'m')::bigint + v_diff));
     INSERT INTO public.field_billing_split_versions (field_id, version_number, effective_from, history_known, reason, created_by)
     VALUES (v_field, 1, DATE '1900-01-01', false, 'Imported: the split saved before split history existed', NULL)

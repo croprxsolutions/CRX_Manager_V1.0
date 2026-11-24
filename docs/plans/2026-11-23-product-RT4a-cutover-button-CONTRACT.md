@@ -113,3 +113,53 @@ None. Authority, refusals, undo and the freeze were settled in the RT-4a contrac
 ## Amendment (2026-11-23, Sol rounds 3-4; Mason: "A: follow-up issue")
 
 - A general database guard on Add a size, Move a size and rate or unit corrections (refusing a rate unit field-app invoices cannot convert to the sold unit) was tried here and drew a new Sol HIGH in each round. Mason chose to keep only the two refusals on the switch itself in this PR and track the general guard as its own follow-up issue: that gap exists on every group today, with or without this button.
+
+## Amendment (2026-11-24, "Re-check at the switch": #2379, #1813; Mason's night-run decisions D1-D3)
+
+Migration `20270228190000_rate_switch_recheck.sql` adds `_rate_cutover_recheck`, run on every promote by both
+`preview_parent_rate_cutover` and `commit_parent_rate_cutover` after the existing planner. Restores are never refused by it.
+
+- **D2, re-approve (#1813).** If any approved rate row of the group no longer passes Rate Review's own outcome checks for
+  the group's current form (`basis_confirmed` false, or `_product_rate_unit_fits(form, basis, unit kind)` false), the
+  switch refuses: `PRODUCT_PARENT_CUTOVER_REAPPROVE: ... re-approve this rate in Rate Review`, naming each row.
+- **D1, over the label (#2379).** For an `approved_default` group, the published approved rate is judged by the same
+  function Rate Review uses (`_product_rate_check_values`) against today's label maximum. Status `above` with no
+  over-label reason refuses (`PRODUCT_PARENT_CUTOVER_OVER_LABEL`) in preview and commit. A reason (trimmed, at most 500
+  characters, the `product_rates.over_label_reason` limit) lets it through, and is recorded with the label check in the
+  `rates_promoted` event's `after_values` and in the receipt. A reason sent when the rate is not above is not recorded.
+  `not_checked` (no label maximum on file) passes, as it does in Rate Review.
+- **Commit re-checks.** A label maximum lowered after the preview refuses the commit. The over-label reason is part of
+  the idempotency fingerprint: the same key with another reason is `IDEMPOTENCY_PAYLOAD_MISMATCH`.
+- **Signatures.** `preview_parent_rate_cutover(uuid, text, p_over_label_reason text DEFAULT NULL)` and
+  `commit_parent_rate_cutover(uuid, text, jsonb, text, p_idempotency_key text DEFAULT NULL, p_over_label_reason text DEFAULT NULL)`;
+  the old signatures are dropped, so positional 2- and 5-argument calls keep their meaning.
+- **Screen.** When the preview refuses with `OVER_LABEL`, the panel shows an "Over-label reason" box; the admin types a
+  reason and previews again. The switch button works only on a preview made with the reason now in the box, and
+  commit sends that reason. `REAPPROVE` is shown as the refusal, with no way past it on this screen.
+- **D3 (docs).** The suggested-rate rule in the RT-4 contract (rule 4, restore in rule 8) is corrected to what the code
+  already does: rewritten from the approved rate on a promote that moves it, restored on switch back.
+- **Live read (2026-11-24, select only):** 413 promotable groups; 0 with an approved row failing the form/basis check;
+  0 approved defaults carrying an over-label reason. So D2 refuses no group today; D1 refuses only groups whose label
+  maximum is below the approved rate.
+- **Proof cases (prover `scripts/smoke/prove-rate-switch-recheck-real-schema.mjs`):** R1 over-label refusals (blank,
+  none, 501 characters); R2 a reason recorded in event and receipt; R3 replay and fingerprint; R4 switch back needs no
+  reason; R5 within the maximum, reason not recorded, positional call; R6 label lowered between preview and commit;
+  R7 form changed and basis unconfirmed; R8 no rows changed, second run refuses, old signatures gone, grants.
+
+### Cold challenge (Astra, gpt-6.2-astra high, 2026-11-24): 18 findings, settled
+
+- **Fixed:** (4) the label check joins `expected`, so a maximum lowered after a reasoned preview refuses as stale;
+  (5) with no over-label reason the commit fingerprint is the 20270125100000 one, so a pre-migration switch's retry
+  replays (proved); (8, 13) the length limit applies only when a reason is needed, after the re-approve check;
+  (9) the reason is trimmed like `product_rates.over_label_reason` (no-break space too) and needs a letter or digit;
+  (10) a missing approved default refuses as stale and an approved row whose unit has no kind refuses re-approve;
+  (11) the receipt carries the label check; (12) the screen's reason box belongs to one group and direction, and shows
+  on a too-long refusal; (18) the preflight pins both Rate Review helper bodies (live md5, select only).
+- **Disproved / by design:** (1) D2 is #1813's rule: re-check the approved rows "as it is then" with Rate Review's own
+  form/basis checks (`_product_rate_review_row_problems`); a row Rate Review would approve today is not refused, and a
+  row's basis cannot change without editing the row, which clears the outcome. (2, 3) D1 says "the same rule Rate
+  Review uses": label-source rows and `not_checked` pass there too. (7, 17) restore and same-key concurrency are
+  unchanged from RT-4a (its prover P1-P9). (14) the refusal's number and unit are the approved row's, as published.
+  (15) the screen sends the over-label reason only when typed, so it also works before the migration is applied.
+  (16) migrations apply in one transaction (the prover applies the file with `psql -1`); rollback stays its own
+  reviewed migration. (6) `_product_rate_check_values` takes the label-registry lock every label writer takes.

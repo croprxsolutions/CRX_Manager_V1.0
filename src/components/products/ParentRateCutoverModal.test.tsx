@@ -39,7 +39,7 @@ describe('RT-4a rate cut-over modal', () => {
     const onSaved = open();
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
     await screen.findByTestId('rate-cutover-table');
-    expect(mockPreview).toHaveBeenCalledWith('par1', 'promote');
+    expect(mockPreview).toHaveBeenCalledWith('par1', 'promote', '');
     expect(screen.getByText('1.8 Lb')).toBeInTheDocument();
     expect(screen.getByText('1.8 Lb/acre')).toBeInTheDocument();
     expect(screen.getByText('$35.37')).toBeInTheDocument();
@@ -61,6 +61,41 @@ describe('RT-4a rate cut-over modal', () => {
     expect(screen.queryByRole('button', { name: 'Switch to approved rate' })).toBeNull();
   });
 
+  it('over the label maximum: asks for an over-label reason, previews with it, and switches with it (#2379)', async () => {
+    const above = { ...eligible, label_check: { status: 'above' }, over_label_reason: 'trial plot' };
+    mockPreview
+      .mockResolvedValueOnce({ parent_id: 'par1', direction: 'promote', eligible: false,
+        refusal: 'PRODUCT_PARENT_CUTOVER_OVER_LABEL: the approved rate is above the current label maximum; type an over-label reason to switch' })
+      .mockResolvedValueOnce(above);
+    mockCommit.mockResolvedValue({ parent_id: 'par1', direction: 'promote', rate_source: 'approved' });
+    const onSaved = open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('type an over-label reason');
+    const box = screen.getByLabelText(/Over-label reason/);
+    fireEvent.change(box, { target: { value: ' trial plot ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    await screen.findByTestId('rate-cutover-table');
+    expect(mockPreview).toHaveBeenLastCalledWith('par1', 'promote', ' trial plot ');
+    // Editing the reason after the preview retires it: preview again with the new text.
+    fireEvent.change(box, { target: { value: 'other' } });
+    expect(screen.queryByRole('button', { name: 'Switch to approved rate' })).toBeNull();
+    fireEvent.change(box, { target: { value: 'trial plot' } });
+    fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'pilot' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to approved rate' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(mockCommit).toHaveBeenCalledWith(above, 'pilot', expect.any(String));
+  });
+
+  it('a rate to re-approve is shown as the refusal, with no reason box (#1813)', async () => {
+    mockPreview.mockResolvedValue({ parent_id: 'par1', direction: 'promote', eligible: false,
+      refusal: 'PRODUCT_PARENT_CUTOVER_REAPPROVE: the form or rate basis of "Smart Test" changed since its rate was approved (label per_100_gal: basis not confirmed); re-approve this rate in Rate Review' });
+    open();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('re-approve this rate in Rate Review');
+    expect(screen.queryByLabelText(/Over-label reason/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Switch to approved rate' })).toBeNull();
+  });
+
   it('switches back with restore when the group is on its approved rate', async () => {
     const restore = { ...eligible, direction: 'restore', rate_source: 'approved',
       target: { rate_per_acre: null, rate_unit: 'Dry oz', suggested_rate: null } };
@@ -69,7 +104,7 @@ describe('RT-4a rate cut-over modal', () => {
     const onSaved = open('approved');
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
     const back = await screen.findByRole('button', { name: 'Switch back to old rate' });
-    expect(mockPreview).toHaveBeenCalledWith('par1', 'restore');
+    expect(mockPreview).toHaveBeenCalledWith('par1', 'restore', '');
     expect(screen.getByText('none (Dry oz)')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'undo pilot' } });
     fireEvent.click(back);

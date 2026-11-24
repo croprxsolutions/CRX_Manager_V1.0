@@ -69,7 +69,7 @@ No advisory locks. A refusal anywhere rolls back everything.
    - Liquid/dry `rate_unit` NULL; seed/each sizes keep their stock unit. The field app shows the stock unit for a NULL rate unit (existing fallback); the rate stays blank.
    - New lines start with no rate (Mason, 2026-11-17: "Yes, leave it blank"). No reader parses `suggested_rate` text into a rate (reader trace 2026-11-17).
 4. **Only rate fields move.**
-   - `suggested_rate` is passed through unchanged (the parent's current value).
+   - `suggested_rate` (corrected 2026-11-24, D3; matches the 20270125100000 code and Mason's 2026-11-18 "Rewrite from approved"): a promote that moves the rate or unit rewrites it to `<rate> <unit>/acre` from the approved row (blank with no per-acre default); a promote that changes nothing keeps it; switch back restores the snapshot's text.
    - `_copy_parent_to_size` also writes category and use timings from the parent. Live: every size already equals its parent on suggested text, category and timings, and the call refuses if any size differs at commit.
 5. **No-change promote** (live: 370 of 372 approved_default parents). It takes the same locks and checks as rule 1, verifies the snapshot, and refuses on any mismatch. It writes no rate column. It records the marker and the event, and it bumps `parent_version` so an old preview cannot replay.
 6. **Changing promote.**
@@ -83,7 +83,7 @@ No advisory locks. A refusal anywhere rolls back everything.
 8. **Restore.**
    - Only when `rate_source = 'approved'`; inactive parents may be restored.
    - Puts the parent's snapshot `legacy` rate and unit back and copies down to every current size through the same `_apply_parent_rates` path. When nothing differs, no write happens.
-   - Restore covers exactly `rate_per_acre` and `rate_unit`. `suggested_rate` was never changed. Per-acre prices are recomputed from today's stock prices, so a price change made since promotion is kept, not undone.
+   - Restore covers `rate_per_acre`, `rate_unit` and `suggested_rate` (the snapshot's `legacy` values; rule 4). Per-acre prices are recomputed from today's stock prices, so a price change made since promotion is kept, not undone.
    - Then `rate_source = 'legacy'`, `rate_source_event_id` NULL, `parent_version` bumped, and a `rates_restored` event citing the promote event.
    - A size added after promotion gets the parent's legacy rate like its siblings; live sizes never differ from their parent today.
 9. **An approved parent cannot drift**, through any route. The guard runs in the database on the tables themselves:

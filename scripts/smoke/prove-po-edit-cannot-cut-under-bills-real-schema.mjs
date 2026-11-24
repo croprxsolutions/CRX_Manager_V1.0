@@ -7,7 +7,8 @@
  * Builds the production baseline plus every post-baseline migration before the candidate in a network-disabled
  * PostgreSQL container (scripts/smoke/undo-paths/harness.mjs), shows the Edit PO gap, applies the candidate (autocommit
  * refused, POSTFLIGHT_OK, re-apply refused), then checks Edit PO saves against the bills and cost cuts after real
- * receipts and real reversals. Every probe is rolled back.
+ * receipts and real reversals. Edit PO probes are rolled back; the receipts, reversals and re-entered bills commit inside
+ * the throwaway container, so later probes see them.
  *
  * Run: node scripts/smoke/prove-po-edit-cannot-cut-under-bills-real-schema.mjs   (needs Docker; never touches live)
  * Prints PO_EDIT_BILLS_PROOF_PASS on success.
@@ -119,6 +120,13 @@ try {
       VALUES ('${VENDOR}', '${PO4}', 'POEB-B0', CURRENT_DATE, CURRENT_DATE + 30, 0, 0);
     SET LOCAL session_replication_role = origin;
     ${refuse(`r := ${saveAs(USERS.rep, PO4, 'submitted', [[L4A, 1, 0]])};`)} v := split_part(t, ':', 1) || '|' || ${total(PO4)};`), 'ok|PO_EDIT_NEEDS_ADMIN|10000');
+  // 4y. A mixed edit that keeps the total (L3A 10 -> 9, L3B 10 -> 11) is refused too: the outcome never depends on
+  //     which line costs more (Sol HIGH). So is a rep's cut on a PO whose bill an admin voids in the same moment: the
+  //     cut then saves with no amounts anywhere (the rep path never raises PO_EDIT_BELOW_BILLED).
+  assert.equal(attempt(USERS.rep, `${refuse(`r := ${saveAs(USERS.rep, PO3, 'submitted', [[L3A, 9, 0], [L3B, 11, 0]])};`)} v := split_part(t, ':', 1) || '|' || ${total(PO3)};`), 'ok|PO_EDIT_NEEDS_ADMIN|20000');
+  assert.equal(attempt(USERS.rep, `SET LOCAL session_replication_role = replica;
+    UPDATE public.vendor_bills SET status = 'voided' WHERE purchase_order_id = '${PO1}'; SET LOCAL session_replication_role = origin;
+    ${asUser(`r := ${saveAs(USERS.rep, PO1, 'partially_received', [[L1A, 60, 60], [L1B, 1, 0]])};`)} v := ${total(PO1)};`), 'ok|61000');
   // 4a. A rep may still raise it, and may cut a PO with no bills.
   assert.equal(saved(USERS.rep, saveAs(USERS.rep, PO1, 'partially_received', [[L1A, 60, 60], [L1B, 50, 0]]), PO1), 'ok|110000');
   assert.equal(saved(USERS.rep, saveAs(USERS.rep, PO4, 'submitted', [[L4A, 1, 0]]), PO4), 'ok|1000');
@@ -127,7 +135,7 @@ try {
   assert.equal(detailOf(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 1, 0]])), 'ok|{"po_total_cents": 61000, "active_billed_cents": 100000}');
   // 5. Raising a quantity is never refused.
   assert.equal(saved(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 50, 0]]), PO1), 'ok|110000');
-  console.log('[edit PO] 40 -> 1 refused; 36 allowed, 35 refused (5% to the cent); dropped line refused; rep cannot lower a billed PO at all, even with a $0 bill (same refusal, no amounts), can raise it or cut an unbilled PO; admin DETAIL has amounts; raise allowed');
+  console.log('[edit PO] 40 -> 1 refused; 36 allowed, 35 refused (5% to the cent); dropped line refused; rep cannot cut a line on a billed PO, even with a $0 bill or a total-neutral mixed edit (same refusal, no amounts), can raise it or cut an unbilled PO; admin DETAIL has amounts; raise allowed');
 
   // 6. A bill already over the whole order ($110 on $100): an edit that keeps the total (notes) still saves, a cut does not.
   assert.equal(saved(USERS.admin, save(PO2, 'submitted', [[L2A, 10, 0]], 'call vendor'), PO2), 'ok|10000');
@@ -145,8 +153,11 @@ try {
   psql(`BEGIN; SET LOCAL session_replication_role = replica; UPDATE public.vendor_bills SET subtotal_cents = 2101, total_cents = 2101 WHERE bill_number = 'POEB-B4'; COMMIT;`);
   assert.equal(refused(USERS.admin, save(PO4, 'submitted', [[L4A, 2, 0]]), PO4), 'ok|PO_EDIT_BELOW_BILLED|10000');
   // 8. A replay of a saved edit returns the receipt and is not refused.
+  //    The retry writes nothing: no second activity entry.
   const k = key();
-  assert.equal(attempt(USERS.admin, `${asUser(`r := ${save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 36, 0]]).replace(/'po-edit-bills-\d+'\)$/, `'${k}')`)}; r2 := ${save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 36, 0]]).replace(/'po-edit-bills-\d+'\)$/, `'${k}')`)};`)} v := (r = r2)::text || '|' || ${total(PO1)};`), 'ok|true|96000');
+  const keyed = () => save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 36, 0]]).replace(/'po-edit-bills-\d+'\)$/, `'${k}')`);
+  assert.equal(attempt(USERS.admin, `${asUser(`r := ${keyed()};`)} n := (SELECT count(*) FROM public.activity_feed);
+    ${asUser(`r2 := ${keyed()};`)} v := (r = r2)::text || '|' || ${total(PO1)} || '|' || ((SELECT count(*) FROM public.activity_feed) = n)::text;`), 'ok|true|96000|true');
   console.log('[edit PO] over-billed PO: notes edit saves, cut refused; no bills / voided bill: cut saves; exactly 5% over saves, a cent more refused; replay not refused');
 
   // Rule 2: a bill that went over because a receipt was reversed does not block a cost correction. A receipt cannot

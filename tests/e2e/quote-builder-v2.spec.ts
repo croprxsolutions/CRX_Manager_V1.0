@@ -13,7 +13,7 @@
  *   9. Customer Detail planned filter + badge
  *  10. Inventory forecasting tab
  *  11. Seasonal rollover (RPC + UI button)
- *  12. Quick Quote from Customer page (New from Last, URL param)
+ *  12. Quick Quote from Customer page (Repeat last quote, URL param)
  *
  * Uses real existing data — creates only quotes/orders which are cleaned up at end.
  * Tests are resilient to V2 migrations not yet applied to the live DB.
@@ -408,19 +408,14 @@ test.describe.serial('Quote Builder V2 (12 Sprints)', () => {
   });
 
   // ================================================================
-  // SPRINT 12: "New from Last" button on Customer Detail
+  // SPRINT 12: "Repeat last quote" button on Customer Detail
   // ================================================================
-  test('Step 08: "New from Last" duplicates most recent quote', async ({ page }) => {
+  test('Step 08: "Repeat last quote" duplicates most recent quote', async ({ page }) => {
     await nav(page, `/customers/${S.customerId}`);
     await waitStable(page);
 
-    // Click Quotes tab
-    const quotesTab = page.locator('button:has-text("Quotes")').first();
-    await quotesTab.click();
-    await waitStable(page);
-
-    // Click "New from Last"
-    const newFromLastBtn = page.locator('button:has-text("New from Last")').first();
+    // Quotes open on load; "Repeat last quote" sits in the page header beside "New quote".
+    const newFromLastBtn = page.getByRole('button', { name: 'Repeat last quote' }).first();
     if (await newFromLastBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await newFromLastBtn.click();
       await waitStable(page, 1000);

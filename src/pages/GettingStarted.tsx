@@ -406,7 +406,7 @@ export default function GettingStarted() {
             <p>When the customer accepts, click <strong>&quot;Convert to Order&quot;</strong>. This creates an order with all the quoted items, releases any inventory holds, and books the prebooked quantities. The quote status changes to &quot;Accepted&quot;.</p>
           </GuideStep>
           <Tip>Use the <strong>version history</strong> panel (top-right of the quote builder) to snapshot your quote before making changes. You can always restore a previous version.</Tip>
-          <Tip>The <strong>&quot;New from Last Quote&quot;</strong> button on the customer detail page lets you quickly create a new quote pre-filled with the customer&apos;s most recent quote items — great for repeat orders.</Tip>
+          <Tip>The <strong>&quot;Repeat last quote&quot;</strong> button at the top of the customer page creates a new quote pre-filled with the customer&apos;s most recent quote items — great for repeat orders.</Tip>
         </GuideSection>
       )}
 

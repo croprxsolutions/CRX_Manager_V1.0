@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState , useCallback, lazy, Suspense } from 'react';
 import { billingM4Enabled } from '../lib/billingFeatures';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, MessageSquarePlus, Copy, ClipboardList, Zap, SprayCan, PhoneCall, User, Ruler, Sprout, Percent, StickyNote, ChevronDown, Users, Lightbulb, FolderOpen, History, Map, Package, Wallet, ShoppingBasket, Receipt, Lock, RotateCcw } from 'lucide-react';
+import { Save, Plus, Trash2, MapPin, FileText, Truck, AlertTriangle, ClipboardList, SprayCan, User, Ruler, Sprout, Percent, StickyNote, ChevronDown, Users, Lightbulb, FolderOpen, History, Map, Package, Wallet, ShoppingBasket, Receipt, Lock } from 'lucide-react';
 import type { InputHTMLAttributes, ReactNode } from 'react';
 import Card, { CardHeader } from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -27,6 +27,7 @@ import SectionJumpBar from '../components/ui/SectionJumpBar';
 import { parseLocalDate, localToday, localDatePlusDays, todayInBusinessTz } from '../lib/dateUtils';
 import QuickTaskModal from '../components/team/QuickTaskModal';
 import RelatedNotes from '../components/team/RelatedNotes';
+import CustomerHeaderActions from '../components/customers/CustomerHeaderActions';
 import type { Customer, CustomerAddress, CommissionSplit, Quote, Order, Delivery, DeliveryRemainder, Field, LinkedEntityType, ActivityFeedItem, ARAgingRow, ARAgingPricedRow } from '../types';
 import type { Json } from '../types/supabase';
 import { Sentry } from '../lib/sentry';
@@ -118,19 +119,22 @@ const makeBlankCustomer = (salesRepId: string | undefined): Partial<Customer> =>
 
 type CustomerSection = 'contacts' | 'knowledge' | 'documents' | 'timeline' | 'fields' | 'quotes' | 'orders' | 'deliveries' | 'financials' | 'history';
 
-// Info is always open; every other section folds and loads only when opened.
+// Info is always open; every other section folds and loads only when opened. Quotes and Orders
+// come first and start open, above the edit form: the page is mostly used to sell.
 const FOLD_SECTIONS: { id: CustomerSection; title: string; icon: ReactNode }[] = [
+  { id: 'quotes', title: 'Quotes', icon: <FileText className="h-5 w-5" /> },
+  { id: 'orders', title: 'Orders', icon: <ClipboardList className="h-5 w-5" /> },
   { id: 'contacts', title: 'Contacts', icon: <Users className="h-5 w-5" /> },
   { id: 'knowledge', title: 'Knowledge', icon: <Lightbulb className="h-5 w-5" /> },
   { id: 'documents', title: 'Documents', icon: <FolderOpen className="h-5 w-5" /> },
   { id: 'timeline', title: 'Timeline', icon: <History className="h-5 w-5" /> },
   { id: 'fields', title: 'Fields', icon: <Map className="h-5 w-5" /> },
-  { id: 'quotes', title: 'Quotes', icon: <FileText className="h-5 w-5" /> },
-  { id: 'orders', title: 'Orders', icon: <ClipboardList className="h-5 w-5" /> },
   { id: 'deliveries', title: 'Deliveries', icon: <Package className="h-5 w-5" /> },
   { id: 'financials', title: 'Financials', icon: <Wallet className="h-5 w-5" /> },
   { id: 'history', title: 'History', icon: <ShoppingBasket className="h-5 w-5" /> },
 ];
+
+const FOLD_BY_ID = Object.fromEntries(FOLD_SECTIONS.map((s) => [s.id, s])) as Record<CustomerSection, (typeof FOLD_SECTIONS)[number]>;
 
 const sectionAnchor = (section: CustomerSection | 'info') => `customer-section-${section}`;
 
@@ -237,7 +241,7 @@ export default function CustomerDetail() {
   const customerRowVersionRef = useRef<number | null>(null);
   const [staleSaveOpen, setStaleSaveOpen] = useState(false);
   const [duplicateMatches, setDuplicateMatches] = useState<CustomerDuplicateMatch[]>([]);
-  const [openSections, setOpenSections] = useState<ReadonlySet<CustomerSection>>(() => new Set());
+  const [openSections, setOpenSections] = useState<ReadonlySet<CustomerSection>>(() => new Set<CustomerSection>(['quotes', 'orders']));
   const [timeline, setTimeline] = useState<ActivityFeedItem[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
 
@@ -970,6 +974,27 @@ export default function CustomerDetail() {
     openSection(section);
   };
 
+  // "Repeat last quote": copies the newest quote into a new draft through duplicate_quote.
+  const repeatLastQuote = async () => {
+    const lastQuote = quotes[0];
+    if (!lastQuote) return;
+    try {
+      // Keyed per source quote: the server binds the key to the quote it copies (KI-10 batch 4c).
+      const idemKey = duplicateQuoteIdem.getKeyFor(lastQuote.id);
+      const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('duplicate_quote', withBelowCostReason('duplicate_quote', {
+        p_source_quote_id: lastQuote.id,
+        p_performed_by: profile?.id as string,
+        p_idempotency_key: idemKey,
+      }, reason)));
+      if (error) { toast('error', 'Failed to duplicate quote'); return; }
+      const result = assertRpcResult<{ quote_id: string }>(data, 'duplicate_quote');
+      duplicateQuoteIdem.resetKeyFor(lastQuote.id);
+      navigate(`/quotes/${result.quote_id}`);
+    } catch (error: unknown) {
+      if (!isBelowCostApprovalHandledError(error)) toast('error', 'Failed to duplicate quote');
+    }
+  };
+
   const handleSave = async (skipDuplicateCheck = false) => {
     if (saving) return;
     // The save writes the CURRENT route id, so it must never carry a form that
@@ -1473,56 +1498,20 @@ export default function CustomerDetail() {
           </h1>
           {!isNew && customer.is_active === false && <Badge variant="default">Inactive</Badge>}
         </div>
-        <div className="flex flex-wrap items-center gap-2 md:justify-end">
-          {!isNew && (isAdmin || profile?.role === 'sales_rep') && customer.is_active === false && (
-            <Button variant="primary" size="sm" icon={<RotateCcw className="w-4 h-4" />} showChevron={false} disabled={saving} onClick={() => setReactivateOpenFor(id ? { id, rowVersion: customerRowVersionRef.current } : null)}>
-              Reactivate
-            </Button>
-          )}
-          {!isNew && (
-            <Button variant="secondary" size="sm" icon={<PhoneCall className="w-4 h-4" />} showChevron={false} onClick={() => setLogInteractionOpen(true)}>
-              Log Call
-            </Button>
-          )}
-          {!isNew && (
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={<MessageSquarePlus className="w-4 h-4" />}
-              showChevron={false}
-              onClick={() => setQuickTaskOpen(true)}
-            >
-              Create Task
-            </Button>
-          )}
-          {!isNew && (profile?.role === 'admin' || profile?.role === 'sales_rep') && (
-            <>
-              <Button variant="secondary" size="sm" icon={<FileText className="w-4 h-4" />} onClick={() => navigate(`/quotes/new?customer_id=${id}`)}>
-                New Quote
-              </Button>
-              <Button variant="secondary" size="sm" icon={<ClipboardList className="w-4 h-4" />} onClick={() => navigate(`/orders/new?customer_id=${id}`)}>
-                New Order
-              </Button>
-              <Button variant="secondary" size="sm" icon={<Truck className="w-4 h-4" />} onClick={() => navigate(`/deliveries/new?customer_id=${id}`)}>
-                Sched. Delivery
-              </Button>
-              <Button variant="secondary" size="sm" icon={<Zap className="w-4 h-4" />} onClick={() => navigate(`/deliveries?quickDeliver=1&customer_id=${id}`)}>
-                Sell &amp; Deliver Now
-              </Button>
-              <Button variant="secondary" size="sm" icon={<SprayCan className="w-4 h-4" />} onClick={() => navigate(`/jobs/new?customer_id=${id}`)}>
-                New Job
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={<FileText className="w-4 h-4" />}
-                onClick={() => setShowSummaryDialog(true)}
-              >
-                Season Summary
-              </Button>
-            </>
-          )}
-        </div>
+        {!isNew && (
+          <CustomerHeaderActions
+            canSell={profile?.role === 'admin' || profile?.role === 'sales_rep'}
+            canReactivate={(isAdmin || profile?.role === 'sales_rep') && customer.is_active === false}
+            reactivateDisabled={saving}
+            hasLastQuote={quotes.length > 0}
+            onReactivate={() => setReactivateOpenFor(id ? { id, rowVersion: customerRowVersionRef.current } : null)}
+            customerId={id ?? ''}
+            onRepeatLastQuote={() => void repeatLastQuote()}
+            onLogCall={() => setLogInteractionOpen(true)}
+            onCreateTask={() => setQuickTaskOpen(true)}
+            onSeasonSummary={() => setShowSummaryDialog(true)}
+          />
+        )}
       </div>
 
       {!isNew && id && <CustomerSummaryBar customerId={id} onCardClick={(t) => jumpTo(t as CustomerSection | 'info')} />}
@@ -1532,7 +1521,7 @@ export default function CustomerDetail() {
         <nav aria-label="Customer sections" className="flex items-center gap-2 border-b border-gray-200 pb-2">
           <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-secondary">Jump to</span>
           <div className="flex min-w-0 gap-1.5 overflow-x-auto [-webkit-overflow-scrolling:touch]">
-            {[{ id: 'info' as const, title: 'Info' }, ...FOLD_SECTIONS].map((section) => (
+            {[FOLD_BY_ID.quotes, FOLD_BY_ID.orders, { id: 'info' as const, title: 'Info' }, ...FOLD_SECTIONS.filter((f) => f.id !== 'quotes' && f.id !== 'orders')].map((section) => (
               <button
                 key={section.id}
                 type="button"
@@ -1544,6 +1533,146 @@ export default function CustomerDetail() {
             ))}
           </div>
         </nav>
+      )}
+
+      {!isNew && <FoldBand section={FOLD_BY_ID.quotes} open={openSections.has('quotes')} onToggle={() => toggleSection('quotes')} />}
+      {openSections.has('quotes') && !isNew && (() => {
+        const filteredQuotes = quotePlannedFilter ? quotes.filter((q) => q.is_planned) : quotes;
+        return (
+        <Card padding={false}>
+          <div className="p-5">
+            {/* The fold band above names this section; New quote and Repeat last quote sit in the page header. */}
+            <div className="flex flex-wrap justify-end gap-2 items-center">
+              <button
+                onClick={() => setQuotePlannedFilter(!quotePlannedFilter)}
+                className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${quotePlannedFilter ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'border border-gray-200 text-secondary hover:bg-gray-50'}`}
+              >
+                Planned Programs
+              </button>
+            </div>
+          </div>
+          {loadingSections.has('quotes') ? (
+            <div className="px-5 pb-5 space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
+              ))}
+            </div>
+          ) : filteredQuotes.length === 0 ? (
+            <div className="px-5 pb-5">
+              <p className="text-sm text-secondary">{quotePlannedFilter ? 'No planned programs for this customer.' : 'No quotes for this customer yet.'}</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="phone-stack w-full text-sm">
+                <thead>
+                  <tr className="border-t border-b border-gray-100">
+                    <th className="px-5 py-3 text-left font-medium text-secondary">Quote #</th>
+                    <th className="px-4 py-3 text-left font-medium text-secondary">Status</th>
+                    <th className="px-4 py-3 text-left font-medium text-secondary">Tier</th>
+                    <th className="px-4 py-3 text-left font-medium text-secondary">Total</th>
+                    {isAdmin && <th className="px-4 py-3 text-left font-medium text-secondary">Margin</th>}
+                    <th className="px-4 py-3 text-left font-medium text-secondary">Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredQuotes.map((q) => (
+                    <tr
+                      key={q.id}
+                      onClick={() => navigate(`/quotes/${q.id}`)}
+                      className="border-b border-gray-50 hover:bg-crx-green-tint cursor-pointer transition-colors"
+                    >
+                      <td className="px-5 py-3 font-medium text-nav-dark">{q.quote_number}</td>
+                      <td data-label="Status" className="px-4 py-3">
+                        <>
+                          <Badge variant={statusToBadgeVariant[q.status] || 'default'}>
+                            {q.status === 'closed_by_application' ? 'Fulfilled (Applied)' : q.status === 'closed_short' ? 'Closed — Short' : q.status}
+                          </Badge>
+                          {q.is_planned && (
+                            <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 rounded">
+                              Planned
+                            </span>
+                          )}
+                        </>
+                      </td>
+                      <td data-label="Tier" className="px-4 py-3">T{q.tier}</td>
+                      <td data-label="Total" className="px-4 py-3 font-mono">{fmt(q.total_price)}</td>
+                      {isAdmin && <td data-label="Margin" className="px-4 py-3 font-mono text-emerald-600">{q.total_margin_pct == null ? '—' : `${q.total_margin_pct.toFixed(1)}%`}</td>}
+                      <td data-label="Created" className="px-4 py-3 text-secondary">
+                        {new Date(q.created_at).toLocaleDateString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+        );
+      })()}
+
+      {!isNew && <FoldBand section={FOLD_BY_ID.orders} open={openSections.has('orders')} onToggle={() => toggleSection('orders')} />}
+      {openSections.has('orders') && !isNew && (
+        <Card padding={false}>
+          <div className="pt-5" />
+          {loadingSections.has('orders') ? (
+            <div className="px-5 pb-5 space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
+              ))}
+            </div>
+          ) : orders.length === 0 ? (
+            <div className="px-5 pb-5">
+              <p className="text-sm text-secondary">No orders for this customer yet.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="phone-stack w-full text-sm">
+                <thead>
+                  <tr className="border-t border-b border-gray-100">
+                    <th className="px-5 py-3 text-left font-medium text-secondary">Order #</th>
+                    <th className="px-4 py-3 text-left font-medium text-secondary">Status</th>
+                    <th className="px-4 py-3 text-left font-medium text-secondary">Total</th>
+                    {isAdmin && <th className="px-4 py-3 text-left font-medium text-secondary">Profit</th>}
+                    <th className="px-4 py-3 text-left font-medium text-secondary">Date</th>
+                    <th className="px-4 py-3 text-left font-medium text-secondary w-40">Fulfillment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orders.map((o) => (
+                    <tr
+                      key={o.id}
+                      onClick={() => navigate(`/orders/${o.id}`)}
+                      className="border-b border-gray-50 hover:bg-crx-green-tint cursor-pointer transition-colors"
+                    >
+                      <td className="px-5 py-3 font-medium text-nav-dark">{o.order_number}</td>
+                      <td data-label="Status" className="px-4 py-3">
+                        <Badge variant={statusToBadgeVariant[o.status] || 'default'}>
+                          {o.status.replace('_', ' ')}
+                        </Badge>
+                      </td>
+                      <td data-label="Total" className="px-4 py-3 font-mono">{fmt(o.total_price)}</td>
+                      {isAdmin && <td data-label="Profit" className="px-4 py-3 font-mono text-emerald-600">{o.total_profit == null ? '—' : fmt(o.total_profit)}</td>}
+                      <td data-label="Date" className="px-4 py-3 text-secondary">
+                        {new Date(o.order_date + 'T00:00:00').toLocaleDateString()}
+                      </td>
+                      <td data-label="Fulfillment" className="px-4 py-3">
+                        <div className="flex w-40 max-w-full items-center gap-2 md:w-auto">
+                          <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-crx-green rounded-full transition-all"
+                              style={{ width: `${o.fulfillment_pct}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-secondary w-8">{o.fulfillment_pct}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
       )}
 
       {(
@@ -1868,24 +1997,24 @@ export default function CustomerDetail() {
         </fieldset>
       )}
 
-      {!isNew && <FoldBand section={FOLD_SECTIONS[0]} open={openSections.has('contacts')} onToggle={() => toggleSection('contacts')} />}
+      {!isNew && <FoldBand section={FOLD_BY_ID.contacts} open={openSections.has('contacts')} onToggle={() => toggleSection('contacts')} />}
       {openSections.has('contacts') && !isNew && id && profile && (
         <CustomerContacts key={id} customerId={id} performedBy={profile.id} />
       )}
 
       {/* key remounts on customer switch — see the CustomerPrepCard note above */}
-      {!isNew && <FoldBand section={FOLD_SECTIONS[1]} open={openSections.has('knowledge')} onToggle={() => toggleSection('knowledge')} />}
+      {!isNew && <FoldBand section={FOLD_BY_ID.knowledge} open={openSections.has('knowledge')} onToggle={() => toggleSection('knowledge')} />}
       {openSections.has('knowledge') && !isNew && id && profile && (
         <CustomerFacts key={id} customerId={id} userId={profile.id} />
       )}
 
       {/* key remounts on customer switch — see the CustomerPrepCard note above */}
-      {!isNew && <FoldBand section={FOLD_SECTIONS[2]} open={openSections.has('documents')} onToggle={() => toggleSection('documents')} />}
+      {!isNew && <FoldBand section={FOLD_BY_ID.documents} open={openSections.has('documents')} onToggle={() => toggleSection('documents')} />}
       {openSections.has('documents') && !isNew && id && profile && (
         <CustomerDocuments key={id} customerId={id} userId={profile.id} />
       )}
 
-      {!isNew && <FoldBand section={FOLD_SECTIONS[3]} open={openSections.has('timeline')} onToggle={() => toggleSection('timeline')} />}
+      {!isNew && <FoldBand section={FOLD_BY_ID.timeline} open={openSections.has('timeline')} onToggle={() => toggleSection('timeline')} />}
       {openSections.has('timeline') && !isNew && (
         <div className="space-y-4">
           {timelineLoading || loadingSections.has('timeline') ? (
@@ -1920,7 +2049,7 @@ export default function CustomerDetail() {
         </div>
       )}
 
-      {!isNew && <FoldBand section={FOLD_SECTIONS[4]} open={openSections.has('fields')} onToggle={() => toggleSection('fields')} />}
+      {!isNew && <FoldBand section={FOLD_BY_ID.fields} open={openSections.has('fields')} onToggle={() => toggleSection('fields')} />}
       {openSections.has('fields') && !isNew && (
         <>
           {/* Mini map showing this customer's fields */}
@@ -2007,176 +2136,7 @@ export default function CustomerDetail() {
         </>
       )}
 
-      {!isNew && <FoldBand section={FOLD_SECTIONS[5]} open={openSections.has('quotes')} onToggle={() => toggleSection('quotes')} />}
-      {openSections.has('quotes') && !isNew && (() => {
-        const filteredQuotes = quotePlannedFilter ? quotes.filter((q) => q.is_planned) : quotes;
-        return (
-        <Card padding={false}>
-          <div className="p-5">
-            {/* The fold band above names this section; only its controls stay here. */}
-            <div className="flex flex-wrap justify-end gap-2 items-center">
-              <button
-                onClick={() => setQuotePlannedFilter(!quotePlannedFilter)}
-                className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${quotePlannedFilter ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'border border-gray-200 text-secondary hover:bg-gray-50'}`}
-              >
-                Planned Programs
-              </button>
-              {quotes.length > 0 && (
-                <button
-                  onClick={async () => {
-                    try {
-                      const lastQuote = quotes[0];
-                      // Keyed per source quote: the server binds the key to the quote it copies (KI-10 batch 4c).
-                      const idemKey = duplicateQuoteIdem.getKeyFor(lastQuote.id);
-                      const { data, error } = await runWithBelowCostApproval((reason) => supabaseUntyped.rpc('duplicate_quote', withBelowCostReason('duplicate_quote', {
-                        p_source_quote_id: lastQuote.id,
-                        p_performed_by: profile?.id as string,
-                        p_idempotency_key: idemKey,
-                      }, reason)));
-                      if (error) { toast('error', 'Failed to duplicate quote'); return; }
-                      const result = assertRpcResult<{ quote_id: string }>(data, 'duplicate_quote');
-                      duplicateQuoteIdem.resetKeyFor(lastQuote.id);
-                      navigate(`/quotes/${result.quote_id}`);
-                    } catch (error: unknown) {
-                      if (!isBelowCostApprovalHandledError(error)) toast('error', 'Failed to duplicate quote');
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-crx-green text-crx-green rounded-lg hover:bg-crx-green-tint"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  New from Last
-                </button>
-              )}
-              <Button variant="ghost" size="sm" onClick={() => navigate(`/quotes/new?customer_id=${id}`)}>
-                New Quote
-              </Button>
-            </div>
-          </div>
-          {loadingSections.has('quotes') ? (
-            <div className="px-5 pb-5 space-y-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
-              ))}
-            </div>
-          ) : filteredQuotes.length === 0 ? (
-            <div className="px-5 pb-5">
-              <p className="text-sm text-secondary">{quotePlannedFilter ? 'No planned programs for this customer.' : 'No quotes for this customer yet.'}</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="phone-stack w-full text-sm">
-                <thead>
-                  <tr className="border-t border-b border-gray-100">
-                    <th className="px-5 py-3 text-left font-medium text-secondary">Quote #</th>
-                    <th className="px-4 py-3 text-left font-medium text-secondary">Status</th>
-                    <th className="px-4 py-3 text-left font-medium text-secondary">Tier</th>
-                    <th className="px-4 py-3 text-left font-medium text-secondary">Total</th>
-                    {isAdmin && <th className="px-4 py-3 text-left font-medium text-secondary">Margin</th>}
-                    <th className="px-4 py-3 text-left font-medium text-secondary">Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredQuotes.map((q) => (
-                    <tr
-                      key={q.id}
-                      onClick={() => navigate(`/quotes/${q.id}`)}
-                      className="border-b border-gray-50 hover:bg-crx-green-tint cursor-pointer transition-colors"
-                    >
-                      <td className="px-5 py-3 font-medium text-nav-dark">{q.quote_number}</td>
-                      <td data-label="Status" className="px-4 py-3">
-                        <>
-                          <Badge variant={statusToBadgeVariant[q.status] || 'default'}>
-                            {q.status === 'closed_by_application' ? 'Fulfilled (Applied)' : q.status === 'closed_short' ? 'Closed — Short' : q.status}
-                          </Badge>
-                          {q.is_planned && (
-                            <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 rounded">
-                              Planned
-                            </span>
-                          )}
-                        </>
-                      </td>
-                      <td data-label="Tier" className="px-4 py-3">T{q.tier}</td>
-                      <td data-label="Total" className="px-4 py-3 font-mono">{fmt(q.total_price)}</td>
-                      {isAdmin && <td data-label="Margin" className="px-4 py-3 font-mono text-emerald-600">{q.total_margin_pct == null ? '—' : `${q.total_margin_pct.toFixed(1)}%`}</td>}
-                      <td data-label="Created" className="px-4 py-3 text-secondary">
-                        {new Date(q.created_at).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-        );
-      })()}
-
-      {!isNew && <FoldBand section={FOLD_SECTIONS[6]} open={openSections.has('orders')} onToggle={() => toggleSection('orders')} />}
-      {openSections.has('orders') && !isNew && (
-        <Card padding={false}>
-          <div className="pt-5" />
-          {loadingSections.has('orders') ? (
-            <div className="px-5 pb-5 space-y-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-12 bg-gray-100 rounded-lg animate-pulse" />
-              ))}
-            </div>
-          ) : orders.length === 0 ? (
-            <div className="px-5 pb-5">
-              <p className="text-sm text-secondary">No orders for this customer yet.</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="phone-stack w-full text-sm">
-                <thead>
-                  <tr className="border-t border-b border-gray-100">
-                    <th className="px-5 py-3 text-left font-medium text-secondary">Order #</th>
-                    <th className="px-4 py-3 text-left font-medium text-secondary">Status</th>
-                    <th className="px-4 py-3 text-left font-medium text-secondary">Total</th>
-                    {isAdmin && <th className="px-4 py-3 text-left font-medium text-secondary">Profit</th>}
-                    <th className="px-4 py-3 text-left font-medium text-secondary">Date</th>
-                    <th className="px-4 py-3 text-left font-medium text-secondary w-40">Fulfillment</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orders.map((o) => (
-                    <tr
-                      key={o.id}
-                      onClick={() => navigate(`/orders/${o.id}`)}
-                      className="border-b border-gray-50 hover:bg-crx-green-tint cursor-pointer transition-colors"
-                    >
-                      <td className="px-5 py-3 font-medium text-nav-dark">{o.order_number}</td>
-                      <td data-label="Status" className="px-4 py-3">
-                        <Badge variant={statusToBadgeVariant[o.status] || 'default'}>
-                          {o.status.replace('_', ' ')}
-                        </Badge>
-                      </td>
-                      <td data-label="Total" className="px-4 py-3 font-mono">{fmt(o.total_price)}</td>
-                      {isAdmin && <td data-label="Profit" className="px-4 py-3 font-mono text-emerald-600">{o.total_profit == null ? '—' : fmt(o.total_profit)}</td>}
-                      <td data-label="Date" className="px-4 py-3 text-secondary">
-                        {new Date(o.order_date + 'T00:00:00').toLocaleDateString()}
-                      </td>
-                      <td data-label="Fulfillment" className="px-4 py-3">
-                        <div className="flex w-40 max-w-full items-center gap-2 md:w-auto">
-                          <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-crx-green rounded-full transition-all"
-                              style={{ width: `${o.fulfillment_pct}%` }}
-                            />
-                          </div>
-                          <span className="text-xs text-secondary w-8">{o.fulfillment_pct}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      )}
-
-      {!isNew && <FoldBand section={FOLD_SECTIONS[7]} open={openSections.has('deliveries')} onToggle={() => toggleSection('deliveries')} />}
+      {!isNew && <FoldBand section={FOLD_BY_ID.deliveries} open={openSections.has('deliveries')} onToggle={() => toggleSection('deliveries')} />}
       {openSections.has('deliveries') && !isNew && (
         <div className="space-y-4">
           <Card padding={false}>
@@ -2315,7 +2275,7 @@ export default function CustomerDetail() {
       )}
 
       {/* Financials Tab — Customer 360 */}
-      {!isNew && <FoldBand section={FOLD_SECTIONS[8]} open={openSections.has('financials')} onToggle={() => toggleSection('financials')} />}
+      {!isNew && <FoldBand section={FOLD_BY_ID.financials} open={openSections.has('financials')} onToggle={() => toggleSection('financials')} />}
       {openSections.has('financials') && !isNew && (
         <div className="space-y-4">
           {financialsLoading || loadingSections.has('financials') ? (
@@ -2495,7 +2455,7 @@ export default function CustomerDetail() {
       )}
 
       {/* GAP FIX #15: Purchase History Tab */}
-      {!isNew && <FoldBand section={FOLD_SECTIONS[9]} open={openSections.has('history')} onToggle={() => toggleSection('history')} />}
+      {!isNew && <FoldBand section={FOLD_BY_ID.history} open={openSections.has('history')} onToggle={() => toggleSection('history')} />}
       {openSections.has('history') && !isNew && (
         <Card padding={false}>
           <div className="p-5">

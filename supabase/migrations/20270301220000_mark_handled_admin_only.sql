@@ -157,7 +157,7 @@ ALTER FUNCTION public.close_delivery_receipt(uuid, text, text, timestamptz) OWNE
 REVOKE ALL ON FUNCTION public.close_delivery_receipt(uuid, text, text, timestamptz) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.close_delivery_receipt(uuid, text, text, timestamptz) TO authenticated;
 COMMENT ON FUNCTION public.close_delivery_receipt(uuid, text, text, timestamptz) IS
-  'KI-25 office call: handled = cancel a queued customer receipt so the server never sends it; manual_send = pause it on the office list (needs_check) before Email Confirmation sends by hand. Outcome closed / paused / sent / none, with sent_at, send_authorized_at and queued_at; refuses DELIVERY_RECEIPT_SENDING while a confirmed send may be in flight, and DELIVERY_RECEIPT_CHANGED when p_expected_queued_at is given and is not the queued receipt. Active admin or sales rep; handled is admin-only except a sales rep closing the receipt they paused for their own hand send (RECEIPT_HANDLED_ADMIN_ONLY). Key required, bound to caller and request.';
+  'KI-25 office call: handled = cancel a queued customer receipt so the server never sends it; manual_send = pause it on the office list (needs_check) before Email Confirmation sends by hand. Outcome closed / paused / sent / none, with sent_at, send_authorized_at and queued_at; refuses DELIVERY_RECEIPT_SENDING while a confirmed send may be in flight, and DELIVERY_RECEIPT_CHANGED when p_expected_queued_at is given and is not the queued receipt. Active admin or sales rep; handled is admin-only, a sales rep''s own hand send included (RECEIPT_HANDLED_ADMIN_ONLY). Key required, bound to caller and request.';
 
 DO $postflight$
 DECLARE

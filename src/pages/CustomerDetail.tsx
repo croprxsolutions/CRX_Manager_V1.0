@@ -19,7 +19,7 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { useIdempotencyKey } from '../hooks/useIdempotencyKey';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { supabase, supabaseUntyped, assertRpcResult, checkMutationResult, hasRpcCode, RpcErrorCodes, sanitizeError } from '../lib/db';
-import { isPricedAgingRow } from '../lib/arAging';
+import { AR_AGING_LABELS, isPricedAgingRow } from '../lib/arAging';
 import { isBelowCostApprovalHandledError, withBelowCostReason } from '../lib/belowCostApproval';
 import Breadcrumbs from '../components/ui/Breadcrumbs';
 import SectionCard from '../components/ui/SectionCard';
@@ -2385,12 +2385,12 @@ export default function CustomerDetail() {
                   <CardHeader title="Aging" accent="Buckets" />
                   {(() => {
                     const buckets = [
-                      { label: 'Current', value: aging.current_amount, color: 'bg-green-500' },
+                      { label: AR_AGING_LABELS.current, value: aging.current_amount, color: 'bg-green-500' },
                       // get_ar_aging's day ranges, as on the AR Aging page (KI-18)
-                      { label: '30-59', value: aging.days_30, color: 'bg-blue-500' },
-                      { label: '60-89', value: aging.days_60, color: 'bg-amber-500' },
-                      { label: '90-119', value: aging.days_90, color: 'bg-orange-500' },
-                      { label: '120+', value: aging.over_90, color: 'bg-red-500' },
+                      { label: AR_AGING_LABELS.days30, value: aging.days_30, color: 'bg-blue-500' },
+                      { label: AR_AGING_LABELS.days60, value: aging.days_60, color: 'bg-amber-500' },
+                      { label: AR_AGING_LABELS.days90, value: aging.days_90, color: 'bg-orange-500' },
+                      { label: AR_AGING_LABELS.over120, value: aging.over_90, color: 'bg-red-500' },
                     ];
                     const total = aging.total_outstanding;
                     return (

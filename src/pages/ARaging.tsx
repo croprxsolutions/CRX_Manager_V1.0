@@ -26,7 +26,7 @@ import { fetchCustomerStatement } from '../lib/customerStatement';
 import CustomerSearchPicker from '../components/customers/CustomerSearchPicker';
 import { Sentry } from '../lib/sentry';
 import { exportToCSV, fmtCSV, formatProductMoneyCSV } from '../lib/csvExport';
-import { agingCents, isPricedAgingRow } from '../lib/arAging';
+import { AR_AGING_LABELS, agingCents, isPricedAgingRow } from '../lib/arAging';
 import { formatCents as fmtCents, formatUSD as fmt } from '../lib/money';
 import { downloadStatementPdf, downloadBatchStatements, generateStatementPdf } from '../lib/statementPdf';
 import { sendEmail, pdfToBase64, buildEmailHtml, EmailUnconfirmedError } from '../lib/emailService';
@@ -279,13 +279,13 @@ export default function ARaging() {
     },
     {
       key: 'current_amount',
-      header: 'Current',
+      header: AR_AGING_LABELS.current,
       sortable: true,
       render: (r) => <span className="font-mono">{fmt(r.current_amount)}</span>,
     },
     {
       key: 'days_30',
-      header: '30 Days',
+      header: AR_AGING_LABELS.days30,
       sortable: true,
       render: (r) => (
         <span className={`font-mono ${r.days_30 > 0 ? 'text-yellow-600' : ''}`}>
@@ -295,7 +295,7 @@ export default function ARaging() {
     },
     {
       key: 'days_60',
-      header: '60 Days',
+      header: AR_AGING_LABELS.days60,
       sortable: true,
       render: (r) => (
         <span className={`font-mono ${r.days_60 > 0 ? 'text-orange-600' : ''}`}>
@@ -305,7 +305,7 @@ export default function ARaging() {
     },
     {
       key: 'days_90',
-      header: '90–119 Days',
+      header: AR_AGING_LABELS.days90,
       sortable: true,
       render: (r) => (
         <span className={`font-mono ${r.days_90 > 0 ? 'text-red-500' : ''}`}>
@@ -315,7 +315,7 @@ export default function ARaging() {
     },
     {
       key: 'over_90',
-      header: '120+ Days',
+      header: AR_AGING_LABELS.over120,
       sortable: true,
       render: (r) => (
         <span className={`font-mono ${r.over_90 > 0 ? 'text-red-700 font-semibold' : ''}`}>
@@ -964,11 +964,11 @@ export default function ARaging() {
                       [...agingData, ...agingUnavailable] as unknown as Record<string, unknown>[],
                       [
                         { key: 'farm_name', header: 'Customer' },
-                        { key: 'current_amount', header: 'Current', format: formatProductMoneyCSV },
-                        { key: 'days_30', header: '30 Days', format: formatProductMoneyCSV },
-                        { key: 'days_60', header: '60 Days', format: formatProductMoneyCSV },
-                        { key: 'days_90', header: '90–119 Days', format: formatProductMoneyCSV },
-                        { key: 'over_90', header: '120+ Days', format: formatProductMoneyCSV },
+                        { key: 'current_amount', header: AR_AGING_LABELS.current, format: formatProductMoneyCSV },
+                        { key: 'days_30', header: AR_AGING_LABELS.days30, format: formatProductMoneyCSV },
+                        { key: 'days_60', header: AR_AGING_LABELS.days60, format: formatProductMoneyCSV },
+                        { key: 'days_90', header: AR_AGING_LABELS.days90, format: formatProductMoneyCSV },
+                        { key: 'over_90', header: AR_AGING_LABELS.over120, format: formatProductMoneyCSV },
                         { key: 'total_outstanding', header: 'Total', format: formatProductMoneyCSV },
                         {
                           key: 'unavailable_reason',
@@ -1025,17 +1025,17 @@ export default function ARaging() {
               )}
             </Card>
             <Card>
-              <p className="text-xs text-secondary mb-1">Current (&lt;30 days)</p>
+              <p className="text-xs text-secondary mb-1">{AR_AGING_LABELS.current}</p>
               <p className="text-xl font-semibold font-heading text-nav-dark">{fmtCents(agingTotals.current)}</p>
             </Card>
             <Card>
-              <p className="text-xs text-secondary mb-1">30-89 Days</p>
+              <p className="text-xs text-secondary mb-1">{AR_AGING_LABELS.days30to89}</p>
               <p className="text-xl font-semibold font-heading text-orange-600">
                 {fmtCents(agingTotals.d30 + agingTotals.d60)}
               </p>
             </Card>
             <Card>
-              <p className="text-xs text-secondary mb-1">90+ Days</p>
+              <p className="text-xs text-secondary mb-1">{AR_AGING_LABELS.days90plus}</p>
               <p className="text-xl font-semibold font-heading text-red-700">
                 {fmtCents(agingTotals.d90 + agingTotals.over90)}
               </p>

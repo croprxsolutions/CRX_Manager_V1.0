@@ -1,5 +1,5 @@
 -- Written 2026-11-24. STATUS: NOT APPLIED (local candidate). Apply status is tracked only in
--- docs/reference/migrations.d/20270301120000_mark_handled_admin_only.md.
+-- docs/reference/migrations.d/20270301220000_mark_handled_admin_only.md.
 --
 -- WHAT (Mason, Slack 2026-11-23, Taha's review item 6): "Mark handled" on a customer receipt is admin-only.
 --   close_delivery_receipt(..., 'handled') from anyone but an admin is refused with RECEIPT_HANDLED_ADMIN_ONLY (42501)

@@ -1,5 +1,7 @@
-# Taha ready bot (Mason and Taha, 2026-11-24): labels our PRs that are ready for Taha's Approve and pings
-# him once per PR head in #crx-work. Deterministic script, no AI model: .github/scripts/taha-ready.mjs.
+# Taha ready bot (Mason and Taha, 2026-11-24): labels our PRs that are ready for Taha's Approve, mirrors his
+# verdict as taha-approved / taha-changes, pings him once per PR head in #crx-reviews (reminder after 24 h),
+# and adds topic labels. Readiness is rules only; Haiku only writes summaries and picks topics.
+# Script: .github/scripts/taha-ready.mjs.
 # The Slack token lives in the release-bot environment, which only main may use, so the bot runs from
 # main (schedule, after CI, by hand) and only the ping job opens that environment.
 name: Taha ready bot
@@ -75,4 +77,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SLACK_RELEASE_TOKEN: ${{ secrets.SLACK_RELEASE_TOKEN }}
           SLACK_RELEASE_CHANNEL: ${{ secrets.SLACK_RELEASE_CHANNEL }}
+          # Optional: a two-line Haiku summary in each first ping. Without it the ping goes out plain.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: node .github/scripts/taha-ready.mjs ping
+
+  topics:
+    name: Topic labels (Haiku)
+    # Scheduled runs only, from main: the API key lives in the main-only release-bot environment.
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release-bot
+    concurrency: { group: taha-ready-topics, cancel-in-progress: false }
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node .github/scripts/taha-ready.mjs topics

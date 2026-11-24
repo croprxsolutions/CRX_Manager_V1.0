@@ -102,3 +102,67 @@ test('ping text escapes PR titles and names the short head', () => {
   assert.match(t, /head aaaaaaa\)/);
   assert.match(t, /<https:\/\/github.com\/x\/y\/pull\/7\|#7>/);
 });
+
+// ── Taha's verdict labels, reminder, Haiku (Mason, 2026-11-24) ─────────────────────────────────
+import { needsReminder, parseTopics, remindMarker, reviewLabelChanges, summarize, tahaVerdict } from './taha-ready.mjs';
+
+const rv = (state, oid = HEAD, login = 'TahaKhanAbdalli') => ({ author: { login }, state, commit: { oid } });
+const L = (...names) => names.map((name) => ({ name }));
+
+test("Taha's verdict on the current head: latest decisive review wins, comments and old heads don't count", () => {
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED')] })), 'taha-approved');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED'), rv('CHANGES_REQUESTED')] })), 'taha-changes');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('CHANGES_REQUESTED'), rv('APPROVED')] })), 'taha-approved');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED'), rv('COMMENTED')] })), 'taha-approved');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('DISMISSED')] })), null);
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED', NEW)] })), null, 'approval of another head');
+  assert.equal(tahaVerdict(pr({ reviews: [rv('APPROVED', HEAD, 'masonwells1')] })), null, 'not Taha');
+});
+
+test('review labels: exactly one of approved / changes, or neither after a push', () => {
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED')] })), { add: ['taha-approved'], remove: [] });
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED')], labels: L('taha-approved') })), { add: [], remove: [] });
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('CHANGES_REQUESTED')], labels: L('taha-approved') })), { add: ['taha-changes'], remove: ['taha-approved'] });
+  assert.deepEqual(reviewLabelChanges(pr({ reviews: [rv('APPROVED', NEW)], labels: L('taha-approved', 'taha-changes') })), { add: [], remove: ['taha-approved', 'taha-changes'] });
+  assert.deepEqual(reviewLabelChanges(pr({ author: { login: 'TahaKhanAbdalli' }, reviews: [rv('APPROVED')] })), { add: [], remove: [] }, "Taha's own PR untouched");
+});
+
+test('reminder: once per head, 24 h after the first ping, while Taha has not decided', () => {
+  const T0 = Date.UTC(2026, 10, 24, 12);
+  const bot = (body, createdAt = new Date(T0).toISOString()) => ({ author: { login: 'github-actions' }, body, createdAt });
+  const waiting = pr({ labels: L('ready-for-taha'), reviewRequests: [{ login: 'TahaKhanAbdalli' }] });
+  const pingedAt = [bot(`x ${pingMarker(HEAD)}`)];
+  const day = T0 + 24 * 3600e3;
+  assert.equal(needsReminder(waiting, pingedAt, day, { checks: green }).remind, true);
+  assert.equal(needsReminder(waiting, pingedAt, day - 1, { checks: green }).remind, false, 'under 24 h');
+  assert.equal(needsReminder(waiting, [], day, { checks: green }).remind, false, 'never pinged');
+  assert.equal(needsReminder(waiting, [bot(`x ${pingMarker(NEW)}`)], day, { checks: green }).remind, false, 'pinged for another head only');
+  assert.equal(needsReminder(waiting, [...pingedAt, bot(`y ${remindMarker(HEAD)}`)], day, { checks: green }).remind, false, 'already reminded');
+  assert.equal(needsReminder({ ...waiting, reviews: [rv('APPROVED')] }, pingedAt, day, { checks: green }).remind, false, 'Taha approved');
+  assert.equal(needsReminder({ ...waiting, reviews: [rv('COMMENTED')] }, pingedAt, day, { checks: green }).remind, true, 'a comment still waits on his decision');
+  assert.equal(needsReminder(waiting, pingedAt, day, { checks: () => [{ name: 'CI', bucket: 'fail' }] }).remind, false, 'checks red');
+  assert.equal(needsReminder(waiting, [{ ...pingedAt[0], author: { login: 'someone' } }], day, { checks: green }).remind, false, "a person's copy of the marker doesn't count");
+});
+
+test('topics: only from the fixed list, at most 3, model noise ignored', () => {
+  assert.deepEqual(parseTopics('Billing, quotes'), ['topic:billing', 'topic:quotes']);
+  assert.deepEqual(parseTopics('ready-for-taha, hotfix, billing, billing'), ['topic:billing']);
+  assert.deepEqual(parseTopics('maps, driver, deliveries, reports'), ['topic:maps', 'topic:driver', 'topic:deliveries']);
+  assert.deepEqual(parseTopics(null), []);
+});
+
+test('summary: only title, description and file names go out; the answer is escaped and cut; failures mean no summary', async () => {
+  let sent;
+  const fetchImpl = async (url, init) => { sent = { url, body: JSON.parse(init.body), key: init.headers['x-api-key'] };
+    return { ok: true, json: async () => ({ content: [{ type: 'text', text: 'Hi <!channel> <@U1>\n'.repeat(60) }] }) }; };
+  const s = await summarize(pr({ body: 'desc' }), ['src/a.ts'], { key: 'k', fetchImpl });
+  assert.equal(sent.url, 'https://api.anthropic.com/v1/messages');
+  assert.equal(sent.body.model, 'claude-haiku-5-5');
+  assert.match(sent.body.messages[0].content, /Title: fix: <!channel> quotes\nDescription:\ndesc\nChanged files:\nsrc\/a\.ts$/);
+  assert.ok(!s.includes('<') && s.length <= 400 && !s.includes('\n'), 'no Slack control text, no newlines, capped');
+  assert.equal(await summarize(pr(), [], { key: '', fetchImpl: never }), null, 'no key, no call');
+  assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: async () => ({ ok: false }) }), null, 'API error');
+  assert.equal(await summarize(pr(), [], { key: 'k', fetchImpl: async () => { throw new Error('timeout'); } }), null, 'network error');
+  assert.match(pingText(pr(), s), /\n> Hi &lt;!channel&gt;/);
+  assert.doesNotMatch(pingText(pr(), null), /\n/);
+});

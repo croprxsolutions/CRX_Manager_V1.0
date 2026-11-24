@@ -93,4 +93,13 @@ describe('UnassignedDeliveriesBanner', () => {
     await waitFor(() => expect(H.tables).toHaveLength(1));
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('re-reads when the page reloads its list, so a cancelled delivery leaves the warning', async () => {
+    H.rows = [{ id: 'd1', delivery_number: 'DEL-001', scheduled_date: '2026-11-25', customer: null }];
+    const { rerender } = render(<MemoryRouter><UnassignedDeliveriesBanner refreshKey={[1]} /></MemoryRouter>);
+    expect(await screen.findByText(/1 scheduled delivery has no driver/)).toBeInTheDocument();
+    H.rows = []; // the office batch-cancelled it; the page reloads its list
+    rerender(<MemoryRouter><UnassignedDeliveriesBanner refreshKey={[]} /></MemoryRouter>);
+    await waitFor(() => expect(screen.queryByText(/no driver/)).not.toBeInTheDocument());
+  });
 });

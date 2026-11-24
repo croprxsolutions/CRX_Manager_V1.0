@@ -1825,7 +1825,7 @@ export default function Deliveries() {
       />
 
       {canCreate && <ReceiptsToCheck />}
-      {canCreate && <UnassignedDeliveriesBanner />}
+      {canCreate && <UnassignedDeliveriesBanner refreshKey={deliveries} />}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

@@ -18,7 +18,8 @@ interface UnassignedRow {
   customer: { farm_name: string | null } | null;
 }
 
-export default function UnassignedDeliveriesBanner() {
+/** `refreshKey`: the page's delivery list; each reload (e.g. after a batch cancel or reschedule) re-reads the banner. */
+export default function UnassignedDeliveriesBanner({ refreshKey }: { refreshKey?: unknown }) {
   const [rows, setRows] = useState<UnassignedRow[]>([]);
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(1);
@@ -61,7 +62,7 @@ export default function UnassignedDeliveriesBanner() {
       live = false;
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [pages]);
+  }, [pages, refreshKey]);
 
   if (total === 0) return null;
   const noun = total === 1 ? 'scheduled delivery has' : 'scheduled deliveries have';

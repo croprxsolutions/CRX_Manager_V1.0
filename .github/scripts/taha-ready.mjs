@@ -118,7 +118,8 @@ async function handle(pr, mode, dry) {
     asked: () => askedAfterPush(
       tryGh(['api', '--paginate', `repos/${REPO}/commits/${pr.headRefOid}/check-suites?per_page=100`, '--jq', '.check_suites[].created_at']),
       tryGh(['api', '--paginate', `repos/${REPO}/issues/${pr.number}/events?per_page=100`, '--jq',
-        `.[] | select((.event == "labeled" and .label.name == "${LABEL}") or (.event == "review_requested" and ((.requested_reviewer.login // "") | ascii_downcase) == "${TAHA_LOGIN}")) | .created_at`])),
+        // Only a person's or agent's label/request counts: the bot's own (made for a non-Sol head) proves no Sol.
+        `.[] | select(.actor.login != "github-actions[bot]") | select((.event == "labeled" and .label.name == "${LABEL}") or (.event == "review_requested" and ((.requested_reviewer.login // "") | ascii_downcase) == "${TAHA_LOGIN}")) | .created_at`])),
   };
   // Everything above was read for one head; a push since then means this run judged the wrong commit.
   const moved = () => currentHead(pr.number) !== pr.headRefOid;

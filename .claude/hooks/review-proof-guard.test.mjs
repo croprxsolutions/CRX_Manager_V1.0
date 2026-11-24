@@ -34,6 +34,44 @@ function assertEntrypointAllowed(payload, label) {
   assert.equal(result.stdout, "", `${label}: must allow`);
 }
 
+// 2026-11-23 (Mason, Sol): a plain read of a proof file is allowed, through the
+// shell or a read-only tool; anything that could write one stays refused.
+const PROOF = ".claude/session-state/codex-review-f8987ca2e979c16a0fdf4db6ca2f49f41600e7c9.json";
+for (const command of [
+  `cat /c/CRX_wt/pr-1985/${PROOF}`,
+  `cat ${PROOF} | head -20`,
+  `jq .verdict ${PROOF}`,
+  `ls -t .claude/session-state/codex-review-*.json | head -3`,
+  `cd /c/CRX_wt/x && grep -n "verdict\\|model" ${PROOF} 2>&1 | head -5`,
+  `S=.claude/session-state; cat $S/sol-rounds.jsonl | tail -5; echo; ls -la $S/codex-review-*.json`,
+  `grep -o '"model":"[^"]*"' ${PROOF} 2>/dev/null`,
+  `gh pr checks 1985 --repo o/r 2>&1 | sort | uniq -c; cat ${PROOF} | head`,
+  `git -C /c/CRX_wt/x log --oneline -3; ls -l ${PROOF}`,
+  `find /c/CRX_wt -maxdepth 6 -name "codex-review-71e3066e*.json" 2>/dev/null | head`,
+]) assertEntrypointAllowed({ tool_name: "Bash", tool_input: { command } }, `plain read: ${command}`);
+assertEntrypointAllowed({ tool_name: "Read", tool_input: { file_path: `C:/CRX_wt/x/${PROOF}` } }, "Read of a proof file");
+for (const command of [
+  `cat x > ${PROOF}`,
+  `cat a.json | tee ${PROOF}`,
+  `cat ${PROOF}; rm -f ${PROOF}`,
+  `cat ${PROOF} && cp fake.json ${PROOF}`,
+  `cat $(echo ${PROOF})`,
+  `cat ${PROOF} | sort -o ${PROOF}`,
+  `cp fake.json ${PROOF}`,
+  `S=$(echo x); cat ${PROOF}`,
+  `find .claude/session-state -name "codex-review-*.json" -delete`,
+  `find . -name "codex-review-*.json" -exec cp fake.json {} ;`,
+  `sort -o ${PROOF} ${PROOF}`,
+  `git -C /c/x diff --output=${PROOF}`,
+  `ls ${PROOF}; uniq a.json ${PROOF}`,
+  `cat ${PROOF}; sed -i s/a/b/ ${PROOF}`,
+  `cat ${PROOF}; node -e "require('fs').writeFileSync('${PROOF}','{}')"`,
+  `grep x ${PROOF}; echo {} >> ${PROOF}`,
+  `cat ${PROOF} "$(rm -f ${PROOF})"`,
+  `grep x ${PROOF}; python - <<'EOF'\nopen('${PROOF}','w')\nEOF`,
+]) assertEntrypointDenied({ tool_name: "Bash", tool_input: { command } }, /REVIEW PROOF GUARD/, `still refused: ${command}`);
+assertEntrypointDenied({ tool_name: "Write", tool_input: { file_path: `C:/CRX_wt/x/${PROOF}`, content: "{}" } }, /REVIEW PROOF GUARD/, "Write of a proof file");
+
 // Native Codex apply_patch passes its patch as a raw tool_input STRING, while
 // other clients nest it in patch. Both real JSON/stdin shapes must route their
 // destination headers through the same protection and preserve documentation

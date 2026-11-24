@@ -1,7 +1,7 @@
 # Google Maps design for CRX (agreed by Mason 2026-11-24, pre-build)
 
 Background, options and the two earlier Sol reviews: `2026-11-24-map-provider-options.md`.
-Status: **design only, revision 3 (after Sol design reviews 1 and 2).** Nothing built.
+Status: **design only, revision 4: Sol READY-WITH-CHANGES (changes adopted).** Nothing built.
 Build starts after the field build's slice 1 lands.
 
 ## What Mason wants
@@ -29,7 +29,8 @@ Google's satellite picture is the default on every map and every printed sheet, 
    appear. Obstacles are always listed as text with their type and description. "None recorded"
    appears only after a successful obstacle read for that field. A failed or partial read prints "Obstacles could not be
    checked — confirm on site". An obstacle that could not be placed on the picture says so. If the
-   job's field list itself can't be loaded, show an error instead of a sheet that looks complete.
+   job's field list itself can't be loaded, or comes back incomplete (row count doesn't match the job), show an error
+   instead of a sheet that looks complete.
 5. Credits follow the picture actually shown: the Google logo plus the viewport's live credit text
    for Google; Mapbox's logo and credits; the USGS service credit for USDA. Prints keep the marks
    the provider bakes into the image. This replaces today's `attributionControl={false}`.
@@ -110,7 +111,8 @@ viewport metadata are not billed. Static Maps (prints): 10,000 free a month, the
 | 3. Google prints + per-field print results + obstacle text | After the paperwork lane lands | `jobMapImages.ts`, applicator sheets |
 | 4. Offline phones, crop colours, print window, ink saver | Spring | — |
 
-Each step has its own rollback: step 1 reverts to the Mapbox engine; step 3 sets the print provider back to Mapbox.
+Each step has its own rollback: step 1 reverts to the Mapbox engine. In step 3, a Google picture outage is handled by setting the print
+provider back to Mapbox, and a bug in the new sheet code by redeploying the last known-good print build (tested on an already-open installed app).
 Taha's areas (quotes, bookings, holds, chemical billing): none touched.
 
 ## Proof before calling it done
@@ -154,12 +156,17 @@ Step 3:
 - One deadline covers obstacle reads, images and conversion; fallback gets a fixed share; at the
   cutoff every row is finalised.
 - The overview follows Google → Mapbox → none and names the fields missing from it.
-- Provider requests carry only geometry and styling (no names or notes). Query strings are stripped from Sentry.
+- Provider requests carry only geometry and styling (no names or notes). Map-image URLs are never sent to
+  Sentry. Mapbox puts outlines in the URL **path**, so record only provider, operation and status.
 - The "Open in Google Maps" link uses the saved field location; if there is none, it says unavailable.
   Paper copies also print the coordinates.
 - Name the exact print entry points (job sheet, applicator sheet) and verify each.
 - If a proxy is ever needed: prove a fixed outbound IP from the host first.
 Installed-app rollback: test an already-open phone moving to the rollback build.
+
+## Sol design review 3 (2026-11-24): READY-WITH-CHANGES
+The print blocker is resolved. Its three HIGH changes are adopted above: an incomplete field list stops the print, map URLs
+are kept out of Sentry, and there's a separate rollback build for sheet-code bugs.
 
 ## Sol design review 2 (2026-11-24): NOT-READY, 4 of 5 blockers resolved
 Resolved: draft loss, acre proof, browser key, USDA print. Remaining: the print data path (fixed in

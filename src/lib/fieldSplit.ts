@@ -92,9 +92,13 @@ export function splitSaveKey(userId: string, fieldId: string, requestFingerprint
   return key;
 }
 
-/** Only after the save is confirmed. */
-export function clearSplitSaveKey(userId: string, fieldId: string): void {
+/** Only after that request's save is confirmed; other unconfirmed requests keep their keys. */
+export function clearSplitSaveKey(userId: string, fieldId: string, requestFingerprint: string): void {
   const slot = `${KEY_PREFIX}${userId}:${fieldId}`;
-  memoryKeys.delete(slot);
-  try { window.sessionStorage.removeItem(slot); } catch { /* nothing stored */ }
+  let stored: Record<string, string> = {};
+  try { stored = JSON.parse(window.sessionStorage.getItem(slot) ?? memoryKeys.get(slot) ?? '{}') ?? {}; } catch { /* nothing readable */ }
+  delete stored[requestFingerprint];
+  const record = JSON.stringify(stored);
+  memoryKeys.set(slot, record);
+  try { window.sessionStorage.setItem(slot, record); } catch { /* the in-memory copy is updated */ }
 }

@@ -311,7 +311,14 @@ function FieldSetupPage() {
   const skipUnsavedPromptRef = useRef(false);
   // Set by a save that synced acres: what that save sent (null for a new field, which reloads after create).
   const adoptSavedBaselineRef = useRef<{ field: typeof field; splits: typeof billingSplits } | null | false>(false);
-  const blocker = useUnsavedChanges(isDirty, skipUnsavedPromptRef);
+  const blocker = useUnsavedChanges(isDirty || saving, skipUnsavedPromptRef);
+  // Locked while saving: leaving mid-save is refused, not offered.
+  useEffect(() => {
+    if (saving && blocker.state === 'blocked') {
+      blocker.reset?.();
+      toast('warning', 'Saving. Wait a moment, then try again.');
+    }
+  }, [saving, blocker, toast]);
   // Post-create navigation happens via this state so it fires on a render where
   // isDirty=false has committed — see the comment at the setter in handleSave.
   const [postSaveNavTarget, setPostSaveNavTarget] = useState<string | null>(null);
@@ -336,8 +343,8 @@ function FieldSetupPage() {
       if (editedMidSave) setIsDirty(true);
       return;
     }
-    if (field === loadedFieldRef.current && billingSplits === loadedSplitsRef.current
-      && payerNotes === loadedNotesRef.current && splitFrom === today) return;
+    const notesSame = billingSplits.every((r) => (payerNotes[r.customer_id] ?? '').trim() === (loadedNotesRef.current[r.customer_id] ?? '').trim());
+    if (field === loadedFieldRef.current && billingSplits === loadedSplitsRef.current && notesSame && splitFrom === today) return;
     setIsDirty(true);
   }, [field, billingSplits, payerNotes, splitFrom, today]);
 
@@ -627,7 +634,6 @@ function FieldSetupPage() {
     splitChanged: boolean,
     notesChanges: Array<{ customer_id: string; notes: string | null }>,
     isNew: boolean,
-    saveLoadSeq: number,
   ): Promise<boolean> => {
     const request = {
       p_field_id: savedFieldId,
@@ -652,33 +658,17 @@ function FieldSetupPage() {
       });
       if (sErr) throw sErr;
       assertRpcResult(sData, 'set_field_billing_split');
-      clearSplitSaveKey(profile!.id, savedFieldId);
+      clearSplitSaveKey(profile!.id, savedFieldId, fingerprintIntentPayload(request));
     } catch (splitError) {
       const message = splitSaveErrorMessage((splitError as { message?: string } | null)?.message ?? 'Failed to save the billing split.');
       Sentry.captureException(toSentryError(splitError), { tags: { source: 'critical_action', action: 'set_field_billing_split' } });
       toast('error', isNew ? `Field created, but its billing split was not saved: ${message} Enter it again and save.` : message);
       return false;
     }
-    if (!isNew && fieldLoadSeqRef.current === saveLoadSeq) {
-      try {
-        const reloaded = await loadFieldSplit(savedFieldId, today);
-        if (fieldLoadSeqRef.current === saveLoadSeq) applySplitData(reloaded);
-      } catch (reloadError) {
-        Sentry.captureException(toSentryError(reloadError), { tags: { source: 'fetch', action: 'reload_field_split_versions' } });
-        // What was sent is saved (the editor was locked meanwhile): make it the clean state so a retry cannot resend it.
-        if (fieldLoadSeqRef.current !== saveLoadSeq) return true;
-        loadedSplitsRef.current = billingSplits;
-        loadedNotesRef.current = payerNotes;
-        setSplitFrom(today);
-        toast('warning', 'The split was saved, but its history could not be reloaded. Reload the page to see it.');
-      }
-    }
     return true;
   };
 
   const handleSave = async () => {
-    // A save's reply must not fill in another field opened meanwhile.
-    const saveLoadSeq = fieldLoadSeqRef.current;
     if (!field.field_name) {
       toast('error', 'Field name is required');
       return;
@@ -840,7 +830,7 @@ function FieldSetupPage() {
 
         // Split and payer notes: one dated version per split change; notes never make a version.
         const splitResult = splitChanged || notesChanges.length > 0
-          ? await saveSplitAndNotes(savedFieldId, splitChanged, notesChanges, isNew, saveLoadSeq)
+          ? await saveSplitAndNotes(savedFieldId, splitChanged, notesChanges, isNew)
           : null;
         const splitSaved = splitResult === true;
         if (splitResult === false) persistError = true;
@@ -855,14 +845,19 @@ function FieldSetupPage() {
           if (isNew && savedFieldId) {
             skipUnsavedPromptRef.current = true;
             navigate(`/fields/${savedFieldId}`, { replace: true });
+          } else if (splitSaved) {
+            await fetchField(); // the split did save: show it fresh from the database (redo the step that failed)
           }
           setSaving(false);
           return;
         }
 
-        if (savedAcres) {
-          // the synced acres are saved, not an edit (a reloaded split is the saved one too)
-          adoptSavedBaselineRef.current = isNew ? null : { field, splits: splitSaved ? loadedSplitsRef.current ?? [] : billingSplits };
+        if (splitSaved && !isNew) {
+          // Mason 2026-11-24: after a split save the page reloads fresh instead of merging the reply (it is locked meanwhile).
+          await fetchField();
+        } else if (savedAcres) {
+          // the synced acres are saved, not an edit
+          adoptSavedBaselineRef.current = isNew ? null : { field, splits: billingSplits };
           setField((f) => ({ ...f, ...savedAcres }));
         }
         setIsDirty(false);
@@ -1176,7 +1171,7 @@ function FieldSetupPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" inert={saving} aria-busy={saving}>
       {/* Header */}
       <div className="flex items-center gap-3">
         <button aria-label="Back to fields" onClick={() => navigate('/fields')} className="p-2 rounded-lg hover:bg-white hover:shadow-sm transition-all text-secondary">

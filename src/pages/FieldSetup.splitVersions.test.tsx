@@ -192,16 +192,16 @@ describe('Field Setup — FP-1 split versions', () => {
     }
   });
 
-  it('if the history reload fails after a split save, a second Save sends nothing again', async () => {
+  it('after a split save the page reloads fresh; if that reload fails it shows the load error, not a stale form', async () => {
     await open();
     fireEvent.change(screen.getByLabelText('Notes for Owner Farm'), { target: { value: 'Call first' } });
     mockFrom.mockImplementation((t: string) => (t === 'field_billing_split_versions'
       ? { select: () => ({ eq: () => ({ order: () => Promise.resolve({ data: null, error: { message: 'down' } }) }) }) }
       : tables(t)));
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
-    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('warning', expect.stringContaining('could not be reloaded')));
-    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }));
-    await waitFor(() => expect(calls('set_field_billing_split')).toHaveLength(1));
+    expect(await screen.findByText('This field could not be loaded')).toBeInTheDocument();
+    expect(calls('set_field_billing_split')).toHaveLength(1);
+    expect(screen.queryByLabelText('Notes for Owner Farm')).not.toBeInTheDocument();
   });
 
   it('a retry of the same save reuses its key; the database refusal is shown plainly', async () => {

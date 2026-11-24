@@ -76,9 +76,9 @@ try {
     UPDATE public.profiles SET is_active = true, denied_pages = ARRAY['reports', 'sales-reports'] WHERE id = '${REP_NO_REPORTS}';
     INSERT INTO public.customers (id, farm_name, is_active, assigned_sales_rep) VALUES ('${id('d9')}', '[IFIP] Farm', true, '${REP}');
     INSERT INTO public.orders (id, order_number, customer_id) VALUES ('${id('d8')}', 'IFIP-O1', '${id('d9')}');
-    INSERT INTO public.products (id, product_name, sku) VALUES ('${PRODUCT}', '[IFIP] Product', 'IFIP-1');
-    INSERT INTO public.inventory_holds (product_id, customer_id, source_id, quantity, hold_type, is_active, expires_at)
-      VALUES ('${PRODUCT}', '${id('d9')}', '${id('d6')}', 5, 'crop_program', true, now() + interval '30 days');
+    INSERT INTO public.products (id, product_name, sku, is_active, product_form, inventory_unit) VALUES ('${PRODUCT}', '[IFIP] Product', 'IFIP-1', true, 'liquid', 'Gal');
+    INSERT INTO public.inventory_holds (product_id, customer_id, source_id, quantity, hold_type, is_active, expires_at, created_by)
+      VALUES ('${PRODUCT}', '${id('d9')}', '${id('d6')}', 5, 'crop_program', true, now() + interval '30 days', '${ADMIN}');
     SET session_replication_role = origin;`, { user: 'supabase_admin' });
   const seeded = scalar(`SELECT string_agg(id::text || '=' || role || ':' || is_active || ':' || array_to_string(denied_pages, '+'), ',' ORDER BY id)
       FROM public.profiles WHERE id IN ('${ADMIN}', '${REP}', '${APPL}', '${REP_NO_INV}', '${REP_NO_REPORTS}');`);

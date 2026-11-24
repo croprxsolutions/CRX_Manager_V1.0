@@ -153,9 +153,9 @@ describe('matchReadIntervals', () => {
     expect(calls).toEqual(['rei_hours is null', 'rei_not_applicable = false', 'epa_registration = 100-1234']);
   });
 
-  it('guards a changed PHI number on the number read, without an EPA filter', () => {
+  it('guards a changed PHI number on the number and EPA number read', () => {
     const { q, calls } = recorder();
     matchReadIntervals(q, { phi_days: 14 }, read);
-    expect(calls).toEqual(['phi_days = 30', 'phi_not_applicable = false']);
+    expect(calls).toEqual(['phi_days = 30', 'phi_not_applicable = false', 'epa_registration = 100-1234']);
   });
 });

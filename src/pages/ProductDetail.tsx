@@ -1696,7 +1696,7 @@ export default function ProductDetail() {
                     setReiDraft(e.target.value);
                     update('rei_hours', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
                   }}
-                  disabled={!isAdmin || saving || Boolean(product.rei_not_applicable)}
+                  disabled={!isAdmin || saving || reloadRequired || Boolean(product.rei_not_applicable)}
                   placeholder={product.rei_not_applicable ? 'Not applicable' : 'From label, e.g. 12'}
                 />
                 {!isNew && (
@@ -1727,7 +1727,7 @@ export default function ProductDetail() {
                     setPhiDraft(e.target.value);
                     update('phi_days', /^\d+$/.test(e.target.value) ? Number(e.target.value) : null);
                   }}
-                  disabled={!isAdmin || saving || Boolean(product.phi_not_applicable)}
+                  disabled={!isAdmin || saving || reloadRequired || Boolean(product.phi_not_applicable)}
                   placeholder={product.phi_not_applicable ? 'Not applicable' : 'From label, e.g. 30'}
                 />
                 {!isNew && (

@@ -700,6 +700,8 @@ export default function DeliveryDetail() {
 
   const startEditing = async () => {
     if (!delivery || !customer || editLocked) return;
+    // A reload that starts while the form loads makes this copy of the delivery old (Sol #2364 r11).
+    const openSeq = fetchSeqRef.current;
     setEditDriver(delivery.assigned_driver || '');
     setEditDriverAtOpen(delivery.assigned_driver || '');
     clearUnconfirmedRef.current = false;
@@ -817,6 +819,7 @@ export default function DeliveryDetail() {
       setAvailableOrderItems([]);
     }
 
+    if (fetchSeqRef.current !== openSeq) { toast('info', 'This delivery just changed. Click Edit again.'); return; }
     setEditing(true);
   };
 

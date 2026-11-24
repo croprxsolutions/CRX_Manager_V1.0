@@ -318,4 +318,30 @@ describe('DeliveryDetail edit: Edit stays locked until the reload after a save l
     release();
     await waitFor(() => expect((screen.getByRole('button', { name: /^Edit$/ }) as HTMLButtonElement).disabled).toBe(false));
   });
+
+  it('an Edit still loading when the delivery reloads does not open on the old copy (Sol r11 HIGH 7)', async () => {
+    tables.data.deliveries = [{ ...(tables.data.deliveries[0] as object), assigned_driver: null }];
+    render(<MemoryRouter><DeliveryDetail /></MemoryRouter>);
+    const edit = await screen.findByRole('button', { name: /^Edit$/ }, { timeout: 3000 });
+    // Hold the Edit form's order-line read, so Edit is still loading when the reload starts.
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    mockFrom.mockImplementation((table: string) => {
+      const chain = buildChain(table);
+      if (table === 'order_items') {
+        const then = chain.then as (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => Promise<unknown>;
+        chain.then = (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => held.then(() => then(ok, bad));
+      }
+      return chain;
+    });
+    fireEvent.click(edit);
+    // Take Delivery: the server assigns user-1, and the page re-reads the delivery.
+    tables.data.deliveries = [{ ...(tables.data.deliveries[0] as object), assigned_driver: 'user-1' }];
+    fireEvent.click(screen.getByRole('button', { name: /Take Delivery/ }));
+    fireEvent.click((await screen.findAllByRole('button', { name: /Take Delivery/ })).at(-1)!);
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Take Delivery/ })).toBeNull());
+    release();
+    await waitFor(() => expect(mockToast).toHaveBeenCalledWith('info', expect.stringMatching(/Click Edit again/)));
+    expect(screen.queryByRole('button', { name: /Save Changes/ })).toBeNull();
+  });
 });

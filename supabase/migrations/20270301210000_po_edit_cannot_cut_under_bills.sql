@@ -97,7 +97,9 @@ BEGIN
        WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided';
       -- Mason, 2026-11-24 (Sol HIGH): a non-admin may not lower the total of a PO with any active bill, whatever the
       -- amounts, so which cuts save can never reveal the bill's size.
-      IF v_billed > 0 AND NOT public.is_admin() THEN
+      IF NOT public.is_admin() AND EXISTS (
+           SELECT 1 FROM public.vendor_bills vb
+            WHERE vb.purchase_order_id = p_po_id AND vb.deleted_at IS NULL AND vb.status <> 'voided') THEN
         RAISE EXCEPTION 'PO_EDIT_NEEDS_ADMIN: this purchase order has a vendor bill, so only an admin can lower its total'
           USING ERRCODE = '42501';
       END IF;

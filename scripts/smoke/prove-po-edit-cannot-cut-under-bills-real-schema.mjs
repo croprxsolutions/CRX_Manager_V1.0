@@ -113,6 +113,12 @@ try {
   assert.equal(repSmall, repBig, 'a rep cannot tell a small cut from a large one');
   assert.doesNotMatch(repBig.split('|').slice(2).join('|'), /\d|\$/, 'no amounts to a rep');
   assert.equal(scalar(`SELECT quantity_ordered FROM public.purchase_order_items WHERE id = '${L1B}';`), '40');
+  // 4z. Any active bill counts, even a $0 one (Luna MED): a rep's cut on PO4 with a $0 bill is refused.
+  assert.equal(attempt(USERS.rep, `SET LOCAL session_replication_role = replica;
+    INSERT INTO public.vendor_bills (vendor_id, purchase_order_id, bill_number, bill_date, due_date, subtotal_cents, total_cents)
+      VALUES ('${VENDOR}', '${PO4}', 'POEB-B0', CURRENT_DATE, CURRENT_DATE + 30, 0, 0);
+    SET LOCAL session_replication_role = origin;
+    ${refuse(`r := ${saveAs(USERS.rep, PO4, 'submitted', [[L4A, 1, 0]])};`)} v := split_part(t, ':', 1) || '|' || ${total(PO4)};`), 'ok|PO_EDIT_NEEDS_ADMIN|10000');
   // 4a. A rep may still raise it, and may cut a PO with no bills.
   assert.equal(saved(USERS.rep, saveAs(USERS.rep, PO1, 'partially_received', [[L1A, 60, 60], [L1B, 50, 0]]), PO1), 'ok|110000');
   assert.equal(saved(USERS.rep, saveAs(USERS.rep, PO4, 'submitted', [[L4A, 1, 0]]), PO4), 'ok|1000');
@@ -121,7 +127,7 @@ try {
   assert.equal(detailOf(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 1, 0]])), 'ok|{"po_total_cents": 61000, "active_billed_cents": 100000}');
   // 5. Raising a quantity is never refused.
   assert.equal(saved(USERS.admin, save(PO1, 'partially_received', [[L1A, 60, 60], [L1B, 50, 0]]), PO1), 'ok|110000');
-  console.log('[edit PO] 40 -> 1 refused; 36 allowed, 35 refused (5% to the cent); dropped line refused; rep cannot lower a billed PO at all (same refusal, no amounts), can raise it or cut an unbilled PO; admin DETAIL has amounts; raise allowed');
+  console.log('[edit PO] 40 -> 1 refused; 36 allowed, 35 refused (5% to the cent); dropped line refused; rep cannot lower a billed PO at all, even with a $0 bill (same refusal, no amounts), can raise it or cut an unbilled PO; admin DETAIL has amounts; raise allowed');
 
   // 6. A bill already over the whole order ($110 on $100): an edit that keeps the total (notes) still saves, a cut does not.
   assert.equal(saved(USERS.admin, save(PO2, 'submitted', [[L2A, 10, 0]], 'call vendor'), PO2), 'ok|10000');

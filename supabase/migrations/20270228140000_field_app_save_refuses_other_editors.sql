@@ -15,14 +15,19 @@
 --   Split Billing set, or the invoice (standalone) / group carries none of this editor's field rows
 --   (field_app_locations). Every invoice this editor saves carries them; a field-app invoice later linked to a job
 --   keeps them and saves as before. Contract: docs/plans/2026-11-23-field-app-save-refuses-other-editors-CONTRACT.md.
+--   Because the check trusts field rows, signed-in users lose direct INSERT/UPDATE/DELETE/TRUNCATE on
+--   field_app_locations and field_app_location_shares (SELECT is untouched; live, the only writers are the two
+--   SECURITY DEFINER save functions, which keep their owner rights; service_role is unchanged), as 20260721014858 did
+--   for invoices. Live 2026-11-23: authenticated held all three; no column-level grants exist.
 --   Live 2026-11-23 (read-only): 3 field-application invoices; 0 Split Billing members, 0 job-made groups, 0 past
 --   orphan cancellations; 1 editable job-made single invoice (no field rows; the screen opens it in the invoice editor).
 --
 -- NOT CHANGED: the rest of the wrapper body, its owner, SECURITY DEFINER, search_path and grants (CREATE OR REPLACE
---   keeps them), every function it calls, every table, row and policy.
+--   keeps them), every function it calls, every row and policy, and every other table grant.
 --
 -- ROLLBACK (its own reviewed migration): re-emit the wrapper body pinned by the preflight below (the
---   20261102180000_bind_money_replay_receipts_batch4a.sql wrapper). It reopens the gap.
+--   20261102180000_bind_money_replay_receipts_batch4a.sql wrapper) and re-grant the revoked table writes to
+--   authenticated. It reopens the gap.
 --
 -- ORDERING: after 20261102180000. Not re-runnable (preflight refuses). Postflight pins the new body.
 
@@ -121,12 +126,39 @@ BEGIN
 END;
 $function$;
 
+-- The check above trusts field rows: only the save functions (owner rights) may write them.
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.field_app_locations, public.field_app_location_shares
+  FROM PUBLIC, anon, authenticated;
+
 DO $postflight$
+DECLARE
+  v_role text;
+  v_table text;
+  v_priv text;
 BEGIN
   IF (SELECT md5(replace(p.prosrc, chr(13), '')) FROM pg_proc p
        WHERE p.oid = to_regprocedure('public.save_field_app_invoice(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)'))
      IS DISTINCT FROM 'a583c46ce9b52ee9bb8968ae15566fac' THEN
     RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_POSTFLIGHT: save_field_app_invoice is not the reviewed new body';
   END IF;
+  IF has_function_privilege('anon', 'public.save_field_app_invoice(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.save_field_app_invoice(uuid,jsonb,jsonb,jsonb,uuid,uuid,text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_POSTFLIGHT: save_field_app_invoice EXECUTE is not authenticated-only';
+  END IF;
+  FOREACH v_table IN ARRAY ARRAY['public.field_app_locations', 'public.field_app_location_shares'] LOOP
+    IF NOT has_table_privilege('authenticated', v_table, 'SELECT') THEN
+      RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_POSTFLIGHT: authenticated lost SELECT on %', v_table;
+    END IF;
+    FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+      FOREACH v_priv IN ARRAY ARRAY['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'] LOOP
+        IF has_table_privilege(v_role, v_table, v_priv) THEN
+          RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_POSTFLIGHT: % can still % %', v_role, v_priv, v_table;
+        END IF;
+      END LOOP;
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = v_table::regclass AND a.attnum > 0 AND a.attacl IS NOT NULL) THEN
+      RAISE EXCEPTION 'FIELD_APP_WRONG_EDITOR_POSTFLIGHT: % has column-level grants', v_table;
+    END IF;
+  END LOOP;
 END;
 $postflight$;

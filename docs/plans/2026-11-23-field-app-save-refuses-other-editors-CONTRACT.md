@@ -101,3 +101,16 @@ Database only; no screen change. One PR into `staging`.
   refuses that since 20270205100000, and PostgreSQL would abort one save, not corrupt data); #5 (no writer removes an
   engine group's field rows or adds a stamped sibling outside this save path; Split Billing stamps groups it creates);
   #6 (a field row carrying both keys is never written: the save writes exactly one; LOW).
+
+## Pre-ship reviewers (2026-11-23)
+
+- `rls-security-reviewer` H1 (HIGH, confirmed live read-only): the check trusts field rows, and signed-in admins and
+  sales reps could insert, update and delete `field_app_locations` / `field_app_location_shares` directly, so one direct
+  insert onto a job's group let the save through. Fixed in this migration: revoke INSERT, UPDATE, DELETE, TRUNCATE on
+  both tables from PUBLIC, anon, authenticated (SELECT kept). Live, the only writers are the two SECURITY DEFINER save
+  functions; no screen or Edge Function writes them; no column-level grants. Proof case added (before: the bypass
+  cancels A and B; after: permission denied). L1 (assert EXECUTE in postflight): done. L2 (service_role may call the
+  impl directly): pre-existing, trusted backend role; noted.
+- `migration-drift-reviewer`: no drift. M1 (live order) is checked by the apply script. L1 (screen shows the
+  `FIELD_APP_WRONG_EDITOR:` prefix) is cosmetic; the screen never sends these invoices. L2/L3 (a different refusal
+  message for already-refused invoices; nothing written either way): accepted.

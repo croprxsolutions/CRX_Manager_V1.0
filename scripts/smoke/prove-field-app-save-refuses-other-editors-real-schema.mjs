@@ -7,7 +7,8 @@
  *           and B's invoices and creates one for C. A Split Billing member is rebuilt the same way.
  *   AFTER:  both are refused FIELD_APP_WRONG_EDITOR and every row stays as it was, with no receipt; an engine-built
  *           group, a field-app invoice linked to a job (it keeps its field rows) and a new invoice save as before.
- *           A second apply stops at the preflight; grants are unchanged.
+ *           A sales rep can no longer write field rows directly (before, writing one onto the job's group let the save
+ *           through); reading them still works. A second apply stops at the preflight; EXECUTE grants are unchanged.
  *
  * Run: node scripts/smoke/prove-field-app-save-refuses-other-editors-real-schema.mjs   (needs Docker)
  * Prints FIELD_APP_WRONG_EDITOR_PROOF_PASS on success. CRX_PROVER_KEEP_CONTAINER=1 keeps the container.
@@ -356,6 +357,22 @@ const jobGroup = (who) => `${who}CREATE TEMP TABLE j AS SELECT fwe.job() AS id;
   SELECT fwe.save((SELECT inv FROM t), ARRAY['${GJ}']::uuid[], ${key('e')}) IS NOT NULL;
   SELECT fwe.state();`;
 const JOB_GROUP = jobGroup(asAdmin), JOB_GROUP_REP = jobGroup(asRep);
+// The same, after the caller writes a field row onto the job's group directly (Data API), so the check finds one.
+const FORGED = `${asRep}CREATE TEMP TABLE j AS SELECT fwe.job() AS id;
+  SELECT public.transfer_job_to_invoice((SELECT id FROM j), auth.uid(), ${key('t')});
+  CREATE TEMP TABLE t AS SELECT i.id AS inv, i.invoice_group_id AS grp FROM invoices i WHERE i.job_id = (SELECT id FROM j) AND i.customer_id = '${A}';
+  INSERT INTO public.field_app_locations (invoice_group_id, field_id, total_acres) SELECT grp, '${GJ}', 100 FROM t;
+  SELECT fwe.save((SELECT inv FROM t), ARRAY['${GJ}']::uuid[], ${key('e')}) IS NOT NULL;
+  SELECT fwe.state();`;
+// Direct writes to either field-row table, and a read, as a signed-in sales rep.
+const DIRECT = {
+  'UPDATE field_app_locations': `${asRep}UPDATE public.field_app_locations SET total_acres = total_acres;`,
+  'DELETE field_app_locations': `${asRep}DELETE FROM public.field_app_locations;`,
+  'INSERT field_app_location_shares': `${asRep}INSERT INTO public.field_app_location_shares (location_id, customer_id, split_pct) SELECT id, '${A}', 100 FROM public.field_app_locations LIMIT 1;`,
+  'UPDATE field_app_location_shares': `${asRep}UPDATE public.field_app_location_shares SET split_pct = split_pct;`,
+  'DELETE field_app_location_shares': `${asRep}DELETE FROM public.field_app_location_shares;`,
+};
+const READ = `${asRep}SELECT (SELECT count(*) FROM public.field_app_locations) >= 0 AND (SELECT count(*) FROM public.field_app_location_shares) >= 0;`;
 // The same, compared row-for-row in one transaction after the refusal; no receipt is kept under the refused key.
 const JOB_GROUP_UNCHANGED = `${asAdmin}CREATE TEMP TABLE j AS SELECT fwe.job() AS id;
   SELECT public.transfer_job_to_invoice((SELECT id FROM j), '${ADMIN}', ${key('t')});
@@ -426,6 +443,11 @@ async function main() {
     console.log(`[before] ${name}: ${before[name]}`);
   }
   assert.equal(before.RETRY, 'same-result | same', 'before: a retry returns the first result');
+  const forgedBefore = okProbe(FORGED);
+  console.log(`[before] a sales rep writes a field row onto the job's group directly, then saves: ${forgedBefore}`);
+  assert.equal(forgedBefore, 'A:cancelled:0:0:solo B:cancelled:0:0:solo C:draft:30000:1:solo', 'before: direct field-row writes are open');
+  for (const [name, sql] of Object.entries(DIRECT)) okProbe(sql);
+  console.log('[before] a sales rep may also update and delete field rows and insert, update and delete their shares directly');
 
   stageText('candidate.sql', lf(CANDIDATE));
   const first = apply('candidate.sql');
@@ -448,6 +470,11 @@ async function main() {
   console.log('[after] a single-farm job invoice saved on the field-app screen: refused the same way');
   refusedProbe(SPLIT_SET, /FIELD_APP_WRONG_EDITOR: Nothing was saved\. This invoice was made by Split Billing, so it cannot be changed on the field application invoice screen\./);
   console.log('[after] a Split Billing member re-saved on the field-app screen: refused FIELD_APP_WRONG_EDITOR');
+  refusedProbe(FORGED, /permission denied for table field_app_locations/);
+  console.log('[after] a sales rep writing a field row onto the job\'s group directly: refused (permission denied), so the save cannot be tricked');
+  for (const [name, sql] of Object.entries(DIRECT)) refusedProbe(sql, /permission denied for table field_app_location/);
+  assert.equal(okProbe(READ), 't');
+  console.log('[after] direct update/delete of field rows and insert/update/delete of their shares: refused; reading both still works');
   for (const name of ['ENGINE_GROUP', 'LINKED', 'LINKED_GROUP', 'NEW_ONE', 'RETRY']) {
     const now = okProbe({ ENGINE_GROUP, LINKED, LINKED_GROUP, NEW_ONE, RETRY }[name]);
     assert.equal(now, before[name], `${name} must end exactly as before`);
